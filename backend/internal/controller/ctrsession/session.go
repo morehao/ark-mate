@@ -48,6 +48,12 @@ type sessionCtr struct {
 	svc svcsession.SessionSvc
 	// hist 会话历史**读面**（P4a 正文第十刀起在用例层，与 `svc` 分开按面持有）。
 	hist svcsession.HistorySvc
+	// detail 会话详情**读面**（P4a 正文第四十刀起在用例层）：单会话详情 + 三份交互快照。
+	//
+	// 与读模型（`plane` 那一族）的分界是"有没有请求校验与错误码出口"：这一面要回
+	// `session_not_found`，而四条出口共用同一份投影（详情里的 pending/memories 就是那两条列表的
+	// 结果），所以它们一起搬、一起持有。
+	detail svcsession.DetailSvc
 	// plane 会话域平面：**只读模型**直接由它提供（P4a 正文第十一刀）。
 	//
 	// 读模型（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）没有请求校验、错误码出口与响应装配，
@@ -60,10 +66,14 @@ type sessionCtr struct {
 
 // NewSessionCtr 构造 SessionCtr。
 //
-// 拿到的是**依赖事实**（会话面过渡期端口 + 库句柄 + 会话域平面 + 事件总线）：
-// 历史读面的用例在这里造（P4a 正文第十刀），其余 18 个方法的实现仍在 `manager`（逐刀搬）。
-func NewSessionCtr(svc svcsession.SessionSvc, st *store.Store, plane *session.Plane, bus *eventbus.Bus) SessionCtr {
-	return &sessionCtr{svc: svc, hist: svcsession.NewHistory(st, plane, bus), plane: plane}
+// 拿到的是**依赖事实**（会话面过渡期端口 + 库句柄 + 会话域平面 + 事件总线 + 交互事实来源）：
+// 历史读面（第十刀）与详情读面（第四十刀）两个用例在这里造，其余方法的实现仍在 `manager`（逐刀搬）。
+func NewSessionCtr(svc svcsession.SessionSvc, st *store.Store, plane *session.Plane, bus *eventbus.Bus,
+	src svcsession.InteractionSource) SessionCtr {
+	return &sessionCtr{
+		svc: svc, hist: svcsession.NewHistory(st, plane, bus), plane: plane,
+		detail: svcsession.NewDetail(plane, src),
+	}
 }
 
 // List 列出全部会话（query `archived` 控制是否包含已归档；默认仅未归档）。
@@ -111,7 +121,7 @@ func (h *sessionCtr) Search(c *gin.Context) {
 
 // Get 返回单会话详情（元数据 + 挂起权限）。
 func (h *sessionCtr) Get(c *gin.Context) {
-	resp, err := h.svc.GetSession(c.Request.Context(), c.Param("id"))
+	resp, err := h.detail.GetSession(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -136,7 +146,7 @@ func (h *sessionCtr) Update(c *gin.Context) {
 
 // Permissions 列出会话的挂起权限请求。
 func (h *sessionCtr) Permissions(c *gin.Context) {
-	resp, err := h.svc.ListPendingPermissions(c.Request.Context(), c.Param("id"))
+	resp, err := h.detail.ListPendingPermissions(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -146,7 +156,7 @@ func (h *sessionCtr) Permissions(c *gin.Context) {
 
 // PermissionMemories 列出会话级权限记忆（allow/reject 双侧，详情/撤销 UI 数据源）。
 func (h *sessionCtr) PermissionMemories(c *gin.Context) {
-	resp, err := h.svc.ListPermissionMemories(c.Request.Context(), c.Param("id"))
+	resp, err := h.detail.ListPermissionMemories(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -185,7 +195,7 @@ func (h *sessionCtr) ResolvePermission(c *gin.Context) {
 
 // Elicitations 列出会话的挂起结构化提问（elicitation/create 表单/URL 卡）。
 func (h *sessionCtr) Elicitations(c *gin.Context) {
-	resp, err := h.svc.ListPendingElicitations(c.Request.Context(), c.Param("id"))
+	resp, err := h.detail.ListPendingElicitations(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

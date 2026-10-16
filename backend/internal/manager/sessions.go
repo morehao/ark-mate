@@ -30,24 +30,6 @@ func capabilitySelectionFromReq(req *dtosession.CapabilitiesReq) *CapabilitySele
 	return &CapabilitySelection{Skills: session.NormalizeIDs(req.Skills), Mcps: session.NormalizeIDs(req.Mcps)}
 }
 
-// GetSession 返回单会话详情（元数据 + 挂起权限 + 会话级始终允许记忆）。
-func (s *Service) GetSession(ctx context.Context, id string) (*dtosession.SessionDetailResp, error) {
-	if !s.hasSession(id) {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
-	}
-	pending := s.PendingPermissions(id)
-	perms := make([]dtosession.PermissionResp, 0, len(pending))
-	for _, p := range pending {
-		perms = append(perms, toPermissionResp(p))
-	}
-	mems := make([]dtosession.MemoryResp, 0)
-	for _, it := range s.PermissionMemories(id) {
-		mems = append(mems, dtosession.MemoryResp{Title: it.Title, Kind: it.Kind, Decision: it.Decision, Since: it.Since.UTC().Format(time.RFC3339)})
-	}
-	detail := dtosession.SessionDetailResp{SessionResp: s.sessionResp(id), Pending: perms, Memories: mems}
-	return &detail, nil
-}
-
 // UpdateSession 更新会话元数据（title/pinned/archived 子集；nil 字段不更新）。
 // sqlite 模式下同步写库（sessions 为 DB 权威元数据镜像）。
 func (s *Service) UpdateSession(ctx context.Context, id string, patch dtosession.SessionPatch) (*dtosession.SessionResp, error) {

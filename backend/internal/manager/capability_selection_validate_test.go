@@ -229,7 +229,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	if n := len(orch.conns); n != 1 {
 		t.Fatalf("应建立一个连接，got %d", n)
 	}
-	detail, err := svc.GetSession(ctx, res.ID)
+	detail, err := detailSvc(svc).GetSession(ctx, res.ID)
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestCreateSessionDefaultPathUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	detail, err := svc.GetSession(ctx, res.ID)
+	detail, err := detailSvc(svc).GetSession(ctx, res.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 	if n := len(orch.conns); n != 2 {
 		t.Fatalf("声明与未声明应是两个代际（2 条连接），got %d", n)
 	}
-	detail, err := svc.GetSession(ctx, declared.ID)
+	detail, err := detailSvc(svc).GetSession(ctx, declared.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +370,7 @@ func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 	if recN.Fingerprint == recD.Fingerprint {
 		t.Fatal("「不限制」与「一个都不要」是不同的能力集，必须不同指纹")
 	}
-	detailNone, err := svc.GetSession(ctx, none.ID)
+	detailNone, err := detailSvc(svc).GetSession(ctx, none.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

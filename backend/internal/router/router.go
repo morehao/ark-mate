@@ -57,6 +57,11 @@ const AppName = "mate"
 // 别在过渡期往里加新的 svc 格：那正是 2026-10-16 被判定为"骚操作"的那批别名的来路。
 type Ports struct {
 	Session svcsession.SessionSvc
+	// InteractionSource 会话交互面的三份只读事实（挂起权限 / 权限记忆 / 挂起提问）。
+	//
+	// 那份状态归**执行面**持有（`Orchestrator` 私有字段），而详情读面用例（`svcsession.NewDetail`）
+	// 在 ctrsession 里造——所以装配点交的是这三条**窄端口**，不是执行面本身（P4a 正文第四十刀）。
+	InteractionSource svcsession.InteractionSource
 	// Runtime 底座**执行面本身**（`*runtimeconn.Plane`；P4a 正文第七刀）——`app` 交的是依赖事实，
 	// 底座面的用例（`svcruntime.New`）由 `ctrruntime` 在自己的构造函数里造。
 	Runtime *runtimeconn.Plane

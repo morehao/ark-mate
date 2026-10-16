@@ -15,9 +15,6 @@ import (
 // **只放用例**：读模型（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）不在这里——它们由控制器
 // 直接经域平面取（见 `ctrsession` 的 `plane` 字段注释）。
 type SessionSvc interface {
-	// GetSession 返回单会话详情（含元数据 + 挂起权限）。
-	GetSession(ctx context.Context, id string) (*dtosession.SessionDetailResp, error)
-
 	// UpdateSession 更新会话元数据（title/pinned/archived 子集更新）。
 	UpdateSession(ctx context.Context, id string, patch dtosession.SessionPatch) (*dtosession.SessionResp, error)
 
@@ -35,20 +32,11 @@ type SessionSvc interface {
 	// （已投递/已作废是台账行，不可撤；不存在的 id 幂等返回 false）。
 	DeleteQueuedInput(ctx context.Context, id, inputID string) (bool, error)
 
-	// ListPendingPermissions 列出某会话的挂起权限请求。
-	ListPendingPermissions(ctx context.Context, id string) ([]dtosession.PermissionResp, error)
-
 	// ResolvePermission 按 call_id 决策（allow/reject × once/always），返回实际回执。
 	ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) (*dtosession.PermissionDecisionResp, error)
 
-	// ListPermissionMemories 列出某会话的会话级权限记忆（allow/reject 双侧，供详情/撤销 UI）。
-	ListPermissionMemories(ctx context.Context, id string) ([]dtosession.MemoryResp, error)
-
 	// RevokeMemory 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。
 	RevokeMemory(ctx context.Context, id, title, kind string) error
-
-	// ListPendingElicitations 列出某会话的挂起结构化提问（elicitation/create）。
-	ListPendingElicitations(ctx context.Context, id string) ([]dtosession.ElicitationResp, error)
 
 	// ResolveElicitation 按 elicitation_id 决策（accept/decline/cancel）。
 	ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any) error

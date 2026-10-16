@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
@@ -112,13 +113,14 @@ type stubSvc struct {
 	cancelID     string
 	cancelErr    error
 
-	memList     []dtosession.MemoryResp
+	memList     []interaction.MemoryItem
 	revokeID    string
 	revokeTitle string
 	revokeKind  string
 	revokeErr   error
 
-	elicitations        []dtosession.ElicitationResp
+	pendingPerms        []interaction.PermissionItem
+	elicitations        []interaction.ElicitationItem
 	resolvedElicID      string
 	resolvedElicAction  string
 	resolvedElicContent map[string]any
@@ -400,12 +402,6 @@ func (s *stubSvc) SearchMessages(_ context.Context, q string, limit int) (*dtose
 
 // ——— P4a：自检用例的**供应商域读面**替身（同上：只交事实） ———
 
-func (s *stubSvc) GetSession(_ context.Context, id string) (*dtosession.SessionDetailResp, error) {
-	return &dtosession.SessionDetailResp{
-		SessionResp: dtosession.SessionResp{ID: id},
-		Memories:    s.memList,
-	}, nil
-}
 func (s *stubSvc) UpdateSession(_ context.Context, id string, patch dtosession.SessionPatch) (*dtosession.SessionResp, error) {
 	resp := dtosession.SessionResp{ID: id}
 	if patch.Title != nil {
@@ -419,9 +415,17 @@ func (s *stubSvc) UpdateSession(_ context.Context, id string, patch dtosession.S
 	}
 	return &resp, nil
 }
-func (s *stubSvc) ListPendingPermissions(_ context.Context, id string) ([]dtosession.PermissionResp, error) {
-	return nil, nil
+
+// ——— 会话交互面的三份事实（P4a 正文第四十刀）：端口吃**域值对象**，投影在用例层 ———
+//
+// 替身只提供事实、不再提供"已经折好的响应"——后者会让"投影真的发生了吗"无从验证
+// （用例层把 Kind 丢掉、把 schema/url 弄反，替身时代都照样绿）。
+func (s *stubSvc) PendingPermissions(string) []interaction.PermissionItem { return s.pendingPerms }
+func (s *stubSvc) PermissionMemories(string) []interaction.MemoryItem     { return s.memList }
+func (s *stubSvc) PendingElicitations(string) []interaction.ElicitationItem {
+	return s.elicitations
 }
+
 func (s *stubSvc) ResolvePermission(_ context.Context, id, callID, optionID string, always, allowed bool) (*dtosession.PermissionDecisionResp, error) {
 	if s.resolvePermErr != nil {
 		return nil, *s.resolvePermErr
@@ -431,17 +435,11 @@ func (s *stubSvc) ResolvePermission(_ context.Context, id, callID, optionID stri
 		OptionID: optionID, Outcome: "selected", SelectedOptionID: optionID,
 	}, nil
 }
-func (s *stubSvc) ListPermissionMemories(_ context.Context, id string) ([]dtosession.MemoryResp, error) {
-	return s.memList, nil
-}
 func (s *stubSvc) RevokeMemory(_ context.Context, id, title, kind string) error {
 	s.revokeID = id
 	s.revokeTitle = title
 	s.revokeKind = kind
 	return s.revokeErr
-}
-func (s *stubSvc) ListPendingElicitations(_ context.Context, id string) ([]dtosession.ElicitationResp, error) {
-	return s.elicitations, nil
 }
 func (s *stubSvc) ResolveElicitation(_ context.Context, id, elicitationID, action string, content map[string]any) error {
 	s.resolvedElicID = elicitationID
@@ -514,7 +512,7 @@ func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 	caps := capability.NewRegistry()
 	skills := skill.NewPlane(caps, nil)
 	return router.Ports{
-		Session: svc,
+		Session: svc, InteractionSource: svc,
 		// 执行面（`Identity`/`Diagnostics`）是**真对象**：用例实例由 ctrruntime 造，而底座诊断
 		// 读的就是执行面此刻的事实——替身化它等于把"诊断读的是哪份进程态"也替身掉。
 		Runtime: runtimeconn.NewPlaneFor(goruntime.AllBuiltinRegistry()),
@@ -1156,12 +1154,19 @@ func histPageOf(t *testing.T, r *gin.Engine, url string) histPage {
 }
 
 // TestPermissionMemoriesList GET /sessions/:id/permissions/memories 返回会话级权限记忆（含 decision 侧）。
+//
+// P4a 正文第四十刀：这一面归 `svcsession.DetailSvc`（用例层）之后，路由测试的替身只提供**域值对象**
+// （`interaction.MemoryItem`），`since` 的 RFC3339 折叠与"空集回 []"都由用例层做——判据因此从
+// "替身收到了 id"变成"投影真的发生了"。同时补上"未知会话 → 40401"：替身时代那条校验根本不存在，
+// 而它是这一面的主要职责（存在性判据）。
 func TestPermissionMemoriesList(t *testing.T) {
-	svc := &stubSvc{memList: []dtosession.MemoryResp{
-		{Title: "运行演示命令 echo hello", Kind: "execute", Decision: "allow", Since: "2026-01-02T03:04:05Z"},
-		{Title: "删除文件", Kind: "execute", Decision: "reject", Since: "2026-01-03T03:04:05Z"},
+	svc := &stubSvc{memList: []interaction.MemoryItem{
+		interaction.NewMemoryItem("s1", "运行演示命令 echo hello", "execute", "allow", time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		interaction.NewMemoryItem("s1", "删除文件", "execute", "reject", time.Date(2026, 1, 3, 3, 4, 5, 0, time.UTC)),
 	}}
-	r := newRestEngine(stubDeps(t, svc))
+	deps := stubDeps(t, svc)
+	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	r := newRestEngine(deps)
 	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/permissions/memories", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
@@ -1169,8 +1174,45 @@ func TestPermissionMemoriesList(t *testing.T) {
 	var out []dtosession.MemoryResp
 	if err := json.Unmarshal(env.Data, &out); err != nil || len(out) != 2 ||
 		out[0].Title != "运行演示命令 echo hello" || out[0].Kind != "execute" || out[0].Decision != "allow" ||
-		out[1].Decision != "reject" {
+		out[1].Decision != "reject" || out[0].Since != "2026-01-02T03:04:05Z" {
 		t.Fatalf("memories data 不符: %s", env.Data)
+	}
+	// 未知会话 → 40401（用例层的校验，不是控制器的）。
+	if env, _ := do(t, r, "GET", "/v1/mate/sessions/nope/permissions/memories", ""); env.Code != 40401 {
+		t.Fatalf("未知会话应 40401: %+v", env)
+	}
+	// 空记忆回 `[]` 而不是 null（前端按数组渲染）。
+	svc.memList = nil
+	env, _ = do(t, r, "GET", "/v1/mate/sessions/s1/permissions/memories", "")
+	if strings.TrimSpace(string(env.Data)) != "[]" {
+		t.Fatalf("空记忆应回 []: %s", env.Data)
+	}
+}
+
+// TestPendingPermissionsList GET /sessions/:id/permissions 返回挂起权限请求（工具调用与选项折叠透传）。
+func TestPendingPermissionsList(t *testing.T) {
+	svc := &stubSvc{pendingPerms: []interaction.PermissionItem{{
+		CallID: "tc1", SessionID: "s1", Title: "执行 echo hello",
+		ToolCall:  acl.ToolCallInfo{ID: "tc1", Kind: "execute", Input: json.RawMessage(`{"cmd":"echo hello"}`)},
+		Options:   []acl.PermissionOption{{OptionID: "allow_once", Name: "本次允许", Kind: "allow_once"}},
+		TimeoutAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+	}}}
+	deps := stubDeps(t, svc)
+	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	r := newRestEngine(deps)
+	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/permissions", "")
+	if env.Code != 0 {
+		t.Fatalf("信封不符: %+v", env)
+	}
+	var out []dtosession.PermissionResp
+	if err := json.Unmarshal(env.Data, &out); err != nil || len(out) != 1 ||
+		out[0].CallID != "tc1" || out[0].Kind != "execute" ||
+		len(out[0].Options) != 1 || out[0].Options[0].OptionID != "allow_once" ||
+		out[0].TimeoutAt != "2026-01-02T03:04:05Z" {
+		t.Fatalf("permissions data 不符: %s", env.Data)
+	}
+	if env, _ := do(t, r, "GET", "/v1/mate/sessions/nope/permissions", ""); env.Code != 40401 {
+		t.Fatalf("未知会话应 40401: %+v", env)
 	}
 }
 
@@ -1197,21 +1239,39 @@ func TestRevokeMemory(t *testing.T) {
 	}
 }
 
-// TestElicitationList GET /sessions/:id/elicitations 返回挂起结构化提问（表单 schema 透传）。
+// TestElicitationList GET /sessions/:id/elicitations 返回挂起结构化提问（表单 schema / URL 二选一）。
 func TestElicitationList(t *testing.T) {
-	svc := &stubSvc{elicitations: []dtosession.ElicitationResp{{
-		ElicitationID: "el-abc", SessionID: "s1", Mode: "form",
-		Message: "请选择一个环境", TimeoutAt: "2026-01-02T03:04:05Z",
+	svc := &stubSvc{elicitations: []interaction.ElicitationItem{{
+		ID: "el-abc", SessionID: "s1", ScopeSource: "wire", Mode: "form",
+		Message: "请选择一个环境", TimeoutAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 		Schema: map[string]any{"type": "object", "properties": map[string]any{"env": map[string]any{"type": "string", "enum": []any{"dev", "prod"}}}},
 	}}}
-	r := newRestEngine(stubDeps(t, svc))
+	deps := stubDeps(t, svc)
+	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	r := newRestEngine(deps)
 	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/elicitations", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
 	var out []dtosession.ElicitationResp
-	if err := json.Unmarshal(env.Data, &out); err != nil || len(out) != 1 || out[0].ElicitationID != "el-abc" || out[0].Mode != "form" {
+	if err := json.Unmarshal(env.Data, &out); err != nil || len(out) != 1 || out[0].ElicitationID != "el-abc" ||
+		out[0].Mode != "form" || out[0].ScopeSource != "wire" || out[0].Schema == nil || out[0].URL != "" {
 		t.Fatalf("elicitations data 不符: %s", env.Data)
+	}
+	// url 模式：回 url、schema 为空（两者互斥，不许两个都回）。
+	svc.elicitations = []interaction.ElicitationItem{{
+		ID: "el-url", SessionID: "s1", Mode: "url", Message: "去这里确认",
+		URL: "https://example.com/confirm", TimeoutAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+	}}
+	env, _ = do(t, r, "GET", "/v1/mate/sessions/s1/elicitations", "")
+	// **必须用新变量**：`json.Unmarshal` 复用切片元素时**不清字段**——第一次解码留下的 `schema`
+	// 会原样挂在这一条上，于是"url 模式不该回 schema"这条判据会假红（实测踩到过一次）。
+	var outURL []dtosession.ElicitationResp
+	if err := json.Unmarshal(env.Data, &outURL); err != nil || len(outURL) != 1 || outURL[0].URL == "" || outURL[0].Schema != nil {
+		t.Fatalf("url 模式应回 url 且 schema 为空: %s", env.Data)
+	}
+	if env, _ := do(t, r, "GET", "/v1/mate/sessions/nope/elicitations", ""); env.Code != 40401 {
+		t.Fatalf("未知会话应 40401: %+v", env)
 	}
 }
 

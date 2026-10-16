@@ -77,14 +77,14 @@ func TestServiceResolveElicitationScope(t *testing.T) {
 	}()
 	it := <-published
 
-	list, err := svc.ListPendingElicitations(context.Background(), "owner")
+	list, err := detailSvc(svc).ListPendingElicitations(context.Background(), "owner")
 	if err != nil {
 		t.Fatalf("ListPendingElicitations: %v", err)
 	}
 	if len(list) != 1 || list[0].SessionID != "owner" || list[0].ScopeSource == "" {
 		t.Fatalf("挂起项应带 scope 归属: %+v", list)
 	}
-	if other, err := svc.ListPendingElicitations(context.Background(), "intruder"); err != nil || len(other) != 0 {
+	if other, err := detailSvc(svc).ListPendingElicitations(context.Background(), "intruder"); err != nil || len(other) != 0 {
 		t.Fatalf("他会话不应看到挂起项: %+v err=%v", other, err)
 	}
 
