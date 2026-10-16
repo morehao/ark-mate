@@ -47,7 +47,7 @@ func TestWorkspaceSettingsWithoutStore(t *testing.T) {
 	if resp.Source != "unavailable" {
 		t.Fatalf("无端口时来源应标 unavailable，得到 %q", resp.Source)
 	}
-	if _, err := svc.UpdateWorkspaceSettings([]string{root}); aclCode(t, err) != "settings_readonly" {
+	if _, err := svc.WorkspacePlane().UpdateSettings([]string{root}); aclCode(t, err) != "settings_readonly" {
 		t.Fatalf("无端口写入应 settings_readonly: %v", err)
 	}
 }
@@ -80,7 +80,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 
 	// 落盘内容必须是**显式**名单（不含代建根）：派生项写进配置文件就变成了运维的配置。
 	var err error
-	resp, err = svc.UpdateWorkspaceSettings([]string{rootA, rootB})
+	resp, err = svc.WorkspacePlane().UpdateSettings([]string{rootA, rootB})
 	if err != nil {
 		t.Fatalf("UpdateWorkspaceSettings: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	}
 
 	// 空名单 = 恢复不限制（面板"取消限定"的那一步）。
-	resp, err = svc.UpdateWorkspaceSettings(nil)
+	resp, err = svc.WorkspacePlane().UpdateSettings(nil)
 	if err != nil {
 		t.Fatalf("清空: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestUpdateWorkspaceSettingsValidation(t *testing.T) {
 		{"好项 + 坏项（逐项校验，不能被前面的合法项带过）", []string{root, "relative"}},
 	}
 	for _, tc := range cases {
-		if _, err := svc.UpdateWorkspaceSettings(tc.roots); aclCode(t, err) != "workspace_invalid" {
+		if _, err := svc.WorkspacePlane().UpdateSettings(tc.roots); aclCode(t, err) != "workspace_invalid" {
 			t.Fatalf("%s: 应 workspace_invalid，得到 %v", tc.name, err)
 		}
 	}
@@ -190,7 +190,7 @@ func TestUpdateWorkspaceSettingsValidation(t *testing.T) {
 	if err := os.Symlink(root, link); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	if _, err := svc.UpdateWorkspaceSettings([]string{"  ", root, link, root}); err != nil {
+	if _, err := svc.WorkspacePlane().UpdateSettings([]string{"  ", root, link, root}); err != nil {
 		t.Fatalf("重复项应去重而不是报错: %v", err)
 	}
 	if len(store.saved) != 1 || len(store.saved[0]) != 1 {
@@ -210,7 +210,7 @@ func TestUpdateWorkspaceSettingsLocked(t *testing.T) {
 	if resp.Writable || resp.LockedBy != "MATE_WORKSPACE_ROOTS" {
 		t.Fatalf("锁定态应透出给面板（它据此转只读）: %+v", resp)
 	}
-	err := func() error { _, e := svc.UpdateWorkspaceSettings([]string{root}); return e }()
+	err := func() error { _, e := svc.WorkspacePlane().UpdateSettings([]string{root}); return e }()
 	if aclCode(t, err) != "settings_locked" {
 		t.Fatalf("应 settings_locked: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestUpdateWorkspaceSettingsSaveFailure(t *testing.T) {
 	before := svc.WorkspacePlane().WorkspaceRoots()
 	svc.WorkspacePlane().SetRootsStore(&fakeRootsStore{saveErr: errors.New("磁盘只读")})
 
-	if _, err := svc.UpdateWorkspaceSettings([]string{root}); aclCode(t, err) != "settings_save_failed" {
+	if _, err := svc.WorkspacePlane().UpdateSettings([]string{root}); aclCode(t, err) != "settings_save_failed" {
 		t.Fatalf("应 settings_save_failed: %v", err)
 	}
 	after := svc.WorkspacePlane().WorkspaceRoots()

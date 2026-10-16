@@ -131,6 +131,20 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		"func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error)") {
 		t.Error("`internal/domain/workspace/registry.go` 里找不到登记表读模型本体：判据失锚＝空转。")
 	}
+	// 设置面写（P4a 正文第三十一刀）：`UpdateWorkspaceSettings` 同样归域平面（写面：校验 + 三个
+	// 语义码 + 落盘都在域里），接口声明与 manager 转发一起删。控制器侧不再有替身可伪造语义码 ——
+	// "锁定 / 只读 / 非法目录"三条由配置面测试用真策略钉。
+	if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcworkspace", "workspace.go"))), "UpdateWorkspaceSettings(") {
+		t.Error("`svcworkspace` 的接口里又出现 `UpdateWorkspaceSettings(`：写面归域平面（`UpdateSettings`）。")
+	}
+	if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_settings.go"))), "func (s *Service) UpdateWorkspaceSettings(") {
+		t.Error("`internal/manager/workspace_settings.go` 里又出现 `UpdateWorkspaceSettings(` 转发：那一行已删。")
+	}
+	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "settings.go"))),
+		"func (pl *Plane) UpdateSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error)") {
+		t.Error("`internal/domain/workspace/settings.go` 里找不到 `func (pl *Plane) UpdateSettings(...)`：判据失锚＝空转。")
+	}
+
 	// 设置面快照（P4a 正文第十九刀）：域里 `Plane.Settings()` 同样已经折好 DTO（含
 	// configured / prefer_roots / source / locked_by），用例层再包一层就只是一行转发。
 	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "service", "svcworkspace")) {

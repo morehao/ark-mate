@@ -175,7 +175,7 @@ func (h *workspaceCtr) UpdateSettings(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.UpdateWorkspaceSettings(req.Roots)
+	resp, err := h.plane.UpdateSettings(req.Roots)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

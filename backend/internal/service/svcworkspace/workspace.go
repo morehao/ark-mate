@@ -28,9 +28,6 @@ type WorkspaceSvc interface {
 	// 那个用于"选工作空间"，这个用于"看资料"）。
 	ListWorkspaceFiles(path string, includeHidden bool) (*dtoworkspace.WorkspaceFilesResp, error)
 
-	// UpdateWorkspaceSettings 全量替换工作区根白名单（落盘 + 热更新；被更高优先级来源锁定时拒绝）。
-	UpdateWorkspaceSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error)
-
 	// ---- v14：工作空间**登记表**（用户产出的持久实体，与上面几个派生视图分工见 manager/workspace_registry.go）----
 
 	// **写面的三条（Rename/Delete/Move）刻意不在这个接口里**（P4a 正文第二十七刀）：它们的

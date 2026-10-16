@@ -639,22 +639,15 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 		t.Fatalf("空平面快照形状不符: %+v", got)
 	}
 
-	// PUT：roots 原样下发（含空数组 = 恢复不限制），响应回更新后的快照。
-	env, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", `{"roots":["/srv/docs"]}`)
-	if env.Code != 0 {
-		t.Fatalf("PUT 应成功: %+v", env)
-	}
-	if !svc.settingsCalled || len(svc.settingsRoots) != 1 || svc.settingsRoots[0] != "/srv/docs" {
-		t.Fatalf("roots 应原样下发: %+v", svc.settingsRoots)
-	}
-	svc.settingsCalled = false
-	if _, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", `{"roots":[]}`); !svc.settingsCalled || len(svc.settingsRoots) != 0 {
-		t.Fatalf("空数组应下发空名单（= 不限制）: called=%v roots=%+v", svc.settingsCalled, svc.settingsRoots)
-	}
-	// 字段缺省与空数组同义：都是"取消限制"（白名单只有"画边界/不画边界"两种状态）。
-	svc.settingsCalled = false
-	if _, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", `{}`); !svc.settingsCalled || len(svc.settingsRoots) != 0 {
-		t.Fatalf("缺省 roots 应下发空名单: called=%v roots=%+v", svc.settingsCalled, svc.settingsRoots)
+	// PUT 自 P4a 正文第三十一刀起也走**真域平面**（`h.plane.UpdateSettings`）：这一格能证的是
+	// "领域错误经带码信封原样出去"——本用例的平面没有配置目录，写面给的就是 `settings_readonly`
+	// （code 40001）。roots 是否原样下发（含空数组 / 字段缺省 = 取消限制）由
+	// `internal/manager` 的设置面测试用**真策略 + 假端口**钉（那边才是判定的本体）。
+	for _, body := range []string{`{"roots":["/srv/docs"]}`, `{"roots":[]}`, `{}`} {
+		env, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", body)
+		if env.Code != 40001 || !strings.Contains(env.Msg, "未启用设置持久化") {
+			t.Fatalf("PUT %s 应把域平面的 `settings_readonly` 原样透出: %+v", body, env)
+		}
 	}
 
 	// body 非法 → 参数错误码（不是 1：面板要能区分"我传错了"与"服务端坏了"）。
@@ -662,12 +655,9 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 		t.Fatalf("非法 body 应 40000: %+v", env)
 	}
 
-	// 领域拒绝（锁定 / 只读 / 非法目录）经 RestErr 映射为业务码，且不吞掉语义码。
-	svc.settingsErr = gerror.Error{Code: 40001, Msg: "[settings_locked] 被 MATE_WORKSPACE_ROOTS 锁定"}
-	env, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", `{"roots":["/srv/docs"]}`)
-	if env.Code != 40001 || !strings.Contains(env.Msg, "settings_locked") {
-		t.Fatalf("领域错误应经 RestErr 透出: %+v", env)
-	}
+	// 领域拒绝的三种语义码（锁定 / 只读 / 非法目录）不再由替身伪造：`settings_readonly` 已由上面
+	// 那一组用**真平面**钉住，`settings_locked` 与 `workspace_invalid` 由 `internal/manager` 的
+	// 设置面测试用真策略（env 锁 / 非法目录）钉——判定的本体在域里，替身只会重复它自己的假设。
 }
 
 // TestWorkspaceRegistryCtrPassThrough v14 登记表的控制器职责：路径参数与 body 原样到端口、
