@@ -25,21 +25,6 @@ func (s *Service) CreateRegisteredWorkspace(path, title string, strict bool) (*d
 }
 
 // TODO(P4b): 删转发（同上）
-func (s *Service) RenameRegisteredWorkspace(id, title string) (*dtoworkspace.WorkspaceResp, error) {
-	return s.planner.RenameRegisteredWorkspace(id, title)
-}
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) DeleteRegisteredWorkspace(id string) (*dtoworkspace.WorkspaceDeleteResp, error) {
-	return s.planner.DeleteRegisteredWorkspace(id)
-}
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) MoveRegisteredWorkspace(id, beforeID string) (*dtoworkspace.WorkspaceMoveResp, error) {
-	return s.planner.MoveRegisteredWorkspace(id, beforeID)
-}
-
-// TODO(P4b): 删转发（同上）
 func (s *Service) EnsureDefaultWorkspace() error { return s.planner.EnsureDefaultWorkspace() }
 
 // TODO(P4b): 删转发（同上）

@@ -708,8 +708,13 @@ func TestWorkspaceRegistryCtrPassThrough(t *testing.T) {
 		t.Fatalf("列表必须是空数组而不是 null（前端按数组渲染）: %+v", list)
 	}
 
-	// POST /workspaces：path/title/strict 三个参数都要到端口（strict 决定重复登记是
-	// 返回既有行还是报错，漏传会让"必须新建"的调用方静默得到旧行）。
+	// 写面（POST/PATCH/DELETE/move）自 P4a 正文第二十七刀起走**真域平面**（投影与错误码都在域里，
+	// 控制器直接 `h.plane.*`），所以这一格能证的只有"领域错误经带码信封原样出去"这一条：
+	// memory 无库平面（本用例的 plane 没接持久层）对写面给的就是 `workspace_schema_read_only`。
+	// 参数是否原样到端口（path/title/strict/before_id）由 `TestWorkspaceRegistryHTTPFlow` 用
+	// **真对象**钉（它建表、建默认工作空间、创建、重排、改名、删除全走真库），不再是替身自报。
+	// `POST /workspaces`（CreateRegisteredWorkspace）**还没搬**（它包内 21 处调用点），仍走用例层接口，
+	// 所以这一格继续断言"参数原样到端口"：
 	env, _ = do(t, r, "POST", "/v1/mate/workspaces", `{"path":"/Users/me/work/ark-mate","title":"昵称","strict":true}`)
 	if env.Code != 0 {
 		t.Fatalf("POST /workspaces 应成功: %+v", env)
@@ -719,67 +724,20 @@ func TestWorkspaceRegistryCtrPassThrough(t *testing.T) {
 			svc.registryCreatePath, svc.registryCreateTitle, svc.registryCreateStrict)
 	}
 
-	// PATCH /workspaces/:id：路径参数与 body 都要到端口。
-	env, _ = do(t, r, "PATCH", "/v1/mate/workspaces/wsp-1", `{"title":"新名字"}`)
-	if env.Code != 0 || svc.registryID != "wsp-1" || svc.registryRenameTitle != "新名字" {
-		t.Fatalf("改名参数未原样下发: code=%d id=%q title=%q", env.Code, svc.registryID, svc.registryRenameTitle)
-	}
-
-	// DELETE /workspaces/:id：released_sessions 必须回出来（界面那句"这 N 个会话回到默认
-	// 工作空间"要有事实支撑，不是前端自己猜的）。
-	env, _ = do(t, r, "DELETE", "/v1/mate/workspaces/wsp-1", "")
-	if env.Code != 0 || svc.registryID != "wsp-1" {
-		t.Fatalf("删除参数未原样下发: code=%d id=%q", env.Code, svc.registryID)
-	}
-	var del dtoworkspace.WorkspaceDeleteResp
-	if err := json.Unmarshal(env.Data, &del); err != nil {
-		t.Fatalf("data 解析: %v", err)
-	}
-	if del.ReleasedSessions != 12 {
-		t.Fatalf("released_sessions 应原样透出: %+v", del)
-	}
-
-	// POST /workspaces/:id/move：锚点原样下发；响应是**完整**顺序。
-	env, _ = do(t, r, "POST", "/v1/mate/workspaces/wsp-1/move", `{"before_id":"wsp-2"}`)
-	if env.Code != 0 || svc.registryID != "wsp-1" || svc.registryMoveBefore != "wsp-2" {
-		t.Fatalf("重排参数未原样下发: code=%d id=%q before=%q", env.Code, svc.registryID, svc.registryMoveBefore)
-	}
-	var mv dtoworkspace.WorkspaceMoveResp
-	if err := json.Unmarshal(env.Data, &mv); err != nil {
-		t.Fatalf("data 解析: %v", err)
-	}
-	if len(mv.IDs) != 2 || mv.IDs[0] != "wsp-2" {
-		t.Fatalf("重排应返回完整顺序: %+v", mv)
-	}
-
-	// **空 body 的 move 不是错误**（追加到尾部），所以缺省 body 也必须走通。
-	svc.registryMoveBefore = "sentinel"
-	if env, _ = do(t, r, "POST", "/v1/mate/workspaces/wsp-1/move", ""); env.Code != 0 {
-		t.Fatalf("空 body 的 move 应成功（= 追加到尾部）: %+v", env)
-	}
-	if svc.registryMoveBefore != "" {
-		t.Fatalf("空 body 时锚点应为空串（追加），实际 %q", svc.registryMoveBefore)
+	for _, c := range []struct{ method, path, body string }{
+		{"PATCH", "/v1/mate/workspaces/wsp-1", `{"title":"新名字"}`},
+		{"DELETE", "/v1/mate/workspaces/wsp-1", ""},
+		{"POST", "/v1/mate/workspaces/wsp-1/move", `{"before_id":"wsp-2"}`},
+	} {
+		env, _ = do(t, r, c.method, c.path, c.body)
+		if env.Code != 40501 || !strings.Contains(env.Msg, "workspace_schema_read_only") {
+			t.Fatalf("%s %s 应把域平面的 `workspace_schema_read_only` 原样透出: %+v", c.method, c.path, env)
+		}
 	}
 
 	// 非法 body → 参数错误码（不是 1：面板要能区分"我传错了"与"服务端坏了"）。
 	if env, _ = do(t, r, "POST", "/v1/mate/workspaces", `{`); env.Code != 40000 {
 		t.Fatalf("非法 body 应 40000: %+v", env)
-	}
-
-	// 领域错误经带码信封出去（未知 id / 默认不可删 / memory 只读都要能被前端分辨）。
-	for _, c := range []struct {
-		code int
-		msg  string
-	}{
-		{40401, "[workspace_not_found] 未知工作空间"},
-		{40001, "[workspace_default_immutable] 默认工作空间不可删除"},
-		{40501, "[workspace_schema_read_only] 当前持久层为 memory"},
-	} {
-		svc.registryErr = gerror.Error{Code: c.code, Msg: c.msg}
-		env, _ = do(t, r, "DELETE", "/v1/mate/workspaces/wsp-x", "")
-		if env.Code != c.code || !strings.Contains(env.Msg, c.msg[:len("[")+len(strings.Fields(c.msg)[0])-1]) {
-			t.Fatalf("领域错误 %s 应经带码信封透出: %+v", c.msg, env)
-		}
 	}
 }
 

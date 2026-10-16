@@ -259,6 +259,30 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 			"落盘端口必须接到**装配好的那个平面**上（接错一个平面时两边都编译过，表现是设置改了不落盘）。")
 	}
 
+	// 写面的三条（P4a 正文第二十七刀）：Rename/Delete/Move 的投影（DTO + 三个错误码）都在域平面，
+	// 用例层接口里**不许再留声明**——留着就只是给"一行转发"留位置。
+	{
+		svcWs := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcworkspace", "workspace.go")))
+		for _, dead := range []string{"RenameRegisteredWorkspace(", "DeleteRegisteredWorkspace(", "MoveRegisteredWorkspace("} {
+			if strings.Contains(svcWs, dead) {
+				t.Errorf("`svcworkspace` 的接口里又出现 `%s`：这三条写面的投影在域平面里，"+
+					"控制器直接 `h.plane.*`（接口里留声明 = 给一行转发留位置）。", dead)
+			}
+		}
+		regMgr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_registry.go")))
+		for _, dead := range []string{"func (s *Service) RenameRegisteredWorkspace(", "func (s *Service) DeleteRegisteredWorkspace(", "func (s *Service) MoveRegisteredWorkspace("} {
+			if strings.Contains(regMgr, dead) {
+				t.Errorf("`internal/manager/workspace_registry.go` 里又出现 `%s`：那一行转发已删。", dead)
+			}
+		}
+		reg := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "registry.go")))
+		for _, must := range []string{"func (pl *Plane) RenameRegisteredWorkspace(", "func (pl *Plane) DeleteRegisteredWorkspace(", "func (pl *Plane) MoveRegisteredWorkspace("} {
+			if !strings.Contains(reg, must) {
+				t.Errorf("`internal/domain/workspace/registry.go` 里找不到 %q：判据失锚＝空转。", must)
+			}
+		}
+	}
+
 	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "workspace.go")))
 	if !strings.Contains(ctrWork, "h.plane.Settings()") {
 		t.Error("`ctrworkspace` 里找不到 `h.plane.Settings()`：设置面快照要么走域平面、要么走一层转发。")

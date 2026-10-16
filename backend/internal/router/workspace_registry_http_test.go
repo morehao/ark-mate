@@ -197,7 +197,7 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("登记 2: %v", err)
 	}
 	// 把第二个移到最前，落一个**非创建顺序**的顺序进库。
-	if _, err := svc.MoveRegisteredWorkspace(ws2.ID, ""); err != nil {
+	if _, err := svc.WorkspacePlane().MoveRegisteredWorkspace(ws2.ID, ""); err != nil {
 		t.Fatalf("重排: %v", err)
 	}
 	before, err := svc.WorkspacePlane().WorkspaceRegistry()

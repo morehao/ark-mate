@@ -226,7 +226,7 @@ func (h *workspaceCtr) Rename(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.RenameRegisteredWorkspace(c.Param("id"), req.Title)
+	resp, err := h.plane.RenameRegisteredWorkspace(c.Param("id"), req.Title)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -239,7 +239,7 @@ func (h *workspaceCtr) Rename(c *gin.Context) {
 // **不删会话、不删目录**：目录与文件一概不动，其会话读面归到默认工作空间。响应回
 // released_sessions 让界面能把这件事说清楚（"这 12 个会话回到了默认工作空间"）。
 func (h *workspaceCtr) Delete(c *gin.Context) {
-	resp, err := h.svc.DeleteRegisteredWorkspace(c.Param("id"))
+	resp, err := h.plane.DeleteRegisteredWorkspace(c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -257,7 +257,7 @@ func (h *workspaceCtr) Move(c *gin.Context) {
 			return
 		}
 	}
-	resp, err := h.svc.MoveRegisteredWorkspace(c.Param("id"), req.BeforeID)
+	resp, err := h.plane.MoveRegisteredWorkspace(c.Param("id"), req.BeforeID)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

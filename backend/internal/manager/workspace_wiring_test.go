@@ -324,7 +324,7 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	}
 
 	// 删登记（模型层 + store 层都要清）。
-	del, err := r.svc.DeleteRegisteredWorkspace(ws.ID)
+	del, err := r.svc.WorkspacePlane().DeleteRegisteredWorkspace(ws.ID)
 	if err != nil {
 		t.Fatalf("DeleteRegisteredWorkspace: %v", err)
 	}

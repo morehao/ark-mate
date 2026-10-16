@@ -244,7 +244,7 @@ func TestWorkspaceRegistryDeleteDefaultRefusedAndUnknown(t *testing.T) {
 	}
 	def, _, _ := r.Svc.DefaultWorkspace()
 
-	_, err := r.Svc.DeleteRegisteredWorkspace(def.ID)
+	_, err := r.Svc.WorkspacePlane().DeleteRegisteredWorkspace(def.ID)
 	if err == nil {
 		t.Fatal("默认工作空间必须拒绝删除")
 	}
@@ -252,7 +252,7 @@ func TestWorkspaceRegistryDeleteDefaultRefusedAndUnknown(t *testing.T) {
 		t.Fatalf("默认不可删应为 40001，实际 %d", c)
 	}
 
-	_, err = r.Svc.DeleteRegisteredWorkspace("wsp-nope")
+	_, err = r.Svc.WorkspacePlane().DeleteRegisteredWorkspace("wsp-nope")
 	if c := gerrCode(t, err); c != code.NotFound {
 		t.Fatalf("未知 id 应为 40401，实际 %d", c)
 	}
@@ -264,7 +264,7 @@ func TestWorkspaceRegistryDeleteDefaultRefusedAndUnknown(t *testing.T) {
 		t.Fatalf("登记: %v", err)
 	}
 	seedStoreSession(t, r.St, "c-del", dir, ws.ID)
-	del, err := r.Svc.DeleteRegisteredWorkspace(ws.ID)
+	del, err := r.Svc.WorkspacePlane().DeleteRegisteredWorkspace(ws.ID)
 	if err != nil {
 		t.Fatalf("删登记: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestWorkspaceRegistryMemoryIsExplicitlyUnsupported(t *testing.T) {
 	} else if c := gerrCode(t, err); c != code.NotSupported {
 		t.Fatalf("memory 下创建应为 40501，实际 %d", c)
 	}
-	if _, err := r.Svc.MoveRegisteredWorkspace("any", ""); err == nil {
+	if _, err := r.Svc.WorkspacePlane().MoveRegisteredWorkspace("any", ""); err == nil {
 		t.Fatal("memory 下重排必须被拒")
 	} else if c := gerrCode(t, err); c != code.NotSupported {
 		t.Fatalf("memory 下重排应为 40501，实际 %d", c)
@@ -314,7 +314,7 @@ func TestWorkspaceRegistryRenameKeepsIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
-	renamed, err := r.Svc.RenameRegisteredWorkspace(ws.ID, "新名")
+	renamed, err := r.Svc.WorkspacePlane().RenameRegisteredWorkspace(ws.ID, "新名")
 	if err != nil {
 		t.Fatalf("改名: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestWorkspaceRegistryRenameKeepsIdentity(t *testing.T) {
 		t.Fatalf("改名不该动身份: 旧 %+v 新 %+v", ws, renamed)
 	}
 	// 清空标题 = 未命名（界面按末级目录名渲染），不是错误。
-	cleared, err := r.Svc.RenameRegisteredWorkspace(ws.ID, "")
+	cleared, err := r.Svc.WorkspacePlane().RenameRegisteredWorkspace(ws.ID, "")
 	if err != nil {
 		t.Fatalf("清空标题: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestWorkspaceRegistryRenameKeepsIdentity(t *testing.T) {
 		t.Fatalf("标题应被清空，实际 %q", cleared.Title)
 	}
 	// 未知 id → 40401。
-	if _, err := r.Svc.RenameRegisteredWorkspace("wsp-nope", "x"); gerrCode(t, err) != code.NotFound {
+	if _, err := r.Svc.WorkspacePlane().RenameRegisteredWorkspace("wsp-nope", "x"); gerrCode(t, err) != code.NotFound {
 		t.Fatalf("未知 id 改名应为 40401，实际 %d", gerrCode(t, err))
 	}
 }
