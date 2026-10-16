@@ -22,11 +22,6 @@ func (s *Service) SetWorkspaceSettingsStore(st WorkspaceRootsStore) {
 }
 
 // TODO(P4b): 删转发（同上）
-func (s *Service) WorkspaceSettings() (*dtoworkspace.WorkspaceSettingsResp, error) {
-	return s.planner.Settings(), nil
-}
-
-// TODO(P4b): 删转发（同上）
 func (s *Service) UpdateWorkspaceSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error) {
 	return s.planner.UpdateSettings(roots)
 }

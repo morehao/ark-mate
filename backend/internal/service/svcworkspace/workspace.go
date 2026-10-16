@@ -28,9 +28,6 @@ type WorkspaceSvc interface {
 	// 那个用于"选工作空间"，这个用于"看资料"）。
 	ListWorkspaceFiles(path string, includeHidden bool) (*dtoworkspace.WorkspaceFilesResp, error)
 
-	// WorkspaceSettings 返回工作区根白名单的设置快照（生效名单 + 显式配置名单 + 来源/锁定态）。
-	WorkspaceSettings() (*dtoworkspace.WorkspaceSettingsResp, error)
-
 	// UpdateWorkspaceSettings 全量替换工作区根白名单（落盘 + 热更新；被更高优先级来源锁定时拒绝）。
 	UpdateWorkspaceSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error)
 

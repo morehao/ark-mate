@@ -160,12 +160,9 @@ func (h *workspaceCtr) Files(c *gin.Context) {
 // 与 `/workspaces/browse` 返回的 roots 同源但**不同义**：browse 给的是生效名单（含平台代建根，
 // 供浏览面把它们列成快捷入口），这里额外区分"显式配置的"与"派生的"，否则面板无法表达"删掉这条"。
 func (h *workspaceCtr) Settings(c *gin.Context) {
-	resp, err := h.svc.WorkspaceSettings()
-	if err != nil {
-		gincontext.Fail(c, code.FromError(err))
-		return
-	}
-	gincontext.Success(c, resp)
+	// 快照从**域平面**取（P4a 正文第十九刀）：域里已折好 DTO（含 configured / prefer_roots /
+	// source / locked_by），用例层再包一层就只是一行转发；它没有错误出口（读自己的状态）。
+	gincontext.Success(c, h.plane.Settings())
 }
 
 // UpdateSettings 全量替换工作区根白名单（落盘 + 对新会话立即生效）。

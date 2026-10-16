@@ -130,7 +130,30 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		"func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error)") {
 		t.Error("`internal/domain/workspace/registry.go` 里找不到登记表读模型本体：判据失锚＝空转。")
 	}
+	// 设置面快照（P4a 正文第十九刀）：域里 `Plane.Settings()` 同样已经折好 DTO（含
+	// configured / prefer_roots / source / locked_by），用例层再包一层就只是一行转发。
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "service", "svcworkspace")) {
+		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "WorkspaceSettings()") {
+			t.Errorf("`svcworkspace` 里又声明了 `WorkspaceSettings()`：投影在域平面里（%s），"+
+				"这一层再包一次就是一行转发。控制器直接经 `h.plane.Settings()` 取。", filepath.Base(path))
+		}
+	}
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "func (s *Service) WorkspaceSettings(") {
+			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) WorkspaceSettings(`："+
+				"那一行转发已删（P4a 正文第十九刀）。", filepath.Base(path))
+		}
+	}
+	settingsFam := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "settings.go")))
+	if !strings.Contains(settingsFam, "func (pl *Plane) Settings() *dtoworkspace.WorkspaceSettingsResp {") {
+		t.Error("`internal/domain/workspace/settings.go` 里找不到 `func (pl *Plane) Settings()`：" +
+			"判据失锚＝空转。")
+	}
 	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "workspace.go")))
+	if !strings.Contains(ctrWork, "h.plane.Settings()") {
+		t.Error("`ctrworkspace` 里找不到 `h.plane.Settings()`：设置面快照要么走域平面、要么走一层转发。")
+	}
+
 	if !strings.Contains(ctrWork, "h.plane.WorkspaceRegistry()") {
 		t.Error("`ctrworkspace` 里找不到 `h.plane.WorkspaceRegistry()`：登记表要么走域平面、" +
 			"要么走一层转发，没有第三条路。")

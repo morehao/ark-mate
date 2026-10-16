@@ -61,7 +61,6 @@ type stubSvc struct {
 	recentResp  []dtoworkspace.WorkspaceRecentResp
 	recentErr   error
 
-	settingsResp   *dtoworkspace.WorkspaceSettingsResp
 	settingsErr    error
 	settingsCalled bool     // UpdateWorkspaceSettings 是否被调用（"传了空名单"与"没调用"必须能区分）
 	settingsRoots  []string // 最近一次 UpdateWorkspaceSettings 收到的 roots
@@ -403,20 +402,13 @@ func (s *stubSvc) ListWorkspaceFiles(path string, includeHidden bool) (*dtoworks
 	return s.filesResp, nil
 }
 
-func (s *stubSvc) WorkspaceSettings() (*dtoworkspace.WorkspaceSettingsResp, error) {
-	if s.settingsErr != nil {
-		return nil, s.settingsErr
-	}
-	return s.settingsResp, nil
-}
-
 func (s *stubSvc) UpdateWorkspaceSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error) {
 	s.settingsCalled = true
 	s.settingsRoots = roots
 	if s.settingsErr != nil {
 		return nil, s.settingsErr
 	}
-	return s.settingsResp, nil
+	return &dtoworkspace.WorkspaceSettingsResp{}, nil
 }
 
 // ——— v14 工作空间登记表桩 ———
@@ -628,12 +620,7 @@ func newRestEngine(deps router.Ports) *gin.Engine {
 // TestWorkspaceSettingsCtrPassThrough 设置面的控制器职责：GET 透出快照、PUT 把 roots 原样交给
 // 领域层（语义判断全在 manager，handler 不做第二套）、body 非法回 40000、领域错误经 RestErr 映射。
 func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
-	snap := &dtoworkspace.WorkspaceSettingsResp{
-		Configured: []string{"/srv/docs"}, Roots: []string{"/srv/docs", "/home/u/.ark-mate/workspaces"},
-		PreferRoots: true, ProvisionDir: "/home/u/.ark-mate/workspaces", ProvisionIncluded: true,
-		Source: "config.json", Writable: true,
-	}
-	svc := &stubSvc{settingsResp: snap}
+	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(t, svc))
 
 	env, _ := do(t, r, "GET", "/v1/mate/settings/workspace", "")
@@ -644,8 +631,12 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &got); err != nil {
 		t.Fatalf("data 解析: %v", err)
 	}
-	if len(got.Roots) != 2 || !got.ProvisionIncluded || !got.Writable {
-		t.Fatalf("快照应原样透出: %+v", got)
+	// 快照这一格自 P4a 正文第十九刀起走**真域平面**（读模型由域折好 DTO）：这里只证
+	// "信封形状对 + 空平面如实自报不可写、来源 unavailable"，"配置过的名单原样透出"由
+	// `internal/manager` 的设置面测试用真策略/真端口钉（那边才是判定的本体）。
+	// 空名单在 JSON 上被 omitempty 抹成缺省（前端按"没有"渲染），这里只钉状态两格。
+	if got.Writable || got.Source != "unavailable" {
+		t.Fatalf("空平面快照形状不符: %+v", got)
 	}
 
 	// PUT：roots 原样下发（含空数组 = 恢复不限制），响应回更新后的快照。

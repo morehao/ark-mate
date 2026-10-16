@@ -39,10 +39,7 @@ func TestWorkspaceSettingsWithoutStore(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, "", []string{mustEval(t, root)})
 
-	resp, err := svc.WorkspaceSettings()
-	if err != nil {
-		t.Fatalf("WorkspaceSettings: %v", err)
-	}
+	resp := svc.WorkspacePlane().Settings()
 	if len(resp.Configured) != 1 || !resp.PreferRoots || resp.Writable {
 		t.Fatalf("快照不符: %+v", resp)
 	}
@@ -72,10 +69,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	svc.SetWorkspaceSettingsStore(store)
 
 	// 起步快照：没有偏好起点（prefer_roots=false，无名单可言，故 provision_included 为 false）。
-	resp, err := svc.WorkspaceSettings()
-	if err != nil {
-		t.Fatalf("WorkspaceSettings: %v", err)
-	}
+	resp := svc.WorkspacePlane().Settings()
 	if resp.PreferRoots || len(resp.Configured) != 0 || len(resp.Roots) != 0 || resp.ProvisionIncluded {
 		t.Fatalf("未配置时不该有偏好起点: %+v", resp)
 	}
@@ -84,6 +78,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	}
 
 	// 落盘内容必须是**显式**名单（不含代建根）：派生项写进配置文件就变成了运维的配置。
+	var err error
 	resp, err = svc.UpdateWorkspaceSettings([]string{rootA, rootB})
 	if err != nil {
 		t.Fatalf("UpdateWorkspaceSettings: %v", err)
@@ -210,14 +205,11 @@ func TestUpdateWorkspaceSettingsLocked(t *testing.T) {
 	store := &fakeRootsStore{src: "env(process)", locked: "MATE_WORKSPACE_ROOTS"}
 	svc.SetWorkspaceSettingsStore(store)
 
-	resp, err := svc.WorkspaceSettings()
-	if err != nil {
-		t.Fatalf("WorkspaceSettings: %v", err)
-	}
+	resp := svc.WorkspacePlane().Settings()
 	if resp.Writable || resp.LockedBy != "MATE_WORKSPACE_ROOTS" {
 		t.Fatalf("锁定态应透出给面板（它据此转只读）: %+v", resp)
 	}
-	err = func() error { _, e := svc.UpdateWorkspaceSettings([]string{root}); return e }()
+	err := func() error { _, e := svc.UpdateWorkspaceSettings([]string{root}); return e }()
 	if aclCode(t, err) != "settings_locked" {
 		t.Fatalf("应 settings_locked: %v", err)
 	}
