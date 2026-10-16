@@ -38,6 +38,12 @@ var runtimeconnAnchors = []string{
 	"func (pl *Plane) SelectedSpec(",
 	"func (pl *Plane) Identity(",
 	"func (pl *Plane) RecordError(",
+	// 第二刀：诊断的组装面 + 两端口的声明。
+	"func (pl *Plane) Diagnostics(",
+	"func (pl *Plane) RemediationFor(",
+	"func (pl *Plane) RecordRuntimeError(",
+	"type CredentialSource interface {",
+	"type LiveClientSource interface {",
 }
 
 // TestRuntimeBindingLivesInRuntimeconn 绑定与诊断状态必须在 `internal/runtimeconn`，
@@ -46,7 +52,7 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 	root := backendRoot(t)
 	domainDir := filepath.Join(root, "internal", "runtimeconn")
 	joined := ""
-	for _, name := range []string{"binding.go", "diagnostics.go"} {
+	for _, name := range []string{"binding.go", "diagnostics.go", "ports.go"} {
 		joined += stripLineComments(readFileOrFatal(t, filepath.Join(domainDir, name)))
 	}
 	for _, a := range runtimeconnAnchors {
@@ -56,13 +62,16 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 		}
 	}
 
-	// manager 侧：转发文件里不得再出现状态与判定。
-	thin := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "runtime_binding.go")))
-	for _, banned := range []string{"sync.Mutex", "runtime.SelectedRuntime()", "acl.NewError("} {
-		if strings.Contains(thin, banned) {
-			t.Errorf("internal/manager/runtime_binding.go 里出现 %q：绑定的状态与判定**只有一份实现**，"+
-				"在 `internal/runtimeconn`（P3a-2）。在这里再写一遍会让 `/meta` 的底座身份与诊断的 State "+
-				"读到两份值，而两边都编译得过。", banned)
+	// manager 侧：两个转发文件里不得再出现状态与判定（组装面第二刀之后也不该留判据文案）。
+	for _, f := range []string{"runtime_binding.go", "diagnostics.go"} {
+		thin := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", f)))
+		for _, banned := range []string{"sync.Mutex", "runtime.SelectedRuntime()", "acl.NewError(",
+			"runtime.Installed(", "looksLikeAuthFailure("} {
+			if strings.Contains(thin, banned) {
+				t.Errorf("internal/manager/%s 里出现 %q：绑定的状态与诊断的判据**只有一份实现**，"+
+					"在 `internal/runtimeconn`（P3a-2）。在这里再写一遍会让 `/meta` 的底座身份、"+
+					"诊断的 State 与「怎么修」的出路各说各话，而两边都编译得过。", f, banned)
+			}
 		}
 	}
 }
@@ -85,5 +94,25 @@ func TestRuntimeBindingIsNotDuplicatedOnService(t *testing.T) {
 			"执行面没有装配。\n" +
 			"表现是绑定恒为 nil、`Snapshot()` 回落到「构建期 id + stopped」——看起来完全正常，" +
 			"只是进程状态永远是 stopped。")
+	}
+	if !strings.Contains(service, "SetCredentialSource(s)") {
+		t.Error("`NewService` 里找不到 `SetCredentialSource(s)`：诊断的「怎么修」少一条出路" +
+			"（凭据悬空/缺密钥时不再提示）——而诊断面照常 200，只是少说一句话。")
+	}
+	// 连接池读面挂钩在编排器回挂那一刻（`NewService` 时它还不存在），漏了的表现是诊断永远报"未连接"。
+	// 判据扫 `manager` 的**生产**文件而不是某一条固定路径：接线点会随搬迁挪窝
+	// （`attachOrchestrator` 现在在 `service.go`，但它属于装配面，P4b/P5a 会再动它）。
+	wired := false
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+		if strings.Contains(readFileOrFatal(t, path), "SetLiveClientSource(") {
+			wired = true
+			break
+		}
+	}
+	if !wired {
+		t.Error("`internal/manager` 的生产文件里找不到 `SetLiveClientSource(`（接线点在 `attachOrchestrator`）：" +
+			"连接池读面没有接给执行面。\n" +
+			"表现是诊断永远报「未连接」、stderr 尾巴恒空——而它只在**底座真的在跑**时才该现形，" +
+			"开发态多半看不见。")
 	}
 }

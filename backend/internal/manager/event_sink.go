@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
 	"github.com/morehao/golib/glog"
@@ -149,7 +150,7 @@ func (o *Orchestrator) publishError(sessionID, runID string, err error, cli *acl
 	ae := acl.Classify(err)
 	tail := ae.StderrTail
 	if len(tail) == 0 && cli != nil {
-		tail = acl.TailLines(cli.StderrTail(), maxDiagStderrLines)
+		tail = acl.TailLines(cli.StderrTail(), runtimeconn.MaxDiagStderrLines)
 	}
 	o.svc.recordRuntimeError(sessionID, ae, tail)
 	payload := map[string]any{

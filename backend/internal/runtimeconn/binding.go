@@ -46,6 +46,10 @@ type Plane struct {
 	diagMu    sync.Mutex
 	lastErr   *LastErr
 	ambiguous *AmbiguityNote
+
+	// 两个口子（装配期登记；nil = 该事实不可得，诊断如实少给一条出路，不臆造）。
+	cred CredentialSource
+	live LiveClientSource
 }
 
 // NewPlane 造一个执行面。`spec` 取不到（未注册）时 Name 回落 ID——构建期选定的 runtime 未注册是

@@ -179,6 +179,9 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	// 装配期的 `runtime.ProductRegistry` 已经 fail-closed，这里只是把事实记下来供诊断如实外露。
 	spec, specOK := reg.Get(runtime.SelectedRuntime())
 	s.runtimePlane = runtimeconn.NewPlane(reg, spec, specOK)
+	// 执行面的两个口子：凭据面（供应商域）现在就能接；连接池读面要等编排器造出来
+	// （见 `attachOrchestrator`）——**早一行拿到的是 nil**，表现是诊断永远报"未连接"（静默）。
+	s.runtimePlane.SetCredentialSource(s)
 	return s
 }
 
@@ -229,5 +232,7 @@ func (s *Service) attachOrchestrator(o *Orchestrator) {
 	// 会话域的用量端口：读的是执行面内存里的"每会话最近一次上报"（`LatestUsage`）。
 	if o != nil {
 		s.sessionPlane.SetUsageSource(o.LatestUsage)
+		// 执行面的连接池读面：诊断要问"此刻哪条连接活着"。
+		s.runtimePlane.SetLiveClientSource(o)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
@@ -473,7 +474,7 @@ func (o *Orchestrator) disconnectSession(as *ActiveSession, intentional bool) {
 			"runtime 连接断开（会话句柄已作废；下次 prompt 按需重建）", nil)
 		var tail []string
 		if as.client != nil {
-			tail = acl.TailLines(as.client.StderrTail(), maxDiagStderrLines)
+			tail = acl.TailLines(as.client.StderrTail(), runtimeconn.MaxDiagStderrLines)
 		}
 		ae.StderrTail = tail
 		o.svc.recordRuntimeError(as.ID, ae, tail)
