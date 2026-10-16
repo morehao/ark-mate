@@ -322,6 +322,35 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 			"（`Picker().SetBindAddr`），多一层转发会让「到底写进了哪个 picker」重新变成可以搞错的事" +
 			"（P4a 正文第十六刀）。")
 	}
+	// ——— 真动作的转发也要走同一条口径，且"替身缝在哪层，契约就在哪层"（P4a 正文第十七刀）———
+	//
+	// `PickDirectoryHost` 是**真动作**（spawn 宿主命令）而不只是读：搬走 manager 那条转发之后，
+	// 控制器直接持 `*workspace.Picker`——于是路由测试再也注入不了"选定 / 取消"两个结局。这条
+	// 守卫钉两件事：① 那层转发不许回潮；② 三个结局的契约测试必须**留在控制器级**（替身缝在
+	// 控制器的窄端口上），否则"搬完就少了一种结局"会静默发生。
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+		body := stripLineComments(readFileOrFatal(t, path))
+		if strings.Contains(body, "func (s *Service) PickDirectoryHost(") {
+			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) PickDirectoryHost(`："+
+				"那是真动作的一行转发（P4a 正文第十七刀），控制器经窄端口直接持域平面。", filepath.Base(path))
+		}
+	}
+	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "workspace.go")))
+	if !strings.Contains(ctrWork, "path, cancelled, err := h.picker.PickDirectoryHost(c.Request.Context())") {
+		t.Error("`ctrworkspace` 的 PickDirectory 里找不到 `h.picker.PickDirectoryHost(...)`：" +
+			"宿主选择器要么经控制器窄端口、要么经过渡转发，没有第三条路。")
+	}
+	if !strings.Contains(ctrWork, "type DirectoryPicker interface {") {
+		t.Error("`ctrworkspace` 里找不到 `type DirectoryPicker interface {`：窄端口是替身缝，" +
+			"删了它三个结局的契约就只能靠真 spawn 宿主命令来验。")
+	}
+	pickCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "pick_test.go")))
+	for _, want := range []string{"选定", "取消不是错误", "无可用选择器可判定", "native_pick_unsupported"} {
+		if !strings.Contains(pickCtr, want) {
+			t.Errorf("控制器级选择器契约测试里找不到 %q：三个结局（选定 / 取消 / 不支持）必须逐个在，", want)
+		}
+	}
+
 	appSrcForBind := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
 	if !strings.Contains(appSrcForBind, "a.svc.Picker().SetBindAddr(") {
 		t.Error("`internal/app/app.go` 里找不到 `a.svc.Picker().SetBindAddr(`：监听地址是**装配好的那个 " +

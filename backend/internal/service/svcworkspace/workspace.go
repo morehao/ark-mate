@@ -3,8 +3,6 @@
 package svcworkspace
 
 import (
-	"context"
-
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 )
 
@@ -15,12 +13,6 @@ type WorkspaceSvc interface {
 	// BrowseWorkspace 浏览某绝对路径下的**子目录**（只读；path 空 = 服务进程家目录）。
 	// Web 端无原生目录选择器，故由控制面提供枚举能力。
 	BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace.WorkspaceBrowseResp, error)
-
-	// PickDirectoryHost 抬一次**宿主原生**目录选择器（系统面板）。
-	//
-	// 返回 (path, false) = 选定；( "", true) = 取消（或超时收回，取消不是错误）；
-	// 宿主没有可用选择器 → `native_pick_unsupported`（可判定，前端据此回落应用内浏览）。
-	PickDirectoryHost(ctx context.Context) (string, bool, error)
 
 	// CreateWorkspaceDir 在某个已存在的目录下建一个子目录（目录浏览面的「新建文件夹」）。
 	//

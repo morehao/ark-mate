@@ -21,6 +21,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/skill"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/middleware"
@@ -81,6 +82,8 @@ type Ports struct {
 	Capabilities *capability.Registry
 	SkillPlane   *skill.Plane
 	Registry     *runtime.Registry
+	// Picker 宿主目录选择器平面（判定/配方/spawn 全在领域里；控制器的窄端口消费它）。
+	Picker *workspace.Picker
 	// McpPlane MCP 注册表/探测态平面（连接器目录读模型的事实来源之一）。
 	McpPlane   *mcp.Plane
 	McpSecrets *mcp.Secrets

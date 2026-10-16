@@ -29,7 +29,7 @@ func TestPickDirectoryHostUnsupportedWhenNotHost(t *testing.T) {
 	if got := svc.Picker().NativePickerMode(); got != string(workspace.NativePickerBrowse) {
 		t.Fatalf("对外监听应为 browse 形态: %s", got)
 	}
-	_, _, err := svc.PickDirectoryHost(context.Background())
+	_, _, err := svc.Picker().PickDirectoryHost(context.Background())
 	if err == nil || !errors.Is(err, workspace.ErrNativePickUnsupported) {
 		t.Fatalf("非 native 形态应 native_pick_unsupported: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestPickDirectoryHostSpawnsAndParsesHostPicker(t *testing.T) {
 	if got := svc.Picker().NativePickerMode(); got != string(workspace.NativePickerHost) {
 		t.Fatalf("本机 macOS 应为 native 形态: %s", got)
 	}
-	path, cancelled, err := svc.PickDirectoryHost(context.Background())
+	path, cancelled, err := svc.Picker().PickDirectoryHost(context.Background())
 	if err != nil {
 		t.Fatalf("PickDirectoryHost: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestPickDirectoryHostSpawnsAndParsesHostPicker(t *testing.T) {
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho 'execution error: User canceled. (-128)' >&2\nexit 1\n"), 0o755); err != nil {
 		t.Fatalf("改写假 osascript: %v", err)
 	}
-	path, cancelled, err = svc.PickDirectoryHost(context.Background())
+	path, cancelled, err = svc.Picker().PickDirectoryHost(context.Background())
 	if err != nil {
 		t.Fatalf("取消不该是错误: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestPickDirectoryHostSpawnsAndParsesHostPicker(t *testing.T) {
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho 'boom' >&2\nexit 3\n"), 0o755); err != nil {
 		t.Fatalf("改写假 osascript: %v", err)
 	}
-	if _, _, err := svc.PickDirectoryHost(context.Background()); err == nil || aclCode(t, err) != "native_pick_failed" {
+	if _, _, err := svc.Picker().PickDirectoryHost(context.Background()); err == nil || aclCode(t, err) != "native_pick_failed" {
 		t.Fatalf("非取消失败应 native_pick_failed: %v", err)
 	}
 }

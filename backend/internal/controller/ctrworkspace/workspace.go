@@ -5,6 +5,7 @@
 package ctrworkspace
 
 import (
+	"context"
 	"strconv"
 	"strings"
 
@@ -39,13 +40,24 @@ var _ WorkspaceCtr = (*workspaceCtr)(nil)
 // 存在理由：Web 端没有 Electron 那样的原生目录选择器（AionUi 用 webFsPicker 替代），
 // 因此"选一个目录"必须由控制面提供枚举能力；且**只列目录**——工作空间必须是目录
 // （见 manager.ValidateWorkspace 的三条件）。
+// DirectoryPicker 宿主目录选择器**窄端口**（控制器侧声明）。
+//
+// 生产传装配好的那个 `*workspace.Picker`（自持 bindAddr 事实）；测试传替身——"选定 / 取消"
+// 两个结局要真的 spawn 宿主命令（osascript/zenity），路由级跑不出来。端口不放 svc 层：域里的
+// `Picker` 已经把判定、配方、错误码全做完（P2a-16），用例层再包一层就只是一行转发（第十一刀口径）。
+type DirectoryPicker interface {
+	PickDirectoryHost(ctx context.Context) (string, bool, error)
+}
+
 type workspaceCtr struct {
 	svc svcworkspace.WorkspaceSvc
+	// picker 宿主目录选择器（事实来自 `router.Ports.Picker`）。
+	picker DirectoryPicker
 }
 
 // NewWorkspaceCtr 构造 WorkspaceCtr。
-func NewWorkspaceCtr(svc svcworkspace.WorkspaceSvc) WorkspaceCtr {
-	return &workspaceCtr{svc: svc}
+func NewWorkspaceCtr(svc svcworkspace.WorkspaceSvc, picker DirectoryPicker) WorkspaceCtr {
+	return &workspaceCtr{svc: svc, picker: picker}
 }
 
 // Browse 列出某绝对路径下的子目录（query `path` 缺省 = 首个工作区根，未配白名单时 = 服务进程家目录；
@@ -94,7 +106,7 @@ func (h *workspaceCtr) CreateDir(c *gin.Context) {
 // 前端本不该在"能力声明说没有"时打到这里（`/capabilities` 的 `native-dialog` 就是干这个的），
 // 所以这个错是"声明与实际不一致"的兜底——按可判定错误回，而不是笼统 50000。
 func (h *workspaceCtr) PickDirectory(c *gin.Context) {
-	path, cancelled, err := h.svc.PickDirectoryHost(c.Request.Context())
+	path, cancelled, err := h.picker.PickDirectoryHost(c.Request.Context())
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

@@ -36,7 +36,7 @@ import (
 // 但新增固定路径时要放在参数路径**之前**读一遍——顺序反了会让 `/workspaces/browse`
 // 被当成 id=browse 打到 Move/Rename 上。
 func registerWorkspace(v1 *gin.RouterGroup, ports Ports) {
-	ctr := ctrworkspace.NewWorkspaceCtr(ports.Workspace)
+	ctr := ctrworkspace.NewWorkspaceCtr(ports.Workspace, ports.Picker)
 
 	// 固定字面量路径（静态段）在前，参数路径在后。
 	v1.GET("/workspaces/browse", ctr.Browse)

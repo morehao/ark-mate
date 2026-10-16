@@ -15,6 +15,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/skill"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
@@ -55,14 +56,10 @@ type stubSvc struct {
 	dirResp   *dtoworkspace.WorkspaceDirCreateResp
 	dirErr    error
 	// v14.5 宿主原生目录选择器（桩只记参 + 透传；判定与 spawn 全在 manager）。
-	pickerMode    string
-	pickCalled    bool
-	pickPath      string
-	pickCancelled bool
-	pickErr       error
-	recentLimit   int // 最近一次 RecentWorkspaces 的 limit 参数
-	recentResp    []dtoworkspace.WorkspaceRecentResp
-	recentErr     error
+	pickerMode  string
+	recentLimit int // 最近一次 RecentWorkspaces 的 limit 参数
+	recentResp  []dtoworkspace.WorkspaceRecentResp
+	recentErr   error
 
 	settingsResp   *dtoworkspace.WorkspaceSettingsResp
 	settingsErr    error
@@ -384,14 +381,6 @@ func (s *stubSvc) NativePickerMode() string {
 	return s.pickerMode
 }
 
-func (s *stubSvc) PickDirectoryHost(_ context.Context) (string, bool, error) {
-	s.pickCalled = true
-	if s.pickErr != nil {
-		return "", false, s.pickErr
-	}
-	return s.pickPath, s.pickCancelled, nil
-}
-
 func (s *stubSvc) CreateWorkspaceDir(parent, name string) (*dtoworkspace.WorkspaceDirCreateResp, error) {
 	s.dirParent, s.dirName = parent, name
 	if s.dirErr != nil {
@@ -622,6 +611,8 @@ func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 		McpSecrets: mcp.NewSecrets(credential.New(reg)), McpGatewayEnabled: func() bool { return true },
 		// MCP 平面（P4a 正文第十四刀起）：连接器目录读模型的事实来源之一（探测态与工具计数）。
 		McpPlane: mcp.NewPlane(caps, nil, mcp.NewSecrets(credential.New(reg))),
+		// 宿主选择器平面（P4a 正文第十七刀）：控制器的窄端口消费它。
+		Picker: workspace.NewPicker(),
 		// 导出（P4a 正文第八刀）：会话域平面与事件总线是**真对象**（事实来源由 ctrexport 造），
 		// sqlite 载体那份 Store 由具体用例按需注入（`stubDeps(...).Store = st`）。
 		// 会话域平面是**真对象**（P4a 正文第十/十一刀起，历史读面与读模型都由它提供）。
