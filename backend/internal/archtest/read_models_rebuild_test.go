@@ -26,12 +26,18 @@ import (
 //
 // 所以判据钉三层（都 fail-closed，解析不到就红）：
 //
-//	① `manager` 里 `RebuildSessionReadModels` 存在，且**恰好一个调用点**，那个调用点在
-//	   `rebuildAllReadModels`（唯一的重建循环）里；
-//	② 启动钩子 `rebuildStaleReadModels` 调的也是 `rebuildAllReadModels`（两侧共用一份实现）；
+//	① 会话侧 `RebuildSessionReadModels`（**单会话重建的唯一实现**）存在，且**恰好一个调用点**，
+//	   那个调用点在 `RebuildAllReadModels`（**唯一的重建循环**，P1a-1b 起落在
+//	   `mechanism/doctor`）里；
+//	② 那个循环**恰好两个触发面**：启动钩子 `rebuildStaleReadModels` 与 doctor 的
+//	   `checkReadModelRebuild`（两侧共用一份实现；多一个 = 有人在别处又写了一段循环）；
 //	③ doctor 那一侧：`--rebuild-read-models` 开关真的存在（字段 + flag 注册）、
 //	   `runDoctor` 里对它的**条件分支**内调用体检的重建项、且 `checkReadModelRebuild` 自己在
-//	   "没给开关"时**早退拒绝**并调用 `manager.RebuildAllReadModels`。
+//	   "没给开关"时**早退拒绝**并调用机制层的 `RebuildAllReadModels`。
+//
+// 判据**按符号**锚定（不钉文件路径）：实现与触发者的落点已经搬过一次
+// （`manager/read_model_doctor.go` → `mechanism/doctor/readmodels.go`，P1a-1b），
+// 下一次是 `persist.go` → `domain/session`（P3b）——钉路径的话两次都会假红。
 
 // rebuildGuard 是守卫从源码里读到的全部事实。
 type rebuildGuard struct {
@@ -39,8 +45,8 @@ type rebuildGuard struct {
 	hasImpl bool
 	// implCallers `RebuildSessionReadModels` 的调用点所在函数名（升序，非测试源码）。
 	implCallers []string
-	// rebuildAllCallers `rebuildAllReadModels` 的调用点所在函数名（升序，非测试源码）。
-	rebuildAllCallers []string
+	// loopCallers `RebuildAllReadModels`（唯一的重建循环）的调用点所在函数名（升序，非测试源码）。
+	loopCallers []string
 	// hasFlagField `doctorOptions` 里有 `RebuildReadModels` 字段。
 	hasFlagField bool
 	// hasCLIFlag `fset.Bool("rebuild-read-models", …)` 注册了。
@@ -49,8 +55,8 @@ type rebuildGuard struct {
 	gateCallsCheck bool
 	// checkRefuses `checkReadModelRebuild` 在 `!opts.RebuildReadModels` 时早退。
 	checkRefuses bool
-	// checkCallsManager `checkReadModelRebuild` 调用了 `manager.RebuildAllReadModels`。
-	checkCallsManager bool
+	// checkCallsLoop `checkReadModelRebuild` 调用了 `RebuildAllReadModels`（机制层的循环）。
+	checkCallsLoop bool
 }
 
 // TestReadModelsAreRebuildable（G7，v21）钉住"读模型可重建"这条口径的三层。
@@ -63,20 +69,25 @@ func TestReadModelsAreRebuildable(t *testing.T) {
 			"J7 的实现点不见了（守卫的事实源消失，fail-closed）")
 	}
 	// ① 唯一实现：调用点只许一个，且在唯一的重建循环里。
-	if len(g.implCallers) != 1 || g.implCallers[0] != "rebuildAllReadModels" {
-		t.Fatalf("`RebuildSessionReadModels` 的调用点必须**恰好一个**且在 `rebuildAllReadModels` 里，"+
+	if len(g.implCallers) != 1 || g.implCallers[0] != "RebuildAllReadModels" {
+		t.Fatalf("`RebuildSessionReadModels` 的调用点必须**恰好一个**且在 `RebuildAllReadModels` 里，"+
 			"实际 %v：\n两份重建实现今天看着一样，明天改一处就分叉——而分叉的后果是「启动重建出来的」"+
 			"与「doctor 重建出来的」读模型不同（J7 要求重建与触发者无关）", g.implCallers)
 	}
-	// ② 启动钩子与 doctor 共用同一份循环。
-	if len(g.rebuildAllCallers) != 2 {
-		t.Fatalf("`rebuildAllReadModels` 应恰好被两个消费面调用（启动钩子 + doctor 重建），实际 %v：\n"+
-			"少一个 = 有一侧自己另写了一段循环（两份实现的开始）", g.rebuildAllCallers)
+	// ② 启动钩子与 doctor 共用同一份循环，且**只有**这两个触发面。
+	if len(g.loopCallers) != 2 {
+		t.Fatalf("`RebuildAllReadModels` 应恰好被两个消费面调用（启动钩子 + doctor 重建），实际 %v：\n"+
+			"少一个 = 有一侧自己另写了一段循环（两份实现的开始）；多一个 = 多了一个能改读模型的入口",
+			g.loopCallers)
 	}
-	joined := strings.Join(g.rebuildAllCallers, ",")
+	joined := strings.Join(g.loopCallers, ",")
 	if !strings.Contains(joined, "rebuildStaleReadModels") {
-		t.Fatalf("启动钩子 `rebuildStaleReadModels` 没有调用 `rebuildAllReadModels`（实际 %v）：\n"+
-			"迁移把 `meta.read_models_rebuild` 置上之后，**唯一**会自动消费它的地方就是这里", g.rebuildAllCallers)
+		t.Fatalf("启动钩子 `rebuildStaleReadModels` 没有调用 `RebuildAllReadModels`（实际 %v）：\n"+
+			"迁移把 `meta.read_models_rebuild` 置上之后，**唯一**会自动消费它的地方就是这里", g.loopCallers)
+	}
+	if !strings.Contains(joined, "checkReadModelRebuild") {
+		t.Fatalf("doctor 的 `checkReadModelRebuild` 没有调用 `RebuildAllReadModels`（实际 %v）：\n"+
+			"命令行这一侧要么没接线，要么自己另写了一段重建（两份实现）", g.loopCallers)
 	}
 
 	// ③ doctor 侧：开关存在、被条件分支挡着、且检查自己也会拒绝。
@@ -93,8 +104,8 @@ func TestReadModelsAreRebuildable(t *testing.T) {
 		t.Fatalf("`checkReadModelRebuild` 没有「没给开关就早退拒绝」那一句：\n" +
 			"调用点接错线时它应当**拒绝写**（记 warn），而不是照写——只读承诺不能只靠一个 if 的位置")
 	}
-	if !g.checkCallsManager {
-		t.Fatalf("`checkReadModelRebuild` 没有调用 `manager.RebuildAllReadModels`：\n" +
+	if !g.checkCallsLoop {
+		t.Fatalf("`checkReadModelRebuild` 没有调用 `RebuildAllReadModels`（机制层的那个循环）：\n" +
 			"命令行这一侧要么没接线，要么自己另写了一段重建（两份实现）")
 	}
 }
@@ -112,7 +123,7 @@ func collectRebuildGuard(t *testing.T, root string) rebuildGuard {
 	// （`persist.go` → 目标 `internal/domain/session`、`read_model_doctor.go` → 目标
 	// `internal/mechanism/doctor`），而 `os.ReadDir` **不递归**——文件一进子目录，扫描要么
 	// 静默空转、要么"解析到一些但恰好漏掉关键的那几个"。放宽到整棵树同时是**更强**的判据：
-	// 下面 `implCallers` / `rebuildAllCallers` 都是**精确值**断言，少一个 = 有触发者被搬走，
+	// 下面 `implCallers` / `loopCallers` 都是**精确值**断言，少一个 = 有触发者被搬走，
 	// 多一个 = 有人在别处又写了一段循环（两份实现的开始，正是本守卫挡的第一类坏法）。
 	internalDir := filepath.Join(root, "internal")
 	parsed := 0
@@ -156,8 +167,8 @@ func collectRebuildGuard(t *testing.T, root string) rebuildGuard {
 				switch calleeName(call) {
 				case "RebuildSessionReadModels":
 					g.implCallers = append(g.implCallers, fn)
-				case "rebuildAllReadModels":
-					g.rebuildAllCallers = append(g.rebuildAllCallers, fn)
+				case "RebuildAllReadModels":
+					g.loopCallers = append(g.loopCallers, fn)
 				}
 				return true
 			})
@@ -249,7 +260,7 @@ func collectRebuildGuard(t *testing.T, root string) rebuildGuard {
 				}
 			case *ast.CallExpr:
 				if calleeName(v) == "RebuildAllReadModels" {
-					g.checkCallsManager = true
+					g.checkCallsLoop = true
 				}
 			}
 			return true

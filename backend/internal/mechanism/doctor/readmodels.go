@@ -1,17 +1,18 @@
-package manager
+package doctor
 
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/morehao/ark-mate/internal/store"
-	goruntime "github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
-// ——— `mate doctor` 的 **读模型**体检（v21–v23） ———
+// ——— `mate doctor` 的 **读模型**体检与重建（v21–v23） ———
 //
-// 分工与 provider 段逐条同形：本文件是**事实的构造函数**（只读），`internal/app/command/
+// 分工：本文件是**事实的构造函数**（只读）与**唯一的重建循环**，`internal/app/command/
 // doctor_readmodels.go` 只负责排版与三档结论。
 //
 // 本文件尾部另有**一个写路径**（`RebuildAllReadModels`）——它不是体检的一部分，而是体检给出的
@@ -61,7 +62,13 @@ type ReadModelDoctorFacts struct {
 }
 
 // CollectReadModelDoctorFacts 采集读模型体检的事实（只读；库不可用时记 Note 并返回零值）。
-func CollectReadModelDoctorFacts(ctx context.Context, st *store.Store) ReadModelDoctorFacts {
+//
+// `messageSources` 是**消息白名单投影的来源类型集合**，由调用方（组合根）交下来：
+// 那份集合的声明面必须与投影的 `switch` 同源（守卫 G5 钉住），所以它属于会话侧；机制层
+// **不认识**事件类型词汇，只按调用方给的集合判"库里有没有别的东西混进 messages"。
+// 这与 `credential.ResolveProviderKey` 收窄成 `(id, keyRef)` 是同一手法：机制层不 import 领域，
+// 由组合根把领域事实交下去。
+func CollectReadModelDoctorFacts(ctx context.Context, st *store.Store, messageSources []string) ReadModelDoctorFacts {
 	var f ReadModelDoctorFacts
 	if st == nil {
 		f.Note = "没有可读的库句柄"
@@ -113,8 +120,8 @@ func CollectReadModelDoctorFacts(ctx context.Context, st *store.Store) ReadModel
 		HAVING lo <> 0 OR hi <> n - 1)`); !ok {
 		return f
 	}
-	// 来源白名单：`json_each` 把每行的来源数组摊开，取出去重后的类型集合，再与 Go 侧那份
-	// 白名单（`messageRowSourceTypes`，与投影的 `switch` 同源）比对。
+	// 来源白名单：`json_each` 把每行的来源数组摊开，取出去重后的类型集合，再与调用方给的
+	// 那份白名单（会话侧唯一声明处）比对。
 	var types []string
 	if err := db.Raw(`SELECT DISTINCT json_extract(je.value, '$.type') AS t
 		FROM messages m, json_each(m.events_json) je
@@ -124,7 +131,7 @@ func CollectReadModelDoctorFacts(ctx context.Context, st *store.Store) ReadModel
 		f.ForeignSources = []string{"<events_json 不是合法 JSON 数组：" + err.Error() + ">"}
 	} else {
 		for _, t := range types {
-			if !isMessageRowSourceType(t) {
+			if !slices.Contains(messageSources, t) {
 				f.ForeignSources = append(f.ForeignSources, t)
 			}
 		}
@@ -136,6 +143,15 @@ func CollectReadModelDoctorFacts(ctx context.Context, st *store.Store) ReadModel
 	return f
 }
 
+// ReadModelRebuilder 重建**一个会话**的读模型（读模型重建的唯一实现由会话侧提供）。
+//
+// 为什么是端口而不是把实现搬进来：单会话重建要 events 读面与 runs/messages 写面，还要在
+// "用日志里的终态收口停在 running 的轮"时复用 live 路径的物化（`materializeRun`，它要 orch 的
+// 用量快照）。那些都是**会话域**的东西；机制层只该知道"能重建一个会话"这件事。
+type ReadModelRebuilder interface {
+	RebuildSessionReadModels(ctx context.Context, sessionID string) error
+}
+
 // RebuildAllReadModels 用 events 重建**全部会话**的读模型（J7 的字面操作）。
 //
 // 消费面两处（**只有这两处**，守卫 G7 钉住）：启动钩子 `rebuildStaleReadModels`（标记驱动——
@@ -143,15 +159,24 @@ func CollectReadModelDoctorFacts(ctx context.Context, st *store.Store) ReadModel
 // 体检报了漂移之后的**出路**；这也是 model/enum.go 里 `MetaKeyReadModelsRebuild` 那段注释
 // 承诺过的两个消费面）。返回会话总数与失败数；`failed > 0` 时调用方应**保留**重建标记。
 //
-// 与 provider 体检同一手法构造一个 Service（`collectRuntimeModelFacts`）：**刻意不调
-// `EnableStore`**——它会顺带做装配期同步（`SyncRuntime`，写 runtime 配置落点），而重建读模型
-// 是纯读模型的写动作。副作用面越小，"doctor 说重建好了"越等于"读模型真被重铺了"。
-func RebuildAllReadModels(ctx context.Context, st *store.Store) (int, int, error) {
+// 两个入参的分工：`st` 用来**枚举**会话（机制层直接读库，无需端口）；`rb` 提供"重建一个会话"
+// 那一件机制层做不到的事。
+func RebuildAllReadModels(ctx context.Context, st *store.Store, rb ReadModelRebuilder) (total, failed int, err error) {
 	if st == nil {
 		return 0, 0, fmt.Errorf("没有可读写的库句柄")
 	}
-	svc := NewService(goruntime.AllBuiltinRegistry(), nil)
-	defer svc.coalescer.Close()
-	svc.attachStore(st)
-	return svc.rebuildAllReadModels(ctx)
+	if rb == nil {
+		return 0, 0, fmt.Errorf("没有可用的读模型重建器（会话侧的实现未接线）")
+	}
+	list, err := st.ListSessions(ctx, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, sess := range list {
+		if rerr := rb.RebuildSessionReadModels(ctx, sess.ID); rerr != nil {
+			failed++
+			glog.Warnw(ctx, "read models: 会话重建失败", "session", sess.ID, "err", rerr)
+		}
+	}
+	return len(list), failed, nil
 }

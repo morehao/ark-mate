@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/object/objid"
@@ -146,7 +147,7 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 //
 // best-effort：任何一步失败只 WARN（标记留着，下次启动重试——比"半个库重建了一半还清了标记"好）。
 //
-// 它与 `mate doctor --rebuild-read-models` 共用 `rebuildAllReadModels`：区别只在**触发条件**
+// 它与 `mate doctor --rebuild-read-models` 共用机制层的 `doctor.RebuildAllReadModels`：区别只在**触发条件**
 // （这边看标记、那边是人工显式要求），而"重建什么"必须只有一份实现——两份的话，
 // "doctor 重建出来的"与"启动重建出来的"就能不一样，而那是最难查的一类不一致（J7 的可重建性
 // 要求"同一份 events 得到同一组读模型"，与谁触发无关）。
@@ -162,7 +163,9 @@ func (s *Service) rebuildStaleReadModels(ctx context.Context) {
 	if !ok || ver == "" {
 		return
 	}
-	total, failed, err := s.rebuildAllReadModels(ctx)
+	// 循环在机制层（`mechanism/doctor`）：它是"遍历全部会话"这件事，与会话域无关；
+	// "重建一个会话"仍由本侧实现（`s` 满足 `doctor.ReadModelRebuilder`）。
+	total, failed, err := doctor.RebuildAllReadModels(ctx, s.st, s)
 	if err != nil {
 		glog.Warnw(ctx, "read models: 列会话失败（重建跳过，标记保留）", "err", err)
 		return
@@ -303,23 +306,6 @@ func (s *Service) runtimeValueToModelID(ctx context.Context, runtimeID string) m
 //
 // 单个会话失败**不中断**（一个会话的坏数据不该让其余会话失去自愈机会），失败只计 WARN；
 // 调用方按 `failed > 0` 决定"重建标记/清理"的去留。
-func (s *Service) rebuildAllReadModels(ctx context.Context) (total, failed int, err error) {
-	if s.st == nil {
-		return 0, 0, nil
-	}
-	list, err := s.st.ListSessions(ctx, nil)
-	if err != nil {
-		return 0, 0, err
-	}
-	for _, sess := range list {
-		if rerr := s.RebuildSessionReadModels(ctx, sess.ID); rerr != nil {
-			failed++
-			glog.Warnw(ctx, "read models: 会话重建失败", "session", sess.ID, "err", rerr)
-		}
-	}
-	return len(list), failed, nil
-}
-
 // RebuildSessionReadModels 用 `events` 重建某会话的全部读模型（J7：读模型整体可重建）。
 //
 // 三段：① `runs` 补缺（`run.started` 事件是权威：缺行→补一行）；② 把**日志里已有终态**却还

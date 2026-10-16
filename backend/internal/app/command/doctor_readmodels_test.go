@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/manager"
+	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/config"
@@ -19,7 +20,7 @@ import (
 // 分档错了就是退出码错了，而判据"从不触发"（写了个永远为 0 的条件）与"读模型干净"在报告里
 // 长得一模一样。
 //
-// 事实是全 SQL 采的（`manager.CollectReadModelDoctorFacts`），所以这里的夹具刻意**直插**：
+// 事实是全 SQL 采的（`doctorfacts.CollectReadModelDoctorFacts`），所以这里的夹具刻意**直插**：
 // 手写 `events_json` 才能造出"越界来源"这种投影不会产出的形态。
 
 type readModelRig struct {
@@ -253,7 +254,7 @@ func collectFactsForTest(t *testing.T, dbPath string) readModelDriftView {
 		t.Fatalf("只读开库: %v", err)
 	}
 	defer func() { _ = st.Close() }()
-	f := manager.CollectReadModelDoctorFacts(context.Background(), st)
+	f := doctorfacts.CollectReadModelDoctorFacts(context.Background(), st, manager.MessageRowSourceTypes())
 	return readModelDriftView{
 		Orphans: f.OrphanMessages, EmptyBodies: f.EmptyBodies,
 		BadOrdinalSessions: f.BadOrdinalSessions, BadEventSeqSessions: f.BadEventSeqSessions,
