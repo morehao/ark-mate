@@ -107,16 +107,17 @@ func TestSearchMessagesSQLite(t *testing.T) {
 
 func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	// memory 模式（无 store）：回扫 transcript，source 明确标注 transcript。
+	//
+	// P3b-2b：检索实现搬进了 `domain/session`，域内已有一条同判据的用例
+	// （`TestSearchMessagesTranscriptFallback`）；这一条留在 manager 是因为它走的是
+	// **真 Service 装配链**（`SetTranscriptDir` → 域、`publish` → 域）——验的是"接上了没有"。
 	dir := t.TempDir()
-	reg := testutil.StubRegistry()
-	svc := NewService(reg, eventbus.New())
+	svc := NewService(testutil.StubRegistry(), eventbus.New())
 	svc.SetTranscriptDir(dir)
-	orch := NewOrchestrator(svc, reg)
-	t.Cleanup(orch.Close)
+	t.Cleanup(svc.closeTranscripts)
 
 	svc.registerSession(&SessionRec{ID: "t-1", Title: "内存会话"})
 	svc.beginTranscript("t-1", "stub", "/tmp", false)
-	defer svc.closeTranscripts()
 	svc.publish(session.BusUserMessage, "t-1", map[string]any{"text": "内存里的关键词 needle"})
 	svc.publish(session.BusMessage, "t-1", map[string]any{"text": "助手也提到 needle"})
 	// ③ 文本增量攒批：断言前手动落盘（生产由 25ms 窗口 / 终态事件 / 阈值触发）。

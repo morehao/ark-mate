@@ -28,8 +28,7 @@ type Service struct {
 	reg  *runtime.Registry
 	bus  *eventbus.Bus
 	orch *Orchestrator
-	tx   *transcriptRecorder // 会话 wire transcript（nil = 未启用，见 SetTranscriptDir）
-	st   *store.Store        // SQLite 持久层（nil = 未启用；启用后见 EnableStore）
+	st   *store.Store // SQLite 持久层（nil = 未启用；启用后见 EnableStore）
 	// runtimeCfgDigests 各 runtime 已物化的模型配置指纹（T5）。它**并进代际键**
 	// （见 connection.go 的 generationKey）：不并进键，暖进程会继续用旧清单而界面显示"已保存"。
 	runtimeCfgDigests map[string]string
@@ -93,8 +92,6 @@ type Service struct {
 	creds *credential.Store
 	// binding 本进程认的那个底座（v19：单实例、构造期建好；见 runtime_binding.go）。
 	binding *runtimeBinding
-	// inputs 会话待投递输入队列（**仅 memory 模式**；sqlite 模式的事实源是 inputs 表）。
-	inputs  map[string][]QueuedInput
 	autoVer map[string]int64 // 自动化事件的版本计数（`automation:<id>` 聚合）；会话侧那张表在 domain/session
 
 	// A3 诊断：底座最近一次失败（含 stderr 尾巴）。独立锁，避免与 s.mu 交叉。
@@ -141,7 +138,6 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		bus:   bus,
 		// 网关默认开启（config 的 auto）：显式在这里置位，避免 atomic.Bool 零值把默认关掉。
 		mcpGatewayWarned: make(map[string]bool),
-		inputs:           make(map[string][]QueuedInput),
 		autoVer:          make(map[string]int64),
 		catalog:          newCatalogStore(),
 		caps:             capability.NewRegistry(),
@@ -218,36 +214,25 @@ func (s *Service) NativePermissionEnabled() bool {
 // SetTranscriptDir 启用会话 wire transcript 落盘（目录不存在会自动创建；
 // dir 为空 = 禁用）。须在任何会话开始前调用（serve/demo 装配时）。
 // 启用后立即回读已落盘 transcript，重建会话列表与历史（会话重启存活）。
-func (s *Service) SetTranscriptDir(dir string) {
-	if dir == "" {
-		s.tx = nil
-		s.sessionPlane.SetTranscriptSink(nil)
-		return
-	}
-	s.tx = newTranscriptRecorder(dir)
-	s.sessionPlane.SetTranscriptSink(s.tx)
-	s.loadTranscripts()
-}
+//
+// P3b-2b：recorder 与装载/检索面整体落 `domain/session`，这一层只剩**装配转发**
+// （域自己持有目录、文件句柄与启动回读，manager 不再认识 transcript 的文件布局）。
+//
+// TODO(P4b): 删转发（装配侧直接依赖 session.Plane）
+func (s *Service) SetTranscriptDir(dir string) { s.sessionPlane.SetTranscriptDir(dir) }
 
-// beginTranscript 为会话写 transcript header（首行）；失败只告警不阻断。
+// beginTranscript 为会话写 transcript header（首行）；失败只告警不阻断（域内实现自己判空）。
+//
+// TODO(P4b): 删转发（写面直接依赖 session.Plane）
 func (s *Service) beginTranscript(sessionID, runtimeID, cwd string, workspaceTemporary bool) {
-	if s.tx == nil {
-		return
-	}
-	s.tx.begin(sessionID, runtimeID, cwd, workspaceTemporary)
+	s.sessionPlane.BeginTranscript(sessionID, runtimeID, cwd, workspaceTemporary)
 }
 
 // closeTranscripts 关闭全部 transcript 文件（daemon 退出/orchestrator.Close 收尾）。
 // 先落掉合并器里的尾部文本增量，再关文件——否则长回复的最后一段会丢。
-func (s *Service) closeTranscripts() {
-	s.flushChunks()
-	if s.tx == nil {
-		return
-	}
-	s.tx.closeAll()
-	s.tx = nil
-	s.sessionPlane.SetTranscriptSink(nil)
-}
+//
+// TODO(P4b): 删转发（装配侧直接依赖 session.Plane）
+func (s *Service) closeTranscripts() { s.sessionPlane.CloseTranscripts() }
 
 // attachOrchestrator 由 NewOrchestrator 回挂；Service 的会话动作委托给它。
 func (s *Service) attachOrchestrator(o *Orchestrator) {

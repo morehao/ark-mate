@@ -12,13 +12,13 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 )
 
 // migrate 把 transcript 目录（默认 ~/.ark-mate/transcripts）全量导入 SQLite（P1 迁移关键路径）：
-//   - 解析全部 *.jsonl（复用 manager 复读器；坏文件告警跳过）；
+//   - 解析全部 *.jsonl（复用 `domain/session` 的复读器——transcript 的 wire 形状归会话域，见 P3b-2b；坏文件告警跳过）；
 //   - 单事务导入（store.ImportBatch：按会话逐行分配**会话内位次** → events → sessions → 数量校验 → 导入标记）；
 //   - 幂等：同目录指纹已导入过则跳过；任一步失败整体回滚（原 transcript 目录不动）。
 func migrate(args []string) {
@@ -50,7 +50,7 @@ func migrate(args []string) {
 	items := make([]store.ImportItem, 0, len(files))
 	skipped, lineCount := 0, 0
 	for _, path := range files {
-		data, ok := manager.ReadTranscriptFile(path)
+		data, ok := session.ReadTranscriptFile(path)
 		if !ok {
 			// v1 格式（事件行没有 id/seq 身份）与损坏文件走同一条出口，但 v1 是**可预期**的那种：
 			// 它的处置出口是 `mate transcripts prune --older-than 1s`（装载面已打 WARN + 提示）。

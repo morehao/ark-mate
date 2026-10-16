@@ -1,10 +1,9 @@
-package manager
+package session
 
 import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,25 +13,31 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 )
 
+// ——— 会话检索（标题 / runtime / 会话 id / 用户消息正文） ———
+//
+// P3b-2b：从 manager 搬进域（`SearchSessions` + `scanTranscriptText` + `foldPreview`）。
+// 它读的是**本域的两份事实**：内存会话表（`pl.sessions`）与 transcript 目录（`pl.tx.dir`），
+// 所以留在 manager 只会让 manager 反向认识域的旁路文件布局。
+
 // SearchSessions 按关键词搜索会话（标题 / Agent / ID / 用户消息正文；含归档）。
 // 元数据命中计 1 次；正文命中逐条累计（片段取首条命中用户消息）。
 // 排序：updated_at 降序，截断 limit（调用方已校验 >0）。
 // 复杂度说明：本地工具态直接扫 transcript 文件（文件小、量级低）；不引入索引/DB（决策范围外）。
-func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]dtosession.SessionSearchHit, error) {
+func (pl *Plane) SearchSessions(_ context.Context, q string, limit int) ([]dtosession.SessionSearchHit, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return nil, nil
 	}
 	qLower := strings.ToLower(q)
 
-	s.mu.Lock()
-	snap := s.sessionPlane.Snapshot()
+	// `Snapshot` 给的是副本（域外读面用）；排序/过滤都在副本上做，不持锁。
+	snap := pl.Snapshot()
 	recs := make([]*SessionRec, 0, len(snap))
 	for i := range snap {
-		r := &snap[i]
-		recs = append(recs, r)
+		recs = append(recs, &snap[i])
 	}
-	s.mu.Unlock()
+	dir := pl.transcriptDir()
+	st := pl.st
 
 	type cand struct {
 		rec     *SessionRec
@@ -45,9 +50,9 @@ func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]dtos
 			strings.Contains(strings.ToLower(r.RuntimeID), qLower) ||
 			(r.Title != "" && strings.Contains(strings.ToLower(r.Title), qLower))
 		snippet, bodyMatches := "", 0
-		if s.st != nil {
+		if st != nil {
 			// sqlite 模式：正文检索走 messages 表（user 行原文；读模型，逐轮物化）。
-			if hits, err := s.st.SearchUserMessages(context.Background(), r.ID, q); err == nil {
+			if hits, err := st.SearchUserMessages(context.Background(), r.ID, q); err == nil {
 				for _, h := range hits {
 					bodyMatches++
 					if snippet == "" {
@@ -56,13 +61,13 @@ func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]dtos
 				}
 			}
 			// 过渡期兜底：DB 尚无 messages（如仅 migrate events 未物化 messages）时回扫 transcript。
-			if bodyMatches == 0 && s.tx != nil && s.tx.dir != "" {
-				if sc, n, ok := scanTranscriptText(s.tx.dir, r.ID, qLower); ok {
+			if bodyMatches == 0 && dir != "" {
+				if sc, n, ok := scanTranscriptText(dir, r.ID, qLower); ok {
 					snippet, bodyMatches = sc, n
 				}
 			}
-		} else if s.tx != nil && s.tx.dir != "" {
-			if sc, n, ok := scanTranscriptText(s.tx.dir, r.ID, qLower); ok {
+		} else if dir != "" {
+			if sc, n, ok := scanTranscriptText(dir, r.ID, qLower); ok {
 				snippet, bodyMatches = sc, n
 			}
 		}
@@ -130,7 +135,7 @@ func scanTranscriptText(dir, sessionID, qLower string) (string, int, bool) {
 			continue
 		}
 		var ev wireTranscriptLine
-		if err := json.Unmarshal(line, &ev); err != nil || ev.Type != session.BusUserMessage {
+		if err := json.Unmarshal(line, &ev); err != nil || ev.Type != BusUserMessage {
 			continue
 		}
 		text, _ := ev.Payload["text"].(string)

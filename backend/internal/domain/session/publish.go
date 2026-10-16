@@ -105,10 +105,11 @@ func (pl *Plane) PublishRaw(typ, sessionID string, payload any) eventbus.Event {
 func (pl *Plane) publishSideEffects(sessionID, eventID, typ string, m map[string]any, seq int64) {
 	// seq < 0 = 这条事件既没落库也没进总线（bus 与 store 都没装配的退化态），压根没有位次。
 	// 不写进 transcript：装载面把负位次当坏行、整份文件跳过，写进去等于自己造一份读不回来的文件。
-	// `pl.tx` 是**接口**端口：具体那半边（manager 的 `*transcriptRecorder`）的方法对 nil 接收者
-	// 是安全的，但**nil 接口**调方法会 panic——这一层判空不能省（真这么炸过一次）。
+	// `pl.tx` 是**具体指针**（P3b-2b 起不再经接口端口）：`(*transcriptRecorder)(nil)` 的接收者
+	// 判空在方法体内（`begin`/`appendLine` 都自己判），这一层判空仍然保留——它省掉的是一次
+	// 无意义的调用，而两处判空的语义一致（nil = 未启用）。
 	if seq >= 0 && pl.tx != nil {
-		pl.tx.AppendLine(sessionID, eventID, seq, typ, m)
+		pl.tx.appendLine(sessionID, eventID, seq, typ, m)
 	}
 	// 会话标题自动推导：首个用户消息作为标题（截断）。PATCH 可覆盖（见 UpdateSession）。
 	//

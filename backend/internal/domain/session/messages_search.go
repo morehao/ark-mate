@@ -1,11 +1,10 @@
-package manager
+package session
 
 import (
 	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,11 +16,14 @@ import (
 	"github.com/morehao/ark-mate/pkg/code"
 )
 
-// SearchMessages 跨会话消息级检索（M3 ②：全局消息搜索 + 锚点跳转）。
+// ——— 跨会话消息级检索（M3 ②：全局消息搜索 + 锚点跳转） ———
 //
+// P3b-2b：从 manager 搬进域（`SearchMessages` + transcript 回扫那半）。
 // 数据面：sqlite 模式走 messages 读模型（角色不限）；memory 模式回扫 transcript 的用户消息与
 // agent 消息（逐行解析事件，取 seq 作锚点）。两者都返回 seq，前端可据锚点滚动定位。
-func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error) {
+
+// SearchMessages 跨会话消息级检索。
+func (pl *Plane) SearchMessages(_ context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_search_query", "搜索关键词 q 不能为空 [invalid_search_query]", nil))
@@ -34,9 +36,9 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtose
 	}
 	resp := &dtosearch.MessageSearchResp{Query: q, Hits: []dtosearch.MessageSearchHit{}}
 
-	if s.st != nil {
+	if pl.st != nil {
 		resp.Source = "sqlite"
-		hits, err := s.st.SearchMessages(context.Background(), q, limit+1)
+		hits, err := pl.st.SearchMessages(context.Background(), q, limit+1)
 		if err != nil {
 			return nil, code.FromError(acl.NewError(acl.ClassService, "message_search_failed",
 				fmt.Sprintf("消息检索失败: %v [message_search_failed]", err), err))
@@ -64,17 +66,15 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtose
 
 	// memory 模式：回扫 transcript（无 DB 时的明确降级面，标注 source=transcript）。
 	resp.Source = "transcript"
-	if s.tx == nil || s.tx.dir == "" {
+	dir := pl.transcriptDir()
+	if dir == "" {
 		return resp, nil
 	}
-	s.mu.Lock()
-	snap := s.sessionPlane.Snapshot()
+	snap := pl.Snapshot()
 	recs := make([]*SessionRec, 0, len(snap))
 	for i := range snap {
-		r := &snap[i]
-		recs = append(recs, r)
+		recs = append(recs, &snap[i])
 	}
-	s.mu.Unlock()
 	sort.Slice(recs, func(i, j int) bool { return recs[i].UpdatedAt.After(recs[j].UpdatedAt) })
 
 	type hit struct {
@@ -84,7 +84,7 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtose
 	var all []hit
 	qLower := strings.ToLower(q)
 	for _, r := range recs {
-		for _, th := range scanTranscriptMessages(s.tx.dir, r.ID, qLower) {
+		for _, th := range scanTranscriptMessages(dir, r.ID, qLower) {
 			all = append(all, hit{at: r.UpdatedAt, out: dtosearch.MessageSearchHit{
 				SessionID: r.ID,
 				Title:     r.Title,
@@ -163,7 +163,7 @@ func scanTranscriptMessages(dir, sessionID, qLower string) []transcriptMessageHi
 	var out []transcriptMessageHit
 	for _, ev := range readTranscriptEvents(f) {
 		switch ev.Type {
-		case session.BusUserMessage, session.BusMessage:
+		case BusUserMessage, BusMessage:
 		default:
 			continue
 		}
@@ -172,7 +172,7 @@ func scanTranscriptMessages(dir, sessionID, qLower string) []transcriptMessageHi
 			continue
 		}
 		role := "assistant"
-		if ev.Type == session.BusUserMessage {
+		if ev.Type == BusUserMessage {
 			role = "user"
 		}
 		out = append(out, transcriptMessageHit{Role: role, Seq: ev.Seq, Text: text})

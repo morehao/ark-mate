@@ -25,8 +25,8 @@ func TestPublishRedactsSecretsAtSingleGate(t *testing.T) {
 	dir := t.TempDir()
 	svc.SetTranscriptDir(dir)
 	svc.registerSession(&SessionRec{ID: "conv-redact"})
-	svc.tx.begin("conv-redact", "stub", "/tmp", false)
-	defer svc.tx.closeAll()
+	transcriptPlane(svc).BeginTranscript("conv-redact", "stub", "/tmp", false)
+	defer transcriptPlane(svc).CloseTranscripts()
 
 	payload := map[string]any{
 		"session_id": "conv-redact",
@@ -144,8 +144,8 @@ func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
 	dir := t.TempDir()
 	svc.SetTranscriptDir(dir)
 	svc.registerSession(&SessionRec{ID: "conv-dyn-v20"})
-	svc.tx.begin("conv-dyn-v20", "stub", "/tmp", false)
-	defer svc.tx.closeAll()
+	transcriptPlane(svc).BeginTranscript("conv-dyn-v20", "stub", "/tmp", false)
+	defer transcriptPlane(svc).CloseTranscripts()
 	svc.publish(session.BusMessage, "conv-dyn-v20", map[string]any{
 		"session_id": "conv-dyn-v20",
 		"msg_id":     "m1",
@@ -211,8 +211,8 @@ func TestMcpSecretValueIsRedactedAfterResolution(t *testing.T) {
 	dir := t.TempDir()
 	svc.SetTranscriptDir(dir)
 	svc.registerSession(&SessionRec{ID: "conv-mcp-dyn"})
-	svc.tx.begin("conv-mcp-dyn", "stub", "/tmp", false)
-	defer svc.tx.closeAll()
+	transcriptPlane(svc).BeginTranscript("conv-mcp-dyn", "stub", "/tmp", false)
+	defer transcriptPlane(svc).CloseTranscripts()
 	svc.publish(session.BusRunError, "conv-mcp-dyn", map[string]any{
 		"session_id":  "conv-mcp-dyn",
 		"details":     "子进程退出",

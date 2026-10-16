@@ -316,41 +316,8 @@ func TestEnsureSessionResumeGating(t *testing.T) {
 	}
 }
 
-// TestHandoffMemoBudget P3 F3 memo 压缩：用户原文收录 + 助手聚合、跨轮分隔、预算截断保最新。
-func TestHandoffMemoBudget(t *testing.T) {
-	svc, _, _ := newTestRig(t)
-	svc.publish(session.BusUserMessage, "cv1", map[string]any{"text": "任务A：第一轮要求"})
-	svc.publish(session.BusMessage, "cv1", map[string]any{"text": "收到A"})
-	svc.publish(session.BusMessage, "cv1", map[string]any{"text": "补充A"})
-	svc.publish(session.BusThought, "cv1", map[string]any{"text": "噪音思考"}) // 不入 memo
-	svc.publish(session.BusUserMessage, "cv1", map[string]any{"text": "任务B：第二轮要求"})
-	svc.publish(session.BusMessage, "cv1", map[string]any{"text": "收到B"})
-	svc.flushChunks() // ③ 合并缓冲落盘后再算 memo
-
-	memo := svc.HandoffMemo("cv1", 6000)
-	for _, want := range []string{"任务A", "任务B", "收到A补充A", "收到B"} {
-		if !strings.Contains(memo, want) {
-			t.Fatalf("memo 应含 %q，got: %s", want, memo)
-		}
-	}
-	if strings.Contains(memo, "噪音思考") {
-		t.Fatalf("memo 不应含 thought 噪音: %s", memo)
-	}
-	// 预算收紧：小到只能放下 header 片段 → 历史轮次被丢弃、输出不超预算。
-	tight := svc.HandoffMemo("cv1", 24)
-	if strings.Contains(tight, "任务A") || strings.Contains(tight, "任务B") {
-		t.Fatalf("紧预算应丢弃历史轮：%s", tight)
-	}
-	if runeLen(tight) > 24 {
-		t.Fatalf("memo 不应超过预算：%d > 24", runeLen(tight))
-	}
-	if got := svc.HandoffMemo("cv1", 0); got != "" {
-		t.Fatalf("0 预算应返回空: %q", got)
-	}
-	if got := svc.HandoffMemo("no-such", 6000); got != "" {
-		t.Fatalf("无事件会话应返回空: %q", got)
-	}
-}
+// TestHandoffMemoBudget 已随 handoff 面搬进 `domain/session`（P3b-2b）：它现在直接验域的
+// `HandoffMemo`，不再经 Service 转发（判据一字未改，见该包的 `TestHandoffMemoBudget`）。
 
 // TestConnKeyModelScoping 连接缓存键：provider 密钥 env 与进程级模型 env 都影响共享键
 // （B5 修复 + Phase B 模型作用域）。会话级模型（dsh，模型经 set_config_option）不进键。

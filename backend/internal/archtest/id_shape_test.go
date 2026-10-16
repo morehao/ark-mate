@@ -594,8 +594,9 @@ func TestEventIdentityTravelsWithData(t *testing.T) {
 			"① nil-bus（内存模式无 bus）分支同样带 id"},
 		{`publishSideEffects\(sessionID, evt\.ID,`, 1,
 			"② 副作用（transcript）拿的是**已发布事件**的 id，不是再铸一支"},
-		{`AppendLine\(sessionID, eventID,`, 1,
-			"② transcript 落盘的 id 来自上游（本函数不再铸号）"},
+		{`appendLine\(sessionID, eventID,`, 1,
+			"② transcript 落盘的 id 来自上游（本函数不再铸号；P3b-2b recorder 随装载面落 " +
+				"`domain/session`，端口 `TranscriptSink` 删除后方法名从 `AppendLine` 回到小写——判据不变）"},
 		{`wireTranscriptLine\{ID: eventID,`, 1,
 			"② v2 事件行的第一个字段就是身份"},
 		{`PublishAt\(p\.sessionID, p\.line\.seq, p\.line\.id,`, 1,

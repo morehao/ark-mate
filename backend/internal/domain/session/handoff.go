@@ -1,17 +1,18 @@
-package manager
-
-import "github.com/morehao/ark-mate/internal/domain/session"
+package session
 
 // HandoffMemo 把会话历史压成 bounded 摘要（§5.6/§18 F3，跨 runtime / 无原生 resume 兜底）。
 // 数据源：eventbus（sqlite 模式重启由 store 回灌 → 恢复后全量可用）；纯 memory 模式进程重启
 // 无历史保留 → 空摘要（best-effort，不臆造内容）。
 // 压缩：用户输入原样收录、助手 message 增量按用户轮聚合、去掉 thought/tool/usage/权限噪音；
 // 预算 maxChars（字符）由 MATE_HANDOFF_MAX_CHARS 控制，超出时丢弃最旧轮次（保最新上下文）。
-func (s *Service) HandoffMemo(sessionID string, maxChars int) string {
+//
+// P3b-2b：随会话域搬进来（它读的是**本域的事件面** `pl.bus`，此前挂在 manager 的 Service 上
+// 只是为了借用同一个 bus 引用）。调用点（`ensureSession` 的原生恢复兜底）改经会话域调用。
+func (pl *Plane) HandoffMemo(sessionID string, maxChars int) string {
 	if maxChars <= 0 {
 		return ""
 	}
-	all := s.bus.EventsAfter(sessionID, -1)
+	all := pl.bus.EventsAfter(sessionID, -1)
 	// 先按「用户轮」聚合：user_message 开新段，其后 message 增量连续拼接为助手段。
 	type seg struct {
 		user string
@@ -29,10 +30,10 @@ func (s *Service) HandoffMemo(sessionID string, maxChars int) string {
 			continue
 		}
 		switch evt.Type {
-		case session.BusUserMessage:
+		case BusUserMessage:
 			segs = append(segs, seg{user: txt})
 			cur = len(segs) - 1
-		case session.BusMessage:
+		case BusMessage:
 			if cur < 0 {
 				segs = append(segs, seg{})
 				cur = len(segs) - 1

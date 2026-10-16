@@ -283,3 +283,11 @@ func newSearchRig(t *testing.T) (*Service, *store.Store) {
 	})
 	return r.Svc, r.St
 }
+
+// transcriptPlane 取 Service 的会话域（**测试专用**：P3b-2b 把 transcript recorder 整体搬进
+// 域后，`Service.tx` 字段就没了——这些装配级用例仍要经"真 Service + 真域"这条链造 transcript
+// 夹具，所以由这里提供唯一的可达入口）。
+//
+// 它刻意是**测试文件里的包内助手**而不是 Service 的导出方法：生产装配不需要"把域拿出来"，
+// 加一个导出 getter 等于给 P4b 留一条新的一行转发。
+func transcriptPlane(svc *Service) *session.Plane { return svc.sessionPlane }

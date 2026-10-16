@@ -288,7 +288,7 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 		if err != nil {
 			return nil, "", err
 		}
-		memo = o.svc.HandoffMemo(rec.ID, o.handoffMaxChars)
+		memo = o.svc.handoffMemo(rec.ID, o.handoffMaxChars)
 		reason = "handoff"
 		// W2（最容易漏的一处：它在"原生恢复失败/迁移"分支里）：新会话的底座原文同样要加壳，
 		// 否则换底座/换会话之后 id 会退化成裸值——库里的形状就变成了两种。

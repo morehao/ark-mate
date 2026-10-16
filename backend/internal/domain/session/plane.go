@@ -33,9 +33,9 @@ type Plane struct {
 	inputs map[string][]QueuedInput
 	// coalescer 文本增量合并器（nil = 不合并；停机时 FlushAll）。
 	coalescer *Coalescer
-	// tx wire transcript 旁路（nil = 未启用；**端口**——transcript 面的装载/检索还在 manager，
-	// P3b-2b 整块搬进来之后它变成域内类型）。
-	tx TranscriptSink
+	// tx wire transcript 旁路（nil = 未启用）。P3b-2b 起是**域内类型**——临时端口
+	// `TranscriptSink` 随装载/检索面一起搬进来后删掉（它此前存在的唯一理由是那半还在 manager）。
+	tx *transcriptRecorder
 
 	// workspaceDisplayOf 归属展示字段的解析（端口：工作空间登记仍在 manager）。
 	workspaceDisplayOf func(workspaceID string) (string, string)
@@ -115,14 +115,6 @@ func (pl *Plane) SetStaleInputsOnRestore(fn func(ctx context.Context)) {
 
 // SetCoalescer 装配期登记文本增量合并器。
 func (pl *Plane) SetCoalescer(c *Coalescer) { pl.coalescer = c }
-
-// TranscriptSink 事件落 wire transcript 的唯一动作（域只在这一处碰它）。
-type TranscriptSink interface {
-	AppendLine(sessionID, eventID string, seq int64, typ string, payload map[string]any)
-}
-
-// SetTranscriptSink 装配期登记 wire transcript 旁路（nil = 未启用）。
-func (pl *Plane) SetTranscriptSink(sink TranscriptSink) { pl.tx = sink }
 
 // Version 某会话当前的事件版本号（进 bus 帧的 `version`）。
 func (pl *Plane) Version(sessionID string) int64 {

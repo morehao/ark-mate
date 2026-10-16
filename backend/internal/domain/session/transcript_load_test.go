@@ -1,50 +1,16 @@
-package manager
+package session
 
 import (
-	"github.com/morehao/ark-mate/internal/domain/session"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
-// 测试用平台会话 id：v15 起平台 id 只由 objid 铸（`ses_<26 位 Crockford Base32>`）。
-// 夹具用**合法形状的固定字面量**（而不是 objid.New），是为了让 JSONL 字面量保持可读、可 grep。
-const (
-	sesLegacyA  = "ses_01J9Z6Q0M7X2V8K4B3N5TRW1PA"
-	sesLegacyB  = "ses_01J9Z6Q0M7X2V8K4B3N5TRW1PB"
-	sesLegacyC  = "ses_01J9Z6Q0M7X2V8K4B3N5TRW1PC"
-	sesWsTemp   = "ses_01J9Z6Q0M7X2V8K4B3N5TRW1PT"
-	sesWsLegacy = "ses_01J9Z6Q0M7X2V8K4B3N5TRW1PS"
-)
-
-// 事件身份夹具（`evt_` + 26 位主体）。v17 起 transcript 事件行必须带它——装载面缺 id/seq
-// 会把**整份文件**跳过（不代铸：身份必须与用户手里那份文件一致）。
-const (
-	evtA1 = "evt_01J9Z6Q0M7X2V8K4B3N5TRW1E1"
-	evtA2 = "evt_01J9Z6Q0M7X2V8K4B3N5TRW1E2"
-	evtA3 = "evt_01J9Z6Q0M7X2V8K4B3N5TRW1E3"
-	evtB1 = "evt_01J9Z6Q0M7X2V8K4B3N5TRW1F1"
-	evtB2 = "evt_01J9Z6Q0M7X2V8K4B3N5TRW1F2"
-	evtC1 = "evt_01J9Z6Q0M7X2V8K4B3N5TRW1G1"
-)
-
-// writeTranscriptJSONL 直接落一个合法 transcript 文件（header + 事件行），用于回读测试。
-func writeTranscriptJSONL(t *testing.T, dir, filename string, lines []string) {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-}
+// P3b-2b：本文件是 `manager/transcript_load_test.go` 的**装载面那一半**，随装载代码搬进本域。
+// 那些要 manager 装配链（`SessionHistory` / `enableStore` 逃生门）的用例留在 manager 侧，
+// 按同一份形状夹具验同一件事——两边不互相 import，判据各自独立可跑。
 
 // TestLoadTranscriptsReseed 回读 transcript → 会话列表重建（标题/状态/时间）+ 事件注入 bus。
 func TestLoadTranscriptsReseed(t *testing.T) {
@@ -58,10 +24,9 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 	}
 	writeTranscriptJSONL(t, dir, sesLegacyA+".jsonl", lines)
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	svc.SetTranscriptDir(dir)
+	pl, bus := testPlane(t, dir)
 
-	sessions, err := svc.ListSessions(false, "", "")
+	sessions, err := pl.ListSessions(false, "", "")
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
@@ -69,32 +34,28 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 		t.Fatalf("期望回灌 1 个会话，got %d: %+v", len(sessions), sessions)
 	}
 	s := sessions[0]
-	if s.ID != sesLegacyA || s.Title != "列出当前目录文件" || s.Status != session.SessionStatusCompleted {
+	if s.ID != sesLegacyA || s.Title != "列出当前目录文件" || s.Status != SessionStatusCompleted {
 		t.Fatalf("回灌元数据不符: %+v", s)
 	}
 	if s.CreatedAt == "" || s.UpdatedAt == "" {
 		t.Fatalf("回灌时间缺失: %+v", s)
 	}
 
-	// 事件已注入 bus：history 可按 agg 回放。
-	hist, err := svc.SessionHistory(t.Context(), sesLegacyA, dtosession.HistoryQuery{Limit: 100})
-	if err != nil {
-		t.Fatalf("SessionHistory: %v", err)
+	// 事件已注入 bus（v17：身份与位次都**原样恢复**，不按行号重铸 seq）。
+	evts := bus.EventsAll()
+	if len(evts) != 3 {
+		t.Fatalf("期望注入 3 条事件，got %d", len(evts))
 	}
-	if len(hist.Events) != 3 {
-		t.Fatalf("期望注入 3 条事件，got %d", len(hist.Events))
+	if evts[0].AggregID != sesLegacyA || evts[2].Type != BusRunEnded {
+		t.Fatalf("注入事件不符: %+v", evts)
 	}
-	if hist.Events[0].AggregID != sesLegacyA || hist.Events[2].Type != session.BusRunEnded {
-		t.Fatalf("注入事件不符: %+v", hist.Events)
-	}
-	// v17：身份与位次都**原样恢复**（不再按行号重铸 seq）。
 	for i, want := range []struct {
 		id  string
 		seq int64
 	}{{evtA1, 2}, {evtA2, 3}, {evtA3, 4}} {
-		if hist.Events[i].ID != want.id || hist.Events[i].Seq != want.seq {
+		if evts[i].ID != want.id || evts[i].Seq != want.seq {
 			t.Fatalf("第 %d 条事件的 id/seq 未原样恢复: got (%q,%d) want (%q,%d)",
-				i, hist.Events[i].ID, hist.Events[i].Seq, want.id, want.seq)
+				i, evts[i].ID, evts[i].Seq, want.id, want.seq)
 		}
 	}
 }
@@ -112,22 +73,19 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 // 的 (id, seq) 逐条比对才能看出区别。
 func TestMemoryModeRestartKeepsEventIdentity(t *testing.T) {
 	dir := t.TempDir()
-	reg := runtime.NewRegistry()
 
 	// —— 第一轮：memory 模式（无 store）**交错**跑两个会话，让位次不是"文件内 1..n"。
 	//
 	// 交错是关键：单会话 transcript 的位次恰好是 1,2,3…，于是"装载时重新取号"与"原样恢复"
 	// 会给出**一模一样**的结果（这正是这个缺陷能活这么久的原因）。两个会话交错时，按文件顺序
 	// 装载会把 B 的位次排到 A 后面，与 seq 序不同——判据才立得住。
-	bus1 := eventbus.New()
-	svc1 := NewService(reg, bus1)
-	svc1.SetTranscriptDir(dir)
-	svc1.beginTranscript(sesLegacyA, "rtx", "/tmp", false)
-	svc1.publish(session.BusUserMessage, sesLegacyA, map[string]any{"session_id": sesLegacyA, "text": "a1"})
-	svc1.beginTranscript(sesLegacyB, "rtx", "/tmp", false)
-	svc1.publish(session.BusMessage, sesLegacyB, map[string]any{"session_id": sesLegacyB, "text": "b1"})
-	svc1.publish(session.BusMessage, sesLegacyA, map[string]any{"session_id": sesLegacyA, "text": "a2"})
-	svc1.closeTranscripts()
+	pl1, bus1 := testPlane(t, dir)
+	pl1.BeginTranscript(sesLegacyA, "rtx", "/tmp", false)
+	pl1.Publish(BusUserMessage, sesLegacyA, map[string]any{"session_id": sesLegacyA, "text": "a1"})
+	pl1.BeginTranscript(sesLegacyB, "rtx", "/tmp", false)
+	pl1.Publish(BusMessage, sesLegacyB, map[string]any{"session_id": sesLegacyB, "text": "b1"})
+	pl1.Publish(BusMessage, sesLegacyA, map[string]any{"session_id": sesLegacyA, "text": "a2"})
+	pl1.CloseTranscripts()
 	before := bus1.EventsAll()
 	if len(before) != 3 {
 		t.Fatalf("第一轮应有 3 条事件，got %d", len(before))
@@ -154,11 +112,9 @@ func TestMemoryModeRestartKeepsEventIdentity(t *testing.T) {
 		t.Fatalf("夹具没造成「发布序 ≠ 注入序」：%+v", before)
 	}
 
-	// —— 第二轮：**新的** Service + 新的 bus（= 重启），transcript 目录不变。
-	bus2 := eventbus.New()
-	svc2 := NewService(reg, bus2)
-	svc2.SetTranscriptDir(dir)
-	if sessions, _ := svc2.ListSessions(false, "", ""); len(sessions) != 2 {
+	// —— 第二轮：**新的** Plane + 新的 bus（= 重启），transcript 目录不变。
+	pl2, bus2 := testPlane(t, dir)
+	if sessions, _ := pl2.ListSessions(false, "", ""); len(sessions) != 2 {
 		t.Fatalf("重启后应从 transcript 回灌 2 个会话，got %d", len(sessions))
 	}
 	after := bus2.EventsAll()
@@ -226,9 +182,7 @@ func TestLoadTranscriptsKeepsPerSessionSeqOrder(t *testing.T) {
 		`{"id":"` + evtB1 + `","seq":2,"ts":"2026-09-07T03:12:42Z","type":"session.user_message","payload":{"text":"b2"}}`,
 	})
 
-	bus := eventbus.New()
-	svc := NewService(runtime.NewRegistry(), bus)
-	svc.SetTranscriptDir(dir)
+	_, bus := testPlane(t, dir)
 
 	all := bus.EventsAll()
 	if len(all) != 3 {
@@ -265,10 +219,8 @@ func TestLoadTranscriptsSkipsV1Schema(t *testing.T) {
 	})
 
 	before := LegacySchemaSkips()
-	bus := eventbus.New()
-	svc := NewService(runtime.NewRegistry(), bus)
-	svc.SetTranscriptDir(dir)
-	sessions, _ := svc.ListSessions(false, "", "")
+	pl, bus := testPlane(t, dir)
+	sessions, _ := pl.ListSessions(false, "", "")
 	if len(sessions) != 0 {
 		t.Fatalf("v1 格式文件不该被装载: %+v", sessions)
 	}
@@ -290,10 +242,8 @@ func TestLoadTranscriptsRejectsLineWithoutIdentity(t *testing.T) {
 		`{"seq":1,"ts":"2026-09-07T03:12:41Z","type":"session.user_message","payload":{"text":"hi"}}`,
 	})
 
-	bus := eventbus.New()
-	svc := NewService(runtime.NewRegistry(), bus)
-	svc.SetTranscriptDir(dir)
-	if sessions, _ := svc.ListSessions(false, "", ""); len(sessions) != 0 {
+	pl, bus := testPlane(t, dir)
+	if sessions, _ := pl.ListSessions(false, "", ""); len(sessions) != 0 {
 		t.Fatalf("缺身份的事件行应让整份文件被跳过: %+v", sessions)
 	}
 	if events := bus.EventsAll(); len(events) != 0 {
@@ -314,9 +264,8 @@ func TestLoadTranscriptsSkipsLegacyShapeID(t *testing.T) {
 	})
 
 	before := LegacyTranscriptSkips()
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	svc.SetTranscriptDir(dir)
-	sessions, _ := svc.ListSessions(false, "", "")
+	pl, _ := testPlane(t, dir)
+	sessions, _ := pl.ListSessions(false, "", "")
 	if len(sessions) != 0 {
 		t.Fatalf("旧形状会话不该被装载: %+v", sessions)
 	}
@@ -333,10 +282,9 @@ func TestLoadTranscriptsNoTerminal(t *testing.T) {
 		header,
 		`{"id":"` + evtB1 + `","seq":2,"ts":"2026-09-07T03:12:41Z","type":"session.user_message","payload":{"text":"hi"}}`,
 	})
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	svc.SetTranscriptDir(dir)
-	sessions, _ := svc.ListSessions(false, "", "")
-	if len(sessions) != 1 || sessions[0].Status != session.SessionStatusInProgress {
+	pl, _ := testPlane(t, dir)
+	sessions, _ := pl.ListSessions(false, "", "")
+	if len(sessions) != 1 || sessions[0].Status != SessionStatusInProgress {
 		t.Fatalf("无终态应为 in_progress: %+v", sessions)
 	}
 }
@@ -346,10 +294,9 @@ func TestLoadTranscriptsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	header := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyC + `","agent_id":"agent-rtx","runtime":"rtx","created_at":"2026-09-07T03:12:40Z"}`
 	writeTranscriptJSONL(t, dir, sesLegacyC+".jsonl", []string{header})
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	svc.SetTranscriptDir(dir)
-	svc.SetTranscriptDir(dir) // 二次调用：也应幂等（无重复注入/覆盖）
-	sessions, _ := svc.ListSessions(false, "", "")
+	pl, _ := testPlane(t, dir)
+	pl.SetTranscriptDir(dir) // 二次调用：也应幂等（无重复注入/覆盖）
+	sessions, _ := pl.ListSessions(false, "", "")
 	if len(sessions) != 1 {
 		t.Fatalf("重复回灌导致的会话数异常: %d", len(sessions))
 	}
@@ -364,26 +311,31 @@ func TestLoadTranscriptsWorkspace(t *testing.T) {
 	writeTranscriptJSONL(t, dir, sesWsTemp+".jsonl", []string{temporaryHeader})
 	writeTranscriptJSONL(t, dir, sesWsLegacy+".jsonl", []string{legacyHeader})
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	svc.SetTranscriptDir(dir)
+	pl, _ := testPlane(t, dir)
 
-	byID := map[string]dtosession.SessionResp{}
-	sessions, err := svc.ListSessions(false, "", "")
+	byID := map[string]struct {
+		cwd string
+		tmp bool
+	}{}
+	sessions, err := pl.ListSessions(false, "", "")
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
 	for _, c := range sessions {
-		byID[c.ID] = c
+		byID[c.ID] = struct {
+			cwd string
+			tmp bool
+		}{c.Cwd, c.WorkspaceTemporary}
 	}
-	if got := byID[sesWsTemp]; got.Cwd != "/home/u/.ark-mate/workspaces/"+sesWsTemp || !got.WorkspaceTemporary {
+	if got := byID[sesWsTemp]; got.cwd != "/home/u/.ark-mate/workspaces/"+sesWsTemp || !got.tmp {
 		t.Fatalf("代建标记/工作空间未回灌: %+v", got)
 	}
-	if got := byID[sesWsLegacy]; got.Cwd != "/work/alpha" || got.WorkspaceTemporary {
+	if got := byID[sesWsLegacy]; got.cwd != "/work/alpha" || got.tmp {
 		t.Fatalf("旧文件应视为非临时: %+v", got)
 	}
 
 	// 按工作空间过滤对回灌会话同样生效（recent/browse 面依赖此能力）。
-	only, _ := svc.ListSessions(false, "/work/alpha", "")
+	only, _ := pl.ListSessions(false, "/work/alpha", "")
 	if len(only) != 1 || only[0].ID != sesWsLegacy {
 		t.Fatalf("回灌会话按 cwd 过滤不符: %+v", only)
 	}

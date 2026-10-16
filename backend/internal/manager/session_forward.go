@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/dto/dtosearch"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/model"
@@ -43,9 +44,22 @@ func (s *Service) sessionResp(id string) dtosession.SessionResp {
 	return s.sessionPlane.SessionResp(id)
 }
 
-// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
+// TODO(P4b): 删转发（会话面直接依赖 session.Plane）
 func (s *Service) ListSessions(archived bool, cwd, workspaceID string) ([]dtosession.SessionResp, error) {
 	return s.sessionPlane.ListSessions(archived, cwd, workspaceID)
+}
+
+// TODO(P4b): 删转发（检索面直接依赖 session.Plane）
+//
+// SearchSessions 与 SearchMessages 读的是**本域的两份事实**（内存会话表 + transcript 旁路），
+// P3b-2b 随 `transcript_search.go` / `messages_search.go` 一起搬进域。
+func (s *Service) SearchSessions(ctx context.Context, q string, limit int) ([]dtosession.SessionSearchHit, error) {
+	return s.sessionPlane.SearchSessions(ctx, q, limit)
+}
+
+// TODO(P4b): 删转发（同上）
+func (s *Service) SearchMessages(ctx context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error) {
+	return s.sessionPlane.SearchMessages(ctx, q, limit)
 }
 
 // TODO(P4b): 删转发（调用点直接依赖 session 包）
@@ -107,6 +121,13 @@ func (s *Service) toSessionResp(r *SessionRec) dtosession.SessionResp {
 // TODO(P4b): 删转发（轮次与权限记忆的落库面直接依赖 session.Plane）
 func (s *Service) openRun(sessionID, runID, text string, firstSeq int64) {
 	s.sessionPlane.OpenRun(sessionID, runID, text, firstSeq)
+}
+
+// TODO(P4b): 删转发（原生恢复兜底面直接依赖 session.Plane）
+//
+// HandoffMemo 读的是**会话域的事件面**（`pl.bus`），P3b-2b 随会话域搬走。
+func (s *Service) handoffMemo(sessionID string, maxChars int) string {
+	return s.sessionPlane.HandoffMemo(sessionID, maxChars)
 }
 
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）

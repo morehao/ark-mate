@@ -87,7 +87,7 @@ func TestCloseTranscriptsFlushesChunks(t *testing.T) {
 	dir := t.TempDir()
 	svc.SetTranscriptDir(dir)
 	svc.registerSession(&SessionRec{ID: "cv-close"})
-	svc.tx.begin("cv-close", "stub", "/tmp", false)
+	transcriptPlane(svc).BeginTranscript("cv-close", "stub", "/tmp", false)
 	svc.publish(session.BusMessage, "cv-close", map[string]any{"session_id": "cv-close", "msg_id": "m1", "text": "尾巴"})
 
 	svc.closeTranscripts()
