@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
@@ -22,6 +23,10 @@ import (
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
+
+// skillPlaneOf 取技能域平面：技能目录的投影在域里（`skill.Plane.ListSkills`），
+// `manager` 侧那份一行转发已删（P4a 正文第十三刀）。
+func skillPlaneOf(svc *Service) *skill.Plane { return svc.skillPlane }
 
 // toolCatalog 取工具目录的**用例层**（P4a 正文第十二刀：读模型从 manager 收进 svccapability）。
 func toolCatalog(svc *Service) svccapability.ToolCatalog {
@@ -54,7 +59,7 @@ func TestLoadCapabilityDefinitionsAndList(t *testing.T) {
 		t.Fatalf("期望加载 3 条，got %d", n)
 	}
 
-	skills, _ := svc.ListSkills()
+	skills, _ := skillPlaneOf(svc).ListSkills()
 	if len(skills) != 1 || skills[0].ID != "plan" || skills[0].Name != "规划" {
 		t.Fatalf("skills 不符: %+v", skills)
 	}

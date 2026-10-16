@@ -262,6 +262,3 @@ func (s *Service) McpServersFor(runtimeID string, sel *CapabilitySelection) []ac
 }
 
 // skillWarnings 把注册表的装载期告警转成 REST 读模型（两处共用一个转换，免漂移）。
-
-// TODO(P4b): 删转发（调用点直接依赖 skill.Plane）
-func (s *Service) ListSkills() ([]dtocapability.SkillResp, error) { return s.skillPlane.ListSkills() }

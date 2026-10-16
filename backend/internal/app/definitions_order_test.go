@@ -83,7 +83,7 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 	})
 
 	// ① 能力面：库里的行 + 内存注册表都可见（"导入先于装载"的合成结果）。
-	skills, err := a.svc.ListSkills()
+	skills, err := a.svc.SkillPlane().ListSkills()
 	if err != nil {
 		t.Fatalf("能力面应可用: %v", err)
 	}

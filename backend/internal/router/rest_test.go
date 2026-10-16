@@ -239,12 +239,6 @@ func (s *stubSvc) ModelCatalog(_ context.Context) (*dtomodel.ModelCatalogResp, e
 }
 
 // ——— P1 能力数据面桩（ListSkills/ListMcpServers/ListTools） ———
-func (s *stubSvc) ListSkills() ([]dtocapability.SkillResp, error) {
-	if s.capErr != nil {
-		return nil, s.capErr
-	}
-	return s.skills, nil
-}
 func (s *stubSvc) SetSkillEnabled(_ context.Context, id string, enabled bool) (*dtocapability.SkillToggleResp, error) {
 	s.skillToggled, s.skillToggleID, s.skillToggleEnabled = true, id, enabled
 	if s.capErr != nil {
@@ -1420,10 +1414,16 @@ func testProviderPlane(t *testing.T) *provider.Plane {
 // TestCapabilityRoutes P1 能力数据面路由：GET /skills /mcps /tools 列出目录（信封 data 数组）。
 func TestCapabilityRoutes(t *testing.T) {
 	svc := &stubSvc{
-		skills: []dtocapability.SkillResp{{ID: "plan", Name: "plan", Description: "先规划再动手"}},
-		mcps:   []dtocapability.McpServerResp{{ID: "fs", Transport: "stdio", Command: "npx"}},
+		mcps: []dtocapability.McpServerResp{{ID: "fs", Transport: "stdio", Command: "npx"}},
 	}
 	deps := stubDeps(t, svc)
+	// 技能目录的**读模型**由域平面直接提供（P4a 正文第十三刀）：夹具是"真注册表里注册过的
+	// 技能"，投影（warnings / scope / enabled）由 `skill.Plane` 做——用例层不再包一层转发。
+	if err := deps.Capabilities.RegisterSkill(&capability.Skill{
+		ID: "plan", Name: "plan", Description: "先规划再动手", Body: "# 先规划",
+	}); err != nil {
+		t.Fatalf("注册技能夹具失败: %v", err)
+	}
 	// 工具目录的**读模型**归用例层（P4a 正文第十二刀）：夹具是"真注册表里注册过的工具"，
 	// 而不是替身返回值——这样断言的才是"投影真的把注册表里那条读出来了"。
 	deps.Capabilities.RegisterTool(&capability.Tool{

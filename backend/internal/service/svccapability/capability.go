@@ -12,8 +12,6 @@ import (
 //
 // 实现方（internal/manager）以编译期断言 var _ CapabilitySvc = (*T)(nil) 保证一致性。
 type CapabilitySvc interface {
-	// ListSkills 返回 Skill 目录（P1 能力数据面）。
-	ListSkills() ([]dtocapability.SkillResp, error)
 
 	// SetSkillEnabled 启停一个 skill（§13.4 S4：写回定义文件 + 立刻重校物化；禁用 = overlay 可逆）。
 	SetSkillEnabled(ctx context.Context, id string, enabled bool) (*dtocapability.SkillToggleResp, error)

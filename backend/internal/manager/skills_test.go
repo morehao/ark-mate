@@ -121,7 +121,7 @@ func TestSetSkillEnabledWritesBackAndWithdraws(t *testing.T) {
 		t.Fatalf("定义文件必须保留（overlay）: %v", err)
 	}
 	// 注册表里仍在，且标记为禁用（关了还能开回来）。
-	list, err := svc.ListSkills()
+	list, err := skillPlaneOf(svc).ListSkills()
 	if err != nil || len(list) != 1 || list[0].Enabled {
 		t.Fatalf("列表应含被禁用条目: %+v err=%v", list, err)
 	}

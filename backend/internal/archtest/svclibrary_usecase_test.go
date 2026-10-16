@@ -176,6 +176,37 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 			"要么走过渡端口，没有第三条路。")
 	}
 
+	// ④′ 技能目录走**域平面**（P4a 正文第十三刀）：与工具目录同族、但落点相反，这条边界
+	// 必须钉住，否则下一个人为了"对称"会给它补一层转发。
+	//
+	// 分界线是**投影在哪一边**：`skill.Plane.ListSkills` 已经把 `capability.Skill` 折成
+	// `dtocapability.SkillResp`（含 warnings 与 scope 判定），用例层再包一层就只是一行转发
+	// ——那正是第十一刀判定为骚操作的形状；而工具目录的投影在 `pkg/` 之上（`pkg/` 不能
+	// import `internal/dto`），只能落用例层。同一个域里的两面因此落点不同，这不是不一致。
+	if strings.Contains(capsSrc, "ListSkills(") {
+		t.Error("`internal/service/svccapability` 里出现 `ListSkills(`：技能目录的投影在域平面里，" +
+			"这一层再包一次就是一行转发（第十一刀的口径）。控制器直接经 `h.skills` 取。")
+	}
+	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "skill", "plane.go"))),
+		"func (m *Plane) ListSkills() ([]dtocapability.SkillResp, error)") {
+		t.Error("`internal/domain/skill` 里找不到 `func (m *Plane) ListSkills()`：投影的本体只有一份且在域里" +
+			"（判据失锚＝空转）。")
+	}
+	for _, path := range mgrFiles {
+		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "func (s *Service) ListSkills(") {
+			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) ListSkills(`：那一行转发已删"+
+				"（P4a 正文第十三刀），读模型的调用点直接用域平面。", filepath.Base(path))
+		}
+	}
+	if !regexp.MustCompile(`skills\s+\*skill\.Plane`).MatchString(capCtr) {
+		t.Error("`ctrcapability` 里找不到 `skills *skill.Plane` 字段" +
+			"（容空白匹配——gofmt 会把字段对齐成多空格，定长写法会假绿）。")
+	}
+	if !strings.Contains(funcBodyOf(t, capCtr, "func (h *capabilityCtr) ListSkills("), "h.skills.ListSkills(") {
+		t.Error("`capabilityCtr.ListSkills` 的函数体里找不到 `h.skills.ListSkills(`：" +
+			"技能目录要么走域平面、要么走一层转发，没有第三条路。")
+	}
+
 	// ③ 默认约定单点：`pkg/runtime` 必须有那个导出入口，且 manager 里不许再自己判默认。
 	regSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "pkg", "runtime", "registry.go")))
 	if !strings.Contains(regSrc, "func (r *Registry) McpTransportsFor(") {

@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
 	"github.com/morehao/ark-mate/pkg/capability"
@@ -47,16 +48,23 @@ type capabilityCtr struct {
 	// 「只读」这一面没有请求校验、没有错误码出口，装配点交下来的只有注册表这一个事实，
 	// 所以不跟其余 16 个方法一起等——控制器按面持有。
 	tools svccapability.ToolCatalog
+	// skills 技能目录**读模型**（P4a 正文第十三刀起由域平面直接提供）。
+	//
+	// 与 `tools` 的区别值得记：工具目录要**投影**（`capability.Tool` → DTO，`pkg/` 不能
+	// import `internal/dto`），所以落用例层；技能目录的投影在域平面里（`skill.Plane.ListSkills`
+	// 已经把 `capability.Skill` 折成 `dtocapability.SkillResp`，含 warnings 与 scope 判定），
+	// 用例层再包一层就只是一行转发——那正是第十一刀判定为骚操作的形状。
+	skills *skill.Plane
 }
 
 // NewCapabilityCtr 构造 CapabilityCtr（`caps` 是能力注册表事实，用例实例在构造里造）。
-func NewCapabilityCtr(svc svccapability.CapabilitySvc, caps *capability.Registry) CapabilityCtr {
-	return &capabilityCtr{svc: svc, tools: svccapability.NewTools(caps)}
+func NewCapabilityCtr(svc svccapability.CapabilitySvc, caps *capability.Registry, skills *skill.Plane) CapabilityCtr {
+	return &capabilityCtr{svc: svc, tools: svccapability.NewTools(caps), skills: skills}
 }
 
 // ListSkills 列出 Skill 目录（平台唯一事实源；按 ID 排序）。
 func (h *capabilityCtr) ListSkills(c *gin.Context) {
-	items, err := h.svc.ListSkills()
+	items, err := h.skills.ListSkills()
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
