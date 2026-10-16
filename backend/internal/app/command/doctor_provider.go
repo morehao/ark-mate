@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/manager"
+	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/config"
 )
@@ -389,7 +390,7 @@ func checkRuntimeModels(facts manager.ProviderDoctorFacts) []doctorCheck {
 }
 
 // checkRuntimeModelState 单个 runtime 的**同步结论**（v12：交付结论由 adapter 回带，平台如实转述）。
-func checkRuntimeModelState(rt manager.ProviderRuntimeFacts) doctorCheck {
+func checkRuntimeModelState(rt doctorfacts.ProviderRuntimeFacts) doctorCheck {
 	name := "models " + rt.Runtime
 	detail := fmt.Sprintf("status=%s effect=%s pending=%t credential=%s(tested=%t) where=%s model_count=%d declares_input=%t",
 		orDash(rt.Status), orDash(rt.Effect), rt.Pending, orDash(rt.CredentialChannel), rt.CredentialTested,
@@ -407,7 +408,7 @@ func checkRuntimeModelState(rt manager.ProviderRuntimeFacts) doctorCheck {
 }
 
 // checkRuntimeModelDiff 对账：**取不到运行时广告就记"无法校验"，不许猜**。
-func checkRuntimeModelDiff(rt manager.ProviderRuntimeFacts) doctorCheck {
+func checkRuntimeModelDiff(rt doctorfacts.ProviderRuntimeFacts) doctorCheck {
 	name := "models " + rt.Runtime + " 对账"
 	if !rt.AdvertisedKnown {
 		return doctorCheck{name, doctorWarn, orDash(rt.DiffNote)}

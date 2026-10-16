@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -144,7 +145,7 @@ type ProviderDoctorFacts struct {
 	ImportMismatchBenignOnly bool `json:"importMismatchBenignOnly"`
 
 	// Runtimes 逐 runtime 的清单同步结论与对账（runtime 升序）。
-	Runtimes []ProviderRuntimeFacts `json:"runtimes"`
+	Runtimes []doctor.ProviderRuntimeFacts `json:"runtimes"`
 
 	// MissingBaseURL 缺端点的供应商 id（升序）。
 	//
@@ -209,47 +210,6 @@ type SensitiveFileFacts struct {
 	Note string `json:"note,omitempty"`
 }
 
-// ProviderRuntimeFacts 某 runtime 的清单同步事实（状态 + 对账）。
-//
-// v12 起"能不能写"这件事不再由平台门控（没有 `ConfigProjection.Tested`/`Writable` 了）：
-// 交付结论由 adapter 回带，平台如实转述。所以这一段的字段就是**端口结论的直投影**。
-type ProviderRuntimeFacts struct {
-	Runtime string `json:"runtime"`
-	// Status applied | unchanged | unsupported | untested | failed。
-	Status string `json:"status"`
-	// Where 人话落点（"同步到哪了"）。
-	Where string `json:"where,omitempty"`
-	// Effect 清单通道的生效时刻（immediate | next_run | next_session | next_process）。
-	Effect string `json:"effect,omitempty"`
-	// CredentialChannel native_doc | env | none（凭据通道与清单分开报，ADR-14）。
-	CredentialChannel string `json:"credentialChannel,omitempty"`
-	// CredentialTested 该凭据通道是否已实测（false → 界面上只能说「待实测」）。
-	CredentialTested bool `json:"credentialTested"`
-	// Pending true = 平台已交付但底座还没读到（**不许说成"已生效"**）。
-	Pending bool `json:"pending"`
-	// ModelCount 平台声明的清单条数。
-	ModelCount int `json:"modelCount"`
-	// DeclaresModelInput 该底座的清单交付面是否声明模型的输入模态（ADR-12）。
-	//
-	// 它由各 adapter 自己声明（例如 dsh=true：平台总是写 `models[].input`；有的底座 false：
-	// 平台不写、底座自己知道）。这一段存在的理由就是**如实区分两侧**：同一份平台清单在不同
-	// 底座上的实际行为不同，用户不该以为自己勾的能力一定生效（在 false 的那一侧它只是平台记录）。
-	DeclaresModelInput bool `json:"declaresModelInput"`
-	// Note 人话说明（未同步过、未声明交付面、逐条 problem…）。
-	Note string `json:"note,omitempty"`
-
-	// AdvertisedKnown 本次是否真的取到了运行时广告的目录（离线命令 = false）。
-	AdvertisedKnown bool `json:"advertisedKnown"`
-	// AdvertisedCount 运行时广告的模型候选数（AdvertisedKnown=false 时无意义）。
-	AdvertisedCount int `json:"advertisedCount"`
-	// Missing 平台声明了、底座没广告（"写了没生效"）的条目。
-	Missing []string `json:"missing,omitempty"`
-	// DiffNote 差集不可得的原因（AdvertisedKnown=false 时必填）。
-	DiffNote string `json:"diffNote,omitempty"`
-	// HighRisk **写了完全没生效**的形态：declared 非空而 advertised 一条都没有。
-	HighRisk bool `json:"highRisk"`
-}
-
 // CollectProviderDoctorFacts 采集 provider / 模型清单的只读事实。
 //
 // `st` 可以为 nil（memory 模式 / 库读不出来）：那时 DB 派生的事实全部记 unknown，
@@ -269,7 +229,7 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 		MissingInStore:        []string{},
 		OrphanMcpSecrets:      []string{},
 		ImportMismatch:        []string{},
-		Runtimes:              []ProviderRuntimeFacts{},
+		Runtimes:              []doctor.ProviderRuntimeFacts{},
 		MissingBaseURL:        []string{},
 		SensitiveFiles:        []SensitiveFileFacts{},
 		ModelsWithoutCapacity: []string{},
@@ -610,148 +570,6 @@ func providerMismatchBenignOnly(entries []string) bool {
 		}
 	}
 	return true
-}
-
-// collectRuntimeModelFacts 逐 runtime 采集模型清单事实。
-//
-// 这里**构造一个只读的 Service**（不拨号、不落盘）：物化状态与清单读数必须与
-// `GET /models` 走同一条取值面——自己再拼一套 SQL 等于把"看到的状态不是真的"引回来。
-// 三处只为读而做的事，逐条写下理由：
-//
-//	`ApplyIsolationEnv(home)`：落点声明里的 `${...}` 占位符只认该 runtime 自己的 Launch.Env
-//	  （fail-closed）。不注入的话 `ResolveConfigProjection` 会报错、
-//	  于是所有 runtime 都从报告里**静默消失**——那是最坏的假绿形态。
-//	`EnableStore(st)`：把 `meta.runtime_config_digest` 读进内存（否则"已物化"会被报成"从未物化"）。
-//	  它只碰内存与注册表，不写盘。
-//	**不**走 `LoadProviderDefinitionsFromStore`：那条路会经 `loadProviders` 读凭据面与库，
-//	  而体检要的是"清单事实"，不是"装载档案"（装载会在缺镜像时按库重建镜像——那是落笔）。
-//	  这里只装载每个 runtime 的清单。
-func collectRuntimeModelFacts(ctx context.Context, st *store.Store, home string) []ProviderRuntimeFacts {
-	out := []ProviderRuntimeFacts{}
-	if st == nil {
-		return out
-	}
-	// 体检刻意用**全部内置**注册表（`AllBuiltinRegistry`）而不是产品装配用的 `ProductRegistry`：
-	// doctor 回答的是"**这台机器上**有哪些底座的配置物化痕迹 / 敏感文件"，不是"本二进制只认哪一个"。
-	// 构建期把产品钉在 dsh 上，并不代表磁盘上不再有另一份底座的遗留物——那恰恰是体检该如实报出来的
-	// 东西（换成 ProductRegistry 会让它们整段消失，表现为"报告一切正常"，而磁盘上的东西一个没少）。
-	reg := goruntime.AllBuiltinRegistry()
-	reg.ApplyIsolationEnv(strings.TrimSpace(home))
-	svc := NewService(reg, nil)
-	defer svc.coalescer.Close()
-	svc.EnableStore(st)
-
-	states := svc.RuntimeConfigStates(ctx)
-	ids := make([]string, 0, len(states))
-	for id := range states {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		out = append(out, svc.runtimeModelFacts(ctx, id, states[id]))
-	}
-	return out
-}
-
-// runtimeModelFacts 单个 runtime 的清单 + 物化状态 + 对账（**只读**）。
-//
-// 单独成方法是为了让"高危"那条判据能被真实夹具（带编排器的 rig + 伪造的运行时目录）
-// 端到端跑到——`CollectProviderDoctorFacts` 里的 Service 天然没有编排器，永远走 unknown 分支。
-func (s *Service) runtimeModelFacts(ctx context.Context, runtimeID string, state RuntimeConfigState) ProviderRuntimeFacts {
-	facts := ProviderRuntimeFacts{
-		Runtime: runtimeID,
-		// 该底座声明不声明输入模态：取它自己的 Spec 字段（**不是**任何静态能力基线）。
-		DeclaresModelInput: declaresModelInput(s.reg, runtimeID),
-		Status:             state.Status,
-		Where:              state.Where,
-		Effect:             state.Effect,
-		CredentialChannel:  state.Credential.Channel,
-		CredentialTested:   state.Credential.Tested,
-		Pending:            state.Pending,
-		Note:               strings.Join(state.Problems, "；"),
-	}
-	if declared, err := s.ListModels(ctx); err != nil {
-		facts.DiffNote = "读平台清单失败：" + err.Error()
-		return facts
-	} else {
-		facts.ModelCount = len(declared)
-	}
-
-	// 对账只对**构建期固定那个底座**有意义：别的 runtime 没有执行面（读不到广告），如实报
-	// "无法校验"，而不是拿选中底座的目录去比对另一张表。
-	if runtimeID != goruntime.SelectedRuntime() {
-		facts.DiffNote = unknownModelDiffNote("该 runtime 不是本二进制构建期固定的那个，本进程没有它的执行面")
-		return facts
-	}
-	sample, err := s.advertisedSample(ctx)
-	switch {
-	case err != nil:
-		facts.DiffNote = "运行时目录读不到（" + err.Error() + "）：**无法校验**差集（既不是空、也不是不符）"
-	case !sample.Known():
-		// 没有来源（离线命令没有编排器 / 没有会话）：**不许**当成"底座一条都没有"。
-		facts.DiffNote = unknownModelDiffNote(sample.Note)
-	default:
-		facts.AdvertisedKnown = true
-		facts.AdvertisedCount = len(sample.Models)
-		// 高危：**写了完全没生效**（声明了 N 条、底座一条都没广告）。
-		facts.HighRisk = facts.ModelCount > 0 && facts.AdvertisedCount == 0
-		facts.Missing = missingDeclaredModels(ctx, s, sample)
-	}
-	return facts
-}
-
-// declaresModelInput 该 runtime 的 Spec 是否声明"平台总是写模型的输入模态"。
-//
-// 未注册的 runtime（远程端点没在这个二进制里）→ false：**不许**把"没见过"当成"会写"。
-func declaresModelInput(reg *goruntime.Registry, runtimeID string) bool {
-	if reg == nil {
-		return false
-	}
-	spec, ok := reg.Get(runtimeID)
-	if !ok {
-		return false
-	}
-	return spec.DeclaresModelInput
-}
-
-// missingDeclaredModels 声明了却没出现在运行时广告里的候选（机器面，人话化）。
-//
-// 判据是**同一份生成规则**（`modelValueFor`）：平台声明 → 该 runtime 认得的不透明值，
-// 再与广告集合比对。两处各写一遍迟早分叉。
-func missingDeclaredModels(ctx context.Context, s *Service, sample advertisedSample) []string {
-	declared, err := s.ListModels(ctx)
-	if err != nil {
-		return nil
-	}
-	advertised := map[string]bool{}
-	for _, m := range sample.Models {
-		advertised[m.Value] = true
-	}
-	var out []string
-	for i := range declared {
-		v, err := modelValueFor(s.reg, sample.Runtime, declared[i].ProviderID, declared[i].Model)
-		if err != nil || v == "" {
-			continue
-		}
-		if !advertised[v] {
-			out = append(out, declared[i].ProviderID+"/"+declared[i].Model)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// unknownModelDiffNote 差集取不到事实一侧时的说明（**"无法校验"**，不是任何一侧为空）。
-//
-// 为什么把这句话集中在一处：它是本文件最重要的一条纪律的落点——离线命令没有编排器/会话，
-// 运行时广告取不到；这时既不能报"两侧一致"（假绿），也不能报"一条都没生效"（假红）。
-func unknownModelDiffNote(reason string) string {
-	if strings.TrimSpace(reason) == "" {
-		reason = "本次没有取到运行时广告的目录"
-	}
-	return "**无法校验**：" + reason +
-		"（离线体检取不到运行时广告——这既不是「两侧一致」，也不是「一条都没生效」；" +
-		"发一条消息或跑 `GET /models?refresh=1` 才有事实一侧）"
 }
 
 // collectSensitiveFiles 列出需要与 `mate.db` 同等看待的敏感文件及其权限（v12 的新增面）。
