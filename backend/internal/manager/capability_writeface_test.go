@@ -315,7 +315,7 @@ func TestMcpServerWriteReadDelete(t *testing.T) {
 			}
 
 			// 读模型：明文键给键名，密钥侧只给键名（连引用都不回），定义里的未知键不影响读。
-			list, err := wf.svc.ListMcpServers()
+			list, err := mcpCatalog(wf.svc).ListMcpServers()
 			if err != nil || len(list) != 1 {
 				t.Fatalf("列表异常: %v %v", list, err)
 			}

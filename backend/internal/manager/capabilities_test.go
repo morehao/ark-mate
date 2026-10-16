@@ -24,6 +24,12 @@ import (
 	"github.com/morehao/golib/gerror"
 )
 
+// mcpCatalog 取 MCP 注册表读模型的**用例层**（P4a 正文第十四刀：读模型从 manager 收进
+// `svccapability`，夹具链不变——注册表/平面/密钥面本来就是真的）。
+func mcpCatalog(svc *Service) svccapability.McpCatalog {
+	return svccapability.NewServers(svc.CapabilityRegistry(), svc.McpPlane(), svc.McpSecrets())
+}
+
 // skillPlaneOf 取技能域平面：技能目录的投影在域里（`skill.Plane.ListSkills`），
 // `manager` 侧那份一行转发已删（P4a 正文第十三刀）。
 func skillPlaneOf(svc *Service) *skill.Plane { return svc.skillPlane }
@@ -64,7 +70,7 @@ func TestLoadCapabilityDefinitionsAndList(t *testing.T) {
 		t.Fatalf("skills 不符: %+v", skills)
 	}
 
-	mcps, _ := svc.ListMcpServers()
+	mcps, _ := mcpCatalog(svc).ListMcpServers()
 	if len(mcps) != 1 || mcps[0].ID != "fs" || mcps[0].Transport != "stdio" {
 		t.Fatalf("mcps 不符: %+v", mcps)
 	}
@@ -242,7 +248,7 @@ func TestProbeMcpServer(t *testing.T) {
 		}
 	}
 	// 状态写回 GET /mcps。
-	mcps, _ := svc.ListMcpServers()
+	mcps, _ := mcpCatalog(svc).ListMcpServers()
 	if len(mcps) != 1 || mcps[0].ToolCount != 1 || mcps[0].LastProbeAt == "" || mcps[0].LastProbeErr != "" {
 		t.Fatalf("mcps 探测状态不符: %+v", mcps)
 	}
@@ -286,7 +292,7 @@ func TestProbeMcpServer(t *testing.T) {
 		}
 	}
 	// 失败状态落盘可读回。
-	mcps, _ = svc.ListMcpServers()
+	mcps, _ = mcpCatalog(svc).ListMcpServers()
 	for _, m := range mcps {
 		if m.ID == "sse1" && !strings.Contains(m.LastProbeErr, "sse") {
 			t.Fatalf("sse1 应记录 last_probe_error，got %+v", m)
@@ -621,7 +627,7 @@ func TestAutoProbeMcpServers(t *testing.T) {
 	if strings.Join(names, ",") != "a__tool_a,b__tool_b" {
 		t.Fatalf("Tool 目录应含两个自动探测结果（远程工具带 serverID 前缀）: %v", names)
 	}
-	mcps, _ := svc.ListMcpServers()
+	mcps, _ := mcpCatalog(svc).ListMcpServers()
 	byID := map[string]dtocapability.McpServerResp{}
 	for _, m := range mcps {
 		byID[m.ID] = m

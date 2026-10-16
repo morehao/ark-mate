@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 )
 
@@ -27,9 +26,3 @@ func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*dtocapability
 
 // TODO(P4b): 删转发（调用点直接依赖 mcp.Plane）
 func (s *Service) AutoProbeMcpServers(ctx context.Context) error { return s.mcpPlane.AutoProbe(ctx) }
-
-// TODO(P4b): 删转发（读面直接依赖 mcp.Plane）
-func (s *Service) mcpProbeSnapshot() map[string]mcp.ProbeStatus { return s.mcpPlane.ProbeSnapshot() }
-
-// TODO(P4b): 删转发（读面直接依赖 mcp.Plane）
-func (s *Service) mcpToolCounts() map[string]int { return s.mcpPlane.ToolCounts() }

@@ -207,6 +207,43 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 			"技能目录要么走域平面、要么走一层转发，没有第三条路。")
 	}
 
+	// ④″ MCP 注册表读模型（P4a 正文第十四刀）：与 `ToolCatalog` 同族（投影在 `pkg/` 之上
+	// ⇒ 落用例层），但它的输入来自**三个源**（注册表条目 / MCP 平面探测态 / 密钥面悬空体检），
+	// 所以是这一域里第一个"多源折一"的读模型——顺手把 manager 那两条私有转发
+	// （`mcpToolCounts`/`mcpProbeSnapshot`）也删了（它们只服务这一个调用点）。
+	for _, anc := range []string{
+		"type McpCatalog interface {",
+		"func NewServers(caps *capability.Registry, plane *mcp.Plane, secrets *mcp.Secrets) McpCatalog",
+		"var _ McpCatalog = (*Servers)(nil)",
+		"func (s *Servers) ListMcpServers() ([]dtocapability.McpServerResp, error)",
+		"s.plane.ToolCounts()",
+		"s.plane.ProbeSnapshot()",
+		"s.secrets.UnresolvedKeys(m)",
+	} {
+		if !strings.Contains(capsSrc, anc) {
+			t.Errorf("internal/service/svccapability 里找不到 %q：MCP 注册表读模型的实现被改名/搬走了？"+
+				"（判据挂在它身上，失锚等于空转）", anc)
+		}
+	}
+	for _, path := range mgrFiles {
+		body := stripLineComments(readFileOrFatal(t, path))
+		for _, dead := range []string{"func (s *Service) ListMcpServers(", "func (s *Service) mcpToolCounts(", "func (s *Service) mcpProbeSnapshot("} {
+			if strings.Contains(body, dead) {
+				t.Errorf("internal/manager/%s 里又出现 `%s`：MCP 注册表读模型只有一份实现，在 "+
+					"`internal/service/svccapability`（P4a 正文第十四刀）；那两条私有转发已随调用点消失。",
+					filepath.Base(path), dead)
+			}
+		}
+	}
+	if !regexp.MustCompile(`mcp\s+svccapability\.McpCatalog`).MatchString(capCtr) {
+		t.Error("`ctrcapability` 里找不到 `mcp svccapability.McpCatalog` 字段" +
+			"（容空白匹配——gofmt 会把字段对齐成多空格，定长写法会假绿）。")
+	}
+	if !strings.Contains(funcBodyOf(t, capCtr, "func (h *capabilityCtr) ListMcpServers("), "h.mcp.ListMcpServers(") {
+		t.Error("`capabilityCtr.ListMcpServers` 的函数体里找不到 `h.mcp.ListMcpServers(`：" +
+			"注册表读模型要么走用例、要么走过渡端口，没有第三条路。")
+	}
+
 	// ③ 默认约定单点：`pkg/runtime` 必须有那个导出入口，且 manager 里不许再自己判默认。
 	regSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "pkg", "runtime", "registry.go")))
 	if !strings.Contains(regSrc, "func (r *Registry) McpTransportsFor(") {

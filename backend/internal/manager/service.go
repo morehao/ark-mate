@@ -238,6 +238,10 @@ func (s *Service) AutomationPlane() *automation.Plane { return s.automationPlane
 // 把它们放进 `router.Ports` 不违反"除控制器外不许引用 svc*"。
 func (s *Service) CapabilityRegistry() *capability.Registry { return s.caps }
 
+// McpPlane MCP 平面（连接器注册表 + 实时调用 + 探测态）。装配点把它当**依赖事实**交给用例层
+// （P4a 正文第十四刀：`svccapability` 的 MCP 目录读模型要用探测态与工具计数）。
+func (s *Service) McpPlane() *mcp.Plane { return s.mcpPlane }
+
 // SkillPlane 技能平面（读面 + 投影；与 mcp 平面共用同一份能力注册表）。
 func (s *Service) SkillPlane() *skill.Plane { return s.skillPlane }
 

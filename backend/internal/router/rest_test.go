@@ -133,7 +133,6 @@ type stubSvc struct {
 	skillToggled       bool
 	skillToggleID      string
 	skillToggleEnabled bool
-	mcps               []dtocapability.McpServerResp
 	capErr             error // 能力列表桩错误注入
 
 	// M2 写面桩
@@ -312,12 +311,6 @@ func (s *stubSvc) SkillMaterialization(id string) (*dtocapability.SkillMateriali
 	}, nil
 }
 
-func (s *stubSvc) ListMcpServers() ([]dtocapability.McpServerResp, error) {
-	if s.capErr != nil {
-		return nil, s.capErr
-	}
-	return s.mcps, nil
-}
 func (s *stubSvc) UsageSummary(_ context.Context, q dtousage.UsageQueryReq) (*dtousage.UsageSummaryResp, error) {
 	s.usageQuery = q
 	if s.usageErr != nil {
@@ -627,6 +620,8 @@ func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 		// ——替身化事实等于把"读模型读的是哪份注册表"也替身掉。
 		Capabilities: caps, SkillPlane: skills, Registry: goruntime.AllBuiltinRegistry(),
 		McpSecrets: mcp.NewSecrets(credential.New(reg)), McpGatewayEnabled: func() bool { return true },
+		// MCP 平面（P4a 正文第十四刀起）：连接器目录读模型的事实来源之一（探测态与工具计数）。
+		McpPlane: mcp.NewPlane(caps, nil, mcp.NewSecrets(credential.New(reg))),
 		// 导出（P4a 正文第八刀）：会话域平面与事件总线是**真对象**（事实来源由 ctrexport 造），
 		// sqlite 载体那份 Store 由具体用例按需注入（`stubDeps(...).Store = st`）。
 		// 会话域平面是**真对象**（P4a 正文第十/十一刀起，历史读面与读模型都由它提供）。
@@ -1413,10 +1408,15 @@ func testProviderPlane(t *testing.T) *provider.Plane {
 
 // TestCapabilityRoutes P1 能力数据面路由：GET /skills /mcps /tools 列出目录（信封 data 数组）。
 func TestCapabilityRoutes(t *testing.T) {
-	svc := &stubSvc{
-		mcps: []dtocapability.McpServerResp{{ID: "fs", Transport: "stdio", Command: "npx"}},
-	}
+	svc := &stubSvc{}
 	deps := stubDeps(t, svc)
+	// MCP 注册表读模型也归用例层（P4a 正文第十四刀）：夹具同样是"真注册表里注册过的 server"，
+	// 探测态/工具计数/悬空引用体检三个源都来自真对象（条目本体之外的都是空态）。
+	if err := deps.Capabilities.RegisterMcpServer(&capability.McpServer{
+		ID: "fs", Transport: "stdio", Command: "/usr/bin/npx",
+	}); err != nil {
+		t.Fatalf("注册 mcp 夹具失败: %v", err)
+	}
 	// 技能目录的**读模型**由域平面直接提供（P4a 正文第十三刀）：夹具是"真注册表里注册过的
 	// 技能"，投影（warnings / scope / enabled）由 `skill.Plane` 做——用例层不再包一层转发。
 	if err := deps.Capabilities.RegisterSkill(&capability.Skill{

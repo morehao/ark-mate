@@ -62,7 +62,7 @@ func TestMcpSecretResolution(t *testing.T) {
 	}
 
 	// 读模型：明文键给键名，密钥侧**只给键名**（连引用都不回），并标出解析不了的键。
-	list, err := svc.ListMcpServers()
+	list, err := mcpCatalog(svc).ListMcpServers()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestMcpSecretResolution(t *testing.T) {
 // dumpMcpServers 把 MCP 列表响应序列化成 JSON（用于"读模型不得泄漏值/引用"的字符串断言）。
 func dumpMcpServers(t *testing.T, svc *Service) string {
 	t.Helper()
-	list, err := svc.ListMcpServers()
+	list, err := mcpCatalog(svc).ListMcpServers()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 		t.Fatalf("探测路径同样应是 40001，got %d（%v）", numericCode(err), err)
 	}
 	// 失败要留痕（GET /mcps 的 last_probe_*），否则用户只看到一次性的响应。
-	list, err := svc.ListMcpServers()
+	list, err := mcpCatalog(svc).ListMcpServers()
 	if err != nil {
 		t.Fatal(err)
 	}

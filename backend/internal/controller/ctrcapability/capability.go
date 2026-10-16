@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
@@ -55,11 +56,20 @@ type capabilityCtr struct {
 	// 已经把 `capability.Skill` 折成 `dtocapability.SkillResp`，含 warnings 与 scope 判定），
 	// 用例层再包一层就只是一行转发——那正是第十一刀判定为骚操作的形状。
 	skills *skill.Plane
+	// mcp MCP 注册表**读模型**（P4a 正文第十四刀起在本包内构造）。
+	//
+	// 与 `tools` 同族：条目本体在注册表里、探测态在 MCP 平面里、悬空引用体检在密钥面里，
+	// 三个源折成一个响应 ⇒ 投影只能落用例层。
+	mcp svccapability.McpCatalog
 }
 
 // NewCapabilityCtr 构造 CapabilityCtr（`caps` 是能力注册表事实，用例实例在构造里造）。
-func NewCapabilityCtr(svc svccapability.CapabilitySvc, caps *capability.Registry, skills *skill.Plane) CapabilityCtr {
-	return &capabilityCtr{svc: svc, tools: svccapability.NewTools(caps), skills: skills}
+func NewCapabilityCtr(svc svccapability.CapabilitySvc, caps *capability.Registry, skills *skill.Plane,
+	mcpPlane *mcp.Plane, mcpSecrets *mcp.Secrets) CapabilityCtr {
+	return &capabilityCtr{
+		svc: svc, tools: svccapability.NewTools(caps), skills: skills,
+		mcp: svccapability.NewServers(caps, mcpPlane, mcpSecrets),
+	}
 }
 
 // ListSkills 列出 Skill 目录（平台唯一事实源；按 ID 排序）。
@@ -185,7 +195,7 @@ func (h *capabilityCtr) SkillMaterialization(c *gin.Context) {
 
 // ListMcpServers 列出 MCP 注册表（按 ID 排序；headers/凭证不读回）。
 func (h *capabilityCtr) ListMcpServers(c *gin.Context) {
-	items, err := h.svc.ListMcpServers()
+	items, err := h.mcp.ListMcpServers()
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

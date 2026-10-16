@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/morehao/ark-mate/internal/domain/skill"
-	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/golib/glog"
@@ -163,35 +161,6 @@ func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir str
 // RegisterTool 注册/覆盖一个工具目录条目（平台 builtin / 观察兜底 / P2 MCP live）。
 func (s *Service) RegisterTool(t capability.Tool) error {
 	return s.caps.RegisterTool(&t)
-}
-
-// ListMcpServers 返回 MCP 注册表（按 ID 排序）。headers/凭证只存内部供 P2 注入，不读回。
-// 附 live 探测状态（tool_count / last_probe_at / last_probe_error，P2 §5.2）。
-func (s *Service) ListMcpServers() ([]dtocapability.McpServerResp, error) {
-	items := s.caps.ListMcpServers()
-	counts := s.mcpToolCounts()
-	probes := s.mcpProbeSnapshot()
-	out := make([]dtocapability.McpServerResp, 0, len(items))
-	for _, m := range items {
-		resp := dtocapability.McpServerResp{
-			ID: m.ID, Name: m.Name, Transport: m.Transport,
-			Command: m.Command, Args: m.Args, URL: m.URL,
-			Scope: m.EffectiveScope(), Enabled: m.IsEnabled(),
-			EnvKeys:              capability.KeysOf(m.Env),
-			SecretEnvKeys:        capability.KeysOf(m.SecretEnv),
-			SecretHeaderKeys:     capability.KeysOf(m.SecretHeaders),
-			UnresolvedSecretKeys: s.unresolvedSecretKeys(m),
-			ToolCount:            counts[m.ID],
-		}
-		if st, ok := probes[m.ID]; ok {
-			if !st.At.IsZero() {
-				resp.LastProbeAt = st.At.UTC().Format(time.RFC3339)
-			}
-			resp.LastProbeErr = st.Err
-		}
-		out = append(out, resp)
-	}
-	return out, nil
 }
 
 // ——— P3d 过渡期转发层（纪律：一行 + TODO）———

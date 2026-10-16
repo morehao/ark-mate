@@ -81,7 +81,9 @@ type Ports struct {
 	Capabilities *capability.Registry
 	SkillPlane   *skill.Plane
 	Registry     *runtime.Registry
-	McpSecrets   *mcp.Secrets
+	// McpPlane MCP 注册表/探测态平面（连接器目录读模型的事实来源之一）。
+	McpPlane   *mcp.Plane
+	McpSecrets *mcp.Secrets
 	// McpGatewayEnabled 平台 MCP 网关开关（**运行期可变**，所以是读取口而不是快照值）。
 	McpGatewayEnabled func() bool
 	// SessionPlane 会话域平面 + Bus 事件总线（**依赖事实**）：导出用例与它的事实来源都由

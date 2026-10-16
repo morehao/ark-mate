@@ -19,9 +19,6 @@ type CapabilitySvc interface {
 	// SkillMaterialization 报告某 skill 在每处物化目标上的现状（§13.4 S2：审计/复现面，只读）。
 	SkillMaterialization(id string) (*dtocapability.SkillMaterializationResp, error)
 
-	// ListMcpServers 返回 MCP 注册表（P1；headers/凭证不读回）。
-	ListMcpServers() ([]dtocapability.McpServerResp, error)
-
 	// ——— 写面（M2）：能力定义可在面板里增删改，**事实源仍是文件** ———
 	//
 	// 请求体是原文 JSON 对象（`map[string]json.RawMessage`）：`PUT` 的语义是"只改出现过的键"，
