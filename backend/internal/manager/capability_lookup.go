@@ -30,7 +30,7 @@ func (s *Service) LookupMcp(id string) (capability.McpServer, bool) {
 // SkillVerdictFacts 实现 `session.CapabilityLookup`。
 func (s *Service) SkillVerdictFacts(runtimeID string) session.SkillVerdictFacts {
 	facts := session.SkillVerdictFacts{Runtime: runtimeID}
-	if p, ok := s.skillProjectionFor(runtimeID); ok {
+	if p, ok := s.skillPlane.Projections().For(runtimeID); ok {
 		facts.Projection = session.ProjectedSkillOf(runtimeID, p.Projection, p.Err)
 		facts.ProjectionOK = true
 	}

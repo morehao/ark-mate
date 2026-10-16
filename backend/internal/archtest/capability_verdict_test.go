@@ -146,6 +146,9 @@ func TestCapabilityVerdictConsumersDelegateToDomain(t *testing.T) {
 // 判据是调用点字面量：这一层没有运行时信号，只有"这一行还在不在"。
 func TestCapabilityWiringIsAttached(t *testing.T) {
 	root := backendRoot(t)
+	// manager 生产目录的全文：本条用例里多处判据都钉"某条转发不得回潮"，
+	// 统一按**整个目录**扫（写死单个文件名会让文件一搬/一删就让判据 Fatal——本批踩过三次）。
+	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "manager"))
 	src := readFileOrFatal(t, filepath.Join(root, "internal", "manager", "service.go"))
 	for _, call := range []string{"SetCapabilityFacts(s)", "SetCapabilityLookup(s)"} {
 		if !strings.Contains(src, call) {
@@ -183,9 +186,12 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 				"控制器直接 `h.skills.*`（接口里留声明 = 给一行转发留位置）。", dead)
 		}
 	}
-	if mgr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "skills.go"))); strings.Contains(mgr, "func (s *Service) SetSkillEnabled(") ||
-		strings.Contains(mgr, "func (s *Service) SkillMaterialization(") {
-		t.Error("`internal/manager/skills.go` 里又出现技能启停/物化的转发：那两行已删。")
+	// 扫描面是**整个 manager 生产目录**（原先只读 `skills.go` 一个文件——那个文件已随第五十刀删除，
+	// 写死文件名会让这条判据直接 Fatal；改成整目录之后它同时变强：那两行转发无论放回哪个文件都红）。
+	if strings.Contains(mgrAll, "func (s *Service) SetSkillEnabled(") ||
+		strings.Contains(mgrAll, "func (s *Service) SkillMaterialization(") {
+		t.Error("`internal/manager` 里又出现技能启停/物化的转发：那两行已删（P4a 正文第三十六刀），" +
+			"投影与错误码都在 `domain/skill`，控制器直接 `h.skills.*`。")
 	}
 	// ——— 定义**写面**六条（skill 三条 / mcp 三条）归域平面（P4a 正文第三十七刀）———
 	//
@@ -339,7 +345,6 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	// 以及定义机制的 repo / 能力目录取用。它们原先保留同名公开方法只是因为调用点拿到的是
 	// `*Service`；转发删掉之后调用点直接写 `McpPlane()` / `defs`——**名字变了**，
 	// 而"这段实现在哪一层"重新变得可判定。
-	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "manager"))
 	for _, dead := range []string{
 		"func (s *Service) GatewayMcpFace(",
 		"func (s *Service) ResolveMcpSecrets(",
@@ -356,6 +361,30 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 		if !strings.Contains(gwSrc, want) {
 			t.Errorf("`internal/gateway/source.go` 里找不到 `%s`：网关装配必须直连 MCP 平面。"+
 				"漏了会让这一条链悄悄退回某个中间层。", want)
+		}
+	}
+
+	// 第五十刀：**技能投影登记与物化**的四条转发清零（`manager/skills.go` 整个文件随之删除）。
+	//
+	// 这一族的调用点分散在装配（app 的投影登记与物化）、能力事实/查表（两条）与测试，
+	// 转发删掉之后一律直连 `skill.Plane` / `definition.Mechanism`。失效方式与前面几族同形：
+	// 一行转发的正确性完全等价于被转发的那一行，所以它写错与否都不会让任何测试变红。
+	for _, dead := range []string{
+		"func (s *Service) SetSkillProjections(",
+		"func (s *Service) skillProjectionFor(",
+		"func (s *Service) ReconcileSkillProjection(",
+		"func (s *Service) capabilityDirSnapshot(",
+	} {
+		if strings.Contains(mgrAll, dead) {
+			t.Errorf("`internal/manager` 里又出现 `%s`：技能投影面的过渡转发已随 P4a 正文第五十刀"+
+				"清零（调用点直连 `SkillPlane()` / `defs`）。", dead)
+		}
+	}
+	appAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	for _, want := range []string{"a.svc.SkillPlane().Projections().Set(", "a.svc.SkillPlane().ReconcileSkillProjection("} {
+		if !strings.Contains(appAll, want) {
+			t.Errorf("`internal/app/app.go` 里找不到 `%s`：装配期的投影登记与物化必须直连技能平面。"+
+				"漏了会让这两条链悄悄退回某个中间层。", want)
 		}
 	}
 }

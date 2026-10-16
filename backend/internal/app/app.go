@@ -646,7 +646,7 @@ func (a *App) reconcileSkillProjections() {
 			continue
 		}
 		proj := skill.Projection{Runtime: sp.ID, Projection: p}
-		w, r, mErr := a.svc.ReconcileSkillProjection(proj)
+		w, r, mErr := a.svc.SkillPlane().ReconcileSkillProjection(proj)
 		if mErr != nil {
 			glog.Warnw(context.Background(), "serve: skill 物化重校失败", "runtime", sp.ID, "root", p.Root, "err", mErr)
 		} else if w > 0 || r > 0 {
@@ -658,7 +658,7 @@ func (a *App) reconcileSkillProjections() {
 		}
 		projections = append(projections, proj)
 	}
-	a.svc.SetSkillProjections(projections)
+	a.svc.SkillPlane().Projections().Set(projections)
 	for _, key := range sortedKeys(a.cfg.ProjectionDirs) {
 		if !claimed[key] {
 			glog.Warnw(context.Background(), "serve: MATE_PROJECTION_DIRS 的这一项没有对应的已注册 runtime:skill，未生效（拼写？该 runtime 未注册？）",

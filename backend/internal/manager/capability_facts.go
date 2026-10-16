@@ -61,7 +61,7 @@ func (s *Service) projectedSkillsForFingerprint(runtimeID string, _ *session.Cap
 	if s.caps == nil {
 		return nil
 	}
-	p, ok := s.skillProjectionFor(runtimeID)
+	p, ok := s.skillPlane.Projections().For(runtimeID)
 	if !ok || p.Err != "" {
 		return nil
 	}

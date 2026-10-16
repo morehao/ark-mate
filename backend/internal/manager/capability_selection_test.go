@@ -32,7 +32,7 @@ func selRig(t *testing.T) *Service {
 			t.Fatal(err)
 		}
 	}
-	svc.SetSkillProjections([]skill.Projection{{
+	svc.skillPlane.Projections().Set([]skill.Projection{{
 		Runtime:    "rtx",
 		Projection: rtxSkillProjectionForTest(),
 	}})

@@ -29,7 +29,7 @@ func storeCapRig(t *testing.T) (*rig, string) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) { c.store = true })
 	root := t.TempDir()
-	r.Svc.SetSkillProjections([]skill.Projection{skillProj(root, "rtx")})
+	r.Svc.skillPlane.Projections().Set([]skill.Projection{skillProj(root, "rtx")})
 	return r, root
 }
 
@@ -381,7 +381,7 @@ func TestStoreMcpWriteFaceRoundTrip(t *testing.T) {
 // DB 模式下定义存在行里，目录只是可选的导入/导出位置。
 func TestStoreWriteFaceRequiresNoCapabilityDir(t *testing.T) {
 	r, _ := storeCapRig(t)
-	if dir := r.Svc.capabilityDirSnapshot(); dir != "" {
+	if dir := r.Svc.defs.Dir(); dir != "" {
 		t.Fatalf("本夹具刻意不配能力目录，got %q", dir)
 	}
 	if _, err := r.Svc.SkillPlane().WriteSkill(context.Background(), "", dtocapability.SkillWriteReq(rawObj(t, "id", `"no-dir"`)), true); err != nil {

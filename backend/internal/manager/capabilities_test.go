@@ -327,7 +327,7 @@ func TestServiceReconcileSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	w, r, err := svc.ReconcileSkillProjection(skillProj(root, "rtx"))
+	w, r, err := svc.skillPlane.ReconcileSkillProjection(skillProj(root, "rtx"))
 	if err != nil {
 		t.Fatalf("ReconcileSkills: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestServiceReconcileSkills(t *testing.T) {
 		t.Fatalf("物化内容不符（应带 frontmatter）: %q", b)
 	}
 	// 幂等重跑：无写无删。
-	if w, r, err := svc.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil || w != 0 || r != 0 {
+	if w, r, err := svc.skillPlane.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil || w != 0 || r != 0 {
 		t.Fatalf("幂等重校应 0/0，got w=%d r=%d err=%v", w, r, err)
 	}
 }

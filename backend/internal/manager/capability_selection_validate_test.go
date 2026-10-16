@@ -33,7 +33,7 @@ func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 	// server 对每个已注册 runtime 都可达，故"不承载 http"这条不再成立——那条新语义由
 	// `TestSelectionValidationRemoteReachableViaGateway` 负责。
 	svc.SetMcpGatewayEnabled(false)
-	svc.SetSkillProjections([]skill.Projection{{
+	svc.skillPlane.Projections().Set([]skill.Projection{{
 		Runtime:    "stub",
 		Projection: rtxSkillProjectionForTest(),
 	}})

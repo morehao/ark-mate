@@ -37,7 +37,7 @@ func skillRig(t *testing.T) (svc *Service, dir, root string) {
 		t.Fatalf("空目录应装载 0 条: %d", n)
 	}
 	_ = bus
-	svc.SetSkillProjections([]skill.Projection{skillProj(root, "rtx")})
+	svc.skillPlane.Projections().Set([]skill.Projection{skillProj(root, "rtx")})
 	return svc, dir, root
 }
 
@@ -72,7 +72,7 @@ func TestSetSkillEnabledWritesBackAndWithdraws(t *testing.T) {
 	if n := svc.LoadCapabilityDefinitions(dir); n != 1 {
 		t.Fatalf("应装载 1 条: %d", n)
 	}
-	if w, _, err := svc.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil || w != 1 {
+	if w, _, err := svc.skillPlane.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil || w != 1 {
 		t.Fatalf("预置物化失败: w=%d err=%v", w, err)
 	}
 	materialized := filepath.Join(root, "demo", "SKILL.md")
@@ -208,7 +208,7 @@ func TestSetSkillEnabledReconcileFailureIsReported(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc.SetSkillProjections([]skill.Projection{skillProj(bad, "rtx")})
+	svc.skillPlane.Projections().Set([]skill.Projection{skillProj(bad, "rtx")})
 	resp, err := svc.SkillPlane().SetSkillEnabled(context.Background(), "demo", false)
 	if err != nil {
 		t.Fatalf("重校失败不该让启停整体失败: %v", err)
@@ -259,7 +259,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 		"runtimes":["rtx"]}`)
 	svc.LoadCapabilityDefinitions(dir)
 	// 用「按 runtime 分 root」的多 root 路径（单 root 兼容路径不登记归属方，见 addRuntime）。
-	svc.SetSkillProjections([]skill.Projection{skillProj(root, "rtx")})
+	svc.skillPlane.Projections().Set([]skill.Projection{skillProj(root, "rtx")})
 	sk, _ := svc.caps.SkillByID("demo")
 
 	// 1) 还没物化 → missing。
@@ -267,7 +267,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 		t.Fatalf("未物化应为 missing 且给出期望摘要: %+v", st)
 	}
 	// 2) 物化后 → in_sync（期望摘要 == 实测摘要）。
-	if w, _, err := svc.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil || w != 1 {
+	if w, _, err := svc.skillPlane.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil || w != 1 {
 		t.Fatalf("物化失败: w=%d err=%v", w, err)
 	}
 	st := matStatus(t, svc, "demo", root)
@@ -288,7 +288,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 		t.Fatalf("篡改后应为 tampered: %+v", st)
 	}
 	// 4) 重校修复 → 回到 in_sync。
-	if _, _, err := svc.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil {
+	if _, _, err := svc.skillPlane.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil {
 		t.Fatal(err)
 	}
 	if st = matStatus(t, svc, "demo", root); st.Status != "in_sync" {
@@ -306,18 +306,18 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(other, "demo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	svc.SetSkillProjections([]skill.Projection{skillProj(other, "rtx")})
+	svc.skillPlane.Projections().Set([]skill.Projection{skillProj(other, "rtx")})
 	if st = matStatus(t, svc, "demo", other); st.Status != "user_owned" {
 		t.Fatalf("无标记目录应为 user_owned: %+v", st)
 	}
 	// 7) 该 runtime 没有已实证 format 的 source → not_applicable。
-	svc.SetSkillProjections([]skill.Projection{skillProj(other, "stub")})
+	svc.skillPlane.Projections().Set([]skill.Projection{skillProj(other, "stub")})
 	if st = matStatus(t, svc, "demo", other); st.Status != "not_applicable" {
 		t.Fatalf("未声明该 runtime 应为 not_applicable: %+v", st)
 	}
 	// 8) 禁用：副本还在 → stale；重校撤回后 → disabled。
-	svc.SetSkillProjections([]skill.Projection{skillProj(root, "rtx")})
-	if _, _, err := svc.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil {
+	svc.skillPlane.Projections().Set([]skill.Projection{skillProj(root, "rtx")})
+	if _, _, err := svc.skillPlane.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.SkillPlane().SetSkillEnabled(context.Background(), "demo", false); err != nil {
@@ -344,26 +344,26 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 	up := skillProj(untestedRoot, "rtx")
 	up.Projection.Tested = false
 	up.Projection.Note = "只验过内容形态，未验过默认根"
-	svc.SetSkillProjections([]skill.Projection{up})
+	svc.skillPlane.Projections().Set([]skill.Projection{up})
 	if st = matStatus(t, svc, "demo", untestedRoot); st.Status != "untested" ||
 		!strings.Contains(st.Detail, "未验过默认根") {
 		t.Fatalf("未实测投影应为 untested 且带上实测备注: %+v", st)
 	}
 	// 10) 投影根解析失败（占位符变量没设 / 落点非法）→ not_configured，且原因可见。
 	badProj := skill.Projection{Runtime: "rtx", Err: "环境变量 HOME 未设置"}
-	svc.SetSkillProjections([]skill.Projection{badProj})
+	svc.skillPlane.Projections().Set([]skill.Projection{badProj})
 	if st = matStatus(t, svc, "demo", ""); st.Status != "not_configured" ||
 		!strings.Contains(st.Detail, "HOME 未设置") {
 		t.Fatalf("解析失败的投影应为 not_configured 且给出原因: %+v", st)
 	}
 	// 11) 解析失败的投影不参与重校（Err 非空直接短路，不当成"没有任何技能"而清空目录）。
 	keepRoot := t.TempDir()
-	svc.SetSkillProjections([]skill.Projection{skillProj(keepRoot, "rtx")})
-	if _, _, err := svc.ReconcileSkillProjection(skillProj(keepRoot, "rtx")); err != nil {
+	svc.skillPlane.Projections().Set([]skill.Projection{skillProj(keepRoot, "rtx")})
+	if _, _, err := svc.skillPlane.ReconcileSkillProjection(skillProj(keepRoot, "rtx")); err != nil {
 		t.Fatal(err)
 	}
-	svc.SetSkillProjections([]skill.Projection{badProj})
-	if w, r, err := svc.ReconcileSkillProjection(badProj); err != nil || w != 0 || r != 0 {
+	svc.skillPlane.Projections().Set([]skill.Projection{badProj})
+	if w, r, err := svc.skillPlane.ReconcileSkillProjection(badProj); err != nil || w != 0 || r != 0 {
 		t.Fatalf("解析失败的投影应短路重校（不写不删）: w=%d r=%d err=%v", w, r, err)
 	}
 	if _, err := os.Stat(filepath.Join(keepRoot, "demo", "SKILL.md")); err != nil {
