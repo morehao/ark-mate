@@ -194,19 +194,6 @@ func (s *Service) ListMcpServers() ([]dtocapability.McpServerResp, error) {
 	return out, nil
 }
 
-// ListTools 返回 Tool 目录（按 name 排序）。
-func (s *Service) ListTools() ([]dtocapability.ToolResp, error) {
-	items := s.caps.ListTools()
-	out := make([]dtocapability.ToolResp, 0, len(items))
-	for _, t := range items {
-		out = append(out, dtocapability.ToolResp{
-			Name: t.Name, Description: t.Description, Source: t.Source,
-			McpServer: t.McpServer, Schema: t.Schema,
-		})
-	}
-	return out, nil
-}
-
 // ——— P3d 过渡期转发层（纪律：一行 + TODO）———
 //
 // 密钥解析面（引用 → 明文、存在性体检、脱敏登记）已落 `domain/mcp.Secrets`（P2a-13）。

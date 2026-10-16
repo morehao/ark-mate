@@ -48,9 +48,6 @@ type CapabilitySvc interface {
 	// DeleteMcpServer 删除 MCP server 定义并一并摘除其归属的工具条目。
 	DeleteMcpServer(ctx context.Context, id string) (*dtocapability.McpDeleteResp, error)
 
-	// ListTools 返回 Tool 目录（P1；静态/平台/观察条目）。
-	ListTools() ([]dtocapability.ToolResp, error)
-
 	// ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测并写 Tool 目录（P2 §5.2）。
 	ProbeMcpServer(ctx context.Context, id string) (*dtocapability.McpProbeResp, error)
 

@@ -129,6 +129,53 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 		}
 	}
 
+	// ④ 工具目录是**同一族读模型**（P4a 正文第十二刀）：`ListTools` 从 `manager` 收进
+	// `svccapability`。它没有请求校验、没有错误码出口，但**有响应装配**——`capability.Tool`
+	// → `dtocapability.ToolResp` 这个投影只能落在用例层：`pkg/` 不能 import `internal/dto`
+	// （分层方向），控制器又只做参数绑定与回响应。所以它不像会话那几个读模型那样"调用方直接用
+	// 平面"，而是像本文件钉的 Library 读模型一样**收进 svc**。
+	//
+	// 失效方式与 ① 同形（实现回流 / 就地投影），只在能力面上：
+	capsSvc := filepath.Join(root, "internal", "service", "svccapability")
+	var capsBody strings.Builder
+	for _, path := range goFilesUnder(t, capsSvc) {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		capsBody.WriteString(stripLineComments(readFileOrFatal(t, path)))
+	}
+	capsSrc := capsBody.String()
+	for _, anc := range []string{
+		"type ToolCatalog interface {",
+		"func NewTools(caps *capability.Registry) ToolCatalog",
+		"var _ ToolCatalog = (*Tools)(nil)",
+		"func (t *Tools) ListTools() ([]dtocapability.ToolResp, error)",
+		"t.caps.ListTools()",
+	} {
+		if !strings.Contains(capsSrc, anc) {
+			t.Errorf("internal/service/svccapability 里找不到 %q：工具目录读模型的实现被改名/搬走了？"+
+				"（判据挂在它身上，失锚等于空转）", anc)
+		}
+	}
+	for _, path := range mgrFiles {
+		base := filepath.Base(path)
+		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "func (s *Service) ListTools(") {
+			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) ListTools(`：工具目录的实现只有一份，"+
+				"在 `internal/service/svccapability`（P4a 正文第十二刀）。两份并存的后果是同一个工具"+
+				"在 `/tools` 与别处的可见范围静默分叉。", base)
+		}
+	}
+	// 取用路径：控制器**函数体**里必须经用例（同包中间函数喂不绿它）。
+	capCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrcapability", "capability.go")))
+	if !regexp.MustCompile(`tools\s+svccapability\.ToolCatalog`).MatchString(capCtr) {
+		t.Error("`ctrcapability` 里找不到 `tools svccapability.ToolCatalog` 字段" +
+			"（容空白匹配——gofmt 会把字段对齐成多空格，定长写法会假绿）。")
+	}
+	if !strings.Contains(funcBodyOf(t, capCtr, "func (h *capabilityCtr) ListTools("), "h.tools.ListTools(") {
+		t.Error("`capabilityCtr.ListTools` 的函数体里找不到 `h.tools.ListTools(`：工具目录要么走用例、" +
+			"要么走过渡端口，没有第三条路。")
+	}
+
 	// ③ 默认约定单点：`pkg/runtime` 必须有那个导出入口，且 manager 里不许再自己判默认。
 	regSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "pkg", "runtime", "registry.go")))
 	if !strings.Contains(regSrc, "func (r *Registry) McpTransportsFor(") {

@@ -134,7 +134,6 @@ type stubSvc struct {
 	skillToggleID      string
 	skillToggleEnabled bool
 	mcps               []dtocapability.McpServerResp
-	tools              []dtocapability.ToolResp
 	capErr             error // 能力列表桩错误注入
 
 	// M2 写面桩
@@ -324,12 +323,6 @@ func (s *stubSvc) ListMcpServers() ([]dtocapability.McpServerResp, error) {
 		return nil, s.capErr
 	}
 	return s.mcps, nil
-}
-func (s *stubSvc) ListTools() ([]dtocapability.ToolResp, error) {
-	if s.capErr != nil {
-		return nil, s.capErr
-	}
-	return s.tools, nil
 }
 func (s *stubSvc) UsageSummary(_ context.Context, q dtousage.UsageQueryReq) (*dtousage.UsageSummaryResp, error) {
 	s.usageQuery = q
@@ -1429,9 +1422,14 @@ func TestCapabilityRoutes(t *testing.T) {
 	svc := &stubSvc{
 		skills: []dtocapability.SkillResp{{ID: "plan", Name: "plan", Description: "先规划再动手"}},
 		mcps:   []dtocapability.McpServerResp{{ID: "fs", Transport: "stdio", Command: "npx"}},
-		tools:  []dtocapability.ToolResp{{Name: "web_search", Source: "builtin", Description: "联网搜索"}},
 	}
-	r := newRestEngine(stubDeps(t, svc))
+	deps := stubDeps(t, svc)
+	// 工具目录的**读模型**归用例层（P4a 正文第十二刀）：夹具是"真注册表里注册过的工具"，
+	// 而不是替身返回值——这样断言的才是"投影真的把注册表里那条读出来了"。
+	deps.Capabilities.RegisterTool(&capability.Tool{
+		Name: "web_search", Source: "builtin", Description: "联网搜索", McpServer: "fs",
+	})
+	r := newRestEngine(deps)
 
 	env, code := do(t, r, "GET", "/v1/mate/skills", "")
 	if code != 200 || env.Code != 0 {
@@ -1458,6 +1456,9 @@ func TestCapabilityRoutes(t *testing.T) {
 	var tools []dtocapability.ToolResp
 	if err := json.Unmarshal(env.Data, &tools); err != nil || len(tools) != 1 || tools[0].Name != "web_search" {
 		t.Fatalf("tools data 不符: %s", env.Data)
+	}
+	if tools[0].McpServer != "fs" || tools[0].Source != "builtin" {
+		t.Fatalf("工具来源/归属未投影: %+v", tools[0])
 	}
 }
 

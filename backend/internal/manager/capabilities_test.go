@@ -15,12 +15,18 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/service/svccapability"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/mcp"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
+
+// toolCatalog 取工具目录的**用例层**（P4a 正文第十二刀：读模型从 manager 收进 svccapability）。
+func toolCatalog(svc *Service) svccapability.ToolCatalog {
+	return svccapability.NewTools(svc.CapabilityRegistry())
+}
 
 func writeCapFile(t *testing.T, path, content string) {
 	t.Helper()
@@ -58,7 +64,7 @@ func TestLoadCapabilityDefinitionsAndList(t *testing.T) {
 		t.Fatalf("mcps 不符: %+v", mcps)
 	}
 
-	tools, _ := svc.ListTools()
+	tools, _ := toolCatalog(svc).ListTools()
 	if len(tools) != 1 || tools[0].Name != "web_search" || tools[0].Source != capability.ToolSourceBuiltin {
 		t.Fatalf("tools 不符: %+v", tools)
 	}
@@ -73,7 +79,7 @@ func TestRegisterToolAndSort(t *testing.T) {
 	if err := svc.RegisterTool(capability.Tool{Name: "a_tool", Source: capability.ToolSourceObserved, Description: "obs"}); err != nil {
 		t.Fatal(err)
 	}
-	tools, _ := svc.ListTools()
+	tools, _ := toolCatalog(svc).ListTools()
 	if len(tools) != 2 || tools[0].Name != "a_tool" || tools[1].Name != "z_tool" {
 		t.Fatalf("tools 排序不符: %+v", tools)
 	}
@@ -219,7 +225,7 @@ func TestProbeMcpServer(t *testing.T) {
 		t.Fatalf("tools 归属/内容不符: %+v", got.Tools)
 	}
 	// 旧条目被替换（描述更新），builtin 保留。
-	all, _ := svc.ListTools()
+	all, _ := toolCatalog(svc).ListTools()
 	if len(all) != 2 {
 		t.Fatalf("tools 应 2 条（mcp+builtin），got %+v", all)
 	}
@@ -285,7 +291,7 @@ func TestProbeMcpServer(t *testing.T) {
 
 func mustListTools(t *testing.T, svc *Service) []dtocapability.ToolResp {
 	t.Helper()
-	out, err := svc.ListTools()
+	out, err := toolCatalog(svc).ListTools()
 	if err != nil {
 		t.Fatal(err)
 	}

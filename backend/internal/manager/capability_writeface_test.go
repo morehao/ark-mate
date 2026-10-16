@@ -348,7 +348,7 @@ func TestMcpServerWriteReadDelete(t *testing.T) {
 			if _, ok := wf.svc.caps.GetMcpServer("fs"); ok {
 				t.Fatal("注册表条目应已摘除")
 			}
-			if tools, _ := wf.svc.ListTools(); len(tools) != 0 {
+			if tools, _ := toolCatalog(wf.svc).ListTools(); len(tools) != 0 {
 				t.Fatalf("归属该 server 的工具应一并摘除，仍剩 %+v", tools)
 			}
 			if wf.hasDef(t, model.DefinitionKindMcp, "fs") {

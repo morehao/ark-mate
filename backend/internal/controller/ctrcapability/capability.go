@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
+	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -41,11 +42,16 @@ var _ CapabilityCtr = (*capabilityCtr)(nil)
 // CapabilityHandler 处理能力数据面 REST（P1：Skill/MCP/Tool 目录列出；注入属 P2）。
 type capabilityCtr struct {
 	svc svccapability.CapabilitySvc
+	// tools 工具目录**读模型**（P4a 正文第十二刀起在本包内构造）。
+	//
+	// 「只读」这一面没有请求校验、没有错误码出口，装配点交下来的只有注册表这一个事实，
+	// 所以不跟其余 16 个方法一起等——控制器按面持有。
+	tools svccapability.ToolCatalog
 }
 
-// NewCapabilityCtr 构造 CapabilityCtr。
-func NewCapabilityCtr(svc svccapability.CapabilitySvc) CapabilityCtr {
-	return &capabilityCtr{svc: svc}
+// NewCapabilityCtr 构造 CapabilityCtr（`caps` 是能力注册表事实，用例实例在构造里造）。
+func NewCapabilityCtr(svc svccapability.CapabilitySvc, caps *capability.Registry) CapabilityCtr {
+	return &capabilityCtr{svc: svc, tools: svccapability.NewTools(caps)}
 }
 
 // ListSkills 列出 Skill 目录（平台唯一事实源；按 ID 排序）。
@@ -181,7 +187,7 @@ func (h *capabilityCtr) ListMcpServers(c *gin.Context) {
 
 // ListTools 列出 Tool 目录（按 name 排序）。
 func (h *capabilityCtr) ListTools(c *gin.Context) {
-	items, err := h.svc.ListTools()
+	items, err := h.tools.ListTools()
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
