@@ -36,12 +36,6 @@ type WorkspaceSvc interface {
 
 	// ---- v14：工作空间**登记表**（用户产出的持久实体，与上面几个派生视图分工见 manager/workspace_registry.go）----
 
-	// WorkspaceRegistry 列出全部工作空间登记（按展示顺序；目录状态/会话数/最近使用读时现算）。
-	//
-	// memory 持久层返回**空列表 + Writable=false**（不是错误）：没有登记是合法状态，
-	// 而"不可写"这件事必须让前端看见，否则它会渲染一个必然失败的创建入口（设计 ADR-11）。
-	WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error)
-
 	// CreateRegisteredWorkspace 登记一个目录（get-or-create；strict=true 时重复报 workspace_exists）。
 	//
 	// 路径校验与建会话**共用同一条实现**（ValidateWorkspace），所以不会出现"能登记、建不了会话"。

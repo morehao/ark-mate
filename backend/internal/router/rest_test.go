@@ -67,12 +67,10 @@ type stubSvc struct {
 	settingsRoots  []string // 最近一次 UpdateWorkspaceSettings 收到的 roots
 
 	// v14 工作空间登记表（桩只记参 + 透传；领域判断全在 manager）。
-	registryList         *dtoworkspace.WorkspaceListResp
 	registryOne          *dtoworkspace.WorkspaceResp
 	registryDelete       *dtoworkspace.WorkspaceDeleteResp
 	registryMove         *dtoworkspace.WorkspaceMoveResp
 	registryErr          error
-	registryListCalled   bool
 	registryCreatePath   string
 	registryCreateTitle  string
 	registryCreateStrict bool
@@ -427,14 +425,6 @@ func (s *stubSvc) UpdateWorkspaceSettings(roots []string) (*dtoworkspace.Workspa
 // 归属解析全在 manager），所以路由测试要证明的也只是"路径与参数原样到了端口、
 // 错误按带码信封出去"。领域语义由 manager 与 store 的测试覆盖。
 
-func (s *stubSvc) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error) {
-	s.registryListCalled = true
-	if s.registryErr != nil {
-		return nil, s.registryErr
-	}
-	return s.registryList, nil
-}
-
 func (s *stubSvc) CreateRegisteredWorkspace(path, title string, strict bool) (*dtoworkspace.WorkspaceResp, error) {
 	s.registryCreatePath, s.registryCreateTitle, s.registryCreateStrict = path, title, strict
 	if s.registryErr != nil {
@@ -613,6 +603,8 @@ func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 		McpPlane: mcp.NewPlane(caps, nil, mcp.NewSecrets(credential.New(reg))),
 		// 宿主选择器平面（P4a 正文第十七刀）：控制器的窄端口消费它。
 		Picker: workspace.NewPicker(),
+		// 工作空间域平面（P4a 正文第十八刀）：登记表读模型的事实来源。
+		WorkspacePlane: workspace.NewPlane(),
 		// 导出（P4a 正文第八刀）：会话域平面与事件总线是**真对象**（事实来源由 ctrexport 造），
 		// sqlite 载体那份 Store 由具体用例按需注入（`stubDeps(...).Store = st`）。
 		// 会话域平面是**真对象**（P4a 正文第十/十一刀起，历史读面与读模型都由它提供）。
@@ -700,7 +692,6 @@ func TestWorkspaceRegistryCtrPassThrough(t *testing.T) {
 	}
 	svc := &stubSvc{
 		registryOne:    one,
-		registryList:   &dtoworkspace.WorkspaceListResp{Items: []dtoworkspace.WorkspaceResp{*one}, DefaultID: "wsp-default", Writable: true},
 		registryDelete: &dtoworkspace.WorkspaceDeleteResp{ID: "wsp-1", ReleasedSessions: 12},
 		registryMove:   &dtoworkspace.WorkspaceMoveResp{IDs: []string{"wsp-2", "wsp-1"}},
 	}
@@ -716,8 +707,14 @@ func TestWorkspaceRegistryCtrPassThrough(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &list); err != nil {
 		t.Fatalf("data 解析: %v", err)
 	}
-	if len(list.Items) != 1 || list.DefaultID != "wsp-default" || !list.Writable {
-		t.Fatalf("登记表应原样透出: %+v", list)
+	// 列表这一格自 P4a 正文第十八刀起走**真域平面**（读模型由域折好 DTO），所以这里只证
+	// "信封形状对、真的问到了平面"；"登记过的行原样透出"由 `TestWorkspaceRegistryHTTPFlow`
+	// 用真登记流程钉（那条测试建表、建默认工作空间、创建、列出、重排、改名、删除全走真对象）。
+	if list.Writable {
+		t.Fatalf("空平面不该自称可写（memory 模式且未接库）: %+v", list)
+	}
+	if list.Items == nil {
+		t.Fatalf("列表必须是空数组而不是 null（前端按数组渲染）: %+v", list)
 	}
 
 	// POST /workspaces：path/title/strict 三个参数都要到端口（strict 决定重复登记是

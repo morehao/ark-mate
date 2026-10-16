@@ -464,7 +464,7 @@ func (a *App) Init(ctx context.Context) error {
 		// Library 读模型（P4a 正文第六刀）：交出三份**域/包事实** + 一个运行期读取口，
 		// 用例实例由 ctrlibrary 自己造。
 		Capabilities: a.svc.CapabilityRegistry(), SkillPlane: a.svc.SkillPlane(),
-		Registry: a.reg, Picker: a.svc.Picker(), McpPlane: a.svc.McpPlane(), McpSecrets: a.svc.McpSecrets(), McpGatewayEnabled: a.svc.McpGatewayEnabled,
+		Registry: a.reg, Picker: a.svc.Picker(), WorkspacePlane: a.svc.WorkspacePlane(), McpPlane: a.svc.McpPlane(), McpSecrets: a.svc.McpSecrets(), McpGatewayEnabled: a.svc.McpGatewayEnabled,
 		// 导出（P4a 正文第八刀）：三份**依赖事实**（模型面已在上面交出 Store）——事实来源
 		// （`svcsystem.NewSource`）与用例实例（`svcsystem.New`）都由 ctrexport 造。
 		SessionPlane: a.svc.SessionPlane(), Bus: a.bus,

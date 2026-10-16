@@ -82,6 +82,8 @@ type Ports struct {
 	Capabilities *capability.Registry
 	SkillPlane   *skill.Plane
 	Registry     *runtime.Registry
+	// WorkspacePlane 工作空间域平面（登记表读模型等事实的来源）。
+	WorkspacePlane *workspace.Plane
 	// Picker 宿主目录选择器平面（判定/配方/spawn 全在领域里；控制器的窄端口消费它）。
 	Picker *workspace.Picker
 	// McpPlane MCP 注册表/探测态平面（连接器目录读模型的事实来源之一）。

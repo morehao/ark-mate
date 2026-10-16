@@ -200,7 +200,7 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	if _, err := svc.MoveRegisteredWorkspace(ws2.ID, ""); err != nil {
 		t.Fatalf("重排: %v", err)
 	}
-	before, err := svc.WorkspaceRegistry()
+	before, err := svc.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	if err := svc2.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace(重启): %v", err)
 	}
-	after, err := svc2.WorkspaceRegistry()
+	after, err := svc2.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry(重启): %v", err)
 	}
@@ -276,6 +276,7 @@ func doRaw(t *testing.T, svc *manager.Service, method, path, body string) []byte
 	t.Helper()
 	engine := router.New(router.Ports{
 		Session: svc, Workspace: svc,
+		WorkspacePlane: svc.WorkspacePlane(), Picker: svc.Picker(),
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
 		Runtime:       runtimeconn.NewPlaneFor(nil),
 		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,

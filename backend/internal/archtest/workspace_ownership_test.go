@@ -106,6 +106,36 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 			}
 		}
 	}
+	// ——— 读模型不进用例层：登记表列表（P4a 正文第十八刀）———
+	//
+	// `WorkspaceRegistry` 曾在 `svcworkspace` 的接口里、由 manager 一行转发到 `workspace.Plane`。
+	// 域里那份已经把登记表折成 `dtoworkspace.WorkspaceListResp`（含 default_id / writable），
+	// 用例层再包一层就只是一行转发——与第十一刀会话读模型、第十三刀技能目录同一条口径。
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "service", "svcworkspace")) {
+		body := stripLineComments(readFileOrFatal(t, path))
+		if strings.Contains(body, "WorkspaceRegistry()") {
+			t.Errorf("`svcworkspace` 里又声明了 `WorkspaceRegistry()`：读模型的投影在域平面里，"+
+				"这一层再包一次就是一行转发（%s）。控制器直接经 `h.plane` 取。", filepath.Base(path))
+		}
+	}
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+		body := stripLineComments(readFileOrFatal(t, path))
+		if strings.Contains(body, "func (s *Service) WorkspaceRegistry(") {
+			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) WorkspaceRegistry(`："+
+				"那一行转发已删（P4a 正文第十八刀）。", filepath.Base(path))
+		}
+	}
+	// 判据不许失锚：域里那份本体必须在。
+	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "registry.go"))),
+		"func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error)") {
+		t.Error("`internal/domain/workspace/registry.go` 里找不到登记表读模型本体：判据失锚＝空转。")
+	}
+	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "workspace.go")))
+	if !strings.Contains(ctrWork, "h.plane.WorkspaceRegistry()") {
+		t.Error("`ctrworkspace` 里找不到 `h.plane.WorkspaceRegistry()`：登记表要么走域平面、" +
+			"要么走一层转发，没有第三条路。")
+	}
+
 }
 
 // TestWorkspaceWiringIsAttached 装配链必须真的接上（库句柄 + 会话事实来源）。

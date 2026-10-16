@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 	"github.com/morehao/ark-mate/pkg/code"
@@ -53,11 +54,14 @@ type workspaceCtr struct {
 	svc svcworkspace.WorkspaceSvc
 	// picker 宿主目录选择器（事实来自 `router.Ports.Picker`）。
 	picker DirectoryPicker
+	// plane 工作空间域平面：**读模型**（登记表列表）直接经它取——域里已经折好 DTO，
+	// 用例层再包一层就只是一行转发（第十一刀口径）。
+	plane *workspace.Plane
 }
 
 // NewWorkspaceCtr 构造 WorkspaceCtr。
-func NewWorkspaceCtr(svc svcworkspace.WorkspaceSvc, picker DirectoryPicker) WorkspaceCtr {
-	return &workspaceCtr{svc: svc, picker: picker}
+func NewWorkspaceCtr(svc svcworkspace.WorkspaceSvc, picker DirectoryPicker, plane *workspace.Plane) WorkspaceCtr {
+	return &workspaceCtr{svc: svc, picker: picker, plane: plane}
 }
 
 // Browse 列出某绝对路径下的子目录（query `path` 缺省 = 首个工作区根，未配白名单时 = 服务进程家目录；
@@ -192,7 +196,7 @@ func (h *workspaceCtr) UpdateSettings(c *gin.Context) {
 // 无参数：顺序与集合都由库里的登记决定，没有可调项——少一个参数就少一种"面板看到的和库里
 // 不一致"的可能（与 Libraries 同一条理由）。
 func (h *workspaceCtr) List(c *gin.Context) {
-	resp, err := h.svc.WorkspaceRegistry()
+	resp, err := h.plane.WorkspaceRegistry()
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

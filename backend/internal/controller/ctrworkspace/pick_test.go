@@ -49,7 +49,7 @@ func TestWorkspacePickDirectoryThreeOutcomes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// svc 传 nil：这条路由只经 picker 端口，正是"控制器只做绑定与回响应"的形状。
 			r := gin.New()
-			r.POST("/pick", NewWorkspaceCtr(nil, tc.stub).PickDirectory)
+			r.POST("/pick", NewWorkspaceCtr(nil, tc.stub, nil).PickDirectory)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/pick", nil))
 			var env envelope

@@ -62,7 +62,7 @@ func TestWorkspaceRegistryDefaultIsProvisioned(t *testing.T) {
 	if err := r.Svc.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("重复 EnsureDefaultWorkspace: %v", err)
 	}
-	list, err := r.Svc.WorkspaceRegistry()
+	list, err := r.Svc.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestWorkspaceRegistryNoProvisionNoDefault(t *testing.T) {
 	if _, ok, _ := r.Svc.DefaultWorkspace(); ok {
 		t.Fatal("代建关闭时不该有默认工作空间")
 	}
-	list, err := r.Svc.WorkspaceRegistry()
+	list, err := r.Svc.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestWorkspaceRegistryListAggregatesLegacyIntoDefault(t *testing.T) {
 	seedStoreSession(t, r.St, "legacy-2", def.Path, "")
 	seedStoreSession(t, r.St, "member", userDir, ws.ID)
 
-	list, err := r.Svc.WorkspaceRegistry()
+	list, err := r.Svc.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestWorkspaceRegistryMissingDirStillListed(t *testing.T) {
 		t.Fatalf("删目录: %v", err)
 	}
 
-	list, err := r.Svc.WorkspaceRegistry()
+	list, err := r.Svc.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestWorkspaceRegistryMemoryIsExplicitlyUnsupported(t *testing.T) {
 	r := newRig(t) // 无库 = memory
 	mustWorkspacePolicy(t, r.Svc, "", nil)
 
-	list, err := r.Svc.WorkspaceRegistry()
+	list, err := r.Svc.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("memory 下读面不该报错: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestWorkspaceRegistryDefaultIsProvisionedInMemory(t *testing.T) {
 
 	// 读面：**要列出它**（否则左栏少一个分组、未指定 cwd 建的会话无处可挂），
 	// 但 `writable` 仍是 false（用户登记表在 memory 模式下无处可存，设计 ADR-11）。
-	list, err := r.Svc.WorkspaceRegistry()
+	list, err := r.Svc.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestWorkspaceRegistryMemoryNoProvisionNoDefault(t *testing.T) {
 	if _, ok, _ := r.Svc.DefaultWorkspace(); ok {
 		t.Fatal("代建关闭时不该有默认工作空间")
 	}
-	list, err := r.Svc.WorkspaceRegistry()
+	list, err := r.Svc.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}

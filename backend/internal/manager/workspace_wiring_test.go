@@ -103,7 +103,7 @@ func TestCreateSessionExplicitCwdKeepsEmptyAssignment(t *testing.T) {
 		t.Fatalf("库里也不该替它登记: %q", row.WorkspaceID)
 	}
 	// 且**没有**因此产生登记行：只有默认工作空间那一条。
-	list, err := r.svc.WorkspaceRegistry()
+	list, err := r.svc.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}

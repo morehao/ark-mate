@@ -63,6 +63,8 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
 		Session: svc, Workspace: svc,
+		WorkspacePlane: svc.WorkspacePlane(),
+		Picker:         svc.Picker(),
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
 		Runtime:       runtimeconn.NewPlaneFor(nil),
 		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,
@@ -388,6 +390,8 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
 		Session: svc, Workspace: svc,
+		WorkspacePlane: svc.WorkspacePlane(),
+		Picker:         svc.Picker(),
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
 		Runtime:       runtimeconn.NewPlaneFor(nil),
 		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,
