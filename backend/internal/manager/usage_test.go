@@ -45,7 +45,7 @@ func TestUsageSummaryService(t *testing.T) {
 	runB1, _, _ := beginRun(t, svc, "u2", "第三问")
 	endRun(svc, "u2", runB1, session.BusRunError, map[string]any{"code": "agent_error", "class": "agent"})
 
-	resp, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{})
+	resp, err := sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{})
 	if err != nil {
 		t.Fatalf("UsageSummary: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// group_by=day：UTC 日期桶（今日 1 个桶）；快照口径下日桶不可相加（前端据此标注）。
-	dayResp, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{GroupBy: "day"})
+	dayResp, err := sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{GroupBy: "day"})
 	if err != nil || len(dayResp.Buckets) != 1 || len(dayResp.Buckets[0].Key) != 10 {
 		t.Fatalf("day 分桶不符: %+v err=%v", dayResp, err)
 	}
@@ -86,7 +86,7 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// 日期形式时间参数：from/to 回显为 UTC RFC3339（date → 当日 00:00）。
-	r2, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
+	r2, err := sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
 	if err != nil {
 		t.Fatalf("日期参数应合法: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := svc.UsageSummary(ctx, tc.q)
+			_, err := sessionPlaneOf(svc).UsageSummary(ctx, tc.q)
 			var ge gerror.Error
 			if !errors.As(err, &ge) || ge.Code != tc.code || !strings.Contains(ge.Msg, tc.token) {
 				t.Fatalf("期望 code=%d 含 %s，got %v", tc.code, tc.token, err)
@@ -119,14 +119,14 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// 空区间（没有落在窗口里的轮次）→ 零值，不报错。
-	resp, err = svc.UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
+	resp, err = sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
 	if err != nil || resp.Totals.Runs != 0 || len(resp.Buckets) != 0 {
 		t.Fatalf("空区间应为零值: %+v err=%v", resp, err)
 	}
 
 	// 内存模式（无 store）→ 明确 unsupported（不返回假零值）。
 	svcMem := NewService(reg, eventbus.New())
-	_, err = svcMem.UsageSummary(ctx, dtousage.UsageQueryReq{})
+	_, err = sessionPlaneOf(svcMem).UsageSummary(ctx, dtousage.UsageQueryReq{})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40501 || !strings.Contains(ge.Msg, "[usage_stats_unsupported]") {
 		t.Fatalf("无 store 应 40501/usage_stats_unsupported，got %v", err)

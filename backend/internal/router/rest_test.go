@@ -81,11 +81,6 @@ type stubSvc struct {
 	registryID           string
 	registryMoveBefore   string
 
-	searchMsgQuery string
-	searchMsgLimit int
-	searchMsgResp  *dtosearch.MessageSearchResp
-	searchMsgErr   error
-
 	// automation 面（M4-5）桩状态
 
 	aclErr          error                              // 任意端点的裸 acl 错误注入（信封映射用）
@@ -138,10 +133,6 @@ type stubSvc struct {
 	mcpWritten    string
 	mcpWriteID    string
 	mcpWriteReq   dtocapability.McpWriteReq
-
-	usageResp  *dtousage.UsageSummaryResp // M3 GET /usage/summary 桩
-	usageQuery dtousage.UsageQueryReq     // 捕获查询参数
-	usageErr   error
 }
 
 // RestErr 桩：与 manager 一致——已映射错误透传，acl 错误按分类映射（测试只关心 acl→信封码）。
@@ -289,16 +280,6 @@ func (s *stubSvc) SkillMaterialization(id string) (*dtocapability.SkillMateriali
 	}, nil
 }
 
-func (s *stubSvc) UsageSummary(_ context.Context, q dtousage.UsageQueryReq) (*dtousage.UsageSummaryResp, error) {
-	s.usageQuery = q
-	if s.usageErr != nil {
-		return nil, s.usageErr
-	}
-	if s.usageResp != nil {
-		return s.usageResp, nil
-	}
-	return &dtousage.UsageSummaryResp{GroupBy: "agent", Source: "sqlite", Buckets: []dtousage.UsageBucketResp{}}, nil
-}
 func (s *stubSvc) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace.WorkspaceBrowseResp, error) {
 	s.browsePath, s.browseHidden = path, includeHidden
 	if s.browseErr != nil {
@@ -386,17 +367,6 @@ func (s *stubSvc) MoveRegisteredWorkspace(id, beforeID string) (*dtoworkspace.Wo
 }
 
 // ——— M3 ② 消息检索 / 批量导出桩 ———
-func (s *stubSvc) SearchMessages(_ context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error) {
-	s.searchMsgQuery, s.searchMsgLimit = q, limit
-	if s.searchMsgErr != nil {
-		return nil, s.searchMsgErr
-	}
-	if s.searchMsgResp != nil {
-		return s.searchMsgResp, nil
-	}
-	return &dtosearch.MessageSearchResp{Query: q, Source: "sqlite", Hits: []dtosearch.MessageSearchHit{}}, nil
-}
-
 // ——— P4a：自检用例的**供应商域读面**替身（同上：只交事实） ———
 
 func (s *stubSvc) UpdateSession(_ context.Context, id string, patch dtosession.SessionPatch) (*dtosession.SessionResp, error) {
@@ -841,41 +811,51 @@ func TestListSessionsWorkspaceQuery(t *testing.T) {
 	}
 }
 
-// TestUsageSummaryRoute M3：GET /usage/summary 参数绑定/透传 + 信封形态 + 业务错误透传。
+// TestUsageSummaryRoute M3：GET /usage/summary **读模型**（P4a 正文第四十三刀起由会话域平面直接提供）。
+//
+// 三种自然答复都在这里验，替身（`usageResp`/`usageQuery`/`usageErr`）随之退场：
+//
+//	内存模式（无 store）→ 40501 `usage_stats_unsupported`（明确降级，不返回假零值）；
+//	store 模式 → 真聚合，且 `from`/`to` 由域**解析后原样回带**——参数透传不再是"替身记下了什么"；
+//	非法 group_by / 反向区间 → 40001（两条判据都在域里，与 `agent_id` 的拒绝同一处）。
 func TestUsageSummaryRoute(t *testing.T) {
-	svc := &stubSvc{usageResp: &dtousage.UsageSummaryResp{
-		From: "2026-09-01T00:00:00Z", To: "2026-09-09T00:00:00Z",
-		GroupBy: "day", Source: "sqlite",
-		Totals:  dtousage.UsageBucketResp{Key: "total", Runs: 3, Completed: 2, Failed: 1, DurationMS: 1200},
-		Buckets: []dtousage.UsageBucketResp{{Key: "2026-09-08", Runs: 3}},
-	}}
-	r := newRestEngine(stubDeps(t, svc))
+	// ① 内存模式：明确 40501。
+	rMem := newRestEngine(stubDeps(t, &stubSvc{}))
+	if env, code := do(t, rMem, "GET", "/v1/mate/usage/summary", ""); code != 200 || env.Code != 40501 {
+		t.Fatalf("内存模式应 40501: http=%d env=%+v", code, env)
+	}
+
+	// ② store 模式：真平面 + 真库。
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
+	t.Cleanup(func() { _ = st.Close() })
+	deps := stubDeps(t, &stubSvc{})
+	deps.SessionPlane.SetStore(st)
+	r := newRestEngine(deps)
 
 	env, code := do(t, r, "GET", "/v1/mate/usage/summary?from=2026-09-01&to=2026-09-09&group_by=day", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d env=%+v", code, env)
 	}
-	if svc.usageQuery.From != "2026-09-01" || svc.usageQuery.To != "2026-09-09" ||
-		svc.usageQuery.GroupBy != "day" {
-		t.Fatalf("查询参数未透传: %+v", svc.usageQuery)
-	}
 	var resp dtousage.UsageSummaryResp
 	if err := json.Unmarshal(env.Data, &resp); err != nil {
 		t.Fatalf("data 解析: %v", err)
 	}
-	if resp.GroupBy != "day" || resp.Source != "sqlite" || resp.Totals.Runs != 3 ||
-		len(resp.Buckets) != 1 || resp.Buckets[0].Key != "2026-09-08" {
+	// 日期形式按"该日 00:00 UTC"解析后**原样回带**（半开区间语义靠它成立）——这就是参数透传的证据。
+	if resp.GroupBy != "day" || resp.Source != "sqlite" ||
+		resp.From != "2026-09-01T00:00:00Z" || resp.To != "2026-09-09T00:00:00Z" {
 		t.Fatalf("响应载荷不符: %+v", resp)
 	}
-
-	// 业务错误（40001/40501）→ HTTP 200 + code≠0 透传。
-	svc.usageErr = gerror.Error{Code: 40001, Msg: `[invalid_usage_group_by] group_by 仅支持 day："tool"`}
-	if env, code := do(t, r, "GET", "/v1/mate/usage/summary?group_by=tool", ""); code != 200 || env.Code != 40001 {
-		t.Fatalf("非法 group_by 应 40001: http=%d env=%+v", code, env)
+	// 空 runs 表 → 零值合计 + 桶是 `[]`（不是 null；前端按数组渲染）。
+	if resp.Totals.Runs != 0 || !strings.Contains(string(env.Data), `"buckets":[]`) {
+		t.Fatalf("空库应回零值合计与空桶数组: %s", env.Data)
 	}
-	svc.usageErr = gerror.Error{Code: 40501, Msg: "[usage_stats_unsupported] 内存模式无统计"}
-	if env, _ := do(t, r, "GET", "/v1/mate/usage/summary", ""); env.Code != 40501 {
-		t.Fatalf("内存模式应 40501: %+v", env)
+
+	// ③ 非法 group_by / 反向区间 → 40001（域里判，控制器不代判）。
+	if env, _ := do(t, r, "GET", "/v1/mate/usage/summary?group_by=tool", ""); env.Code != 40001 {
+		t.Fatalf("非法 group_by 应 40001: %+v", env)
+	}
+	if env, _ := do(t, r, "GET", "/v1/mate/usage/summary?from=2026-09-09&to=2026-09-01", ""); env.Code != 40001 {
+		t.Fatalf("反向区间应 40001: %+v", env)
 	}
 }
 
@@ -885,12 +865,12 @@ func TestUsageSummaryRoute(t *testing.T) {
 // 与领域层的 50000 并存，同一个"未归类内部错误"有两个码。P5 收敛到
 // code.Internal(50000) 一个兜底码，且 msg 仍原样带出（不失诊断信息）。
 //
-// P4a 正文第十一刀起这一格不再用会话列表注入：`GET /sessions` 走**真域平面**（读模型），
-// 而"兜底码"验的是**控制器的错误出口**，与哪个端点无关——改用仍由替身供给的用量面。
+// P4a 正文第十一/四十三刀把会话读面（列表、用量）都交给真域平面之后，这一格改挂**会话写面**
+// （`createErr`）——它要验的是**控制器的错误出口**，与哪个端点无关。
 func TestUnclassifiedErrorFallsBackToInternal(t *testing.T) {
-	svc := &stubSvc{usageErr: errors.New("boom")}
+	svc := &stubSvc{createErr: errors.New("boom")}
 	r := newRestEngine(stubDeps(t, svc))
-	env, _ := do(t, r, "GET", "/v1/mate/usage/summary", "")
+	env, _ := do(t, r, "POST", "/v1/mate/sessions", "{}")
 	if env.Code != code.Internal {
 		t.Fatalf("期望 code=%d（Internal），got %+v", code.Internal, env)
 	}
@@ -1501,11 +1481,9 @@ func TestProbeMcpServerRoute(t *testing.T) {
 // v19：这些用例原挂在 agent 端点上（已随 agent 面删除）；映射表本身与端点无关，
 // 只要求"某个端点把一支 acl 错误原样交给信封映射"。
 //
-// P4a 正文第四刀之后改用**会话列表面**（`listSessionsErr`）：供应商面的档案/自检用例
-// 现在由控制器从真域平面构造，替身注入不进去了——而这条用例要钉的是**映射**，不是供应商面。
-//
-// P4a 正文第十一刀又换了一次承载端点：会话列表也归真域平面了，于是改用**用量面**
-// （`usageErr`）。映射表与端点无关，只要求"某个端点把一支 acl 错误原样交给信封映射"。
+// 承载端点换过三次（供应商面 → 会话列表 → 用量），每次都是因为那一面**归了真域平面/真用例**、
+// 替身注入不进去了；P4a 正文第四十三刀用量面也归域平面后，改挂**会话写面**（`createErr`）。
+// 映射表与端点无关，这条链只要还有一端替身就仍然成立。
 func TestErrorEnvelopeMapping(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1520,9 +1498,9 @@ func TestErrorEnvelopeMapping(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &stubSvc{usageErr: tc.err}
+			svc := &stubSvc{createErr: tc.err}
 			r := newRestEngine(stubDeps(t, svc))
-			env, http := do(t, r, "GET", "/v1/mate/usage/summary", "")
+			env, http := do(t, r, "POST", "/v1/mate/sessions", "{}")
 			if http != 200 || env.Code != tc.code {
 				t.Fatalf("期望 HTTP 200 code=%d，got http=%d code=%d msg=%q", tc.code, http, env.Code, env.Msg)
 			}
@@ -1532,48 +1510,101 @@ func TestErrorEnvelopeMapping(t *testing.T) {
 		})
 	}
 	// 已映射错误不得被二次映射（FromError 幂等）。
-	svc := &stubSvc{usageErr: gerror.Error{Code: 40001, Msg: "已映射"}}
+	svc := &stubSvc{createErr: gerror.Error{Code: 40001, Msg: "已映射"}}
 	r := newRestEngine(stubDeps(t, svc))
-	env, _ := do(t, r, "GET", "/v1/mate/usage/summary", "")
+	env, _ := do(t, r, "POST", "/v1/mate/sessions", "{}")
 	if env.Code != 40001 || env.Msg != "已映射" {
 		t.Fatalf("已映射错误应透传: %+v", env)
 	}
 }
 
-// TestMessageSearchRoute GET /search/messages：参数校验（q 必填、limit 正整数）、
-// 查询透传与信封形状（M3 ② 锚点跳转数据面）。
+// TestMessageSearchRoute GET /search/messages：参数校验（q 必填、limit 正整数）与**窗口语义**
+// （读模型自 P4a 正文第四十三刀起直接由会话域平面提供）。
+//
+// 替身（`searchMsgResp`/`searchMsgQuery`/`searchMsgLimit`）撤掉之后，判据从「替身记下了什么」换成
+// **回来的窗口本身**：memory 模式回扫 transcript（`source=transcript`），夹具因此是
+// 「真会话 + 真 transcript 文件」。这样「limit 被忽略了」与「limit 生效但恰好没差别」才是可分的
+// ——替身时代这两件事无法区分（它只证"替身收到了参数"）。
 func TestMessageSearchRoute(t *testing.T) {
-	svc := &stubSvc{searchMsgResp: &dtosearch.MessageSearchResp{
-		Query: "502", Source: "sqlite", Total: 1, HasMore: false,
-		Hits: []dtosearch.MessageSearchHit{{SessionID: "c-1", Title: "部署", Role: "user", Seq: 7, Snippet: "网关 502"}},
-	}}
-	r := newRestEngine(stubDeps(t, svc))
+	dir := t.TempDir()
+	// 平台会话 id（`ses_<26 位 ULID>`）：transcript 装载面**只认这个形状**的文件名，
+	// 用 `c-1` 那种历史形态会被当成旧文件跳过（装载面的判据），而检索面按 `<dir>/<会话id>.jsonl`
+	// 打开文件——文件名对不上就永远扫不到。
+	sesID := objid.New(objid.Session)
+	line := func(seq int64, typ, text string) string {
+		return fmt.Sprintf(`{"id":%q,"seq":%d,"ts":"2026-01-02T03:04:05Z","type":%q,"payload":{"text":%q}}`,
+			objid.New(objid.Event), seq, typ, text)
+	}
+	writeTranscript(t, dir, sesID,
+		line(7, session.BusUserMessage, "网关 502"),
+		line(8, session.BusMessage, "502 已恢复 upstream"),
+		line(9, session.BusUserMessage, "谢谢"),
+	)
+	deps := stubDeps(t, &stubSvc{})
+	// 顺序：先启用回扫（装载面会顺手把这条会话登记进来），再登记一次把标题/运行时补上
+	// （检索返回的 `title`/`runtime_id` 取自会话记录，不取自文件）。
+	deps.SessionPlane.SetTranscriptDir(dir)
+	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: sesID, Title: "部署", RuntimeID: "rtx"})
+	r := newRestEngine(deps)
 
-	env, http := do(t, r, "GET", "/v1/mate/search/messages?q=502&limit=5", "")
+	env, http := do(t, r, "GET", "/v1/mate/search/messages?q=502", "")
 	if http != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d %+v", http, env)
 	}
-	if svc.searchMsgQuery != "502" || svc.searchMsgLimit != 5 {
-		t.Fatalf("参数透传不符: q=%q limit=%d", svc.searchMsgQuery, svc.searchMsgLimit)
+	var resp dtosearch.MessageSearchResp
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("data 解析: %v", err)
 	}
-	if !strings.Contains(string(env.Data), `"seq":7`) || !strings.Contains(string(env.Data), `"source":"sqlite"`) {
-		t.Fatalf("响应载荷不符: %s", env.Data)
+	// 两条命中（「谢谢」不含关键词），按 seq 倒序；角色由事件类型分。
+	if resp.Source != "transcript" || resp.Total != 2 || len(resp.Hits) != 2 {
+		t.Fatalf("命中不符: %+v", resp)
+	}
+	if resp.Hits[0].Seq != 8 || resp.Hits[0].Role != "assistant" ||
+		resp.Hits[1].Seq != 7 || resp.Hits[1].Role != "user" {
+		t.Fatalf("命中的锚点/角色不符: %+v", resp.Hits)
+	}
+	if resp.Hits[1].SessionID != sesID || resp.Hits[1].Title != "部署" || resp.Hits[1].RuntimeID != "rtx" {
+		t.Fatalf("命中的会话归属不符: %+v", resp.Hits[1])
+	}
+	if !strings.Contains(resp.Hits[1].Snippet, "网关 502") {
+		t.Fatalf("摘要不符: %+v", resp.Hits[1])
 	}
 
-	// 缺 q → 40001（HTTP 200 + 信封非 0）。
+	// limit=1 → 只回最新一条 + `has_more`：这就是「limit 真的到了域」的证据。
+	env, _ = do(t, r, "GET", "/v1/mate/search/messages?q=502&limit=1", "")
+	var one dtosearch.MessageSearchResp
+	if err := json.Unmarshal(env.Data, &one); err != nil {
+		t.Fatalf("limit 页解析: %v", err)
+	}
+	if len(one.Hits) != 1 || !one.HasMore || one.Hits[0].Seq != 8 {
+		t.Fatalf("limit=1 应回最新一条 + has_more: %+v", one)
+	}
+
+	// 缺 q → 40001；非法 limit → 40001（两条都是**控制器**判的，与域无关）。
 	env, http = do(t, r, "GET", "/v1/mate/search/messages", "")
 	if http != 200 || env.Code != 40001 || !strings.Contains(env.Msg, "invalid_search_query") {
 		t.Fatalf("缺 q 校验不符: http=%d %+v", http, env)
 	}
-	// 非法 limit → 40001。
 	env, http = do(t, r, "GET", "/v1/mate/search/messages?q=a&limit=abc", "")
 	if http != 200 || env.Code != 40001 || !strings.Contains(env.Msg, "invalid_search_limit") {
 		t.Fatalf("limit 校验不符: http=%d %+v", http, env)
 	}
-	// 默认 limit=30。
-	_, _ = do(t, r, "GET", "/v1/mate/search/messages?q=a", "")
-	if svc.searchMsgLimit != 30 {
-		t.Fatalf("默认 limit 应为 30: %d", svc.searchMsgLimit)
+}
+
+// writeTranscript 按 wire transcript 的落盘格式造一个会话的 jsonl 夹具。
+//
+// 首行是 header（`schema` + `session_id`），其后每行一条事件原语——域读的就是这份文件
+// （`readTranscriptEvents` 认不出 header 就整份跳过，所以这个夹具同时钉住了「header 必须在前」）。
+func writeTranscript(t *testing.T, dir, sessionID string, lines ...string) {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString(`{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sessionID + `"}`)
+	b.WriteString("\n")
+	for _, l := range lines {
+		b.WriteString(l + "\n")
+	}
+	if err := os.WriteFile(filepath.Join(dir, sessionID+".jsonl"), []byte(b.String()), 0o644); err != nil {
+		t.Fatalf("写 transcript 夹具: %v", err)
 	}
 }
 

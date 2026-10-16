@@ -5,15 +5,25 @@ package svcsession
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/dto/dtosearch"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/dto/dtousage"
 )
 
 // SessionSvc 会话面（过渡期端口：实现仍在 `manager`，逐刀并入本包）。
 //
 // **只放用例**：读模型（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）不在这里——它们由控制器
 // 直接经域平面取（见 `ctrsession` 的 `plane` 字段注释）。
+//
+// **剩余形状（P4a 正文第四十三刀之后）**：只剩 4 条，且都不是"顺手可搬"的小块——
+//
+//	`UpdateSession`  一半是**模型面**（`resolveSessionModel` 要 store/reg/供应商面 +
+//	                 `ApplySessionModel` 是执行面），与 `svcmodel` 那一批同刀；
+//	`CreateSession`  工作空间解析 + `StartSession`/`Prompt`（编排）；
+//	`PromptSession`  `NormalizeDelivery`（域）+ `PromptWithDelivery`（编排）；
+//	`CancelRun`      **纯编排**：域里连存在性判据都没有（`o.CancelRun` 自己回 40401），
+//	                 搬过来只会得到一行转发 ⇒ 随 `Orchestrator` 在 P5 一起收口。
+//
+// 会话面的其余部分已按**面**切开，各有自己的接口：`HistorySvc`（第十刀）/ `DetailSvc`（第四十刀）/
+// `InteractionSvc`（第四十一刀）/ `QueueSvc`（第四十二刀）——**不要把新面塞回这里**（守卫有反向判据）。
 type SessionSvc interface {
 	// UpdateSession 更新会话元数据（title/pinned/archived 子集更新）。
 	UpdateSession(ctx context.Context, id string, patch dtosession.SessionPatch) (*dtosession.SessionResp, error)
@@ -27,12 +37,4 @@ type SessionSvc interface {
 
 	// CancelRun 取消进行中的 run（无 run 时幂等 no-op）。
 	CancelRun(ctx context.Context, id string) error
-	// SearchMessages 跨会话消息级检索（M3 ②：全局消息搜索 + 锚点跳转）。
-	//
-	// ADR-2：原 `svcsearch` 的单方法面并入这里——它是**会话域**的读面（检索的就是消息）。
-	SearchMessages(ctx context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error)
-	// UsageSummary 聚合用量统计（M3 首项：runs 计数/时长 + 会话上下文/费用快照）。
-	//
-	// ADR-2：原 `svcusage` 的单方法面并入这里——runs 与上下文快照都挂在会话上。
-	UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*dtousage.UsageSummaryResp, error)
 }

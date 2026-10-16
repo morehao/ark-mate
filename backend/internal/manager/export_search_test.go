@@ -61,7 +61,7 @@ func TestSearchMessagesSQLite(t *testing.T) {
 	seedSearchSession(t, svc, st, "c-2", "无关会话",
 		[2]string{"user", "今天天气不错"})
 
-	resp, err := svc.SearchMessages(ctx, "502", 10)
+	resp, err := sessionPlaneOf(svc).SearchMessages(ctx, "502", 10)
 	if err != nil {
 		t.Fatalf("SearchMessages: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestSearchMessagesSQLite(t *testing.T) {
 	}
 
 	// 助手消息也命中（角色不限）。
-	resp2, err := svc.SearchMessages(ctx, "upstream", 10)
+	resp2, err := sessionPlaneOf(svc).SearchMessages(ctx, "upstream", 10)
 	if err != nil {
 		t.Fatalf("SearchMessages(assistant): %v", err)
 	}
@@ -90,7 +90,7 @@ func TestSearchMessagesSQLite(t *testing.T) {
 	// 大小写不敏感 + limit 截断语义。
 	seedSearchSession(t, svc, st, "c-3", "大写",
 		[2]string{"user", "UPSTREAM 再问一次"})
-	resp3, err := svc.SearchMessages(ctx, "upstream", 1)
+	resp3, err := sessionPlaneOf(svc).SearchMessages(ctx, "upstream", 1)
 	if err != nil {
 		t.Fatalf("SearchMessages(limit): %v", err)
 	}
@@ -99,7 +99,7 @@ func TestSearchMessagesSQLite(t *testing.T) {
 	}
 
 	// 空关键词 → 明确 40001。
-	if _, err := svc.SearchMessages(ctx, "   ", 10); err == nil {
+	if _, err := sessionPlaneOf(svc).SearchMessages(ctx, "   ", 10); err == nil {
 		t.Fatal("空关键词应报错")
 	} else if ge, ok := err.(gerror.Error); !ok || ge.Code != 40001 || !strings.Contains(ge.Msg, "invalid_search_query") {
 		t.Fatalf("错误码不符: %v", err)
@@ -124,7 +124,7 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	// ③ 文本增量攒批：断言前手动落盘（生产由 25ms 窗口 / 终态事件 / 阈值触发）。
 	svc.flushChunks()
 
-	resp, err := svc.SearchMessages(context.Background(), "needle", 10)
+	resp, err := sessionPlaneOf(svc).SearchMessages(context.Background(), "needle", 10)
 	if err != nil {
 		t.Fatalf("SearchMessages: %v", err)
 	}

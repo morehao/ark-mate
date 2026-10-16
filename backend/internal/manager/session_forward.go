@@ -7,9 +7,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/dto/dtosearch"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/model"
 )
 
@@ -44,20 +42,8 @@ func (s *Service) sessionResp(id string) dtosession.SessionResp {
 	return s.sessionPlane.SessionResp(id)
 }
 
-// TODO(P4b): 删转发（同上）
-func (s *Service) SearchMessages(ctx context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error) {
-	return s.sessionPlane.SearchMessages(ctx, q, limit)
-}
-
 // TODO(P4b): 删转发（调用点直接依赖 session 包）
 func decodePayload(raw string) any { return session.DecodePayload(raw) }
-
-// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
-//
-// UsageSummary 用量统计（读 `runs` 读模型）。
-func (s *Service) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*dtousage.UsageSummaryResp, error) {
-	return s.sessionPlane.UsageSummary(ctx, q)
-}
 
 // TODO(P4b): 删转发（调用点直接依赖 session 包）
 func terminalRunStatus(typ string) string { return session.TerminalRunStatus(typ) }

@@ -23,7 +23,8 @@ import (
 //
 // 三种失效：
 //
-//	① **转发回潮**：`SessionSvc` 里又出现 `ListSessions`（用例层成了纯转发）；
+//	① **转发回潮**：`SessionSvc` 里又出现 `ListSessions` / `SearchMessages` / `UsageSummary`
+//	   （用例层成了纯转发；后两条见 P4a 正文第四十三刀）；
 //	② **实现回流**：`manager` 里又出现 `func (s *Service) ListSessions(`；
 //	③ **取用路径改错**：控制器不再经域平面取（或经同一个包里的中间函数绕开——
 //	   整文件字面量判据会被那种写法喂绿，所以在**函数体**上判）。
@@ -54,8 +55,14 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 	// 所以名单写死在这里——新增一个读模型进 `SessionSvc` 会立刻红，而不是等人去发现。
 	// 第十一刀后半场 +3：`SearchSessions` / `ListRuns` / `ListQueuedInputs`（前两个替身恒
 	// 返回空、第三个替身返回固定行，路由测试改成真平面后都换成了真事实）。
-	readModels := []string{"ListSessions", "SearchSessions", "ListRuns", "ListQueuedInputs"}
-	ctrSrcAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go")))
+	// 第四十三刀 +2：`SearchMessages` / `UsageSummary`——两条都是纯转发到域平面（检索的实现与
+	// transcript 目录绑死、用量的校验与分组口径全在 `domain/session`），声明与转发随之删除。
+	// 它们的控制器**不在** `ctrsession` 里，所以下面的"控制器取用路径"要扫三个文件。
+	readModels := []string{"ListSessions", "SearchSessions", "ListRuns", "ListQueuedInputs",
+		"SearchMessages", "UsageSummary"}
+	ctrSrcAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go"))) +
+		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsearch", "search.go"))) +
+		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrusage", "usage.go")))
 	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "manager"))
 	ifaceAll := interfaceBodyOf(t, readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsession", "session.go")), "type SessionSvc interface {")
 	for _, m := range readModels {
@@ -69,7 +76,8 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 			t.Errorf("`internal/manager` 里又出现 `func (s *Service) %s(`：那一行转发已按 P4b 口径删除。", m)
 		}
 		if !strings.Contains(ctrSrcAll, "h.plane."+m+"(") {
-			t.Errorf("`ctrsession` 里没有任何 `h.plane.%s(` 调用点：读模型要从域平面取，不能走转发。", m)
+			t.Errorf("`ctrsession`/`ctrsearch`/`ctrusage` 三个控制器里都没有 `h.plane.%s(` 调用点："+
+				"读模型要从域平面取，不能走转发。", m)
 		}
 	}
 
