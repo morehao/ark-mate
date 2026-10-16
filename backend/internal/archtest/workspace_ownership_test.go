@@ -217,25 +217,32 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 用它挡"顺手再加一个别名"，同时如实记下还没清完的那几笔账——清一个删一行）。
 	// 判据只认顶格的 `type X = `：方法体里的类型断言/赋值不在此列。
 	registeredAliases := map[string]string{
-		"automationRec":        "internal/manager/automation_forward.go",
-		"automationRunOutcome": "internal/manager/automation_forward.go",
-		"CapabilitySelection":  "internal/manager/capability_facts.go",
-		"RuntimeConfigState":   "internal/manager/resource_sync.go",
-		"runtimeBinding":       "internal/manager/runtime_binding.go",
-		"runtimeSpec":          "internal/manager/runtime_binding.go",
-		"SessionRec":           "internal/manager/session_forward.go",
+		"CapabilitySelection": "internal/manager/capability_facts.go",
+		"runtimeBinding":      "internal/manager/runtime_binding.go",
+		"runtimeSpec":         "internal/manager/runtime_binding.go",
+		"SessionRec":          "internal/manager/session_forward.go",
 	}
 	aliasRe := regexp.MustCompile(`(?m)^type ([A-Za-z0-9_]+) = `)
 	aliasSeen := 0
+	aliasFound := map[string]bool{}
 	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
 		for _, m := range aliasRe.FindAllStringSubmatch(stripLineComments(readFileOrFatal(t, path)), -1) {
 			aliasSeen++
+			aliasFound[m[1]] = true
 			if _, ok := registeredAliases[m[1]]; !ok {
 				t.Errorf("internal/manager/%s 里出现未登记的端口别名 `type %s = `："+
 					"第三条硬规矩禁别名（一个类型只有一处定义，接错线时两边都编译过）。"+
 					"若是清理过渡期账目，请**先迁走调用点再删这一行**；确需保留请登记进 registeredAliases 并写明理由。",
 					filepath.Base(path), m[1])
 			}
+		}
+	}
+	// **双向对账**：登记了但磁盘上没有 = 清理时忘删登记行（这种漂移会让"还有几笔账"变成假数，
+	// 而下面的"一个都没扫到"只在全清空时才响，中间状态它抓不到）。
+	for name := range registeredAliases {
+		if !aliasFound[name] {
+			t.Errorf("`registeredAliases` 里登记着 %q，但 `internal/manager` 生产文件里已经没有这个别名了："+
+				"清完一笔账要**同时删掉登记行**（判据与被判对象同生共死）。", name)
 		}
 	}
 	if aliasSeen == 0 {

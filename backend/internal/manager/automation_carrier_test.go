@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	domainautomation "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"strings"
 	"testing"
@@ -393,7 +394,7 @@ func TestAutomationRecordFailureKeepsCursor(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatalf("关库: %v", err)
 	}
-	out := svc.finishAutomationRun(ctx, rec, automationRunOutcome{
+	out := svc.finishAutomationRun(ctx, rec, domainautomation.RunOutcome{
 		ScheduledFor: occurrence, Status: automation.RunOverlap, Trigger: automation.TriggerScheduled,
 		Advance: true, Reason: "上一次还在跑；下一次 occurrence 照常",
 	})

@@ -19,12 +19,6 @@ import (
 // 类型别名（`Rec` / `RunOutcome`）让既有集成用例的调用点几乎零改动——它们读的是域里的**同一份**
 // 定义，不会出现"两份定义"这种真正危险的状态。
 
-// automationRec 是域里那份记录的**类型别名**。
-type automationRec = automation.Rec
-
-// automationRunOutcome 同上。
-type automationRunOutcome = automation.RunOutcome
-
 // automationOrigin 会话来源标记（域里那份的转发）。
 //
 // TODO(P4b): 删转发（调用点直接依赖 automation 包）

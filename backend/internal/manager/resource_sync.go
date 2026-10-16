@@ -31,10 +31,6 @@ import (
 //
 //	① 同步失败**不回滚资源**（资源已提交，失败如实回带）——沿用 v11 的诚实语义；
 //	② 同一份声明重复同步**不换代际**（摘要由声明算出，不由产物算出）；
-//	③ 凭据通道**二选一**（原生文档 / env），绝不两者同时启用（否则轮换静默失效）。
-
-// runtimeConfigState 是 `RuntimeConfigState` 的别名（对外形状 = 机器面的逐 runtime 同步结论）。
-type RuntimeConfigState = dtomodel.RuntimeSyncResp
 
 // runtimeConfigDigestEntry meta 里某 runtime 的同步记录（**保留 v11 的键名** `runtime_config_digest`
 // ——改名只会造成无收益的迁移，Q8）。
@@ -589,8 +585,8 @@ func (s *Service) TrySyncModels(ctx context.Context) string {
 }
 
 // RuntimeConfigStates 返回各 runtime 最后一次同步的结论（`mate doctor` 与读面用）。
-func (s *Service) RuntimeConfigStates(ctx context.Context) map[string]RuntimeConfigState {
-	out := map[string]RuntimeConfigState{}
+func (s *Service) RuntimeConfigStates(ctx context.Context) map[string]dtomodel.RuntimeSyncResp {
+	out := map[string]dtomodel.RuntimeSyncResp{}
 	s.mu.Lock()
 	outcomes := map[string]resource.Outcome{}
 	for k, v := range s.runtimeSyncOutcomes {
