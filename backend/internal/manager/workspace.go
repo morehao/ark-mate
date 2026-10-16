@@ -2,41 +2,17 @@ package manager
 
 import (
 	"context"
-
-	"github.com/morehao/ark-mate/internal/domain/workspace"
 )
 
-// ——— P2b：工作空间域（策略 / 校验 / 解析）的过渡期转发与别名 ———
+// ——— P2b：工作空间域（策略 / 校验 / 解析）——已清空 ———
 //
-// 纯函数（`ValidateWorkspace` / `ResolveWorkspace` / `DiscardWorkspace` / `withinRoots` 那一族）
-// 与**起始点偏好策略**（代建根 + 生效名单，`workspace.Plane` 自持锁）已落 `domain/workspace`
-// （P2b 第一刀）。
+// 这个文件曾经装着三样东西：策略读写转发、三个纯函数转发（`ValidateWorkspace` /
+// `ResolveWorkspace` / `DiscardWorkspace`）、以及两个**类型别名**（`WorkspaceResolution` /
+// `DefaultWorkspaceRef`）。前两批按"调用点直接依赖域"清掉（P4a 正文第二十一/二十二刀），
+// 别名在第二十三刀清掉——**别名让"两份定义"这种危险状态不会出现，但它同时让"谁是这个类型的
+// 主人"变得不可判定**：接错线时两边都编译过（第三条硬规矩禁别名正是为此）。
 //
-// 为什么用**别名**而不是让调用点直接改指域：`WorkspaceResolution` / `DefaultWorkspaceRef` 与那
-// 三个纯函数在 `internal/router` 的测试里直接用（`manager.ResolveWorkspace` /
-// `manager.DefaultWorkspaceRef`），别名让那些点一个字都不用改，而"两份定义"这种真正危险的
-// 状态也不会出现——别名与域里的类型**是同一个类型**。
-//
-// 策略状态**不再挂在 `Service` 上**（它此前与 `sessions` 共用 `Service.mu`）：现在只有
-// `Service.planner` 一个持有者，读写都经它自己的锁。P2b 前置（§3.1.49）已经把"持 manager 锁
-// 请求会话快照"清零，所以那两把锁之间没有互指的边。
-
-// WorkspaceResolution 是域里那份解析结果的**类型别名**。
-type WorkspaceResolution = workspace.WorkspaceResolution
-
-// DefaultWorkspaceRef 同上。
-type DefaultWorkspaceRef = workspace.DefaultWorkspaceRef
-
-// TODO(P4b): 删转发（调用点直接依赖 workspace 包）
-func ValidateWorkspace(spec string) (string, error) { return workspace.ValidateWorkspace(spec) }
-
-// TODO(P4b): 删转发（调用点直接依赖 workspace 包）
-func ResolveWorkspace(spec string, def *DefaultWorkspaceRef) (WorkspaceResolution, error) {
-	return workspace.ResolveWorkspace(spec, def)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 workspace 包）
-func DiscardWorkspace(res WorkspaceResolution) { workspace.DiscardWorkspace(res) }
+// 现在 `manager` 一侧只剩 `planner` 这一个持有者（`WorkspacePlane()` 是它的事实出口）。
 
 // planner 工作空间域（装配期构造；策略状态在它自己的锁下）。
 //

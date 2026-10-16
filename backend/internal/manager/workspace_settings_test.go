@@ -2,6 +2,7 @@ package manager
 
 import (
 	"errors"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,7 +106,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	if err := os.MkdirAll(defDir, 0o755); err != nil {
 		t.Fatalf("mkdir default: %v", err)
 	}
-	if _, err := ResolveWorkspace("", &DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}); err != nil {
+	if _, err := workspace.ResolveWorkspace("", &workspace.DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}); err != nil {
 		t.Fatalf("默认工作空间应始终可选（代建根隐式并入）: %v", err)
 	}
 	if _, err := svc.BrowseWorkspace(provision, false); err != nil {

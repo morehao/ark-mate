@@ -48,7 +48,7 @@ func (s *Service) DefaultWorkspace() (model.WorkspaceEntity, bool, error) {
 }
 
 // TODO(P4b): 删转发（同上）
-func (s *Service) resolveTargetWorkspace(reqWorkspaceID string) (*DefaultWorkspaceRef, string, error) {
+func (s *Service) resolveTargetWorkspace(reqWorkspaceID string) (*workspace.DefaultWorkspaceRef, string, error) {
 	return s.planner.ResolveTargetWorkspace(reqWorkspaceID)
 }
 

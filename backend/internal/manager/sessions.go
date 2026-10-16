@@ -159,7 +159,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 		}
 		explicit := ""
 		if strings.TrimSpace(req.Cwd) != "" {
-			p, verr := ValidateWorkspace(req.Cwd)
+			p, verr := workspace.ValidateWorkspace(req.Cwd)
 			if verr != nil {
 				return nil, code.FromError(verr)
 			}
@@ -172,7 +172,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 		spec = row.Path
 	}
 	convID := objid.New(objid.Session)
-	ws, err := ResolveWorkspace(spec, target)
+	ws, err := workspace.ResolveWorkspace(spec, target)
 	if err != nil {
 		return nil, code.FromError(err)
 	}
@@ -199,7 +199,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	})
 	if err != nil {
 		// v14 起这是空操作（不再有会话独占目录要清理；默认工作空间是共享的，删不得）。
-		DiscardWorkspace(ws)
+		workspace.DiscardWorkspace(ws)
 		return nil, code.FromError(err)
 	}
 	resp := &dtosession.SessionCreateResp{

@@ -40,7 +40,7 @@ var _ WorkspaceCtr = (*workspaceCtr)(nil)
 // workspaceCtr 处理工作空间相关的只读 REST 请求（目录浏览 + 最近使用 + 目录内容）与目录创建。
 // 存在理由：Web 端没有 Electron 那样的原生目录选择器（AionUi 用 webFsPicker 替代），
 // 因此"选一个目录"必须由控制面提供枚举能力；且**只列目录**——工作空间必须是目录
-// （见 manager.ValidateWorkspace 的三条件）。
+// （见 workspace.ValidateWorkspace 的三条件）。
 // DirectoryPicker 宿主目录选择器**窄端口**（控制器侧声明）。
 //
 // 生产传装配好的那个 `*workspace.Picker`（自持 bindAddr 事实）；测试传替身——"选定 / 取消"
@@ -204,7 +204,7 @@ func (h *workspaceCtr) List(c *gin.Context) {
 // Create 登记一个目录为工作空间（`POST /workspaces`）。
 //
 // 默认 get-or-create（重复登记返回既有那一行）；`strict=true` 时才报 workspace_exists。
-// 目录不存在 / 不是目录 / 落在白名单外 → 40000（三种 code 名可分辨，见 manager.ValidateWorkspace）。
+// 目录不存在 / 不是目录 / 落在白名单外 → 40000（三种 code 名可分辨，见 workspace.ValidateWorkspace）。
 func (h *workspaceCtr) Create(c *gin.Context) {
 	var req dtoworkspace.WorkspaceCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"os"
 	"path/filepath"
 	"strings"
@@ -420,9 +421,9 @@ func TestWorkspaceRegistryDefaultIsProvisionedInMemory(t *testing.T) {
 	if target.ID != def.ID || target.Path != def.Path || assignment != "" {
 		t.Fatalf("解析目标应指向默认工作空间且不额外指定归属: target=%+v assignment=%q", target, assignment)
 	}
-	res, err := ResolveWorkspace("", target)
+	res, err := workspace.ResolveWorkspace("", target)
 	if err != nil {
-		t.Fatalf("ResolveWorkspace(空 spec, 默认工作空间) 应成功（这就是那条 40001 的判据）: %v", err)
+		t.Fatalf("workspace.ResolveWorkspace(空 spec, 默认工作空间) 应成功（这就是那条 40001 的判据）: %v", err)
 	}
 	if !res.Temporary || res.WorkspaceID != def.ID {
 		t.Fatalf("未指定 cwd 得到的应是\"平台代建\"归属: %+v", res)

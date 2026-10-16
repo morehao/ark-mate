@@ -2,6 +2,7 @@ package router_test
 
 import (
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
 	"net/http/httptest"
 	"net/url"
@@ -723,7 +724,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	if err := os.MkdirAll(defDir, 0o755); err != nil {
 		t.Fatalf("mkdir default: %v", err)
 	}
-	if _, err := manager.ResolveWorkspace("", &manager.DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}); err != nil {
+	if _, err := workspace.ResolveWorkspace("", &workspace.DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}); err != nil {
 		t.Fatalf("默认工作空间应仍可用（代建根隐式并入）: %v", err)
 	}
 

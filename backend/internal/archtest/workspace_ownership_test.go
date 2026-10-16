@@ -2,6 +2,7 @@ package archtest
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -190,6 +191,57 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 			"func (pl *Plane) SetWorkspacePolicy(dir string, roots []string) error") {
 			t.Error("`internal/domain/workspace/policy.go` 里找不到 `SetWorkspacePolicy` 本体：判据失锚＝空转。")
 		}
+	}
+
+	// 别名与纯函数转发（P4a 正文第二十三刀）：`manager/workspace.go` 里那两个别名
+	// （`WorkspaceResolution` / `DefaultWorkspaceRef`）与三个纯函数转发一起删。**别名最危险的
+	// 地方不是"多一份定义"，而是"谁是这个类型的主人"变得不可判定**——接错线时两边都编译过。
+	wsMgr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace.go")))
+	for _, dead := range []string{
+		"type WorkspaceResolution =", "type DefaultWorkspaceRef =",
+		"func ValidateWorkspace(", "func ResolveWorkspace(", "func DiscardWorkspace(",
+	} {
+		if strings.Contains(wsMgr, dead) {
+			t.Errorf("`internal/manager/workspace.go` 里又出现 `%s`：域是这些类型与纯函数的主人"+
+				"（第三条硬规矩禁别名），调用点直接依赖 `internal/domain/workspace`。", dead)
+		}
+	}
+	wsDomain := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "policy.go")))
+	for _, must := range []string{"type WorkspaceResolution struct", "type DefaultWorkspaceRef struct", "func ValidateWorkspace(", "func ResolveWorkspace(", "func DiscardWorkspace("} {
+		if !strings.Contains(wsDomain, must) {
+			t.Errorf("`internal/domain/workspace/policy.go` 里找不到 %q：判据失锚＝空转（本体必须在域里）。", must)
+		}
+	}
+
+	// **别名不许再新开**：`manager` 生产文件里剩下的别名必须**登记在册**（P4a 正文第二十三刀起
+	// 用它挡"顺手再加一个别名"，同时如实记下还没清完的那几笔账——清一个删一行）。
+	// 判据只认顶格的 `type X = `：方法体里的类型断言/赋值不在此列。
+	registeredAliases := map[string]string{
+		"automationRec":        "internal/manager/automation_forward.go",
+		"automationRunOutcome": "internal/manager/automation_forward.go",
+		"CapabilitySelection":  "internal/manager/capability_facts.go",
+		"RuntimeConfigState":   "internal/manager/resource_sync.go",
+		"runtimeBinding":       "internal/manager/runtime_binding.go",
+		"runtimeSpec":          "internal/manager/runtime_binding.go",
+		"SessionRec":           "internal/manager/session_forward.go",
+		"QueuedInput":          "internal/manager/session_forward.go",
+		"PromptOutcome":        "internal/manager/session_forward.go",
+	}
+	aliasRe := regexp.MustCompile(`(?m)^type ([A-Za-z0-9_]+) = `)
+	aliasSeen := 0
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+		for _, m := range aliasRe.FindAllStringSubmatch(stripLineComments(readFileOrFatal(t, path)), -1) {
+			aliasSeen++
+			if _, ok := registeredAliases[m[1]]; !ok {
+				t.Errorf("internal/manager/%s 里出现未登记的端口别名 `type %s = `："+
+					"第三条硬规矩禁别名（一个类型只有一处定义，接错线时两边都编译过）。"+
+					"若是清理过渡期账目，请**先迁走调用点再删这一行**；确需保留请登记进 registeredAliases 并写明理由。",
+					filepath.Base(path), m[1])
+			}
+		}
+	}
+	if aliasSeen == 0 {
+		t.Error("`internal/manager` 下一个别名都没扫到：判据失锚＝空转（登记表与扫描面必须同步收敛）。")
 	}
 
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "policy.go"))),

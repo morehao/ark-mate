@@ -72,12 +72,12 @@ func TestValidateWorkspace(t *testing.T) {
 	// 合法：目录（含尾斜杠 / 冗余片段）→ 规范化后的绝对路径。
 	want, _ := filepath.EvalSymlinks(dir)
 	for _, in := range []string{dir, dir + string(filepath.Separator), filepath.Join(dir, ".", "..", filepath.Base(dir))} {
-		got, err := ValidateWorkspace(in)
+		got, err := workspace.ValidateWorkspace(in)
 		if err != nil {
-			t.Fatalf("ValidateWorkspace(%q) 应通过: %v", in, err)
+			t.Fatalf("workspace.ValidateWorkspace(%q) 应通过: %v", in, err)
 		}
 		if got != want {
-			t.Fatalf("ValidateWorkspace(%q)=%q want %q", in, got, want)
+			t.Fatalf("workspace.ValidateWorkspace(%q)=%q want %q", in, got, want)
 		}
 	}
 
@@ -86,7 +86,7 @@ func TestValidateWorkspace(t *testing.T) {
 	if err := os.Symlink(dir, link); err != nil {
 		t.Skipf("环境不支持 symlink: %v", err)
 	}
-	got, err := ValidateWorkspace(link)
+	got, err := workspace.ValidateWorkspace(link)
 	if err != nil {
 		t.Fatalf("symlink 应通过校验: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestValidateWorkspace(t *testing.T) {
 		"不存在": filepath.Join(dir, "nope"),
 		"是文件": file,
 	} {
-		if _, err := ValidateWorkspace(in); err == nil {
+		if _, err := workspace.ValidateWorkspace(in); err == nil {
 			t.Fatalf("%s（%q）应被拒", name, in)
 		} else if code := aclCode(t, err); code != "workspace_invalid" {
 			t.Fatalf("%s 错误码=%q want workspace_invalid", name, code)
@@ -117,9 +117,9 @@ func TestResolveWorkspace(t *testing.T) {
 	explicit := t.TempDir()
 
 	// 显式指定 → 原样（规范）使用，非临时、无归属（归属由调用方按路径补）。
-	got, err := ResolveWorkspace(explicit, nil)
+	got, err := workspace.ResolveWorkspace(explicit, nil)
 	if err != nil {
-		t.Fatalf("ResolveWorkspace(显式): %v", err)
+		t.Fatalf("workspace.ResolveWorkspace(显式): %v", err)
 	}
 	if got.Temporary {
 		t.Fatalf("显式指定不应标记为临时: %+v", got)
@@ -133,10 +133,10 @@ func TestResolveWorkspace(t *testing.T) {
 	}
 
 	// 未指定 → 落在默认工作空间（Temporary=true，归属 = 那条登记的 id）。
-	def := &DefaultWorkspaceRef{ID: "wsp-default", Path: t.TempDir()}
-	got, err = ResolveWorkspace("", def)
+	def := &workspace.DefaultWorkspaceRef{ID: "wsp-default", Path: t.TempDir()}
+	got, err = workspace.ResolveWorkspace("", def)
 	if err != nil {
-		t.Fatalf("ResolveWorkspace(默认工作空间): %v", err)
+		t.Fatalf("workspace.ResolveWorkspace(默认工作空间): %v", err)
 	}
 	if !got.Temporary {
 		t.Fatalf("落在默认工作空间应标记为 Temporary: %+v", got)
@@ -155,16 +155,16 @@ func TestResolveWorkspace(t *testing.T) {
 
 	// 没有默认工作空间（代建关闭，或默认被删）且未指定 → workspace_required；
 	// **不回落 os.Getwd()**（那条铁律不变）。
-	if _, err := ResolveWorkspace("", nil); err == nil {
+	if _, err := workspace.ResolveWorkspace("", nil); err == nil {
 		t.Fatal("没有默认工作空间 + 未指定 应报错")
 	} else if code := aclCode(t, err); code != "workspace_required" {
 		t.Fatalf("错误码=%q want workspace_required", code)
 	}
 	// 半个默认工作空间（只有 id 没路径 / 反之）同样按"没有"处理，不半信半疑地用它。
-	if _, err := ResolveWorkspace("", &DefaultWorkspaceRef{ID: "wsp-x"}); err == nil {
+	if _, err := workspace.ResolveWorkspace("", &workspace.DefaultWorkspaceRef{ID: "wsp-x"}); err == nil {
 		t.Fatal("默认工作空间缺路径应报错")
 	}
-	if _, err := ResolveWorkspace("", &DefaultWorkspaceRef{Path: t.TempDir()}); err == nil {
+	if _, err := workspace.ResolveWorkspace("", &workspace.DefaultWorkspaceRef{Path: t.TempDir()}); err == nil {
 		t.Fatal("默认工作空间缺 id 应报错")
 	}
 }
@@ -175,19 +175,19 @@ func TestResolveWorkspace(t *testing.T) {
 // 已经不再有对象（没有会话独占目录了），而如果它被误接到默认工作空间上，一次失败的建会话
 // 会连带删掉别的会话正在用的文件——那是本设计最不能出的一类事故。
 func TestDiscardWorkspaceIsNoop(t *testing.T) {
-	def := &DefaultWorkspaceRef{ID: "wsp-default", Path: t.TempDir()}
-	res, err := ResolveWorkspace("", def)
+	def := &workspace.DefaultWorkspaceRef{ID: "wsp-default", Path: t.TempDir()}
+	res, err := workspace.ResolveWorkspace("", def)
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
-	DiscardWorkspace(res)
+	workspace.DiscardWorkspace(res)
 	if _, err := os.Stat(res.Path); err != nil {
 		t.Fatalf("默认工作空间绝不能被 DiscardWorkspace 删掉: %v", err)
 	}
 
 	// 用户显式指定的目录同样不动（历史行为）。
 	keep := t.TempDir()
-	DiscardWorkspace(WorkspaceResolution{Path: keep})
+	workspace.DiscardWorkspace(workspace.WorkspaceResolution{Path: keep})
 	if _, err := os.Stat(keep); err != nil {
 		t.Fatalf("显式目录不该被删: %v", err)
 	}
@@ -204,9 +204,9 @@ func mustEval(t *testing.T, p string) string {
 
 // discardTempWorkspace 清理代建目录（t.TempDir 只删自己建的树，代建目录在 workspaceDir 下，
 // 单独删一次避免测试间互相看见残留）。
-func discardTempWorkspace(t *testing.T, res WorkspaceResolution) {
+func discardTempWorkspace(t *testing.T, res workspace.WorkspaceResolution) {
 	t.Helper()
-	DiscardWorkspace(res)
+	workspace.DiscardWorkspace(res)
 }
 
 // ——— 建会话路径的接线（解析先于任何 ACP 动作） ———
@@ -389,7 +389,7 @@ func TestBrowseWorkspace(t *testing.T) {
 		t.Fatalf("应只列 2 个非隐藏目录（按名排序）: %+v", resp.Entries)
 	}
 	// entries[].path 必须可直接当 cwd 提交（与 ValidateWorkspace 结果一致）。
-	if got, err := ValidateWorkspace(resp.Entries[0].Path); err != nil || got != resp.Entries[0].Path {
+	if got, err := workspace.ValidateWorkspace(resp.Entries[0].Path); err != nil || got != resp.Entries[0].Path {
 		t.Fatalf("entry path 不是可直接使用的 cwd: %q err=%v", resp.Entries[0].Path, err)
 	}
 	if resp.Parent != filepath.Dir(resp.Path) {
@@ -508,24 +508,24 @@ func TestValidateWorkspaceIgnoresPreferenceRoots(t *testing.T) {
 		}
 	}
 
-	if _, err := ValidateWorkspace(inside); err != nil {
+	if _, err := workspace.ValidateWorkspace(inside); err != nil {
 		t.Fatalf("路径可用即应通过: %v", err)
 	}
 	// 偏好名录之外：**照样通过**（这正是这次要钉住的语义）。
-	if _, err := ValidateWorkspace(outside); err != nil {
+	if _, err := workspace.ValidateWorkspace(outside); err != nil {
 		t.Fatalf("名录外的可用目录不该被拒（选工作区是全系统）: %v", err)
 	}
 	// 仍然被拒的只有"路径本身不能用"。
-	if _, err := ValidateWorkspace(filepath.Join(base, "nope")); aclCode(t, err) != "workspace_invalid" {
+	if _, err := workspace.ValidateWorkspace(filepath.Join(base, "nope")); aclCode(t, err) != "workspace_invalid" {
 		t.Fatalf("不存在的路径应 workspace_invalid: %v", err)
 	}
-	if _, err := ValidateWorkspace("relative"); aclCode(t, err) != "workspace_invalid" {
+	if _, err := workspace.ValidateWorkspace("relative"); aclCode(t, err) != "workspace_invalid" {
 		t.Fatalf("相对路径应 workspace_invalid: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(base, "a.txt"), []byte("x"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := ValidateWorkspace(filepath.Join(base, "a.txt")); aclCode(t, err) != "workspace_invalid" {
+	if _, err := workspace.ValidateWorkspace(filepath.Join(base, "a.txt")); aclCode(t, err) != "workspace_invalid" {
 		t.Fatalf("文件应 workspace_invalid: %v", err)
 	}
 }
@@ -547,12 +547,12 @@ func TestResolveWorkspacePreferenceRoots(t *testing.T) {
 	}
 
 	// 名录外的显式 cwd → 照常解析（不再是错）。
-	if res, err := ResolveWorkspace(outside, nil); err != nil || res.Path != mustEval(t, outside) {
+	if res, err := workspace.ResolveWorkspace(outside, nil); err != nil || res.Path != mustEval(t, outside) {
 		t.Fatalf("名录外的显式 cwd 应照常解析: res=%+v err=%v", res, err)
 	}
 	// 未指定 → 用默认工作空间，结果带归属且标 Temporary。
-	def := &DefaultWorkspaceRef{ID: "wsp-default", Path: root}
-	res, err := ResolveWorkspace("", def)
+	def := &workspace.DefaultWorkspaceRef{ID: "wsp-default", Path: root}
+	res, err := workspace.ResolveWorkspace("", def)
 	if err != nil {
 		t.Fatalf("默认工作空间: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	if err := os.MkdirAll(defDir, 0o755); err != nil {
 		t.Fatalf("mkdir default: %v", err)
 	}
-	res, err := ResolveWorkspace("", &DefaultWorkspaceRef{ID: "wsp-default", Path: defDir})
+	res, err := workspace.ResolveWorkspace("", &workspace.DefaultWorkspaceRef{ID: "wsp-default", Path: defDir})
 	if err != nil {
 		t.Fatalf("默认工作空间: %v", err)
 	}
@@ -943,7 +943,7 @@ func TestSessionWorksOutsidePreferenceRoots(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, filepath.Join(base, "tmp"), []string{mustEval(t, preferred)})
 
-	res, err := ResolveWorkspace(other, nil)
+	res, err := workspace.ResolveWorkspace(other, nil)
 	if err != nil {
 		t.Fatalf("名录外的目录应能作为会话 cwd（选工作区是全系统）: %v", err)
 	}
@@ -951,8 +951,8 @@ func TestSessionWorksOutsidePreferenceRoots(t *testing.T) {
 		t.Fatalf("显式 cwd 应原样生效且不标 Temporary: %+v", res)
 	}
 	// 未指定 cwd 时仍落默认工作空间（这条与名录无关，别被上一条改动带偏）。
-	def := &DefaultWorkspaceRef{ID: "wsp-default", Path: preferred}
-	if got, err := ResolveWorkspace("", def); err != nil || !got.Temporary || got.WorkspaceID != "wsp-default" {
+	def := &workspace.DefaultWorkspaceRef{ID: "wsp-default", Path: preferred}
+	if got, err := workspace.ResolveWorkspace("", def); err != nil || !got.Temporary || got.WorkspaceID != "wsp-default" {
 		t.Fatalf("未指定 cwd 应落默认工作空间: %+v err=%v", got, err)
 	}
 }
