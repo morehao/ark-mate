@@ -493,7 +493,7 @@ export const listModels = (runtimeId?: string): Promise<ModelsResp> => {
  */
 export const listModelCatalog = (): Promise<ModelCatalogResp> => http.get<ModelCatalogResp>('/mate/models/catalog')
 
-/** 新建一条模型条目（同 `(provider_id, model_id)` 已存在 → 40901 `model_exists`）。 */
+/** 新建一条模型条目（同 `(provider_id, model)` 已存在 → 40901 `model_exists`）。 */
 export const createModel = (req: ModelCreateReq): Promise<ModelRow> =>
   http.post<ModelRow>('/mate/models', req)
 

@@ -231,7 +231,7 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 	}
 	// 注入哪条档案由**默认模型**那条清单决定（v19：agent 上的 provider 字段已撤销）。
 	if _, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{
-		ProviderID: "p1", ModelID: "m-1", IsDefault: ptr(true),
+		ProviderID: "p1", Model: "m-1", IsDefault: ptr(true),
 	}); err != nil {
 		t.Fatalf("建默认模型: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestCredentialProblemPointsAtModelSettings(t *testing.T) {
 	defaultModel := func(t *testing.T, id, providerID string) {
 		t.Helper()
 		created, err := st.CreateModelDefinition(ctx, store.ModelColumns{
-			ID: id, ProviderID: providerID, ModelID: "m-" + id, InputModalities: "text",
+			ID: id, ProviderID: providerID, Model: "m-" + id, InputModalities: "text",
 		}, "t")
 		if err != nil || !created {
 			t.Fatalf("造模型行: created=%v err=%v", created, err)

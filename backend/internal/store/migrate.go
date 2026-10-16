@@ -732,6 +732,19 @@ var schemaMigrations = []migration{
 	// v23 的版本步本体在 `migrate_v23.go`（`messages` 补会话内序号 `ordinal` 与种类 `kind`，
 	// 并把索引按"整会话读"重排——序号是"投影完不完整"这条不变式的载体）。
 	migrationV23,
+
+	// v24 的版本步本体在 `migrate_v24.go`（**纯改名**：`models.model_id` → `models.model`；
+	// 本步零行为变化，验收判据是 `git diff testdata/` 为空——理由写在该文件头）。
+	migrationV24,
+
+	// v25 的版本步本体在 `migrate_v25.go`（`models` 补两个**可空、无 DEFAULT** 的容量列——
+	// 路由键隔离之后容量不再能从底座目录继承，只能由平台声明；理由写在该文件头）。
+	migrationV25,
+
+	// v26 的版本步本体在 `migrate_v26.go`（会话模型引用改**平台行 id**：删掉 v19 之后就没有写入点
+	// 的 `sessions.provider_id`，并给存量 `model_id` 置一个"待回填"标记——回填在应用层做，因为
+	// store 不得 import adapter；理由写在该文件头）。
+	migrationV26,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

@@ -2,13 +2,13 @@
 # 归属标记：本文件只有平台会写；dsh 自己的 cordis.patch.yml 不在此列。
 - id: acp
   config:
-    provider: "beta.gw"
+    provider: "mate-beta.gw"
     model: "qwen:7b"
 - id: llm-pi-ai
   config:
     providers:
-      "alpha-gw":
-        displayName: "alpha-gw"
+      "mate-alpha-gw":
+        displayName: "内网网关 Alpha"
         api: "openai-completions"
         apiKeyEnv: "MATE_ALPHA_GW_255CB31F_API_KEY"
         baseURL: "https://alpha.example.com/v1"
@@ -22,8 +22,8 @@
 - id: llm-pi-ai
   config:
     providers:
-      "beta.gw":
-        displayName: "beta.gw"
+      "mate-beta.gw":
+        displayName: "备用网关"
         api: "openai-completions"
         apiKeyEnv: "MATE_BETA_GW_39E72D68_API_KEY"
         baseURL: "https://beta.example.com/openai/v1"
@@ -36,8 +36,8 @@
 - id: llm-pi-ai
   config:
     providers:
-      "zeta":
-        displayName: "zeta"
+      "mate-zeta":
+        displayName: "Zeta 直连"
         api: "openai-completions"
         apiKeyEnv: "MATE_ZETA_5CC10D91_API_KEY"
         baseURL: "https://zeta.example.com/v1"

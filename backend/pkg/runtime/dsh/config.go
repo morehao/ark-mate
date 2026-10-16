@@ -301,8 +301,13 @@ func buildPatch(set resource.Set) ([]byte, error) {
 	b = append(b, []byte("# ark-mate 生成的模型清单 overlay（平台自有文件；经 dsh --patch 递入）\n")...)
 	b = append(b, []byte("# 归属标记：本文件只有平台会写；dsh 自己的 cordis.patch.yml 不在此列。\n")...)
 
-	// 默认模型：`Set.DefaultModel` 是**平台模型 id**，要在这里解析成上游 id 与它挂靠的 route
+	// 默认模型：`Set.DefaultModel` 是**平台模型 id**，要在这里解析成上游模型名与它挂靠的 route
 	// （端口两边各用各的词汇，不做隐式转换）。解析不到就**不下发**默认——比下发一个不存在的值好。
+	//
+	// `provider:` 写的是**派生后的路由键**——它与下面 `providers.<route>:` 的键、以及 ACP 模型值的
+	// 第一段必须逐字相同（三处同源，少一处就是"所有选了模型的会话立刻起不来"：`set_config_option`
+	// 找不到那个 provider）。守卫③ 的静态那半 + `TestDshRouteKeyAgreesBetweenPatchAndModelValue`
+	// 的动态那半一起钉这条边。
 	for _, m := range sortedModels(set.Models) {
 		if set.DefaultModel == "" || m.ID != set.DefaultModel {
 			continue
@@ -310,7 +315,7 @@ func buildPatch(set resource.Set) ([]byte, error) {
 		// 目标行 `id: acp`：平台会话真正消费"当前选中"的那一行（实测：只改它 currentValue 就变；
 		// 只改 agent-default-model 则不变）。
 		b = append(b, []byte("- id: acp\n  config:\n")...)
-		b = append(b, fmt.Sprintf("    provider: %s\n    model: %s\n", yamlQuote(m.ProviderID), yamlQuote(m.ModelID))...)
+		b = append(b, fmt.Sprintf("    provider: %s\n    model: %s\n", yamlQuote(routeKey(m.ProviderID)), yamlQuote(m.Model))...)
 	}
 
 	// 路由声明：按 route 分组（`llm-pi-ai` 的 `providers.<route>.models[]` 是**整体替换**语义，
@@ -318,20 +323,27 @@ func buildPatch(set resource.Set) ([]byte, error) {
 	// 本版只写 `llm-pi-ai` 路由；`llm-deepseek` 的内置目录保持不动（它的 `models` 语义是
 	// 咨询性目录，写它反而会把内置两条挤掉）。
 	if len(set.Providers) > 0 {
-		byID := make(map[string]resource.Provider, len(set.Providers))
+		// `routes` 收的是**派生后的路由键**（底座命名空间里的名字），`byRoute` 记回它对应的平台档案。
+		// 两者必须分开记：键用底座词，而"这条模型属于谁"比的是**平台词**（`m.ProviderID == p.ID`）
+		// ——拿派生键去比 `ProviderID` 会一条模型都匹配不上，产出一份**语法合法但没有 models 的**
+		// 路由声明（底座静默回落自己的目录，外观上完全正常）。
+		//
+		// 排序仍按派生键：前缀是常量，派生后相对序与按平台 id 排**逐字相同**（v11 的等价性依赖这条）。
+		byRoute := make(map[string]resource.Provider, len(set.Providers))
 		routes := make([]string, 0, len(set.Providers))
 		for _, p := range set.Providers {
-			routes = append(routes, p.ID)
-			byID[p.ID] = p
+			rk := routeKey(p.ID)
+			routes = append(routes, rk)
+			byRoute[rk] = p
 		}
 		sort.Strings(routes)
 		models := sortedModels(set.Models)
 		for _, route := range routes {
-			p := byID[route]
+			p := byRoute[route]
 			b = append(b, []byte("- id: llm-pi-ai\n  config:\n    providers:\n")...)
-			// `displayName` 取**路由 id**，与 v11 逐字相同（理由同另一个底座当初对 `name` 的处理：
-			// 供应商展示名是平台侧的用户词，改它会让等价性 golden 的 A 部分出现差异）。
-			b = append(b, fmt.Sprintf("      %s:\n        displayName: %s\n", yamlQuote(route), yamlQuote(route))...)
+			// `displayName` 取**供应商展示名**（空则回落平台 id）——v24 之前这里写的是路由键，
+			// 于是用户给供应商起的名字在交付面上**不可见**（底座界面一律显示路由键）。
+			b = append(b, fmt.Sprintf("      %s:\n        displayName: %s\n", yamlQuote(route), yamlQuote(displayNameOf(p, route)))...)
 			// `api` 由 adapter 内置（ADR-3：协议只支持 openai，不再让用户为它付一个自由串的代价）。
 			b = append(b, fmt.Sprintf("        api: %s\n", yamlQuote(apiOpenAICompletions))...)
 			// `apiKeyEnv` 是**凭据引用名**（逐供应商派生，ADR-16），配置文件里**绝不出现密钥值**——
@@ -344,12 +356,23 @@ func buildPatch(set resource.Set) ([]byte, error) {
 			}
 			b = append(b, []byte("        models:\n")...)
 			for _, m := range models {
-				if m.ProviderID != route {
+				if m.ProviderID != p.ID {
 					continue
 				}
-				b = append(b, fmt.Sprintf("          - id: %s\n", yamlQuote(m.ModelID))...)
+				b = append(b, fmt.Sprintf("          - id: %s\n", yamlQuote(m.Model))...)
 				if m.Name != "" {
 					b = append(b, fmt.Sprintf("            name: %s\n", yamlQuote(m.Name))...)
+				}
+				// 容量：**平台声明**（v25）。非空才写——空 = 不下发该字段，让底座自己的兜底生效
+				// （`DEFAULT_CONTEXT_WINDOW`/`DEFAULT_MAX_TOKENS`），而不是由平台塞一个假值。
+				//
+				// 字段名用**底座的词**（`contextWindow`/`maxTokens`）只出现在这里：内核那两列叫
+				// `max_input_tokens`/`max_output_tokens`，映射就这一处（A9 的精神：底座词表不回流）。
+				if m.MaxInputTokens != nil {
+					b = append(b, fmt.Sprintf("            contextWindow: %d\n", *m.MaxInputTokens)...)
+				}
+				if m.MaxOutputTokens != nil {
+					b = append(b, fmt.Sprintf("            maxTokens: %d\n", *m.MaxOutputTokens)...)
 				}
 				// **总是**写 `input`（ADR-12）：`text` 是用户的**明确选择**而不是"没设"。
 				//
@@ -374,19 +397,19 @@ func buildPatch(set resource.Set) ([]byte, error) {
 	return b, nil
 }
 
-// sortedModels 把模型按 `(ProviderID, ModelID)` 排序后返回。
+// sortedModels 把模型按 `(ProviderID, Model)` 排序后返回。
 //
 // 为什么要防御性排序：dsh 的 `models[]` 是**数组**（顺序进字节），逐字节 golden 要求"同输入同字节"。
-// 编排层虽然已经按 `(ProviderID, ModelID)` 固定顺序（`pkg/resource.Set` 的契约），但这里再排一次
-// 让"顺序"这件事不依赖调用方的记性；且该序在**逐 route 过滤后**恰好是 v11 的 `ModelID` 升序
-// （v11 的输入就是按 `ModelID` 全局排序的），等价性因此成立。
+// 编排层虽然已经按 `(ProviderID, Model)` 固定顺序（`pkg/resource.Set` 的契约），但这里再排一次
+// 让"顺序"这件事不依赖调用方的记性；且该序在**逐 route 过滤后**恰好是 v11 的上游模型名升序
+// （v11 的输入就是按上游模型名全局排序的），等价性因此成立。
 func sortedModels(in []resource.Model) []resource.Model {
 	out := append([]resource.Model(nil), in...)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].ProviderID != out[j].ProviderID {
 			return out[i].ProviderID < out[j].ProviderID
 		}
-		return out[i].ModelID < out[j].ModelID
+		return out[i].Model < out[j].Model
 	})
 	return out
 }

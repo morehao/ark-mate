@@ -183,11 +183,11 @@ func TestCapabilityDefinitionColumnsFrozen(t *testing.T) {
 		// 无 body（ADR-1/ADR-2）。它们的列集合由 `archtest` 的
 		// `TestProviderModelTablesAreColumnsNotCarriers` 按**白名单**钉住（这里只冻住
 		// 四张定义载体表，两者判据分工不同：那张表说的是"哪些列可以有"，这里说的是"不许再加列"）。
-		// v20 起多一列 `key`（明文密钥进库）：这条判据问的是**最终形态**，所以它随迁移前进——
-		// 而"不许再加列"的那半仍然成立，加列必须同时改这里（守卫的用意是让人当场回答一次
-		// "这列属于谁"）。
+		// v20 起多一列 `key`（明文密钥进库）；v24 把 `model_id` 改名 `model`；v25 补两个容量列
+		// （可空、无 DEFAULT，`ALTER TABLE ADD COLUMN` **追加在末尾**——这条判据比的是**物理列序**，
+		// 所以两个容量列排在时间列之后，不按"逻辑分组"提前）。
 		model.TableNameProvider: {"id", "name", "protocol", "base_url", "note", "revision", "created_at", "updated_at", "key"},
-		model.TableNameModel:    {"id", "provider_id", "model_id", "name", "note", "input_modalities", "revision", "created_at", "updated_at"},
+		model.TableNameModel:    {"id", "provider_id", "model", "name", "note", "input_modalities", "revision", "created_at", "updated_at", "max_input_tokens", "max_output_tokens"},
 	}
 	for table, wantCols := range want {
 		rows, err := s.db.Raw(`PRAGMA table_info(` + table + `)`).Rows()

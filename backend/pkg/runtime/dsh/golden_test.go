@@ -17,14 +17,20 @@ import (
 // 判据分两部分（设计 §行为基线与等价性验证）：
 //
 //	A 部分（未点名的一切）：供应商按键排序、缩进、尾换行、`- id: acp` / `- id: llm-pi-ai` 的条目形态、
-//	  `displayName`、`api`、`baseURL`、`models[]` 的顺序与 `name` 的 YAML 转义 —— **必须逐字节相同**；
+//	  `api`、`baseURL`、`models[]` 的顺序与 `name` 的 YAML 转义 —— **必须逐字节相同**；
 //	B 部分（本方案点名的偏差，以新形态为期望）：
 //	  B1 `apiKeyEnv` 由 `envKeyOf(type)`（每个 type 一个名字）换成**逐供应商**的引用名（修 ADR-16 的真实缺陷）；
 //	  B2 每个模型条目**多一行** `input: [text]` / `[text, image]`（v13/M6 的 ADR-12：平台**总是**声明
-//	     输入模态，所以"默认 text"是明确值而不是"没设"——代价是覆盖底座 catalog，见 config.go 的注释）。
+//	     输入模态，所以"默认 text"是明确值而不是"没设"——代价是覆盖底座 catalog，见 config.go 的注释）；
+//	  B3 文件名（v24–v25 的路由键隔离，见 spec §5.1）：① `providers.<k>` 的键与 `- id: acp` 的
+//	     `provider:` 值都加平台保留前缀 `mate-`；② `displayName` 从"路由键"改成**供应商展示名**
+//	     （空则回落路由键）——即"这一个字段的取值不再是路由键本身"。
 //
 // A 部分的证明方式：把冻结的 v11 字节按**仅 B 部分**改写一遍，再与新 adapter 的输出逐字节比对。
-// 改写函数只允许做 B 部分那一件事——多做一件比对就红。
+// 改写函数只允许做 B 部分那几件事——多做一件比对就红。
+//
+// 文件名保留 `dsh-v12.patch.yml`：它命名的是**等价性序列**（"v11 基线 → 当前形态"），不是当前
+// 版本号——B2 于 v13 加入时就沿用了这个名字，B3 同样。
 //
 // 另外两处**未迁移字段**（`compat` 与模型的 `extra`）在本期没有出口，夹具因此刻意不带它们；
 // 它们由 `TestGoldenDshCompatHasNoV12Exit` 单独**机器登记**，不混进 A 部分。
@@ -34,18 +40,20 @@ var updateGolden = flag.Bool("update", false, "重新生成 golden 文件（评�
 const goldenRefPattern = "MATE_%s_API_KEY"
 
 type goldenFixtureProvider struct {
-	ID      string
-	Name    string // 平台展示名——**刻意不下发**（见 TestGoldenDshProjectsRouteIDAsDisplayName）
-	Type    string // v11 的 `type`（只喂给冻结的 v11 生成器）
+	ID   string
+	Name string // 平台展示名——v24 起**下发**为 `displayName`（见 TestGoldenDshProjectsProviderNameAsDisplayName）
+	Type string // v11 的 `type`（只喂给冻结的 v11 生成器）
+	// BaseURL 端点。空串 = 不写 `baseURL` 行（用来覆盖"这个字段可以缺席"这条形态）。
 	BaseURL string
 }
 
 type goldenFixtureModel struct {
 	ID         string // 平台模型 id
 	ProviderID string
-	ModelID    string
-	Name       string
-	Default    bool
+	// Model 发给上游的模型名（v24 起这一列叫 `model`；这里跟到平台词，v11 的 `ModelID` 是历史词）。
+	Model   string
+	Name    string
+	Default bool
 	// Modalities 输入模态（nil = 默认 `[text]`）。夹具里**两类都要有**，否则 B2 的两种形态
 	// 只被覆盖到一种——而"显式 text 覆盖了 catalog"与"用户勾了图片"是两件必须分别可见的事。
 	Modalities []string
@@ -60,22 +68,26 @@ var (
 		{ID: "zeta", Name: "Zeta 直连", Type: "deepseek", BaseURL: "https://zeta.example.com/v1"},
 	}
 	goldenFixtureModels = []goldenFixtureModel{
-		{ID: "m-alpha-1", ProviderID: "alpha-gw", ModelID: "gpt-4o-mini", Name: "小模型·中文",
+		{ID: "m-alpha-1", ProviderID: "alpha-gw", Model: "gpt-4o-mini", Name: "小模型·中文",
 			Modalities: []string{"text", "image"}},
-		{ID: "m-alpha-2", ProviderID: "alpha-gw", ModelID: "gpt-4o", Name: `大模型 "A" \ 备用`},
-		{ID: "m-beta-1", ProviderID: "beta.gw", ModelID: "qwen:7b", Name: "qwen #7b", Default: true},
-		{ID: "m-beta-2", ProviderID: "beta.gw", ModelID: "llama/3-8b", Name: ""},
-		{ID: "m-zeta-1", ProviderID: "zeta", ModelID: "deepseek-chat", Name: "DeepSeek 对话"},
-		{ID: "m-zeta-2", ProviderID: "zeta", ModelID: "deepseek-reasoner", Name: "推理\t模型"},
+		{ID: "m-alpha-2", ProviderID: "alpha-gw", Model: "gpt-4o", Name: `大模型 "A" \ 备用`},
+		{ID: "m-beta-1", ProviderID: "beta.gw", Model: "qwen:7b", Name: "qwen #7b", Default: true},
+		{ID: "m-beta-2", ProviderID: "beta.gw", Model: "llama/3-8b", Name: ""},
+		{ID: "m-zeta-1", ProviderID: "zeta", Model: "deepseek-chat", Name: "DeepSeek 对话"},
+		{ID: "m-zeta-2", ProviderID: "zeta", Model: "deepseek-reasoner", Name: "推理\t模型"},
 	}
 )
 
+// 主夹具里**没有**展示名为空的供应商——为什么那条回落链不放进来：主夹具同时喂给**冻结的 v11
+// 生成器**，加一家供应商会把 `testdata/dsh-v11.patch.yml`（v11 基线本身）一起改写掉，而计划
+// §4.M2.T4.5 要求它**一个字节都不许动**（"v11 基线"这份证据的价值就在于它是被评审过的那一份）。
+// 回落链因此由 `TestGoldenDshDisplayNameFallsBackToRouteKey` 用一个**独立的小集合**覆盖。
 const goldenFixtureDefaultModel = "m-beta-1"
 
 // v11FixtureInputs 把夹具翻译成冻结 v11 生成器的输入。
 //
-// 模型按 `ModelID` 排序——这是 v11 的 `collectRuntimeConfigInput` 的真实输入形态（它会对模型做一次
-// 全局 `ModelID` 升序），也是 v12 逐 route 过滤后的数组顺序。**不排就会让数组顺序变**，那属于 A 部分。
+// 模型按**上游模型名**排序——这是 v11 的 `collectRuntimeConfigInput` 的真实输入形态（它会对模型做一次
+// 全局上游名升序），也是 v12 逐 route 过滤后的数组顺序。**不排就会让数组顺序变**，那属于 A 部分。
 //
 // `compat` 是 v11 独有、v12 没有出口的字段（设计 §载体差异的「未迁移字段」清单），所以它由调用方
 // 显式给出（主 golden 传 nil）；不给参数就不动全局夹具，避免用例之间互相污染。
@@ -83,7 +95,7 @@ func v11FixtureInputs(compat map[string]map[string]any) ([]v11Model, map[string]
 	models := make([]v11Model, 0, len(goldenFixtureModels))
 	for _, m := range goldenFixtureModels {
 		models = append(models, v11Model{
-			ModelID:    m.ModelID,
+			ModelID:    m.Model,
 			Name:       m.Name,
 			ProviderID: m.ProviderID,
 			IsDefault:  m.Default,
@@ -120,7 +132,7 @@ func goldenSet() resource.Set {
 	models := make([]resource.Model, 0, len(goldenFixtureModels))
 	for _, m := range goldenFixtureModels {
 		models = append(models, resource.Model{
-			ID: m.ID, ProviderID: m.ProviderID, ModelID: m.ModelID, Name: m.Name,
+			ID: m.ID, ProviderID: m.ProviderID, Model: m.Model, Name: m.Name,
 			// 端口契约是"总是带值"：nil 也要显式给 `[text]`（与编排层的行为一致）。
 			InputModalities: goldenModalities(m),
 		})
@@ -173,7 +185,7 @@ func TestGoldenDsh(t *testing.T) {
 		t.Errorf("冻结的 v11 生成器产出与 %s 不一致——v11 基线的忠实性被破坏：\n%s",
 			oldPath, firstDiff(want, string(v11Bytes)))
 	}
-	rewritten := rewriteDshV11ToV12(t, string(v11Bytes))
+	rewritten := rewriteDshV11ToV24(t, string(v11Bytes))
 	if rewritten != string(v12Bytes) {
 		t.Errorf("A 部分（未点名处）出现差异——按纪律必须以 golden 为准、把 adapter 改到一致：\n%s",
 			firstDiff(rewritten, string(v12Bytes)))
@@ -237,9 +249,28 @@ func TestGoldenDshBPartPresent(t *testing.T) {
 	if c := strings.Count(got, "        api: \"openai-completions\"\n"); c != len(goldenFixtureProviders) {
 		t.Errorf("每个 route 都应写固定 api（实测 %d 处，应有 %d 处）", c, len(goldenFixtureProviders))
 	}
-	// 默认模型：`Set.DefaultModel` 是**平台 id**，必须解析成上游 id 与它挂靠的 route。
-	if !strings.Contains(got, "    provider: \"beta.gw\"\n    model: \"qwen:7b\"\n") {
-		t.Error("默认模型未按 `DefaultModel`（平台 id）解析成 route + 上游 id")
+	// 默认模型：`Set.DefaultModel` 是**平台 id**，必须解析成上游 id 与它挂靠的**派生路由键**。
+	if !strings.Contains(got, "    provider: \"mate-beta.gw\"\n    model: \"qwen:7b\"\n") {
+		t.Error("默认模型未按 `DefaultModel`（平台 id）解析成派生路由键 + 上游模型名")
+	}
+
+	// B3 的前置：v11 的产出里**确实有**这三类文本，否则 B3 的改写是空转
+	// （等价性判据自己失效是最难查的一类绿：两边都不含被改写的形态，比对当然相等）。
+	for _, needle := range []string{"    provider: \"", "        displayName: \"", "    providers:\n"} {
+		if !strings.Contains(old, needle) {
+			t.Fatalf("v11 产出里没有 %q——B3 的改写对象不存在，等价性判据在空转", needle)
+		}
+	}
+	// B3 的落地形态（以新产出为期望）：键带保留前缀、展示名是供应商展示名（空则回落路由键）。
+	for _, p := range goldenFixtureProviders {
+		wantRoute := "      \"mate-" + p.ID + "\":\n"
+		if !strings.Contains(got, wantRoute) {
+			t.Errorf("B3 未落地：路由键应为 %q", "mate-"+p.ID)
+		}
+		wantName := fixtureDisplayName(p.ID, p.Name)
+		if !strings.Contains(got, wantRoute+"        displayName: "+strconv.Quote(wantName)+"\n") {
+			t.Errorf("B3 未落地：供应商 %s 的 displayName 应为 %q（展示名空则回落路由键）", p.ID, wantName)
+		}
 	}
 }
 
@@ -267,24 +298,81 @@ func TestGoldenDshCompatHasNoV12Exit(t *testing.T) {
 	}
 	// 把 v11 的那一行删掉，再按 B 部分改写 → 应与 v12 逐字节相同。
 	stripped := dropYAMLLine(t, string(v11Bytes), "compat:")
-	if got, want := rewriteDshV11ToV12(t, stripped), string(v12Bytes); got != want {
+	if got, want := rewriteDshV11ToV24(t, stripped), string(v12Bytes); got != want {
 		t.Errorf("compat 是本例唯一的差异，其余字节必须相同：\n%s", firstDiff(want, got))
 	}
 }
 
-// TestGoldenDshProjectsRouteIDAsDisplayName 记录一条**刻意的**选择：`displayName` 取路由 id，
-// 不取供应商展示名（理由同**历史实测**里另一底座（已下线）的 `name`：它属于 A 部分，v11 写的就是路由 id）。
-func TestGoldenDshProjectsRouteIDAsDisplayName(t *testing.T) {
+// TestGoldenDshProjectsProviderNameAsDisplayName 记录一条 v24 起**有意变更**的交付形态：
+// `displayName` 交付**供应商展示名**（空则回落路由键），而不是路由键本身。
+//
+// 原断言（`TestGoldenDshProjectsRouteIDAsDisplayName`）钉的是"展示名属于 A 部分、v11 写的就是路由
+// id"——那条纪律的理由是"v11 里没有供应商展示名这个概念"（`resource.Provider.Name` 是 v12 才进
+// 夹具的字段）。v24 推翻它：展示名是用户在平台里起的名字，交付面把它写成路由键会让这个名字**在
+// 底座侧完全不可见**（库里叫「内网网关 Alpha」，界面上显示 `alpha-gw`）。
+//
+// 代价如实写：这一行不再与 v11 逐字节相同——所以它进了 B 部分（B3），由
+// `rewriteDshV11ToV24` 机械改写后参与 A 部分的比对，而不是被悄悄放过。
+func TestGoldenDshProjectsProviderNameAsDisplayName(t *testing.T) {
 	b, err := buildPatch(goldenSet())
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(b)
 	for _, p := range goldenFixtureProviders {
-		if !strings.Contains(got, "      \""+p.ID+"\":\n        displayName: \""+p.ID+"\"\n") {
-			t.Errorf("route %s 的 displayName 应为路由 id（展示名 %q 不下发）", p.ID, p.Name)
+		if p.Name == "" {
+			t.Fatalf("主夹具的供应商 %s 没有展示名：这条用例判的是「展示名被下发」，它必须每家都有名字", p.ID)
+		}
+		want := "      \"mate-" + p.ID + "\":\n        displayName: " + strconv.Quote(p.Name) + "\n"
+		if !strings.Contains(got, want) {
+			t.Errorf("route mate-%s 的 displayName 应为供应商展示名 %q", p.ID, p.Name)
 		}
 	}
+	// 反向：`displayName` 不得再等于**不带前缀**的平台 id 或**带前缀的路由键**（那正是被推翻的旧形态）。
+	for _, p := range goldenFixtureProviders {
+		for _, banned := range []string{p.ID, "mate-" + p.ID} {
+			if strings.Contains(got, "        displayName: \""+banned+"\"\n") {
+				t.Errorf("route %s 的 displayName 退回了旧形态 %q——它必须来自供应商展示名", p.ID, banned)
+			}
+		}
+	}
+}
+
+// TestGoldenDshDisplayNameFallsBackToRouteKey 覆盖回落链的另一半：供应商**没有**展示名时，
+// `displayName` 回落**路由键**（DSH 语义逐字："defaults to the route key"）。
+//
+// 为什么单独一条、不放主夹具：见 `goldenFixtureProviders` 后面那段说明——主夹具喂给冻结的 v11
+// 生成器，往里加一家供应商会把 v11 基线文件一起改写掉（计划 T4.5 不许）。
+//
+// 反证：把 `displayNameOf` 的回落改成空串 / 平台 id → 本用例红。
+func TestGoldenDshDisplayNameFallsBackToRouteKey(t *testing.T) {
+	b, err := buildPatch(resource.Set{
+		Runtime: ID,
+		Providers: []resource.Provider{
+			{ID: "noname", Protocol: resource.ProtocolOpenAI, BaseURL: "https://n.example.com/v1"},
+		},
+		Models: []resource.Model{
+			{ID: "m-noname", ProviderID: "noname", Model: "n-1", InputModalities: []string{resource.ModalityText}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "      \"mate-noname\":\n        displayName: \"mate-noname\"\n"
+	if !strings.Contains(string(b), want) {
+		t.Errorf("没有展示名时 displayName 应回落路由键：\nwant:\n%s\ngot:\n%s", want, b)
+	}
+}
+
+// fixtureDisplayName 供应商在交付面上的**期望**展示名。
+//
+// 这里刻意**不调用** `displayNameOf`：判据若由被测实现自己生成，改了实现它也跟着改，等于没有判据
+// （golden 的价值就在"期望是写死的字节"）。
+func fixtureDisplayName(id, name string) string {
+	if name != "" {
+		return name
+	}
+	return "mate-" + id
 }
 
 // TestGoldenDshEmptySetProducesNothing 契约③的前置：空清单**绝不能**走到生成器——
@@ -317,11 +405,18 @@ func TestGoldenDshEmptySetProducesNothing(t *testing.T) {
 
 // ——— 改写与比对工具 ———
 
-// rewriteDshV11ToV12 把 v11 的字节**只**按 B 部分改写：`apiKeyEnv` 的值换成逐供应商引用名。
+// rewriteDshV11ToV24 把 v11 的字节**只**按 B 部分改写（B1/B2/B3），用于 A 部分的逐字节比对。
 //
-// 按"出现顺序"配对（apiKeyEnv 行的顺序 = route 升序 = provider 对象键序），这样它顺带证明了
-// "第 k 个 route 拿到第 k 个引用名"；按类型配对恰恰会掩盖 ADR-16 的那个缺陷。
-func rewriteDshV11ToV12(t *testing.T, old string) string {
+// B1：`apiKeyEnv` 的值换成逐供应商引用名。按"出现顺序"配对（apiKeyEnv 行的顺序 = route 升序 =
+// provider 对象键序），这样它顺带证明了"第 k 个 route 拿到第 k 个引用名"；按类型配对恰恰会掩盖
+// ADR-16 的那个缺陷。
+// B2：给每个模型条目补一行 `input: [...]`（见 `insertGoldenModelInputs`）。
+// B3：路由键加保留前缀 + `displayName` 换成供应商展示名（见 `rewriteGoldenRouteKeys`）。
+//
+// 顺序：B1 与 B3 都在"行级"上作业，但改的是互不相交的行；B2 是**插入**行，必须先做完再让 B3 扫
+// ——否则 B3 会去认那些还不存在的行（`input` 行与 displayName/键行的前缀都不同，实际不会撞，但
+// 依赖"不撞"比依赖"顺序"脆）。所以固定为 B1 → B2 → B3。
+func rewriteDshV11ToV24(t *testing.T, old string) string {
 	t.Helper()
 	routes := make([]string, 0, len(goldenFixtureProviders))
 	for _, p := range goldenFixtureProviders {
@@ -347,7 +442,62 @@ func rewriteDshV11ToV12(t *testing.T, old string) string {
 	// B2：给**每个**模型条目补一行 `input: [...]`（v11 没有这个字段，所以它只能"插入"）。
 	// 插入位置 = 该条目的末尾（下一个 `          - id: ` 之前，或文件末尾）——与 adapter
 	// 把 `input` 写在 `name` 之后一致。
-	return insertGoldenModelInputs(t, strings.Join(lines, "\n"))
+	return rewriteGoldenRouteKeys(t, insertGoldenModelInputs(t, strings.Join(lines, "\n")))
+}
+
+// rewriteGoldenRouteKeys 是 B3 的机械改写：① 路由键（`providers.<k>` 的键与 `- id: acp` 的
+// `provider:` 值）加平台保留前缀 `mate-`；② `displayName` 从"路由键"换成供应商展示名（空则回落
+// 路由键，与 `displayNameOf` 同口径）。
+//
+// 为什么按**行内的那个 id**配对而不是按"第 k 个"：这三个形态各自携带它属于哪条 route 的信息，
+// 按出现顺序配对只会在夹具顺序变化时静默错位；而"行里的 id 不在夹具里"必须**响**——那正是配对不上
+// 的情形（T4.1 的 `t.Fatalf`），静默漏改会让 A 部分的比对在两边都不含新形态时假绿。
+func rewriteGoldenRouteKeys(t *testing.T, text string) string {
+	t.Helper()
+	names := map[string]string{}
+	for _, p := range goldenFixtureProviders {
+		names[p.ID] = p.Name
+	}
+	lines := strings.Split(text, "\n")
+	keys, providers, displayNames := 0, 0, 0
+	for i, ln := range lines {
+		switch {
+		case strings.HasPrefix(ln, "      \"") && strings.HasSuffix(ln, "\":"):
+			// ①a `providers.<k>:`（缩进 6）。
+			id := strings.TrimSuffix(strings.TrimPrefix(ln, "      \""), "\":")
+			if _, ok := names[id]; !ok {
+				t.Fatalf("第 %d 行的路由键 %q 不在夹具里——B3 的改写配对不上（必须响，不能静默漏改）", i+1, id)
+			}
+			lines[i] = "      \"mate-" + id + "\":"
+			keys++
+		case strings.HasPrefix(ln, "    provider: \"") && strings.HasSuffix(ln, "\""):
+			// ①b `- id: acp` 块的 `provider:` 值（缩进 4）。
+			id := strings.TrimSuffix(strings.TrimPrefix(ln, "    provider: \""), "\"")
+			if _, ok := names[id]; !ok {
+				t.Fatalf("第 %d 行的 provider 值 %q 不在夹具里——B3 的改写配对不上", i+1, id)
+			}
+			lines[i] = "    provider: \"mate-" + id + "\""
+			providers++
+		case strings.HasPrefix(ln, "        displayName: \"") && strings.HasSuffix(ln, "\""):
+			// ② `displayName:`（缩进 8）。
+			id := strings.TrimSuffix(strings.TrimPrefix(ln, "        displayName: \""), "\"")
+			name, ok := names[id]
+			if !ok {
+				t.Fatalf("第 %d 行的 displayName %q 不在夹具里——B3 的改写配对不上", i+1, id)
+			}
+			lines[i] = "        displayName: " + yamlQuote(fixtureDisplayName(id, name))
+			displayNames++
+		}
+	}
+	switch {
+	case keys != len(goldenFixtureProviders):
+		t.Fatalf("B3 的路由键改写覆盖不全：改了 %d 处，应有 %d 处（夹具/形态分叉）", keys, len(goldenFixtureProviders))
+	case providers != 1:
+		t.Fatalf("B3 的 `provider:` 改写覆盖不全：改了 %d 处，应有 1 处（默认模型那一行）", providers)
+	case displayNames != len(goldenFixtureProviders):
+		t.Fatalf("B3 的 displayName 改写覆盖不全：改了 %d 处，应有 %d 处", displayNames, len(goldenFixtureProviders))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // insertGoldenModelInputs 在每个模型条目末尾插入 `input:` 行（B2 的机械改写）。
@@ -383,10 +533,10 @@ func insertGoldenModelInputs(t *testing.T, text string) string {
 	return strings.Join(out, "\n")
 }
 
-// modalitiesOfUpstream 上游模型 id → 夹具里那条模型声明的模态（找不到就按默认 `[text]`）。
-func modalitiesOfUpstream(modelID string) []string {
+// modalitiesOfUpstream 上游模型名 → 夹具里那条模型声明的模态（找不到就按默认 `[text]`）。
+func modalitiesOfUpstream(upstream string) []string {
 	for _, m := range goldenFixtureModels {
-		if m.ModelID == modelID {
+		if m.Model == upstream {
 			return goldenModalities(m)
 		}
 	}

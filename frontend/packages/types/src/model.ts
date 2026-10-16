@@ -2,7 +2,8 @@
  * 模型面（v12）：**两个读面分得很开**，改这个文件前先认清哪一个是哪一个。
  *
  *  - ① **运行时目录面**（`ModelCatalogResp`，`GET /models/catalog`）：运行时（ACP server）
- *    自报的会话配置项投影，`value` 是**不透明字符串**、必须原样回传。会话级模型选择器用它。
+ *    自报的会话配置项投影，`value` 是**不透明字符串**、必须原样回传。会话级模型选择器用它
+ *    ——v27 起选择器只吃 `modelValues`（= 这份广告与平台清单的**交集**，见它的注释）。
  *  - ② **平台清单面**（`ModelsResp`，`GET /models`）：用户登记的应用层资源（供应商下的模型），
  *    外加**聚合**生效结论。设置 · 模型 那一节用它。
  *
@@ -34,6 +35,16 @@ export interface ConfigOptionValue {
   /** 平台观测：该值最近被运行时拒绝过（如凭证缺失）。仅提示，最终以运行时为准。 */
   unavailable?: boolean
   unavailable_reason?: string
+  /**
+   * 这个候选对应**平台清单里的哪一行**（`mdl_…`；空 = 平台没有声明过它）——v26 加。
+   *
+   * 会话的 `model` 收的是平台模型行 id，而选择发生在**运行时目录**上，所以注解跟着候选走：
+   * 一次取数就能"选运行时值、提交平台 id"。
+   *
+   * **空 = 客户端选不了它**（服务端会以 40401 拒）。v27 起选择器**不渲染**这类候选
+   * （`modelValues` 只回带注解的那些，见它的注释）——它是诊断事实，不是用户要找的东西。
+   */
+  model_id?: string
 }
 
 /** 一个会话配置项（select 下拉 / boolean 开关）。 */
@@ -96,9 +107,14 @@ export interface ModelRow {
   id: string
   /** 挂靠的供应商 id。 */
   provider_id: string
-  /** 发给上游的模型 id（**不是**运行时的 value，也不是平台 id）。 */
-  model_id: string
-  /** 展示名（空 = 前端回落显示 model_id）。 */
+  /**
+   * 发给上游的模型名（**不是**运行时的 value，也不是平台 id）。
+   *
+   * v24 从 `model_id` 改名：`_id` 在本仓一律指"指向某表 `id`"，而这一格是外部世界的名字
+   * （生态标准词 `model`）。
+   */
+  model: string
+  /** 展示名（空 = 前端回落显示 model）。 */
   name?: string
   /** 备注（不驱动行为）。 */
   note?: string
@@ -109,6 +125,16 @@ export interface ModelRow {
    * 「图片不会被接受」，要图片得逐条勾选——所以列表里必须让用户看得见、改得动。
    */
   input_modalities?: string[]
+  /**
+   * 上下文输入上限（**平台声明**；`null` = 未声明）。
+   *
+   * v25 起容量只能由平台声明：路由键加了保留前缀之后，交付的路由再也命中不了底座内置目录，
+   * 于是"没声明"就等于**用底座自己的兜底**（那是一句猜测，不是平台事实）。界面必须把这层区别
+   * 如实标出来（行卡上那句「容量由环境兜底」），不能让用户以为自己看到的是自己设的值。
+   */
+  max_input_tokens: number | null
+  /** 单次输出上限（**平台声明**；`null` = 未声明）。语义同 `max_input_tokens`。 */
+  max_output_tokens: number | null
   /** 写面乐观锁计数（每次成功提交 +1）；**不是内容版本**（内容指纹在审计里）。 */
   revision: number
   updated_at?: string
@@ -187,7 +213,11 @@ export interface ModelsResp {
 /** `POST /models` 的请求体。**没有 `runtime`**：模型不带底座维度（带 `runtime` 会被 40001 拒）。 */
 export interface ModelCreateReq {
   provider_id: string
-  model_id: string
+  /** 发给上游的模型名（线上键名就是 `model`；v24 从 `model_id` 改名）。 */
+  model: string
+  /** 容量声明（v25；省略 = 不声明）。取值必须 ≥ 1。 */
+  max_input_tokens?: number
+  max_output_tokens?: number
   name?: string
   note?: string
   /** 输入模态：`['text']`（默认）| `['text','image']`；非法取值会被 40501 拒。 */
@@ -202,6 +232,18 @@ export interface ModelPatchReq {
   note?: string
   /** 输入模态：`['text']` | `['text','image']`；省略 = 不改。 */
   input_modalities?: string[]
+  /**
+   * 容量（v25）。**三态**：
+   *
+   *  - 省略 = 不改；
+   *  - ≥ 1 = 声明成这个数；
+   *  - `0` = **清除声明**（回到「由环境兜底」）。
+   *
+   * 为什么用 0 而不是 `null` 当「清除」：`null` 与「键缺失」在服务端的 JSON 绑定里都落成 nil，
+   * 分不开；而 0 本来就不是合法容量（底座的 schema 是 `min(1)`），不会与任何真实取值撞车。
+   */
+  max_input_tokens?: number
+  max_output_tokens?: number
   /** true = 设为唯一默认；false = 取消默认（幂等）。 */
   is_default?: boolean
 }
@@ -225,17 +267,67 @@ export const configOptionByCategory = (
 ): ConfigOption | undefined => (options ?? []).find((o) => o.category === category)
 
 /**
- * 会话级模型候选值（无模型项 → 空数组：运行时没有可切换的模型）。
+ * 运行时**广告**的全部模型候选（运行时没有模型项 → 空数组）。
  *
  * **只吃运行时目录面**（`ModelCatalogResp`）：候选取 `options[category=model].values`，
  * 它们的 `value` 是不透明串、必须原样回传给会话接口。平台清单（`ModelsResp`）不喂这里——
  * 那是应用层资源，不是运行时候选。
+ *
+ * ⚠️ **不得直接喂选择器**：它含"平台没声明过"的候选（`model_id` 为空），那些**选不了**
+ * （服务端会以 40401 拒）。选择器吃 `modelValues`；这个函数只剩两个正当消费者：空态说明里
+ * 那句"运行时广告了几个候选"与本地记忆的自愈闸门（目录到没到）。
  */
-export const modelValues = (resp?: ModelCatalogResp | null): ConfigOptionValue[] =>
+export const advertisedModelValues = (resp?: ModelCatalogResp | null): ConfigOptionValue[] =>
   configOptionByCategory(resp?.options, 'model')?.values ?? []
 
-/** 模型引用：创建/切换会话时选定的模型（运行时目录里的不透明 value）。 */
+/**
+ * 会话级模型候选值 = **运行时广告 ∩ 平台清单**（无交集 → 空数组：没有可切换的模型）——v27。
+ *
+ * 为什么必须收窄（用户原话，2026-10-16：「模型下拉列表应该只出现【设置】中配置的模型」）：
+ * 运行时会广告它认识的**一整份**目录——自己的内置目录 + 平台交付的路由；而平台只认得自己清单
+ * 里的那些行（`models` 表），会话的模型引用也只收平台行 id。把交集之外的候选摆进下拉，用户看到
+ * 的是"设置里没配过的模型"，它既选不了、也不是用户要找的东西。**"广告了、平台没声明"这条事实
+ * 是给排障看的**，落点是诊断面（`GET /models` 的 `sync[].advertised` / `missing`），不是选择器。
+ */
+export const modelValues = (resp?: ModelCatalogResp | null): ConfigOptionValue[] =>
+  advertisedModelValues(resp).filter((v) => !!v.model_id)
+
+/**
+ * 运行时广告了、平台清单里没有的候选（v27）。
+ *
+ * **只用来把"下拉为什么这么少/是空的"讲成一句人话**（`model_id` 为空 = 选不了，见类型注释）；
+ * 没有任何渲染面该把它摆成可选项。
+ */
+export const undeclaredModelValues = (resp?: ModelCatalogResp | null): ConfigOptionValue[] =>
+  advertisedModelValues(resp).filter((v) => !v.model_id)
+
+/** 模型引用：创建/切换会话时选定的模型（**平台模型行 id**）。 */
 export interface ModelRef {
-  /** 运行时目录里的模型 value（原样回传；空 = 跟随运行时默认）。 */
+  /**
+   * 平台模型行 id（`mdl_…`；空 = 跟随平台/底座默认）。
+   *
+   * v26 起名副其实：此前这个字段装的是**运行时目录里的不透明 value**（名字里的 `ID` 是假的），
+   * 所以那时它只能原样回传；现在它就是平台行身份，与 `session.model` 同源。
+   */
   modelID?: string
 }
+
+/**
+ * 平台模型行 id 的形状（`mdl_` + 26 位 Crockford ULID，由 `pkg/object/objid` 铸造）。
+ *
+ * 与后端守卫里的 `sessionModelIDForm`（`internal/archtest`）**同源**：那条是"库里存的必须是
+ * 平台行 id"，这条是"客户端手上拿的必须是平台行 id"。
+ */
+export const PLATFORM_MODEL_ID_PATTERN = /^mdl_[0-9A-HJKMNP-TV-Z]{26}$/
+
+/**
+ * 这个值是不是平台模型行 id。
+ *
+ * **为什么客户端需要一个形状判据**：本地记住的"上次所选模型"（`mate.web.lastModel`）可能来自
+ * v26 之前——那时它存的是**运行时目录里的不透明 value**（dsh 形如 `["yygu","deepseek-flash"]`）。
+ * 那种值在本地看着像"已经选好一个模型"，发出去却会被平台以 40401 拒（平台只接受自己声明过的
+ * 模型），而它与合法值在界面上**长得一模一样**——所以判据必须落在形状上、且**不依赖目录到没到**
+ * （目录为空是"还不知道"，不是"可以继续用一个形状就不对的值"）。
+ */
+export const isPlatformModelID = (value: string | null | undefined): value is string =>
+  typeof value === 'string' && PLATFORM_MODEL_ID_PATTERN.test(value)

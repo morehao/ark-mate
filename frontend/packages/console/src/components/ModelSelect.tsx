@@ -7,7 +7,13 @@ import type { ConfigOptionValue } from '@ark-mate/types'
 interface ModelSelectProps {
   /** 候选值（来自运行时目录 category=model 的 values；空 = 运行时没有可选项）。 */
   values: ConfigOptionValue[]
-  /** 选中值（null = 跟随运行时默认）。值是不透明串，原样回传，不解析。 */
+  /**
+   * 选中值 = **平台模型行 id**（`mdl_…`；null = 跟随运行时默认）。
+   *
+   * v26 起受控值与回调都换成了平台 id（此前是不透明串）：候选 `value` 是**底座**的词，
+   * 而会话存/收的是**平台**的词——两层词汇在这里汇合，转换只此一处（按候选的 `model_id` 注解）。
+   * 没有注解的候选渲染得出来但**选不了**（`disabled`）：平台没声明过它，提交必被服务端拒。
+   */
   value: string | null
   onChange: (value: string | null) => void
   disabled?: boolean
@@ -21,10 +27,12 @@ interface ModelSelectProps {
   emptyNote?: ReactNode
 }
 
-/** 下拉项展示：名称 +（描述副文案，第二行）+（被运行时拒绝过的值标灰提示）。
+/** 下拉项展示：名称 +（描述副文案，第二行）+（标签：不可用）。
  *  两行紧凑行（而不是名称与描述并排一行）——并排会把浮层撑到 550px+，相对 130px 的药丸太重。 */
 function optionLabel(v: ConfigOptionValue): ReactNode {
-  const dim = v.unavailable ? tokens.textPlaceholder : tokens.text
+  // 变暗 = 这个候选此刻不该被当成可选项：或者底座拒过它（动态事实），或者平台没有声明过它
+  // （静态事实 —— v27 起这种候选由调用方收窄掉，见下面的组件注释；真出现就只有"补当前模型"那一行）。
+  const dim = v.unavailable || !v.model_id ? tokens.textPlaceholder : tokens.text
   return (
     <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, maxWidth: 300 }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -69,9 +77,14 @@ function optionLabel(v: ConfigOptionValue): ReactNode {
 /**
  * 模型选择器（会话级模型：值取自运行时目录，经 session/set_config_option 应用）。
  *
- *  - 全部候选来自运行时（底座自报的 config option），平台不内置任何清单；
+ *  - 候选由调用方给，且**只该是平台清单里声明过的那些**（v27：`modelValues` = 运行时广告 ∩
+ *    平台清单）。运行时广告里对不上平台行的候选（`model_id` 为空）**不渲染**——用户要的是
+ *    "设置里配过的模型"，而"底座广告了、平台没声明"是诊断事实（`GET /models` 的 `sync[]`）。
+ *    组件这一层仍按 `disabled: !v.model_id` 兜底（纵深防御：调用方补的"当前模型"那一行就是这种）；
  *  - 按底座下发的分组（values[].group/group_name）分组展示，未分组则扁平；
- *  - value 是不透明串：只展示 name，绝不解析内部结构；
+ *  - 受控值与回调是**平台模型行 id**（v26），候选是不透明串：两层词汇的转换只在本文件里做
+ *    （按候选的 `model_id` 注解），别处不许再转一次；
+ *  - 候选只展示 name，**绝不解析**它的结构（那是底座词表）；
  *  - null = 跟随运行时默认；allowClear 可清回默认；
  *  - **关闭态只显示名称**：antd 把 option.label 原样渲染进选择器，若把描述塞进 label，
  *    收起的选择器会宽达 500+px 成为不可压缩的 flex item，把所在行挤塌（见 StartPanel
@@ -98,12 +111,28 @@ export function ModelSelect({
     g.items.push(v)
     groups.set(key, g)
   }
+  // 候选 → 平台模型 id 的映射（antd 的 option value 用**运行时的不透明串**：它是候选自身的标识；
+  // 而受控值与回调走平台 id）。两边的转换只在这里做一次。
+  const modelIDByValue = new Map<string, string>()
+  for (const v of values) {
+    if (v.model_id) modelIDByValue.set(v.value, v.model_id)
+  }
+  // 关闭态显示什么：受控值是平台 id，所以要先从候选里反查出它对应的**运行时值**再交给 antd 匹配。
+  // 反查不到（会话引用的那条模型已不在清单里）就把 id 原样交给 antd——它按原始串显示，这正是
+  // "如实显示不可用"（显示成空会让人以为会话没选模型）。
+  const valueOfModelID = new Map<string, string>()
+  for (const [v, id] of modelIDByValue) valueOfModelID.set(id, v)
+  const rawValue = value === null ? undefined : (valueOfModelID.get(value) ?? value)
+
   const toOption = (v: ConfigOptionValue) => ({
     value: v.value,
     // 关闭态回落到这个 label：只放名称（放描述会让选择器带上几百像素的固有宽度）。
     label: v.name || v.value,
     // 过滤用检索串（label 是 JSX，antd 不能直接 search）——只含展示字段，不含 value。
     search: `${v.name} ${v.description ?? ''}`.toLowerCase(),
+    // **平台没声明过它** ⇒ 不可选（服务端会以 40401 拒；界面这里只是别让用户白点一次）。
+    // v27 起正常候选都带注解（调用方已收窄），这条只剩"调用方补的当前模型那一行"会命中。
+    disabled: !v.model_id,
     // 下拉项要靠它还原完整展示（optionRender 拿到的只有这条 option 本身）。
     model: v,
   })
@@ -119,9 +148,17 @@ export function ModelSelect({
       variant="borderless"
       disabled={disabled}
       allowClear={allowClear}
-      value={value ?? undefined}
+      value={rawValue}
       placeholder={placeholder ?? `模型 · ${defaultLabel}`}
-      onChange={(v: string | undefined) => onChange(typeof v === 'string' ? v : null)}
+      // `v` 是候选的**运行时值**：折回平台模型 id 再交给调用方（没有注解的候选不可选，所以这里
+      // 理论上拿不到"没有 id"的选中值；真拿到就按 null 处置 = 不下发，不猜）。
+      onChange={(v: string | undefined) => {
+        if (typeof v !== 'string') {
+          onChange(null)
+          return
+        }
+        onChange(modelIDByValue.get(v) ?? null)
+      }}
       options={options}
       showSearch
       popupMatchSelectWidth={false}

@@ -42,6 +42,12 @@ func (s *Store) UpdateSessionMeta(ctx context.Context, id string, meta model.Ses
 	return s.sessions.UpdateMeta(ctx, id, meta)
 }
 
+// SetSessionModelID **只**写 `model_id`（v26 存量回填专用；见 dao.SessionDao.SetModelID 的注释：
+// 不刷新 `updated_at`——一次数据迁移不该重排用户的会话列表）。
+func (s *Store) SetSessionModelID(ctx context.Context, id, modelID string) error {
+	return s.sessions.SetModelID(ctx, id, modelID)
+}
+
 // nonZeroTime 把零值时间替换为当前时刻（写入路径的默认值语义）。
 func nonZeroTime(t time.Time) time.Time {
 	if t.IsZero() {

@@ -13,7 +13,10 @@ type SessionPatch struct {
 	Title    *string `json:"title"`
 	Pinned   *bool   `json:"pinned"`
 	Archived *bool   `json:"archived"`
-	Model    *string `json:"model"` // 会话级模型（能改的时机由该底座的能力声明决定）
+	// Model 切换会话的模型：**平台模型行 id**（`mdl_…`；v26 起，此前是运行时目录的不透明取值）。
+	// 形状不对或查不到行 → `40401 model_not_found`，**一个字节都不落库**（静默换模型是这一版
+	// 最该防的失败）。能改的时机由该底座的能力声明决定。
+	Model *string `json:"model"`
 }
 
 // PromptReq 追加 prompt 请求体（POST /sessions/:id/prompt）。
@@ -46,8 +49,13 @@ type SessionCreateReq struct {
 	// 猜错的后果是会话跑在用户没打算用的目录里，而那个目录正是沙箱边界）。
 	// 给了 WorkspaceID 时 Cwd 可以省：平台按登记的路径定 cwd。
 	WorkspaceID string `json:"workspace_id,omitempty"`
-	// Model 运行时目录（GET /models 的 options[category=model].values[].value）里的**不透明取值**，
-	// 原样回传（空 = 跟随运行时默认）。
+	// Model 会话要用的**平台模型行 id**（`mdl_…`；空 = 用平台的默认模型那一行）。
+	//
+	// v26 起含义是"平台行身份"（**破坏性 wire 变更**，与 v15 同档）：此前它是**运行时目录里的
+	// 不透明取值**（原样回传）——那是另一个意思，而键名一直叫 `model`，所以界面看不出来换过。
+	// 平台只接受**自己声明过的**模型（可表示性收窄）：形状不对或查不到行 → `40401 model_not_found`。
+	// 注意这与"可用性"是两件事：声明过的模型照样可能被底座拒（那时建会话失败，行为一个字不变）。
+	// 另注意与 `/models` 行的 `model` **同词不同义**：那边是"发给上游的模型名"。
 	Model string `json:"model,omitempty"`
 	// Capabilities 会话级能力选定（M3）。**缺省 = 与引入本字段之前逐字节相同**：
 	// MCP 全量（按 runtime transport 过滤）、skill 走各自的 runtimes 声明，且不产生能力指纹。

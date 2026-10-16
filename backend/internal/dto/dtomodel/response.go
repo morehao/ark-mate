@@ -15,6 +15,17 @@ type ConfigOptionValueResp struct {
 	// Unavailable 平台观测：该值最近被运行时拒绝过（如凭证缺失）。仅作提示，最终以运行时为准。
 	Unavailable       bool   `json:"unavailable,omitempty"`
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
+	// ModelID 这个候选对应**平台清单里的哪一行**（`mdl_…`；空 = 平台没有声明过它）——v26 加。
+	//
+	// 会话的 `model`（创建/切换）收的是**平台模型行 id**，而选择发生在**运行时目录**上，所以
+	// 注解必须跟着候选走：前端一次取数就能"选运行时值、提交平台 id"，不必同时持有两份清单再自己 join。
+	//
+	// 怎么算出来的：对每条平台行算**派生值**（`modelValueFor`）再与候选逐字比对——**比对派生值 ≠
+	// 解析不透明值**，所以这不违反"平台不解析底座词表"。多命中按 fail-closed（不注解 = 客户端选不了它）。
+	//
+	// **刻意不复用 `Unavailable`**：那个字段的含义是"**底座拒过**这个值"（动态学到的事实），
+	// "平台没声明过它"是另一件静态的事；一个字段塞两种含义会让界面上那句「不可用」变成假话。
+	ModelID string `json:"model_id,omitempty"`
 }
 
 // ConfigOptionResp 一个会话配置项（ACP session config option 的直投影）。

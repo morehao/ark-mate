@@ -121,12 +121,12 @@ func (d *RowDao[T, L]) DeleteCAS(ctx context.Context, id string, expectedRev int
 const (
 	// providerListOrder 供应商列表：按 id 升序（与 v11/v12 的 `List` 语义逐字相同）。
 	providerListOrder = "id ASC"
-	// modelListOrder 模型清单：**按 (provider_id, model_id) 升序**（ADR-6）。
+	// modelListOrder 模型清单：**按 (provider_id, model) 升序**（ADR-6）。
 	//
 	// 为什么不是 `created_at DESC`：存量行的 created_at 是 updated_at 近似值，按它排会把
-	// "最后改备注的时刻"当插入序；而 `(provider_id, model_id)` 与设置页的供应商分组一致，
+	// "最后改备注的时刻"当插入序；而 `(provider_id, model)` 与设置页的供应商分组一致，
 	// 且对老行新行都立刻有意义。
-	modelListOrder = "provider_id ASC, model_id ASC"
+	modelListOrder = "provider_id ASC, model ASC"
 )
 
 // ProviderDao 访问 providers 表（v13：列 + revision CAS）。
@@ -164,7 +164,7 @@ func (d *ModelDao) WithTx(tx *gorm.DB) *ModelDao {
 	return &ModelDao{RowDao: d.RowDao.WithTx(tx)}
 }
 
-// ListAll 列出全部模型条目（`(provider_id, model_id)` 升序）。
+// ListAll 列出全部模型条目（`(provider_id, model)` 升序）。
 //
 // v12 起模型**不带 runtime 维度**，所以"列某 runtime 的清单"不再是一个查询轴：
 // 同一份清单投给所有已注册底座，`ListAll` 就是同步时的那一次读取。
@@ -182,13 +182,13 @@ func (d *ModelDao) ListByProvider(ctx context.Context, providerID string) (model
 	return rows, err
 }
 
-// GetByProviderModel 按 `(provider_id, model_id)` 取一条（`model_exists` 判定；不存在 → (nil,false,nil)）。
+// GetByProviderModel 按 `(provider_id, model)` 取一条（`model_exists` 判定；不存在 → (nil,false,nil)）。
 //
 // 它对应的就是唯一索引 `idx_models_provider_model`：**判据交由库级唯一性表达**，
 // 而不是"先查后写"（那中间有窗口）。
-func (d *ModelDao) GetByProviderModel(ctx context.Context, providerID, modelID string) (*model.ModelEntity, bool, error) {
+func (d *ModelDao) GetByProviderModel(ctx context.Context, providerID, upstreamModel string) (*model.ModelEntity, bool, error) {
 	var row model.ModelEntity
-	err := d.DB(ctx).Where("provider_id = ? AND model_id = ?", providerID, modelID).Take(&row).Error
+	err := d.DB(ctx).Where("provider_id = ? AND model = ?", providerID, upstreamModel).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, nil
 	}

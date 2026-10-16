@@ -113,9 +113,9 @@ type Model struct {
 	ID string
 	// ProviderID 挂靠的供应商 id。
 	ProviderID string
-	// ModelID 发给上游的模型 id（**不是**平台 id）。
-	ModelID string
-	// Name 展示名（空 = 回落 ModelID）。
+	// Model 发给上游的模型名（**不是**平台 id）；线上键名就是 `model`（v24 从 `model_id` 改名）。
+	Model string
+	// Name 展示名（空 = 回落 Model）。
 	Name string
 	// InputModalities 该模型能接受的输入模态（**总是带值**，默认 `["text"]`）。
 	//
@@ -126,18 +126,28 @@ type Model struct {
 	// ——代价是覆盖底座 catalog（底座目录里本来能收图的模型会变成纯文本，除非用户勾选图片）。
 	// 这条代价是拍板结果、不是 bug：界面必须让用户能看见并一键改。
 	InputModalities []string
+	// MaxInputTokens / MaxOutputTokens **平台声明的容量**（v25；nil = 未声明）。
+	//
+	// 为什么是**指针**而不是 int64：nil（未声明）与一个数（声明过）必须可分——adapter 只在非 nil 时
+	// 写底座对应字段，nil 就什么都不写（让底座自己的兜底生效，并在诊断里如实说"这不是平台声明"）。
+	// 0 不是合法容量（底座 schema 是 `min(1)`），写面已把它折成 nil。
+	//
+	// 字段名用平台的词（输入/输出上限），**不抄底座**的 `contextWindow`/`maxTokens`：那是底座词表，
+	// 映射只住在 adapter 里（A9 的精神）。
+	MaxInputTokens  *int64
+	MaxOutputTokens *int64
 }
 
 // Set 某个 runtime 该拿到的**一整份**清单（整份替换语义，不是增量）。
 //
-// 顺序由编排层固定（Providers 按 ID、Models 按 ProviderID+ModelID），保证同输入同字节
+// 顺序由编排层固定（Providers 按 ID、Models 按 ProviderID+Model），保证同输入同字节
 // ——逐字节 golden 等价性（A4/A5）依赖这条。
 type Set struct {
 	Runtime   string
 	Providers []Provider
 	Models    []Model
-	// DefaultModel 平台模型 id（= `Model.ID`，不是发给上游的那个 `ModelID`）；空 = 不下发默认模型。
-	// 由 adapter 自行在 Models 里解析出上游 id——端口两边各用各的词汇，不做隐式转换。
+	// DefaultModel 平台模型 id（= `Model.ID`，不是发给上游的那个 `Model`）；空 = 不下发默认模型。
+	// 由 adapter 自行在 Models 里解析出上游模型名——端口两边各用各的词汇，不做隐式转换。
 	DefaultModel string
 	// CredentialDocPath 出参：**已解析的绝对路径**（空 = 本 runtime 不走原生凭据文档）。
 	//

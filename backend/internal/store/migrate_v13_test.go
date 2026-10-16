@@ -156,8 +156,18 @@ func TestMigrateV13(t *testing.T) {
 		"m-empty":  {"p-both", "e-1", "", "", "text", 1},
 		"m-orphan": {"nope", "x-1", "孤儿", "", "text", 1},
 	}
-	mrows, err := s.ListModelDefinitions(ctx)
-	if err != nil {
+	// 本用例的上界停在 v13，所以这里**走裸 SQL + 历史列名**（`model_id` 是 v13 那一版的名字）。
+	//
+	// 为什么不用 `s.ListModelDefinitions`：DAO 认的是**今天**那一版（v24 起 `ORDER BY provider_id, model`），
+	// 拿它读 v13 库会当场 `no such column: model`——这正是"停在旧版的夹具必须按当时那一版的名字走裸 SQL"
+	// 这条纪律的现场。改回 DAO 会让本用例红在查询上，而不是红在被测的迁移上。
+	type v13ModelRow struct {
+		ID, ProviderID, ModelID, Name, Note, InputModalities string
+		Revision                                             int64
+	}
+	var mrows []v13ModelRow
+	if err := s.db.Raw(`SELECT id, provider_id, model_id, name, note, input_modalities, revision
+		FROM models ORDER BY provider_id, model_id`).Scan(&mrows).Error; err != nil {
 		t.Fatalf("列模型: %v", err)
 	}
 	if len(mrows) != len(modelWants) {

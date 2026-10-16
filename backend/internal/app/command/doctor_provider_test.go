@@ -107,7 +107,7 @@ func TestDoctorProviderSectionClean(t *testing.T) {
 		seedProvider(t, st, "p1", "sk-p1")
 		// 引用者是模型条目（v19：供应商的唯一引用者；默认模型决定注入哪条档案）。
 		if created, err := st.CreateModelDefinition(context.Background(), store.ModelColumns{
-			ID: "mdl_a1", ProviderID: "p1", ModelID: "m-1", InputModalities: "text",
+			ID: "mdl_a1", ProviderID: "p1", Model: "m-1", InputModalities: "text",
 		}, "t"); err != nil || !created {
 			t.Fatalf("造模型行: created=%v err=%v", created, err)
 		}

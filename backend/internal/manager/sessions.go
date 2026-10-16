@@ -107,7 +107,6 @@ func toSessionResp(r *SessionRec) dtosession.SessionResp {
 		Title:              r.Title,
 		Pinned:             r.Pinned,
 		Archived:           r.Archived,
-		Provider:           r.ProviderID,
 		Model:              r.ModelID,
 		Cwd:                r.Cwd,
 		WorkspaceTemporary: r.WorkspaceTemporary,
@@ -194,14 +193,26 @@ func (s *Service) UpdateSession(ctx context.Context, id string, patch dtosession
 	if patch.Archived != nil {
 		r.Archived = *patch.Archived
 	}
+	// 会话的 runtime 身份在**持锁区**里读出来（它在会话建立后不再变，但"不变"不该靠约定：
+	// 解锁之后再读 `r` 的字段，读到的就可能是另一个 goroutine 刚写过的值）。
+	sessionRuntime := r.RuntimeID
 	r.UpdatedAt = time.Now().UTC()
 	s.mu.Unlock()
 
 	// 会话内改模型：活会话经 session/set_config_option 立即生效（运行时是唯一判据）；
 	// 失败即上抛且**不落元数据**（避免「界面显示新模型、实际仍用旧的」的静默偏差）。
 	// 会话不活跃（未启动/已断连）→ 只更新元数据，下次恢复会话时生效。
+	//
+	// v26：`patch.Model` 是**平台模型行 id**，必须先在**活跃集合之外**解析成"行 + 运行时值"
+	// （解析要读库，而上面那段持锁区不许读库——症状是偶发死锁）。解析失败即上抛（40401），
+	// **一个字节都不落库**：静默换模型是这一版最该防的失败。
+	appliedModelID := patch.Model
 	if patch.Model != nil {
-		applied, err := s.orch.ApplySessionModel(ctx, id, runtime.ModelConfig{Model: *patch.Model})
+		platformID, cfg, err := s.resolveSessionModel(ctx, sessionRuntime, *patch.Model)
+		if err != nil {
+			return nil, code.FromError(err)
+		}
+		applied, err := s.orch.ApplySessionModel(ctx, id, cfg)
 		if err != nil {
 			return nil, code.FromError(err)
 		}
@@ -209,13 +220,15 @@ func (s *Service) UpdateSession(ctx context.Context, id string, patch dtosession
 			glog.Debugw(ctx, "会话不在活跃集合，模型变更仅更新元数据", "session", id)
 		}
 		s.mu.Lock()
-		r.ModelID = *patch.Model
+		// **落库的是身份**（平台行 id），不是运行时值——定案「辰」的核心。
+		r.ModelID = platformID
 		r.UpdatedAt = time.Now().UTC()
 		s.mu.Unlock()
+		appliedModelID = &platformID
 	}
 
 	if s.st != nil {
-		meta := model.SessionMetaPatch{Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived, ModelID: patch.Model}
+		meta := model.SessionMetaPatch{Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived, ModelID: appliedModelID}
 		ctx2, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
 		if err := s.st.UpdateSessionMeta(ctx2, id, meta); err != nil {

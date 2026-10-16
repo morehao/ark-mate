@@ -23,7 +23,7 @@ import (
 //
 // 本文件**不判断某个底座属于哪一类**（那是各 adapter 自己的事），只如实报两侧。
 // 判据始终是"**平台声明 → 该 runtime 认得的不透明值**"（`modelValueFor`，形态由该 adapter
-// 声明，见 `pkg/runtime/model_value.go`），不是 `model_id` 字符串比对——运行时的目录里
+// 声明，见 `pkg/runtime/model_value.go`），不是上游模型名的字符串比对——运行时的目录里
 // 只有它自己的不透明串。
 
 // advertisedSample 一次运行时目录取样（**事实一侧**），并带上"这份取样到底可不可信"的来源。

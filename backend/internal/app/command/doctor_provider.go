@@ -66,6 +66,8 @@ func checkProviderSection(opts doctorOptions) (manager.ProviderDoctorFacts, []do
 	checks = append(checks, checkMigrationNotesV13(facts))
 	checks = append(checks, checkSensitiveFiles(facts)...)
 	checks = append(checks, checkModalityDeclaration(facts))
+	// v25 新增：容量声明面（未声明 → 用底座兜底；只报不判红）。
+	checks = append(checks, checkModelCapacity(facts))
 	checks = append(checks, checkRuntimeModels(facts)...)
 	return facts, checks
 }
@@ -328,6 +330,38 @@ func checkModalityDeclaration(facts manager.ProviderDoctorFacts) doctorCheck {
 		return doctorCheck{name, doctorWarn, detail}
 	}
 	return doctorCheck{name, doctorOK, detail}
+}
+
+// checkModelCapacity 容量声明面（v25）：未声明的模型会落到**底座自己的兜底**，而不是平台事实。
+//
+// 为什么要单列一条：路由键加上保留前缀之后（v24–v25 的路由键隔离），每条路由都是平台手写的声明，
+// 底座内置目录**再也命中不了**——于是"容量"不再有"恰好命中目录时侥幸拿到真值"这条退路：平台不说，
+// 就是底座那句自注 "a guess by construction" 的默认值（dsh 的 262144/32768）。这条体检回答的是
+// "我看到的上下文上限，到底是不是我设的"。
+//
+// **不判红**：没声明是一个合法状态（用户可能有意让环境决定），所以最高只到 warn——但要把条数与
+// 具体是哪些**说出来**，并给出路（「设置 · 模型」逐条填）。
+func checkModelCapacity(facts manager.ProviderDoctorFacts) doctorCheck {
+	name := "模型容量声明"
+	if facts.Carrier != "db" {
+		return doctorCheck{name, doctorWarn, "载体不是 DB（" + orDash(facts.CarrierNote) + "）：容量声明面无从校验"}
+	}
+	if facts.ModelRows == 0 {
+		return doctorCheck{name, doctorWarn, "平台模型清单为空：没有可校验的容量声明"}
+	}
+	none, half := facts.ModelsWithoutCapacity, facts.ModelsPartialCapacity
+	if len(none) == 0 && len(half) == 0 {
+		return doctorCheck{name, doctorOK,
+			fmt.Sprintf("清单里 %d 条模型都声明了输入/输出上限", facts.ModelRows)}
+	}
+	detail := fmt.Sprintf("清单共 %d 条：**%d 条未声明容量**（用底座兜底——那不是平台事实）%s",
+		facts.ModelRows, len(none), bracketList(none))
+	if len(half) > 0 {
+		detail += fmt.Sprintf("；**%d 条只声明了一半**（用户以为设过了，实际只有一半是自己的值）%s",
+			len(half), bracketList(half))
+	}
+	detail += "；出路：「设置 · 模型」里逐条填「输入上限/输出上限」（留空 = 继续由环境兜底）"
+	return doctorCheck{name, doctorWarn, detail}
 }
 
 // checkRuntimeModels 逐 runtime 的清单物化状态与差集。

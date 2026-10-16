@@ -92,7 +92,7 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 	}); err != nil && errCode(err) != "provider_exists" {
 		t.Fatalf("CreateProvider(%s): %v", providerID, err)
 	}
-	req := dtomodel.ModelCreateReq{ProviderID: providerID, ModelID: modelID}
+	req := dtomodel.ModelCreateReq{ProviderID: providerID, Model: modelID}
 	for _, m := range mutate {
 		m(&req)
 	}
@@ -109,7 +109,7 @@ func TestModelListFailureFaces(t *testing.T) {
 	r := newModelRig(t)
 
 	// ① 请求体里带 `runtime` → 40001（A2）：模型不再分底座，静默收下等于承认它有意义。
-	_, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p1", ModelID: "m", Runtime: ptr(runtimetest.ID)})
+	_, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p1", Model: "m", Runtime: ptr(runtimetest.ID)})
 	if errCode(err) != "invalid_param" || codeOf(err) != 40001 {
 		t.Fatalf("带 runtime 应 40001 invalid_param，got %q/%d（%v）", errCode(err), codeOf(err), err)
 	}
@@ -118,19 +118,19 @@ func TestModelListFailureFaces(t *testing.T) {
 	}
 
 	// ② provider 不存在 → 40401 provider_not_found。
-	_, err = r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "nope", ModelID: "m"})
+	_, err = r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "nope", Model: "m"})
 	if errCode(err) != "provider_not_found" || codeOf(err) != 40401 {
 		t.Fatalf("provider 不存在应 40401 provider_not_found，got %q/%d（%v）", errCode(err), codeOf(err), err)
 	}
 
 	// ③ 同 `(provider_id, model_id)` 重复 → 40901 model_exists。
 	r.createModel(t, "p1", "v4-flash")
-	_, err = r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p1", ModelID: "v4-flash"})
+	_, err = r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p1", Model: "v4-flash"})
 	if errCode(err) != "model_exists" || codeOf(err) != 40901 {
 		t.Fatalf("重复 (provider_id, model_id) 应 40901 model_exists，got %q/%d（%v）", errCode(err), codeOf(err), err)
 	}
 	// 换 provider → 是另一条（同一模型 id 可以挂在两个端点下）。
-	if _, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p2", ModelID: "v4-flash"}); errCode(err) != "provider_not_found" {
+	if _, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p2", Model: "v4-flash"}); errCode(err) != "provider_not_found" {
 		t.Fatalf("p2 还没建，应先报 provider_not_found，got %q", errCode(err))
 	}
 	r.createModel(t, "p2", "v4-flash")
@@ -188,7 +188,8 @@ func TestDefaultModelIsSingleAndDeleteClears(t *testing.T) {
 // 判据是"同一输入产出逐字节相同的值"——本测试用两个**形态不同**的实现把"内核没有内建形态"
 // 这件事钉住：
 //
-//	dsh（真实 adapter，走 `pkg/runtime/dsh`）：`["<provider>","<model>"]`（JSON 数组）
+//	dsh（真实 adapter，走 `pkg/runtime/dsh`）：`["mate-<provider>","<model>"]`（JSON 数组；第一段是
+//	派生路由键，v25 起带平台保留前缀）
 //	rtx（合成夹具，走 internal/testutil/runtimetest）：`<provider>/<model>`
 //
 // 两者形态**刻意不同**：如果内核还留着一个 `switch runtimeID`，它就必然挑中其中一个形态、
@@ -200,7 +201,8 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != `["deepseek-main","deepseek-v4-flash"]` {
+	// v25 起第一段是**派生后的路由键**（带平台保留前缀）——它与配置里声明的键必须逐字同源。
+	if v != `["mate-deepseek-main","deepseek-v4-flash"]` {
 		t.Fatalf("内置底座的模型值形态不符: %q", v)
 	}
 	var arr []string
@@ -232,7 +234,7 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("读行: found=%v err=%v", found, err)
 	}
-	if row.ModelID != "v4-flash" || row.ProviderID != "p1" {
+	if row.Model != "v4-flash" || row.ProviderID != "p1" {
 		t.Fatalf("身份列应逐字落库: %+v", row)
 	}
 	// v13 列化之后"生成的值"连落点都没有：整行字段是列，没有自由 JSON 可塞。
@@ -245,7 +247,7 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 func TestModelListRequiresSQLite(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(runtime.AllBuiltinRegistry(), eventbus.New())
-	_, err := svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p", ModelID: "m"})
+	_, err := svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p", Model: "m"})
 	if errCode(err) != "model_list_unavailable" || codeOf(err) != 40501 {
 		t.Fatalf("memory 模式的清单写面应 40501 model_list_unavailable，got %q/%d（%v）", errCode(err), codeOf(err), err)
 	}

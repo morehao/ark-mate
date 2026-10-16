@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
@@ -72,7 +73,7 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 		rec := &SessionRec{
 			ID: sess.ID, Cwd: sess.Cwd,
 			WorkspaceID:        sess.WorkspaceID,
-			WorkspaceTemporary: sess.WorkspaceTemporary, ProviderID: sess.ProviderID,
+			WorkspaceTemporary: sess.WorkspaceTemporary,
 			ModelID: sess.ModelID, RuntimeID: runtime.NormalizeID(sess.RuntimeID),
 			RuntimeSessionID: sess.RuntimeSessionID,
 			Title:            sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
@@ -118,6 +119,9 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 	// 读模型重建（v21）：迁移把 `meta.read_models_rebuild` 置成刚跑过的版本号，表示"位次口径换了、
 	// 旧读模型里的窗口列已经不可信"。此处消费它并清标记——**只有这一条路径**（见 model/enum.go）。
 	s.rebuildStaleReadModels(ctx)
+	// 会话模型引用回填（v26）：`sessions.model_id` 从"底座的不透明值"改成"平台模型行 id"，
+	// 存量只能在应用层换算（迁移里做不了：那只把标记置起来）。同一条恢复路径、同一条纪律。
+	s.backfillSessionModelRefs(ctx)
 	// §6：重启前排队未投递的输入一律作废——它们等的那一轮已随进程消失，自动重放等于替用户
 	// 按下发送（且上下文已断）。保留行仅作审计（见 inputqueue.go）。
 	s.staleQueuedInputsOnRestore(ctx)
@@ -160,6 +164,127 @@ func (s *Service) rebuildStaleReadModels(ctx context.Context) {
 		return
 	}
 	glog.Infow(ctx, "read models rebuilt", "migration", ver, "sessions", total)
+}
+
+// backfillSessionModelRefs 消费 `meta.sessions_model_ref_backfill`（v26 定案「辰」的存量回填）。
+//
+// 一次性、**幂等**、best-effort：
+//
+//	① 读标记；无值即返回（只有这一条路径消费它，同 G7 的纪律）；
+//	② 对每个 runtime 建"该 runtime 的运行时值 → 平台模型行 id"的表（`modelValueFor` 派生，
+//	   多命中按 fail-closed 不收录——与目录注解同一份口径）；
+//	③ 存量 `model_id` 是**旧形态的不透明值**：唯一命中才写 `model_id = <行 id>`；
+//	   零命中 / 多命中一律**置空串**并按类别计数（日志里给条数与样例）——
+//	   空 = "没有模型引用"，与 `sessions.model_id` 的 `NOT NULL DEFAULT ''` 一致；
+//	④ **已经是平台 id 的行直接跳过**：这是幂等的关键——否则"上一次跑到一半"的产物会在下一次
+//	   被当成"旧形态的不透明值"而清掉（把成功的结果当成失败来处置）；
+//	⑤ 全部成功才清标记；任何一步失败只 WARN、**标记留着**（下次启动重试）。
+//	   **绝不在"算不出来"时打勾**：算不出来 = 下次还有机会，打勾 = 永久把一次失败固化成事实。
+//
+// 代价（如实写进升级文档，不是迁移的 bug）：模型**从未被平台声明过**的会话，升级后失去模型选择，
+// 下一次发消息落到平台默认（或底座默认）。这是"可表示性收窄"的直接后果——平台只接受自己声明过的
+// 模型，回填只是尽力把能对上的救回来。
+func (s *Service) backfillSessionModelRefs(ctx context.Context) {
+	if s.st == nil {
+		return
+	}
+	ver, ok, err := s.st.GetMeta(ctx, model.MetaKeySessionsModelRefBackfill)
+	if err != nil {
+		glog.Warnw(ctx, "session model refs: 读回填标记失败", "err", err)
+		return
+	}
+	if !ok || ver == "" {
+		return
+	}
+	sessions, err := s.st.ListSessions(ctx, nil)
+	if err != nil {
+		glog.Warnw(ctx, "session model refs: 列会话失败（回填跳过，标记保留）", "err", err)
+		return
+	}
+
+	// 按 runtime 惰性建表：`modelValueFor` 逐 runtime 形态不同，混在一起算会把 A 底座的值
+	// 拿去比 B 底座的声明。
+	byRuntime := map[string]map[string]string{}
+	valueTable := func(runtimeID string) map[string]string {
+		if t, done := byRuntime[runtimeID]; done {
+			return t
+		}
+		t := s.runtimeValueToModelID(ctx, runtimeID)
+		byRuntime[runtimeID] = t
+		return t
+	}
+
+	migrated, cleared, skipped, failed := 0, 0, 0, 0
+	clearedSample := []string{}
+	for i := range sessions {
+		rec := sessions[i]
+		cur := strings.TrimSpace(rec.ModelID)
+		if cur == "" {
+			continue
+		}
+		if strings.HasPrefix(cur, objid.Model) && objid.IsPlatformID(cur) {
+			skipped++ // 已经是平台 id（上一次跑到一半的产物）：幂等，不动它
+			continue
+		}
+		runtimeID := runtime.NormalizeID(rec.RuntimeID)
+		next := valueTable(runtimeID)[cur]
+		if next == "" {
+			cleared++
+			if len(clearedSample) < 5 {
+				clearedSample = append(clearedSample, rec.ID)
+			}
+		} else {
+			migrated++
+		}
+		if err := s.st.SetSessionModelID(ctx, rec.ID, next); err != nil {
+			failed++
+			glog.Warnw(ctx, "session model refs: 写回一条失败（标记保留，下次重试）",
+				"session", rec.ID, "err", err)
+		}
+	}
+	if failed > 0 {
+		glog.Warnw(ctx, "session model refs: 回填未全部成功，标记保留待下次重试",
+			"migration", ver, "failed", failed, "total", len(sessions))
+		return
+	}
+	if err := s.st.DeleteMeta(ctx, model.MetaKeySessionsModelRefBackfill); err != nil {
+		glog.Warnw(ctx, "session model refs: 清回填标记失败", "err", err)
+		return
+	}
+	// 清不掉的会话**按类别计数**（"失去了模型选择"这件事必须被看见，不能静默）。
+	glog.Infow(ctx, "session model refs backfilled", "migration", ver, "sessions", len(sessions),
+		"migrated", migrated, "cleared", cleared, "already_platform_id", skipped,
+		"cleared_sample", clearedSample)
+}
+
+// runtimeValueToModelID 建"该 runtime 的运行时值 → 平台模型行 id"表（多命中按 fail-closed 不收录）。
+//
+// 与 `modelIDByValue`（目录注解）同口径：**派生值对派生值**，平台不解析底座词表。两处都必须
+// fail-closed——"两条平台行派生出同一个值"时随便挑一条就是静默选错模型。
+func (s *Service) runtimeValueToModelID(ctx context.Context, runtimeID string) map[string]string {
+	rows, err := s.st.ListModelDefinitions(ctx)
+	if err != nil {
+		glog.Warnw(ctx, "session model refs: 读平台清单失败（该底座本次全部按零命中处置）",
+			"runtime", runtimeID, "err", err)
+		return nil
+	}
+	seen := make(map[string]string, len(rows))
+	dup := map[string]bool{}
+	for i := range rows {
+		v, verr := modelValueFor(s.reg, runtimeID, rows[i].ProviderID, rows[i].Model)
+		if verr != nil || v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			dup[v] = true
+			continue
+		}
+		seen[v] = rows[i].ID
+	}
+	for v := range dup {
+		delete(seen, v)
+	}
+	return seen
 }
 
 // rebuildAllReadModels 重建**全部会话**的读模型：返回会话总数与失败数。
@@ -383,7 +508,6 @@ func (s *Service) persistSession(rec *SessionRec) {
 		Cwd:                rec.Cwd,
 		WorkspaceID:        rec.WorkspaceID,
 		WorkspaceTemporary: rec.WorkspaceTemporary,
-		ProviderID:         rec.ProviderID,
 		ModelID:            rec.ModelID,
 		RuntimeID:          rec.RuntimeID,
 		RuntimeSessionID:   rec.RuntimeSessionID,

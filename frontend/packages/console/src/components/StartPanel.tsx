@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from 'antd'
 import { ArrowUpOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import { modelValues } from '@ark-mate/types'
+import { advertisedModelValues, modelValues, undeclaredModelValues, isPlatformModelID } from '@ark-mate/types'
 import { useMate } from '../store'
 import { ModelSelect } from './ModelSelect'
 import { WorkspacePicker, type WorkspaceChoice } from './WorkspacePicker'
@@ -12,10 +12,29 @@ import { CapabilityPicker } from './CapabilityPicker'
 import { FOLLOW_DEFAULT, selectionPayload, type CapabilityChoice } from '../console/capabilityView'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
 
-// 新建会话时记住的「上次所选模型」。
+// 新建会话时记住的「上次所选模型」——存的是**平台模型行 id**（`mdl_…`；v26 起）。
 // 键名前缀随 M0-1 的前端产品包改名统一为 `mate.web.*`（与其它前端持久键同前缀）；
 // 旧键名不回填——代价是既有本地选择在改名后一次性回到默认模型。
+//
+// v26 顺带改了一次**值**的形态（旧值是不透明串），于是这个键有了两层自愈（见 `readStoredModel`
+// 与下面的 effect）：**形状不对的无条件清掉**（不等目录），形状对但已不在候选里的等目录到了再清。
+// 为什么要分两层：2026-10-15 的真实事故是"等目录"等成了一个死锁——目录为空的那些天里，
+// 旧值一直留着，而每次发送都被平台以 40401 拒（下拉里又没有别的候选可换）。
 const LAST_MODEL_KEY = 'mate.web.lastModel'
+
+// 本地记住的模型 → 平台行 id 或 `null`。
+//
+// 形状不对（v26 之前的运行时 value，如 `["yygu","deepseek-flash"]`）**当场丢弃**：平台只接受
+// 自己声明过的模型，这种值发出去必被拒，而它在界面上与合法值长得一模一样。
+const readStoredModel = (): string | null => {
+  const v = localStorage.getItem(LAST_MODEL_KEY)?.trim()
+  if (!v) return null
+  if (!isPlatformModelID(v)) {
+    localStorage.removeItem(LAST_MODEL_KEY)
+    return null
+  }
+  return v
+}
 
 // 示例指令（参照 AionUi /guid「试试这些指令」：`pages/guid/GuidPage.tsx`）
 const EXAMPLES = [
@@ -44,10 +63,8 @@ export function StartPanel() {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
-  const [model, setModel] = useState<string | null>(() => {
-    const v = localStorage.getItem(LAST_MODEL_KEY)
-    return v && v.trim() ? v : null
-  })
+  // 初值只认**形状合法**的本地记忆（`readStoredModel`：形状不对的当场丢弃，不等目录）。
+  const [model, setModel] = useState<string | null>(readStoredModel)
   // 工作空间选择（v14）：`null` = 未指定（会话落在**默认工作空间**）；否则是选中的登记 id
   // （v14.3 起这里只剩 id：选择面删掉「输入路径」后，前端不再产生裸绝对路径这种值）。
   //
@@ -100,13 +117,28 @@ export function StartPanel() {
   const empty = draft.trim().length === 0
   const canSend = !empty && !sending
 
-  // 候选全部来自运行时自报的配置项（平台无内置清单）：category=model 的候选值；
-  // 为空 = 运行时没有可切换的模型（空态提示 + note/登录引导）。
-  const modelOptions = modelValues(modelCatalog ?? undefined)
+  // 候选的**两个面**（v27，别合并）：
+  //	- `advertised`：运行时广告的全部候选 —— 只服务两条判断（目录到没到、广告了几个）；
+  //	- `modelOptions`：**能选**的那些（= 广告 ∩ 平台清单）。喂给选择器的只有它——用户要的是
+  //	  "设置里配过的模型"，广告里对不上平台行的候选（`model_id` 为空）既选不了也不是他要找的。
+  const advertised = useMemo(() => advertisedModelValues(modelCatalog ?? undefined), [modelCatalog])
+  const modelOptions = useMemo(() => modelValues(modelCatalog ?? undefined), [modelCatalog])
+  // 广告了、但平台没声明过的那部分。**收窄不许是静默的**（那正是 v26 当初不肯过滤的理由）：
+  // 它在这里换成一句人话，见下面的 `narrowedNote`。
+  const undeclared = useMemo(() => undeclaredModelValues(modelCatalog ?? undefined), [modelCatalog])
   const catalogNote = modelCatalog?.note ?? ''
   const authHint = (modelCatalog?.auth_guidance ?? [])
     .map((g) => (g.terminal && g.command?.length ? `${g.name}：${g.command.join(' ')}` : g.name))
     .join(' ｜ ')
+  // 下拉为空**至少有两种成因**，文案必须分开（同后端 `catalogEmptyNote` 的理由）：
+  //	① 运行时此刻一个候选都没广告 → `catalogNote` 会说清是哪一种；
+  //	② 广告了，但没有一条在平台清单里（`undeclared` 非空）——2026-10-16 截图里那种，
+  //	   而"广告了 N 个"这件事只有这里看得见（收窄之后选择器里一个都不剩）。
+  const narrowedNote =
+    modelOptions.length === 0 && undeclared.length > 0
+      ? `当前模型目录里的 ${undeclared.length} 个候选都不是「设置 · 模型」里配置过的模型：` +
+        '先到那里添加供应商与模型。'
+      : ''
 
   // 拉取模型目录（v19 起这条读面无参：取样对象就是构建期固定的那个底座，
   // 后端按运行时会话/缓存/resume 取样）。
@@ -114,15 +146,31 @@ export function StartPanel() {
     void loadModelCatalog()
   }, [loadModelCatalog])
 
-  // 本地记住的模型若已不在运行时候选里（换了底座/换了已配置的 provider），就地清掉：
-  // 否则会把运行时不再广告的值发出去 → 建会话被拒（宁可回到「跟随默认」，不留死状态）。
+  // 本地记住的模型的自愈分两层，**形状那一层不许等目录**：
+  //
+  //	① 形状不对（v26 之前的运行时 value，或别的底座的词）：无条件清掉。等目录到齐再清是个
+  //	   死锁——目录为空时那句 `return` 会让旧值永远留着，于是每次发送都被 40401 拒，而下拉里
+  //	   一个候选都没有、用户无从替换（2026-10-15 的真实事故）；
+  //	② 形状对但已不在运行时候选里（换了底座 / 模型行被删）：等目录到了再判——目录为空只代表
+  //	   "还不知道"，不代表"没有"。比的是候选的 **`model_id` 注解**（本地存的是平台模型行 id），
+  //	   不是候选的 `value`（那是底座的词，两者比不出结果，症状是"每次打开都把记住的模型清掉"）。
+  //
+  // 闸门取**广告面**（`advertised`）而不是收窄后的候选（v27）：两个问题不同——"目录到没到"看广告，
+  // "这条能不能选"看 `model_id` 注解。拿收窄后的列表当闸门，会把"平台清单为空、底座却广告了一堆"
+  // 这一态变成"保持旧值"，而旧值正是发出去必被 40401 拒的那种——那正是 v26.1 修掉的死锁形状。
   useEffect(() => {
-    if (!model || modelOptions.length === 0) return
-    if (!modelOptions.some((v) => v.value === model)) {
+    if (!model) return
+    if (!isPlatformModelID(model)) {
+      setModel(null)
+      localStorage.removeItem(LAST_MODEL_KEY)
+      return
+    }
+    if (advertised.length === 0) return
+    if (!advertised.some((v) => v.model_id === model)) {
       setModel(null)
       localStorage.removeItem(LAST_MODEL_KEY)
     }
-  }, [model, modelOptions])
+  }, [model, advertised])
 
   // 选中的登记项**不在这里校验**目录是否存在：它的目录状态由 `GET /workspaces` 的 `dir_status`
   // 下发，选择器已经据此禁用了不可用的那一行（拿 id 去 `browse` 是问错了接口）。
@@ -133,15 +181,19 @@ export function StartPanel() {
     if (!canSend) return
     setSending(true)
     try {
+      // 出口再判一次**形状**（纵深防御：状态只该由上面两条路写进来，但那两条路都不该是
+      // "不合法值能发出去"的唯一保证）。形状不对 → 一个字都不带，回到「跟随默认」——
+      // 平台只接受自己声明过的模型，带一个形状不对的值只会换来一次 40401。
+      const picked = isPlatformModelID(model) ? model : null
       const id = await createAndRun(
         draft.trim(),
-        model ? { modelID: model } : undefined,
+        picked ? { modelID: picked } : undefined,
         workspace.id,
         // UI 三态（null = 未限制）→ wire 形态（键缺失 = 未限制）：两个 kind 都没限制时返回
         // undefined，请求体里连 capabilities 键都不出现。转换只此一处，别的层不再判。
         selectionPayload(capabilities),
       )
-      if (model) localStorage.setItem(LAST_MODEL_KEY, model)
+      if (picked) localStorage.setItem(LAST_MODEL_KEY, picked)
       if (id) navigate(`/sessions/${id}`)
     } finally {
       setSending(false)
@@ -276,6 +328,8 @@ export function StartPanel() {
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                 {/* 会话级模型选择器：关闭态只显示名称；候选、描述与空目录提示都在下拉里
                     （下拉即「浏览全部」，不再单独开弹窗）。创建时经 set_config_option 应用。
+                    候选只喂**平台清单里声明过的**那些（v27，见上面两个面的注释）——"运行时
+                    无可用模型"这种说法在收窄之后是假话（运行时可能广告了一堆，只是都没配过）。
                     宽度由 .fg-model-pill 管（静息贴合文案、聚焦展开），这里不再固定 240px。 */}
                 <ModelSelect
                   values={modelOptions}
@@ -283,8 +337,11 @@ export function StartPanel() {
                   onChange={(v) => setModel(v)}
                   allowClear
                   size="small"
-                  placeholder={modelOptions.length === 0 ? '运行时无可用模型' : '模型 · 跟随默认'}
-                  emptyNote={[catalogNote, authHint].filter(Boolean).join(' ｜ ') || '运行时未提供模型目录'}
+                  placeholder={modelOptions.length === 0 ? '模型 · 暂无可选' : '模型 · 跟随默认'}
+                  emptyNote={
+                    [narrowedNote, catalogNote, authHint].filter(Boolean).join(' ｜ ') ||
+                    '当前没有可选的模型：到「设置 · 模型」里添加供应商与模型，再选一条默认模型。'
+                  }
                 />
 
                 <Button

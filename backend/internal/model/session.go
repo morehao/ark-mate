@@ -29,15 +29,18 @@ type SessionEntity struct {
 	// WorkspaceTemporary 该工作空间是否由平台代建（未指定 cwd 时在 workspace_dir 下建）。
 	// 权威标志：任何「临时空间」判定都必须读它，不得从路径形状反推。
 	WorkspaceTemporary bool `gorm:"column:workspace_temporary;serializer:arkmate_flag"`
-	// ProviderID provider 档案 id（会话级模型选择；空 = 跟随 agent）。
+	// 这里曾有 `ProviderID string \`gorm:"column:provider_id"\``：会话级的"用哪个供应商"。
 	//
-	// v16 起列名带 `_id`（原 `provider`）：**库里这一列是引用**（指向 `providers.id`），
-	// 于是它与 `models.provider_id` 同名同义；而 wire 上的 `provider` 是**选择器**
-	// （"选哪个供应商"），所以 DTO/前端字段名不变（设计 D5：库里的列是引用 → `_id` 结尾，
-	// 线上的字段是选择器 → 原名）。
-	ProviderID string `gorm:"column:provider_id;not null"`
-	// ModelID 会话级模型 id（空 = 底座默认）。指向 `models.model_id`，**不是** `models.id`——
-	// 后者是平台铸造的 `mdl_<ULID>` 行身份，前者才是底座认的模型名。v16 前叫 `model`。
+	// v19 删掉 agent 面之后它**再没有任何写入点**（`SessionRec.ProviderID` 只被读、从不被赋值），
+	// 线上恒为空串；v26 删列。供应商由**模型行**给出（`models.provider_id`）——会话引用的是一条
+	// 平台模型行，那一行已经说清了它挂在哪家供应商下，再存一列就是第二事实源。
+	// ModelID 会话级模型引用（空 = 底座默认）。**指向 `models.id`**（平台铸造的 `mdl_<ULID>` 行身份），
+	// **不是** `models.model`（那是"发给上游的模型名"，一个外部世界的字符串）。
+	//
+	// v26 起语义是"存**身份**、运行时值现算"（定案「辰」，设计 §5.4）：库里只留平台行 id，底座认的
+	// 不透明值（dsh 下是 `["mate-<provider>","<model>"]` 这个 JSON 数组）由 adapter **每次现算**——
+	// 于是路由键改名之后旧会话照样活得下来，而且内核的表里不再出现底座词表的字符串。
+	// v16 前叫 `model`（更早还存过"供应商/模型"两段）。
 	ModelID string `gorm:"column:model_id;not null"`
 	// RuntimeID 最近/首选 runtime（执行事实，非身份，用户不可见）。v17 前叫 `runtime_hint`。
 	//
@@ -81,16 +84,16 @@ type SessionEntityList []SessionEntity
 
 // SessionMetaPatch 会话元数据子集更新（nil = 不更新；updated_at 恒刷新）。
 type SessionMetaPatch struct {
-	Title      *string
-	Pinned     *bool
-	Archived   *bool
-	Status     *string
-	ProviderID *string
-	ModelID    *string
+	Title    *string
+	Pinned   *bool
+	Archived *bool
+	Status   *string
+	// ModelID 平台模型行 id（v26 起；`nil` = 不改）。删掉了与之并列的 `ProviderID`——那一列已出列。
+	ModelID *string
 }
 
 // Empty 判断补丁是否为空（空补丁不产生 SQL）。
 func (p SessionMetaPatch) Empty() bool {
 	return p.Title == nil && p.Pinned == nil && p.Archived == nil &&
-		p.Status == nil && p.ProviderID == nil && p.ModelID == nil
+		p.Status == nil && p.ModelID == nil
 }

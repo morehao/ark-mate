@@ -531,3 +531,155 @@ func TestModelEntitiesFollowNamingConvention(t *testing.T) {
 		t.Fatalf("实体数 %d ≠ 表名常量数 %d（一一对应）", len(entities), len(consts))
 	}
 }
+
+// TestModelsVocabularyIsModelNotModelID 守卫⑤（v24 / 计划 §4.M1.T4）。
+//
+// `models.model_id` 在本仓是**一词三义**的一半（另一半是 `models.id`）：前者是"发给上游的模型名"，
+// 后者是"平台铸造的行身份（`mdl_<ULID>`）"——两个都带 `id` 又都不是同一个东西，正是用户
+// 2026-10-15 那句「`models` 中 `id` 和 `model_id` 两个字段也很有歧义」。v24 把前者改名 `model`
+// （定案 §3 辛），此后 `_id` 一律指"指向某表 `id`"。
+//
+// 四面 + 一反向，全部 fail-closed（解析不到即失败，避免改名/搬迁后守卫静默空转）：
+//
+//	① **真 schema**：跑完整迁移的库里 `models` 有 `model`、没有 `model_id`；
+//	② **DTO**：`internal/dto/dtomodel/*.go` 剥注释后零 `model_id`（线上键名唯一事实源）；
+//	③ **前端类型**：`packages/types/src/model.ts` 剥注释后零 `model_id`；
+//	④ **实体 gorm 标签**：`internal/model/model.go` 必须是 `column:model`——标签写错**编译期无感**，
+//	   只有运行时那条 SQL 才报 `no such column`（v16 的 A1 守卫注释里写着同一件事）；
+//	⑤ **反向**（防"改过头"）：`sessions` **必须仍有** `model_id` 列——E8 的陷阱变成机器判据。
+//
+// 为什么不做全仓 grep：`model_id` 在**会话侧**是保留词（`sessions.model_id` → `models.id`，
+// 它名列其名），在**历史迁移**里是必须写出的当时那一版名字。判据按**面**限定（真 schema + DTO +
+// 前端类型 + 一个实体文件），而不是全仓子串——后者要么假红，要么得维护一张长长的白名单。
+func TestModelsVocabularyIsModelNotModelID(t *testing.T) {
+	// ① 真 schema。
+	db := migratedSchemaDB(t)
+	cols := map[string]bool{}
+	rows, err := db.Raw(`PRAGMA table_info(models)`).Rows()
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(models): %v", err)
+	}
+	for rows.Next() {
+		var (
+			cid, notnull, pk int
+			name, ctype      string
+			dflt             *string
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("扫 models 的列: %v", err)
+		}
+		cols[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("关 models 的列游标: %v", err)
+	}
+	if len(cols) == 0 {
+		t.Fatal("models 一列都没读到（fail-closed：真 schema 是这条守卫的根）")
+	}
+	if !cols["model"] {
+		t.Fatal("v24 起 `models` 必须有 `model` 列（发给上游的模型名）")
+	}
+	if cols["model_id"] {
+		t.Fatal("v24 起 `models.model_id` 必须已改名 `model`——它仍然在，说明改名没落地"+
+			"（或有人把它加了回来）")
+	}
+
+	// ② DTO：**平台清单那一面**的线上键名。
+	//
+	// 只扫 `list.go`（平台清单的对外面）而不是整个包：同一个包里还有 `response.go` 的**运行时目录面**
+	// （`ConfigOptionValueResp.ModelID` 是"这个候选对应平台哪一行"的**注解**，wire 键就叫
+	// `model_id`，v26 加的）——那是第三个含义、也是**正确**的那个名字（它真的指向 `models.id`）。
+	// 判据按**面**限定：这里问的是"平台清单行里那个'发给上游的模型名'键叫什么"。
+	listPath := filepath.Join(backendRoot(t), "internal", "dto", "dtomodel", "list.go")
+	raw, err := os.ReadFile(listPath)
+	if err != nil {
+		t.Fatalf("读不到 %s: %v（fail-closed：平台清单的线上键名是这条守卫的一半）", listPath, err)
+	}
+	if idx := strings.Index(strings.ToLower(stripLineComments(string(raw))), "model_id"); idx >= 0 {
+		t.Fatalf("%s 剥注释后仍出现 `model_id`——平台清单行的上游模型名键一律 `model`（v24）", listPath)
+	}
+	// 反向：目录面的注解必须还在（它消失时"候选 → 平台行"这条链就断了，而前端会静默地
+	// 让所有候选都变成"平台未声明"）。
+	catPath := filepath.Join(backendRoot(t), "internal", "dto", "dtomodel", "response.go")
+	raw, err = os.ReadFile(catPath)
+	if err != nil {
+		t.Fatalf("读不到 %s: %v（fail-closed）", catPath, err)
+	}
+	if !strings.Contains(string(raw), "`json:\"model_id,omitempty\"`") {
+		t.Fatalf("%s 里找不到 `json:\"model_id,omitempty\"`：目录候选的**平台行注解**是 v26 的契约，"+
+			"没了它前端只能把所有候选标成「平台未声明」", catPath)
+	}
+
+	// ③ 前端类型（fail-closed：文件不在即失败，避免"改名后路径变了"静默空转）。
+	tsPath := filepath.Join(frontendRoot(t), "packages", "types", "src", "model.ts")
+	raw, err = os.ReadFile(tsPath)
+	if err != nil {
+		t.Fatalf("读不到 %s: %v（fail-closed：前端类型面是这条守卫的一半）", tsPath, err)
+	}
+	tsSrc := stripTSComments(string(raw))
+	// 只判**平台清单**那两个接口（`ModelRow` / `ModelCreateReq`）的成员，不判整个文件：
+	// 同一个文件里还有目录候选的 `ConfigOptionValue.model_id`——那是 v26 的**注解**
+	// （候选 → 平台行），它真的指向 `models.id`，名字是对的。判据按**面**限定。
+	for _, name := range []string{"ModelRow", "ModelCreateReq"} {
+		body, ok := tsInterfaceBody(tsSrc, name)
+		if !ok {
+			t.Fatalf("在 %s 里解析不出 `export interface %s {…}` 的成员体"+
+				"（fail-closed：退化成「整文件扫」或「什么都不扫」都会让这条守卫失效）", tsPath, name)
+		}
+		if idx := strings.Index(strings.ToLower(body), "model_id"); idx >= 0 {
+			t.Fatalf("%s 的 %s 剥注释后仍出现 `model_id`——平台清单那一面的线上键一律 `model`（v24）",
+				tsPath, name)
+		}
+		if !strings.Contains(body, "model") {
+			t.Fatalf("%s 的 %s 里找不到 `model` 成员：抽取器读空了（fail-closed）", tsPath, name)
+		}
+	}
+	// 反向：目录候选的注解必须还在（它消失时前端会把所有候选静默标成"平台未声明"）。
+	if body, ok := tsInterfaceBody(tsSrc, "ConfigOptionValue"); !ok || !strings.Contains(body, "model_id") {
+		t.Fatalf("%s 的 ConfigOptionValue 里找不到 `model_id` 注解（v26 契约）："+
+			"没了它前端只能把所有候选标成「平台未声明」", tsPath)
+	}
+
+	// ④ 实体 gorm 标签。
+	entityPath := filepath.Join(backendRoot(t), "internal", "model", "model.go")
+	raw, err = os.ReadFile(entityPath)
+	if err != nil {
+		t.Fatalf("读不到 %s: %v（fail-closed）", entityPath, err)
+	}
+	entitySrc := stripLineComments(string(raw))
+	if !strings.Contains(entitySrc, "column:model;") {
+		t.Fatalf("%s 里找不到 `column:model` 标签——gorm 标签与 DDL 不同步是**编译期无感**的，"+
+			"只有运行时那条 SQL 才报 `no such column`", entityPath)
+	}
+	if strings.Contains(entitySrc, "column:model_id") {
+		t.Fatalf("%s 里仍有 `column:model_id`——实体标签必须跟到 `model`（v24）", entityPath)
+	}
+
+	// ⑤ 反向：会话侧那一列**必须还在**（E8：辰之后它的名字才是对的）。
+	var sessionModelID int64
+	if err := db.Raw(`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='model_id'`).
+		Row().Scan(&sessionModelID); err != nil {
+		t.Fatalf("读 sessions 列集合: %v", err)
+	}
+	if sessionModelID != 1 {
+		t.Fatal("`sessions.model_id` 必须仍在：它指的是 `models.id`（v24 之后这个名字才是对的）。" +
+			"把它一起改名 = 把「改会话语义」与「改列名」混在一起（计划 E8）")
+	}
+}
+
+// tsInterfaceBody 抽出 `export interface <name> { … }` 的成员体（**不含**花括号本身）。
+//
+// 为什么需要一个抽取器：词汇类判据"扫整个文件"会把同一个文件里**另一个面**的合法字段一起判红
+// （`packages/types/src/model.ts` 同时装着平台清单面与运行时目录面，两面的 `model_id` 含义不同）。
+// 按接口名取成员体是"按面限定"的最小实现，且**解析不到即失败**（调用方 fail-closed）——
+// 改写法（比如换成 `type X = {…}`）时必须有人回来把这行判据对齐，而不是让它静默空转。
+//
+// 收尾用行首的 `}`（本仓的接口一律这样排版）；成员体为空也返回 ok（那由调用方另行判空）。
+func tsInterfaceBody(src, name string) (string, bool) {
+	re := regexp.MustCompile(`(?m)^export interface ` + regexp.QuoteMeta(name) + `\s*\{([\s\S]*?)^\}`)
+	m := re.FindStringSubmatch(src)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
