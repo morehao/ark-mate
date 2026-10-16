@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"sort"
 	"strings"
 	"time"
 
@@ -17,105 +16,6 @@ import (
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
-
-// ListSessions 返回会话概要；archived=false 仅未归档（默认），true 仅归档。
-// cwd 非空 = 只返回工作空间精确等于该路径的会话（按工作空间过滤；路径须为绝对路径，
-// 会话 cwd 已规范化为 canonical 形式，调用方传同一个字符串即可命中）。
-// 按创建时间倒序（置顶优先）。
-// ListSessions 列出会话（archived 过滤；cwd / workspaceID 非空则再收一道）。
-//
-// 两个过滤参数都是"按工作空间看"的入口，但口径不同（设计 ADR-2/ADR-5）：
-//   - `cwd`：**执行事实**的字符串相等（历史行为，兼容保留）；
-//   - `workspaceID`：**归属事实**（v14 起左栏分组用它，可索引，且不受路径写法差异影响）。
-//
-// 归属过滤会同时把"历史会话（workspace_id=”）"算进默认工作空间那一组：那些行在**读面**
-// 归默认工作空间（设计 ADR-6），所以按 default id 过滤时它们必须出现——否则界面上默认工作
-// 空间显示 N 个会话、点进去却是空的。
-func (s *Service) ListSessions(archived bool, cwd, workspaceID string) ([]dtosession.SessionResp, error) {
-	cwd = normalizeWorkspaceFilter(cwd)
-	workspaceID = strings.TrimSpace(workspaceID)
-	// 归属过滤要先把"默认工作空间 id"和"目标 id 是否就是默认"问出来（读面语义的一部分）。
-	defaultID := ""
-	if s.st != nil {
-		if def, ok, err := s.st.DefaultWorkspace(context.Background()); err == nil && ok {
-			defaultID = def.ID
-		}
-	}
-	s.mu.Lock()
-	out := make([]dtosession.SessionResp, 0, len(s.sessions))
-	for _, r := range s.sessions {
-		if r.Archived != archived {
-			continue
-		}
-		if cwd != "" && r.Cwd != cwd {
-			continue
-		}
-		if workspaceID != "" && !workspaceMatches(r.WorkspaceID, workspaceID, defaultID) {
-			continue
-		}
-		resp := toSessionResp(r)
-		// 归属的**原始值**必须先落到响应上：`toSessionResp` 刻意不带它（那会持锁读库），
-		// 而下面的 fill 要靠它去解析展示名。漏这一步的表现是"所有会话都归到默认工作空间"
-		// ——一个看起来完全正常的错误分组。
-		resp.WorkspaceID = r.WorkspaceID
-		out = append(out, resp)
-	}
-	s.mu.Unlock()
-	// 展示字段（workspace_id / workspace_title）在**释放锁之后**补齐：它们要读库，
-	// 而持锁读库会与 registerSession 的"先写内存再落库"顺序互相卡住。
-	s.fillWorkspaceDisplay(out)
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Pinned != out[j].Pinned {
-			return out[i].Pinned
-		}
-		return out[i].CreatedAt > out[j].CreatedAt
-	})
-	return out, nil
-}
-
-// workspaceMatches 归属过滤的判定（设计 ADR-6）：`rWorkspaceID == ”` 的行归默认工作空间。
-//
-// 单独成函数是为了让这条语义只有一处：把它内联进循环，那个 `== ""` 的特例迟早被漏掉一处，
-// 而漏掉的表现是"默认工作空间下面看不到历史会话"——一个没有解释余地的空列表。
-func workspaceMatches(recWorkspaceID, wantID, defaultID string) bool {
-	if wantID == defaultID {
-		return recWorkspaceID == "" || recWorkspaceID == wantID
-	}
-	return recWorkspaceID == wantID
-}
-
-// fillWorkspaceDisplay 给一批响填补归属展示字段（v14；读面解析，见设计 §4.3）。
-func (s *Service) fillWorkspaceDisplay(items []dtosession.SessionResp) {
-	for i := range items {
-		id, title := s.workspaceDisplayOf(items[i].WorkspaceID)
-		items[i].WorkspaceID = id
-		items[i].WorkspaceTitle = title
-	}
-}
-
-// toSessionResp 把 SessionRec 折叠为 dtosession.SessionResp。
-//
-// **不含归属展示字段**（workspace_id / workspace_title）：那两个要读库，而本函数在持 s.mu 的
-// 调用点里跑。需要它们的调用点用 `fillWorkspaceDisplay` 在释放锁之后补——这条分界必须显式，
-// 否则下一个人会顺手在这里加一次查库，而症状是偶发死锁。
-func toSessionResp(r *SessionRec) dtosession.SessionResp {
-	return dtosession.SessionResp{
-		Capabilities:       toCapabilitiesResp(r),
-		ID:                 r.ID,
-		RuntimeSessionID:   r.RuntimeSessionID,
-		RuntimeID:          r.RuntimeID,
-		Status:             r.Status,
-		Title:              r.Title,
-		Pinned:             r.Pinned,
-		Archived:           r.Archived,
-		Model:              r.ModelID,
-		Cwd:                r.Cwd,
-		WorkspaceTemporary: r.WorkspaceTemporary,
-		Origin:             r.Origin,
-		CreatedAt:          r.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:          r.UpdatedAt.UTC().Format(time.RFC3339),
-	}
-}
 
 // capabilitySelectionFromReq 请求 DTO → 内部选定。
 //
@@ -179,26 +79,25 @@ func (s *Service) GetSession(ctx context.Context, id string) (*dtosession.Sessio
 // UpdateSession 更新会话元数据（title/pinned/archived 子集；nil 字段不更新）。
 // sqlite 模式下同步写库（sessions 为 DB 权威元数据镜像）。
 func (s *Service) UpdateSession(ctx context.Context, id string, patch dtosession.SessionPatch) (*dtosession.SessionResp, error) {
-	s.mu.Lock()
-	r, ok := s.sessions[id]
-	if !ok {
-		s.mu.Unlock()
+	// 记录改在**会话域自己的锁**下（该域自持锁，见计划 §3.1.40 的并发审查结论）。
+	var sessionRuntime string
+	if !s.sessionPlane.Mutate(id, func(r *SessionRec) {
+		if patch.Title != nil {
+			r.Title = *patch.Title
+		}
+		if patch.Pinned != nil {
+			r.Pinned = *patch.Pinned
+		}
+		if patch.Archived != nil {
+			r.Archived = *patch.Archived
+		}
+		// 会话的 runtime 身份在**持锁区**里读出来（它在会话建立后不再变，但"不变"不该靠约定：
+		// 解锁之后再读字段，读到的就可能是另一个 goroutine 刚写过的值）。
+		sessionRuntime = r.RuntimeID
+		r.UpdatedAt = time.Now().UTC()
+	}) {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
-	if patch.Title != nil {
-		r.Title = *patch.Title
-	}
-	if patch.Pinned != nil {
-		r.Pinned = *patch.Pinned
-	}
-	if patch.Archived != nil {
-		r.Archived = *patch.Archived
-	}
-	// 会话的 runtime 身份在**持锁区**里读出来（它在会话建立后不再变，但"不变"不该靠约定：
-	// 解锁之后再读 `r` 的字段，读到的就可能是另一个 goroutine 刚写过的值）。
-	sessionRuntime := r.RuntimeID
-	r.UpdatedAt = time.Now().UTC()
-	s.mu.Unlock()
 
 	// 会话内改模型：活会话经 session/set_config_option 立即生效（运行时是唯一判据）；
 	// 失败即上抛且**不落元数据**（避免「界面显示新模型、实际仍用旧的」的静默偏差）。
@@ -220,11 +119,11 @@ func (s *Service) UpdateSession(ctx context.Context, id string, patch dtosession
 		if !applied {
 			glog.Debugw(ctx, "会话不在活跃集合，模型变更仅更新元数据", "session", id)
 		}
-		s.mu.Lock()
-		// **落库的是身份**（平台行 id），不是运行时值——定案「辰」的核心。
-		r.ModelID = platformID
-		r.UpdatedAt = time.Now().UTC()
-		s.mu.Unlock()
+		s.sessionPlane.Mutate(id, func(r *SessionRec) {
+			// **落库的是身份**（平台行 id），不是运行时值——定案「辰」的核心。
+			r.ModelID = platformID
+			r.UpdatedAt = time.Now().UTC()
+		})
 		appliedModelID = &platformID
 	}
 
@@ -236,28 +135,8 @@ func (s *Service) UpdateSession(ctx context.Context, id string, patch dtosession
 			glog.Warnw(ctx, "store: update session meta failed", "session", id, "err", err)
 		}
 	}
-	s.mu.Lock()
-	resp := toSessionResp(r)
-	s.mu.Unlock()
+	resp := s.sessionPlane.SessionResp(id)
 	return &resp, nil
-}
-
-// sessionResp 返回单个会话的轻量表示（须持锁调用）。
-func (s *Service) sessionResp(id string) dtosession.SessionResp {
-	r := s.sessions[id]
-	return toSessionResp(r)
-}
-
-// deriveTitle 从首条用户消息推导会话标题（单行、截断、折叠空白）。
-// 截断按 rune 数判断（len() 是字节数，CJK 一个字符占 3 字节：按字节判断会
-// 在「字节够长但字符不足 48」时对 runes[:48] 越界 panic）。
-func deriveTitle(text string) string {
-	text = strings.Join(strings.Fields(text), " ")
-	runes := []rune(text)
-	if len(runes) > 48 {
-		text = string(runes[:48]) + "…"
-	}
-	return text
 }
 
 // CreateSession 在 agent 对应 runtime 上建立会话，若携带 prompt 则同步发起首轮

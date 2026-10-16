@@ -104,7 +104,7 @@ func (s *Service) sessionMeta(id string) (exportMeta, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, ok := s.sessions[id]
+	r, ok := s.sessionPlane.Lookup(id)
 	if !ok {
 		return exportMeta{}, false
 	}

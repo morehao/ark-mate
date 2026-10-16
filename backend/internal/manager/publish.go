@@ -114,7 +114,7 @@ func (s *Service) publishSideEffects(sessionID, eventID, typ string, m map[strin
 	if typ == session.BusUserMessage {
 		var derived string
 		s.mu.Lock()
-		if r, ok := s.sessions[sessionID]; ok && strings.TrimSpace(r.Title) == "" {
+		if r, ok := s.sessionPlane.Lookup(sessionID); ok && strings.TrimSpace(r.Title) == "" {
 			if text, _ := m["text"].(string); text != "" {
 				derived = deriveTitle(text)
 				r.Title = derived

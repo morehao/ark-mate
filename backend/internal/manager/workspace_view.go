@@ -270,8 +270,10 @@ type wsUsage struct {
 func (s *Service) workspaceUsage() map[string]*wsUsage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	byPath := make(map[string]*wsUsage, len(s.sessions))
-	for _, r := range s.sessions {
+	snap := s.sessionPlane.Snapshot()
+	byPath := make(map[string]*wsUsage, len(snap))
+	for i := range snap {
+		r := &snap[i]
 		if r.Cwd == "" || r.WorkspaceTemporary {
 			continue
 		}

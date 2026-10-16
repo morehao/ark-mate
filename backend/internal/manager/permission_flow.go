@@ -147,16 +147,10 @@ func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string
 	if err != nil {
 		return ""
 	}
-	o.svc.mu.Lock()
-	for _, r := range o.svc.sessions {
-		if r.RuntimeSessionID == wrapped {
-			sid := r.ID
-			o.svc.mu.Unlock()
-			return sid
-		}
+	if sid, ok := o.svc.sessionPlane.ByRuntimeSessionID(wrapped); ok {
+		return sid
 	}
 	st := o.svc.st
-	o.svc.mu.Unlock()
 	if st == nil {
 		return ""
 	}

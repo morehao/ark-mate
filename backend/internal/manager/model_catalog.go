@@ -374,12 +374,12 @@ func (s *Service) fetchCatalogByResume(ctx context.Context, spec runtime.Spec) (
 func (s *Service) catalogResumeCandidates(ctx context.Context, rc *runtimeConn) []resumeTarget {
 	// 1) 平台记录（内存集合 + sqlite 兜底）。
 	s.mu.Lock()
-	recs := make([]SessionRec, 0, len(s.sessions))
-	for _, r := range s.sessions {
+	var recs []SessionRec
+	for _, r := range s.sessionPlane.Snapshot() {
 		if r.RuntimeSessionID == "" || r.Cwd == "" {
 			continue
 		}
-		recs = append(recs, *r)
+		recs = append(recs, r)
 	}
 	st := s.st
 	s.mu.Unlock()

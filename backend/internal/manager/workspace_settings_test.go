@@ -136,7 +136,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 		t.Fatalf("名录外的旧会话应仍可作为候选被推回来: %+v", recent)
 	}
 	svc.mu.Lock()
-	_, kept := svc.sessions["c-old"]
+	_, kept := svc.sessionPlane.Lookup("c-old")
 	svc.mu.Unlock()
 	if !kept {
 		t.Fatal("旧会话记录必须保留（可续聊性只看会话是否存在）")

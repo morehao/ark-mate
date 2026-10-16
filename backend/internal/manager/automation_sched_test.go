@@ -117,9 +117,10 @@ func (r *schedRig) sessionsOf(t *testing.T, id string) []*SessionRec {
 	r.svc.mu.Lock()
 	defer r.svc.mu.Unlock()
 	var out []*SessionRec
-	for _, c := range r.svc.sessions {
-		if c.Origin == automationOrigin(id) {
-			out = append(out, c)
+	snap := r.svc.sessionPlane.Snapshot()
+	for i := range snap {
+		if snap[i].Origin == automationOrigin(id) {
+			out = append(out, &snap[i])
 		}
 	}
 	return out
@@ -152,7 +153,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	}
 	// 端口形态也要带上它：面板读的是 `GET /sessions` 的信封，不是内存记录。
 	// 这里断言"标记真的走完了到客户端的那一段路"，否则面板只能靠时间去猜哪条是自动跑的。
-	resp := toSessionResp(convs[0])
+	resp := r.svc.toSessionResp(convs[0])
 	if resp.Origin != "automation:daily" {
 		t.Fatalf("SessionResp 应回带 origin: %q", resp.Origin)
 	}

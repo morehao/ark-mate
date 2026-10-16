@@ -185,8 +185,8 @@ func TestDisconnectIdleSession(t *testing.T) {
 
 	orch.dropConn(rc)
 
-	if got := svc.sessions["s1"].Status; got != session.SessionStatusCompleted {
-		t.Fatalf("空闲会话的上一轮终态不应被断连改写: %s", got)
+	if got, _ := svc.sessionPlane.Lookup("s1"); got.Status != session.SessionStatusCompleted {
+		t.Fatalf("空闲会话的上一轮终态不应被断连改写: %s", got.Status)
 	}
 	if bus.Published() != before {
 		t.Fatalf("断连不应伪造会话事件（run.error 等）: published=%d want %d", bus.Published(), before)
@@ -226,8 +226,8 @@ func TestIntentionalTeardownKeepsIdleSession(t *testing.T) {
 
 	orch.dropConn(rc)
 
-	if got := svc.sessions["s1"].Status; got != session.SessionStatusCompleted {
-		t.Fatalf("主动停机不得改写会话状态（completed 应保持）: %s", got)
+	if got, _ := svc.sessionPlane.Lookup("s1"); got.Status != session.SessionStatusCompleted {
+		t.Fatalf("主动停机不得改写会话状态（completed 应保持）: %s", got.Status)
 	}
 	if bus.Published() != before {
 		t.Fatalf("主动停机不得发布 connection_lost 等事件: published=%d want %d", bus.Published(), before)
@@ -434,7 +434,7 @@ func TestPublishTitleConcurrentUpdate(t *testing.T) {
 	svc, _, _ := newTestRig(t)
 	id := "s-title-race"
 	svc.mu.Lock()
-	svc.sessions[id] = &SessionRec{ID: id, Status: session.SessionStatusInProgress}
+	svc.sessionPlane.RegisterSession(&SessionRec{ID: id, Status: session.SessionStatusInProgress})
 	svc.ver[id] = 0
 	svc.mu.Unlock()
 

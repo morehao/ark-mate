@@ -275,7 +275,7 @@ func (s *Service) workspaceRespForMemDefault(def model.WorkspaceEntity) dtoworks
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, rec := range s.sessions {
+	for _, rec := range s.sessionPlane.Snapshot() {
 		if rec.WorkspaceID == def.ID || rec.WorkspaceID == "" {
 			resp.Sessions++
 			if at := rec.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"); at > resp.LastUsedAt {
@@ -409,16 +409,13 @@ func (s *Service) clearWorkspaceAssignment(workspaceID string) int {
 	if workspaceID == "" {
 		return 0
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	n := 0
-	for _, rec := range s.sessions {
-		if rec.WorkspaceID == workspaceID {
-			rec.WorkspaceID = ""
-			n++
+	return s.sessionPlane.MutateAll(func(rec *SessionRec) bool {
+		if rec.WorkspaceID != workspaceID {
+			return false
 		}
-	}
-	return n
+		rec.WorkspaceID = ""
+		return true
+	})
 }
 
 // workspaceIDByPath 按规范化路径查登记 id（查不到 → 空串 = 归属留空，读面归默认工作空间）。

@@ -44,12 +44,7 @@ func (s *Service) providerEffect(providerID string) *dtoprovider.ProviderEffect 
 
 	// 在环上 → 这份声明变了，本机所有会话下一条命轮都会按新声明重开连接（逐会话判是否顺延）。
 	s.mu.Lock()
-	recs := make([]SessionRec, 0, len(s.sessions))
-	for _, rec := range s.sessions {
-		if rec != nil {
-			recs = append(recs, *rec)
-		}
-	}
+	recs := s.sessionPlane.Snapshot()
 	s.mu.Unlock()
 
 	for i := range recs {

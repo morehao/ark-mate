@@ -181,23 +181,6 @@ func resolveRealPath(p string) string {
 	}
 }
 
-// normalizeWorkspaceFilter 把「按工作空间过滤」的入参归一化到与会话 cwd 同一形态。
-//
-// 会话 cwd 一律是 canonical 绝对路径（ValidateWorkspace 已 EvalSymlinks），
-// 而客户端可能仍按自己熟悉的写法传（macOS 上 /tmp 与 /private/tmp 是同一目录）。
-// 不归一化就会出现「明明在同一个目录里，却查不到会话」——路径字符串不该决定身份。
-// 路径不存在时按 Clean 处理（不报错）：过滤一个没人用过的工作空间，正确结果本就是空集。
-func normalizeWorkspaceFilter(cwd string) string {
-	cwd = strings.TrimSpace(cwd)
-	if cwd == "" {
-		return ""
-	}
-	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
-		return resolved
-	}
-	return filepath.Clean(cwd)
-}
-
 // DiscardWorkspace 在会话最终建立失败时清理**会话独占**的工作空间目录（best-effort）。
 //
 // **v14 起它恒为空操作**，且这件事必须写在这里而不是悄悄删掉函数：解析路径已经不再创建

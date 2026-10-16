@@ -28,7 +28,7 @@ func TestRunTimeoutWatchdog(t *testing.T) {
 	if got, _ := evts[len(evts)-1].Payload.(map[string]any)["run_id"].(string); got == "" {
 		t.Fatalf("run.cancelled 载荷缺 run_id: %+v", evts[len(evts)-1].Payload)
 	}
-	rec, ok := svc.sessions["s1"]
+	rec, ok := svc.sessionPlane.Lookup("s1")
 	if !ok || rec.Status != session.SessionStatusCancelled {
 		t.Fatalf("会话状态应 cancelled: %+v", rec)
 	}

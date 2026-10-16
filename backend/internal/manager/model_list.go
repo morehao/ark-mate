@@ -464,12 +464,7 @@ func (s *Service) modelEffect(defaultTouched bool) *dtomodel.ModelEffect {
 	eff := &dtomodel.ModelEffect{Effect: "next_session"}
 	o := s.orch
 	s.mu.Lock()
-	recs := make([]SessionRec, 0, len(s.sessions))
-	for _, rec := range s.sessions {
-		if rec != nil {
-			recs = append(recs, *rec)
-		}
-	}
+	recs := s.sessionPlane.Snapshot()
 	s.mu.Unlock()
 	for i := range recs {
 		eff.AffectedSessions++

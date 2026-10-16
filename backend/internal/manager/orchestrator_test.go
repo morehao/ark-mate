@@ -87,7 +87,7 @@ func TestPromptRunEnded(t *testing.T) {
 	if startedID == "" || startedID != endedID {
 		t.Fatalf("run.started/run.ended 的 run_id 应同源: started=%q ended=%q", startedID, endedID)
 	}
-	rec, ok := svc.sessions["s1"]
+	rec, ok := svc.sessionPlane.Lookup("s1")
 	if !ok || rec.Status != session.SessionStatusCompleted {
 		t.Fatalf("会话状态应 completed: %+v", rec)
 	}
@@ -129,8 +129,8 @@ func TestCancelRun(t *testing.T) {
 	if evts[len(evts)-1].Type != session.BusRunCancelled {
 		t.Fatalf("期望 run.cancelled，got %+v", evts)
 	}
-	if svc.sessions["s1"].Status != session.SessionStatusCancelled {
-		t.Fatalf("状态应 cancelled: %v", svc.sessions["s1"].Status)
+	if st, _ := svc.sessionPlane.Lookup("s1"); st.Status != session.SessionStatusCancelled {
+		t.Fatalf("状态应 cancelled: %v", func() string { s, _ := svc.sessionPlane.Lookup("s1"); return s.Status }())
 	}
 }
 
@@ -199,8 +199,8 @@ func TestCancelRunAgentUnresponsive(t *testing.T) {
 	if len(evts) < 3 || evts[len(evts)-1].Type != session.BusRunCancelled {
 		t.Fatalf("期望 run.cancelled，got %+v", evts)
 	}
-	if svc.sessions["s1"].Status != session.SessionStatusCancelled {
-		t.Fatalf("状态应 cancelled: %v", svc.sessions["s1"].Status)
+	if st, _ := svc.sessionPlane.Lookup("s1"); st.Status != session.SessionStatusCancelled {
+		t.Fatalf("状态应 cancelled: %v", func() string { s, _ := svc.sessionPlane.Lookup("s1"); return s.Status }())
 	}
 }
 

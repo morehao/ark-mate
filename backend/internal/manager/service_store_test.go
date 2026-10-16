@@ -12,6 +12,34 @@ import (
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
+// TestListSessionsArchivedFilter 归档是软删除：默认列表不展示，`archived=true` 才展示。
+//
+// 为什么单开一条：这个过滤位随读面搬进 `domain/session` 时**没有判据**——实测把
+// `r.Archived != archived` 整个抽掉，全量 `go test ./...` **一条都不会红**。它的失效方式是静默的：
+// 归档过的会话重新出现在默认列表里，用户看到的是"我删掉的又回来了"。
+func TestListSessionsArchivedFilter(t *testing.T) {
+	reg := testutil.StubRegistry()
+	svc := NewService(reg, eventbus.New())
+	svc.EnableStore(testutil.OpenStore(t, testutil.TempDBPath(t)))
+	svc.registerSession(&SessionRec{ID: "s-live", Title: "在用的", RuntimeID: "stub"})
+	svc.registerSession(&SessionRec{ID: "s-archived", Title: "归档的", RuntimeID: "stub", Archived: true})
+
+	live, err := svc.ListSessions(false, "", "")
+	if err != nil {
+		t.Fatalf("ListSessions(false): %v", err)
+	}
+	if len(live) != 1 || live[0].ID != "s-live" {
+		t.Fatalf("默认列表只该有未归档的那条: %+v", live)
+	}
+	archived, err := svc.ListSessions(true, "", "")
+	if err != nil {
+		t.Fatalf("ListSessions(true): %v", err)
+	}
+	if len(archived) != 1 || archived[0].ID != "s-archived" {
+		t.Fatalf("`archived=true` 只该有归档的那条: %+v", archived)
+	}
+}
+
 // sessionMaxSeq 读某会话当前的最高位次。
 //
 // v21 起"号序到哪了"**只能按会话问**（全局水位那行 meta 已删）：所以这里走会话自己的

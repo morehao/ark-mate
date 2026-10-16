@@ -77,9 +77,10 @@ func automationSessions(t *testing.T, svc *Service, id string) []*SessionRec {
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
 	var out []*SessionRec
-	for _, c := range svc.sessions {
-		if c.Origin == automationOrigin(id) {
-			out = append(out, c)
+	snap := svc.sessionPlane.Snapshot()
+	for i := range snap {
+		if snap[i].Origin == automationOrigin(id) {
+			out = append(out, &snap[i])
 		}
 	}
 	return out

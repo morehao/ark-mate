@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
@@ -20,65 +19,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
-	"github.com/morehao/golib/glog"
 )
-
-// SessionRec 是进程内会话终态记录（内存镜像；sqlite 模式下与 sessions 行同源）。
-//
-// **身份只有 runtime**（v19）：v17 时这里写着"P0 起不再记录 runtime 身份"，本轮反过来——
-// 底座由构建期固定、用户不可自定义，所以 `runtime_id` 就是唯一身份事实（它同时是 DB 列
-// `sessions.runtime_id`、事件 payload 的 `runtime`、诊断面的 `runtime`）。v19 之前那半个
-// `agent_id` 与它指向同一个东西，收成一个。
-type SessionRec struct {
-	ID string
-	// Cwd 会话工作空间（canonical 绝对路径）。它同时是 ACP session/new 的 cwd 与
-	// 原生权限 workspace-write 的边界（见 workspace.go）。
-	Cwd string
-	// WorkspaceTemporary 该工作空间是否由**平台**给出（= 默认工作空间）。
-	// 落库 + 写 transcript header：**权威标志**，前端与离线回放都不得从路径形状反推。
-	WorkspaceTemporary bool
-	// WorkspaceID 归属的工作空间登记 id（v14；'' = 未登记/登记已删 → 读面归默认工作空间）。
-	//
-	// 与 Cwd 的分工（设计 ADR-2，最容易踩的一处）：Cwd 是**执行事实**（底座 ACP session 的
-	// cwd、原生权限 workspace-write 的边界、不可变），WorkspaceID 是**归属事实**（左栏分组）。
-	// 两者不一致是允许的（工作空间登记被删、或目录后来不可用），执行**恒**用 Cwd。
-	WorkspaceID string
-	// ModelID 会话引用的**平台模型行 id**（`mdl_…`；空 = 底座默认）。
-	//
-	// v26 起语义是"存身份、运行时值现算"（定案「辰」，设计 §5.4）：库/内存里只留平台行 id，
-	// 底座认的不透明值由 adapter 每次现算（`modelValueFor`）——路由键改名后旧会话照样活得下来。
-	// 它**不是** `models.model`（那是发给上游的模型名，一个外部世界的字符串）。
-	//
-	// 这里曾有 `ProviderID`：v19 删 agent 面后它没有任何写入点（恒空），v26 删列——
-	// 供应商由**模型行**给出（`models.provider_id`），再存一份就是第二事实源。
-	ModelID string
-	// RuntimeID 本会话的 runtime 身份（v17 起列 `runtime_id`；v19 起它是**唯一的**身份事实）。
-	RuntimeID string
-	// Generation 会话**执行代际**：每次重建执行上下文（连接断开后重连 / 会话被重开）自增。
-	// §6 排队输入据此判断「排队时依赖的那一轮上下文还在不在」——不等即作废（见 inputqueue.go）。
-	// 只在内存：重启本身就让所有排队行作废，没有跨重启比对的语义。
-	Generation int64
-	// RuntimeSessionID 原生底座会话 id（P3 双 id；session id = 平台 uuid，本字段存
-	// 原生 id 供 load/resume 恢复承载，v17 前叫 ProviderSessionID / `provider_session_id`。
-	// memory 模式下仅在活跃集合期间可用）。
-	RuntimeSessionID string
-	// Fingerprint 该会话钉住的**能力指纹**（代际；空 = 未声明能力选择）。
-	// 恢复路径据此回到同一代际。M3-1 起落库列 `capability_fingerprint`（v7），
-	// RestoreFromStore 原样读回——否则重启后指纹变空、会话悄悄换到默认能力集。
-	Fingerprint string
-	// Origin 会话来源（'' = 人工；'automation:<id>' = 该 automation 触发产生）。M4 写入，M3 只落列。
-	Origin string
-	// CapabilityJSON 创建时解析出的**能力选定明细**（JSON；'' = 未声明 → 全量按 runtime 过滤）。
-	// 与 Fingerprint 的分工：指纹回答"是不是同一套"（比较/回收用），明细回答"到底是哪几个"
-	// （回显、诊断、以及指纹算法变化后的一次性迁移判据）。
-	CapabilityJSON string
-	Status         string
-	Title          string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
-	Pinned         bool   // 置顶（侧栏/管理面用）
-	Archived       bool   // 归档（软删除；会话列表默认不展示）
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
 
 // Service 实现 handler.Service（替换 mock），为控制面提供「真实」数据与动作：
 // runtime 来自注册表（构建期固定，见 runtime_binding.go）；会话来自本进程内存存储；
@@ -151,12 +92,10 @@ type Service struct {
 	// creds 凭据机制的状态（四层凭据面 + 凭据 cwd；见 mechanism/credential）。
 	creds *credential.Store
 	// binding 本进程认的那个底座（v19：单实例、构造期建好；见 runtime_binding.go）。
-	binding  *runtimeBinding
-	sessions map[string]*SessionRec
+	binding *runtimeBinding
 	// inputs 会话待投递输入队列（**仅 memory 模式**；sqlite 模式的事实源是 inputs 表）。
-	inputs    map[string][]QueuedInput
-	ver       map[string]int64 // 每 agg(session) 的版本计数（域事件递增）
-	restoring bool             // RestoreFromStore 进行中：registerSession 跳过 DB 回写
+	inputs map[string][]QueuedInput
+	ver    map[string]int64 // 每 agg(session) 的版本计数（域事件递增）
 
 	// A3 诊断：底座最近一次失败（含 stderr 尾巴）。独立锁，避免与 s.mu 交叉。
 	// 单底座 ⇒ 一份记录（v19 之前是 per-agent 的 map）。
@@ -202,7 +141,6 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		bus:   bus,
 		// 网关默认开启（config 的 auto）：显式在这里置位，避免 atomic.Bool 零值把默认关掉。
 		mcpGatewayWarned: make(map[string]bool),
-		sessions:         make(map[string]*SessionRec),
 		inputs:           make(map[string][]QueuedInput),
 		ver:              make(map[string]int64),
 		catalog:          newCatalogStore(),
@@ -221,6 +159,9 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s.providerPlane = provider.NewPlane(reg, s.creds)
 	// 会话域：本批只装库句柄与用量端口（其余端口随 P3b-1b/2 接上）。
 	s.sessionPlane = session.NewPlane()
+	// 会话读面的两个端口：归属展示（工作空间登记面）与能力选定回显（能力代际面，P3c 才搬）。
+	s.sessionPlane.SetWorkspaceDisplay(s.workspaceDisplayOf)
+	s.sessionPlane.SetCapabilityView(toCapabilitiesResp)
 	// 两个端口都读会话/模型面（编排侧），在装配期接上；`demo`/`migrate` 这类没有编排器的
 	// 场景下 `effect` 恒 nil（回执为 nil，与拆分前逐字同义）。
 	s.providerPlane.SetEffect(s.providerEffect)
@@ -295,78 +236,6 @@ func (s *Service) closeTranscripts() {
 	s.tx = nil
 }
 
-// registerSession 登记一个新会话（已存在则覆盖）；未提供的时间落为当前 UTC。
-// loadTranscripts 回灌时保留原 created_at/updated_at。
-// sqlite 模式下（st != nil 且非恢复过程）同步写库。
-func (s *Service) registerSession(rec *SessionRec) {
-	s.mu.Lock()
-	now := time.Now().UTC()
-	if rec.CreatedAt.IsZero() {
-		rec.CreatedAt = now
-	}
-	if rec.UpdatedAt.IsZero() {
-		rec.UpdatedAt = now
-	}
-	s.sessions[rec.ID] = rec
-	restoring := s.restoring
-	s.mu.Unlock()
-	if !restoring {
-		s.persistSession(rec)
-	}
-}
-
-// bumpGeneration 会话执行代际自增（执行上下文重建时调用；见 SessionRec.Generation）。
-func (s *Service) bumpGeneration(id string) int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.sessions[id]
-	if !ok {
-		return 0
-	}
-	rec.Generation++
-	return rec.Generation
-}
-
-// sessionGeneration 读会话当前执行代际（会话不存在 → 0，此时任何排队项都不匹配 → 作废）。
-func (s *Service) sessionGeneration(id string) int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.sessions[id]
-	if !ok {
-		return 0
-	}
-	return rec.Generation
-}
-
-// sessionRec 返回某会话的进程内记录副本（断点恢复/内部查询用；不存在返回 nil）。
-func (s *Service) sessionRec(id string) *SessionRec {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.sessions[id]
-	if !ok {
-		return nil
-	}
-	cp := *rec
-	return &cp
-}
-
-// markSession 更新会话终态（sqlite 模式下同步写库 status）。
-func (s *Service) markSession(id, status string) {
-	s.mu.Lock()
-	if r, ok := s.sessions[id]; ok {
-		r.Status = status
-		r.UpdatedAt = time.Now().UTC()
-	}
-	s.mu.Unlock()
-	if s.st != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		if err := s.st.UpdateSessionMeta(ctx, id, model.SessionMetaPatch{Status: &status}); err != nil {
-			glog.Warnw(context.Background(), "store: mark session failed", "session", id, "err", err)
-		}
-	}
-}
-
 // attachOrchestrator 由 NewOrchestrator 回挂；Service 的会话动作委托给它。
 func (s *Service) attachOrchestrator(o *Orchestrator) {
 	s.orch = o
@@ -374,12 +243,4 @@ func (s *Service) attachOrchestrator(o *Orchestrator) {
 	if o != nil {
 		s.sessionPlane.SetUsageSource(o.LatestUsage)
 	}
-}
-
-// hasSession 判断会话是否在本进程登记。
-func (s *Service) hasSession(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.sessions[id]
-	return ok
 }

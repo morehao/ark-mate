@@ -465,7 +465,7 @@ func (s *Service) sessionRunning(id string) bool {
 	// 出锁后再读 rec.Status 就是数据竞争（-race 直接报）。
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	conv, ok := s.sessions[id]
+	conv, ok := s.sessionPlane.Lookup(id)
 	if !ok {
 		return false
 	}

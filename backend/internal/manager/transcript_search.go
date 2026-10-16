@@ -26,8 +26,10 @@ func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]dtos
 	qLower := strings.ToLower(q)
 
 	s.mu.Lock()
-	recs := make([]*SessionRec, 0, len(s.sessions))
-	for _, r := range s.sessions {
+	snap := s.sessionPlane.Snapshot()
+	recs := make([]*SessionRec, 0, len(snap))
+	for i := range snap {
+		r := &snap[i]
 		recs = append(recs, r)
 	}
 	s.mu.Unlock()

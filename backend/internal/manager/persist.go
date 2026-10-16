@@ -73,11 +73,11 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 		return 0, 0, fmt.Errorf("restore: list sessions: %w", err)
 	}
 	s.mu.Lock()
-	s.restoring = true
+	s.sessionPlane.SetRestoring(true)
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
-		s.restoring = false
+		s.sessionPlane.SetRestoring(false)
 		s.mu.Unlock()
 	}()
 
@@ -302,38 +302,6 @@ func (s *Service) runtimeValueToModelID(ctx context.Context, runtimeID string) m
 		delete(seen, v)
 	}
 	return seen
-}
-
-// persistSession 把会话记录同步写库（best-effort：失败告警不阻断会话流程）。
-func (s *Service) persistSession(rec *SessionRec) {
-	if s.st == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	err := s.st.UpsertSession(ctx, model.SessionEntity{
-		ID:                 rec.ID,
-		Cwd:                rec.Cwd,
-		WorkspaceID:        rec.WorkspaceID,
-		WorkspaceTemporary: rec.WorkspaceTemporary,
-		ModelID:            rec.ModelID,
-		RuntimeID:          rec.RuntimeID,
-		RuntimeSessionID:   rec.RuntimeSessionID,
-		Title:              rec.Title,
-		Pinned:             rec.Pinned,
-		Archived:           rec.Archived,
-		Status:             rec.Status,
-		Origin:             rec.Origin,
-		CapabilityJSON:     rec.CapabilityJSON,
-		// **钉住的指纹**（代际）：普通持久化写的就是记录里的那个值（会话一旦建立就不再重新解析），
-		// 所以这里不会"每次落库都把指纹刷成当前值"；只有 M3-6 的轮次边界迁移会显式改写它。
-		CapabilityFingerprint: rec.Fingerprint,
-		CreatedAt:             rec.CreatedAt,
-		UpdatedAt:             rec.UpdatedAt,
-	})
-	if err != nil {
-		glog.Warnw(context.Background(), "store: upsert session failed", "session", rec.ID, "err", err)
-	}
 }
 
 // persistMemoryAdd 写一条权限记忆（permission_memories 表；同键覆盖，since 为授予时刻）。

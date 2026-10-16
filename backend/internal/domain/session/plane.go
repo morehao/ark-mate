@@ -3,6 +3,7 @@ package session
 import (
 	"sync"
 
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
 )
@@ -17,6 +18,18 @@ type Plane struct {
 	mu sync.Mutex
 	st *store.Store
 
+	// sessions 进程内会话记录（v14 起 sqlite 模式只是**镜像**：库是元数据权威，内存是执行上下文）。
+	// 它由**本域自己的锁**保护（并发审查结论：会话的临界区 0 处跨域，见计划 §3.1.40/§3.1.43）。
+	sessions map[string]*SessionRec
+	// restoring 正从库恢复（恢复期不逐条回写：刚读出来的东西立刻写回去）。
+	restoring bool
+
+	// workspaceDisplayOf 归属展示字段的解析（端口：工作空间登记仍在 manager）。
+	workspaceDisplayOf func(workspaceID string) (string, string)
+	// capabilityViewOf 会话记录 → 能力选定回显（端口：`CapabilitySelection` 是能力代际面，
+	// P3c 才搬进本域；会话读面不该为了一个回显字段把整个代际面拖进来）。
+	capabilityViewOf func(rec *SessionRec) *dtosession.SessionCapabilitiesResp
+
 	// usageOf 取某会话最近一次上报的用量快照（**端口**：它读的是执行面
 	// `Orchestrator.LatestUsage` 的内存表，属 runtimeconn；nil = 没有编排器，同拆分前
 	// "`s.orch == nil` 时 usage_json 留空"的语义）。
@@ -24,7 +37,28 @@ type Plane struct {
 }
 
 // NewPlane 造一个会话域。库句柄与用量端口都由装配期注入（端口可后置——离线命令没有编排器）。
-func NewPlane() *Plane { return &Plane{} }
+func NewPlane() *Plane { return &Plane{sessions: make(map[string]*SessionRec)} }
+
+// Snapshot 会话记录的**副本**切片（读面用；调用方拿不到内部指针，改不动本域状态）。
+func (pl *Plane) Snapshot() []SessionRec {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	out := make([]SessionRec, 0, len(pl.sessions))
+	for _, r := range pl.sessions {
+		out = append(out, *r)
+	}
+	return out
+}
+
+// SetWorkspaceDisplay 装配期登记归属展示解析（工作空间登记面）。
+func (pl *Plane) SetWorkspaceDisplay(fn func(workspaceID string) (string, string)) {
+	pl.workspaceDisplayOf = fn
+}
+
+// SetCapabilityView 装配期登记能力选定回显投影（能力代际面）。
+func (pl *Plane) SetCapabilityView(fn func(rec *SessionRec) *dtosession.SessionCapabilitiesResp) {
+	pl.capabilityViewOf = fn
+}
 
 // SetStore 装配期登记库句柄。**必须在装配期调用**：构造时按值传一个当时的 `st` 会永远停在
 // nil，而表现是"该走库的走了内存"——静默（见 `Service.attachStore` 的注释）。
@@ -33,4 +67,14 @@ func (pl *Plane) SetStore(st *store.Store) { pl.st = st }
 // SetUsageSource 装配期登记用量快照来源（执行面）。
 func (pl *Plane) SetUsageSource(fn func(sessionID string) (objusage.UsageInfo, bool)) {
 	pl.usageOf = fn
+}
+
+// SetRestoring 标记"正在从库恢复"（恢复期逐条落库没有意义：刚读出来的东西立刻写回去）。
+//
+// 必须是显式 setter：这个标志以前是 `Service` 的字段、由 `RestoreFromStore` 直接赋值；搬进本域
+// 之后若忘了这条线，**表现是静默的**——恢复期间多发一轮写库，读模型与最终状态都对，只是慢。
+func (pl *Plane) SetRestoring(v bool) {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	pl.restoring = v
 }
