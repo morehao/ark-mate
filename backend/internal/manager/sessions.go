@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"strings"
 	"time"
 
@@ -155,7 +156,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 			return nil, code.FromError(gerr)
 		}
 		if !ok {
-			return nil, code.FromError(workspaceNotFoundError(assignment))
+			return nil, code.FromError(workspace.WorkspaceNotFoundError(assignment))
 		}
 		explicit := ""
 		if strings.TrimSpace(req.Cwd) != "" {

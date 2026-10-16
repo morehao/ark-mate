@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/acl"
 )
@@ -344,6 +345,12 @@ type Plane struct {
 	st *store.Store
 	// sessions 会话事实来源（本域不拥有会话，见 ports.go）。
 	sessions SessionSource
+	// memDefaultWorkspace memory 模式的**默认工作空间**（登记表不存在时的那一份）。
+	//
+	// 它不是"登记项的缓存"：默认工作空间是**平台代建**的东西，而登记表（用户显式产出的状态）
+	// 在 memory 模式本来就无处可存。少了它，"未指定 cwd 就发一条消息"这条最普通的路在
+	// `MATE_STORE=memory` 下直接报 `workspace_required`——用户什么都没做错。
+	memDefaultWorkspace *model.WorkspaceEntity
 }
 
 // NewPlane 造一个工作空间域（策略字段默认全空 = 不限制、不代建）。

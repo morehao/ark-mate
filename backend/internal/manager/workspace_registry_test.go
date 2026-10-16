@@ -429,7 +429,7 @@ func TestWorkspaceRegistryDefaultIsProvisionedInMemory(t *testing.T) {
 	}
 
 	// 展示面：归属 id → 展示名（库里存的是语言中立的 default-workspace）。
-	if id, title := r.Svc.workspaceDisplayOf(def.ID); id != def.ID || title != "默认工作空间" {
+	if id, title := r.Svc.planner.WorkspaceDisplayOf(def.ID); id != def.ID || title != "默认工作空间" {
 		t.Fatalf("默认工作空间的展示名应是「默认工作空间」: id=%q title=%q", id, title)
 	}
 }

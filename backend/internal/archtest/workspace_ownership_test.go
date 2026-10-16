@@ -44,10 +44,20 @@ var workspaceDomainAnchors = map[string][]string{
 		"type SessionSource interface {",
 		"ClearWorkspaceAssignment(",
 	},
+	"registry.go": {
+		"func (pl *Plane) WorkspaceRegistry(",
+		"func (pl *Plane) CreateRegisteredWorkspace(",
+		"func (pl *Plane) DeleteRegisteredWorkspace(",
+		"func (pl *Plane) EnsureDefaultWorkspace(",
+		"func (pl *Plane) WorkspaceDisplayOf(",
+		"func (pl *Plane) ResolveTargetWorkspace(",
+	},
 }
 
 // workspaceManagerThinFiles manager 侧**只许是薄转发**的文件：它们不得再出现实现痕迹。
-var workspaceManagerThinFiles = []string{"workspace_view.go", "workspace_settings.go"}
+var workspaceManagerThinFiles = []string{
+	"workspace_view.go", "workspace_settings.go", "workspace_registry.go", "workspace.go",
+}
 
 // workspaceManagerImplMarkers 实现痕迹（这些动作现在只许在域里做）。
 var workspaceManagerImplMarkers = []string{
@@ -56,6 +66,8 @@ var workspaceManagerImplMarkers = []string{
 	"os.Mkdir(",
 	"filepath.EvalSymlinks(",
 	"SaveWorkspaceRoots(",
+	"dirStatusOf(",
+	"BootstrapDefaultWorkspace(",
 }
 
 // TestWorkspaceImplementationLivesInDomain 域侧必须真的有那些入口，且 manager 的薄转发文件里
