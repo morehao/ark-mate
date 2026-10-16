@@ -275,6 +275,17 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 				t.Errorf("`internal/manager/workspace_registry.go` 里又出现 `%s`：那一行转发已删。", dead)
 			}
 		}
+		// 登记表最后一条写面（P4a 正文第二十九刀）：`CreateRegisteredWorkspace` 也走域平面，
+		// 接口与 manager 转发一起删（接口里留声明 = `*manager.Service` 还得实现它 = 一行转发）。
+		if strings.Contains(svcWs, "CreateRegisteredWorkspace(") {
+			t.Error("`svcworkspace` 的接口里又出现 `CreateRegisteredWorkspace(`：投影在域平面里，" +
+				"控制器直接 `h.plane.*`。")
+		}
+		if strings.Contains(regMgr, "func (s *Service) CreateRegisteredWorkspace(") {
+			t.Error("`internal/manager/workspace_registry.go` 里又出现 `func (s *Service) CreateRegisteredWorkspace(`：" +
+				"那一行转发已删。")
+		}
+
 		// 默认工作空间的两条（P4a 正文第二十八刀）：`EnsureDefaultWorkspace` / `DefaultWorkspace`
 		// 也走域平面——它们是"这个平面自己的默认项"，读/建都只有一处入口。
 		for _, dead := range []string{"func (s *Service) EnsureDefaultWorkspace(", "func (s *Service) DefaultWorkspace("} {
@@ -290,6 +301,9 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 			}
 		}
 
+		if !strings.Contains(reg, "func (pl *Plane) CreateRegisteredWorkspace(") {
+			t.Error("`internal/domain/workspace/registry.go` 里找不到 `CreateRegisteredWorkspace` 本体：判据失锚＝空转。")
+		}
 		for _, must := range []string{"func (pl *Plane) RenameRegisteredWorkspace(", "func (pl *Plane) DeleteRegisteredWorkspace(", "func (pl *Plane) MoveRegisteredWorkspace("} {
 			if !strings.Contains(reg, must) {
 				t.Errorf("`internal/domain/workspace/registry.go` 里找不到 %q：判据失锚＝空转。", must)

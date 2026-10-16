@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/domain/workspace"
-
-	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 )
 
 // ——— P2b：工作空间登记表的过渡期转发与别名（最后一刀） ———
@@ -17,11 +15,6 @@ import (
 // 会话域的回显端口（`SetWorkspaceDisplay`）也改指域：它在 `NewService` 里接的是
 // `planner.WorkspaceDisplayOf`——那是同一个"用 id 换展示名"的判定，两处各写一遍会让
 // 左栏分组名与读面 title 各说各话。
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) CreateRegisteredWorkspace(path, title string, strict bool) (*dtoworkspace.WorkspaceResp, error) {
-	return s.planner.CreateRegisteredWorkspace(path, title, strict)
-}
 
 // TODO(P4b): 删转发（同上）
 func (s *Service) resolveTargetWorkspace(reqWorkspaceID string) (*workspace.DefaultWorkspaceRef, string, error) {

@@ -112,7 +112,7 @@ func TestWorkspaceRegistryCreateValidatesLikeSession(t *testing.T) {
 	r, _ := registryRig(t, []string{allowed})
 
 	// 白名单内：能登记。
-	resp, err := r.Svc.CreateRegisteredWorkspace(allowed, "", false)
+	resp, err := r.Svc.WorkspacePlane().CreateRegisteredWorkspace(allowed, "", false)
 	if err != nil {
 		t.Fatalf("白名单内应能登记: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestWorkspaceRegistryCreateValidatesLikeSession(t *testing.T) {
 	}
 
 	// 名录外：**照常登记**（v14.5：名录已降级为浏览起点偏好，不再拒绝任何可用目录）。
-	outsideResp, err := r.Svc.CreateRegisteredWorkspace(outside, "", false)
+	outsideResp, err := r.Svc.WorkspacePlane().CreateRegisteredWorkspace(outside, "", false)
 	if err != nil {
 		t.Fatalf("名录外的可用目录应能登记（选工作区是全系统）: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestWorkspaceRegistryCreateValidatesLikeSession(t *testing.T) {
 
 	// 相对路径 / 不存在 / 不是目录：三条都拒（与 ValidateWorkspace 同一套）。
 	for _, bad := range []string{"relative/path", filepath.Join(allowed, "nope"), writeFile(t, allowed)} {
-		if _, err := r.Svc.CreateRegisteredWorkspace(bad, "", false); err == nil {
+		if _, err := r.Svc.WorkspacePlane().CreateRegisteredWorkspace(bad, "", false); err == nil {
 			t.Fatalf("非法路径 %q 必须拒绝", bad)
 		}
 	}
@@ -143,18 +143,18 @@ func TestWorkspaceRegistryGetOrCreateAndStrict(t *testing.T) {
 	r, _ := registryRig(t, nil)
 	mustWorkspacePolicy(t, r.Svc, "", nil)
 
-	first, err := r.Svc.CreateRegisteredWorkspace(dir, "一号", false)
+	first, err := r.Svc.WorkspacePlane().CreateRegisteredWorkspace(dir, "一号", false)
 	if err != nil {
 		t.Fatalf("首次登记: %v", err)
 	}
-	again, err := r.Svc.CreateRegisteredWorkspace(dir, "改了名也不该新建", false)
+	again, err := r.Svc.WorkspacePlane().CreateRegisteredWorkspace(dir, "改了名也不该新建", false)
 	if err != nil {
 		t.Fatalf("重复登记应 get-or-create: %v", err)
 	}
 	if again.ID != first.ID || again.Title != "一号" {
 		t.Fatalf("get-or-create 应返回既有行且不改标题: %+v", again)
 	}
-	if _, err := r.Svc.CreateRegisteredWorkspace(dir, "", true); err == nil {
+	if _, err := r.Svc.WorkspacePlane().CreateRegisteredWorkspace(dir, "", true); err == nil {
 		t.Fatal("strict=true 时重复登记必须报错")
 	} else if c := gerrCode(t, err); c != code.Conflict {
 		t.Fatalf("重复登记（strict）应为 40901，实际 %d", c)
@@ -174,7 +174,7 @@ func TestWorkspaceRegistryListAggregatesLegacyIntoDefault(t *testing.T) {
 
 	// 两条历史会话（workspace_id 留空）+ 一条显式归属普通工作空间。
 	userDir := t.TempDir()
-	ws, err := r.Svc.CreateRegisteredWorkspace(userDir, "项目", false)
+	ws, err := r.Svc.WorkspacePlane().CreateRegisteredWorkspace(userDir, "项目", false)
 	if err != nil {
 		t.Fatalf("登记项目: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestWorkspaceRegistryMissingDirStillListed(t *testing.T) {
 	}
 	r, _ := registryRig(t, nil)
 	mustWorkspacePolicy(t, r.Svc, "", nil)
-	ws, err := r.Svc.CreateRegisteredWorkspace(dir, "会被删掉", false)
+	ws, err := r.Svc.WorkspacePlane().CreateRegisteredWorkspace(dir, "会被删掉", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestWorkspaceRegistryDeleteDefaultRefusedAndUnknown(t *testing.T) {
 
 	// 普通工作空间可删，且响应带回被释放的会话数（界面那句话要有事实支撑）。
 	dir := t.TempDir()
-	ws, err := r.Svc.CreateRegisteredWorkspace(dir, "", false)
+	ws, err := r.Svc.WorkspacePlane().CreateRegisteredWorkspace(dir, "", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestWorkspaceRegistryMemoryIsExplicitlyUnsupported(t *testing.T) {
 		t.Fatalf("memory 下应是空列表 + 不可写: %+v", list)
 	}
 
-	if _, err := r.Svc.CreateRegisteredWorkspace(t.TempDir(), "", false); err == nil {
+	if _, err := r.Svc.WorkspacePlane().CreateRegisteredWorkspace(t.TempDir(), "", false); err == nil {
 		t.Fatal("memory 下创建必须被拒")
 	} else if c := gerrCode(t, err); c != code.NotSupported {
 		t.Fatalf("memory 下创建应为 40501，实际 %d", c)
@@ -310,7 +310,7 @@ func TestWorkspaceRegistryRenameKeepsIdentity(t *testing.T) {
 	dir := t.TempDir()
 	r, _ := registryRig(t, nil)
 	mustWorkspacePolicy(t, r.Svc, "", nil)
-	ws, err := r.Svc.CreateRegisteredWorkspace(dir, "旧名", false)
+	ws, err := r.Svc.WorkspacePlane().CreateRegisteredWorkspace(dir, "旧名", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}

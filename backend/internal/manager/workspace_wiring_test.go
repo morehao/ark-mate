@@ -116,7 +116,7 @@ func TestCreateSessionExplicitCwdKeepsEmptyAssignment(t *testing.T) {
 func TestCreateSessionByWorkspaceID(t *testing.T) {
 	r := newConvRig(t)
 	dir := t.TempDir()
-	ws, err := r.svc.CreateRegisteredWorkspace(dir, "我的项目", false)
+	ws, err := r.svc.WorkspacePlane().CreateRegisteredWorkspace(dir, "我的项目", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestCreateSessionWorkspaceConflict(t *testing.T) {
 	r := newConvRig(t)
 	dirA := t.TempDir()
 	dirB := t.TempDir()
-	wsA, err := r.svc.CreateRegisteredWorkspace(dirA, "A", false)
+	wsA, err := r.svc.WorkspacePlane().CreateRegisteredWorkspace(dirA, "A", false)
 	if err != nil {
 		t.Fatalf("登记 A: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestListSessionsByWorkspaceFilter(t *testing.T) {
 	r := newConvRig(t)
 	def, _, _ := r.svc.WorkspacePlane().DefaultWorkspace()
 	dir := t.TempDir()
-	ws, err := r.svc.CreateRegisteredWorkspace(dir, "项目", false)
+	ws, err := r.svc.WorkspacePlane().CreateRegisteredWorkspace(dir, "项目", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestRecentWorkspacesExcludesRegistered(t *testing.T) {
 	def, _, _ := r.svc.WorkspacePlane().DefaultWorkspace()
 	registeredDir := t.TempDir()
 	looseDir := t.TempDir()
-	ws, err := r.svc.CreateRegisteredWorkspace(registeredDir, "已登记", false)
+	ws, err := r.svc.WorkspacePlane().CreateRegisteredWorkspace(registeredDir, "已登记", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	r := newConvRig(t)
 	def, _, _ := r.svc.WorkspacePlane().DefaultWorkspace()
 	dir := t.TempDir()
-	ws, err := r.svc.CreateRegisteredWorkspace(dir, "要被移除的", false)
+	ws, err := r.svc.WorkspacePlane().CreateRegisteredWorkspace(dir, "要被移除的", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}

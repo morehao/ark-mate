@@ -211,7 +211,7 @@ func (h *workspaceCtr) Create(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.CreateRegisteredWorkspace(req.Path, req.Title, req.Strict)
+	resp, err := h.plane.CreateRegisteredWorkspace(req.Path, req.Title, req.Strict)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

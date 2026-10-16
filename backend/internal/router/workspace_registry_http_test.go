@@ -152,7 +152,7 @@ func TestWorkspaceRegistryHTTPFlow(t *testing.T) {
 	}
 
 	// ⑦ 删除（DELETE）：只删登记，目录仍在（数据保留）。
-	if _, err := svc.CreateRegisteredWorkspace(dirA, "", false); err != nil {
+	if _, err := svc.WorkspacePlane().CreateRegisteredWorkspace(dirA, "", false); err != nil {
 		t.Fatalf("前置登记: %v", err)
 	}
 	_, dataDel := callJSON(t, svc, "DELETE", "/v1/mate/workspaces/"+wsA.ID, "")
@@ -189,10 +189,10 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 	dir1, dir2 := t.TempDir(), t.TempDir()
-	if _, err := svc.CreateRegisteredWorkspace(dir1, "第一个", false); err != nil {
+	if _, err := svc.WorkspacePlane().CreateRegisteredWorkspace(dir1, "第一个", false); err != nil {
 		t.Fatalf("登记 1: %v", err)
 	}
-	ws2, err := svc.CreateRegisteredWorkspace(dir2, "第二个", false)
+	ws2, err := svc.WorkspacePlane().CreateRegisteredWorkspace(dir2, "第二个", false)
 	if err != nil {
 		t.Fatalf("登记 2: %v", err)
 	}

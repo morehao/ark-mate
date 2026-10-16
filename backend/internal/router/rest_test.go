@@ -713,18 +713,9 @@ func TestWorkspaceRegistryCtrPassThrough(t *testing.T) {
 	// memory 无库平面（本用例的 plane 没接持久层）对写面给的就是 `workspace_schema_read_only`。
 	// 参数是否原样到端口（path/title/strict/before_id）由 `TestWorkspaceRegistryHTTPFlow` 用
 	// **真对象**钉（它建表、建默认工作空间、创建、重排、改名、删除全走真库），不再是替身自报。
-	// `POST /workspaces`（CreateRegisteredWorkspace）**还没搬**（它包内 21 处调用点），仍走用例层接口，
-	// 所以这一格继续断言"参数原样到端口"：
-	env, _ = do(t, r, "POST", "/v1/mate/workspaces", `{"path":"/Users/me/work/ark-mate","title":"昵称","strict":true}`)
-	if env.Code != 0 {
-		t.Fatalf("POST /workspaces 应成功: %+v", env)
-	}
-	if svc.registryCreatePath != "/Users/me/work/ark-mate" || svc.registryCreateTitle != "昵称" || !svc.registryCreateStrict {
-		t.Fatalf("创建参数未原样下发: path=%q title=%q strict=%v",
-			svc.registryCreatePath, svc.registryCreateTitle, svc.registryCreateStrict)
-	}
-
+	// `POST /workspaces` 自第二十九刀起也走真域平面，同样并入下面这一组。
 	for _, c := range []struct{ method, path, body string }{
+		{"POST", "/v1/mate/workspaces", `{"path":"/Users/me/work/ark-mate","title":"昵称","strict":true}`},
 		{"PATCH", "/v1/mate/workspaces/wsp-1", `{"title":"新名字"}`},
 		{"DELETE", "/v1/mate/workspaces/wsp-1", ""},
 		{"POST", "/v1/mate/workspaces/wsp-1/move", `{"before_id":"wsp-2"}`},
