@@ -165,7 +165,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	// ⑥ 保存并重开（模拟重启）：装载出来的内存档案与文件时代逐字段一致。
 	svc := NewService(publisherRegistry(), eventbus.New())
 	svc.EnableStore(st)
-	svc.SetCredentials(newTestCredentials(t, home))
+	svc.creds.SetLayered(newTestCredentials(t, home))
 	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
 	items, _ := svc.providerPlane.ListProviders(context.Background())
 	if len(items) != 2 {
@@ -246,7 +246,7 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	}
 	svc := NewService(publisherRegistry(), eventbus.New())
 	svc.EnableStore(st)
-	svc.SetCredentials(newTestCredentials(t, home))
+	svc.creds.SetLayered(newTestCredentials(t, home))
 	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	// 写面：新建一条（走 store）+ 覆盖一条（走 store）。
@@ -336,7 +336,7 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	svc := NewService(publisherRegistry(), eventbus.New())
 	svc.EnableStore(st)
-	svc.SetCredentials(newTestCredentials(t, home))
+	svc.creds.SetLayered(newTestCredentials(t, home))
 	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
 	for _, id := range []string{"p-b", "p-a"} {
 		if _, err := svc.providerPlane.CreateProvider(ctx, providerReq(id, ptr("sk-"+id))); err != nil {

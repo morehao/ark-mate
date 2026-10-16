@@ -193,7 +193,7 @@ func TestProviderStaleMirrorKeyNotAdopted(t *testing.T) {
 	svc := NewService(v12ProviderRegistry(), nil)
 	svc.EnableStore(st)
 	svc.providerPlane.SetProviderDir(dir)
-	svc.SetCredentials(newTestCredentials(t, home))
+	svc.creds.SetLayered(newTestCredentials(t, home))
 	// 库里一条**没有密钥**的档案（面板上刚清掉，或从来没设过）。
 	if _, err := st.ImportProviderDefinition(ctx, store.ProviderColumns{
 		ID: "default", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
@@ -320,7 +320,7 @@ func TestProviderEnvLayerShadowsStore(t *testing.T) {
 	// 候选变量名由注册表的 `RefPattern` 派生（不是手抄常量）：夹具跟着它走，
 	// 换模板时这条用例仍然验的是"继承环境遮住密钥面"这件事。
 	envName := ""
-	for _, n := range NewService(v12ProviderRegistry(), nil).providerEnvKeyNames("default") {
+	for _, n := range NewService(v12ProviderRegistry(), nil).creds.ProviderEnvKeyNames("default") {
 		if strings.Contains(n, "DEFAULT") {
 			envName = n
 			break
@@ -335,7 +335,7 @@ func TestProviderEnvLayerShadowsStore(t *testing.T) {
 		}
 		return ""
 	}
-	svc.SetCredentials(l)
+	svc.creds.SetLayered(l)
 	if _, err := st.ImportProviderDefinition(ctx, store.ProviderColumns{
 		ID: "default", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
 	}); err != nil {

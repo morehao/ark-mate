@@ -61,7 +61,7 @@ func providerTestSvc(t *testing.T, providerDir string) *Service {
 		// 与装配期同一条路径：先装配凭据分层（镜像落在 provider 目录的父目录下，即"mate home"），
 		// 再装载 `providers.json`（它顺带登记定义目录）。顺序与 `internal/app` 逐条同形——
 		// 反过来，memory 模式下装载时读到的密钥就会按"凭据面未装配"处理。
-		svc.SetCredentials(newTestCredentials(t, filepath.Dir(providerDir)))
+		svc.creds.SetLayered(newTestCredentials(t, filepath.Dir(providerDir)))
 		svc.providerPlane.LoadProviderDefinitions(providerDir)
 	}
 	return svc

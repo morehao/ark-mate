@@ -45,7 +45,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	svc := NewService(v12ProviderRegistry(), nil)
 	svc.EnableStore(st)
-	svc.SetCredentials(newTestCredentials(t, home))
+	svc.creds.SetLayered(newTestCredentials(t, home))
 	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	// ① 写面：带密钥新建 → 落进那一列，回执不回显明文。

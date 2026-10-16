@@ -185,7 +185,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	if layered, _, cErr := credential.OpenCredentialSource(opts.Cfg.HomeDir, credCwd); cErr != nil {
 		glog.Warnw(ctx, "mcp 网关: 凭据分层未装配（只有库里的那一份可用）", "err", cErr)
 	} else {
-		s.svc.SetCredentials(layered)
+		s.svc.CredentialStore().SetLayered(layered)
 	}
 
 	// 持久层：sqlite 走 DB（事实源），memory 走文件目录——两侧都必须拿到 `ProviderDir`

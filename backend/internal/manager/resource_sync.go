@@ -434,7 +434,7 @@ func (s *Service) providerForSync(providerID string) (*provider.Def, string, err
 	if cp == nil {
 		return nil, "", nil
 	}
-	res := s.resolveProviderKey(ctx, cp)
+	res := s.providerPlane.KeyFor(ctx, cp)
 	if res.Value == "" && len(res.Problems) > 0 {
 		return cp, "", errors.New(strings.Join(res.Problems, "；"))
 	}

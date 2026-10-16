@@ -32,7 +32,7 @@ func TestProviderWriteFaceCRUD(t *testing.T) {
 	r := newRig(t) // 带编排器（生效面回执需要它）
 	svc := r.Svc
 	// 凭据面：memory 模式下托管文档就是密钥的事实源（与装配期同一条路径）。
-	svc.SetCredentials(newTestCredentials(t, home))
+	svc.creds.SetLayered(newTestCredentials(t, home))
 	svc.providerPlane.SetProviderDir(dir)
 
 	key := "sk-abc"
@@ -136,7 +136,7 @@ func TestProviderCreateDoesNotWriteKeyWhenRowExists(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.EnableStore(st)
-	svc.SetCredentials(newTestCredentials(t, home))
+	svc.creds.SetLayered(newTestCredentials(t, home))
 	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	// 载体里先放一行（内存不知道）→ 写面读内存判定"不存在"，于是走新建 → CAS 未命中。
@@ -178,7 +178,7 @@ func TestProviderUpdateKeepsKeyWhenContentCasFails(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.EnableStore(st)
-	svc.SetCredentials(newTestCredentials(t, home))
+	svc.creds.SetLayered(newTestCredentials(t, home))
 	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	old := "sk-old"
@@ -313,7 +313,7 @@ func TestProviderProblemsSurfaceBeforeSession(t *testing.T) {
 	home := t.TempDir()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.providerPlane.SetProviderDir(filepath.Join(home, "providers"))
-	svc.SetCredentials(newTestCredentials(t, home))
+	svc.creds.SetLayered(newTestCredentials(t, home))
 	if _, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "no-key", Protocol: "openai"}); err != nil {
 		t.Fatal(err)
 	}

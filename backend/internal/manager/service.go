@@ -219,6 +219,12 @@ func (s *Service) SetBus(bus *eventbus.Bus) { s.bus = bus }
 // 两份平面 = 两个事实源。
 func (s *Service) ProviderPlane() *provider.Plane { return s.providerPlane }
 
+// CredentialStore 凭据机制的事实出口（P4a 正文第五十一刀）。
+//
+// 装配期（`app.go` 的 serve 与 `gateway/source.go`）要用它登记四层凭据面、cwd 与镜像对账；
+// 这些动作的实现只有 `mechanism/credential` 那一份，manager 侧的八个同名转发已随本刀删除。
+func (s *Service) CredentialStore() *credential.Store { return s.creds }
+
 // SessionPlane 交会话域平面（**依赖事实**）：导出用例的事实来源（`svcsystem.NewSource`）
 // 由 `ctrexport` 用它与 Store/Bus 一起在自己的构造函数里造（P4a 正文第八刀）。
 func (s *Service) SessionPlane() *session.Plane { return s.sessionPlane }

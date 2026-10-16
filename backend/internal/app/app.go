@@ -220,12 +220,12 @@ func (a *App) Init(ctx context.Context) error {
 	cwd, _ := os.Getwd()
 	// 凭据 cwd **显式登记**（不是让用到的每一处各自 `os.Getwd()`）：它要随网关条目交给网关
 	// **子进程**，而网关的 cwd 是底座给的（会话工作区）——见 `mcp.GatewayCredCwdEnv`。
-	a.svc.SetCredentialCwd(cwd)
+	a.svc.CredentialStore().SetCwd(cwd)
 	if layered, mirrorPath, cErr := credmech.OpenCredentialSource(cfg.HomeDir, cwd); cErr != nil {
 		glog.Warnw(ctx, "serve: 凭据分层未装配（只有库里的那一份可用）", "err", cErr,
 			"home", config.DisplayHome(cfg.HomeDir))
 	} else {
-		a.svc.SetCredentials(layered)
+		a.svc.CredentialStore().SetLayered(layered)
 		glog.Infow(ctx, "serve: 凭据面已装配（层序：继承环境 > 托管文档 > <cwd>/.env > <MATE_HOME>/.env）",
 			"credentials", mirrorPath)
 	}
@@ -343,7 +343,7 @@ func (a *App) Init(ctx context.Context) error {
 		// `<MATE_HOME>/credentials.json`。**合并、非破坏**：库里有值的那几条被补齐，
 		// 镜像里的其它键**不动**（"镜像有而库里没有"是 doctor 要报的事实，装配期顺手删掉它
 		// 那条判据就永远看不到东西了）。失败只 WARN：镜像是可重建副本，不阻断启动。
-		if changed, sErr := a.svc.SyncCredentialMirror(ctx, "serve 装配期"); sErr != nil {
+		if changed, sErr := a.svc.CredentialStore().SyncCredentialMirror(ctx, "serve 装配期"); sErr != nil {
 			glog.Warnw(ctx, "serve: 托管凭据文档未能按库对账（库是权威，键不受影响；`mate doctor` 会列出差异）",
 				"err", sErr, "path", credmech.CredentialsPath(cfg.HomeDir))
 		} else if changed > 0 {

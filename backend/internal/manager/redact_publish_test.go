@@ -123,7 +123,7 @@ func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
 	ctx := context.Background()
 	svc, st := newSearchRig(t)
 	home := t.TempDir()
-	svc.SetCredentials(newTestCredentials(t, home))
+	svc.creds.SetLayered(newTestCredentials(t, home))
 	svc.providerPlane.SetProviderDir(filepath.Join(home, "providers"))
 
 	key := "zq7-not-a-known-shape-42" // 形状上谁都认不出来
@@ -188,7 +188,7 @@ func TestMcpSecretValueIsRedactedAfterResolution(t *testing.T) {
 	ctx := context.Background()
 	svc, st := newSearchRig(t)
 	home := t.TempDir()
-	svc.SetCredentials(newTestCredentials(t, home))
+	svc.creds.SetLayered(newTestCredentials(t, home))
 	svc.providerPlane.SetProviderDir(filepath.Join(home, "providers"))
 	svc.EnableStore(st)
 

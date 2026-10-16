@@ -145,7 +145,7 @@ func (s *Service) gatewayEntry(runtimeID string, sel *CapabilitySelection) (acl.
 	}
 	// 空 = 装配期没登记（测试、`mate demo` 这类不经装配的入口）：**不带这个键**，让网关侧
 	// 明确知道"核心没交 cwd"，回落并 WARN——不臆造一个 `os.Getwd()` 冒充核心的答案。
-	if cwd := s.credentialCwd(); cwd != "" {
+	if cwd := s.creds.Cwd(); cwd != "" {
 		entry.Env = map[string]string{mcp.GatewayCredCwdEnv: cwd}
 	}
 	return entry, nil

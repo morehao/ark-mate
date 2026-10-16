@@ -27,6 +27,12 @@ import (
 // `rejectRuntimeHintInPatch` 同源"），不剥的话死符号会被注释喂绿——这是本判据最容易假绿的地方，
 // 也是它的**第一版**（不剥注释）实测就会放过 11 个真死符号的原因。
 //
+// **已知盲区（第五十一刀实测）**：判据按**名字**数引用，所以**跨包同名符号会喂活**一个真死符号——
+// `manager` 的 `credentialDoc` / `mirrorSet` / `mirrorDelete` 三条转发一直活着，只因为
+// `internal/domain/provider` 里有同名私有方法。补这个盲区要按包解析（go/types），代价远超收益；
+// 处置是「靠具体的面守卫兜」（见 `credential_mirror_ref_test.go` 的
+// `TestCredentialFaceHasNoTransitionalForwards`）。
+//
 // **扫描面解析不到即失败**：一个私有符号都扫不到（目录改名 / 文件搬走）时判失败＝判据失锚，
 // 与 `TestFrontendUiScanRootsCoverAllUi` 同形。
 func TestManagerHasNoDeadPrivateSymbols(t *testing.T) {

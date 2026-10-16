@@ -59,7 +59,7 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	// 继承环境那一层置空：这条夹具不该被跑测试的机器上恰好存在的同名变量影响
 	// （层序本身由 `pkg/credentials` 的用例与 manager 的用例覆盖）。
 	creds.Env = func(string) string { return "" }
-	svc.SetCredentials(creds)
+	svc.CredentialStore().SetLayered(creds)
 	svc.ProviderPlane().SetProviderDir(filepath.Join(home, "providers"))
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
