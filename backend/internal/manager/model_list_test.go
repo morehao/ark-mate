@@ -10,9 +10,13 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/object/objid"
+	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
@@ -81,7 +85,14 @@ func builtinSpec(t *testing.T, id string) runtime.Spec {
 	return sp
 }
 
-// createModel 走真实写面建一条条目（供应商不存在时先建）。
+// createModel 直接往库里插一条模型行（**绕开写面**）。
+//
+// 写面（`CreateModel`/`UpdateModel`/`DeleteModel`）已搬进 `service/svcmodel`（P4a 正文第五刀）：
+// 这些用例要的是"清单里有一条"这个**前提**，不是写面的行为——写面的判据跟着实现走，
+// 在 `internal/service/svcmodel/declared_test.go`。
+//
+// 仍借 `store.ModelColumns` 落库而不是手写 SQL：前提必须与产品落库的形态同源
+// （列化之后"清单里有一条"这句话的含义就是这些列）。
 func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate ...func(*dtomodel.ModelCreateReq)) *dtomodel.ModelResp {
 	t.Helper()
 	ctx := context.Background()
@@ -96,90 +107,35 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 	for _, m := range mutate {
 		m(&req)
 	}
-	resp, err := r.svc.CreateModel(ctx, req)
-	if err != nil {
-		t.Fatalf("CreateModel: %v", err)
+	id := objid.New(objid.Model)
+	modalities := resource.ModalityText
+	if req.InputModalities != nil {
+		modalities = resource.ModalitiesToColumn(*req.InputModalities)
+	}
+	name, note := "", ""
+	if req.Name != nil {
+		name = *req.Name
+	}
+	if req.Note != nil {
+		note = *req.Note
+	}
+	ok, err := r.svc.st.CreateModelDefinition(ctx, store.ModelColumns{
+		ID: id, ProviderID: providerID, Model: modelID, Name: name, Note: note,
+		InputModalities: modalities, MaxInputTokens: req.MaxInputTokens, MaxOutputTokens: req.MaxOutputTokens,
+	}, definition.DefinitionWriteActor)
+	if err != nil || !ok {
+		t.Fatalf("插模型行: ok=%v err=%v", ok, err)
+	}
+	if req.IsDefault != nil && *req.IsDefault {
+		if err := r.svc.st.SetDefaultModelID(ctx, id); err != nil {
+			t.Fatalf("置默认: %v", err)
+		}
+	}
+	resp, found, err := r.svc.ModelRow(ctx, id)
+	if err != nil || !found {
+		t.Fatalf("读回刚插的行: found=%v err=%v", found, err)
 	}
 	return resp
-}
-
-// TestModelListFailureFaces 写面的失败面，错误码逐条等于设计表。
-func TestModelListFailureFaces(t *testing.T) {
-	ctx := context.Background()
-	r := newModelRig(t)
-
-	// ① 请求体里带 `runtime` → 40001（A2）：模型不再分底座，静默收下等于承认它有意义。
-	_, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p1", Model: "m", Runtime: ptr(runtimetest.ID)})
-	if errCode(err) != "invalid_param" || codeOf(err) != 40001 {
-		t.Fatalf("带 runtime 应 40001 invalid_param，got %q/%d（%v）", errCode(err), codeOf(err), err)
-	}
-	if _, err := r.svc.UpdateModel(ctx, "x", dtomodel.ModelPatchReq{Runtime: ptr(runtimetest.ID)}); errCode(err) != "invalid_param" {
-		t.Fatalf("PATCH 带 runtime 也应被拒，got %q", errCode(err))
-	}
-
-	// ② provider 不存在 → 40401 provider_not_found。
-	_, err = r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "nope", Model: "m"})
-	if errCode(err) != "provider_not_found" || codeOf(err) != 40401 {
-		t.Fatalf("provider 不存在应 40401 provider_not_found，got %q/%d（%v）", errCode(err), codeOf(err), err)
-	}
-
-	// ③ 同 `(provider_id, model_id)` 重复 → 40901 model_exists。
-	r.createModel(t, "p1", "v4-flash")
-	_, err = r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p1", Model: "v4-flash"})
-	if errCode(err) != "model_exists" || codeOf(err) != 40901 {
-		t.Fatalf("重复 (provider_id, model_id) 应 40901 model_exists，got %q/%d（%v）", errCode(err), codeOf(err), err)
-	}
-	// 换 provider → 是另一条（同一模型 id 可以挂在两个端点下）。
-	if _, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p2", Model: "v4-flash"}); errCode(err) != "provider_not_found" {
-		t.Fatalf("p2 还没建，应先报 provider_not_found，got %q", errCode(err))
-	}
-	r.createModel(t, "p2", "v4-flash")
-	if items, err := r.svc.ListModels(ctx); err != nil || len(items) != 2 {
-		t.Fatalf("换 provider 应可建（共 2 条）: n=%d err=%v", len(items), err)
-	}
-
-	// ④ PATCH/DELETE 不存在的条目 → 40401 model_not_found / 幂等 false。
-	if _, err := r.svc.UpdateModel(ctx, "no-such", dtomodel.ModelPatchReq{Name: ptr("x")}); errCode(err) != "model_not_found" {
-		t.Fatalf("PATCH 不存在应 model_not_found，got %q", errCode(err))
-	}
-	if resp, err := r.svc.DeleteModel(ctx, "no-such"); err != nil || resp.Deleted {
-		t.Fatalf("DELETE 不存在应幂等（deleted=false, code=0）: %+v err=%v", resp, err)
-	}
-}
-
-// TestDefaultModelIsSingleAndDeleteClears 默认模型是**单一值**；删掉它连带清空（B4）。
-//
-// v11 的语义是"每 runtime 一条 + 删默认被 40501 拒绝"。v12 两条都变了：默认是**用户的偏好**
-// （单一值），偏好跟着资源消失比拦住用户更合理——所以允许删，但**必须把清空说出来**
-// （`default_cleared`），不静默。
-func TestDefaultModelIsSingleAndDeleteClears(t *testing.T) {
-	ctx := context.Background()
-	r := newModelRig(t)
-	a := r.createModel(t, "p1", "m-a", func(req *dtomodel.ModelCreateReq) { req.IsDefault = ptr(true) })
-	if a.Effect == nil || a.Effect.Effect != "next_session" {
-		t.Fatalf("改默认应回 next_session: %+v", a.Effect)
-	}
-	if id, found, _ := r.svc.st.DefaultModelID(ctx); !found || id != a.ID {
-		t.Fatalf("首条设为默认后应是唯一默认: id=%q found=%v", id, found)
-	}
-	b := r.createModel(t, "p1", "m-b", func(req *dtomodel.ModelCreateReq) { req.IsDefault = ptr(true) })
-	// 单一值：设 b 之后默认就是 b，而不是"每个底座各一条"。
-	if id, _, _ := r.svc.st.DefaultModelID(ctx); id != b.ID {
-		t.Fatalf("默认应是最后设置的那条（单一值），实际 %q", id)
-	}
-	// 删默认**允许**，且如实回带 default_cleared。
-	resp, err := r.svc.DeleteModel(ctx, b.ID)
-	if err != nil || !resp.Deleted || !resp.DefaultCleared {
-		t.Fatalf("删默认应成功并回 default_cleared=true: %+v err=%v", resp, err)
-	}
-	if _, found, _ := r.svc.st.DefaultModelID(ctx); found {
-		t.Fatal("删掉默认之后默认应被清空")
-	}
-	// 删一条**非**默认不报 default_cleared。
-	resp, err = r.svc.DeleteModel(ctx, a.ID)
-	if err != nil || !resp.Deleted || resp.DefaultCleared {
-		t.Fatalf("删非默认不该报 default_cleared: %+v err=%v", resp, err)
-	}
 }
 
 // TestModelValueForTwoAlgorithmsAgree 下发（T2）与交付（T5）**共用同一个生成规则**，
@@ -243,14 +199,12 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 	}
 }
 
-// TestModelListRequiresSQLite memory 模式（无清单载体）→ 40501，而不是"内存生效、盘上没留痕"。
-func TestModelListRequiresSQLite(t *testing.T) {
+// TestModelListReadsEmptyWithoutSQLite memory 模式（无清单载体）：读面回空列表。
+//
+// 写面（"没有载体就 40501"）随实现在 `internal/service/svcmodel/declared_test.go`。
+func TestModelListReadsEmptyWithoutSQLite(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(runtime.AllBuiltinRegistry(), eventbus.New())
-	_, err := svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p", Model: "m"})
-	if errCode(err) != "model_list_unavailable" || codeOf(err) != 40501 {
-		t.Fatalf("memory 模式的清单写面应 40501 model_list_unavailable，got %q/%d（%v）", errCode(err), codeOf(err), err)
-	}
 	items, err := svc.ListModels(ctx)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("memory 模式的清单读面应回空列表: %+v err=%v", items, err)
@@ -319,46 +273,4 @@ func TestDefaultModelReasoningEffortNotSent(t *testing.T) {
 		t.Fatal("dsh 应已声明凭据引用名模板（逐供应商唯一的那个）")
 	}
 	_ = testutil.StubRegistry() // 保持 testutil 依赖（夹具在别处复用）
-}
-
-// TestClearDefaultModel PATCH 的两个方向都要生效。
-//
-// 这条来自一次**端到端探针**：删掉 dsh 的 overlay 之后想恢复，只删文件不够——平台侧仍声明着默认，
-// T2 会继续把它下发、底座已经不认识了，于是每条新会话都失败；而"清掉默认"这个动作当时是**静默无效**的
-// （写面只处理 `is_default:true`）。
-func TestClearDefaultModel(t *testing.T) {
-	ctx := context.Background()
-	r := newModelRig(t)
-	created := r.createModel(t, "p1", "m1")
-	if _, err := r.svc.UpdateModel(ctx, created.ID, dtomodel.ModelPatchReq{IsDefault: boolPtr(true)}); err != nil {
-		t.Fatalf("置默认: %v", err)
-	}
-	if v, err := r.svc.DefaultModelValueFor(ctx, runtimetest.ID); err != nil || v == "" {
-		t.Fatalf("置默认后应有默认值: %q %v", v, err)
-	}
-	if _, err := r.svc.UpdateModel(ctx, created.ID, dtomodel.ModelPatchReq{IsDefault: boolPtr(false)}); err != nil {
-		t.Fatalf("清默认: %v", err)
-	}
-	if v, err := r.svc.DefaultModelValueFor(ctx, runtimetest.ID); err != nil || v != "" {
-		t.Fatalf("清默认后不该再有默认值: %q %v", v, err)
-	}
-	// 幂等：本来就不是默认 → 仍然成功。
-	if _, err := r.svc.UpdateModel(ctx, created.ID, dtomodel.ModelPatchReq{IsDefault: boolPtr(false)}); err != nil {
-		t.Fatalf("重复清默认应幂等: %v", err)
-	}
-	// 改正文的那一版仍走行 CAS（一行 + 一条审计同事务的纪律）：置默认/清默认不碰模型行，
-	// 所以修一次正文就该看到 revision 前进。
-	if _, err := r.svc.UpdateModel(ctx, created.ID, dtomodel.ModelPatchReq{Name: ptr("别名")}); err != nil {
-		t.Fatalf("改正文: %v", err)
-	}
-	got, found, err := r.svc.st.GetModelDefinition(ctx, created.ID)
-	if err != nil || !found {
-		t.Fatalf("读行: found=%v err=%v", found, err)
-	}
-	if got.Revision < 2 {
-		t.Fatalf("改正文应推进一版 revision，实际 %d", got.Revision)
-	}
-	if got.Name != "别名" {
-		t.Fatalf("改正文应落到 name 列: %+v", got)
-	}
 }

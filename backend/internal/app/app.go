@@ -232,6 +232,10 @@ func (a *App) Init(ctx context.Context) error {
 	// 持久层装配（P1）：MATE_STORE=sqlite → SQLite（DB 为事实源，transcript 停写保留只读）；
 	// =memory → 维持 transcript 落盘 + 启动回读；auto（默认）→ DB 文件已存在则 sqlite，否则 memory。
 	mode := cfg.ResolvedStoreMode()
+	// st 提到 switch 之外：装配面（`Ports.Store`）与 `Close` 都要看它。
+	// 此前它只在 sqlite 分支里存活，于是 `a.st` 永远是 nil、`a.st.Close()` 从来没被执行过
+	// ——存储句柄的关闭是一次**静默的 no-op**（本轮修掉：既是端口要的事实，也是个真缺口）。
+	var st *store.Store
 	switch mode {
 	case config.StoreModeSQLite:
 		// 配置目录化后 DB 路径可由文件指定，父目录未必存在：先补齐（此前只依赖用户手建目录）。
@@ -240,10 +244,12 @@ func (a *App) Init(ctx context.Context) error {
 				return fatalErr("serve: 创建 DB 目录 %s: %v", dir, err)
 			}
 		}
-		st, err := store.Open(cfg.DBPath)
+		opened, err := store.Open(cfg.DBPath)
 		if err != nil {
 			return fatalErr("serve: 打开持久层 %s: %v", cfg.DBPath, err)
 		}
+		st = opened
+		a.st = opened
 		// 定义目录**先行登记**（顺序敏感，2026-10-11 修）：下面 `EnableStore` 会立刻做一次
 		// 装配期 runtime 同步，那一刻 `providerLocator` 已经要有确定值（否则报错文案指向空路径）。
 		// v20 起它与密钥无关——密钥面在库与托管文档里，都不依赖这个目录（见 `SetProviderDir`）。
@@ -451,7 +457,9 @@ func (a *App) Init(ctx context.Context) error {
 		Runtime: a.rconn,
 		// 档案四动作 + 自检的两个事实端口：自检用例（svcprovider.Probe）由 ctrprovider 造。
 		ProviderPlane: a.svc.ProviderPlane(), ProviderCatalog: a.svc,
-		Model:      a.svc,
+		// 模型清单写面（P4a 第五刀）：交出**清单载体**与供应商域平面（依赖事实）+ 一个过渡端口
+		// （读一条的投影 / 生效面回执 / 同步触发仍在 manager），写面用例由 ctrmodel 自己造。
+		Store: st, Model: a.svc, ModelHost: a.svc,
 		Capability: a.svc, Automation: a.svc, Library: a.svc,
 		// P4a 起"用例实现"不再等于 manager：导出搬进了 svcsystem，manager 交出**事实来源**
 		// （`SessionMeta`/`SessionEvents`），用例实例由 ctrexport 造。这一处的断言力也随之上移：

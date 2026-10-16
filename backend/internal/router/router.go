@@ -29,6 +29,7 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svcsession"
 	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/internal/service/svcworkspace"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/golib/biz/gserver/ginserver"
 )
 
@@ -58,11 +59,17 @@ type Ports struct {
 	// 档案用例与自检用例**都在控制器里造**（P4a 正文第四刀）。
 	ProviderPlane   *provider.Plane
 	ProviderCatalog svcprovider.Catalog
-	Model           svcmodel.ModelSvc
-	Capability      svccapability.CapabilitySvc
-	Automation      svcautomation.AutomationSvc
-	Library         svclibrary.LibrarySvc
-	System          svcsystem.Source
+	// Store 持久层句柄（**依赖事实**：memory 模式为 nil）；模型清单的写面用它落库。
+	Store *store.Store
+	// Model 还没搬完的那半边模型面（读清单 / 运行时目录 / 同步），过渡期由 manager 满足。
+	Model svcmodel.ModelSvc
+	// ModelHost 写面之外的模型面（读一条的投影 / 生效面回执 / 同步触发），过渡期端口；
+	// 与 Store、ProviderPlane 一起交给 `ctrmodel.NewModelCtr`，写面用例在控制器里造。
+	ModelHost  svcmodel.Host
+	Capability svccapability.CapabilitySvc
+	Automation svcautomation.AutomationSvc
+	Library    svclibrary.LibrarySvc
+	System     svcsystem.Source
 }
 
 // CapabilityHostFacts 报告"宿主能不能抬起系统目录面板"（`native-dialog` 的可用性判据）。

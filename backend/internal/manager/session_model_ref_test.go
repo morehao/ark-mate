@@ -10,9 +10,12 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objid"
+	"github.com/morehao/ark-mate/pkg/resource"
 )
 
 // ——— v26：会话模型引用 = **平台模型行 id**（定案「辰」）———
@@ -49,7 +52,10 @@ type byModelNameOnly struct{}
 
 func (byModelNameOnly) Value(_, model string) (string, error) { return "m:" + model, nil }
 
-// createProviderAndModel 走真实写面造一条"供应商 + 模型行"，返回模型行。
+// createProviderAndModel 造一条"供应商 + 模型行"，返回模型行。
+//
+// 模型行**直接插库**（写面已搬进 `service/svcmodel`：这些用例测的是会话侧怎么解析模型，
+// 不是写面，见 `seedModelRow`）。
 func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName string) *dtomodel.ModelResp {
 	t.Helper()
 	ctx := context.Background()
@@ -59,11 +65,18 @@ func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName st
 	}); err != nil && errCode(err) != "provider_exists" {
 		t.Fatalf("CreateProvider(%s): %v", providerID, err)
 	}
-	resp, err := svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: providerID, Model: modelName})
-	if err != nil {
-		t.Fatalf("CreateModel(%s/%s): %v", providerID, modelName, err)
+	id := objid.New(objid.Model)
+	ok, err := svc.st.CreateModelDefinition(ctx, store.ModelColumns{
+		ID: id, ProviderID: providerID, Model: modelName, InputModalities: resource.ModalityText,
+	}, definition.DefinitionWriteActor)
+	if err != nil || !ok {
+		t.Fatalf("插模型行(%s/%s): ok=%v err=%v", providerID, modelName, ok, err)
 	}
-	return resp
+	row, found, err := svc.ModelRow(ctx, id)
+	if err != nil || !found {
+		t.Fatalf("读回模型行 %s: found=%v err=%v", id, found, err)
+	}
+	return row
 }
 
 // TestResolveSessionModelRejectsUnknown 守卫⑧的行为面：**对不上平台清单的入参一律被拒**，
@@ -113,7 +126,7 @@ func TestResolveSessionModelRejectsUnknown(t *testing.T) {
 	if _, cfg, err := r.svc.resolveSessionModel(ctx, r.runtme, ""); err != nil || cfg.Model != "" {
 		t.Fatalf("未设默认模型时应回「不下发」而不是报错: cfg=%+v err=%v", cfg, err)
 	}
-	if _, err := r.svc.UpdateModel(ctx, row.ID, dtomodel.ModelPatchReq{IsDefault: ptr(true)}); err != nil {
+	if err := r.svc.st.SetDefaultModelID(ctx, row.ID); err != nil {
 		t.Fatalf("设默认模型: %v", err)
 	}
 	id, cfg, err = r.svc.resolveSessionModel(ctx, r.runtme, "")

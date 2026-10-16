@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/store"
@@ -231,11 +230,8 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 		t.Fatalf("CreateProvider: %v", err)
 	}
 	// 注入哪条档案由**默认模型**那条清单决定（v19：agent 上的 provider 字段已撤销）。
-	if _, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{
-		ProviderID: "p1", Model: "m-1", IsDefault: ptr(true),
-	}); err != nil {
-		t.Fatalf("建默认模型: %v", err)
-	}
+	// 夹具直接插行：写面已搬进 `service/svcmodel`（见 `seedModelRow`）。
+	r.seedModelRow(t, "p1", "m-1", true)
 
 	idleID, idle := r.start(t, nil)
 	busyID, busy := r.start(t, nil)

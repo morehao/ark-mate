@@ -556,12 +556,16 @@ func (s *Service) recordSyncOutcome(ctx context.Context, runtimeID string, set r
 	return s.st.SetMeta(ctx, model.MetaKeyRuntimeConfigDigest, string(b))
 }
 
+// TrySyncModels 「提交就同步」：写面提交后把清单推给各底座，返回一句给用户看的话。
+//
+// 导出是**过渡期的端口实现**（`svcmodel.Host`，P4a 正文第五刀）：清单写面在 `service/svcmodel`，
+// 而同步要写各底座的配置（Syncer + 凭据通道），随读面/同步面一起搬（P4b 第二刀）。
 // trySyncModels 写面末尾的尽力同步：资源行**已经提交**，所以同步失败不回滚它，
 // 而是把失败如实带回写面回执（note），并留一条 WARN。
 //
 // 为什么不直接返回错误：那会让前端以为"清单没保存"——它保存了。真实情况是
 // "清单已保存，但交付没成功"，这两件事必须分开说。
-func (s *Service) trySyncModels(ctx context.Context) string {
+func (s *Service) TrySyncModels(ctx context.Context) string {
 	if s.st == nil {
 		return ""
 	}

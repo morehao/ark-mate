@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 )
 
@@ -30,11 +29,8 @@ func TestProviderKeyChangeSwitchesGenerationNextRun(t *testing.T) {
 		t.Fatalf("建档案: %v", err)
 	}
 	// v19：注入哪条档案由**默认模型**那条清单决定（agent 上的 provider 字段已随 agent 面撤销）。
-	if _, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{
-		ProviderID: "p1", Model: "m-1", IsDefault: ptrOf(true),
-	}); err != nil {
-		t.Fatalf("建默认模型: %v", err)
-	}
+	// 夹具直接插行：写面已搬进 `service/svcmodel`（见 `seedModelRow`）。
+	r.seedModelRow(t, "p1", "m-1", true)
 
 	convID, as1 := r.start(t, nil)
 	// 先立住"没变就不切"这一半：否则下面那次切换可能只是"每轮都换"。

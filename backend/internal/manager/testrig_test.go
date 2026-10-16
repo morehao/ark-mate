@@ -16,6 +16,8 @@ package manager
 // （`import cycle not allowed in test`）。详见 internal/testutil 的包注释。
 
 import (
+	"context"
+
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
@@ -23,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
@@ -291,3 +294,26 @@ func newSearchRig(t *testing.T) (*Service, *store.Store) {
 // 它刻意是**测试文件里的包内助手**而不是 Service 的导出方法：生产装配不需要"把域拿出来"，
 // 加一个导出 getter 等于给 P4b 留一条新的一行转发。
 func transcriptPlane(svc *Service) *session.Plane { return svc.sessionPlane }
+
+// seedModelRow 直接往库里插一条模型行（**绕开写面**），返回行 id。
+//
+// 写面（`CreateModel`/`UpdateModel`/`DeleteModel`）已搬进 `service/svcmodel`（P4a 正文第五刀）：
+// 还留在 manager 的用例要的是"清单里有一条（甚至是默认那条）"这个**前提**，不是写面的行为
+// ——写面自己的判据跟着实现走（`internal/service/svcmodel/declared_test.go`）。
+func (r *genRig) seedModelRow(t *testing.T, providerID, model string, isDefault bool) string {
+	t.Helper()
+	ctx := context.Background()
+	id := objid.New(objid.Model)
+	ok, err := r.svc.st.CreateModelDefinition(ctx, store.ModelColumns{
+		ID: id, ProviderID: providerID, Model: model, InputModalities: resource.ModalityText,
+	}, definition.DefinitionWriteActor)
+	if err != nil || !ok {
+		t.Fatalf("插模型行 %s/%s: ok=%v err=%v", providerID, model, ok, err)
+	}
+	if isDefault {
+		if err := r.svc.st.SetDefaultModelID(ctx, id); err != nil {
+			t.Fatalf("置默认模型 %s: %v", id, err)
+		}
+	}
+	return id
+}

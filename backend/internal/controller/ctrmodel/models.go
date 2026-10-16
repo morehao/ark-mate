@@ -1,13 +1,15 @@
 // Package ctrmodel 承载模型目录控制器（运行时派生的 ACP session config options 投影）。
 //
-// 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
+// 控制器只依赖 internal/service/svc* 的窄端口与**依赖事实**（清单载体、供应商域平面），不感知领域实现；
 // 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
 package ctrmodel
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -26,14 +28,25 @@ var _ ModelCtr = (*modelCtr)(nil)
 
 // modelCtr 处理模型目录 REST（GET /models）。
 //
-// 只依赖一个端口（svcruntime）：底座由构建期固定（v19），"问哪个底座"不再是一个参数。
+// 两个字段分工是这一层"用例归谁造"的可见处：
+//
+//	declared —— 平台清单的**写面**用例，**本控制器自己造**（`svcmodel.NewDeclared`，P4a 第五刀）
+//	svc      —— 还没搬完的那半边（读清单 / 运行时目录 / 同步），装配点交出
+//
+// 底座由构建期固定（v19），"问哪个底座"不是一个参数。
 type modelCtr struct {
-	svc svcmodel.ModelSvc
+	svc      svcmodel.ModelSvc
+	declared svcmodel.DeclaredSvc
 }
 
-// NewModelCtr 构造 ModelCtr。
-func NewModelCtr(svc svcmodel.ModelSvc) ModelCtr {
-	return &modelCtr{svc: svc}
+// NewModelCtr 构造 ModelCtr：交出**依赖事实**（清单载体、供应商域平面）与一个过渡端口
+// （`host`：读一条的投影 / 生效面回执 / 同步触发——三条今天仍在 `manager`），
+// 拿回写面用例与控制器。
+//
+// 三个入参都没有"顺便给一份 Service"的口子：写面只用到清单载体、供应商存在性和那三件事，
+// 而除控制器之外的层不许引用 `service/svc*`（`internal/archtest/svc_layer_consumer_test.go`）。
+func NewModelCtr(svc svcmodel.ModelSvc, st *store.Store, plane *provider.Plane, host svcmodel.Host) ModelCtr {
+	return &modelCtr{svc: svc, declared: svcmodel.NewDeclared(st, plane, host)}
 }
 
 // List 返回模型读面：**平台清单 + 聚合生效结论 + 逐 runtime 机器面明细（sync[]）**。
@@ -89,7 +102,7 @@ func (h *modelCtr) Create(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.CreateModel(c.Request.Context(), req)
+	resp, err := h.declared.CreateModel(c.Request.Context(), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -104,7 +117,7 @@ func (h *modelCtr) Update(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.UpdateModel(c.Request.Context(), c.Param("id"), patch)
+	resp, err := h.declared.UpdateModel(c.Request.Context(), c.Param("id"), patch)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -114,7 +127,7 @@ func (h *modelCtr) Update(c *gin.Context) {
 
 // Delete 删除一条模型条目（幂等；若它是默认模型则**连带清空**并在响应里说明）。
 func (h *modelCtr) Delete(c *gin.Context) {
-	resp, err := h.svc.DeleteModel(c.Request.Context(), c.Param("id"))
+	resp, err := h.declared.DeleteModel(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
