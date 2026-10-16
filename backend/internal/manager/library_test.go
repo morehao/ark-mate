@@ -57,11 +57,11 @@ func TestLibraryKindsAndOrigin(t *testing.T) {
 	svc := libraryRig(t)
 	ctx := context.Background()
 
-	if _, err := svc.CreateSkill(ctx, writeReq(t, `{"id":"demo","name":"演示 skill","body":"# d"}`)); err != nil {
+	if _, err := svc.SkillPlane().WriteSkill(ctx, "", writeReq(t, `{"id":"demo","name":"演示 skill","body":"# d"}`), true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.CreateMcpServer(ctx, writeMcpReq(t,
-		`{"id":"fs","name":"文件","transport":"stdio","command":"/usr/local/bin/npx"}`)); err != nil {
+	if _, err := svc.McpPlane().WriteServer(ctx, "", writeMcpReq(t,
+		`{"id":"fs","name":"文件","transport":"stdio","command":"/usr/local/bin/npx"}`), true); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.RegisterTool(capability.Tool{Name: "builtin_echo", Source: capability.ToolSourceBuiltin}); err != nil {
@@ -111,7 +111,7 @@ func TestLibraryKindFilterAndQuery(t *testing.T) {
 	svc := libraryRig(t)
 	// id 必须符合底座词法（大写/下划线会被 dsh 静默丢弃，2026-10-08 实测），所以"大小写不敏感"
 	// 这一层改用**查询串**来测：id 全小写、查询给大写形态（`PDF-READER` 只可能命中 id 那条路）。
-	if _, err := svc.CreateSkill(context.Background(), writeReq(t, `{"id":"pdf-reader","name":"读 PDF","description":"解析文档"}`)); err != nil {
+	if _, err := svc.SkillPlane().WriteSkill(context.Background(), "", writeReq(t, `{"id":"pdf-reader","name":"读 PDF","description":"解析文档"}`), true); err != nil {
 		t.Fatal(err)
 	}
 	items, err := listLibrary(t, svc).ListLibrary(svclibrary.Query{Kind: dtolibrary.KindSkill})
@@ -153,7 +153,7 @@ func TestLibraryKindFilterAndQuery(t *testing.T) {
 func TestLibrarySkillApplicability(t *testing.T) {
 	svc := libraryRig(t)
 	ctx := context.Background()
-	if _, err := svc.CreateSkill(ctx, writeReq(t, `{"id":"demo","body":"# d"}`)); err != nil {
+	if _, err := svc.SkillPlane().WriteSkill(ctx, "", writeReq(t, `{"id":"demo","body":"# d"}`), true); err != nil {
 		t.Fatal(err)
 	}
 	statusFor := func(id, rt string) dtolibrary.Applicability {
@@ -198,7 +198,7 @@ func TestLibrarySkillApplicability(t *testing.T) {
 	}
 
 	// 白名单不含某 runtime → not_applicable（并说清怎么改）。
-	if _, err := svc.UpdateSkill(ctx, "demo", writeReq(t, `{"runtimes":["rtx"]}`)); err != nil {
+	if _, err := svc.SkillPlane().WriteSkill(ctx, "demo", writeReq(t, `{"runtimes":["rtx"]}`), false); err != nil {
 		t.Fatal(err)
 	}
 	if sk, ok := svc.caps.SkillByID("demo"); !ok || len(sk.Runtimes) != 1 {
@@ -209,7 +209,7 @@ func TestLibrarySkillApplicability(t *testing.T) {
 	}
 
 	// 禁用 → disabled（优先级最高：用户的显式决定最先说）。
-	if _, err := svc.UpdateSkill(ctx, "demo", writeReq(t, `{"enabled":false}`)); err != nil {
+	if _, err := svc.SkillPlane().WriteSkill(ctx, "demo", writeReq(t, `{"enabled":false}`), false); err != nil {
 		t.Fatal(err)
 	}
 	if a := statusFor("demo", "rtx"); a.Status != dtolibrary.StatusDisabled {
@@ -222,8 +222,8 @@ func TestLibrarySkillApplicability(t *testing.T) {
 func TestLibraryMcpAndToolApplicability(t *testing.T) {
 	svc := libraryRig(t)
 	ctx := context.Background()
-	if _, err := svc.CreateMcpServer(ctx, writeMcpReq(t,
-		`{"id":"fs","transport":"stdio","command":"/usr/local/bin/npx"}`)); err != nil {
+	if _, err := svc.McpPlane().WriteServer(ctx, "", writeMcpReq(t,
+		`{"id":"fs","transport":"stdio","command":"/usr/local/bin/npx"}`), true); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.RegisterTool(capability.Tool{Name: "fs_read", Source: capability.ToolSourceMCP, McpServer: "fs"}); err != nil {
@@ -282,7 +282,7 @@ func TestLibraryScale(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 300; i++ {
 		id := fmt.Sprintf("skill-%03d", i)
-		if _, err := svc.CreateSkill(ctx, writeReq(t, fmt.Sprintf(`{"id":%q,"name":"技能 %d","description":"批量"}`, id, i))); err != nil {
+		if _, err := svc.SkillPlane().WriteSkill(ctx, "", writeReq(t, fmt.Sprintf(`{"id":%q,"name":"技能 %d","description":"批量"}`, id, i)), true); err != nil {
 			t.Fatal(err)
 		}
 	}

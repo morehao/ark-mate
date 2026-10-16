@@ -49,9 +49,9 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 	id := "db-skill"
 
 	// —— 新建：落行 + 入表 + 审计 + 物化 ——
-	resp, err := r.Svc.CreateSkill(ctx, dtocapability.SkillWriteReq(rawObj(t,
+	resp, err := r.Svc.SkillPlane().WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t,
 		"id", `"db-skill"`, "name", `"DB Skill"`, "body", `"# DB"`, "runtimes", `["rtx"]`,
-		"my_note", `"手写字段"`)))
+		"my_note", `"手写字段"`)), true)
 	if err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 	}
 
 	// —— 覆盖写：只改出现的键，未知键与其余键保留；revision 递增；审计追加 ——
-	resp, err = r.Svc.UpdateSkill(ctx, id, dtocapability.SkillWriteReq(rawObj(t, "name", `"改名了"`)))
+	resp, err = r.Svc.SkillPlane().WriteSkill(ctx, id, dtocapability.SkillWriteReq(rawObj(t, "name", `"改名了"`)), false)
 	if err != nil {
 		t.Fatalf("UpdateSkill: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 	}
 
 	// —— 删除：行没了、内存条目没了、物化副本撤回、审计仍在（删了也留痕） ——
-	del, err := r.Svc.DeleteSkill(ctx, id)
+	del, err := r.Svc.SkillPlane().DeleteSkill(ctx, id)
 	if err != nil {
 		t.Fatalf("DeleteSkill: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 	}
 
 	// —— 幂等删除：第二次是 noop，且**不追加审计**（没发生的变更不该留痕） ——
-	del2, err := r.Svc.DeleteSkill(ctx, id)
+	del2, err := r.Svc.SkillPlane().DeleteSkill(ctx, id)
 	if err != nil {
 		t.Fatalf("重复删除: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 	r, _ := storeCapRig(t)
 	ctx := context.Background()
 
-	if _, err := r.Svc.CreateSkill(ctx, dtocapability.SkillWriteReq(rawObj(t, "id", `"cas-skill"`, "name", `"orig"`))); err != nil {
+	if _, err := r.Svc.SkillPlane().WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t, "id", `"cas-skill"`, "name", `"orig"`)), true); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 	repo, err := r.Svc.definitionRepoFor(definition.CapSubSkills)
@@ -222,7 +222,7 @@ func TestStoreWriteFaceGateRejectsWithoutWrite(t *testing.T) {
 	ctx := context.Background()
 
 	// skill：非法 scope。
-	_, err := r.Svc.CreateSkill(ctx, dtocapability.SkillWriteReq(rawObj(t, "id", `"bad-scope"`, "scope", `"bogus"`)))
+	_, err := r.Svc.SkillPlane().WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t, "id", `"bad-scope"`, "scope", `"bogus"`)), true)
 	if err == nil || !strings.Contains(err.Error(), "scope") || !strings.Contains(err.Error(), "definition_invalid") {
 		t.Fatalf("非法 scope 应被闸门以 definition_invalid 拒绝: %v", err)
 	}
@@ -240,8 +240,8 @@ func TestStoreWriteFaceGateRejectsWithoutWrite(t *testing.T) {
 	}
 
 	// mcp：stdio 命令不是绝对路径（同一道闸门，MCP 侧最常踩的一条）。
-	_, err = r.Svc.CreateMcpServer(ctx, dtocapability.McpWriteReq(rawObj(t,
-		"id", `"bad-mcp"`, "transport", `"stdio"`, "command", `"npx"`)))
+	_, err = r.Svc.McpPlane().WriteServer(ctx, "", dtocapability.McpWriteReq(rawObj(t,
+		"id", `"bad-mcp"`, "transport", `"stdio"`, "command", `"npx"`)), true)
 	if err == nil || !strings.Contains(err.Error(), "绝对路径") {
 		t.Fatalf("相对命令应被闸门拒绝: %v", err)
 	}
@@ -258,8 +258,8 @@ func TestStoreSkillEnabledTogglesOnlyOneKey(t *testing.T) {
 	r, root := storeCapRig(t)
 	ctx := context.Background()
 
-	if _, err := r.Svc.CreateSkill(ctx, dtocapability.SkillWriteReq(rawObj(t,
-		"id", `"toggle"`, "name", `"T"`, "body", `"# T"`, "my_note", `"留着"`))); err != nil {
+	if _, err := r.Svc.SkillPlane().WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t,
+		"id", `"toggle"`, "name", `"T"`, "body", `"# T"`, "my_note", `"留着"`)), true); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 	if !materializedAt(t, root, "toggle") {
@@ -326,9 +326,9 @@ func TestStoreMcpWriteFaceRoundTrip(t *testing.T) {
 	r, _ := storeCapRig(t)
 	ctx := context.Background()
 
-	resp, err := r.Svc.CreateMcpServer(ctx, dtocapability.McpWriteReq(rawObj(t,
+	resp, err := r.Svc.McpPlane().WriteServer(ctx, "", dtocapability.McpWriteReq(rawObj(t,
 		"id", `"fs"`, "transport", `"stdio"`, "command", `"/usr/bin/env"`, "args", `["node"]`,
-		"secret_env", `{"TOKEN":"store:fs/token"}`)))
+		"secret_env", `{"TOKEN":"store:fs/token"}`)), true)
 	if err != nil {
 		t.Fatalf("CreateMcpServer: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestStoreMcpWriteFaceRoundTrip(t *testing.T) {
 	if err := r.Svc.RegisterTool(capability.Tool{Name: "fs__read", Source: capability.ToolSourceMCP, McpServer: "fs"}); err != nil {
 		t.Fatal(err)
 	}
-	del, err := r.Svc.DeleteMcpServer(ctx, "fs")
+	del, err := r.Svc.McpPlane().DeleteServer(ctx, "fs")
 	if err != nil {
 		t.Fatalf("DeleteMcpServer: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestStoreWriteFaceRequiresNoCapabilityDir(t *testing.T) {
 	if dir := r.Svc.capabilityDirSnapshot(); dir != "" {
 		t.Fatalf("本夹具刻意不配能力目录，got %q", dir)
 	}
-	if _, err := r.Svc.CreateSkill(context.Background(), dtocapability.SkillWriteReq(rawObj(t, "id", `"no-dir"`))); err != nil {
+	if _, err := r.Svc.SkillPlane().WriteSkill(context.Background(), "", dtocapability.SkillWriteReq(rawObj(t, "id", `"no-dir"`)), true); err != nil {
 		t.Fatalf("DB 模式没配目录也该能写: %v", err)
 	}
 }

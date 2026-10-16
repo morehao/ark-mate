@@ -169,6 +169,40 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 		strings.Contains(mgr, "func (s *Service) SkillMaterialization(") {
 		t.Error("`internal/manager/skills.go` 里又出现技能启停/物化的转发：那两行已删。")
 	}
+	// ——— 定义**写面**六条（skill 三条 / mcp 三条）归域平面（P4a 正文第三十七刀）———
+	//
+	// 六条转发（`CreateSkill`/`UpdateSkill`/`DeleteSkill`/`CreateMcpServer`/`UpdateMcpServer`/
+	// `DeleteMcpServer`）的函数体各自只有一行、且目标方法**名字都不同**（`WriteSkill(ctx, "", req, true)`
+	// 这类「同一方法 + create 开关」的形状）——**正因为名字不同，接口方法名与域方法名的对应关系
+	// 没有编译器能替我们记住**：谁把 `create` 开关写反，或者把 id 与 req 传颠倒，编译照样过。
+	// 所以判据钉三件事：接口里零命中那六个名字、manager 两个薄文件里零命中那六个方法、域里四个
+	// 本体（`WriteSkill`/`DeleteSkill`/`WriteServer`/`DeleteServer`）必须在（失锚＝空转）。
+	for _, dead := range []string{"CreateSkill(ctx context.Context", "UpdateSkill(ctx context.Context", "DeleteSkill(ctx context.Context",
+		"CreateMcpServer(ctx context.Context", "UpdateMcpServer(ctx context.Context", "DeleteMcpServer(ctx context.Context"} {
+		if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svccapability", "capability.go"))), dead) {
+			t.Errorf("`svccapability` 的接口里又出现 `%s`：写面归域平面（`WriteSkill`/`WriteServer`），"+
+				"接口里留声明 = 给一行转发留位置。", dead)
+		}
+	}
+	writeFaces := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "skills_write.go"))) +
+		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "mcps_write.go")))
+	for _, dead := range []string{"func (s *Service) CreateSkill(", "func (s *Service) UpdateSkill(", "func (s *Service) DeleteSkill(",
+		"func (s *Service) CreateMcpServer(", "func (s *Service) UpdateMcpServer(", "func (s *Service) DeleteMcpServer("} {
+		if strings.Contains(writeFaces, dead) {
+			t.Errorf("`internal/manager/{%s,mcps_write.go}` 里又出现 `%s`：那一行转发已删。", "skills_write.go", dead)
+		}
+	}
+	for _, must := range []string{"func (m *Plane) WriteSkill(", "func (m *Plane) DeleteSkill("} {
+		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "skill", "write.go"))), must) {
+			t.Errorf("`domain/skill/write.go` 里找不到 %q：判据失锚＝空转。", must)
+		}
+	}
+	for _, must := range []string{"func (p *Plane) WriteServer(", "func (p *Plane) DeleteServer("} {
+		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "mcp", "write.go"))), must) {
+			t.Errorf("`domain/mcp/write.go` 里找不到 %q：判据失锚＝空转。", must)
+		}
+	}
+
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "skill", "plane.go"))), "func (m *Plane) SetSkillEnabled(") ||
 		!strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "skill", "materialization.go"))), "func (m *Plane) SkillMaterialization(") {
 		t.Error("`domain/skill` 里找不到两个本体：判据失锚＝空转。")

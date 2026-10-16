@@ -56,6 +56,8 @@ type capabilityCtr struct {
 	// 已经把 `capability.Skill` 折成 `dtocapability.SkillResp`，含 warnings 与 scope 判定），
 	// 用例层再包一层就只是一行转发——那正是第十一刀判定为骚操作的形状。
 	skills *skill.Plane
+	// mcpPlane MCP 定义**写面**的平面（P4a 正文第三十七刀：写面归域平面，控制器直接调）。
+	mcpPlane *mcp.Plane
 	// mcp MCP 注册表**读模型**（P4a 正文第十四刀起在本包内构造）。
 	//
 	// 与 `tools` 同族：条目本体在注册表里、探测态在 MCP 平面里、悬空引用体检在密钥面里，
@@ -67,7 +69,7 @@ type capabilityCtr struct {
 func NewCapabilityCtr(svc svccapability.CapabilitySvc, caps *capability.Registry, skills *skill.Plane,
 	mcpPlane *mcp.Plane, mcpSecrets *mcp.Secrets) CapabilityCtr {
 	return &capabilityCtr{
-		svc: svc, tools: svccapability.NewTools(caps), skills: skills,
+		svc: svc, tools: svccapability.NewTools(caps), skills: skills, mcpPlane: mcpPlane,
 		mcp: svccapability.NewServers(caps, mcpPlane, mcpSecrets),
 	}
 }
@@ -90,7 +92,7 @@ func (h *capabilityCtr) CreateSkill(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.CreateSkill(c.Request.Context(), req)
+	resp, err := h.skills.WriteSkill(c.Request.Context(), "", req, true)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -106,7 +108,7 @@ func (h *capabilityCtr) UpdateSkill(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.UpdateSkill(c.Request.Context(), c.Param("id"), req)
+	resp, err := h.skills.WriteSkill(c.Request.Context(), c.Param("id"), req, false)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -116,7 +118,7 @@ func (h *capabilityCtr) UpdateSkill(c *gin.Context) {
 
 // DeleteSkill 删除一个 skill 定义并撤回已物化副本（幂等：不存在 → `deleted:false` 且 code=0）。
 func (h *capabilityCtr) DeleteSkill(c *gin.Context) {
-	resp, err := h.svc.DeleteSkill(c.Request.Context(), c.Param("id"))
+	resp, err := h.skills.DeleteSkill(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -132,7 +134,7 @@ func (h *capabilityCtr) CreateMcpServer(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.CreateMcpServer(c.Request.Context(), req)
+	resp, err := h.mcpPlane.WriteServer(c.Request.Context(), "", req, true)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -147,7 +149,7 @@ func (h *capabilityCtr) UpdateMcpServer(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.UpdateMcpServer(c.Request.Context(), c.Param("id"), req)
+	resp, err := h.mcpPlane.WriteServer(c.Request.Context(), c.Param("id"), req, false)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -157,7 +159,7 @@ func (h *capabilityCtr) UpdateMcpServer(c *gin.Context) {
 
 // DeleteMcpServer 删除一个 MCP server 定义，并**一并摘除**归属它的工具条目。
 func (h *capabilityCtr) DeleteMcpServer(c *gin.Context) {
-	resp, err := h.svc.DeleteMcpServer(c.Request.Context(), c.Param("id"))
+	resp, err := h.mcpPlane.DeleteServer(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
