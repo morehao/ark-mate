@@ -157,7 +157,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	if resp.Origin != "automation:daily" {
 		t.Fatalf("SessionResp 应回带 origin: %q", resp.Origin)
 	}
-	listed, err := r.svc.ListSessions(false, "", "")
+	listed, err := sessionPlaneOf(r.svc).ListSessions(false, "", "")
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}

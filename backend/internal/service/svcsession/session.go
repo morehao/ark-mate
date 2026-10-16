@@ -10,18 +10,11 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 )
 
-// SessionSvc 会话面的服务端口。
+// SessionSvc 会话面（过渡期端口：实现仍在 `manager`，逐刀并入本包）。
 //
-// 实现方（internal/manager）以编译期断言 var _ SessionSvc = (*T)(nil) 保证一致性。
+// **只放用例**：读模型（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）不在这里——它们由控制器
+// 直接经域平面取（见 `ctrsession` 的 `plane` 字段注释）。
 type SessionSvc interface {
-	// ListSessions 返回会话概要（可按 archived 过滤）。
-	//
-	// 两个工作空间过滤参数口径不同（设计 ADR-2/ADR-5），都为空则不过滤：
-	//   - cwd：**执行事实**的字符串相等（绝对路径；历史行为，兼容保留）；
-	//   - workspaceID：**归属事实**（v14 左栏分组用它，可索引）。按默认工作空间过滤时
-	//     **同时包含** `workspace_id=''` 的历史会话（那些行读面归默认工作空间）。
-	ListSessions(archived bool, cwd, workspaceID string) ([]dtosession.SessionResp, error)
-
 	// SearchSessions 按关键词搜索会话（标题/Agent/正文；含归档；updated 降序截断 limit）。
 	SearchSessions(ctx context.Context, q string, limit int) ([]dtosession.SessionSearchHit, error)
 

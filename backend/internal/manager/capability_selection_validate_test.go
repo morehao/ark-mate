@@ -206,7 +206,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	if len(list) != 0 {
 		t.Fatalf("校验失败不该写库，got %+v", list)
 	}
-	if list, _ := svc.ListSessions(false, "", ""); len(list) != 0 {
+	if list, _ := sessionPlaneOf(svc).ListSessions(false, "", ""); len(list) != 0 {
 		t.Fatalf("校验失败不该登记会话，got %+v", list)
 	}
 	// 副作用面：工作空间目录下**只能有** default/（v14：未指定 cwd 落在共享的默认工作空间，

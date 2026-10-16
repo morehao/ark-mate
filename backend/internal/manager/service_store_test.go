@@ -24,14 +24,14 @@ func TestListSessionsArchivedFilter(t *testing.T) {
 	svc.registerSession(&SessionRec{ID: "s-live", Title: "在用的", RuntimeID: "stub"})
 	svc.registerSession(&SessionRec{ID: "s-archived", Title: "归档的", RuntimeID: "stub", Archived: true})
 
-	live, err := svc.ListSessions(false, "", "")
+	live, err := sessionPlaneOf(svc).ListSessions(false, "", "")
 	if err != nil {
 		t.Fatalf("ListSessions(false): %v", err)
 	}
 	if len(live) != 1 || live[0].ID != "s-live" {
 		t.Fatalf("默认列表只该有未归档的那条: %+v", live)
 	}
-	archived, err := svc.ListSessions(true, "", "")
+	archived, err := sessionPlaneOf(svc).ListSessions(true, "", "")
 	if err != nil {
 		t.Fatalf("ListSessions(true): %v", err)
 	}
@@ -111,7 +111,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	if n != 1 || injected != 2 {
 		t.Fatalf("恢复统计: sessions=%d events=%d", n, injected)
 	}
-	list, _ := svc2.ListSessions(false, "", "")
+	list, _ := sessionPlaneOf(svc2).ListSessions(false, "", "")
 	if len(list) != 1 || list[0].Status != session.SessionStatusCompleted || list[0].Title != "用户改的标题" || !list[0].Pinned {
 		t.Fatalf("恢复后会话元数据不符: %+v", list)
 	}
@@ -273,7 +273,7 @@ func TestFirstUserMessageDerivesTitleInMemory(t *testing.T) {
 
 	svc.publish(session.BusUserMessage, "s-title", map[string]any{"session_id": "s-title", "text": "第一条用户消息"})
 
-	list, err := svc.ListSessions(false, "", "")
+	list, err := sessionPlaneOf(svc).ListSessions(false, "", "")
 	if err != nil || len(list) != 1 {
 		t.Fatalf("ListSessions: n=%d err=%v", len(list), err)
 	}

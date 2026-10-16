@@ -39,12 +39,7 @@ import (
 // ——— stub Service（handler.Service 的测试替身，记录调用） ———
 
 type stubSvc struct {
-	sessions []dtosession.SessionResp
-
-	listSessionsErr  error
-	listCwd          string // 最近一次 ListSessions 的工作空间过滤参数
-	listWorkspaceID  string // 最近一次 ListSessions 的归属过滤参数（v14）
-	listArchivedOnly bool   // 最近一次 ListSessions 的 archived 参数
+	listWorkspaceID string // 最近一次 ListSessions 的归属过滤参数（v14）
 
 	browsePath   string // 最近一次 BrowseWorkspace 的 path 参数
 	browseHidden bool   // 最近一次 BrowseWorkspace 的 hidden 参数
@@ -396,13 +391,6 @@ func (s *stubSvc) ProbeMcpServer(_ context.Context, id string) (*dtocapability.M
 	}
 	return &dtocapability.McpProbeResp{ID: id, ProbedAt: "2026-09-09T00:00:00Z"}, nil
 }
-func (s *stubSvc) ListSessions(archived bool, cwd, workspaceID string) ([]dtosession.SessionResp, error) {
-	s.listArchivedOnly, s.listCwd, s.listWorkspaceID = archived, cwd, workspaceID
-	if s.listSessionsErr != nil {
-		return nil, s.listSessionsErr
-	}
-	return s.sessions, nil
-}
 func (s *stubSvc) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace.WorkspaceBrowseResp, error) {
 	s.browsePath, s.browseHidden = path, includeHidden
 	if s.browseErr != nil {
@@ -635,6 +623,14 @@ type envelope struct {
 	Data      json.RawMessage `json:"data"`
 }
 
+// sessionPlaneForRouter 造一个可用的会话域平面：只接**归属展示**这一个端口，
+// 因为 `ListSessions` 释放锁后要解析 workspace 展示字段，端口为空会 nil panic（真实现见 manager）。
+func sessionPlaneForRouter() *session.Plane {
+	pl := session.NewPlane()
+	pl.SetWorkspaceDisplay(func(id string) (string, string) { return id, "" })
+	return pl
+}
+
 // stubDeps 用同一个测试替身填满全部领域端口（stubSvc 实现了全部端口）。
 //
 // 能力三表与技能投影是**真对象**但**空**：Library 读模型要能跑（nil 平面会判空集），
@@ -661,7 +657,12 @@ func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 		McpSecrets: mcp.NewSecrets(credential.New(reg)), McpGatewayEnabled: func() bool { return true },
 		// 导出（P4a 正文第八刀）：会话域平面与事件总线是**真对象**（事实来源由 ctrexport 造），
 		// sqlite 载体那份 Store 由具体用例按需注入（`stubDeps(...).Store = st`）。
-		SessionPlane: session.NewPlane(), Bus: eventbus.New(),
+		// 会话域平面是**真对象**（P4a 正文第十/十一刀起，历史读面与读模型都由它提供）。
+		// 归属展示是**端口**（`SetWorkspaceDisplay`，工作空间登记仍在 manager）：这里给一个
+		// 最小实现——路由测试断言的是信封与过滤结果，不是展示名解析（那是工作空间域的事）。
+		SessionPlane: sessionPlaneForRouter(),
+		// 事件总线同理：导出（第八刀）与历史读面（第十刀）都读它。
+		Bus: eventbus.New(),
 	}
 }
 
@@ -932,11 +933,14 @@ func do(t *testing.T, r *gin.Engine, method, path, body string) (*envelope, int)
 // TestListEndpoints GET /sessions 返回 code=0 + 真实列表载荷。
 //
 // v19：agent 列表那一半随 `/agents` 路由整体删除——会话身份只剩 `runtime_id`（构建期固定）。
+// P4a 正文第十一刀起这一格走**真域平面**（读模型由域直接提供，`manager` 侧转发已删），
+// 所以夹具是"注册进平面的会话"而不是替身返回值。
 func TestListEndpoints(t *testing.T) {
-	svc := &stubSvc{
-		sessions: []dtosession.SessionResp{{ID: "s1", RuntimeID: "rtx", Status: "completed"}},
-	}
-	r := newRestEngine(stubDeps(t, svc))
+	deps := stubDeps(t, &stubSvc{})
+	deps.SessionPlane.RegisterSession(&session.SessionRec{
+		ID: "s1", RuntimeID: "rtx", Status: "completed", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
+	r := newRestEngine(deps)
 
 	env, _ := do(t, r, "GET", "/v1/mate/sessions", "")
 	if env.Code != 0 || env.Msg != "success" {
@@ -951,40 +955,49 @@ func TestListEndpoints(t *testing.T) {
 	}
 }
 
-// TestListSessionsWorkspaceQuery GET /sessions 的 `cwd` 过滤：
-// 绝对路径透传给 service（含 workspace_temporary 回读），相对路径属参数错误直接 40000。
+// TestListSessionsWorkspaceQuery GET /sessions 的 `cwd` 过滤与排序。
+//
+// 原来这里验的是"cwd 透传给 service"（替身标志位）。换成真平面之后透传不再可观测，
+// 于是改成验**过滤结果本身**：两个不同 cwd 的会话，带 cwd 只回一个、不带 cwd 回两个；
+// 相对路径属参数错误直接 40000（仍在 handler 层拦，两个会话一个都不该出现）。
 func TestListSessionsWorkspaceQuery(t *testing.T) {
-	svc := &stubSvc{sessions: []dtosession.SessionResp{{
-		ID: "c-1", RuntimeID: "rtx", Status: "completed",
-		Cwd: "/work/alpha", WorkspaceTemporary: true,
-	}}}
-	r := newRestEngine(stubDeps(t, svc))
+	deps := stubDeps(t, &stubSvc{})
+	now := time.Now()
+	deps.SessionPlane.RegisterSession(&session.SessionRec{
+		ID: "c-1", RuntimeID: "rtx", Status: "completed", Cwd: "/work/alpha",
+		WorkspaceTemporary: true, CreatedAt: now, UpdatedAt: now,
+	})
+	deps.SessionPlane.RegisterSession(&session.SessionRec{
+		ID: "c-2", RuntimeID: "rtx", Status: "completed", Cwd: "/work/beta",
+		CreatedAt: now.Add(-time.Minute), UpdatedAt: now,
+	})
+	r := newRestEngine(deps)
 
 	env, code := do(t, r, "GET", "/v1/mate/sessions?cwd=/work/alpha", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d env=%+v", code, env)
 	}
-	if svc.listCwd != "/work/alpha" || svc.listArchivedOnly {
-		t.Fatalf("cwd 未透传: cwd=%q archived=%v", svc.listCwd, svc.listArchivedOnly)
-	}
 	var list []dtosession.SessionResp
 	if err := json.Unmarshal(env.Data, &list); err != nil || len(list) != 1 {
-		t.Fatalf("sessions data 不符: %s", env.Data)
+		t.Fatalf("按 cwd 过滤应只剩一个: %s", env.Data)
 	}
 	if list[0].Cwd != "/work/alpha" || !list[0].WorkspaceTemporary {
 		t.Fatalf("工作空间字段未回读: %+v", list[0])
 	}
 
-	// 未指定 cwd → 不过滤（空串透传）。
-	svc.listCwd = "sentinel"
-	if _, code := do(t, r, "GET", "/v1/mate/sessions", ""); code != 200 {
+	// 未指定 cwd → 不过滤（两个都在，且按创建时间倒序：c-1 更新 → 在前）。
+	env, code = do(t, r, "GET", "/v1/mate/sessions", "")
+	if code != 200 {
 		t.Fatalf("无 cwd 应 200，got %d", code)
 	}
-	if svc.listCwd != "" {
-		t.Fatalf("无 cwd 时应透传空串，got %q", svc.listCwd)
+	if err := json.Unmarshal(env.Data, &list); err != nil || len(list) != 2 {
+		t.Fatalf("无 cwd 应回全部: %s", env.Data)
+	}
+	if list[0].ID != "c-1" || list[1].ID != "c-2" {
+		t.Fatalf("应按创建时间倒序: %s", env.Data)
 	}
 
-	// 相对路径 → 40000（在 handler 层拦截，不进入 service）。
+	// 相对路径 → 40000（在 handler 层拦截，不进入域）。
 	env, _ = do(t, r, "GET", "/v1/mate/sessions?cwd=relative/dir", "")
 	if env.Code != 40000 {
 		t.Fatalf("相对 cwd 应 40000，got %+v", env)
@@ -1029,15 +1042,18 @@ func TestUsageSummaryRoute(t *testing.T) {
 	}
 }
 
-// TestListFailure 列表失败 → code=50000（兜底内部错误）。
+// TestUnclassifiedErrorFallsBackToInternal 裸错误（不带码）→ code=50000，msg 原样带出。
 //
 // 历史形态是 code=1：那时控制器各处手写 gerror.Error{Code: 1, Msg: err.Error()}，
 // 与领域层的 50000 并存，同一个"未归类内部错误"有两个码。P5 收敛到
 // code.Internal(50000) 一个兜底码，且 msg 仍原样带出（不失诊断信息）。
-func TestListFailure(t *testing.T) {
-	svc := &stubSvc{listSessionsErr: errors.New("boom")}
+//
+// P4a 正文第十一刀起这一格不再用会话列表注入：`GET /sessions` 走**真域平面**（读模型），
+// 而"兜底码"验的是**控制器的错误出口**，与哪个端点无关——改用仍由替身供给的用量面。
+func TestUnclassifiedErrorFallsBackToInternal(t *testing.T) {
+	svc := &stubSvc{usageErr: errors.New("boom")}
 	r := newRestEngine(stubDeps(t, svc))
-	env, _ := do(t, r, "GET", "/v1/mate/sessions", "")
+	env, _ := do(t, r, "GET", "/v1/mate/usage/summary", "")
 	if env.Code != code.Internal {
 		t.Fatalf("期望 code=%d（Internal），got %+v", code.Internal, env)
 	}
@@ -1543,6 +1559,9 @@ func TestProbeMcpServerRoute(t *testing.T) {
 //
 // P4a 正文第四刀之后改用**会话列表面**（`listSessionsErr`）：供应商面的档案/自检用例
 // 现在由控制器从真域平面构造，替身注入不进去了——而这条用例要钉的是**映射**，不是供应商面。
+//
+// P4a 正文第十一刀又换了一次承载端点：会话列表也归真域平面了，于是改用**用量面**
+// （`usageErr`）。映射表与端点无关，只要求"某个端点把一支 acl 错误原样交给信封映射"。
 func TestErrorEnvelopeMapping(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1557,9 +1576,9 @@ func TestErrorEnvelopeMapping(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &stubSvc{listSessionsErr: tc.err}
+			svc := &stubSvc{usageErr: tc.err}
 			r := newRestEngine(stubDeps(t, svc))
-			env, http := do(t, r, "GET", "/v1/mate/sessions", "")
+			env, http := do(t, r, "GET", "/v1/mate/usage/summary", "")
 			if http != 200 || env.Code != tc.code {
 				t.Fatalf("期望 HTTP 200 code=%d，got http=%d code=%d msg=%q", tc.code, http, env.Code, env.Msg)
 			}
@@ -1569,9 +1588,9 @@ func TestErrorEnvelopeMapping(t *testing.T) {
 		})
 	}
 	// 已映射错误不得被二次映射（FromError 幂等）。
-	svc := &stubSvc{listSessionsErr: gerror.Error{Code: 40001, Msg: "已映射"}}
+	svc := &stubSvc{usageErr: gerror.Error{Code: 40001, Msg: "已映射"}}
 	r := newRestEngine(stubDeps(t, svc))
-	env, _ := do(t, r, "GET", "/v1/mate/sessions", "")
+	env, _ := do(t, r, "GET", "/v1/mate/usage/summary", "")
 	if env.Code != 40001 || env.Msg != "已映射" {
 		t.Fatalf("已映射错误应透传: %+v", env)
 	}

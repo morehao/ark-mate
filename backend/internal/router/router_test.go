@@ -71,6 +71,10 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 		// Library 读模型（P4a 正文第六刀）：域/包事实由装配点交下来，用例实例在控制器里造。
 		Capabilities: svc.CapabilityRegistry(), SkillPlane: svc.SkillPlane(), Registry: reg,
 		McpSecrets: svc.McpSecrets(), McpGatewayEnabled: svc.McpGatewayEnabled,
+		// 会话域平面与总线是**依赖事实**（P4a 正文第十/十一刀）：历史读面与读模型都从它们取数。
+		// 这条夹具用真 `manager.Service`（memory 模式），所以平面是**装配好的那个**——
+		// 归属展示端口也由它接好；自造一个空平面会在 `ListSessions` 补齐展示字段时 nil panic。
+		SessionPlane: svc.SessionPlane(), Bus: bus,
 	}, bus, router.Options{Web: assets})
 	return engine, svc
 }
@@ -392,6 +396,8 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 		// Library 读模型（P4a 正文第六刀）：域/包事实由装配点交下来，用例实例在控制器里造。
 		Capabilities: svc.CapabilityRegistry(), SkillPlane: svc.SkillPlane(), Registry: reg,
 		McpSecrets: svc.McpSecrets(), McpGatewayEnabled: svc.McpGatewayEnabled,
+		// 同 `newEngineWithService`：会话域平面与总线是依赖事实（读模型/历史读面从它们取数）。
+		SessionPlane: svc.SessionPlane(), Bus: bus,
 	}, bus, router.Options{Credentials: creds})
 	return engine
 }

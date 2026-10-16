@@ -59,7 +59,10 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		t.Error("`SessionSvc` 里又声明了 `SessionHistory(`：这一面有自己的接口（`HistorySvc`），" +
 			"收回去等于同一个用例有两条取用路径，按面切分当场失效。")
 	}
-	if !strings.Contains(iface, "SessionByID(") && !strings.Contains(iface, "ListSessions(") {
+	// 反向锚（防"接口体读成空也绿"）：只取**留在用例层**的真用例——
+	// 读模型（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）刻意不在 `SessionSvc` 里
+	// （见 `svcsession_readface_test.go`），所以锚不能取它们。
+	if !strings.Contains(iface, "CreateSession(") && !strings.Contains(iface, "PromptSession(") {
 		t.Errorf("`SessionSvc` 的接口体里找不到任何已知方法：判据失锚（接口被改名/搬走了？）。实际体：\n%s", iface)
 	}
 

@@ -17,6 +17,12 @@ import (
 	"github.com/morehao/golib/gerror"
 )
 
+// sessionPlaneOf 取会话域平面：**读模型**（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）由域直接
+// 提供，`manager` 侧那份 TODO(P4b) 转发已删（P4a 正文第十一刀）。
+//
+// 夹具链不变——测试本来就在驱动真平面，换的只是取用路径。
+func sessionPlaneOf(svc *Service) *session.Plane { return svc.sessionPlane }
+
 // historySvc 取会话历史读面的**用例层**（P4a 正文第十刀起它不在 manager 上）。
 //
 // 夹具链不变：库句柄、会话域平面、事件总线都还是同一个，用例只是换了个所有者。

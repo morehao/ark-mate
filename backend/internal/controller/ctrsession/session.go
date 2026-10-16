@@ -48,6 +48,14 @@ type sessionCtr struct {
 	svc svcsession.SessionSvc
 	// hist 会话历史**读面**（P4a 正文第十刀起在用例层，与 `svc` 分开按面持有）。
 	hist svcsession.HistorySvc
+	// plane 会话域平面：**只读模型**直接由它提供（P4a 正文第十一刀）。
+	//
+	// 读模型（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）没有请求校验、错误码出口与响应装配，
+	// 它们的实现与域自己的锁和状态绑在一起（`ListSessions` 要持 `pl.mu` 遍历注册表、
+	// 释放锁后再补齐归属展示字段）。给它们造一层用例只会得到**一行转发**——
+	// 那正是 2026-10-16 被判定为"转发骚操作"的形状，所以这一面按 P4b 的原口径收口：
+	// 调用点直接依赖域平面（`manager` 侧那份 TODO(P4b) 转发随之删除）。
+	plane *session.Plane
 }
 
 // NewSessionCtr 构造 SessionCtr。
@@ -55,7 +63,7 @@ type sessionCtr struct {
 // 拿到的是**依赖事实**（会话面过渡期端口 + 库句柄 + 会话域平面 + 事件总线）：
 // 历史读面的用例在这里造（P4a 正文第十刀），其余 18 个方法的实现仍在 `manager`（逐刀搬）。
 func NewSessionCtr(svc svcsession.SessionSvc, st *store.Store, plane *session.Plane, bus *eventbus.Bus) SessionCtr {
-	return &sessionCtr{svc: svc, hist: svcsession.NewHistory(st, plane, bus)}
+	return &sessionCtr{svc: svc, hist: svcsession.NewHistory(st, plane, bus), plane: plane}
 }
 
 // List 列出全部会话（query `archived` 控制是否包含已归档；默认仅未归档）。
@@ -72,7 +80,7 @@ func (h *sessionCtr) List(c *gin.Context) {
 		return
 	}
 	workspaceID := strings.TrimSpace(c.Query("workspace_id"))
-	sessions, err := h.svc.ListSessions(archived, cwd, workspaceID)
+	sessions, err := h.plane.ListSessions(archived, cwd, workspaceID)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

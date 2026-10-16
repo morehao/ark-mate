@@ -316,7 +316,7 @@ func TestListSessionsWorkspaceFilter(t *testing.T) {
 	svc.registerSession(&SessionRec{ID: "c-b", Cwd: "/work/beta", WorkspaceTemporary: true})
 	svc.registerSession(&SessionRec{ID: "c-tmp-sub", Cwd: "/work/alpha/sub"})
 
-	all, err := svc.ListSessions(false, "", "")
+	all, err := sessionPlaneOf(svc).ListSessions(false, "", "")
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestListSessionsWorkspaceFilter(t *testing.T) {
 	}
 
 	// 精确匹配：子目录不算同一工作空间（避免"看起来像同一目录"的误归组）。
-	alpha, err := svc.ListSessions(false, "/work/alpha", "")
+	alpha, err := sessionPlaneOf(svc).ListSessions(false, "/work/alpha", "")
 	if err != nil {
 		t.Fatalf("ListSessions(cwd): %v", err)
 	}
@@ -342,7 +342,7 @@ func TestListSessionsWorkspaceFilter(t *testing.T) {
 		t.Fatalf("cwd 过滤应精确命中 c-a，got %+v", alpha)
 	}
 
-	none, _ := svc.ListSessions(false, "/work/nowhere", "")
+	none, _ := sessionPlaneOf(svc).ListSessions(false, "/work/nowhere", "")
 	if len(none) != 0 {
 		t.Fatalf("未用过的工作空间应返回空，got %+v", none)
 	}
@@ -353,7 +353,7 @@ func TestListSessionsWorkspaceFilter(t *testing.T) {
 	svc2 := NewService(runtime.NewRegistry(), eventbus.New())
 	svc2.registerSession(&SessionRec{ID: "c-real", Cwd: mustEval(t, rootDir)})
 	for _, spelling := range []string{rootDir, rootDir + "/", filepath.Join(rootDir, ".", "..", filepath.Base(rootDir))} {
-		got, err := svc2.ListSessions(false, spelling, "")
+		got, err := sessionPlaneOf(svc2).ListSessions(false, spelling, "")
 		if err != nil {
 			t.Fatalf("ListSessions(%q): %v", spelling, err)
 		}

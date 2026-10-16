@@ -168,7 +168,7 @@ func TestCreateSessionWorkspaceConflict(t *testing.T) {
 	if c := gerrCode(t, err); c != code.InvalidRequest {
 		t.Fatalf("冲突应为 40001，实际 %d: %v", c, err)
 	}
-	list, _ := r.svc.ListSessions(false, "", "")
+	list, _ := sessionPlaneOf(r.svc).ListSessions(false, "", "")
 	if len(list) != 0 {
 		t.Fatalf("冲突请求不该建出会话: %+v", list)
 	}
@@ -209,7 +209,7 @@ func TestListSessionsByWorkspaceFilter(t *testing.T) {
 	r.svc.registerSession(&SessionRec{ID: "c-legacy", Cwd: def.Path})
 
 	// 按项目过滤 → 只有那一条。
-	proj, err := r.svc.ListSessions(false, "", ws.ID)
+	proj, err := sessionPlaneOf(r.svc).ListSessions(false, "", ws.ID)
 	if err != nil {
 		t.Fatalf("按项目过滤: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestListSessionsByWorkspaceFilter(t *testing.T) {
 	}
 
 	// 按默认工作空间过滤 → 显式归默认的 + 历史行都在。
-	dflt, err := r.svc.ListSessions(false, "", def.ID)
+	dflt, err := sessionPlaneOf(r.svc).ListSessions(false, "", def.ID)
 	if err != nil {
 		t.Fatalf("按默认过滤: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestListSessionsByWorkspaceFilter(t *testing.T) {
 	}
 
 	// 无过滤 → 三条都在（参数为空 = 不过滤，与历史行为逐字相同）。
-	all, _ := r.svc.ListSessions(false, "", "")
+	all, _ := sessionPlaneOf(r.svc).ListSessions(false, "", "")
 	if len(all) != 3 {
 		t.Fatalf("无过滤应返回 3 条，实际 %d", len(all))
 	}
@@ -333,7 +333,7 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	}
 
 	// **立刻**按默认工作空间过滤：那条会话必须已经在这儿（内存镜像已同步）。
-	got, err := r.svc.ListSessions(false, "", def.ID)
+	got, err := sessionPlaneOf(r.svc).ListSessions(false, "", def.ID)
 	if err != nil {
 		t.Fatalf("按默认过滤: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	}
 
 	// 按被删的那个归属过滤 → 空（id 已不存在，不该再返回任何东西）。
-	if stale, _ := r.svc.ListSessions(false, "", ws.ID); len(stale) != 0 {
+	if stale, _ := sessionPlaneOf(r.svc).ListSessions(false, "", ws.ID); len(stale) != 0 {
 		t.Fatalf("已删登记不该再返回会话: %+v", stale)
 	}
 }

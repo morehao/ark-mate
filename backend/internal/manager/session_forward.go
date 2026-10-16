@@ -44,11 +44,6 @@ func (s *Service) sessionResp(id string) dtosession.SessionResp {
 	return s.sessionPlane.SessionResp(id)
 }
 
-// TODO(P4b): 删转发（会话面直接依赖 session.Plane）
-func (s *Service) ListSessions(archived bool, cwd, workspaceID string) ([]dtosession.SessionResp, error) {
-	return s.sessionPlane.ListSessions(archived, cwd, workspaceID)
-}
-
 // TODO(P4b): 删转发（检索面直接依赖 session.Plane）
 //
 // SearchSessions 与 SearchMessages 读的是**本域的两份事实**（内存会话表 + transcript 旁路），
