@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/pkg/acl"
 )
@@ -155,7 +156,7 @@ func (s *Service) CreateWorkspaceDir(parent, name string) (*dtoworkspace.Workspa
 		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
 			fmt.Sprintf("创建目录失败: %s", target), err)
 	}
-	return &dtoworkspace.WorkspaceDirCreateResp{Path: resolveRealPath(target)}, nil
+	return &dtoworkspace.WorkspaceDirCreateResp{Path: workspace.ResolveRealPath(target)}, nil
 }
 
 // ancestryCrumbs 从**文件系统根**到 target（含自身）的祖先链，逐级可跳。

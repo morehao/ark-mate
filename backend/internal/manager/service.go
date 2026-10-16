@@ -38,18 +38,16 @@ type Service struct {
 	// providerDir 定义目录（v19 起只装 `providers.json`；空 = 不落盘，仅内存）。
 	// v20 起它与凭据面无关：密钥在库里，托管文档锚在 `MATE_HOME`（见 SetProviderDir）。
 	providerDir string
-	// workspaceDir 代建工作空间的根目录（未指定 cwd 时在 <root>/<会话id>/ 建）。
-	// 空 = 关闭代建（未指定 cwd 直接报 workspace_required，不回落 os.Getwd()）。
-	// 见 SetWorkspacePolicy / ResolveWorkspace。
-	workspaceDir string
-	// workspaceRoots 允许作为工作空间的根白名单（MATE_WORKSPACE_ROOTS；空 = 不限制）。
-	// 非空时显式 cwd 与目录浏览都被收在内，浏览也不允许越过根向上。
-	// 这里存的是**显式配置**的那一份；对外生效名单还要并上代建根（effectiveWorkspaceRootsLocked）。
-	// 见 SetWorkspacePolicy / withinRoots。
-	workspaceRoots []string
+	// planner 工作空间域（起始点偏好策略：代建根 + 生效名单）。P2b 起策略字段归它自持锁；
+	// `Service` 上**不再复刻**一份（两份 = 两个事实源，表现是面板改了名单、校验却按旧的走）。
+	planner *workspace.Plane
 	// workspaceRootsStore 白名单的持久化端口（面板 PUT 时写回配置目录；nil = 只读）。
 	// 端口而非直接实现：manager 不碰配置文件，优先级/锁定判定由 infra 报告（见 workspace_settings.go）。
+	//
+	// 它由 `workspaceMu` 单独保护：策略字段 P2b 起归域（`planner` 自持锁），而这个引用是**装配
+	// 期一次性注入**的端口——把它继续挂在 `s.mu` 上只会让"读端口"也去抢会话那把锁。
 	workspaceRootsStore WorkspaceRootsStore
+	workspaceMu         sync.Mutex
 	catalog             *catalogStore        // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
 	caps                *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
 	// capabilityDir 能力定义目录。**语义按持久层模式分叉**（M6-2）：
@@ -152,6 +150,8 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s.mcpPlane = mcp.NewPlane(s.caps, s.defs, s.mcpSecrets)
 	// 选择器无外部依赖（宿主事实每次调用现采），构造期建一个即可。
 	s.picker = workspace.NewPicker()
+	// 工作空间域：策略状态在它自己的锁下（P2b 起不再是 Service 的字段）。
+	s.planner = workspace.NewPlane()
 	s.providerPlane = provider.NewPlane(reg, s.creds)
 	// 会话域：本批只装库句柄与用量端口（其余端口随 P3b-1b/2 接上）。
 	s.sessionPlane = session.NewPlane()

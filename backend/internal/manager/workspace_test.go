@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,12 @@ import (
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
+
+// withinRoots 是 `workspace.WithinRoots` 的**测试兼容别名**（P2b 把纯函数搬进域之后，
+// 这一族"策展过滤"用例的判据一字未改——`filepath.Rel` 的逐段比较与两侧真身解析仍在域里那份里）。
+func withinRoots(path string, allowedRoots []string) bool {
+	return workspace.WithinRoots(path, allowedRoots)
+}
 
 // ——— 工作空间解析（workspace.go）单元测试 ———
 

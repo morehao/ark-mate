@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/pkg/acl"
 )
@@ -37,8 +38,8 @@ type WorkspaceRootsStore interface {
 // SetWorkspaceSettingsStore 注入白名单持久化端口。nil = 只读（GET 可用，PUT 报 settings_readonly）：
 // 没有配置目录的进程（如 demo 冒烟）不该往磁盘上写设置。
 func (s *Service) SetWorkspaceSettingsStore(st WorkspaceRootsStore) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
 	s.workspaceRootsStore = st
 }
 
@@ -49,15 +50,18 @@ func (s *Service) SetWorkspaceSettingsStore(st WorkspaceRootsStore) {
 // Configured 与 Roots 必须分开给：面板编辑的是 Configured，而"代建根"是平台派生的、
 // 用户删不掉的那一条；只给生效名单，面板就永远无法表达"删掉这一条"。
 func (s *Service) WorkspaceSettings() (*dtoworkspace.WorkspaceSettingsResp, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// P2b：策略状态归域（`planner` 自持锁），这里读的是**域**那份快照。
+	// 端口引用由 `workspaceMu` 单独保护（它不再是 `s.mu` 的同批字段）。
+	effective, configured, provisionDir := s.planner.PolicySnapshot()
+	s.workspaceMu.Lock()
 	store := s.workspaceRootsStore
+	s.workspaceMu.Unlock()
 	resp := &dtoworkspace.WorkspaceSettingsResp{
-		Configured:        append([]string{}, s.workspaceRoots...),
-		Roots:             s.effectiveWorkspaceRootsLocked(),
-		PreferRoots:       len(s.workspaceRoots) > 0,
-		ProvisionDir:      s.workspaceDir,
-		ProvisionIncluded: len(s.workspaceRoots) > 0 && s.workspaceDir != "",
+		Configured:        append([]string{}, configured...),
+		Roots:             effective,
+		PreferRoots:       len(configured) > 0,
+		ProvisionDir:      provisionDir,
+		ProvisionIncluded: len(configured) > 0 && provisionDir != "",
 		Source:            string(sourceUnavailable),
 	}
 	if store != nil {
@@ -80,9 +84,9 @@ const sourceUnavailable = "unavailable"
 // 理由是交互式设置的反馈必须在当下给（否则面板保存成功、下次进来看到的是错误页），
 // 而声明式配置允许"挂载还没到"这种编排顺序——两处的取舍不同是有意的。
 func (s *Service) UpdateWorkspaceSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error) {
-	s.mu.Lock()
+	s.workspaceMu.Lock()
 	store := s.workspaceRootsStore
-	s.mu.Unlock()
+	s.workspaceMu.Unlock()
 	if store == nil {
 		return nil, acl.NewError(acl.ClassRequest, "settings_readonly",
 			"当前进程未启用设置持久化（无配置目录）：工作区根白名单只能由 MATE_WORKSPACE_ROOTS 或配置文件设置", nil)
@@ -131,7 +135,7 @@ func normalizeSettingsRoots(roots []string) ([]string, error) {
 			return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
 				fmt.Sprintf("工作区根需为目录: %s", p), nil)
 		}
-		real := resolveRealPath(p)
+		real := workspace.ResolveRealPath(p)
 		if seen[real] {
 			continue
 		}

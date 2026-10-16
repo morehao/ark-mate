@@ -12,7 +12,7 @@
 - 原生那半是**宿主进程**抬的（macOS `osascript`、Linux zenity/kdialog、Windows COM），所以 **`dsh web` 的本机浏览器入口也用系统面板**；只有远程/SSH/无显示会话才退化成应用内浏览；
 - 两个实现是**一对可替换的 occupant**，不是"两套并存"。
 
-本仓的对应物（照抄过来的形状）：判定与命令配方在 `backend/internal/manager/workspace_picker.go`（纯函数）、声明走 `GET /capabilities` 的 `native-dialog`、执行面是 `POST /workspaces/pick-directory`。**别放错边**：判据一旦落到客户端（UA、`window.electron`、"有没有 Electron 桥"），本机浏览器就会被静默降级——这正是我们踩过的那个坑，现在有守卫 `TestDirectoryPickerIsTwoStateHostResolved` 钉着。
+本仓的对应物（照抄过来的形状）：判定与命令配方在 `backend/internal/domain/workspace/picker.go`（纯函数；`manager` 侧只剩三条转发）、声明走 `GET /capabilities` 的 `native-dialog`、执行面是 `POST /workspaces/pick-directory`。**别放错边**：判据一旦落到客户端（UA、`window.electron`、"有没有 Electron 桥"），本机浏览器就会被静默降级——这正是我们踩过的那个坑，现在有守卫 `TestDirectoryPickerIsTwoStateHostResolved` 钉着。
 
 **其余同样值得先查再定的题**：目录选择器自身的交互（面包屑/双栏/新建文件夹/隐藏项开关，见 `packages/client/ui-directory-picker-browse`）、工作区作为持久实体的形态（`packages/workspace`）、会话与工作区的归属关系、以及"桌面只能多给、多给的那半必须有服务端等价路径"这条一致性纪律（它的 web bundle 与 desktop bundle 各有一份 cordis 配置，可逐项对照）。**取舍照旧**：DSH 没有的概念（例如我们的工作区起始点偏好）不要硬套，写清偏离理由即可。
 

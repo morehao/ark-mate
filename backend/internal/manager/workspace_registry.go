@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
@@ -219,7 +220,7 @@ func (s *Service) EnsureDefaultWorkspace() error {
 		// 显式关闭代建（`workspace_dir` 为空/off）：该类部署**要求**显式 cwd，这是配置意图。
 		return nil
 	}
-	provision := defaultWorkspaceDir(dir)
+	provision := workspace.DefaultWorkspaceDir(dir)
 	if s.st == nil {
 		return s.provisionMemoryDefaultWorkspace(provision)
 	}
