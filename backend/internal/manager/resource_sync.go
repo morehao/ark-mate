@@ -415,14 +415,13 @@ func (s *Service) resolveCredentialDoc(spec runtime.Spec) (string, error) {
 // 所以这里不再有"两条取密钥的路"（v13–v19 的 `Key` / `KeyRef + 密文句柄` 二选一就是那种分叉）。
 func (s *Service) providerForSync(providerID string) (*provider.Def, string, error) {
 	ctx := context.Background()
-	s.mu.Lock()
+	// **不持 `s.mu`**（P4a 守卫）：`Snapshot` 自己取供应商域的锁并返回值语义副本。
 	d, _ := s.providerPlane.Snapshot(providerID)
 	var cp *provider.Def
 	if d != nil {
 		c := *d
 		cp = &c
 	}
-	s.mu.Unlock()
 	if cp == nil {
 		// sqlite 载体可能比内存先有（导入/并发装配）：回落到行（v13 起是纯列投影）。
 		if s.st != nil {

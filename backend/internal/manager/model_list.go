@@ -449,10 +449,8 @@ func (s *Service) requireProvider(ctx context.Context, providerID string) error 
 			return nil
 		}
 	}
-	s.mu.Lock()
-	ok := s.providerPlane.Exists(providerID)
-	s.mu.Unlock()
-	if !ok {
+	// **不持 `s.mu`**（P4a 守卫）：`Exists` 自己取供应商域的锁；manager 锁在这条路上没有保护对象。
+	if !s.providerPlane.Exists(providerID) {
 		return acl.NewError(acl.ClassRequest, "provider_not_found",
 			fmt.Sprintf("供应商 %q 不存在：模型必须挂靠在一条已登记的供应商下", providerID), nil)
 	}

@@ -65,13 +65,15 @@ func (s *Service) probeProvider(ctx context.Context, id string, req dtoprovider.
 	if err := provider.ValidateProviderID(id); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
+	// **不持 `s.mu`**（P4a 守卫）：`Snapshot` 自己取供应商域的锁并返回**值语义**的副本，
+	// 所以随后的读取本身就是竞态安全的——manager 锁在这条路上没有保护对象。
+	// 在域平面外面再包一把锁，会把"manager 锁 → 域锁"这条边固化下来（同族教训见
+	// `internal/archtest/manager_lock_order_test.go`）。
 	d, _ := s.providerPlane.Snapshot(id)
 	var snap provider.Def
 	if d != nil {
 		snap = *d
 	}
-	s.mu.Unlock()
 
 	checks := make([]dtoprovider.ProviderCheckResp, 0, 8)
 	checks = append(checks, s.probeLocal(ctx, id, d, &snap)...)
