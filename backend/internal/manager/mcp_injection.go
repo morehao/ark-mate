@@ -61,7 +61,7 @@ func (s *Service) planMcpInjection(runtimeID string, sel *CapabilitySelection) m
 	if s.caps == nil {
 		return plan
 	}
-	supported, ok := s.supportedMcpTransports(runtimeID)
+	supported, ok := s.reg.McpTransportsFor(runtimeID)
 	if !ok {
 		return plan // 未知 runtime → 不下发（维持现状）
 	}

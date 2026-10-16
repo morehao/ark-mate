@@ -135,7 +135,7 @@ func TestValidateSelectionVerdicts(t *testing.T) {
 	}
 
 	// 判定与 Library 同源：Library 说不可达的，这里也必须拒（反之亦然）。
-	lib, err := svc.ListLibrary(libQueryAll())
+	lib, err := listLibrary(t, svc).ListLibrary(libQueryAll())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ func TestSelectionValidationRemoteReachableViaGateway(t *testing.T) {
 		t.Fatalf("网关在环时应通过（平台代连）：%v", err)
 	}
 	// 读面同向：Library 的该 (server, runtime) 判据也必须转为可达，且理由说明"经网关代连"。
-	lib, err := svc.ListLibrary(libQueryAll())
+	lib, err := listLibrary(t, svc).ListLibrary(libQueryAll())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +446,7 @@ func TestSelectionValidationRemoteReachableViaGateway(t *testing.T) {
 
 	// 关掉网关 → 读面也随之回到"不承载"，两侧永不同向漂移。
 	svc.SetMcpGatewayEnabled(false)
-	lib2, err := svc.ListLibrary(libQueryAll())
+	lib2, err := listLibrary(t, svc).ListLibrary(libQueryAll())
 	if err != nil {
 		t.Fatal(err)
 	}

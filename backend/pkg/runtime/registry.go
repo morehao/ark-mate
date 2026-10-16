@@ -253,6 +253,27 @@ func (r *Registry) IDs() []string {
 	return ids
 }
 
+// McpTransportsFor 该 runtime 声明承载的 MCP 传输。
+//
+// **未声明 → 仅 stdio**（ACP 要求所有 agent 至少支持 stdio）；未知 runtime → `ok=false`
+// （调用方据此区分"这个底座不在册"与"它什么都不承载"——两者混一起会让不可达的 runtime 报成可达）。
+//
+// 为什么这条约定归注册表：它有两个消费面（Library 的逐 runtime 可达性、MCP 注入时的传输判据），
+// 各写一遍必然漂移，而漂移的表现是"面板说可达、注入时被跳过"。它读的又只有 Spec。
+//
+// 用字面量 `"stdio"` 而不是 `capability.TransportStdio`：`pkg/runtime` **零依赖 `pkg/capability`**
+// （P-1 定的包边界，见 projection.go 顶部），同包 `adapters.go` 的 Spec 声明也是这么写的。
+func (r *Registry) McpTransportsFor(id string) ([]string, bool) {
+	spec, ok := r.Get(id)
+	if !ok {
+		return nil, false
+	}
+	if len(spec.McpTransports) == 0 {
+		return []string{"stdio"}, true
+	}
+	return spec.McpTransports, true
+}
+
 // Require 返回 Spec；未知 ID 返回可读错误（供上层做参数校验）。
 func (r *Registry) Require(id string) (Spec, error) {
 	s, ok := r.Get(id)

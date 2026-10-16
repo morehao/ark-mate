@@ -103,9 +103,12 @@ func TestCapabilityVerdictConsumersDelegateToDomain(t *testing.T) {
 		call string
 		why  string
 	}{
-		{"internal/manager/library.go", "session.SkillVerdict(",
+		// P4a 正文第六刀起：读面孔径随实现搬进了用例层（`svclibrary`），判据跟着它走——
+		// 留一个指向 `manager/library.go` 的锚会在文件搬走之后变成 `readFileOrFatal` 的 Fatal
+		// （**这一次是实测出来的**：那正是"判据失锚不静默"该有的样子）。
+		{"internal/service/svclibrary/list.go", "session.SkillVerdict(",
 			"Library 读面（skill 那条）"},
-		{"internal/manager/library.go", "session.McpVerdict(",
+		{"internal/service/svclibrary/list.go", "session.McpVerdict(",
 			"Library 读面（MCP 那条）"},
 		{"internal/domain/session/capability_selection_validate.go", "SkillVerdict(",
 			"建会话的选定校验（skill 那条）"},
@@ -120,12 +123,14 @@ func TestCapabilityVerdictConsumersDelegateToDomain(t *testing.T) {
 				"而两种都**不会让既有测试变红**。", c.file, c.call, c.why, capabilityVerdictFile)
 		}
 	}
-	// 适配层不许把判决抄回来：`manager/library.go` 里出现判据文案锚即意味着有人手写了一遍。
-	libSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "library.go")))
+	// 消费面不许把判决抄回来：`svclibrary` 里出现判据文案锚即意味着有人手写了一遍
+	// （它只该搬运 `session.SkillVerdict`/`McpVerdict` 的返回值）。
+	libSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root,
+		filepath.FromSlash("internal/service/svclibrary/list.go"))))
 	for _, p := range capabilityVerdictMarkers {
 		if strings.Contains(libSrc, p) {
-			t.Errorf("internal/manager/library.go 里出现判决文案锚 %q：文案随判决一起归 %s，"+
-				"适配层只搬运结论（`session.SkillVerdict`/`McpVerdict` 的返回值）。", p, capabilityVerdictOwner)
+			t.Errorf("internal/service/svclibrary/list.go 里出现判决文案锚 %q：文案随判决一起归 %s，"+
+				"消费层只搬运结论（`session.SkillVerdict`/`McpVerdict` 的返回值）。", p, capabilityVerdictOwner)
 		}
 	}
 }

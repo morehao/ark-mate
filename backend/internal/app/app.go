@@ -460,7 +460,11 @@ func (a *App) Init(ctx context.Context) error {
 		// 模型清单写面（P4a 第五刀）：交出**清单载体**与供应商域平面（依赖事实）+ 一个过渡端口
 		// （读一条的投影 / 生效面回执 / 同步触发仍在 manager），写面用例由 ctrmodel 自己造。
 		Store: st, Model: a.svc, ModelHost: a.svc,
-		Capability: a.svc, Automation: a.svc, Library: a.svc,
+		Capability: a.svc, Automation: a.svc,
+		// Library 读模型（P4a 正文第六刀）：交出三份**域/包事实** + 一个运行期读取口，
+		// 用例实例由 ctrlibrary 自己造。
+		Capabilities: a.svc.CapabilityRegistry(), SkillPlane: a.svc.SkillPlane(),
+		Registry: a.reg, McpSecrets: a.svc.McpSecrets(), McpGatewayEnabled: a.svc.McpGatewayEnabled,
 		// P4a 起"用例实现"不再等于 manager：导出搬进了 svcsystem，manager 交出**事实来源**
 		// （`SessionMeta`/`SessionEvents`），用例实例由 ctrexport 造。这一处的断言力也随之上移：
 		// `a.svc` 不再满足哪个端口，就在这个字面量上当场编译失败。

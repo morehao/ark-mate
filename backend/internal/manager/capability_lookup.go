@@ -39,7 +39,7 @@ func (s *Service) SkillVerdictFacts(runtimeID string) session.SkillVerdictFacts 
 
 // McpVerdictFacts 实现 `session.CapabilityLookup`。
 func (s *Service) McpVerdictFacts(runtimeID string) session.McpVerdictFacts {
-	supported, known := s.supportedMcpTransports(runtimeID)
+	supported, known := s.reg.McpTransportsFor(runtimeID)
 	// **不做默认化**：`supportedMcpTransports` 已经实现"声明为空 → 只收 stdio"那条约定，并且在
 	// 未知 runtime 上返回**空列表**（那正是"这个 runtime 什么传输都不承载"这个结论）。在这里再
 	// 默认一次会把未知 runtime 变成"只收 stdio"，于是"未注册 runtime 应不可达"这条判据静默失效。

@@ -41,6 +41,17 @@ func libraryRig(t *testing.T) *Service {
 
 func libCtx() svclibrary.Query { return svclibrary.Query{} }
 
+// listLibrary 在测试里按**装配点的形状**造一次 Library 用例。
+//
+// Library 的实现已搬进 `service/svclibrary`（P4a 正文第六刀），而 manager 的历史用例要拿真
+// Service 的能力面当夹具（装载、写面、投影都在 manager 上）——这正是"用例实例由装配点造"这条
+// 规矩在测试里的样子：签名由编译期钉住，装配点漂了这里先红。
+func listLibrary(tb testing.TB, svc *Service) svclibrary.LibrarySvc {
+	tb.Helper()
+	return svclibrary.NewLibrary(svc.CapabilityRegistry(), svc.SkillPlane(), svc.reg,
+		svc.McpSecrets(), svc.McpGatewayEnabled)
+}
+
 // TestLibraryKindsAndOrigin 三类齐全 + origin 判据只看"有没有事实源文件"。
 func TestLibraryKindsAndOrigin(t *testing.T) {
 	svc := libraryRig(t)
@@ -56,7 +67,7 @@ func TestLibraryKindsAndOrigin(t *testing.T) {
 	if err := svc.RegisterTool(capability.Tool{Name: "builtin_echo", Source: capability.ToolSourceBuiltin}); err != nil {
 		t.Fatal(err)
 	}
-	items, err := svc.ListLibrary(libCtx())
+	items, err := listLibrary(t, svc).ListLibrary(libCtx())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +114,7 @@ func TestLibraryKindFilterAndQuery(t *testing.T) {
 	if _, err := svc.CreateSkill(context.Background(), writeReq(t, `{"id":"pdf-reader","name":"读 PDF","description":"解析文档"}`)); err != nil {
 		t.Fatal(err)
 	}
-	items, err := svc.ListLibrary(svclibrary.Query{Kind: dtolibrary.KindSkill})
+	items, err := listLibrary(t, svc).ListLibrary(svclibrary.Query{Kind: dtolibrary.KindSkill})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +122,7 @@ func TestLibraryKindFilterAndQuery(t *testing.T) {
 		t.Fatalf("kind 过滤失效: %+v", items)
 	}
 	for _, q := range []string{"pdf", "PDF", "PDF-READER", "读 pdf", "解析"} {
-		got, err := svc.ListLibrary(svclibrary.Query{Q: q})
+		got, err := listLibrary(t, svc).ListLibrary(svclibrary.Query{Q: q})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,18 +130,18 @@ func TestLibraryKindFilterAndQuery(t *testing.T) {
 			t.Fatalf("子串 %q 应命中（大小写不敏感、id/name/description 都算）", q)
 		}
 	}
-	got, err := svc.ListLibrary(svclibrary.Query{Kind: dtolibrary.KindSkill, Q: "nonexistent"})
+	got, err := listLibrary(t, svc).ListLibrary(svclibrary.Query{Kind: dtolibrary.KindSkill, Q: "nonexistent"})
 	if err != nil || len(got) != 0 {
 		t.Fatalf("不命中应返回空表: %+v err=%v", got, err)
 	}
-	if _, err := svc.ListLibrary(svclibrary.Query{Kind: "command"}); err == nil {
+	if _, err := listLibrary(t, svc).ListLibrary(svclibrary.Query{Kind: "command"}); err == nil {
 		t.Fatal("未知 kind 应报错（M5 之前 command 不合法）")
 	} else if numericCode(err) != code.InvalidParam {
 		t.Fatalf("未知 kind 应是 40000，got %d", numericCode(err))
 	}
 	// v19 撤掉了 agent 这一类：`?kind=agent` 必须**显式拒绝**（列出合法取值），
 	// 而不是返回一张空表让用户以为"没有数据"。
-	if _, err := svc.ListLibrary(svclibrary.Query{Kind: "agent"}); err == nil {
+	if _, err := listLibrary(t, svc).ListLibrary(svclibrary.Query{Kind: "agent"}); err == nil {
 		t.Fatal("已撤掉的 kind=agent 应显式拒绝")
 	} else if numericCode(err) != code.InvalidParam || !strings.Contains(err.Error(), "skill|mcp|tool") {
 		t.Fatalf("kind=agent 应是 40000 且列出合法取值，got %v", err)
@@ -147,7 +158,7 @@ func TestLibrarySkillApplicability(t *testing.T) {
 	}
 	statusFor := func(id, rt string) dtolibrary.Applicability {
 		t.Helper()
-		items, err := svc.ListLibrary(svclibrary.Query{Kind: dtolibrary.KindSkill})
+		items, err := listLibrary(t, svc).ListLibrary(svclibrary.Query{Kind: dtolibrary.KindSkill})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -218,7 +229,7 @@ func TestLibraryMcpAndToolApplicability(t *testing.T) {
 	if err := svc.RegisterTool(capability.Tool{Name: "fs_read", Source: capability.ToolSourceMCP, McpServer: "fs"}); err != nil {
 		t.Fatal(err)
 	}
-	items, err := svc.ListLibrary(libCtx())
+	items, err := listLibrary(t, svc).ListLibrary(libCtx())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +255,7 @@ func TestLibraryMcpAndToolApplicability(t *testing.T) {
 	if err := svc.RegisterTool(capability.Tool{Name: "ghost", Source: capability.ToolSourceMCP, McpServer: "gone"}); err != nil {
 		t.Fatal(err)
 	}
-	items, err = svc.ListLibrary(svclibrary.Query{Kind: dtolibrary.KindTool, Q: "ghost"})
+	items, err = listLibrary(t, svc).ListLibrary(svclibrary.Query{Kind: dtolibrary.KindTool, Q: "ghost"})
 	if err != nil || len(items) != 1 {
 		t.Fatalf("应能找到悬空工具: %+v err=%v", items, err)
 	}
@@ -276,7 +287,7 @@ func TestLibraryScale(t *testing.T) {
 		}
 	}
 	start := time.Now()
-	items, err := svc.ListLibrary(libCtx())
+	items, err := listLibrary(t, svc).ListLibrary(libCtx())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +316,7 @@ func BenchmarkLibraryList(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := svc.ListLibrary(libCtx()); err != nil {
+		if _, err := listLibrary(b, svc).ListLibrary(libCtx()); err != nil {
 			b.Fatal(err)
 		}
 	}

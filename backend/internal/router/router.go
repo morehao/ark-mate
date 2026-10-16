@@ -16,13 +16,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
-	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
 	"github.com/morehao/ark-mate/internal/service/svcprovider"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
@@ -30,6 +31,8 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/biz/gserver/ginserver"
 )
 
@@ -68,8 +71,15 @@ type Ports struct {
 	ModelHost  svcmodel.Host
 	Capability svccapability.CapabilitySvc
 	Automation svcautomation.AutomationSvc
-	Library    svclibrary.LibrarySvc
-	System     svcsystem.Source
+	// Library 读模型的事实来源（P4a 正文第六刀）：三张能力表 + 技能投影 + 运行期事实。
+	// 用例实例（`svclibrary.NewLibrary`）由 ctrlibrary 自己造——`app`/`router` 都不 import svc。
+	Capabilities *capability.Registry
+	SkillPlane   *skill.Plane
+	Registry     *runtime.Registry
+	McpSecrets   *mcp.Secrets
+	// McpGatewayEnabled 平台 MCP 网关开关（**运行期可变**，所以是读取口而不是快照值）。
+	McpGatewayEnabled func() bool
+	System            svcsystem.Source
 }
 
 // CapabilityHostFacts 报告"宿主能不能抬起系统目录面板"（`native-dialog` 的可用性判据）。

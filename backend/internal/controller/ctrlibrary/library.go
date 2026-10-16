@@ -6,8 +6,12 @@ package ctrlibrary
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/domain/mcp"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
+	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -22,8 +26,14 @@ type libraryCtr struct {
 	svc svclibrary.LibrarySvc
 }
 
-// NewLibraryCtr 构造 LibraryCtr。
-func NewLibraryCtr(svc svclibrary.LibrarySvc) LibraryCtr { return &libraryCtr{svc: svc} }
+// NewLibraryCtr 构造 LibraryCtr：交出**依赖事实**（三张能力表 / 技能投影 / 运行期事实），
+// 用例实例（`svclibrary.NewLibrary`）在控制器里造——`app` 与 `router` 都不 import `service/svc*`。
+func NewLibraryCtr(
+	caps *capability.Registry, skills *skill.Plane, reg *runtime.Registry,
+	secrets *mcp.Secrets, mcpGatewayEnabled func() bool,
+) LibraryCtr {
+	return &libraryCtr{svc: svclibrary.NewLibrary(caps, skills, reg, secrets, mcpGatewayEnabled)}
+}
 
 // ListLibrary 统一能力清单：`?kind=skill|mcp|agent|tool`（未知值 → 40000 `invalid_param`）、
 // `?q=`（id/name/description 大小写不敏感子串）。逐条回带**逐 runtime 的可达性**与人话原因，

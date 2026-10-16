@@ -9,11 +9,12 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
@@ -24,8 +25,8 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/router"
-	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
 	goruntime "github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
@@ -170,7 +171,6 @@ type stubSvc struct {
 	mcpWriteReq   dtocapability.McpWriteReq
 
 	// M2-4 Library 桩
-	libraryQueried svclibrary.Query
 
 	probeResp *dtocapability.McpProbeResp // P2 §5.2 MCP live 探测桩
 	probeErr  error
@@ -704,7 +704,14 @@ type envelope struct {
 }
 
 // stubDeps 用同一个测试替身填满全部领域端口（stubSvc 实现了全部端口）。
+//
+// 能力三表与技能投影是**真对象**但**空**：Library 读模型要能跑（nil 平面会判空集），
+// 而本包只验路由与信封——读模型的过滤/可达性判据在用例层自己的测试里。
 func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
+	t.Helper()
+	reg := goruntime.AllBuiltinRegistry()
+	caps := capability.NewRegistry()
+	skills := skill.NewPlane(caps, nil)
 	return router.Ports{
 		Session: svc, Workspace: svc,
 		// 执行面（`Identity`/`Diagnostics`）：用例实例由 ctrruntime 造。
@@ -714,7 +721,11 @@ func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 		// 目录落到临时目录，且不带密钥——本包只验路由与信封，密钥/载体行为在用例层自己的测试里。
 		ProviderPlane:   testProviderPlane(t),
 		ProviderCatalog: svc, Model: svc,
-		Capability: svc, Library: svc,
+		Capability: svc,
+		// Library 读模型（P4a 正文第六刀起）：域/包事实是**真对象**，用例实例由 ctrlibrary 造
+		// ——替身化事实等于把"读模型读的是哪份注册表"也替身掉。
+		Capabilities: caps, SkillPlane: skills, Registry: goruntime.AllBuiltinRegistry(),
+		McpSecrets: mcp.NewSecrets(credential.New(reg)), McpGatewayEnabled: func() bool { return true },
 		// 事实来源（`SessionMeta`/`SessionEvents`）：导出用例由 ctrexport 造。
 		System: svc,
 	}
@@ -1900,48 +1911,30 @@ func TestResolvePermissionReceiptShape(t *testing.T) {
 	}
 }
 
-// stubLibrary 让 stubSvc 满足 Library 端口（Library 读模型在 manager 侧有真装配测试）。
-func (s *stubSvc) ListLibrary(q svclibrary.Query) ([]dtolibrary.LibraryItem, error) {
-	s.libraryQueried = q
-	if s.capErr != nil {
-		return nil, s.capErr
-	}
-	return []dtolibrary.LibraryItem{{
-		ID: "demo", Kind: dtolibrary.KindSkill, Name: "演示", Origin: dtolibrary.OriginLocal,
-		Scope: "global", Enabled: true, SourceFile: "/tmp/skills/demo.json",
-		Applicability: []dtolibrary.Applicability{
-			{Runtime: "rtx", OK: true, Status: dtolibrary.StatusProjected, Reason: "投放到 /tmp/skills"},
-		},
-	}}, nil
-}
-
-// TestLibraryRouteShape GET /library：过滤参数透传领域层 + 逐 runtime 可达性原样透出 + 领域错误映射。
+// TestLibraryRouteShape GET /library：真实用例跑起来（空注册表 → 空数组）+ 领域校验落成 40000。
+//
+// 替身撤掉之后这条用例验的是**装配**：控制器拿到的是域/包事实、用例在控制器里造、错误经信封映射。
+// 读模型的过滤与逐 runtime 可达性在 `internal/service/svclibrary` 的测试里（那里有真注册表与投影）。
 func TestLibraryRouteShape(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(t, svc))
 
-	env, httpCode := do(t, r, "GET", "/v1/mate/library?kind=skill&q=dem", "")
+	env, httpCode := do(t, r, "GET", "/v1/mate/library", "")
 	if httpCode != 200 || env.Code != 0 {
 		t.Fatalf("GET /library 应成功: http=%d env=%+v", httpCode, env)
 	}
-	if svc.libraryQueried.Kind != "skill" || svc.libraryQueried.Q != "dem" {
-		t.Fatalf("过滤参数应透传到领域层: %+v", svc.libraryQueried)
-	}
-	var items []dtolibrary.LibraryItem
-	if err := json.Unmarshal(env.Data, &items); err != nil {
-		t.Fatalf("data 应是 LibraryItem 数组: %v（%s）", err, env.Data)
-	}
-	if len(items) != 1 || len(items[0].Applicability) != 1 || !items[0].Applicability[0].OK {
-		t.Fatalf("逐 runtime 可达性应原样透出: %+v", items)
-	}
-	if items[0].Origin != dtolibrary.OriginLocal || items[0].SourceFile == "" {
-		t.Fatalf("origin/source_file 应透出: %+v", items[0])
+	// `applicability` 必须是空数组而不是 null（形状由用例层收口），空清单本身要是 `[]`。
+	if got := strings.TrimSpace(string(env.Data)); got != "[]" {
+		t.Fatalf("空注册表应回空数组: %s", got)
 	}
 
-	// 未知 kind 的**校验在领域层**（控制器只透传 query），这里验证领域错误经信封落成 40000。
-	svc.capErr = code.Error(code.InvalidParam, "未知 kind \"command\"")
+	// 未知 kind 的**校验在用例层**（控制器只透传 query）——这里证明走的是真用例：
+	// 替身会照 200 + 空表返回，而真用例铸 40000。
 	env, httpCode = do(t, r, "GET", "/v1/mate/library?kind=command", "")
 	if httpCode != 200 || env.Code != code.InvalidParam {
-		t.Fatalf("领域层拒绝应落成 40000: http=%d env=%+v", httpCode, env)
+		t.Fatalf("用例层拒绝应落成 40000: http=%d env=%+v", httpCode, env)
+	}
+	if !strings.Contains(env.Msg, "未知 kind") {
+		t.Fatalf("错误文案应来自用例层: %s", env.Msg)
 	}
 }

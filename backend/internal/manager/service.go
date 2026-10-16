@@ -219,6 +219,21 @@ func (s *Service) SetBus(bus *eventbus.Bus) { s.bus = bus }
 // 两份平面 = 两个事实源。
 func (s *Service) ProviderPlane() *provider.Plane { return s.providerPlane }
 
+// CapabilityRegistry / SkillPlane / McpSecrets 交出能力面的三份**事实来源**
+// （`ctrlibrary` 的读模型用例要用它们，P4a 正文第六刀）。
+//
+// 与 `ProviderPlane()` 同一条理由：用例层已经用构造函数把"它要哪几件事实"写清楚了，
+// 中间再垫一层同名转发只会多一处需要同步的清单；**同一个实例**交给两个消费面，
+// 两份平面 = 两个事实源。这三个都是**域/包类型**（不是 `service/*` 的类型）——所以装配点
+// 把它们放进 `router.Ports` 不违反"除控制器外不许引用 svc*"。
+func (s *Service) CapabilityRegistry() *capability.Registry { return s.caps }
+
+// SkillPlane 技能平面（读面 + 投影；与 mcp 平面共用同一份能力注册表）。
+func (s *Service) SkillPlane() *skill.Plane { return s.skillPlane }
+
+// McpSecrets 连接器密钥解析面（引用 → 明文 / 存在性体检）。
+func (s *Service) McpSecrets() *mcp.Secrets { return s.mcpSecrets }
+
 // SetNativePermission 开关 B5 原生权限映射（false = 不向底座注入权限配置）。
 func (s *Service) SetNativePermission(enabled bool) {
 	s.nativePermMu.Lock()

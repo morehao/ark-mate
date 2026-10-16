@@ -280,7 +280,12 @@ func doRaw(t *testing.T, svc *manager.Service, method, path, body string) []byte
 		Runtime:       runtimeconn.NewPlaneFor(nil),
 		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,
 		Model:      svc,
-		Capability: svc, Library: svc,
+		Capability: svc,
+		// Library 读模型（P4a 正文第六刀）：这条夹具只走工作空间路由，但**不埋 nil**——
+		// 读模型拿的是真注册表与真能力面（注册表另起一份：本文件不断言读模型）。
+		Capabilities: svc.CapabilityRegistry(), SkillPlane: svc.SkillPlane(),
+		Registry: runtime.AllBuiltinRegistry(), McpSecrets: svc.McpSecrets(),
+		McpGatewayEnabled: svc.McpGatewayEnabled,
 	}, eventbus.New())
 	var rd *strings.Reader
 	rd = strings.NewReader(body)

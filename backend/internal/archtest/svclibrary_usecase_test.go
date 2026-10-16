@@ -1,0 +1,197 @@
+package archtest
+
+import (
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+// ——— P4a 正文第六刀「能力 Library 读模型归属」守卫 ———
+//
+// `ListLibrary`（跨四个平面的聚合读模型）从 `manager/library.go`（`*Service` 的方法）搬进
+// `internal/service/svclibrary`。这一刀与上一刀（`svcmodel` 写面）有一处**结构上的不同**，
+// 值得钉住：它**不需要过渡端口**——依赖全是事实：
+//
+//	*capability.Registry  三张能力表（skill/mcp/tool）
+//	*skill.Plane          已解析出的技能投影（逐 runtime 的可达性候选）
+//	*runtime.Registry     已注册底座 + 它声明的 MCP 传输
+//	*mcp.Secrets          「密钥引用解析不出来」这类告警事实
+//	func() bool           平台 MCP 网关开关（运行期可变 → 读取口，不是快照值）
+//
+// 四种失效各有一条判据：
+//
+//	① **实现回流**：谁在 `manager` 里再写一遍聚合（再 join 一次三表、再排一次序、再收口一次
+//	   `applicability` 的空数组形态）——两份读模型静默分叉，同一个资源在两个入口显示不同的
+//	   可达性，而两边都编译得过、都"看起来在工作"；
+//	② **判决分叉**：逐 runtime 的可达性判决本体在 `domain/session`（P3c 的**唯一实现**），
+//	   这一层必须**委托**它；顺手写一个本地 `switch` 就会让"面板说可达、注入时被跳过"回来；
+//	③ **默认约定分叉**："未声明 MCP 传输 → 仅 stdio"有两个消费面（本读模型与注入判据），
+//	   所以它必须只有一处实现（`runtime.Registry.McpTransportsFor`）；
+//	④ **装配漏接**：`ctrlibrary` 忘了造用例、或 `app.go` 没交那几份事实——前者一请求就 panic，
+//	   后者是**静默空转**（nil 能力面 → 恒空清单，而路由照常 200）。
+//
+// 反证（实跑）：把 `func (s *Service) ListLibrary(` 加回 `manager`（真实现的形态，能编译）→ 红；
+// 抽掉 `ctrlibrary` 的 `svclibrary.NewLibrary(` → 红；把 `McpSecrets` 从 `router.Ports` 拿掉 → 红；
+// 把 `Capabilities: a.svc.CapabilityRegistry()` 从 `app.go` 抽掉 → 红；把 `manager` 里
+// `s.reg.McpTransportsFor(` 换回本地的 `len(spec.McpTransports) == 0` → 红。
+
+// libraryUseCaseAnchors 用例层的实现锚（**实现**，不是转发）。
+var libraryUseCaseAnchors = []string{
+	"func NewLibrary(",
+	"var _ LibrarySvc = (*Library)(nil)",
+	"func (l *Library) ListLibrary(",
+	"func (l *Library) librarySkills(",
+	"func (l *Library) libraryMcps(",
+	"func (l *Library) libraryTools(",
+	"func libraryMatch(",
+	"func libraryOrigin(",
+	"func libraryMcpDesc(",
+}
+
+// libraryVerdictAnchors 判决**委托**的锚：领域判决唯一实现的两个入口 + 五份事实的取用处。
+var libraryVerdictAnchors = []string{
+	"session.SkillVerdict(",
+	"session.McpVerdict(",
+	"l.skills.Snapshot()",
+	"l.secrets.UnresolvedKeys(",
+	"l.reg.McpTransportsFor(",
+	"func (l *Library) mcpVerdictFacts(",
+}
+
+// libraryRelocationMarkers manager 侧**不得再出现**的实现痕迹。
+var libraryRelocationMarkers = []string{
+	"func (s *Service) ListLibrary(",
+	"func libraryMatch(",
+	"func libraryOrigin(",
+	"func libraryMcpDesc(",
+	"func skillWarningMessages(",
+	"func skillApplicability(",
+	"func mcpApplicability(",
+	"func skillRuntimeVerdict(",
+	"func mcpRuntimeVerdict(",
+	"func (s *Service) supportedMcpTransports(",
+}
+
+func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
+	root := backendRoot(t)
+	dir := filepath.Join(root, "internal", "service", "svclibrary")
+
+	files := goFilesUnder(t, dir)
+	if len(files) == 0 {
+		t.Fatalf("%s 下没有 .go 文件：守卫失去检查对象", dir)
+	}
+	var body strings.Builder
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		body.WriteString(stripLineComments(readFileOrFatal(t, path)))
+	}
+	src := body.String()
+	for _, a := range append(append([]string{}, libraryUseCaseAnchors...), libraryVerdictAnchors...) {
+		if !strings.Contains(src, a) {
+			t.Errorf("internal/service/svclibrary 里找不到 %q：读模型的实现被改名/搬走了？"+
+				"（判据挂在它身上，失锚等于空转）", a)
+		}
+	}
+	// 这一层的依赖**全是事实**：它既不该认识过渡期的 `manager`，也不该自己去读库
+	// （读模型 join 的是注册表与投影，`store` 出现在这里意味着有人把"数据面"又接了一遍）。
+	for _, m := range []string{
+		`"github.com/morehao/ark-mate/internal/manager"`,
+		`"github.com/morehao/ark-mate/internal/store"`,
+	} {
+		if strings.Contains(src, m) {
+			t.Errorf("internal/service/svclibrary 里出现 import %s：这一层的依赖是域/包事实"+
+				"（能力注册表 / 技能平面 / 底座注册表 / 密钥面），读模型自己不读库。", m)
+		}
+	}
+
+	// ① manager 侧：实现痕迹一律不得回来；文件本身也不得复活。
+	mgr := filepath.Join(root, "internal", "manager")
+	mgrFiles := productionGoFiles(t, mgr)
+	if len(mgrFiles) == 0 {
+		t.Fatalf("%s 下没有生产 .go 文件：守卫失去检查对象", mgr)
+	}
+	for _, path := range mgrFiles {
+		base := filepath.Base(path)
+		if base == "library.go" || base == "library_read.go" {
+			t.Errorf("internal/manager/%s 复活了：读模型**只有一份实现**，在 `internal/service/svclibrary`"+
+				"（P4a 正文第六刀）。两份并存的后果是同一个资源在两个入口显示不同的可达性。", base)
+		}
+		mgrBody := stripLineComments(readFileOrFatal(t, path))
+		for _, m := range libraryRelocationMarkers {
+			if strings.Contains(mgrBody, m) {
+				t.Errorf("internal/manager/%s 里出现读模型的实现痕迹 %q：它只有一份实现，在 "+
+					"`internal/service/svclibrary`。在这里再写一遍的后果是聚合口径与可达性判决静默分叉。",
+					base, m)
+			}
+		}
+	}
+
+	// ③ 默认约定单点：`pkg/runtime` 必须有那个导出入口，且 manager 里不许再自己判默认。
+	regSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "pkg", "runtime", "registry.go")))
+	if !strings.Contains(regSrc, "func (r *Registry) McpTransportsFor(") {
+		t.Error("pkg/runtime/registry.go 里找不到 `func (r *Registry) McpTransportsFor(`：'未声明 MCP 传输 → 仅 stdio' " +
+			"这条默认约定有两个消费面（Library 读模型与 MCP 注入判据），各写一遍必然漂移——" +
+			"漂移的表现是「面板说可达、注入时被跳过」。")
+	}
+	for _, path := range mgrFiles {
+		body := stripLineComments(readFileOrFatal(t, path))
+		if strings.Contains(body, "len(spec.McpTransports) == 0") {
+			t.Errorf("internal/manager/%s 里又自己判了一次 MCP 传输默认（`len(spec.McpTransports) == 0`）："+
+				"默认约定只有一处实现——`runtime.Registry.McpTransportsFor`。", filepath.Base(path))
+		}
+	}
+
+	// ④ 装配：用例在控制器里造；`Ports` 交的是五份事实，且 router 不得再认识这个 svc 包。
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrlibrary", "library.go")))
+	if !strings.Contains(ctr, "svclibrary.NewLibrary(") {
+		t.Error("internal/controller/ctrlibrary/library.go 里没有 `svclibrary.NewLibrary(`：用例必须在控制器里造出来" +
+			"（装配只能自上而下；`app`/`router` 不许引用 `service/svc*`）。")
+	}
+
+	routerFiles := goFilesUnder(t, filepath.Join(root, "internal", "router"))
+	if len(routerFiles) == 0 {
+		t.Fatal("internal/router 下没有 .go 文件：守卫失去检查对象")
+	}
+	for _, path := range routerFiles {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		// 判**代码**不是判注释：注释里点名 svc 包是允许的（那正是"哪一层在造用例"的说明）。
+		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "svclibrary") {
+			t.Errorf("internal/router/%s 里出现 `svclibrary`：读模型的用例接口不外溢到装配点——"+
+				"`Ports` 只放**依赖事实**，用例实例由控制器造（P4a 那批端口别名已判定为骚操作）。",
+				filepath.Base(path))
+		}
+	}
+	ports := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))
+	// 容空白正则：gofmt 会把字段对齐成多空格，定长空格的判据格式化之后会静默变绿。
+	for _, want := range []*regexp.Regexp{
+		regexp.MustCompile(`Capabilities\s+\*capability\.Registry`),
+		regexp.MustCompile(`SkillPlane\s+\*skill\.Plane`),
+		regexp.MustCompile(`Registry\s+\*runtime\.Registry`),
+		regexp.MustCompile(`McpSecrets\s+\*mcp\.Secrets`),
+		regexp.MustCompile(`McpGatewayEnabled\s+func\(\) bool`),
+	} {
+		if !want.MatchString(ports) {
+			t.Errorf("internal/router/router.go 的 `Ports` 里找不到 %s：读模型的五份事实必须在装配点交出"+
+				"（少任何一份，控制器那一步就编译不过；而 `McpGatewayEnabled` 必须是**读取口**——"+
+				"网关开关运行期可变，交快照值会让开关翻面之后读模型仍按旧值算）。", want)
+		}
+	}
+
+	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	for _, want := range []string{
+		"Capabilities: a.svc.CapabilityRegistry()",
+		"SkillPlane: a.svc.SkillPlane()",
+		"McpSecrets: a.svc.McpSecrets()",
+		"McpGatewayEnabled: a.svc.McpGatewayEnabled",
+	} {
+		if !strings.Contains(app, want) {
+			t.Errorf("internal/app/app.go 里找不到 %q：读模型的事实来源在装配点交出。"+
+				"（漏掉能力面/投影 ⇒ 清单恒空而路由照常 200——**静默空转**，比 panic 更难发现。）", want)
+		}
+	}
+}

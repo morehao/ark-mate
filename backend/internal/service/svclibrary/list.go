@@ -1,17 +1,73 @@
-package manager
+package svclibrary
 
 import (
 	"fmt"
-
-	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/domain/skill"
 	"sort"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/domain/mcp"
+	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
+
+// ——— P4a 正文第六刀：Library 读模型（用例实现） ———
+//
+// 这一层**不拥有数据**（选型 E1）：一次调用内 join 三张能力表 + 运行期投影，返回派生视图；
+// 判决本体在 `domain/session`（`SkillVerdict`/`McpVerdict`，P3c 的**唯一实现**），这里只把事实
+// 交过去、把结果套回读模型形态。搬进来之前它住在 `manager/library.go`（`*Service` 的方法）。
+//
+// **依赖全是事实**（没有"只做一行转发"的过渡端口——这正是这一刀比 `svcmodel` 干净的地方）：
+//
+//	*capability.Registry  三张能力表（skill/mcp/tool）
+//	*skill.Plane          已解析出的技能投影（逐 runtime 的可达性候选）
+//	*runtime.Registry     已注册 runtime + 它声明的 MCP 传输
+//	*mcp.Secrets          "密钥引用解析不出来"这类告警事实
+//	func() bool           平台 MCP 网关开关（**运行期可变**，所以取读取口而不是快照值）
+//
+// 最后一项是唯一的非类型事实：装配期 `SetMcpGatewayEnabled` 之后还可能被测试/设置面改动，
+// 交一个方法值（`a.svc.McpGatewayEnabled`）读的是**当下**的值。
+
+// Library 统一能力清单的读模型用例（见文件头）。
+type Library struct {
+	caps              *capability.Registry
+	skills            *skill.Plane
+	reg               *runtime.Registry
+	secrets           *mcp.Secrets
+	mcpGatewayEnabled func() bool
+}
+
+// NewLibrary 造用例。五个入参都是装配点交下来的**依赖事实**（控制器在这里构造）。
+func NewLibrary(
+	caps *capability.Registry, skills *skill.Plane, reg *runtime.Registry,
+	secrets *mcp.Secrets, mcpGatewayEnabled func() bool,
+) LibrarySvc {
+	return &Library{caps: caps, skills: skills, reg: reg, secrets: secrets, mcpGatewayEnabled: mcpGatewayEnabled}
+}
+
+var _ LibrarySvc = (*Library)(nil)
+
+// mcpVerdictFacts 逐 runtime 的 MCP 可达性事实（P3c：判决在域里，事实在这里）。
+//
+// 传输默认约定（未声明 → 仅 stdio）在 `runtime.Registry.McpTransportsFor` 一处；这里**不做
+// 默认化**：那个方法已经区分"声明为空 → 只收 stdio"与"未知 runtime → 什么传输都不承载"，
+// 再默认一次会把未知 runtime 变成"只收 stdio"，于是"未注册 runtime 应不可达"这条判据静默失效。
+func (l *Library) mcpVerdictFacts(runtimeID string) session.McpVerdictFacts {
+	supported, known := l.reg.McpTransportsFor(runtimeID)
+	gateway := false
+	if l.mcpGatewayEnabled != nil {
+		gateway = l.mcpGatewayEnabled()
+	}
+	return session.McpVerdictFacts{
+		Runtime:        runtimeID,
+		Supported:      supported,
+		SupportedKnown: known,
+		GatewayEnabled: gateway,
+	}
+}
 
 // ——— M2-4：Library 统一读模型 ———
 //
@@ -27,7 +83,7 @@ import (
 //     not_configured/not_applicable/disabled），两处各造一套词就会让用户对着两个页面猜哪个是真的。
 
 // ListLibrary 返回统一能力清单（按 kind、id 排序；排序稳定 → 面板与测试都不会"抖动"）。
-func (s *Service) ListLibrary(q skill.Query) ([]dtolibrary.LibraryItem, error) {
+func (l *Library) ListLibrary(q skill.Query) ([]dtolibrary.LibraryItem, error) {
 	if q.Kind != "" && !dtolibrary.ValidKinds[q.Kind] {
 		// 未知 kind 报 40000 而不是静默返回空表：静默会让"筛了但没有"与"我拼错了"长得一样。
 		return nil, code.Error(code.InvalidParam,
@@ -36,9 +92,9 @@ func (s *Service) ListLibrary(q skill.Query) ([]dtolibrary.LibraryItem, error) {
 	needle := strings.ToLower(strings.TrimSpace(q.Q))
 
 	items := make([]dtolibrary.LibraryItem, 0, 64)
-	items = append(items, s.librarySkills()...)
-	items = append(items, s.libraryMcps()...)
-	items = append(items, s.libraryTools()...)
+	items = append(items, l.librarySkills()...)
+	items = append(items, l.libraryMcps()...)
+	items = append(items, l.libraryTools()...)
 
 	out := items[:0]
 	for _, it := range items {
@@ -77,12 +133,12 @@ func libraryMatch(it dtolibrary.LibraryItem, needle string) bool {
 // 候选 runtime = **本进程已解析出 skill 投影的全部 runtime**（不是技能声明白名单的子集）：
 // 白名单决定"投不投"，可达性决定"能不能投"，两者混在一起就答不了"我把 runtimes 写成 [] 之后
 // 到底会落到哪几个底座"。
-func (s *Service) librarySkills() []dtolibrary.LibraryItem {
-	if s.caps == nil {
+func (l *Library) librarySkills() []dtolibrary.LibraryItem {
+	if l.caps == nil {
 		return nil
 	}
-	projections := s.skillProjectionsSnapshot()
-	skills := s.caps.ListSkills()
+	projections := l.skills.Snapshot()
+	skills := l.caps.ListSkills()
 	out := make([]dtolibrary.LibraryItem, 0, len(skills))
 	for _, sk := range skills {
 		it := dtolibrary.LibraryItem{
@@ -127,12 +183,12 @@ func skillRuntimeVerdict(sk capability.Skill, p skill.Projection) dtolibrary.App
 }
 
 // libraryMcps MCP 条目 + 逐 runtime 可达性（按 transport 承载）。
-func (s *Service) libraryMcps() []dtolibrary.LibraryItem {
-	if s.caps == nil {
+func (l *Library) libraryMcps() []dtolibrary.LibraryItem {
+	if l.caps == nil {
 		return nil
 	}
-	servers := s.caps.ListMcpServers()
-	runtimes := s.reg.IDs()
+	servers := l.caps.ListMcpServers()
+	runtimes := l.reg.IDs()
 	out := make([]dtolibrary.LibraryItem, 0, len(servers))
 	for _, m := range servers {
 		it := dtolibrary.LibraryItem{
@@ -143,40 +199,40 @@ func (s *Service) libraryMcps() []dtolibrary.LibraryItem {
 		if !m.IsEnabled() {
 			it.Warnings = append(it.Warnings, "该 server 已被禁用（enabled:false）：定义与密钥引用都保留，只是不注入")
 		}
-		if keys := s.unresolvedSecretKeys(m); len(keys) > 0 {
+		if keys := l.secrets.UnresolvedKeys(m); len(keys) > 0 {
 			it.Warnings = append(it.Warnings,
 				fmt.Sprintf("密钥引用当前解析不出值（%s）：注入时会跳过这个 server", strings.Join(keys, ", ")))
 		}
-		it.Applicability = mcpApplicability(m, runtimes, s)
+		it.Applicability = l.mcpApplicability(m, runtimes)
 		out = append(out, it)
 	}
 	return out
 }
 
 // mcpApplicability 逐 runtime 报 MCP server 的可达性（判据 = 该 runtime 是否承载这种 transport）。
-func mcpApplicability(m capability.McpServer, runtimes []string, s *Service) []dtolibrary.Applicability {
+func (l *Library) mcpApplicability(m capability.McpServer, runtimes []string) []dtolibrary.Applicability {
 	out := make([]dtolibrary.Applicability, 0, len(runtimes))
 	for _, rt := range runtimes {
-		out = append(out, mcpRuntimeVerdict(m, rt, s))
+		out = append(out, l.mcpRuntimeVerdict(m, rt))
 	}
 	return out
 }
 
 // mcpRuntimeVerdict 单个 (server, runtime) 的可达性判定——**薄适配**（P3c；理由同 skillRuntimeVerdict）。
-func mcpRuntimeVerdict(m capability.McpServer, rt string, s *Service) dtolibrary.Applicability {
+func (l *Library) mcpRuntimeVerdict(m capability.McpServer, rt string) dtolibrary.Applicability {
 	// P3c：判决本体已落 `domain/session`（唯一实现）。事实（承载哪些传输 / 在不在册 / 网关开关）
 	// 由装配侧如实交出——域只消费结论。
-	v := session.McpVerdict(m, s.McpVerdictFacts(rt))
+	v := session.McpVerdict(m, l.mcpVerdictFacts(rt))
 	return dtolibrary.Applicability{Runtime: rt, OK: v.OK, Status: v.Status, Reason: v.Reason}
 }
 
 // libraryTools Tool 条目 + 归属 server 的可承载 runtime（builtin/observed 对所有 runtime 可达）。
-func (s *Service) libraryTools() []dtolibrary.LibraryItem {
-	if s.caps == nil {
+func (l *Library) libraryTools() []dtolibrary.LibraryItem {
+	if l.caps == nil {
 		return nil
 	}
-	tools := s.caps.ListTools()
-	runtimes := s.reg.IDs()
+	tools := l.caps.ListTools()
+	runtimes := l.reg.IDs()
 	out := make([]dtolibrary.LibraryItem, 0, len(tools))
 	for _, t := range tools {
 		it := dtolibrary.LibraryItem{
@@ -186,14 +242,14 @@ func (s *Service) libraryTools() []dtolibrary.LibraryItem {
 		}
 		switch {
 		case t.Source == capability.ToolSourceMCP && t.McpServer != "":
-			server, ok := s.caps.GetMcpServer(t.McpServer)
+			server, ok := l.caps.GetMcpServer(t.McpServer)
 			if !ok {
 				it.Warnings = append(it.Warnings, fmt.Sprintf(
 					"归属的 MCP server %q 已不在注册表里（这条工具暂时调不通，重新注册该 server 或删掉它）", t.McpServer))
 				break
 			}
 			it.Scope = server.EffectiveScope()
-			it.Applicability = mcpApplicability(server, runtimes, s)
+			it.Applicability = l.mcpApplicability(server, runtimes)
 		default:
 			for _, rt := range runtimes {
 				it.Applicability = append(it.Applicability, dtolibrary.Applicability{Runtime: rt, OK: true,

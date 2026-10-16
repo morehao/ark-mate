@@ -207,19 +207,6 @@ func (s *Service) ListTools() ([]dtocapability.ToolResp, error) {
 	return out, nil
 }
 
-// supportedMcpTransports 返回 runtime 声明支持的 MCP 传输（未声明 → 仅 stdio，ACP 全 agent 必须支持）。
-// 未知 runtime → ok=false。
-func (s *Service) supportedMcpTransports(runtimeID string) ([]string, bool) {
-	spec, ok := s.reg.Get(runtimeID)
-	if !ok {
-		return nil, false
-	}
-	if len(spec.McpTransports) == 0 {
-		return []string{capability.TransportStdio}, true
-	}
-	return spec.McpTransports, true
-}
-
 // ——— P3d 过渡期转发层（纪律：一行 + TODO）———
 //
 // 密钥解析面（引用 → 明文、存在性体检、脱敏登记）已落 `domain/mcp.Secrets`（P2a-13）。
