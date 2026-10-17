@@ -136,7 +136,7 @@ minted:
 	//    （`objid.New(objid.Run)`），且不得出现派生写法。
 	//
 	// 锚点是**符号计数 + 递归扫描**，不是文件路径。为什么：这个点会随包搬家
-	// （`manager/run.go` → 目标 `internal/domain/session`），而 `filepath.Glob(dir, "*.go")`
+	// （`manager/run.go` → `internal/domain/session/runner.go`，P4a 第五十五刀已完成），而 `filepath.Glob(dir, "*.go")`
 	// **不递归**——文件一旦进子目录，判据就静默空转（照样绿，什么都没检查）。
 	// 放宽到整棵树同时是**更强**的判据：派生写法或第二处铸号出现在 `internal/` 任何地方都红。
 	//
@@ -234,13 +234,13 @@ func TestInterruptedRunsAreClosedOnRestoreButNotLive(t *testing.T) {
 	}
 
 	// ② 实时路径：`executeRun` 的 `intentional` 分支**保持零事件**。
-	runPath := filepath.Join(root, "internal", "manager", "run.go")
+	runPath := filepath.Join(root, "internal", "domain", "session", "runner.go")
 	runSrc := stripLineComments(readFileOrFatal(t, runPath))
 	block, ok := switchCaseBlock(runSrc, "case intentional:")
 	if !ok {
 		t.Fatalf("%s 里找不到 `case intentional:` 分支（改名/挪走了？本守卫 fail-closed）", runPath)
 	}
-	for _, marker := range []string{"BusRun", "PublishRunStatus", "publishRunStatus", "closeRunStatus", "runStatusFor"} {
+	for _, marker := range []string{"BusRun", "PublishRunStatus", "CloseRunStatus", "RunStatusFor"} {
 		if strings.Contains(block, marker) {
 			t.Fatalf("%s 的 `case intentional:` 分支里出现了 %q：\n"+
 				"ADR-8 的前半是**实时路径继续不发伪终态**（原注释逐字：「伪终态会污染历史、失败轮"+

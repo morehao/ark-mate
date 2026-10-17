@@ -50,7 +50,7 @@ func TestReapIdleOnceSkips(t *testing.T) {
 	o.inflight.Mark(busy.Client, "s1")
 	withSession := old("dsh")
 	o.pool.Add(withSession)
-	o.sessions["s-x"] = &ActiveSession{client: withSession.Client}
+	o.handles.Put(session.NewActiveSession(session.HandleParams{Client: withSession.Client}))
 
 	if n := o.pool.ReapIdle(now, 5*time.Minute); n != 0 {
 		t.Fatalf("三种情形都不应回收，实际 %d", n)

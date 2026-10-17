@@ -57,14 +57,14 @@ func (s *gatedSession) prompts() []string {
 
 // newQueueRig 队列测试架子：echo 注册表 + 总线 +（可选）临时库 + 一条**已登记
 // 且有活句柄**的会话 conv-1（句柄的 sess 由调用方给定，用于掌控轮次节奏）。
-func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orchestrator, *gatedSession, *ActiveSession) {
+func newQueueRig(t *testing.T, sess session.ACP, withStore bool) (*Service, *Orchestrator, *gatedSession, *session.ActiveSession) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) {
 		c.stub, c.bus, c.store = true, true, withStore
 	})
 	g := sess.(*gatedSession)
-	as := &ActiveSession{ID: "conv-1", Runtime: "stub", sess: sess}
-	r.Orch.sessions[as.ID] = as
+	as := session.NewActiveSession(session.HandleParams{ID: "conv-1", Runtime: "stub", Session: sess})
+	r.Orch.handles.Put(as)
 	r.Svc.registerSession(&SessionRec{
 		ID: as.ID, RuntimeID: "stub", Status: session.SessionStatusInProgress, Generation: 1,
 	})
@@ -88,14 +88,12 @@ func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orch
 			}
 		}
 		drainRun := func() bool { // true = 已无在途轮次
-			as.mu.Lock()
-			t := as.run
-			as.mu.Unlock()
+			t := as.ActiveRun()
 			if t == nil {
 				return true
 			}
 			select {
-			case <-t.done:
+			case <-t.Done():
 				return false // 这一轮收尾完了；可能又被投递了下一轮，外层再判一次
 			case <-time.After(time.Second):
 				return true
@@ -109,9 +107,7 @@ func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orch
 			// `as.run = nil` 早于 `close(t.done)`，所以"看到 nil"仍有可能是收尾窗口：
 			// 给一个静默窗口再确认一次确实没有新轮次，才摘句柄。
 			time.Sleep(5 * time.Millisecond)
-			as.mu.Lock()
-			still := as.run
-			as.mu.Unlock()
+			still := as.ActiveRun()
 			if still == nil {
 				break
 			}
@@ -467,7 +463,7 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 	svc1 := NewService(runtime.NewRegistry(), nil)
 	svc1.EnableStore(st)
 	svc1.registerSession(&SessionRec{ID: "c1", Generation: 1})
-	queued, err := svc1.enqueueInput(context.Background(), "c1", "重启前的排队", DeliveryAfterRun, "run-x", 1)
+	queued, err := svc1.sessionPlane.EnqueueInput(context.Background(), "c1", "重启前的排队", DeliveryAfterRun, "run-x", 1)
 	if err != nil {
 		t.Fatal(err)
 	}

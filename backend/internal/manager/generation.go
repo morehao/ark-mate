@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/golib/glog"
 )
@@ -73,15 +74,13 @@ type generationPlan struct {
 //
 // 只读、无副作用：四条纪律里的三条（键比较、忙/挂起、探针可读性）都能在不拉进程的前提下被
 // 单测逐条钉住。
-func (o *Orchestrator) planGenerationSwitch(as *ActiveSession, rec *SessionRec) generationPlan {
+func (o *Orchestrator) planGenerationSwitch(as *session.ActiveSession, rec *SessionRec) generationPlan {
 	if as == nil || rec == nil {
 		return generationPlan{Action: genActionKeep, Reason: "会话记录不可读：不动（保守）"}
 	}
 	// 探针：句柄状态。dead 的句柄不该在这里动——它已经作废，下一次 prompt 会走
 	// ensureSession 的重建路径，那条路径本来就按**当前**配置重开。
-	as.mu.Lock()
-	busy, dead := as.busy, as.dead
-	as.mu.Unlock()
+	busy, dead := as.Busy(), as.Dead()
 	if dead {
 		return generationPlan{Action: genActionKeep, Reason: "句柄已作废：交给重建路径按当前配置重开"}
 	}
@@ -91,7 +90,7 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveSession, rec *SessionRec) 
 	}
 	// ③ 探针不可读 → 保守当忙。连接反查不到（正在拆/已拆）时无法判断这条句柄挂在什么上面，
 	// 那就当它不可动——真正的重建由 ensureSession 负责，不在这里猜。
-	rc := o.pool.ConnOfClient(as.client)
+	rc := o.pool.ConnOfClient(as.Client())
 	if rc == nil {
 		return generationPlan{Action: genActionKeep, Reason: "连接不可读：不动（保守）"}
 	}
@@ -120,7 +119,7 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveSession, rec *SessionRec) 
 		plan.Reason = "有在途轮次：顺延到下一轮"
 		return plan
 	}
-	if as.client == nil || as.sess == nil || o.perm == nil || o.elic == nil {
+	if as.Client() == nil || as.Native() == nil || o.perm == nil || o.elic == nil {
 		plan.Action = genActionDefer
 		plan.Reason = "会话忙碌状态不可读：保守顺延"
 		return plan
@@ -153,7 +152,7 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveSession, rec *SessionRec) 
 //
 // 串行化：迁移是罕见操作（配置变更后的第一个轮次边界），用一把全局锁把并发的第二个调用挡在
 // 外面，让它直接拿换好的句柄——比在每个句柄上加状态机简单得多，也不会成为热点。
-func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveSession) (*ActiveSession, error) {
+func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *session.ActiveSession) (*session.ActiveSession, error) {
 	plan := o.planGenerationSwitch(as, o.svc.sessionRec(as.ID))
 	switch plan.Action {
 	case genActionKeep:
@@ -197,7 +196,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveSes
 			targetFP = fp
 		}
 	}
-	oldRC := o.pool.ConnOfClient(as.client)
+	oldRC := o.pool.ConnOfClient(as.Client())
 	// 预热新代际并按既有 resume 语义把会话挂上去（`connectSession` 内完成，
 	// 与"进程死掉重建"共用同一条路径——两条路径共用才不会出现"重启后能力集悄悄换一套"）。
 	next, _, err := o.connectSession(ctx, rec, spec, rec.Cwd, sel, targetFP)
@@ -216,7 +215,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveSes
 	}
 	glog.Infow(ctx, "代际迁移完成", "session", as.ID, "runtime", spec.ID,
 		"from", plan.From, "to", plan.To, "perm_changed", plan.PermChanged,
-		"runtime_session", next.providerID)
+		"runtime_session", next.ProviderID())
 	o.attachSession(next, "generation")
 	// 缩权/换代后立刻淘汰**已无人引用**的旧代际（不等空闲阈值）：旧进程代表的可能是一套
 	// 已经不该存在的权限/能力面，留着它既占内存又违反"缩权立刻生效"的直觉。

@@ -24,7 +24,7 @@ import (
 func (o *Orchestrator) requestPermission(ctx context.Context, req acl.PermissionRequest) acl.PermissionDecision {
 	// P3 双 id：权限请求只携带原生 session id → 解析为平台会话 uuid 键控（记忆/挂起/事件
 	// 均以平台会话 id 为键，与 sessions/events/permission_memories 一致）。
-	sid := o.resolveProvider(req.SessionID)
+	sid := o.handles.ResolveProvider(req.SessionID)
 	if sid == "" {
 		sid = req.SessionID // 兜底回落原生（理论上不应出现；保留事件不丢）
 	}
@@ -56,7 +56,7 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 		// 「等用户决策」是**插曲不是终态**（S1）：它让界面说得出「等待你确认授权」，
 		// 而不是拿「进行中」蒙混过去。进入等待前的状态由域里的投影记着，决策后由
 		// `ResumeRunStatus` 送回去（否则头栏会一直停在等待态）。
-		o.runStatusFor(sid, session.RunStatusWaitingForPermission, session.RunStatusOpts{
+		o.runner.RunStatusFor(sid, session.RunStatusWaitingForPermission, session.RunStatusOpts{
 			ToolCallID: tool.ID, ToolName: title, WaitingFor: "permission",
 		})
 		o.svc.publish(session.BusPermissionRequest, sid, map[string]any{
@@ -171,7 +171,7 @@ func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string
 	if rawProviderID == "" {
 		return ""
 	}
-	if sid := o.resolveProvider(rawProviderID); sid != "" {
+	if sid := o.handles.ResolveProvider(rawProviderID); sid != "" {
 		return sid
 	}
 	wrapped, err := objid.WrapRuntime(rawProviderID)
@@ -205,7 +205,7 @@ func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string
 func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.ElicitationRequest) acl.ElicitationOutcome {
 	sid := req.SessionID // 断点恢复别名归一
 	publish := func(it interaction.ElicitationItem) {
-		o.runStatusFor(sid, session.RunStatusWaitingForUser, session.RunStatusOpts{WaitingFor: "elicitation"})
+		o.runner.RunStatusFor(sid, session.RunStatusWaitingForUser, session.RunStatusOpts{WaitingFor: "elicitation"})
 		payload := map[string]any{
 			"session_id":     sid,
 			"scope_source":   it.ScopeSource,

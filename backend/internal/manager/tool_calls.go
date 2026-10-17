@@ -12,6 +12,9 @@ import "github.com/morehao/ark-mate/pkg/acl"
 // 生命周期：`tool_call` 写入；`tool_call_update` 带 input 时刷新；终态（completed/failed）
 // 即删除。上限 `maxRememberedToolCalls`，超出按插入序淘汰——它是**短期**记忆，不是审计日志
 // （`events` 表才是审计）。
+//
+// 归属：它按 toolCallId 存活、不按轮次，所以留在编排侧，经 `ToolMemory` 端口供会话域的事件
+// 出口写入（P4a 第五十五刀把事件出口搬进 `domain/session` 时只搬了消费方）。
 
 // maxRememberedToolCalls 上限（单进程）。256 足够覆盖"同会话并发工具 + 权限等待"的窗口；
 // 不设上限的后果是长跑进程里这个 map 只增不减（工具调用每秒都在发生）。

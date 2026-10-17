@@ -290,7 +290,7 @@ func TestCatalogAnnotatesCandidatesWithPlatformRowID(t *testing.T) {
 			{Value: "p2/ghost", Name: "未声明"},
 		},
 	}}
-	r.orch.sessions["c1"] = &ActiveSession{ID: "c1", Runtime: r.runtme, sess: &stubSession{options: opts}}
+	r.orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: r.runtme, Session: &stubSession{options: opts}}))
 
 	resp, err := r.svc.ModelCatalog(ctx)
 	if err != nil {

@@ -328,7 +328,7 @@ func TestRunUsageLandsInRunRowThroughTheSessionPlane(t *testing.T) {
 
 	runID, _, _ := beginRun(t, svc, "s-usage-wire", "问一句")
 	// 执行面记一次用量上报（真实路径由 event_sink 在收到 usage 事件时调用）。
-	orch.recordUsage("s-usage-wire", objusage.UsageInfo{Used: 321, Size: 128000})
+	orch.runner.RecordUsage("s-usage-wire", objusage.UsageInfo{Used: 321, Size: 128000})
 	endRun(svc, "s-usage-wire", runID, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	rows, err := st.ListRuns(ctx, "s-usage-wire")

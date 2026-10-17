@@ -93,7 +93,7 @@ func TestRunStatusIsSingleSource(t *testing.T) {
 // `TestInterruptedRunsAreClosedOnRestoreButNotLive` 钉）。
 func TestRunStatusCoversEveryTerminal(t *testing.T) {
 	root := backendRoot(t)
-	runPath := filepath.Join(root, "internal", "manager", "run.go")
+	runPath := filepath.Join(root, "internal", "domain", "session", "runner.go")
 	src := stripLineComments(readFileOrFatal(t, runPath))
 
 	// 每个终态分支：分支标签 → 该分支里必须出现的终态发射锚。
@@ -102,10 +102,10 @@ func TestRunStatusCoversEveryTerminal(t *testing.T) {
 		terminal  string
 		rationale string
 	}{
-		{"case userCancel:", "session.BusRunCancelled", "用户显式取消（优先于 interrupted）"},
-		{"case cancelled:", "session.BusRunCancelled", "底座返回取消类结果"},
-		{"case err != nil:", "o.publishError(", "失败"},
-		{"\tdefault:", "session.BusRunEnded", "正常结束"},
+		{"case userCancel:", "BusRunCancelled", "用户显式取消（优先于 interrupted）"},
+		{"case cancelled:", "BusRunCancelled", "底座返回取消类结果"},
+		{"case err != nil:", "r.PublishError(", "失败"},
+		{"\tdefault:", "BusRunEnded", "正常结束"},
 	}
 	for _, c := range cases {
 		block, ok := switchCaseBlock(src, c.label)
@@ -116,8 +116,8 @@ func TestRunStatusCoversEveryTerminal(t *testing.T) {
 			t.Fatalf("%s 的分支 %q 里找不到终态发射 %q：判据的锚变了（fail-closed，"+
 				"否则本条会在改结构之后静默空转）", runPath, c.label, c.terminal)
 		}
-		if !strings.Contains(block, "o.closeRunStatus(") {
-			t.Fatalf("%s 的分支 %q（%s）里没有收口 `o.closeRunStatus(`：\n"+
+		if !strings.Contains(block, "r.CloseRunStatus(") {
+			t.Fatalf("%s 的分支 %q（%s）里没有收口 `r.CloseRunStatus(`：\n"+
 				"界面「还在跑吗」的判据必须是一个**状态**，不能是「一段时间没事件」——后者正是"+
 				"被取代的那套前端倒推。四个终态分支各要一次，只补一个不会让任何既有用例变红",
 				runPath, c.label, c.rationale)

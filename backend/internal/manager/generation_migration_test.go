@@ -114,13 +114,13 @@ func sessionNewLog(t *testing.T) func() []map[string]any {
 }
 
 // start 建一条钉住 sel 的 a1 会话。
-func (r *genRig) start(t *testing.T, sel *CapabilitySelection) (string, *ActiveSession) {
+func (r *genRig) start(t *testing.T, sel *CapabilitySelection) (string, *session.ActiveSession) {
 	t.Helper()
 	return r.startAs(t, sel)
 }
 
 // startAs 建一条钉住 sel 的会话（v19：会话就是进程归属，没有"给哪个 agent"这一维），返回 id 与当时的句柄。
-func (r *genRig) startAs(t *testing.T, sel *CapabilitySelection) (string, *ActiveSession) {
+func (r *genRig) startAs(t *testing.T, sel *CapabilitySelection) (string, *session.ActiveSession) {
 	t.Helper()
 	res, err := r.orch.startSessionOn(context.Background(),
 		StartOptions{Cwd: t.TempDir(), Selection: sel})
@@ -135,7 +135,7 @@ func (r *genRig) startAs(t *testing.T, sel *CapabilitySelection) (string, *Activ
 }
 
 // boundary 走**真实入口**取这一轮的句柄（Prompt / 排队投递都经它）。
-func (r *genRig) boundary(t *testing.T, convID string) *ActiveSession {
+func (r *genRig) boundary(t *testing.T, convID string) *session.ActiveSession {
 	t.Helper()
 	as, err := r.orch.acquireSession(context.Background(), convID)
 	if err != nil {
@@ -167,8 +167,6 @@ func (r *genRig) waitConns(t *testing.T, want int) int {
 }
 
 func (r *genRig) conns() int {
-	r.orch.mu.Lock()
-	defer r.orch.mu.Unlock()
 	return r.orch.pool.Len()
 }
 
@@ -215,7 +213,7 @@ func TestGenerationMigration(t *testing.T) {
 	if as2.Fingerprint != want {
 		t.Fatalf("新句柄指纹 = %q，期望 %q", as2.Fingerprint, want)
 	}
-	if as2.client == as1.client {
+	if as2.Client() == as1.Client() {
 		t.Fatal("新代际必须落在**另一个**连接上（能力集是进程级的，共用连接等于把两套能力合进一个进程）")
 	}
 	// 旧代际此刻已无人引用 → 当场回收（不等空闲阈值）：它代表的是一套已经过时的能力集。
@@ -225,9 +223,7 @@ func TestGenerationMigration(t *testing.T) {
 	if cur := r.orch.session(convID); cur != as2 {
 		t.Fatal("活跃集合应指向新句柄")
 	}
-	as1.mu.Lock()
-	deadOld := as1.dead
-	as1.mu.Unlock()
+	deadOld := as1.Dead()
 	if !deadOld {
 		t.Fatal("旧句柄应被标废")
 	}
@@ -306,16 +302,12 @@ func TestGenerationMigrationDefersWhileBusy(t *testing.T) {
 	r.registerMcp(t, fsServer("v2"))
 
 	// ②-a 在途轮次：不切。
-	as1.mu.Lock()
-	as1.busy = true
-	as1.mu.Unlock()
+	setBusy(as1, true)
 	if got := r.boundary(t, convID); got != as1 {
 		t.Fatal("有在途轮次时不得换代际（绝不打断）")
 	}
 	// 轮次结束 → 下一个边界切上（"下一轮生效"不是"永远不生效"）。
-	as1.mu.Lock()
-	as1.busy = false
-	as1.mu.Unlock()
+	setBusy(as1, false)
 	as2 := r.boundary(t, convID)
 	if as2 == as1 {
 		t.Fatal("空闲后应在下一个轮次边界完成迁移")
@@ -427,7 +419,7 @@ func TestGenerationPool(t *testing.T) {
 		t.Fatalf("acquire(缺省): %v", err)
 	}
 	_, as1 := r.start(t, &CapabilitySelection{Mcps: ptrOf([]string{"fs"})})
-	if as1.client == idle.Client {
+	if as1.Client() == idle.Client {
 		t.Fatal("不同能力集必须各起一个代际")
 	}
 	if n := r.conns(); n != 2 {
@@ -501,10 +493,10 @@ func TestMigrationReclaimsSharedGenerationOnlyWhenUnreferenced(t *testing.T) {
 	// 两条会话钉住**同一套**能力 → 共用同一个代际。
 	c1, a1 := r.start(t, sel)
 	c2, a2 := r.start(t, sel)
-	if a1.client != a2.client {
+	if a1.Client() != a2.Client() {
 		t.Fatal("同一套能力应共用代际")
 	}
-	oldClient := a1.client
+	oldClient := a1.Client()
 
 	r.registerMcp(t, fsServer("v2"))
 	_ = r.boundary(t, c1)

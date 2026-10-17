@@ -2,10 +2,6 @@ package manager
 
 import (
 	"context"
-
-	"github.com/morehao/ark-mate/internal/domain/session"
-
-	"github.com/morehao/golib/glog"
 )
 
 // ——— §6 busy input 队列（排队 / 插话） ———
@@ -29,42 +25,9 @@ import (
 //
 // 不自动续投的两种收尾：run 失败（避免把队列变成「连续失败重放」）与进程主动停机
 // （intentional；重启时全库 queued 行统一置作废——等待的那一轮已随进程消失）。
-
-// 队列项终态（事件收敛用；与 store.InputStatus* 同值）。
-
-// ——— Service 侧队列读写（唯一入口；DB / 内存两实现） ———
-
-// ——— Orchestrator 侧：投递 ———
-
-// deliverQueued 在会话空闲时投递队首排队输入（executeRun 收尾 / 入队后复查调用）。
-// 不投递：会话仍忙（下一轮自然会再触发）、句柄已死（重建后代际已变，队列项会作废）、队列空。
-func (o *Orchestrator) deliverQueued(as *ActiveSession) {
-	as.mu.Lock()
-	dead, busy := as.dead, as.busy
-	as.mu.Unlock()
-	if dead || busy {
-		return
-	}
-	gen := o.svc.sessionGeneration(as.ID)
-	q, ok := o.svc.claimNextInput(context.Background(), as.ID, gen)
-	if !ok {
-		return
-	}
-	// 先启动新一轮、再发布 delivered：反过来（先发 delivered 再 Prompt）一旦启动失败，
-	// 前端会看到队列项凭空消失而其文本从未作为 user_message 出现过。
-	if _, err := o.Prompt(context.Background(), as.ID, q.Text); err != nil {
-		glog.Warnw(context.Background(), "排队输入投递失败", "session", as.ID, "input_id", q.ID, "err", err)
-		o.svc.publish(session.BusInputCancelled, as.ID, map[string]any{
-			"session_id": as.ID, "runtime": as.Runtime, "input_id": q.ID,
-			"delivery": q.Delivery, "reason": ReasonDeliverFail,
-		})
-		return
-	}
-	o.svc.publish(session.BusInputDelivered, as.ID, map[string]any{
-		"session_id": as.ID, "runtime": as.Runtime, "input_id": q.ID,
-		"delivery": q.Delivery, "reason": ReasonRunFinished,
-	})
-}
+//
+// **投递本体**（`deliverQueued`）随轮次状态机进了 `domain/session.Runner`（P4a 正文第五十五刀）：
+// 它要与在途状态、收尾路径共用同一份"谁在投递"的事实，留在本层就会出现两份。
 
 // DeliverQueuedNow 会话**空闲**时立刻投递队首排队输入（「立即发送」在空闲态的落点）。
 //
@@ -72,16 +35,16 @@ func (o *Orchestrator) deliverQueued(as *ActiveSession) {
 //   - 没有执行面（离线命令 / 测试夹具）：队列只是一份状态，没有人会跑它；
 //   - 会话句柄不在活跃集合里：没有活连接就没有"现在"这一说，下次 prompt 重建句柄时
 //     队首会按正常路径投递；
-//   - 会话正忙：那一轮结束时 `executeRun` 的收尾会投队首——而此刻排队项已经被排到第一位。
+//   - 会话正忙：那一轮结束时收尾路径会投队首——而此刻排队项已经被排到第一位。
 //
-// 为什么放在 Service 而不是让它自己启动一轮：投递只有**一份实现**（`deliverQueued`），
+// 为什么放在 Service 而不是让它自己启动一轮：投递只有**一份实现**（Runner.DeliverQueued），
 // 多了第二份之后"谁在投递"就再也说不清，而两条路在并发下的分叉表现是重复投递或丢投递。
 func (s *Service) DeliverQueuedNow(ctx context.Context, id string) error {
 	if s.orch == nil || id == "" {
 		return nil
 	}
 	if as := s.orch.session(id); as != nil {
-		s.orch.deliverQueued(as)
+		s.orch.runner.DeliverQueued(as)
 	}
 	return nil
 }

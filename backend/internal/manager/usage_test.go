@@ -31,14 +31,14 @@ func TestUsageSummaryService(t *testing.T) {
 	// 两个会话：a1（echo，两轮，用量快照 250/1000）与 a2（echo，一轮无上报）。
 	svc.registerSession(&SessionRec{ID: "u1"})
 	svc.registerSession(&SessionRec{ID: "u2"})
-	orch.recordUsage("u1", objusage.UsageInfo{Used: 100, Size: 1000})
+	orch.runner.RecordUsage("u1", objusage.UsageInfo{Used: 100, Size: 1000})
 
 	// 每轮都走开轮三连（v22：轮次是实体，没有开轮行就没有 runs 行可聚合）。
 	runA1, _, _ := beginRun(t, svc, "u1", "第一问")
 	svc.publish(session.BusMessage, "u1", map[string]any{"text": "答一"})
 	endRun(svc, "u1", runA1, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
-	orch.recordUsage("u1", objusage.UsageInfo{Used: 250, Size: 1000, CostAmount: 0.5, CostCurrency: "USD"})
+	orch.runner.RecordUsage("u1", objusage.UsageInfo{Used: 250, Size: 1000, CostAmount: 0.5, CostCurrency: "USD"})
 	runA2, _, _ := beginRun(t, svc, "u1", "第二问")
 	endRun(svc, "u1", runA2, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
@@ -137,12 +137,12 @@ func TestUsageSummaryService(t *testing.T) {
 func TestOrchestratorUsageEvent(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
 	svc.registerSession(&SessionRec{ID: "c1"})
-	orch.byProvider["native-1"] = "c1"
+	orch.handles.BindProvider("native-1", "c1")
 
 	// live-only：订阅之后才触发 sink，断言的是"这一条新事件"。
 	sub := bus.Subscribe()
 	defer bus.Unsubscribe(sub)
-	sink := orch.eventSink("stub")
+	sink := orch.runner.EventSink("stub")
 	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1",
 		Payload: objusage.UsageInfo{Used: 42, Size: 200, CostAmount: 0.25, CostCurrency: "USD"}})
 

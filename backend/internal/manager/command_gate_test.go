@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/domain/interaction"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/pkg/acl"
 )
 
@@ -81,7 +82,7 @@ func TestCommandGatePrecedesPermissionMemory(t *testing.T) {
 	o := &Orchestrator{
 		commandPolicy: gateRules(t),
 		perm:          interaction.NewPermissionManager(interaction.DefaultPermissionTimeout),
-		byProvider:    map[string]string{},
+		handles:       session.NewHandles(),
 	}
 	tool := acl.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute",
 		Input: map[string]any{"command": "rm -rf /tmp/x"}}

@@ -13,7 +13,7 @@ package archtest
 //	② 同一文件用 `toolCallFor(` 回查工具详情（权限请求只带 toolCallId，命令行在同 id 的
 //	   tool_call 更新里）；
 //	③ `app.go` 真的加载规则（`LoadCommandPolicyFile(`）并交给 Service（`SetCommandPolicy(`）；
-//	④ `event_sink.go` 写入/删除工具调用记忆（`rememberToolCall(` / `forgetToolCall(`）。
+//	④ `domain/session/eventsink.go` 写入/删除工具调用记忆（P4a 第五十五刀搬入）（`rememberToolCall(` / `forgetToolCall(`）。
 //
 // 反证（实跑）：把 `AutoDecision` 挪到门禁之前 → ① 红；抽掉 app 的加载调用 → ③ 红。
 
@@ -69,12 +69,12 @@ func TestCommandGateIsWiredToPermissionDecision(t *testing.T) {
 	}
 
 	// ④ 工具详情记忆的写入/删除
-	sink := stripGoComments(read("internal/manager/event_sink.go"))
+	sink := stripGoComments(read("internal/domain/session/eventsink.go"))
 	if !strings.Contains(sink, "rememberToolCall(") {
-		t.Errorf("event_sink.go 没有 rememberToolCall(——权限请求到达时查不到命令行")
+		t.Errorf("eventsink.go 没有 rememberToolCall(——权限请求到达时查不到命令行")
 	}
 	if !strings.Contains(sink, "forgetToolCall(") {
-		t.Errorf("event_sink.go 没有 forgetToolCall(——工具详情会随进程只增不减")
+		t.Errorf("eventsink.go 没有 forgetToolCall(——工具详情会随进程只增不减")
 	}
 
 	// 配置键：MATE_COMMAND_POLICY 是唯一入口。

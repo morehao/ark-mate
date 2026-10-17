@@ -9,73 +9,12 @@ import (
 
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/object/objusage"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
 
-// agentCancelTimeout session/cancel RPC 的上限等待：底座无响应（如模型限流重试挂起）时
-// 不阻塞本地解除，Prompt 的 ctx 取消总是会立刻返回。
-const agentCancelTimeout = 3 * time.Second
-
 // DefaultHandoffMaxChars bounded handoff memo 默认字符预算（§18 D-3；env MATE_HANDOFF_MAX_CHARS 覆盖）。
 const DefaultHandoffMaxChars = 6000
-
-// acpSession 是 acl.Session 的最小接口（测试可注入桩；真实实现为 *acl.Session）。
-type acpSession interface {
-	Prompt(ctx context.Context, text string) (string, error)
-	Cancel(ctx context.Context) error
-	// ConfigOptions 会话配置项（模型目录等，唯一来源：运行时自报）。
-	ConfigOptions() []acl.ConfigOption
-}
-
-// ActiveSession 是 manager 层持久会话句柄：绑定一条 ACP 会话与其所属连接，
-// 支持多轮 prompt（每轮单飞）。事件经 eventSink 入 eventbus（agg = session id）。
-type ActiveSession struct {
-	ID string
-	// Runtime 本句柄所属的 runtime（= 构建期固定的那个；v19 起它是唯一身份）。
-	Runtime string
-	// Fingerprint 该会话钉住的能力指纹（代际）。空 = 未声明能力选择。恢复路径据此回到**同一代际**
-	// （漏了它就会在重启后悄悄换一套能力集）。
-	Fingerprint string
-	// NativeMode 该会话钉住的原生权限模式（v29）。它是**暖进程键的一维**：模式只能以进程 env
-	// 下发，所以两个模式不同的会话不能共用一个暖进程（见 `runtimeconn.Pool.KeyFor`）。
-	NativeMode string
-
-	client *acl.Client
-	sess   acpSession
-	// providerID 底座侧的原生会话 id（`sess.ID()`）。存一份是因为换句柄（代际迁移）时要拿旧值
-	// 摘 `byProvider` 映射与关掉旧会话，而 `sess` 是接口（`acpSession` 上没有 ID()）。
-	providerID string
-	// proj 会话的可执行投影（§4.2 会话边界版；design doc §16 Orchestrator 采用 Runtime）。
-	// 由 startSessionOn 依 spec 构造；测试注入的假会话为 nil → 走 sess 直连路径。
-	proj runtime.Runtime
-
-	mu   sync.Mutex
-	busy bool
-	run  *Run
-	dead bool // 连接已断开，本句柄作废（下次 prompt 经 ensureSession 按需重建）
-	// memo bounded handoff memo（P3 F3）：跨 runtime / 无原生 resume 兜底建的 fresh session
-	// 首条 prompt 注入（Prompt 消费后清空，仅生效一次）。
-	memo string
-}
-
-// Run 一轮 prompt 的运行状态。
-type Run struct {
-	// id 本轮标识（平台侧生成）。用途：§6 排队输入的 target_run_id 台账（「排在哪一轮后面」），
-	// 以及日志/事件里指认具体某轮——不做投递判据（那一轮必然先结束）。
-	id        string
-	done      chan struct{}
-	cancel    context.CancelFunc
-	cancelReq bool // 用户主动 cancel（区别于父 ctx 超时/外部取消）
-	// intentional 本轮所属连接是被**我方主动拆除**的（daemon 停机），
-	// 区别于对端或子进程意外断开：主动拆除不是故障，收尾归 interrupted（无终态、可续聊重发），
-	// 不能当失败处理（见 disconnectSession 的状态语义）。受 as.mu 保护。
-	intentional bool
-	ctx         context.Context
-	stop        string
-	err         error
-}
 
 // CreateResult 是 StartSession 的结果。
 type CreateResult struct {
@@ -91,17 +30,17 @@ type Orchestrator struct {
 	reg *runtime.Registry
 	// pool 连接池（P4a 正文第五十四刀起归执行面 `internal/runtimeconn`）。
 	//
-	// **它与会话表不共用锁**：池自持一把只保护连接表的锁，本结构体的 `mu` 只保护
-	// `sessions` / `byProvider`。此前三样东西挤在一把锁下，于是"持锁请求会话快照"这类
-	// 锁序反转只能靠人眼防（§3.1.49 踩过，表现是 `go test ./...` 挂死而不是红）。
+	// **它与会话表不共用锁**：池自持一把只保护连接表的锁，句柄表在会话域自己的锁下。
+	// 此前三样东西挤在一把锁下，于是"持锁请求会话快照"这类锁序反转只能靠人眼防
+	// （§3.1.49 踩过，表现是 `go test ./...` 挂死而不是红）。
 	pool *runtimeconn.Pool
 
-	mu       sync.Mutex
-	sessions map[string]*ActiveSession
-	// byProvider：原生 provider session id → 平台会话 uuid（P3 双 id）。事件/权限等底层
-	// 回调只携带原生 id（acl.Event.SessionID / PermissionRequest.SessionID），host 侧经此
-	// 解析为平台会话 id 再发布/键控；会话失活（`DropSink.OnConnDropped`）时随 victim 一并清除。
-	byProvider map[string]string
+	// handles 运行期句柄表（P4a 正文第五十五刀起归 `domain/session`）：平台 id ↔ 原生 id
+	// 双索引与句柄状态都在域里。编排侧只通过它取句柄，不再自己持一份 map。
+	handles *session.Handles
+	// runner 轮次运行期状态机（受理 / 事件出口 / 排队投递 / 收尾）。它持有在途轮次状态，
+	// 与 handles 同属会话域；编排侧只负责「怎么拿到连接」与「怎么把决定投给底座」。
+	runner *session.Runner
 
 	// inflight 记录每连接上正在执行 run 的会话（session.InFlightTracker：§17 E1 显式化簿记，
 	// 语义同 §1.5 决策修订——连接上唯一在途才归属，多会话并发在途不猜测）。
@@ -114,14 +53,6 @@ type Orchestrator struct {
 	perm *interaction.PermissionManager
 	// elic 管理挂起结构化提问（elicitation/create：表单/URL + 超时自动取消）。
 	elic *interaction.ElicitationManager
-
-	// usageMu/usage 保护「每平台会话最近一次 ACP 用量快照」（M3 用量统计：run 收口时
-	// 随 runs.usage_json 落库；底座不上报时无条目）。
-	usageMu sync.Mutex
-	usage   map[string]objusage.UsageInfo
-
-	// runTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetRunTimeout / MATE_RUN_TIMEOUT）。
-	runTimeout time.Duration
 
 	// handoffMaxChars bounded handoff memo 字符预算（§5.6/§18 D-3；见 SetHandoffMaxChars /
 	// MATE_HANDOFF_MAX_CHARS）。0 = 关闭 memo 兜底。
@@ -202,15 +133,26 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		svc:             svc,
 		reg:             reg,
 		pool:            svc.runtimePool,
-		sessions:        make(map[string]*ActiveSession),
-		byProvider:      make(map[string]string),
+		handles:         session.NewHandles(),
 		inflight:        session.NewInFlightTracker(),
 		perm:            interaction.NewPermissionManager(interaction.DefaultPermissionTimeout),
 		elic:            interaction.NewElicitationManager(interaction.DefaultElicitationTimeout),
-		usage:           make(map[string]objusage.UsageInfo),
 		handoffMaxChars: DefaultHandoffMaxChars,
 		toolCalls:       make(map[string]acl.ToolCallInfo),
 	}
+	// 轮次运行期状态机的四张窄端口：句柄取自本结构体、在途登记沿用同一份 tracker，
+	// 其余三样（诊断 / 模型目录 / 工具记忆 / 交互取消）都是编排侧的事实，用适配器交出。
+	o.runner = session.NewRunner(session.RunnerDeps{
+		Plane:        svc.sessionPlane,
+		Handles:      o.handles,
+		Acquire:      o.acquireSession,
+		Busy:         o.inflight,
+		Diagnostics:  runnerDiagnostics{o: o},
+		Catalog:      runnerCatalog{svc: svc},
+		ToolMemory:   runnerToolMemory{o: o},
+		ToolFailures: reg,
+		Interactions: runnerInteractions{perm: o.perm, elic: o.elic},
+	})
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
 	// （session.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。
 	o.perm.SetOnResolved(func(sessionID, callID, reason string, d acl.PermissionDecision) {
@@ -277,7 +219,7 @@ func (o *Orchestrator) SetPermissionTimeout(d time.Duration) { o.perm.SetTimeout
 func (o *Orchestrator) SetElicitationTimeout(d time.Duration) { o.elic.SetTimeout(d) }
 
 // SetRunTimeout 设置单轮 run 看门狗超时（0 = 关闭）。见 watchdogRun。
-func (o *Orchestrator) SetRunTimeout(d time.Duration) { o.runTimeout = d }
+func (o *Orchestrator) SetRunTimeout(d time.Duration) { o.runner.SetRunTimeout(d) }
 
 // SetCommandPolicy 装配期登记命令门禁规则（nil = 未启用）。规则表由 app 从
 // `<MATE_HOME>/command_policy.json` 加载并**加载期校验**；这里只持有，不再校验。
@@ -287,10 +229,8 @@ func (o *Orchestrator) SetCommandPolicy(rules []interaction.PrefixRule) { o.comm
 func (o *Orchestrator) SetHandoffMaxChars(n int) { o.handoffMaxChars = n }
 
 // session 按 ID 取活跃会话（连接存活期内）。查找不存在（如进程重启后）按未找到处理。
-func (o *Orchestrator) session(id string) *ActiveSession {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.sessions[id]
+func (o *Orchestrator) session(id string) *session.ActiveSession {
+	return o.handles.Get(id)
 }
 
 // Close 关闭全部连接并清理（daemon 退出/测试收尾）。

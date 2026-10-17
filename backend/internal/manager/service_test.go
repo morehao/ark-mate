@@ -35,10 +35,8 @@ func rigWithRuntime(t *testing.T, specs ...runtime.Spec) (*Service, *Orchestrato
 // P3 双 id：原生 session id 经 byProvider 解析后发布）。
 func TestEventSinkMapping(t *testing.T) {
 	_, orch, bus := newTestRig(t)
-	orch.mu.Lock()
-	orch.byProvider["s1"] = "conv-1" // 原生底座 session id → 平台会话 uuid
-	orch.mu.Unlock()
-	sink := orch.eventSink("rtx")
+	orch.handles.BindProvider("s1", "conv-1") // 原生底座 session id → 平台会话 uuid
+	sink := orch.runner.EventSink("rtx")
 
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "hi"}})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindThought, Payload: acl.ThoughtDelta{Text: "think"}})
@@ -100,7 +98,7 @@ func TestEventSinkMapping(t *testing.T) {
 // TestEventSinkWrongPayloadType 载荷类型不匹配 → 事件被跳过（不 panic、不发布）。
 func TestEventSinkWrongPayloadType(t *testing.T) {
 	_, orch, bus := newTestRig(t)
-	sink := orch.eventSink("rtx")
+	sink := orch.runner.EventSink("rtx")
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindMessage, Payload: "not a delta"})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindToolCall, Payload: nil})
 	if bus.Published() != 0 {
@@ -114,10 +112,8 @@ func TestEventSinkWrongPayloadType(t *testing.T) {
 // 载荷类型不匹配则被跳过。
 func TestEventSinkCommands(t *testing.T) {
 	_, orch, bus := newTestRig(t)
-	orch.mu.Lock()
-	orch.byProvider["s1"] = "conv-1"
-	orch.mu.Unlock()
-	sink := orch.eventSink("rtx")
+	orch.handles.BindProvider("s1", "conv-1")
+	sink := orch.runner.EventSink("rtx")
 	sub := bus.SubscribeAfter(nil)
 	defer bus.Unsubscribe(sub)
 
@@ -183,9 +179,9 @@ func TestDisconnectIdleSession(t *testing.T) {
 	// 字符串，不是本仓内置清单成员），所以服务该 runtime 的 agent 由夹具显式登记——
 	// 字段与 `seedBuiltinAgents` 播出来的那条逐字同形（尤其是 `State: stopped`：后面那条断言
 	// 验的是"断连不把 agent 状态改坏"，起点错成空串就变成一句空话）。
-	as := &ActiveSession{ID: "s1", Runtime: "rtx"} // client nil
-	rc := &runtimeconn.Conn{}                      // client 亦 nil → 相等匹配
-	orch.sessions["s1"] = as
+	as := session.NewActiveSession(session.HandleParams{ID: "s1", Runtime: "rtx"}) // client nil
+	rc := &runtimeconn.Conn{}                                                      // client 亦 nil → 相等匹配
+	orch.handles.Put(as)
 	svc.registerSession(&SessionRec{ID: "s1", Status: session.SessionStatusCompleted})
 	before := bus.Published()
 
@@ -201,7 +197,7 @@ func TestDisconnectIdleSession(t *testing.T) {
 		t.Fatalf("底座状态应 stopped: %s", st)
 	}
 	// 句柄作废并摘出活跃集合（下次 prompt 才能重建），平台侧会话记录保留。
-	if _, ok := orch.sessions["s1"]; ok {
+	if orch.handles.Get("s1") != nil {
 		t.Fatal("断连后死句柄应摘出活跃集合")
 	}
 	if rec := svc.sessionRec("s1"); rec == nil {
@@ -223,10 +219,10 @@ func TestDisconnectIdleSession(t *testing.T) {
 // 停机不是故障 —— 状态如实保留、不发 connection_lost（容器 `docker restart` 的每次重启都会走这条）。
 func TestIntentionalTeardownKeepsIdleSession(t *testing.T) {
 	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "rtx", Name: "rtx"})
-	as := &ActiveSession{ID: "s1", Runtime: "rtx"}
+	as := session.NewActiveSession(session.HandleParams{ID: "s1", Runtime: "rtx"})
 	rc := &runtimeconn.Conn{}
 	rc.Intentional.Store(true)
-	orch.sessions["s1"] = as
+	orch.handles.Put(as)
 	svc.registerSession(&SessionRec{ID: "s1", Status: session.SessionStatusCompleted})
 	before := bus.Published()
 
@@ -238,7 +234,7 @@ func TestIntentionalTeardownKeepsIdleSession(t *testing.T) {
 	if bus.Published() != before {
 		t.Fatalf("主动停机不得发布 connection_lost 等事件: published=%d want %d", bus.Published(), before)
 	}
-	if _, ok := orch.sessions["s1"]; ok {
+	if orch.handles.Get("s1") != nil {
 		t.Fatal("停机后死句柄应摘出活跃集合（下次 prompt 重建）")
 	}
 }
@@ -247,12 +243,12 @@ func TestIntentionalTeardownKeepsIdleSession(t *testing.T) {
 // 可续聊重发），既不算失败也不算用户取消 —— 不发布 run.error / run.cancelled。
 func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
 	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "rtx", Name: "rtx"})
-	as := &ActiveSession{
+	as := session.NewActiveSession(session.HandleParams{
 		ID: "s1", Runtime: "rtx",
-		sess: &stubSession{cancelOnCtx: true}, // 阻塞到 ctx 取消，模拟生成中的轮次
-	}
+		Session: &stubSession{cancelOnCtx: true}, // 阻塞到 ctx 取消，模拟生成中的轮次
+	})
 	rc := &runtimeconn.Conn{}
-	orch.sessions["s1"] = as
+	orch.handles.Put(as)
 	svc.registerSession(&SessionRec{ID: "s1"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "生成中"); err != nil {
@@ -294,7 +290,7 @@ func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
 			t.Fatalf("主动拆除不应发布终态事件: %s", e.Type)
 		}
 	}
-	if _, ok := orch.sessions["s1"]; ok {
+	if orch.handles.Get("s1") != nil {
 		t.Fatal("停机后死句柄应摘出活跃集合")
 	}
 }

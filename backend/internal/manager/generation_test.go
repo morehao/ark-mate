@@ -149,7 +149,7 @@ func TestWarmProcessSharingWithoutCapabilitySelection(t *testing.T) {
 	if c1 == nil || c2 == nil {
 		t.Fatal("两个会话都应活跃")
 	}
-	if c1.client != c2.client {
+	if c1.Client() != c2.Client() {
 		t.Fatal("两个会话应挂在同一个连接上（缺省代际复用）")
 	}
 	if c1.Fingerprint != "" || c2.Fingerprint != "" {

@@ -90,7 +90,7 @@ func TestGatewayRemoteMcpEntersFaceWithoutGenerationSwitch(t *testing.T) {
 	if as2 == as1 {
 		t.Fatal("加一台 stdio server 应换代际")
 	}
-	if as2.client == as1.client {
+	if as2.Client() == as1.Client() {
 		t.Fatal("新代际必须落在另一个连接上")
 	}
 	// 新代际的注入集 = stdio 直连 + 网关条目（远程仍只占一条）。

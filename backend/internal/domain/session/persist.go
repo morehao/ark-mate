@@ -307,7 +307,7 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 //
 // 判据是「这一轮有 `run.started`、行却还在 running」——即日志里没有它的终态。实时路径从不调本
 // 函数：那边知道自己为什么停（主动拆除），发伪终态会污染历史、失败轮列表与重试入口
-// （`manager/run.go` 的 `intentional` 分支保留原注释，那是 ADR-8 的**前半**）。
+// （`Runner.executeRun` 的 `intentional` 分支保留原注释，那是 ADR-8 的**前半**）。
 //
 // 收口事实带 `reason:"restart"`：界面对它说的是「上一轮因进程重启中断，可重发」，**不**说
 // 「失败」——那是底座的结论，平台只知道自己被杀了。

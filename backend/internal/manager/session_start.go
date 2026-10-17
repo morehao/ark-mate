@@ -19,17 +19,15 @@ import (
 //   - 会话不在活跃集合（未启动/已断连）→ (false, nil)：调用方只更新元数据，等下次恢复会话时生效；
 //   - 活跃 → 经 session/set_config_option 应用（运行时是唯一判据），失败原样上抛（调用方不得吞）。
 func (o *Orchestrator) ApplySessionModel(ctx context.Context, sessionID string, model runtime.ModelConfig) (bool, error) {
-	o.mu.Lock()
-	as := o.sessions[sessionID]
-	o.mu.Unlock()
-	if as == nil || as.dead || as.sess == nil {
+	as := o.session(sessionID)
+	if as == nil || as.Dead() || as.Native() == nil {
 		return false, nil
 	}
 	spec, ok := o.reg.Get(as.Runtime)
 	if !ok {
 		return false, nil
 	}
-	if err := o.applyModelOnSession(ctx, as, spec, as.sess, model); err != nil {
+	if err := o.applyModelOnSession(ctx, as, spec, as.Native(), model); err != nil {
 		return true, err
 	}
 	return true, nil
@@ -106,8 +104,11 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 
 	// P3 双 id（D-1，用户已授权破坏性变更）：会话对外 id = 平台铸造的 `ses_<ULID>`（隐藏底座 id 形状、
 	// 跨重启稳定定位）；原生 provider id 存 sess/RuntimeSessionID 列，供恢复承载（load/resume）。
-	as := &ActiveSession{ID: convID, Runtime: spec.ID, Fingerprint: fingerprint,
-		NativeMode: opt.NativeMode, client: rc.Client, sess: sess, providerID: sess.ID(), proj: runtime.NewProjection(spec, sess)}
+	as := session.NewActiveSession(session.HandleParams{
+		ID: convID, Runtime: spec.ID, Fingerprint: fingerprint, NativeMode: opt.NativeMode,
+		ProviderID: sess.ID(), Client: rc.Client, Session: sess,
+		Projection: runtime.NewProjection(spec, sess),
+	})
 	// 会话级模型应用（运行时派生模型面的落地，决策记录）：
 	//   - 值由 `modelCfg` 给出（平台行 → adapter 现算，见 `resolveSessionModel`）；
 	//   - 运行时**拒绝**该值 → 建会话失败（错误上抛给调用方，绝不静默回落到底座默认模型）；
@@ -119,16 +120,13 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	}
 	// W1：底座原文 → 平台侧的值（`rt_` 壳）。**失败即返回错误、不建 rec**——把裸 id 落库会让
 	// "平台 id 与底座 id 形状可分"这条不变式当场失效，而那是静默的（守卫② 事后才发现）。
-	// `as.providerID` 刻意保留**原文**：它是进程内映射 `byProvider` 的键，与 ACP 回调同源。
+	// `HandleParams.ProviderID` 刻意保留**原文**：它是句柄表原生索引的键，与 ACP 回调同源。
 	providerSessID, err := objid.WrapRuntime(sess.ID())
 	if err != nil {
 		_ = sess.Close(context.WithoutCancel(ctx))
 		return nil, err
 	}
-	o.mu.Lock()
-	o.sessions[as.ID] = as
-	o.byProvider[sess.ID()] = as.ID
-	o.mu.Unlock()
+	o.handles.Put(as)
 
 	o.svc.registerSession(&SessionRec{ID: as.ID, Cwd: cwd,
 		WorkspaceID: opt.WorkspaceID, WorkspaceTemporary: opt.WorkspaceTemporary,
@@ -167,7 +165,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 // **重开即迁移（M3-6）**：重建时按**当前定义**重算代际指纹，于是"改了 skill 正文/MCP 定义后
 // 会话在进程死掉重开"这一路径天然落在最新代际上；算不出或按新代际重开失败 → 回退钉住的旧代际
 // 继续跑（可用性优先，见 generation.go 的四条纪律）。
-func (o *Orchestrator) ensureSession(ctx context.Context, sessionID string) (*ActiveSession, error) {
+func (o *Orchestrator) ensureSession(ctx context.Context, sessionID string) (*session.ActiveSession, error) {
 	if as := o.session(sessionID); as != nil {
 		return as, nil
 	}
@@ -230,7 +228,7 @@ func (o *Orchestrator) ensureSession(ctx context.Context, sessionID string) (*Ac
 // 记录用**副本**更新后整体写回（`registerSession` 会同时持久化）：中途失败时调用方手里的
 // rec 保持原样，回退旧代际那一次才不会被半成品污染。
 func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
-	spec runtime.Spec, cwd string, sel *CapabilitySelection, fingerprint string) (*ActiveSession, string, error) {
+	spec runtime.Spec, cwd string, sel *CapabilitySelection, fingerprint string) (*session.ActiveSession, string, error) {
 	rec := *recIn
 	// **恢复路径也要带上会话钉住的指纹与权限模式**：漏改这一处的后果分别是"重启后能力集悄悄换了
 	// 一套"与"重启后沙箱边界悄悄变宽/变窄"——两者都不会报错。
@@ -306,17 +304,18 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 		rec.Fingerprint = fingerprint
 	}
 	o.svc.registerSession(&rec)
-	as := &ActiveSession{ID: rec.ID, Runtime: spec.ID, Fingerprint: fingerprint,
-		NativeMode: rec.NativeMode,
-		client:     rc.Client, sess: sess, providerID: sess.ID(),
-		proj: runtime.NewProjection(spec, sess), memo: memo}
+	as := session.NewActiveSession(session.HandleParams{
+		ID: rec.ID, Runtime: spec.ID, Fingerprint: fingerprint, NativeMode: rec.NativeMode,
+		ProviderID: sess.ID(), Client: rc.Client, Session: sess,
+		Projection: runtime.NewProjection(spec, sess), Memo: memo,
+	})
 	// 会话级模型在恢复后重新断言一次（平台记录是权威意图；原生恢复未必带回该状态）：
 	// **best-effort** —— 恢复不是用户在选模型，运行时若已不再提供该值（换了 provider/档案），
 	// 只留痕 + 标灰，不让老会话因为一个失效取值而打不开。
 	//
 	// `proj == nil` = 该 runtime 没有会话级投影（`NewProjection` 按 runtime id 派生；测试桩
 	// 就是这一类），此时没有模型语义可言——**必须显式跳过**，否则对 nil 接口调方法直接 panic。
-	if as.proj == nil {
+	if as.Projection() == nil {
 		return as, reason, nil
 	}
 	if rec.ModelID != "" {
@@ -327,15 +326,15 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 		if rerr != nil || recCfg.Model == "" {
 			glog.Warnw(ctx, "恢复时按平台模型行重算运行时值失败（跳过重放，继续用运行时当前值）",
 				"session", rec.ID, "runtime", spec.ID, "model", rec.ModelID, "err", rerr)
-		} else if _, err := as.proj.ApplyModel(ctx, recCfg); err != nil {
+		} else if _, err := as.Projection().ApplyModel(ctx, recCfg); err != nil {
 			if ae, ok := acl.As(err); !ok || !strings.HasPrefix(ae.Code, "unsupported_") {
 				o.svc.catalog.markRejected(spec.ID, recCfg.Model, provider.ModelApplyReason(err))
 			}
 			glog.Warnw(ctx, "恢复后重放会话模型失败（忽略，继续用运行时当前值）",
 				"session", rec.ID, "runtime", spec.ID, "model", recCfg.Model, "err", err)
 		}
-	} else if len(as.proj.ConfigOptions()) > 0 {
-		o.svc.catalog.put(spec.ID, as.proj.ConfigOptions())
+	} else if len(as.Projection().ConfigOptions()) > 0 {
+		o.svc.catalog.put(spec.ID, as.Projection().ConfigOptions())
 	}
 	return as, reason, nil
 }
@@ -345,25 +344,15 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 // 被替换的旧句柄：**只作废它自己**（摘 provider 映射 + best-effort 关掉那条原生会话），
 // 绝不动它所在的连接——旧代际的暖进程可能还在服务别的会话，代际回收是 M3-7 的事。
 // 关掉旧原生会话是为了让底座尽快释放它那份资源（会话级，不是进程级）。
-func (o *Orchestrator) attachSession(as *ActiveSession, reason string) {
-	o.mu.Lock()
-	old := o.sessions[as.ID]
-	o.sessions[as.ID] = as
-	o.byProvider[as.providerID] = as.ID
-	if old != nil && old != as && old.providerID != as.providerID {
-		if o.byProvider[old.providerID] == old.ID {
-			delete(o.byProvider, old.providerID)
-		}
-	}
-	o.mu.Unlock()
+func (o *Orchestrator) attachSession(as *session.ActiveSession, reason string) {
+	old := o.handles.Put(as)
 	if old != nil && old != as {
-		old.mu.Lock()
-		old.dead = true // 旧句柄作废：拿到它旧指针的路径会走重建（而不是用一个已被顶替的会话）
-		old.mu.Unlock()
-		if c, ok := old.sess.(*acl.Session); ok && c != nil {
+		// 旧句柄作废：拿到它旧指针的路径会走重建（而不是用一个已被顶替的会话）
+		old.MarkDead(false)
+		if c, ok := old.Native().(*acl.Session); ok && c != nil {
 			// 关会话是收尾动作：用**脱离请求**的 ctx（本轮 ctx 可能已取消）并带上限等待，
 			// 免得底座吞掉 session/close 时把这一轮拖住。
-			cctx, cancel := context.WithTimeout(context.Background(), agentCancelTimeout)
+			cctx, cancel := context.WithTimeout(context.Background(), session.AgentCancelTimeout)
 			_ = c.Close(cctx)
 			cancel()
 		}
@@ -391,9 +380,9 @@ func (o *Orchestrator) attachSession(as *ActiveSession, reason string) {
 //
 // model.Model 为空 = 不下发设置（跟随运行时默认），永远成功。
 // 思考档位不在平台侧下发（见 runtime.ModelConfig 说明）。
-func (o *Orchestrator) applyModelOnSession(ctx context.Context, as *ActiveSession,
-	spec runtime.Spec, sess acpSession, model runtime.ModelConfig) error {
-	if as.proj == nil { // 测试注入的假会话（无投影）：无模型语义
+func (o *Orchestrator) applyModelOnSession(ctx context.Context, as *session.ActiveSession,
+	spec runtime.Spec, sess session.ACP, model runtime.ModelConfig) error {
+	if as.Projection() == nil { // 测试注入的假会话（无投影）：无模型语义
 		return nil
 	}
 	if model.Model == "" {
@@ -401,11 +390,11 @@ func (o *Orchestrator) applyModelOnSession(ctx context.Context, as *ActiveSessio
 	}
 	// 不预判、但留痕：取值不在会话当前广告列表里（缓存滞后/跨会话选择）时记一条，仍然下发由
 	// 运行时裁决——协议保证运行时只接受已广告的值，平台侧预判会因快照滞后造成假阴性。
-	if !acl.HasConfigValue(as.proj.ConfigOptions(), acl.CategoryModel, model.Model) {
+	if !acl.HasConfigValue(as.Projection().ConfigOptions(), acl.CategoryModel, model.Model) {
 		glog.Debugw(ctx, "模型取值不在当前广告列表中，交由运行时裁决",
 			"session", as.ID, "model", model.Model)
 	}
-	applied, err := as.proj.ApplyModel(ctx, model)
+	applied, err := as.Projection().ApplyModel(ctx, model)
 	if err == nil {
 		o.svc.catalog.clearRejection(spec.ID, model.Model)
 		if len(applied) > 0 {
@@ -431,16 +420,7 @@ func (o *Orchestrator) applyModelOnSession(ctx context.Context, as *ActiveSessio
 // 注：有活跃会话但配置项为空时同样返回 ok=true（空即运行时的真实答案：未配 provider/未登录），
 // 不走 resume 兜底去「凑一份」目录。
 func (o *Orchestrator) liveConfigOptions() ([]acl.ConfigOption, bool) {
-	o.mu.Lock()
-	var sess acpSession
-	for _, as := range o.sessions {
-		if as.dead || as.sess == nil {
-			continue
-		}
-		sess = as.sess
-		break
-	}
-	o.mu.Unlock()
+	sess := o.handles.AnyLive()
 	if sess == nil {
 		return nil, false
 	}

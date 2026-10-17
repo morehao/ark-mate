@@ -325,7 +325,7 @@ func (s *Service) closeTranscripts() { s.sessionPlane.CloseTranscripts() }
 // attachOrchestrator 由 NewOrchestrator 回挂；Service 的会话动作委托给它。
 func (s *Service) attachOrchestrator(o *Orchestrator) {
 	s.orch = o
-	// 会话域的用量端口：读的是执行面内存里的"每会话最近一次上报"（`LatestUsage`）。
+	// 会话域的用量端口：读的是轮次状态机内存里的"每会话最近一次上报"（`Runner.LatestUsage`）。
 	if o != nil {
 		s.sessionPlane.SetUsageSource(o.LatestUsage)
 		// 连接拆除的**应用**面：池只负责摘除与通知，会话/在途/诊断怎么收尾由编排侧决定

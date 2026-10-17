@@ -26,8 +26,8 @@ import (
 // TestRunStatusSequenceOnRun 一轮问答的过程状态：preparing → model_requesting → idle → run.ended。
 func TestRunStatusSequenceOnRun(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	as := &ActiveSession{ID: "s1", Runtime: "rtx", sess: &stubSession{stop: "end_turn"}}
-	orch.sessions["s1"] = as
+	as := session.NewActiveSession(session.HandleParams{ID: "s1", Runtime: "rtx", Session: &stubSession{stop: "end_turn"}})
+	orch.handles.Put(as)
 	svc.registerSession(&SessionRec{ID: "s1"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
@@ -81,14 +81,15 @@ func TestRunStatusSequenceOnRun(t *testing.T) {
 func TestRunStatusFromEventSink(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
 	// P3 双 id：底层事件只带原生 session id，得先有映射（与 TestEventSinkMapping 同一套夹具）。
-	orch.mu.Lock()
-	orch.byProvider["native-1"] = "s1"
-	orch.mu.Unlock()
-	as := &ActiveSession{ID: "s1", Runtime: "rtx"}
-	as.run = &Run{id: "run_test_in_sink"}
-	orch.sessions["s1"] = as
+	orch.handles.BindProvider("native-1", "s1")
+	as := session.NewActiveSession(session.HandleParams{ID: "s1", Runtime: "rtx"})
+	run, _, err := as.BeginRun(context.Background())
+	if err != nil {
+		t.Fatalf("开轮: %v", err)
+	}
+	orch.handles.Put(as)
 	svc.registerSession(&SessionRec{ID: "s1"})
-	sink := orch.eventSink("rtx")
+	sink := orch.runner.EventSink("rtx")
 
 	// 两条文本增量：只应产生**一帧** `model_streaming`（同状态去重）。
 	sink(acl.Event{SessionID: "native-1", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "a"}})
@@ -119,7 +120,7 @@ func TestRunStatusFromEventSink(t *testing.T) {
 	if statuses[1]["tool_name"] != "Bash" || statuses[1]["tool_call_id"] != "call-1" {
 		t.Fatalf("tool_executing 必须带 tool_name/tool_call_id（头栏「正在执行 Bash」靠它）：%+v", statuses[1])
 	}
-	if statuses[0]["run_id"] != "run_test_in_sink" || statuses[1]["run_id"] != "run_test_in_sink" {
+	if statuses[0]["run_id"] != run.ID() || statuses[1]["run_id"] != run.ID() {
 		t.Fatalf("过程状态的 run_id 必须指向当前那一轮：%+v / %+v", statuses[0], statuses[1])
 	}
 	// 先有「我要跑 X」再有「X 的结果」。
@@ -141,8 +142,8 @@ func TestRunStatusFromEventSink(t *testing.T) {
 // TestIntentionalRunEmitsNoCloser 停机拆除（intentional）一支**零收口**（ADR-8 的前半）。
 func TestIntentionalRunEmitsNoCloser(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	as := &ActiveSession{ID: "s1", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
-	orch.sessions["s1"] = as
+	as := session.NewActiveSession(session.HandleParams{ID: "s1", Runtime: "r", Session: &stubSession{cancelOnCtx: true}})
+	orch.handles.Put(as)
 	svc.registerSession(&SessionRec{ID: "s1"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {

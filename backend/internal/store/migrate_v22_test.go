@@ -375,7 +375,7 @@ func countRuns(t *testing.T, s *Store, sessionID string) int64 {
 // 不是漏做：事件流是"当时发生了什么"的记录（判据 J4：身份随数据走），迁移伪造出来的事件会改变
 // transcript、改变 `events` 的身份集合，还会让用户在界面里看见一轮凭空的「开始」。
 // 这条判据把"不伪造"钉成机器可读的意图，挡的正是那种"为了让判据变绿而补事件"的改动；
-// 新轮的对称性由 `manager` 的"开轮三连"保证（`internal/manager/run.go` 的 Prompt）。
+// 新轮的对称性由 `domain/session` 的"开轮三连"保证（`Runner.Prompt`）。
 func TestMigrateV22DoesNotFabricateRunStarted(t *testing.T) {
 	s := openV21ForV22Test(t)
 	at := "2026-05-06T10:00:00Z"

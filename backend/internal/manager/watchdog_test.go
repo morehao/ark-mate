@@ -11,8 +11,8 @@ import (
 func TestRunTimeoutWatchdog(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
 	orch.SetRunTimeout(80 * time.Millisecond)
-	as := &ActiveSession{ID: "s1", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
-	orch.sessions["s1"] = as
+	as := session.NewActiveSession(session.HandleParams{ID: "s1", Runtime: "r", Session: &stubSession{cancelOnCtx: true}})
+	orch.handles.Put(as)
 	svc.registerSession(&SessionRec{ID: "s1"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
@@ -35,9 +35,7 @@ func TestRunTimeoutWatchdog(t *testing.T) {
 	// busy 必须已释放（否则后续 prompt 仍报 run_in_progress）。
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		as.mu.Lock()
-		busy := as.busy
-		as.mu.Unlock()
+		busy := as.Busy()
 		if !busy {
 			break
 		}
@@ -51,8 +49,8 @@ func TestRunTimeoutWatchdog(t *testing.T) {
 // TestRunTimeoutOff 看门狗关闭时挂起 run 不自动取消（保持 busy，等外部 cancel）。
 func TestRunTimeoutOff(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	as := &ActiveSession{ID: "s1", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
-	orch.sessions["s1"] = as
+	as := session.NewActiveSession(session.HandleParams{ID: "s1", Runtime: "r", Session: &stubSession{cancelOnCtx: true}})
+	orch.handles.Put(as)
 	svc.registerSession(&SessionRec{ID: "s1"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
@@ -72,9 +70,7 @@ func TestRunTimeoutOff(t *testing.T) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	as.mu.Lock()
-	busy := as.busy
-	as.mu.Unlock()
+	busy := as.Busy()
 	if !busy {
 		t.Fatalf("看门狗关闭时挂起 run 应保持 busy")
 	}

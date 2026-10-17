@@ -31,9 +31,6 @@ func (s *Service) sessionRec(id string) *SessionRec { return s.sessionPlane.Rec(
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）
 func (s *Service) bumpGeneration(id string) int64 { return s.sessionPlane.BumpGeneration(id) }
 
-// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
-func (s *Service) sessionGeneration(id string) int64 { return s.sessionPlane.SessionGeneration(id) }
-
 // TODO(P4b): 删转发（调用点直接依赖 session 包）
 func decodePayload(raw string) any { return session.DecodePayload(raw) }
 
@@ -139,23 +136,8 @@ var ValidDeliveries = session.ValidDeliveries
 func NormalizeDelivery(v string) (string, error) { return session.NormalizeDelivery(v) }
 
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）
-func (s *Service) enqueueInput(ctx context.Context, convID, text, delivery, targetRun string, generation int64) (session.QueuedInput, error) {
-	return s.sessionPlane.EnqueueInput(ctx, convID, text, delivery, targetRun, generation)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
 func (s *Service) listQueuedInputs(ctx context.Context, convID string) []session.QueuedInput {
 	return s.sessionPlane.ListQueuedInputsOf(ctx, convID)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
-func (s *Service) claimNextInput(ctx context.Context, convID string, generation int64) (*session.QueuedInput, bool) {
-	return s.sessionPlane.ClaimNextInput(ctx, convID, generation)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
-func (s *Service) deleteQueuedInput(ctx context.Context, convID, inputID string) (bool, error) {
-	return s.sessionPlane.DeleteQueuedInput(ctx, convID, inputID)
 }
 
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）

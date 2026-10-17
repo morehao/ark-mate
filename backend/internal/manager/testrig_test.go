@@ -317,3 +317,15 @@ func (r *genRig) seedModelRow(t *testing.T, providerID, model string, isDefault 
 	}
 	return id
 }
+
+// setBusy 在测试里模拟「有/没有在途轮次」：走真实状态机入口，不直接写句柄的私有字段。
+//
+// 直接置位曾经可行（同在 `package manager`），但那让测试依赖「busy 只是一个 bool」这个
+// 实现细节；搬进 `domain/session` 之后，状态的唯一写口就是 BeginRun/FinishRun。
+func setBusy(as *session.ActiveSession, busy bool) {
+	if busy {
+		_, _, _ = as.BeginRun(context.Background())
+		return
+	}
+	as.FinishRun()
+}

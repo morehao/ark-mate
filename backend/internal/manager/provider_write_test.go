@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/store"
@@ -237,9 +238,7 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 	busyID, busy := r.start(t, nil)
 
 	// ② 忙的那条：有在途轮次。
-	busy.mu.Lock()
-	busy.busy = true
-	busy.mu.Unlock()
+	setBusy(busy, true)
 
 	// 走 env 通道的底座上，改**密钥**才会换基础键（改了它才谈得上"下一轮拿到新 env"）。
 	neu := "sk-new"
@@ -265,7 +264,7 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 	// 同源：逐会话调 planGenerationSwitch，裁决必须与回执一致。
 	for _, tc := range []struct {
 		id   string
-		as   *ActiveSession
+		as   *session.ActiveSession
 		want generationAction
 	}{
 		{idleID, idle, genActionSwitch},

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -20,7 +21,7 @@ import (
 //	② **拆除的应用**（`DropSink`）：一条连接被摘除之后，会话状态怎么收尾、在途登记怎么作废、
 //	   诊断怎么留痕——那是会话域的不变量，池不该认识（它也放不进 ≤4 方法的端口）。
 //
-// **锁**：本文件里 `o.mu` 只保护 `sessions` / `byProvider`；连接表在池自己的锁下。
+// **锁**：连接表在池自己的锁下，句柄表在会话域自己的锁下（P4a 第五十五刀起两者分属两层）。
 // 两条边都不许互指——池在**池锁之外**回调这里（见 `Pool.Drop` 的注释）。
 
 // acquire 取（或拨）一条 runtime 连接：活着复用，断开则作废重拨；并挂断连监听。
@@ -99,7 +100,7 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 	// spawn + 握手由 runtime.Connect 承载（可执行投影的拨号底座，语义与此前内联实现一致）。
 	dialCtx := context.WithoutCancel(ctx)
 	client, err := runtime.Connect(dialCtx, spec, args, env, acl.ClientOptions{
-		OnEvent:             o.eventSink(spec.ID),
+		OnEvent:             o.runner.EventSink(spec.ID),
 		RequestPermission:   reqPerm,
 		CreateElicitation:   reqElic,
 		CompleteElicitation: completeElic,
@@ -138,16 +139,9 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 func (o *Orchestrator) OnConnDropped(d runtimeconn.ConnDrop) {
 	// 连接断开：在途登记一并作废（executeRun 的 unmark 对已清键为 no-op）。
 	o.inflight.Clear(d.Client)
-	o.mu.Lock()
-	victims := make([]*ActiveSession, 0, 1)
-	for _, as := range o.sessions {
-		if as.client == d.Client {
-			victims = append(victims, as)
-		}
-	}
-	o.mu.Unlock()
+	victims := o.handles.ForClient(d.Client)
 	for _, as := range victims {
-		o.unregisterSessionProvider(as.ID) // 连接断开：原生→平台映射一并清除（迟到事件丢弃）
+		o.handles.ForgetSession(as.ID) // 连接断开：原生→平台映射一并清除（迟到事件丢弃）
 	}
 	for _, as := range victims {
 		o.disconnectSession(as, d.Intentional)
@@ -161,8 +155,8 @@ func (o *Orchestrator) OnConnDropped(d runtimeconn.ConnDrop) {
 // InUseOn 这条连接还有人用吗：有在途轮次、或仍挂着会话（含已完成态）。
 //
 // 这是空闲回收与代际回收的**唯一判据**，判定留在这一侧是因为"谁挂在这条连接上"是会话侧
-// 的登记（`ActiveSession.client`）。池在**池锁之外**问它（见 `Pool.reclaim`），
-// 所以这里取 `o.mu` 不会与池锁互指。
+// 的登记（`Handles.ForClient`）。池在**池锁之外**问它（见 `Pool.reclaim`），
+// 句柄表的锁与池锁不互指。
 func (o *Orchestrator) InUseOn(c *runtimeconn.Conn) bool {
 	if c == nil {
 		return true
@@ -172,48 +166,12 @@ func (o *Orchestrator) InUseOn(c *runtimeconn.Conn) bool {
 		// 而那一轮的角色就是"在途 run"——`RegisterAndWait` 由该轮的 RPC 派发调用。）
 		return true
 	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	for _, as := range o.sessions {
-		if as.client == c.Client {
-			return true // 仍有会话引用（含已完成态），不回收
-		}
-	}
-	return false
-}
-
-// markBusy / unmarkBusy 委托 inFlightTracker（§17 E1 显式化簿记；语义不变）。
-// client 为 nil（理论上不应出现）或未登记时均安全 no-op。
-func (o *Orchestrator) markBusy(client *acl.Client, sessionID string) {
-	o.inflight.Mark(client, sessionID)
-}
-
-func (o *Orchestrator) unmarkBusy(client *acl.Client, sessionID string) {
-	o.inflight.Unmark(client, sessionID)
+	return len(o.handles.ForClient(c.Client)) > 0 // 仍有会话引用（含已完成态），不回收
 }
 
 // busySessionForClient 返回该连接上「唯一在途」的会话 id；无在途或多会话并发在途返回空串。
 func (o *Orchestrator) busySessionForClient(client *acl.Client) string {
 	return o.inflight.SoleOwner(client)
-}
-
-// resolveProvider 把原生 provider session id 解析为平台会话 uuid（P3 双 id）。
-// 底层回调（事件/权限请求）只携带原生 id；未登记（如断连后迟到事件）返回空串。
-func (o *Orchestrator) resolveProvider(providerID string) string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.byProvider[providerID]
-}
-
-// unregisterSessionProvider 移除某会话的原生→平台映射（连接失活/会话清理时调用）。
-func (o *Orchestrator) unregisterSessionProvider(sessionID string) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	for k, v := range o.byProvider {
-		if v == sessionID {
-			delete(o.byProvider, k)
-		}
-	}
 }
 
 // disconnectSession 把某断连连接上的会话句柄作废并摘出活跃集合。
@@ -228,18 +186,12 @@ func (o *Orchestrator) unregisterSessionProvider(sessionID string) {
 //
 // 会话记录本身（svc/sessions 与 store）不动：执行可丢弃、会话平台拥有（ADR-4），
 // 下次 prompt 经 ensureSession 走 native resume / handoff memo 重建句柄。
-func (o *Orchestrator) disconnectSession(as *ActiveSession, intentional bool) {
-	as.mu.Lock()
-	if as.dead {
-		as.mu.Unlock()
+func (o *Orchestrator) disconnectSession(as *session.ActiveSession, intentional bool) {
+	// 主动拆除：收尾归 interrupted，不按失败/用户取消处理（`MarkDead` 内部标记在途轮次）。
+	t, newly := as.MarkDead(intentional)
+	if !newly {
 		return
 	}
-	as.dead = true
-	t := as.run
-	if t != nil && intentional {
-		t.intentional = true // 主动拆除：收尾归 interrupted，不按失败/用户取消处理
-	}
-	as.mu.Unlock()
 	o.evictSession(as)
 
 	// 连接没了，挂起的权限/提问永远等不到决策：随拆除一并收敛，不留「待确认」幽灵卡。
@@ -247,15 +199,15 @@ func (o *Orchestrator) disconnectSession(as *ActiveSession, intentional bool) {
 	o.elic.CancelSession(as.ID)
 
 	if t != nil {
-		t.cancel()
+		t.Cancel()
 		return
 	}
 	if !intentional {
 		ae := acl.NewError(acl.ClassConnection, "connection_lost",
 			"runtime 连接断开（会话句柄已作废；下次 prompt 按需重建）", nil)
 		var tail []string
-		if as.client != nil {
-			tail = acl.TailLines(as.client.StderrTail(), runtimeconn.MaxDiagStderrLines)
+		if cli := as.Client(); cli != nil {
+			tail = acl.TailLines(cli.StderrTail(), runtimeconn.MaxDiagStderrLines)
 		}
 		ae.StderrTail = tail
 		o.svc.recordRuntimeError(as.ID, ae, tail)
@@ -266,12 +218,8 @@ func (o *Orchestrator) disconnectSession(as *ActiveSession, intentional bool) {
 
 // evictSession 把句柄从活跃集合摘除（仅当仍是当前句柄；已被新句柄顶替时不动）。
 // 只为让下一次 prompt 能重建：会话记录（平台侧）不受影响。
-func (o *Orchestrator) evictSession(as *ActiveSession) {
-	o.mu.Lock()
-	if o.sessions[as.ID] == as {
-		delete(o.sessions, as.ID)
-	}
-	o.mu.Unlock()
+func (o *Orchestrator) evictSession(as *session.ActiveSession) {
+	o.handles.RemoveIf(as.ID, as)
 }
 
 // **刻意不留**那五个键派生函数（`connKey`/`generationKey`/`shortGenerationKeys`/

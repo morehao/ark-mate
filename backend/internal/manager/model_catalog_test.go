@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -57,8 +58,8 @@ func TestModelCatalogLiveSession(t *testing.T) {
 			{Value: `["anthropic","claude-sonnet"]`, Name: "Claude Sonnet", Group: "anthropic", GroupName: "Anthropic"},
 		},
 	}}
-	orch.sessions["c1"] = &ActiveSession{ID: "c1", Runtime: "stub",
-		sess: &stubSession{options: opts}}
+	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: "stub",
+		Session: &stubSession{options: opts}}))
 
 	resp, err := svc.ModelCatalog(context.Background())
 	if err != nil {
@@ -81,7 +82,7 @@ func TestModelCatalogLiveSession(t *testing.T) {
 	}
 
 	// 活会话消失后仍可从缓存取（避免每次查询都 resume）。
-	delete(orch.sessions, "c1")
+	orch.handles.Remove("c1")
 	cached, err := svc.ModelCatalog(context.Background())
 	if err != nil {
 		t.Fatalf("ModelCatalog(cache): %v", err)
@@ -138,8 +139,8 @@ func TestApplySessionModelSemantics(t *testing.T) {
 		CurrentValue: "test/other",
 		Values:       []acl.ConfigOptionValue{{Value: "test/other", Name: "Other"}},
 	}}}
-	orch.sessions["c1"] = &ActiveSession{ID: "c1", Runtime: "stub",
-		sess: &stubSession{}, proj: proj}
+	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: "stub",
+		Session: &stubSession{}, Projection: proj}))
 	svc.catalog.markRejected("stub", "test/other", "旧失败")
 	applied, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Model: "test/other"})
 	if err != nil || !applied {
@@ -169,8 +170,8 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	// 3) 运行时未广告模型项（echo 语义）：显式指定模型 → model_not_supported；
 	//    未指定（空）→ 无操作。
 	unsupported := &fakeProjection{err: acl.NewError(acl.ClassUnsupported, "unsupported_model", "未广告模型配置项", nil)}
-	orch.sessions["c2"] = &ActiveSession{ID: "c2", Runtime: "stub",
-		sess: &stubSession{}, proj: unsupported}
+	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c2", Runtime: "stub",
+		Session: &stubSession{}, Projection: unsupported}))
 	_, err = orch.ApplySessionModel(context.Background(), "c2", runtime.ModelConfig{Model: "x"})
 	ae, ok := acl.As(err)
 	if !ok || ae.Code != "model_not_supported" {
@@ -401,7 +402,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 // ——把"底座没有当前选中的模型"这个唯一可执行的结论藏了起来（v26.1 修）。
 func TestModelCatalogLiveSessionWithoutModelKeepsNote(t *testing.T) {
 	svc, orch := catalogRig(t)
-	orch.sessions["c1"] = &ActiveSession{ID: "c1", Runtime: "stub", sess: &stubSession{}}
+	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: "stub", Session: &stubSession{}}))
 
 	resp, err := svc.ModelCatalog(context.Background())
 	if err != nil {

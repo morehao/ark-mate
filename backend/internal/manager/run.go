@@ -2,86 +2,56 @@ package manager
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
-	"time"
 
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/ark-mate/pkg/runtime"
-	"github.com/morehao/golib/glog"
+	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/pkg/object/objusage"
 )
 
-// Prompt 向会话追加一轮 prompt（异步；事件经 bus/WS 出流）。
-// 返回 user_message 事件后的 bus 水位（客户端 attach 续传用）。会话正忙时返回 run_in_progress。
-// 会话无活句柄（进程刚起、或连接已断）时按需重建：持久层有记录 → ensureSession 走
-// native resume / handoff memo（ADR-4：执行可丢弃、会话平台拥有）；无记录才 session_not_found。
-func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int64, error) {
-	as, err := o.acquireSession(ctx, sessionID)
-	if err != nil {
-		return 0, err
-	}
-	as.mu.Lock()
-	if as.busy {
-		as.mu.Unlock()
-		return 0, acl.NewError(acl.ClassLimit, "run_in_progress", "该会话正有 run 在执行，请等待结束", nil)
-	}
-	memo := as.memo
-	as.memo = "" // 一次性消费：仅 fresh+handoff 会话首条 prompt 注入 memo
-	tctx, cancel := context.WithCancel(ctx)
-	t := &Run{id: objid.New(objid.Run), done: make(chan struct{}), cancel: cancel, ctx: tctx}
-	as.run = t
-	as.busy = true
-	client := as.client
-	as.mu.Unlock()
-	o.markBusy(client, as.ID)
+// ——— 会话轮次的**编排侧入口**（P4a 正文第五十五刀）———
+//
+// 受理 / 事件出口 / 排队投递 / 收尾整套运行期状态机已进 `domain/session.Runner`；本文件只剩
+// 三件**编排侧**的事：
+//
+//	① `acquireSession`：取（或重建）活句柄——重建要拨连接、恢复要 resume/handoff，属本层；
+//	② 轮次边界的代际迁移（`maybeMigrateGeneration`）：要拿连接池与权限/提问的挂起状态；
+//	③ 对外的四个入口（Prompt / PromptWithDelivery / CancelRun / WaitRun）——薄转发到 Runner，
+//	   调用点（Service / demo / 测试）不用跟着改名。
 
-	o.svc.markSession(as.ID, session.SessionStatusInProgress)
-	// 开轮三连（v22，设计 §D2）：① `run.started` 落库拿到本轮的**起点位次** → ② 开轮行
-	// （`run_<ULID>` 身份与事件载荷同源、`first_seq` = 那个位次）→ ③ 用户消息。
-	//
-	// 顺序不能换：开轮行要写 first_seq，而 first_seq 就是本条事件的位次；用户消息在它之后，
-	// 于是本轮窗口把"用户输入"整个包在里面（窗口起点早于输入，不再需要"轮界裁剪"）。
-	se := o.svc.publish(session.BusRunStarted, as.ID, map[string]any{
-		"session_id": as.ID, "run_id": t.id, "runtime": as.Runtime, "text": text,
-	})
-	o.svc.openRun(as.ID, t.id, text, se.Seq)
-	// 过程状态的第一帧（S1 / ADR-6）：一轮已经开始、还没向模型发请求。它落在 `run.started`
-	// **之后**（本轮窗口从 run.started 起算，状态属于这一轮）、用户消息之前。
-	o.runStatusFor(as.ID, session.RunStatusPreparing, session.RunStatusOpts{})
-	ue := o.svc.publish(session.BusUserMessage, as.ID, map[string]any{
-		"session_id": as.ID, "runtime": as.Runtime, "text": text,
-	})
-	// P3 F3 memo 注入：摘要仅作为发给 runtime 的首条 prompt 引导（user_message 事件保持用户
-	// 原文，不含摘要）。SDK v0.13.5 无 provider handoff 通道 → 文本前缀承载；provider 侧拒绝
-	// 重试语义随 SDK 能力后置，不臆造。
-	if memo != "" {
-		text = memo + "\n\n" + text
-	}
-	go o.executeRun(as, t, text)
-	// 看门狗：runTimeout 内未收尾则自动取消（防 runtime 吞错/挂起导致 busy 永久占用）。
-	if o.runTimeout > 0 {
-		go o.watchdogRun(as, sessionID, t)
-	}
-	return ue.Seq, nil
+// Prompt 向会话追加一轮 prompt（异步；事件经 bus/WS 出流）。
+func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int64, error) {
+	return o.runner.Prompt(ctx, sessionID, text)
+}
+
+// PromptWithDelivery 带投递模式的 Prompt（§6 busy input 队列）。
+func (o *Orchestrator) PromptWithDelivery(ctx context.Context, sessionID, text, delivery string) (session.PromptOutcome, error) {
+	return o.runner.PromptWithDelivery(ctx, sessionID, text, delivery)
+}
+
+// CancelRun 取消会话进行中的 run（无 run 时为幂等 no-op）。
+func (o *Orchestrator) CancelRun(ctx context.Context, sessionID string) error {
+	return o.runner.CancelRun(ctx, sessionID)
+}
+
+// WaitRun 阻塞至当前 run 结束（demo/同步路径用）；无 run 立即返回。
+func (o *Orchestrator) WaitRun(ctx context.Context, sessionID string) (string, error) {
+	return o.runner.WaitRun(ctx, sessionID)
+}
+
+// LatestUsage 取会话最近一次用量快照（无上报 → false）。run 收口落库用。
+func (o *Orchestrator) LatestUsage(sessionID string) (objusage.UsageInfo, bool) {
+	return o.runner.LatestUsage(sessionID)
 }
 
 // acquireSession 取（或重建）会话的活句柄。Prompt 与 §6 排队投递共用：
 // 两者都必须在「会话忙不忙」之前先把句柄拿到手——队列入队要记当前执行代际，
 // 代际只在活句柄存在时有意义（无句柄 = 需要重建，重建即换代）。
-func (o *Orchestrator) acquireSession(ctx context.Context, sessionID string) (*ActiveSession, error) {
+func (o *Orchestrator) acquireSession(ctx context.Context, sessionID string) (*session.ActiveSession, error) {
 	as := o.session(sessionID)
-	if as != nil {
-		as.mu.Lock()
-		dead := as.dead
-		as.mu.Unlock()
-		if dead {
-			// 连接已断的死句柄（拆连后理应已被摘除；这里兜住拿到旧指针的竞态）：摘除并按需重建。
-			o.evictSession(as)
-			as = nil
-		}
+	if as != nil && as.Dead() {
+		// 连接已断的死句柄（拆连后理应已被摘除；这里兜住拿到旧指针的竞态）：摘除并按需重建。
+		o.evictSession(as)
+		as = nil
 	}
 	if as == nil {
 		var err error
@@ -95,277 +65,6 @@ func (o *Orchestrator) acquireSession(ctx context.Context, sessionID string) (*A
 	// 纯能力定义变化 → 回退旧代际继续跑（纪律④，不返回错误）；缩权面（权限/provider）变化
 	// → 带码拒绝这一轮，绝不用已被收回的权限面继续跑。
 	return o.maybeMigrateGeneration(ctx, as)
-}
-
-// PromptWithDelivery 带投递模式的 Prompt（§6 busy input 队列）。
-//
-//   - reject（缺省）：忙时报 run_in_progress（历史行为，不排队）。
-//   - after_run：忙时入队，当前轮结束后自动投递；空闲时与 reject 同路径（不产生队列行）。
-//   - interrupt_then_prompt：入队**后**取消当前轮，随后由收尾路径自动投递。
-//     顺序是刻意的——反过来（先取消再入队）会在「取消已生效、executeRun 已收尾取队」与
-//     「本函数还没入队」之间留一个窗口，那一项将永远不被投递。入队后再复查一次空闲，
-//     闭合「取消前旧轮已自然结束」的另一半窗口（认领是条件更新，两边都跑也只会投一次）。
-func (o *Orchestrator) PromptWithDelivery(ctx context.Context, sessionID, text, delivery string) (session.PromptOutcome, error) {
-	mode, err := NormalizeDelivery(delivery)
-	if err != nil {
-		return session.PromptOutcome{}, err
-	}
-	if mode == DeliveryReject {
-		seq, err := o.Prompt(ctx, sessionID, text)
-		return session.PromptOutcome{EventSeq: seq}, err
-	}
-	as, err := o.acquireSession(ctx, sessionID)
-	if err != nil {
-		return session.PromptOutcome{}, err
-	}
-	as.mu.Lock()
-	busy, runID := as.busy, ""
-	if as.run != nil {
-		runID = as.run.id
-	}
-	as.mu.Unlock()
-	if !busy {
-		// 空闲：直接执行（与 reject 路径同语义——没有「等的那一轮」，不该留下队列行）。
-		seq, err := o.Prompt(ctx, sessionID, text)
-		return session.PromptOutcome{EventSeq: seq}, err
-	}
-	q, err := o.svc.enqueueInput(ctx, sessionID, text, mode, runID, o.svc.sessionGeneration(sessionID))
-	if err != nil {
-		return session.PromptOutcome{}, err
-	}
-	evt := o.svc.publish(session.BusInputQueued, sessionID, map[string]any{
-		"session_id": sessionID, "runtime": as.Runtime, "input_id": q.ID, "text": q.Text,
-		"delivery": q.Delivery, "target_run_id": q.TargetRunID, "generation": q.Generation,
-	})
-	if mode == DeliveryInterruptThenPrompt {
-		if cerr := o.CancelRun(ctx, sessionID); cerr != nil {
-			// 取消失败（会话/连接已变）：入队项留着没有意义——就地撤下，避免留下一条
-			// 「谁也不等」的孤儿队列项。
-			if _, derr := o.svc.deleteQueuedInput(ctx, sessionID, q.ID); derr != nil {
-				glog.Warnw(ctx, "取消当前轮失败且撤下排队项失败", "session", sessionID, "input_id", q.ID, "err", derr)
-			}
-			o.svc.publish(session.BusInputCancelled, sessionID, map[string]any{
-				"session_id": sessionID, "runtime": as.Runtime, "input_id": q.ID,
-				"delivery": q.Delivery, "reason": ReasonDeliverFail,
-			})
-			return session.PromptOutcome{}, cerr
-		}
-	}
-	o.deliverQueued(as) // 空闲复查（见函数注释：闭合窗口；认领条件更新保证只投一次）
-	return session.PromptOutcome{EventSeq: evt.Seq, Queued: true, InputID: q.ID}, nil
-}
-
-// watchdogRun 单轮超时兜底：超时后走 CancelRun 的有界取消路径（agent 无响应也本地解除），
-// 终态事件由 executeRun 依取消语义发布（run.cancelled）。与用户手动取消幂等共存：run 已结束时
-// select 到 t.done 直接退出；已取消则 CancelRun 对 nil run 为 no-op。
-func (o *Orchestrator) watchdogRun(as *ActiveSession, sessionID string, t *Run) {
-	timer := time.NewTimer(o.runTimeout)
-	defer timer.Stop()
-	select {
-	case <-t.done:
-	case <-timer.C:
-		glog.Warnw(context.Background(), "run 超过看门狗时限，自动取消", "session", sessionID, "timeout", o.runTimeout.String())
-		_ = o.CancelRun(context.Background(), sessionID)
-	}
-}
-
-// executeRun 执行一轮 prompt 并发布终态事件（单写者：仅本 goroutine 改动 run 终态）。
-// Prompt 走 ActiveSession.proj（Runtime 接口；§16 采用），proj 为 nil（测试假会话/
-// 未投影 runtime）时回退底层会话直连——两路径语义一致。
-func (o *Orchestrator) executeRun(as *ActiveSession, t *Run, text string) {
-	var (
-		stop string
-		err  error
-	)
-	// 「请求已发出、首个增量未到」——它覆盖从发请求到第一个 token 之间的那段空白，
-	// 而那正是用户最容易以为「没反应」的时候（今天这段时间与「已卡住」长得一模一样）。
-	// 用 `t.id` 而不是重查：这一支里 `as.run` 就是 `t`，重查只多一个可能拿到 nil 的窗口。
-	o.svc.sessionPlane.PublishRunStatus(as.ID, t.id, session.RunStatusModelRequesting, session.RunStatusOpts{})
-	if as.proj != nil {
-		stop, err = as.proj.Prompt(t.ctx, runtime.PromptRequest{Text: text})
-	} else {
-		stop, err = as.sess.Prompt(t.ctx, text)
-	}
-
-	as.mu.Lock()
-	intentional := t.intentional
-	userCancel := t.cancelReq // 用户显式取消：即使正在停机收尾，取消仍是用户事实（优先于 interrupted）
-	cancelled := t.cancelReq || (err == nil && strings.EqualFold(stop, "cancelled"))
-	// agent 侧返回「取消类」错误（如 dsh 的 "Request cancelled"、SDK ctx 取消）也归一为 cancelled。
-	if !cancelled && err != nil && errLooksCancelled(err) {
-		cancelled = true
-	}
-	as.busy = false
-	as.run = nil
-	client := as.client
-	as.mu.Unlock()
-	o.unmarkBusy(client, as.ID)
-	t.stop = stop
-	t.err = err
-
-	// §6：本轮正常走完（含用户取消）→ 收尾后推进排队输入。**失败不自动续投**：
-	// 底座刚报错就把队列一条条灌进去，等于把队列变成「连续失败重放」；停机（intentional）
-	// 更不该投——那一轮注定不会被执行，重启时统一作废（见 staleQueuedInputsOnRestore）。
-	deliverNext := false
-	switch {
-	case userCancel:
-		// 用户取消优先：与停机撞车时，取消是用户意图，不能改写成 interrupted。
-		o.closeRunStatus(as.ID, t.id)
-		o.svc.markSession(as.ID, session.SessionStatusCancelled)
-		o.svc.publish(session.BusRunCancelled, as.ID, map[string]any{
-			"session_id": as.ID, "run_id": t.id, "stop_reason": stop,
-		})
-		deliverNext = true
-	case intentional:
-		// 主动拆除（daemon 停机 / 显式停 agent）打断的轮次：既不是用户取消也不是失败，
-		// 归 interrupted —— 无终态、可续聊重发（与崩溃恢复同义）。刻意不发 run.error /
-		// run.cancelled：伪终态会污染历史、失败轮列表与重试入口。
-		//
-		// **也不发收口 `run.status`**（ADR-8 的前半）：收口状态同样是「这一轮到此为止」的宣告，
-		// 在这一支上它与伪终态同罪。崩溃残轮的收口由**恢复路径**补（`persist.go` 的
-		// `closeInterruptedRuns`），两处行为相反且各有判据。
-		o.svc.markSession(as.ID, session.SessionStatusInterrupted)
-		glog.Infow(context.Background(), "run 因连接主动拆除而中断（会话保留，可续聊重发）",
-			"session", as.ID, "runtime", as.Runtime)
-	case cancelled:
-		o.closeRunStatus(as.ID, t.id)
-		o.svc.markSession(as.ID, session.SessionStatusCancelled)
-		o.svc.publish(session.BusRunCancelled, as.ID, map[string]any{
-			"session_id": as.ID, "run_id": t.id, "stop_reason": stop,
-		})
-		deliverNext = true
-	case err != nil:
-		o.closeRunStatus(as.ID, t.id)
-		o.svc.markSession(as.ID, session.SessionStatusFailed)
-		o.publishError(as.ID, t.id, err, client)
-	default:
-		o.closeRunStatus(as.ID, t.id)
-		o.svc.markSession(as.ID, session.SessionStatusCompleted)
-		o.svc.publish(session.BusRunEnded, as.ID, map[string]any{
-			"session_id": as.ID, "run_id": t.id, "runtime": as.Runtime, "stop_reason": stop,
-		})
-		deliverNext = true
-	}
-	close(t.done)
-	if deliverNext {
-		// 在 executeRun 的 goroutine 里同步投递队首（deliverQueued 内部另起 goroutine 跑新一轮，
-		// 不会在本 goroutine 上递归执行）。
-		o.deliverQueued(as)
-	}
-}
-
-// activeRunID 取会话当前那一轮的 id（没有在跑的轮 → 空串）。
-//
-// 过程状态的载荷要带 `run_id`（那一轮的身份）：UI 与读面据此判断「这条状态属于哪一轮」，
-// 而这正是"多轮会话里过程状态被上一轮残留"的唯一防线。
-func (o *Orchestrator) activeRunID(sessionID string) string {
-	as := o.session(sessionID)
-	if as == nil {
-		return ""
-	}
-	as.mu.Lock()
-	defer as.mu.Unlock()
-	if as.run == nil {
-		return ""
-	}
-	return as.run.id
-}
-
-// runStatusFor 发一条过程状态（**只**调域里的唯一铸造点：manager 不拼载荷、不碰 `BusRunStatus`）。
-func (o *Orchestrator) runStatusFor(sessionID, status string, opt session.RunStatusOpts) {
-	if sessionID == "" {
-		return
-	}
-	o.svc.sessionPlane.PublishRunStatus(sessionID, o.activeRunID(sessionID), status, opt)
-}
-
-// closeRunStatus 终态事件**之前**的收口状态（ADR-6）：界面「停止」的判据必须是一个**状态**，
-// 不能是「一段时间没事件」。
-//
-// 刻意只在**非 intentional** 的四个终态分支里调：那一支连收口状态都不发（ADR-8 的前半）。
-func (o *Orchestrator) closeRunStatus(sessionID, runID string) {
-	o.svc.sessionPlane.PublishRunStatus(sessionID, runID, session.RunStatusIdle, session.RunStatusOpts{})
-}
-
-// errLooksCancelled 判断错误是否为「取消」语义（ctx 取消或 agent 取消类错误文本）。
-func errLooksCancelled(err error) bool {
-	if errors.Is(err, context.Canceled) {
-		return true
-	}
-	var ae *acl.Error
-	if errors.As(err, &ae) {
-		s := strings.ToLower(ae.Code + " " + ae.Details)
-		return strings.Contains(s, "cancel") || strings.Contains(s, "abort")
-	}
-	return false
-}
-
-// CancelRun 取消会话进行中的 run（无 run 时为幂等 no-op）。
-func (o *Orchestrator) CancelRun(ctx context.Context, sessionID string) error {
-	as := o.session(sessionID)
-	if as == nil {
-		return acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
-	}
-	as.mu.Lock()
-	t := as.run
-	if t != nil {
-		t.cancelReq = true
-	}
-	as.mu.Unlock()
-	if t == nil {
-		return nil
-	}
-	// 「已受理取消、收尾未完成」（S1）：它与终态**不是**同一件事——底座的 `session/cancel`
-	// 可能没响应，而这一段时间里界面必须能说清「正在收尾」而不是「已经停了」。
-	//
-	// 这里直接用 `t.id` 而不是 `o.activeRunID(...)`：`as.run` 随时可能被 `executeRun` 收尾清空，
-	// 重查一次会拿到空 id，于是这条状态挂到一个「不存在的轮」上。
-	o.svc.sessionPlane.PublishRunStatus(sessionID, t.id, session.RunStatusCancelling, session.RunStatusOpts{})
-	// agent 侧取消（session/cancel）有界执行：runtime 无响应时不阻塞本地解除。
-	// 无论 RPC 是否送达，随后都 t.cancel() 让 Prompt 返回（executeRun 收尾不依赖 RPC）。
-	cctx, ccancel := context.WithTimeout(context.WithoutCancel(ctx), agentCancelTimeout)
-	defer ccancel()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		// §17 E2：会话级取消走投影（Cancel 已入 Runtime 接口）；proj nil（测试注入假会话）
-		// 回退直连 sess.Cancel，语义一致。
-		if as.proj != nil {
-			_ = as.proj.Cancel(cctx)
-			return
-		}
-		_ = as.sess.Cancel(cctx)
-	}()
-	select {
-	case <-done:
-	case <-cctx.Done():
-		glog.Debugw(ctx, "session/cancel RPC 未在限期内响应，本地强制解除",
-			"session", sessionID, "timeout", agentCancelTimeout.String())
-	}
-	t.cancel()                      // 解除 SDK 阻塞
-	o.perm.CancelSession(sessionID) // session/cancel 后按 ACP 规范回 Cancelled 全部挂起权限
-	o.elic.CancelSession(sessionID) // 挂起的结构化提问一并按取消回馈
-	return nil
-}
-
-// WaitRun 阻塞至当前 run 结束（demo/同步路径用）；无 run 立即返回。
-func (o *Orchestrator) WaitRun(ctx context.Context, sessionID string) (string, error) {
-	as := o.session(sessionID)
-	if as == nil {
-		return "", acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
-	}
-	as.mu.Lock()
-	t := as.run
-	as.mu.Unlock()
-	if t == nil {
-		return "", nil
-	}
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case <-t.done:
-	}
-	return t.stop, t.err
 }
 
 // RunOnce 在**构建期选定的** runtime 上跑一次 fresh session + prompt 并等待结束（mate demo 用）。
