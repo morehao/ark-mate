@@ -628,6 +628,8 @@ function ensureTransport(): WsTransport {
       // 水位推进（供重连续传）
       if (f.type === 'event') transportRef?.ackSeq(f.agg_id, f.event.seq)
       if (f.type === 'snapshot') transportRef?.ackSeq(f.agg_id, f.event_seq)
+      // 回放结束 = 这一段历史确实看完了：把续传游标推到那里，重连时不会再把同一段重放一遍。
+      if (f.type === 'replay_end') transportRef?.ackSeq(f.agg_id, f.event_seq)
       if (f.type === 'gap') {
         // 慢订阅丢帧（服务端缓冲满）：按当前已应用水位立即重挂该聚合——
         // 服务端 EventsAfter 为开区间（seq > since），重放不会重复已应用事件；若起点已被淘汰则回 snapshot。
@@ -721,6 +723,29 @@ export const useMate = create<MateStore>((set, get) => {
                   lastSeq: f.event_seq,
                 },
               },
+            }
+          }
+          case 'replay_begin': {
+            // 进入回放（ADR-13）：**服务端说它在回放**，不是我们猜的。
+            //
+            // 同时裁决「加载更早」：冷挂载（`since_seq=-1`）收到 `replay_begin` 就证明服务端
+            // 是**从会话第一条起**给的（淘汰过的话它会回 snapshot）——这就是「已到最早」的事实，
+            // 不必等第一个事件到达才敢下结论（新会话可能一条事件都没有）。
+            const atStart = coldFullReplay.delete(f.agg_id)
+            const view = s.views[f.agg_id] ?? emptyView()
+            return {
+              ...s,
+              historyStart: atStart ? { ...s.historyStart, [f.agg_id]: true } : s.historyStart,
+              // 回放期不渲染"实时"的样子——`hydrating` 就是那面旗。
+              views: { ...s.views, [f.agg_id]: { ...view, hydrating: true } },
+            }
+          }
+          case 'replay_end': {
+            // 回放结束：加载态**精确**结束在这里（12s 的 `expireHydration` 降级成保险丝）。
+            const view = s.views[f.agg_id] ?? emptyView()
+            return {
+              ...s,
+              views: { ...s.views, [f.agg_id]: { ...view, hydrating: false } },
             }
           }
           case 'event': {

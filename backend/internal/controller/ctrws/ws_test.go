@@ -97,8 +97,8 @@ func wsWrite(t *testing.T, c *websocket.Conn, v any) {
 	}
 }
 
-// wsRead 读下一文本帧并解 JSON。
-func wsRead(t *testing.T, c *websocket.Conn, dst any) {
+// wsReadRaw 读下一文本帧，返回原始 JSON。
+func wsReadRaw(t *testing.T, c *websocket.Conn) []byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -109,8 +109,31 @@ func wsRead(t *testing.T, c *websocket.Conn, dst any) {
 	if typ != websocket.MessageText {
 		t.Fatalf("期望 text 帧，got type %v", typ)
 	}
-	if err := json.Unmarshal(data, dst); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	return data
+}
+
+// wsRead 读下一文本帧并解 JSON，**跳过回放区间帧**（`replay_begin` / `replay_end`）。
+//
+// 为什么默认跳过（ADR-13）：这两帧描述的是"这次连接正在回放"，与"这个会话产生了哪些业务帧"
+// 无关；把它们算进序列断言，会让每一条订阅用例都要多读两帧。**顺序**由
+// `TestReplayFramesBracketReplay` 专门钉住（那一支用 `wsReadRaw` 逐帧核对）。
+func wsRead(t *testing.T, c *websocket.Conn, dst any) {
+	t.Helper()
+	for {
+		data := wsReadRaw(t, c)
+		var probe struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(data, &probe); err != nil {
+			t.Fatalf("unmarshal(probe): %v", err)
+		}
+		if probe.Type == "replay_begin" || probe.Type == "replay_end" {
+			continue
+		}
+		if err := json.Unmarshal(data, dst); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return
 	}
 }
 
@@ -409,5 +432,55 @@ func TestWSAcceptSurvivesAccessLogWriterWrap(t *testing.T) {
 	wsRead(t, conn, &pong)
 	if pong.Type != "pong" {
 		t.Fatalf("被访问日志包装后 WS 仍应可用，期望 pong，got %+v", pong)
+	}
+}
+
+// TestReplayFramesBracketReplay 回放区间帧（ADR-13）：`replay_begin` 恒在 `replay_end` 之前，
+// 且把它们之间的事件**全部**包住。
+//
+// 为什么这一条需要行为判据（源码那半由 archtest 的 `TestReplayFramesBracketHistory` 钉）：
+// "两帧都在、顺序也对"可以在**回放之外**成立（例如放在 attach 的开头和一条 defer 里），
+// 而那样前端仍然会在回放中途退出加载态、在回放结束后才开始等——两种表现都不报错。
+func TestReplayFramesBracketReplay(t *testing.T) {
+	bus := eventbus.New()
+	pre1 := bus.Publish(testEventID, "session.created", "s1", 1, map[string]any{"text": "a"})
+	pre2 := bus.Publish(testEventID, "session.user_message", "s1", 2, map[string]any{"text": "b"})
+	conn := startWS(t, bus)
+	wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1"})
+
+	var types []string
+	var seqs []int64
+	// 三帧：begin + 两条事件 + end。
+	for i := 0; i < 4; i++ {
+		var f frame
+		if err := json.Unmarshal(wsReadRaw(t, conn), &f); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		types = append(types, f.Type)
+		seqs = append(seqs, f.EventSeq)
+	}
+	want := []string{"replay_begin", "event", "event", "replay_end"}
+	for i := range want {
+		if types[i] != want[i] {
+			t.Fatalf("帧序列不符：got %v（want %v）：回放必须被 begin/end **夹住**", types, want)
+		}
+	}
+	if seqs[0] != -1 {
+		t.Fatalf("全量回放时 `replay_begin.event_seq` 应为 -1（= 从最早一条起），got %d", seqs[0])
+	}
+	if seqs[3] != pre2.Seq {
+		t.Fatalf("`replay_end.event_seq` 应为回放到的位次 %d，got %d", pre2.Seq, seqs[3])
+	}
+	_ = pre1
+
+	// 增量续传：begin 带请求的起点。
+	conn2 := startWS(t, bus)
+	wsWrite(t, conn2, map[string]any{"action": "attach", "agg_id": "s1", "since_seq": pre1.Seq})
+	var begin frame
+	if err := json.Unmarshal(wsReadRaw(t, conn2), &begin); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if begin.Type != "replay_begin" || begin.EventSeq != pre1.Seq {
+		t.Fatalf("增量续传的 begin 帧应带请求起点 %d：%+v", pre1.Seq, begin)
 	}
 }
