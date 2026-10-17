@@ -3,6 +3,7 @@ package session
 import (
 	"time"
 
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
 )
 
@@ -300,4 +301,27 @@ func (pl *Plane) PublishRunInterrupted(sessionID, runID string) eventbus.Event {
 	evt := pl.Publish(BusRunStatus, sessionID, payload)
 	pl.recordRunStatus(sessionID, evt.Seq, payload)
 	return evt
+}
+
+// RunPhaseOf 把最近一次 `run.status` 的投影折成对外形状（**唯一**一份投影；列表行与详情共用）。
+//
+// 没有投影（历史会话 / 本轮还没开始）→ nil：JSON 里整个 `run` 键缺席。**不回空壳**——
+// 一个 `{status:""}` 会让界面以为「有一个状态，只是空」。
+func (pl *Plane) RunPhaseOf(id string) *dtosession.RunPhaseResp {
+	snap, ok := pl.RunSnapshot(id)
+	if !ok || snap.Status() == "" {
+		return nil
+	}
+	return &dtosession.RunPhaseResp{
+		RunID:      snap.Str("run_id"),
+		Status:     snap.Status(),
+		Phase:      snap.Str("phase"),
+		Detail:     snap.Str("detail"),
+		ToolCallID: snap.Str("tool_call_id"),
+		ToolName:   snap.Str("tool_name"),
+		WaitingFor: snap.Str("waiting_for"),
+		Reason:     snap.Str("reason"),
+		At:         snap.Str("at"),
+		Seq:        snap.Seq,
+	}
 }

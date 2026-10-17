@@ -56,6 +56,9 @@ func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]dtosess
 	// 展示字段（workspace_id / workspace_title）在**释放锁之后**补齐：它们要读库，
 	// 而持锁读库会与 registerSession 的"先写内存再落库"顺序互相卡住。
 	pl.fillWorkspaceDisplay(out)
+	// 过程状态的投影同理在**释放锁之后**补（`RunSnapshot` 自己取锁）：持锁读它会与
+	// `recordRunStatus` 的取锁路径互相卡住——这条分界与 `fillWorkspaceDisplay` 是同一条。
+	pl.fillRunPhase(out)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Pinned != out[j].Pinned {
 			return out[i].Pinned
@@ -63,6 +66,16 @@ func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]dtosess
 		return out[i].CreatedAt > out[j].CreatedAt
 	})
 	return out, nil
+}
+
+// fillRunPhase 给一批会话行补上当前轮次的过程状态（侧栏阶段文案的来源）。
+//
+// 必须在**释放锁之后**调：`RunSnapshot` 自己取锁，而 `recordRunStatus` 与 `ListSessions`
+// 的读循环是两条会互相等待的边（持锁读域状态 → 详情写点取锁 = 经典的锁序反转）。
+func (pl *Plane) fillRunPhase(items []dtosession.SessionResp) {
+	for i := range items {
+		items[i].Run = pl.RunPhaseOf(items[i].ID)
+	}
 }
 
 // fillWorkspaceDisplay 给一批响填补归属展示字段（v14；读面解析，见设计 §4.3）。

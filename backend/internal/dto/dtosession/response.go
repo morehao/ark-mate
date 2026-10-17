@@ -21,9 +21,16 @@ type SessionResp struct {
 	// 执行事实**（历史会话可能停在别的底座上），读面照读不照推。
 	RuntimeID string `json:"runtime_id"`
 	Status    string `json:"status"`
-	Title     string `json:"title"`
-	Pinned    bool   `json:"pinned"`
-	Archived  bool   `json:"archived"`
+	// Run 当前轮次的**过程状态**（`run.status` 的读面投影，ADR-6）。列表行与详情都带它——
+	// 侧栏会话行的阶段文案（「等待你授权」「正在执行 Bash」）是它的**第二个消费者**，
+	// 只给详情会让侧栏永远只有状态点。
+	//
+	// 没有过过程事件（历史会话 / 本轮还没开始）→ 整个键缺席，**不回空壳**：
+	// `{status:""}` 会让界面渲染一个"有状态但为空"的东西。
+	Run      *RunPhaseResp `json:"run,omitempty"`
+	Title    string        `json:"title"`
+	Pinned   bool          `json:"pinned"`
+	Archived bool          `json:"archived"`
 	// Cwd 会话工作空间（canonical 绝对路径；已随会话创建定稿，之后不可变）。
 	// 同时是底座 session 的 cwd 与原生权限 workspace-write 的边界。
 	Cwd string `json:"cwd,omitempty"`
@@ -94,9 +101,6 @@ type SessionDetailResp struct {
 	SessionResp
 	Pending  []PermissionResp `json:"pending"`
 	Memories []MemoryResp     `json:"memories"`
-	// Run 当前轮次的**过程状态**（ADR-6 的读面）：取自该会话最近一次 `run.status` 事件。
-	// 没有过过程事件（历史会话、或本轮还没开始）→ 省掉整个键（`omitempty`），而不是回一个空壳。
-	Run *RunPhaseResp `json:"run,omitempty"`
 }
 
 // RunPhaseResp 会话**当前轮次过程**的对外表示（`run.status` 的投影，不是 `runs` 表的行）。

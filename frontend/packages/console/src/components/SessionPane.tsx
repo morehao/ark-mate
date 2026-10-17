@@ -13,6 +13,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { tokens } from '@ark-mate/ui'
 import { Dot, sessionStatusMeta } from '@ark-mate/ui'
+import { runNarration } from '../console/runView'
 import { automationIDFromOrigin, isAutomationOrigin } from '../console/automationView'
 import type { MenuProps } from 'antd'
 import type { SessionSearchHit, SessionSummary, MessageSearchHit, MessageSearchResp } from '@ark-mate/types'
@@ -401,7 +402,13 @@ export function SessionPane({ onCreate }: Props) {
   const renderItem = (sm: SessionSummary) => {
     const view = views[sm.id]
     const meta = sessionStatusMeta(sm.status)
-    const running = sm.status === 'in_progress'
+    // 阶段文案（Q12）：`run.status` 的**第二个消费者**。它说得出「等待你授权」「正在执行 Bash」，
+    // 而 `sm.status` 只能说「进行中/已完成」——后者区分不出在跑还是在等人。
+    //
+    // 两个来源同源不同鲜：`views[id].run` 是事件流（实时），`sm.run` 是列表快照（刷新时）。
+    // 都没有（没打开过、也没过过程事件）→ 回落终态归类文案，**不猜**。
+    const narr = runNarration(view?.run ?? sm.run)
+    const running = narr.tone === 'run'
     const on = sm.id === activeId
 
     // 行内「更多」：重命名 / 置顶·取消置顶 / 归档（或恢复）
@@ -512,8 +519,19 @@ export function SessionPane({ onCreate }: Props) {
               {runtimeLabelOf(runtime, sm.runtime_id)}
             </span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', minWidth: 0 }}>
-              <Dot color={meta.color} pulse={running} size={6} />
-              <span style={{ color: running ? tokens.text : tokens.textSecondary }}>{meta.label}</span>
+              <Dot
+                color={narr.tone === 'wait' || narr.tone === 'interrupted' ? tokens.warning : meta.color}
+                pulse={running}
+                size={6}
+              />
+              <span
+                style={{
+                  color: narr.tone === 'wait' || narr.tone === 'interrupted' ? tokens.warning : running ? tokens.text : tokens.textSecondary,
+                }}
+              >
+                {/* 阶段文案优先；没有过程状态才回落到会话的终态归类。 */}
+                {narr.label || meta.label}
+              </span>
             </span>
             {/* 来源标记：由定时任务触发的会话（`origin=automation:<id>`）——人工与会话流混在一起时，
                 "这条是谁开的"必须一眼可见，而不是靠时间去猜。 */}

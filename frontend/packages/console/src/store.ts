@@ -33,6 +33,7 @@ import type {
   ModelCatalogResp,
   ModelRef,
   QueuedInput,
+  RunPhase,
   RuntimeDiagnostics,
   RuntimeInfo,
   StreamEntry,
@@ -79,6 +80,15 @@ export interface SessionView {
    * 会话重开时由事件全量回放重建，故没有 REST 读端点。
    */
   commands?: CommandInfo[]
+  /**
+   * 当前轮次的**过程状态**（`session.run.status` 事件的投影，ADR-6）。
+   *
+   * 与 `sessions[]` 行上的 `run`（REST 读面）**同源**：这里是实时的、那里是刷新时的快照。
+   * 界面优先读这里（它跟着事件流走），没有再回落到列表行——两处都缺时**什么都不说**，
+   * 绝不退回"猜"（`serverBusy` 那套倒推已经删了，见 archtest 的
+   * `TestNoClientSideRunInference`）。
+   */
+  run?: RunPhase
 }
 
 const emptyView = (): SessionView => ({
@@ -221,6 +231,28 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
           tone: 'info',
           text: runtime ? `${label} · ${runtime}` : label,
         }),
+        lastSeq,
+      }
+    }
+    case Ev.RunStatus: {
+      // 过程状态：整块替换（服务端每次给的都是那一刻的完整状态，不做增量合并）。
+      // 不做任何本地推断——包括"看起来该结束了"。
+      const status = String(e.payload?.status ?? '')
+      if (!status) return { ...v, lastSeq }
+      return {
+        ...v,
+        run: {
+          run_id: e.payload?.run_id ? String(e.payload.run_id) : undefined,
+          status: status as RunPhase['status'],
+          phase: e.payload?.phase ? String(e.payload.phase) : undefined,
+          detail: e.payload?.detail ? String(e.payload.detail) : undefined,
+          tool_call_id: e.payload?.tool_call_id ? String(e.payload.tool_call_id) : undefined,
+          tool_name: e.payload?.tool_name ? String(e.payload.tool_name) : undefined,
+          waiting_for: e.payload?.waiting_for ? String(e.payload.waiting_for) : undefined,
+          reason: e.payload?.reason ? String(e.payload.reason) : undefined,
+          at: e.payload?.at ? String(e.payload.at) : undefined,
+          seq: e.seq,
+        },
         lastSeq,
       }
     }

@@ -80,41 +80,16 @@ func (d *Detail) GetSession(_ context.Context, id string) (*dtosession.SessionDe
 	for _, p := range pending {
 		perms = append(perms, toPermissionResp(p))
 	}
+	resp := d.plane.SessionResp(id)
+	// 过程状态（ADR-6 的读面）折进同一条会话行——**投影在域里**（`RunPhaseOf`），
+	// 这一层只把字段搬过去。列表行与详情共用同一份投影，侧栏与头栏因此不可能说得不一样。
+	resp.Run = d.plane.RunPhaseOf(id)
 	detail := dtosession.SessionDetailResp{
-		SessionResp: d.plane.SessionResp(id),
+		SessionResp: resp,
 		Pending:     perms,
 		Memories:    memoryResps(d.src.PermissionMemories(id)),
-		Run:         runPhaseResp(d.plane, id),
 	}
 	return &detail, nil
-}
-
-// runPhaseResp 把域里的 `run.status` 投影折成响应里的 `run` 段（唯一一份投影）。
-//
-// 为什么投影在域里、装配在这里：**判决归域、形状归用例**（与 `SessionResp` 同一把尺子）。
-// 投影若在这里再算一遍（例如"取最后一条 run.status 事件"），memory 模式没有事件表、
-// 重启之后也没有办法重建——那正是"两份实现各自"的一半坏处；另一半是它会与
-// `Restore` 里的重建悄悄分叉。
-//
-// 没有投影（历史会话 / 本轮还没开始）→ 回 nil，JSON 里整个 `run` 键缺席。**不回空壳**：
-// 一个 `{status:""}` 会让界面以为"有一个状态，只是空"。
-func runPhaseResp(plane *session.Plane, id string) *dtosession.RunPhaseResp {
-	snap, ok := plane.RunSnapshot(id)
-	if !ok || snap.Status() == "" {
-		return nil
-	}
-	return &dtosession.RunPhaseResp{
-		RunID:      snap.Str("run_id"),
-		Status:     snap.Status(),
-		Phase:      snap.Str("phase"),
-		Detail:     snap.Str("detail"),
-		ToolCallID: snap.Str("tool_call_id"),
-		ToolName:   snap.Str("tool_name"),
-		WaitingFor: snap.Str("waiting_for"),
-		Reason:     snap.Str("reason"),
-		At:         snap.Str("at"),
-		Seq:        snap.Seq,
-	}
 }
 
 // ListPendingPermissions 列出某会话的挂起权限请求。
