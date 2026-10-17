@@ -39,6 +39,11 @@ export const Ev = {
   // `GET /sessions/:id/runs`），但它在契约里：帧上出现未知 type 时前端只能丢弃，
   // 而"这一轮开始了"是能对齐 `runs` 行的唯一事实。
   RunStarted: 'run.started',
+  // 一轮问答的**过程状态**（后端唯一铸造点 = domain/session 的 `RunStatusPayload`）。
+  // payload = {session_id, run_id, status, phase?, detail?, tool_call_id?, tool_name?,
+  // waiting_for?, retry?, at}。`status` 的 10 个活体取值见本文件下方的 `RunStatus`；
+  // 恢复路径另有一支 `interrupted` 作收口（实时路径永不发它，ADR-8）。
+  RunStatus: 'run.status',
   RunEnded: 'run.ended',
   RunError: 'run.error',
   RunCancelled: 'run.cancelled',
@@ -48,6 +53,46 @@ export const Ev = {
 } as const
 
 export type EvType = (typeof Ev)[keyof typeof Ev]
+
+/**
+ * `run.status` 的取值（ADR-7：按本仓的 ACP 观测面收窄到 10 个**活体**状态）。
+ *
+ * 为什么不是参照产品的 13 态：那是它自己 CLI 状态机的投影，而本仓观测面是 ACP——声明一个
+ * 观测不到的取值，会让界面在两种状态下显示同一个东西。`interrupted` 是**例外**：它不是活体
+ * 阶段，而是**恢复路径**的收口取值（进程被杀、日志里没有终态），实时路径永不发它。
+ */
+export type RunStatus =
+  | 'preparing'
+  | 'model_requesting'
+  | 'model_streaming'
+  | 'tool_executing'
+  | 'waiting_for_permission'
+  | 'waiting_for_user'
+  | 'retrying'
+  | 'compacting'
+  | 'cancelling'
+  | 'idle'
+  | 'interrupted'
+
+/** `run.status` 的载荷（`Ev.RunStatus`；后端唯一铸造点是 domain/session 的 `RunStatusPayload`）。 */
+export interface RunStatusPayload {
+  session_id: string
+  run_id: string
+  status: RunStatus
+  /** 底座给的更细阶段名，原样透传（平台不翻译、不重排；缺失时 status 仍可用）。 */
+  phase?: string
+  /** 人话旁白（界面头栏用；平台自己的判定产物）。 */
+  detail?: string
+  tool_call_id?: string
+  tool_name?: string
+  /** permission | elicitation | model | tool。 */
+  waiting_for?: string
+  retry?: { attempt?: number; reason?: string } & Record<string, unknown>
+  /** RFC3339Nano。 */
+  at?: string
+  /** 仅恢复收口带：`restart`。 */
+  reason?: string
+}
 
 export interface BusEvent {
   // id 事件行身份（`evt_<26 位 ULID>`，v17 起）。

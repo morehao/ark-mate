@@ -80,6 +80,17 @@ const (
 	// 它落 durable 存储，所以"进行中的轮"在事件流里有痕迹——`runs` 行因此是**纯投影**，
 	// 崩溃/重启也能从 events 重建（设计 §D2/J7）。
 	BusRunStarted = "run.started"
+	// BusRunStatus 一轮问答的**过程状态**（v27 + S1；durable）。
+	//
+	// payload 见 `runstatus.go` 的 `RunStatusPayload`（**唯一铸造点**）：`{session_id, run_id,
+	// status, phase?, detail?, tool_call_id?, tool_name?, waiting_for?, retry?, at}`。
+	//
+	// 与既有 `run.*` 的关系：`run.started` 开轮 → 若干 `run.status`（阶段变化）→ `run.status(idle)`
+	// 收口 → 终态四选一。**恢复路径**另有一支 `run.status(interrupted)` 作为收口（ADR-8 的后半，
+	// 实时路径永不发它）。
+	//
+	// 它不是「一段时间没事件」的替代品，而是那件事的**反面**：界面「还在跑吗」必须能读到一个状态。
+	BusRunStatus = "run.status"
 	// BusRunEnded 一轮 prompt 正常结束（stop_reason）。
 	BusRunEnded = "run.ended"
 	// BusRunError 一轮 prompt 失败（含稳定 code/分类，对齐 acl.Class）。
