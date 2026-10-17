@@ -8,6 +8,7 @@ import { sessionHistory, sessionRuns } from '@ark-mate/api'
 import { useMate } from '../store'
 import { SessionDetailDrawer } from '../components/SessionDetail'
 import { Composer } from '../components/Composer'
+import { ConfirmArea } from '../components/ConfirmArea'
 import { QueuedInputs } from '../components/QueuedInputs'
 import { StartPanel } from '../components/StartPanel'
 import { EntryView } from '../components/Transcript'
@@ -610,6 +611,9 @@ export function ChatPage() {
               </div>
               {activeId && (
                 <>
+                  {/* 确认区（S9）：输入区上方常驻；条目流里未结算的卡已不再渲染，所以这里是
+                      用户能作答的**唯一**去处。空则整块不占位。 */}
+                  <ConfirmArea entries={view?.entries ?? []} />
                   <QueuedInputs
                     queue={view?.queue ?? []}
                     cancelling={cancellingInput}

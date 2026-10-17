@@ -55,7 +55,7 @@ function decisionFor(opt: PermissionOption): PermissionDecision {
 }
 
 /** 权限确认卡（ACP session/request_permission → 用户点选经 REST 回传）。 */
-function PermissionCard({ e }: { e: StreamEntry }) {
+export function PermissionCard({ e }: { e: StreamEntry }) {
   const respond = useMate((s) => s.respondPermission)
   const options = e.optionKinds ?? []
   const resolved = e.resolved ?? false
@@ -223,7 +223,7 @@ function toolFailReasonLabel(reason: string): string {
 }
 
 /** 结构化提问卡（ACP elicitation/create → schema 渲染表单 / 引导链接 → 用户提交经 REST 回传）。 */
-function ElicitationCard({ e }: { e: StreamEntry }) {
+export function ElicitationCard({ e }: { e: StreamEntry }) {
   const respond = useMate((s) => s.respondElicitation)
   const resolved = e.resolved ?? false
   const busy = useMate((s) => {
@@ -626,10 +626,15 @@ export function EntryView({
   runInfo?: RunUsageInfo
 }) {
   switch (e.kind) {
+    // 未结算的确认类卡片**不**渲染在条目流里（S9 / Q2 选①）：它们搬到输入区上方的**确认区**
+    // （`ConfirmArea.tsx`）。理由不是审美——条目流是**历史**，用户往上翻的时候被一张浮在中段的
+    // 卡片反复拦路；而"现在需要我做什么"是一个**当下的问题**，它该在离输入框最近的地方。
+    //
+    // 已结算的那些仍然留在流里（那是历史事实：当时被允许/拒绝了什么）。
     case 'permission':
-      return <PermissionCard e={e} />
+      return e.resolved ? <PermissionCard e={e} /> : null
     case 'elicitation':
-      return <ElicitationCard e={e} />
+      return e.resolved ? <ElicitationCard e={e} /> : null
     case 'user':
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
