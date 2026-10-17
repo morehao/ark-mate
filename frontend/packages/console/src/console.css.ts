@@ -108,6 +108,10 @@ export const consoleStyleSheet = `
   }
   .fg-rail-new-icon { font-size: 14px; color: ${tokens.textSecondary}; }
   .fg-rail-new:hover .fg-rail-new-icon { color: ${tokens.primary}; }
+  /* /sessions 上没有一级导航项（问答入口已去重）：选中态落在新建按钮上。
+     与 .fg-navitem.fg-on 同一套语汇（底色 + 主色前缘），只是按钮自带边框，所以再点亮边框。 */
+  .fg-rail-new.fg-on { background: ${tokens.primarySoft}; border-color: ${tokens.primary}; }
+  .fg-rail-new.fg-on .fg-rail-new-icon { color: ${tokens.primary}; }
 
   /* 导航区：一级 32px / 二级 30px，条目间距 1px */
   .fg-nav-rail {
@@ -226,6 +230,8 @@ export const consoleStyleSheet = `
     display: flex;
     flex-direction: column;
     border-top: 1px solid ${tokens.border};
+    /* 这栏永远不横滚（需求 5）：内容是单行省略的目录，横向滚动只可能是布局溢出。 */
+    overflow-x: hidden;
   }
 
   /* 左栏 footer：固定左下，点「设置」在**它上方**展开二级菜单（向上生长）。这一行只有「设置」一个入口
@@ -1270,31 +1276,30 @@ export const consoleStyleSheet = `
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 8px 5px 6px;
+    padding: 5px 8px 5px 8px;
     border-radius: 8px;
     cursor: pointer;
     font-size: 12.5px;
     font-weight: 600;
     color: ${tokens.text};
+    /* 内容再多也不外溢：名字是单行省略，动作按钮一直占位（需求 5 的第二道保险）。 */
+    overflow: hidden;
+    transition: background 0.12s ease;
   }
   .fg-wsgroup-row:hover { background: ${tokens.softFill}; }
-  /* leading 槽：**一颗实心三角，鼠标放不放上去都是它**（v14.2 修订）。
-     上一版是"静止 folder、悬停换三角"（对齐 dsh 的 projectRow），用户复核后否掉了：
-     一个图标不该因为鼠标在不在一块儿就变成另一个东西。展开态由三角自己旋转 90° 表达，
-     含当前会话的组用主色——"你在哪"必须在未悬停时也看得见。 */
+  /* 展开态不再靠箭头：底色 + 组内会话行左缩进（需求 3）。
+     含当前会话的组用主色名——"你在哪"必须在未悬停时也看得见。 */
+  .fg-wsgroup-row.fg-open { background: ${tokens.softFill}; }
+  .fg-wsgroup-row.fg-current .fg-wsgroup-name { color: ${tokens.primary}; }
+  .fg-wsgroup-body { padding-left: 10px; }
+  /* 目录不可用时的警示图标：窄槽，不再承担方向指示。 */
   .fg-wsgroup-lead {
     flex: none;
-    width: 16px;
-    height: 18px;
     display: inline-flex;
     align-items: center;
-    gap: 3px;
     font-size: 11px;
-    color: ${tokens.textPlaceholder};
+    color: ${tokens.warning};
   }
-  .fg-wsgroup-lead.fg-current { color: ${tokens.primary}; }
-  .fg-wsgroup-lead .anticon { transition: transform 0.12s ease; }
-  .fg-wsgroup-row.fg-open .fg-wsgroup-lead .anticon { transform: rotate(90deg); }
   .fg-wsgroup-name {
     flex: 1;
     min-width: 0;
@@ -1303,18 +1308,6 @@ export const consoleStyleSheet = `
     white-space: nowrap;
   }
   .fg-wsgroup-name.fg-unnamed { font-style: italic; font-weight: 500; color: ${tokens.textSecondary}; }
-  /* 会话数：**恒常显示**，悬停时不让位（v14.2 修订）。原先它在悬停时淡出让位给 ⋯ / ⊕，
-     于是"鼠标放不放上去是两个样子"；现在动作按钮的位置一直占着（见 .fg-ws-manage），
-     名字宽度与会话数在两种状态下逐像素相同。 */
-  .fg-wsgroup-count {
-    flex: none;
-    max-width: 40px;
-    overflow: hidden;
-    font-size: 11px;
-    font-weight: 500;
-    color: ${tokens.textPlaceholder};
-    font-variant-numeric: tabular-nums;
-  }
   .fg-wsgroup-warn { flex: none; color: ${tokens.warning}; font-size: 11.5px; }
   /* 组内配额：「展开其余 N 个会话」/「收起」——一行文字按钮，不做成大块空态。 */
   .fg-wsgroup-more {
@@ -1343,6 +1336,19 @@ export const consoleStyleSheet = `
     line-height: 1.6;
   }
 
+  /* 会话行右端相对时间（需求 9）：与标题同一基线、不参与收缩。
+     ⋯ 与它共用行右端——静止态时间在最右，hover / 当前行时时间淡出让位，位置不跳（D11）。 */
+  .fg-sess-time {
+    flex: none;
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    color: ${tokens.textSecondary};
+    white-space: nowrap;
+    transition: opacity 0.12s ease;
+  }
+  .fg-sess-item:hover .fg-sess-time,
+  .fg-sess-item.fg-on .fg-sess-time { opacity: 0; }
+
   /* 会话行「更多」按钮：悬停浮现；触屏（移动抽屉态）常显 */
   .fg-sess-more { opacity: 0; transition: opacity 0.12s ease; }
   .fg-sess-item:hover .fg-sess-more,
@@ -1351,5 +1357,114 @@ export const consoleStyleSheet = `
     .fg-sess-more { opacity: 1; }
     /* 触屏（抽屉态）没有 hover：动作按钮常显（位置本来就一直占着）。 */
     .fg-ws-manage { visibility: visible; }
+  }
+
+  /* 发送 / 停止同一颗 32px 圆钮（需求 6 上半）：三态只换图标与底色，**不位移、不降透明度**。
+     空闲空文本时禁用的是箭头（仍看得清），等待授权/回答时是"禁用停止"并靠 title 说明原因。 */
+  .fg-send-btn {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    box-sizing: border-box;
+    display: inline-grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: ${tokens.primary};
+    color: #ffffff;
+    font: inherit;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .fg-send-btn:hover:not(:disabled) { background: ${tokens.primaryHover}; }
+  .fg-send-btn:active:not(:disabled) { background: ${tokens.primaryActive}; }
+  .fg-send-btn:disabled { cursor: default; opacity: 1; }
+  .fg-send-btn:disabled:not(.fg-send-stop) { background: ${tokens.softFill}; color: ${tokens.textPlaceholder}; }
+  .fg-send-btn.fg-send-stop { background: ${tokens.error}; color: #ffffff; }
+  .fg-send-btn.fg-send-stop:hover:not(:disabled) { background: ${tokens.error}; filter: brightness(1.06); }
+  .fg-send-btn.fg-send-wait { background: ${tokens.softFill}; }
+  .fg-send-btn.fg-send-wait .fg-send-square { background: ${tokens.textPlaceholder}; }
+  .fg-send-square {
+    display: block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: currentColor;
+  }
+
+  /* 流式状态行：阶段词 + 内联光标 + 已处理时长（替代原来那颗孤立光标）。 */
+  .fg-turn-status { line-height: 1.6; }
+  .fg-shimmer {
+    background: linear-gradient(
+      110deg,
+      ${tokens.textSecondary} 30%,
+      ${tokens.primary} 50%,
+      ${tokens.textSecondary} 70%
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: fg-shimmer 1.8s linear infinite;
+  }
+  @keyframes fg-shimmer {
+    0% { background-position: 120% 0; }
+    100% { background-position: -120% 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fg-shimmer {
+      animation: none;
+      background: none;
+      color: ${tokens.textSecondary};
+      -webkit-text-fill-color: currentColor;
+    }
+  }
+
+  /* 思考折叠块（需求 6 下半）：整行点击、流式中 shimmer 且无箭头、结束后出现 12px 线性箭头。 */
+  .fg-thought-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 13px;
+    color: ${tokens.textSecondary};
+    text-align: left;
+    cursor: pointer;
+  }
+  .fg-thought-head:hover:not(:disabled) { color: ${tokens.text}; }
+  /* 流式中是正在生长的内容：不给收起动作，鼠标也不该变成"可点"。 */
+  .fg-thought-head:disabled { cursor: default; }
+  .fg-thought-chevron {
+    flex: none;
+    color: ${tokens.textPlaceholder};
+    transition: transform 0.12s ease;
+  }
+  .fg-thought-chevron.fg-open { transform: rotate(90deg); }
+  .fg-thought-clip {
+    overflow: hidden;
+    transition: max-height 0.28s cubic-bezier(0.33, 1, 0.68, 1), opacity 0.18s ease;
+  }
+  .fg-thought-body {
+    max-height: 200px;
+    overflow-y: auto;
+    border-left: 2px solid ${tokens.border};
+    margin-left: 1px;
+    padding: 2px 0 2px 12px;
+    font-size: 13px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    transform: translateY(-6px);
+    transition: transform 0.28s cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  .fg-thought-clip[data-open='true'] .fg-thought-body { transform: translateY(0); }
+  @media (prefers-reduced-motion: reduce) {
+    .fg-thought-clip,
+    .fg-thought-body { transition: none; }
+    .fg-thought-body { transform: none; }
   }
 `

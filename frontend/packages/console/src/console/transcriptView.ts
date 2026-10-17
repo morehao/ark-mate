@@ -73,3 +73,102 @@ export function prependOlder(
   if (fresh.length === 0) return current
   return [...fresh, ...current]
 }
+
+/** 流式状态行：阶段词 + 是否要那颗内联光标（正文还没出现时才给）。 */
+export interface TurnStatus {
+  /** 状态行文案；空串 = 这一档不显示状态行。 */
+  stage: string
+  /** 正文尚未出现时，在阶段词后面挂一颗内联闪烁光标。 */
+  showCaret: boolean
+}
+
+/**
+ * 流式末尾的**状态行**（替代原来那颗孤立的闪烁光标）。
+ *
+ * 两种形态：
+ *  - 本轮已有正文 → 退化成阶段词（「正在执行 Bash」/「正在输出」），不再显示「思考中」；
+ *  - 还没有正文 → 「思考中」+ 内联光标。
+ *
+ * 非流式（轮次已收口 / 没发过）返回空 stage，调用方据此整行不渲染。
+ */
+export function turnStatusOf(entries: StreamEntry[], streaming: boolean, narrationLabel: string): TurnStatus {
+  if (!streaming) return { stage: '', showCaret: false }
+  // 只看**本轮**（最后一条用户消息之后）：否则在旧会话里发新消息时，历史的 assistant 正文
+  // 会让状态行跳过「思考中」，从一开始就显示阶段词。
+  let turnStart = 0
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].kind === 'user') {
+      turnStart = i + 1
+      break
+    }
+  }
+  const hasBody = entries
+    .slice(turnStart)
+    .some((e) => e.kind === 'assistant' && (e.text ?? '').trim().length > 0)
+  return { stage: hasBody ? narrationLabel || '正在输出' : '思考中', showCaret: !hasBody }
+}
+
+// ——— 思考过程折叠（需求 6 下半，D6） ———
+
+/**
+ * 一段相邻思考收成的一块。`id` 取该块**首条**条目 id（服务端已铸号，不新造身份），
+ * 重渲染时不会抖。
+ */
+export interface ThoughtFold {
+  kind: 'thought-fold'
+  id: string
+  text: string
+  /** `streaming` = 这一折还在生长（不收起、无箭头）；`completed` = 已截断（默认收起）。 */
+  variant: 'streaming' | 'completed'
+  startedAtSeq?: number
+  endedAtSeq?: number
+}
+
+/** 类型守卫：渲染分派用（`StreamEntry.kind` 是另一套联合，直接比较会被 TS 判为无重叠）。 */
+export function isThoughtFold(e: StreamEntry | ThoughtFold): e is ThoughtFold {
+  return e.kind === 'thought-fold'
+}
+
+/**
+ * 把**相邻**的 `thought` 条目合并成一折，其余条目原样保留。
+ *
+ * 为什么按相邻性分组：前端已经能从事件形状推出「这是一段连续的思考」，
+ * 不必为此加契约字段（`is_finished` 留作 O1 的备选）。底座在同一段思考里插入工具事件时
+ * 会被切成两块——那是对事件流的**诚实反映**，不是分组算法出错。
+ *
+ * `streaming` 时**只有最后一折且它就在流末尾**算「还在生长」：一经出现正文/工具事件，
+ * 那一段思考就结束了，应当收起（验收 A7：正文开始后自动收起、出现箭头）。
+ */
+export function foldThoughts(entries: StreamEntry[], streaming: boolean): Array<StreamEntry | ThoughtFold> {
+  const out: Array<StreamEntry | ThoughtFold> = []
+  let i = 0
+  while (i < entries.length) {
+    if (entries[i].kind !== 'thought') {
+      out.push(entries[i])
+      i++
+      continue
+    }
+    const group: StreamEntry[] = []
+    while (i < entries.length && entries[i].kind === 'thought') {
+      group.push(entries[i])
+      i++
+    }
+    const first = group[0]
+    const last = group[group.length - 1]
+    out.push({
+      kind: 'thought-fold',
+      id: first.id,
+      text: group.map((e) => e.text ?? '').join('\n'),
+      variant: 'completed',
+      startedAtSeq: first.seq,
+      endedAtSeq: last.seq,
+    })
+  }
+  if (streaming) {
+    const tail = out[out.length - 1]
+    if (tail && isThoughtFold(tail) && entries[entries.length - 1]?.kind === 'thought') {
+      tail.variant = 'streaming'
+    }
+  }
+  return out
+}

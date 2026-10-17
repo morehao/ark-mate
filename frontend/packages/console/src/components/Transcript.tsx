@@ -686,38 +686,10 @@ export function EntryView({
       )
 
     case 'thought':
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-          <Role>assistant · thinking</Role>
-          <div
-            style={{
-              display: 'flex',
-              gap: 10,
-              borderLeft: `2px solid ${tokens.border}`,
-              padding: '2px 0 2px 12px',
-              color: tokens.textSecondary,
-              fontSize: 13.5,
-              lineHeight: 1.7,
-              minWidth: 0,
-            }}
-          >
-            <span
-              style={{
-                flex: 'none',
-                fontFamily: tokens.fontMono,
-                fontSize: 10,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-                color: tokens.textPlaceholder,
-                paddingTop: 3,
-              }}
-            >
-              思考
-            </span>
-            <span style={{ minWidth: 0, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{e.text}</span>
-          </div>
-        </div>
-      )
+      // 单条思考**不在这里直接渲染**：相邻的 thought 会被 `foldThoughts` 收成一折，
+      // 由 `ThoughtFoldView` 统一画（ChatPage 分组）。留一个 null 是为了让"漏分组"不至于
+      // 把原始思考又摊回条目流里——它应该是一个可见的缺口，而不是两套标签并存。
+      return null
 
     case 'tool': {
       const meta = toolStatusMeta(e.status ?? '')
@@ -815,6 +787,10 @@ export function EntryView({
     case 'system': {
       const tone = (e.tone ?? 'info') as NonNullable<StreamEntry['tone']>
       const retry = tone === 'err' && !!onRetry
+      // 轮末（tone='ok'）只在这里补时长：事件到达时还没有本轮用量，`runInfo` 是稍后到达的
+      // 事实；拿不到就只显示「已完成」，不编一个 0.0s。
+      const endSuffix =
+        tone === 'ok' && runInfo && runInfo.durationMS > 0 ? ` · ${(runInfo.durationMS / 1000).toFixed(1)}s` : ''
       return (
         <div
           style={{
@@ -839,7 +815,10 @@ export function EntryView({
             }}
           >
             {systemIcon[tone]}
-            <span>{e.text}</span>
+            <span>
+              {e.text}
+              {endSuffix}
+            </span>
             {usageText && (
               <Popover
                 title="本轮用量"
@@ -857,6 +836,12 @@ export function EntryView({
                           <span style={{ fontFamily: tokens.fontMono }}>{r.value}</span>
                         </div>
                       ))}
+                      {e.stopReason && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, padding: '2px 0' }}>
+                          <span style={{ color: tokens.textSecondary }}>结束原因</span>
+                          <span style={{ fontFamily: tokens.fontMono }}>{e.stopReason}</span>
+                        </div>
+                      )}
                       <div
                         style={{
                           marginTop: 6,

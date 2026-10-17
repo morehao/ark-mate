@@ -32,7 +32,6 @@ export function NavRail() {
   const drawerOpen = useMate((s) => s.drawerOpen)
   const navExpanded = useMate((s) => s.navExpanded)
   const setNavGroupExpanded = useMate((s) => s.setNavGroupExpanded)
-  const sessions = useMate((s) => s.sessions)
 
   const openSettings = useMate((s) => s.openSettings)
 
@@ -132,9 +131,6 @@ export function NavRail() {
       >
         <span className="fg-navitem-icon">{entry.icon}</span>
         <span className="fg-navitem-label">{entry.label}</span>
-        {entry.id === 'chat' && sessions.length > 0 && (
-          <span className="fg-navitem-count">{String(sessions.length).padStart(2, '0')}</span>
-        )}
       </NavLink>
     )
   }
@@ -147,7 +143,15 @@ export function NavRail() {
 
       {/* 新建会话：品牌下方常驻的全宽按钮（v14.1）。它是这一栏的**第一动作**——
           从任何页面点一下都回到新建面板；样式只在这个类里（console.css.ts）。 */}
-      <button type="button" className="fg-rail-new" onClick={openNew}>
+      {/* `/sessions` 没有一级导航项了（问答入口已去重，只留这一颗新建按钮）：
+          用 `fg-on` 补「你在哪」——否则这个页面上左栏一处选中态都没有。
+          `/sessions/:id` 不亮：那时用户在看具体会话，不是「新建面板」。 */}
+      <button
+        type="button"
+        className={`fg-rail-new${pathname === '/sessions' ? ' fg-on' : ''}`}
+        aria-current={pathname === '/sessions' ? 'page' : undefined}
+        onClick={openNew}
+      >
         <PlusCircleOutlined className="fg-rail-new-icon" />
         <span>新建会话</span>
       </button>

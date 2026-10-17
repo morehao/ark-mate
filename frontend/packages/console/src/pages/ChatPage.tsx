@@ -12,12 +12,65 @@ import { ConfirmArea } from '../components/ConfirmArea'
 import { QueuedInputs } from '../components/QueuedInputs'
 import { StartPanel } from '../components/StartPanel'
 import { EntryView } from '../components/Transcript'
+import { ThoughtFoldView } from '../components/ThoughtFoldView'
 import { anchorIndex } from '../console/searchView'
 import { titleFor } from '../console/util'
 import { fmtRunDockLine, fmtRunUsageLine, toRunUsageInfo, type RunUsageInfo } from '../console/usageView'
-import { TRANSCRIPT_WINDOW, stickToBottom, windowEntries } from '../console/transcriptView'
-import { runNarration } from '../console/runView'
+import {
+  TRANSCRIPT_WINDOW,
+  foldThoughts,
+  isThoughtFold,
+  stickToBottom,
+  turnStatusOf,
+  windowEntries,
+} from '../console/transcriptView'
+import { elapsedLabel, runNarration } from '../console/runView'
 import type { DeliveryChoice } from '../console/queueView'
+
+/**
+ * 流式末尾的**状态行**：阶段词（shimmer）+ 可选内联光标 + 已处理时长。
+ *
+ * 它替代了原来那颗孤立的闪烁光标——光标只说明"还在动"，阶段词才说明"在干什么"。
+ * 时长来自**客户端观测**（`runStartedAt`）：刷新回来没有这个事实就不显示秒数，不编数字。
+ */
+function TurnStatus({ stage, showCaret, elapsed }: { stage: string; showCaret: boolean; elapsed: string }) {
+  return (
+    <div
+      className="fg-turn-status"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '2px 2px 0',
+        fontSize: 13,
+        color: tokens.textSecondary,
+        minWidth: 0,
+      }}
+    >
+      <span className="fg-shimmer" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {stage}
+      </span>
+      {showCaret && (
+        <span
+          className="fg-anim-blink"
+          style={{
+            display: 'inline-block',
+            flex: 'none',
+            width: 2,
+            height: '1em',
+            background: tokens.primary,
+            verticalAlign: '-0.12em',
+          }}
+        />
+      )}
+      {elapsed && (
+        <span style={{ flex: 'none', fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textPlaceholder }}>
+          已处理 {elapsed}
+        </span>
+      )}
+    </div>
+  )
+}
 
 /** 问答控制台主视图：会话侧栏 + 聊天（head / transcript / composer）+ 状态条。 */
 export function ChatPage() {
@@ -27,6 +80,7 @@ export function ChatPage() {
 
   const runtime = useMate((s) => s.runtime)
   const sessions = useMate((s) => s.sessions)
+  const workspaces = useMate((s) => s.workspaces)
   const views = useMate((s) => s.views)
   const activeId = useMate((s) => s.activeId)
   const activate = useMate((s) => s.activate)
@@ -58,6 +112,10 @@ export function ChatPage() {
   // 搜索命中跳转（M3 ②）：已应用的锚点 key（防重复滚动）+ 高亮条目 id。
   const anchorAppliedRef = useRef<string | null>(null)
   const [flashEntryId, setFlashEntryId] = useState<string | null>(null)
+  // 「已处理 Ns」的时钟：只在本来就有开始时刻时每 1s 推进一次（没有开始时刻就一个字都不显示）。
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  // 用户手动展开过的思考折：流式中有人展开着看历史时，自动贴底要停下（D6 / 7.9）。
+  const [foldOpen, setFoldOpen] = useState<Record<string, boolean>>({})
   // err 轮重试文本回退（会话 id → 历史最后 user_message；undefined=未取）
   const [errFallback, setErrFallback] = useState<Record<string, string | undefined>>({})
   // C2：服务端「加载更早」在途标记（同一时刻只允许一次请求）。
@@ -134,6 +192,13 @@ export function ChatPage() {
   const narration = runNarration(run)
   const busy = streaming || narration.busy
   const canStop = streaming || narration.canStop
+  const runStartedAt = activeId ? views[activeId]?.runStartedAt : undefined
+  useEffect(() => {
+    if (!busy || !runStartedAt) return
+    const t = window.setInterval(() => setNowTick(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [busy, runStartedAt])
+  const elapsed = busy ? elapsedLabel(runStartedAt, nowTick) : ''
   // v21：会话头标题走 `plain` 兜底——没命名、也没发过言的会话就叫「新会话」，
   // 不再拼成「新会话 · dsh」（底座信息不进对话框页面），也不摊一串 id 冒充名字。
   // 左栏那行仍走带底座/带短 id 的口径（那是浏览面，本轮不动）。
@@ -229,10 +294,12 @@ export function ChatPage() {
       el.scrollTop += el.scrollHeight - prevHeight
       return
     }
+    // 流式中有人手动展开了某一段思考 = 他在读历史：别再把他拉回底部。
+    if (streaming && Object.values(foldOpen).some(Boolean)) return
     if (stickToBottom({ scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight })) {
       el.scrollTop = el.scrollHeight
     }
-  }, [view?.entries, view?.streaming, view?.lastSeq, revealed])
+  }, [view?.entries, view?.streaming, view?.lastSeq, revealed, streaming, foldOpen])
 
 
   // 搜索命中跳转（M3 ②）：条目就绪后滚动到锚点条目并短暂高亮。
@@ -266,10 +333,24 @@ export function ChatPage() {
   }, [anchorSeq, activeId, hydrating, entries, revealed])
 
   const entryWindow = windowEntries(view?.entries ?? [], TRANSCRIPT_WINDOW, revealed)
+  const turnStatus = turnStatusOf(view?.entries ?? [], streaming, narration.label)
+  // 分组在**窗口之后**：先按条目窗口取尾部，再把其中相邻的 thought 收成一折。
+  const folded = foldThoughts(entryWindow.visible, streaming)
+  // 搜索锚点仍按**原条目下标**定位：折叠块的 id 是它首条条目的 id，所以它沿用那个下标。
+  const windowBase = Math.max(0, (view?.entries.length ?? 0) - entryWindow.visible.length)
+  const entryIndex = new Map(entryWindow.visible.map((e, i) => [e.id, windowBase + i]))
+  const settleScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    if (stickToBottom({ scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight })) {
+      el.scrollTop = el.scrollHeight
+    }
+  }
 
-  // 切换会话：复位尾部窗口（新会话从尾部一页开始）。
+  // 切换会话：复位尾部窗口（新会话从尾部一页开始）与折叠展开态。
   useEffect(() => {
     setRevealed(0)
+    setFoldOpen({})
   }, [activeId])
 
   const onSend = (text: string, delivery?: DeliveryChoice) => {
@@ -323,13 +404,18 @@ export function ChatPage() {
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 12,
-          flexWrap: 'wrap',
+          // 长名字**截断**，不把右侧动作按钮挤到第二行（需求 7）。左侧块可伸缩、右侧不参与压缩。
+          flexWrap: 'nowrap',
+          // nowrap 会让这个 flex 项在**列方向**上的自动最小尺寸变成 min-content（长标题 + 右侧按钮
+          // 的宽度），把整个会话区撑出视口。显式 minWidth:0 才允许它随窗口收缩。
+          minWidth: 0,
+          overflow: 'hidden',
           padding: '10px 20px',
           borderBottom: `1px solid ${tokens.border}`,
           background: tokens.surface,
         }}
       >
-        <div style={{ minWidth: 0 }}>
+        <div style={{ flex: '1 1 auto', minWidth: 0 }}>
           <div style={{ fontSize: 14.5, fontWeight: 650, letterSpacing: '-0.01em', lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={title}>
             {title}
           </div>
@@ -446,13 +532,6 @@ export function ChatPage() {
               {metaText}
             </span>
           </span>
-          {/* 停止按钮只在**真能停**时出现：等待态（等授权/等回答）点停止等于把用户正要答的
-              那一轮扔掉，所以那一档不给按钮（原型里那一格也明确没有）。 */}
-          {canStop && (
-            <Button size="small" onClick={() => void cancel()} style={{ borderRadius: 8 }}>
-              停止
-            </Button>
-          )}
           {resendable && (
             <Button size="small" onClick={() => lastUserText && void sendPrompt(lastUserText)} style={{ borderRadius: 8 }}>
               重发
@@ -502,8 +581,8 @@ export function ChatPage() {
   }
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: tokens.bg }}>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative' }}>
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', background: tokens.bg }}>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', position: 'relative' }}>
         <section style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, background: tokens.bg }}>
           {!activeId ? (
             // 未选中会话 = 新建会话面板（不再有独立的「开始问答」空态页）；
@@ -570,10 +649,10 @@ export function ChatPage() {
                           </Button>
                         </div>
                       )}
-                      {entryWindow.visible.map((e, i) => (
+                      {folded.map((e) => (
                         <div
                           key={e.id}
-                          data-fg-idx={entryWindow.hidden + i}
+                          data-fg-idx={entryIndex.get(e.id) ?? 0}
                           style={{
                             display: 'flex',
                             flexDirection: 'column',
@@ -582,28 +661,24 @@ export function ChatPage() {
                             boxShadow: flashEntryId === e.id ? `0 0 0 2px ${tokens.primary}` : 'none',
                           }}
                         >
-                          <EntryView
-                            e={e}
-                            onRetry={e === lastEntry ? retryLast : undefined}
-                            usageText={e.seq != null ? runsBySeq.get(e.seq)?.usageText : undefined}
-                            runInfo={e.seq != null ? runsBySeq.get(e.seq)?.info : undefined}
-                          />
+                          {isThoughtFold(e) ? (
+                            <ThoughtFoldView
+                              fold={e}
+                              onUserToggle={(id, open) => setFoldOpen((prev) => ({ ...prev, [id]: open }))}
+                              onSettled={settleScroll}
+                            />
+                          ) : (
+                            <EntryView
+                              e={e}
+                              onRetry={e === lastEntry ? retryLast : undefined}
+                              usageText={e.seq != null ? runsBySeq.get(e.seq)?.usageText : undefined}
+                              runInfo={e.seq != null ? runsBySeq.get(e.seq)?.info : undefined}
+                            />
+                          )}
                         </div>
                       ))}
-                      {streaming && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 2, color: tokens.text }}>
-                          <span
-                            className="fg-anim-blink"
-                            style={{
-                              display: 'inline-block',
-                              width: 2,
-                              height: '1em',
-                              background: tokens.primary,
-                              verticalAlign: '-0.12em',
-                              marginLeft: 1,
-                            }}
-                          />
-                        </div>
+                      {turnStatus.stage && (
+                        <TurnStatus stage={turnStatus.stage} showCaret={turnStatus.showCaret} elapsed={elapsed} />
                       )}
                     </>
                   )}
@@ -633,9 +708,21 @@ export function ChatPage() {
                   />
                   <Composer
                     busy={busy}
+                    canStop={canStop}
+                    onStop={() => void cancel()}
                     workspace={
                       activeSum?.cwd
-                        ? { path: activeSum.cwd, temporary: !!activeSum.workspace_temporary }
+                        ? {
+                            path: activeSum.cwd,
+                            temporary: !!activeSum.workspace_temporary,
+                            // 「默认工作空间」是**登记事实**（id 对默认 id），不是 temporary：
+                            // v14 起登记过的默认工作空间 temporary=false。
+                            isDefault:
+                              !!activeSum.workspace_id && activeSum.workspace_id === workspaces?.default_id,
+                            // 服务端给的展示名（默认工作空间是「默认工作空间」散文口径）；
+                            // chip 自己按 isDefault 映射成「默认」。
+                            title: activeSum.workspace_title,
+                          }
                         : undefined
                     }
                     busyNote={

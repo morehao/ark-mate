@@ -158,6 +158,11 @@ export interface StreamEntry {
   title?: string
   status?: string
   tone?: 'ok' | 'err' | 'cancel' | 'info'
+  /**
+   * 轮末收口原因（`run.ended.stop_reason`，D9）：**不进正文**（`end_turn` 是协议词），
+   * 由系统条目的「本轮用量」悬浮展示成一行「结束原因」。
+   */
+  stopReason?: string
   // —— 权限确认卡（kind='permission'）——
   callId?: string // 决策回传锚点（POST /sessions/:id/permission）
   optionKinds?: PermissionOption[] // ACP 可选项（allow/reject × once/always）
