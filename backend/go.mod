@@ -6,7 +6,7 @@ require (
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/coder/websocket v1.8.15
 	github.com/gin-gonic/gin v1.12.0
-	github.com/morehao/golib v1.32.22
+	github.com/morehao/golib v1.32.27
 	gorm.io/gorm v1.31.1
 )
 
