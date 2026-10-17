@@ -21,6 +21,11 @@ var notFoundCodes = map[string]bool{
 	"skill_not_found":      true,
 	"provider_not_found":   true,
 	"automation_not_found": true,
+	// 队列三动作（ADR-10）：重排 / 立即发送 / 取出编辑 打到一个**已不在队列里**的队项。
+	//
+	// 它刻意**不是**幂等 no-op（与撤下那条相反）：撤下是"我不想要了"，重复撤下没有额外含义；
+	// 而"移动一个不存在的项"若回成功，界面会真的去改本地顺序——那是**假成功**。
+	"queued_input_not_found": true,
 	// 设置 · 模型（v11）：PATCH/DELETE 打到不存在的模型条目——与"打错 id 的新建"是两件事，
 	// 必须能被前端分辨（刷新列表 vs 改参数）。
 	//

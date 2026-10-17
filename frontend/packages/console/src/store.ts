@@ -3,6 +3,9 @@ import {
   HttpError,
   cancelSession,
   cancelQueuedInput as apiCancelQueuedInput,
+  moveQueuedInput as apiMoveQueuedInput,
+  sendQueuedInputNow as apiSendQueuedInputNow,
+  popQueuedInput as apiPopQueuedInput,
   sessionHistory,
   createSession,
   createWorkspace as apiCreateWorkspace,
@@ -546,6 +549,12 @@ export interface MateActions {
   sendPrompt: (text: string, delivery?: DeliveryChoice) => Promise<void>
   /** §6：撤下一条尚未投递的排队输入（收敛以 input_cancelled 事件为准）。 */
   cancelQueuedInput: (inputId: string) => Promise<void>
+  /** ADR-10 动作①：重排一条队项（`beforeId` 缺省 = 追加到末尾）。 */
+  moveQueuedInput: (inputId: string, beforeId?: string) => Promise<void>
+  /** ADR-10 动作②：让这一条**成为下一轮**（忙时排到队首，空闲时立刻投递）。 */
+  sendQueuedInputNow: (inputId: string) => Promise<void>
+  /** ADR-10 动作③：取回草稿并作废（正文回填到待发送文案）。 */
+  popQueuedInput: (inputId: string) => Promise<string | null>
   /** §6：用服务端当前态补齐队列（冷挂载/HISTORY 未覆盖时用；`anchorQueueSeq` 见 SessionView.queueSeq）。 */
   refreshQueue: (id: string, anchorQueueSeq: number) => Promise<void>
   cancel: () => Promise<void>
@@ -1094,6 +1103,55 @@ export const useMate = create<MateStore>((set, get) => {
         }
       } catch (err) {
         showToast(toErrorMessage(err))
+      }
+    },
+
+    moveQueuedInput: async (inputId, beforeId) => {
+      const id = get().activeId
+      if (!id) return
+      try {
+        const items = await apiMoveQueuedInput(id, inputId, beforeId)
+        // 服务端回**重排后的完整队列**：本地顺序以它为准（不自己算"我插到第几位"——
+        // 客户端的序号与服务端的 `inputs.seq` 是两套东西，自己算迟早分叉）。
+        set((s) => {
+          const view = s.views[id]
+          if (!view) return {}
+          return { views: { ...s.views, [id]: { ...view, queue: items.map(queuedFromResp) } } }
+        })
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    sendQueuedInputNow: async (inputId) => {
+      const id = get().activeId
+      if (!id) return
+      try {
+        await apiSendQueuedInputNow(id, inputId)
+        // 出队**不在这里做**：会话忙时它只是排到队首（还没发出去），空闲时由服务端发
+        // `input_delivered` 收敛。本地先删掉会造出"看起来发出去了、其实还在队列里"的假象。
+        const items = await listQueuedInputs(id)
+        set((s) => {
+          const view = s.views[id]
+          if (!view) return {}
+          return { views: { ...s.views, [id]: { ...view, queue: items.map(queuedFromResp) } } }
+        })
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    popQueuedInput: async (inputId) => {
+      const id = get().activeId
+      if (!id) return null
+      try {
+        const res = await apiPopQueuedInput(id, inputId)
+        // 队列那一行由 `input_cancelled{reason:'user_edit'}` 收敛（服务端是唯一铸造点），
+        // 这里只负责把正文交给调用方回填。
+        return res.text ?? ''
+      } catch (err) {
+        showToast(toErrorMessage(err))
+        return null
       }
     },
 

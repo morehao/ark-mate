@@ -163,6 +163,12 @@ type SessionPromptResp struct {
 	InputID string `json:"input_id,omitempty"`
 }
 
+// QueuedInputMoveReq `POST /sessions/:id/inputs/:input_id/move` 的请求体（DOM insertBefore 语义）。
+type QueuedInputMoveReq struct {
+	// BeforeID 锚点队项；空 = 追加到末尾。锚点不在该会话的待投递集里 → 40001。
+	BeforeID string `json:"before_id,omitempty"`
+}
+
 // QueuedInputResp 一条待投递的排队输入（§6）。
 //
 // 与事件的关系：`session.input_queued` 是它**曾经入队**的事实，本读模型是它**此刻还在队里**

@@ -321,6 +321,40 @@ export const listQueuedInputs = (sessionId: string): Promise<QueuedInputResp[]> 
   http.get<QueuedInputResp[]>(`/mate/sessions/${encodeURIComponent(sessionId)}/inputs`)
 
 /**
+ * §6 / ADR-10：**重排**一条待投递输入（DOM insertBefore 语义，`beforeId` 缺省 = 追加到末尾）。
+ * 回**重排后的完整队列**——客户端的本地顺序靠它对齐（同 `moveWorkspace` 的手法）。
+ */
+export const moveQueuedInput = (sessionId: string, inputId: string, beforeId?: string): Promise<QueuedInputResp[]> =>
+  http.post<QueuedInputResp[]>(
+    `/mate/sessions/${encodeURIComponent(sessionId)}/inputs/${encodeURIComponent(inputId)}/move`,
+    { before_id: beforeId },
+  )
+
+/**
+ * §6 / ADR-10：**立即发送**——让这一条成为下一轮（跳过 FIFO）。
+ *
+ * 会话忙时它只是把它排到队首（当前轮结束时收尾路径会先投它）；空闲时服务端会立刻起一轮。
+ */
+export const sendQueuedInputNow = async (sessionId: string, inputId: string): Promise<void> => {
+  await http.post(
+    `/mate/sessions/${encodeURIComponent(sessionId)}/inputs/${encodeURIComponent(inputId)}/send-now`,
+    {},
+  )
+}
+
+/**
+ * §6 / ADR-10：**取出编辑**——把队项取回草稿并作废，返回正文（前端填进输入框）。
+ *
+ * 服务端会发一条 `input_cancelled{reason:'user_edit'}`；队列那一行的消失**只**由它驱动
+ * （`user_edit` 与 `user_cancel` 是两个值，界面含义不同）。
+ */
+export const popQueuedInput = (sessionId: string, inputId: string): Promise<{ text: string }> =>
+  http.post<{ text: string }>(
+    `/mate/sessions/${encodeURIComponent(sessionId)}/inputs/${encodeURIComponent(inputId)}/pop`,
+    {},
+  )
+
+/**
  * §6：撤下一条**尚未投递**的排队输入。
  *
  * 已投递/已作废是台账行、撤不动（回 `deleted:false`，幂等不报错）；真正的收敛以

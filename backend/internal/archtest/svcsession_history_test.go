@@ -242,7 +242,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	// 最后一条的失效是静默的：REST 回 `{"deleted":true}`、库里那行真的没了，而前端的队列
 	// 只认事件、不做本地推断——界面里那一行会永远挂着（直到刷新）。
 	queueAnchors := []string{
-		"func NewQueue(plane *session.Plane) QueueSvc",
+		"func NewQueue(plane *session.Plane, del QueuedDelivery) QueueSvc",
 		"var _ QueueSvc = (*Queue)(nil)",
 		"func (q *Queue) DeleteQueuedInput(ctx context.Context, id, inputID string) (bool, error)",
 		`"input_required"`,

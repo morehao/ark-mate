@@ -55,6 +55,14 @@ func (s *Store) StaleQueuedInput(ctx context.Context, id string) (bool, error) {
 	return s.inputs.MarkStale(ctx, id)
 }
 
+// ReorderQueuedInputs 按给定 id 顺序重写该会话待投递输入的会话内位次（同一事务，两阶段）。
+//
+// 调用方负责把 ids 传成**该会话当前 queued 行的完整顺序**：漏掉的行会被留在偏移段里
+// （排在所有目标之后），而那是"我明明把它排到中间了"最隐蔽的失效方式。
+func (s *Store) ReorderQueuedInputs(ctx context.Context, sessionID string, ids []string) error {
+	return s.inputs.Reorder(ctx, sessionID, ids)
+}
+
 // DeleteQueuedInput 删除一条待投递输入（仅 queued；返回是否删除）。
 func (s *Store) DeleteQueuedInput(ctx context.Context, sessionID, id string) (bool, error) {
 	return s.inputs.Delete(ctx, sessionID, id)

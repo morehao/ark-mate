@@ -101,9 +101,10 @@ type stubSvc struct {
 	promptResp     *dtosession.SessionPromptResp
 	promptErr      error
 
-	cancelCalled bool
-	cancelID     string
-	cancelErr    error
+	cancelCalled    bool
+	deliverQueuedID string
+	cancelID        string
+	cancelErr       error
 
 	memList     []interaction.MemoryItem
 	revokeID    string
@@ -457,6 +458,12 @@ func (s *stubSvc) CancelRun(_ context.Context, id string) error {
 	s.cancelCalled = true
 	s.cancelID = id
 	return s.cancelErr
+}
+
+// DeliverQueuedNow 「立即发送」在空闲态的落点（ADR-10）：替身只记账，不真的起一轮。
+func (s *stubSvc) DeliverQueuedNow(_ context.Context, id string) error {
+	s.deliverQueuedID = id
+	return nil
 }
 
 // ListRuns 桩：默认空 runs（详情/统计路径不依赖其返回）。

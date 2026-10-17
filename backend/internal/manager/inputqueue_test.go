@@ -526,3 +526,105 @@ func TestInputQueueMemoryMode(t *testing.T) {
 	g.release <- struct{}{}
 	waitQueueDrain(t, svc, "conv-1")
 }
+
+// TestQueuedInputThreeActions ADR-10 的三件动作：重排 / 立即发送 / 取出编辑。
+//
+// 三件都挂在「用户看得见后果」这条判据上（这正是本仓只补这三件、不抄参照产品的 17 个方法的理由）：
+//
+//	重排     「我看到的顺序」就是投递顺序
+//	立即发送 不想等了（跳过 FIFO 成为下一轮）
+//	取出编辑 发错了（取回草稿并作废，**且要说话**）
+//
+// 最要紧的一条是「取出编辑必须发 `input_cancelled{reason:user_edit}`」：这条事件是那一行从
+// 界面队列消失的**唯一**依据——漏发的话 REST 照样回成功、库里那行也没了，而队列里那一行
+// 会一直挂着，直到刷新页面。那种"看起来成功了"的静默，是这一批里最容易漏掉的一份。
+func TestQueuedInputThreeActions(t *testing.T) {
+	ctx := context.Background()
+	r := newRig(t, func(c *rigConfig) { c.store, c.bus = true, true })
+	svc := r.Svc
+	id := "s-q3"
+	svc.registerSession(&SessionRec{ID: id})
+	q := queueSvc(svc)
+
+	// 三条排队输入（store 分配会话内位次）。
+	var ids []string
+	for _, text := range []string{"一", "二", "三"} {
+		in, err := svc.sessionPlane.EnqueueInput(ctx, id, text, session.DeliveryAfterRun, "", 0)
+		if err != nil {
+			t.Fatalf("EnqueueInput: %v", err)
+		}
+		ids = append(ids, in.ID)
+	}
+	orderOf := func() []string {
+		out := make([]string, 0, 3)
+		for _, it := range svc.sessionPlane.ListQueuedInputsOf(ctx, id) {
+			out = append(out, it.ID)
+		}
+		return out
+	}
+	if got := orderOf(); len(got) != 3 || got[0] != ids[0] {
+		t.Fatalf("初始顺序应为入队顺序，got %v", got)
+	}
+
+	// ① 重排：把第三条插到第一条之前（DOM insertBefore 语义）。
+	if err := q.MoveQueuedInput(ctx, id, ids[2], ids[0]); err != nil {
+		t.Fatalf("MoveQueuedInput: %v", err)
+	}
+	if got := orderOf(); got[0] != ids[2] || got[1] != ids[0] || got[2] != ids[1] {
+		t.Fatalf("重排后顺序不符：got %v（want 三/一/二）", got)
+	}
+	// 追加到末尾（before 为空）。
+	if err := q.MoveQueuedInput(ctx, id, ids[2], ""); err != nil {
+		t.Fatalf("MoveQueuedInput(末尾): %v", err)
+	}
+	if got := orderOf(); got[2] != ids[2] {
+		t.Fatalf("追加到末尾失败：got %v", got)
+	}
+	// 不存在的 id 不是幂等：它是"你以为移动成功"的假象。
+	if err := q.MoveQueuedInput(ctx, id, "inp_nope", ""); numericCode(err) != 40401 {
+		t.Fatalf("移动不存在的队项应 40401: %v", err)
+	}
+
+	// ② 立即发送：排到队首（会话忙/无句柄时端口那半是 no-op，顺序仍然落定）。
+	if err := q.SendNow(ctx, id, ids[1]); err != nil {
+		t.Fatalf("SendNow: %v", err)
+	}
+	if got := orderOf(); got[0] != ids[1] {
+		t.Fatalf("立即发送应把它排到队首：got %v", got)
+	}
+
+	// ③ 取出编辑：回正文 + 离队 + **发一条 user_edit 的 cancelled**。
+	sub := svc.bus.SubscribeAfter(nil)
+	defer svc.bus.Unsubscribe(sub)
+	text, err := q.PopForEdit(ctx, id, ids[1])
+	if err != nil {
+		t.Fatalf("PopForEdit: %v", err)
+	}
+	if text != "二" {
+		t.Fatalf("取回的正文应为 %q，got %q", "二", text)
+	}
+	if got := orderOf(); len(got) != 2 {
+		t.Fatalf("取出后队列应剩 2 条：got %v", got)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case e := <-sub.C:
+			if e.Type != session.BusInputCancelled {
+				continue
+			}
+			m, _ := e.Payload.(map[string]any)
+			if m["input_id"] != ids[1] {
+				continue
+			}
+			if m["reason"] != session.ReasonUserEdit {
+				t.Fatalf("取出编辑的 reason 应为 %q（与 user_cancel 分开是刻意的：界面含义不同），got %v",
+					session.ReasonUserEdit, m["reason"])
+			}
+			return
+		case <-deadline:
+			t.Fatalf("取出编辑必须发一条 session.input_cancelled：不发的话 REST 说成功了、库里也没了，" +
+				"而前端的队列只认事件——那一行会永远挂着")
+		}
+	}
+}

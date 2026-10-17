@@ -32,6 +32,9 @@ export function ChatPage() {
   const expireHydration = useMate((s) => s.expireHydration)
   const sendPrompt = useMate((s) => s.sendPrompt)
   const cancelQueuedInput = useMate((s) => s.cancelQueuedInput)
+  const moveQueuedInput = useMate((s) => s.moveQueuedInput)
+  const sendQueuedInputNow = useMate((s) => s.sendQueuedInputNow)
+  const popQueuedInput = useMate((s) => s.popQueuedInput)
   const cancel = useMate((s) => s.cancel)
   const archiveSession = useMate((s) => s.archiveSession)
   const showToast = useMate((s) => s.showToast)
@@ -44,6 +47,8 @@ export function ChatPage() {
   const lastParamRef = useRef<string | null | undefined>(undefined)
   // 尾部窗口（P3 余留）：长会话只渲染尾部 TRANSCRIPT_WINDOW 条，更早的按需展开。
   const [revealed, setRevealed] = useState(0)
+  // 「取出编辑」塞回输入框的草稿（ADR-10 动作③）：nonce 变化即生效一次。
+  const [injectedDraft, setInjectedDraft] = useState<{ text: string; nonce: number } | null>(null)
   // 首次定位到底部：每个会话只在首次拿到条目时执行一次（切回不打扰用户阅读位置）。
   const anchoredRef = useRef<string | null>(null)
   // 「显示更早」前后的高度差补偿（保持视口停在原处）。
@@ -612,6 +617,15 @@ export function ChatPage() {
                       setCancellingInput(inputId)
                       void cancelQueuedInput(inputId).finally(() => setCancellingInput(null))
                     }}
+                    onMove={(inputId, beforeId) => void moveQueuedInput(inputId, beforeId)}
+                    onSendNow={(inputId) => void sendQueuedInputNow(inputId)}
+                    onPop={(inputId) => {
+                      // 取出编辑：正文回到输入框（**不**立刻发出去——用户是拿去改的）。
+                      void popQueuedInput(inputId).then((text) => {
+                        if (text === null) return
+                        setInjectedDraft((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }))
+                      })
+                    }}
                   />
                   <Composer
                     busy={busy}
@@ -634,6 +648,7 @@ export function ChatPage() {
                     // 命令发现面（ADR-17）：底座自报的斜杠命令，undefined = 该底座不提供发现面
                     // （dsh 的 ACP 面不含命令）。输入框里打 `/` 时据此给候选，平台不声明这些命令。
                     commands={view?.commands}
+                    injectDraft={injectedDraft ?? undefined}
                   />
                   {dockLine && (
                     <div

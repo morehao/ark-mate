@@ -121,6 +121,20 @@ export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | '
  * **只认事件、不做本地推断**：投递与撤下是两条不同的事实，前端不靠「POST 成功」或超时去猜。
  * 刷新/重连靠历史回放重建（服务端重启作废队项时也会补发 cancelled，见 reason=stale）。
  */
+/**
+ * 排队项**离队原因**（`session.input_cancelled` 的 `reason`）。
+ *
+ * 与后端 `domain/session/inputqueue.go` 的 `QueuedInputReasons` **逐条相等**（由 archtest 的
+ * `TestQueuedInputReasonVocabularyIsClosed` 钉住）。为什么必须闭合：前端**只认事件**、不做本地
+ * 推断——后端多发一个前端不认的值，那一行就会永远挂在队列里（或者被渲染成"未知原因"）。
+ */
+export type QueuedInputReason =
+  | 'run_finished' // 因上一轮结束而投递（配合 input_delivered）
+  | 'user_cancel' // 用户显式撤下
+  | 'deliver_failed' // 投递时启动新一轮失败
+  | 'stale' // 进程重启：等待的那一轮已随进程消失
+  | 'user_edit' // 用户把队项取回编辑（ADR-10 的第三个动作）
+
 export interface QueuedInput {
   inputId: string
   text: string
