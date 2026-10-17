@@ -635,7 +635,13 @@ export function ChatPage() {
                     busy={busy}
                     workspace={
                       activeSum?.cwd
-                        ? { path: activeSum.cwd, temporary: !!activeSum.workspace_temporary }
+                        ? {
+                            path: activeSum.cwd,
+                            temporary: !!activeSum.workspace_temporary,
+                            // 服务端给的展示名（默认工作空间是「默认工作空间」散文口径）；
+                            // chip 自己按 temporary 映射成「默认」。
+                            title: activeSum.workspace_title,
+                          }
                         : undefined
                     }
                     busyNote={

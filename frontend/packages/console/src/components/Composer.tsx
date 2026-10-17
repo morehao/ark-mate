@@ -20,7 +20,7 @@ interface Props {
    * 之后不可变——它是底座 ACP session 的 cwd，也是原生权限 `workspace-write` 的沙箱边界，
    * 所以这里没有"改目录"入口：要换目录就新开一个会话。`temporary` 为服务端权威标志（平台代建）。
    */
-  workspace?: { path: string; temporary: boolean }
+  workspace?: { path: string; temporary: boolean; title?: string }
   /**
    * 底座自报的可用斜杠命令（`session.commands` 全量事件的投影；ADR-17）。
    * `undefined` = 该底座不提供命令发现面（dsh 即如此）→ 不显示候选；
@@ -165,7 +165,7 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
             在工作空间行（左栏），不在输入区。 */}
         {workspace && (
           <div className="fg-ws-chiprow">
-            <WorkspaceChipStatic path={workspace.path} temporary={workspace.temporary} />
+            <WorkspaceChipStatic path={workspace.path} temporary={workspace.temporary} title={workspace.title} />
           </div>
         )}
         <div className="fg-composer" style={{ padding: '10px 12px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>

@@ -57,8 +57,21 @@ interface Props {
   allowCreate?: boolean
 }
 
-/** 一条登记的展示名：'' = 未命名 → 末级目录名；默认工作空间由服务端已渲染好。 */
+/**
+ * 库里的默认工作空间标题是**语言中立的哨兵**（Go 侧 `store.DefaultWorkspaceTitle`）；
+ * 展示时映射成中文「默认」。用户改过名的默认工作空间照旧显示用户的名字。
+ */
+const DEFAULT_WORKSPACE_TITLE = 'default-workspace'
+
+/**
+ * 一条登记的展示名：默认工作空间读作「默认」；'' = 未命名 → 末级目录名。
+ *
+ * 为什么不在后端本地化：那是语言无关的 wire（跨语言切换/跨端必须一致），
+ * 同一条哨兵由 Go 的 `defaultWorkspaceDisplayTitle()`（散文语域用完整名词）与这里
+ * （行名/选择器/chip 用「默认」）各自映射。
+ */
 export function workspaceLabel(ws: Workspace): string {
+  if (ws.is_default && (!ws.title || ws.title === DEFAULT_WORKSPACE_TITLE)) return '默认'
   if (ws.title) return ws.title
   return splitDirPath(ws.path).name || ws.path
 }
@@ -202,7 +215,7 @@ export function WorkspacePicker({ value, onChange, disabled, variant = 'pill', a
             key={ws.id}
             type="button"
             className="fg-ws-item"
-            title={ws.path}
+            title={ws.is_default ? workspaceLabel(ws) : ws.path}
             disabled={busy || broken}
             onClick={() => applyWorkspace(ws)}
           >
@@ -216,7 +229,9 @@ export function WorkspacePicker({ value, onChange, disabled, variant = 'pill', a
                 {/* 未命名的项用**末级目录名**（服务端不给空标题编名字：那是语言相关的） */}
                 {workspaceLabel(ws)}
               </span>
-              <span className="fg-ws-item-sub">{ws.path}</span>
+              {/* 默认工作空间不展示绝对路径（需求 4）：那行只说明"这是平台给的目录"，
+                  路径本身在「设置 · 工作空间」里才是主题。 */}
+              <span className="fg-ws-item-sub">{ws.is_default ? '平台分配' : ws.path}</span>
             </span>
             {broken && <span className="fg-ws-item-meta">目录不可用</span>}
             {ws.id === value?.id && <CheckOutlined className="fg-ws-item-check" />}
@@ -266,7 +281,7 @@ export function WorkspacePicker({ value, onChange, disabled, variant = 'pill', a
                 使用{defaultWS ? `「${workspaceLabel(defaultWS)}」` : '平台分配的目录'}
               </span>
               <span className="fg-ws-item-sub">
-                {defaultWS ? defaultWS.path : '未指定工作空间时由平台分配'}
+                {defaultWS ? '平台分配' : '未指定工作空间时由平台分配'}
               </span>
             </span>
           </button>
@@ -292,7 +307,7 @@ export function WorkspacePicker({ value, onChange, disabled, variant = 'pill', a
             currentPath
               ? currentPath
               : defaultWS
-                ? `未指定：会话落在「${workspaceLabel(defaultWS)}」（${defaultWS.path}）`
+                ? `未指定：会话落在「${workspaceLabel(defaultWS)}」`
                 : '未指定：每个会话在创建时由平台分配一个独立工作目录'
           }
           // chip 的弹层朝下，tooltip 朝上会被挡；两者错开。
@@ -341,11 +356,13 @@ export function WorkspacePicker({ value, onChange, disabled, variant = 'pill', a
  * 形态对齐 DSH：它的工作空间 chip 在首条消息之后也是锁定的静态回声（`.workspace:disabled`）。
  */
 export function WorkspaceChipStatic({ path, temporary, title }: { path: string; temporary?: boolean; title?: string }) {
+  // `temporary` 是服务端的权威标志（= 落在默认工作空间上），不是从路径形状反推的。
+  // 默认工作空间在**所有面向用户的名字位**读作「默认」，且不回显绝对路径（需求 4）。
   return (
     <Tooltip
       title={
         <span style={{ fontFamily: tokens.fontMono, fontSize: 11 }}>
-          {title ?? path}
+          {temporary ? '默认工作空间 · 平台默认目录' : title ?? path}
           {temporary && (
             <>
               <br />
@@ -360,7 +377,9 @@ export function WorkspaceChipStatic({ path, temporary, title }: { path: string; 
     >
       <span className="fg-ws-chip fg-ws-chip-static">
         <FolderOpenOutlined style={{ fontSize: 16, color: tokens.textSecondary }} />
-        <span className="fg-ws-chip-name">{temporary ? '平台分配的目录' : splitDirPath(path).name || path}</span>
+        <span className="fg-ws-chip-name">
+          {temporary ? '默认' : title || splitDirPath(path).name || path}
+        </span>
       </span>
     </Tooltip>
   )
