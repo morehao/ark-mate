@@ -41,6 +41,13 @@ type MetaDeps interface {
 
 	// UpdateMeta 落库元数据（失败只告警，不阻断——所以它没有返回值）。
 	UpdateMeta(ctx context.Context, id string, meta model.SessionMetaPatch)
+
+	// CancelElicitations 会话**归档**时作废它的挂起提问（`reason:archive`，ADR-11）。
+	//
+	// 归档之后会话不该再接受回答——而挂起项还在的话，那张卡片既点得动又没人收，
+	// 用户会一直等一个不会来的答复。它**不返回错误**：作废是尽力而为的收尾，失败只告警
+	// （真实原因已经在服务端日志里，拦住归档反而更糟）。
+	CancelElicitations(sessionID string)
 }
 
 // Meta 元数据写面用例。依赖事实：会话域平面（就地改 + 回读投影）+ 上面那三份。
@@ -79,6 +86,11 @@ func (m *Meta) UpdateSession(ctx context.Context, id string, patch dtosession.Se
 		r.UpdatedAt = time.Now().UTC()
 	}) {
 		return nil, sessionNotFoundErr(id)
+	}
+
+	// 归档 ⇒ 挂起提问随之作废（先收口再落库：反过来的话，库里已经是归档态而卡片还挂着）。
+	if patch.Archived != nil && *patch.Archived {
+		m.deps.CancelElicitations(id)
 	}
 
 	appliedModelID := patch.Model

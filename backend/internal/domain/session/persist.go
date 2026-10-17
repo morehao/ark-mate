@@ -191,6 +191,8 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 	// 这不是假设——本批实现时正是这么写了一次，症状是全量测试挂死在这个 defer 上。
 	defer pl.SetRestoring(false)
 
+	// openElicitations 各会话「问了但没答」的挂起提问 id（按事件顺序增删；见下面的注入循环）。
+	openElicitations := map[string][]string{}
 	sessions, injected := 0, 0
 	interrupted := 0
 	interruptedIDs := make([]string, 0, 8)
@@ -234,6 +236,23 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 			}
 			for _, ev := range evs {
 				ver[ev.SessionID]++
+				// 挂起提问的**未决**账：重启之后它们一条都活不下来（管理面在内存里），
+				// 但历史里那条 `elicitation_request` 还在——前端回放就会渲染出一张**永远
+				// 回答不了**的卡片。这里记下 id，注入结束后逐条补 `resolved{cancel,restart}`。
+				switch ev.Type {
+				case BusElicitationRequest:
+					if m, ok := DecodePayload(ev.PayloadJSON).(map[string]any); ok {
+						if id, _ := m["elicitation_id"].(string); id != "" {
+							openElicitations[ev.SessionID] = append(openElicitations[ev.SessionID], id)
+						}
+					}
+				case BusElicitationResolved:
+					if m, ok := DecodePayload(ev.PayloadJSON).(map[string]any); ok {
+						if id, _ := m["elicitation_id"].(string); id != "" {
+							openElicitations[ev.SessionID] = removeString(openElicitations[ev.SessionID], id)
+						}
+					}
+				}
 				pl.bus.PublishAt(ev.SessionID, ev.Seq, ev.ID, ev.Type, ver[ev.SessionID], DecodePayload(ev.PayloadJSON))
 				// `run.status` 的**投影**在同一次回放里重建（不再为它多扫一遍库）：重启之后
 				// `GET /sessions/:id` 的 `run` 段仍然说得出「上一轮停在哪一步」。
@@ -256,6 +275,12 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 	// 必须放在**事件注入之后**：这些收口事件是新铸的（落库拿到最新位次），若先发再注入，bus 的
 	// `nextSeq` 已经被它推到前面，随后逐条 `PublishAt` 回放的历史事件会被**逐个顶号**——位次是
 	// 续传游标，顶号等于把客户端的 since_seq 全部错开（而表面上一切正常）。
+	// 挂起提问的**作废**（ADR-11 / P1-d）：同上，必须排在事件注入之后（理由逐字相同）。
+	//
+	// **比参照产品弱一档（如实写）**：dsh 的 pending 跨 Host 重启仍可回答（回复作为新一轮进入）；
+	// 本仓选择「重启即作废」。理由是 elicitation 的归属（D1）只能**推断**（wire /
+	// inferred_inflight / ambiguous），跨重启保留 pending 会把一个推断出来的归属当成权威。
+	pl.cancelDanglingElicitations(openElicitations)
 	pl.closeInterruptedRuns(ctx, interruptedIDs)
 
 	// 读模型重建（v21）：迁移把 `meta.read_models_rebuild` 置成刚跑过的版本号，表示"位次口径换了、
@@ -466,4 +491,38 @@ func (pl *Plane) RuntimeValueToModelID(ctx context.Context, runtimeID string) ma
 		delete(seen, v)
 	}
 	return seen
+}
+
+// cancelDanglingElicitations 重启恢复后把「问了但没答」的挂起提问逐条作废（`reason:restart`）。
+//
+// 为什么必须有这一条：挂起提问只活在进程内存里，重启后**一条都不在了**——但历史里那条
+// `elicitation_request` 还在。前端回放会据此渲染一张卡片，而那张卡片背后已经没有任何挂起项：
+// 用户填完点提交，服务端只能回「不存在或已过期」。**看起来能点，点下去才发现不行**——这正是
+// 本仓最忌的那类静默。
+//
+// 不发事件的另一半后果更隐蔽：卡片一直挂着，用户会以为"它还在等我"。
+func (pl *Plane) cancelDanglingElicitations(open map[string][]string) {
+	if pl.bus == nil {
+		return
+	}
+	for sessionID, ids := range open {
+		for _, id := range ids {
+			pl.Publish(BusElicitationResolved, sessionID, map[string]any{
+				"session_id":     sessionID,
+				"elicitation_id": id,
+				"action":         "cancel",
+				"reason":         ElicitationReasonRestart,
+			})
+		}
+	}
+}
+
+// removeString 从切片里删掉一个值（只删第一处；不存在即原样返回）。
+func removeString(list []string, v string) []string {
+	for i, it := range list {
+		if it == v {
+			return append(list[:i:i], list[i+1:]...)
+		}
+	}
+	return list
 }

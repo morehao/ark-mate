@@ -230,7 +230,7 @@ func (h *sessionCtr) ResolveElicitation(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	if err := h.interaction.ResolveElicitation(c.Request.Context(), c.Param("id"), req.ElicitationID, req.Action, req.Content); err != nil {
+	if err := h.interaction.ResolveElicitation(c.Request.Context(), c.Param("id"), req.ElicitationID, req.Action, req.Content, req.Late); err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
 	}

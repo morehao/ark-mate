@@ -331,13 +331,20 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       }
     }
     case Ev.ElicitationResolved: {
-      // 挂起提问终局（accept/decline/cancel/超时自动取消）——同上，收敛以服务端事件为准。
+      // 挂起提问终局——同上，收敛以服务端事件为准。
+      //
+      // **例外：`action:"pending"` 不收敛**（ADR-11）。它说的是"那一轮不等了，但你想答还是能答"：
+      // 卡片留着、按钮可点，只是多一句"仍可回答"。把它并进收敛就是把「去倒杯水回来，整轮要重来」
+      // 写进代码——而这是这一档存在的全部理由。
       const elicitationId = String(e.payload?.elicitation_id ?? '')
+      const pending = String(e.payload?.action ?? '') === 'pending'
       return {
         ...v,
         entries: entries.map((en): StreamEntry =>
           en.kind === 'elicitation' && en.elicitationId === elicitationId && !en.resolved
-            ? { ...en, resolved: true, decision: elicitationResolvedLabel(e.payload) }
+            ? pending
+              ? { ...en, pendingLate: true }
+              : { ...en, resolved: true, decision: elicitationResolvedLabel(e.payload) }
             : en,
         ),
         lastSeq,
@@ -1210,10 +1217,17 @@ export const useMate = create<MateStore>((set, get) => {
       const id = get().activeId
       if (!id) return
       try {
+        // `late` 由**这一面**判定（卡片自己的状态），不由调用方传：调用方（表单/按钮）不该
+        // 知道"这一轮是不是已经不等了"——那是事件投影出来的事实。
+        const entry = get().views[id]?.entries.find(
+          (en) => en.kind === 'elicitation' && en.elicitationId === elicitationId,
+        )
+        const late = entry?.kind === 'elicitation' ? entry.pendingLate === true : false
         await resolveElicitation(id, {
           elicitation_id: elicitationId,
           action: decision.action,
           content: decision.content,
+          late,
         })
         // 本地就地标记该提问卡已决策（按钮禁用 + 展示结果），底座随后经 WS 续流。
         set((s) => {

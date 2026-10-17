@@ -97,6 +97,14 @@ function PermissionCard({ e }: { e: StreamEntry }) {
             {e.toolCallId && <span>{e.toolCallId}</span>}
           </span>
         </div>
+        {/* 超时转 pending（ADR-11）：**卡片留着**，只多一句"仍可回答"。这一档的全部意义就是
+            用户去倒杯水回来还能答——把它画成"已收尾"等于把那一档删掉。 */}
+        {e.pendingLate && !resolved && (
+          <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>
+            这一轮已经不等了，但问题仍然可以回答；回答会作为新一轮发出去。
+          </span>
+        )}
+
         {resolved ? (
           <span
             style={{

@@ -213,11 +213,13 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	o.perm.SetMemoryHooks(o.svc.persistMemoryAdd, o.svc.persistMemoryDel, o.svc.persistMemoryDelAll)
 	// 挂起提问一旦有终局（accept/decline/cancel/超时自动取消/会话取消），发布收敛事件
 	// （session.elicitation_resolved），前端据此收敛提问卡——服务端事件是唯一事实。
-	o.elic.SetOnResolved(func(sessionID, id, reason string, d acl.ElicitationOutcome) {
+	// `action` 由域给出，**不是**回给底座的那个 outcome：超时那一支要发 `pending`（卡片保留可答），
+	// 而回给底座的仍是 `cancel`（那一轮的 ACP 调用必须有人应答）。这个不对称是 ADR-11 的核心。
+	o.elic.SetOnResolved(func(sessionID, id, action, reason string) {
 		o.svc.publish(session.BusElicitationResolved, sessionID, map[string]any{
 			"session_id":     sessionID,
 			"elicitation_id": id,
-			"action":         d.Action,
+			"action":         action,
 			"reason":         reason,
 		})
 	})

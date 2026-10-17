@@ -168,7 +168,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		"func NewInteraction(plane *session.Plane, deliver InteractionDelivery) InteractionSvc",
 		"var _ InteractionSvc = (*Interaction)(nil)",
 		"func (h *Interaction) ResolvePermission(_ context.Context, id, callID, optionID string, always, allowed bool) (*dtosession.PermissionDecisionResp, error)",
-		"func (h *Interaction) ResolveElicitation(_ context.Context, id, elicitationID, action string, content map[string]any) error",
+		"func (h *Interaction) ResolveElicitation(_ context.Context, id, elicitationID, action string, content map[string]any, late bool) error",
 		"func (h *Interaction) RevokeMemory(_ context.Context, id, title, kind string) error",
 		// 两个"不是域回执"的码：它们是这一层的判据（跨会话/已过期一律按不存在处理）。
 		`"permission_not_found"`,
@@ -177,7 +177,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		// （本包不许 import svc，端口一旦用 svc 自己声明的值类型，适配器就没有落点）。
 		"type InteractionDelivery interface {",
 		"ResolvePermission(sessionID, callID, optionID string, always, allowed bool) (interaction.DecisionOutcome, bool, error)",
-		"ResolveElicitation(sessionID, elicitationID, action string, content map[string]any) (bool, error)",
+		"ResolveElicitation(sessionID, elicitationID, action string, content map[string]any, late bool) (bool, error)",
 		"RevokeMemory(sessionID, title, kind string) (bool, error)",
 	}
 	for _, a := range interactionAnchors {

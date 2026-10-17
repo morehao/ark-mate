@@ -112,12 +112,14 @@ type stubSvc struct {
 	revokeKind  string
 	revokeErr   error
 
-	pendingPerms        []interaction.PermissionItem
-	elicitations        []interaction.ElicitationItem
-	resolvedElicID      string
-	resolvedElicAction  string
-	resolvedElicContent map[string]any
-	resolveElicErr      error
+	pendingPerms         []interaction.PermissionItem
+	elicitations         []interaction.ElicitationItem
+	resolvedElicID       string
+	resolvedElicAction   string
+	resolvedElicContent  map[string]any
+	resolvedElicLate     bool
+	cancelledElicSession string
+	resolveElicErr       error
 
 	skills []dtocapability.SkillResp // P1 能力数据面桩
 	// §13.4 S4 启停桩
@@ -423,12 +425,19 @@ func (s *stubSvc) RevokeMemory(sessionID, title, kind string) (bool, error) {
 	s.revokeKind = kind
 	return true, s.revokeErr
 }
-func (s *stubSvc) ResolveElicitation(sessionID, elicitationID, action string, content map[string]any) (bool, error) {
+func (s *stubSvc) ResolveElicitation(sessionID, elicitationID, action string, content map[string]any, late bool) (bool, error) {
 	s.resolvedElicID = elicitationID
 	s.resolvedElicAction = action
 	s.resolvedElicContent = content
+	s.resolvedElicLate = late
 	return true, s.resolveElicErr
 }
+
+// CancelElicitations 归档时作废挂起提问（ADR-11）：替身只记账。
+func (s *stubSvc) CancelElicitations(sessionID string) {
+	s.cancelledElicSession = sessionID
+}
+
 func (s *stubSvc) CreateSession(_ context.Context, req dtosession.SessionCreateReq) (*dtosession.SessionCreateResp, error) {
 	s.createCalled = true
 	s.createReq = req

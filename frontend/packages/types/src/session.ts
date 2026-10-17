@@ -339,13 +339,27 @@ export interface ElicitationResp {
   timeout_at: string // ISO；过期即 service 自动取消
 }
 
-export type ElicitationAction = 'accept' | 'decline' | 'cancel'
+/**
+ * 一条挂起提问的**境况**（服务端事件 `session.elicitation_resolved` 的 `action`，ADR-11）。
+ *
+ * `pending` 与 `cancel` 的区别是全部的：`cancel` 说"这张卡没了"，而 `pending` 说
+ * "那一轮不等了，但你想答还是能答"——迟到的回答**作为新一轮**进去（不是塞回旧轮）。
+ */
+export type ElicitationAction = 'accept' | 'decline' | 'cancel' | 'pending'
 
 /** 决策体：accept=提交（content 为表单内容对象）；decline=拒绝提供；cancel=取消本次提问。 */
 export interface ResolveElicitationReq {
   elicitation_id: string
   action: ElicitationAction
   content?: Record<string, unknown>
+  /**
+   * 回答一条**已经超时转 pending** 的提问（ADR-11）。
+   *
+   * 它走的不是"投给那一轮"而是"作为**新一轮**的用户消息进去"：那一轮的 ACP 调用在超时那一刻
+   * 就已经拿到 `cancel` 返回了。缺省 false —— 服务端不替你猜（猜错的两个方向都很难看：
+   * 把新回答塞进旧轮 / 把正在等的那条当迟到处理）。
+   */
+  late?: boolean
 }
 
 export interface ResolveElicitationResp {

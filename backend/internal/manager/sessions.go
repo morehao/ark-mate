@@ -173,3 +173,15 @@ func (s *Service) CancelRun(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// CancelElicitations 归档时作废该会话的挂起提问（`reason:archive`，ADR-11）。
+//
+// 走 `CancelSessionReason` 而不是直接删表项：那一支会把 `cancel` 投给正在等的那一轮、
+// 再由 `RegisterAndWait` 的终局回调发 `elicitation_resolved{action:cancel, reason:archive}`
+// ——**事件是前端收敛卡片的唯一事实**，删表项不发事件等于留一张永远回答不了的卡。
+func (s *Service) CancelElicitations(sessionID string) {
+	if s.orch == nil || sessionID == "" {
+		return
+	}
+	s.orch.CancelElicitations(sessionID)
+}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -209,9 +211,14 @@ func (o *Orchestrator) PendingElicitations(sessionID string) []interaction.Elici
 
 // ResolveElicitation 按 elicitation_id 投递决策（accept/decline/cancel；accept 可带 content）。
 // sessionID 是决策发起方会话：C3 起做 scope 校验，只有归属会话能决策（跨会话 → not found）。
-func (o *Orchestrator) ResolveElicitation(sessionID, elicitationID, action string, content map[string]any) (bool, error) {
+// `late=true` 走另一条路（ADR-11）：那条提问已经超时转 pending，那一轮的 ACP 调用早已拿到
+// `cancel` 返回，所以回答**不能**塞回旧轮——它作为**新一轮**的用户消息进去（见 `lateElicitation`）。
+func (o *Orchestrator) ResolveElicitation(sessionID, elicitationID, action string, content map[string]any, late bool) (bool, error) {
 	if elicitationID == "" {
 		return false, acl.NewError(acl.ClassRequest, "elicitation_id_required", "elicitation_id 必填", nil)
+	}
+	if late {
+		return o.lateElicitation(sessionID, elicitationID, action, content)
 	}
 	var found, mismatch bool
 	switch action {
@@ -234,4 +241,83 @@ func (o *Orchestrator) ResolveElicitation(sessionID, elicitationID, action strin
 		o.svc.sessionPlane.ResumeRunStatus(sessionID)
 	}
 	return found, nil
+}
+
+// CancelElicitations 归档时作废该会话的挂起提问（`reason:archive`）。
+func (o *Orchestrator) CancelElicitations(sessionID string) {
+	o.elic.CancelSessionReason(sessionID, session.ElicitationReasonArchive)
+}
+
+// lateElicitation 回答一条**已经超时转 pending** 的提问（ADR-11）。
+//
+// 与常态那一支的分界不是"参数不同"，而是**语义不同**：
+//
+//	常态（还在阻塞等）  回答投给那一轮 → 底座的 elicitation/create 拿到结果 → 那一轮继续
+//	迟到（已超时转 pending） 那一轮早已收尾 → 回答**作为新一轮**的用户消息进去
+//
+// `accept` 才会起新一轮；`decline`/`cancel` 只是把卡片收敛（用户不想答，没有内容可发）。
+//
+// 起新一轮用 `o.Prompt`（队列/忙判据/开轮三连全都在那一条路上）——不直接调底座：那会绕开
+// 忙碌判定与事件铸造，而"绕过的那一半"在界面上完全看不出来。
+func (o *Orchestrator) lateElicitation(sessionID, elicitationID, action string, content map[string]any) (bool, error) {
+	message, found, mismatch := o.elic.ResolveLate(sessionID, elicitationID)
+	if mismatch {
+		return false, acl.NewError(acl.ClassRequest, "elicitation_not_found",
+			fmt.Sprintf("结构化提问 %q 不存在或已过期", elicitationID), nil)
+	}
+	if !found {
+		// 不是 pending 态：说明它还在等（走常态）或压根不存在。两种都**不**猜——交给调用方
+		// 按 `late=false` 重试，或者如实回"不存在"（与常态那一支同一条出路）。
+		return false, acl.NewError(acl.ClassRequest, "elicitation_not_found",
+			fmt.Sprintf("结构化提问 %q 不在「超时仍可回答」状态", elicitationID), nil)
+	}
+	// 卡片收敛：`reason:late` 说得出"这是迟到的回答"（与 `user` 分开，界面文案不同）。
+	o.svc.publish(session.BusElicitationResolved, sessionID, map[string]any{
+		"session_id":     sessionID,
+		"elicitation_id": elicitationID,
+		"action":         action,
+		"reason":         "late",
+	})
+	if action != "accept" {
+		return true, nil
+	}
+	text := lateAnswerText(message, content)
+	if text == "" {
+		return true, nil
+	}
+	if _, err := o.Prompt(context.Background(), sessionID, text); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+// lateAnswerText 把迟到回答拼成一条**用户消息**的正文（确定性顺序：按 key 排序）。
+//
+// 为什么不发明一个"结构化回答"的消息类型：那一轮已经结束了，这条东西在历史里就是**用户说的话**
+// ——界面上它必须与其它用户消息长得一样，否则下一轮读它的模型会看到一个没人定义过的形状。
+func lateAnswerText(question string, content map[string]any) string {
+	keys := make([]string, 0, len(content))
+	for k := range content {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	if question != "" {
+		b.WriteString("关于「")
+		b.WriteString(question)
+		b.WriteString("」的回答：")
+	} else {
+		b.WriteString("关于上一个提问的回答：")
+	}
+	if len(keys) == 0 {
+		b.WriteString("（无内容）")
+		return b.String()
+	}
+	for _, k := range keys {
+		b.WriteString("\n- ")
+		b.WriteString(k)
+		b.WriteString("：")
+		b.WriteString(fmt.Sprintf("%v", content[k]))
+	}
+	return b.String()
 }

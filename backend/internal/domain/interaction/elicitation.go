@@ -38,15 +38,20 @@ type pendingElicitation struct {
 	urlID       string         // url 模式的 ACP elicitationId（elicitation/complete 的反查锚点）
 	ch          chan elicitationResolution
 	timeout     time.Time
+	// late 已经**超时转 pending**（ADR-11）：卡片仍可回答，但那一轮的 ACP 调用已经回给底座了，
+	// 所以晚到的回答不能再塞回旧轮——它要作为**新一轮**的用户消息进去（见 `ResolveLate`）。
+	late bool
 }
 
 // ElicitationManager 管理挂起结构化提问：注册 → 发布事件 → 等待决策 → 按 id 回馈。
 // 与 PermissionManager 同构（无「始终允许」类记忆：每次提问独立征询）。
 type ElicitationManager struct {
-	mu         sync.Mutex
-	pending    map[string]*pendingElicitation
-	timeout    time.Duration
-	onResolved func(sessionID, id, reason string, d acl.ElicitationOutcome)
+	mu      sync.Mutex
+	pending map[string]*pendingElicitation
+	timeout time.Duration
+	// onResolved 挂起提问「对事件说的话」：action 可能 **不是** 回给底座的那个 outcome
+	// （超时那一支要发 `pending`，而回给底座的仍是 `cancel`——ADR-11 的关键一处不对称）。
+	onResolved func(sessionID, id, action, reason string)
 }
 
 // NewElicitationManager 构造提问管理器。
@@ -68,10 +73,48 @@ func (m *ElicitationManager) SetTimeout(d time.Duration) {
 }
 
 // SetOnResolved 注入「挂起提问已决」回调（user/timeout/cancel 全路径，供发布收敛事件；可为 nil）。
-func (m *ElicitationManager) SetOnResolved(fn func(sessionID, id, reason string, d acl.ElicitationOutcome)) {
+func (m *ElicitationManager) SetOnResolved(fn func(sessionID, id, action, reason string)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onResolved = fn
+}
+
+// actionPending 挂起提问的超时形态：**问题仍可回答**（不是空答案、拒绝、确认或授权）。
+//
+// 它只出现在 `session.elicitation_resolved` 的 `action` 上，**永远不会**回给底座——
+// 回给底座的仍是 `cancel`（那一轮的 ACP 调用必须有人应答）。这个不对称是 ADR-11 的核心：
+// 「对用户说的」与「对底座说的」是两件事。
+// 与 `domain/session` 的 `ElicitationActionPending` **逐字同值**（两个包不能互相 import：
+// 事件常量的家在 session，管理面的家在 interaction）。这条边由 archtest 的
+// `TestElicitationTimeoutBecomesPending` 钉着。
+const actionPending = "pending"
+
+// ResolveLate 回答一条**已经超时转 pending** 的提问：抹掉挂起项并回问题正文（供调用方把它
+// 作为**新一轮**的用户消息注入）。`late=false` 的条目（还在阻塞等决策）→ `found=false`：
+// 那种情况走 `ResolveAccept/Decline/Cancel`，两条路刻意不混。
+//
+// 为什么晚到的回答不能塞回旧轮：那一轮的 ACP 调用在超时那一刻就已经拿到 `cancel` 返回了，
+// 底座那边的 agent 早已继续（或被收尾）。把回答投进一个已经关闭的通道，表现是"点了发送、
+// 什么都没发生"——而这是本仓最忌的那类静默。
+//
+// **比参照产品弱一档（如实写）**：dsh 的 pending 跨 Host 重启仍可回答（回复作为新一轮进入）。
+// 本仓选择「重启即作废」，理由是 elicitation 的归属在 D1 里只能**推断**（wire /
+// inferred_inflight / ambiguous），跨重启保留 pending 会把一个推断出来的归属当成权威。
+// 这条偏离登记在 `docs/unimplemented.md`。
+func (m *ElicitationManager) ResolveLate(sessionID, id string) (message string, found, mismatch bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.pending[id]
+	if !ok || !p.late {
+		return "", false, false
+	}
+	if sessionID != "" && p.sessionID != sessionID {
+		glog.Warnw(context.Background(), "elicitation: 迟到回答的会话与归属不符，拒绝（scope mismatch）",
+			"id", id, "owner", p.sessionID, "caller", sessionID)
+		return "", true, true
+	}
+	delete(m.pending, id)
+	return p.message, true, false
 }
 
 // genElicitationID 生成稳定 id。
@@ -102,6 +145,14 @@ func schemaMap(s *acl.ElicitationSchema) map[string]any {
 
 // CancelSession 取消某会话的全部挂起提问（session/cancel 后按 Cancelled 回馈 agent）。
 func (m *ElicitationManager) CancelSession(sessionID string) {
+	m.CancelSessionReason(sessionID, reasonCancel)
+}
+
+// CancelSessionReason 同上，但由调用方给出**终局原因**（`cancel` / `archive` / `restart`）。
+//
+// 为什么要分开：收敛事件里的 `reason` 是给用户看的——「这一轮被取消」与「会话归档了」
+// 是两件不同的事，用同一个值就只能靠猜。
+func (m *ElicitationManager) CancelSessionReason(sessionID, reason string) {
 	m.mu.Lock()
 	var victims []*pendingElicitation
 	for _, p := range m.pending {
@@ -114,7 +165,7 @@ func (m *ElicitationManager) CancelSession(sessionID string) {
 	for _, p := range victims {
 		// 直接向持有 channel 投递（此时条目已移出 map，不能走按 id 的 resolve）。
 		select {
-		case p.ch <- elicitationResolution{outcome: acl.ElicitationOutcome{Action: "cancel"}, reason: reasonCancel}:
+		case p.ch <- elicitationResolution{outcome: acl.ElicitationOutcome{Action: "cancel"}, reason: reason}:
 		default:
 		}
 	}
@@ -202,8 +253,14 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID stri
 	timer := time.NewTimer(m.timeout)
 	defer timer.Stop()
 
-	var d acl.ElicitationOutcome
-	reason := reasonUser
+	var (
+		d acl.ElicitationOutcome
+		// eventAction 是对**事件**说的话，可能与回给底座的 `d.Action` 不同：超时那一支回给底座的是
+		// `cancel`（那一轮的 ACP 调用必须有人应答），而事件说 `pending`（问题仍可回答）。
+		eventAction = ""
+		reason      = reasonUser
+		pendingLate = false
+	)
 	select {
 	case r := <-p.ch:
 		// 已决策：结果与终局原因（user / complete）由投递方一并给出
@@ -212,18 +269,39 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID stri
 		d = acl.ElicitationOutcome{Action: "cancel"} // 取消
 		reason = reasonCancel
 	case <-timer.C:
-		glog.Warnw(ctx, "elicitation: request timeout, auto-cancel", "session", sessionID, "id", id)
+		// **超时不等于取消**（ADR-11，对齐参照产品的 open|continued|settled 状态机）：
+		// 30 分钟无人回答只说明"现在没人看着"，不说明"用户不想答"。今天这一支铸的是 `cancel`，
+		// 于是卡片消失、用户去倒杯水回来就得把整轮重来一遍——那是真实的可用性损失，而修法
+		// 不引入任何新的不变量。
+		//
+		// 两件事同时发生：
+		//   ① 回给底座 `cancel`（那一轮不能永远挂着——ACP 调用必须有人应答）；
+		//   ② 挂起项**留在** map 里并标 `late`、清掉 `timeout_at`（卡片保留、无期限可答），
+		//      事件发 `pending`。迟到的回答走 `ResolveLate` → **作为新一轮**的用户消息进去。
+		glog.Warnw(ctx, "elicitation: request timeout, 转 pending（卡片保留可回答）",
+			"session", sessionID, "id", id)
 		d = acl.ElicitationOutcome{Action: "cancel"}
-		reason = reasonTimeout
+		eventAction, reason = actionPending, reasonTimeout
+		pendingLate = true
 	}
 	m.mu.Lock()
-	delete(m.pending, id)
-	onResolved := m.onResolved
-	m.mu.Unlock()
-	if onResolved != nil {
-		onResolved(sessionID, id, reason, d)
+	if pendingLate {
+		p.late = true
+		p.timeout = time.Time{} // 无期限：`timeout_at` 不再下发，界面也不再起倒计时
+	} else {
+		delete(m.pending, id)
 	}
-	glog.Infow(ctx, "elicitation: resolved", "session", sessionID, "id", id, "action", d.Action, "reason", reason)
+	fn := m.onResolved
+	m.mu.Unlock()
+	if fn != nil {
+		action := d.Action
+		if eventAction != "" {
+			action = eventAction
+		}
+		fn(sessionID, id, action, reason)
+	}
+	glog.Infow(ctx, "elicitation: resolved", "session", sessionID, "id", id,
+		"action", d.Action, "event_action", eventAction, "reason", reason)
 	return d
 }
 

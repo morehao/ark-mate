@@ -173,6 +173,14 @@ export interface StreamEntry {
   schema?: ElicitationFormSchema // form 模式字段 schema（UI 据此渲染控件）
   url?: string // url 模式链接
   content?: Record<string, unknown> // accept 时用户提交的内容（结果展示）
+  /**
+   * 已**超时但问题仍可回答**（ADR-11 的 `action:"pending"`）。
+   *
+   * 与 `resolved` 互斥：`resolved` 说"这张卡没了"，它说"那一轮不等了，但你想答还是能答"。
+   * 卡片据此保留按钮 + 显示一句「仍可回答」；回答时请求体带 `late:true`，
+   * 那条回答**作为新一轮**的用户消息进去（不是塞回已经收尾的旧轮）。
+   */
+  pendingLate?: boolean
   /** 失败时的 runtime stderr 诊断尾巴（A3；错误条目可展开查看，空 = 无采集）。 */
   stderrTail?: string[]
 }
