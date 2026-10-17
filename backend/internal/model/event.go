@@ -45,7 +45,7 @@ type EventEntity struct {
 	// 而行的身份是 `ID`。排序、比较、水位一律用它（守卫 G1 禁止按 id 游标）。
 	Seq       int64  `gorm:"column:seq;not null"`
 	SessionID string `gorm:"column:session_id;not null"`
-	// Type 事件类型。取值权威定义在 internal/manager/events.go。
+	// Type 事件类型。取值权威定义在 internal/domain/session/events.go。
 	Type string `gorm:"column:type;not null"`
 	// PayloadJSON 事件载荷（一律序列化为 JSON 文本，含结构体载荷）。
 	PayloadJSON string    `gorm:"column:payload_json;not null"`

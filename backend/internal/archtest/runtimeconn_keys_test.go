@@ -61,7 +61,7 @@ func TestConnectionKeysLiveInRuntimeconn(t *testing.T) {
 
 	// manager 侧：**全部**生产文件（第五十四刀起不再有"转发文件"豁免——`connection.go` 里
 	// 那五个键派生转发已随本刀删除）。
-	dir := filepath.Join(root, "internal", "manager")
+	dir := filepath.Join(root, "internal", "sessionruntime")
 	files := productionGoFiles(t, dir)
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：守卫失去检查对象", dir)
@@ -70,7 +70,7 @@ func TestConnectionKeysLiveInRuntimeconn(t *testing.T) {
 		body := stripLineComments(readFileOrFatal(t, path))
 		for _, m := range keyDerivationMarkers {
 			if strings.Contains(body, m) {
-				t.Errorf("internal/manager/%s 里出现连接键/代际键的派生本体或取键点 %q：它**只有一份实现**，"+
+				t.Errorf("internal/sessionruntime/%s 里出现连接键/代际键的派生本体或取键点 %q：它**只有一份实现**，"+
 					"在 `internal/runtimeconn`（P3a-2 第三刀派生、P4a 第五十四刀取键）。\n"+
 					"两份的后果不是报错而是静默分叉：迁移判据说「不用换进程」而 acquire 换了——"+
 					"表现为改了能力选择之后一部分会话仍跑在旧配置的进程上。", filepath.Base(path), m)

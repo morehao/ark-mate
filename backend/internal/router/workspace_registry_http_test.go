@@ -9,9 +9,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
@@ -30,28 +30,28 @@ import (
 // registryApp 装配真路由 + 真 manager + 独立 sqlite 库（工作区白名单：不受限）。
 //
 // 返回 service 是为了让用例能直接调领域方法做前置（例如建出默认工作空间）。
-func registryApp(t *testing.T) (*manager.Service, string, string) {
+func registryApp(t *testing.T) (*sessionruntime.Service, string, string) {
 	t.Helper()
 	dbPath := testutil.TempDBPath(t)
 	st := testutil.OpenStore(t, dbPath)
 	t.Cleanup(func() { _ = st.Close() })
 
-	svc := manager.NewService(runtime.NewRegistry(), eventbus.New())
+	svc := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New())
 	svc.EnableStore(st)
 
 	// 工作空间根放在**私有临时目录**下（本机隔离纪律：绝不碰 ~/.ark-mate）。
 	provision := filepath.Join(t.TempDir(), "workspaces")
-	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
+	if err := svc.Planes().Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	if err := svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
+	if err := svc.Planes().Workspaces.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 
 	return svc, dbPath, provision
 }
 
-func callJSON(t *testing.T, svc *manager.Service, method, path, body string) (int, json.RawMessage) {
+func callJSON(t *testing.T, svc *sessionruntime.Service, method, path, body string) (int, json.RawMessage) {
 	t.Helper()
 	env := doRaw(t, svc, method, path, body)
 	var parsed struct {
@@ -152,7 +152,7 @@ func TestWorkspaceRegistryHTTPFlow(t *testing.T) {
 	}
 
 	// ⑦ 删除（DELETE）：只删登记，目录仍在（数据保留）。
-	if _, err := svc.WorkspacePlane().CreateRegisteredWorkspace(dirA, "", false); err != nil {
+	if _, err := svc.Planes().Workspaces.CreateRegisteredWorkspace(dirA, "", false); err != nil {
 		t.Fatalf("前置登记: %v", err)
 	}
 	_, dataDel := callJSON(t, svc, "DELETE", "/v1/mate/workspaces/"+wsA.ID, "")
@@ -179,28 +179,28 @@ func TestWorkspaceRegistryHTTPFlow(t *testing.T) {
 func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	st := testutil.OpenStore(t, dbPath)
-	svc := manager.NewService(runtime.NewRegistry(), eventbus.New())
+	svc := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New())
 	svc.EnableStore(st)
 	provision := filepath.Join(t.TempDir(), "workspaces")
-	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
+	if err := svc.Planes().Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	if err := svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
+	if err := svc.Planes().Workspaces.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 	dir1, dir2 := t.TempDir(), t.TempDir()
-	if _, err := svc.WorkspacePlane().CreateRegisteredWorkspace(dir1, "第一个", false); err != nil {
+	if _, err := svc.Planes().Workspaces.CreateRegisteredWorkspace(dir1, "第一个", false); err != nil {
 		t.Fatalf("登记 1: %v", err)
 	}
-	ws2, err := svc.WorkspacePlane().CreateRegisteredWorkspace(dir2, "第二个", false)
+	ws2, err := svc.Planes().Workspaces.CreateRegisteredWorkspace(dir2, "第二个", false)
 	if err != nil {
 		t.Fatalf("登记 2: %v", err)
 	}
 	// 把第二个移到最前，落一个**非创建顺序**的顺序进库。
-	if _, err := svc.WorkspacePlane().MoveRegisteredWorkspace(ws2.ID, ""); err != nil {
+	if _, err := svc.Planes().Workspaces.MoveRegisteredWorkspace(ws2.ID, ""); err != nil {
 		t.Fatalf("重排: %v", err)
 	}
-	before, err := svc.WorkspacePlane().WorkspaceRegistry()
+	before, err := svc.Planes().Workspaces.WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}
@@ -209,16 +209,16 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	// 重新打开同一个库（等价重启）：登记与顺序都必须在。
 	st2 := testutil.OpenStore(t, dbPath)
 	t.Cleanup(func() { _ = st2.Close() })
-	svc2 := manager.NewService(runtime.NewRegistry(), eventbus.New())
+	svc2 := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New())
 	svc2.EnableStore(st2)
-	if err := svc2.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
+	if err := svc2.Planes().Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy(重启): %v", err)
 	}
 	// 幂等：默认工作空间已存在 → 不重建、不改顺序。
-	if err := svc2.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
+	if err := svc2.Planes().Workspaces.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace(重启): %v", err)
 	}
-	after, err := svc2.WorkspacePlane().WorkspaceRegistry()
+	after, err := svc2.Planes().Workspaces.WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry(重启): %v", err)
 	}
@@ -241,7 +241,7 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 
 // TestWorkspaceRegistryMemoryModeIsReadOnlyHTTP memory 持久层：读面空 + 不可写，写面 40501。
 func TestWorkspaceRegistryMemoryModeIsReadOnlyHTTP(t *testing.T) {
-	svc := manager.NewService(runtime.NewRegistry(), eventbus.New()) // 无库 = memory
+	svc := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New()) // 无库 = memory
 	env := doRaw(t, svc, "GET", "/v1/mate/workspaces", "")
 	var parsed struct {
 		Code int                            `json:"code"`
@@ -272,20 +272,20 @@ func TestWorkspaceRegistryMemoryModeIsReadOnlyHTTP(t *testing.T) {
 }
 
 // doRaw 走真实路由表发一次请求，返回原始信封字节。
-func doRaw(t *testing.T, svc *manager.Service, method, path, body string) []byte {
+func doRaw(t *testing.T, svc *sessionruntime.Service, method, path, body string) []byte {
 	t.Helper()
 	engine := router.New(router.Ports{
 		Session:        svc,
-		WorkspacePlane: svc.WorkspacePlane(), Picker: svc.Picker(),
+		WorkspacePlane: svc.Planes().Workspaces, Picker: svc.Planes().Picker,
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
 		Runtime:       runtimeconn.NewPlaneFor(nil),
-		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,
-		Model: svc,
+		ProviderPlane: svc.Planes().Providers, ProviderCatalog: svc.Planes().Providers,
+		Model: sessionruntime.NewModelFace(svc),
 		// Library 读模型（P4a 正文第六刀）：这条夹具只走工作空间路由，但**不埋 nil**——
 		// 读模型拿的是真注册表与真能力面（注册表另起一份：本文件不断言读模型）。
-		Capabilities: svc.CapabilityRegistry(), SkillPlane: svc.SkillPlane(),
-		Registry: runtime.AllBuiltinRegistry(), McpSecrets: svc.McpSecrets(),
-		McpGatewayEnabled: svc.McpGatewayEnabled,
+		Capabilities: svc.Planes().Capabilities, SkillPlane: svc.Planes().Skills,
+		Registry: runtime.AllBuiltinRegistry(), McpSecrets: svc.Planes().McpSecrets,
+		McpGatewayEnabled: svc.Planes().McpGatewayEnabled,
 	}, eventbus.New())
 	var rd *strings.Reader
 	rd = strings.NewReader(body)

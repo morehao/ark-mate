@@ -65,7 +65,7 @@ func TestProviderMirrorRefFormatIsPinned(t *testing.T) {
 
 // TestCredentialFaceHasNoTransitionalForwards 凭据面的**八条一行转发**不许回潮（P4a 正文第五十一刀）。
 //
-// `internal/manager/credentials.go` 整个删除（77 行）：`SetCredentials` / `SetCredentialCwd` /
+// `internal/sessionruntime/credentials.go` 整个删除（77 行）：`SetCredentials` / `SetCredentialCwd` /
 // `credentialCwd` / `credentialDoc` / `SyncCredentialMirror` / `providerEnvKeyNames` /
 // `mirrorSet` / `mirrorDelete` 全部改成调用点直连——装配期（`app.go` / `gateway/source.go`）走
 // **事实出口** `CredentialStore()`，包内两处走 `s.creds` / `s.providerPlane`。
@@ -78,12 +78,12 @@ func TestProviderMirrorRefFormatIsPinned(t *testing.T) {
 // 判据两段、fail-closed：
 //
 //	① manager 生产目录里零命中那八个名字的转发声明；
-//	② 装配点必须走事实出口（`a.svc.CredentialStore()`），否则"实现搬到哪一层"重新不可见。
+//	② 装配点必须走事实出口（`a.svc.Planes().Credentials`），否则"实现搬到哪一层"重新不可见。
 func TestCredentialFaceHasNoTransitionalForwards(t *testing.T) {
 	root := backendRoot(t)
-	mgr := dirProductionBody(t, filepath.Join(root, "internal", "manager"))
+	mgr := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
 	if len(mgr) < 1000 {
-		t.Fatalf("`internal/manager` 只扫到 %d 字节——扫描面解析错了？（fail-closed）", len(mgr))
+		t.Fatalf("`internal/sessionruntime` 只扫到 %d 字节——扫描面解析错了？（fail-closed）", len(mgr))
 	}
 	for _, dead := range []string{
 		"func (s *Service) SetCredentials(",
@@ -97,29 +97,31 @@ func TestCredentialFaceHasNoTransitionalForwards(t *testing.T) {
 		"func (s *Service) resolveProviderKey(",
 	} {
 		if strings.Contains(mgr, dead) {
-			t.Errorf("`internal/manager` 里又出现 `%s`：凭据面的过渡转发已随 P4a 正文第五十一刀清零"+
+			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：凭据面的过渡转发已随 P4a 正文第五十一刀清零"+
 				"（装配走 `CredentialStore()`，包内走 `s.creds` / `s.providerPlane.KeyFor`）。", dead)
 		}
 	}
 	// 事实出口必须在（少了它，装配点只能再造一份转发）。
-	svcSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "service.go")))
-	if !strings.Contains(svcSrc, "func (s *Service) CredentialStore() *credential.Store") {
-		t.Error("`internal/manager/service.go` 里找不到 `CredentialStore()` 事实出口：装配期没有它就只能" +
+	svcSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "service.go")))
+	// P4b：`CredentialStore()` 也删了——事实出口收敛成 `Planes()`（一份实例，一条路径）。
+	if !strings.Contains(svcSrc, "func (s *Service) Planes() *registry.Planes") {
+		t.Error("`internal/sessionruntime/service.go` 里找不到 `Planes()` 事实出口：装配期没有它就只能" +
 			"再写一层转发，而那正是本刀删掉的东西。")
 	}
-	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	// P5a 起凭据面由 `registry.Planes.Credentials` 拥有，装配动作在 app/assembly.go。
+	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
 	for _, want := range []string{
-		"a.svc.CredentialStore().SetCwd(",
-		"a.svc.CredentialStore().SetLayered(",
-		"a.svc.CredentialStore().SyncCredentialMirror(",
+		"a.planes.Credentials.SetCwd(",
+		"a.planes.Credentials.SetLayered(",
+		"a.planes.Credentials.SyncCredentialMirror(",
 	} {
 		if !strings.Contains(appSrc, want) {
-			t.Errorf("`internal/app/app.go` 里找不到 `%s`：装配期的凭据登记必须直连事实出口。"+
+			t.Errorf("`internal/app/assembly.go` 里找不到 `%s`：装配期的凭据登记必须直连事实出口。"+
 				"漏了会让这一条链悄悄退回某个中间层。", want)
 		}
 	}
-	if gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "gateway", "source.go"))); !strings.Contains(gwSrc, "s.svc.CredentialStore().SetLayered(") {
-		t.Error("`internal/gateway/source.go` 里找不到 `s.svc.CredentialStore().SetLayered(`：" +
-			"网关装配必须直连事实出口。")
+	if gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "gateway", "source.go"))); !strings.Contains(gwSrc, "s.planes.Credentials.SetLayered(") {
+		t.Error("`internal/gateway/source.go` 里找不到 `s.planes.Credentials.SetLayered(`：" +
+			"网关装配必须直连事实（P5a 起是 registry.Planes，不再是 manager 转发）。")
 	}
 }

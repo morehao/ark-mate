@@ -60,7 +60,7 @@ func TestPermissionMemoryCarriesGrantShape(t *testing.T) {
 	}
 
 	// ③ 装载路径必须把形态带回来（"写了但不复原"是这一族最典型的静默失效）。
-	orch := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "orchestrator.go")))
+	orch := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "orchestrator.go")))
 	restore, ok := goFuncBody(orch, "func (o *Orchestrator) RestoreMemoriesFromStore(")
 	if !ok {
 		t.Fatalf("找不到 `RestoreMemoriesFromStore(`")

@@ -31,7 +31,7 @@ import (
 // 事件（那条事件是本步引入的语义），所以升级后这些行的 `first_seq` 指不到任何 `run.started`——
 // 老库上这条判据会整片非零，这是**事实**不是漏做。事件流是"当时发生了什么"的记录（J4：身份随
 // 数据走），迁移补出来的事件会改 transcript、改 `events` 的身份集合、还会让界面里多出一轮凭空的
-// 「开始」。新轮由 `manager` 的"开轮三连"保证对称（`internal/manager/run.go` 的 Prompt）；
+// 「开始」。新轮由 `domain/session` 的"开轮三连"保证对称（`Runner.Prompt`）；
 // 判据见 `TestMigrateV22DoesNotFabricateRunStarted`。
 //
 // 语句里的 `runs` / `messages` / `inputs` / `idx_*` 都是**字面量**（守卫⑤：版本步只许写历史

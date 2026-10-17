@@ -13,7 +13,7 @@ package archtest
 //	② 同一文件用 `toolCallFor(` 回查工具详情（权限请求只带 toolCallId，命令行在同 id 的
 //	   tool_call 更新里）；
 //	③ `app.go` 真的加载规则（`LoadCommandPolicyFile(`）并交给 Service（`SetCommandPolicy(`）；
-//	④ `event_sink.go` 写入/删除工具调用记忆（`rememberToolCall(` / `forgetToolCall(`）。
+//	④ `domain/session/eventsink.go` 写入/删除工具调用记忆（P4a 第五十五刀搬入）（`rememberToolCall(` / `forgetToolCall(`）。
 //
 // 反证（实跑）：把 `AutoDecision` 挪到门禁之前 → ① 红；抽掉 app 的加载调用 → ③ 红。
 
@@ -37,7 +37,7 @@ func TestCommandGateIsWiredToPermissionDecision(t *testing.T) {
 	}
 
 	// ①② 裁决点顺序 + 回查
-	flow := stripGoComments(read("internal/manager/permission_flow.go"))
+	flow := stripGoComments(read("internal/sessionruntime/permission_flow.go"))
 	// 必须落在 requestPermission 的**函数体**里：本文件末尾也有 commandGateDecision 的
 	// 定义，按整文件找会被定义那一行喂饱（本仓已经踩过"判据被定义喂饱"的坑）。
 	body, ok := goFuncBody(flow, "func (o *Orchestrator) requestPermission(")
@@ -55,26 +55,26 @@ func TestCommandGateIsWiredToPermissionDecision(t *testing.T) {
 	if gateIdx > memIdx {
 		t.Errorf("命令门禁排在会话级记忆**之后**——规则说 forbidden 的命令会被『这类工具始终允许』放行")
 	}
-	if !strings.Contains(body, "toolCallFor(") {
-		t.Errorf("permission_flow.go 没有 toolCallFor(——权限请求只带 toolCallId，不回查就拿不到命令行")
+	if !strings.Contains(body, "o.tools.Get(") {
+		t.Errorf("permission_flow.go 没有 o.tools.Get(——权限请求只带 toolCallId，不回查就拿不到命令行")
 	}
 
-	// ③ 装配：加载 + 交给 service
-	app := stripGoComments(read("internal/app/app.go"))
+	// ③ 装配：加载 + 交给 service（P5a 起这条动作在 app/assembly.go 的声明表里）
+	app := stripGoComments(read("internal/app/assembly.go"))
 	if !strings.Contains(app, "LoadCommandPolicyFile(") {
-		t.Errorf("app.go 没有 LoadCommandPolicyFile(——规则文件写了但没人读")
+		t.Errorf("assembly.go 没有 LoadCommandPolicyFile(——规则文件写了但没人读")
 	}
 	if !strings.Contains(app, "SetCommandPolicy(") {
-		t.Errorf("app.go 没有 SetCommandPolicy(——规则加载了但没交给裁决点")
+		t.Errorf("assembly.go 没有 SetCommandPolicy(——规则加载了但没交给裁决点")
 	}
 
 	// ④ 工具详情记忆的写入/删除
-	sink := stripGoComments(read("internal/manager/event_sink.go"))
+	sink := stripGoComments(read("internal/domain/session/eventsink.go"))
 	if !strings.Contains(sink, "rememberToolCall(") {
-		t.Errorf("event_sink.go 没有 rememberToolCall(——权限请求到达时查不到命令行")
+		t.Errorf("eventsink.go 没有 rememberToolCall(——权限请求到达时查不到命令行")
 	}
 	if !strings.Contains(sink, "forgetToolCall(") {
-		t.Errorf("event_sink.go 没有 forgetToolCall(——工具详情会随进程只增不减")
+		t.Errorf("eventsink.go 没有 forgetToolCall(——工具详情会随进程只增不减")
 	}
 
 	// 配置键：MATE_COMMAND_POLICY 是唯一入口。

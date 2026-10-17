@@ -4,12 +4,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/session"
+
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
@@ -41,12 +42,12 @@ func demo(args []string) {
 	}
 
 	bus := eventbus.New()
-	svc := manager.NewService(reg, bus)
+	svc := sessionruntime.NewService(reg, bus)
 	// runtime 配置隔离（M3-3）：demo 也会真的拉起底座子进程，必须与 serve 走同一份隔离表
 	// （否则 demo 读的是用户自己的底座 home 目录，与平台会话行为不一致）。
 	reg.ApplyIsolationEnv(cfg.HomeDir)
-	svc.SetTranscriptDir(cfg.TranscriptDir) // demo 会话也落 transcript（wire 事实源）
-	orch := manager.NewOrchestrator(svc, reg)
+	svc.SessionPlane().SetTranscriptDir(cfg.TranscriptDir) // demo 会话也落 transcript（wire 事实源）
+	orch := sessionruntime.NewOrchestrator(svc, reg)
 	orch.SetAllowAll(*allowAll)
 	orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	orch.SetElicitationTimeout(cfg.ElicitationTimeout)
@@ -74,7 +75,7 @@ func demo(args []string) {
 	}()
 
 	fmt.Printf("▶ demo runtime=%s prompt=%q\n", runtime.SelectedRuntime(), *prompt)
-	res, err := orch.RunOnce(ctx, manager.RunOptions{
+	res, err := orch.RunOnce(ctx, sessionruntime.RunOptions{
 		Prompt:     *prompt,
 		Cwd:        *cwd,
 		ConfigPath: *configPath,

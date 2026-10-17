@@ -58,7 +58,7 @@ type SessionEntity struct {
 	Title            string `gorm:"column:title;not null"`
 	Pinned           bool   `gorm:"column:pinned;serializer:arkmate_flag"`
 	Archived         bool   `gorm:"column:archived;serializer:arkmate_flag"`
-	// Status 会话状态。取值权威定义在 internal/manager/events.go（SessionStatus*）。
+	// Status 会话状态。取值权威定义在 internal/domain/session/events.go（SessionStatus*）。
 	Status string `gorm:"column:status;not null"`
 	// Origin 会话来源（M3；'' = 人工创建，'automation:<id>' = 该 automation 触发产生）。
 	// 单独成列而不是塞进 capability_json：会话列表要逐行渲染"这是不是自动跑出来的"，

@@ -3,14 +3,15 @@ package command
 import (
 	"context"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/manager"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
+	"github.com/morehao/ark-mate/internal/registry"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/config"
 )
@@ -49,7 +50,7 @@ func checkProviderSection(opts doctorOptions) (doctorfacts.ProviderDoctorFacts, 
 		ProvidersFileName:   provider.ProvidersFileName,
 		BackupName:          provider.ProvidersBackupName,
 		MismatchExtraMarker: provider.ProviderMismatchExtraMarker,
-	}, manager.CollectRuntimeModelFacts)
+	}, registry.CollectRuntimeModelFacts)
 	if st != nil {
 		defer func() { _ = st.Close() }()
 	}

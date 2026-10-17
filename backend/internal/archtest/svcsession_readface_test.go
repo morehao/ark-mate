@@ -63,7 +63,7 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 	ctrSrcAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go"))) +
 		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsearch", "search.go"))) +
 		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrusage", "usage.go")))
-	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "manager"))
+	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
 	ifaceAll := interfaceBodyOf(t, readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsession", "session.go")), "type SessionSvc interface {")
 	for _, m := range readModels {
 		if !strings.Contains(domBody, "func (pl *Plane) "+m+"(") {
@@ -73,7 +73,7 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 			t.Errorf("`SessionSvc` 里又声明了读模型 `%s(`：进用例层只能是一行转发（被判定为骚操作的形状）。", m)
 		}
 		if strings.Contains(mgrAll, "func (s *Service) "+m+"(") {
-			t.Errorf("`internal/manager` 里又出现 `func (s *Service) %s(`：那一行转发已按 P4b 口径删除。", m)
+			t.Errorf("`internal/sessionruntime` 里又出现 `func (s *Service) %s(`：那一行转发已按 P4b 口径删除。", m)
 		}
 		if !strings.Contains(ctrSrcAll, "h.plane."+m+"(") {
 			t.Errorf("`ctrsession`/`ctrsearch`/`ctrusage` 三个控制器里都没有 `h.plane.%s(` 调用点："+
@@ -93,9 +93,9 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 	}
 
 	// ② manager 侧不得再有这份实现（TODO(P4b) 的转发已删）。
-	mgrBody := dirProductionBody(t, filepath.Join(root, "internal", "manager"))
+	mgrBody := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
 	if strings.Contains(mgrBody, "func (s *Service) ListSessions(") {
-		t.Error("`internal/manager` 里又出现 `func (s *Service) ListSessions(`：它是一行转发，" +
+		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) ListSessions(`：它是一行转发，" +
 			"读模型的实现只有一份且在域里（P4a 正文第十一刀）。")
 	}
 

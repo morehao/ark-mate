@@ -15,7 +15,7 @@ import (
 //	TestAdapterHasNoStoreLiterals          —— adapter 不得反向依赖平台的持久层。
 //
 // 为什么必须是静态守卫而不是靠约定：v11 的失败正是"靠约定"——生成器、格式串、校验门
-// 全都住在 `internal/manager`，接一个新底座就要改内核（T2 不成立），而没有任何机器判据
+// 全都住在 `internal/sessionruntime`，接一个新底座就要改内核（T2 不成立），而没有任何机器判据
 // 会在知识回流的那一刻报红。判据一旦只用注释表达，下一个人"顺手在这里加一个分支"就再也回不去了。
 
 // runtimeConfigLiterals 底座的配置格式与机制字面量（T1：`internal/` 下零命中）。

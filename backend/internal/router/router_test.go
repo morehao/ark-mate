@@ -2,8 +2,6 @@ package router_test
 
 import (
 	"encoding/json"
-	"github.com/morehao/ark-mate/internal/domain/workspace"
-	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -14,19 +12,22 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/domain/workspace"
+	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
+
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/config"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
-// newEngine 走真实装配路径：manager.Service + router.New（含 /v1/mate 分组与默认中间件）。
+// newEngine 走真实装配路径：sessionruntime.Service + router.New（含 /v1/mate 分组与默认中间件）。
 func newEngine(t *testing.T) *gin.Engine {
 	t.Helper()
 	e, _ := newEngineWithService(t)
@@ -38,7 +39,7 @@ func newEngine(t *testing.T) *gin.Engine {
 // 资产按**生产同一条路径**解析（M2-1）：release 构建内嵌 → 有资产（非 API 未知路径回落 SPA）；
 // 默认构建 → 没有（回落信封 404）。忽略解析错误是刻意的——"没有资产"对只测 API 的用例是合法状态，
 // 而生产入口（serve）走的是 app.Init，那里会按退出码 3 拒绝启动。
-func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
+func newEngineWithService(t *testing.T) (*gin.Engine, *sessionruntime.Service) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	reg := runtime.AllBuiltinRegistry()
@@ -46,7 +47,7 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	// 否则模型配置落点会因为解析不到隔离根而报错（这是刻意的 fail-closed：绝不回落到用户目录）。
 	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
 	bus := eventbus.New()
-	svc := manager.NewService(reg, bus)
+	svc := sessionruntime.NewService(reg, bus)
 	// v20：这条夹具是 **memory 模式**（没有 sqlite 层），所以密钥的落点是托管文档
 	// `<MATE_HOME>/credentials.json`——`POST/PATCH providers` 带 `api_key` 时它就是事实源，
 	// 文档没装配会被**显式拒绝**（`credentials_write_failed`：拒绝一次只在内存里成功的写入）。
@@ -59,22 +60,22 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	// 继承环境那一层置空：这条夹具不该被跑测试的机器上恰好存在的同名变量影响
 	// （层序本身由 `pkg/credentials` 的用例与 manager 的用例覆盖）。
 	creds.Env = func(string) string { return "" }
-	svc.CredentialStore().SetLayered(creds)
-	svc.ProviderPlane().SetProviderDir(filepath.Join(home, "providers"))
+	svc.Planes().Credentials.SetLayered(creds)
+	svc.Planes().Providers.SetProviderDir(filepath.Join(home, "providers"))
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
 		Session:        svc,
-		WorkspacePlane: svc.WorkspacePlane(),
-		Picker:         svc.Picker(),
+		WorkspacePlane: svc.Planes().Workspaces,
+		Picker:         svc.Planes().Picker,
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
 		Runtime:       runtimeconn.NewPlaneFor(nil),
-		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,
-		Model: svc,
+		ProviderPlane: svc.Planes().Providers, ProviderCatalog: svc.Planes().Providers,
+		Model: sessionruntime.NewModelFace(svc),
 		// Library 读模型（P4a 正文第六刀）：域/包事实由装配点交下来，用例实例在控制器里造。
-		Capabilities: svc.CapabilityRegistry(), SkillPlane: svc.SkillPlane(), Registry: reg,
-		McpSecrets: svc.McpSecrets(), McpGatewayEnabled: svc.McpGatewayEnabled,
+		Capabilities: svc.Planes().Capabilities, SkillPlane: svc.Planes().Skills, Registry: reg,
+		McpSecrets: svc.Planes().McpSecrets, McpGatewayEnabled: svc.Planes().McpGatewayEnabled,
 		// 会话域平面与总线是**依赖事实**（P4a 正文第十/十一刀）：历史读面与读模型都从它们取数。
-		// 这条夹具用真 `manager.Service`（memory 模式），所以平面是**装配好的那个**——
+		// 这条夹具用真 `sessionruntime.Service`（memory 模式），所以平面是**装配好的那个**——
 		// 归属展示端口也由它接好；自造一个空平面会在 `ListSessions` 补齐展示字段时 nil panic。
 		SessionPlane: svc.SessionPlane(), Bus: bus,
 	}, bus, router.Options{Web: assets})
@@ -387,18 +388,18 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 	// 否则模型配置落点会因为解析不到隔离根而报错（这是刻意的 fail-closed：绝不回落到用户目录）。
 	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
 	bus := eventbus.New()
-	svc := manager.NewService(reg, bus)
+	svc := sessionruntime.NewService(reg, bus)
 	engine := router.New(router.Ports{
 		Session:        svc,
-		WorkspacePlane: svc.WorkspacePlane(),
-		Picker:         svc.Picker(),
+		WorkspacePlane: svc.Planes().Workspaces,
+		Picker:         svc.Planes().Picker,
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
 		Runtime:       runtimeconn.NewPlaneFor(nil),
-		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,
-		Model: svc,
+		ProviderPlane: svc.Planes().Providers, ProviderCatalog: svc.Planes().Providers,
+		Model: sessionruntime.NewModelFace(svc),
 		// Library 读模型（P4a 正文第六刀）：域/包事实由装配点交下来，用例实例在控制器里造。
-		Capabilities: svc.CapabilityRegistry(), SkillPlane: svc.SkillPlane(), Registry: reg,
-		McpSecrets: svc.McpSecrets(), McpGatewayEnabled: svc.McpGatewayEnabled,
+		Capabilities: svc.Planes().Capabilities, SkillPlane: svc.Planes().Skills, Registry: reg,
+		McpSecrets: svc.Planes().McpSecrets, McpGatewayEnabled: svc.Planes().McpGatewayEnabled,
 		// 同 `newEngineWithService`：会话域平面与总线是依赖事实（读模型/历史读面从它们取数）。
 		SessionPlane: svc.SessionPlane(), Bus: bus,
 	}, bus, router.Options{Credentials: creds})
@@ -555,7 +556,7 @@ func TestAuthTokenDisabled(t *testing.T) {
 	}
 }
 
-// TestWorkspaceRoutes 走真实装配（manager.Service）验证工作空间只读面：
+// TestWorkspaceRoutes 走真实装配（sessionruntime.Service）验证工作空间只读面：
 // browse 只列目录且路径与 cwd 同形态；recent 从会话派生（新库为空）。
 func TestWorkspaceRoutes(t *testing.T) {
 	dir := t.TempDir()
@@ -617,7 +618,7 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 		}
 	}
 	e, svc := newEngineWithService(t)
-	if err := svc.WorkspacePlane().SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
+	if err := svc.Planes().Workspaces.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 
@@ -675,10 +676,10 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 		t.Fatalf("写 config.json: %v", err)
 	}
 	e, svc := newEngineWithService(t)
-	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
+	if err := svc.Planes().Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	svc.WorkspacePlane().SetRootsStore(config.NewSettingsStore(cfgDir, ""))
+	svc.Planes().Workspaces.SetRootsStore(config.NewSettingsStore(cfgDir, ""))
 
 	// 起步：没有偏好起点（prefer_roots=false），可写，来源 = 默认值。
 	env := get(t, e, "/v1/mate/settings/workspace")
@@ -749,7 +750,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	}
 
 	// 被更高优先级来源锁定 → 拒绝写并自报只读（面板据此转只读，而不是假装保存成功）。
-	svc.WorkspacePlane().SetRootsStore(config.NewSettingsStore(cfgDir, config.SourceEnv))
+	svc.Planes().Workspaces.SetRootsStore(config.NewSettingsStore(cfgDir, config.SourceEnv))
 	env = put(t, e, "/v1/mate/settings/workspace", `{"roots":[]}`)
 	if env.Code != 40001 || !strings.Contains(env.Msg, "settings_locked") {
 		t.Fatalf("锁定时应 settings_locked: %+v", env)
@@ -807,7 +808,7 @@ func TestWorkspaceFilesRoute(t *testing.T) {
 	e, svc := newEngineWithService(t)
 
 	// 即便配了"起始点偏好"，看资料也不受它限制（v14.5：名录不是边界）。
-	if err := svc.WorkspacePlane().SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
+	if err := svc.Planes().Workspaces.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 

@@ -3,12 +3,13 @@ package command
 import (
 	"context"
 	"encoding/json"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"

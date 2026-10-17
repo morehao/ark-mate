@@ -24,10 +24,10 @@ import (
 func TestToolPayloadKeysAreClosed(t *testing.T) {
 	root := backendRoot(t)
 
-	// ① 白名单声明在 manager 的 `toolPayload` 旁边，且 `toolPayload` 只写这些键。
-	sink := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "event_sink.go")))
+	// ① 白名单声明在会话域的 `toolPayload` 旁边（P4a 第五十五刀随事件出口搬入），且 `toolPayload` 只写这些键。
+	sink := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "session", "eventsink.go")))
 	if !strings.Contains(sink, "var ToolPayloadKeys = []string{") {
-		t.Fatalf("event_sink.go 里找不到 `var ToolPayloadKeys = []string{`：工具载荷的键必须有白名单")
+		t.Fatalf("eventsink.go 里找不到 `var ToolPayloadKeys = []string{`：工具载荷的键必须有白名单")
 	}
 	block := tsUnionBlock(sink, "var ToolPayloadKeys = []string{")
 	if block == "" {

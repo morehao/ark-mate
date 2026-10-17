@@ -60,9 +60,9 @@ type Plane struct {
 	// 本域，届时这条线变成域内调用）。
 	staleInputsOnRestore func(ctx context.Context)
 
-	// usageOf 取某会话最近一次上报的用量快照（**端口**：它读的是执行面
-	// `Orchestrator.LatestUsage` 的内存表，属 runtimeconn；nil = 没有编排器，同拆分前
-	// "`s.orch == nil` 时 usage_json 留空"的语义）。
+	// usageOf 取某会话最近一次上报的用量快照（**端口**：它读的是轮次状态机
+	// `Runner.LatestUsage` 的内存表，随 P4a 第五十五刀同族搬入本域；nil = 没有状态机，
+	// 同拆分前 "`s.orch == nil` 时 usage_json 留空"的语义）。
 	usageOf func(sessionID string) (objusage.UsageInfo, bool)
 }
 

@@ -26,13 +26,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+
+	"github.com/morehao/ark-mate/internal/registry"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/config"
@@ -105,8 +106,12 @@ func resolveCredCwd(explicit string, getenv func(string) string) (cwd, source st
 }
 
 // MateSource 从平台持久层取数并代理远程 MCP 的 `Source` 实现。
+//
+// **不经过 manager**（P5a）：网关要的是领域平面与库句柄，而不是会话/编排。两边各自
+// `manager.NewService` 一遍时，能力装载与凭据分层会静默分叉（"核心能注入的服务器，
+// 网关注入不了"），所以统一从 `registry.Planes` 取同一套装配事实。
 type MateSource struct {
-	svc         *manager.Service
+	planes      *registry.Planes
 	pool        *mcp.Pool
 	ownPool     bool
 	st          *store.Store
@@ -155,7 +160,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	if err != nil {
 		return nil, fmt.Errorf("网关装配底座: %w", err)
 	}
-	s.svc = manager.NewService(reg, nil)
+	s.planes = registry.NewPlanes(reg)
 
 	if opts.Pool != nil {
 		s.pool = opts.Pool
@@ -185,7 +190,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	if layered, _, cErr := credential.OpenCredentialSource(opts.Cfg.HomeDir, credCwd); cErr != nil {
 		glog.Warnw(ctx, "mcp 网关: 凭据分层未装配（只有库里的那一份可用）", "err", cErr)
 	} else {
-		s.svc.CredentialStore().SetLayered(layered)
+		s.planes.Credentials.SetLayered(layered)
 	}
 
 	// 持久层：sqlite 走 DB（事实源），memory 走文件目录——两侧都必须拿到 `ProviderDir`
@@ -200,13 +205,13 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 		s.st, s.ownStore = st, true
 	}
 	if s.st != nil {
-		s.svc.EnableStore(s.st)
-		s.svc.ProviderPlane().LoadProviderDefinitionsFromStore(ctx, opts.Cfg.ProviderDir)
-		s.svc.LoadCapabilityDefinitionsFromStore(ctx, opts.Cfg.CapabilityDir)
+		s.planes.EnableStore(s.st)
+		s.planes.Providers.LoadProviderDefinitionsFromStore(ctx, opts.Cfg.ProviderDir)
+		s.planes.LoadCapabilityDefinitionsFromStore(ctx, opts.Cfg.CapabilityDir)
 	} else {
 		// memory 模式没有持久层：文件是唯一事实源（与核心进程逐条一致）。
-		s.svc.ProviderPlane().LoadProviderDefinitions(opts.Cfg.ProviderDir)
-		s.svc.LoadCapabilityDefinitions(opts.Cfg.CapabilityDir)
+		s.planes.Providers.LoadProviderDefinitions(opts.Cfg.ProviderDir)
+		s.planes.LoadCapabilityDefinitions(opts.Cfg.CapabilityDir)
 	}
 	s.lastReload = s.now()
 	glog.Infow(ctx, "mcp 网关数据面就绪",
@@ -362,14 +367,14 @@ func (s *MateSource) servers(ctx context.Context) ([]gatewayServer, error) {
 	if err := s.reload(ctx); err != nil {
 		return nil, err
 	}
-	defs, err := s.svc.McpPlane().GatewayFace(runtime.SelectedRuntime(), s.pinned)
+	defs, err := s.planes.Mcp.GatewayFace(runtime.SelectedRuntime(), s.pinned)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]gatewayServer, 0, len(defs))
 	for _, def := range defs {
 		// 远程传输只用得到 header（env 是 stdio 子进程的注入面，而 stdio 不进网关）。
-		_, headers, problems := s.svc.McpPlane().ResolveSecrets(def)
+		_, headers, problems := s.planes.Mcp.ResolveSecrets(def)
 		if len(problems) > 0 {
 			if !s.warnOnce("secret:" + def.ID) {
 				glog.Warnw(ctx, "mcp 网关: 密钥引用解析失败，跳过该 server", "server", def.ID, "problems", problems)
@@ -406,13 +411,13 @@ func (s *MateSource) reload(ctx context.Context) error {
 	s.lastReload = s.now()
 	s.mu.Unlock()
 
-	if _, err := s.svc.ReloadCapabilityDefinitions(ctx); err != nil {
+	if _, err := s.planes.ReloadCapabilityDefinitions(ctx); err != nil {
 		return fmt.Errorf("网关重读能力定义失败: %w", err)
 	}
 	// provider 面也要重读：密钥引用解析与"这条档案还在不在"都在它上面。
 	// `providerDir` 必须原样传回：`providers.json` 在文件侧（locator 的取值来源），传空会静默
 	// 把密钥解析面砍掉（症状是"所有引用都解析不了"，而不是报错）。
-	s.svc.ProviderPlane().ReloadProviderDefinitionsFromStore(ctx, s.providerDir)
+	s.planes.Providers.ReloadProviderDefinitionsFromStore(ctx, s.providerDir)
 	return nil
 }
 

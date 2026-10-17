@@ -70,9 +70,6 @@ var automationDomainAnchors = map[string][]string{
 	},
 }
 
-// automationManagerThinFiles manager 侧**只许是薄转发/适配**的文件。
-var automationManagerThinFiles = []string{"automation_forward.go", "automation_host.go"}
-
 // automationManagerImplMarkers 实现痕迹（这些动作现在只许在域里做）。
 var automationManagerImplMarkers = []string{
 	"os.ReadDir(",
@@ -101,24 +98,23 @@ func TestAutomationImplementationLivesInDomain(t *testing.T) {
 		t.Fatal("自动化域一个入口文件都没解析到（判据失效）")
 	}
 
-	managerDir := filepath.Join(root, "internal", "manager")
+	managerDir := filepath.Join(root, "internal", "sessionruntime")
 	mgrAll := dirProductionBody(t, managerDir)
 	for _, dead := range []string{"func ImportAutomationDir(", "func ExportAutomationDir("} {
 		if strings.Contains(mgrAll, dead) {
-			t.Errorf("`internal/manager` 里又出现 `%s`：存量定义的导入/导出已随 P4a 正文第四十五刀"+
+			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：存量定义的导入/导出已随 P4a 正文第四十五刀"+
 				"搬进 `internal/domain/automation/import.go`（那里面要按 `automation.ReservedKeys` 切分"+
 				"定义与运行态，是域的知识；机制层不许 import 域）。", dead)
 		}
 	}
-	for _, f := range automationManagerThinFiles {
-		src := stripLineComments(readFileOrFatal(t, filepath.Join(managerDir, f)))
-		for _, m := range automationManagerImplMarkers {
-			if strings.Contains(src, m) {
-				t.Errorf("internal/manager/%s 里出现实现痕迹 %q：自动化的定义读写**只有一份实现**，"+
-					"在 `internal/domain/automation`（P2b）。\n"+
-					"在 manager 里再写一遍的后果是两份语义静默分叉（一份写了运行态 overlay、另一份没写）——"+
-					"而两边都编译得过。", f, m)
-			}
+	// 扫描面是**整个 manager 生产目录**（而不是一份写死的文件名清单）：转发文件删掉之后，
+	// 按文件名读会直接 Fatal，而"实现痕迹换个文件放回来"反而溜过去（P4a 一批踩过五次）。
+	for _, m := range automationManagerImplMarkers {
+		if strings.Contains(mgrAll, m) {
+			t.Errorf("`internal/sessionruntime` 里出现实现痕迹 %q：自动化的定义读写**只有一份实现**，"+
+				"在 `internal/domain/automation`（P2b）。\n"+
+				"在 manager 里再写一遍的后果是两份语义静默分叉（一份写了运行态 overlay、另一份没写）——"+
+				"而两边都编译得过。", m)
 		}
 	}
 }
@@ -130,15 +126,16 @@ func TestAutomationImplementationLivesInDomain(t *testing.T) {
 //   - 漏 `SetHost`：**任何模式**下都不报错，只是自动化永远不建会话。
 func TestAutomationWiringIsAttached(t *testing.T) {
 	root := backendRoot(t)
-	persist := readFileOrFatal(t, filepath.Join(root, "internal", "manager", "persist.go"))
-	if !strings.Contains(persist, "s.automationPlane.SetStore(st)") {
-		t.Error("`internal/manager/persist.go` 的 `attachStore` 里找不到 `s.automationPlane.SetStore(st)`：" +
+	// P5a 起库句柄的接线统一在 `registry.Planes.EnableStore`（漏一处 = 静默）。
+	persist := readFileOrFatal(t, filepath.Join(root, "internal", "registry", "planes.go"))
+	if !strings.Contains(persist, "p.Automation.SetStore(st)") {
+		t.Error("`internal/registry/planes.go` 的 `EnableStore` 里找不到 `p.Automation.SetStore(st)`：" +
 			"自动化域没拿到库句柄。\n" +
 			"表现**只在 sqlite 模式**现形——定义行读不到，面板空、触发不跑（memory 模式的注册表在域自己的字段里）。")
 	}
-	service := readFileOrFatal(t, filepath.Join(root, "internal", "manager", "service.go"))
+	service := readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "service.go"))
 	if !strings.Contains(service, "SetHost(") {
-		t.Error("`internal/manager/service.go` 的 `NewService` 里找不到 `SetHost(...)`：" +
+		t.Error("`internal/sessionruntime/service.go` 的 `NewService` 里找不到 `SetHost(...)`：" +
 			"自动化域没有宿主端口。\n" +
 			"表现是**任何模式**下都不报错，只是自动化永远不建会话（「我配了但它从来没跑过」）。")
 	}

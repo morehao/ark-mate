@@ -79,9 +79,12 @@ var declaredRelocationMarkers = []string{
 // P4b 第二刀（读面 + 同步面进 `svcmodel`）会把这三条逐条删掉，**判据跟着少**——
 // 这正是"过渡期债务单调收缩"应有的形状。
 var managerModelPortAnchors = []string{
-	"func (s *Service) ModelRow(",
 	"func (s *Service) ModelEffect(",
-	"func (s *Service) TrySyncModels(",
+}
+
+// registryModelPortAnchors P5a 起同步面在 `registry.Resources`（P4b/取样面搬完后与读面合流）。
+var registryModelPortAnchors = []string{
+	"func (r *Resources) TrySyncModels(",
 }
 
 // TestModelWriteUseCaseLivesInModelSvc 见文件头。
@@ -98,8 +101,8 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	}
 	// 清单载体是**依赖事实**（写面要落库），而实现层不许认识：`manager` 是过渡期的邻居，
 	// 用例层通过端口取它的东西，绝不 import 它（否则"谁拥有这段逻辑"就没有答案了）。
-	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/manager"`) {
-		t.Error("internal/service/svcmodel 里出现 `internal/manager` 的 import：写面通过 `Host` 端口取那半边，不 import 实现层。")
+	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/sessionruntime"`) {
+		t.Error("internal/service/svcmodel 里出现 `internal/sessionruntime` 的 import：写面通过 `Host` 端口取那半边，不 import 实现层。")
 	}
 	if !strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/store"`) {
 		t.Error("internal/service/svcmodel 里没有 `internal/store` 的 import：清单载体是这一层的**依赖事实**（P4a 起装配点交出 store），" +
@@ -138,7 +141,7 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	}
 
 	// ① manager 侧：不得再有实现痕迹；③ 还留在那里的端口实现必须真的在。
-	mgr := filepath.Join(root, "internal", "manager")
+	mgr := filepath.Join(root, "internal", "sessionruntime")
 	files := productionGoFiles(t, mgr)
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：守卫失去检查对象", mgr)
@@ -149,7 +152,7 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 		mgrBody.WriteString(body)
 		for _, m := range declaredRelocationMarkers {
 			if strings.Contains(body, m) {
-				t.Errorf("internal/manager/%s 里出现模型写面的实现痕迹 %q：它**只有一份实现**，"+
+				t.Errorf("internal/sessionruntime/%s 里出现模型写面的实现痕迹 %q：它**只有一份实现**，"+
 					"在 `internal/service/svcmodel`（P4a 正文第五刀）。\n"+
 					"manager 交出的是清单载体与供应商域平面（依赖事实）+ 过渡端口的三条实现。\n"+
 					"在这里再写一遍的后果是校验与错误码静默分叉（一处允许多个默认、另一处只留一个），"+
@@ -159,8 +162,26 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	}
 	for _, a := range managerModelPortAnchors {
 		if !strings.Contains(mgrBody.String(), a) {
-			t.Errorf("internal/manager 的生产文件里找不到 %q：`svcmodel.Host` 的这条实现被改名/删掉了？"+
+			t.Errorf("internal/sessionruntime 的生产文件里找不到 %q：`svcmodel.Host` 的这条实现被改名/删掉了？"+
 				"（改名后 `app.go` 一起改就能编译过，而端口的那件事没人做）", a)
+		}
+	}
+	// ModelRow 随模型读面进了 `domain/provider`；`registry.ModelViews` 嵌入该平面后一并满足
+	// `svcmodel.Host`。判据落在**真实现**上（不是转发）。
+	providerModels := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "provider", "models.go")))
+	if !strings.Contains(providerModels, "func (pl *Plane) ModelRow(") {
+		t.Errorf("`internal/domain/provider/models.go` 里找不到 `func (pl *Plane) ModelRow(`：" +
+			"`svcmodel.Host` 的读一条实现必须有真落点")
+	}
+	views := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "registry", "models_view.go")))
+	if !strings.Contains(views, "*provider.Plane") {
+		t.Errorf("`internal/registry/models_view.go` 的 ModelViews 没有嵌入 `*provider.Plane`：" +
+			"ModelSvc/Host 的读面就少一份真实现")
+	}
+	regBody := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "registry", "resources.go")))
+	for _, a := range registryModelPortAnchors {
+		if !strings.Contains(regBody, a) {
+			t.Errorf("internal/registry/resources.go 里找不到 %q：同步面的端口实现被改名/删掉了？", a)
 		}
 	}
 
@@ -199,10 +220,10 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 			"用例接口不外溢到装配点（P4a 那批端口别名已判定为骚操作，别再开这条路）。")
 	}
 
-	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
-	for _, want := range []string{"ModelHost: a.svc", "Store: st"} {
+	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
+	for _, want := range []string{"ModelHost: sessionruntime.NewModelFace(as.a.svc)", "Store: as.st"} {
 		if !strings.Contains(app, want) {
-			t.Errorf("internal/app/app.go 里找不到 %q：模型写面的依赖事实与过渡端口都在装配点交出"+
+			t.Errorf("internal/app/assembly.go 里找不到 %q：模型写面的依赖事实与过渡端口都在装配点交出"+
 				"（漏了 Store ⇒ 所有模式都报「清单不可用」；漏了 ModelHost ⇒ 端口没人满足，编译期就该拦）。", want)
 		}
 	}

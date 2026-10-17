@@ -30,6 +30,15 @@ type Plane struct {
 	effect EffectFn
 	// defaultModel 平台默认模型落在哪条供应商上（空 = 没有默认模型 → 不注入密钥）。
 	defaultModel DefaultModelProvider
+
+	// catalog 运行时模型目录缓存与拒绝值反馈（独立锁；见 catalog.go）。
+	catalog *configCatalog
+
+	// 目录取样的三个窄端口（见 catalog_read.go）：活会话 / 历史会话取样 / 连接期事实。
+	// 任一为 nil = 该来源不可用（纯列表装配、无执行面）；**不是错误**，说明文案会如实写出来。
+	live      LiveConfigOptionsSource
+	sampler   CatalogSampler
+	connFacts CatalogConnectionFacts
 }
 
 // EffectFn 计算"这次改动对谁何时生效"的回执。
@@ -52,6 +61,7 @@ func NewPlane(reg *goruntime.Registry, creds *credential.Store) *Plane {
 		providers: make(map[string]*Def),
 		reg:       reg,
 		creds:     creds,
+		catalog:   newConfigCatalog(),
 	}
 }
 
@@ -140,7 +150,7 @@ func (pl *Plane) registeredRuntimeIDs() []string {
 //
 // 字段的语义与 v11–v20 的历史见 `providerFile`（磁盘形状）与 `Def.KeyRef` 的注释；
 // 导出是因为 `resource_sync.go`（运行期同步面）与 `service/svcprovider`（自检；P4a 起从
-// `manager/provider_probe.go` 搬进用例层）都要构造/拷贝它。
+// 执行面的旧实现搬进用例层）都要构造/拷贝它。
 type Def struct {
 	ID       string `json:"id"`
 	Name     string `json:"name,omitempty"`

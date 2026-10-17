@@ -25,7 +25,7 @@ type RunEntity struct {
 	// UserText 本轮的用户输入（**开轮时**写入，权威来源是 `run.started` 载荷）。
 	UserText string `gorm:"column:user_text;not null"`
 	// Status 轮次状态。in_progress = 进行中（v30 起单一取值；历史 `running` 行已由 v30 归一）；
-	// 终态取值权威定义在 internal/manager/events.go。
+	// 终态取值权威定义在 internal/domain/session/events.go。
 	Status     string `gorm:"column:status;not null"`
 	ErrorCode  string `gorm:"column:error_code;not null"`
 	StopReason string `gorm:"column:stop_reason;not null"`
@@ -51,7 +51,7 @@ type RunEntity struct {
 type RunFinishPatch struct {
 	// LastSeq 本轮窗口终点（终态事件的会话内位次；进行中 = -1）。
 	LastSeq int64
-	// Status 终态：completed / failed / cancelled（权威定义在 internal/manager/events.go）。
+	// Status 终态：completed / failed / cancelled（权威定义在 internal/domain/session/events.go）。
 	Status     string
 	StopReason string
 	ErrorCode  string

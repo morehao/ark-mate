@@ -12,9 +12,9 @@ import (
 //
 //	测试包 manager（**内部**测试包，package manager）
 //	  └─ import internal/testutil
-//	       └─ import internal/manager        ← 编译失败：import cycle not allowed in test
+//	       └─ import internal/sessionruntime        ← 编译失败：import cycle not allowed in test
 //
-// 若 internal/testutil 反过来 import internal/manager（很自然的冲动：把
+// 若 internal/testutil 反过来 import internal/sessionruntime（很自然的冲动：把
 // "造一个 Service + Orchestrator" 的夹具也放进去"统一"一下），manager 的**全部**测试会
 // 立刻无法编译，而报错文本（"import cycle not allowed in test"）不会告诉你该怎么改。
 // 换外部测试包（package manager_test）确实允许这种环，但 manager 的 29 个测试文件都是内部
@@ -30,7 +30,7 @@ func TestTestutilMustNotImportImplementations(t *testing.T) {
 		t.Fatalf("internal/testutil 不存在或无 Go 文件（夹具无处安放？）")
 	}
 	forbidden := []string{
-		modulePrefix + "internal/manager",
+		modulePrefix + "internal/sessionruntime",
 		modulePrefix + "internal/controller",
 		modulePrefix + "internal/router",
 		modulePrefix + "internal/app",

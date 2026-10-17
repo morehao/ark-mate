@@ -58,14 +58,14 @@ func TestNativeModeIsDeliveredPerSession(t *testing.T) {
 	}
 
 	// ③ 恢复路径必须把它带进 `acquire`（不是只放进记录）。
-	start := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "session_start.go")))
-	if !strings.Contains(start, "o.acquire(ctx, spec, fingerprint, rec.NativeMode)") {
+	start := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "session", "lifecycle.go")))
+	if !strings.Contains(start, "l.acquire(ctx, spec, fingerprint, rec.NativeMode)") {
 		t.Fatalf("恢复路径的 `acquire` 没有带 `rec.NativeMode`：重启后模式不参与算键，" +
 			"沙箱边界跟着变，而界面上没有任何一行会说这件事变过")
 	}
 
 	// ④ adapter 的 `Env()` 必须有**生产调用点**（本轮之前它是死代码）。
-	poolPort := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "runtime_pool.go")))
+	poolPort := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "runtime_pool.go")))
 	if !strings.Contains(poolPort, "adapter.Env(mode, \"\", nil)") {
 		t.Fatalf("`runtime_pool.go` 里没有 `adapter.Env(`：原生权限投影会退回死代码——" +
 			"映射写得再完整，没人喊它就不生效")

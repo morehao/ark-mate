@@ -102,7 +102,7 @@ func TestPkgMustNotImportInternal(t *testing.T) {
 func TestTransportFreeLayersMustNotImportAppLayers(t *testing.T) {
 	root := backendRoot(t)
 	forbidden := []string{
-		modulePrefix + "internal/manager",
+		modulePrefix + "internal/sessionruntime",
 		modulePrefix + "internal/server",
 		modulePrefix + "internal/app",
 	}
@@ -120,7 +120,7 @@ func TestTransportFreeLayersMustNotImportAppLayers(t *testing.T) {
 
 // TestPortsAndDTOsMustNotImportTransport 锁定"传输层 → 端口/DTO"的单向依赖。
 //
-// 历史形态（本次重构修掉的层反向依赖）：internal/manager 直接 import
+// 历史形态（本次重构修掉的层反向依赖）：internal/sessionruntime 直接 import
 // internal/server/handler，把 handler.AgentResp 等传输层 DTO 当作自己的返回类型。
 // 后果是领域层每加一个字段都要改传输层文件，且依赖方向与调用方向相反。
 //
@@ -132,7 +132,7 @@ func TestPortsAndDTOsMustNotImportTransport(t *testing.T) {
 	root := backendRoot(t)
 	forbidden := []string{
 		modulePrefix + "internal/server",
-		modulePrefix + "internal/manager",
+		modulePrefix + "internal/sessionruntime",
 		modulePrefix + "internal/app",
 	}
 	var walk func(dir string)
@@ -161,14 +161,14 @@ func TestPortsAndDTOsMustNotImportTransport(t *testing.T) {
 
 // TestControllersMustNotImportImplementations 锁定控制器的依赖面：
 // 控制器只允许依赖 internal/service/svc*（端口）与 internal/dto/dto*（数据），
-// 不得 import internal/manager（实现）或 internal/router（自己所属的装配层）。
+// 不得 import internal/sessionruntime（实现）或 internal/router（自己所属的装配层）。
 //
 // 这条边界是 P2/P3 重构的核心收益：控制器与实现两边的任一侧改动，
 // 只要端口不变就不会互相牵连，也让控制器可以脱离 manager 单测。
 func TestControllersMustNotImportImplementations(t *testing.T) {
 	root := backendRoot(t)
 	forbidden := []string{
-		modulePrefix + "internal/manager",
+		modulePrefix + "internal/sessionruntime",
 		modulePrefix + "internal/router",
 		modulePrefix + "internal/server",
 		modulePrefix + "internal/app",
@@ -210,7 +210,7 @@ func TestPersistenceLayersMustNotImportAppLayers(t *testing.T) {
 		modulePrefix + "internal/service",
 	}
 	app := []string{
-		modulePrefix + "internal/manager",
+		modulePrefix + "internal/sessionruntime",
 		modulePrefix + "internal/app",
 	}
 

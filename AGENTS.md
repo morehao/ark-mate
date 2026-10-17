@@ -12,7 +12,7 @@
 - 原生那半是**宿主进程**抬的（macOS `osascript`、Linux zenity/kdialog、Windows COM），所以 **`dsh web` 的本机浏览器入口也用系统面板**；只有远程/SSH/无显示会话才退化成应用内浏览；
 - 两个实现是**一对可替换的 occupant**，不是"两套并存"。
 
-本仓的对应物（照抄过来的形状）：判定与命令配方在 `backend/internal/domain/workspace/picker.go`（纯函数；`manager` 侧只剩三条转发）、声明走 `GET /capabilities` 的 `native-dialog`、执行面是 `POST /workspaces/pick-directory`。**别放错边**：判据一旦落到客户端（UA、`window.electron`、"有没有 Electron 桥"），本机浏览器就会被静默降级——这正是我们踩过的那个坑，现在有守卫 `TestDirectoryPickerIsTwoStateHostResolved` 钉着。
+本仓的对应物（照抄过来的形状）：判定与命令配方在 `backend/internal/domain/workspace/picker.go`（纯函数；P4b 起装配点直接持 `workspace.Picker`，转发已删）、声明走 `GET /capabilities` 的 `native-dialog`、执行面是 `POST /workspaces/pick-directory`。**别放错边**：判据一旦落到客户端（UA、`window.electron`、"有没有 Electron 桥"），本机浏览器就会被静默降级——这正是我们踩过的那个坑，现在有守卫 `TestDirectoryPickerIsTwoStateHostResolved` 钉着。
 
 **其余同样值得先查再定的题**：目录选择器自身的交互（面包屑/双栏/新建文件夹/隐藏项开关，见 `packages/client/ui-directory-picker-browse`）、工作区作为持久实体的形态（`packages/workspace`）、会话与工作区的归属关系、以及"桌面只能多给、多给的那半必须有服务端等价路径"这条一致性纪律（它的 web bundle 与 desktop bundle 各有一份 cordis 配置，可逐项对照）。**取舍照旧**：DSH 没有的概念（例如我们的工作区起始点偏好）不要硬套，写清偏离理由即可。
 
@@ -21,7 +21,7 @@
 - `backend/`：唯一 Go module（`github.com/morehao/ark-mate`，go 1.26.1）。**仓库根没有 go.mod / go.work——所有 go 命令必须在 `backend/` 下运行**。
   - **`pkg/` 与 `internal/` 的分界**（对齐 ark-iam）：可复用基础设施进 `pkg/`，应用专属逻辑留 `internal/`。`pkg/` 内部**不得 import `internal/`**（由 `internal/archtest` 守卫）。
     - `pkg/`：`code`（对外业务错误码唯一事实源：常量 + 注册表 + `FromError` 归一）、`acl`（ACP 客户端）、`runtime/{dsh}`（adapter + 注册表，另有 `runtime` 根包的 Spec/投影/指纹/三张**端口**表：`Syncer`/`NativePermissionAdapter`/`ModelValueAdapter`）、`mcp`（自研 MCP 客户端）、`capability`、`config`（进程配置）、`procreg`（进程注册表）、`dbclient`（gorm 句柄装配 + SQLite URL 拼装）、`logging`（第三方 slog 边界桥）、`credentials`（v20 凭据分层：`继承环境 > 托管文档 > `<cwd>/.env` > `<home>/.env`` 的**唯一**实现 + 严格 `引用 → 值` 的托管文档 `<MATE_HOME>/credentials.json`，0600 且权限不合即失败）、`object/objusage`（跨层共享值对象）、`object/objid`（**平台铸造 id 与底座 id 包装的唯一实现**：`ses_`/`msg_`/`run_`/`inp_`/`wsp_`/`mdl_`/`pem_`/`evt_` + 26 位 ULID，进程内单调、字典序 = 铸造序；底座原文一律加 `rt_` 壳，包装/解包严格不静默容错）。
-    - `internal/`：`app`（装配 + 启停生命周期）、`app/command`（CLI 子命令）、`router`（唯一路由装配点，按领域分 `routes_*.go`）、`controller/ctr<领域>`（传输层控制器）、`middleware`、`dto/dto<领域>`（请求/响应 DTO）、`service/svc<领域>`（**业务逻辑层**：包内声明接口（`XxxSvc`）+ 实现 + 构造函数 `NewXxx(deps...) XxxSvc`；内部可直接调 `dao`（单表）、`store`（跨表事务/读模型）与通用能力领域包 `internal/domain/*`、`pkg/*`）、`manager`（**过渡期**的领域实现（逐域并入 `service/svc<领域>` 后整体删除）：Service / Orchestrator / 事件 / 权限；**按领域分文件，不设 god file**——`service.go`/`orchestrator.go` 只留类型、构造与装配，会话动作在 `sessions.go`、轮次在 `run.go`、连接在 `connection.go`、进程回收在 `orphan_reap.go`、事件出口在 `event_sink.go`、权限/提问在 `interaction.go`/`permission_flow.go`）、`model`（持久层实体：**一表一文件**（`session.go`/`event.go`/…，17 张表 17 个文件），结构体一律 `<域词>Entity` / `<域词>EntityList`、表名常量 `TableName<域词>` **随实体文件走**（不做汇总 `table.go`）；`enum.go`/`serializer.go`/`time.go` 只放列与取值约定。两条由 `TestModelEntitiesFollowNamingConvention` 双向钉住）、`dao`（单表数据访问，基于 golib gormdao）、`store`（持久层门面：句柄 + 跨表事务 + 读模型 API）、`eventbus`、`testutil`（跨包复用的测试夹具；**不得 import `manager`**——manager 的测试是内部测试包，反向依赖会形成 `import cycle not allowed in test`，manager 专属组合留在其 `testrig_test.go`，由 `archtest` 守卫）、`archtest`（架构守卫测试）。
+    - `internal/`：`app`（装配 + 启停生命周期）、`app/command`（CLI 子命令）、`router`（唯一路由装配点，按领域分 `routes_*.go`）、`controller/ctr<领域>`（传输层控制器）、`middleware`、`dto/dto<领域>`（请求/响应 DTO）、`service/svc<领域>`（**业务逻辑层**：包内声明接口（`XxxSvc`）+ 实现 + 构造函数 `NewXxx(deps...) XxxSvc`；内部可直接调 `dao`（单表）、`store`（跨表事务/读模型）与通用能力领域包 `internal/domain/*`、`pkg/*`）、`registry`（**装配层**：`Planes` 平面集合 + 启停装配表 `Sequence` + 资源同步面 + 模型读面与体检事实；P5a 起由它拥有 planes，见 `internal/registry/doc.go`）、`sessionruntime`（**会话编排层**：Service / Orchestrator / 权限与提问 / 目录取样适配；按领域分文件，不设 god file——`service.go`/`orchestrator.go` 只留类型、构造与装配，会话动作在 `sessions.go`、权限/提问在 `interaction.go`/`permission_flow.go`；拨号与连接池在 `runtimeconn`，轮次状态机与启动/恢复在 `domain/session`；**`internal/manager` 已在 P4b 删除**。本层可被 `app` import，但不得 import `service/svc*`/`app`/`router`/`controller`/`gateway`）、`model`（持久层实体：**一表一文件**（`session.go`/`event.go`/…，17 张表 17 个文件），结构体一律 `<域词>Entity` / `<域词>EntityList`、表名常量 `TableName<域词>` **随实体文件走**（不做汇总 `table.go`）；`enum.go`/`serializer.go`/`time.go` 只放列与取值约定。两条由 `TestModelEntitiesFollowNamingConvention` 双向钉住）、`dao`（单表数据访问，基于 golib gormdao）、`store`（持久层门面：句柄 + 跨表事务 + 读模型 API）、`eventbus`、`testutil`（跨包复用的测试夹具；**不得 import `sessionruntime`**——它的测试是内部测试包，反向依赖会形成 `import cycle not allowed in test`，专属组合留在其 `testrig_test.go`，由 `archtest` 守卫）、`archtest`（架构守卫测试）。
   - **依赖方向单一**：
     - 应用侧：`cmd → app → router → controller → service → dao/store`；`dto` 被 **controller 与 service 共用**（跨这两条边传的就是 dto，service 也收 dto、回 dto），`dto` 自身不依赖应用层。
     - **装配只能自上而下，不许反向**：`app` 把**依赖事实**（store / runtime 注册表 / 执行面 / 总线 / 配置）交给 `router.Ports`，`router` 把依赖交给 controller 的构造函数，**service 实例在 controller 内部构造**。`app` **不得引用 controller 的类型**，`router`/`app` **都不得引用 `service/svc*`**。
@@ -29,7 +29,7 @@
   - **用例层（`service/svc<领域>`）的三条硬规矩**（2026-10-16 定案；违反者由 `internal/archtest` 拦，别靠注释）：
 
     1. **只有 `internal/controller/ctr<领域>` 可以引用 `internal/service/svc<领域>`**——「引用」包括调用、构造与**写类型名**。
-       `app` / `router` / `manager` / `domain` / `mechanism` / `dao` / `store` / `pkg` 一律不许出现 `svc*` 类型。
+       `app` / `router` / `sessionruntime` / `domain` / `mechanism` / `dao` / `store` / `pkg` 一律不许出现 `svc*` 类型。
        连带的装配口径：**`app` 不引用 controller**（`cmd → app → router → controller` 是有向的），
        `router` 拿到的只是依赖事实，controller 在自己的构造函数里把 service 造出来。
     2. **`service/svc*` 之间零互相 import、零互调用**（同层的另外半边由既有守卫钉）。需要别的域的事实时，
@@ -53,7 +53,8 @@
   `tz_offset?: number` / api 必须 `p.set('tz_offset'` / 页面必须 `tz_offset: -new Date().getTimezoneOffset()`。
   反证（实跑）：存储层改回 `UTC()` 分桶 → 红；抽掉 api 的 `p.set('tz_offset'` → 红。
 
-  **共 147 条**——加守卫时记得同步这句话。
+  **共 148 条**——加守卫时记得同步这句话。
+  （2026-10-17 P4a 正文第五十五刀加 1 条 → **148**：`TestSessionStateLivesInSessionDomain`（新文件 `session_state_domain_test.go`）。会话运行期状态机（`ActiveSession`/`Run`/`Handles` + 事件出口 + 排队投递 + 轮次收口）从 `internal/manager` 整族搬进 `internal/domain/session`；判据三段 fail-closed：域侧锚必须在（`active.go`/`runner.go`/`eventsink.go` 八个符号）、manager 生产代码零命中旧状态（`type ActiveSession struct`/`type Run struct`/`sessions map[string]*`/`byProvider map[string]string`/`.sessions[`/`.byProvider[`）、接线正判据（`session.NewRunner(` + `Acquire: o.acquireSession` + `o.runner.EventSink(` + `o.handles.Put(` + `o.runner.Prompt(`）。反证（实跑）：在 manager 放一个 `type Run struct{}` → 红。
   （2026-10-17 文档口径清偿加 4 条 → **141**：`TestUnimplementedIdsFollowSectionPrefix` / `TestUnimplementedRecordsAreResolvable` / `TestShippedDocsHaveNoAdrReferences` / `TestDocsHaveNoStaleClaims`（新文件 `docs_consistency_test.go`）。前两条钉编号规则与记录列可复核（存在路径 / 存在提交号 / 归档指针）；后两条钉出货文档零 `ADR-\d+`（各 spec 私有编号、跨 spec 撞号）与已失效表述（`每部署一个模式` / `workspace_path_immutable` / `无连接池` / `前端策略编辑` / L3-2 `保持未关闭`）不再回潮。反证（实跑）：把 C19 改回 O16 / 把记录列改成「见当年那份文档」/ 在 roadmap 加一处 `ADR-` 形式的引用/ 把 `workspace_path_immutable` 写回 unimplemented，四者皆红。）
   （2026-10-17 RunningRows / 用量修复加 1 条 → **142**：`TestRunInProgressStatusIsSingleSourced`（新文件 `run_status_source_test.go`）。四段 fail-closed：`OpenRun` 写 `SessionStatusInProgress`、`dao/run.go` 过滤 `in_progress` 且不含 `"running"`、`store/usage.go` 的 `case "in_progress"`、v30 迁移存在且已登记。失效方式是静默的：写入方写 `in_progress` 而查询方读 `running` ⇒ 查询恒空（`runRowFor` 的兜底成了死代码）、用量 `Running` 恒 0，两边都能编译。反证（实跑）：DAO 改回 `running` / 删掉 v30 的 UPDATE，两者皆红。）
   （2026-10-17 会话读面快照化加 1 条 → **143**：`TestSessionReadFaceTakesOwnLock`（新文件 `session_readface_lock_test.go`）。`SessionResp` 收成包内 `sessionRespLocked`，跨包读面改走 `SessionSnapshot`（一次取锁返回 resp + run + 存在性）；`make test-race` 新目标跑 `-race`（`internal/domain/session/` / `internal/service/svcsession/` / `internal/runtimeconn/`）。判据四段 fail-closed：导出 `SessionResp` 零命中、`SessionSnapshot` 体内有 `pl.mu.Lock()`、`svcsession` 生产文件有 `SessionSnapshot(`、同面 `.SessionResp(` 零命中。反证（实跑）：把导出方法加回来 + 让 `meta.go` 调它，①②④ 同红。）
@@ -79,7 +80,7 @@
 - `make dev` 开发循环（`frontend/scripts/dev-loop.mjs`：**构建一次** → `tsc -b --watch` + `vite build --watch --no-emptyOutDir` 重建 → 核心服务**同一份产物**，浏览器开 `http://127.0.0.1:10001`；Ctrl-C 按进程组一起收，**任一阶段自己退出即整体回红**——不许出现"前端已死、循环还活着"的假活）；**不再有 `:5173` 那条路**（vite dev server 从源码现编译 = 与交付不是同一次构建，`apps/web/vite.config.ts` 直接报错拦住，见 archtest 的 `TestDevLoopServesBuiltArtifact`）。`make server` 仅后端；`make web` **只**构建前端产物（`frontend/apps/web/dist`，唯一一份——核心从不自带资产，跑时用 `--web-dir` / `MATE_WEB_DIR` 指过去，没给就拒启退出码 3）。**这两条都认 `RUNTIME_BIN=<可执行文件>`**（v18 从历史名 `OPENCODE_BIN` 改来：它替换的是**构建期固定的那个**底座、默认 `dsh`）：核心拉底座是写死的名字——构建期固定的那个——由 `exec` 走 `PATH` 解析，所以 dev/server 默认命中**本机装的那份**（桌面态相反：壳解析随包载荷、**不回落** `PATH`）；本机装的是 v1 而仓库取证以 v2 为准时（2026-10-10），用 `make dev RUNTIME_BIN=…` 显式指定随包那份即可，不必动本机安装（**各底座的入口形态不同，别照抄**：dsh 载荷里**没有平台化二进制**，入口是 npm 包的可执行 `payloads/dsh/<ver>/node_modules/@deepseek-ai/dsh/lib/bin.js` = 该版本 `payload.json` 的 `entry`；有的底座是自带二进制铺在载荷根。`make dev` 横幅在"跑的是 PATH 上那份"时会按当前底座印出可直接粘贴的那一行）。语义是**显式覆盖、不探测**（不填 = 与今天逐字相同；填了只把**核心子进程**的 `PATH` 前置到一个只含**构建期固定那个名字**的转发目录 `.cache/dev-bin/`，前端不拿；填了不可执行当场失败）。也可以写进仓库根的 `.env` 一次配好（那正是 compose 用的同一个文件；Makefile **只挑 `RUNTIME_BIN` 一个键**、不做整份 `-include`），优先级 **命令行 > 进程环境变量 > `.env` > PATH**。**`make dev` 的回显（2026-10-11 P4 重做）说的才是真的**：它打印构建期固定的 runtime、**命中的那一份**（路径 + 来源）、**版本**（只在路径落在 `resources/payloads/<name>/<ver>/` 内时给真值——核心与本仓都**不探测**本机安装：底座连 `--version` 都写自己的 home）与随包那份，不一致/无从判定时打 ⚠️/ℹ️；同一份事实经 `--payloads` 交给核心，于是 `/meta.payloads[]` 在 dev 态**不再恒空**（`source: path` 正是那份契约为本形态预留的取值）。**这里有个曾经骗人的坑（2026-10-12 已修根因）**：转发 shim 的名字曾写死成某一个底座，于是构建期固定成另一个时那个覆盖 **根本不生效**——旧回显还会把它当"底座"报出来。**根因已修**：shim 现在按 `$(RUNTIME)` 命名（`dev/runtime-bin` 生成 `<DEV_BIN_DIR>/$(RUNTIME)`），在任何构建上都生效；那句警告与 `inert` 分流整体删除。守卫 `TestDevLoopReportsRuntimeHit`（第 39 条）钉住这条链，含"命中报告必须是打印而不是判据"（D6：不判红）。**注意 `.env` 也被 `dsh` 自己读**（真实运行时读「调用目录」的 `.env`；`--version` 快路径不读）：前缀 `DSH_`/`XDG_`/`DYLD_`/`BASH_FUNC_` 与 49 个固定启动键（`PATH`/`HOME`/`NODE_OPTIONS`/`SSL_CERT_*`/代理四项…）写进去会让 dsh **拒绝启动**——要给 compose 钉底座版本就走 `export`（compose 与 dsh 都是"继承环境优先"），别写进 `.env`。
 - `make build && make vet && make test` = `cd backend && go build|vet|test ./...`（注意**没有** `build/vet/test` 这种合并目标：make 会把斜杠当成目标名的一部分而报 `No rule to make target`）。无独立 lint。**全仓只有这一个构建配置**：`-tags release` 这个维度已于 2026-10-10 随 `go:embed` 删除（连带 `make test/release` 与 `make all` 单二进制形态），不再有"只有发布才编译、默认 `go test` 覆盖不到"的代码。
 - 容器：`make image`（默认最小镜像）/ `make image/runtimes WITH_DSH=true`（内置底座）/ `IMAGE_TAG=runtimes make image/run`；开关只认 `true|false` 且必须与 `--target` 配套（最小 target 传开会构建失败，不静默忽略）。基础镜像与仓库地址可用变量覆盖（`NODE_IMAGE/GO_IMAGE/RUNTIME_IMAGE/GO_PROXY/NPM_REGISTRY`），细节见 `docs/deployment.md` §4。
-- 单包 / 单测试：`cd backend && go test ./internal/manager -run TestName -v`。全量 `go test ./...` 约 2 分钟、**不依赖外部 runtime**（夹具用 `testutil.StubRegistry()` 提供的 stub runtime 注册表，需要真 ACP 语义的用例用自建最小 responder，见 `pkg/runtime/acp_testserver_test.go` / `pkg/acl/elicitation_e2e_test.go`）。
+- 单包 / 单测试：`cd backend && go test ./internal/sessionruntime -run TestName -v`。全量 `go test ./...` 约 2 分钟、**不依赖外部 runtime**（夹具用 `testutil.StubRegistry()` 提供的 stub runtime 注册表，需要真 ACP 语义的用例用自建最小 responder，见 `pkg/runtime/acp_testserver_test.go` / `pkg/acl/elicitation_e2e_test.go`）。
 - 前端：`cd frontend && pnpm dev / typecheck / build`。
 - 界面验收（前端无测试框架，这是"看过界面"的唯一路径）：`cd frontend && pnpm ui:accept [cap|cmd|auto|model|wsdir]`——真 Chrome（CDP，零新依赖）+ 真服务，脚本自造自清夹具（验收用 skill / 自动化 / 会话），如实录见 `.dsh/docs/notes/2026-09-24-panel-ui-acceptance.md`。**默认靶 = `http://127.0.0.1:10001`（= `make dev`，服务的是一份构建产物）**，开跑前有**启动断言**逐字核对"这个靶给的 `index.html` 就是本地 `apps/web/dist` 那份、哈希资产真取得到、`/meta.webPath` 指的就是它"——指到"从源码现编译"的靶上**当场红**（写死的靶错了，后面几十条验的都不是交付件）。**场景按 `GET /agents` 的在册事实驱动**（不写死某个底座；底座由构建期固定）：验不了的场景**显式跳过并写明理由**（打印在汇总里、不计红），**不接受"靠上一轮残留数据碰巧绿"**——2026-10-11 实测 `cmd` 就是这种假绿。默认四条（`cap cmd auto model`）；`wsdir`（目录浏览对话框）与 `auto` 里"手输绝对路径"那一段**要在核的进程环境里给一个 `SSH_CONNECTION`** 才跑——那条判定决定"用系统面板还是应用内浏览"，而自动验收只能在**应用内浏览**那一态上跑（系统面板要真人回答；判据是 `GET /capabilities` 的 `native-dialog`，**别在前端猜**）。**不进 CI**（要真浏览器 + 真底座 + 会真跑模型）。日常一条命令：**`make verify/ui-product`**（前置 = `make dev` 在跑）。桌面入口的对应靶是 `cd frontend && pnpm ui:accept:desktop`（真 Electron + 真核心，**脚本自己起壳并自造自清**，跑之前别让 `make dev` 的核同时活着——两个核心共用 `~/.ark-mate/mate.db`），由 `make verify/desktop-dod` 串成桌面 DoD；**浏览器产物靶不进那条 DoD**（它需要"核已在跑"，与 DoD"源码态自起壳"的前置互斥）。
 
@@ -162,7 +163,7 @@ memory 模式写入断言 ×1）、解包 3 处（原生恢复 ×2、探测 resu
 | 词 | 指 | 落点 | 机器判据 |
 |---|---|---|---|
 | `definition` | **定义变更审计**：覆盖 skill / mcp / automation / provider / model **五种定义**（v19 起 agent 不再是一种定义） | 表 `definition_revisions`、列 `definition_id`、Go 类型 `DefinitionRevisionEntity`/`DefinitionRevisionDao`、常量 `DefinitionKind*`/`DefinitionAction*`、索引 `idx_definition_revisions_history` | `TestNoCapabilityRevisionVocabulary`：旧词 `capability_revisions`/`capability_id`/`CapabilityRevision` 零命中 |
-| `run` | **平台聚合的一轮**（用户发一次 prompt → 终态） | 表 `runs`（v1 起就叫 runs）、`messages.run_id`、`inputs.target_run_id`、Go 类型 `RunEntity`/`RunRec`、`manager/run.go`、事件 `run.started`/`run.ended`/`run.error`、配置键 `run_timeout`/`MATE_RUN_TIMEOUT` | 全仓 `turn` 只剩底座原文（见下） |
+| `run` | **平台聚合的一轮**（用户发一次 prompt → 终态） | 表 `runs`（v1 起就叫 runs）、`messages.run_id`、`inputs.target_run_id`、Go 类型 `RunEntity`/`RunRec`、`domain/session/runner.go`、事件 `run.started`/`run.ended`/`run.error`、配置键 `run_timeout`/`MATE_RUN_TIMEOUT` | 全仓 `turn` 只剩底座原文（见下） |
 
 **`turn` 只允许留在底座原文里**（改了就等于改协议常量，不是改我们的词汇）：ACP 的 `StopReasonEndTurn` 与逐字取值 `"end_turn"`（`pkg/acl`/`pkg/runtime` 原样比对，ACP 回的就是这个串）。
 
@@ -176,7 +177,7 @@ memory 模式写入断言 ×1）、解包 3 处（原生恢复 ×2、探测 resu
 |---|---|---|---|
 | `models.model`（v24 从 `model_id` 改名） | **发给上游的模型名**（外部世界的名字；不是任何一行的 id） | `models.model` 列、wire `model`、`resource.Model.Model`、`ModelValueAdapter.Value(providerID, model)` | `TestModelsVocabularyIsModelNotModelID`：真 schema 有 `model` 无 `model_id` + DTO（`dtomodel/list.go`）+ 前端类型（`ModelRow`/`ModelCreateReq`）+ 实体 gorm 标签四面，**反向**断言 `sessions.model_id` 仍在 |
 | `sessions.model_id`（v26 改名保留、**语义改**） | **平台模型行 id**（`mdl_…`；指向 `models.id`）。运行时的不透明值**不落库、不过 wire**，由 adapter 现算 | `sessions.model_id` 列、wire `model`（`dtosession` 三处）、`SessionRec.ModelID` | `TestSessionModelRefIsPlatformID`（写入点必须先经 `resolveSessionModel`）+ `TestModelSelectionIsLimitedToPlatformList`（对不上平台清单必须**显式拒**，复用 `40401 model_not_found`） |
-| `ConfigOptionValueResp.model_id`（v26 加） | **注解**：这条运行时候选对应平台清单里的哪一行（空 = 平台未声明 ⇒ 客户端选不了） | `GET /models/catalog` 的 `values[].model_id`、`manager/modelIDByValue`（唯一产出点，多命中 fail-closed） | 同守卫⑧ + `internal/manager/session_model_ref_test.go` 的三条链一致性判据 |
+| `ConfigOptionValueResp.model_id`（v26 加） | **注解**：这条运行时候选对应平台清单里的哪一行（空 = 平台未声明 ⇒ 客户端选不了） | `GET /models/catalog` 的 `values[].model_id`、`domain/provider/catalog_read.go` 的 `ModelIDByValue`（唯一产出点，多命中 fail-closed） | 同守卫⑧ + `internal/sessionruntime/session_model_ref_test.go` 的三条链一致性判据 |
 
 **消歧规则**（这是本节唯一要记的）：`_id` 一律指"指向某表 `id`"（`models.provider_id` → `providers.id`、`sessions.model_id` → `models.id`），而 `model` 是"发给上游的那个名字"。所以判据**按表/按面**限定，不是全局 grep：`sessions` 侧与目录注解的 `model_id` 是**正确**的名字，历史迁移里的 `model_id` 是**当时那一版**的名字。
 
@@ -197,10 +198,10 @@ memory 模式写入断言 ×1）、解包 3 处（原生恢复 ×2、探测 resu
 ## 一致性守卫 / 测试约定
 
 - `TestReadmeRoutesMatchRouter`（`internal/router/router_test.go`）把 README 反引号内的 `/v1/mate` 路径与真实注册路由做**双向**比对：README 引用的路径必须注册（抓改名/删除），每条注册路由也必须在 README 出现（抓新增）。所以**改路由与改文档必须同一次提交**——新增端点不写文档同样红。因此没有豁免名单：**兼容别名也是端点，也要成行写进路由表**（`/permissions/always` 两个别名就是这么被补进文档的）。README 里也不得再出现历史名 `/conversations`。
-- 域事件 type 权威定义在 `backend/internal/manager/events.go`。
-- **连接拆除语义（`manager`，改动前先读 `disconnectSession` 注释）**：连接断开只是连接事实，绝不等于轮次失败。主动拆除（`Close` 停机 / `stopAgent` / 空闲回收）在途轮次归 `interrupted`（可续聊重发）、空闲会话状态**原样保留**；只有对端或子进程意外断开才可能把在途轮次收成失败，空闲会话同样不被改写（只落连接诊断 `connection_lost`）。拆除原因由 `runtimeConn.intentional` 承载（`watchConn` 观察到对端结束 = 意外），断连时句柄摘除但会话记录不动——下次 prompt 经 `ensureSession` 按 native resume / handoff memo 重建（执行可丢弃、会话平台拥有），**可续聊性只看会话是否存在**，上一轮的终态不是作废判据。
+- 域事件 type 权威定义在 `backend/internal/domain/session/events.go`。
+- **连接拆除语义（`sessionruntime`，改动前先读 `disconnectSession` 注释）**：连接断开只是连接事实，绝不等于轮次失败。主动拆除（`Close` 停机 / `stopAgent` / 空闲回收）在途轮次归 `interrupted`（可续聊重发）、空闲会话状态**原样保留**；只有对端或子进程意外断开才可能把在途轮次收成失败，空闲会话同样不被改写（只落连接诊断 `connection_lost`）。拆除原因由 `runtimeConn.intentional` 承载（`watchConn` 观察到对端结束 = 意外），断连时句柄摘除但会话记录不动——下次 prompt 经 `ensureSession` 按 native resume / handoff memo 重建（执行可丢弃、会话平台拥有），**可续聊性只看会话是否存在**，上一轮的终态不是作废判据。
 - WS / REST 契约改动优先看 `internal/router/routes_*.go` 与 `internal/controller/ctr*`，测试多为走真实装配路径
-  （`manager.NewService` + `router.New`）的进程内测试；`TestReadmeRoutesMatchRouter` 走的就是真实引擎。
+  （`sessionruntime.NewService` + `router.New`）的进程内测试；`TestReadmeRoutesMatchRouter` 走的就是真实引擎。
 
 ## 前端风格约束（frontend/DESIGN.md）
 
@@ -210,7 +211,7 @@ memory 模式写入断言 ×1）、解包 3 处（原生恢复 ×2、探测 resu
 ## 变更授权
 
 - **允许破坏性调整**：删除/重命名既有对外形态（兼容别名如 `/permissions/always`、历史路径）、改造本地持久数据（SQLite schema、transcript 格式、providers 档案）与大范围重构（包边界、装配路径）均被允许，**不要求保留过渡性兼容层**。
-- 例外（仍强制）：改路由须同步 README 接口摘要（`TestReadmeRoutesMatchRouter` 守卫保持绿）；改事件 type / 数据 schema 须同步 `manager/events.go`、`internal/model` 实体与 `internal/store` 迁移内核（三处手工一致）；改动后测试与前端 typecheck 保持通过。
+- 例外（仍强制）：改路由须同步 README 接口摘要（`TestReadmeRoutesMatchRouter` 守卫保持绿）；改事件 type / 数据 schema 须同步 `domain/session/events.go`、`internal/model` 实体与 `internal/store` 迁移内核（三处手工一致）；改动后测试与前端 typecheck 保持通过。
 
 ## 运行配置要点
 
