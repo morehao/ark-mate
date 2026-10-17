@@ -192,3 +192,21 @@ func TestUsageSummaryFieldWiseSnapshotAndCurrency(t *testing.T) {
 		t.Fatalf("单币种应求和且无明细: %+v", res2.Totals)
 	}
 }
+
+// TestUsageCountsInProgressAsRunning 修掉「Running 恒 0」之后，进行中的轮必须计入
+// `Running`。写入方（`OpenRun`）写 `in_progress`，v30 又把历史 `running` 归一到了同一个值，
+// 所以这里只认 `in_progress`——再写一个 `running` 分支就是同一件事的第二份事实。
+func TestUsageCountsInProgressAsRunning(t *testing.T) {
+	s := openTestDB(t)
+	day := func(h int) time.Time { return time.Date(2026, 9, 1, h, 0, 0, 0, time.UTC) }
+	seedRun(t, s, "r_open", "c_open", "in_progress", day(10), time.Time{}, "")
+	seedRun(t, s, "r_done", "c_done", "completed", day(11), day(11).Add(time.Second), "")
+
+	res, err := s.UsageSummary(ctxT(), UsageQuery{})
+	if err != nil {
+		t.Fatalf("UsageSummary: %v", err)
+	}
+	if res.Totals.Runs != 2 || res.Totals.Running != 1 || res.Totals.Completed != 1 {
+		t.Fatalf("计数不符: %+v（want runs=2 running=1 completed=1）", res.Totals)
+	}
+}

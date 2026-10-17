@@ -760,6 +760,11 @@ var schemaMigrations = []migration{
 	// 下发（`/permission` 命令面不存在），所以"一个进程内按会话切换"走不通，只能每模式一个暖
 	// 进程；而暖进程的键要在**取连接之前**已知 ⇒ 模式必须落库。语义见该文件头）。
 	migrationV29,
+
+	// v30 的版本步本体在 `migrate_v30.go`（数据归一：`runs.status` 的历史 `running` → 写入方
+	// 实际用的 `in_progress`。两个值并存让 `RunningRows` 恒空、用量 `Running` 恒 0，而这两件事
+	// 都不报错——理由写在该文件头）。
+	migrationV30,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

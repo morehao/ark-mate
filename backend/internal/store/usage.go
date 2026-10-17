@@ -154,7 +154,7 @@ func aggregateUsage(rows []usageRow) UsageBucket {
 			b.Failed++
 		case "cancelled":
 			b.Cancelled++
-		case "running":
+		case "in_progress":
 			b.Running++
 		}
 		if !r.endedAt.IsZero() && r.endedAt.After(r.startedAt) {
