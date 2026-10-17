@@ -54,7 +54,7 @@ function SettingsDeepLink({ section }: { section: string }) {
 
 /** 窄屏顶条上的当前入口名（导航定义只有一份，这里不重复写别名）。 */
 function currentEntryLabel(pathname: string): string {
-  return NAV_ENTRIES.find((e) => isEntryActive(pathname, e))?.label ?? '问答'
+  return NAV_ENTRIES.find((e) => isEntryActive(pathname, e))?.label ?? '会话'
 }
 
 export function App() {

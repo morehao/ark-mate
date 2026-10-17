@@ -13,7 +13,6 @@ import {
   AppstoreOutlined,
   BarChartOutlined,
   ClockCircleOutlined,
-  MessageOutlined,
 } from '@ant-design/icons'
 
 export interface NavLeaf {
@@ -47,7 +46,6 @@ export type NavEntry = NavLeaf | NavGroup
 export const PENDING_HINT = '预设化助手（未实现）'
 
 export const NAV_ENTRIES: readonly NavEntry[] = [
-  { id: 'chat', label: '问答', to: '/sessions', order: 10, icon: <MessageOutlined /> },
   {
     id: 'extensions',
     label: '扩展',

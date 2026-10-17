@@ -108,6 +108,10 @@ export const consoleStyleSheet = `
   }
   .fg-rail-new-icon { font-size: 14px; color: ${tokens.textSecondary}; }
   .fg-rail-new:hover .fg-rail-new-icon { color: ${tokens.primary}; }
+  /* /sessions 上没有一级导航项（问答入口已去重）：选中态落在新建按钮上。
+     与 .fg-navitem.fg-on 同一套语汇（底色 + 主色前缘），只是按钮自带边框，所以再点亮边框。 */
+  .fg-rail-new.fg-on { background: ${tokens.primarySoft}; border-color: ${tokens.primary}; }
+  .fg-rail-new.fg-on .fg-rail-new-icon { color: ${tokens.primary}; }
 
   /* 导航区：一级 32px / 二级 30px，条目间距 1px */
   .fg-nav-rail {
