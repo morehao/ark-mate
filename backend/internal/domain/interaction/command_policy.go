@@ -45,17 +45,17 @@ var ValidCommandDecisions = []CommandDecision{CommandAllow, CommandPrompt, Comma
 // PrefixRule 一条前缀规则。
 type PrefixRule struct {
 	// Name 规则名（日志与拒绝文案用；空 = 按序号渲染）。
-	Name string
+	Name string `json:"name,omitempty"`
 	// Pattern 有序 token 模式；每个位置是一组备选（单元素 = 精确匹配那一个 token）。
-	Pattern [][]string
+	Pattern [][]string `json:"pattern"`
 	// Decision 命中后的判决。
-	Decision CommandDecision
+	Decision CommandDecision `json:"decision"`
 	// MatchSamples 加载期**必须命中**的样例（空 = 不校验这一侧）。
-	MatchSamples [][]string
+	MatchSamples [][]string `json:"match_samples,omitempty"`
 	// NotMatchSamples 加载期**必须不命中**的样例。
-	NotMatchSamples [][]string
+	NotMatchSamples [][]string `json:"not_match_samples,omitempty"`
 	// HostExecutable 只对列出的绝对路径开放 basename 回退比较（空 = 不回退）。
-	HostExecutable []string
+	HostExecutable []string `json:"host_executable,omitempty"`
 }
 
 // Match 该规则是否命中一串 token。

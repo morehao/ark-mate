@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
@@ -299,6 +300,14 @@ func (s *Service) NativePermissionEnabled() bool {
 //
 // TODO(P4b): 删转发（装配侧直接依赖 session.Plane）
 func (s *Service) SetTranscriptDir(dir string) { s.sessionPlane.SetTranscriptDir(dir) }
+
+// SetCommandPolicy 装配期登记命令门禁规则（nil = 未启用；规则来自
+// `<MATE_HOME>/command_policy.json`，加载期已校验）。
+func (s *Service) SetCommandPolicy(rules []interaction.PrefixRule) {
+	if s.orch != nil {
+		s.orch.SetCommandPolicy(rules)
+	}
+}
 
 // beginTranscript 为会话写 transcript header（首行）；失败只告警不阻断（域内实现自己判空）。
 //

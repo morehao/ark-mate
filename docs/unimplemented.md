@@ -63,7 +63,7 @@
 | O15 | **队列项不能原子替换正文**：队列只补了三个动作（重排 / 立即发送 / 取出编辑），**没有** `surfaceOp: replace` 那类"就地改写一条已排队输入"。取出编辑会把它作废、让用户改完重新入队——语义上等价，但**位次会变**（改完排到队尾） | 出现"改一句话但保留排队位置"的真实需求 | `docs/decisions.md` v28 偏离 ④（刻意不做 17 方法队列） |
 | O18 | **既有会话的归属不自愈**：工作空间改名/搬迁/删除之后，`sessions.workspace_id` 仍指向那条登记，而登记指向的目录可能已经不存在（`dir_status: missing`）。今天只有读面如实上报，没有自愈路径（不自动重挂、也不批量改归属） | 出现「用户确认过的新位置」这一事实源之后 | `docs/decisions.md` v28 偏离 ① + `backend/internal/domain/workspace/registry.go` |
 | O19 | **确认区一次只显示一张卡**：权限优先、其余以「还有 N 条」计数，**不能**并列处理。同时挂起多条时用户需要逐条处理 | 出现"一次要确认很多条"的真实场景 | `frontend/packages/console/src/components/ConfirmArea.tsx` |
-| O20 | **命令门禁只落了规则表**：`domain/interaction/command_policy.go` 已有前缀规则 + 加载期自校验 + 兜底 `prompt`（`ececcf5`），但**未接进工具调用裁决点**（需要先拿到真实 `bash` 工具入参形状），前端也没有策略编辑面（复核：无策略路由、无 DTO、设置分节只有 通用 / 模型 / 访问令牌） | 拿到真实 `bash` 入参形状之后 | `backend/internal/domain/interaction/command_policy.go`（+ `ececcf5`） |
+| O20 | **命令门禁没有编辑面**：规则文件（`<MATE_HOME>/command_policy.json`，见 `docs/deployment.md` §2.3.3）与裁决点已接通（先按 `toolCallId` 回查命令行，只对简单命令 `allow`/`forbidden`；复杂命令一律 prompt；`forbidden` 先于会话记忆）。**没有**前端编辑面（要手写 JSON），也没有「今天哪些规则生效」的读面 | 出现「非手写配置」的真实需求时 | `backend/internal/domain/interaction/command_gate.go` + `backend/internal/manager/permission_flow.go` |
 
 ## 3. 已关闭（CLOSED，保留追溯）
 

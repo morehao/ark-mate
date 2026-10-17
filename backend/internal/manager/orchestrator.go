@@ -126,6 +126,16 @@ type Orchestrator struct {
 	// handoffMaxChars bounded handoff memo 字符预算（§5.6/§18 D-3；见 SetHandoffMaxChars /
 	// MATE_HANDOFF_MAX_CHARS）。0 = 关闭 memo 兜底。
 	handoffMaxChars int
+
+	// commandPolicy 命令门禁规则表（A2；`domain/interaction/command_policy.go`）。
+	// 空 = 未启用：`GateCommand` 返回 isShell=false，行为与改前逐字相同。
+	commandPolicy []interaction.PrefixRule
+
+	// toolMu/toolCalls 按 toolCallId 记住工具调用详情（见 tool_calls.go 的完整理由）：
+	// dsh 的权限请求只带 toolCallId，命令行在同 id 的 tool_call 更新里。
+	toolMu    sync.Mutex
+	toolCalls map[string]acl.ToolCallInfo
+	toolOrder []string
 }
 
 // RunOptions 一次 RunOnce（demo）的入参。
@@ -199,6 +209,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		elic:            interaction.NewElicitationManager(interaction.DefaultElicitationTimeout),
 		usage:           make(map[string]objusage.UsageInfo),
 		handoffMaxChars: DefaultHandoffMaxChars,
+		toolCalls:       make(map[string]acl.ToolCallInfo),
 	}
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
 	// （session.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。
@@ -267,6 +278,10 @@ func (o *Orchestrator) SetElicitationTimeout(d time.Duration) { o.elic.SetTimeou
 
 // SetRunTimeout 设置单轮 run 看门狗超时（0 = 关闭）。见 watchdogRun。
 func (o *Orchestrator) SetRunTimeout(d time.Duration) { o.runTimeout = d }
+
+// SetCommandPolicy 装配期登记命令门禁规则（nil = 未启用）。规则表由 app 从
+// `<MATE_HOME>/command_policy.json` 加载并**加载期校验**；这里只持有，不再校验。
+func (o *Orchestrator) SetCommandPolicy(rules []interaction.PrefixRule) { o.commandPolicy = rules }
 
 // SetHandoffMaxChars 设置 bounded handoff memo 字符预算（0 = 关闭 memo 兜底）。见 ensureSession。
 func (o *Orchestrator) SetHandoffMaxChars(n int) { o.handoffMaxChars = n }

@@ -61,12 +61,25 @@ func TestSandboxEscalationGoesThroughApproval(t *testing.T) {
 	}
 
 	// ③ 审批通道只有一条：权限请求必须经 `RegisterAndWait`（没有"某类权限自动放行"的短路）。
+	//
+	//    平台替用户允许**只有两处**：用户决策（`RegisterAndWait`）与**已配置的命令门禁**
+	//    （A2：规则文件里显式写了 `allow`，见 `commandGateDecision`）。除此之外，`permission_flow.go`
+	//    里出现 `Allowed: true` 都视为"默认值式放行"——所以判据按**函数体**切分：门禁函数里必须有
+	//    `CommandAllow` 分支且允许，其余部分一个字都不许有。
 	flow := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "permission_flow.go")))
 	if !strings.Contains(flow, "o.perm.RegisterAndWait(") {
 		t.Fatalf("`permission_flow.go` 里没有 `o.perm.RegisterAndWait(`：审批通道必须只有这一条")
 	}
-	if strings.Contains(flow, "Allowed: true") {
-		t.Fatalf("`permission_flow.go` 里出现了 `Allowed: true`：那不是**用户**的决定——\n" +
-			"平台替用户允许一次权限是这一族里最危险的一行代码（它看起来像「默认值」）")
+	gateBody, ok := goFuncBody(flow, "func (o *Orchestrator) commandGateDecision(")
+	if !ok {
+		t.Fatalf("`permission_flow.go` 里找不到 `commandGateDecision(`（门禁的允许出口必须在这里且只有这里）")
+	}
+	if !strings.Contains(gateBody, "interaction.CommandAllow") || !strings.Contains(gateBody, "Allowed: true") {
+		t.Fatalf("`commandGateDecision` 没有「只在 CommandAllow 分支允许」的形状：\n" +
+			"平台替用户允许必须可追溯到一条**显式配置**的规则，而不是一个无条件默认值")
+	}
+	if rest := strings.Replace(flow, gateBody, "", 1); strings.Contains(rest, "Allowed: true") {
+		t.Fatalf("`permission_flow.go` 的门禁之外出现了 `Allowed: true`：那不是**用户**的决定，\n" +
+			"也不是一条已配置的规则——平台替用户允许是这一族里最危险的一行代码（它看起来像「默认值」）")
 	}
 }

@@ -48,6 +48,8 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 		case acl.KindToolCall:
 			typ = session.BusToolCall
 			if d, ok := ev.Payload.(acl.ToolCallInfo); ok {
+				// 权限请求只带 toolCallId（dsh 的 wire 形状）：把详情留到权限裁决那一刻。
+				o.rememberToolCall(d)
 				// 工具过程（S1）：带 `tool_name` —— 头栏那句「正在执行 Bash」正是它（Q6 选①）。
 				// 必须在 publish 工具事件**之前**发：先有「我要跑 X」再有「X 的结果」。
 				o.runStatusFor(ev.SessionID, session.RunStatusToolExecuting, session.RunStatusOpts{
@@ -58,6 +60,11 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 		case acl.KindToolUpdate:
 			typ = session.BusToolUpdate
 			if d, ok := ev.Payload.(acl.ToolCallInfo); ok {
+				// 终态 update 可能只带 status：先合并（不带 input 不会抹掉命令行），再按终态删除。
+				o.rememberToolCall(d)
+				if d.Status == acl.ToolStatusCompleted || d.Status == acl.ToolStatusFailed {
+					o.forgetToolCall(d.ID)
+				}
 				p := toolPayload(ev.SessionID, runtimeID, d)
 				// 「这条为什么没成」的归类来自**底座的签名表**（第四张可执行端口表）：
 				// 被沙箱拒绝的那一帧 `status` 是 `completed`，只有结果正文说得清。
