@@ -12,10 +12,18 @@ import { ConfirmArea } from '../components/ConfirmArea'
 import { QueuedInputs } from '../components/QueuedInputs'
 import { StartPanel } from '../components/StartPanel'
 import { EntryView } from '../components/Transcript'
+import { ThoughtFoldView } from '../components/ThoughtFoldView'
 import { anchorIndex } from '../console/searchView'
 import { titleFor } from '../console/util'
 import { fmtRunDockLine, fmtRunUsageLine, toRunUsageInfo, type RunUsageInfo } from '../console/usageView'
-import { TRANSCRIPT_WINDOW, stickToBottom, turnStatusOf, windowEntries } from '../console/transcriptView'
+import {
+  TRANSCRIPT_WINDOW,
+  foldThoughts,
+  isThoughtFold,
+  stickToBottom,
+  turnStatusOf,
+  windowEntries,
+} from '../console/transcriptView'
 import { elapsedLabel, runNarration } from '../console/runView'
 import type { DeliveryChoice } from '../console/queueView'
 
@@ -106,6 +114,8 @@ export function ChatPage() {
   const [flashEntryId, setFlashEntryId] = useState<string | null>(null)
   // 「已处理 Ns」的时钟：只在本来就有开始时刻时每 1s 推进一次（没有开始时刻就一个字都不显示）。
   const [nowTick, setNowTick] = useState(() => Date.now())
+  // 用户手动展开过的思考折：流式中有人展开着看历史时，自动贴底要停下（D6 / 7.9）。
+  const [foldOpen, setFoldOpen] = useState<Record<string, boolean>>({})
   // err 轮重试文本回退（会话 id → 历史最后 user_message；undefined=未取）
   const [errFallback, setErrFallback] = useState<Record<string, string | undefined>>({})
   // C2：服务端「加载更早」在途标记（同一时刻只允许一次请求）。
@@ -284,10 +294,12 @@ export function ChatPage() {
       el.scrollTop += el.scrollHeight - prevHeight
       return
     }
+    // 流式中有人手动展开了某一段思考 = 他在读历史：别再把他拉回底部。
+    if (streaming && Object.values(foldOpen).some(Boolean)) return
     if (stickToBottom({ scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight })) {
       el.scrollTop = el.scrollHeight
     }
-  }, [view?.entries, view?.streaming, view?.lastSeq, revealed])
+  }, [view?.entries, view?.streaming, view?.lastSeq, revealed, streaming, foldOpen])
 
 
   // 搜索命中跳转（M3 ②）：条目就绪后滚动到锚点条目并短暂高亮。
@@ -322,10 +334,23 @@ export function ChatPage() {
 
   const entryWindow = windowEntries(view?.entries ?? [], TRANSCRIPT_WINDOW, revealed)
   const turnStatus = turnStatusOf(view?.entries ?? [], streaming, narration.label)
+  // 分组在**窗口之后**：先按条目窗口取尾部，再把其中相邻的 thought 收成一折。
+  const folded = foldThoughts(entryWindow.visible, streaming)
+  // 搜索锚点仍按**原条目下标**定位：折叠块的 id 是它首条条目的 id，所以它沿用那个下标。
+  const windowBase = Math.max(0, (view?.entries.length ?? 0) - entryWindow.visible.length)
+  const entryIndex = new Map(entryWindow.visible.map((e, i) => [e.id, windowBase + i]))
+  const settleScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    if (stickToBottom({ scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight })) {
+      el.scrollTop = el.scrollHeight
+    }
+  }
 
-  // 切换会话：复位尾部窗口（新会话从尾部一页开始）。
+  // 切换会话：复位尾部窗口（新会话从尾部一页开始）与折叠展开态。
   useEffect(() => {
     setRevealed(0)
+    setFoldOpen({})
   }, [activeId])
 
   const onSend = (text: string, delivery?: DeliveryChoice) => {
@@ -620,10 +645,10 @@ export function ChatPage() {
                           </Button>
                         </div>
                       )}
-                      {entryWindow.visible.map((e, i) => (
+                      {folded.map((e) => (
                         <div
                           key={e.id}
-                          data-fg-idx={entryWindow.hidden + i}
+                          data-fg-idx={entryIndex.get(e.id) ?? 0}
                           style={{
                             display: 'flex',
                             flexDirection: 'column',
@@ -632,12 +657,20 @@ export function ChatPage() {
                             boxShadow: flashEntryId === e.id ? `0 0 0 2px ${tokens.primary}` : 'none',
                           }}
                         >
-                          <EntryView
-                            e={e}
-                            onRetry={e === lastEntry ? retryLast : undefined}
-                            usageText={e.seq != null ? runsBySeq.get(e.seq)?.usageText : undefined}
-                            runInfo={e.seq != null ? runsBySeq.get(e.seq)?.info : undefined}
-                          />
+                          {isThoughtFold(e) ? (
+                            <ThoughtFoldView
+                              fold={e}
+                              onUserToggle={(id, open) => setFoldOpen((prev) => ({ ...prev, [id]: open }))}
+                              onSettled={settleScroll}
+                            />
+                          ) : (
+                            <EntryView
+                              e={e}
+                              onRetry={e === lastEntry ? retryLast : undefined}
+                              usageText={e.seq != null ? runsBySeq.get(e.seq)?.usageText : undefined}
+                              runInfo={e.seq != null ? runsBySeq.get(e.seq)?.info : undefined}
+                            />
+                          )}
                         </div>
                       ))}
                       {turnStatus.stage && (

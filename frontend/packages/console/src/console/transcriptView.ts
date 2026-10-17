@@ -107,3 +107,68 @@ export function turnStatusOf(entries: StreamEntry[], streaming: boolean, narrati
     .some((e) => e.kind === 'assistant' && (e.text ?? '').trim().length > 0)
   return { stage: hasBody ? narrationLabel || '正在输出' : '思考中', showCaret: !hasBody }
 }
+
+// ——— 思考过程折叠（需求 6 下半，D6） ———
+
+/**
+ * 一段相邻思考收成的一块。`id` 取该块**首条**条目 id（服务端已铸号，不新造身份），
+ * 重渲染时不会抖。
+ */
+export interface ThoughtFold {
+  kind: 'thought-fold'
+  id: string
+  text: string
+  /** `streaming` = 这一折还在生长（不收起、无箭头）；`completed` = 已截断（默认收起）。 */
+  variant: 'streaming' | 'completed'
+  startedAtSeq?: number
+  endedAtSeq?: number
+}
+
+/** 类型守卫：渲染分派用（`StreamEntry.kind` 是另一套联合，直接比较会被 TS 判为无重叠）。 */
+export function isThoughtFold(e: StreamEntry | ThoughtFold): e is ThoughtFold {
+  return e.kind === 'thought-fold'
+}
+
+/**
+ * 把**相邻**的 `thought` 条目合并成一折，其余条目原样保留。
+ *
+ * 为什么按相邻性分组：前端已经能从事件形状推出「这是一段连续的思考」，
+ * 不必为此加契约字段（`is_finished` 留作 O1 的备选）。底座在同一段思考里插入工具事件时
+ * 会被切成两块——那是对事件流的**诚实反映**，不是分组算法出错。
+ *
+ * `streaming` 时**只有最后一折且它就在流末尾**算「还在生长」：一经出现正文/工具事件，
+ * 那一段思考就结束了，应当收起（验收 A7：正文开始后自动收起、出现箭头）。
+ */
+export function foldThoughts(entries: StreamEntry[], streaming: boolean): Array<StreamEntry | ThoughtFold> {
+  const out: Array<StreamEntry | ThoughtFold> = []
+  let i = 0
+  while (i < entries.length) {
+    if (entries[i].kind !== 'thought') {
+      out.push(entries[i])
+      i++
+      continue
+    }
+    const group: StreamEntry[] = []
+    while (i < entries.length && entries[i].kind === 'thought') {
+      group.push(entries[i])
+      i++
+    }
+    const first = group[0]
+    const last = group[group.length - 1]
+    out.push({
+      kind: 'thought-fold',
+      id: first.id,
+      text: group.map((e) => e.text ?? '').join('\n'),
+      variant: 'completed',
+      startedAtSeq: first.seq,
+      endedAtSeq: last.seq,
+    })
+  }
+  if (streaming) {
+    const tail = out[out.length - 1]
+    if (tail && isThoughtFold(tail) && entries[entries.length - 1]?.kind === 'thought') {
+      tail.variant = 'streaming'
+    }
+  }
+  return out
+}

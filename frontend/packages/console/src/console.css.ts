@@ -1419,4 +1419,52 @@ export const consoleStyleSheet = `
       -webkit-text-fill-color: currentColor;
     }
   }
+
+  /* 思考折叠块（需求 6 下半）：整行点击、流式中 shimmer 且无箭头、结束后出现 12px 线性箭头。 */
+  .fg-thought-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 13px;
+    color: ${tokens.textSecondary};
+    text-align: left;
+    cursor: pointer;
+  }
+  .fg-thought-head:hover:not(:disabled) { color: ${tokens.text}; }
+  /* 流式中是正在生长的内容：不给收起动作，鼠标也不该变成"可点"。 */
+  .fg-thought-head:disabled { cursor: default; }
+  .fg-thought-chevron {
+    flex: none;
+    color: ${tokens.textPlaceholder};
+    transition: transform 0.12s ease;
+  }
+  .fg-thought-chevron.fg-open { transform: rotate(90deg); }
+  .fg-thought-clip {
+    overflow: hidden;
+    transition: max-height 0.28s cubic-bezier(0.33, 1, 0.68, 1), opacity 0.18s ease;
+  }
+  .fg-thought-body {
+    max-height: 200px;
+    overflow-y: auto;
+    border-left: 2px solid ${tokens.border};
+    margin-left: 1px;
+    padding: 2px 0 2px 12px;
+    font-size: 13px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    transform: translateY(-6px);
+    transition: transform 0.28s cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  .fg-thought-clip[data-open='true'] .fg-thought-body { transform: translateY(0); }
+  @media (prefers-reduced-motion: reduce) {
+    .fg-thought-clip,
+    .fg-thought-body { transition: none; }
+    .fg-thought-body { transform: none; }
+  }
 `
