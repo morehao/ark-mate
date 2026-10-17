@@ -123,7 +123,10 @@ export function WorkspacePicker({ value, onChange, disabled, variant = 'pill', a
 
   // 当前选中项（登记 id 优先；未登记的路径字面量只有自动化的目标会走到）。
   const current = value?.id ? items.find((w) => w.id === value.id) : undefined
-  const currentPath = current?.path ?? value?.path ?? ''
+  // 默认工作空间**不展示绝对路径**（需求 4）：选中它时「当前」行读名字 + 「平台分配」，
+  // tooltip 也不回显 path。非默认项仍显示路径——那是区分两个同名登记的唯一手段。
+  const currentIsDefault = !!current?.is_default
+  const currentPath = currentIsDefault ? '' : current?.path ?? value?.path ?? ''
   const currentName = (() => {
     if (current) return workspaceLabel(current)
     if (value?.path) return splitDirPath(value.path).name
@@ -304,11 +307,13 @@ export function WorkspacePicker({ value, onChange, disabled, variant = 'pill', a
       >
         <Tooltip
           title={
-            currentPath
-              ? currentPath
-              : defaultWS
-                ? `未指定：会话落在「${workspaceLabel(defaultWS)}」`
-                : '未指定：每个会话在创建时由平台分配一个独立工作目录'
+            currentIsDefault
+              ? '默认工作空间 · 平台默认目录'
+              : currentPath
+                ? currentPath
+                : defaultWS
+                  ? `未指定：会话落在「${workspaceLabel(defaultWS)}」`
+                  : '未指定：每个会话在创建时由平台分配一个独立工作目录'
           }
           // chip 的弹层朝下，tooltip 朝上会被挡；两者错开。
           placement={chip ? 'bottom' : 'top'}
