@@ -55,6 +55,14 @@ func (pl *Plane) RebuildSessionReadModels(ctx context.Context, sessionID string)
 			return fmt.Errorf("read models: list runs: %w", err)
 		}
 	}
+	// ②b 还剩 running 的行、而会话已经不在 in_progress：崩溃残轮没有事件层收口事实的旧库。
+	// 「重建之后不该有悬空的 running」是这一段的**唯一**目的（`mate doctor` 的判据就是它）。
+	if closed := pl.closeDanglingRunsOfInactiveSession(ctx, sessionID, runs, all); closed {
+		glog.Infow(ctx, "read models: 会话不在进行中，收口了残留的 running 行", "session", sessionID)
+		if runs, err = pl.SessionRuns(ctx, sessionID); err != nil {
+			return fmt.Errorf("read models: list runs: %w", err)
+		}
+	}
 	// ③ 整会话重铺 messages（"按窗口切片 + 序号跨轮连续 + 空正文丢弃"全在
 	// `buildSessionMessageRows` 里；进行中的轮窗口也在那里夹）。
 	return pl.ReplaceSessionMessages(ctx, sessionID, all, runs)
@@ -114,13 +122,15 @@ func (pl *Plane) reconcileRunRows(ctx context.Context, sessionID string, all []m
 	return added, nil
 }
 
-// closeRunsWithTerminal 把"日志里已经有本轮终态事件、行却还停在 running"的 run 收口。
+// closeRunsWithTerminal 把"日志里已经有本轮**收口事实**、行却还停在 running"的 run 收口。
 //
-// 这是给终态物化**失败**（`FinishRun` 写库失败只 WARN）自愈用的：那一轮的开轮行还在、终态事件
-// 也在，缺的只是那次 UPDATE。判据不是"猜这一轮结束了"——而是日志里那条终态事件的载荷
+// 这是给收口物化**失败**（`FinishRun` 写库失败只 WARN）自愈用的：那一轮的开轮行还在、收口事件
+// 也在，缺的只是那次 UPDATE。判据不是"猜这一轮结束了"——而是日志里那条事件的载荷
 // `run_id` **就是这一轮的身份**（同一支值，从开轮一路带到这里）。
 //
-// 崩溃中断的轮次刻意不受影响：它们没有终态事件，因此仍然留在 running（见 RunEntity 注释）。
+// "收口事实"有两支（见 `RunClosingStatus`）：终态事件，以及恢复路径的 `run.status(interrupted)`。
+// 后者是崩溃残轮在**事件层**留下的收口；没有它，重建只能靠"会话不在 in_progress"这条更弱的口径
+// （见 `closeDanglingRunsOfInactiveSession`），而那条口径说不出「轮次是重启带走的」。
 func (pl *Plane) closeRunsWithTerminal(sessionID string, all []model.EventEntity, runs []model.RunEntity) bool {
 	open := make(map[string]bool, len(runs))
 	for _, r := range runs {
@@ -133,11 +143,11 @@ func (pl *Plane) closeRunsWithTerminal(sessionID string, all []model.EventEntity
 	}
 	closed := false
 	for _, e := range all {
-		if TerminalRunStatus(e.Type) == "" {
-			continue
-		}
 		var m map[string]any
 		if err := json.Unmarshal([]byte(e.PayloadJSON), &m); err != nil {
+			continue
+		}
+		if RunClosingStatus(e.Type, m) == "" {
 			continue
 		}
 		id, _ := m["run_id"].(string)
@@ -148,6 +158,40 @@ func (pl *Plane) closeRunsWithTerminal(sessionID string, all []model.EventEntity
 		// 相对行里的起点）——"重建"与"运行时"必须是同一段代码，否则两条路会慢慢分叉。
 		pl.MaterializeRun(sessionID, e.Type, m, e.Seq)
 		delete(open, id)
+		closed = true
+	}
+	return closed
+}
+
+// closeDanglingRunsOfInactiveSession 把「会话已经不在 in_progress、run 行却仍停在 running」的行收口。
+//
+// 这是**只剩这一条路**时的兜底：崩溃残轮在旧库（`run.status(interrupted)` 还不存在时写下的）里
+// 没有事件层的收口事实，而「会话不在 in_progress」本身已经是一个足够强的判断——一条会话不可能
+// 在非 in_progress 状态下还有一轮在跑。取值直接用会话的终态归类（`interrupted` / `completed` /
+// `failed` / `cancelled` 与 run 的取值同词），窗口右端取该会话的最后一个位次（没有终态事件，
+// 窗口就是"从起点到日志末尾"）。
+//
+// 与 `closeRunsWithTerminal` 的分工：那一支优先（它读得出"重启带走的"），本函数只处理它漏下的。
+func (pl *Plane) closeDanglingRunsOfInactiveSession(ctx context.Context, sessionID string, runs []model.RunEntity, all []model.EventEntity) bool {
+	if pl.st == nil || len(runs) == 0 || len(all) == 0 {
+		return false
+	}
+	rec, ok := pl.Lookup(sessionID)
+	if !ok || rec.Status == SessionStatusInProgress || rec.Status == "" {
+		return false
+	}
+	lastSeq := all[len(all)-1].Seq
+	closed := false
+	for _, r := range runs {
+		if r.LastSeq >= 0 || lastSeq < r.FirstSeq {
+			continue
+		}
+		if err := pl.st.FinishRun(ctx, r.ID, model.RunFinishPatch{
+			LastSeq: lastSeq, Status: rec.Status, EndedAt: all[len(all)-1].CreatedAt,
+		}); err != nil {
+			glog.Warnw(ctx, "read models: 收口残留 running 行失败", "session", sessionID, "run", r.ID, "err", err)
+			continue
+		}
 		closed = true
 	}
 	return closed
@@ -212,7 +256,7 @@ func (pl *Plane) MaterializeRun(sessionID, typ string, payload map[string]any, t
 	if pl.st == nil {
 		return
 	}
-	status := TerminalRunStatus(typ)
+	status := RunClosingStatus(typ, payload)
 	if status == "" {
 		return
 	}
@@ -353,6 +397,29 @@ func TerminalRunStatus(typ string) string {
 		return SessionStatusFailed
 	case BusRunCancelled:
 		return SessionStatusCancelled
+	}
+	return ""
+}
+
+// RunClosingStatus 判断一条事件是否**收口**当前轮，返回该轮的终态取值（空串 = 不收口）。
+//
+// 两支：
+//   - 终态事件（`TerminalRunStatus`）——实时路径的常规收口；
+//   - `run.status(interrupted)`——**恢复路径**的收口（ADR-8 的后半）。它不在 10 个活体状态里，
+//     所以必须按**载荷**判，不能只看 type。
+//
+// 为什么两支要落在同一个函数里：`publish.go` 的「是否物化 runs」与 `closeRunsWithTerminal` 的
+// 「日志里有没有收口事实」必须用**同一支判据**。各写一遍的话，恢复收口会只在 live 路径生效
+// （重建出来的读模型里那一轮仍是 `running`），而两条路各自都"看起来在工作"。
+func RunClosingStatus(typ string, payload map[string]any) string {
+	if s := TerminalRunStatus(typ); s != "" {
+		return s
+	}
+	if typ != BusRunStatus || payload == nil {
+		return ""
+	}
+	if v, _ := payload["status"].(string); v == RunStatusInterrupted {
+		return SessionStatusInterrupted
 	}
 	return ""
 }

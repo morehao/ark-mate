@@ -193,6 +193,7 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 
 	sessions, injected := 0, 0
 	interrupted := 0
+	interruptedIDs := make([]string, 0, 8)
 	ver := map[string]int64{}
 	for _, sess := range list {
 		rec := &SessionRec{
@@ -215,6 +216,7 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 		if rec.Status == SessionStatusInProgress {
 			pl.MarkSession(rec.ID, SessionStatusInterrupted)
 			interrupted++
+			interruptedIDs = append(interruptedIDs, rec.ID)
 		}
 	}
 
@@ -241,6 +243,14 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 			}
 		}
 	}
+	// 崩溃残轮的**收口**（v27 + S7 / ADR-8 的后半）：把"有 `run.started` 而无终态"的轮次补一条
+	// `run.status(interrupted)`——`runs` 行因此不再永久停在 `running`。
+	//
+	// 必须放在**事件注入之后**：这些收口事件是新铸的（落库拿到最新位次），若先发再注入，bus 的
+	// `nextSeq` 已经被它推到前面，随后逐条 `PublishAt` 回放的历史事件会被**逐个顶号**——位次是
+	// 续传游标，顶号等于把客户端的 since_seq 全部错开（而表面上一切正常）。
+	pl.closeInterruptedRuns(ctx, interruptedIDs)
+
 	// 读模型重建（v21）：迁移把 `meta.read_models_rebuild` 置成刚跑过的版本号，表示"位次口径换了、
 	// 旧读模型里的窗口列已经不可信"。此处消费它并清标记——**只有这一条路径**（见 model/enum.go）。
 	pl.rebuildStaleReadModels(ctx)
@@ -252,6 +262,42 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 	pl.staleInputsOnRestore(ctx)
 	glog.Infow(ctx, "store restored", "sessions", sessions, "events", injected)
 	return sessions, injected, nil
+}
+
+// closeInterruptedRuns 给恢复出来的崩溃残轮补一条收口事件（ADR-8 的后半：**只在恢复路径**）。
+//
+// 判据是「这一轮有 `run.started`、行却还在 running」——即日志里没有它的终态。实时路径从不调本
+// 函数：那边知道自己为什么停（主动拆除），发伪终态会污染历史、失败轮列表与重试入口
+// （`manager/run.go` 的 `intentional` 分支保留原注释，那是 ADR-8 的**前半**）。
+//
+// 收口事实带 `reason:"restart"`：界面对它说的是「上一轮因进程重启中断，可重发」，**不**说
+// 「失败」——那是底座的结论，平台只知道自己被杀了。
+func (pl *Plane) closeInterruptedRuns(ctx context.Context, sessionIDs []string) {
+	if pl.st == nil || len(sessionIDs) == 0 {
+		return
+	}
+	closed := 0
+	for _, id := range sessionIDs {
+		// 判据用 `last_seq < 0`（= 还没有收口事件）而不是「status 是 running」：
+		// 开轮行写的状态值是 `in_progress`（与 `sessions.status` 同一套词汇），而"这一轮收口了吗"
+		// 在库里的事实是 `last_seq`——`closeRunsWithTerminal` 用的也是这一支。两处必须同一支判据，
+		// 否则恢复收口的选取面与重建的选取面会悄悄分叉（一个认为有残轮、另一个认为没有）。
+		rows, err := pl.st.ListRuns(ctx, id)
+		if err != nil {
+			glog.Warnw(ctx, "restore: 读 run 行失败（该会话不补收口）", "session", id, "err", err)
+			continue
+		}
+		for _, r := range rows {
+			if r.LastSeq >= 0 {
+				continue
+			}
+			pl.PublishRunInterrupted(id, r.ID)
+			closed++
+		}
+	}
+	if closed > 0 {
+		glog.Infow(ctx, "restore: 崩溃残轮已补收口", "runs", closed, "sessions", len(sessionIDs))
+	}
 }
 
 // rebuildStaleReadModels 消费 `meta.read_models_rebuild`：有值 = 上一次迁移改动了事件位次口径，
