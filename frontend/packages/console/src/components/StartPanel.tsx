@@ -344,6 +344,8 @@ export function StartPanel() {
                   }
                 />
 
+                {/* 与输入区同一颗 32px 圆钮的外观（需求 6 上半）：这一屏还没有会话，
+                    所以没有停止态，也不带速记提示以外的交互。 */}
                 <Button
                   type="primary"
                   shape="circle"
@@ -351,7 +353,7 @@ export function StartPanel() {
                   disabled={!canSend}
                   loading={sending}
                   onClick={() => void send()}
-                  style={{ width: 38, height: 38, boxSizing: 'border-box', flex: 'none' }}
+                  style={{ width: 32, height: 32, boxSizing: 'border-box', flex: 'none' }}
                 />
               </span>
             </div>

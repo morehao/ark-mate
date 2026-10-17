@@ -81,3 +81,18 @@ export function runNarration(run: RunPhase | undefined): RunNarration {
       return { tone: 'run', label: String(run.status), busy: true, canStop: true, canRetry: false }
   }
 }
+
+/**
+ * 本轮已处理时长的展示串（`18.4s`）；不足 1 秒返回空串。
+ *
+ * **纯函数**且不读时钟：调用方传 `now`，这样它可以每 1s 重渲染一次而保持可测；
+ * 也不把"秒"塞进 `runNarration` 的映射——旁白回答"在干什么"，时长回答"多久了"，两件事。
+ */
+export function elapsedLabel(startedAt: string | undefined, now: number): string {
+  if (!startedAt) return ''
+  const t0 = Date.parse(startedAt)
+  if (Number.isNaN(t0)) return ''
+  const ms = now - t0
+  if (ms < 1000) return ''
+  return `${(ms / 1000).toFixed(1)}s`
+}

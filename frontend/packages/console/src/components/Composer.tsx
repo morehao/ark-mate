@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Select } from 'antd'
+import { Select } from 'antd'
 import { ArrowUpOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import type { CommandInfo } from '@ark-mate/types'
@@ -10,6 +10,10 @@ import { WorkspaceChipStatic } from './WorkspacePicker'
 
 interface Props {
   busy: boolean
+  /** 这一轮能不能被停：等待授权/回答时**不可停**（停了等于把用户正要答的那一轮扔掉）。 */
+  canStop: boolean
+  /** 停止本轮（只在 `busy && canStop && 草稿为空` 时由按钮触发）。 */
+  onStop: () => void
   busyNote?: string
   placeholder?: string
   /** 空闲时的发送；忙时按所选投递模式发送（§6）。 */
@@ -20,7 +24,7 @@ interface Props {
    * 之后不可变——它是底座 ACP session 的 cwd，也是原生权限 `workspace-write` 的沙箱边界，
    * 所以这里没有"改目录"入口：要换目录就新开一个会话。`temporary` 为服务端权威标志（平台代建）。
    */
-  workspace?: { path: string; temporary: boolean; title?: string }
+  workspace?: { path: string; temporary: boolean; isDefault: boolean; title?: string }
   /**
    * 底座自报的可用斜杠命令（`session.commands` 全量事件的投影；ADR-17）。
    * `undefined` = 该底座不提供命令发现面（dsh 即如此）→ 不显示候选；
@@ -52,7 +56,18 @@ interface Props {
  * v21 版面：工作空间 chip 从底栏移到卡片上沿左上角（对齐 DSH 的 composerStack：chip 是卡片的
  * 标题行，底栏留给"这次怎么发"）。
  */
-export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, workspace, commands, injectDraft }: Props) {
+export function Composer({
+  busy,
+  canStop,
+  onStop,
+  busyNote,
+  placeholder,
+  onSend,
+  autoFocus,
+  workspace,
+  commands,
+  injectDraft,
+}: Props) {
   const [draft, setDraft] = useState('')
   // 「取出编辑」塞回来的草稿：只在 nonce 变化时生效一次（同一条再取一次也要能生效，故用计数）。
   useEffect(() => {
@@ -71,6 +86,14 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
   const taRef = useRef<HTMLTextAreaElement | null>(null)
 
   const empty = draft.trim().length === 0
+  // 同一颗圆钮的三个状态（D7）：
+  //  - 空闲：箭头（空文本禁用）；
+  //  - 忙且可停、**草稿为空**：停止方块；忙且可停、草稿非空：按所选投递模式发送（排队/打断）；
+  //  - 忙但不可停（等授权/等回答）：禁用的停止态 + 说明原因的 title（不给一个"点了也没用"的按钮）。
+  const stopMode = busy && canStop && empty
+  const waitMode = busy && !canStop
+  const sendDisabled = waitMode || (!busy && empty)
+  const buttonLabel = waitMode ? '等待你回答后才能停止' : stopMode ? '停止' : busy ? DELIVERY_LABEL[delivery] : '发送'
 
   // 候选只在「正在输入命令名」时出现：`commandHintQuery` 判上下文，`matchCommands` 按前缀筛。
   // 没有命令时（dsh 不通告，或底座通告了空列表）自然为空 → 弹层不出现，**不编造占位候选**。
@@ -165,7 +188,12 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
             在工作空间行（左栏），不在输入区。 */}
         {workspace && (
           <div className="fg-ws-chiprow">
-            <WorkspaceChipStatic path={workspace.path} temporary={workspace.temporary} title={workspace.title} />
+            <WorkspaceChipStatic
+              path={workspace.path}
+              temporary={workspace.temporary}
+              isDefault={workspace.isDefault}
+              title={workspace.title}
+            />
           </div>
         )}
         <div className="fg-composer" style={{ padding: '10px 12px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -242,18 +270,12 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
                 overflow: 'hidden',
               }}
             >
-              {busy && busyNote && <span style={{ color: tokens.text, overflow: 'hidden', textOverflow: 'ellipsis' }}>{busyNote}</span>}
-              <button
-                type="button"
-                title="点击切换发送键：Enter 发送 / Enter 换行"
-                onClick={() => setSendMode((m) => toggleSendKey(m))}
-                className="fg-hint-kbd"
-              >
-                {sendKeyHint(sendMode)} ⇄
-              </button>
+              {busy && busyNote && (
+                <span style={{ color: tokens.text, overflow: 'hidden', textOverflow: 'ellipsis' }}>{busyNote}</span>
+              )}
               {busy && (
-                // 忙时投递模式：排队（等这轮完）或打断（先取消再发）。解释放在下拉项里，
-                // 不塞进按钮——按钮上只留动作本身。
+                // 忙时投递模式：排队（等这轮完）或打断（先取消再发）。它紧跟在旁白后面——
+                // 「怎么发」与「现在在干什么」是同一行上的两件事，别让快捷键提示夹在中间。
                 <Select
                   size="small"
                   value={delivery}
@@ -266,16 +288,29 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
                   }))}
                 />
               )}
+              <button
+                type="button"
+                title="点击切换发送键：Enter 发送 / Enter 换行"
+                onClick={() => setSendMode((m) => toggleSendKey(m))}
+                className="fg-hint-kbd"
+              >
+                {sendKeyHint(sendMode)} ⇄
+              </button>
             </span>
-            <Button
-              type="primary"
-              icon={<ArrowUpOutlined style={{ fontSize: 13 }} />}
-              disabled={empty}
-              onClick={send}
-              style={{ borderRadius: 9, fontWeight: 560 }}
+            <button
+              type="button"
+              className={`fg-send-btn${stopMode || waitMode ? ' fg-send-stop' : ''}${waitMode ? ' fg-send-wait' : ''}`}
+              disabled={sendDisabled}
+              title={buttonLabel}
+              aria-label={buttonLabel}
+              onClick={stopMode ? onStop : send}
             >
-              {busy ? DELIVERY_LABEL[delivery] : '发送'}
-            </Button>
+              {stopMode || waitMode ? (
+                <span className="fg-send-square" aria-hidden="true" />
+              ) : (
+                <ArrowUpOutlined style={{ fontSize: 13 }} />
+              )}
+            </button>
           </div>
         </div>
       </div>

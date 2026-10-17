@@ -355,15 +355,28 @@ export function WorkspacePicker({ value, onChange, disabled, variant = 'pill', a
  *
  * 形态对齐 DSH：它的工作空间 chip 在首条消息之后也是锁定的静态回声（`.workspace:disabled`）。
  */
-export function WorkspaceChipStatic({ path, temporary, title }: { path: string; temporary?: boolean; title?: string }) {
-  // `temporary` 是服务端的权威标志（= 落在默认工作空间上），不是从路径形状反推的。
+export function WorkspaceChipStatic({
+  path,
+  temporary,
+  isDefault,
+  title,
+}: {
+  path: string
+  temporary?: boolean
+  /** 这条会话是否落在**默认工作空间**（由调用方按 `workspace_id === default_id` 判定）。 */
+  isDefault?: boolean
+  title?: string
+}) {
+  // `temporary` 是历史字段（平台代建的目录），v14 起"默认工作空间"由 `isDefault` 表达——
+  // 两者不是同一件事（登记过的默认工作空间 `temporary=false`），所以不能拿它当「默认」的判据。
   // 默认工作空间在**所有面向用户的名字位**读作「默认」，且不回显绝对路径（需求 4）。
+  const platformAssigned = isDefault || temporary
   return (
     <Tooltip
       title={
         <span style={{ fontFamily: tokens.fontMono, fontSize: 11 }}>
-          {temporary ? '默认工作空间 · 平台默认目录' : title ?? path}
-          {temporary && (
+          {isDefault ? '默认工作空间 · 平台默认目录' : title ?? path}
+          {platformAssigned && (
             <>
               <br />
               <span style={{ fontFamily: tokens.fontFamily, color: tokens.textPlaceholder }}>
@@ -378,7 +391,7 @@ export function WorkspaceChipStatic({ path, temporary, title }: { path: string; 
       <span className="fg-ws-chip fg-ws-chip-static">
         <FolderOpenOutlined style={{ fontSize: 16, color: tokens.textSecondary }} />
         <span className="fg-ws-chip-name">
-          {temporary ? '默认' : title || splitDirPath(path).name || path}
+          {isDefault ? '默认' : temporary ? '平台分配的目录' : title || splitDirPath(path).name || path}
         </span>
       </span>
     </Tooltip>

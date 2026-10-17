@@ -94,6 +94,13 @@ export interface SessionView {
    * `TestNoClientSideRunInference`）。
    */
   run?: RunPhase
+  /**
+   * 本轮**客户端观测到的开始时刻**（ISO）：`run_status` 首次进入忙态时记，收口/失败/取消时清空。
+   *
+   * 只用于状态行里的「已处理 Ns」。刷新/切会话回来时它是空的——**宁可不显示秒数，
+   * 也不给一个从页面打开时刻起算的假数字**（后端 `run.status` 今天不带 started_at，见 O1）。
+   */
+  runStartedAt?: string
 }
 
 const emptyView = (): SessionView => ({
@@ -251,8 +258,19 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       // 不做任何本地推断——包括"看起来该结束了"。
       const status = String(e.payload?.status ?? '')
       if (!status) return { ...v, lastSeq }
+      // 忙态才有"开始时刻"：idle / interrupted 不算在跑。换 `run_id` 或首次见到忙态时记一次，
+      // 同一轮的后续帧不重置（否则秒数会每帧归零）。
+      const busy = status !== 'idle' && status !== 'interrupted'
+      const nextRunID = e.payload?.run_id ? String(e.payload.run_id) : undefined
+      const sameRun = nextRunID !== undefined && v.run?.run_id === nextRunID
+      const runStartedAt = busy
+        ? sameRun && v.runStartedAt
+          ? v.runStartedAt
+          : new Date().toISOString()
+        : undefined
       return {
         ...v,
+        runStartedAt,
         run: {
           run_id: e.payload?.run_id ? String(e.payload.run_id) : undefined,
           status: status as RunPhase['status'],
@@ -279,6 +297,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
           '已结束',
         ),
         streaming: false,
+        runStartedAt: undefined,
         lastSeq,
       }
     case Ev.RunError: {
@@ -298,6 +317,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
           '已结束',
         ),
         streaming: false,
+        runStartedAt: undefined,
         lastSeq,
       }
     }
@@ -306,6 +326,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
         ...v,
         entries: settleCards(push('system', undefined, { tone: 'cancel', text: '已取消' }), '已取消'),
         streaming: false,
+        runStartedAt: undefined,
         lastSeq,
       }
     case Ev.PermissionRequest: {

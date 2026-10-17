@@ -1358,4 +1358,65 @@ export const consoleStyleSheet = `
     /* 触屏（抽屉态）没有 hover：动作按钮常显（位置本来就一直占着）。 */
     .fg-ws-manage { visibility: visible; }
   }
+
+  /* 发送 / 停止同一颗 32px 圆钮（需求 6 上半）：三态只换图标与底色，**不位移、不降透明度**。
+     空闲空文本时禁用的是箭头（仍看得清），等待授权/回答时是"禁用停止"并靠 title 说明原因。 */
+  .fg-send-btn {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    box-sizing: border-box;
+    display: inline-grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: ${tokens.primary};
+    color: #ffffff;
+    font: inherit;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .fg-send-btn:hover:not(:disabled) { background: ${tokens.primaryHover}; }
+  .fg-send-btn:active:not(:disabled) { background: ${tokens.primaryActive}; }
+  .fg-send-btn:disabled { cursor: default; opacity: 1; }
+  .fg-send-btn:disabled:not(.fg-send-stop) { background: ${tokens.softFill}; color: ${tokens.textPlaceholder}; }
+  .fg-send-btn.fg-send-stop { background: ${tokens.error}; color: #ffffff; }
+  .fg-send-btn.fg-send-stop:hover:not(:disabled) { background: ${tokens.error}; filter: brightness(1.06); }
+  .fg-send-btn.fg-send-wait { background: ${tokens.softFill}; }
+  .fg-send-btn.fg-send-wait .fg-send-square { background: ${tokens.textPlaceholder}; }
+  .fg-send-square {
+    display: block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: currentColor;
+  }
+
+  /* 流式状态行：阶段词 + 内联光标 + 已处理时长（替代原来那颗孤立光标）。 */
+  .fg-turn-status { line-height: 1.6; }
+  .fg-shimmer {
+    background: linear-gradient(
+      110deg,
+      ${tokens.textSecondary} 30%,
+      ${tokens.primary} 50%,
+      ${tokens.textSecondary} 70%
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: fg-shimmer 1.8s linear infinite;
+  }
+  @keyframes fg-shimmer {
+    0% { background-position: 120% 0; }
+    100% { background-position: -120% 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fg-shimmer {
+      animation: none;
+      background: none;
+      color: ${tokens.textSecondary};
+      -webkit-text-fill-color: currentColor;
+    }
+  }
 `

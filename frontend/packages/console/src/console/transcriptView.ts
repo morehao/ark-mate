@@ -73,3 +73,37 @@ export function prependOlder(
   if (fresh.length === 0) return current
   return [...fresh, ...current]
 }
+
+/** 流式状态行：阶段词 + 是否要那颗内联光标（正文还没出现时才给）。 */
+export interface TurnStatus {
+  /** 状态行文案；空串 = 这一档不显示状态行。 */
+  stage: string
+  /** 正文尚未出现时，在阶段词后面挂一颗内联闪烁光标。 */
+  showCaret: boolean
+}
+
+/**
+ * 流式末尾的**状态行**（替代原来那颗孤立的闪烁光标）。
+ *
+ * 两种形态：
+ *  - 本轮已有正文 → 退化成阶段词（「正在执行 Bash」/「正在输出」），不再显示「思考中」；
+ *  - 还没有正文 → 「思考中」+ 内联光标。
+ *
+ * 非流式（轮次已收口 / 没发过）返回空 stage，调用方据此整行不渲染。
+ */
+export function turnStatusOf(entries: StreamEntry[], streaming: boolean, narrationLabel: string): TurnStatus {
+  if (!streaming) return { stage: '', showCaret: false }
+  // 只看**本轮**（最后一条用户消息之后）：否则在旧会话里发新消息时，历史的 assistant 正文
+  // 会让状态行跳过「思考中」，从一开始就显示阶段词。
+  let turnStart = 0
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].kind === 'user') {
+      turnStart = i + 1
+      break
+    }
+  }
+  const hasBody = entries
+    .slice(turnStart)
+    .some((e) => e.kind === 'assistant' && (e.text ?? '').trim().length > 0)
+  return { stage: hasBody ? narrationLabel || '正在输出' : '思考中', showCaret: !hasBody }
+}

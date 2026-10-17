@@ -15,9 +15,54 @@ import { EntryView } from '../components/Transcript'
 import { anchorIndex } from '../console/searchView'
 import { titleFor } from '../console/util'
 import { fmtRunDockLine, fmtRunUsageLine, toRunUsageInfo, type RunUsageInfo } from '../console/usageView'
-import { TRANSCRIPT_WINDOW, stickToBottom, windowEntries } from '../console/transcriptView'
-import { runNarration } from '../console/runView'
+import { TRANSCRIPT_WINDOW, stickToBottom, turnStatusOf, windowEntries } from '../console/transcriptView'
+import { elapsedLabel, runNarration } from '../console/runView'
 import type { DeliveryChoice } from '../console/queueView'
+
+/**
+ * 流式末尾的**状态行**：阶段词（shimmer）+ 可选内联光标 + 已处理时长。
+ *
+ * 它替代了原来那颗孤立的闪烁光标——光标只说明"还在动"，阶段词才说明"在干什么"。
+ * 时长来自**客户端观测**（`runStartedAt`）：刷新回来没有这个事实就不显示秒数，不编数字。
+ */
+function TurnStatus({ stage, showCaret, elapsed }: { stage: string; showCaret: boolean; elapsed: string }) {
+  return (
+    <div
+      className="fg-turn-status"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '2px 2px 0',
+        fontSize: 13,
+        color: tokens.textSecondary,
+        minWidth: 0,
+      }}
+    >
+      <span className="fg-shimmer" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {stage}
+      </span>
+      {showCaret && (
+        <span
+          className="fg-anim-blink"
+          style={{
+            display: 'inline-block',
+            flex: 'none',
+            width: 2,
+            height: '1em',
+            background: tokens.primary,
+            verticalAlign: '-0.12em',
+          }}
+        />
+      )}
+      {elapsed && (
+        <span style={{ flex: 'none', fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textPlaceholder }}>
+          已处理 {elapsed}
+        </span>
+      )}
+    </div>
+  )
+}
 
 /** 问答控制台主视图：会话侧栏 + 聊天（head / transcript / composer）+ 状态条。 */
 export function ChatPage() {
@@ -27,6 +72,7 @@ export function ChatPage() {
 
   const runtime = useMate((s) => s.runtime)
   const sessions = useMate((s) => s.sessions)
+  const workspaces = useMate((s) => s.workspaces)
   const views = useMate((s) => s.views)
   const activeId = useMate((s) => s.activeId)
   const activate = useMate((s) => s.activate)
@@ -58,6 +104,8 @@ export function ChatPage() {
   // 搜索命中跳转（M3 ②）：已应用的锚点 key（防重复滚动）+ 高亮条目 id。
   const anchorAppliedRef = useRef<string | null>(null)
   const [flashEntryId, setFlashEntryId] = useState<string | null>(null)
+  // 「已处理 Ns」的时钟：只在本来就有开始时刻时每 1s 推进一次（没有开始时刻就一个字都不显示）。
+  const [nowTick, setNowTick] = useState(() => Date.now())
   // err 轮重试文本回退（会话 id → 历史最后 user_message；undefined=未取）
   const [errFallback, setErrFallback] = useState<Record<string, string | undefined>>({})
   // C2：服务端「加载更早」在途标记（同一时刻只允许一次请求）。
@@ -134,6 +182,13 @@ export function ChatPage() {
   const narration = runNarration(run)
   const busy = streaming || narration.busy
   const canStop = streaming || narration.canStop
+  const runStartedAt = activeId ? views[activeId]?.runStartedAt : undefined
+  useEffect(() => {
+    if (!busy || !runStartedAt) return
+    const t = window.setInterval(() => setNowTick(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [busy, runStartedAt])
+  const elapsed = busy ? elapsedLabel(runStartedAt, nowTick) : ''
   // v21：会话头标题走 `plain` 兜底——没命名、也没发过言的会话就叫「新会话」，
   // 不再拼成「新会话 · dsh」（底座信息不进对话框页面），也不摊一串 id 冒充名字。
   // 左栏那行仍走带底座/带短 id 的口径（那是浏览面，本轮不动）。
@@ -266,6 +321,7 @@ export function ChatPage() {
   }, [anchorSeq, activeId, hydrating, entries, revealed])
 
   const entryWindow = windowEntries(view?.entries ?? [], TRANSCRIPT_WINDOW, revealed)
+  const turnStatus = turnStatusOf(view?.entries ?? [], streaming, narration.label)
 
   // 切换会话：复位尾部窗口（新会话从尾部一页开始）。
   useEffect(() => {
@@ -447,13 +503,6 @@ export function ChatPage() {
               {metaText}
             </span>
           </span>
-          {/* 停止按钮只在**真能停**时出现：等待态（等授权/等回答）点停止等于把用户正要答的
-              那一轮扔掉，所以那一档不给按钮（原型里那一格也明确没有）。 */}
-          {canStop && (
-            <Button size="small" onClick={() => void cancel()} style={{ borderRadius: 8 }}>
-              停止
-            </Button>
-          )}
           {resendable && (
             <Button size="small" onClick={() => lastUserText && void sendPrompt(lastUserText)} style={{ borderRadius: 8 }}>
               重发
@@ -591,20 +640,8 @@ export function ChatPage() {
                           />
                         </div>
                       ))}
-                      {streaming && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 2, color: tokens.text }}>
-                          <span
-                            className="fg-anim-blink"
-                            style={{
-                              display: 'inline-block',
-                              width: 2,
-                              height: '1em',
-                              background: tokens.primary,
-                              verticalAlign: '-0.12em',
-                              marginLeft: 1,
-                            }}
-                          />
-                        </div>
+                      {turnStatus.stage && (
+                        <TurnStatus stage={turnStatus.stage} showCaret={turnStatus.showCaret} elapsed={elapsed} />
                       )}
                     </>
                   )}
@@ -634,13 +671,19 @@ export function ChatPage() {
                   />
                   <Composer
                     busy={busy}
+                    canStop={canStop}
+                    onStop={() => void cancel()}
                     workspace={
                       activeSum?.cwd
                         ? {
                             path: activeSum.cwd,
                             temporary: !!activeSum.workspace_temporary,
+                            // 「默认工作空间」是**登记事实**（id 对默认 id），不是 temporary：
+                            // v14 起登记过的默认工作空间 temporary=false。
+                            isDefault:
+                              !!activeSum.workspace_id && activeSum.workspace_id === workspaces?.default_id,
                             // 服务端给的展示名（默认工作空间是「默认工作空间」散文口径）；
-                            // chip 自己按 temporary 映射成「默认」。
+                            // chip 自己按 isDefault 映射成「默认」。
                             title: activeSum.workspace_title,
                           }
                         : undefined
