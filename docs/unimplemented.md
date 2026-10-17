@@ -61,7 +61,6 @@
 | O13 | **事件持久化的边角**：`store.AppendEvent` 写库失败的事件不出现在 REST 历史（事件总线侧仍有，且打 WARN），位次退化为进程内分配 | 需要历史与事件总线完全一致 | §19.22 |
 | O14 | **会话级权限模式只能在进程边界上区分**：`/permission` 命令面在 ACP 上**不存在**（底座根本不发 `available_commands_update`，见 D10），所以模式只能以进程 env（`DSH_PERMISSION_MODE`）下发。v29 起模式进 `ConnKey` 基础键 ⇒ **不同模式各起一个暖进程**；**同一进程内按会话切模式仍不可达**。代价是进程数随模式数增加 | 底座补命令面（届时才谈同进程切换）；或愿意接受"每模式一个进程"的开销 | `backend/internal/runtimeconn/pool.go` |
 | O15 | **队列项不能原子替换正文**：队列只补了三个动作（重排 / 立即发送 / 取出编辑），**没有** `surfaceOp: replace` 那类"就地改写一条已排队输入"。取出编辑会把它作废、让用户改完重新入队——语义上等价，但**位次会变**（改完排到队尾） | 出现"改一句话但保留排队位置"的真实需求 | `docs/decisions.md` v28 偏离 ④（刻意不做 17 方法队列） |
-| O18 | **既有会话的归属不自愈**：工作空间改名/搬迁/删除之后，`sessions.workspace_id` 仍指向那条登记，而登记指向的目录可能已经不存在（`dir_status: missing`）。今天只有读面如实上报，没有自愈路径（不自动重挂、也不批量改归属） | 出现「用户确认过的新位置」这一事实源之后 | `docs/decisions.md` v28 偏离 ① + `backend/internal/domain/workspace/registry.go` |
 | O19 | **确认区一次只显示一张卡**：权限优先、其余以「还有 N 条」计数，**不能**并列处理。同时挂起多条时用户需要逐条处理 | 出现"一次要确认很多条"的真实场景 | `frontend/packages/console/src/components/ConfirmArea.tsx` |
 
 ## 3. 已关闭（CLOSED，保留追溯）
@@ -91,3 +90,4 @@
 | C21 | **权限策略增强**（原 O11） | 改判依据（2026-10-17 复核）：当前**不存在**权限策略面——`routes_*.go` 无 policy 路由、`dto` 无 Policy 类型、设置分节只有 通用 / 模型 / 访问令牌（`frontend/packages/console/src/console/settingsView.tsx`），原句描述的「JSON 文本域」与「运行中 PATCH」都已没有对象；命令粒度并入 O20（规则表已落地）。若策略编辑面重新立项，新开一条 O 条目，不复用本号 |
 | C22 | **会话行仍是单行式**（原 O21） | 已实现两行式（`frontend/packages/console/src/components/SessionPane.tsx`）：第 1 行 = 标题单行省略 + 置顶标记，第 2 行 = 状态点 + 阶段文案 + 来源 + 时间；行尾「更多」绝对定位在第 1 行右端（不嵌套 button）。守卫 `TestSessionRowIsTwoLine` 用 `data-sess-line` 两个锚点钉住；反证（实跑）：删 meta 锚点 / 把 `WebkitLineClamp: 2` 加回标题行，两者皆红 |
 | C23 | **命令门禁没有编辑面**（原 O20） | 规则文件 + 裁决点 + 设置「命令规则」编辑面均已落地：`GET/PUT /command-policy`（`backend/internal/controller/ctrcommandpolicy` + `backend/internal/service/svccommandpolicy`）、`frontend/packages/console/src/components/settings/CommandPolicyPanel.tsx`；保存**先校验再原子落盘**并热生效（`Apply` 回调）。**边界**：`match_samples`/`not_match_samples` 仍只能手写文件（面板原样保留、不提供编辑）；只对简单命令自动裁决，复杂命令一律 prompt |
+| C24 | **既有会话归属自愈**（原 O18） | 判定为**不做（by design）**：`sessions.workspace_id` 指向登记本身没有坏；坏的是登记指向的目录不存在了（`dir_status: missing`）。用户的「确认过的新位置」= `PATCH /workspaces/:id {path}`（设置里『选择新目录…』，`frontend/packages/console/src/components/WorkspaceGroupPane.tsx`）；平台**不**把「目录没了」猜成「搬到哪」——猜错会把会话归属悄悄改到另一个项目。**会话的 `cwd` 是执行事实，刻意不批量改写**：旧 transcript / 上下文仍指当时的工作目录，改写等于让历史会话在另一个目录里续跑。读面如实上报 + 显式改路径就是完整出路；将来若要批量重挂，应作为**独立的显式动作**（逐会话确认），不是自愈 |
