@@ -29,7 +29,7 @@ func libraryRig(t *testing.T) *Service {
 		runtime.Spec{ID: "dsh", Name: "dsh", McpTransports: []string{"stdio"}},
 	)
 	svc := NewService(reg, eventbus.New())
-	svc.LoadCapabilityDefinitions(dir)
+	svc.Planes().LoadCapabilityDefinitions(dir)
 	svc.skillPlane.Projections().Set([]skill.Projection{{
 		Runtime: "rtx",
 		Projection: runtime.Projection{Kind: runtime.ProjectionSkill, Scope: runtime.ScopeGlobal,
@@ -64,7 +64,7 @@ func TestLibraryKindsAndOrigin(t *testing.T) {
 		`{"id":"fs","name":"文件","transport":"stdio","command":"/usr/local/bin/npx"}`), true); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.RegisterTool(capability.Tool{Name: "builtin_echo", Source: capability.ToolSourceBuiltin}); err != nil {
+	if err := svc.Planes().RegisterTool(capability.Tool{Name: "builtin_echo", Source: capability.ToolSourceBuiltin}); err != nil {
 		t.Fatal(err)
 	}
 	items, err := listLibrary(t, svc).ListLibrary(libCtx())
@@ -226,7 +226,7 @@ func TestLibraryMcpAndToolApplicability(t *testing.T) {
 		`{"id":"fs","transport":"stdio","command":"/usr/local/bin/npx"}`), true); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.RegisterTool(capability.Tool{Name: "fs_read", Source: capability.ToolSourceMCP, McpServer: "fs"}); err != nil {
+	if err := svc.Planes().RegisterTool(capability.Tool{Name: "fs_read", Source: capability.ToolSourceMCP, McpServer: "fs"}); err != nil {
 		t.Fatal(err)
 	}
 	items, err := listLibrary(t, svc).ListLibrary(libCtx())
@@ -252,7 +252,7 @@ func TestLibraryMcpAndToolApplicability(t *testing.T) {
 	}
 
 	// 归属 server 被删（工具条目被一并摘除）——再造一个"悬空工具"看警告分支。
-	if err := svc.RegisterTool(capability.Tool{Name: "ghost", Source: capability.ToolSourceMCP, McpServer: "gone"}); err != nil {
+	if err := svc.Planes().RegisterTool(capability.Tool{Name: "ghost", Source: capability.ToolSourceMCP, McpServer: "gone"}); err != nil {
 		t.Fatal(err)
 	}
 	items, err = listLibrary(t, svc).ListLibrary(svclibrary.Query{Kind: dtolibrary.KindTool, Q: "ghost"})
@@ -307,7 +307,7 @@ func BenchmarkLibraryList(b *testing.B) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "rtx", McpTransports: []string{"stdio"},
 		Projections: []runtime.Projection{rtxSkillProjectionForTest()}})
 	svc := NewService(reg, eventbus.New())
-	svc.LoadCapabilityDefinitions(dir)
+	svc.Planes().LoadCapabilityDefinitions(dir)
 	for i := 0; i < 300; i++ {
 		sk := capability.Skill{ID: fmt.Sprintf("skill-%03d", i), Name: "技能", Description: "批量"}
 		if err := svc.caps.RegisterSkill(&sk); err != nil {

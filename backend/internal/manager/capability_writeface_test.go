@@ -336,7 +336,7 @@ func TestMcpServerWriteReadDelete(t *testing.T) {
 			}
 
 			// 挂一条归属该 server 的 mcp 工具，再删除 → 工具必须一起摘。
-			if err := wf.svc.RegisterTool(capability.Tool{
+			if err := wf.svc.Planes().RegisterTool(capability.Tool{
 				Name: "fs_read", Source: capability.ToolSourceMCP, McpServer: "fs",
 			}); err != nil {
 				t.Fatal(err)

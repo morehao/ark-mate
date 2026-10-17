@@ -245,11 +245,11 @@ func TestProviderProbeUseCaseLivesInProviderSvc(t *testing.T) {
 	// 调用点那一头：装配与 gateway 必须**直连域平面**（少了这条，删掉转发只会把调用点改成
 	// 另一个名字的转发，判据形同虚设）。
 	for _, c := range []struct{ file, want, why string }{
-		{"internal/app/app.go", "a.svc.ProviderPlane().LoadProviderDefinitionsFromStore(",
+		{"internal/app/app.go", "a.planes.Providers.LoadProviderDefinitionsFromStore(",
 			"serve 的装载入口"},
-		{"internal/app/app.go", "a.svc.ProviderPlane().SetProviderDir(",
+		{"internal/app/assembly.go", "as.a.planes.Providers.SetProviderDir(",
 			"serve 的目录入口"},
-		{"internal/gateway/source.go", "s.svc.ProviderPlane().ReloadProviderDefinitionsFromStore(",
+		{"internal/gateway/source.go", "s.planes.Providers.ReloadProviderDefinitionsFromStore(",
 			"gateway 的换代重载"},
 		// 第五十四刀：建连时的密钥注入经**执行面端口**取（池的 `ProviderEnvSource`），
 		// 适配器在 `runtime_pool.go`。锚跟着对象走，判据不变：调用点必须直连域平面。

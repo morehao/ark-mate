@@ -12,12 +12,14 @@ import (
 // 实现，**只有实现，没有逻辑**：
 //
 //	ProviderEnv(runtimeID)      —— 子进程 env（供应商域；同时是基础连接键的输入）
-//	ConfigDigest(runtimeID)     —— 平台模型清单指纹（进代际键）
+//	NativePermissionEnv(...)     —— 原生权限模式的子进程 env（进基础键）
+//	（ConfigDigest 的实现已随同步面在 P5a 搬进 `registry.Resources`——那份状态与同步编排
+//	  是同一件事，分开就是"同步写了一半"；装配点在 NewService 里直接交给池。）
 //	（DropSink 的两个方法在 `connection.go`：它们要读写会话状态，属编排面）
 //
 // 为什么适配器落在 manager 而不是 `internal/app`：端口的签名只吃 `pkg`/域类型，而事实住在
-// `Service`（`providerPlane` 与 `runtimeConfigDigests`）。装配层交的是**同一个实例**（见
-// `Service.RuntimePool`），不重造池——两份池 = 两个事实源。
+// `Service`（`providerPlane`）。装配层交的是**同一个实例**（见 `Service.RuntimePool`），
+// 不重造池——两份池 = 两个事实源。
 
 // ProviderEnv 实现 `runtimeconn.ProviderEnvSource`：某 runtime 上给子进程注入的 env。
 //
@@ -54,14 +56,11 @@ func (s *Service) NativePermissionEnv(runtimeID, mode string) ([]string, string)
 	return adapter.Env(mode, "", nil)
 }
 
-// ConfigDigest 实现 `runtimeconn.ConfigDigestSource`：平台为某 runtime 物化的清单指纹。
-func (s *Service) ConfigDigest(runtimeID string) string { return s.runtimeConfigDigest(runtimeID) }
-
-// 编译期断言：执行面的三个端口必须由本层实现（改名/签名漂移当场编译失败，而不是等到
+// 编译期断言：执行面的这两个端口必须由本层实现（改名/签名漂移当场编译失败，而不是等到
 // 装配期拿到一个 nil 端口——那时表现是"少注入密钥"/"代际键少一维"，两者都静默）。
+// ConfigDigest 的断言跟着实现搬去了 `registry`（同一个实例交给池）。
 var (
-	_ runtimeconn.ProviderEnvSource  = (*Service)(nil)
-	_ runtimeconn.ConfigDigestSource = (*Service)(nil)
-	_ runtimeconn.NativeEnvSource    = (*Service)(nil)
-	_ runtimeconn.DropSink           = (*Orchestrator)(nil)
+	_ runtimeconn.ProviderEnvSource = (*Service)(nil)
+	_ runtimeconn.NativeEnvSource   = (*Service)(nil)
+	_ runtimeconn.DropSink          = (*Orchestrator)(nil)
 )

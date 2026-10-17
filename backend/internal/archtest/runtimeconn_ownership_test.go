@@ -116,10 +116,11 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 				"没有任何测试会因此变红。", banned)
 		}
 	}
-	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	// P5a 起启动动作在 app/assembly.go 的声明表里，事实仍是执行面 `a.rconn`。
+	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
 	for _, want := range []string{"a.rconn.SetProcRegistry(", "a.rconn.ReapOrphans("} {
 		if !strings.Contains(appSrc, want) {
-			t.Errorf("`internal/app/app.go` 里找不到 %q：注册表必须交给**执行面**（`a.rconn`）——"+
+			t.Errorf("`internal/app/assembly.go` 里找不到 %q：注册表必须交给**执行面**（`a.rconn`）——"+
 				"交给编排器等于让「哪些子进程是我的」这份事实挂在过渡层上，随它一起被删掉。", want)
 		}
 	}
@@ -268,7 +269,7 @@ func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
 		switch {
 		case strings.HasPrefix(slash, "internal/runtimeconn/"):
 			inRuntimeconn += n
-		case filepath.Base(path) == "resource_sync.go":
+		case filepath.ToSlash(rel(root, path)) == "internal/registry/resources.go":
 			inResourceSync += n
 		case strings.HasPrefix(slash, "internal/manager/"):
 			inManager += n
@@ -286,7 +287,7 @@ func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
 		t.Errorf("`internal/manager` 里仍有 %d 处 `runtime_not_found` 铸码。", inManager)
 	}
 	if inResourceSync != 1 {
-		t.Error("`internal/manager/resource_sync.go` 里那个 `runtime_not_found` 不见了：" +
+		t.Error("`internal/registry/resources.go` 里那个 `runtime_not_found` 不见了：" +
 			"它校验的是**用户请求同步的那个 runtime**（另一个输入，故放行）——删掉它 = " +
 			"请求一个不在册的 runtime 会被静默当成「同步全部」。")
 	}

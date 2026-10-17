@@ -27,7 +27,7 @@ import (
 type providerModelFacts struct{ svc *Service }
 
 func (p providerModelFacts) RuntimeStates(ctx context.Context) map[string]dtomodel.RuntimeSyncResp {
-	return p.svc.RuntimeConfigStates(ctx)
+	return p.svc.runtimeSync.RuntimeConfigStates(ctx)
 }
 
 func (p providerModelFacts) DeclaredModels(ctx context.Context) ([]dtomodel.ModelResp, error) {

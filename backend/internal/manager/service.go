@@ -10,16 +10,14 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/registry"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
@@ -31,21 +29,19 @@ type Service struct {
 	bus  *eventbus.Bus
 	orch *Orchestrator
 	st   *store.Store // SQLite 持久层（nil = 未启用；启用后见 EnableStore）
-	// runtimeCfgDigests 各 runtime 已物化的模型配置指纹（T5）。它**并进代际键**
-	// （见 connection.go 的 generationKey）：不并进键，暖进程会继续用旧清单而界面显示"已保存"。
-	runtimeCfgDigests map[string]string
-	// runtimeSyncOutcomes 各 runtime **最后一次同步的结论**（v12：读面直接读它，不在读路径上重跑同步）。
-	runtimeSyncOutcomes map[string]resource.Outcome
+	// planes 本次进程的领域平面集合（P5a：**装配层 `internal/registry` 拥有**）。
+	//
+	// 下面那些平面字段是**同一实例的过渡期视角**（P4b 随 Service 解散时删除）：它们指向
+	// `planes.X`，不是第二份实例——两份平面 = 两个事实源，这正是拆分要消灭的形态。
+	// 为什么先留着：本包 100+ 处调用点与测试按字段名读平面，改名不该与"所有权搬家"混在一刀里。
+	planes *registry.Planes
+	// runtimeSync 资源同步面的过渡期视角（同一实例；见 `planes.Resources`）。
+	runtimeSync *registry.Resources
 
 	// planner 工作空间域（起始点偏好策略：代建根 + 生效名单）。P2b 起策略字段归它自持锁；
 	// `Service` 上**不再复刻**一份（两份 = 两个事实源，表现是面板改了名单、校验却按旧的走）。
 	planner *workspace.Plane
-	caps    *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
-	// capabilityDir 能力定义目录。**语义按持久层模式分叉**（M6-2）：
-	//   - memory 模式：装载源 + 启停写回位置（文件是唯一持久形态）；
-	//   - sqlite 模式：**只作导入/导出目录**——事实源是 DB（v8 的 skills/mcp_servers），
-	//     装载走 LoadCapabilityDefinitionsFromStore，写面走 store 的 CAS（M6-3）。
-	// 两种模式都由 LoadCapabilityDefinitions / LoadCapabilityDefinitionsFromStore 登记。
+	caps    *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；装载入口已归 registry.Planes）
 	// automationPlane 自动化域（定义注册表 + 排期 + 调度循环；P2b 起状态归它自持锁）。
 	automationPlane *automation.Plane
 	// skillPlane 技能平面（读面 + 重校；与 mcp 平面共用同一份 caps 注册表）。
@@ -53,21 +49,14 @@ type Service struct {
 	// mcpSecrets 连接器平面的密钥解析面（引用 → 明文；与 creds 共用同一份凭据机制）。
 	mcpSecrets *mcp.Secrets
 	// mcpPlane 连接器平面（实时调用 + 探测；与 skill 平面共用同一份 caps 注册表）。
-	// 探测状态（预算 + 最近一次探测结果）自持在平面内，不再挂在 Service 上。
 	mcpPlane *mcp.Plane
 	// sessionPlane 会话域（自持一把只保护域内字段的锁；P3b 分批搬入）。
 	sessionPlane *session.Plane
 	// providerPlane 供应商域（内存档案表 + 载体 + 凭据面；自持一把只保护域内字段的锁）。
-	//
-	// P4a 起它的**读面**经 `ProviderPlane()` 交给 `ctrprovider`：自检的用例实现落
-	// `service/svcprovider`，而「谁把域与用例接起来」的落点是**控制器**（除它之外的层不许引用
-	// `service/svc*`）。于是本对象不再持有一个 `*svcprovider.Probe` 字段。
 	providerPlane *provider.Plane
 	// picker 原生目录选择器（宿主事实判定 + 命令配方 + spawn）。自持"监听地址"一个事实。
 	picker *workspace.Picker
 
-	mu   sync.Mutex
-	defs *definition.Mechanism
 	// creds 凭据机制的状态（四层凭据面 + 凭据 cwd；见 mechanism/credential）。
 	creds *credential.Store
 	// runtimePlane 执行面（P3a-2 分批搬入）：本批装"本进程认的那个底座"的绑定，
@@ -81,21 +70,15 @@ type Service struct {
 	// coalescer ③ 文本增量合并器（NewService 构造时创建；见 chunk_coalescer.go）。
 	coalescer *session.Coalescer
 
-	// defWarned 装载期"同一条定义问题只 WARN 一次"的记账（key = 域:id@revision）。
-	// 装载会被反复调用（启动、导入、**网关每次取数**），不记账就会把一条坏定义刷成日志洪水，
-	// 而洪水之后真问题也没人看。见 defWarnOnce。
-	defWarned map[string]bool
-
 	// B5 原生权限映射开关（MATE_NATIVE_PERMISSION=off 关闭；默认开启）。
 	nativePermMu      sync.Mutex
 	nativePermEnabled bool
 	nativePermSet     bool
 
-	// mcpGatewayEnabled 平台侧 MCP 网关开关（M7-3；MATE_MCP_GATEWAY=off 回退）。
-	// 零值 false 会被 NewService 显式置成 true——"忘了设"不该等于"静默关掉网关"。
-	mcpGatewayEnabled atomic.Bool
-	mcpGatewayWarnMu  sync.Mutex
-	mcpGatewayWarned  map[string]bool
+	// mcpGatewayWarned 网关条目组装失败"逐 key 只 WARN 一次"的记账（纯日志节流，
+	// 不是网关开关本身——开关在 `registry.Planes`，那是进程级配置事实）。
+	mcpGatewayWarnMu sync.Mutex
+	mcpGatewayWarned map[string]bool
 }
 
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。
@@ -115,36 +98,43 @@ type Option func(*Service)
 // 连接却活着"这种分叉会立刻发生（`runtimeconn.Plane` 的进程状态是它自己的字段）。
 func WithRuntimePlane(pl *runtimeconn.Plane) Option { return func(s *Service) { s.runtimePlane = pl } }
 
+// WithPlanes 使用装配层已经造好的领域平面（核心与网关共用同一套事实的前提）。
+//
+// 不传时本函数自己造一套（130+ 处测试与 `mate demo` 走这条默认路径）；装配层传的是
+// **同一个实例**——两份平面 = 两个事实源（"核心能注入、网关注入不了"就是那样长出来的）。
+func WithPlanes(p *registry.Planes) Option { return func(s *Service) { s.planes = p } }
+
 func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Service {
 	s := &Service{
-		reg:   reg,
-		defs:  definition.New(),
-		creds: credential.New(reg),
-		bus:   bus,
-		// 网关默认开启（config 的 auto）：显式在这里置位，避免 atomic.Bool 零值把默认关掉。
-		mcpGatewayWarned: make(map[string]bool),
-		caps:             capability.NewRegistry(),
+		reg: reg,
+		bus: bus,
 		// 默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
 		nativePermEnabled: true,
 	}
-	// 技能平面与 RegisterSkill 共用**同一份**注册表（两份注册表 = 两个事实源）。
-	s.skillPlane = skill.NewPlane(s.caps, s.defs)
-	// 密钥解析面与 provider 凭据面共用**同一份** `credential.Store`（两份 = 同一份引用解析出两个结果）。
-	s.mcpSecrets = mcp.NewSecrets(s.creds)
-	// 连接器平面与 RegisterMcpServer 共用**同一份**注册表与**同一份**密钥解析面。
-	s.mcpPlane = mcp.NewPlane(s.caps, s.defs, s.mcpSecrets)
-	// 选择器无外部依赖（宿主事实每次调用现采），构造期建一个即可。
-	s.picker = workspace.NewPicker()
-	// 工作空间域：策略状态在它自己的锁下（P2b 起不再是 Service 的字段）。
-	s.planner = workspace.NewPlane()
-	// 自动化域：定义注册表与调度态都在它自己的锁下（P2b 起不再是 Service 的字段）。
-	// 它需要两样家当（库句柄 + 宿主端口），分别在 `attachStore` 与这里接上——**早一行是 nil**，
-	// 而表现是"该走库的走了内存"或"触发时找不到宿主"（静默）。
-	s.automationPlane = automation.NewPlane()
+	// 可选注入**先行**：`WithPlanes` 决定的实例要在下面被引用，晚一步就会造出第二份平面。
+	for _, opt := range opts {
+		opt(s)
+	}
+	if s.planes == nil {
+		s.planes = registry.NewPlanes(reg)
+	}
+	// 领域平面的过渡期视角（同一实例；P4b 随本结构体解散删除）。
+	s.creds = s.planes.Credentials
+	s.caps = s.planes.Capabilities
+	s.skillPlane = s.planes.Skills
+	s.mcpSecrets = s.planes.McpSecrets
+	s.mcpPlane = s.planes.Mcp
+	s.picker = s.planes.Picker
+	s.planner = s.planes.Workspaces
+	s.automationPlane = s.planes.Automation
+	s.providerPlane = s.planes.Providers
+	s.runtimeSync = s.planes.Resources
+
+	// 自动化域需要宿主端口（建会话/取消轮次）；它是编排面的事实，装配层造不了——
+	// 与库句柄一样，漏接的表现是"触发时找不到宿主"（静默）。
 	s.automationPlane.SetHost(automationHostAdapter{svc: s})
 	// 会话事实端口（P2b）：workspace 域不拥有会话，只消费这里的两个动作。
 	s.planner.SetSessionSource(s)
-	s.providerPlane = provider.NewPlane(reg, s.creds)
 	// 会话域：本批只装库句柄与用量端口（其余端口随 P3b-1b/2 接上）。
 	s.sessionPlane = session.NewPlane()
 	// 会话读面的端口：归属展示（工作空间登记面）P2b 起也在域内（`Plane.WorkspaceDisplayOf`）。
@@ -173,9 +163,6 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 		return strings.TrimSpace(row.ProviderID), true
 	})
 
-	// 网关默认开启（config 的 auto）。放在构造末尾而不是结构体字面量里：atomic.Bool 没法写成
-	// 复合字面量字段，且这里"默认值"的意图要一眼可见（off 由装配期显式关）。
-	s.mcpGatewayEnabled.Store(true)
 	// ③ 流式增量合并：flushFn 直连 publishRaw（绕过合并入口，避免自递归）。
 	s.coalescer = session.NewCoalescer(func(typ, sessionID string, payload any) {
 		s.publishRaw(typ, sessionID, payload)
@@ -186,17 +173,18 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 	// 绑定构建期选定的那个底座（v19：单实例）。`specOK=false`（未注册）不是这里报错——
 	// 装配期的 `runtime.ProductRegistry` 已经 fail-closed，这里只是把事实记下来供诊断如实外露。
 	spec, specOK := reg.Get(runtime.SelectedRuntime())
-	s.runtimePlane = runtimeconn.NewPlane(reg, spec, specOK)
-	for _, opt := range opts {
-		opt(s)
+	if s.runtimePlane == nil {
+		s.runtimePlane = runtimeconn.NewPlane(reg, spec, specOK)
 	}
 	// 执行面的口子：凭据面（供应商域）与连接池。池必须在这里造——它需要**最终那个**平面
 	// （`WithRuntimePlane` 可能已经换过实例），且装配层（`app`）要用它设代际上限/空闲回收。
 	s.runtimePlane.SetCredentialSource(s)
 	s.runtimePool = runtimeconn.NewPool(s.runtimePlane)
-	// env 与配置指纹都是**本层的事实**，池只认端口（执行面不认识供应商档案与模型清单）。
+	// env 与配置指纹都是**装配事实**，池只认端口（执行面不认识供应商档案与模型清单）。
 	s.runtimePool.SetProviderEnvSource(s)
-	s.runtimePool.SetConfigDigestSource(s)
+	// 指纹的来源是 `registry.Resources`（P5a 随同步面搬走）：它是同一份 `runtimeCfgDigests`，
+	// 不再经 Service 转一道——转一道就是第二处需要同步的读面。
+	s.runtimePool.SetConfigDigestSource(s.runtimeSync)
 	// 原生权限 env 的来源（P1-f 下半）：模式**进基础键**，所以这条端口不是"可选的注入"，
 	// 而是"键的第三维"——不登记它，`DSH_PERMISSION_MODE` 既不会注入、也不会分进程。
 	s.runtimePool.SetNativeEnvSource(s)
@@ -229,6 +217,17 @@ func (s *Service) RuntimePool() *runtimeconn.Pool { return s.runtimePool }
 // 装配期（`app.go` 的 serve 与 `gateway/source.go`）要用它登记四层凭据面、cwd 与镜像对账；
 // 这些动作的实现只有 `mechanism/credential` 那一份，manager 侧的八个同名转发已随本刀删除。
 func (s *Service) CredentialStore() *credential.Store { return s.creds }
+
+// Planes 交出本次装配的**领域平面集合**（同一实例；P5a）。
+//
+// 装配层（app）与网关子进程都用它拿事实：它们要的是平面本身，不是 Service 上的转发。
+func (s *Service) Planes() *registry.Planes { return s.planes }
+
+// RuntimeSync 交出资源同步面（同一实例；P5a）。
+//
+// 模型同步与 `GET /models` 的同步结论都从这一份读——读面与写面共用一个状态机，
+// 两份状态就是"同步写了一半"的来源。
+func (s *Service) RuntimeSync() *registry.Resources { return s.runtimeSync }
 
 // SessionPlane 交会话域平面（**依赖事实**）：导出用例的事实来源（`svcsystem.NewSource`）
 // 由 `ctrexport` 用它与 Store/Bus 一起在自己的构造函数里造（P4a 正文第八刀）。

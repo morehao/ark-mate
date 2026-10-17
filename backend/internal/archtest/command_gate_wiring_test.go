@@ -59,13 +59,13 @@ func TestCommandGateIsWiredToPermissionDecision(t *testing.T) {
 		t.Errorf("permission_flow.go 没有 o.tools.Get(——权限请求只带 toolCallId，不回查就拿不到命令行")
 	}
 
-	// ③ 装配：加载 + 交给 service
-	app := stripGoComments(read("internal/app/app.go"))
+	// ③ 装配：加载 + 交给 service（P5a 起这条动作在 app/assembly.go 的声明表里）
+	app := stripGoComments(read("internal/app/assembly.go"))
 	if !strings.Contains(app, "LoadCommandPolicyFile(") {
-		t.Errorf("app.go 没有 LoadCommandPolicyFile(——规则文件写了但没人读")
+		t.Errorf("assembly.go 没有 LoadCommandPolicyFile(——规则文件写了但没人读")
 	}
 	if !strings.Contains(app, "SetCommandPolicy(") {
-		t.Errorf("app.go 没有 SetCommandPolicy(——规则加载了但没交给裁决点")
+		t.Errorf("assembly.go 没有 SetCommandPolicy(——规则加载了但没交给裁决点")
 	}
 
 	// ④ 工具详情记忆的写入/删除

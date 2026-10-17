@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/registry"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
@@ -24,10 +24,11 @@ func TestSyncerContractEmptySet(t *testing.T) {
 	stub := &recordingSyncer{}
 	reg.RegisterSyncer("stub", stub)
 
-	svc := manager.NewService(reg, nil)
+	// 同步面在 P5a 搬进 `registry`：它只依赖注册表 + 供应商域（没有会话/编排）。
+	res := registry.NewPlanes(reg).Resources
 	// 没有持久层 ⇒ 声明为空 ⇒ `buildSet` 产出**空 Set**（这正是要覆盖的那条路径：
 	// 清单为空 / 记忆模式 / 全新装机都可能落在这里）。
-	out, err := svc.SyncRuntime(context.Background(), "stub")
+	out, err := res.SyncRuntime(context.Background(), "stub")
 	if err != nil {
 		t.Fatalf("空集同步不该报错（撤回是正常路径）: %v", err)
 	}
@@ -52,8 +53,8 @@ func TestSyncerContractEmptySet(t *testing.T) {
 	// 这条同时说明上面的计数不是"什么都会调一次"的假绿。
 	reg2 := runtime.NewRegistry(runtime.Spec{ID: "bare", Name: "Bare"})
 	stub2 := &recordingSyncer{}
-	svc2 := manager.NewService(reg2, nil)
-	out2, err := svc2.SyncRuntime(context.Background(), "bare")
+	res2 := registry.NewPlanes(reg2).Resources
+	out2, err := res2.SyncRuntime(context.Background(), "bare")
 	if err != nil {
 		t.Fatalf("未声明交付面不该报错: %v", err)
 	}

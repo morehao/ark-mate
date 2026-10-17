@@ -1,4 +1,4 @@
-package manager
+package registry
 
 import (
 	"context"
@@ -7,30 +7,88 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
 
-// ——— 同步编排（M4）：读资源 → 组 Set → 逐 runtime 调端口 → 记摘要 → 回带 Outcome ———
+// ——— 资源同步（M4）：读资源 → 组 Set → 逐 runtime 调端口 → 记摘要 → 回带 Outcome ———
 //
-// 这一层是「谁懂底座」这件事的分界线：它**不解析任何底座格式**，只说"把这份声明交给该 runtime"。
-// 底座知识全在 adapter；本文件之上（DTO / 路由 / 前端）不知道底座的配置长什么样。
+// 这一层是「谁懂底座」这件事的分界线：它**不解析任何底座格式**，只说"把这份声明交给该
+// runtime"。底座知识全在 adapter；本文件之上（DTO / 路由 / 前端）不知道底座的配置长什么样。
 //
 // 三条不变量：
 //
 //	① 同步失败**不回滚资源**（资源已提交，失败如实回带）——沿用 v11 的诚实语义；
 //	② 同一份声明重复同步**不换代际**（摘要由声明算出，不由产物算出）；
+//	③ 同步结论**持久化**（`GET /models` 是只读面，读一次列表不该写文件、改启动参数）。
+//
+// 落点为什么是 `registry` 而不是 `manager`（P5a）：同步要读的是**装配事实**——各底座配置写面
+// （注册表 + `pkg/resource.Syncer`）、凭据通道（供应商密钥 + 交付面 `Delivery`）、同步结果
+// （meta 里的摘要与结论）。这三样没有一样来自会话/编排，而 `mate doctor` 与网关子进程也要
+// 同一份事实。把状态、`EnableStore`、同步与结果记录**四件一起**搬过来，避免"同步写了一半、
+// 下一轮读到另一份状态"的静默缺口。
+
+// Resources 资源同步面：同步状态 + 装配期装载 + 逐 runtime 交付。
+//
+// 它自持一把锁（只保护 `st` / 摘要 / 结论三张表）；`provider.Plane` 的读面自己取域锁，
+// 所以这里**不再有**改造前 `manager` 那种"持 s.mu 去问供应商域"的锁序风险。
+type Resources struct {
+	reg       *runtime.Registry
+	providers *provider.Plane
+
+	mu       sync.Mutex
+	st       *store.Store
+	digests  map[string]string
+	outcomes map[string]resource.Outcome
+}
+
+// NewResources 构造资源同步面（不读盘；库句柄由 `EnableStore` 交进来）。
+func NewResources(reg *runtime.Registry, providers *provider.Plane) *Resources {
+	return &Resources{reg: reg, providers: providers}
+}
+
+// Store 当前库句柄（nil = memory 模式）。只在装配/装载路径读，拷贝出指针避免持锁调用。
+func (r *Resources) Store() *store.Store {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.st
+}
+
+// EnableStore 接上持久层，然后做启动期的两件事：装载同步指纹、与当前声明对齐一次。
+//
+// 顺序是语义的：指纹先读进内存（它并进代际键，重启后必须仍然生效——否则重启会把"已物化的
+// 清单"当成"没有清单"，下一轮凭空重换代际），再同步（否则这一轮交付会把刚读到的结论覆盖成
+// "刚刚同步成功"，而它其实还没被观测到）。
+func (r *Resources) EnableStore(st *store.Store) {
+	r.mu.Lock()
+	r.st = st
+	r.mu.Unlock()
+
+	r.loadRuntimeConfigDigests(context.Background())
+	// 装配期把启动面与当前声明对齐一次（v12：启动参数/内联内容/凭据 env 都由 adapter 经
+	// `resource.Delivery` 装卸）。重启后平台必须重新交付——否则上一轮的交付物与新声明可能分叉，
+	// 而界面显示的是"已同步"。
+	if ids, err := r.runtimeIDsForSync(""); err == nil {
+		for _, id := range ids {
+			if _, serr := r.SyncRuntime(context.Background(), id); serr != nil {
+				glog.Warnw(context.Background(), "runtime sync: 装配期同步失败", "runtime", id, "err", serr)
+			}
+		}
+	}
+}
 
 // runtimeConfigDigestEntry meta 里某 runtime 的同步记录（**保留 v11 的键名** `runtime_config_digest`
 // ——改名只会造成无收益的迁移，Q8）。
@@ -50,22 +108,23 @@ type runtimeConfigDigestEntry struct {
 // runtimeConfigGeneratorVersion 摘要/代际键的代数。
 const runtimeConfigGeneratorVersion = 2
 
-// runtimeConfigDigest 当前进程内存里的配置指纹（runtime → digest）。
+// ConfigDigest 当前进程内存里的配置指纹（runtime → digest）。
 //
 // 它是**代际键的一部分**（`generationKey` 的第三维）：不并进键，暖进程会继续用旧清单，
 // 而界面显示"已保存"。读来源是 `meta.runtime_config_digest`（重启后仍生效）。
-func (s *Service) runtimeConfigDigest(runtimeID string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.runtimeCfgDigests[runtimeID]
+func (r *Resources) ConfigDigest(runtimeID string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.digests[runtimeID]
 }
 
 // loadRuntimeConfigDigests 启动期把 meta 里的同步记录读进内存（并进代际键 + 供读面用）。
-func (s *Service) loadRuntimeConfigDigests(ctx context.Context) {
-	if s.st == nil {
+func (r *Resources) loadRuntimeConfigDigests(ctx context.Context) {
+	st := r.Store()
+	if st == nil {
 		return
 	}
-	raw, ok, err := s.st.GetMeta(ctx, model.MetaKeyRuntimeConfigDigest)
+	raw, ok, err := st.GetMeta(ctx, model.MetaKeyRuntimeConfigDigest)
 	if err != nil {
 		glog.Warnw(ctx, "runtime sync: 读 meta.runtime_config_digest 失败", "err", err)
 		return
@@ -87,25 +146,25 @@ func (s *Service) loadRuntimeConfigDigests(ctx context.Context) {
 			}
 		}
 	}
-	s.mu.Lock()
-	s.runtimeCfgDigests = digests
-	s.runtimeSyncOutcomes = outcomes
-	s.mu.Unlock()
+	r.mu.Lock()
+	r.digests = digests
+	r.outcomes = outcomes
+	r.mu.Unlock()
 }
 
 // SyncModels 重新同步（`POST /models/sync`）。runtimeID 为空 = 全部已注册 runtime。
 //
 // 它**不绕过任何一道门**：未实测仍然如实报 untested、清单为空仍然走撤回路径、
 // 自校验失败仍然一个字节不写。返回里也没有 `advertised`——那要新进程才拿得到。
-func (s *Service) SyncModels(ctx context.Context, runtimeID string) (*dtomodel.ModelSyncResp, error) {
-	ids, err := s.runtimeIDsForSync(runtimeID)
+func (r *Resources) SyncModels(ctx context.Context, runtimeID string) (*dtomodel.ModelSyncResp, error) {
+	ids, err := r.runtimeIDsForSync(runtimeID)
 	if err != nil {
 		return nil, err
 	}
 	out := &dtomodel.ModelSyncResp{Applied: make([]dtomodel.RuntimeSyncResp, 0, len(ids))}
 	var failed []string
 	for _, id := range ids {
-		o, err := s.SyncRuntime(ctx, id)
+		o, err := r.SyncRuntime(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -126,16 +185,16 @@ func (s *Service) SyncModels(ctx context.Context, runtimeID string) (*dtomodel.M
 }
 
 // runtimeIDsForSync 解析要同步的 runtime 集合（空 = 全部已注册，升序）。
-func (s *Service) runtimeIDsForSync(runtimeID string) ([]string, error) {
+func (r *Resources) runtimeIDsForSync(runtimeID string) ([]string, error) {
 	if runtimeID != "" {
-		if _, ok := s.reg.Get(runtimeID); !ok {
+		if _, ok := r.reg.Get(runtimeID); !ok {
 			return nil, acl.NewError(acl.ClassRequest, "runtime_not_found",
 				fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
 		}
 		return []string{runtimeID}, nil
 	}
 	ids := make([]string, 0, 4)
-	for _, spec := range s.reg.List() {
+	for _, spec := range r.reg.List() {
 		ids = append(ids, spec.ID)
 	}
 	sort.Strings(ids)
@@ -151,15 +210,15 @@ func (s *Service) runtimeIDsForSync(runtimeID string) ([]string, error) {
 //     而是让那条供应商整体不进 Set 并记一条 problem（宁可不下发，也不下发半条）；
 //  3. 调端口；err != nil → `failed` + 可执行出路，**不覆盖上一份成功的状态**；
 //  4. 仅 applied/unchanged 时记摘要并更新代际键输入。
-func (s *Service) SyncRuntime(ctx context.Context, runtimeID string) (resource.Outcome, error) {
-	spec, ok := s.reg.Get(runtimeID)
+func (r *Resources) SyncRuntime(ctx context.Context, runtimeID string) (resource.Outcome, error) {
+	spec, ok := r.reg.Get(runtimeID)
 	if !ok {
 		return resource.Outcome{
 			Status:   resource.StatusUnsupported,
 			Problems: []string{fmt.Sprintf("runtime %q 未注册：平台不会为未知交付面猜形态", runtimeID)},
 		}, nil
 	}
-	syncer, ok := s.reg.Syncer(runtimeID)
+	syncer, ok := r.reg.Syncer(runtimeID)
 	if !ok {
 		return resource.Outcome{
 			Status: resource.StatusUnsupported,
@@ -169,7 +228,7 @@ func (s *Service) SyncRuntime(ctx context.Context, runtimeID string) (resource.O
 		}, nil
 	}
 
-	set, problems := s.buildSet(ctx, spec)
+	set, problems := r.buildSet(ctx, spec)
 	outcome, err := syncer.SyncModels(ctx, set)
 	if err != nil {
 		// 失败**不覆盖**上一份成功的状态：界面继续显示上一次的真实结论，而不是被这次失败抹掉。
@@ -182,16 +241,16 @@ func (s *Service) SyncRuntime(ctx context.Context, runtimeID string) (resource.O
 	}
 	outcome.Problems = append(problems, outcome.Problems...)
 	if outcome.Status == resource.StatusApplied || outcome.Status == resource.StatusUnchanged {
-		if rerr := s.recordSyncOutcome(ctx, runtimeID, set, outcome); rerr != nil {
+		if rerr := r.recordSyncOutcome(ctx, runtimeID, set, outcome); rerr != nil {
 			return outcome, rerr
 		}
 	}
-	s.mu.Lock()
-	if s.runtimeSyncOutcomes == nil {
-		s.runtimeSyncOutcomes = map[string]resource.Outcome{}
+	r.mu.Lock()
+	if r.outcomes == nil {
+		r.outcomes = map[string]resource.Outcome{}
 	}
-	s.runtimeSyncOutcomes[runtimeID] = outcome
-	s.mu.Unlock()
+	r.outcomes[runtimeID] = outcome
+	r.mu.Unlock()
 	return outcome, nil
 }
 
@@ -199,11 +258,11 @@ func (s *Service) SyncRuntime(ctx context.Context, runtimeID string) (resource.O
 //
 // 两条「整体不进 Set」的判据都是刻意的：缺端点或密钥解不开时**不下发半条**
 // （半条配置会让底座报一个与真实原因无关的错），改为记一条可执行的 problem。
-func (s *Service) buildSet(ctx context.Context, spec runtime.Spec) (resource.Set, []string) {
+func (r *Resources) buildSet(ctx context.Context, spec runtime.Spec) (resource.Set, []string) {
 	set := resource.Set{Runtime: spec.ID}
 	problems := []string{}
 
-	models, err := s.declaredModels(ctx)
+	models, err := r.declaredModels(ctx)
 	if err != nil {
 		return set, []string{"读清单失败：" + err.Error()}
 	}
@@ -217,11 +276,11 @@ func (s *Service) buildSet(ctx context.Context, spec runtime.Spec) (resource.Set
 	}
 	sort.Strings(providerIDs)
 
-	defaultID, _ := s.declaredDefaultModelID(ctx)
+	defaultID, _ := r.declaredDefaultModelID(ctx)
 
 	for _, pid := range providerIDs {
 		// 只保留「至少有一条模型」的供应商：底座侧一条 route 挂零模型没有意义。
-		d, key, kerr := s.providerForSync(pid)
+		d, key, kerr := r.providerForSync(pid)
 		if d == nil {
 			problems = append(problems, fmt.Sprintf(
 				"供应商 %q 已不存在，挂靠它的 %d 条模型不会被交付：在「设置 · 模型」里把它改挂到别的供应商，或删掉这些模型",
@@ -291,7 +350,7 @@ func (s *Service) buildSet(ctx context.Context, spec runtime.Spec) (resource.Set
 	}
 
 	// 凭据通道**二选一**（决定权在编排层，不在 adapter——"要不要注入 env"是启动者的事）。
-	cred, credProblems := s.applyCredentialChannel(ctx, spec, &set, byProvider)
+	cred, credProblems := r.applyCredentialChannel(ctx, spec, &set, byProvider)
 	problems = append(problems, credProblems...)
 	set.CredentialDocPath = cred.docPath
 	if cred.docPath != "" {
@@ -313,14 +372,14 @@ type credentialPlan struct {
 //
 // 两条通道**绝不**同时启用：dsh 的优先级实测是"继承环境 > 存储文档"，同时启用会让已存文档被
 // 陈旧的 env 永久遮蔽——用户轮换了密钥、文档也更新了，而生效的仍是旧值，**且没有任何报错**。
-func (s *Service) applyCredentialChannel(
+func (r *Resources) applyCredentialChannel(
 	ctx context.Context, spec runtime.Spec, set *resource.Set, _ map[string][]resource.Model,
 ) (credentialPlan, []string) {
 	problems := []string{}
 	// 逐供应商取明文（只在这一层短暂存在；去向只有 adapter 的凭据文档或子进程 env 两处）。
 	withKeys := make([]resource.Provider, 0, len(set.Providers))
 	for _, p := range set.Providers {
-		_, key, kerr := s.providerForSync(p.ID)
+		_, key, kerr := r.providerForSync(p.ID)
 		if kerr != nil || key == "" {
 			continue
 		}
@@ -330,14 +389,14 @@ func (s *Service) applyCredentialChannel(
 
 	native := spec.Credential.Tested && strings.TrimSpace(spec.Credential.NativeDoc) != ""
 	if native {
-		docPath, err := s.resolveCredentialDoc(spec)
+		docPath, err := r.resolveCredentialDoc(spec)
 		if err != nil {
 			problems = append(problems, "原生凭据文档路径无法解析（"+err.Error()+"）：本次回退到子进程 env 注入")
 			native = false
 		} else {
 			// 原生通道：**平台不注入同名 env**（否则 env 会遮蔽文档，轮换静默失效）。
 			for _, p := range set.Providers {
-				if err := s.reg.DeliveryFor(spec.ID).SetEnv(p.Ref, ""); err != nil {
+				if err := r.reg.DeliveryFor(spec.ID).SetEnv(p.Ref, ""); err != nil {
 					glog.Warnw(context.Background(), "runtime sync: 撤销凭据 env 失败", "runtime", spec.ID, "ref", p.Ref, "err", err)
 				}
 			}
@@ -354,7 +413,7 @@ func (s *Service) applyCredentialChannel(
 	}
 
 	// env 通道：平台把明文注入子进程 env（按**逐供应商**的引用名，ADR-16 修 v11 的共用密钥缺陷）。
-	delivery := s.reg.DeliveryFor(spec.ID)
+	delivery := r.reg.DeliveryFor(spec.ID)
 	for _, p := range withKeys {
 		if err := delivery.SetEnv(p.Ref, p.APIKey); err != nil {
 			problems = append(problems, "注入凭据 env 失败（"+p.Ref+"）："+err.Error())
@@ -384,7 +443,7 @@ func (s *Service) applyCredentialChannel(
 //
 // 只看该 runtime 自己的 `Launch.Env`（隔离表注入的那份）——**刻意不回落到进程环境**：
 // 回落会让平台去写用户自己的 `~/.dsh`，而那正是本机隔离纪律禁止的事，且它是**静默**的。
-func (s *Service) resolveCredentialDoc(spec runtime.Spec) (string, error) {
+func (r *Resources) resolveCredentialDoc(spec runtime.Spec) (string, error) {
 	launch := map[string]string{}
 	for _, kv := range spec.Launch.Env {
 		if name, val, ok := strings.Cut(kv, "="); ok {
@@ -407,12 +466,12 @@ func (s *Service) resolveCredentialDoc(spec runtime.Spec) (string, error) {
 
 // providerForSync 取某供应商的在册定义 + 生效明文密钥（不存在 → (nil,"",nil)）。
 //
-// 密钥走 `resolveProviderKey`（四层回落的唯一入口）：内存里那条与库里的那一列都是它的输入，
+// 密钥走 `provider.Plane.KeyFor`（四层回落的唯一入口）：内存里那条与库里的那一列都是它的输入，
 // 所以这里不再有"两条取密钥的路"（v13–v19 的 `Key` / `KeyRef + 密文句柄` 二选一就是那种分叉）。
-func (s *Service) providerForSync(providerID string) (*provider.Def, string, error) {
+func (r *Resources) providerForSync(providerID string) (*provider.Def, string, error) {
 	ctx := context.Background()
-	// **不持 `s.mu`**（P4a 守卫）：`Snapshot` 自己取供应商域的锁并返回值语义副本。
-	d, _ := s.providerPlane.Snapshot(providerID)
+	// **不持本结构的锁去问域**：`Snapshot` 自己取供应商域的锁并返回值语义副本。
+	d, _ := r.providers.Snapshot(providerID)
 	var cp *provider.Def
 	if d != nil {
 		c := *d
@@ -420,8 +479,8 @@ func (s *Service) providerForSync(providerID string) (*provider.Def, string, err
 	}
 	if cp == nil {
 		// sqlite 载体可能比内存先有（导入/并发装配）：回落到行（v13 起是纯列投影）。
-		if s.st != nil {
-			row, found, err := s.st.GetProviderDefinition(ctx, providerID)
+		if st := r.Store(); st != nil {
+			row, found, err := st.GetProviderDefinition(ctx, providerID)
 			if err != nil || !found {
 				return nil, "", err
 			}
@@ -434,7 +493,7 @@ func (s *Service) providerForSync(providerID string) (*provider.Def, string, err
 	if cp == nil {
 		return nil, "", nil
 	}
-	res := s.providerPlane.KeyFor(ctx, cp)
+	res := r.providers.KeyFor(ctx, cp)
 	if res.Value == "" && len(res.Problems) > 0 {
 		return cp, "", errors.New(strings.Join(res.Problems, "；"))
 	}
@@ -442,11 +501,12 @@ func (s *Service) providerForSync(providerID string) (*provider.Def, string, err
 }
 
 // declaredModels 读全部平台清单并折成端口值对象。
-func (s *Service) declaredModels(ctx context.Context) ([]resource.Model, error) {
-	if s.st == nil {
+func (r *Resources) declaredModels(ctx context.Context) ([]resource.Model, error) {
+	st := r.Store()
+	if st == nil {
 		return nil, nil
 	}
-	rows, err := s.st.ListModelDefinitions(ctx)
+	rows, err := st.ListModelDefinitions(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -481,8 +541,8 @@ func capacitySentinel(v *int64) string {
 }
 
 // declaredDefaultModelID 读**单一**默认模型（未设 → ""）。
-func (s *Service) declaredDefaultModelID(ctx context.Context) (string, bool) {
-	row, ok, err := s.providerPlane.DefaultModelRow(ctx)
+func (r *Resources) declaredDefaultModelID(ctx context.Context) (string, bool) {
+	row, ok, err := r.providers.DefaultModelRow(ctx)
 	if err != nil || !ok {
 		return "", false
 	}
@@ -525,19 +585,20 @@ func setFingerprint(set resource.Set) string {
 }
 
 // recordSyncOutcome 把本次摘要与结论写进 meta 与内存（内存里那份并进代际键）。
-func (s *Service) recordSyncOutcome(ctx context.Context, runtimeID string, set resource.Set, outcome resource.Outcome) error {
+func (r *Resources) recordSyncOutcome(ctx context.Context, runtimeID string, set resource.Set, outcome resource.Outcome) error {
 	digest := setFingerprint(set)
-	s.mu.Lock()
-	if s.runtimeCfgDigests == nil {
-		s.runtimeCfgDigests = map[string]string{}
+	r.mu.Lock()
+	if r.digests == nil {
+		r.digests = map[string]string{}
 	}
-	s.runtimeCfgDigests[runtimeID] = digest
-	s.mu.Unlock()
-	if s.st == nil {
+	r.digests[runtimeID] = digest
+	r.mu.Unlock()
+	st := r.Store()
+	if st == nil {
 		return nil
 	}
 	m := map[string]runtimeConfigDigestEntry{}
-	if raw, ok, err := s.st.GetMeta(ctx, model.MetaKeyRuntimeConfigDigest); err == nil && ok && raw != "" {
+	if raw, ok, err := st.GetMeta(ctx, model.MetaKeyRuntimeConfigDigest); err == nil && ok && raw != "" {
 		_ = json.Unmarshal([]byte(raw), &m)
 	}
 	o := outcome
@@ -549,29 +610,25 @@ func (s *Service) recordSyncOutcome(ctx context.Context, runtimeID string, set r
 	if err != nil {
 		return err
 	}
-	return s.st.SetMeta(ctx, model.MetaKeyRuntimeConfigDigest, string(b))
+	return st.SetMeta(ctx, model.MetaKeyRuntimeConfigDigest, string(b))
 }
 
 // TrySyncModels 「提交就同步」：写面提交后把清单推给各底座，返回一句给用户看的话。
 //
-// 导出是**过渡期的端口实现**（`svcmodel.Host`，P4a 正文第五刀）：清单写面在 `service/svcmodel`，
-// 而同步要写各底座的配置（Syncer + 凭据通道），随读面/同步面一起搬（P4b 第二刀）。
-// trySyncModels 写面末尾的尽力同步：资源行**已经提交**，所以同步失败不回滚它，
-// 而是把失败如实带回写面回执（note），并留一条 WARN。
-//
-// 为什么不直接返回错误：那会让前端以为"清单没保存"——它保存了。真实情况是
-// "清单已保存，但交付没成功"，这两件事必须分开说。
-func (s *Service) TrySyncModels(ctx context.Context) string {
-	if s.st == nil {
+// 写面末尾的尽力同步：资源行**已经提交**，所以同步失败不回滚它，而是把失败如实带回写面回执
+// （note），并留一条 WARN。为什么不直接返回错误：那会让前端以为"清单没保存"——它保存了。
+// 真实情况是"清单已保存，但交付没成功"，这两件事必须分开说。
+func (r *Resources) TrySyncModels(ctx context.Context) string {
+	if r.Store() == nil {
 		return ""
 	}
-	ids, err := s.runtimeIDsForSync("")
+	ids, err := r.runtimeIDsForSync("")
 	if err != nil {
 		return ""
 	}
 	notes := make([]string, 0, len(ids))
 	for _, id := range ids {
-		o, serr := s.SyncRuntime(ctx, id)
+		o, serr := r.SyncRuntime(ctx, id)
 		if serr != nil {
 			glog.Warnw(ctx, "runtime sync: 写面后的同步失败（资源已保存，交付未更新）", "runtime", id, "err", serr)
 			notes = append(notes, "⚠ 已保存，但同步失败（"+serr.Error()+"）：重试 POST /models/sync")
@@ -585,18 +642,18 @@ func (s *Service) TrySyncModels(ctx context.Context) string {
 }
 
 // RuntimeConfigStates 返回各 runtime 最后一次同步的结论（`mate doctor` 与读面用）。
-func (s *Service) RuntimeConfigStates(ctx context.Context) map[string]dtomodel.RuntimeSyncResp {
+func (r *Resources) RuntimeConfigStates(ctx context.Context) map[string]dtomodel.RuntimeSyncResp {
 	out := map[string]dtomodel.RuntimeSyncResp{}
-	s.mu.Lock()
+	r.mu.Lock()
 	outcomes := map[string]resource.Outcome{}
-	for k, v := range s.runtimeSyncOutcomes {
+	for k, v := range r.outcomes {
 		outcomes[k] = v
 	}
-	s.mu.Unlock()
-	for _, spec := range s.reg.List() {
+	r.mu.Unlock()
+	for _, spec := range r.reg.List() {
 		o, ok := outcomes[spec.ID]
 		if !ok {
-			if _, hasSyncer := s.reg.Syncer(spec.ID); !hasSyncer {
+			if _, hasSyncer := r.reg.Syncer(spec.ID); !hasSyncer {
 				o = resource.Outcome{Status: resource.StatusUnsupported,
 					Where:    "未声明模型清单交付面",
 					Problems: []string{"该交付面没有实现同步端口（pkg/resource.Syncer）"}}
@@ -633,151 +690,5 @@ func outcomeToDTO(runtimeID string, o resource.Outcome) dtomodel.RuntimeSyncResp
 			Effect: o.Credential.Effect, Tested: o.Credential.Tested, Where: o.Credential.Where,
 		},
 		Problems: problems,
-	}
-}
-
-// ModelsView 组装 `GET /models` 读面：**平台清单 + 聚合生效结论 + 逐 runtime 机器面明细**。
-//
-// 它是**无副作用**的：逐 runtime 的结论直接读上一次同步的持久记录，不在读路径上重跑同步
-// （读一次列表不该写文件、改启动参数）。
-//
-// `runtimeID` 非空 = 只看那一个 runtime 的明细；`effective`/`effective_at` 恒为**聚合**值
-// （ADR-22：用户面只有一个结论）。
-func (s *Service) ModelsView(ctx context.Context, runtimeID string, refresh bool) (*dtomodel.ModelsResp, error) {
-	models, err := s.providerPlane.ListModels(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defaultID, _ := s.declaredDefaultModelID(ctx)
-
-	resp := &dtomodel.ModelsResp{
-		Models:       models,
-		DefaultModel: defaultID,
-		Sync:         []dtomodel.RuntimeSyncResp{},
-	}
-	states := s.RuntimeConfigStates(ctx)
-	ids := make([]string, 0, len(states))
-	for id := range states {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		if runtimeID != "" && id != runtimeID {
-			continue
-		}
-		st := states[id]
-		// **尽力采样**底座事实（`advertised`/`missing` 是机器面）：取不到就留空，
-		// 绝不把"没取到"当成"底座一条都没有"（那是假红），也不当成"两侧一致"（那是假绿）。
-		// 采样面只有**构建期固定那个底座**有执行面；别的 runtime 如实留空（unknown）。
-		if id != runtime.SelectedRuntime() {
-			resp.Sync = append(resp.Sync, st)
-			continue
-		}
-		if sample, serr := s.advertisedSample(ctx); serr == nil && sample.Known() {
-			values := make([]string, 0, len(sample.Models))
-			for _, m := range sample.Models {
-				values = append(values, m.Value)
-			}
-			sort.Strings(values)
-			st.Advertised = values
-			st.Missing = missingDeclaredModelsFor(ctx, s, id, values)
-		}
-		resp.Sync = append(resp.Sync, st)
-	}
-	resp.Effective, resp.EffectiveAt = aggregateEffect(resp.Sync, len(models))
-	if len(models) == 0 {
-		resp.Note = "清单为空：平台不下发任何条目，新会话进程只看到它自带的目录"
-	}
-	return resp, nil
-}
-
-// missingDeclaredModelsFor 声明了却没出现在运行时广告里的条目（机器面，人话化）。
-//
-// 判据是**同一份生成规则**（`modelValueFor`）：平台声明 → 该 runtime 认得的不透明值，再与广告
-// 集合比对。两处各写一遍迟早分叉——"界面说生效了、实际目录里其实没有"正是这条要挡的。
-func missingDeclaredModelsFor(ctx context.Context, s *Service, runtimeID string, advertised []string) []string {
-	declared, err := s.providerPlane.ListModels(ctx)
-	if err != nil {
-		return nil
-	}
-	have := make(map[string]bool, len(advertised))
-	for _, v := range advertised {
-		have[v] = true
-	}
-	out := []string{}
-	for i := range declared {
-		v, verr := s.providerPlane.ModelValueFor(runtimeID, declared[i].ProviderID, declared[i].Model)
-		if verr != nil || v == "" {
-			continue
-		}
-		if !have[v] {
-			out = append(out, declared[i].ProviderID+"/"+declared[i].Model)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// aggregateEffect 把逐 runtime 的结论折成用户面的**聚合**结论（ADR-22）。
-//
-// 三条判据，从差到好：
-//
-//	failed   任一 runtime 交付失败；
-//	pending  交付成功但**没有被观测到**（advertised 采样为空、或有声明条目不在目录里、
-//	         或该 runtime 根本没声明交付面）——「已保存」只说明写进了平台清单；
-//	applied  某次采样里**声明的条目全都出现在底座目录里**（`missing` 为空且确实取到了样本）。
-//
-// 为什么 `applied` 必须以**观测**为准而不是"交付成功"：那正是本仓反复要防的那类谎——
-// 平台写完文件就说"已生效"，而底座要等新进程才读它。`sync[].pending` 就是这个事实的载体；
-// 用户面不许出现底座名，所以聚合结论只能取所有 runtime 里**最保守**的那一档。
-// 也正因为如此，`effective_at` 取所有 runtime 里**最晚**的那个（同样保守）。
-func aggregateEffect(sync []dtomodel.RuntimeSyncResp, modelCount int) (effective, effectiveAt string) {
-	if modelCount == 0 {
-		// 清单为空：没有要交付的东西，聚合结论就是"已生效"（撤回路径也走这里）。
-		return "applied", "now"
-	}
-	effective, effectiveAt = "applied", "now"
-	worst := -1
-	for i := range sync {
-		st := sync[i]
-		// 清单与凭据两条通道各报各的时机（ADR-14），取更晚的那条。
-		rank := resource.EffectRank(st.Effect)
-		if r := resource.EffectRank(st.Credential.Effect); r > rank {
-			rank = r
-		}
-		if rank > worst {
-			worst = rank
-			effectiveAt = effectToUserWord(rank)
-		}
-		switch {
-		case st.Status == resource.StatusFailed:
-			effective = "failed"
-		case st.Status == resource.StatusUnsupported, st.Status == resource.StatusUntested:
-			if effective != "failed" {
-				effective = "pending"
-			}
-		case len(st.Advertised) == 0 || len(st.Missing) > 0:
-			// 交付成功但没被观测到（或观测到缺口）：**不许**说"已生效"。
-			if effective != "failed" {
-				effective = "pending"
-			}
-		}
-	}
-	if len(sync) == 0 {
-		// 一个可用底座都没有：如实报"待生效"而不是"已生效"。
-		effective = "pending"
-	}
-	return effective, effectiveAt
-}
-
-// effectToUserWord 把机器面的生效时刻折成用户词（`now` | `next_session` | `next_launch`）。
-func effectToUserWord(rank int) string {
-	switch rank {
-	case 0:
-		return "now"
-	case 1, 2:
-		return "next_session"
-	default:
-		return "next_launch"
 	}
 }

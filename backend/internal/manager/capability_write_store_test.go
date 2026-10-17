@@ -154,7 +154,7 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 	if _, err := r.Svc.SkillPlane().WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t, "id", `"cas-skill"`, "name", `"orig"`)), true); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	repo, err := r.Svc.defs.DefinitionRepoFor(definition.CapSubSkills)
+	repo, err := r.Svc.Planes().Definitions.DefinitionRepoFor(definition.CapSubSkills)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestStoreMcpWriteFaceRoundTrip(t *testing.T) {
 	}
 
 	// 归属该 server 的工具条目必须随删除一起摘掉。
-	if err := r.Svc.RegisterTool(capability.Tool{Name: "fs__read", Source: capability.ToolSourceMCP, McpServer: "fs"}); err != nil {
+	if err := r.Svc.Planes().RegisterTool(capability.Tool{Name: "fs__read", Source: capability.ToolSourceMCP, McpServer: "fs"}); err != nil {
 		t.Fatal(err)
 	}
 	del, err := r.Svc.McpPlane().DeleteServer(ctx, "fs")
@@ -381,7 +381,7 @@ func TestStoreMcpWriteFaceRoundTrip(t *testing.T) {
 // DB 模式下定义存在行里，目录只是可选的导入/导出位置。
 func TestStoreWriteFaceRequiresNoCapabilityDir(t *testing.T) {
 	r, _ := storeCapRig(t)
-	if dir := r.Svc.defs.Dir(); dir != "" {
+	if dir := r.Svc.Planes().Definitions.Dir(); dir != "" {
 		t.Fatalf("本夹具刻意不配能力目录，got %q", dir)
 	}
 	if _, err := r.Svc.SkillPlane().WriteSkill(context.Background(), "", dtocapability.SkillWriteReq(rawObj(t, "id", `"no-dir"`)), true); err != nil {

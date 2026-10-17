@@ -94,9 +94,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 		t.Fatalf("导入的历史明文应进 key 列: %q", v)
 	}
 	// 装载面如实报"有密钥"。
-	svc.mu.Lock()
 	svc.providerPlane.DeleteForTest("legacy")
-	svc.mu.Unlock()
 	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
 	items, _ := svc.providerPlane.ListProviders(ctx)
 	for _, it := range items {

@@ -81,7 +81,11 @@ var declaredRelocationMarkers = []string{
 var managerModelPortAnchors = []string{
 	"func (s *Service) ModelRow(",
 	"func (s *Service) ModelEffect(",
-	"func (s *Service) TrySyncModels(",
+}
+
+// registryModelPortAnchors P5a 起同步面在 `registry.Resources`（P4b/取样面搬完后与读面合流）。
+var registryModelPortAnchors = []string{
+	"func (r *Resources) TrySyncModels(",
 }
 
 // TestModelWriteUseCaseLivesInModelSvc 见文件头。
@@ -163,6 +167,12 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 				"（改名后 `app.go` 一起改就能编译过，而端口的那件事没人做）", a)
 		}
 	}
+	regBody := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "registry", "resources.go")))
+	for _, a := range registryModelPortAnchors {
+		if !strings.Contains(regBody, a) {
+			t.Errorf("internal/registry/resources.go 里找不到 %q：同步面的端口实现被改名/删掉了？", a)
+		}
+	}
 
 	// ③ 装配：用例在**控制器**里造（`app` 与 `router` 都不许引用 `service/svc*`）。
 	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrmodel", "models.go")))
@@ -199,10 +209,10 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 			"用例接口不外溢到装配点（P4a 那批端口别名已判定为骚操作，别再开这条路）。")
 	}
 
-	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
-	for _, want := range []string{"ModelHost: a.svc", "Store: st"} {
+	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
+	for _, want := range []string{"ModelHost: manager.NewModelFace(as.a.svc)", "Store: as.st"} {
 		if !strings.Contains(app, want) {
-			t.Errorf("internal/app/app.go 里找不到 %q：模型写面的依赖事实与过渡端口都在装配点交出"+
+			t.Errorf("internal/app/assembly.go 里找不到 %q：模型写面的依赖事实与过渡端口都在装配点交出"+
 				"（漏了 Store ⇒ 所有模式都报「清单不可用」；漏了 ModelHost ⇒ 端口没人满足，编译期就该拦）。", want)
 		}
 	}

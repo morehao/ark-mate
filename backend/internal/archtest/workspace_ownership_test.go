@@ -274,9 +274,9 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 			"端口包删掉之后不该回来（P4a 正文第三十四刀）。")
 	}
 
-	appGo := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
-	if !strings.Contains(appGo, "a.svc.WorkspacePlane().SetRootsStore(") {
-		t.Error("`internal/app/app.go` 里找不到 `a.svc.WorkspacePlane().SetRootsStore(`：" +
+	appGo := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
+	if !strings.Contains(appGo, "a.planes.Workspaces.SetRootsStore(") {
+		t.Error("`internal/app/assembly.go` 里找不到 `a.planes.Workspaces.SetRootsStore(`：" +
 			"落盘端口必须接到**装配好的那个平面**上（接错一个平面时两边都编译过，表现是设置改了不落盘）。")
 	}
 
@@ -353,9 +353,9 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 // `RecentWorkspaces` 会安静地把默认工作空间与已登记项当成"未登记"推回来，或者干脆恒空。
 func TestWorkspaceWiringIsAttached(t *testing.T) {
 	root := backendRoot(t)
-	persist := readFileOrFatal(t, filepath.Join(root, "internal", "manager", "persist.go"))
-	if !strings.Contains(persist, "s.planner.SetStore(st)") {
-		t.Error("`internal/manager/persist.go` 的 `attachStore` 里找不到 `s.planner.SetStore(st)`：" +
+	persist := readFileOrFatal(t, filepath.Join(root, "internal", "registry", "planes.go"))
+	if !strings.Contains(persist, "p.Workspaces.SetStore(st)") {
+		t.Error("`internal/registry/planes.go` 的 `EnableStore` 里找不到 `p.Workspaces.SetStore(st)`：" +
 			"工作空间域没拿到库句柄。\n" +
 			"表现**只在 sqlite 模式**现形——`RecentWorkspaces` 会把默认工作空间与已登记项当成" +
 			"「未登记」推回来（memory 模式的登记表在域自己的字段里，开发态多半看不见）。")

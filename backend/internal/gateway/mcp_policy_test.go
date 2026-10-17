@@ -76,7 +76,7 @@ func TestProbeAndGatewayFacesMatch(t *testing.T) {
 	// 探测面：管理器装载同一份定义后探测（真实入口，走真远端）。
 	svc := manager.NewService(runtime.AllBuiltinRegistry(), nil)
 	svc.EnableStore(r.st)
-	if n := svc.LoadCapabilityDefinitionsFromStore(ctx, ""); n == 0 {
+	if n := svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, ""); n == 0 {
 		t.Fatal("装载能力定义：应读到 1 条")
 	}
 	probe, err := svc.McpPlane().Probe(ctx, "gh")

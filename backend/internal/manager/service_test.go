@@ -435,10 +435,8 @@ func TestServiceResolveRuntimeUsesBuildRuntime(t *testing.T) {
 func TestPublishTitleConcurrentUpdate(t *testing.T) {
 	svc, _, _ := newTestRig(t)
 	id := "s-title-race"
-	svc.mu.Lock()
 	svc.sessionPlane.RegisterSession(&SessionRec{ID: id, Status: session.SessionStatusInProgress})
 	svc.sessionPlane.ResetVersion(id)
-	svc.mu.Unlock()
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})

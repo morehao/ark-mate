@@ -134,7 +134,7 @@ func TestStartupResolvesStoredProviderKeyAndWritesMirror(t *testing.T) {
 	assertCredentialsMirror(t, home, "providers/yygu", secret)
 
 	// ⑥ 同步面也不能把"密钥不可解"写进去——那会让模型清单被当成空的**撤回**。
-	states := a.svc.RuntimeConfigStates(ctx)
+	states := a.svc.RuntimeSync().RuntimeConfigStates(ctx)
 	st, ok := states["dsh"]
 	if !ok {
 		t.Fatalf("装配期同步应有 dsh 的结论，得到 %v", states)

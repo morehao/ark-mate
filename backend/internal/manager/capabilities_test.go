@@ -61,7 +61,7 @@ func TestLoadCapabilityDefinitionsAndList(t *testing.T) {
 	writeCapFile(t, filepath.Join(dir, "tools", "web.json"), `{"name":"web_search","source":"builtin"}`)
 
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	if n := svc.LoadCapabilityDefinitions(dir); n != 3 {
+	if n := svc.Planes().LoadCapabilityDefinitions(dir); n != 3 {
 		t.Fatalf("期望加载 3 条，got %d", n)
 	}
 
@@ -84,10 +84,10 @@ func TestLoadCapabilityDefinitionsAndList(t *testing.T) {
 // TestRegisterToolAndSort 代码注入工具 + 列表排序（工具表按 name）。
 func TestRegisterToolAndSort(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	if err := svc.RegisterTool(capability.Tool{Name: "z_tool", Source: capability.ToolSourceBuiltin}); err != nil {
+	if err := svc.Planes().RegisterTool(capability.Tool{Name: "z_tool", Source: capability.ToolSourceBuiltin}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.RegisterTool(capability.Tool{Name: "a_tool", Source: capability.ToolSourceObserved, Description: "obs"}); err != nil {
+	if err := svc.Planes().RegisterTool(capability.Tool{Name: "a_tool", Source: capability.ToolSourceObserved, Description: "obs"}); err != nil {
 		t.Fatal(err)
 	}
 	tools, _ := toolCatalog(svc).ListTools()

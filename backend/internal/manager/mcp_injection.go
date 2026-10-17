@@ -153,12 +153,13 @@ func (s *Service) gatewayEntry(runtimeID string, sel *CapabilitySelection) (acl.
 
 // SetMcpGatewayEnabled 开关平台侧 MCP 网关（M7-3；`MATE_MCP_GATEWAY=off` 回退）。
 // 默认**开启**：不设置时远程 MCP 走网关（见 config.Config.McpGatewayEnabled）。
-func (s *Service) SetMcpGatewayEnabled(enabled bool) {
-	s.mcpGatewayEnabled.Store(enabled)
-}
+//
+// 开关本身是**进程级配置事实**，P5a 起归 `registry.Planes`（网关子进程与核心读同一个值）；
+// 这里只剩过渡期入口，装配点直接用 `planes.SetMcpGatewayEnabled`。
+func (s *Service) SetMcpGatewayEnabled(enabled bool) { s.planes.SetMcpGatewayEnabled(enabled) }
 
 // McpGatewayEnabled 读取网关开关。
-func (s *Service) McpGatewayEnabled() bool { return s.mcpGatewayEnabled.Load() }
+func (s *Service) McpGatewayEnabled() bool { return s.planes.McpGatewayEnabled() }
 
 // mcpGatewayWarnOnce 逐 key 只 WARN 一次（组装发生在每次建会话/取指纹时，不节流会刷屏）。
 func (s *Service) mcpGatewayWarnOnce(key, msg string, args ...any) {

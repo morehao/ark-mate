@@ -86,7 +86,7 @@ func mutexSessionCallFunctions(t *testing.T, src string) []string {
 // 三处**都只读域平面自己取锁后返回的副本**，manager 锁在语义上多余。判据只钉 `sessionPlane`
 // 等于把"同一个错的另外三种写法"放过去——与 §3.1.53 把 `Snapshot()` 放宽到 `sessionPlane.*`
 // 是同一条推理，这次再放宽到**所有域平面**。
-var domainPlaneNames = []string{"sessionPlane", "providerPlane", "automationPlane", "planner", "runtimePlane"}
+var domainPlaneNames = []string{"sessionPlane", "providerPlane", "automationPlane", "planner", "runtimePlane", "providers"}
 
 // serviceMutexLockRe 抓 **Service 自己那把锁**的加锁点。
 //
@@ -98,7 +98,7 @@ var domainPlaneNames = []string{"sessionPlane", "providerPlane", "automationPlan
 //
 // 与本节另外两条讲究同一条推理：**判据要对「名字长什么样」免疫**——写成子串匹配就等于假设
 // 这个名字不会被别人当后缀。
-var serviceMutexLockRe = regexp.MustCompile(`\bs\.mu\.Lock\(\)`)
+var serviceMutexLockRe = regexp.MustCompile(`\b[sr]\.mu\.Lock\(\)`)
 
 // domainPlaneCallRe 抓 `?.<域平面>.<动作>(` 的动作名（报错用）。
 var domainPlaneCallRe = regexp.MustCompile(`(?:\.|\b)(` + strings.Join(domainPlaneNames, "|") + `)\.([A-Za-z_][A-Za-z0-9_]*)\(`)
@@ -134,10 +134,19 @@ func funcNameOf(decl string) string {
 // 去调**任一域平面**（会话域 / 供应商域 / 自动化域 / 工作空间域 / 执行面）。
 func TestManagerDoesNotHoldMutexWhileCallingDomainPlane(t *testing.T) {
 	root := backendRoot(t)
-	dir := filepath.Join(root, "internal", "manager")
-	files := productionGoFiles(t, dir)
-	if len(files) == 0 {
-		t.Fatalf("%s 下没有生产 .go 文件：这条守卫失去了检查对象（目录改名/搬走了？）", dir)
+	// P5a 起同步面搬进 registry，最后一个 `s.mu` 随之消失；判据的检查对象改为
+	// **manager + registry** 两个装配/同步面（任一处在锁内调域平面都算红色）。
+	dirs := []string{
+		filepath.Join(root, "internal", "manager"),
+		filepath.Join(root, "internal", "registry"),
+	}
+	var files []string
+	for _, dir := range dirs {
+		fs := productionGoFiles(t, dir)
+		if len(fs) == 0 {
+			t.Fatalf("%s 下没有生产 .go 文件：这条守卫失去了检查对象（目录改名/搬走了？）", dir)
+		}
+		files = append(files, fs...)
 	}
 	locked := 0
 	for _, path := range files {
@@ -146,7 +155,7 @@ func TestManagerDoesNotHoldMutexWhileCallingDomainPlane(t *testing.T) {
 			locked++
 		}
 		for _, fn := range mutexSessionCallFunctions(t, src) {
-			t.Errorf("internal/manager/%s 的 `%s` 持 `s.mu` 调**域平面**：这是**锁序反转**的雏形。\n"+
+			t.Errorf("%s 的 `%s` 持本结构的锁调**域平面**：这是**锁序反转**的雏形。\n"+
 				"域平面会回调别的域（`SetWorkspaceDisplay` 这类端口），于是"+
 				"\"manager 锁 → 域锁\" 与某条反向回调合成互指的边——表现是 `go test ./...`"+
 				"**挂死**而不是红。\n"+
@@ -156,10 +165,10 @@ func TestManagerDoesNotHoldMutexWhileCallingDomainPlane(t *testing.T) {
 				filepath.Base(path), fn)
 		}
 	}
-	// 判据本身不许空转：这个包里必须还有人在用 s.mu（否则说明 mutex 字段被搬走了，
-	// 这条守卫的判据对象也就不存在了）。
+	// 判据本身不许空转：两个装配/同步面里必须还有人在用本结构的锁（registry.Resources
+	// 保着同步状态）。一处都没有 = 锁被搬走/改名了，判据失锚。
 	if locked == 0 {
-		t.Fatal("internal/manager 里没有任何 `s.mu.Lock()`：锁本身被搬走/改名了？" +
+		t.Fatal("internal/{manager,registry} 里没有任何 `s.mu.Lock()` / `r.mu.Lock()`：锁本身被搬走/改名了？" +
 			"这条守卫的判据挂在它身上，失锚等于空转。")
 	}
 }

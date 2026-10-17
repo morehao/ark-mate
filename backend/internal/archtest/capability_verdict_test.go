@@ -361,7 +361,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 		}
 	}
 	gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "gateway", "source.go")))
-	for _, want := range []string{"s.svc.McpPlane().GatewayFace(", "s.svc.McpPlane().ResolveSecrets("} {
+	for _, want := range []string{"s.planes.Mcp.GatewayFace(", "s.planes.Mcp.ResolveSecrets("} {
 		if !strings.Contains(gwSrc, want) {
 			t.Errorf("`internal/gateway/source.go` 里找不到 `%s`：网关装配必须直连 MCP 平面。"+
 				"漏了会让这一条链悄悄退回某个中间层。", want)
@@ -384,8 +384,9 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 				"清零（调用点直连 `SkillPlane()` / `defs`）。", dead)
 		}
 	}
+	// P5a 起事实来自 `registry.Planes`；投影重校仍在 app.go 的装载辅助里。
 	appAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
-	for _, want := range []string{"a.svc.SkillPlane().Projections().Set(", "a.svc.SkillPlane().ReconcileSkillProjection("} {
+	for _, want := range []string{"a.planes.Skills.Projections().Set(", "a.planes.Skills.ReconcileSkillProjection("} {
 		if !strings.Contains(appAll, want) {
 			t.Errorf("`internal/app/app.go` 里找不到 `%s`：装配期的投影登记与物化必须直连技能平面。"+
 				"漏了会让这两条链悄悄退回某个中间层。", want)

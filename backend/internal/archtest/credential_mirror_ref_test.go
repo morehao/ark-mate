@@ -107,19 +107,20 @@ func TestCredentialFaceHasNoTransitionalForwards(t *testing.T) {
 		t.Error("`internal/manager/service.go` 里找不到 `CredentialStore()` 事实出口：装配期没有它就只能" +
 			"再写一层转发，而那正是本刀删掉的东西。")
 	}
-	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	// P5a 起凭据面由 `registry.Planes.Credentials` 拥有，装配动作在 app/assembly.go。
+	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
 	for _, want := range []string{
-		"a.svc.CredentialStore().SetCwd(",
-		"a.svc.CredentialStore().SetLayered(",
-		"a.svc.CredentialStore().SyncCredentialMirror(",
+		"a.planes.Credentials.SetCwd(",
+		"a.planes.Credentials.SetLayered(",
+		"a.planes.Credentials.SyncCredentialMirror(",
 	} {
 		if !strings.Contains(appSrc, want) {
-			t.Errorf("`internal/app/app.go` 里找不到 `%s`：装配期的凭据登记必须直连事实出口。"+
+			t.Errorf("`internal/app/assembly.go` 里找不到 `%s`：装配期的凭据登记必须直连事实出口。"+
 				"漏了会让这一条链悄悄退回某个中间层。", want)
 		}
 	}
-	if gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "gateway", "source.go"))); !strings.Contains(gwSrc, "s.svc.CredentialStore().SetLayered(") {
-		t.Error("`internal/gateway/source.go` 里找不到 `s.svc.CredentialStore().SetLayered(`：" +
-			"网关装配必须直连事实出口。")
+	if gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "gateway", "source.go"))); !strings.Contains(gwSrc, "s.planes.Credentials.SetLayered(") {
+		t.Error("`internal/gateway/source.go` 里找不到 `s.planes.Credentials.SetLayered(`：" +
+			"网关装配必须直连事实（P5a 起是 registry.Planes，不再是 manager 转发）。")
 	}
 }

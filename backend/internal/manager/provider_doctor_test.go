@@ -219,7 +219,7 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	// 对账借读的判据是构建期底座（v19：没有"哪个 agent 跑在哪个底座"这一维了），
 	// 所以这里把它设成要体检的那个（`newModelRig` 也注册了合成底座 rtx 的声明）。
 	setBuildRuntime(t, runtimetest.ID)
-	state := r.svc.RuntimeConfigStates(ctx)[runtimetest.ID]
+	state := r.svc.RuntimeSync().RuntimeConfigStates(ctx)[runtimetest.ID]
 
 	// ① 平台声明一条、底座却什么都没广告（这里用"有目录条目但零候选"造出 advertised=0 的事实）：
 	//    这正是"写了完全没生效"的形态 → 高危。

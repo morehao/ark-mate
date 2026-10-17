@@ -33,7 +33,7 @@ func skillRig(t *testing.T) (svc *Service, dir, root string) {
 	if err := os.MkdirAll(filepath.Join(dir, "skills"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if n := svc.LoadCapabilityDefinitions(dir); n != 0 {
+	if n := svc.Planes().LoadCapabilityDefinitions(dir); n != 0 {
 		t.Fatalf("空目录应装载 0 条: %d", n)
 	}
 	_ = bus
@@ -69,7 +69,7 @@ func TestSetSkillEnabledWritesBackAndWithdraws(t *testing.T) {
   "body": "# demo",
   "x-user-note": {"keep": ["me", 1]}
 }`)
-	if n := svc.LoadCapabilityDefinitions(dir); n != 1 {
+	if n := svc.Planes().LoadCapabilityDefinitions(dir); n != 1 {
 		t.Fatalf("应装载 1 条: %d", n)
 	}
 	if w, _, err := svc.skillPlane.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil || w != 1 {
@@ -182,7 +182,7 @@ func TestSetSkillEnabledErrors(t *testing.T) {
 
 	// 4) 坏 JSON 定义 → 报错且不改文件（启停不该顺手「修好」用户的文件）。
 	writeSkill(t, dir, "broken", `{"id": "broken", `)
-	svc.LoadCapabilityDefinitions(dir) // 装载容错：坏文件跳过，不报错
+	svc.Planes().LoadCapabilityDefinitions(dir) // 装载容错：坏文件跳过，不报错
 	if err := svc.caps.RegisterSkill(&capability.Skill{ID: "broken", Body: "# b"}); err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestSetSkillEnabledErrors(t *testing.T) {
 func TestSetSkillEnabledReconcileFailureIsReported(t *testing.T) {
 	svc, dir, root := skillRig(t)
 	writeSkill(t, dir, "demo", `{"id":"demo","body":"# d","sources":[{"runtime":"rtx","format":"SKILL.md"}]}`)
-	if n := svc.LoadCapabilityDefinitions(dir); n != 1 {
+	if n := svc.Planes().LoadCapabilityDefinitions(dir); n != 1 {
 		t.Fatalf("应装载 1 条: %d", n)
 	}
 	// 把 root 换成一个「文件」——重校扫描必然失败。
@@ -257,7 +257,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 	svc, dir, root := skillRig(t)
 	writeSkill(t, dir, "demo", `{"id":"demo","name":"Demo","body":"# demo",
 		"runtimes":["rtx"]}`)
-	svc.LoadCapabilityDefinitions(dir)
+	svc.Planes().LoadCapabilityDefinitions(dir)
 	// 用「按 runtime 分 root」的多 root 路径（单 root 兼容路径不登记归属方，见 addRuntime）。
 	svc.skillPlane.Projections().Set([]skill.Projection{skillProj(root, "rtx")})
 	sk, _ := svc.caps.SkillByID("demo")
@@ -407,7 +407,7 @@ func TestLegacyRuntimeIDInSkillDeclsStillApplies(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillsDir, "legacy-rt.json"), []byte(def), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if n := svc.LoadCapabilityDefinitions(dir); n == 0 {
+	if n := svc.Planes().LoadCapabilityDefinitions(dir); n == 0 {
 		t.Fatal("定义应被装载")
 	}
 	var got *capability.Skill

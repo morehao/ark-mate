@@ -121,7 +121,7 @@ func (s *Service) ModelCatalog(ctx context.Context) (*dtomodel.ModelCatalogResp,
 // 可供读取"——用户照着那句去查会话，方向从一开始就错了。
 func (s *Service) catalogEmptyNote(ctx context.Context, sampled bool, sampleErr error) string {
 	declared := 0
-	if rows, err := s.declaredModels(ctx); err == nil {
+	if rows, err := s.providerPlane.ListModels(ctx); err == nil {
 		declared = len(rows)
 	}
 	switch {

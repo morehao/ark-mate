@@ -27,7 +27,7 @@ func TestLoadCapabilityDefinitionsFromStore(t *testing.T) {
 	}
 
 	// 坏定义不该让整个能力面起不来（容错口径与 LoadDir 逐字一致）。
-	if n := r.Svc.LoadCapabilityDefinitionsFromStore(ctx, ""); n != 3 {
+	if n := r.Svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, ""); n != 3 {
 		t.Fatalf("应装载 3 条（2 skill + 1 mcp，坏定义跳过），got %d", n)
 	}
 	skills := r.Svc.caps.ListSkills()
@@ -44,7 +44,7 @@ func TestLoadCapabilityDefinitionsFromStore(t *testing.T) {
 	// id 以**行主键**为准：body 里写别的 id 不该让这条能力挂到另一个名字下
 	// （行主键是 CAS 与审计的键，body 里的 id 只是历史残留）。
 	mustUpsertSkill(t, r, "c-skill", `{"id":"wrong-id","name":"C"}`)
-	if n := r.Svc.LoadCapabilityDefinitionsFromStore(ctx, ""); n != 4 {
+	if n := r.Svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, ""); n != 4 {
 		t.Fatalf("第二次装载应 4 条，got %d", n)
 	}
 	for _, sk := range r.Svc.caps.ListSkills() {
@@ -57,7 +57,7 @@ func TestLoadCapabilityDefinitionsFromStore(t *testing.T) {
 	if ok, err := r.St.DeleteSkillDefinition(ctx, "a-skill", 1, "test"); err != nil || !ok {
 		t.Fatalf("删除 skill 行: ok=%v err=%v", ok, err)
 	}
-	if n := r.Svc.LoadCapabilityDefinitionsFromStore(ctx, ""); n != 3 {
+	if n := r.Svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, ""); n != 3 {
 		t.Fatalf("删除后装载应 3 条，got %d", n)
 	}
 	for _, sk := range r.Svc.caps.ListSkills() {
@@ -75,7 +75,7 @@ func TestLoadCapabilityDefinitionsFromStore(t *testing.T) {
 	if ok, err := r.St.DeleteMcpServerDefinition(ctx, "m1", 1, "test"); err != nil || !ok {
 		t.Fatalf("删除 m1: ok=%v err=%v", ok, err)
 	}
-	if n := r.Svc.LoadCapabilityDefinitionsFromStore(ctx, ""); n != 0 {
+	if n := r.Svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, ""); n != 0 {
 		t.Fatalf("全删后应 0 条，got %d", n)
 	}
 	if got := r.Svc.caps.ListSkills(); len(got) != 0 {
@@ -92,7 +92,7 @@ func TestLoadCapabilityDefinitionsFromStore(t *testing.T) {
 // 日志可见），比崩在启动路径上更符合本仓"装载失败只告警不阻断"的既有口径。
 func TestLoadCapabilityDefinitionsFromStoreRequiresStore(t *testing.T) {
 	r := newRig(t) // 不带库
-	if n := r.Svc.LoadCapabilityDefinitionsFromStore(context.Background(), ""); n != 0 {
+	if n := r.Svc.Planes().LoadCapabilityDefinitionsFromStore(context.Background(), ""); n != 0 {
 		t.Fatalf("无库时应 0 条，got %d", n)
 	}
 }

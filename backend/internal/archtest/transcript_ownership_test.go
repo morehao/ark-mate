@@ -126,7 +126,7 @@ func TestTranscriptWiringIsAttached(t *testing.T) {
 		file string // 相对 backend/ 的路径
 		why  string
 	}{
-		{"internal/app/app.go", "serve：sqlite/memory 分流里 memory 那一支把目录交给会话域"},
+		{"internal/app/assembly.go", "serve：sqlite/memory 分流里 memory 那一支把目录交给会话域"},
 		{"internal/app/command/demo.go", "demo：演示会话也落 transcript（wire 事实源）"},
 	}
 	for _, c := range cases {

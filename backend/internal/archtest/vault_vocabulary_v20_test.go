@@ -131,7 +131,7 @@ var vaultVocabularyWhitelist = []vaultVocabularyWhitelistEntry{
 			"否则测不到改写；v13 建表列集合的冻结断言也在这一类里",
 	},
 	{
-		path: "backend/internal/app/app.go",
+		path: "backend/internal/app/assembly.go",
 		reason: "**装配期的一次性搬运**：启动时调 `st.ImportLegacyVault(ctx, anchor)` 并把它搬了" +
 			"几条、哪几条失败（只带引用名与条数，绝不含值）打成 WARN。这是全仓唯一的调用点——" +
 			"装配层知道旧物在哪（`LegacySecretAnchor`），搬运器知道怎么解",

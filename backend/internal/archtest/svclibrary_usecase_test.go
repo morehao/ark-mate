@@ -297,15 +297,16 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 		}
 	}
 
-	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	// P5a 起端口装配在 app/assembly.go，事实来自 registry.Planes（同一实例）。
+	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
 	for _, want := range []string{
-		"Capabilities: a.svc.CapabilityRegistry()",
-		"SkillPlane: a.svc.SkillPlane()",
-		"McpSecrets: a.svc.McpSecrets()",
-		"McpGatewayEnabled: a.svc.McpGatewayEnabled",
+		"Capabilities: as.a.planes.Capabilities",
+		"SkillPlane: as.a.planes.Skills",
+		"McpSecrets: as.a.planes.McpSecrets",
+		"McpGatewayEnabled: as.a.planes.McpGatewayEnabled",
 	} {
 		if !strings.Contains(app, want) {
-			t.Errorf("internal/app/app.go 里找不到 %q：读模型的事实来源在装配点交出。"+
+			t.Errorf("internal/app/assembly.go 里找不到 %q：读模型的事实来源在装配点交出。"+
 				"（漏掉能力面/投影 ⇒ 清单恒空而路由照常 200——**静默空转**，比 panic 更难发现。）", want)
 		}
 	}
