@@ -2,9 +2,10 @@ package sessionruntime
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"path/filepath"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/store"

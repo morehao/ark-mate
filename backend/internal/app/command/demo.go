@@ -4,9 +4,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/sessionruntime"

@@ -2,13 +2,14 @@ package sessionruntime
 
 import (
 	"errors"
-	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/pkg/runtime"

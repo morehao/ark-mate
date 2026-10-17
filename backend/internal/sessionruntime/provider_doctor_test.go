@@ -3,13 +3,15 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
-	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
+	"github.com/morehao/ark-mate/internal/registry"
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
@@ -48,7 +50,7 @@ func (f *providerDoctorFixture) facts(t *testing.T) doctorfacts.ProviderDoctorFa
 		ProvidersFileName:   provider.ProvidersFileName,
 		BackupName:          provider.ProvidersBackupName,
 		MismatchExtraMarker: provider.ProviderMismatchExtraMarker,
-	}, CollectRuntimeModelFacts)
+	}, registry.CollectRuntimeModelFacts)
 }
 
 // TestCollectProviderDoctorFactsReadsEverything 一次把五件事都放上：没有密钥的档案、
@@ -190,7 +192,7 @@ func TestCollectProviderDoctorFactsMemoryMode(t *testing.T) {
 	}
 	got := doctorfacts.CollectProviderDoctorFacts(context.Background(), nil, doctorfacts.ProviderDoctorOptions{
 		Home: home, ProviderDir: providerDir, ProvidersFileName: provider.ProvidersFileName,
-	}, CollectRuntimeModelFacts)
+	}, registry.CollectRuntimeModelFacts)
 	if got.Carrier != "unknown" || got.CarrierNote == "" {
 		t.Fatalf("没有持久层时载体应记 unknown 并给出原因：%+v", got)
 	}
@@ -230,7 +232,7 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedCatalog(r.svc, runtimetest.ID)
-	facts := r.svc.runtimeModelFacts(ctx, runtimetest.ID, state)
+	facts := doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(r.svc.Planes()), runtimetest.ID, state)
 	if !facts.AdvertisedKnown || facts.AdvertisedCount != 0 {
 		t.Fatalf("应取到「目录为空」这个事实：%+v", facts)
 	}
@@ -243,7 +245,7 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 
 	// ② 底座广告了它 → 不高危、差集为空。
 	seedCatalog(r.svc, runtimetest.ID, aclValue(value))
-	facts = r.svc.runtimeModelFacts(ctx, runtimetest.ID, state)
+	facts = doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(r.svc.Planes()), runtimetest.ID, state)
 	if !facts.AdvertisedKnown || facts.HighRisk || facts.AdvertisedCount != 1 {
 		t.Fatalf("两侧一致时不该高危：%+v", facts)
 	}
@@ -258,7 +260,7 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	// 摘掉编排器走的正是 CLI 离线那条路。
 	r.svc.orch = nil
 	r.svc.planes.Providers.ResetConfigCatalog()
-	facts = r.svc.runtimeModelFacts(ctx, runtimetest.ID, state)
+	facts = doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(r.svc.Planes()), runtimetest.ID, state)
 	if facts.AdvertisedKnown || facts.HighRisk {
 		t.Fatalf("取不到广告时不许判定：%+v", facts)
 	}
@@ -274,7 +276,7 @@ func aclValue(value string) acl.ConfigOptionValue {
 
 // TestCollectProviderDoctorFactsNoStoreNoHome 极端输入：什么都没有时不许 panic。
 func TestCollectProviderDoctorFactsNoStoreNoHome(t *testing.T) {
-	got := doctorfacts.CollectProviderDoctorFacts(context.Background(), nil, doctorfacts.ProviderDoctorOptions{}, CollectRuntimeModelFacts)
+	got := doctorfacts.CollectProviderDoctorFacts(context.Background(), nil, doctorfacts.ProviderDoctorOptions{}, registry.CollectRuntimeModelFacts)
 	if got.Carrier != "unknown" || got.LegacySecretAnchor != "" {
 		t.Fatalf("空输入应老实报 unknown 且不给假锚点：%+v", got)
 	}

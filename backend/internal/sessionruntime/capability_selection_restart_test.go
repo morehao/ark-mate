@@ -2,10 +2,11 @@ package sessionruntime
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/runtimeconn"

@@ -3,12 +3,13 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
-	domainautomation "github.com/morehao/ark-mate/internal/domain/automation"
-	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"strings"
 	"testing"
 	"time"
+
+	domainautomation "github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"

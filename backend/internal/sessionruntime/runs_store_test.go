@@ -2,17 +2,19 @@ package sessionruntime
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"regexp"
 	"testing"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
+
+	"strings"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
-	"strings"
 )
 
 // runIDShape 轮次身份的形状：`run_` + 26 位 Crockford Base32（v22 起重铸，不再是由

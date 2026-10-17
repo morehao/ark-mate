@@ -3,10 +3,11 @@ package sessionruntime
 import (
 	"context"
 	"errors"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/eventbus"

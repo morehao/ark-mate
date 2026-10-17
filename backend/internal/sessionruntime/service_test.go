@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"

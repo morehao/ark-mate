@@ -3,12 +3,13 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
-	"github.com/morehao/ark-mate/internal/domain/skill"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/domain/skill"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/model"

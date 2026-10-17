@@ -1,8 +1,6 @@
 package sessionruntime
 
 import (
-	"context"
-
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/registry"
 )
@@ -11,11 +9,6 @@ import (
 //
 // 行投影已随模型读面进 `domain/provider`（`ModelRow` 只留一行转发）；`ModelEffect` 仍在这里：
 // "哪些会话会顺延"要问代际裁决（与连接/会话编排绑在一起），随 `Orchestrator` 在 P5 dissolve。
-
-// ModelRow 读一条模型并投影（`svcmodel.Host`；实现在 `provider.Plane.ModelRow`）。
-func (s *Service) ModelRow(ctx context.Context, id string) (*dtomodel.ModelResp, bool, error) {
-	return s.planes.Providers.ModelRow(ctx, id)
-}
 
 // ModelEffect 计算模型清单改动的生效面回执（只读、无副作用；判据与代际裁决同源）。
 //
@@ -52,19 +45,17 @@ func (s *Service) ModelEffect(defaultTouched bool) *dtomodel.ModelEffect {
 
 // ——— 派生只读：`GET /agents` 的 `default_model` ———
 
-// ModelFace 把「读模型（本层，含取样）」与「同步（`registry.Resources`）」拼成模型面的两个端口：
-// `svcmodel.ModelSvc`（ModelsView / ModelCatalog / SyncModels）与 `svcmodel.Host`（ModelRow /
-// ModelEffect / TrySyncModels）。
+// ModelFace 把「模型读面（registry.ModelViews：清单/目录/同步）」与「生效面回执
+// （本层 ModelEffect）」拼成 `svcmodel.ModelSvc` / `Host` 需要的形状。
 //
-// 这是装配点的**组合**，不是转发层：六个方法各自来自一份真实现。P5a 把同步面搬进 registry 之后，
-// 读面（取样）还留在本层，于是装配点必须把两份事实拼成一个接口实现——这就是它的全部职责。
-// 取样面搬完（计划 §3.1.72 的"剩余"）这两半会落在同一个包，本类型随之删除。
+// 这是装配点的**组合**，不是转发层：读面与同步各自来自一份真实现，生效面回执要问代际裁决
+// （随 Orchestrator 留在这里）。两份事实拼成一个接口实现——这就是它的全部职责。
 type ModelFace struct {
+	*registry.ModelViews
 	*Service
-	*registry.Resources
 }
 
 // NewModelFace 造一个模型面组合（装配点与测试共用）。
 func NewModelFace(s *Service) ModelFace {
-	return ModelFace{Service: s, Resources: s.Planes().Resources}
+	return ModelFace{ModelViews: registry.NewModelViews(s.Planes()), Service: s}
 }

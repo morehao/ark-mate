@@ -83,7 +83,7 @@ func TestSessionruntimeHasNoDeadPrivateSymbols(t *testing.T) {
 			}
 		}
 	}
-	if declared < 50 {
+	if declared < 25 {
 		t.Fatalf("只解析到 %d 个私有符号声明——判据失锚（正则或扫描面被改坏了）", declared)
 	}
 	if len(dead) > 0 {

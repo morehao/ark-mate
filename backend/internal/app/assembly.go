@@ -496,7 +496,7 @@ func (as *assembly) startPorts(ctx context.Context) error {
 		// （`*runtimeconn.Plane`），用例实例由 ctrruntime 自己造——`app` 不 import `service/svc*`。
 		Runtime: as.a.rconn,
 		// 档案四动作 + 自检的两个事实端口：自检用例（svcprovider.Probe）由 ctrprovider 造。
-		ProviderPlane: as.a.planes.Providers, ProviderCatalog: as.a.svc,
+		ProviderPlane: as.a.planes.Providers, ProviderCatalog: as.a.planes.Providers,
 		// 模型面：读（含取样）仍在本进程的 manager，同步已在 registry；两者由装配点拼成
 		// `svcmodel.ModelSvc` / `Host` 需要的形状（`ModelFace` 是组合，不是转发层）。
 		Store: as.st, Model: sessionruntime.NewModelFace(as.a.svc), ModelHost: sessionruntime.NewModelFace(as.a.svc),

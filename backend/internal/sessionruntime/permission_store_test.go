@@ -2,9 +2,10 @@ package sessionruntime
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"testing"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/acl"

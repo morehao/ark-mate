@@ -2,11 +2,12 @@ package provider
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/logging"

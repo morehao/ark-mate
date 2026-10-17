@@ -2,10 +2,11 @@ package sessionruntime
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"regexp"
 	"testing"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
@@ -72,7 +73,7 @@ func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName st
 	if err != nil || !ok {
 		t.Fatalf("插模型行(%s/%s): ok=%v err=%v", providerID, modelName, ok, err)
 	}
-	row, found, err := svc.ModelRow(ctx, id)
+	row, found, err := svc.Planes().Providers.ModelRow(ctx, id)
 	if err != nil || !found {
 		t.Fatalf("读回模型行 %s: found=%v err=%v", id, found, err)
 	}
@@ -292,7 +293,7 @@ func TestCatalogAnnotatesCandidatesWithPlatformRowID(t *testing.T) {
 	}}
 	r.orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: r.runtme, Session: &stubSession{options: opts}}))
 
-	resp, err := r.svc.ModelCatalog(ctx)
+	resp, err := r.svc.Planes().Providers.ModelCatalog(ctx)
 	if err != nil {
 		t.Fatalf("ModelCatalog: %v", err)
 	}
@@ -320,7 +321,7 @@ func TestSessionModelValueAgreesWithCatalogAnnotation(t *testing.T) {
 	row := createProviderAndModel(t, r.svc, "p1", "m-1")
 
 	// 目录注解算出来的值 → 行。
-	table := r.svc.modelIDByValue(ctx, r.runtme)
+	table := r.svc.Planes().Providers.ModelIDByValue(ctx, r.runtme)
 	if len(table) != 1 {
 		t.Fatalf("注解表应恰好一条（一条平台行），实际 %d 条: %v", len(table), table)
 	}

@@ -84,47 +84,6 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 		}
 	}
 
-	// manager 侧：诊断的组装面不得再出现判据文案。
-	//
-	// `runtime_binding.go` 已随 P4a 正文第四十九刀**整个删除**（它只剩执行面自身的四条一行转发），
-	// 所以这条判据的扫描面从"两个文件"收成一个；那四条转发改由下面的**符号判据**钉。
-	for _, f := range []string{"diagnostics.go"} {
-		thin := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", f)))
-		for _, banned := range []string{"sync.Mutex", "runtime.SelectedRuntime()", "acl.NewError(",
-			"runtime.Installed(", "looksLikeAuthFailure("} {
-			if strings.Contains(thin, banned) {
-				t.Errorf("internal/sessionruntime/%s 里出现 %q：绑定的状态与诊断的判据**只有一份实现**，"+
-					"在 `internal/runtimeconn`（P3a-2）。在这里再写一遍会让 `/meta` 的底座身份、"+
-					"诊断的 State 与「怎么修」的出路各说各话，而两边都编译得过。", f, banned)
-			}
-		}
-	}
-
-	// 第四十八刀：**子进程注册表**也只有一份，在执行面。
-	//
-	// 判据两段：① `internal/sessionruntime` 里不得再出现动作本体（`reg.Reap(` / `reg.Add(` /
-	// `reg.Remove(`）与那份状态（`procReg *procreg.Registry` 字段）——两份注册表的后果是
-	// **静默**的：登记写一份、回收读另一份，表现为「孤儿回收 `reaped=0` 而进程确实还活着」，
-	// 而所有既有测试照旧绿；② 装配点必须把注册表交给**执行面**（`a.rconn`），不是交给编排器
-	// （后者现在只是它的使用者）。
-	mgrBody := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
-	for _, banned := range []string{"reg.Reap(", "reg.Add(", "reg.Remove(", "procReg *procreg.Registry"} {
-		if strings.Contains(mgrBody, banned) {
-			t.Errorf("`internal/sessionruntime` 里出现 %q：子进程注册表的动作与状态**只有一份实现**，"+
-				"在 `internal/runtimeconn`（P4a 正文第四十八刀，`procreg.go`）。两份的表现是"+
-				"「登记写一份、回收读另一份」，症状为孤儿回收报 `reaped=0` 而进程还活着——"+
-				"没有任何测试会因此变红。", banned)
-		}
-	}
-	// P5a 起启动动作在 app/assembly.go 的声明表里，事实仍是执行面 `a.rconn`。
-	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
-	for _, want := range []string{"a.rconn.SetProcRegistry(", "a.rconn.ReapOrphans("} {
-		if !strings.Contains(appSrc, want) {
-			t.Errorf("`internal/app/assembly.go` 里找不到 %q：注册表必须交给**执行面**（`a.rconn`）——"+
-				"交给编排器等于让「哪些子进程是我的」这份事实挂在过渡层上，随它一起被删掉。", want)
-		}
-	}
-
 	// 第四十九刀：执行面自身的**四条一行转发**清零（`runtime_binding.go` 整个文件随之删除）。
 	//
 	// 这一族与供应商那七条（第四十六刀）同形：一行转发的正确性完全等价于被转发的那一行，

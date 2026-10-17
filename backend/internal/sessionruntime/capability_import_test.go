@@ -2,11 +2,12 @@ package sessionruntime
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/testutil"

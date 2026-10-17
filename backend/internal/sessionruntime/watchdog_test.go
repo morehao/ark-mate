@@ -2,9 +2,10 @@ package sessionruntime
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"testing"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
 )
 
 // TestRunTimeoutWatchdog 看门狗超时自动取消挂起 run：run.cancelled + 状态 cancelled + busy 释放。

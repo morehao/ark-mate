@@ -79,7 +79,6 @@ var declaredRelocationMarkers = []string{
 // P4b 第二刀（读面 + 同步面进 `svcmodel`）会把这三条逐条删掉，**判据跟着少**——
 // 这正是"过渡期债务单调收缩"应有的形状。
 var managerModelPortAnchors = []string{
-	"func (s *Service) ModelRow(",
 	"func (s *Service) ModelEffect(",
 }
 
@@ -166,6 +165,18 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 			t.Errorf("internal/sessionruntime 的生产文件里找不到 %q：`svcmodel.Host` 的这条实现被改名/删掉了？"+
 				"（改名后 `app.go` 一起改就能编译过，而端口的那件事没人做）", a)
 		}
+	}
+	// ModelRow 随模型读面进了 `domain/provider`；`registry.ModelViews` 嵌入该平面后一并满足
+	// `svcmodel.Host`。判据落在**真实现**上（不是转发）。
+	providerModels := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "provider", "models.go")))
+	if !strings.Contains(providerModels, "func (pl *Plane) ModelRow(") {
+		t.Errorf("`internal/domain/provider/models.go` 里找不到 `func (pl *Plane) ModelRow(`：" +
+			"`svcmodel.Host` 的读一条实现必须有真落点")
+	}
+	views := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "registry", "models_view.go")))
+	if !strings.Contains(views, "*provider.Plane") {
+		t.Errorf("`internal/registry/models_view.go` 的 ModelViews 没有嵌入 `*provider.Plane`：" +
+			"ModelSvc/Host 的读面就少一份真实现")
 	}
 	regBody := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "registry", "resources.go")))
 	for _, a := range registryModelPortAnchors {

@@ -717,7 +717,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 > `MATE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已被 `MATE_PROJECTION_DIRS` 取代（旧键现在会让启动
 > 失败并给出等价写法），单 root 的"兼容路径"也已不存在——物化落点只由各 runtime 的投影声明
 > 决定，配置只能覆盖根。当时记录里"归属标记 / 共享 root 只摘自己 / 空归属即残留清理"这些**不变式**
-> 仍成立，由 `pkg/capability/skill_materialize_test.go` 与 `internal/manager/skills_test.go` 覆盖。
+> 仍成立，由 `pkg/capability/skill_materialize_test.go` 与 `internal/sessionruntime/skills_test.go` 覆盖。
 >
 > **底座面也已变（2026-10 后阅读）**：本节 C4/C6/C7 与容器那几条里出现的 `opencode`，指的是
 > **当时在册的第二个一等适配**——它已下线（决策 v18），随包载荷、`Dockerfile` 的 `WITH_OPENCODE`

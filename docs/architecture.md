@@ -101,11 +101,12 @@ cmd/mate  →  internal/app（装配 + 启停生命周期）
                       →  internal/controller/ctr<领域>
                             →  internal/service/svc<领域>（**业务逻辑层**：接口 + 实现）
                                   →  internal/domain/* · dao · store
-                internal/manager（**过渡期**：尚未搬完的实现与 ACP 回调适配；逐域搬空后整体删除）
+                internal/registry（**装配层**：Planes + 启停表 + 资源同步）
+                internal/sessionruntime（**会话编排层**：Service / Orchestrator / 权限）
 ```
 
 - `internal/router` 声明自己需要哪些端口（`router.Ports`），由 `internal/app` 注入实现；每个领域一个 `routes_*.go`，各自构造控制器并注册自己的路由。
-- `internal/service/svc<领域>` 是**业务逻辑层**：包内声明接口 + 实现 + 构造函数，控制器在自己的构造函数里造实例；`internal/manager` 是**过渡期实现**（逐域并入 `svc<领域>` / `domain/*` 后整体删除）。
+- `internal/service/svc<领域>` 是**业务逻辑层**：包内声明接口 + 实现 + 构造函数，控制器在自己的构造函数里造实例；`internal/sessionruntime` 是**会话编排层**（P4b 起取代 `internal/manager`：Service / Orchestrator / 权限，执行面在 `runtimeconn`、领域状态在 `domain/*`），`internal/registry` 是**装配层**（平面集合 + 启停表 + 资源同步）。
 - `internal/dto/dto<领域>` 被控制器、用例层与过渡期实现共用，自身不依赖任何应用层。
 
 ### 4.2 持久侧

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"

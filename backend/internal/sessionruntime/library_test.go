@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/domain/skill"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/domain/skill"
 
 	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
 	"github.com/morehao/ark-mate/internal/eventbus"

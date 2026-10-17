@@ -4,12 +4,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/capability"

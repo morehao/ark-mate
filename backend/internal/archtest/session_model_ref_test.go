@@ -244,9 +244,9 @@ func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
 			"（会话引用了一个查不到的模型行 = 同一个码、同一份引导：刷新列表）")
 	}
 	// ④ 目录注解的产出点**只有一处**（`modelIDByValue`）：第二个产出点迟早与它分叉。
-	catalog := readStripped(t, uniqueSourceFile(t, internalDir, nil,
-		declREFor("modelIDByValue").String(), "目录注解产出点 `modelIDByValue`"))
-	if c := strings.Count(catalog, "func (s *Service) modelIDByValue("); c != 1 {
+	// P5a：目录逻辑搬进 `domain/provider`，产出点改名为 `ModelIDByValue`（同一份实现）。
+	catalog := readStripped(t, filepath.Join(backendRoot(t), "internal", "domain", "provider", "catalog_read.go"))
+	if c := strings.Count(catalog, "func (pl *Plane) ModelIDByValue("); c != 1 {
 		t.Fatalf("`modelIDByValue` 应恰好定义 1 处，实际 %d 处", c)
 	}
 	if c := strings.Count(catalog, "val.ModelID = "); c != 1 {

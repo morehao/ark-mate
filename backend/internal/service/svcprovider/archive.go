@@ -10,8 +10,9 @@ import (
 // ——— P4a 正文第四刀：供应商**档案面**用例层实现 ———
 //
 // 这一刀之前，档案四动作的实现在 `domain/provider`（P3a-1b 搬进去的 1128 行），而"谁把
-// 它们端出去"是 `manager` 的四条转发（`provider_forward.go`，每一条都写着 `TODO(P4b)`）。
-// 转发层是**过渡期的形状**：它存在的唯一理由是调用点还认 `*manager.Service`。
+// 它们端出去"是 `manager` 的四条转发（`provider_forward.go`）。
+// 转发层是**过渡期的形状**：它存在的唯一理由是调用点还认 `*manager.Service`——P4b 已把
+// 那四条转发与整个 `manager` 包一起删除，调用点直连域平面。
 //
 // 现在的形状（口径见 AGENTS.md「用例层（`service/svc<领域>`）的三条硬规矩」）：
 //

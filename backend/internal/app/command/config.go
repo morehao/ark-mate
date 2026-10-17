@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 
 	"github.com/morehao/ark-mate/pkg/config"
 )

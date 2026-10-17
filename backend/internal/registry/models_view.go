@@ -1,38 +1,51 @@
-package sessionruntime
+package registry
 
 import (
 	"context"
 	"sort"
 
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
-// ——— 模型读面的**取样那一半**（P5a 暂留，取样面最后一批搬走）———
+// ——— `GET /models` 的读模型（P5a 取样面收口）———
 //
-// 同步编排与同步结论已随 P5a 归 `internal/registry.Resources`；本文件只剩 `GET /models` 的
-// 读模型组装，因为它要做**运行时目录取样**（`advertisedSample`：活会话 / resume / 缓存三选一），
-// 而取样要碰编排器的连接与会话。
+// 它把两份事实拼在一起：**平台声明 + 运行时目录/同步结论**。两份事实各有主人：
 //
-// 搬走顺序见计划 §3.1.72 的"剩余"：先做 `LiveConfigOptions` 一方法端口，把 resume 采样落
-// `runtimeconn`，再用 `CatalogSampler` 端口回给域；届时本文件与 `model_reconcile.go`、
-// `provider_model_facts.go` 的 `Advertised` 一起走。
+//	provider.Plane    清单、目录取样、缓存与拒绝值（域）
+//	Resources         同步结论与配置指纹（装配层）
+//
+// 目录取样的执行细节（活会话 / resume）经域的三个窄端口交下去；本类型只做**组合**与聚合，
+// 不碰连接、不碰 ACP。
+
+// ModelViews 模型读面的组合实现：`svcmodel.ModelSvc` 的 ModelsView/SyncModels/ModelCatalog，
+// 以及 `svcmodel.Host` 的 ModelRow/TrySyncModels 都由它（的两份真实现）提供。
+type ModelViews struct {
+	*provider.Plane
+	*Resources
+}
+
+// NewModelViews 用装配好的平面造模型读面。
+func NewModelViews(p *Planes) *ModelViews {
+	return &ModelViews{Plane: p.Providers, Resources: p.Resources}
+}
 
 // ModelsView 组装 `GET /models` 读面：**平台清单 + 聚合生效结论 + 逐 runtime 机器面明细**。
 //
-// 它是**无副作用**的：逐 runtime 的结论直接读上一次同步的持久记录（`Resources.RuntimeConfigStates`），
+// 它是**无副作用**的：逐 runtime 的结论直接读上一次同步的持久记录（`RuntimeConfigStates`），
 // 不在读路径上重跑同步（读一次列表不该写文件、改启动参数）。
 //
 // `runtimeID` 非空 = 只看那一个 runtime 的明细；`effective`/`effective_at` 恒为**聚合**值
 // （ADR-22：用户面只有一个结论）。
-func (s *Service) ModelsView(ctx context.Context, runtimeID string, refresh bool) (*dtomodel.ModelsResp, error) {
-	models, err := s.planes.Providers.ListModels(ctx)
+func (v *ModelViews) ModelsView(ctx context.Context, runtimeID string, refresh bool) (*dtomodel.ModelsResp, error) {
+	models, err := v.Plane.ListModels(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defaultID := ""
-	if row, ok, derr := s.planes.Providers.DefaultModelRow(ctx); derr == nil && ok {
+	if row, ok, derr := v.Plane.DefaultModelRow(ctx); derr == nil && ok {
 		defaultID = row.ID
 	}
 
@@ -41,7 +54,7 @@ func (s *Service) ModelsView(ctx context.Context, runtimeID string, refresh bool
 		DefaultModel: defaultID,
 		Sync:         []dtomodel.RuntimeSyncResp{},
 	}
-	states := s.planes.Resources.RuntimeConfigStates(ctx)
+	states := v.Resources.RuntimeConfigStates(ctx)
 	ids := make([]string, 0, len(states))
 	for id := range states {
 		ids = append(ids, id)
@@ -59,14 +72,14 @@ func (s *Service) ModelsView(ctx context.Context, runtimeID string, refresh bool
 			resp.Sync = append(resp.Sync, st)
 			continue
 		}
-		if sample, serr := s.advertisedSample(ctx); serr == nil && sample.Known() {
+		if sample, serr := v.Plane.AdvertisedSample(ctx); serr == nil && sample.Known() {
 			values := make([]string, 0, len(sample.Models))
 			for _, m := range sample.Models {
 				values = append(values, m.Value)
 			}
 			sort.Strings(values)
 			st.Advertised = values
-			st.Missing = missingDeclaredModelsFor(ctx, s, id, values)
+			st.Missing = v.missingDeclaredModelsFor(ctx, id, values)
 		}
 		resp.Sync = append(resp.Sync, st)
 	}
@@ -79,24 +92,24 @@ func (s *Service) ModelsView(ctx context.Context, runtimeID string, refresh bool
 
 // missingDeclaredModelsFor 声明了却没出现在运行时广告里的条目（机器面，人话化）。
 //
-// 判据是**同一份生成规则**（`provider.ModelValueFor`）：平台声明 → 该 runtime 认得的不透明值，
+// 判据是**同一份生成规则**（`ModelValueFor`）：平台声明 → 该 runtime 认得的不透明值，
 // 再与广告集合比对。两处各写一遍迟早分叉——"界面说生效了、实际目录里其实没有"正是这条要挡的。
-func missingDeclaredModelsFor(ctx context.Context, s *Service, runtimeID string, advertised []string) []string {
-	declared, err := s.planes.Providers.ListModels(ctx)
+func (v *ModelViews) missingDeclaredModelsFor(ctx context.Context, runtimeID string, advertised []string) []string {
+	declared, err := v.Plane.ListModels(ctx)
 	if err != nil {
 		return nil
 	}
 	have := make(map[string]bool, len(advertised))
-	for _, v := range advertised {
-		have[v] = true
+	for _, a := range advertised {
+		have[a] = true
 	}
 	out := []string{}
 	for i := range declared {
-		v, verr := s.planes.Providers.ModelValueFor(runtimeID, declared[i].ProviderID, declared[i].Model)
-		if verr != nil || v == "" {
+		val, verr := v.Plane.ModelValueFor(runtimeID, declared[i].ProviderID, declared[i].Model)
+		if verr != nil || val == "" {
 			continue
 		}
-		if !have[v] {
+		if !have[val] {
 			out = append(out, declared[i].ProviderID+"/"+declared[i].Model)
 		}
 	}

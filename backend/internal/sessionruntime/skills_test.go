@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/morehao/ark-mate/internal/domain/skill"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/domain/skill"
 
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/eventbus"

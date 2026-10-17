@@ -2,8 +2,6 @@ package router_test
 
 import (
 	"encoding/json"
-	"github.com/morehao/ark-mate/internal/domain/workspace"
-	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -13,6 +11,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/domain/workspace"
+	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/credential"
@@ -68,7 +69,7 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *sessionruntime.Service) {
 		Picker:         svc.Planes().Picker,
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
 		Runtime:       runtimeconn.NewPlaneFor(nil),
-		ProviderPlane: svc.Planes().Providers, ProviderCatalog: svc,
+		ProviderPlane: svc.Planes().Providers, ProviderCatalog: svc.Planes().Providers,
 		Model: sessionruntime.NewModelFace(svc),
 		// Library 读模型（P4a 正文第六刀）：域/包事实由装配点交下来，用例实例在控制器里造。
 		Capabilities: svc.Planes().Capabilities, SkillPlane: svc.Planes().Skills, Registry: reg,
@@ -394,7 +395,7 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 		Picker:         svc.Planes().Picker,
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
 		Runtime:       runtimeconn.NewPlaneFor(nil),
-		ProviderPlane: svc.Planes().Providers, ProviderCatalog: svc,
+		ProviderPlane: svc.Planes().Providers, ProviderCatalog: svc.Planes().Providers,
 		Model: sessionruntime.NewModelFace(svc),
 		// Library 读模型（P4a 正文第六刀）：域/包事实由装配点交下来，用例实例在控制器里造。
 		Capabilities: svc.Planes().Capabilities, SkillPlane: svc.Planes().Skills, Registry: reg,

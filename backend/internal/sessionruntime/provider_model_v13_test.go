@@ -3,13 +3,14 @@ package sessionruntime
 import (
 	"context"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"

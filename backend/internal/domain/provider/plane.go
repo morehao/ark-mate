@@ -33,6 +33,12 @@ type Plane struct {
 
 	// catalog 运行时模型目录缓存与拒绝值反馈（独立锁；见 catalog.go）。
 	catalog *configCatalog
+
+	// 目录取样的三个窄端口（见 catalog_read.go）：活会话 / 历史会话取样 / 连接期事实。
+	// 任一为 nil = 该来源不可用（纯列表装配、无执行面）；**不是错误**，说明文案会如实写出来。
+	live      LiveConfigOptionsSource
+	sampler   CatalogSampler
+	connFacts CatalogConnectionFacts
 }
 
 // EffectFn 计算"这次改动对谁何时生效"的回执。

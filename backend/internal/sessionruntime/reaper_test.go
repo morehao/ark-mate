@@ -1,10 +1,11 @@
 package sessionruntime
 
 import (
-	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"testing"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 
 	"github.com/morehao/ark-mate/pkg/runtime"
 )

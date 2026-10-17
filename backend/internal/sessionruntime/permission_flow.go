@@ -3,11 +3,12 @@ package sessionruntime
 import (
 	"context"
 	"fmt"
-	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"sort"
 	"strings"
 	"time"
+
+	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
+	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/golib/glog"
 

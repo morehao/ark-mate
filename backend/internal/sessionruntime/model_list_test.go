@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/morehao/ark-mate/internal/domain/provider"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/domain/provider"
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
@@ -132,7 +133,7 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 			t.Fatalf("置默认: %v", err)
 		}
 	}
-	resp, found, err := r.svc.ModelRow(ctx, id)
+	resp, found, err := r.svc.Planes().Providers.ModelRow(ctx, id)
 	if err != nil || !found {
 		t.Fatalf("读回刚插的行: found=%v err=%v", found, err)
 	}

@@ -2,9 +2,10 @@ package sessionruntime
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"sync"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/registry"
@@ -72,6 +73,11 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 	if s.planes == nil {
 		s.planes = registry.NewPlanes(reg)
 	}
+	// 模型目录取样的三个窄端口（P5a）：活会话 / 历史会话 / 连接期事实。
+	// **必须紧跟平面创建点**：早一行它们还是 nil，表现是目录恒空且说明文案说"没有执行面"。
+	s.planes.Providers.SetLiveConfigOptionsSource(s)
+	s.planes.Providers.SetCatalogSampler(s)
+	s.planes.Providers.SetCatalogConnectionFacts(s)
 	// 自动化域需要宿主端口（建会话/取消轮次）；它是编排面的事实，装配层造不了——
 	// 与库句柄一样，漏接的表现是"触发时找不到宿主"（静默）。
 	s.planes.Automation.SetHost(automationHostAdapter{svc: s})

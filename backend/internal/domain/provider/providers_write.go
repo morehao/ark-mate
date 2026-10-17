@@ -3,9 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"sort"
 	"strings"
+
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/model"

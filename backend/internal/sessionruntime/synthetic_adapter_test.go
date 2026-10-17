@@ -3,14 +3,15 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
-	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
+	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"

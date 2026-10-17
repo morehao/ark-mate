@@ -1,9 +1,10 @@
 package sessionruntime
 
 import (
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
 )
 
 // TestDeriveTitleCJKShort 回归：中文 prompt「字节数超过 48 但 rune 数不足 48」

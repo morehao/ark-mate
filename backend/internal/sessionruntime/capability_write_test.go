@@ -3,11 +3,12 @@ package sessionruntime
 import (
 	"encoding/json"
 	"errors"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"

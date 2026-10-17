@@ -3,11 +3,12 @@ package sessionruntime
 import (
 	"context"
 	"errors"
+	"strings"
+	"testing"
+
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
-	"strings"
-	"testing"
 
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/runtimeconn"

@@ -26,11 +26,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 
 	"github.com/morehao/ark-mate/internal/registry"
 	"github.com/morehao/ark-mate/internal/store"

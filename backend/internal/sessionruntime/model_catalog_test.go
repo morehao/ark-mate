@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/provider"
+
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -61,11 +63,11 @@ func TestModelCatalogLiveSession(t *testing.T) {
 	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: "stub",
 		Session: &stubSession{options: opts}}))
 
-	resp, err := svc.ModelCatalog(context.Background())
+	resp, err := svc.Planes().Providers.ModelCatalog(context.Background())
 	if err != nil {
 		t.Fatalf("ModelCatalog: %v", err)
 	}
-	if resp.Source != catalogFromSession || resp.Runtime != "stub" {
+	if resp.Source != provider.CatalogFromSession || resp.Runtime != "stub" {
 		t.Fatalf("来源标注不符: %+v", resp)
 	}
 	if len(resp.Options) != 1 || resp.Options[0].Category != "model" || !resp.Options[0].Grouped {
@@ -83,11 +85,11 @@ func TestModelCatalogLiveSession(t *testing.T) {
 
 	// 活会话消失后仍可从缓存取（避免每次查询都 resume）。
 	orch.handles.Remove("c1")
-	cached, err := svc.ModelCatalog(context.Background())
+	cached, err := svc.Planes().Providers.ModelCatalog(context.Background())
 	if err != nil {
 		t.Fatalf("ModelCatalog(cache): %v", err)
 	}
-	if cached.Source != catalogFromCache {
+	if cached.Source != provider.CatalogFromCache {
 		t.Fatalf("应命中缓存: %+v", cached)
 	}
 	if len(cached.Options) != 1 || cached.Options[0].CurrentValue != resp.Options[0].CurrentValue {
@@ -99,11 +101,11 @@ func TestModelCatalogLiveSession(t *testing.T) {
 // （**不新建探测会话**：此处若为拿到目录而 session/new，会留下无法删除的持久记录）。
 func TestModelCatalogNoSource(t *testing.T) {
 	svc, _ := catalogRig(t)
-	resp, err := svc.ModelCatalog(context.Background())
+	resp, err := svc.Planes().Providers.ModelCatalog(context.Background())
 	if err != nil {
 		t.Fatalf("ModelCatalog: %v", err)
 	}
-	if resp.Source != catalogFromNone {
+	if resp.Source != provider.CatalogFromNone {
 		t.Fatalf("应 source=none: %+v", resp)
 	}
 	if len(resp.Options) != 0 {
@@ -121,7 +123,7 @@ func TestModelCatalogRuntimeNotRegistered(t *testing.T) {
 	setBuildRuntime(t, "ghost") // 换一个不在注册表里的构建期底座
 	// 注意：这条错误在 ModelCatalog 里已被 `code.FromError` 归一（`runtime_not_registered` 只留在
 	// 文案里），所以判据是信封码 + 文案，而不是 acl 的稳定 code。
-	if _, err := svc.ModelCatalog(context.Background()); err == nil {
+	if _, err := svc.Planes().Providers.ModelCatalog(context.Background()); err == nil {
 		t.Fatal("构建期底座未装配应报错")
 	} else if numericCode(err) != 40001 || !strings.Contains(err.Error(), "runtime_not_registered") {
 		t.Fatalf("应是 40001 runtime_not_registered，got %d（%v）", numericCode(err), err)
@@ -153,7 +155,7 @@ func TestApplySessionModelSemantics(t *testing.T) {
 		t.Fatalf("成功后应清除不可用标记: %s", reason)
 	}
 	// 缓存被成功状态刷新（活会话优先级更高，故直接查缓存）。
-	entry, ok := svc.planes.Providers.ConfigOptions("stub", defaultCatalogTTL)
+	entry, ok := svc.planes.Providers.ConfigOptions("stub", provider.DefaultCatalogTTL)
 	if !ok || acl.CurrentConfigValue(entry.Options, acl.CategoryModel) != "test/other" {
 		t.Fatalf("目录缓存应被成功状态刷新: %+v", entry)
 	}
@@ -329,7 +331,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 	r := sessionModelRig(t)
 
 	// ① 平台清单还是空的：出路是"先去添加模型"。
-	noModels := r.svc.catalogEmptyNote(ctx, true, nil)
+	noModels := r.svc.Planes().Providers.CatalogEmptyNote(ctx, true, nil)
 	if !strings.Contains(noModels, "设置 · 模型") || !strings.Contains(noModels, "添加") {
 		t.Fatalf("清单为空时应指向「先去添加模型」，实际：%s", noModels)
 	}
@@ -337,13 +339,13 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 	createProviderAndModel(t, r.svc, "p1", "m-1")
 
 	// ② 读通了但运行时零候选（真实成因）：出路是"选一条默认模型"。
-	noSelection := r.svc.catalogEmptyNote(ctx, true, nil)
+	noSelection := r.svc.Planes().Providers.CatalogEmptyNote(ctx, true, nil)
 	if !strings.Contains(noSelection, "平台已声明 1 条") || !strings.Contains(noSelection, "默认模型") {
 		t.Fatalf("读通了但零候选时应指向「选一条默认模型」，实际：%s", noSelection)
 	}
 
 	// ③ 取样失败：如实说"这次没读到"，并且**不得**冒充"还没有会话可供读取"。
-	failed := r.svc.catalogEmptyNote(ctx, false,
+	failed := r.svc.Planes().Providers.CatalogEmptyNote(ctx, false,
 		acl.NewError(acl.ClassRequest, "invalid_params", `no adapter registered for provider "old"`, nil))
 	if !strings.Contains(failed, "取样失败") {
 		t.Fatalf("取样失败应如实说失败，实际：%s", failed)
@@ -354,7 +356,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 
 	// ④ "该底座不支持在不新建会话的前提下读目录"是**能力事实、不是故障**：
 	//    退回"发一条消息就会补全"这条正常出路。
-	unsupported := r.svc.catalogEmptyNote(ctx, false,
+	unsupported := r.svc.Planes().Providers.CatalogEmptyNote(ctx, false,
 		acl.NewError(acl.ClassUnsupported, "resume_session_unsupported", "不支持 resume", nil))
 	if !strings.Contains(unsupported, "发送一条消息") {
 		t.Fatalf("底座不支持读时应给「发消息」这条路，实际：%s", unsupported)
@@ -369,7 +371,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 	_, _, noCandErr := sampleCandidates[string](nil, func(string) ([]acl.ConfigOption, error) {
 		return nil, nil
 	})
-	noCandidate := r.svc.catalogEmptyNote(ctx, false, noCandErr)
+	noCandidate := r.svc.Planes().Providers.CatalogEmptyNote(ctx, false, noCandErr)
 	if !strings.Contains(noCandidate, "发送一条消息") || strings.Contains(noCandidate, "取样失败") {
 		t.Fatalf("没有候选时应说「发消息就会补全」而不是取样失败，实际：%s", noCandidate)
 	}
@@ -404,11 +406,11 @@ func TestModelCatalogLiveSessionWithoutModelKeepsNote(t *testing.T) {
 	svc, orch := catalogRig(t)
 	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: "stub", Session: &stubSession{}}))
 
-	resp, err := svc.ModelCatalog(context.Background())
+	resp, err := svc.Planes().Providers.ModelCatalog(context.Background())
 	if err != nil {
 		t.Fatalf("ModelCatalog: %v", err)
 	}
-	if resp.Source != catalogFromSession {
+	if resp.Source != provider.CatalogFromSession {
 		t.Fatalf("活会话在时应标 source=session: %+v", resp)
 	}
 	if len(resp.Options) != 0 {
