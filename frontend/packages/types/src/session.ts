@@ -1,3 +1,7 @@
+// 过程状态的取值定义在事件契约那一侧（`Ev.RunStatus` 的载荷），这里只按类型引用——
+// 让「`run.status` 的取值集」在仓库里仍然只有一处定义。
+import type { RunStatus } from './events'
+
 export type SessionStatus = 'in_progress' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
 
 export interface SessionSummary {
@@ -177,6 +181,34 @@ export interface ExportResp {
 export interface SessionDetail extends SessionSummary {
   pending: PermissionResp[] // 挂起权限请求（确认通道待决项）
   memories?: PermissionMemory[] // 会话级权限记忆（allow/reject 双侧，可逐条/一键撤销）
+  /**
+   * 当前轮次的**过程状态**（`run.status` 的读面投影，ADR-6）。
+   *
+   * 这是「这一轮在干什么」的**唯一**事实来源：头栏旁白与侧栏会话行的状态文案都读它，
+   * 不再从 `status` + 本地条目尾部倒推。没出现过过程事件（历史会话 / 本轮还没开始）时
+   * 整个键缺席——不要把它当成"状态是空串"来渲染。
+   */
+  run?: RunPhase
+}
+
+/** 会话当前轮次过程的对外表示（与 `RunResp` 的分工：那是历史账本，这是此刻在做什么）。 */
+export interface RunPhase {
+  run_id?: string
+  status: RunStatus
+  /** 底座给的更细阶段名，原样透传（平台不翻译、不重排）。 */
+  phase?: string
+  /** 人话旁白（平台自己的判定产物）。 */
+  detail?: string
+  tool_call_id?: string
+  tool_name?: string
+  /** permission | elicitation | model | tool。 */
+  waiting_for?: string
+  /** 仅恢复收口带：`restart`（界面说「上一轮因进程重启中断，可重发」，不说「失败」）。 */
+  reason?: string
+  /** 该状态事件的时刻（RFC3339Nano）。 */
+  at?: string
+  /** 该事件在会话内的位次（与 `events.seq` 同一套）。 */
+  seq: number
 }
 
 /** 会话级权限记忆（decision 区分「始终允许」与「始终拒绝」，对称语义）。 */

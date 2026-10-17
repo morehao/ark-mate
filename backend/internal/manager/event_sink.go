@@ -28,6 +28,8 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 		switch ev.Kind {
 		case acl.KindMessage:
 			typ = session.BusMessage
+			// 首个文本增量到 ⇒ 「正在收模型输出」。连发由域里的去重键吞掉（同状态同 tool 只留第一帧）。
+			o.runStatusFor(ev.SessionID, session.RunStatusModelStreaming, session.RunStatusOpts{})
 			if d, ok := ev.Payload.(acl.MessageDelta); ok {
 				payload = map[string]any{"session_id": ev.SessionID, "runtime": runtimeID, "text": d.Text}
 				if d.MessageID != "" {
@@ -36,6 +38,7 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 			}
 		case acl.KindThought:
 			typ = session.BusThought
+			o.runStatusFor(ev.SessionID, session.RunStatusModelStreaming, session.RunStatusOpts{})
 			if d, ok := ev.Payload.(acl.ThoughtDelta); ok {
 				payload = map[string]any{"session_id": ev.SessionID, "runtime": runtimeID, "text": d.Text}
 				if d.MessageID != "" {
@@ -45,6 +48,11 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 		case acl.KindToolCall:
 			typ = session.BusToolCall
 			if d, ok := ev.Payload.(acl.ToolCallInfo); ok {
+				// 工具过程（S1）：带 `tool_name` —— 头栏那句「正在执行 Bash」正是它（Q6 选①）。
+				// 必须在 publish 工具事件**之前**发：先有「我要跑 X」再有「X 的结果」。
+				o.runStatusFor(ev.SessionID, session.RunStatusToolExecuting, session.RunStatusOpts{
+					ToolCallID: d.ID, ToolName: d.Title,
+				})
 				payload = toolPayload(ev.SessionID, runtimeID, d)
 			}
 		case acl.KindToolUpdate:

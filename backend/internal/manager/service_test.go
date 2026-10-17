@@ -56,9 +56,14 @@ func TestEventSinkMapping(t *testing.T) {
 	defer bus.Unsubscribe(sub)
 	var evs []eventbus.Event
 	timeout := afterShort()
+	// 过程状态（`run.status`）不计入这 6 条：这一条用例钉的是**业务事件的映射与载荷**。
+	// 它同时会插一条 `tool_executing`，由 `runstatus_test.go` 单独钉住。
 	for len(evs) < 6 {
 		select {
 		case e := <-sub.C:
+			if e.Type == session.BusRunStatus {
+				continue
+			}
 			evs = append(evs, e)
 		case <-timeout:
 			t.Fatalf("事件不足: got %d want 6, events=%+v", len(evs), evs)

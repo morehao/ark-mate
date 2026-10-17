@@ -89,11 +89,41 @@ type SessionSearchHit struct {
 	Matches int    `json:"matches"`
 }
 
-// SessionDetailResp 单会话详情（元数据 + 挂起权限 + 会话级权限记忆）。
+// SessionDetailResp 单会话详情（元数据 + 挂起权限 + 会话级权限记忆 + 当前轮次过程）。
 type SessionDetailResp struct {
 	SessionResp
 	Pending  []PermissionResp `json:"pending"`
 	Memories []MemoryResp     `json:"memories"`
+	// Run 当前轮次的**过程状态**（ADR-6 的读面）：取自该会话最近一次 `run.status` 事件。
+	// 没有过过程事件（历史会话、或本轮还没开始）→ 省掉整个键（`omitempty`），而不是回一个空壳。
+	Run *RunPhaseResp `json:"run,omitempty"`
+}
+
+// RunPhaseResp 会话**当前轮次过程**的对外表示（`run.status` 的投影，不是 `runs` 表的行）。
+//
+// 与 `RunResp`（`GET /sessions/:id/runs` 的轮次明细）的分工：那是**历史账本**（一轮一行，
+// 含用量/首令牌耗时/窗口位次），这是**此刻在做什么**（可能同一轮反复变化）。两者共用
+// `run_id` 这一支身份，所以界面能对上「头栏说的这一轮」就是「账本里的那一行」。
+type RunPhaseResp struct {
+	RunID string `json:"run_id,omitempty"`
+	// Status 10 个活体取值之一，或恢复收口的 `interrupted`（实时路径永不发后者）。
+	Status string `json:"status"`
+	// Phase 底座给的更细阶段名，**原样透传**（平台不翻译、不重排；缺失时不出现该键）。
+	Phase string `json:"phase,omitempty"`
+	// Detail 人话旁白（平台自己的判定产物）。
+	Detail string `json:"detail,omitempty"`
+	// ToolCallID / ToolName 正在执行的工具（`tool_executing` / `waiting_for_permission` 时有值）。
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+	// WaitingFor 在等什么：permission | elicitation | model | tool。
+	WaitingFor string `json:"waiting_for,omitempty"`
+	// Reason 仅恢复收口带（`restart`）：界面据此说「上一轮因进程重启中断，可重发」，
+	// **不**说「失败」——那是底座的结论。
+	Reason string `json:"reason,omitempty"`
+	// At 该状态事件的时刻（RFC3339Nano）。
+	At string `json:"at,omitempty"`
+	// Seq 该事件在会话内的位次（与 `events.seq` 同一套；界面拿它判断新鲜度与续传）。
+	Seq int64 `json:"seq"`
 }
 
 // MemoryResp 会话级权限记忆的对外表示（decision 区分始终允许/始终拒绝）。

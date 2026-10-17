@@ -31,6 +31,12 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 		return d
 	}
 	publish := func(callID, title string, tool acl.ToolCallInfo, opts []acl.PermissionOption, timeout time.Time) {
+		// 「等用户决策」是**插曲不是终态**（S1）：它让界面说得出「等待你确认授权」，
+		// 而不是拿「进行中」蒙混过去。进入等待前的状态由域里的投影记着，决策后由
+		// `ResumeRunStatus` 送回去（否则头栏会一直停在等待态）。
+		o.runStatusFor(sid, session.RunStatusWaitingForPermission, session.RunStatusOpts{
+			ToolCallID: tool.ID, ToolName: title, WaitingFor: "permission",
+		})
 		o.svc.publish(session.BusPermissionRequest, sid, map[string]any{
 			"session_id":   sid,
 			"call_id":      callID,
@@ -66,6 +72,9 @@ func (o *Orchestrator) ResolvePermission(sessionID, callID, optionID string, alw
 	if !found {
 		return PermissionDecisionOutcome{}, false, nil
 	}
+	// 等待结束：把**进入等待前**那一次状态送回去（等待是插曲，不是终态）。不发这一条的后果
+	// 不是报错，而是头栏**永久**停在「等待你确认授权」——卡片已消、那一轮已经在跑。
+	o.svc.sessionPlane.ResumeRunStatus(sessionID)
 	return PermissionDecisionOutcome{
 		Allowed:  d.Allowed,
 		Rejected: d.Rejected,
@@ -174,6 +183,7 @@ func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string
 func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.ElicitationRequest) acl.ElicitationOutcome {
 	sid := req.SessionID // 断点恢复别名归一
 	publish := func(it interaction.ElicitationItem) {
+		o.runStatusFor(sid, session.RunStatusWaitingForUser, session.RunStatusOpts{WaitingFor: "elicitation"})
 		payload := map[string]any{
 			"session_id":     sid,
 			"scope_source":   it.ScopeSource,
@@ -218,6 +228,10 @@ func (o *Orchestrator) ResolveElicitation(sessionID, elicitationID, action strin
 		// 归属不符：对外与「不存在」同表现（不泄露其它会话的挂起项），细节已在 manager 侧告警。
 		return false, acl.NewError(acl.ClassRequest, "elicitation_not_found",
 			fmt.Sprintf("结构化提问 %q 不存在或已过期", elicitationID), nil)
+	}
+	// 等待结束（同权限：等待是插曲，决策后要把进入等待前的阶段送回去）。
+	if found {
+		o.svc.sessionPlane.ResumeRunStatus(sessionID)
 	}
 	return found, nil
 }

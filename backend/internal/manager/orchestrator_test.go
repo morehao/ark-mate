@@ -46,8 +46,32 @@ func (s *stubSession) Prompt(ctx context.Context, _ string) (string, error) {
 func (s *stubSession) Cancel(context.Context) error { return nil }
 
 // feed 收集某聚合最多 want 个 bus 事件（超时 2s 防御）。
+//
+// **跳过 `run.status`**（P0-2 起每轮会插若干条过程状态）：本组用例的意图是
+// 「开轮 → 用户消息 → 终态」这三段，过程状态的取值、顺序与去重由 `runstatus_test.go`
+// 专门钉住。把它们算进计数，会让每加一类阶段都要改一堆与阶段无关的用例——而那类改动
+// 一旦变成「顺手把断言放宽」，真正的回归就从眼前溜过去了。
 func feed(bus *eventbus.Bus, aggID string, want int) []eventbus.Event {
 	sub := bus.SubscribeAfter(nil) // 回放 + live：feed 收集该聚合此后可见的全部事件
+	defer bus.Unsubscribe(sub)
+	var out []eventbus.Event
+	timeout := time.After(2 * time.Second)
+	for len(out) < want {
+		select {
+		case e := <-sub.C:
+			if e.AggregID == aggID && e.Type != session.BusRunStatus {
+				out = append(out, e)
+			}
+		case <-timeout:
+			return out
+		}
+	}
+	return out
+}
+
+// feedAll 同 `feed`，但**不**跳过 `run.status`（过程状态的专属用例用）。
+func feedAll(bus *eventbus.Bus, aggID string, want int) []eventbus.Event {
+	sub := bus.SubscribeAfter(nil)
 	defer bus.Unsubscribe(sub)
 	var out []eventbus.Event
 	timeout := time.After(2 * time.Second)

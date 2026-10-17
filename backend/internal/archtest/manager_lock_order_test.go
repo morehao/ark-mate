@@ -62,7 +62,7 @@ func mutexSessionCallFunctions(t *testing.T, src string) []string {
 			cur, locked, calls = "", false, nil
 			continue
 		}
-		if strings.Contains(line, "s.mu.Lock()") {
+		if serviceMutexLockRe.MatchString(line) {
 			locked = true
 		}
 		for _, m := range domainPlaneCallRe.FindAllStringSubmatch(line, -1) {
@@ -87,6 +87,18 @@ func mutexSessionCallFunctions(t *testing.T, src string) []string {
 // 等于把"同一个错的另外三种写法"放过去——与 §3.1.53 把 `Snapshot()` 放宽到 `sessionPlane.*`
 // 是同一条推理，这次再放宽到**所有域平面**。
 var domainPlaneNames = []string{"sessionPlane", "providerPlane", "automationPlane", "planner", "runtimePlane"}
+
+// serviceMutexLockRe 抓 **Service 自己那把锁**的加锁点。
+//
+// 必须是正则而不是 `strings.Contains(line, "s.mu.Lock()")`——后者会把 `as.mu.Lock()`
+// （`*ActiveSession` 的锁）**当成** `s.mu.Lock()`：`a` 后面紧跟着 `s.mu.Lock()` 这个子串。
+// 于是"函数里既持 as.mu 又调域平面"会被误报成锁序反转，而两者的锁根本不是同一把、也不构成
+// 任何互指的边。实测抓到（2026-10-16，P0-2）：`executeRun` / `CancelRun` 只是在 `as.mu` 解锁
+// **之后**发过程状态，判据却喊"持 s.mu 调域平面"。
+//
+// 与本节另外两条讲究同一条推理：**判据要对「名字长什么样」免疫**——写成子串匹配就等于假设
+// 这个名字不会被别人当后缀。
+var serviceMutexLockRe = regexp.MustCompile(`\bs\.mu\.Lock\(\)`)
 
 // domainPlaneCallRe 抓 `?.<域平面>.<动作>(` 的动作名（报错用）。
 var domainPlaneCallRe = regexp.MustCompile(`(?:\.|\b)(` + strings.Join(domainPlaneNames, "|") + `)\.([A-Za-z_][A-Za-z0-9_]*)\(`)
@@ -130,7 +142,7 @@ func TestManagerDoesNotHoldMutexWhileCallingDomainPlane(t *testing.T) {
 	locked := 0
 	for _, path := range files {
 		src := stripLineComments(readFileOrFatal(t, path))
-		if strings.Contains(src, "s.mu.Lock()") {
+		if serviceMutexLockRe.MatchString(src) {
 			locked++
 		}
 		for _, fn := range mutexSessionCallFunctions(t, src) {

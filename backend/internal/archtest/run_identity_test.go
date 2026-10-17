@@ -240,7 +240,7 @@ func TestInterruptedRunsAreClosedOnRestoreButNotLive(t *testing.T) {
 	if !ok {
 		t.Fatalf("%s 里找不到 `case intentional:` 分支（改名/挪走了？本守卫 fail-closed）", runPath)
 	}
-	for _, marker := range []string{"BusRun", "PublishRunStatus", "publishRunStatus"} {
+	for _, marker := range []string{"BusRun", "PublishRunStatus", "publishRunStatus", "closeRunStatus", "runStatusFor"} {
 		if strings.Contains(block, marker) {
 			t.Fatalf("%s 的 `case intentional:` 分支里出现了 %q：\n"+
 				"ADR-8 的前半是**实时路径继续不发伪终态**（原注释逐字：「伪终态会污染历史、失败轮"+

@@ -235,6 +235,13 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 			for _, ev := range evs {
 				ver[ev.SessionID]++
 				pl.bus.PublishAt(ev.SessionID, ev.Seq, ev.ID, ev.Type, ver[ev.SessionID], DecodePayload(ev.PayloadJSON))
+				// `run.status` 的**投影**在同一次回放里重建（不再为它多扫一遍库）：重启之后
+				// `GET /sessions/:id` 的 `run` 段仍然说得出「上一轮停在哪一步」。
+				if ev.Type == BusRunStatus {
+					if m, ok := DecodePayload(ev.PayloadJSON).(map[string]any); ok {
+						pl.recordRunStatus(ev.SessionID, ev.Seq, m)
+					}
+				}
 				injected++
 				afterSession, afterSeq = ev.SessionID, ev.Seq
 			}
