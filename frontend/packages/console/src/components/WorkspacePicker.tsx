@@ -189,7 +189,7 @@ export function WorkspacePicker({ value, onChange, disabled, variant = 'pill', a
               {defaultWS ? workspaceLabel(defaultWS) : '平台分配的目录'}
             </span>
             <span className="fg-ws-item-sub">
-              {defaultWS ? defaultWS.path : '未指定工作空间时由平台分配，之后不可更改'}
+              {defaultWS ? '平台分配' : '未指定工作空间时由平台分配，之后不可更改'}
             </span>
           </span>
         )}
