@@ -2,6 +2,7 @@ package interaction
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -68,6 +69,28 @@ func alwaysKey(t acl.ToolCallInfo) string { return alwaysKeyOf(t.Title, t.Kind) 
 // AutoDecision 决定「无需征询」的快速路径：会话级记忆命中 → 直接放行/拒绝。
 // 返回 (decision, ok)：ok=false 表示需要真正挂起等待用户。
 func (m *PermissionManager) AutoDecision(sessionID string, req acl.PermissionRequest) (acl.PermissionDecision, bool) {
+	// **只给"可以被记住"的请求自动裁决**（A1 / v28）。判据：这次请求的选项里有没有 `always` 那一档。
+	//
+	// 为什么这条短路是必须的：会话级记忆记的是"这个会话里这类工具**始终**允许"。而宿主（底座）
+	// 有时会发一次**只给 `once` 档**的请求——被沙箱边界挡下之后的**升权请求**正是这一种
+	// （探针实测：options 恒 allow-once / reject-once）。若让记忆替它裁决，等于把用户当时那句
+	// "这一类都行"自动扩张成一个底座**刻意只肯给一次**的动作——那是本仓最不该发生的一类静默授权。
+	//
+	// 反过来的方向也是对的：给了 `always` 档却仍走审批，只是多问一次（可恢复）；
+	// 而错放一次升权不可恢复。
+	//
+	// 判据是**"宿主明确只给了 once 档"**，不是"没有 always 档"：
+	//
+	//	有 `_always` 档                    → 可以被记住（常态请求）
+	//	没有任何 `_always`、且有 `_once` 档 → **不可以**（升权请求：宿主刻意只肯给一次）
+	//	选项为空 / 选项的 kind 都没写        → 当"未知"处理，仍可按记忆裁决
+	//
+	// 最后一档是刻意宽松的：`Kind` 为空的选项是历史构造点与不提供选项面的路径，"没写"不是
+	// "只给一次"的证据。把它当证据会让那些调用方**静默失去**记忆能力——那是把一条安全判据
+	// 变成了一个功能回退（而回退比误拦更难发现）。
+	if offersOnlyOnceOptions(req) {
+		return acl.PermissionDecision{}, false
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e := m.lookupLocked(sessionID, req.ToolCall)
@@ -221,4 +244,23 @@ func (m *PermissionManager) List(sessionID string) []MemoryItem {
 		out = append(out, r.item)
 	}
 	return out
+}
+
+// offersOnlyOnceOptions 这次请求是否**明确只给了 `once` 档**（= 升权请求，不可被记忆裁决）。
+//
+// 判据落在**选项的 kind** 上，而不是标题/工具名里的字：标题是模型写的自由文本，
+// 拿它判"这是不是升权请求"只会得到一条时灵时不灵的规则。选项是协议字段。
+//
+// 三档语义见 `AutoDecision` 的注释：有 always → 可记住；无 always 且有 once → 不可；都没有 → 未知。
+func offersOnlyOnceOptions(req acl.PermissionRequest) bool {
+	hasAlways, hasOnce := false, false
+	for _, o := range req.Options {
+		if strings.HasSuffix(o.Kind, "_always") {
+			hasAlways = true
+		}
+		if strings.HasSuffix(o.Kind, "_once") {
+			hasOnce = true
+		}
+	}
+	return !hasAlways && hasOnce
 }

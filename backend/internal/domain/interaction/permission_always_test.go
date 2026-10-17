@@ -218,3 +218,36 @@ func TestPermissionMemoryListOrderIsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// TestAutoDecisionSkipsOnceOnlyRequests 升权请求**不得**被会话级记忆自动放行（A1 / v28）。
+//
+// 底座发来的**升权请求**只给 `once` 档（探针实测：options 恒 allow-once / reject-once）。
+// 会话级记忆记的是"这个会话里这类工具**始终**允许"——若让记忆替升权请求裁决，等于把用户当时
+// 那句"这一类都行"自动扩张成一个底座**刻意只肯给一次**的动作。那是本仓最不该发生的一类静默授权。
+//
+// 反过来的方向是可恢复的：给了 `always` 档却仍走审批，只是多问一次。
+func TestAutoDecisionSkipsOnceOnlyRequests(t *testing.T) {
+	pm := NewPermissionManager(time.Minute)
+	cmd := acl.ToolCallInfo{ID: "tc1", Title: "bash: rm -rf build", Kind: "execute"}
+
+	// 先记一条"始终允许"。
+	pm.Remember("s1", cmd, memDecisionAllow, "allow-always")
+	// 常态请求（选项里有 always 档）→ 记忆命中。
+	withAlways := acl.PermissionRequest{
+		SessionID: "s1", ToolCall: cmd,
+		Options: []acl.PermissionOption{
+			{OptionID: "a1", Kind: "allow_once"}, {OptionID: "a2", Kind: "allow_always"},
+		},
+	}
+	if d, ok := pm.AutoDecision("s1", withAlways); !ok || !d.Allowed {
+		t.Fatalf("带 always 档的请求应被记忆命中，ok=%v d=%+v", ok, d)
+	}
+	// 升权请求（**只有 once 档**）→ 不自动裁决，走人工审批。
+	onceOnly := withAlways
+	onceOnly.Options = []acl.PermissionOption{
+		{OptionID: "a1", Kind: "allow_once"}, {OptionID: "r1", Kind: "reject_once"},
+	}
+	if d, ok := pm.AutoDecision("s1", onceOnly); ok {
+		t.Fatalf("只给 once 档的请求**不得**被记忆自动放行（那是升权请求），got %+v", d)
+	}
+}
