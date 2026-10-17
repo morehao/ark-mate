@@ -491,6 +491,10 @@ vet:
 test:
 	cd backend && go test ./...
 
+# test-race：两处"只在 -race 下才看得见"的读面（会话快照 / 执行面键），收尾与改动它们时跑。
+test-race:
+	cd backend && go test -race ./internal/domain/session/ ./internal/service/svcsession/ ./internal/runtimeconn/
+
 clean:
 	rm -rf $(FRONTEND_ROOT)/apps/web/dist
 

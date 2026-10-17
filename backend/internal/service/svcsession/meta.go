@@ -118,6 +118,11 @@ func (m *Meta) UpdateSession(ctx context.Context, id string, patch dtosession.Se
 	m.deps.UpdateMeta(ctx, id, model.SessionMetaPatch{
 		Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived, ModelID: appliedModelID,
 	})
-	resp := m.plane.SessionResp(id)
+	resp, _, ok := m.plane.SessionSnapshot(id)
+	if !ok {
+		// 上面的 Mutate 已经确认过存在；这里再判一次是防"两条语句之间被删"的窗口，
+		// 出口与其余读面同一个码（不静默回空壳）。
+		return nil, sessionNotFoundErr(id)
+	}
 	return &resp, nil
 }

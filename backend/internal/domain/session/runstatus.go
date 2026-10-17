@@ -309,7 +309,19 @@ func (pl *Plane) PublishRunInterrupted(sessionID, runID string) eventbus.Event {
 // 一个 `{status:""}` 会让界面以为「有一个状态，只是空」。
 func (pl *Plane) RunPhaseOf(id string) *dtosession.RunPhaseResp {
 	snap, ok := pl.RunSnapshot(id)
-	if !ok || snap.Status() == "" {
+	if !ok {
+		return nil
+	}
+	return runPhaseOfSnapshot(snap)
+}
+
+// runPhaseOfSnapshot 把一份投影折成对外形状（**不取锁**的纯函数）。
+//
+// 抽出来是为了 `SessionSnapshot`：它已经持着 `pl.mu`，不能再调 `RunPhaseOf`
+// （`RunSnapshot` 会二次取锁 ⇒ 自死锁）。判据只有一处（"没有投影 / 空状态 → nil"），
+// 两个入口共用。
+func runPhaseOfSnapshot(snap RunStatusSnapshot) *dtosession.RunPhaseResp {
+	if snap.Status() == "" {
 		return nil
 	}
 	return &dtosession.RunPhaseResp{

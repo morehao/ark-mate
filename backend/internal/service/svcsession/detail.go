@@ -72,7 +72,11 @@ func sessionNotFoundErr(id string) error {
 
 // GetSession 返回单会话详情（元数据 + 挂起权限 + 会话级始终允许记忆）。
 func (d *Detail) GetSession(_ context.Context, id string) (*dtosession.SessionDetailResp, error) {
-	if !d.plane.HasSession(id) {
+	// 一次取锁拿"会话 + 过程状态"（同一时刻的事实）；不存在也由它一并回答。
+	// 不用 `HasSession` + `SessionResp` + `RunPhaseOf` 三次调用：那会得到三个瞬间的快照，
+	// 而它们在同一行字上（`SessionSnapshot` 的注释里有完整理由）。
+	resp, run, ok := d.plane.SessionSnapshot(id)
+	if !ok {
 		return nil, sessionNotFoundErr(id)
 	}
 	pending := d.src.PendingPermissions(id)
@@ -80,10 +84,8 @@ func (d *Detail) GetSession(_ context.Context, id string) (*dtosession.SessionDe
 	for _, p := range pending {
 		perms = append(perms, toPermissionResp(p))
 	}
-	resp := d.plane.SessionResp(id)
-	// 过程状态（ADR-6 的读面）折进同一条会话行——**投影在域里**（`RunPhaseOf`），
-	// 这一层只把字段搬过去。列表行与详情共用同一份投影，侧栏与头栏因此不可能说得不一样。
-	resp.Run = d.plane.RunPhaseOf(id)
+	// 过程状态（ADR-6 的读面）来自同一次快照——**投影在域里**，这一层只把字段搬过去。
+	resp.Run = run
 	detail := dtosession.SessionDetailResp{
 		SessionResp: resp,
 		Pending:     perms,

@@ -87,10 +87,36 @@ func (pl *Plane) fillWorkspaceDisplay(items []dtosession.SessionResp) {
 	}
 }
 
-// sessionResp 返回单个会话的轻量表示（须持锁调用）。
-func (pl *Plane) SessionResp(id string) dtosession.SessionResp {
+// sessionRespLocked 返回单会话的轻量表示（**调用方必须持 `pl.mu`**）。
+//
+// 刻意不导出：锁在包里、调用方拿不到，"须持锁调用"这种约定只对包内有效。跨包读面走
+// `SessionSnapshot`——它自己取锁。这条是 2026-10-17 修的：此前它叫 `SessionResp` 且导出，
+// 而 `svcsession` 的两个调用点都不持锁（对 map 的裸读，`-race` 可复现）。
+func (pl *Plane) sessionRespLocked(id string) dtosession.SessionResp {
 	r := pl.sessions[id]
 	return pl.ToSessionRespOf(r)
+}
+
+// SessionSnapshot 一次取锁返回单会话的读面：轻量表示 + 过程状态 + 存在性。
+//
+// 为什么一次取锁而不是三个方法各取一次：详情页要的是**同一时刻**的"这条会话 + 它这一轮在
+// 干什么"。分三次取得到三个瞬间的快照（resp 属于时刻 A、run 属于时刻 B），而两段在界面上
+// 是同一行字。列表路径仍走 `fillRunPhase`（锁外逐条补，见那里的注释）。
+//
+// 返回的 `RunPhase` 为 nil = 没有投影（历史会话 / 本轮还没开始），与 `RunPhaseOf` 同一口径。
+func (pl *Plane) SessionSnapshot(id string) (dtosession.SessionResp, *dtosession.RunPhaseResp, bool) {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	r, ok := pl.sessions[id]
+	if !ok {
+		return dtosession.SessionResp{}, nil, false
+	}
+	resp := pl.ToSessionRespOf(r)
+	var run *dtosession.RunPhaseResp
+	if snap, ok := pl.runStatusLatest[id]; ok {
+		run = runPhaseOfSnapshot(snap)
+	}
+	return resp, run, true
 }
 
 // workspaceMatches 归属过滤的判定（设计 ADR-6）：`rWorkspaceID == ”` 的行归默认工作空间。
