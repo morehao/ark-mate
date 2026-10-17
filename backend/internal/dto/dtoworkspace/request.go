@@ -46,6 +46,20 @@ type WorkspaceCreateReq struct {
 type WorkspacePatchReq struct {
 	// Title 新展示名（空串 = 清空，回落到末级目录名渲染）。
 	Title string `json:"title"`
+	// DefaultCapability **该工作空间新建会话时的默认能力选定**（v27；`nil` = 不改）。
+	//
+	// 用指针区分"没写"与"写了空串"：后者是**清掉**该档默认值（回到平台缺省），
+	// 而前者是"这次只改标题"。两者在 wire 上都长得像"没有这个键"，合成一个就会出
+	// 「只想改标题，结果把默认能力集清空了」。
+	DefaultCapability *string `json:"default_capability"`
+	// DefaultPermissionMode 默认权限模式（同上：`nil` = 不改，空串 = 清掉）。
+	DefaultPermissionMode *string `json:"default_permission_mode"`
+	// Path **改（登记）路径**（W4；`nil` = 不改）。
+	//
+	// 它改的是"这个工作空间指向哪个目录"——那是身份的一半，所以它比改名危险得多：
+	// 服务端按与建会话**同一条**校验（绝对 / 存在 / 是目录 / 规范化）处理，且
+	// **既有会话的 `cwd` 一个字节都不动**（它们的历史就在那个目录里）。
+	Path *string `json:"path"`
 }
 
 // WorkspaceMoveReq `POST /workspaces/:id/move` 的请求体（DOM insertBefore 语义）。

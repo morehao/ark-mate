@@ -199,6 +199,79 @@ func (pl *Plane) CreateNamedWorkspace(name, title string) (*dtoworkspace.Workspa
 	return resp, nil
 }
 
+// PatchWorkspace 改写一条登记的**可改字段**（展示名 / 两个默认值）。
+//
+// 三条判据：
+//
+//	① 默认值只改**传了的**（`nil` = 不改）——把"没写"与"写了空串"合成一个就会出
+//	   「只想改标题，结果把默认能力集清空了」；
+//	② 展示名沿用既有的 `RenameRegisteredWorkspace`（一条流水线，不在这里再写一份改库）；
+//	③ **既有会话一个字节都不动**：能力集与权限模式在会话上是**快照**，改工作空间默认值
+//	   就把它们悄悄改掉，表现是「我调了个默认值，昨天那个会话的行为变了」。
+//
+// **改登记路径不在本批**（`req.Path` 由 W4 / P1-g 接）：那要先定"改路径之后既有会话的 cwd
+// 怎么办"，而那不是本批的判断。本批显式拒绝它，而不是悄悄忽略——悄悄忽略等于让前端以为
+// 改成功了。
+func (pl *Plane) PatchWorkspace(id string, req dtoworkspace.WorkspacePatchReq) (*dtoworkspace.WorkspaceResp, error) {
+	if pl.st == nil {
+		return nil, WorkspaceReadOnlyError()
+	}
+	if req.Path != nil {
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "workspace_path_immutable",
+			"改登记路径尚未支持（W4 落地之前显式拒绝，不静默忽略）", nil))
+	}
+	resp, err := pl.RenameRegisteredWorkspace(id, req.Title)
+	if err != nil {
+		return nil, err
+	}
+	if req.DefaultCapability == nil && req.DefaultPermissionMode == nil {
+		return resp, nil
+	}
+	cur, ok, err := pl.workspaceDefaults(id)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, WorkspaceNotFoundError(id)
+	}
+	capability, mode := cur.CapabilityJSON, cur.PermissionMode
+	if req.DefaultCapability != nil {
+		capability = *req.DefaultCapability
+	}
+	if req.DefaultPermissionMode != nil {
+		mode = *req.DefaultPermissionMode
+	}
+	if _, err := pl.st.SetWorkspaceDefaults(context.Background(), id, capability, mode); err != nil {
+		return nil, err
+	}
+	return pl.RenameRegisteredWorkspace(id, req.Title)
+}
+
+// workspaceDefaults 读一个工作空间当前声明的默认值（不存在 → ok=false）。
+func (pl *Plane) workspaceDefaults(id string) (WorkspaceDefaults, bool, error) {
+	if pl.st == nil {
+		return WorkspaceDefaults{}, false, nil
+	}
+	row, ok, err := pl.st.GetWorkspace(context.Background(), id)
+	if err != nil || !ok {
+		return WorkspaceDefaults{}, false, err
+	}
+	return WorkspaceDefaults{
+		CapabilityJSON: row.DefaultCapabilityJSON,
+		PermissionMode: row.DefaultPermissionMode,
+	}, true, nil
+}
+
+// WorkspaceDefaultsOf 读某工作空间声明的默认值（建会话那条解析链的**唯一**取值口）。
+//
+// `ok=false`（memory 模式 / 未登记）与"登记了但没有默认值"（`”`）是两件事：
+// 前者交给下游缺省，后者同样交给下游缺省——但它们不该在类型上被合起来，
+// 否则将来"工作空间没登记"要报错时就没有位置放了。
+func (pl *Plane) WorkspaceDefaultsOf(id string) (WorkspaceDefaults, bool) {
+	d, ok, _ := pl.workspaceDefaults(id)
+	return d, ok
+}
+
 // workspaceExistsErr 同名目标已存在（唯一出口：40901 + `workspace_exists`）。
 func workspaceExistsErr(target string) error {
 	return acl.NewError(acl.ClassLimit, "workspace_exists",

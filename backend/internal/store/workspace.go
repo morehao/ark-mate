@@ -406,3 +406,14 @@ func indexOf(s []string, v string) int {
 	}
 	return -1
 }
+
+// SetWorkspaceDefaults 改写一个工作空间的两个默认值（`”` = 清掉该档）。
+//
+// **它只 UPDATE `workspaces` 一行**——绝不连带改 `sessions`。既有会话的能力集与权限模式是
+// **快照**：改了工作空间默认值就把它们悄悄改掉，表现是「我调了个默认值，昨天那个会话的行为变了」。
+// 这条由 archtest 的 `TestWorkspaceDefaultsDoNotRewriteSessions` 钉住。
+//
+// 返回 false = 该 id 不存在（不报错：调用方按 404 处理，与目录当前态同一口径）。
+func (s *Store) SetWorkspaceDefaults(ctx context.Context, id, capabilityJSON, permissionMode string) (bool, error) {
+	return s.workspaces.SetDefaults(ctx, id, capabilityJSON, permissionMode)
+}

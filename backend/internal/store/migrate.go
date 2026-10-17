@@ -745,6 +745,11 @@ var schemaMigrations = []migration{
 	// 的 `sessions.provider_id`，并给存量 `model_id` 置一个"待回填"标记——回填在应用层做，因为
 	// store 不得 import adapter；理由写在该文件头）。
 	migrationV26,
+
+	// v27 的版本步本体在 `migrate_v27.go`（工作空间补两个**默认值**列；本步**一个字都不改
+	// `sessions`**——默认值只影响以后建的会话，理由写在该文件头。`permission_memories` 的
+	// `scope` 重建挪到 v28 / P2-a：一列加上用它的写面属于同一件事）。
+	migrationV27,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

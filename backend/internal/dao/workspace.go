@@ -83,6 +83,22 @@ func (d *WorkspaceDao) UpdateTitle(ctx context.Context, id, title string) error 
 		Updates(map[string]any{"title": title, "updated_at": model.NowTS()}).Error
 }
 
+// SetDefaults 改写某行的两个**默认值**（v27；`”` = 清掉该档）。
+//
+// **只动 workspaces 一行**：既有会话的快照不许被连带改写（理由见 store.SetWorkspaceDefaults）。
+func (d *WorkspaceDao) SetDefaults(ctx context.Context, id, capabilityJSON, permissionMode string) (bool, error) {
+	res := d.DB(ctx).Model(&model.WorkspaceEntity{}).Where("id = ?", id).
+		Updates(map[string]any{
+			"default_capability_json": capabilityJSON,
+			"default_permission_mode": permissionMode,
+			"updated_at":              model.NowTS(),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
 // SetOrder 直接设定某行的顺序（重排的原子动作在 store 层，见那里的对账）。
 func (d *WorkspaceDao) SetOrder(ctx context.Context, id string, order int64) error {
 	return d.DB(ctx).Model(&model.WorkspaceEntity{}).Where("id = ?", id).

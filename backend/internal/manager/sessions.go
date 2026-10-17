@@ -103,6 +103,18 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	// 传了（哪怕 `{}`）→ 声明了：两个 kind 各自 nil（不限制）或白名单，由 DTO 的指针区分。
 	// 可达性校验在编排器内、**建连之前**做（校验不过一个副作用都不留：不建会话/不拉进程/不写库）。
 	selection := capabilitySelectionFromReq(req.Capabilities)
+	// 工作空间**默认值**（v27 / ADR-7）：请求没声明能力选定时，落到该工作空间声明的默认那一档。
+	//
+	// 合并链只有一份实现（`workspace.ResolveSessionDefaults`）：显式 > 工作空间默认 > 平台缺省。
+	// 这里只负责把"请求写了什么"与"工作空间声明了什么"交给它——**不在这里再写一遍 if**，
+	// 那是"某个入口不吃工作空间默认值"的唯一来源。
+	if selection == nil && ws.WorkspaceID != "" {
+		if def, ok := s.planner.WorkspaceDefaultsOf(ws.WorkspaceID); ok && def.CapabilityJSON != "" {
+			// `ParseCapabilitySelection` 对坏 JSON 回 nil（= 未声明）并留日志——默认值是**便利**，
+			// 不是"会话能不能建"的判据。
+			selection = ParseCapabilitySelection(def.CapabilityJSON)
+		}
+	}
 	// 底座不由请求指定（构建期固定，见 pkg/runtime/build.go）：这里没有 runtime 参数要校验。
 	res, err := s.startSession(runCtx, StartOptions{
 		SessionID:          convID,
