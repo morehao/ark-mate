@@ -31,6 +31,11 @@
 | D3 | **原生权限只映射已知键，且原生沙箱不构成对平台放行的否决**：内核只做「模式 → 取三张端口表之一 → 转发」，adapter 只映射自己认识的原生权限键、未知键跳过（仍由平台拦截面裁决）；dsh 在 `read-only` 下会发起沙箱升级请求，该请求走**平台权限通道**——平台策略 `allow` 时会被放行 | 需要「原生沙箱能否决平台放行」时（要底座提供不可绕过的策略位） | §19.20 |
 | D4 | **用量成本依赖底座上报**：`usage.cost` 需底座主动上报，当前内置底座不上报 → 界面显示 `—`，平台**不做估算**；逐轮 token/费用明细受 ACP 通道限制（只有上下文快照 + 可选累计费用）；快照口径 / 上报率 / 多币种已显式化 | 底座开始上报 `cost` 或提供逐轮用量 | §19.7 · §19.7.1 · §19.21 |
 | D5 | **dsh 的 `.system` 子目录与可选键未映射**（`user-invocable`/`disable-model-invocation` 等）；ACP 的 `resources/subscribe`、`prompts` 的 `completion/complete` 未支持；MCP 服务端反向请求（sampling/roots）只回 `method_not_found` | 有真实使用场景再评估（当前不在平台范围） | §19.4 · §19.17 · §19.18 |
+| D6 | **网络与进程可见性拿不到**：ACP 面没有「这一轮访问了哪些主机/起了哪些进程」的通道。平台的工具卡只能显示工具**自报**的 title/status，以及 `tool_call_update.content` 的正文文本；界面**不做**网络/进程维度的汇总，也不从 title 里猜（`bash` 的 title 是模型写的自由文本） | 底座提供结构化的网络/进程审计事件 | 2026-10-16 探针（`dsh 0.2.0-rc.2`） |
+| D7 | **压缩不可观测**：底座**不通告**上下文压缩。实测把阈值压到几乎必触发、会话日志里两次完整压缩（`compaction/start→summary→end`），同一时段 ACP 面 **0 帧**、帧里 `compact` 命中 0。所以 `session.compact` 事件**没有外部事实来源**——平台**不发**这个事件，界面也不显示"正在压缩" | 底座在 ACP 面通告压缩（届时接 `session.compact`） | 2026-10-16 探针 · `.dsh/docs/notes/2026-10-16-workbuddy-alignment-execution-notes.md` P1-a ② |
+| D8 | **阶段/进度不可观测**：ACP 服务端只发 6 种 `sessionUpdate`（thought/message chunk、`tool_call`、`tool_call_update`、`usage_update`、`config_option_update`），`phase`/`progress`/`_meta` 全包零命中。所以 `run.status` 的 `phase` 段**恒空**，`retrying`/`compacting` 两档**永不出现**（P0-2 当时"没找到观察点"的选择，现在有了实测依据） | 底座补 `agent_phase` / `progress` 类元数据 | 2026-10-16 探针 · P0-2 |
+| D9 | **终端与 plan 不可见**：ACP 的 `terminal/*`（内嵌终端）与 `plan`（`sessionUpdate` 的 plan 变体）平台**不建模**——`normalizeUpdate` 的 `default` 分支丢弃它们。界面上没有"这一轮的计划清单"，也没有内嵌终端 | 底座把 plan 当常规更新推送、或出现内嵌终端的真实需求 | `pkg/acl/client.go` 的 `default:` 分支 |
+| D10 | **沙箱形态读不到（两半）**：① ACP 面**没有** `SandboxEnforcement`（`full`/`partial`）——`packages/acp/**` 搜 `enforcement`/`permissionMode`/`sandboxMode` 零命中，`session/new` 只回 `{sessionId, configOptions}`。② 沙箱失败的结构化码（`SANDBOX_UNAVAILABLE`）在 `tool/result.data.error.code` 里，而 ACP 只转发 `message.content`，**那串字连文本里都不出现** ⇒ 平台只能按**文本签名**归类（`sandbox_denied` / `sandbox_unavailable`，见 `pkg/runtime/dsh/tool_failure.go`），**不能**用 `status` 判（被拒绝的那一帧 `status` 是 `completed`）。**因此界面不得声称「文件修改都被限制在工作空间内」**——平台没有能支撑这句承诺的事实 | 底座在 ACP 面透出 enforcement 与结构化错误码 | 2026-10-16 探针 · P1-b |
 
 ## 2. 平台自身未做（OPEN）
 
@@ -48,6 +53,13 @@
 | O11 | **权限策略增强**：无「按工具参数模式匹配」（如 bash 命令白名单）；前端策略编辑的工具项是 JSON 文本域（无键值行编辑器）；原生配置在连接建立时固定，运行中 PATCH 只影响新连接 | 精细化策略 / 更好的编辑体验 | §19.5 · §19.20 · §19.21 |
 | O12 | **排障可见性**：跨会话 elicitation 决策与「未知 id」**同码同文案**（细节只在服务端 WARN）；决策回执里的 `always` 是请求意图，不是「记忆是否真的写入」（记忆以 memories 读面为准） | 需要更强的审计/排障信息 | §19.23 · §19.25 |
 | O13 | **事件持久化的边角**：`store.AppendEvent` 写库失败的事件不出现在 REST 历史（事件总线侧仍有，且打 WARN），位次退化为进程内分配 | 需要历史与事件总线完全一致 | §19.22 |
+| O14 | **会话级权限模式不可达**：`/permission` 命令面在 ACP 上**不存在**（底座根本不发 `available_commands_update`，见 D10），所以"会话级模式下发"只能退化成「每模式一个暖进程 + `DSH_PERMISSION_MODE`」。今天是**每部署一个模式**：模式不同的两个会话共享同一个暖进程，各自拿不到自己的模式 | 底座补命令面，或愿意接受"进程池按模式分桶"的开销 | P1-a ③(b) · P1-f 偏离 ② |
+| O15 | **队列项不能原子替换正文**：队列只补了三个动作（重排 / 立即发送 / 取出编辑），**没有** `surfaceOp: replace` 那类"就地改写一条已排队输入"。取出编辑会把它作废、让用户改完重新入队——语义上等价，但**位次会变**（改完排到队尾） | 出现"改一句话但保留排队位置"的真实需求 | ADR-10（刻意不做 17 个方法） |
+| O16 | **权限记忆只有一种形态**：`permission_memories` 的唯一键是 `(session_id, title, kind)`，所以"只允许这一次"与"这个会话内始终允许"**压在同一行**——要么把一次性的允许永久记住，要么把"始终"降级成一次。`scope` 列（v28）与写面改造尚未落地 | 需要区分"一次 / 会话内始终"两种授权形态时（P2-a） | P1-f 偏离 ① |
+| O17 | **工作空间不能改登记路径**：`PATCH /workspaces/:id` 收 `path` 但**显式拒绝**（`workspace_path_immutable`）。改路径要先定"既有会话的 `cwd` 怎么办"——它们的历史就在那个目录里，跟着搬等于把历史指到别处 | W4 落地时（归属自愈 + 改 path 同批） | P1-f `PatchWorkspace` 注释 |
+| O18 | **既有会话的归属不自愈**：工作空间改名/搬迁/删除之后，`sessions.workspace_id` 仍指向那条登记，而登记指向的目录可能已经不存在（`dir_status: missing`）。今天只有读面如实上报，没有自愈路径（不自动重挂、也不批量改归属） | W4 落地时 | 计划 P1-g |
+| O19 | **确认区一次只显示一张卡**：权限优先、其余以「还有 N 条」计数，**不能**并列处理。同时挂起多条时用户需要逐条处理 | 出现"一次要确认很多条"的真实场景 | P1-e `ConfirmArea.tsx` |
+| O20 | **命令门禁未做**：斜杠命令目前是"底座自报清单 + 选中即填入输入框"，平台**不拦截**未在清单里的命令，也没有命令级权限 | A2 落地时 | 计划 P2-c |
 
 ## 3. 已关闭（CLOSED，保留追溯）
 
