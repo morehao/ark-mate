@@ -94,6 +94,50 @@ func ValidateWorkspace(spec string) (string, error) {
 	return resolved, nil
 }
 
+// ValidateWorkspaceName 校验**单段目录名**——建目录/建工作空间两条路径的**唯一**实现。
+//
+// 为什么必须单点：本仓有两条"造一个新目录"的路径（目录浏览面的「新建文件夹」与工作空间面的
+// 「新建工作空间…」），它们问的是**同一个问题**（这个名字能不能当一段目录名）。各写一份的表现
+// 不是报错，而是两条路的接受集悄悄分叉——于是"文件夹能建、工作空间建不了"（或反过来），
+// 而用户看到的是两个都长得对的错误提示。
+//
+// 判据（与参照产品的 `generate({name})` 同一条）：空 / 含路径分隔符（`/`、`\`）/ `.` / `..` /
+// 绝对路径 / 超长 → **全部是 40001**（`invalid_workspace_name`）。刻意**不做**宽松处置：
+// 把 `..` 归一成上一级、或把 `/` 当路径的一部分，会让"我建的是 foo"与"我建出来的是 foo/bar"
+// 看起来一样。
+//
+// 返回值是**去掉首尾空白后**的名字——但只用于判定与拼接：目录名首尾含空白是合法的
+// （「我的 项目」），TrimSpace 只是把"看起来是空的"识别出来。真正的名字用入参原文减去首尾空白，
+// 这与 `CreateWorkspaceDir` 此前的口径逐字一致（那里的注释写着同一条理由）。
+func ValidateWorkspaceName(name string) (string, error) {
+	n := strings.TrimSpace(name)
+	switch {
+	case n == "":
+		return "", invalidWorkspaceNameErr("目录名不能为空")
+	case filepath.IsAbs(n):
+		return "", invalidWorkspaceNameErr(fmt.Sprintf("目录名不能是绝对路径: %q", n))
+	case strings.ContainsAny(n, `/\`):
+		return "", invalidWorkspaceNameErr(fmt.Sprintf("目录名不能包含路径分隔符: %q", n))
+	case n == "." || n == "..":
+		return "", invalidWorkspaceNameErr(fmt.Sprintf("目录名不能是 %q", n))
+	case len([]rune(n)) > maxWorkspaceNameRunes:
+		return "", invalidWorkspaceNameErr(
+			fmt.Sprintf("目录名过长（上限 %d 个字符）: %d", maxWorkspaceNameRunes, len([]rune(n))))
+	}
+	return n, nil
+}
+
+// maxWorkspaceNameRunes 单段目录名的字符上限。
+//
+// 256 是常见宿主文件系统（APFS / ext4 / NTFS）对**单段名**的上限，这里取 128 留出余量：
+// 名称还要参与路径拼接与展示，太长的名字在界面上只会被截断成两段看不出差别的串。
+const maxWorkspaceNameRunes = 128
+
+// invalidWorkspaceNameErr 名字非法（唯一出口：40001 + 稳定 code 名 `invalid_workspace_name`）。
+func invalidWorkspaceNameErr(msg string) error {
+	return acl.NewError(acl.ClassRequest, "invalid_workspace_name", msg, nil)
+}
+
 // ResolveWorkspace 解析建会话时应使用的 cwd。
 //
 //	spec 非空    → 校验后原样使用（Temporary=false；v14.5 起只要路径可用，不受任何名单限制）
@@ -293,10 +337,35 @@ func (pl *Plane) WorkspaceRoots() []string {
 //
 // **一次取齐**而不是三次分别取：分三次的话，面板可能在两次之间看到"配置改了、生效名单还没改"
 // 的中间态（并发 PUT 时真的会发生），而那个中间态在界面上是一份自相矛盾的名单。
-func (pl *Plane) PolicySnapshot() (effective, configured []string, provisionDir string) {
+func (pl *Plane) PolicySnapshot() (effective, configured []string, provisionDir, createRoot string) {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
-	return pl.effectiveWorkspaceRootsLocked(), append([]string(nil), pl.roots...), pl.dir
+	return pl.effectiveWorkspaceRootsLocked(), append([]string(nil), pl.roots...), pl.dir, pl.createRootLocked()
+}
+
+// CreateRoot 返回**新建工作空间的落盘根**（ADR-3）——`name` 模式的唯一取值来源。
+//
+// 它与 `provision_dir`（平台代建默认工作空间的根）和历史概念 `roots`（浏览从哪起步的偏好）
+// 是三件不同的事，必须分开：
+//
+//	roots        浏览**从哪起步**（v14.5 起不是边界）
+//	provision_dir 平台**代建**默认工作空间落哪（`<provision_dir>/default`）
+//	create_root  用户**新建**工作空间落哪（缺省 = provision_dir；空 ⇒ name 模式显式拒绝）
+//
+// 今天 `create_root` 的取值就是 `provision_dir`（还没有独立的配置项），但**取值这件事只有这一处
+// 实现**：将来加环境变量/配置文件时改这里，别在 `registry.go` 里再读一次 env——那样会出现
+// 「设置里显示一个位置、新建却落到别处」，而两处都"看起来在工作"。
+func (pl *Plane) CreateRoot() string {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	return pl.createRootLocked()
+}
+
+// createRootLocked 落盘根的解析（调用方须持 pl.mu；**唯一的取值实现**）。
+func (pl *Plane) createRootLocked() string {
+	// 缺省 = provision_dir。刻意不让它回落到家目录/os.Getwd()：那等于把"新东西落在哪"
+	// 交给"平台自己站在哪"，而它会是用户从没选过的地方（同 `ResolveWorkspace` 的不回落铁律）。
+	return pl.dir
 }
 
 // effectiveWorkspaceRootsLocked 生效白名单 = 显式配置的根 ∪ 平台代建根（调用方须持 pl.mu）。

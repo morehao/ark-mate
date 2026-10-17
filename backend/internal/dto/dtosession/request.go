@@ -128,4 +128,12 @@ type ElicitationResolveReq struct {
 	ElicitationID string         `json:"elicitation_id" binding:"required"`
 	Action        string         `json:"action" binding:"required"` // accept | decline | cancel
 	Content       map[string]any `json:"content,omitempty"`         // accept 时用户提交的表单内容
+	// Late 回答一条**已经超时转 pending** 的提问（ADR-11）。
+	//
+	// 它走的不是"投给那一轮"而是"**作为新一轮**的用户消息进去"：那一轮的 ACP 调用在超时那一刻
+	// 就已经拿到 `cancel` 返回了，把回答投进一个已关闭的通道，表现是"点了发送、什么都没发生"。
+	//
+	// 缺省 false：常态是"这一轮还在等"。服务端不会替你猜——传错的话两种结果都很难看
+	// （把新回答塞进旧轮 / 把正在等的那条当迟到处理）。
+	Late bool `json:"late,omitempty"`
 }

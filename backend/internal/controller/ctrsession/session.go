@@ -37,6 +37,10 @@ type SessionCtr interface {
 	Cancel(c *gin.Context)
 	QueuedInputs(c *gin.Context)
 	DeleteQueuedInput(c *gin.Context)
+	// 队列三动作（ADR-10）：重排 / 立即发送 / 取出编辑。
+	MoveQueuedInput(c *gin.Context)
+	SendNowQueuedInput(c *gin.Context)
+	PopQueuedInput(c *gin.Context)
 	History(c *gin.Context)
 	Runs(c *gin.Context)
 }
@@ -87,7 +91,7 @@ func NewSessionCtr(svc svcsession.SessionSvc, st *store.Store, plane *session.Pl
 		svc: svc, hist: svcsession.NewHistory(st, plane, bus), plane: plane,
 		detail:      svcsession.NewDetail(plane, src),
 		interaction: svcsession.NewInteraction(plane, deliver),
-		queue:       svcsession.NewQueue(plane),
+		queue:       svcsession.NewQueue(plane, svc),
 		meta:        svcsession.NewMeta(plane, metaDeps),
 	}
 }
@@ -226,7 +230,7 @@ func (h *sessionCtr) ResolveElicitation(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	if err := h.interaction.ResolveElicitation(c.Request.Context(), c.Param("id"), req.ElicitationID, req.Action, req.Content); err != nil {
+	if err := h.interaction.ResolveElicitation(c.Request.Context(), c.Param("id"), req.ElicitationID, req.Action, req.Content, req.Late); err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
 	}
@@ -286,6 +290,43 @@ func (h *sessionCtr) DeleteQueuedInput(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, gin.H{"id": id, "input_id": inputID, "deleted": ok})
+}
+
+// MoveQueuedInput 重排一条待投递输入（ADR-10 动作①；DOM insertBefore 语义）。
+//
+// `before_id` 缺省 = 追加到末尾。改的是**投递顺序**（`inputs.seq`），不发事件：顺序是队列的
+// 当前态而不是可回放的事实，冷挂载走 `GET /sessions/:id/inputs` 拿到的就是重排后的顺序。
+func (h *sessionCtr) MoveQueuedInput(c *gin.Context) {
+	var req dtosession.QueuedInputMoveReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	id := c.Param("id")
+	if err := h.queue.MoveQueuedInput(c.Request.Context(), id, c.Param("input_id"), req.BeforeID); err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	h.QueuedInputs(c)
+}
+
+// SendNowQueuedInput 让一条待投递输入成为下一轮（ADR-10 动作②）。
+func (h *sessionCtr) SendNowQueuedInput(c *gin.Context) {
+	if err := h.queue.SendNow(c.Request.Context(), c.Param("id"), c.Param("input_id")); err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, gin.H{"id": c.Param("id"), "input_id": c.Param("input_id"), "sent": true})
+}
+
+// PopQueuedInput 把一条待投递输入取回草稿并作废（ADR-10 动作③），回正文给前端填进输入框。
+func (h *sessionCtr) PopQueuedInput(c *gin.Context) {
+	text, err := h.queue.PopForEdit(c.Request.Context(), c.Param("id"), c.Param("input_id"))
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, gin.H{"id": c.Param("id"), "input_id": c.Param("input_id"), "text": text})
 }
 
 // Cancel 取消进行中的 run（幂等）。

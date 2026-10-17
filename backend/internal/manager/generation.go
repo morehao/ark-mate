@@ -103,7 +103,7 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveSession, rec *SessionRec) 
 	}
 	// 目标键由池一次算完（基础键 + 能力指纹 + T5 的模型配置指纹，三个维度同源）。
 	// T5：平台生成的模型配置指纹也是代际维度——配置文件在**进程启动时**读。
-	keys := o.pool.KeyFor(spec, wantFP)
+	keys := o.pool.KeyFor(spec, wantFP, as.NativeMode)
 	plan := generationPlan{
 		From: rc.Key, To: keys.Key,
 		PermChanged:        keys.BaseKey != rc.BaseKey,

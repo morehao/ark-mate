@@ -5,7 +5,11 @@ import (
 	"fmt"
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"sort"
+	"strings"
 	"time"
+
+	"github.com/morehao/golib/glog"
 
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objid"
@@ -24,6 +28,24 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 	if sid == "" {
 		sid = req.SessionID // 兜底回落原生（理论上不应出现；保留事件不丢）
 	}
+	// 命令门禁（A2）**排在会话级记忆之前**：规则说 forbidden 的命令，不能被"这类工具始终允许"
+	// 的旧记忆放行；allow 的则直接放行（不再问人）。判据见 command_gate.go 的 doc。
+	//
+	// 权限请求只带 toolCallId（dsh 的 wire 形状），命令行在同 id 的 tool_call 更新里——按 id 回查
+	// （`tool_calls.go`）。查不到就只用请求自带的字段：门禁取不到 command 时不再参与。
+	tool := req.ToolCall
+	if cached, ok := o.toolCallFor(req.ToolCall.ID); ok {
+		tool = cached
+	}
+	if d, rule, decided := o.commandGateDecision(tool, req.Options); decided {
+		if d.Allowed {
+			glog.Infow(ctx, "命令门禁放行了一次工具调用", "session", sid, "call", tool.ID, "rule", rule)
+		} else {
+			glog.Warnw(ctx, "命令门禁拒绝了一次工具调用", "session", sid, "call", tool.ID, "rule", rule)
+		}
+		return d
+	}
+
 	// v19 起没有 per-agent 默认权限策略这一层（agent 面删除）：裁决只剩**会话级记忆**
 	// （用户"始终允许"过的）与会话级征询。`session.permission_policy` 事件常量仍冻结在
 	// events.go（对外契约），但已经没有生产者。
@@ -31,6 +53,12 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 		return d
 	}
 	publish := func(callID, title string, tool acl.ToolCallInfo, opts []acl.PermissionOption, timeout time.Time) {
+		// 「等用户决策」是**插曲不是终态**（S1）：它让界面说得出「等待你确认授权」，
+		// 而不是拿「进行中」蒙混过去。进入等待前的状态由域里的投影记着，决策后由
+		// `ResumeRunStatus` 送回去（否则头栏会一直停在等待态）。
+		o.runStatusFor(sid, session.RunStatusWaitingForPermission, session.RunStatusOpts{
+			ToolCallID: tool.ID, ToolName: title, WaitingFor: "permission",
+		})
 		o.svc.publish(session.BusPermissionRequest, sid, map[string]any{
 			"session_id":   sid,
 			"call_id":      callID,
@@ -66,6 +94,9 @@ func (o *Orchestrator) ResolvePermission(sessionID, callID, optionID string, alw
 	if !found {
 		return PermissionDecisionOutcome{}, false, nil
 	}
+	// 等待结束：把**进入等待前**那一次状态送回去（等待是插曲，不是终态）。不发这一条的后果
+	// 不是报错，而是头栏**永久**停在「等待你确认授权」——卡片已消、那一轮已经在跑。
+	o.svc.sessionPlane.ResumeRunStatus(sessionID)
 	return PermissionDecisionOutcome{
 		Allowed:  d.Allowed,
 		Rejected: d.Rejected,
@@ -174,6 +205,7 @@ func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string
 func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.ElicitationRequest) acl.ElicitationOutcome {
 	sid := req.SessionID // 断点恢复别名归一
 	publish := func(it interaction.ElicitationItem) {
+		o.runStatusFor(sid, session.RunStatusWaitingForUser, session.RunStatusOpts{WaitingFor: "elicitation"})
 		payload := map[string]any{
 			"session_id":     sid,
 			"scope_source":   it.ScopeSource,
@@ -199,9 +231,14 @@ func (o *Orchestrator) PendingElicitations(sessionID string) []interaction.Elici
 
 // ResolveElicitation 按 elicitation_id 投递决策（accept/decline/cancel；accept 可带 content）。
 // sessionID 是决策发起方会话：C3 起做 scope 校验，只有归属会话能决策（跨会话 → not found）。
-func (o *Orchestrator) ResolveElicitation(sessionID, elicitationID, action string, content map[string]any) (bool, error) {
+// `late=true` 走另一条路（ADR-11）：那条提问已经超时转 pending，那一轮的 ACP 调用早已拿到
+// `cancel` 返回，所以回答**不能**塞回旧轮——它作为**新一轮**的用户消息进去（见 `lateElicitation`）。
+func (o *Orchestrator) ResolveElicitation(sessionID, elicitationID, action string, content map[string]any, late bool) (bool, error) {
 	if elicitationID == "" {
 		return false, acl.NewError(acl.ClassRequest, "elicitation_id_required", "elicitation_id 必填", nil)
+	}
+	if late {
+		return o.lateElicitation(sessionID, elicitationID, action, content)
 	}
 	var found, mismatch bool
 	switch action {
@@ -219,5 +256,127 @@ func (o *Orchestrator) ResolveElicitation(sessionID, elicitationID, action strin
 		return false, acl.NewError(acl.ClassRequest, "elicitation_not_found",
 			fmt.Sprintf("结构化提问 %q 不存在或已过期", elicitationID), nil)
 	}
+	// 等待结束（同权限：等待是插曲，决策后要把进入等待前的阶段送回去）。
+	if found {
+		o.svc.sessionPlane.ResumeRunStatus(sessionID)
+	}
 	return found, nil
+}
+
+// CancelElicitations 归档时作废该会话的挂起提问（`reason:archive`）。
+func (o *Orchestrator) CancelElicitations(sessionID string) {
+	o.elic.CancelSessionReason(sessionID, session.ElicitationReasonArchive)
+}
+
+// lateElicitation 回答一条**已经超时转 pending** 的提问（ADR-11）。
+//
+// 与常态那一支的分界不是"参数不同"，而是**语义不同**：
+//
+//	常态（还在阻塞等）  回答投给那一轮 → 底座的 elicitation/create 拿到结果 → 那一轮继续
+//	迟到（已超时转 pending） 那一轮早已收尾 → 回答**作为新一轮**的用户消息进去
+//
+// `accept` 才会起新一轮；`decline`/`cancel` 只是把卡片收敛（用户不想答，没有内容可发）。
+//
+// 起新一轮用 `o.Prompt`（队列/忙判据/开轮三连全都在那一条路上）——不直接调底座：那会绕开
+// 忙碌判定与事件铸造，而"绕过的那一半"在界面上完全看不出来。
+func (o *Orchestrator) lateElicitation(sessionID, elicitationID, action string, content map[string]any) (bool, error) {
+	message, found, mismatch := o.elic.ResolveLate(sessionID, elicitationID)
+	if mismatch {
+		return false, acl.NewError(acl.ClassRequest, "elicitation_not_found",
+			fmt.Sprintf("结构化提问 %q 不存在或已过期", elicitationID), nil)
+	}
+	if !found {
+		// 不是 pending 态：说明它还在等（走常态）或压根不存在。两种都**不**猜——交给调用方
+		// 按 `late=false` 重试，或者如实回"不存在"（与常态那一支同一条出路）。
+		return false, acl.NewError(acl.ClassRequest, "elicitation_not_found",
+			fmt.Sprintf("结构化提问 %q 不在「超时仍可回答」状态", elicitationID), nil)
+	}
+	// 卡片收敛：`reason:late` 说得出"这是迟到的回答"（与 `user` 分开，界面文案不同）。
+	o.svc.publish(session.BusElicitationResolved, sessionID, map[string]any{
+		"session_id":     sessionID,
+		"elicitation_id": elicitationID,
+		"action":         action,
+		"reason":         "late",
+	})
+	if action != "accept" {
+		return true, nil
+	}
+	text := lateAnswerText(message, content)
+	if text == "" {
+		return true, nil
+	}
+	if _, err := o.Prompt(context.Background(), sessionID, text); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+// lateAnswerText 把迟到回答拼成一条**用户消息**的正文（确定性顺序：按 key 排序）。
+//
+// 为什么不发明一个"结构化回答"的消息类型：那一轮已经结束了，这条东西在历史里就是**用户说的话**
+// ——界面上它必须与其它用户消息长得一样，否则下一轮读它的模型会看到一个没人定义过的形状。
+func lateAnswerText(question string, content map[string]any) string {
+	keys := make([]string, 0, len(content))
+	for k := range content {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	if question != "" {
+		b.WriteString("关于「")
+		b.WriteString(question)
+		b.WriteString("」的回答：")
+	} else {
+		b.WriteString("关于上一个提问的回答：")
+	}
+	if len(keys) == 0 {
+		b.WriteString("（无内容）")
+		return b.String()
+	}
+	for _, k := range keys {
+		b.WriteString("\n- ")
+		b.WriteString(k)
+		b.WriteString("：")
+		b.WriteString(fmt.Sprintf("%v", content[k]))
+	}
+	return b.String()
+}
+
+// commandGateDecision 把一次权限请求交给命令门禁。
+//
+// decided=false 表示**交回既有流程**（prompt / 非 shell 命令 / 未配置规则）；true 表示门禁已经
+// 给出终局（allow / forbidden），调用方直接返回它，不再走记忆与人工审批。
+func (o *Orchestrator) commandGateDecision(tool acl.ToolCallInfo, opts []acl.PermissionOption) (acl.PermissionDecision, string, bool) {
+	d, rule, isShell := interaction.GateCommand(o.commandPolicy, tool.Input)
+	if !isShell {
+		return acl.PermissionDecision{}, "", false
+	}
+	switch d {
+	case interaction.CommandForbidden:
+		return acl.PermissionDecision{Rejected: true, OptionID: permissionOptionID(opts, false)}, rule, true
+	case interaction.CommandAllow:
+		return acl.PermissionDecision{Allowed: true, OptionID: permissionOptionID(opts, true)}, rule, true
+	default:
+		return acl.PermissionDecision{}, rule, false
+	}
+}
+
+// permissionOptionID 选一个放行/拒绝选项：优先 `_once`（最小授权），其次同类任一；没有 → 空串
+// （ACP 层按 EffectivePermissionOutcome 兜底：放行选第一个，拒绝落回 cancelled）。
+func permissionOptionID(opts []acl.PermissionOption, allow bool) string {
+	prefix, once := "reject", "reject_once"
+	if allow {
+		prefix, once = "allow", "allow_once"
+	}
+	for _, o := range opts {
+		if o.Kind == once {
+			return o.OptionID
+		}
+	}
+	for _, o := range opts {
+		if strings.HasPrefix(o.Kind, prefix) {
+			return o.OptionID
+		}
+	}
+	return ""
 }

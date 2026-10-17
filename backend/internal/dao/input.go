@@ -119,6 +119,37 @@ func (d *InputDao) MarkStale(ctx context.Context, id string) (bool, error) {
 	return res.RowsAffected > 0, nil
 }
 
+// Reorder 按给定 id 顺序重写某会话 **queued** 行的会话内位次（同一事务，两阶段）。
+//
+// 为什么必须两阶段：`inputs` 上有 `UNIQUE(session_id, seq)`（v22 的 D4），就地互换会中途撞约束
+// ——那不会"看起来能跑"：约束直接让事务失败。所以阶段一把整段挪到远离现有区间的偏移段，
+// 阶段二按目标顺序写回 0..n-1。
+//
+// 只动 **queued** 行：已投递/已作废是台账，它们的位次是"当时排第几"的历史事实，重排队列
+// 没有资格改历史。
+func (d *InputDao) Reorder(ctx context.Context, sessionID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	// 偏移量要大于任何现实的队列长度（队列是"人手动排的几句话"，不是数据管道）。
+	const stride = 1_000_000
+	return d.DB(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.InputEntity{}).
+			Where("session_id = ? AND status = ?", sessionID, model.InputStatusQueued).
+			Update("seq", gorm.Expr("seq + ?", stride)).Error; err != nil {
+			return err
+		}
+		for i, id := range ids {
+			if err := tx.Model(&model.InputEntity{}).
+				Where("session_id = ? AND id = ? AND status = ?", sessionID, id, model.InputStatusQueued).
+				Update("seq", i).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // Delete 删除一条待投递项（**仅 queued**：已投递/已作废是审计行，不可删）；返回是否删除。
 func (d *InputDao) Delete(ctx context.Context, sessionID, id string) (bool, error) {
 	res := d.DB(ctx).Where("session_id = ? AND id = ? AND status = ?",

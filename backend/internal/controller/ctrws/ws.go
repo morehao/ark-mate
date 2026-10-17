@@ -106,7 +106,7 @@ type wsClientFrame struct {
 
 // wsServerFrame 服务端 → 客户端帧。
 type wsServerFrame struct {
-	Type     string          `json:"type"`                // snapshot | event | gap | detached | pong
+	Type     string          `json:"type"`                // snapshot | event | gap | detached | pong | replay_begin | replay_end
 	AggID    string          `json:"agg_id,omitempty"`    // 归属聚合
 	EventSeq int64           `json:"event_seq,omitempty"` // 该会话水位（snapshot）/ event 的会话内位次 / gap 的首丢位次
 	FromSeq  int64           `json:"from_seq,omitempty"`  // gap：重挂起点（= 首丢 seq）
@@ -324,9 +324,26 @@ func (h *wsCtr) attach(st *connState, f wsClientFrame) {
 		h.send(st, wsServerFrame{Type: "snapshot", AggID: f.AggID, EventSeq: h.bus.LastSeq(f.AggID), State: json.RawMessage(`{}`)})
 		return
 	}
-	for _, evt := range h.bus.EventsAfter(f.AggID, since) {
+	// 历史回放是**一段可宣布的区间**（ADR-13）：`replay_begin` / `replay_end` 两帧把它夹起来，
+	// 前端据此精确地进出"回放中"，而不是靠 12s 超时猜。
+	//
+	// **这是帧 type，不是域事件**：它们不进 `events` 表、不进 transcript、不动事件契约快照
+	// （`TestReplayFramesBracketHistory` 反过来钉这一条——把 `replay_begin` 塞进 `events.go`
+	// 会让它红）。理由是它们描述的是**这次连接正在做什么**，不是会话身上发生过什么：同一次
+	// 回放换成两个客户端就是两段不同的区间，写进事件日志等于把"谁的连接"也记进了历史。
+	h.send(st, wsServerFrame{Type: "replay_begin", AggID: f.AggID, EventSeq: since})
+	evs := h.bus.EventsAfter(f.AggID, since)
+	for i := range evs {
+		evt := evs[i]
 		h.send(st, wsServerFrame{Type: "event", AggID: f.AggID, EventSeq: evt.Seq, Event: &evt})
 	}
+	// 结束帧带**回放到的位次**（没有事件可回放时就是该聚合的水位）：前端拿它做两件事——
+	// 结束加载态、把续传游标推到"我确实看完了这里"。
+	end := h.bus.LastSeq(f.AggID)
+	if n := len(evs); n > 0 {
+		end = evs[n-1].Seq
+	}
+	h.send(st, wsServerFrame{Type: "replay_end", AggID: f.AggID, EventSeq: end})
 }
 
 func (h *wsCtr) detach(st *connState, aggID string) {

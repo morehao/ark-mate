@@ -384,3 +384,65 @@ func TestWorkspaceUniqueIndexEnforced(t *testing.T) {
 		t.Fatal("第二条 is_default=1 必须被部分唯一索引拦下（否则默认工作空间会有两个，落点变得不确定）")
 	}
 }
+
+// TestWorkspaceRelocate 改登记路径（W4）：**id 不变、会话不动、冲突显式报**。
+//
+// 三条都容易被"顺手写得更方便"：
+//
+//	① 改路径时顺手把会话的 `cwd` 也刷一遍——看起来贴心，实际上是把历史指到别处
+//	   （`cwd` 是执行事实，transcript 就在那个目录里）；
+//	② 目标目录已被另一条登记占着时，get-or-create 返回那条既有行——两个入口给出同一个"成功"，
+//	   而用户改的那个工作空间还在老地方；
+//	③ 顺手重新生成 id——那会让该工作空间下的会话归属悬空。
+func TestWorkspaceRelocate(t *testing.T) {
+	s := openTestDB(t)
+	a := t.TempDir()
+	b := t.TempDir()
+
+	rec, err := s.CreateWorkspace(ctxT(), a, "A")
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	// 种一行指向 rec 的会话（本用例要的只是"有一条会话归属它"）。
+	if err := s.DB().Exec(`INSERT INTO sessions (id, title, cwd, workspace_id, status, capability_json, model_id, created_at, updated_at)
+		VALUES ('ses-1', '', ?, ?, 'idle', '', 'mdl_x', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`, rec.Path, rec.ID).Error; err != nil {
+		t.Fatalf("种会话行: %v", err)
+	}
+
+	// ① 正常改：id 不变、path 变。
+	ok, err := s.RelocateWorkspace(ctxT(), rec.ID, b)
+	if err != nil || !ok {
+		t.Fatalf("RelocateWorkspace: ok=%v err=%v", ok, err)
+	}
+	after, ok, err := s.GetWorkspace(ctxT(), rec.ID)
+	if err != nil || !ok {
+		t.Fatalf("改路径后应仍能按**原 id** 取到: ok=%v err=%v", ok, err)
+	}
+	if after.Path != b {
+		t.Fatalf("路径应改成 %q，got %q", b, after.Path)
+	}
+
+	// ② 会话一个字节都不动（`cwd` 与归属都还是旧值）。
+	var cwd, workspaceID string
+	if err := s.DB().Raw(`SELECT cwd, workspace_id FROM sessions WHERE id = 'ses-1'`).Row().Scan(&cwd, &workspaceID); err != nil {
+		t.Fatalf("读会话行: %v", err)
+	}
+	if cwd != rec.Path || workspaceID != rec.ID {
+		t.Fatalf("改登记路径**不许**动会话：cwd %q（want %q）/ workspace_id %q（want %q）",
+			cwd, rec.Path, workspaceID, rec.ID)
+	}
+
+	// ③ 冲突显式报（不 get-or-create）。
+	other := t.TempDir()
+	if _, err := s.CreateWorkspace(ctxT(), other, "B"); err != nil {
+		t.Fatalf("CreateWorkspace(B): %v", err)
+	}
+	if _, err := s.RelocateWorkspace(ctxT(), rec.ID, other); err != ErrWorkspacePathTaken {
+		t.Fatalf("改到已被占用的目录应报 ErrWorkspacePathTaken，got %v", err)
+	}
+	// 冲突之后那行**还是老路径**（失败要能回滚到"什么都没发生"）。
+	again, _, _ := s.GetWorkspace(ctxT(), rec.ID)
+	if again.Path != b {
+		t.Fatalf("冲突失败后路径不应变化，got %q", again.Path)
+	}
+}

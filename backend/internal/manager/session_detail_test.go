@@ -24,9 +24,10 @@ func interactionSvc(svc *Service) svcsession.InteractionSvc {
 	return svcsession.NewInteraction(svc.sessionPlane, svc)
 }
 
-// queueSvc 同理造一次**排队输入**用例（P4a 正文第四十二刀）。它只吃会话域平面一个事实。
+// queueSvc 同理造一次**排队输入**用例（P4a 正文第四十二刀；ADR-10 起多一个投递窄端口）。
+// 依赖事实两个：会话域平面（队列状态与事件出口）+ `svc` 自己（`DeliverQueuedNow`）。
 func queueSvc(svc *Service) svcsession.QueueSvc {
-	return svcsession.NewQueue(svc.sessionPlane)
+	return svcsession.NewQueue(svc.sessionPlane, svc)
 }
 
 // metaSvc 同理造一次**元数据写面**用例（P4a 正文第四十四刀）：域平面 + 三方法窄端口。

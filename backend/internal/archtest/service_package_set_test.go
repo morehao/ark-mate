@@ -30,6 +30,7 @@ import (
 //	svccapability 能力定义
 //	svcautomation 自动化
 //	svclibrary    库读面
+//	svccommandpolicy 命令门禁读写（O20 编辑面；规则表在域、裁决在执行面，本包只管读/校验/落盘/生效）
 //	svcsystem     系统面（`svcexport` 并入）
 //
 // 三种失效都**不会让别的测试变红**：
@@ -43,7 +44,7 @@ import (
 
 // servicePackageSet ADR-2 定下的用例层包集（**恰好**这些）。
 var servicePackageSet = []string{
-	"svcautomation", "svccapability", "svclibrary", "svcmodel",
+	"svcautomation", "svccapability", "svccommandpolicy", "svclibrary", "svcmodel",
 	"svcprovider", "svcruntime", "svcsession", "svcsystem",
 }
 

@@ -63,7 +63,7 @@ const SourceUnavailable = "unavailable"
 // Configured 与 Roots 必须分开给：面板编辑的是 Configured，而"代建根"是平台派生的、
 // 用户删不掉的那一条；只给生效名单，面板就永远无法表达"删掉这一条"。
 func (pl *Plane) Settings() *dtoworkspace.WorkspaceSettingsResp {
-	effective, configured, provisionDir := pl.PolicySnapshot()
+	effective, configured, provisionDir, createRoot := pl.PolicySnapshot()
 	store := pl.rootsStoreRef()
 	resp := &dtoworkspace.WorkspaceSettingsResp{
 		Configured:        append([]string{}, configured...),
@@ -71,6 +71,7 @@ func (pl *Plane) Settings() *dtoworkspace.WorkspaceSettingsResp {
 		PreferRoots:       len(configured) > 0,
 		ProvisionDir:      provisionDir,
 		ProvisionIncluded: len(configured) > 0 && provisionDir != "",
+		CreateRoot:        createRoot,
 		Source:            SourceUnavailable,
 	}
 	if store != nil {

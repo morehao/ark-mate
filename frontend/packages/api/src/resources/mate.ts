@@ -52,6 +52,8 @@ import type {
   ResolveElicitationResp,
   ResolvePermissionReq,
   ResolvePermissionResp,
+  CommandPolicyResp,
+  CommandPolicyRule,
   RevokeMemoryReq,
   RuntimeDiagnostics,
   Skill,
@@ -321,6 +323,40 @@ export const listQueuedInputs = (sessionId: string): Promise<QueuedInputResp[]> 
   http.get<QueuedInputResp[]>(`/mate/sessions/${encodeURIComponent(sessionId)}/inputs`)
 
 /**
+ * §6 / ADR-10：**重排**一条待投递输入（DOM insertBefore 语义，`beforeId` 缺省 = 追加到末尾）。
+ * 回**重排后的完整队列**——客户端的本地顺序靠它对齐（同 `moveWorkspace` 的手法）。
+ */
+export const moveQueuedInput = (sessionId: string, inputId: string, beforeId?: string): Promise<QueuedInputResp[]> =>
+  http.post<QueuedInputResp[]>(
+    `/mate/sessions/${encodeURIComponent(sessionId)}/inputs/${encodeURIComponent(inputId)}/move`,
+    { before_id: beforeId },
+  )
+
+/**
+ * §6 / ADR-10：**立即发送**——让这一条成为下一轮（跳过 FIFO）。
+ *
+ * 会话忙时它只是把它排到队首（当前轮结束时收尾路径会先投它）；空闲时服务端会立刻起一轮。
+ */
+export const sendQueuedInputNow = async (sessionId: string, inputId: string): Promise<void> => {
+  await http.post(
+    `/mate/sessions/${encodeURIComponent(sessionId)}/inputs/${encodeURIComponent(inputId)}/send-now`,
+    {},
+  )
+}
+
+/**
+ * §6 / ADR-10：**取出编辑**——把队项取回草稿并作废，返回正文（前端填进输入框）。
+ *
+ * 服务端会发一条 `input_cancelled{reason:'user_edit'}`；队列那一行的消失**只**由它驱动
+ * （`user_edit` 与 `user_cancel` 是两个值，界面含义不同）。
+ */
+export const popQueuedInput = (sessionId: string, inputId: string): Promise<{ text: string }> =>
+  http.post<{ text: string }>(
+    `/mate/sessions/${encodeURIComponent(sessionId)}/inputs/${encodeURIComponent(inputId)}/pop`,
+    {},
+  )
+
+/**
  * §6：撤下一条**尚未投递**的排队输入。
  *
  * 已投递/已作废是台账行、撤不动（回 `deleted:false`，幂等不报错）；真正的收敛以
@@ -516,11 +552,12 @@ export const syncModels = (runtime?: string): Promise<ModelSyncResp> =>
 
 // ——— M3 用量统计 ———
 
-/** 用量汇总（GET /usage/summary）：from/to 半开区间、group_by=day（v19 起没有 agent 维度）。 */
+/** 用量汇总（GET /usage/summary）：from/to 半开区间、group_by=day、tz_offset 决定日历日（v19 起没有 agent 维度）。 */
 export const usageSummary = (q: UsageQuery = {}): Promise<UsageSummary> => {
   const p = new URLSearchParams()
   if (q.from) p.set('from', q.from)
   if (q.to) p.set('to', q.to)
+  if (q.tz_offset != null) p.set('tz_offset', String(q.tz_offset))
   if (q.group_by) p.set('group_by', q.group_by)
   const qs = p.toString()
   return http.get<UsageSummary>(`/mate/usage/summary${qs ? `?${qs}` : ''}`)
@@ -544,9 +581,36 @@ export const listWorkspaces = (): Promise<WorkspaceListResp> =>
 export const createWorkspace = (path: string, title?: string, strict = false): Promise<Workspace> =>
   http.post<Workspace>('/mate/workspaces', { path, title, strict })
 
+/**
+ * **新建**一个工作空间（ADR-2 的 `name` 模式）：在 `create_root` 下建一个同名目录并登记，**一步**。
+ *
+ * 与 `createWorkspace(path)` 的区别不是"参数不同"，而是**用户意图不同**：这个是从零造一个目录，
+ * 那个是登记一个已经存在的目录。服务端两个都走同一条路径校验（`ValidateWorkspaceName` /
+ * `ValidateWorkspace`），所以"能新建"与"能选已有"不会分叉。
+ *
+ * 服务端错误码：名字非法 40001（`invalid_workspace_name`）、同名目录已存在 40901
+ * （`workspace_exists`，**绝不静默复用**）、未配置落盘根 40001（`workspace_create_root_unset`）。
+ */
+export const createNamedWorkspace = (name: string, title?: string): Promise<Workspace> =>
+  http.post<Workspace>('/mate/workspaces', { name, title })
+
 /** 改写展示名（**不改身份**：id 与 path 都不动）。空串 = 清空，界面按末级目录名渲染。 */
 export const renameWorkspace = (id: string, title: string): Promise<Workspace> =>
   http.patch<Workspace>(`/mate/workspaces/${encodeURIComponent(id)}`, { title })
+
+/**
+ * **改登记路径**（W4）：把这条工作空间指向另一个目录。
+ *
+ * **id 不变、既有会话一个字节都不动**——它们的 `cwd` 是执行事实（ACP cwd + 沙箱边界），
+ * transcript 也落在那个目录里。所以这个动作的语义是"以后在这个工作空间里新建的会话落在哪"，
+ * 不是"把已有的会话搬过去"。
+ *
+ * 服务端按与建会话**同一条**校验处理（绝对 / 存在 / 是目录 / 规范化）；目标目录已被另一条登记
+ * 占着 → 40901（**不**静默复用，那会让"改成功"与"那个目录已经是别人的"分不清楚）；
+ * 默认工作空间的路径不可改 → 40001（`workspace_default_immutable`）。
+ */
+export const relocateWorkspace = (id: string, path: string): Promise<Workspace> =>
+  http.patch<Workspace>(`/mate/workspaces/${encodeURIComponent(id)}`, { path })
 
 /**
  * 删除一条登记**而保留数据**：目录、文件、会话历史一概不动，其会话回到默认工作空间。
@@ -558,3 +622,19 @@ export const deleteWorkspace = (id: string): Promise<WorkspaceDeleteResp> =>
 /** 重排：`beforeId` 缺省 = 追加到尾部；返回**完整**顺序（客户端据此对齐本地顺序）。 */
 export const moveWorkspace = (id: string, beforeId?: string): Promise<WorkspaceMoveResp> =>
   http.post<WorkspaceMoveResp>(`/mate/workspaces/${encodeURIComponent(id)}/move`, { before_id: beforeId })
+
+/**
+ * 命令门禁（A2）：读当前规则（`GET /command-policy`）。
+ * `enabled=false` 表示规则文件未配置（写面会回 40001），界面据它转只读。
+ */
+export const getCommandPolicy = (): Promise<CommandPolicyResp> =>
+  http.get<CommandPolicyResp>('/mate/command-policy')
+
+/**
+ * 全量替换命令门禁规则（`PUT /command-policy`）。
+ *
+ * 服务端**先校验再落盘**：一条规则的样板断言不通过 → 整表拒绝（40001 `command_policy_invalid`），
+ * 盘上的旧规则保持原样。成功后立即生效（不需要重启）。
+ */
+export const updateCommandPolicy = (rules: CommandPolicyRule[]): Promise<CommandPolicyResp> =>
+  http.put<CommandPolicyResp>('/mate/command-policy', { rules })

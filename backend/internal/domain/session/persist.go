@@ -40,8 +40,10 @@ func (pl *Plane) persistSession(rec *SessionRec) {
 		// **钉住的指纹**（代际）：普通持久化写的就是记录里的那个值（会话一旦建立就不再重新解析），
 		// 所以这里不会"每次落库都把指纹刷成当前值"；只有 M3-6 的轮次边界迁移会显式改写它。
 		CapabilityFingerprint: rec.Fingerprint,
-		CreatedAt:             rec.CreatedAt,
-		UpdatedAt:             rec.UpdatedAt,
+		// **钉住的原生权限模式**（v29）：与指纹同一条纪律——写的是记录里的那个值，不重算。
+		NativeMode: rec.NativeMode,
+		CreatedAt:  rec.CreatedAt,
+		UpdatedAt:  rec.UpdatedAt,
 	})
 	if err != nil {
 		glog.Warnw(context.Background(), "store: upsert session failed", "session", rec.ID, "err", err)
@@ -49,7 +51,7 @@ func (pl *Plane) persistSession(rec *SessionRec) {
 }
 
 // PersistMemoryAdd 写一条权限记忆（permission_memories 表；同键覆盖，since 为授予时刻）。
-func (pl *Plane) PersistMemoryAdd(sessionID, title, kind, decision string, since time.Time) {
+func (pl *Plane) PersistMemoryAdd(sessionID, title, kind, decision, scope, grantInputDigest string, since time.Time) {
 	if pl.st == nil {
 		return
 	}
@@ -57,7 +59,8 @@ func (pl *Plane) PersistMemoryAdd(sessionID, title, kind, decision string, since
 	defer cancel()
 	if err := pl.st.AddMemory(ctx, model.PermissionMemoryEntity{
 		ID:        objid.New(objid.PermissionMemory),
-		SessionID: sessionID, Title: title, Kind: kind, Decision: decision, CreatedAt: since,
+		SessionID: sessionID, Title: title, Kind: kind, Decision: decision,
+		Scope: scope, GrantInputDigest: grantInputDigest, CreatedAt: since,
 	}); err != nil {
 		glog.Warnw(context.Background(), "store: add permission memory failed", "session", sessionID, "title", title, "err", err)
 	}
@@ -191,8 +194,11 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 	// 这不是假设——本批实现时正是这么写了一次，症状是全量测试挂死在这个 defer 上。
 	defer pl.SetRestoring(false)
 
+	// openElicitations 各会话「问了但没答」的挂起提问 id（按事件顺序增删；见下面的注入循环）。
+	openElicitations := map[string][]string{}
 	sessions, injected := 0, 0
 	interrupted := 0
+	interruptedIDs := make([]string, 0, 8)
 	ver := map[string]int64{}
 	for _, sess := range list {
 		rec := &SessionRec{
@@ -206,7 +212,11 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 			// **恢复会话钉住的指纹**：漏了这一段，重启后 rec.Fingerprint 就是空的 →
 			// 代际键退回"未声明"形态，会话悄悄换到默认能力集（正是 M3 要防的漂移）。
 			Fingerprint: sess.CapabilityFingerprint,
-			CreatedAt:   sess.CreatedAt, UpdatedAt: sess.UpdatedAt,
+			// **恢复钉住的权限模式**：漏了这段，重启后模式变空 → 该会话的暖进程键变了一维，
+			// 它会**悄悄换到一个"不注入原生权限"的进程上**（沙箱边界跟着放宽/收紧），
+			// 而界面上没有任何一行会说这件事变过。
+			NativeMode: sess.NativeMode,
+			CreatedAt:  sess.CreatedAt, UpdatedAt: sess.UpdatedAt,
 		}
 		pl.RegisterSession(rec) // restoring=true → 不重复回写 DB
 		sessions++
@@ -215,6 +225,7 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 		if rec.Status == SessionStatusInProgress {
 			pl.MarkSession(rec.ID, SessionStatusInterrupted)
 			interrupted++
+			interruptedIDs = append(interruptedIDs, rec.ID)
 		}
 	}
 
@@ -232,7 +243,31 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 			}
 			for _, ev := range evs {
 				ver[ev.SessionID]++
+				// 挂起提问的**未决**账：重启之后它们一条都活不下来（管理面在内存里），
+				// 但历史里那条 `elicitation_request` 还在——前端回放就会渲染出一张**永远
+				// 回答不了**的卡片。这里记下 id，注入结束后逐条补 `resolved{cancel,restart}`。
+				switch ev.Type {
+				case BusElicitationRequest:
+					if m, ok := DecodePayload(ev.PayloadJSON).(map[string]any); ok {
+						if id, _ := m["elicitation_id"].(string); id != "" {
+							openElicitations[ev.SessionID] = append(openElicitations[ev.SessionID], id)
+						}
+					}
+				case BusElicitationResolved:
+					if m, ok := DecodePayload(ev.PayloadJSON).(map[string]any); ok {
+						if id, _ := m["elicitation_id"].(string); id != "" {
+							openElicitations[ev.SessionID] = removeString(openElicitations[ev.SessionID], id)
+						}
+					}
+				}
 				pl.bus.PublishAt(ev.SessionID, ev.Seq, ev.ID, ev.Type, ver[ev.SessionID], DecodePayload(ev.PayloadJSON))
+				// `run.status` 的**投影**在同一次回放里重建（不再为它多扫一遍库）：重启之后
+				// `GET /sessions/:id` 的 `run` 段仍然说得出「上一轮停在哪一步」。
+				if ev.Type == BusRunStatus {
+					if m, ok := DecodePayload(ev.PayloadJSON).(map[string]any); ok {
+						pl.recordRunStatus(ev.SessionID, ev.Seq, m)
+					}
+				}
 				injected++
 				afterSession, afterSeq = ev.SessionID, ev.Seq
 			}
@@ -241,6 +276,20 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 			}
 		}
 	}
+	// 崩溃残轮的**收口**（v27 + S7 / ADR-8 的后半）：把"有 `run.started` 而无终态"的轮次补一条
+	// `run.status(interrupted)`——`runs` 行因此不再永久停在 `running`。
+	//
+	// 必须放在**事件注入之后**：这些收口事件是新铸的（落库拿到最新位次），若先发再注入，bus 的
+	// `nextSeq` 已经被它推到前面，随后逐条 `PublishAt` 回放的历史事件会被**逐个顶号**——位次是
+	// 续传游标，顶号等于把客户端的 since_seq 全部错开（而表面上一切正常）。
+	// 挂起提问的**作废**（ADR-11 / P1-d）：同上，必须排在事件注入之后（理由逐字相同）。
+	//
+	// **比参照产品弱一档（如实写）**：dsh 的 pending 跨 Host 重启仍可回答（回复作为新一轮进入）；
+	// 本仓选择「重启即作废」。理由是 elicitation 的归属（D1）只能**推断**（wire /
+	// inferred_inflight / ambiguous），跨重启保留 pending 会把一个推断出来的归属当成权威。
+	pl.cancelDanglingElicitations(openElicitations)
+	pl.closeInterruptedRuns(ctx, interruptedIDs)
+
 	// 读模型重建（v21）：迁移把 `meta.read_models_rebuild` 置成刚跑过的版本号，表示"位次口径换了、
 	// 旧读模型里的窗口列已经不可信"。此处消费它并清标记——**只有这一条路径**（见 model/enum.go）。
 	pl.rebuildStaleReadModels(ctx)
@@ -252,6 +301,42 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 	pl.staleInputsOnRestore(ctx)
 	glog.Infow(ctx, "store restored", "sessions", sessions, "events", injected)
 	return sessions, injected, nil
+}
+
+// closeInterruptedRuns 给恢复出来的崩溃残轮补一条收口事件（ADR-8 的后半：**只在恢复路径**）。
+//
+// 判据是「这一轮有 `run.started`、行却还在 running」——即日志里没有它的终态。实时路径从不调本
+// 函数：那边知道自己为什么停（主动拆除），发伪终态会污染历史、失败轮列表与重试入口
+// （`manager/run.go` 的 `intentional` 分支保留原注释，那是 ADR-8 的**前半**）。
+//
+// 收口事实带 `reason:"restart"`：界面对它说的是「上一轮因进程重启中断，可重发」，**不**说
+// 「失败」——那是底座的结论，平台只知道自己被杀了。
+func (pl *Plane) closeInterruptedRuns(ctx context.Context, sessionIDs []string) {
+	if pl.st == nil || len(sessionIDs) == 0 {
+		return
+	}
+	closed := 0
+	for _, id := range sessionIDs {
+		// 判据用 `last_seq < 0`（= 还没有收口事件）而不是「status 是 running」：
+		// 开轮行写的状态值是 `in_progress`（与 `sessions.status` 同一套词汇），而"这一轮收口了吗"
+		// 在库里的事实是 `last_seq`——`closeRunsWithTerminal` 用的也是这一支。两处必须同一支判据，
+		// 否则恢复收口的选取面与重建的选取面会悄悄分叉（一个认为有残轮、另一个认为没有）。
+		rows, err := pl.st.ListRuns(ctx, id)
+		if err != nil {
+			glog.Warnw(ctx, "restore: 读 run 行失败（该会话不补收口）", "session", id, "err", err)
+			continue
+		}
+		for _, r := range rows {
+			if r.LastSeq >= 0 {
+				continue
+			}
+			pl.PublishRunInterrupted(id, r.ID)
+			closed++
+		}
+	}
+	if closed > 0 {
+		glog.Infow(ctx, "restore: 崩溃残轮已补收口", "runs", closed, "sessions", len(sessionIDs))
+	}
 }
 
 // rebuildStaleReadModels 消费 `meta.read_models_rebuild`：有值 = 上一次迁移改动了事件位次口径，
@@ -413,4 +498,38 @@ func (pl *Plane) RuntimeValueToModelID(ctx context.Context, runtimeID string) ma
 		delete(seen, v)
 	}
 	return seen
+}
+
+// cancelDanglingElicitations 重启恢复后把「问了但没答」的挂起提问逐条作废（`reason:restart`）。
+//
+// 为什么必须有这一条：挂起提问只活在进程内存里，重启后**一条都不在了**——但历史里那条
+// `elicitation_request` 还在。前端回放会据此渲染一张卡片，而那张卡片背后已经没有任何挂起项：
+// 用户填完点提交，服务端只能回「不存在或已过期」。**看起来能点，点下去才发现不行**——这正是
+// 本仓最忌的那类静默。
+//
+// 不发事件的另一半后果更隐蔽：卡片一直挂着，用户会以为"它还在等我"。
+func (pl *Plane) cancelDanglingElicitations(open map[string][]string) {
+	if pl.bus == nil {
+		return
+	}
+	for sessionID, ids := range open {
+		for _, id := range ids {
+			pl.Publish(BusElicitationResolved, sessionID, map[string]any{
+				"session_id":     sessionID,
+				"elicitation_id": id,
+				"action":         "cancel",
+				"reason":         ElicitationReasonRestart,
+			})
+		}
+	}
+}
+
+// removeString 从切片里删掉一个值（只删第一处；不存在即原样返回）。
+func removeString(list []string, v string) []string {
+	for i, it := range list {
+		if it == v {
+			return append(list[:i:i], list[i+1:]...)
+		}
+	}
+	return list
 }

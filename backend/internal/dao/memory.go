@@ -49,6 +49,11 @@ func (d *PermissionMemoryDao) Upsert(ctx context.Context, m *model.PermissionMem
 		Columns: []clause.Column{{Name: "session_id"}, {Name: "title"}, {Name: "kind"}},
 		DoUpdates: clause.Assignments(map[string]any{
 			"decision": m.Decision,
+			// **同键覆盖时也刷新这两列**（v28）：`scope` 与授权时的入参摘要描述的是"**最近一次**
+			// 那条授权长什么样"。不刷新的话，同一 (title,kind) 被重新授权一次之后，库里记的仍是
+			// 上一次那条调用的入参——审计时会指到一次与当前授权无关的调用上。
+			"scope":              m.Scope,
+			"grant_input_digest": m.GrantInputDigest,
 			"created_at": gorm.Expr(
 				"CASE WHEN "+model.TableNamePermissionMemory+".decision = ? THEN "+model.TableNamePermissionMemory+".created_at ELSE ? END",
 				m.Decision, model.FormatTimeOrNow(m.CreatedAt)),

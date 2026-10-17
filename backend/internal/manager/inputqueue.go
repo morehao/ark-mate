@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/golib/glog"
@@ -63,4 +64,24 @@ func (o *Orchestrator) deliverQueued(as *ActiveSession) {
 		"session_id": as.ID, "runtime": as.Runtime, "input_id": q.ID,
 		"delivery": q.Delivery, "reason": ReasonRunFinished,
 	})
+}
+
+// DeliverQueuedNow 会话**空闲**时立刻投递队首排队输入（「立即发送」在空闲态的落点）。
+//
+// 三种情况都是 no-op 且**都不该报错**：
+//   - 没有执行面（离线命令 / 测试夹具）：队列只是一份状态，没有人会跑它；
+//   - 会话句柄不在活跃集合里：没有活连接就没有"现在"这一说，下次 prompt 重建句柄时
+//     队首会按正常路径投递；
+//   - 会话正忙：那一轮结束时 `executeRun` 的收尾会投队首——而此刻排队项已经被排到第一位。
+//
+// 为什么放在 Service 而不是让它自己启动一轮：投递只有**一份实现**（`deliverQueued`），
+// 多了第二份之后"谁在投递"就再也说不清，而两条路在并发下的分叉表现是重复投递或丢投递。
+func (s *Service) DeliverQueuedNow(ctx context.Context, id string) error {
+	if s.orch == nil || id == "" {
+		return nil
+	}
+	if as := s.orch.session(id); as != nil {
+		s.orch.deliverQueued(as)
+	}
+	return nil
 }

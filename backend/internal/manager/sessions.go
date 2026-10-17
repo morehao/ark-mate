@@ -103,6 +103,30 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	// 传了（哪怕 `{}`）→ 声明了：两个 kind 各自 nil（不限制）或白名单，由 DTO 的指针区分。
 	// 可达性校验在编排器内、**建连之前**做（校验不过一个副作用都不留：不建会话/不拉进程/不写库）。
 	selection := capabilitySelectionFromReq(req.Capabilities)
+	// 工作空间**默认值**（v27 / ADR-7）：请求没声明能力选定时，落到该工作空间声明的默认那一档。
+	//
+	// 合并链只有一份实现（`workspace.ResolveSessionDefaults`）：显式 > 工作空间默认 > 平台缺省。
+	// 这里只负责把"请求写了什么"与"工作空间声明了什么"交给它——**不在这里再写一遍 if**，
+	// 那是"某个入口不吃工作空间默认值"的唯一来源。
+	if selection == nil && ws.WorkspaceID != "" {
+		if def, ok := s.planner.WorkspaceDefaultsOf(ws.WorkspaceID); ok && def.CapabilityJSON != "" {
+			// `ParseCapabilitySelection` 对坏 JSON 回 nil（= 未声明）并留日志——默认值是**便利**，
+			// 不是"会话能不能建"的判据。
+			selection = ParseCapabilitySelection(def.CapabilityJSON)
+		}
+	}
+	// **原生权限模式**（v29 / P1-f 下半）：同一条合并链——请求没声明就落到该工作空间声明的默认
+	// 那一档，都没有就**不注入**（空串，刻意不物化平台缺省）。
+	//
+	// 为什么必须在**这里**定下来并落库：模式只能以进程 env（`DSH_PERMISSION_MODE`）下发
+	// （探针实测 `/permission` 命令面在 ACP 上不存在），所以两个模式不同的会话不能共用一个暖
+	// 进程；而暖进程的键要在取连接之前已知 ⇒ 模式是会话的**快照字段**，不是每次现算的推导值。
+	nativeMode := ""
+	if ws.WorkspaceID != "" {
+		if def, ok := s.planner.WorkspaceDefaultsOf(ws.WorkspaceID); ok {
+			nativeMode = def.PermissionMode
+		}
+	}
 	// 底座不由请求指定（构建期固定，见 pkg/runtime/build.go）：这里没有 runtime 参数要校验。
 	res, err := s.startSession(runCtx, StartOptions{
 		SessionID:          convID,
@@ -111,6 +135,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 		WorkspaceID:        ws.WorkspaceID,
 		Model:              runtime.ModelConfig{Model: req.Model},
 		Selection:          selection,
+		NativeMode:         nativeMode,
 		Origin:             req.Origin,
 	})
 	if err != nil {
@@ -172,4 +197,16 @@ func (s *Service) CancelRun(ctx context.Context, id string) error {
 		return code.FromError(err)
 	}
 	return nil
+}
+
+// CancelElicitations 归档时作废该会话的挂起提问（`reason:archive`，ADR-11）。
+//
+// 走 `CancelSessionReason` 而不是直接删表项：那一支会把 `cancel` 投给正在等的那一轮、
+// 再由 `RegisterAndWait` 的终局回调发 `elicitation_resolved{action:cancel, reason:archive}`
+// ——**事件是前端收敛卡片的唯一事实**，删表项不发事件等于留一张永远回答不了的卡。
+func (s *Service) CancelElicitations(sessionID string) {
+	if s.orch == nil || sessionID == "" {
+		return
+	}
+	s.orch.CancelElicitations(sessionID)
 }

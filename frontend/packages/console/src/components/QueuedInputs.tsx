@@ -1,5 +1,5 @@
 import { Button, Tooltip } from 'antd'
-import { CloseOutlined } from '@ant-design/icons'
+import { ArrowDownOutlined, ArrowUpOutlined, CloseOutlined, EditOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import type { QueuedInput } from '@ark-mate/types'
 import { deliveryLabel, queueExcerpt, queueSummary } from '../console/queueView'
@@ -8,6 +8,12 @@ interface Props {
   queue: QueuedInput[]
   /** 撤下一条队项（服务端收敛以 session.input_cancelled 事件为准）。 */
   onCancel: (inputId: string) => void
+  /** ADR-10 动作①：重排（`beforeId` 缺省 = 追加到末尾）。 */
+  onMove: (inputId: string, beforeId?: string) => void
+  /** ADR-10 动作②：立即发送（忙时排到队首，空闲时立刻起一轮）。 */
+  onSendNow: (inputId: string) => void
+  /** ADR-10 动作③：取出编辑（正文回填到待发送文案）。 */
+  onPop: (inputId: string) => void
   /** 正在撤下的队项 id（按钮转圈，避免连点）。 */
   cancelling?: string | null
 }
@@ -21,7 +27,7 @@ interface Props {
  * 内容只来自事件投影（`session.input_queued` 建项、delivered/cancelled 出队），所以没有
  * 「本地乐观项」：刷新后由历史回放重建出同一份队列。
  */
-export function QueuedInputs({ queue, onCancel, cancelling }: Props) {
+export function QueuedInputs({ queue, onCancel, onMove, onSendNow, onPop, cancelling }: Props) {
   if (queue.length === 0) return null
   return (
     <div style={{ flex: 'none', padding: '0 20px', background: tokens.bg }}>
@@ -45,7 +51,7 @@ export function QueuedInputs({ queue, onCancel, cancelling }: Props) {
             <span style={{ fontSize: 11, color: tokens.textPlaceholder, cursor: 'default' }}>尚未发出</span>
           </Tooltip>
         </div>
-        {queue.map((q) => (
+        {queue.map((q, i) => (
           <div
             key={q.inputId}
             style={{
@@ -84,6 +90,40 @@ export function QueuedInputs({ queue, onCancel, cancelling }: Props) {
               <span style={{ fontSize: 10.5, color: tokens.textPlaceholder, whiteSpace: 'nowrap' }}>
                 {deliveryLabel(q.delivery)}
               </span>
+            </Tooltip>
+            {/* ADR-10 三动作（Q4 选①：行内小图标，不藏进菜单——它们都是「我现在就想做」的动作）。
+                重排用 ↑↓ 而不是拖拽：拖拽在滚动容器里会与页面滚动抢手势，而队列最多几条。 */}
+            <Button
+              size="small"
+              type="text"
+              icon={<ArrowUpOutlined style={{ fontSize: 11 }} />}
+              disabled={i === 0}
+              onClick={() => onMove(q.inputId, queue[i - 1]?.inputId)}
+              title="上移一位"
+            />
+            <Button
+              size="small"
+              type="text"
+              icon={<ArrowDownOutlined style={{ fontSize: 11 }} />}
+              disabled={i === queue.length - 1}
+              onClick={() => onMove(q.inputId, queue[i + 2]?.inputId)}
+              title="下移一位"
+            />
+            <Tooltip title="立即发送：让它成为下一轮（当前轮仍在跑时它排到队首，等这一轮结束后先发它）">
+              <Button
+                size="small"
+                type="text"
+                icon={<ThunderboltOutlined style={{ fontSize: 11 }} />}
+                onClick={() => onSendNow(q.inputId)}
+              />
+            </Tooltip>
+            <Tooltip title="取出编辑：取回草稿并从队列撤下，改完再发">
+              <Button
+                size="small"
+                type="text"
+                icon={<EditOutlined style={{ fontSize: 11 }} />}
+                onClick={() => onPop(q.inputId)}
+              />
             </Tooltip>
             <Button
               size="small"

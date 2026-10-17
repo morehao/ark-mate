@@ -71,11 +71,11 @@ func (s *Service) PendingElicitations(id string) []interaction.ElicitationItem {
 }
 
 // ResolveElicitation 投递一次结构化提问决策（`svcsession.InteractionDelivery` 的实现）。
-func (s *Service) ResolveElicitation(sessionID, elicitationID, action string, content map[string]any) (bool, error) {
+func (s *Service) ResolveElicitation(sessionID, elicitationID, action string, content map[string]any, late bool) (bool, error) {
 	if s.orch == nil {
 		return false, acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil)
 	}
-	return s.orch.ResolveElicitation(sessionID, elicitationID, action, content)
+	return s.orch.ResolveElicitation(sessionID, elicitationID, action, content, late)
 }
 
 // PermissionMemories 直接透传编排器的会话级权限记忆（供 GetSession 复用；REST 见 ListPermissionMemories）。

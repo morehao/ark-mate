@@ -28,6 +28,8 @@ type Registry struct {
 	nativePermissions map[string]NativePermissionAdapter
 	// modelValues 第三张可执行端口表：该底座的「模型值生成」实现（见 model_value.go）。
 	modelValues map[string]ModelValueAdapter
+	// toolFailures 各 runtime 的**工具失败签名归类**（第四张可执行端口表，见 tool_failure.go）。
+	toolFailures map[string]ToolFailureClassifier
 }
 
 // NewRegistry 从一组 Spec 构建注册表（按 ID 去重，后注册覆盖）。

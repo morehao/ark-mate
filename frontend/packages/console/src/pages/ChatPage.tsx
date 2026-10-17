@@ -8,6 +8,7 @@ import { sessionHistory, sessionRuns } from '@ark-mate/api'
 import { useMate } from '../store'
 import { SessionDetailDrawer } from '../components/SessionDetail'
 import { Composer } from '../components/Composer'
+import { ConfirmArea } from '../components/ConfirmArea'
 import { QueuedInputs } from '../components/QueuedInputs'
 import { StartPanel } from '../components/StartPanel'
 import { EntryView } from '../components/Transcript'
@@ -15,6 +16,7 @@ import { anchorIndex } from '../console/searchView'
 import { titleFor } from '../console/util'
 import { fmtRunDockLine, fmtRunUsageLine, toRunUsageInfo, type RunUsageInfo } from '../console/usageView'
 import { TRANSCRIPT_WINDOW, stickToBottom, windowEntries } from '../console/transcriptView'
+import { runNarration } from '../console/runView'
 import type { DeliveryChoice } from '../console/queueView'
 
 /** 问答控制台主视图：会话侧栏 + 聊天（head / transcript / composer）+ 状态条。 */
@@ -31,6 +33,9 @@ export function ChatPage() {
   const expireHydration = useMate((s) => s.expireHydration)
   const sendPrompt = useMate((s) => s.sendPrompt)
   const cancelQueuedInput = useMate((s) => s.cancelQueuedInput)
+  const moveQueuedInput = useMate((s) => s.moveQueuedInput)
+  const sendQueuedInputNow = useMate((s) => s.sendQueuedInputNow)
+  const popQueuedInput = useMate((s) => s.popQueuedInput)
   const cancel = useMate((s) => s.cancel)
   const archiveSession = useMate((s) => s.archiveSession)
   const showToast = useMate((s) => s.showToast)
@@ -43,6 +48,8 @@ export function ChatPage() {
   const lastParamRef = useRef<string | null | undefined>(undefined)
   // 尾部窗口（P3 余留）：长会话只渲染尾部 TRANSCRIPT_WINDOW 条，更早的按需展开。
   const [revealed, setRevealed] = useState(0)
+  // 「取出编辑」塞回输入框的草稿（ADR-10 动作③）：nonce 变化即生效一次。
+  const [injectedDraft, setInjectedDraft] = useState<{ text: string; nonce: number } | null>(null)
   // 首次定位到底部：每个会话只在首次拿到条目时执行一次（切回不打扰用户阅读位置）。
   const anchoredRef = useRef<string | null>(null)
   // 「显示更早」前后的高度差补偿（保持视口停在原处）。
@@ -114,21 +121,19 @@ export function ChatPage() {
   // 挂起交互请求条数（权限确认 + 结构化提问的待决项；聊天头角标）
   const pendingPerms =
     activeId && view ? view.entries.filter((en) => (en.kind === 'permission' || en.kind === 'elicitation') && !en.resolved).length : 0
-  // 服务端忙水位：本地无流（streaming=false）但会话在服务端仍 in_progress 且本地视图没有终态条目
-  // （如刷新/重启后该 run 仍在跑或已卡住）→ 视为 busy：展示「停止」以自愈（后端 cancel 幂等解 busy）。
-  // 一旦本地已收到终态条目（tone ok/err/cancel 的 system 尾条），即使列表 status 还没刷新也不当 busy。
-  const lastSettledTone = (() => {
-    if (!view) return undefined
-    for (let i = view.entries.length - 1; i >= 0; i--) {
-      const en = view.entries[i]
-      if (en.kind === 'system') return en.tone
-      if (en.kind !== 'tool' && en.kind !== 'thought') break // 越过尾部流式/工具残留即停
-    }
-    return undefined
-  })()
-  const serverBusy =
-    activeSum?.status === 'in_progress' && !streaming && lastSettledTone !== 'ok' && lastSettledTone !== 'err' && lastSettledTone !== 'cancel'
-  const busy = streaming || serverBusy
+  // 一轮在干什么 = **服务端铸造的过程状态**（`session.run.status` 事件 → 视图投影，ADR-6）。
+  //
+  // 这里原来是一段倒推：`serverBusy = 会话 status==='in_progress' && !streaming && 本地尾条 tone
+  // 不是终态`，再据此显示「可点「停止」解除」。它的失效形态不是报错，而是**让用户去点「停止」
+  // 解除一个其实已经死掉的轮次**（刷新/重启之后本地条目与服务端 status 必然分叉，那段注释
+  // 自己就写着"如刷新/重启后该 run 仍在跑或已卡住"）。
+  //
+  // 现在的两个输入都是事实：`views[id].run`（实时事件流）与 `activeSum.run`（REST 快照）。
+  // 两处都缺 = 服务端没说过任何过程状态 → **什么都不说**，不当作忙（宁可少显示，不猜）。
+  const run = (activeId ? views[activeId]?.run : undefined) ?? activeSum?.run
+  const narration = runNarration(run)
+  const busy = streaming || narration.busy
+  const canStop = streaming || narration.canStop
   // v21：会话头标题走 `plain` 兜底——没命名、也没发过言的会话就叫「新会话」，
   // 不再拼成「新会话 · dsh」（底座信息不进对话框页面），也不摊一串 id 冒充名字。
   // 左栏那行仍走带底座/带短 id 的口径（那是浏览面，本轮不动）。
@@ -161,6 +166,18 @@ export function ChatPage() {
   const errFallbackText = activeId ? errFallback[activeId] : undefined
   const retryText = hasErrTail ? retryLocalText ?? (errFallbackText || undefined) : undefined
   const retryLast = retryText ? () => void sendPrompt(retryText) : undefined
+  // 「上一轮因进程重启中断，可重发」（Q7 选①）：重发的就是**最近一条用户输入**。
+  // 与上面的失败重试分开算——那是 `run.error` 的入口（历史/失败轮列表相关），
+  // 这是恢复收口（`run.status(interrupted)`）的入口。两者都不猜：没有用户输入就不给按钮。
+  const lastUserText = (() => {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const en = entries[i]
+      if (en.kind === 'system') break
+      if (en.kind === 'user' && typeof en.text === 'string' && en.text.trim()) return en.text
+    }
+    return null
+  })()
+  const resendable = narration.canRetry && !!lastUserText
 
   // 本地无该轮输入（部分重放/冷挂载后直接失败）时，从历史取最后一条 user_message 作为重试文本。
   useEffect(() => {
@@ -290,9 +307,14 @@ export function ChatPage() {
     if (!activeId) return null
     // 位次是会话内的、0 是合法位次（v21）："还没有事件"是 -1，所以判据是 `>= 0`。
     const seq = view?.lastSeq ?? -1
+    // 旁白优先：`narration.label` 就是"这一刻在干什么"（服务端铸造的过程状态）。
+    // 没有过程状态（历史会话 / 本轮还没开始）才回落到会话的**终态归类**——那是另一件事，
+    // 它说得出「已完成/已取消」，说不出「正在执行 Bash」。
     const metaText = streaming
       ? '进行中'
-      : `${activeSum ? statusLabel(activeSum.status) : '未知状态'}${seq >= 0 ? ` · seq ${seq}` : ''}`
+      : narration.label
+        ? `${narration.label}${seq >= 0 ? ` · seq ${seq}` : ''}`
+        : `${activeSum ? statusLabel(activeSum.status) : '未知状态'}${seq >= 0 ? ` · seq ${seq}` : ''}`
     return (
       <div
         style={{
@@ -402,17 +424,38 @@ export function ChatPage() {
               color: tokens.textSecondary,
             }}
           >
-            {streaming && (
+            {(streaming || narration.tone === 'run' || narration.tone === 'wait') && (
               <span
                 className="fg-anim-pulse"
-                style={{ width: 7, height: 7, borderRadius: '50%', background: tokens.primary, display: 'inline-block' }}
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  // 等待态用警示色：那是最需要用户看见的一档（「等待你确认授权」）。
+                  background: narration.tone === 'wait' ? tokens.warning : tokens.primary,
+                  display: 'inline-block',
+                }}
               />
             )}
-            <span style={{ color: streaming ? tokens.text : tokens.textSecondary, fontWeight: streaming ? 600 : 400 }}>{metaText}</span>
+            <span
+              style={{
+                color: narration.tone === 'wait' ? tokens.warning : streaming ? tokens.text : tokens.textSecondary,
+                fontWeight: streaming || narration.tone === 'wait' ? 600 : 400,
+              }}
+            >
+              {metaText}
+            </span>
           </span>
-          {busy && (
+          {/* 停止按钮只在**真能停**时出现：等待态（等授权/等回答）点停止等于把用户正要答的
+              那一轮扔掉，所以那一档不给按钮（原型里那一格也明确没有）。 */}
+          {canStop && (
             <Button size="small" onClick={() => void cancel()} style={{ borderRadius: 8 }}>
               停止
+            </Button>
+          )}
+          {resendable && (
+            <Button size="small" onClick={() => lastUserText && void sendPrompt(lastUserText)} style={{ borderRadius: 8 }}>
+              重发
             </Button>
           )}
         </div>
@@ -568,12 +611,24 @@ export function ChatPage() {
               </div>
               {activeId && (
                 <>
+                  {/* 确认区（S9）：输入区上方常驻；条目流里未结算的卡已不再渲染，所以这里是
+                      用户能作答的**唯一**去处。空则整块不占位。 */}
+                  <ConfirmArea entries={view?.entries ?? []} />
                   <QueuedInputs
                     queue={view?.queue ?? []}
                     cancelling={cancellingInput}
                     onCancel={(inputId) => {
                       setCancellingInput(inputId)
                       void cancelQueuedInput(inputId).finally(() => setCancellingInput(null))
+                    }}
+                    onMove={(inputId, beforeId) => void moveQueuedInput(inputId, beforeId)}
+                    onSendNow={(inputId) => void sendQueuedInputNow(inputId)}
+                    onPop={(inputId) => {
+                      // 取出编辑：正文回到输入框（**不**立刻发出去——用户是拿去改的）。
+                      void popQueuedInput(inputId).then((text) => {
+                        if (text === null) return
+                        setInjectedDraft((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }))
+                      })
                     }}
                   />
                   <Composer
@@ -584,19 +639,20 @@ export function ChatPage() {
                         : undefined
                     }
                     busyNote={
-                      streaming
-                        ? // v21：原来还缀着底座名（`run 进行中 · dsh`）——底座信息不进对话框页面，
-                          // 底栏只讲用户能感知的状态。
-                          'run 进行中'
-                        : serverBusy
-                          ? '会话在服务端仍处运行中 — 可点「停止」解除'
-                          : undefined
+                      // v21：原来还缀着底座名（`run 进行中 · dsh`）——底座信息不进对话框页面，
+                      // 底栏只讲用户能感知的状态。
+                      //
+                      // 「会话在服务端仍处运行中 — 可点「停止」解除」这句**已删**：它是倒推的产物
+                      // （`serverBusy`），而且它让用户去点「停止」解除一个其实已经死掉的轮次。
+                      // 现在要么有过程状态（头栏已经在说「正在执行 Bash」），要么什么都不说。
+                      streaming ? 'run 进行中' : narration.tone === 'wait' ? narration.label : undefined
                     }
                     placeholder={busy ? '正在回复…' : '向助手提问…（Enter 发送）'}
                     onSend={onSend}
                     // 命令发现面（ADR-17）：底座自报的斜杠命令，undefined = 该底座不提供发现面
                     // （dsh 的 ACP 面不含命令）。输入框里打 `/` 时据此给候选，平台不声明这些命令。
                     commands={view?.commands}
+                    injectDraft={injectedDraft ?? undefined}
                   />
                   {dockLine && (
                     <div

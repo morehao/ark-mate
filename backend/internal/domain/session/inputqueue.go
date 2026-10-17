@@ -33,7 +33,18 @@ const (
 	ReasonUserCancel  = "user_cancel"    // 用户显式撤下
 	ReasonDeliverFail = "deliver_failed" // 投递时启动新一轮失败（文本保留在台账行里，不静默丢弃）
 	ReasonStale       = "stale"          // 进程重启：等待的那一轮已随进程消失，统一作废
+	// ReasonUserEdit 用户把队项**取回编辑**（ADR-10 的第三个动作）：它没被投递，也不算"撤下"——
+	// 用户是拿去改内容，改完会作为**新一轮**再发一次。与 user_cancel 分开是刻意的：
+	// 两者的界面含义不同（"我不要了" vs "我要改一下"），合成一个值就只能靠猜。
+	ReasonUserEdit = "user_edit"
 )
+
+// QueuedInputReasons 队列项离队原因的**取值集**（唯一事实源）。
+//
+// 三处必须逐条相等：这里、前端 `QueuedInputReason`（`types/src/session.ts`）、以及 archtest 的
+// `TestQueuedInputReasonVocabularyIsClosed`。理由是前端**只认事件**、不做本地推断——后端多发一个
+// 前端不认的值，界面就只能把它渲染成"未知原因"或者干脆不收敛。
+var QueuedInputReasons = []string{ReasonRunFinished, ReasonUserCancel, ReasonDeliverFail, ReasonStale, ReasonUserEdit}
 
 // NormalizeDelivery 归一并校验投递模式（空 = reject，即历史行为）。
 // 非法值显式报错而不是回落 reject：投递语义是**用户的意图**，猜错等于悄悄丢输入。
@@ -199,6 +210,128 @@ func (pl *Plane) DeleteQueuedInput(ctx context.Context, convID, inputID string) 
 		}
 	}
 	return false, nil
+}
+
+// MoveQueuedInput 重排一条待投递输入（DOM insertBefore 语义）：把 `inputID` 插到 `beforeID` 之前，
+// `beforeID` 为空 = 追加到末尾（ADR-10 的第一个动作）。
+//
+// 「我看到的顺序」就是投递顺序——这是它唯一的承诺。实现复用 v22 的 `inputs.seq`
+// （会话内位次 + `UNIQUE(session_id, seq)`），整段重编号在同一事务里做（见 dao 的两阶段）。
+//
+// 不存在 / 已投递 / 已作废 → `queued_input_not_found`(40401)：队列项不是"资源集合里的元素"
+// 而是"一句话的投递状态"，改一个不存在的项没有幂等含义（那会让界面以为"我移动成功了"）。
+func (pl *Plane) MoveQueuedInput(ctx context.Context, convID, inputID, beforeID string) error {
+	list := pl.ListQueuedInputsOf(ctx, convID)
+	order := make([]string, 0, len(list))
+	found := false
+	for _, q := range list {
+		if q.ID == inputID {
+			found = true
+			continue
+		}
+		order = append(order, q.ID)
+	}
+	if !found {
+		return code.FromError(queuedInputNotFoundErr(inputID))
+	}
+	if beforeID == "" {
+		order = append(order, inputID)
+	} else {
+		at := -1
+		for i, id := range order {
+			if id == beforeID {
+				at = i
+				break
+			}
+		}
+		if at < 0 {
+			return code.FromError(acl.NewError(acl.ClassRequest, "queued_input_anchor_not_found",
+				fmt.Sprintf("锚点队项 %q 不在该会话的待投递列表里", beforeID), nil))
+		}
+		order = append(order[:at:at], append([]string{inputID}, order[at:]...)...)
+	}
+	return pl.reorderQueued(ctx, convID, order)
+}
+
+// SendNowQueuedInput 让一条待投递输入**成为下一轮**（ADR-10 的第二个动作）：把它排到队首。
+//
+// 为什么"排到队首"就是"立即发送"：本仓一轮一次、队列在**当前轮结束时**投递队首。所以"下一条
+// 投递的是它"这件事的全部含义就是它排在第一位——多写一条"现在就发"的路径只会让同一件事有
+// 两种实现（而那两种在并发下必然分叉）。会话空闲时投递由调用方立刻触发（见 `QueueSvc.SendNow`）。
+func (pl *Plane) SendNowQueuedInput(ctx context.Context, convID, inputID string) error {
+	list := pl.ListQueuedInputsOf(ctx, convID)
+	if len(list) == 0 {
+		return code.FromError(queuedInputNotFoundErr(inputID))
+	}
+	order := make([]string, 0, len(list))
+	found := false
+	for _, q := range list {
+		if q.ID == inputID {
+			found = true
+			continue
+		}
+		order = append(order, q.ID)
+	}
+	if !found {
+		return code.FromError(queuedInputNotFoundErr(inputID))
+	}
+	order = append([]string{inputID}, order...)
+	return pl.reorderQueued(ctx, convID, order)
+}
+
+// PopQueuedInputForEdit 把一条待投递输入**取回草稿并作废**（ADR-10 的第三个动作），返回正文。
+//
+// 它同时是"离队事实"的铸造点：发一条 `input_cancelled{reason: user_edit}`。不发那一行的后果与
+// 撤下时漏发一模一样——REST 说成功了、库里那行也没了，而前端的队列只认事件，那一行会一直挂着。
+func (pl *Plane) PopQueuedInputForEdit(ctx context.Context, convID, inputID string) (string, error) {
+	text := ""
+	for _, q := range pl.ListQueuedInputsOf(ctx, convID) {
+		if q.ID == inputID {
+			text = q.Text
+			break
+		}
+	}
+	ok, err := pl.DeleteQueuedInput(ctx, convID, inputID)
+	if err != nil {
+		return "", code.FromError(err)
+	}
+	if !ok {
+		return "", code.FromError(queuedInputNotFoundErr(inputID))
+	}
+	pl.Publish(BusInputCancelled, convID, map[string]any{
+		"session_id": convID, "input_id": inputID, "reason": ReasonUserEdit,
+	})
+	return text, nil
+}
+
+// reorderQueued 落盘重排（store / 内存两实现共用一处入口）。
+func (pl *Plane) reorderQueued(ctx context.Context, convID string, order []string) error {
+	if pl.st != nil {
+		if err := pl.st.ReorderQueuedInputs(ctx, convID, order); err != nil {
+			return err
+		}
+		return nil
+	}
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	byID := make(map[string]QueuedInput, len(pl.inputs[convID]))
+	for _, q := range pl.inputs[convID] {
+		byID[q.ID] = q
+	}
+	out := make([]QueuedInput, 0, len(order))
+	for _, id := range order {
+		if q, ok := byID[id]; ok {
+			out = append(out, q)
+		}
+	}
+	pl.inputs[convID] = out
+	return nil
+}
+
+// queuedInputNotFoundErr 队项不在该会话的待投递集里（唯一出口：40401）。
+func queuedInputNotFoundErr(inputID string) error {
+	return acl.NewError(acl.ClassRequest, "queued_input_not_found",
+		fmt.Sprintf("待投递输入 %q 不存在或已不在队列里", inputID), nil)
 }
 
 // StaleQueuedInputsOnRestore 启动恢复：把全库待投递输入置作废——等待的那一轮已随进程消失，

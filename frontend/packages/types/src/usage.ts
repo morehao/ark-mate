@@ -5,7 +5,15 @@ export interface UsageQuery {
   from?: string
   to?: string
   /**
-   * 分组维度：只有 day（UTC 日期，key = `YYYY-MM-DD`）。
+   * 客户端相对 UTC 的偏移分钟数（东为正，`-new Date().getTimezoneOffset()`；缺省 0/UTC）。
+   *
+   * 日期形式的 `from`/`to` 与 day 桶的键都按它解释：日期是**用户日历上的**那一天，
+   * 不是 UTC 的那一天。不传它 = 按 UTC 分桶——UTC+8 的用户会看到每天 00:00–08:00 的
+   * 轮次算进前一天，而界面上一句话都不会说。
+   */
+  tz_offset?: number
+  /**
+   * 分组维度：只有 day（键 = `YYYY-MM-DD`，日期属于 `tz_offset` 时区）。
    *
    * v19 起没有 agent 分组（连同 `?agent_id=` 过滤一起撤掉）：底座由构建期固定，
    * 按它分组只会得到"一个桶装着全部"——那不是分组，是给同一个答案多画一列。
@@ -44,6 +52,8 @@ export interface UsageSummary {
   to?: string
   runtime_id?: string
   group_by: string
+  /** 生效的客户端时区偏移分钟数（东为正；0 = UTC）。day 桶与日期参数按它解释。 */
+  tz_offset?: number
   /** sqlite | memory（memory 模式无统计）。 */
   source: string
   /** 上下文口径：`end_of_window_snapshot_sum`（区间末快照，非增量）。 */

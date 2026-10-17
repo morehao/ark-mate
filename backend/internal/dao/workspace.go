@@ -83,6 +83,32 @@ func (d *WorkspaceDao) UpdateTitle(ctx context.Context, id, title string) error 
 		Updates(map[string]any{"title": title, "updated_at": model.NowTS()}).Error
 }
 
+// SetDefaults 改写某行的两个**默认值**（v27；`”` = 清掉该档）。
+//
+// **只动 workspaces 一行**：既有会话的快照不许被连带改写（理由见 store.SetWorkspaceDefaults）。
+func (d *WorkspaceDao) SetDefaults(ctx context.Context, id, capabilityJSON, permissionMode string) (bool, error) {
+	res := d.DB(ctx).Model(&model.WorkspaceEntity{}).Where("id = ?", id).
+		Updates(map[string]any{
+			"default_capability_json": capabilityJSON,
+			"default_permission_mode": permissionMode,
+			"updated_at":              model.NowTS(),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
+// SetPath 改写某行的登记路径（W4；**id 不变**）。
+//
+// 只写 `path` 与 `updated_at` 两列：改登记路径改的是"这个工作空间指向哪个目录"，
+// 不是它的身份。顺带改 id 会让该工作空间下的会话归属悬空，而那种悬空在界面上表现为
+// 「会话跑到别的分组里去了」。
+func (d *WorkspaceDao) SetPath(ctx context.Context, id, path string) error {
+	return d.DB(ctx).Model(&model.WorkspaceEntity{}).Where("id = ?", id).
+		Updates(map[string]any{"path": path, "updated_at": model.NowTS()}).Error
+}
+
 // SetOrder 直接设定某行的顺序（重排的原子动作在 store 层，见那里的对账）。
 func (d *WorkspaceDao) SetOrder(ctx context.Context, id string, order int64) error {
 	return d.DB(ctx).Model(&model.WorkspaceEntity{}).Where("id = ?", id).

@@ -38,6 +38,9 @@ type ActiveSession struct {
 	// Fingerprint 该会话钉住的能力指纹（代际）。空 = 未声明能力选择。恢复路径据此回到**同一代际**
 	// （漏了它就会在重启后悄悄换一套能力集）。
 	Fingerprint string
+	// NativeMode 该会话钉住的原生权限模式（v29）。它是**暖进程键的一维**：模式只能以进程 env
+	// 下发，所以两个模式不同的会话不能共用一个暖进程（见 `runtimeconn.Pool.KeyFor`）。
+	NativeMode string
 
 	client *acl.Client
 	sess   acpSession
@@ -123,6 +126,16 @@ type Orchestrator struct {
 	// handoffMaxChars bounded handoff memo 字符预算（§5.6/§18 D-3；见 SetHandoffMaxChars /
 	// MATE_HANDOFF_MAX_CHARS）。0 = 关闭 memo 兜底。
 	handoffMaxChars int
+
+	// commandPolicy 命令门禁规则表（A2；`domain/interaction/command_policy.go`）。
+	// 空 = 未启用：`GateCommand` 返回 isShell=false，行为与改前逐字相同。
+	commandPolicy []interaction.PrefixRule
+
+	// toolMu/toolCalls 按 toolCallId 记住工具调用详情（见 tool_calls.go 的完整理由）：
+	// dsh 的权限请求只带 toolCallId，命令行在同 id 的 tool_call 更新里。
+	toolMu    sync.Mutex
+	toolCalls map[string]acl.ToolCallInfo
+	toolOrder []string
 }
 
 // RunOptions 一次 RunOnce（demo）的入参。
@@ -168,6 +181,12 @@ type StartOptions struct {
 	// 现算（`capabilityFingerprint`）。两者分开传的后果是"指纹按 A 算、注入按 B 做"，
 	// 而那种分裂不会报错——只会让会话拿到与代际台账不符的能力集，且只在重启后显现。
 	Selection *CapabilitySelection
+	// NativeMode 会话**钉住**的原生权限模式（v29；'' = 不注入）。
+	//
+	// 它同时是**暖进程键的一维**：模式只能以进程 env 下发，两个模式不同的会话不能共用一个
+	// 暖进程（见 `runtimeconn.Pool.KeyFor`）。合并链在 `manager/sessions.go` 建会话处一次性
+	// 解析（显式 > 工作空间默认 > 平台缺省），这里只负责把它带下去。
+	NativeMode string
 }
 
 // RunResult 一次 RunOnce（demo）的结果。
@@ -190,6 +209,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		elic:            interaction.NewElicitationManager(interaction.DefaultElicitationTimeout),
 		usage:           make(map[string]objusage.UsageInfo),
 		handoffMaxChars: DefaultHandoffMaxChars,
+		toolCalls:       make(map[string]acl.ToolCallInfo),
 	}
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
 	// （session.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。
@@ -213,11 +233,13 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	o.perm.SetMemoryHooks(o.svc.persistMemoryAdd, o.svc.persistMemoryDel, o.svc.persistMemoryDelAll)
 	// 挂起提问一旦有终局（accept/decline/cancel/超时自动取消/会话取消），发布收敛事件
 	// （session.elicitation_resolved），前端据此收敛提问卡——服务端事件是唯一事实。
-	o.elic.SetOnResolved(func(sessionID, id, reason string, d acl.ElicitationOutcome) {
+	// `action` 由域给出，**不是**回给底座的那个 outcome：超时那一支要发 `pending`（卡片保留可答），
+	// 而回给底座的仍是 `cancel`（那一轮的 ACP 调用必须有人应答）。这个不对称是 ADR-11 的核心。
+	o.elic.SetOnResolved(func(sessionID, id, action, reason string) {
 		o.svc.publish(session.BusElicitationResolved, sessionID, map[string]any{
 			"session_id":     sessionID,
 			"elicitation_id": id,
-			"action":         d.Action,
+			"action":         action,
 			"reason":         reason,
 		})
 	})
@@ -237,8 +259,11 @@ func (o *Orchestrator) RestoreMemoriesFromStore(ctx context.Context) error {
 	}
 	items := make([]interaction.MemoryItem, 0, len(rows))
 	for _, r := range rows {
+		// 恢复时把**授权形态**一并带回来（v28）：不带就等于重启后丢掉了"当初那句话是在哪次
+		// 具体调用上说的"。旧库里两列是默认值（`session` / 空串），所以老数据天然兼容。
 		items = append(items, interaction.NewMemoryItem(
-			r.SessionID, r.Title, r.Kind, r.Decision, r.CreatedAt))
+			r.SessionID, r.Title, r.Kind, r.Decision, r.CreatedAt).
+			WithGrantShape(r.Scope, r.GrantInputDigest))
 	}
 	o.perm.LoadMemories(items)
 	glog.Infow(ctx, "permission memories restored", "count", len(items))
@@ -253,6 +278,10 @@ func (o *Orchestrator) SetElicitationTimeout(d time.Duration) { o.elic.SetTimeou
 
 // SetRunTimeout 设置单轮 run 看门狗超时（0 = 关闭）。见 watchdogRun。
 func (o *Orchestrator) SetRunTimeout(d time.Duration) { o.runTimeout = d }
+
+// SetCommandPolicy 装配期登记命令门禁规则（nil = 未启用）。规则表由 app 从
+// `<MATE_HOME>/command_policy.json` 加载并**加载期校验**；这里只持有，不再校验。
+func (o *Orchestrator) SetCommandPolicy(rules []interaction.PrefixRule) { o.commandPolicy = rules }
 
 // SetHandoffMaxChars 设置 bounded handoff memo 字符预算（0 = 关闭 memo 兜底）。见 ensureSession。
 func (o *Orchestrator) SetHandoffMaxChars(n int) { o.handoffMaxChars = n }

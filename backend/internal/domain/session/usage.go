@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
@@ -18,6 +19,9 @@ import (
 //   - 计数/时长 = 区间内 run 行聚合；上下文/费用 = 每会话最近一次上报的**快照**（不累加历史）；
 //   - 无底座上报（usage_json 为空）→ usage_reported=0，上下文/费用为零值，不估算；
 //   - 内存模式（无 store）无 runs 读模型 → 明确 40501 usage_stats_unsupported（不返回假零值）。
+//
+// 时区：日期参数与 day 桶键都按**客户端时区**解释（`?tz_offset=`，东为正的分钟数；缺省 0/UTC）。
+// 界面给的是用户日历上的日期，按 UTC 解释会让每天 00:00–08:00（UTC+8）的轮次算进前一天。
 //
 // v19：随 agent 概念整体取消，本面没有 agent 维度——`?agent_id=` 显式拒绝、分组只有 day。
 
@@ -35,12 +39,16 @@ func (pl *Plane) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*d
 		return nil, code.FromError(acl.NewError(acl.ClassUnsupported, "usage_stats_unsupported",
 			"[usage_stats_unsupported] 内存模式（未启用 store）无 runs 读模型，用量统计不可用（请以 sqlite 模式启动）", nil))
 	}
-	from, err := parseUsageTime(q.From)
+	tz, loc, err := parseUsageZone(q.TZOffset)
+	if err != nil {
+		return nil, code.FromError(err)
+	}
+	from, err := parseUsageTime(q.From, loc)
 	if err != nil {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_usage_range",
 			fmt.Sprintf("[invalid_usage_range] from 需为 RFC3339 或 YYYY-MM-DD：%q", q.From), nil))
 	}
-	to, err := parseUsageTime(q.To)
+	to, err := parseUsageTime(q.To, loc)
 	if err != nil {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_usage_range",
 			fmt.Sprintf("[invalid_usage_range] to 需为 RFC3339 或 YYYY-MM-DD：%q", q.To), nil))
@@ -64,13 +72,14 @@ func (pl *Plane) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*d
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_usage_group_by",
 			fmt.Sprintf("[invalid_usage_group_by] group_by 仅支持 day：%q", q.GroupBy), nil))
 	}
-	res, err := pl.st.UsageSummary(ctx, store.UsageQuery{From: from, To: to})
+	res, err := pl.st.UsageSummary(ctx, store.UsageQuery{From: from, To: to, Location: loc})
 	if err != nil {
 		return nil, code.FromError(acl.NewError(acl.ClassService, "usage_query_failed",
 			fmt.Sprintf("[usage_query_failed] 用量聚合失败: %v", err), err))
 	}
 	out := &dtousage.UsageSummaryResp{
 		GroupBy:          groupBy,
+		TZOffset:         tz,
 		Source:           "sqlite",
 		ContextSemantics: usageContextSemantics,
 		CostSemantics:    usageCostSemantics,
@@ -102,14 +111,39 @@ func toUsageBucketResp(b store.UsageBucket) dtousage.UsageBucketResp {
 	}
 }
 
-// parseUsageTime 解析统计时间参数：空 = 零值（不限）；YYYY-MM-DD = 该日 00:00 UTC；
-// 其他 = RFC3339。日期形式让 `to=2026-09-09` 覆盖当天（半开区间语义自然成立）。
-func parseUsageTime(v string) (time.Time, error) {
+// parseUsageZone 解析客户端时区偏移（分钟，东为正）：空 = 0/UTC；越界（±14h 之外）或非整数
+// → 40001 `invalid_usage_tz_offset`（显式拒绝，不静默按 UTC 处理——那正好是这条要修的偏差）。
+func parseUsageZone(v string) (int, *time.Location, error) {
+	if v == "" {
+		return 0, time.UTC, nil
+	}
+	off, err := strconv.Atoi(v)
+	if err != nil || off < -14*60 || off > 14*60 {
+		return 0, nil, acl.NewError(acl.ClassRequest, "invalid_usage_tz_offset",
+			fmt.Sprintf("[invalid_usage_tz_offset] tz_offset 需为 -840..840 的整数分钟（东为正）：%q", v), nil)
+	}
+	if off == 0 {
+		return 0, time.UTC, nil
+	}
+	// FixedZone 的名字进不了对外载荷（响应只回数字），它只用于把瞬时投影到用户本地日历。
+	return off, time.FixedZone("client", off*60), nil
+}
+
+// parseUsageTime 解析统计时间参数：空 = 零值（不限）；YYYY-MM-DD = **用户时区**该日 00:00；
+// 其他 = RFC3339（自带偏移，按它自己的瞬时解析）。
+//
+// 日期形式必须按客户端时区解释：界面给的是用户日历上的「9 月 1 日」，不是 UTC 的 9 月 1 日。
+// 按 UTC 解释的后果是整段区间偏移 8 小时（UTC+8）、日桶边界错位——数字看起来"少了一点"，
+// 界面上没有任何一行会说它错在哪。
+func parseUsageTime(v string, loc *time.Location) (time.Time, error) {
 	if v == "" {
 		return time.Time{}, nil
 	}
-	if t, err := time.Parse("2006-01-02", v); err == nil {
-		return t.UTC(), nil
+	if loc == nil {
+		loc = time.UTC
+	}
+	if t, err := time.ParseInLocation("2006-01-02", v, loc); err == nil {
+		return t, nil
 	}
 	return time.Parse(time.RFC3339, v)
 }

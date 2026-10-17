@@ -428,3 +428,64 @@ func TestFrontendUiScanRootsCoverAllUi(t *testing.T) {
 	}
 	t.Logf("界面文件覆盖检查：%d 个文件全部落在 %d 个声明根内", len(checked), len(declared))
 }
+
+// TestNoClientSideRunInference 守卫 11（S2 / ADR-6）：忙态**只许读服务端铸造的过程状态**。
+//
+// 被取代的那套写法长这样（`ChatPage.tsx` 的原文，2026-10-16 基线）：
+//
+//	serverBusy = 会话 status === 'in_progress' && !streaming && 本地尾条 tone 不是终态
+//	→ 头栏显示「会话在服务端仍处运行中 — 可点「停止」解除」
+//
+// 它的两个输入分属不同层（服务端会话列 + 前端本地条目），**刷新/重连后必然分叉**，而分叉的
+// 表现是**让用户去点「停止」解除一个其实已经死掉的轮次**。今天这两个输入都换成了事实：
+// `session.run.status` 事件（实时）与 `GET /sessions` 行的 `run` 段（快照）。
+//
+// 为什么需要机器判据：删掉那两行不会让任何测试变红（前端没有测试框架），而下一个人补一个
+// "看起来更稳"的兜底太容易了——它会在所有正常路径上工作，只在**服务端刚崩过**那条路上骗人，
+// 而那正是用户唯一需要它说真话的时刻。
+//
+// 判据四段，都 fail-closed：
+//  1. 旁白函数必须真的在（`console/runView.ts` 的 `runNarration`）——它是**唯一**的旁白出处；
+//  2. 界面源码里 `serverBusy` / `lastSettledTone` **零命中**（先剥注释：解释这段历史的注释里
+//     就有这两个词，不剥会把"记着为什么删"当成"还没删"）；
+//  3. `expireHydration` 不得再作为忙态兜底——判据是"同一行里既出现它又出现 busy"；
+//  4. ChatPage 必须真的用上旁白，且**不得**再出现 `status === 'in_progress'` 这类按会话终态
+//     归类推过程的写法（`statusLabel` 里那个 `in_progress: '进行中'` 是**展示映射**，不误伤）。
+func TestNoClientSideRunInference(t *testing.T) {
+	root := frontendRoot(t)
+	narrationPath := filepath.Join(root, "packages", "console", "src", "console", "runView.ts")
+	narration := stripTSComments(readFileOrFatal(t, narrationPath))
+	if !strings.Contains(narration, "export function runNarration(") {
+		t.Fatalf("%s 里找不到 `export function runNarration(`：旁白的唯一出处不见了。"+
+			"本守卫的判据挂在它身上，失锚等于空转（头栏与侧栏各写一份 switch 就会立刻分叉）", narrationPath)
+	}
+
+	for _, p := range listUISources(t) {
+		body := stripTSComments(readFileOrFatal(t, p))
+		for _, banned := range []string{"serverBusy", "lastSettledTone"} {
+			if strings.Contains(body, banned) {
+				t.Errorf("%s 里又出现了 %q：忙态的唯一事实是服务端铸造的 `run.status`。"+
+					"从前端本地条目 + 会话 status 倒推的写法，会在刷新/重连后让用户去点「停止」"+
+					"解除一个已经死掉的轮次（而那正是它当初被删掉的原因）", p, banned)
+			}
+		}
+		for _, line := range strings.Split(body, "\n") {
+			if strings.Contains(line, "expireHydration") && strings.Contains(line, "busy") {
+				t.Errorf("%s 的同一行里既出现 `expireHydration` 又出现 `busy`：\n\t%s\n"+
+					" hydration 超时是**加载态**的保险丝（12s），它不知道服务端在不在跑；"+
+					"拿它当忙态兜底等于把「连不上」当成「在跑」", p, strings.TrimSpace(line))
+			}
+		}
+	}
+
+	chatPath := filepath.Join(root, "packages", "console", "src", "pages", "ChatPage.tsx")
+	chat := stripTSComments(readFileOrFatal(t, chatPath))
+	if !strings.Contains(chat, "runNarration(") {
+		t.Fatalf("%s 里没有调用 `runNarration(`：头栏与侧栏必须读同一份旁白", chatPath)
+	}
+	if strings.Contains(chat, "status === 'in_progress'") {
+		t.Fatalf("%s 里又出现了 `status === 'in_progress'`：会话的终态归类（进行中/已完成/已取消）"+
+			"**不是**过程状态——它区分不出「在流式」与「在等授权」，也只能表达最后一轮。"+
+			"过程一律读 `run`（`runNarration`）", chatPath)
+	}
+}

@@ -32,7 +32,7 @@
 | --- | --- | --- |
 | `SessionsPersistent` | `true` | `session/new` 即持久；disconnect/close 走同一 quiescent teardown，结束后仍可 list/resume（**「断连即失效」不成立**；断连时进行中的 run 被取消） |
 | `MultiSessionConcurrent` | `true` | 同一连接可并行多会话 |
-| `Images` | `false` | **保守基线，不是门禁**（ADR-14）：真值取决于附件仓是否可用与**当前路由**的 `models[].input` 是否含 image。拿它当门禁，用户会在一个其实能收图的 dsh 上被告知「不支持」 |
+| `Images` | `false` | **保守基线，不是门禁**：真值取决于附件仓是否可用与**当前路由**的 `models[].input` 是否含 image。拿它当门禁，用户会在一个其实能收图的 dsh 上被告知「不支持」 |
 | `EmbeddedContext` | `false` | 同上，以连接期探测为准 |
 
 `Caps` 的**消费者是零**：唯一旧出口 `/runtimes` 已随决策 v18 删除，「能不能收图」一律走连接期事实

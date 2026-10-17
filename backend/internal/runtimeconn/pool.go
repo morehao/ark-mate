@@ -61,6 +61,8 @@ type Pool struct {
 	env    ProviderEnvSource
 	digest ConfigDigestSource
 	sink   DropSink
+	// native 原生权限/沙箱 env 的来源（nil = 不注入、基础键无这一维）。
+	native NativeEnvSource
 
 	mu              sync.Mutex
 	conns           map[string]*Conn
@@ -75,6 +77,9 @@ func NewPool(bind *Plane) *Pool {
 
 // SetProviderEnvSource 装配期登记子进程 env 的来源（nil = 不注入、基础键无 env 维度）。
 func (pl *Pool) SetProviderEnvSource(src ProviderEnvSource) { pl.env = src }
+
+// SetNativeEnvSource 装配期登记原生权限/沙箱 env 的来源（nil = 不注入、基础键无这一维）。
+func (pl *Pool) SetNativeEnvSource(src NativeEnvSource) { pl.native = src }
 
 // SetConfigDigestSource 装配期登记模型清单指纹的来源（nil = 代际键不含该维度）。
 func (pl *Pool) SetConfigDigestSource(src ConfigDigestSource) { pl.digest = src }
@@ -97,7 +102,7 @@ type KeyInputs struct {
 //
 // 这是**取键点的唯一实现**：基础键的 env 维度、代际维度的两个指纹都在这里拼进去。
 // 键怎么构造、怎么匹配只在这个文件里说话（`TestConnectionKeysLiveInRuntimeconn` 钉着）。
-func (pl *Pool) KeyFor(spec runtime.Spec, fingerprint string) KeyInputs {
+func (pl *Pool) KeyFor(spec runtime.Spec, fingerprint, nativeMode string) KeyInputs {
 	var env []string
 	if pl.env != nil {
 		env = pl.env.ProviderEnv(spec.ID)
@@ -106,10 +111,22 @@ func (pl *Pool) KeyFor(spec runtime.Spec, fingerprint string) KeyInputs {
 	if pl.digest != nil {
 		digest = pl.digest.ConfigDigest(spec.ID)
 	}
-	base := ConnKey(spec.ID, env)
+	// **第三个 env 组：原生权限/沙箱**（P1-f 下半）。
+	//
+	// 为什么它是**基础键**的一维而不是代际维：模式和代际是两件不同的事——代际回答"能力集是不是
+	// 同一套"，模式回答"这个进程的沙箱边界在哪"。两者混进同一个维度会让"改了能力选择"看起来
+	// 也换了模式（诊断时读不出来到底是哪一维变了）。
+	//
+	// 为什么它必须进键：模式只能以**进程 env**（`DSH_PERMISSION_MODE`）下发（探针实测
+	// `/permission` 命令面在 ACP 上不存在），所以一个进程只能有一个模式。不进键的表现不是报错，
+	// 是**后建的会话悄悄跑在先进那个进程的模式里**——用户以为选了只读，实际是完全访问。
+	nativeEnv, _ := pl.nativeEnvFor(spec.ID, nativeMode)
+	base := ConnKey(spec.ID, env, nativeEnv)
 	return KeyInputs{
-		BaseKey:      base,
-		Env:          env,
+		BaseKey: base,
+		// **注入的就是算键用的那一份**（同一次取值）：分开取会得到"键说共享、env 却是另一套"
+		// 的静默分叉——那正是 `ProviderEnvSource` 注释里那条纪律，这里逐字适用。
+		Env:          append(append([]string{}, env...), nativeEnv...),
 		ConfigDigest: digest,
 		Key:          GenerationKey(base, fingerprint, digest),
 	}
@@ -297,4 +314,22 @@ func (pl *Pool) CloseAll() {
 			_ = c.Client.Close() // watch 收尾（Drop 幂等）
 		}
 	}
+}
+
+// NativeEnvSource 原生权限/沙箱 env 的来源（adapter 拥有措辞，这里只要结果）。
+//
+// 签名只用基础类型：实现在 `internal/manager`，这一层不该认识 runtime 根包的类型细节
+// （`NativePermissionAdapter.Env` 的两个额外参数由实现侧补齐）。
+type NativeEnvSource interface {
+	// NativePermissionEnv 该 runtime 在给定原生模式下的进程 env（空模式/未知 → nil）。
+	// desc 是人类可读说明（日志与诊断用；**不注入也要给**，否则"我设了策略却没反应"只能靠猜）。
+	NativePermissionEnv(runtimeID, mode string) (env []string, desc string)
+}
+
+// nativeEnvFor 取该模式的 env（无来源 → 空）。**只做转发**，判据都在实现侧。
+func (pl *Pool) nativeEnvFor(runtimeID, mode string) ([]string, string) {
+	if pl.native == nil {
+		return nil, ""
+	}
+	return pl.native.NativePermissionEnv(runtimeID, mode)
 }

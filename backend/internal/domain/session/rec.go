@@ -51,6 +51,12 @@ type SessionRec struct {
 	// 恢复路径据此回到同一代际。M3-1 起落库列 `capability_fingerprint`（v7），
 	// RestoreFromStore 原样读回——否则重启后指纹变空、会话悄悄换到默认能力集。
 	Fingerprint string
+	// NativeMode 会话**钉住**的原生权限模式（v29；'' = 不注入原生权限配置）。
+	//
+	// 与 Fingerprint 同款的**快照**语义：建会话时按「显式 > 工作空间默认 > 平台缺省」解析一次
+	// 就钉住。它同时是**暖进程键的一维**——模式只能以进程 env（`DSH_PERMISSION_MODE`）下发，
+	// 所以两个模式不同的会话不能共用同一个暖进程（见 `runtimeconn.Pool.KeyFor`）。
+	NativeMode string
 	// Origin 会话来源（'' = 人工；'automation:<id>' = 该 automation 触发产生）。M4 写入，M3 只落列。
 	Origin string
 	// CapabilityJSON 创建时解析出的**能力选定明细**（JSON；'' = 未声明 → 全量按 runtime 过滤）。

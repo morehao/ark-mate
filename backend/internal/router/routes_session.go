@@ -33,6 +33,13 @@ func registerSession(v1 *gin.RouterGroup, ports Ports) {
 	// §6 busy input 队列：列出待投递项（冷挂载重建）+ 撤下一条（投递走 POST prompt 的 delivery）。
 	v1.GET("/sessions/:id/inputs", ctr.QueuedInputs)
 	v1.DELETE("/sessions/:id/inputs/:input_id", ctr.DeleteQueuedInput)
+	// 队列三动作（ADR-10）：重排 / 立即发送 / 取出编辑。
+	//
+	// 三条都是**参数路径下的固定字面量**，与上面那条 DELETE 同级——它们必须留在
+	// `:input_id` **之后**注册：提到前面会让 `/inputs/move` 被当成 input_id="move" 打到撤下上。
+	v1.POST("/sessions/:id/inputs/:input_id/move", ctr.MoveQueuedInput)
+	v1.POST("/sessions/:id/inputs/:input_id/send-now", ctr.SendNowQueuedInput)
+	v1.POST("/sessions/:id/inputs/:input_id/pop", ctr.PopQueuedInput)
 	v1.GET("/sessions/:id/permissions", ctr.Permissions)
 	v1.POST("/sessions/:id/permission", ctr.ResolvePermission)
 	// 会话级权限记忆（allow/reject 双侧，P0 起对称语义）。

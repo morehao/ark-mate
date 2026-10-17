@@ -44,7 +44,7 @@ func (d *RunDao) WithTx(tx *gorm.DB) *RunDao {
 	return &RunDao{Dao: d.Dao.WithTx(tx)}
 }
 
-// CreateIfAbsent 插入一条 run（**开轮**落行：status=running、first_seq 必填、last_seq=-1）。
+// CreateIfAbsent 插入一条 run（**开轮**落行：status=in_progress、first_seq 必填、last_seq=-1）。
 //
 // 幂等：`ON CONFLICT DO NOTHING` 覆盖**两个**唯一键——同 `id`（重放同一轮）与同
 // `(session_id, first_seq)`（v22 的 `idx_runs_session_first_seq`）。后者才是真正的幂等键：
@@ -67,15 +67,16 @@ func (d *RunDao) GetByID(ctx context.Context, id string) (model.RunEntity, bool,
 	return r, true, nil
 }
 
-// RunningRows 取某会话**进行中**的行（first_seq 降序；最多两条）。
+// RunningRows 取某会话**进行中**的行（`status = in_progress`，与 `OpenRun` 写入的
+// `SessionStatusInProgress` 同源；first_seq 降序；最多两条）。
 //
 // 只给终态物化的兜底路径用：终态载荷缺 `run_id`（或那个 id 不在库）时，本轮的开轮行只能按
-// "该会话那条 running"找。**刻意返回一页而不是一条**：同一会话里多于一条 running 行意味着
+// "该会话那条 in_progress"找。**刻意返回一页而不是一条**：同一会话里多于一条 in_progress 行意味着
 // 崩溃留下的残轮（那时"最近一条"只是猜测），调用方要能看见"不唯一"并选择不猜。
 func (d *RunDao) RunningRows(ctx context.Context, sessionID string) (model.RunEntityList, error) {
 	var rows model.RunEntityList
 	err := d.DB(ctx).Model(&model.RunEntity{}).
-		Where("session_id = ? AND status = ?", sessionID, "running").
+		Where("session_id = ? AND status = ?", sessionID, "in_progress").
 		Order("first_seq DESC").Limit(2).Find(&rows).Error
 	return rows, err
 }

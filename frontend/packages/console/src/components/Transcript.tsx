@@ -55,7 +55,7 @@ function decisionFor(opt: PermissionOption): PermissionDecision {
 }
 
 /** 权限确认卡（ACP session/request_permission → 用户点选经 REST 回传）。 */
-function PermissionCard({ e }: { e: StreamEntry }) {
+export function PermissionCard({ e }: { e: StreamEntry }) {
   const respond = useMate((s) => s.respondPermission)
   const options = e.optionKinds ?? []
   const resolved = e.resolved ?? false
@@ -97,6 +97,14 @@ function PermissionCard({ e }: { e: StreamEntry }) {
             {e.toolCallId && <span>{e.toolCallId}</span>}
           </span>
         </div>
+        {/* 超时转 pending（ADR-11）：**卡片留着**，只多一句"仍可回答"。这一档的全部意义就是
+            用户去倒杯水回来还能答——把它画成"已收尾"等于把那一档删掉。 */}
+        {e.pendingLate && !resolved && (
+          <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>
+            这一轮已经不等了，但问题仍然可以回答；回答会作为新一轮发出去。
+          </span>
+        )}
+
         {resolved ? (
           <span
             style={{
@@ -193,8 +201,29 @@ function summarizeContent(schema: StreamEntry['schema'], content?: Record<string
   return entries.join('；')
 }
 
+/**
+ * 工具失败原因的**用户可读文案**（S4 / 原型场景 E）。
+ *
+ * 两种原因的处置**相反**，文案也必须分开：
+ *
+ *	`sandbox_denied`        被沙箱边界拒了 → 可以引导换一个允许写的位置/模式（再试**有用**）
+ *	`sandbox_unavailable`   宿主没有可用的沙箱后端 → 再试一次也一样失败（引导升权是**错的**）
+ *
+ * 未知值按"出了点什么"如实说，不猜成其中任何一种——猜错的那一半会让用户照着一条错的引导去修。
+ */
+function toolFailReasonLabel(reason: string): string {
+  switch (reason) {
+    case 'sandbox_denied':
+      return '这一步被工作空间的写入边界挡下了：换一个允许写入的位置，或改用允许修改的模式再试。'
+    case 'sandbox_unavailable':
+      return '这台机器上没有可用的沙箱后端，所以这一步没能执行——重试不会改变结果，需要先装好沙箱依赖。'
+    default:
+      return '这一步没有成功（原因见上方输出）。'
+  }
+}
+
 /** 结构化提问卡（ACP elicitation/create → schema 渲染表单 / 引导链接 → 用户提交经 REST 回传）。 */
-function ElicitationCard({ e }: { e: StreamEntry }) {
+export function ElicitationCard({ e }: { e: StreamEntry }) {
   const respond = useMate((s) => s.respondElicitation)
   const resolved = e.resolved ?? false
   const busy = useMate((s) => {
@@ -597,10 +626,15 @@ export function EntryView({
   runInfo?: RunUsageInfo
 }) {
   switch (e.kind) {
+    // 未结算的确认类卡片**不**渲染在条目流里（S9 / Q2 选①）：它们搬到输入区上方的**确认区**
+    // （`ConfirmArea.tsx`）。理由不是审美——条目流是**历史**，用户往上翻的时候被一张浮在中段的
+    // 卡片反复拦路；而"现在需要我做什么"是一个**当下的问题**，它该在离输入框最近的地方。
+    //
+    // 已结算的那些仍然留在流里（那是历史事实：当时被允许/拒绝了什么）。
     case 'permission':
-      return <PermissionCard e={e} />
+      return e.resolved ? <PermissionCard e={e} /> : null
     case 'elicitation':
-      return <ElicitationCard e={e} />
+      return e.resolved ? <ElicitationCard e={e} /> : null
     case 'user':
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
@@ -750,6 +784,29 @@ export function EntryView({
               <span style={{ color: tokens.text, fontWeight: 500 }}>{meta.label}</span>
               <span style={{ marginLeft: 'auto' }}>tool_result · {e.status || 'running'}</span>
             </div>
+            {/* 失败原因（S4 / 原型场景 E）：**服务端**归类出来的，客户端不从 status 推。
+                `sandbox_denied` 与 `sandbox_unavailable` 的处置相反，文案也必须分开写——
+                前者可以引导"换成允许写的工作空间"，后者不能（再试一次也一样失败）。 */}
+            {e.failReason && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  borderTop: `1px solid ${tokens.border}`,
+                  paddingTop: 7,
+                }}
+              >
+                <span style={{ fontSize: 11.5, color: tokens.error }}>
+                  {toolFailReasonLabel(e.failReason)}
+                </span>
+                {e.bizCode && (
+                  <span style={{ fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textPlaceholder }}>
+                    {e.bizCode}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )

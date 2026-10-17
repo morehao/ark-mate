@@ -12,11 +12,11 @@ const (
 //
 // 生命周期（设计 §D2）：
 //
-//	开轮：`run.started` 事件落库拿到起点位次 → INSERT（status='running'、first_seq=该位次、
+//	开轮：`run.started` 事件落库拿到起点位次 → INSERT（status='in_progress'、first_seq=该位次、
 //	      last_seq=-1、ended_at 空）——`UNIQUE(session_id, first_seq)` 保证重放不会插出第二行；
 //	终态：UPDATE（last_seq=终态位次、status/stop_reason/error_code/usage_json/ended_at）。
 //
-// 崩溃或进程被停时，进行中的轮**留在 status='running'**（会话侧记为 interrupted）：这是事实，
+// 崩溃或进程被停时，进行中的轮**留在 status='in_progress'**（会话侧记为 interrupted）：这是事实，
 // 不是缺陷——那一轮既没成功也没失败，伪造终态会污染失败轮列表与重试入口。
 type RunEntity struct {
 	// ID 平台铸号 `run_<26 位 ULID>`（v22 起重铸；此前是派生的 `r-<session>-<first_seq>`）。
@@ -24,7 +24,8 @@ type RunEntity struct {
 	SessionID string `gorm:"column:session_id;not null"`
 	// UserText 本轮的用户输入（**开轮时**写入，权威来源是 `run.started` 载荷）。
 	UserText string `gorm:"column:user_text;not null"`
-	// Status 轮次状态。running = 进行中；终态取值权威定义在 internal/manager/events.go。
+	// Status 轮次状态。in_progress = 进行中（v30 起单一取值；历史 `running` 行已由 v30 归一）；
+	// 终态取值权威定义在 internal/manager/events.go。
 	Status     string `gorm:"column:status;not null"`
 	ErrorCode  string `gorm:"column:error_code;not null"`
 	StopReason string `gorm:"column:stop_reason;not null"`

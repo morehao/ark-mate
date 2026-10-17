@@ -48,6 +48,9 @@ func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int6
 		"session_id": as.ID, "run_id": t.id, "runtime": as.Runtime, "text": text,
 	})
 	o.svc.openRun(as.ID, t.id, text, se.Seq)
+	// 过程状态的第一帧（S1 / ADR-6）：一轮已经开始、还没向模型发请求。它落在 `run.started`
+	// **之后**（本轮窗口从 run.started 起算，状态属于这一轮）、用户消息之前。
+	o.runStatusFor(as.ID, session.RunStatusPreparing, session.RunStatusOpts{})
 	ue := o.svc.publish(session.BusUserMessage, as.ID, map[string]any{
 		"session_id": as.ID, "runtime": as.Runtime, "text": text,
 	})
@@ -174,6 +177,10 @@ func (o *Orchestrator) executeRun(as *ActiveSession, t *Run, text string) {
 		stop string
 		err  error
 	)
+	// 「请求已发出、首个增量未到」——它覆盖从发请求到第一个 token 之间的那段空白，
+	// 而那正是用户最容易以为「没反应」的时候（今天这段时间与「已卡住」长得一模一样）。
+	// 用 `t.id` 而不是重查：这一支里 `as.run` 就是 `t`，重查只多一个可能拿到 nil 的窗口。
+	o.svc.sessionPlane.PublishRunStatus(as.ID, t.id, session.RunStatusModelRequesting, session.RunStatusOpts{})
 	if as.proj != nil {
 		stop, err = as.proj.Prompt(t.ctx, runtime.PromptRequest{Text: text})
 	} else {
@@ -203,6 +210,7 @@ func (o *Orchestrator) executeRun(as *ActiveSession, t *Run, text string) {
 	switch {
 	case userCancel:
 		// 用户取消优先：与停机撞车时，取消是用户意图，不能改写成 interrupted。
+		o.closeRunStatus(as.ID, t.id)
 		o.svc.markSession(as.ID, session.SessionStatusCancelled)
 		o.svc.publish(session.BusRunCancelled, as.ID, map[string]any{
 			"session_id": as.ID, "run_id": t.id, "stop_reason": stop,
@@ -212,19 +220,26 @@ func (o *Orchestrator) executeRun(as *ActiveSession, t *Run, text string) {
 		// 主动拆除（daemon 停机 / 显式停 agent）打断的轮次：既不是用户取消也不是失败，
 		// 归 interrupted —— 无终态、可续聊重发（与崩溃恢复同义）。刻意不发 run.error /
 		// run.cancelled：伪终态会污染历史、失败轮列表与重试入口。
+		//
+		// **也不发收口 `run.status`**（ADR-8 的前半）：收口状态同样是「这一轮到此为止」的宣告，
+		// 在这一支上它与伪终态同罪。崩溃残轮的收口由**恢复路径**补（`persist.go` 的
+		// `closeInterruptedRuns`），两处行为相反且各有判据。
 		o.svc.markSession(as.ID, session.SessionStatusInterrupted)
 		glog.Infow(context.Background(), "run 因连接主动拆除而中断（会话保留，可续聊重发）",
 			"session", as.ID, "runtime", as.Runtime)
 	case cancelled:
+		o.closeRunStatus(as.ID, t.id)
 		o.svc.markSession(as.ID, session.SessionStatusCancelled)
 		o.svc.publish(session.BusRunCancelled, as.ID, map[string]any{
 			"session_id": as.ID, "run_id": t.id, "stop_reason": stop,
 		})
 		deliverNext = true
 	case err != nil:
+		o.closeRunStatus(as.ID, t.id)
 		o.svc.markSession(as.ID, session.SessionStatusFailed)
 		o.publishError(as.ID, t.id, err, client)
 	default:
+		o.closeRunStatus(as.ID, t.id)
 		o.svc.markSession(as.ID, session.SessionStatusCompleted)
 		o.svc.publish(session.BusRunEnded, as.ID, map[string]any{
 			"session_id": as.ID, "run_id": t.id, "runtime": as.Runtime, "stop_reason": stop,
@@ -237,6 +252,39 @@ func (o *Orchestrator) executeRun(as *ActiveSession, t *Run, text string) {
 		// 不会在本 goroutine 上递归执行）。
 		o.deliverQueued(as)
 	}
+}
+
+// activeRunID 取会话当前那一轮的 id（没有在跑的轮 → 空串）。
+//
+// 过程状态的载荷要带 `run_id`（那一轮的身份）：UI 与读面据此判断「这条状态属于哪一轮」，
+// 而这正是"多轮会话里过程状态被上一轮残留"的唯一防线。
+func (o *Orchestrator) activeRunID(sessionID string) string {
+	as := o.session(sessionID)
+	if as == nil {
+		return ""
+	}
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	if as.run == nil {
+		return ""
+	}
+	return as.run.id
+}
+
+// runStatusFor 发一条过程状态（**只**调域里的唯一铸造点：manager 不拼载荷、不碰 `BusRunStatus`）。
+func (o *Orchestrator) runStatusFor(sessionID, status string, opt session.RunStatusOpts) {
+	if sessionID == "" {
+		return
+	}
+	o.svc.sessionPlane.PublishRunStatus(sessionID, o.activeRunID(sessionID), status, opt)
+}
+
+// closeRunStatus 终态事件**之前**的收口状态（ADR-6）：界面「停止」的判据必须是一个**状态**，
+// 不能是「一段时间没事件」。
+//
+// 刻意只在**非 intentional** 的四个终态分支里调：那一支连收口状态都不发（ADR-8 的前半）。
+func (o *Orchestrator) closeRunStatus(sessionID, runID string) {
+	o.svc.sessionPlane.PublishRunStatus(sessionID, runID, session.RunStatusIdle, session.RunStatusOpts{})
 }
 
 // errLooksCancelled 判断错误是否为「取消」语义（ctx 取消或 agent 取消类错误文本）。
@@ -267,6 +315,12 @@ func (o *Orchestrator) CancelRun(ctx context.Context, sessionID string) error {
 	if t == nil {
 		return nil
 	}
+	// 「已受理取消、收尾未完成」（S1）：它与终态**不是**同一件事——底座的 `session/cancel`
+	// 可能没响应，而这一段时间里界面必须能说清「正在收尾」而不是「已经停了」。
+	//
+	// 这里直接用 `t.id` 而不是 `o.activeRunID(...)`：`as.run` 随时可能被 `executeRun` 收尾清空，
+	// 重查一次会拿到空 id，于是这条状态挂到一个「不存在的轮」上。
+	o.svc.sessionPlane.PublishRunStatus(sessionID, t.id, session.RunStatusCancelling, session.RunStatusOpts{})
 	// agent 侧取消（session/cancel）有界执行：runtime 无响应时不阻塞本地解除。
 	// 无论 RPC 是否送达，随后都 t.cancel() 让 Prompt 返回（executeRun 收尾不依赖 RPC）。
 	cctx, ccancel := context.WithTimeout(context.WithoutCancel(ctx), agentCancelTimeout)

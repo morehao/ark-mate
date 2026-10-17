@@ -1,7 +1,11 @@
 package interaction
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -37,6 +41,10 @@ type MemoryItem struct {
 	Kind      string    `json:"kind"`
 	Decision  string    `json:"decision"` // allow | reject
 	Since     time.Time `json:"since"`
+	// Scope 授权形态（v28；今天恒 `session`）。
+	Scope string `json:"scope"`
+	// GrantInputDigest 当初那条工具入参的摘要（**不是**原文；见 `grantInputDigest`）。
+	GrantInputDigest string `json:"grant_input_digest,omitempty"`
 }
 
 // NewMemoryItem 造一条记忆项。
@@ -48,9 +56,25 @@ func NewMemoryItem(sessionID, title, kind, decision string, since time.Time) Mem
 	return MemoryItem{sessionID: sessionID, Title: title, Kind: kind, Decision: decision, Since: since}
 }
 
+// WithGrantShape 补上授权形态（v28；装载路径用——`Remember` 走的是另一条构造）。
+func (it MemoryItem) WithGrantShape(scope, grantInputDigest string) MemoryItem {
+	it.Scope = scope
+	it.GrantInputDigest = grantInputDigest
+	return it
+}
+
+// SessionID 该记忆归属的会话（域外装载/落库要它；**没有 json tag**，故不会进对外载荷）。
+func (it MemoryItem) SessionID() string { return it.sessionID }
+
+// memoryItemOf 造一条**带授权形态**的记忆项（`Remember` 用；v28）。
+func memoryItemOf(sessionID string, it MemoryItem) MemoryItem {
+	it.sessionID = sessionID
+	return it
+}
+
 // SetMemoryHooks 注入会话级记忆持久化挂钩（sqlite 模式；可为 nil 表示不持久化）。
 // 挂钩在锁外调用（DB 写是 best-effort，不入关键路径）。
-func (m *PermissionManager) SetMemoryHooks(add func(sessionID, title, kind, decision string, since time.Time),
+func (m *PermissionManager) SetMemoryHooks(add func(it MemoryItem),
 	del func(sessionID, title, kind string), delAll func(sessionID string)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -68,6 +92,28 @@ func alwaysKey(t acl.ToolCallInfo) string { return alwaysKeyOf(t.Title, t.Kind) 
 // AutoDecision 决定「无需征询」的快速路径：会话级记忆命中 → 直接放行/拒绝。
 // 返回 (decision, ok)：ok=false 表示需要真正挂起等待用户。
 func (m *PermissionManager) AutoDecision(sessionID string, req acl.PermissionRequest) (acl.PermissionDecision, bool) {
+	// **只给"可以被记住"的请求自动裁决**（A1 / v28）。判据：这次请求的选项里有没有 `always` 那一档。
+	//
+	// 为什么这条短路是必须的：会话级记忆记的是"这个会话里这类工具**始终**允许"。而宿主（底座）
+	// 有时会发一次**只给 `once` 档**的请求——被沙箱边界挡下之后的**升权请求**正是这一种
+	// （探针实测：options 恒 allow-once / reject-once）。若让记忆替它裁决，等于把用户当时那句
+	// "这一类都行"自动扩张成一个底座**刻意只肯给一次**的动作——那是本仓最不该发生的一类静默授权。
+	//
+	// 反过来的方向也是对的：给了 `always` 档却仍走审批，只是多问一次（可恢复）；
+	// 而错放一次升权不可恢复。
+	//
+	// 判据是**"宿主明确只给了 once 档"**，不是"没有 always 档"：
+	//
+	//	有 `_always` 档                    → 可以被记住（常态请求）
+	//	没有任何 `_always`、且有 `_once` 档 → **不可以**（升权请求：宿主刻意只肯给一次）
+	//	选项为空 / 选项的 kind 都没写        → 当"未知"处理，仍可按记忆裁决
+	//
+	// 最后一档是刻意宽松的：`Kind` 为空的选项是历史构造点与不提供选项面的路径，"没写"不是
+	// "只给一次"的证据。把它当证据会让那些调用方**静默失去**记忆能力——那是把一条安全判据
+	// 变成了一个功能回退（而回退比误拦更难发现）。
+	if offersOnlyOnceOptions(req) {
+		return acl.PermissionDecision{}, false
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e := m.lookupLocked(sessionID, req.ToolCall)
@@ -98,8 +144,22 @@ func (m *PermissionManager) lookupLocked(sessionID string, t acl.ToolCallInfo) *
 	return &cp
 }
 
+// MemoryScopeSession 会话内始终（v28 的**唯一**可写授权形态）。
+//
+// "只允许这一次"没有对应取值：`Remember` 只被 always 决策调用，once 决策**从不落库**。
+// 给它留一个永远不会被写入的枚举值，只会让下一个读它的人以为平台支持那种记忆。
+const MemoryScopeSession = "session"
+
 // Remember 记录（或覆盖）一条会话级权限记忆。decision ∈ allow|reject。
 // sqlite 模式下同步旁路持久化（permission_memories 表，同键覆盖）。
+//
+// v28 起还带两样**描述这次授权**的东西（都**不进**唯一键）：
+//
+//	scope             授权形态（今天恒 `session`）
+//	grantInputDigest  当初那条工具入参的摘要
+//
+// 后者是为了**可复核**：出事时能回答"当初那句话，是在哪次具体调用上说的"。入参本身不进库
+// （它可能含密钥），只进摘要。
 func (m *PermissionManager) Remember(sessionID string, t acl.ToolCallInfo, decision, optionID string) {
 	m.mu.Lock()
 	set := m.mem[sessionID]
@@ -119,7 +179,10 @@ func (m *PermissionManager) Remember(sessionID string, t acl.ToolCallInfo, decis
 	add := m.memAdd
 	m.mu.Unlock()
 	if add != nil {
-		add(sessionID, t.Title, t.Kind, decision, since)
+		add(memoryItemOf(sessionID, MemoryItem{
+			Title: t.Title, Kind: t.Kind, Decision: decision, Since: since,
+			Scope: MemoryScopeSession, GrantInputDigest: grantInputDigest(t.Input),
+		}))
 	}
 }
 
@@ -221,4 +284,42 @@ func (m *PermissionManager) List(sessionID string) []MemoryItem {
 		out = append(out, r.item)
 	}
 	return out
+}
+
+// offersOnlyOnceOptions 这次请求是否**明确只给了 `once` 档**（= 升权请求，不可被记忆裁决）。
+//
+// 判据落在**选项的 kind** 上，而不是标题/工具名里的字：标题是模型写的自由文本，
+// 拿它判"这是不是升权请求"只会得到一条时灵时不灵的规则。选项是协议字段。
+//
+// 三档语义见 `AutoDecision` 的注释：有 always → 可记住；无 always 且有 once → 不可；都没有 → 未知。
+func offersOnlyOnceOptions(req acl.PermissionRequest) bool {
+	hasAlways, hasOnce := false, false
+	for _, o := range req.Options {
+		if strings.HasSuffix(o.Kind, "_always") {
+			hasAlways = true
+		}
+		if strings.HasSuffix(o.Kind, "_once") {
+			hasOnce = true
+		}
+	}
+	return !hasAlways && hasOnce
+}
+
+// grantInputDigest 当初那条工具入参的摘要（`sha256` 前 16 位十六进制；空入参 → 空串）。
+//
+// 为什么是摘要而不是原文：工具入参里可能有路径、token、甚至命令里的密钥。审计要的是
+// "**是不是同一次调用**"，那是摘要能回答的，而原文只会让库里多一份敏感数据。
+//
+// 为什么截到 16 位：它是**审计锚点**不是密码学承诺——碰撞在这条链上没有攻击价值
+// （能改库的人已经能改一切），而 16 位让它在日志里读得下去。
+func grantInputDigest(in any) string {
+	if in == nil {
+		return ""
+	}
+	b, err := json.Marshal(in)
+	if err != nil || len(b) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
 }

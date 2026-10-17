@@ -745,6 +745,26 @@ var schemaMigrations = []migration{
 	// 的 `sessions.provider_id`，并给存量 `model_id` 置一个"待回填"标记——回填在应用层做，因为
 	// store 不得 import adapter；理由写在该文件头）。
 	migrationV26,
+
+	// v27 的版本步本体在 `migrate_v27.go`（工作空间补两个**默认值**列；本步**一个字都不改
+	// `sessions`**——默认值只影响以后建的会话，理由写在该文件头。`permission_memories` 的
+	// `scope` 重建挪到 v28 / P2-a：一列加上用它的写面属于同一件事）。
+	migrationV27,
+
+	// v28 的版本步本体在 `migrate_v28.go`（权限记忆带上**授权形态**：`scope` + 授权时那条工具
+	// 入参的摘要。**唯一键刻意不变**——把入参并进键会把"这类工具始终允许"拆成"这一个参数组合
+	// 始终允许"；理由写在该文件头）。
+	migrationV28,
+
+	// v29 的版本步本体在 `migrate_v29.go`（会话**钉住**自己的原生权限模式：模式只能以进程 env
+	// 下发（`/permission` 命令面不存在），所以"一个进程内按会话切换"走不通，只能每模式一个暖
+	// 进程；而暖进程的键要在**取连接之前**已知 ⇒ 模式必须落库。语义见该文件头）。
+	migrationV29,
+
+	// v30 的版本步本体在 `migrate_v30.go`（数据归一：`runs.status` 的历史 `running` → 写入方
+	// 实际用的 `in_progress`。两个值并存让 `RunningRows` 恒空、用量 `Running` 恒 0，而这两件事
+	// 都不报错——理由写在该文件头）。
+	migrationV30,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

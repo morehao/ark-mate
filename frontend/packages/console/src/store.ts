@@ -3,9 +3,13 @@ import {
   HttpError,
   cancelSession,
   cancelQueuedInput as apiCancelQueuedInput,
+  moveQueuedInput as apiMoveQueuedInput,
+  sendQueuedInputNow as apiSendQueuedInputNow,
+  popQueuedInput as apiPopQueuedInput,
   sessionHistory,
   createSession,
   createWorkspace as apiCreateWorkspace,
+  createNamedWorkspace as apiCreateNamedWorkspace,
   deleteWorkspace as apiDeleteWorkspace,
   listSessions,
   listModelCatalog,
@@ -13,6 +17,7 @@ import {
   listWorkspaces,
   moveWorkspace as apiMoveWorkspace,
   renameWorkspace as apiRenameWorkspace,
+  relocateWorkspace as apiRelocateWorkspace,
   promptSession,
   resolveElicitation,
   resolvePermission,
@@ -33,6 +38,7 @@ import type {
   ModelCatalogResp,
   ModelRef,
   QueuedInput,
+  RunPhase,
   RuntimeDiagnostics,
   RuntimeInfo,
   StreamEntry,
@@ -79,6 +85,15 @@ export interface SessionView {
    * 会话重开时由事件全量回放重建，故没有 REST 读端点。
    */
   commands?: CommandInfo[]
+  /**
+   * 当前轮次的**过程状态**（`session.run.status` 事件的投影，ADR-6）。
+   *
+   * 与 `sessions[]` 行上的 `run`（REST 读面）**同源**：这里是实时的、那里是刷新时的快照。
+   * 界面优先读这里（它跟着事件流走），没有再回落到列表行——两处都缺时**什么都不说**，
+   * 绝不退回"猜"（`serverBusy` 那套倒推已经删了，见 archtest 的
+   * `TestNoClientSideRunInference`）。
+   */
+  run?: RunPhase
 }
 
 const emptyView = (): SessionView => ({
@@ -188,6 +203,11 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     }
     case Ev.ToolUpdate: {
       const id = String(e.payload?.tool_call_id ?? '')
+      // `fail_reason` / `biz_code` 由**服务端**按底座的签名表给（平台侧归类，见 ADR-16）。
+      // 客户端不推断"这条为什么失败"：被沙箱拒绝的那一帧 `status` 就是 `completed`，
+      // 靠 status 猜只会把"跑完了"和"被拒了"说成同一件事。
+      const failReason = String(e.payload?.fail_reason ?? '')
+      const bizCode = String(e.payload?.biz_code ?? '')
       return {
         ...v,
         entries: entries.map((en) =>
@@ -196,6 +216,8 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
                 ...en,
                 title: String(e.payload?.title ?? en.title ?? id),
                 status: String(e.payload?.status ?? en.status ?? ''),
+                failReason: failReason || en.failReason,
+                bizCode: bizCode || en.bizCode,
               }
             : en,
         ),
@@ -221,6 +243,28 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
           tone: 'info',
           text: runtime ? `${label} · ${runtime}` : label,
         }),
+        lastSeq,
+      }
+    }
+    case Ev.RunStatus: {
+      // 过程状态：整块替换（服务端每次给的都是那一刻的完整状态，不做增量合并）。
+      // 不做任何本地推断——包括"看起来该结束了"。
+      const status = String(e.payload?.status ?? '')
+      if (!status) return { ...v, lastSeq }
+      return {
+        ...v,
+        run: {
+          run_id: e.payload?.run_id ? String(e.payload.run_id) : undefined,
+          status: status as RunPhase['status'],
+          phase: e.payload?.phase ? String(e.payload.phase) : undefined,
+          detail: e.payload?.detail ? String(e.payload.detail) : undefined,
+          tool_call_id: e.payload?.tool_call_id ? String(e.payload.tool_call_id) : undefined,
+          tool_name: e.payload?.tool_name ? String(e.payload.tool_name) : undefined,
+          waiting_for: e.payload?.waiting_for ? String(e.payload.waiting_for) : undefined,
+          reason: e.payload?.reason ? String(e.payload.reason) : undefined,
+          at: e.payload?.at ? String(e.payload.at) : undefined,
+          seq: e.seq,
+        },
         lastSeq,
       }
     }
@@ -295,13 +339,20 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       }
     }
     case Ev.ElicitationResolved: {
-      // 挂起提问终局（accept/decline/cancel/超时自动取消）——同上，收敛以服务端事件为准。
+      // 挂起提问终局——同上，收敛以服务端事件为准。
+      //
+      // **例外：`action:"pending"` 不收敛**（ADR-11）。它说的是"那一轮不等了，但你想答还是能答"：
+      // 卡片留着、按钮可点，只是多一句"仍可回答"。把它并进收敛就是把「去倒杯水回来，整轮要重来」
+      // 写进代码——而这是这一档存在的全部理由。
       const elicitationId = String(e.payload?.elicitation_id ?? '')
+      const pending = String(e.payload?.action ?? '') === 'pending'
       return {
         ...v,
         entries: entries.map((en): StreamEntry =>
           en.kind === 'elicitation' && en.elicitationId === elicitationId && !en.resolved
-            ? { ...en, resolved: true, decision: elicitationResolvedLabel(e.payload) }
+            ? pending
+              ? { ...en, pendingLate: true }
+              : { ...en, resolved: true, decision: elicitationResolvedLabel(e.payload) }
             : en,
         ),
         lastSeq,
@@ -474,8 +525,18 @@ export interface MateActions {
    * 所以调用方用 toast（旧的内嵌弹层那种"留在原地换个目录"的交互已不存在）。
    */
   createWorkspace: (path: string, title?: string) => Promise<Workspace>
+  /**
+   * **新建**工作空间（ADR-2 的 name 模式）：在落盘根下建同名目录并登记，一步。
+   * 与 `createWorkspace(path)` 是两条用户意图不同的路（造一个 vs 登记一个）。
+   */
+  createNamedWorkspace: (name: string, title?: string) => Promise<Workspace>
   /** 改名（不改身份）。 */
   renameWorkspace: (id: string, title: string) => Promise<void>
+  /**
+   * **改登记路径**（W4）：目录被删/搬走之后就地补救。`id` 不变、既有会话不动
+   * （它们的 `cwd` 是执行事实，跟着搬等于把历史指到别处）。
+   */
+  relocateWorkspace: (id: string, path: string) => Promise<void>
   /** 删除登记（**不删目录、不删会话**）；其会话回到默认工作空间，页面随之刷新。 */
   deleteWorkspace: (id: string) => Promise<void>
   /** 重排（beforeId 缺省 = 追加到尾部）。 */
@@ -508,6 +569,12 @@ export interface MateActions {
   sendPrompt: (text: string, delivery?: DeliveryChoice) => Promise<void>
   /** §6：撤下一条尚未投递的排队输入（收敛以 input_cancelled 事件为准）。 */
   cancelQueuedInput: (inputId: string) => Promise<void>
+  /** ADR-10 动作①：重排一条队项（`beforeId` 缺省 = 追加到末尾）。 */
+  moveQueuedInput: (inputId: string, beforeId?: string) => Promise<void>
+  /** ADR-10 动作②：让这一条**成为下一轮**（忙时排到队首，空闲时立刻投递）。 */
+  sendQueuedInputNow: (inputId: string) => Promise<void>
+  /** ADR-10 动作③：取回草稿并作废（正文回填到待发送文案）。 */
+  popQueuedInput: (inputId: string) => Promise<string | null>
   /** §6：用服务端当前态补齐队列（冷挂载/HISTORY 未覆盖时用；`anchorQueueSeq` 见 SessionView.queueSeq）。 */
   refreshQueue: (id: string, anchorQueueSeq: number) => Promise<void>
   cancel: () => Promise<void>
@@ -596,6 +663,8 @@ function ensureTransport(): WsTransport {
       // 水位推进（供重连续传）
       if (f.type === 'event') transportRef?.ackSeq(f.agg_id, f.event.seq)
       if (f.type === 'snapshot') transportRef?.ackSeq(f.agg_id, f.event_seq)
+      // 回放结束 = 这一段历史确实看完了：把续传游标推到那里，重连时不会再把同一段重放一遍。
+      if (f.type === 'replay_end') transportRef?.ackSeq(f.agg_id, f.event_seq)
       if (f.type === 'gap') {
         // 慢订阅丢帧（服务端缓冲满）：按当前已应用水位立即重挂该聚合——
         // 服务端 EventsAfter 为开区间（seq > since），重放不会重复已应用事件；若起点已被淘汰则回 snapshot。
@@ -691,6 +760,29 @@ export const useMate = create<MateStore>((set, get) => {
               },
             }
           }
+          case 'replay_begin': {
+            // 进入回放（ADR-13）：**服务端说它在回放**，不是我们猜的。
+            //
+            // 同时裁决「加载更早」：冷挂载（`since_seq=-1`）收到 `replay_begin` 就证明服务端
+            // 是**从会话第一条起**给的（淘汰过的话它会回 snapshot）——这就是「已到最早」的事实，
+            // 不必等第一个事件到达才敢下结论（新会话可能一条事件都没有）。
+            const atStart = coldFullReplay.delete(f.agg_id)
+            const view = s.views[f.agg_id] ?? emptyView()
+            return {
+              ...s,
+              historyStart: atStart ? { ...s.historyStart, [f.agg_id]: true } : s.historyStart,
+              // 回放期不渲染"实时"的样子——`hydrating` 就是那面旗。
+              views: { ...s.views, [f.agg_id]: { ...view, hydrating: true } },
+            }
+          }
+          case 'replay_end': {
+            // 回放结束：加载态**精确**结束在这里（12s 的 `expireHydration` 降级成保险丝）。
+            const view = s.views[f.agg_id] ?? emptyView()
+            return {
+              ...s,
+              views: { ...s.views, [f.agg_id]: { ...view, hydrating: false } },
+            }
+          }
           case 'event': {
             terminal = TERMINAL_TYPES.has(f.event.type)
             const view = applyEvent(s.views[f.agg_id] ?? emptyView(), f.event)
@@ -775,6 +867,16 @@ export const useMate = create<MateStore>((set, get) => {
       }
     },
 
+    createNamedWorkspace: async (name, title) => {
+      // 失败**不吞**（同 `createWorkspace`）：名字非法 / 重名 / 未配置落盘根三种原因都要回到调用方，
+      // 由弹层就地显示服务端文案——不在前端编一句更"好懂"的话（那会把三种处置不同的情况
+      // 说成同一件事：改名重试 / 换个名字 / 改用「选择已有目录…」）。
+      const ws = await apiCreateNamedWorkspace(name, title)
+      // 刷新而不是本地插入（理由同 createWorkspace：顺序由服务端的 list_order 决定）。
+      await get().loadWorkspaces()
+      return ws
+    },
+
     createWorkspace: async (path, title) => {
       // 失败**不吞**：登记失败的原因必须回到调用方。工作空间选择器要把它**就地**显示在弹层里
       // （设计 §5.2 状态 E：弹层不关，原因用服务端 msg，不自己编文案）。这里原先把错误收成一句
@@ -785,6 +887,14 @@ export const useMate = create<MateStore>((set, get) => {
       // 本地插在中间或末尾都可能与服务端不一致，而那种不一致下次刷新会"跳一下"。
       await get().loadWorkspaces()
       return ws
+    },
+
+    relocateWorkspace: async (id, path) => {
+      // 失败**不吞**：目录不存在 / 被另一条登记占着 / 默认工作空间——三种原因的处置完全不同
+      // （换一个目录 / 换一个工作空间 / 根本不该改），必须让调用方就地显示服务端文案。
+      const ws = await apiRelocateWorkspace(id, path)
+      await get().loadWorkspaces()
+      showToast(`已把工作空间「${ws.title || ws.path}」指向新目录`)
     },
 
     renameWorkspace: async (id, title) => {
@@ -1024,6 +1134,55 @@ export const useMate = create<MateStore>((set, get) => {
       }
     },
 
+    moveQueuedInput: async (inputId, beforeId) => {
+      const id = get().activeId
+      if (!id) return
+      try {
+        const items = await apiMoveQueuedInput(id, inputId, beforeId)
+        // 服务端回**重排后的完整队列**：本地顺序以它为准（不自己算"我插到第几位"——
+        // 客户端的序号与服务端的 `inputs.seq` 是两套东西，自己算迟早分叉）。
+        set((s) => {
+          const view = s.views[id]
+          if (!view) return {}
+          return { views: { ...s.views, [id]: { ...view, queue: items.map(queuedFromResp) } } }
+        })
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    sendQueuedInputNow: async (inputId) => {
+      const id = get().activeId
+      if (!id) return
+      try {
+        await apiSendQueuedInputNow(id, inputId)
+        // 出队**不在这里做**：会话忙时它只是排到队首（还没发出去），空闲时由服务端发
+        // `input_delivered` 收敛。本地先删掉会造出"看起来发出去了、其实还在队列里"的假象。
+        const items = await listQueuedInputs(id)
+        set((s) => {
+          const view = s.views[id]
+          if (!view) return {}
+          return { views: { ...s.views, [id]: { ...view, queue: items.map(queuedFromResp) } } }
+        })
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    popQueuedInput: async (inputId) => {
+      const id = get().activeId
+      if (!id) return null
+      try {
+        const res = await apiPopQueuedInput(id, inputId)
+        // 队列那一行由 `input_cancelled{reason:'user_edit'}` 收敛（服务端是唯一铸造点），
+        // 这里只负责把正文交给调用方回填。
+        return res.text ?? ''
+      } catch (err) {
+        showToast(toErrorMessage(err))
+        return null
+      }
+    },
+
     refreshQueue: async (id, anchorQueueSeq) => {
       try {
         const items = await listQueuedInputs(id)
@@ -1079,10 +1238,17 @@ export const useMate = create<MateStore>((set, get) => {
       const id = get().activeId
       if (!id) return
       try {
+        // `late` 由**这一面**判定（卡片自己的状态），不由调用方传：调用方（表单/按钮）不该
+        // 知道"这一轮是不是已经不等了"——那是事件投影出来的事实。
+        const entry = get().views[id]?.entries.find(
+          (en) => en.kind === 'elicitation' && en.elicitationId === elicitationId,
+        )
+        const late = entry?.kind === 'elicitation' ? entry.pendingLate === true : false
         await resolveElicitation(id, {
           elicitation_id: elicitationId,
           action: decision.action,
           content: decision.content,
+          late,
         })
         // 本地就地标记该提问卡已决策（按钮禁用 + 展示结果），底座随后经 WS 续流。
         set((s) => {

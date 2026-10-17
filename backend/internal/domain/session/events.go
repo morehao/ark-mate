@@ -55,10 +55,28 @@ const (
 	// BusElicitationRequest 结构化提问请求（elicitation/create 挂起态：payload = 表单 schema /
 	// URL + message + id；前端据此渲染提问卡，用户提交/放弃经 POST /sessions/:id/elicitation 回传）。
 	BusElicitationRequest = "session.elicitation_request"
-	// BusElicitationResolved 挂起提问终局（accept/decline/cancel/超时/取消）——前端收敛提问卡的
-	// 唯一事实（不依赖前端时钟）。payload = {session_id, elicitation_id, action(accept|decline|cancel),
-	// reason(user|timeout|cancel)}。
+	// BusElicitationResolved 挂起提问终局——前端收敛提问卡的**唯一事实**（不依赖前端时钟）。
+	// payload = {session_id, elicitation_id, action, reason}。
+	//
+	// `action` 五值：`accept` / `decline` / `cancel` / **`pending`** / `late`。
+	//
+	//   - `pending` = **超时但问题仍可回答**（ADR-11）。这一档与 `cancel` 的区别是全部的：
+	//     `cancel` 说"这张卡没了"，而 `pending` 说"那一轮不等了，但你想答还是能答"——
+	//     迟到的回答作为**新一轮**进去。把它并进 `cancel` 就是"去倒杯水回来，整轮要重来"。
+	//   - `late` = 迟到的回答真的到了（`reason:"late"`），卡片这时才收敛。
+	//
+	// `reason` 七值：`user` / `timeout` / `cancel` / `complete` / **`restart`** / **`archive`** / `late`。
+	// 后三个是**平台侧**的原因（底座没问、平台自己收的口），与前者一样必须留下事件：
+	// 前端只认事件，漏一条就留一张永远回答不了的卡片。
 	BusElicitationResolved = "session.elicitation_resolved"
+	// ElicitationReasonRestart 进程重启：挂起提问随进程消失（内存态），逐条补 `resolved{cancel,restart}`。
+	ElicitationReasonRestart = "restart"
+	// ElicitationReasonArchive 会话归档：不再接受回答，逐条补 `resolved{cancel,archive}`。
+	ElicitationReasonArchive = "archive"
+	// ElicitationReasonLate 迟到的回答（超时转 pending 之后用户仍然答了）。
+	ElicitationReasonLate = "late"
+	// ElicitationActionPending 超时但**仍可回答**的那一档（见上方 `action` 取值说明）。
+	ElicitationActionPending = "pending"
 	// BusInputQueued §6：会话正忙，用户输入已入队等待投递（delivery=after_run|interrupt_then_prompt）。
 	// payload = {session_id, input_id, text, delivery, target_run_id, generation}。
 	// 前端据此在输入区上方渲染队列；收敛靠 input_delivered / input_cancelled。
@@ -80,6 +98,17 @@ const (
 	// 它落 durable 存储，所以"进行中的轮"在事件流里有痕迹——`runs` 行因此是**纯投影**，
 	// 崩溃/重启也能从 events 重建（设计 §D2/J7）。
 	BusRunStarted = "run.started"
+	// BusRunStatus 一轮问答的**过程状态**（v27 + S1；durable）。
+	//
+	// payload 见 `runstatus.go` 的 `RunStatusPayload`（**唯一铸造点**）：`{session_id, run_id,
+	// status, phase?, detail?, tool_call_id?, tool_name?, waiting_for?, retry?, at}`。
+	//
+	// 与既有 `run.*` 的关系：`run.started` 开轮 → 若干 `run.status`（阶段变化）→ `run.status(idle)`
+	// 收口 → 终态四选一。**恢复路径**另有一支 `run.status(interrupted)` 作为收口（ADR-8 的后半，
+	// 实时路径永不发它）。
+	//
+	// 它不是「一段时间没事件」的替代品，而是那件事的**反面**：界面「还在跑吗」必须能读到一个状态。
+	BusRunStatus = "run.status"
 	// BusRunEnded 一轮 prompt 正常结束（stop_reason）。
 	BusRunEnded = "run.ended"
 	// BusRunError 一轮 prompt 失败（含稳定 code/分类，对齐 acl.Class）。

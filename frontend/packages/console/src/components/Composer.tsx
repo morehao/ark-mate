@@ -27,6 +27,16 @@ interface Props {
    * `[]` = 通告了"当前没有命令" → 同样不显示候选，但两者语义不同（见 SessionView.commands）。
    */
   commands?: CommandInfo[]
+  /**
+   * 外部**塞进来的草稿**（`nonce` 变化即生效一次）。
+   *
+   * 唯一消费者是队列的「取出编辑」（ADR-10 动作③）：用户把一条还没投递的话取回来改，
+   * 正文必须回到输入框里——否则"取出"就只是"删掉"。
+   *
+   * 为什么用 `{text, nonce}` 而不是受控 `value`：输入框的草稿是**组件自己的**状态（有光标、
+   * 有本地拼写习惯、有 ↑ 翻历史），改成受控会把每一次按键都提给父组件。窄口进、状态自持。
+   */
+  injectDraft?: { text: string; nonce: number }
 }
 
 /**
@@ -42,8 +52,16 @@ interface Props {
  * v21 版面：工作空间 chip 从底栏移到卡片上沿左上角（对齐 DSH 的 composerStack：chip 是卡片的
  * 标题行，底栏留给"这次怎么发"）。
  */
-export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, workspace, commands }: Props) {
+export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, workspace, commands, injectDraft }: Props) {
   const [draft, setDraft] = useState('')
+  // 「取出编辑」塞回来的草稿：只在 nonce 变化时生效一次（同一条再取一次也要能生效，故用计数）。
+  useEffect(() => {
+    if (!injectDraft) return
+    setDraft(injectDraft.text)
+    taRef.current?.focus()
+    // 依赖刻意只写 nonce：`injectDraft.text` 变了但 nonce 没变时不该覆盖用户正在打的字。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [injectDraft?.nonce])
   const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
   // 投递模式是「这次怎么送」的选择，默认排队——打断当前轮是有代价的动作，不该是默认值。
   const [delivery, setDelivery] = useState<DeliveryChoice>('after_run')

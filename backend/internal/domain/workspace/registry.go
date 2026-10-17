@@ -15,6 +15,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/object/objid"
+	"github.com/morehao/golib/glog"
 )
 
 // 本文件是**工作空间登记表**（v14）的领域实现。
@@ -48,6 +49,7 @@ func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error) {
 			Items:        []dtoworkspace.WorkspaceResp{},
 			Writable:     false,
 			ProvisionDir: pl.WorkspaceDir(),
+			CreateRoot:   pl.CreateRoot(),
 		}
 		if def, ok, _ := pl.DefaultWorkspace(); ok {
 			out.Items = append(out.Items, pl.workspaceRespForMemDefault(def))
@@ -83,6 +85,7 @@ func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error) {
 		DefaultID:    defaultID,
 		Writable:     true,
 		ProvisionDir: pl.WorkspaceDir(),
+		CreateRoot:   pl.CreateRoot(),
 	}
 	for _, r := range rows {
 		resp := dtoworkspace.WorkspaceResp{
@@ -107,6 +110,188 @@ func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error) {
 		out.Items = append(out.Items, resp)
 	}
 	return out, nil
+}
+
+// CreateWorkspace 创建登记的**唯一入口**：按请求体的形状在两种模式里选一种（ADR-2）。
+//
+//	`path` 非空 → 登记一个**已存在**的目录（get-or-create；`Strict=true` 时重复报错）
+//	`name` 非空 → 在**落盘根**（`create_root`）下建一个目录并登记
+//	两个都给 / 都不给 → 40001（**不猜**用户想干嘛：猜错的后果是"我明明点了新建，它却登记了别的目录"）
+//
+// 为什么在域里而不是控制器里：这是**业务判决**（哪条路、哪条错误码），而控制器的职责只有
+// 参数绑定与回响应。放控制器里还会让"两模式"这件事出现在一个不懂工作空间语义的地方。
+func (pl *Plane) CreateWorkspace(req dtoworkspace.WorkspaceCreateReq) (*dtoworkspace.WorkspaceResp, error) {
+	path := strings.TrimSpace(req.Path)
+	name := strings.TrimSpace(req.Name)
+	switch {
+	case path != "" && name != "":
+		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+			"`path` 与 `name` 只能给一个：「选择已有目录」与「新建工作空间」是两条路", nil)
+	case path == "" && name == "":
+		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+			"需要 `path`（登记已有目录）或 `name`（在落盘根下新建）之一", nil)
+	case name != "":
+		return pl.CreateNamedWorkspace(name, req.Title)
+	default:
+		return pl.CreateRegisteredWorkspace(path, req.Title, req.Strict)
+	}
+}
+
+// CreateNamedWorkspace 在**落盘根**下建一个目录并登记（ADR-2 的 `name` 模式）。
+//
+// 为什么它必须是一条服务端路径而不是前端串两次调用：`POST /workspaces/dirs`（建目录）与
+// `POST /workspaces`（登记）是两次可失败的网络往返，中间任何一步失败都会留下
+// 「目录建了但没登记」或「登记失败但目录在」的半成品，而**用户看不到哪一半成了**。
+//
+// 三件一起做（顺序是有理由的）：
+//
+//	① 名字校验 —— `ValidateWorkspaceName`（与「新建文件夹」共用同一条实现）；
+//	② `Mkdir`（**不递归、不覆盖**）—— 已存在即 40901，绝不静默复用；
+//	③ 登记 —— 走与 `path` 模式**同一条** `CreateRegisteredWorkspace` 流水线。
+//
+// 关于"同一事务"：文件系统与 sqlite 不在一个事务里，这是形态的硬限制，所以这里用**补偿**代替——
+// 目录建好而登记失败时把它删回去（`os.Remove` 只能删空目录，正好是刚建出来的那一层）。
+// 顺序选「先建目录后登记」而不是反过来，是因为两种残留的代价不对称：
+//
+//	建了目录没登记 → 一个空目录（应用看不见它，用户可以自己删掉）
+//	登记了没目录   → 一条 `dir_status: missing` 的登记（会话建不了，得靠 P1-g 的补救路径修）
+//
+// 后者更糟：它是一条**指向不存在东西的**记录，而前者只是多了一个空文件夹。
+func (pl *Plane) CreateNamedWorkspace(name, title string) (*dtoworkspace.WorkspaceResp, error) {
+	if pl.st == nil {
+		return nil, WorkspaceReadOnlyError()
+	}
+	root := pl.CreateRoot()
+	if root == "" {
+		// 未声明落盘根 → **显式拒绝**，且界面这一档不渲染入口（ADR-3 的入口纪律：
+		// 不给一个必然失败的按钮）。
+		const codeName = "workspace_create_root_unset"
+		return nil, acl.NewError(acl.ClassRequest, codeName,
+			"["+codeName+"] 未配置新建工作空间的落盘根（create_root / workspace_dir）：无法按名字新建，请改用「选择已有目录…」", nil)
+	}
+	cleaned, err := ValidateWorkspaceName(name)
+	if err != nil {
+		return nil, err
+	}
+	target := filepath.Join(root, cleaned)
+	// 已存在（目录 / 文件 / 符号链接）→ 40901。**不静默复用**：同名目录已存在与"我建了一个新的"
+	// 是两件事，界面必须能分辨（与本仓 `CreateWorkspaceDir` 的既有口径逐字一致）。
+	if _, statErr := os.Lstat(target); statErr == nil {
+		return nil, workspaceExistsErr(target)
+	}
+	if err := os.Mkdir(target, 0o755); err != nil {
+		if os.IsExist(err) {
+			return nil, workspaceExistsErr(target)
+		}
+		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+			fmt.Sprintf("创建目录失败: %s", target), err)
+	}
+	// 登记走 path 模式那条流水线（`strict=true`）：它与「选择已有目录…」共用同一套路径校验
+	// 与同一份响应投影，所以两条路不会在"能建"与"能登记"上分叉。
+	resp, regErr := pl.CreateRegisteredWorkspace(target, title, true)
+	if regErr != nil {
+		// 补偿：把刚建出来的空目录删回去（删不掉只告警——它已经被登记失败的事实带走了）。
+		if rmErr := os.Remove(target); rmErr != nil {
+			glog.Warnw(context.Background(), "工作空间：登记失败后清理新建目录失败", "dir", target, "err", rmErr)
+		}
+		return nil, regErr
+	}
+	return resp, nil
+}
+
+// PatchWorkspace 改写一条登记的**可改字段**（展示名 / 两个默认值）。
+//
+// 三条判据：
+//
+//	① 默认值只改**传了的**（`nil` = 不改）——把"没写"与"写了空串"合成一个就会出
+//	   「只想改标题，结果把默认能力集清空了」；
+//	② 展示名沿用既有的 `RenameRegisteredWorkspace`（一条流水线，不在这里再写一份改库）；
+//	③ **既有会话一个字节都不动**：能力集与权限模式在会话上是**快照**，改工作空间默认值
+//	   就把它们悄悄改掉，表现是「我调了个默认值，昨天那个会话的行为变了」。
+//
+// **改登记路径不在本批**（`req.Path` 由 W4 / P1-g 接）：那要先定"改路径之后既有会话的 cwd
+// 怎么办"，而那不是本批的判断。本批显式拒绝它，而不是悄悄忽略——悄悄忽略等于让前端以为
+// 改成功了。
+func (pl *Plane) PatchWorkspace(id string, req dtoworkspace.WorkspacePatchReq) (*dtoworkspace.WorkspaceResp, error) {
+	if pl.st == nil {
+		return nil, WorkspaceReadOnlyError()
+	}
+	// 改登记路径（W4）：**id 不变、既有会话不动**。走与建会话**同一条**校验（绝对 / 存在 /
+	// 是目录 / 符号链接规范化），所以"能改过去"与"能在那里建会话"不可能一个能过一个不能过。
+	if req.Path != nil {
+		canonical, verr := ValidateWorkspace(*req.Path)
+		if verr != nil {
+			return nil, verr
+		}
+		ok, rerr := pl.st.RelocateWorkspace(context.Background(), id, canonical)
+		switch {
+		case errors.Is(rerr, store.ErrWorkspacePathTaken):
+			return nil, workspaceExistsErr(canonical)
+		case errors.Is(rerr, store.ErrWorkspaceDefaultImmutable):
+			return nil, acl.NewError(acl.ClassRequest, "workspace_default_immutable",
+				"默认工作空间的路径由装配期决定，不能改", nil)
+		case rerr != nil:
+			return nil, rerr
+		case !ok:
+			return nil, WorkspaceNotFoundError(id)
+		}
+	}
+	resp, err := pl.RenameRegisteredWorkspace(id, req.Title)
+	if err != nil {
+		return nil, err
+	}
+	if req.DefaultCapability == nil && req.DefaultPermissionMode == nil {
+		return resp, nil
+	}
+	cur, ok, err := pl.workspaceDefaults(id)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, WorkspaceNotFoundError(id)
+	}
+	capability, mode := cur.CapabilityJSON, cur.PermissionMode
+	if req.DefaultCapability != nil {
+		capability = *req.DefaultCapability
+	}
+	if req.DefaultPermissionMode != nil {
+		mode = *req.DefaultPermissionMode
+	}
+	if _, err := pl.st.SetWorkspaceDefaults(context.Background(), id, capability, mode); err != nil {
+		return nil, err
+	}
+	return pl.RenameRegisteredWorkspace(id, req.Title)
+}
+
+// workspaceDefaults 读一个工作空间当前声明的默认值（不存在 → ok=false）。
+func (pl *Plane) workspaceDefaults(id string) (WorkspaceDefaults, bool, error) {
+	if pl.st == nil {
+		return WorkspaceDefaults{}, false, nil
+	}
+	row, ok, err := pl.st.GetWorkspace(context.Background(), id)
+	if err != nil || !ok {
+		return WorkspaceDefaults{}, false, err
+	}
+	return WorkspaceDefaults{
+		CapabilityJSON: row.DefaultCapabilityJSON,
+		PermissionMode: row.DefaultPermissionMode,
+	}, true, nil
+}
+
+// WorkspaceDefaultsOf 读某工作空间声明的默认值（建会话那条解析链的**唯一**取值口）。
+//
+// `ok=false`（memory 模式 / 未登记）与"登记了但没有默认值"（`”`）是两件事：
+// 前者交给下游缺省，后者同样交给下游缺省——但它们不该在类型上被合起来，
+// 否则将来"工作空间没登记"要报错时就没有位置放了。
+func (pl *Plane) WorkspaceDefaultsOf(id string) (WorkspaceDefaults, bool) {
+	d, ok, _ := pl.workspaceDefaults(id)
+	return d, ok
+}
+
+// workspaceExistsErr 同名目标已存在（唯一出口：40901 + `workspace_exists`）。
+func workspaceExistsErr(target string) error {
+	return acl.NewError(acl.ClassLimit, "workspace_exists",
+		fmt.Sprintf("目录已存在: %s", target), nil)
 }
 
 // CreateRegisteredWorkspace 登记一个工作空间（**get-or-create**；strict=true 时重复即报错）。

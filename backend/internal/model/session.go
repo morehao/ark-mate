@@ -70,6 +70,13 @@ type SessionEntity struct {
 	// 走索引查"还有哪些会话在用这个代际"；塞进 JSON 就得全表扫 + 逐行解析。
 	// '' = 未声明能力选择（与未引入代际时的行为逐字相同）。
 	CapabilityFingerprint string `gorm:"column:capability_fingerprint;not null"`
+	// NativeMode 会话**钉住**的原生权限模式（v29；`''` = 不注入原生权限配置）。
+	//
+	// 它是**创建时的快照**（与 `capability_json` 同款）：模式只能以进程 env 下发
+	// （`DSH_PERMISSION_MODE`），所以"一个进程内按会话切换"走不通，只能每模式一个暖进程；
+	// 而暖进程的键必须在取连接之前已知 ⇒ 模式必须落库。每次现算工作空间默认的后果是——
+	// 用户改了工作空间的默认权限模式，**昨天那些会话**的行为跟着变了，而界面上什么都不会说。
+	NativeMode string `gorm:"column:native_mode;not null;default:''"`
 	// LastSeq 该会话已落库事件的最后 seq（events.seq 全局单调）。
 	LastSeq   int64     `gorm:"column:last_seq"`
 	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`

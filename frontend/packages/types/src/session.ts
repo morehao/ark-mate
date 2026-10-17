@@ -1,3 +1,7 @@
+// 过程状态的取值定义在事件契约那一侧（`Ev.RunStatus` 的载荷），这里只按类型引用——
+// 让「`run.status` 的取值集」在仓库里仍然只有一处定义。
+import type { RunStatus } from './events'
+
 export type SessionStatus = 'in_progress' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
 
 export interface SessionSummary {
@@ -11,6 +15,15 @@ export interface SessionSummary {
    */
   runtime_id: string
   status: SessionStatus
+  /**
+   * 当前轮次的**过程状态**（`run.status` 的读面投影，ADR-6）。
+   *
+   * 这是「这一轮在干什么」的**唯一**事实来源：头栏旁白与侧栏会话行的阶段文案都读它，
+   * 不再从 `status` + 本地条目尾部倒推。列表行与详情都带它（侧栏要能对**没打开过的**会话
+   * 说出「等待你授权」）。没出现过过程事件（历史会话 / 本轮还没开始）时整个键缺席——
+   * 不要把它当成"状态是空串"来渲染。
+   */
+  run?: RunPhase
   title: string // 会话标题（服务端由首条用户消息推导；可 PATCH 覆盖）
   pinned: boolean
   archived: boolean
@@ -179,6 +192,26 @@ export interface SessionDetail extends SessionSummary {
   memories?: PermissionMemory[] // 会话级权限记忆（allow/reject 双侧，可逐条/一键撤销）
 }
 
+/** 会话当前轮次过程的对外表示（与 `RunResp` 的分工：那是历史账本，这是此刻在做什么）。 */
+export interface RunPhase {
+  run_id?: string
+  status: RunStatus
+  /** 底座给的更细阶段名，原样透传（平台不翻译、不重排）。 */
+  phase?: string
+  /** 人话旁白（平台自己的判定产物）。 */
+  detail?: string
+  tool_call_id?: string
+  tool_name?: string
+  /** permission | elicitation | model | tool。 */
+  waiting_for?: string
+  /** 仅恢复收口带：`restart`（界面说「上一轮因进程重启中断，可重发」，不说「失败」）。 */
+  reason?: string
+  /** 该状态事件的时刻（RFC3339Nano）。 */
+  at?: string
+  /** 该事件在会话内的位次（与 `events.seq` 同一套）。 */
+  seq: number
+}
+
 /** 会话级权限记忆（decision 区分「始终允许」与「始终拒绝」，对称语义）。 */
 export interface PermissionMemory {
   title: string
@@ -306,13 +339,27 @@ export interface ElicitationResp {
   timeout_at: string // ISO；过期即 service 自动取消
 }
 
-export type ElicitationAction = 'accept' | 'decline' | 'cancel'
+/**
+ * 一条挂起提问的**境况**（服务端事件 `session.elicitation_resolved` 的 `action`，ADR-11）。
+ *
+ * `pending` 与 `cancel` 的区别是全部的：`cancel` 说"这张卡没了"，而 `pending` 说
+ * "那一轮不等了，但你想答还是能答"——迟到的回答**作为新一轮**进去（不是塞回旧轮）。
+ */
+export type ElicitationAction = 'accept' | 'decline' | 'cancel' | 'pending'
 
 /** 决策体：accept=提交（content 为表单内容对象）；decline=拒绝提供；cancel=取消本次提问。 */
 export interface ResolveElicitationReq {
   elicitation_id: string
   action: ElicitationAction
   content?: Record<string, unknown>
+  /**
+   * 回答一条**已经超时转 pending** 的提问（ADR-11）。
+   *
+   * 它走的不是"投给那一轮"而是"作为**新一轮**的用户消息进去"：那一轮的 ACP 调用在超时那一刻
+   * 就已经拿到 `cancel` 返回了。缺省 false —— 服务端不替你猜（猜错的两个方向都很难看：
+   * 把新回答塞进旧轮 / 把正在等的那条当迟到处理）。
+   */
+  late?: boolean
 }
 
 export interface ResolveElicitationResp {

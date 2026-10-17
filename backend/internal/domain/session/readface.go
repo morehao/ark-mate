@@ -56,6 +56,9 @@ func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]dtosess
 	// 展示字段（workspace_id / workspace_title）在**释放锁之后**补齐：它们要读库，
 	// 而持锁读库会与 registerSession 的"先写内存再落库"顺序互相卡住。
 	pl.fillWorkspaceDisplay(out)
+	// 过程状态的投影同理在**释放锁之后**补（`RunSnapshot` 自己取锁）：持锁读它会与
+	// `recordRunStatus` 的取锁路径互相卡住——这条分界与 `fillWorkspaceDisplay` 是同一条。
+	pl.fillRunPhase(out)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Pinned != out[j].Pinned {
 			return out[i].Pinned
@@ -63,6 +66,16 @@ func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]dtosess
 		return out[i].CreatedAt > out[j].CreatedAt
 	})
 	return out, nil
+}
+
+// fillRunPhase 给一批会话行补上当前轮次的过程状态（侧栏阶段文案的来源）。
+//
+// 必须在**释放锁之后**调：`RunSnapshot` 自己取锁，而 `recordRunStatus` 与 `ListSessions`
+// 的读循环是两条会互相等待的边（持锁读域状态 → 详情写点取锁 = 经典的锁序反转）。
+func (pl *Plane) fillRunPhase(items []dtosession.SessionResp) {
+	for i := range items {
+		items[i].Run = pl.RunPhaseOf(items[i].ID)
+	}
 }
 
 // fillWorkspaceDisplay 给一批响填补归属展示字段（v14；读面解析，见设计 §4.3）。
@@ -74,10 +87,36 @@ func (pl *Plane) fillWorkspaceDisplay(items []dtosession.SessionResp) {
 	}
 }
 
-// sessionResp 返回单个会话的轻量表示（须持锁调用）。
-func (pl *Plane) SessionResp(id string) dtosession.SessionResp {
+// sessionRespLocked 返回单会话的轻量表示（**调用方必须持 `pl.mu`**）。
+//
+// 刻意不导出：锁在包里、调用方拿不到，"须持锁调用"这种约定只对包内有效。跨包读面走
+// `SessionSnapshot`——它自己取锁。这条是 2026-10-17 修的：此前它叫 `SessionResp` 且导出，
+// 而 `svcsession` 的两个调用点都不持锁（对 map 的裸读，`-race` 可复现）。
+func (pl *Plane) sessionRespLocked(id string) dtosession.SessionResp {
 	r := pl.sessions[id]
 	return pl.ToSessionRespOf(r)
+}
+
+// SessionSnapshot 一次取锁返回单会话的读面：轻量表示 + 过程状态 + 存在性。
+//
+// 为什么一次取锁而不是三个方法各取一次：详情页要的是**同一时刻**的"这条会话 + 它这一轮在
+// 干什么"。分三次取得到三个瞬间的快照（resp 属于时刻 A、run 属于时刻 B），而两段在界面上
+// 是同一行字。列表路径仍走 `fillRunPhase`（锁外逐条补，见那里的注释）。
+//
+// 返回的 `RunPhase` 为 nil = 没有投影（历史会话 / 本轮还没开始），与 `RunPhaseOf` 同一口径。
+func (pl *Plane) SessionSnapshot(id string) (dtosession.SessionResp, *dtosession.RunPhaseResp, bool) {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	r, ok := pl.sessions[id]
+	if !ok {
+		return dtosession.SessionResp{}, nil, false
+	}
+	resp := pl.ToSessionRespOf(r)
+	var run *dtosession.RunPhaseResp
+	if snap, ok := pl.runStatusLatest[id]; ok {
+		run = runPhaseOfSnapshot(snap)
+	}
+	return resp, run, true
 }
 
 // workspaceMatches 归属过滤的判定（设计 ADR-6）：`rWorkspaceID == ”` 的行归默认工作空间。

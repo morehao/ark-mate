@@ -39,6 +39,11 @@ export const Ev = {
   // `GET /sessions/:id/runs`），但它在契约里：帧上出现未知 type 时前端只能丢弃，
   // 而"这一轮开始了"是能对齐 `runs` 行的唯一事实。
   RunStarted: 'run.started',
+  // 一轮问答的**过程状态**（后端唯一铸造点 = domain/session 的 `RunStatusPayload`）。
+  // payload = {session_id, run_id, status, phase?, detail?, tool_call_id?, tool_name?,
+  // waiting_for?, retry?, at}。`status` 的 10 个活体取值见本文件下方的 `RunStatus`；
+  // 恢复路径另有一支 `interrupted` 作收口（实时路径永不发它，ADR-8）。
+  RunStatus: 'run.status',
   RunEnded: 'run.ended',
   RunError: 'run.error',
   RunCancelled: 'run.cancelled',
@@ -48,6 +53,46 @@ export const Ev = {
 } as const
 
 export type EvType = (typeof Ev)[keyof typeof Ev]
+
+/**
+ * `run.status` 的取值（ADR-7：按本仓的 ACP 观测面收窄到 10 个**活体**状态）。
+ *
+ * 为什么不是参照产品的 13 态：那是它自己 CLI 状态机的投影，而本仓观测面是 ACP——声明一个
+ * 观测不到的取值，会让界面在两种状态下显示同一个东西。`interrupted` 是**例外**：它不是活体
+ * 阶段，而是**恢复路径**的收口取值（进程被杀、日志里没有终态），实时路径永不发它。
+ */
+export type RunStatus =
+  | 'preparing'
+  | 'model_requesting'
+  | 'model_streaming'
+  | 'tool_executing'
+  | 'waiting_for_permission'
+  | 'waiting_for_user'
+  | 'retrying'
+  | 'compacting'
+  | 'cancelling'
+  | 'idle'
+  | 'interrupted'
+
+/** `run.status` 的载荷（`Ev.RunStatus`；后端唯一铸造点是 domain/session 的 `RunStatusPayload`）。 */
+export interface RunStatusPayload {
+  session_id: string
+  run_id: string
+  status: RunStatus
+  /** 底座给的更细阶段名，原样透传（平台不翻译、不重排；缺失时 status 仍可用）。 */
+  phase?: string
+  /** 人话旁白（界面头栏用；平台自己的判定产物）。 */
+  detail?: string
+  tool_call_id?: string
+  tool_name?: string
+  /** permission | elicitation | model | tool。 */
+  waiting_for?: string
+  retry?: { attempt?: number; reason?: string } & Record<string, unknown>
+  /** RFC3339Nano。 */
+  at?: string
+  /** 仅恢复收口带：`restart`。 */
+  reason?: string
+}
 
 export interface BusEvent {
   // id 事件行身份（`evt_<26 位 ULID>`，v17 起）。
@@ -76,6 +121,20 @@ export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | '
  * **只认事件、不做本地推断**：投递与撤下是两条不同的事实，前端不靠「POST 成功」或超时去猜。
  * 刷新/重连靠历史回放重建（服务端重启作废队项时也会补发 cancelled，见 reason=stale）。
  */
+/**
+ * 排队项**离队原因**（`session.input_cancelled` 的 `reason`）。
+ *
+ * 与后端 `domain/session/inputqueue.go` 的 `QueuedInputReasons` **逐条相等**（由 archtest 的
+ * `TestQueuedInputReasonVocabularyIsClosed` 钉住）。为什么必须闭合：前端**只认事件**、不做本地
+ * 推断——后端多发一个前端不认的值，那一行就会永远挂在队列里（或者被渲染成"未知原因"）。
+ */
+export type QueuedInputReason =
+  | 'run_finished' // 因上一轮结束而投递（配合 input_delivered）
+  | 'user_cancel' // 用户显式撤下
+  | 'deliver_failed' // 投递时启动新一轮失败
+  | 'stale' // 进程重启：等待的那一轮已随进程消失
+  | 'user_edit' // 用户把队项取回编辑（ADR-10 的第三个动作）
+
 export interface QueuedInput {
   inputId: string
   text: string
@@ -114,6 +173,25 @@ export interface StreamEntry {
   schema?: ElicitationFormSchema // form 模式字段 schema（UI 据此渲染控件）
   url?: string // url 模式链接
   content?: Record<string, unknown> // accept 时用户提交的内容（结果展示）
+  /**
+   * 已**超时但问题仍可回答**（ADR-11 的 `action:"pending"`）。
+   *
+   * 与 `resolved` 互斥：`resolved` 说"这张卡没了"，它说"那一轮不等了，但你想答还是能答"。
+   * 卡片据此保留按钮 + 显示一句「仍可回答」；回答时请求体带 `late:true`，
+   * 那条回答**作为新一轮**的用户消息进去（不是塞回已经收尾的旧轮）。
+   */
+  pendingLate?: boolean
+  /**
+   * 工具失败的**平台侧归类**（服务端按底座的签名表给，S4）。
+   *
+   * `sandbox_denied`（被沙箱边界拒了，可以引导升权）与 `sandbox_unavailable`（宿主根本没有可用的
+   * 沙箱后端，再点一次也一样失败）的处置**相反**，所以必须是两个值。
+   *
+   * 客户端**不**从 `status` 推断它：被沙箱拒绝的那一帧 `status` 就是 `completed`。
+   */
+  failReason?: string
+  /** 与 `failReason` 配套的稳定业务码（可选；服务端不给就没有）。 */
+  bizCode?: string
   /** 失败时的 runtime stderr 诊断尾巴（A3；错误条目可展开查看，空 = 无采集）。 */
   stderrTail?: string[]
 }

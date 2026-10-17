@@ -71,7 +71,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	// 代际键与引入代际之前逐字相同（R11）。指纹与下面注入用的 opt.Selection 同源，
 	// 不存在"按 A 算指纹、按 B 注入"的可能。
 	fingerprint := o.svc.capabilityFingerprint(spec.ID, opt.Selection)
-	rc, err := o.acquire(ctx, spec, fingerprint)
+	rc, err := o.acquire(ctx, spec, fingerprint, opt.NativeMode)
 	if err != nil {
 		o.svc.runtimePlane.SetState(session.AgentStateStopped)
 		// A3：底座起不来 / 握手失败时记诊断（含该阶段的 stderr 尾巴），供
@@ -107,7 +107,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	// P3 双 id（D-1，用户已授权破坏性变更）：会话对外 id = 平台铸造的 `ses_<ULID>`（隐藏底座 id 形状、
 	// 跨重启稳定定位）；原生 provider id 存 sess/RuntimeSessionID 列，供恢复承载（load/resume）。
 	as := &ActiveSession{ID: convID, Runtime: spec.ID, Fingerprint: fingerprint,
-		client: rc.Client, sess: sess, providerID: sess.ID(), proj: runtime.NewProjection(spec, sess)}
+		NativeMode: opt.NativeMode, client: rc.Client, sess: sess, providerID: sess.ID(), proj: runtime.NewProjection(spec, sess)}
 	// 会话级模型应用（运行时派生模型面的落地，决策记录）：
 	//   - 值由 `modelCfg` 给出（平台行 → adapter 现算，见 `resolveSessionModel`）；
 	//   - 运行时**拒绝**该值 → 建会话失败（错误上抛给调用方，绝不静默回落到底座默认模型）；
@@ -137,7 +137,10 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 		RuntimeSessionID: providerSessID, Status: session.SessionStatusInProgress,
 		// 钉住的选定**与指纹一起**落库（M3-3 起）：两者必须同源，缺一则恢复路径
 		// 要么注入集不对、要么代际挂错。
-		CapabilityJSON: MarshalCapabilitySelection(opt.Selection)})
+		CapabilityJSON: MarshalCapabilitySelection(opt.Selection),
+		// 钉住的原生权限模式（v29）：它决定这个会话跑在**哪个暖进程**上，所以必须与其它
+		// 钉住字段一起落库——漏了它，重启后该会话会悄悄换到一个"不注入原生权限"的进程上。
+		NativeMode: opt.NativeMode})
 	o.svc.beginTranscript(as.ID, spec.ID, cwd, opt.WorkspaceTemporary) // wire transcript header（未启用时 no-op）
 	evt := o.svc.publish(session.BusSessionCreated, as.ID, map[string]any{
 		"session_id": as.ID, "runtime": spec.ID,
@@ -229,8 +232,9 @@ func (o *Orchestrator) ensureSession(ctx context.Context, sessionID string) (*Ac
 func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 	spec runtime.Spec, cwd string, sel *CapabilitySelection, fingerprint string) (*ActiveSession, string, error) {
 	rec := *recIn
-	// **恢复路径也要带上会话钉住的指纹**：漏改这一处的后果是"重启后能力集悄悄换了一套"。
-	rc, err := o.acquire(ctx, spec, fingerprint)
+	// **恢复路径也要带上会话钉住的指纹与权限模式**：漏改这一处的后果分别是"重启后能力集悄悄换了
+	// 一套"与"重启后沙箱边界悄悄变宽/变窄"——两者都不会报错。
+	rc, err := o.acquire(ctx, spec, fingerprint, rec.NativeMode)
 	if err != nil {
 		return nil, "", err
 	}
@@ -303,7 +307,8 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 	}
 	o.svc.registerSession(&rec)
 	as := &ActiveSession{ID: rec.ID, Runtime: spec.ID, Fingerprint: fingerprint,
-		client: rc.Client, sess: sess, providerID: sess.ID(),
+		NativeMode: rec.NativeMode,
+		client:     rc.Client, sess: sess, providerID: sess.ID(),
 		proj: runtime.NewProjection(spec, sess), memo: memo}
 	// 会话级模型在恢复后重新断言一次（平台记录是权威意图；原生恢复未必带回该状态）：
 	// **best-effort** —— 恢复不是用户在选模型，运行时若已不再提供该值（换了 provider/档案），

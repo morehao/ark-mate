@@ -26,7 +26,9 @@ type UsageSummaryResp struct {
 	From    string `json:"from,omitempty"`
 	To      string `json:"to,omitempty"`
 	GroupBy string `json:"group_by"`
-	Source  string `json:"source"` // sqlite | memory（memory 模式无统计，返回 40501）
+	// TZOffset 生效的客户端时区偏移分钟数（东为正；0 = UTC）。day 桶的键与日期参数都按它解释。
+	TZOffset int    `json:"tz_offset"`
+	Source   string `json:"source"` // sqlite | memory（memory 模式无统计，返回 40501）
 	// ContextSemantics/CostSemantics 口径：均为「区间末快照」，不是区间增量。
 	ContextSemantics string `json:"context_semantics"`
 	CostSemantics    string `json:"cost_semantics"`

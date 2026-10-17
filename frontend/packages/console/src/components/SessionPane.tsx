@@ -13,6 +13,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { tokens } from '@ark-mate/ui'
 import { Dot, sessionStatusMeta } from '@ark-mate/ui'
+import { runNarration } from '../console/runView'
 import { automationIDFromOrigin, isAutomationOrigin } from '../console/automationView'
 import type { MenuProps } from 'antd'
 import type { SessionSearchHit, SessionSummary, MessageSearchHit, MessageSearchResp } from '@ark-mate/types'
@@ -401,7 +402,13 @@ export function SessionPane({ onCreate }: Props) {
   const renderItem = (sm: SessionSummary) => {
     const view = views[sm.id]
     const meta = sessionStatusMeta(sm.status)
-    const running = sm.status === 'in_progress'
+    // 阶段文案（Q12）：`run.status` 的**第二个消费者**。它说得出「等待你授权」「正在执行 Bash」，
+    // 而 `sm.status` 只能说「进行中/已完成」——后者区分不出在跑还是在等人。
+    //
+    // 两个来源同源不同鲜：`views[id].run` 是事件流（实时），`sm.run` 是列表快照（刷新时）。
+    // 都没有（没打开过、也没过过程事件）→ 回落终态归类文案，**不猜**。
+    const narr = runNarration(view?.run ?? sm.run)
+    const running = narr.tone === 'run'
     const on = sm.id === activeId
 
     // 行内「更多」：重命名 / 置顶·取消置顶 / 归档（或恢复）
@@ -438,8 +445,9 @@ export function SessionPane({ onCreate }: Props) {
         key={sm.id}
         className={`fg-sess-item${on ? ' fg-on' : ''}`}
         style={{
+          position: 'relative',
           display: 'flex',
-          alignItems: 'center',
+          flexDirection: 'column',
           gap: 2,
           width: '100%',
           borderRadius: 10,
@@ -447,6 +455,7 @@ export function SessionPane({ onCreate }: Props) {
           marginBottom: 2,
           border: '1px solid transparent',
           color: tokens.text,
+          opacity: sm.archived ? 0.68 : 1,
         }}
       >
         <button
@@ -460,60 +469,69 @@ export function SessionPane({ onCreate }: Props) {
             textAlign: 'left',
             background: 'transparent',
             border: 0,
-            padding: '5px 0',
+            padding: '2px 0',
             color: 'inherit',
             cursor: busy && !on ? 'not-allowed' : 'pointer',
           }}
         >
+          {/* 第 1 行 = 标题 + 置顶标记（原型 `.sess .l1`）。
+              标题**单行**省略：状态/时间已在第 2 行，再 clamp 两行会把行高抬到三行，
+              而 236px 的栏里那两行只用来重复「这条是什么」——原型明确用 nowrap。 */}
           <span
-            style={{
-              display: '-webkit-box',
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-              fontSize: 13.5,
-              fontWeight: 560,
-              letterSpacing: '-0.005em',
-              lineHeight: 1.4,
-              color: sm.archived ? tokens.textSecondary : tokens.text,
-            }}
+            data-sess-line="title"
+            style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, paddingRight: 30 }}
           >
-            {titleFor(sm, view, runtime?.name)}
+            <span
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontSize: 13.5,
+                fontWeight: 560,
+                letterSpacing: '-0.005em',
+                color: sm.archived ? tokens.textSecondary : tokens.text,
+              }}
+            >
+              {titleFor(sm, view, runtime?.name)}
+            </span>
+            {sm.pinned && <PushpinFilled style={{ fontSize: 11, color: tokens.primary, flex: 'none' }} />}
           </span>
+          {/* 第 2 行 = 状态点 + 阶段文案 + 来源标记 + 相对时间（原型 `.sess .l2`）。
+              阶段文案优先；没有过程状态才回落到会话的终态归类（`runNarration` 的同一口径）。 */}
           <span
+            data-sess-line="meta"
             style={{
-              marginTop: 7,
+              marginTop: 2,
               display: 'flex',
               alignItems: 'center',
-              gap: 7,
+              gap: 6,
               minWidth: 0,
               fontFamily: tokens.fontMono,
               fontSize: 10.5,
               color: tokens.textSecondary,
             }}
           >
+            <Dot
+              color={narr.tone === 'wait' || narr.tone === 'interrupted' ? tokens.warning : meta.color}
+              pulse={running}
+              size={6}
+            />
             <span
-              title={sm.runtime_id}
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                border: `1px solid ${tokens.border}`,
-                borderRadius: 999,
-                padding: '1px 7px',
-                color: tokens.text,
-                fontWeight: 500,
-                whiteSpace: 'nowrap',
-                maxWidth: 150,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                color:
+                  narr.tone === 'wait' || narr.tone === 'interrupted'
+                    ? tokens.warning
+                    : running
+                      ? tokens.text
+                      : tokens.textSecondary,
               }}
             >
-              {runtimeLabelOf(runtime, sm.runtime_id)}
-            </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', minWidth: 0 }}>
-              <Dot color={meta.color} pulse={running} size={6} />
-              <span style={{ color: running ? tokens.text : tokens.textSecondary }}>{meta.label}</span>
+              {narr.label || meta.label}
             </span>
             {/* 来源标记：由定时任务触发的会话（`origin=automation:<id>`）——人工与会话流混在一起时，
                 "这条是谁开的"必须一眼可见，而不是靠时间去猜。 */}
@@ -535,37 +553,13 @@ export function SessionPane({ onCreate }: Props) {
                 ⏱ 定时
               </span>
             )}
-            <span
-              style={{ marginLeft: 'auto', flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              title={sm.updated_at}
-            >
-              <span>{relTime(sm.updated_at)}</span>
-              {view && view.lastSeq >= 0 && (
-                <span style={{ color: tokens.textPlaceholder }}>seq {view.lastSeq}</span>
-              )}
+            <span style={{ marginLeft: 'auto', flex: 'none' }} title={sm.updated_at}>
+              {relTime(sm.updated_at)}
             </span>
           </span>
         </button>
-        <button
-          type="button"
-          title={sm.pinned ? '取消置顶' : '置顶'}
-          aria-label={sm.pinned ? '取消置顶' : '置顶'}
-          onClick={() => void togglePin(sm.id)}
-          style={{
-            flex: 'none',
-            display: 'inline-grid',
-            placeItems: 'center',
-            width: 26,
-            height: 26,
-            border: 0,
-            borderRadius: 8,
-            background: 'transparent',
-            color: sm.pinned ? tokens.primary : tokens.textPlaceholder,
-            cursor: 'pointer',
-          }}
-        >
-          {sm.pinned ? <PushpinFilled style={{ fontSize: 13 }} /> : <PushpinOutlined style={{ fontSize: 13 }} />}
-        </button>
+        {/* 行尾「更多」：绝对定位在第 1 行右端（原型 `.sess .ops`）。
+            放在按钮**外面**是为了不出现嵌套 button；`paddingRight` 已在标题行预留它的宽度。 */}
         <Dropdown menu={{ items: menuItems, onClick: onMenu }} trigger={['click']} placement="bottomRight">
           <button
             type="button"
@@ -574,13 +568,15 @@ export function SessionPane({ onCreate }: Props) {
             aria-label="更多操作"
             onClick={(ev) => ev.stopPropagation()}
             style={{
-              flex: 'none',
+              position: 'absolute',
+              top: 3,
+              right: 3,
               display: 'inline-grid',
               placeItems: 'center',
-              width: 26,
-              height: 26,
+              width: 22,
+              height: 22,
               border: 0,
-              borderRadius: 8,
+              borderRadius: 7,
               background: 'transparent',
               color: tokens.textSecondary,
               cursor: 'pointer',

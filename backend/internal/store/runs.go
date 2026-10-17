@@ -8,7 +8,7 @@ import (
 
 // ——— runs 表（一轮 prompt 的**实体**：v22 起开轮落行，终态 UPDATE） ———
 
-// CreateRun 插入一条 run 行（**开轮**语义见 manager.openRun：status=running、first_seq=本轮
+// CreateRun 插入一条 run 行（**开轮**语义见 manager.openRun：status=in_progress、first_seq=本轮
 // `run.started` 的位次、last_seq=-1）。幂等：同 id 或同 `(session_id, first_seq)` 已存在即跳过。
 //
 // 刻意只做"行级插入"、不在这里塞业务语义：本函数也被测试用来直接种一行终态（那时它就是

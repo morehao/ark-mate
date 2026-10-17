@@ -21,7 +21,10 @@ type InteractionSvc interface {
 	ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) (*dtosession.PermissionDecisionResp, error)
 
 	// ResolveElicitation 按 elicitation_id 决策（accept/decline/cancel；accept 可带 content）。
-	ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any) error
+	//
+	// `late=true` 回答一条**已经超时转 pending** 的提问（ADR-11）：那条路不投给旧轮，
+	// 而是作为**新一轮**的用户消息进去。
+	ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any, late bool) error
 
 	// RevokeMemory 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。
 	RevokeMemory(ctx context.Context, id, title, kind string) error
@@ -40,8 +43,8 @@ type InteractionDelivery interface {
 	// ResolvePermission 投递权限决策；ok=false = 挂起项不存在/已过期/不属于该会话。
 	ResolvePermission(sessionID, callID, optionID string, always, allowed bool) (interaction.DecisionOutcome, bool, error)
 
-	// ResolveElicitation 投递结构化提问决策（accept/decline/cancel）。
-	ResolveElicitation(sessionID, elicitationID, action string, content map[string]any) (bool, error)
+	// ResolveElicitation 投递结构化提问决策（accept/decline/cancel）；`late` = 回答已超时转 pending 的那条。
+	ResolveElicitation(sessionID, elicitationID, action string, content map[string]any, late bool) (bool, error)
 
 	// RevokeMemory 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。
 	RevokeMemory(sessionID, title, kind string) (bool, error)
@@ -95,11 +98,11 @@ func (h *Interaction) ResolvePermission(_ context.Context, id, callID, optionID 
 
 // ResolveElicitation 按 elicitation_id 决策（accept/decline/cancel；accept 可带 content）。
 // C3 归属与权限面同一立场：跨会话调用按「不存在」处理（40401，不泄露他会话挂起项）。
-func (h *Interaction) ResolveElicitation(_ context.Context, id, elicitationID, action string, content map[string]any) error {
+func (h *Interaction) ResolveElicitation(_ context.Context, id, elicitationID, action string, content map[string]any, late bool) error {
 	if !h.plane.HasSession(id) {
 		return sessionNotFoundErr(id)
 	}
-	ok, err := h.deliver.ResolveElicitation(id, elicitationID, action, content)
+	ok, err := h.deliver.ResolveElicitation(id, elicitationID, action, content, late)
 	if err != nil {
 		return code.FromError(err)
 	}

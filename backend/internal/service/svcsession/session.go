@@ -34,4 +34,10 @@ type SessionSvc interface {
 
 	// CancelRun 取消进行中的 run（无 run 时幂等 no-op）。
 	CancelRun(ctx context.Context, id string) error
+
+	// DeliverQueuedNow 会话**空闲**时立刻投递队首排队输入（ADR-10 的「立即发送」在空闲态的落点）。
+	//
+	// 它属于会话轮次这一面而不是队列那一面：真正要做的是"启动一轮"，队列只是它的输入源。
+	// 忙时是 no-op —— 那一轮结束时的收尾路径会自然投递队首（此时排队项已经被排到第一位）。
+	DeliverQueuedNow(ctx context.Context, id string) error
 }

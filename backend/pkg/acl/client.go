@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -359,6 +360,9 @@ func normalizeUpdate(n acpsdk.SessionNotification) []Event {
 			Kind:   kind,
 			Input:  tu.RawInput,
 			Output: tu.RawOutput,
+			// 结果的**正文**只在 `content` 里（dsh 从不下发 rawOutput，2026-10-16 实测）——
+			// 不读它，平台就拿不到"这条为什么没成"，因为被沙箱拒绝的那一帧 status 是 completed。
+			ContentText: toolContentText(tu.Content),
 		})
 	case u.UsageUpdate != nil:
 		uu := u.UsageUpdate
@@ -402,4 +406,25 @@ func firstNonEmptyPtr(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// toolContentText 把 `tool_call_update.content` 里的 text 块拼成一段纯文本。
+//
+// 只取 text：图片/资源/终端块对"为什么没成"没有帮助，而把它们序列化进来会让失败签名匹配
+// 变成一个 JSON 形状依赖（形状一变判据就静默失效）。
+func toolContentText(blocks []acpsdk.ToolCallContent) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, blk := range blocks {
+		if blk.Content == nil || blk.Content.Content.Text == nil {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(blk.Content.Content.Text.Text)
+	}
+	return b.String()
 }

@@ -86,11 +86,14 @@ func (pl *Plane) PublishRaw(typ, sessionID string, payload any) eventbus.Event {
 	if m, ok := payload.(map[string]any); ok {
 		pl.publishSideEffects(sessionID, evt.ID, typ, m, evt.Seq)
 	}
-	// 终态事件 → runs 收口（sqlite 模式；窗口由开轮行的 first_seq 与本条事件的位次界定）。
+	// 收口事件 → runs 收口（sqlite 模式；窗口由开轮行的 first_seq 与本条事件的位次界定）。
 	// 位次**必须传进去**：它同时是窗口右端（`runs.last_seq`）——从窗口里"最后一个事件"反推
 	// 会在这条终态事件恰好没落库（append 失败）时写下一个错位。
-	if pl.st != nil && TerminalRunStatus(typ) != "" {
-		if m, ok := payload.(map[string]any); ok {
+	//
+	// 判据是 `RunClosingStatus` 而不是 `TerminalRunStatus`：恢复路径的 `run.status(interrupted)`
+	// 也是收口事实，两条路必须用同一支判据（见该函数注释）。
+	if pl.st != nil {
+		if m, ok := payload.(map[string]any); ok && RunClosingStatus(typ, m) != "" {
 			pl.MaterializeRun(sessionID, typ, m, evt.Seq)
 		}
 	}

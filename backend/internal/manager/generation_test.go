@@ -172,7 +172,7 @@ func TestGenerationPerFingerprint(t *testing.T) {
 		t.Fatal("stub runtime 未注册")
 	}
 	for _, fp := range []string{"", "fp-a", "fp-b"} {
-		if _, err := r.Orch.acquire(ctx, spec, fp); err != nil {
+		if _, err := r.Orch.acquire(ctx, spec, fp, ""); err != nil {
 			t.Fatalf("acquire(fp=%q): %v", fp, err)
 		}
 	}
@@ -181,7 +181,7 @@ func TestGenerationPerFingerprint(t *testing.T) {
 		t.Fatalf("三个不同指纹应各有一条连接，got %d", n)
 	}
 	// 重复取同一个指纹必须复用，不新增。
-	if _, err := r.Orch.acquire(ctx, spec, "fp-a"); err != nil {
+	if _, err := r.Orch.acquire(ctx, spec, "fp-a", ""); err != nil {
 		t.Fatal(err)
 	}
 	if n := connCount(r.Orch); n != 3 {

@@ -38,10 +38,11 @@ func NewUsageCtr(plane *session.Plane) UsageCtr {
 // **静默丢弃才是错的**：那会让用户以为「按底座筛选生效了」。
 func (h *usageCtr) Summary(c *gin.Context) {
 	q := dtousage.UsageQueryReq{
-		From:    c.Query("from"),
-		To:      c.Query("to"),
-		GroupBy: c.Query("group_by"),
-		AgentID: c.Query("agent_id"),
+		From:     c.Query("from"),
+		To:       c.Query("to"),
+		TZOffset: c.Query("tz_offset"),
+		GroupBy:  c.Query("group_by"),
+		AgentID:  c.Query("agent_id"),
 	}
 	resp, err := h.plane.UsageSummary(c.Request.Context(), q)
 	if err != nil {

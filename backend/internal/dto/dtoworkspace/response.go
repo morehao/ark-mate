@@ -126,6 +126,13 @@ type WorkspaceSettingsResp struct {
 	PreferRoots bool `json:"prefer_roots"`
 	// ProvisionDir 平台代建工作空间的根目录（空 = 代建关闭）。
 	ProvisionDir string `json:"provision_dir,omitempty"`
+	// CreateRoot **新建工作空间的落盘根**（ADR-3；空 = 未声明 → `name` 模式显式拒绝，
+	// 界面也不给入口）。
+	//
+	// 它与 `provision_dir` 今天取同一个值，但**是两件事**：`provision_dir` 是"平台代建的默认
+	// 工作空间落哪"，`create_root` 是"用户新建的工作空间落哪"。分成两个键是为了让"将来有一条
+	// 独立配置"不需要改 wire 形状，也让面板能如实显示"新建会落在哪里"。
+	CreateRoot string `json:"create_root,omitempty"`
 	// ProvisionIncluded 代建根是否已隐式并入生效白名单（受限模式下恒 true；不受限时为 false——
 	// 那时"名单"根本不存在，谈不上包含）。
 	ProvisionIncluded bool `json:"provision_included"`
@@ -183,6 +190,11 @@ type WorkspaceListResp struct {
 	// ProvisionDir 平台默认工作空间的所在目录（空 = 代建关闭）。透出是为了让"默认那个目录在哪"
 	// 有答案，也是排障时的第一个锚点。
 	ProvisionDir string `json:"provision_dir,omitempty"`
+	// CreateRoot 新建工作空间的落盘根（ADR-3；空 = 不给「新建工作空间…」入口）。
+	//
+	// 放在**列表响应**上而不是只放设置响应里：左栏区头的添加菜单要据此决定渲不渲染第二项，
+	// 而那一屏只读 `state.workspaces`（不读设置）。入口纪律同 ADR-11——能力缺失就不给按钮。
+	CreateRoot string `json:"create_root,omitempty"`
 }
 
 // WorkspaceDeleteResp `DELETE /workspaces/:id` 响应。

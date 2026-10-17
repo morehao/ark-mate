@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
@@ -196,6 +197,16 @@ func (a *App) Init(ctx context.Context) error {
 	a.rconn = runtimeconn.NewPlaneFor(reg)
 	a.svc = manager.NewService(reg, a.bus, manager.WithRuntimePlane(a.rconn))
 	a.reg = reg
+
+	// 命令门禁（A2）：规则文件默认 `<MATE_HOME>/command_policy.json`，文件不存在 = 未启用；
+	// **文件存在但 JSON/规则非法 = 拒绝启动**（坏文件不能被当成"没有规则"——那会让门禁
+	// 静默退回"全部问人"，而用户以为自己配了规则）。
+	if rules, err := interaction.LoadCommandPolicyFile(cfg.CommandPolicyPath); err != nil {
+		return fmt.Errorf("命令门禁规则加载失败（拒绝启动；移除或修复 %s 后重试）: %w", cfg.CommandPolicyPath, err)
+	} else if len(rules) > 0 {
+		a.svc.SetCommandPolicy(rules)
+		glog.Infow(ctx, "命令门禁已启用", "rules", len(rules), "path", cfg.CommandPolicyPath)
+	}
 
 	// v19 的目录改名一次性导入（`agents/providers.json` → `providers/providers.json`）：
 	// 必须在任何读 `ProviderDir` 的动作之前——包括下面 `ImportProviderFile` 的存量导入
@@ -470,6 +481,7 @@ func (a *App) Init(ctx context.Context) error {
 		// 导出（P4a 正文第八刀）：三份**依赖事实**（模型面已在上面交出 Store）——事实来源
 		// （`svcsystem.NewSource`）与用例实例（`svcsystem.New`）都由 ctrexport 造。
 		SessionPlane: a.svc.SessionPlane(), Bus: a.bus,
+		CommandPolicyPath: cfg.CommandPolicyPath, CommandPolicyApply: a.svc.SetCommandPolicy,
 	}
 	// 资产层（M2-1）：资产来自调用方给的目录（`--web-dir` / `MATE_WEB_DIR`），
 	// 没给即**拒绝启动**（退出码 3）。放在监听之前：装错资产时不该先占住端口再报错。

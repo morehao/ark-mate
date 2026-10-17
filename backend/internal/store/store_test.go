@@ -37,12 +37,20 @@ func openTestDB(t *testing.T) *Store {
 
 func seedSession(t *testing.T, s *Store, id string) {
 	t.Helper()
-	sess := model.SessionEntity{
-		ID: id, Title: "", Status: "in_progress",
-		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
-	}
-	if err := s.UpsertSession(ctxT(), sess); err != nil {
-		t.Fatalf("UpsertSession: %v", err)
+	// **走原始 SQL 且列固定**，不用 `UpsertSession`：后者按**当前实体**列出全部列，于是这套
+	// "停在某个历史版本"的夹具用例（`migrateUpTo(t, s, 22)` 之类）每加一列就会集体红——
+	// 而它们要钉的是**当时那一版**的行为，不是"最新实体能被写进旧 schema"。
+	//
+	// 列固定在这里 = 后来加的任何列都由 DDL 的 `DEFAULT` 兜住（这也正是那些迁移步的自我要求）。
+	err := s.DB().Exec(`INSERT INTO sessions
+		(id, cwd, workspace_id, workspace_temporary, model_id, runtime_id, runtime_session_id,
+		 title, pinned, archived, status, origin, capability_json, capability_fingerprint,
+		 last_seq, created_at, updated_at)
+		VALUES (?, '', '', 0, '', '', '', '', 0, 0, 'in_progress', '', '', '', 0, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at`,
+		id, time.Now().UTC(), time.Now().UTC()).Error
+	if err != nil {
+		t.Fatalf("seed session: %v", err)
 	}
 }
 

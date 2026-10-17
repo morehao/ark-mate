@@ -45,6 +45,19 @@ type WorkspaceEntity struct {
 	// ——与 dsh 的 workspaceDisplayTitle 同一手法：一次安装跨语言切换时磁盘路径与库里
 	// 的标题都不变，只有屏幕上的字跟着变。
 	IsDefault bool `gorm:"column:is_default;serializer:arkmate_flag"`
+	// DefaultCapabilityJSON 该工作空间新建会话时的**默认能力选定**（空 = 没有默认值）。
+	//
+	// 载荷形态与 `sessions.capability_json` **同源同构**（同一个 `CapabilitySelection` 形状），
+	// 因为读面的那条链就是"工作空间默认值 → 会话快照"——两份形状分叉的话，中间那次转换
+	// 就会变成一个没人审的翻译层。
+	//
+	// **它只影响以后建的会话**：既有会话存的是快照，改这里不动它们（v27 的迁移注里有理由）。
+	DefaultCapabilityJSON string `gorm:"column:default_capability_json;not null;default:''"`
+	// DefaultPermissionMode 该工作空间新建会话时的**默认权限模式**（空 = 没有默认值）。
+	//
+	// 取值集与 `interaction.PermissionMode*` 逐条相等（不必在这里复述：那一条由
+	// `TestWorkspaceDefaultsAreResolvedOnce` 顺着解析链断言）。
+	DefaultPermissionMode string `gorm:"column:default_permission_mode;not null;default:''"`
 	// ListOrder 左栏展示顺序（升序；新登记的追加到尾部）。
 	ListOrder int64 `gorm:"column:list_order;not null"`
 	// CreatedAt 登记时刻（RFC3339Nano(UTC)）。

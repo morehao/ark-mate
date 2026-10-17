@@ -132,20 +132,17 @@ func (pl *Plane) CreateWorkspaceDir(parent, name string) (*dtoworkspace.Workspac
 	if err != nil {
 		return nil, err
 	}
+	// 名字校验走**唯一实现**（`ValidateWorkspaceName`）：它与工作空间面的「新建工作空间…」
+	// 问的是同一个问题（"这个名字能不能当一段目录名"）。此前这两条路各写一份判据，
+	// 于是接受集随时可能悄悄分叉——而"文件夹能建、工作空间建不了"看起来像是两个不同的 bug。
+	//
 	// TrimSpace 只用来判定"是不是空的"，真正建的是用户原样给的名字：
 	// 目录名首尾含空白是合法的（"我的 项目"），替用户裁掉等于建了另一个名字。
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid", "目录名不能为空", nil)
+	cleaned, err := ValidateWorkspaceName(name)
+	if err != nil {
+		return nil, err
 	}
-	if strings.ContainsAny(name, `/\`) {
-		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
-			fmt.Sprintf("目录名不能包含路径分隔符: %q", name), nil)
-	}
-	if name == "." || name == ".." {
-		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
-			fmt.Sprintf("目录名不能是 %q", name), nil)
-	}
+	name = cleaned
 	target := filepath.Join(dir, name)
 	if err := os.Mkdir(target, 0o755); err != nil {
 		if os.IsExist(err) {

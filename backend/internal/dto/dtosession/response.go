@@ -21,9 +21,16 @@ type SessionResp struct {
 	// 执行事实**（历史会话可能停在别的底座上），读面照读不照推。
 	RuntimeID string `json:"runtime_id"`
 	Status    string `json:"status"`
-	Title     string `json:"title"`
-	Pinned    bool   `json:"pinned"`
-	Archived  bool   `json:"archived"`
+	// Run 当前轮次的**过程状态**（`run.status` 的读面投影，ADR-6）。列表行与详情都带它——
+	// 侧栏会话行的阶段文案（「等待你授权」「正在执行 Bash」）是它的**第二个消费者**，
+	// 只给详情会让侧栏永远只有状态点。
+	//
+	// 没有过过程事件（历史会话 / 本轮还没开始）→ 整个键缺席，**不回空壳**：
+	// `{status:""}` 会让界面渲染一个"有状态但为空"的东西。
+	Run      *RunPhaseResp `json:"run,omitempty"`
+	Title    string        `json:"title"`
+	Pinned   bool          `json:"pinned"`
+	Archived bool          `json:"archived"`
 	// Cwd 会话工作空间（canonical 绝对路径；已随会话创建定稿，之后不可变）。
 	// 同时是底座 session 的 cwd 与原生权限 workspace-write 的边界。
 	Cwd string `json:"cwd,omitempty"`
@@ -89,11 +96,38 @@ type SessionSearchHit struct {
 	Matches int    `json:"matches"`
 }
 
-// SessionDetailResp 单会话详情（元数据 + 挂起权限 + 会话级权限记忆）。
+// SessionDetailResp 单会话详情（元数据 + 挂起权限 + 会话级权限记忆 + 当前轮次过程）。
 type SessionDetailResp struct {
 	SessionResp
 	Pending  []PermissionResp `json:"pending"`
 	Memories []MemoryResp     `json:"memories"`
+}
+
+// RunPhaseResp 会话**当前轮次过程**的对外表示（`run.status` 的投影，不是 `runs` 表的行）。
+//
+// 与 `RunResp`（`GET /sessions/:id/runs` 的轮次明细）的分工：那是**历史账本**（一轮一行，
+// 含用量/首令牌耗时/窗口位次），这是**此刻在做什么**（可能同一轮反复变化）。两者共用
+// `run_id` 这一支身份，所以界面能对上「头栏说的这一轮」就是「账本里的那一行」。
+type RunPhaseResp struct {
+	RunID string `json:"run_id,omitempty"`
+	// Status 10 个活体取值之一，或恢复收口的 `interrupted`（实时路径永不发后者）。
+	Status string `json:"status"`
+	// Phase 底座给的更细阶段名，**原样透传**（平台不翻译、不重排；缺失时不出现该键）。
+	Phase string `json:"phase,omitempty"`
+	// Detail 人话旁白（平台自己的判定产物）。
+	Detail string `json:"detail,omitempty"`
+	// ToolCallID / ToolName 正在执行的工具（`tool_executing` / `waiting_for_permission` 时有值）。
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+	// WaitingFor 在等什么：permission | elicitation | model | tool。
+	WaitingFor string `json:"waiting_for,omitempty"`
+	// Reason 仅恢复收口带（`restart`）：界面据此说「上一轮因进程重启中断，可重发」，
+	// **不**说「失败」——那是底座的结论。
+	Reason string `json:"reason,omitempty"`
+	// At 该状态事件的时刻（RFC3339Nano）。
+	At string `json:"at,omitempty"`
+	// Seq 该事件在会话内的位次（与 `events.seq` 同一套；界面拿它判断新鲜度与续传）。
+	Seq int64 `json:"seq"`
 }
 
 // MemoryResp 会话级权限记忆的对外表示（decision 区分始终允许/始终拒绝）。
@@ -127,6 +161,12 @@ type SessionPromptResp struct {
 	// 本次输入已入队，等待当前轮结束投递（可用 DELETE /sessions/:id/inputs/:input_id 撤下）。
 	Queued  bool   `json:"queued,omitempty"`
 	InputID string `json:"input_id,omitempty"`
+}
+
+// QueuedInputMoveReq `POST /sessions/:id/inputs/:input_id/move` 的请求体（DOM insertBefore 语义）。
+type QueuedInputMoveReq struct {
+	// BeforeID 锚点队项；空 = 追加到末尾。锚点不在该会话的待投递集里 → 40001。
+	BeforeID string `json:"before_id,omitempty"`
 }
 
 // QueuedInputResp 一条待投递的排队输入（§6）。

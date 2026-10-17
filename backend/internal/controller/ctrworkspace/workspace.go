@@ -199,17 +199,18 @@ func (h *workspaceCtr) List(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
-// Create 登记一个目录为工作空间（`POST /workspaces`）。
+// Create 创建一条工作空间登记（`POST /workspaces`，ADR-2 的两种模式）。
 //
-// 默认 get-or-create（重复登记返回既有那一行）；`strict=true` 时才报 workspace_exists。
-// 目录不存在 / 不是目录 / 落在白名单外 → 40000（三种 code 名可分辨，见 workspace.ValidateWorkspace）。
+// `path` = 登记一个已存在的目录（get-or-create；`strict=true` 时才报 workspace_exists）；
+// `name` = 在落盘根下建一个目录并登记（一步）。**二选一**，判决在域里
+// （`Plane.CreateWorkspace`）——控制器只做绑定与回响应。
 func (h *workspaceCtr) Create(c *gin.Context) {
 	var req dtoworkspace.WorkspaceCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.plane.CreateRegisteredWorkspace(req.Path, req.Title, req.Strict)
+	resp, err := h.plane.CreateWorkspace(req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -217,14 +218,17 @@ func (h *workspaceCtr) Create(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
-// Rename 改写展示名（`PATCH /workspaces/:id`）。
+// Rename 改写一条登记的可改字段（`PATCH /workspaces/:id`）：展示名 / 两个默认值。
+//
+// 判决在域里（`Plane.PatchWorkspace`）：`nil` 与空串是两件事、默认值只影响**以后**建的会话、
+// 改路径本批显式拒绝。控制器只做绑定与回响应。
 func (h *workspaceCtr) Rename(c *gin.Context) {
 	var req dtoworkspace.WorkspacePatchReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.plane.RenameRegisteredWorkspace(c.Param("id"), req.Title)
+	resp, err := h.plane.PatchWorkspace(c.Param("id"), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

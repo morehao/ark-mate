@@ -2,6 +2,7 @@ package interaction
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -216,5 +217,86 @@ func TestPermissionMemoryListOrderIsDeterministic(t *testing.T) {
 		if list[0].Title != "先写的" || list[1].Title != "后写的" {
 			t.Fatalf("同一时刻应按写入先后，得到 %q, %q", list[0].Title, list[1].Title)
 		}
+	}
+}
+
+// TestAutoDecisionSkipsOnceOnlyRequests 升权请求**不得**被会话级记忆自动放行（A1 / v28）。
+//
+// 底座发来的**升权请求**只给 `once` 档（探针实测：options 恒 allow-once / reject-once）。
+// 会话级记忆记的是"这个会话里这类工具**始终**允许"——若让记忆替升权请求裁决，等于把用户当时
+// 那句"这一类都行"自动扩张成一个底座**刻意只肯给一次**的动作。那是本仓最不该发生的一类静默授权。
+//
+// 反过来的方向是可恢复的：给了 `always` 档却仍走审批，只是多问一次。
+func TestAutoDecisionSkipsOnceOnlyRequests(t *testing.T) {
+	pm := NewPermissionManager(time.Minute)
+	cmd := acl.ToolCallInfo{ID: "tc1", Title: "bash: rm -rf build", Kind: "execute"}
+
+	// 先记一条"始终允许"。
+	pm.Remember("s1", cmd, memDecisionAllow, "allow-always")
+	// 常态请求（选项里有 always 档）→ 记忆命中。
+	withAlways := acl.PermissionRequest{
+		SessionID: "s1", ToolCall: cmd,
+		Options: []acl.PermissionOption{
+			{OptionID: "a1", Kind: "allow_once"}, {OptionID: "a2", Kind: "allow_always"},
+		},
+	}
+	if d, ok := pm.AutoDecision("s1", withAlways); !ok || !d.Allowed {
+		t.Fatalf("带 always 档的请求应被记忆命中，ok=%v d=%+v", ok, d)
+	}
+	// 升权请求（**只有 once 档**）→ 不自动裁决，走人工审批。
+	onceOnly := withAlways
+	onceOnly.Options = []acl.PermissionOption{
+		{OptionID: "a1", Kind: "allow_once"}, {OptionID: "r1", Kind: "reject_once"},
+	}
+	if d, ok := pm.AutoDecision("s1", onceOnly); ok {
+		t.Fatalf("只给 once 档的请求**不得**被记忆自动放行（那是升权请求），got %+v", d)
+	}
+}
+
+// TestRememberCarriesGrantShape 授权形态随记忆一起落库（P2-a / v28）。
+//
+// 三件事：`scope` 恒 `session`（"一次"不落库，所以它没有第二个取值可写）、入参**只进摘要**
+// （不存原文）、同一 (title,kind) 被**重新授权**时摘要跟着刷新（否则库里记的是上一次那条调用，
+// 审计会指到一次与当前授权无关的调用上）。
+func TestRememberCarriesGrantShape(t *testing.T) {
+	pm := NewPermissionManager(time.Minute)
+	var got []MemoryItem
+	pm.SetMemoryHooks(func(it MemoryItem) { got = append(got, it) },
+		func(_, _, _ string) {}, func(_ string) {})
+
+	first := acl.ToolCallInfo{ID: "tc1", Title: "bash", Kind: "execute",
+		Input: map[string]any{"command": "rm -rf build"}}
+	pm.Remember("s1", first, memDecisionAllow, "allow-always")
+	if len(got) != 1 {
+		t.Fatalf("应落一条记忆，got %d", len(got))
+	}
+	if got[0].Scope != MemoryScopeSession {
+		t.Fatalf("scope 应恒 %q（「一次」不落库所以没有第二档），got %q", MemoryScopeSession, got[0].Scope)
+	}
+	if got[0].GrantInputDigest == "" {
+		t.Fatal("入参非空时摘要不该为空")
+	}
+	if strings.Contains(got[0].GrantInputDigest, "rm -rf") {
+		t.Fatalf("摘要里出现了入参原文 %q：入参可能含路径/token/命令里的密钥，**只进摘要**",
+			got[0].GrantInputDigest)
+	}
+
+	// 同一 (title,kind) 换一条入参重新授权 → 摘要必须刷新。
+	second := first
+	second.Input = map[string]any{"command": "ls"}
+	pm.Remember("s1", second, memDecisionAllow, "allow-always")
+	if len(got) != 2 {
+		t.Fatalf("重新授权应再落一次（同键覆盖），got %d 条", len(got))
+	}
+	if got[1].GrantInputDigest == got[0].GrantInputDigest {
+		t.Fatal("入参变了摘要必须跟着变：否则库里记的是上一次那条调用，审计会指到一次与当前授权无关的调用上")
+	}
+	if got[1].Title != "bash" || got[1].Kind != "execute" {
+		t.Fatalf("同键覆盖不该改 title/kind，got %q/%q", got[1].Title, got[1].Kind)
+	}
+	// 空入参 → 空摘要（不是"空对象的摘要"）。
+	pm.Remember("s1", acl.ToolCallInfo{Title: "write", Kind: "edit"}, memDecisionReject, "reject-always")
+	if last := got[len(got)-1]; last.GrantInputDigest != "" {
+		t.Fatalf("空入参的摘要应为空串，got %q", last.GrantInputDigest)
 	}
 }

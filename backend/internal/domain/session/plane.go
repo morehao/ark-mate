@@ -28,6 +28,16 @@ type Plane struct {
 	restoring bool
 	// ver 每个会话的事件版本号（进 bus 帧的 version；与库里的位次是两件事）。
 	ver map[string]int64
+	// runStatusKey 每个会话**上一次发出的** `run.status` 去重键（`run_id|status|phase|…`，
+	// 见 `PublishRunStatus`）。它只在进程内、只用于「同状态连发只留第一帧」——丢了不丢事实
+	// （事件已在库里），所以不进库、不需要持久化。
+	runStatusKey map[string]string
+	// runStatusLatest 每个会话**最近一次** `run.status` 的投影（`GET /sessions/:id` 的 `run` 段
+	// 与一切过程读面都读它）。写点只有 `recordRunStatus` 一处：实时发布、恢复回放、决策恢复。
+	runStatusLatest map[string]RunStatusSnapshot
+	// runStatusHold 每个会话**进入等待前**那一次状态（权限 / 提问是插曲，决策后要回到那里）。
+	// 由 `recordRunStatus` 在等待/非等待的转换上维护，`ResumeRunStatus` 消费。
+	runStatusHold map[string]RunStatusSnapshot
 	// inputs 进程内排队输入（memory 模式的事实源；sqlite 模式是 inputs 表的镜像/缓存）。
 	inputs map[string][]QueuedInput
 	// coalescer 文本增量合并器（nil = 不合并；停机时 FlushAll）。

@@ -17,6 +17,7 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
@@ -106,6 +107,10 @@ type Ports struct {
 	// ctrexport 在自己的构造函数里造（P4a 正文第八刀）；`Store` 那一格复用上面模型面的句柄。
 	SessionPlane *session.Plane
 	Bus          *eventbus.Bus
+	// CommandPolicyPath 命令门禁规则文件（空 = 未配置）；CommandPolicyApply 是"立即生效"的执行面
+	// 回调（归 manager）。两者一起交给 ctrcommandpolicy——用例实例在控制器里造。
+	CommandPolicyPath  string
+	CommandPolicyApply func([]interaction.PrefixRule)
 }
 
 // CapabilityHostFacts 报告"宿主能不能抬起系统目录面板"（`native-dialog` 的可用性判据）。
@@ -204,6 +209,7 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	rest.Use(middleware.Credential(creds, credential.ScopeREST))
 
 	registerWorkspace(rest, ports)
+	registerCommandPolicy(rest, ports.CommandPolicyPath, ports.CommandPolicyApply)
 	registerSession(rest, ports)
 	registerRuntime(rest, ports)
 	registerCapability(rest, ports)
