@@ -52,11 +52,9 @@ type Orchestrator struct {
 	// 空 = 未启用：`GateCommand` 返回 isShell=false，行为与改前逐字相同。
 	commandPolicy []interaction.PrefixRule
 
-	// toolMu/toolCalls 按 toolCallId 记住工具调用详情（见 tool_calls.go 的完整理由）：
+	// tools 按 toolCallId 记住工具调用详情（P4a 第六十一刀起归 `domain/session`）：
 	// dsh 的权限请求只带 toolCallId，命令行在同 id 的 tool_call 更新里。
-	toolMu    sync.Mutex
-	toolCalls map[string]acl.ToolCallInfo
-	toolOrder []string
+	tools *session.ToolCallMemory
 }
 
 // RunOptions 一次 RunOnce（demo）的入参。
@@ -79,14 +77,14 @@ type RunResult struct {
 // NewOrchestrator 构造编排器并回挂到 Service（Service 负责 bus/存储/REST 方法）。
 func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	o := &Orchestrator{
-		svc:       svc,
-		reg:       reg,
-		pool:      svc.runtimePool,
-		handles:   session.NewHandles(),
-		inflight:  session.NewInFlightTracker(),
-		perm:      interaction.NewPermissionManager(interaction.DefaultPermissionTimeout),
-		elic:      interaction.NewElicitationManager(interaction.DefaultElicitationTimeout),
-		toolCalls: make(map[string]acl.ToolCallInfo),
+		svc:      svc,
+		reg:      reg,
+		pool:     svc.runtimePool,
+		handles:  session.NewHandles(),
+		inflight: session.NewInFlightTracker(),
+		perm:     interaction.NewPermissionManager(interaction.DefaultPermissionTimeout),
+		elic:     interaction.NewElicitationManager(interaction.DefaultElicitationTimeout),
+		tools:    session.NewToolCallMemory(),
 	}
 	// 轮次运行期状态机的四张窄端口：句柄取自本结构体、在途登记沿用同一份 tracker，
 	// 其余三样（诊断 / 模型目录 / 工具记忆 / 交互取消）都是编排侧的事实，用适配器交出。
@@ -110,7 +108,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		Busy:         o.inflight,
 		Diagnostics:  runnerDiagnostics{o: o},
 		Catalog:      runnerCatalog{svc: svc},
-		ToolMemory:   runnerToolMemory{o: o},
+		ToolMemory:   o.tools,
 		ToolFailures: reg,
 		Interactions: runnerInteractions{perm: o.perm, elic: o.elic},
 	})

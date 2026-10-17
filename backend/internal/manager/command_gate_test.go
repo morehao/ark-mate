@@ -68,7 +68,7 @@ func TestCommandGateDecision(t *testing.T) {
 	}
 
 	// 没配置规则 = 不参与（行为与改前逐字相同）。
-	plain := &Orchestrator{}
+	plain := &Orchestrator{tools: session.NewToolCallMemory()}
 	if _, _, decided := plain.commandGateDecision(acl.ToolCallInfo{
 		ID: "c6", Input: map[string]any{"command": "rm -rf /"},
 	}, opts); decided {
@@ -83,10 +83,11 @@ func TestCommandGatePrecedesPermissionMemory(t *testing.T) {
 		commandPolicy: gateRules(t),
 		perm:          interaction.NewPermissionManager(interaction.DefaultPermissionTimeout),
 		handles:       session.NewHandles(),
+		tools:         session.NewToolCallMemory(),
 	}
 	tool := acl.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute",
 		Input: map[string]any{"command": "rm -rf /tmp/x"}}
-	o.rememberToolCall(tool)
+	o.tools.Remember(tool)
 	// 记忆里先放一条"这类工具始终允许"。
 	o.perm.Remember("ses_1", tool, "allow", "allow-always")
 
@@ -103,13 +104,13 @@ func TestCommandGatePrecedesPermissionMemory(t *testing.T) {
 
 // TestToolCallMemoryMergesAndForgets 缓存的三条语义：合并非空字段 / 终态删除 / 有界。
 func TestToolCallMemoryMergesAndForgets(t *testing.T) {
-	o := &Orchestrator{}
-	o.rememberToolCall(acl.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute",
+	o := &Orchestrator{tools: session.NewToolCallMemory()}
+	o.tools.Remember(acl.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute",
 		Input: map[string]any{"command": "ls"}})
 	// 后续 update 只带 status/正文：不得把 Input 抹掉。
-	o.rememberToolCall(acl.ToolCallInfo{ID: "c1", Status: acl.ToolStatusInProgress, ContentText: "out"})
+	o.tools.Remember(acl.ToolCallInfo{ID: "c1", Status: acl.ToolStatusInProgress, ContentText: "out"})
 
-	got, ok := o.toolCallFor("c1")
+	got, ok := o.tools.Get("c1")
 	if !ok || got.Title != "bash" || got.ContentText != "out" {
 		t.Fatalf("合并结果不符: %+v", got)
 	}
@@ -117,21 +118,21 @@ func TestToolCallMemoryMergesAndForgets(t *testing.T) {
 		t.Fatalf("Input 被 status-only update 抹掉了: %#v", got.Input)
 	}
 
-	o.forgetToolCall("c1")
-	if _, ok := o.toolCallFor("c1"); ok {
+	o.tools.Forget("c1")
+	if _, ok := o.tools.Get("c1"); ok {
 		t.Fatal("forget 之后仍能查到")
 	}
 
-	for i := 0; i < maxRememberedToolCalls+20; i++ {
-		o.rememberToolCall(acl.ToolCallInfo{ID: "bulk_" + strconv.Itoa(i)})
+	for i := 0; i < session.MaxRememberedToolCalls+20; i++ {
+		o.tools.Remember(acl.ToolCallInfo{ID: "bulk_" + strconv.Itoa(i)})
 	}
-	if len(o.toolCalls) > maxRememberedToolCalls {
-		t.Fatalf("缓存无界: %d > %d", len(o.toolCalls), maxRememberedToolCalls)
+	if o.tools.Len() > session.MaxRememberedToolCalls {
+		t.Fatalf("缓存无界: %d > %d", o.tools.Len(), session.MaxRememberedToolCalls)
 	}
-	if _, ok := o.toolCallFor("bulk_0"); ok {
+	if _, ok := o.tools.Get("bulk_0"); ok {
 		t.Fatal("最旧的条目应被淘汰")
 	}
-	if _, ok := o.toolCallFor("bulk_" + strconv.Itoa(maxRememberedToolCalls+19)); !ok {
+	if _, ok := o.tools.Get("bulk_" + strconv.Itoa(session.MaxRememberedToolCalls+19)); !ok {
 		t.Fatal("最新的条目必须还在")
 	}
 }
@@ -139,7 +140,7 @@ func TestToolCallMemoryMergesAndForgets(t *testing.T) {
 // TestToolCallMemoryConcurrent 并发写/读/删：事件回调与权限裁决在不同 goroutine。
 // 判据在 `-race` 下（`make test-race` 含本包）；无 `-race` 时验证不 panic、不丢最终状态。
 func TestToolCallMemoryConcurrent(t *testing.T) {
-	o := &Orchestrator{}
+	o := &Orchestrator{tools: session.NewToolCallMemory()}
 	var wg sync.WaitGroup
 	for w := 0; w < 4; w++ {
 		wg.Add(1)
@@ -147,17 +148,17 @@ func TestToolCallMemoryConcurrent(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < 200; i++ {
 				id := "c" + strconv.Itoa(w) + "_" + strconv.Itoa(i%20)
-				o.rememberToolCall(acl.ToolCallInfo{ID: id, Title: "bash",
+				o.tools.Remember(acl.ToolCallInfo{ID: id, Title: "bash",
 					Input: map[string]any{"command": "git status"}})
-				_, _ = o.toolCallFor(id)
+				_, _ = o.tools.Get(id)
 				if i%7 == 0 {
-					o.forgetToolCall(id)
+					o.tools.Forget(id)
 				}
 			}
 		}(w)
 	}
 	wg.Wait()
-	if _, ok := o.toolCallFor(""); ok {
+	if _, ok := o.tools.Get(""); ok {
 		t.Fatal("空 id 永远不该命中缓存")
 	}
 }

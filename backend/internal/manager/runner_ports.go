@@ -67,12 +67,6 @@ func (o *Orchestrator) acquireClient(ctx context.Context, spec runtime.Spec, fin
 	return rc.Client, nil
 }
 
-// runnerToolMemory 工具调用详情的短期记忆（仍归编排侧：它的生命周期按 toolCallId，不按轮次）。
-type runnerToolMemory struct{ o *Orchestrator }
-
-func (m runnerToolMemory) Remember(info acl.ToolCallInfo) { m.o.rememberToolCall(info) }
-func (m runnerToolMemory) Forget(id string)               { m.o.forgetToolCall(id) }
-
 // runnerInteractions 会话取消时把挂起的权限/提问一并收敛（权限面事实）。
 type runnerInteractions struct {
 	perm interface{ CancelSession(string) }

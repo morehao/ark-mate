@@ -55,8 +55,8 @@ func TestCommandGateIsWiredToPermissionDecision(t *testing.T) {
 	if gateIdx > memIdx {
 		t.Errorf("命令门禁排在会话级记忆**之后**——规则说 forbidden 的命令会被『这类工具始终允许』放行")
 	}
-	if !strings.Contains(body, "toolCallFor(") {
-		t.Errorf("permission_flow.go 没有 toolCallFor(——权限请求只带 toolCallId，不回查就拿不到命令行")
+	if !strings.Contains(body, "o.tools.Get(") {
+		t.Errorf("permission_flow.go 没有 o.tools.Get(——权限请求只带 toolCallId，不回查就拿不到命令行")
 	}
 
 	// ③ 装配：加载 + 交给 service
