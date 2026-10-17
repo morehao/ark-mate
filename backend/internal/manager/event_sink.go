@@ -58,7 +58,20 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 		case acl.KindToolUpdate:
 			typ = session.BusToolUpdate
 			if d, ok := ev.Payload.(acl.ToolCallInfo); ok {
-				payload = toolPayload(ev.SessionID, runtimeID, d)
+				p := toolPayload(ev.SessionID, runtimeID, d)
+				// 「这条为什么没成」的归类来自**底座的签名表**（第四张可执行端口表）：
+				// 被沙箱拒绝的那一帧 `status` 是 `completed`，只有结果正文说得清。
+				//
+				// 不认识就**不写这个键**（写一个猜的原因比不写更糟：用户会照着它去修一个不存在的问题）。
+				if f, ok := o.svc.reg.ClassifyToolFailure(runtimeID, d.ContentText); ok {
+					if f.Reason != "" {
+						p[ToolPayloadFailReason] = f.Reason
+					}
+					if f.BizCode != "" {
+						p[ToolPayloadBizCode] = f.BizCode
+					}
+				}
+				payload = p
 			}
 		case acl.KindUserMessage:
 			// 用户消息以宿主侧 Prompt 提交时发布的 session.BusUserMessage（orchestrator.Prompt）为唯一来源；
@@ -113,21 +126,49 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 	}
 }
 
+// 工具事件载荷的**白名单键**（S4 / ADR-16 的旁支）。
+//
+// 这张表是**契约的一半**：另一半是前端 `StreamEntry` 里读的那些键。新增一个只有后端会写的键
+// 不会让任何测试变红——事件照常推、界面照常渲染，只是那个键永远没人读（或者下一个人照着它
+// 又在前端加一份推断）。由 archtest 的 `TestToolPayloadKeysAreClosed` 两侧一起钉。
+const (
+	ToolPayloadSessionID  = "session_id"
+	ToolPayloadRuntime    = "runtime"
+	ToolPayloadToolCallID = "tool_call_id"
+	ToolPayloadTitle      = "title"
+	ToolPayloadStatus     = "status"
+	ToolPayloadKind       = "kind"
+	ToolPayloadInput      = "input"
+	ToolPayloadOutput     = "output"
+	ToolPayloadFailReason = "fail_reason"
+	ToolPayloadBizCode    = "biz_code"
+)
+
+// ToolPayloadKeys 载荷允许出现的全部键（白名单，顺序即文档顺序）。
+var ToolPayloadKeys = []string{
+	ToolPayloadSessionID, ToolPayloadRuntime, ToolPayloadToolCallID, ToolPayloadTitle,
+	ToolPayloadStatus, ToolPayloadKind, ToolPayloadInput, ToolPayloadOutput,
+	ToolPayloadFailReason, ToolPayloadBizCode,
+}
+
 // toolPayload 构造工具事件载荷：稳定键 tool_call_id/title/status，可选透传 kind/input/output
 // （ACP ToolKind/rawInput/rawOutput，决策 v5②；字段为空/缺省时不出现在载荷中）。
+//
+// `fail_reason` / `biz_code` 由调用方按底座的签名表补（见 `ToolPayloadFailReason`）：
+// 它们**不是** ACP 字段，而是平台从结果正文里读出来的归类。
 func toolPayload(sessionID, runtimeID string, d acl.ToolCallInfo) map[string]any {
 	p := map[string]any{
-		"session_id": sessionID, "runtime": runtimeID,
-		"tool_call_id": d.ID, "title": d.Title, "status": d.Status,
+		ToolPayloadSessionID: sessionID, ToolPayloadRuntime: runtimeID,
+		ToolPayloadToolCallID: d.ID, ToolPayloadTitle: d.Title, ToolPayloadStatus: d.Status,
 	}
 	if d.Kind != "" {
-		p["kind"] = d.Kind
+		p[ToolPayloadKind] = d.Kind
 	}
 	if d.Input != nil {
-		p["input"] = d.Input
+		p[ToolPayloadInput] = d.Input
 	}
 	if d.Output != nil {
-		p["output"] = d.Output
+		p[ToolPayloadOutput] = d.Output
 	}
 	return p
 }

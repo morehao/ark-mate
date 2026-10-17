@@ -63,6 +63,12 @@ type ToolCallInfo struct {
 	Kind   string `json:"kind,omitempty"`   // ACP ToolKind（read/edit/execute/…），可空
 	Input  any    `json:"input,omitempty"`  // 调用入参（rawInput）
 	Output any    `json:"output,omitempty"` // 调用结果（rawOutput；仅 ToolCallUpdate 携带时非空）
+	// ContentText 结果里的**纯文本**（`tool_call_update.content` 里 text 块的拼接）。
+	//
+	// 为什么必须有它：dsh 从不下发 `rawOutput`——工具结果的正文**只在 `content` 里**
+	// （2026-10-16 实测）。此前本客户端只取 `rawOutput`，于是那条正文压根到不了平台，
+	// 「这条调用为什么没成」也就无从判断：被沙箱拒绝的那一帧 `status` 是 `completed`。
+	ContentText string `json:"-"` // 不进 wire（只在进程内传递；对外用 `output` 以外的键）
 }
 
 // PermissionInfo 权限请求决策留痕（每次决策后上抛，供上层留痕/审计）。

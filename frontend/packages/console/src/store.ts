@@ -202,6 +202,11 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     }
     case Ev.ToolUpdate: {
       const id = String(e.payload?.tool_call_id ?? '')
+      // `fail_reason` / `biz_code` 由**服务端**按底座的签名表给（平台侧归类，见 ADR-16）。
+      // 客户端不推断"这条为什么失败"：被沙箱拒绝的那一帧 `status` 就是 `completed`，
+      // 靠 status 猜只会把"跑完了"和"被拒了"说成同一件事。
+      const failReason = String(e.payload?.fail_reason ?? '')
+      const bizCode = String(e.payload?.biz_code ?? '')
       return {
         ...v,
         entries: entries.map((en) =>
@@ -210,6 +215,8 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
                 ...en,
                 title: String(e.payload?.title ?? en.title ?? id),
                 status: String(e.payload?.status ?? en.status ?? ''),
+                failReason: failReason || en.failReason,
+                bizCode: bizCode || en.bizCode,
               }
             : en,
         ),

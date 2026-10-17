@@ -181,6 +181,17 @@ export interface StreamEntry {
    * 那条回答**作为新一轮**的用户消息进去（不是塞回已经收尾的旧轮）。
    */
   pendingLate?: boolean
+  /**
+   * 工具失败的**平台侧归类**（服务端按底座的签名表给，S4）。
+   *
+   * `sandbox_denied`（被沙箱边界拒了，可以引导升权）与 `sandbox_unavailable`（宿主根本没有可用的
+   * 沙箱后端，再点一次也一样失败）的处置**相反**，所以必须是两个值。
+   *
+   * 客户端**不**从 `status` 推断它：被沙箱拒绝的那一帧 `status` 就是 `completed`。
+   */
+  failReason?: string
+  /** 与 `failReason` 配套的稳定业务码（可选；服务端不给就没有）。 */
+  bizCode?: string
   /** 失败时的 runtime stderr 诊断尾巴（A3；错误条目可展开查看，空 = 无采集）。 */
   stderrTail?: string[]
 }

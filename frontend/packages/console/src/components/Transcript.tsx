@@ -201,6 +201,27 @@ function summarizeContent(schema: StreamEntry['schema'], content?: Record<string
   return entries.join('；')
 }
 
+/**
+ * 工具失败原因的**用户可读文案**（S4 / 原型场景 E）。
+ *
+ * 两种原因的处置**相反**，文案也必须分开：
+ *
+ *	`sandbox_denied`        被沙箱边界拒了 → 可以引导换一个允许写的位置/模式（再试**有用**）
+ *	`sandbox_unavailable`   宿主没有可用的沙箱后端 → 再试一次也一样失败（引导升权是**错的**）
+ *
+ * 未知值按"出了点什么"如实说，不猜成其中任何一种——猜错的那一半会让用户照着一条错的引导去修。
+ */
+function toolFailReasonLabel(reason: string): string {
+  switch (reason) {
+    case 'sandbox_denied':
+      return '这一步被工作空间的写入边界挡下了：换一个允许写入的位置，或改用允许修改的模式再试。'
+    case 'sandbox_unavailable':
+      return '这台机器上没有可用的沙箱后端，所以这一步没能执行——重试不会改变结果，需要先装好沙箱依赖。'
+    default:
+      return '这一步没有成功（原因见上方输出）。'
+  }
+}
+
 /** 结构化提问卡（ACP elicitation/create → schema 渲染表单 / 引导链接 → 用户提交经 REST 回传）。 */
 function ElicitationCard({ e }: { e: StreamEntry }) {
   const respond = useMate((s) => s.respondElicitation)
@@ -758,6 +779,29 @@ export function EntryView({
               <span style={{ color: tokens.text, fontWeight: 500 }}>{meta.label}</span>
               <span style={{ marginLeft: 'auto' }}>tool_result · {e.status || 'running'}</span>
             </div>
+            {/* 失败原因（S4 / 原型场景 E）：**服务端**归类出来的，客户端不从 status 推。
+                `sandbox_denied` 与 `sandbox_unavailable` 的处置相反，文案也必须分开写——
+                前者可以引导"换成允许写的工作空间"，后者不能（再试一次也一样失败）。 */}
+            {e.failReason && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  borderTop: `1px solid ${tokens.border}`,
+                  paddingTop: 7,
+                }}
+              >
+                <span style={{ fontSize: 11.5, color: tokens.error }}>
+                  {toolFailReasonLabel(e.failReason)}
+                </span>
+                {e.bizCode && (
+                  <span style={{ fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textPlaceholder }}>
+                    {e.bizCode}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )

@@ -196,6 +196,7 @@ func RegisterBuiltinPorts(r *Registry) {
 	registerBuiltinSyncers(r)
 	registerBuiltinNativePermissions(r)
 	registerBuiltinModelValues(r)
+	registerBuiltinToolFailures(r)
 }
 
 // registerBuiltinModelValues 登记各 adapter 的模型值投影实现（第三张可执行端口表，见 model_value.go）。
@@ -239,6 +240,24 @@ func registerBuiltinNativePermissions(r *Registry) {
 		switch id {
 		case dsh.ID:
 			r.RegisterNativePermission(id, dsh.NativePermission{})
+		}
+	}
+}
+
+// registerBuiltinToolFailures 登记各 adapter 的工具失败签名归类（第四张可执行端口表）。
+//
+// 与前三张同一条讲究：只登记**在册**的 id；刻意保留 `switch id` 形态（接下一个 adapter = 加一个 case）。
+func registerBuiltinToolFailures(r *Registry) {
+	if r == nil {
+		return
+	}
+	for _, id := range []string{dsh.ID} {
+		if _, ok := r.Get(id); !ok {
+			continue
+		}
+		switch id {
+		case dsh.ID:
+			r.RegisterToolFailureClassifier(id, dsh.ToolFailure{})
 		}
 	}
 }
