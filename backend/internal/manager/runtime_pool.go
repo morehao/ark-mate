@@ -28,6 +28,32 @@ func (s *Service) ProviderEnv(runtimeID string) []string {
 	return s.providerPlane.ProviderEnvFor(runtimeID, s.providerPlane.InjectedProviderID(context.Background()))
 }
 
+// NativePermissionEnv 实现 `runtimeconn.NativeEnvSource`：该 runtime 在给定原生权限模式下
+// 的**进程 env**（P1-f 下半 / B5 的接活点）。
+//
+// 这是 `NativePermissionAdapter.Env()` 在生产代码里的**唯一调用点**——它此前是一段写得很完整
+// 却没有任何调用者的死代码（守卫 `TestNativePermissionModeLiteralsMatchWire` 只管它的取值，
+// 不管它有没有人喊）。
+//
+// 三个入参的来源都在这里收口，调用方只给模式：
+//
+//	mode  —— 会话钉住的那一档（`SessionRec.NativeMode`；空 = 不注入）
+//	def   —— 权限策略的默认动作（空 = 未声明，由 adapter 按自己的词表处理）
+//	tools —— 工具级 allow/ask/deny 表（本层暂时不提供，adapter 侧已容忍 nil）
+//
+// **空模式直接短路**（不调 adapter）：`”` 的语义是"不注入原生配置"，那是平台级开关，
+// 不属于任何底座（adapter 那边的 `NativeModeOff` 分支也写着同一句话）。
+func (s *Service) NativePermissionEnv(runtimeID, mode string) ([]string, string) {
+	if mode == "" {
+		return nil, "native_mode 空（不注入原生权限配置）"
+	}
+	adapter, ok := s.reg.NativePermission(runtimeID)
+	if !ok {
+		return nil, "该底座未登记原生权限投影（不注入）"
+	}
+	return adapter.Env(mode, "", nil)
+}
+
 // ConfigDigest 实现 `runtimeconn.ConfigDigestSource`：平台为某 runtime 物化的清单指纹。
 func (s *Service) ConfigDigest(runtimeID string) string { return s.runtimeConfigDigest(runtimeID) }
 
@@ -36,5 +62,6 @@ func (s *Service) ConfigDigest(runtimeID string) string { return s.runtimeConfig
 var (
 	_ runtimeconn.ProviderEnvSource  = (*Service)(nil)
 	_ runtimeconn.ConfigDigestSource = (*Service)(nil)
+	_ runtimeconn.NativeEnvSource    = (*Service)(nil)
 	_ runtimeconn.DropSink           = (*Orchestrator)(nil)
 )

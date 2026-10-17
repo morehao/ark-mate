@@ -213,6 +213,9 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 	// env 与配置指纹都是**本层的事实**，池只认端口（执行面不认识供应商档案与模型清单）。
 	s.runtimePool.SetProviderEnvSource(s)
 	s.runtimePool.SetConfigDigestSource(s)
+	// 原生权限 env 的来源（P1-f 下半）：模式**进基础键**，所以这条端口不是"可选的注入"，
+	// 而是"键的第三维"——不登记它，`DSH_PERMISSION_MODE` 既不会注入、也不会分进程。
+	s.runtimePool.SetNativeEnvSource(s)
 	// 连接池读面：诊断要问"此刻哪条连接活着"。**早一行拿到的是 nil**，表现是诊断永远报
 	// 「未连接」、stderr 尾巴恒空——而它只在底座真的在跑时才该现形（开发态多半看不见）。
 	s.runtimePlane.SetLiveClientSource(s.runtimePool)

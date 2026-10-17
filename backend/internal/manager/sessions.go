@@ -115,6 +115,18 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 			selection = ParseCapabilitySelection(def.CapabilityJSON)
 		}
 	}
+	// **原生权限模式**（v29 / P1-f 下半）：同一条合并链——请求没声明就落到该工作空间声明的默认
+	// 那一档，都没有就**不注入**（空串，刻意不物化平台缺省）。
+	//
+	// 为什么必须在**这里**定下来并落库：模式只能以进程 env（`DSH_PERMISSION_MODE`）下发
+	// （探针实测 `/permission` 命令面在 ACP 上不存在），所以两个模式不同的会话不能共用一个暖
+	// 进程；而暖进程的键要在取连接之前已知 ⇒ 模式是会话的**快照字段**，不是每次现算的推导值。
+	nativeMode := ""
+	if ws.WorkspaceID != "" {
+		if def, ok := s.planner.WorkspaceDefaultsOf(ws.WorkspaceID); ok {
+			nativeMode = def.PermissionMode
+		}
+	}
 	// 底座不由请求指定（构建期固定，见 pkg/runtime/build.go）：这里没有 runtime 参数要校验。
 	res, err := s.startSession(runCtx, StartOptions{
 		SessionID:          convID,
@@ -123,6 +135,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 		WorkspaceID:        ws.WorkspaceID,
 		Model:              runtime.ModelConfig{Model: req.Model},
 		Selection:          selection,
+		NativeMode:         nativeMode,
 		Origin:             req.Origin,
 	})
 	if err != nil {

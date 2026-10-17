@@ -27,7 +27,7 @@ import (
 //
 // fingerprint = 该会话钉住的能力指纹（M1 恒为空：显式能力选择是 M3 的面）。空值走的是
 // GenerationKey 的原样返回分支，所以缺省路径与"代际机制之前"完全等价。
-func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerprint string) (*runtimeconn.Conn, error) {
+func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*runtimeconn.Conn, error) {
 	// 凭据面先校验（P2）：**默认模型所在的那条档案**缺失/无 key 属配置错误 → 显式
 	// credential_missing（文案含出路），不静默以「无密钥」姿态起进程。放 acquire 内可一处
 	// 覆盖两条入口：新建会话、按需恢复。
@@ -38,7 +38,10 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 	// **同源**——分开取会得到"键说共享、注入的却是另一套 env"这种静默分叉。
 	// 模型不进 env/缓存键：模型选择是**会话级**语义（session/set_config_option），
 	// 同一连接可服务多个模型。
-	keys := o.pool.KeyFor(spec, fingerprint)
+	//
+	// 第三维是**原生权限模式**（P1-f 下半）：模式只能以进程 env 下发，所以它必须进基础键——
+	// 不进键的表现是"后建的会话悄悄跑在先进那个进程的模式里"。
+	keys := o.pool.KeyFor(spec, fingerprint, nativeMode)
 
 	if rc := o.pool.Get(keys.Key); rc != nil {
 		if rc.Client == nil {

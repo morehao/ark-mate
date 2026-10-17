@@ -40,8 +40,10 @@ func (pl *Plane) persistSession(rec *SessionRec) {
 		// **钉住的指纹**（代际）：普通持久化写的就是记录里的那个值（会话一旦建立就不再重新解析），
 		// 所以这里不会"每次落库都把指纹刷成当前值"；只有 M3-6 的轮次边界迁移会显式改写它。
 		CapabilityFingerprint: rec.Fingerprint,
-		CreatedAt:             rec.CreatedAt,
-		UpdatedAt:             rec.UpdatedAt,
+		// **钉住的原生权限模式**（v29）：与指纹同一条纪律——写的是记录里的那个值，不重算。
+		NativeMode: rec.NativeMode,
+		CreatedAt:  rec.CreatedAt,
+		UpdatedAt:  rec.UpdatedAt,
 	})
 	if err != nil {
 		glog.Warnw(context.Background(), "store: upsert session failed", "session", rec.ID, "err", err)
@@ -210,7 +212,11 @@ func (pl *Plane) Restore(ctx context.Context) (int, int, error) {
 			// **恢复会话钉住的指纹**：漏了这一段，重启后 rec.Fingerprint 就是空的 →
 			// 代际键退回"未声明"形态，会话悄悄换到默认能力集（正是 M3 要防的漂移）。
 			Fingerprint: sess.CapabilityFingerprint,
-			CreatedAt:   sess.CreatedAt, UpdatedAt: sess.UpdatedAt,
+			// **恢复钉住的权限模式**：漏了这段，重启后模式变空 → 该会话的暖进程键变了一维，
+			// 它会**悄悄换到一个"不注入原生权限"的进程上**（沙箱边界跟着放宽/收紧），
+			// 而界面上没有任何一行会说这件事变过。
+			NativeMode: sess.NativeMode,
+			CreatedAt:  sess.CreatedAt, UpdatedAt: sess.UpdatedAt,
 		}
 		pl.RegisterSession(rec) // restoring=true → 不重复回写 DB
 		sessions++

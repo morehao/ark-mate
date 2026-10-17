@@ -422,7 +422,7 @@ func TestGenerationPool(t *testing.T) {
 
 	r.orch.pool.SetGenerationLimit(2)
 	// 一条**无人引用**的代际（默认指纹，没有会话挂它）+ 一条**有会话引用**的代际（选定不同 → 指纹不同）。
-	idle, err := r.orch.acquire(ctx, spec, "")
+	idle, err := r.orch.acquire(ctx, spec, "", "")
 	if err != nil {
 		t.Fatalf("acquire(缺省): %v", err)
 	}
@@ -441,7 +441,7 @@ func TestGenerationPool(t *testing.T) {
 		t.Fatalf("复用不该新增代际，got %d", n)
 	}
 	// 显式淘汰空闲代际：池子满了，但其中一条无人引用 → 当场淘汰它腾出位置（不报错）。
-	if _, err := r.orch.acquire(ctx, spec, "fp-third"); err != nil {
+	if _, err := r.orch.acquire(ctx, spec, "fp-third", ""); err != nil {
 		t.Fatalf("有无人引用的代际可淘汰时应允许新建: %v", err)
 	}
 	if n := r.conns(); n != 2 {
@@ -456,7 +456,7 @@ func TestGenerationPool(t *testing.T) {
 		t.Fatalf("仍应为 2 个代际，got %d", n)
 	}
 	// 现在两条**都有会话引用** → 第三条带码拒绝，且绝不悄悄复用一个错的能力集。
-	_, err = r.orch.acquire(ctx, spec, "fp-fourth")
+	_, err = r.orch.acquire(ctx, spec, "fp-fourth", "")
 	if err == nil {
 		t.Fatal("达上限且都有引用时应拒绝新建代际")
 	}
@@ -474,10 +474,10 @@ func TestGenerationPool(t *testing.T) {
 		t.Fatalf("拒绝时不得改动池子，got %d", n)
 	}
 	// 已达上限仍可复用现有代际（上限只管"新建"，不管"用"）。
-	if _, err := r.orch.acquire(ctx, spec, as1.Fingerprint); err != nil {
+	if _, err := r.orch.acquire(ctx, spec, as1.Fingerprint, ""); err != nil {
 		t.Fatalf("已达上限时复用现有代际不该报错: %v", err)
 	}
-	if _, err := r.orch.acquire(ctx, spec, as2.Fingerprint); err != nil {
+	if _, err := r.orch.acquire(ctx, spec, as2.Fingerprint, ""); err != nil {
 		t.Fatalf("已达上限时复用现有代际不该报错: %v", err)
 	}
 	if n := r.conns(); n != 2 {
@@ -486,7 +486,7 @@ func TestGenerationPool(t *testing.T) {
 	// 0 = 不限制（显式关掉护栏）。
 	r.orch.pool.SetGenerationLimit(0)
 	for _, fp := range []string{"fp-x", "fp-y", "fp-z"} {
-		if _, err := r.orch.acquire(ctx, spec, fp); err != nil {
+		if _, err := r.orch.acquire(ctx, spec, fp, ""); err != nil {
 			t.Fatalf("0 = 不限制时不该拒绝（fp=%s）: %v", fp, err)
 		}
 	}

@@ -38,6 +38,9 @@ type ActiveSession struct {
 	// Fingerprint 该会话钉住的能力指纹（代际）。空 = 未声明能力选择。恢复路径据此回到**同一代际**
 	// （漏了它就会在重启后悄悄换一套能力集）。
 	Fingerprint string
+	// NativeMode 该会话钉住的原生权限模式（v29）。它是**暖进程键的一维**：模式只能以进程 env
+	// 下发，所以两个模式不同的会话不能共用一个暖进程（见 `runtimeconn.Pool.KeyFor`）。
+	NativeMode string
 
 	client *acl.Client
 	sess   acpSession
@@ -168,6 +171,12 @@ type StartOptions struct {
 	// 现算（`capabilityFingerprint`）。两者分开传的后果是"指纹按 A 算、注入按 B 做"，
 	// 而那种分裂不会报错——只会让会话拿到与代际台账不符的能力集，且只在重启后显现。
 	Selection *CapabilitySelection
+	// NativeMode 会话**钉住**的原生权限模式（v29；'' = 不注入）。
+	//
+	// 它同时是**暖进程键的一维**：模式只能以进程 env 下发，两个模式不同的会话不能共用一个
+	// 暖进程（见 `runtimeconn.Pool.KeyFor`）。合并链在 `manager/sessions.go` 建会话处一次性
+	// 解析（显式 > 工作空间默认 > 平台缺省），这里只负责把它带下去。
+	NativeMode string
 }
 
 // RunResult 一次 RunOnce（demo）的结果。

@@ -316,8 +316,9 @@ func sampleCandidates[T any](cands []T, sample func(T) ([]acl.ConfigOption, erro
 // `catalogResumeCandidates` 给，逐条退避由 `sampleCandidates` 做。
 // 不新建会话（session/new 会在两家 runtime 里落一条持久记录，且都没有 delete 能力）。
 func (s *Service) fetchCatalogByResume(ctx context.Context, spec runtime.Spec) ([]acl.ConfigOption, bool, error) {
-	// 目录探测不绑定任何会话，按缺省代际复用连接（不额外起进程）。
-	rc, err := s.orch.acquire(ctx, spec, "")
+	// 目录探测不绑定任何会话，按缺省代际复用连接（不额外起进程）。原生模式同样走缺省（空 =
+	// 不注入）——目录探测不需要沙箱边界，用缺省那一档才可能命中已有的暖进程。
+	rc, err := s.orch.acquire(ctx, spec, "", "")
 	if err != nil {
 		return nil, false, err
 	}
