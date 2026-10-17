@@ -12,9 +12,6 @@ import {
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { tokens } from '@ark-mate/ui'
-import { Dot, sessionStatusMeta } from '@ark-mate/ui'
-import { runNarration } from '../console/runView'
-import { automationIDFromOrigin, isAutomationOrigin } from '../console/automationView'
 import type { MenuProps } from 'antd'
 import type { SessionSearchHit, SessionSummary, MessageSearchHit, MessageSearchResp } from '@ark-mate/types'
 import { sessionSearch, exportSessions, messageSearch, toErrorMessage } from '@ark-mate/api'
@@ -401,14 +398,6 @@ export function SessionPane({ onCreate }: Props) {
 
   const renderItem = (sm: SessionSummary) => {
     const view = views[sm.id]
-    const meta = sessionStatusMeta(sm.status)
-    // 阶段文案（Q12）：`run.status` 的**第二个消费者**。它说得出「等待你授权」「正在执行 Bash」，
-    // 而 `sm.status` 只能说「进行中/已完成」——后者区分不出在跑还是在等人。
-    //
-    // 两个来源同源不同鲜：`views[id].run` 是事件流（实时），`sm.run` 是列表快照（刷新时）。
-    // 都没有（没打开过、也没过过程事件）→ 回落终态归类文案，**不猜**。
-    const narr = runNarration(view?.run ?? sm.run)
-    const running = narr.tone === 'run'
     const on = sm.id === activeId
 
     // 行内「更多」：重命名 / 置顶·取消置顶 / 归档（或恢复）
@@ -450,6 +439,9 @@ export function SessionPane({ onCreate }: Props) {
           flexDirection: 'column',
           gap: 2,
           width: '100%',
+          // 百分比宽度是**内容盒**宽度：不换成 border-box 时，内边距与边框会把行顶出
+          // 滚动盒 10px，横向滚动条又回来了（需求 5 的实测根因之一）。
+          boxSizing: 'border-box',
           borderRadius: 10,
           padding: '4px 4px 4px 12px',
           marginBottom: 2,
@@ -474,12 +466,12 @@ export function SessionPane({ onCreate }: Props) {
             cursor: busy && !on ? 'not-allowed' : 'pointer',
           }}
         >
-          {/* 第 1 行 = 标题 + 置顶标记（原型 `.sess .l1`）。
-              标题**单行**省略：状态/时间已在第 2 行，再 clamp 两行会把行高抬到三行，
-              而 236px 的栏里那两行只用来重复「这条是什么」——原型明确用 nowrap。 */}
+          {/* 会话行**只有一行**（需求 9 / 10）：标题在左、相对时间贴行右端，同一基线。
+              行内不再有状态点 / 阶段文案 / 来源标记——「这一轮在干什么」在会话页头与主区
+              确认区里说，左栏只回答「这条叫什么、什么时候」。 */}
           <span
             data-sess-line="title"
-            style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, paddingRight: 30 }}
+            style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, paddingRight: 0 }}
           >
             <span
               style={{
@@ -493,73 +485,19 @@ export function SessionPane({ onCreate }: Props) {
                 letterSpacing: '-0.005em',
                 color: sm.archived ? tokens.textSecondary : tokens.text,
               }}
+              title={titleFor(sm, view, runtime?.name)}
             >
               {titleFor(sm, view, runtime?.name)}
             </span>
             {sm.pinned && <PushpinFilled style={{ fontSize: 11, color: tokens.primary, flex: 'none' }} />}
-          </span>
-          {/* 第 2 行 = 状态点 + 阶段文案 + 来源标记 + 相对时间（原型 `.sess .l2`）。
-              阶段文案优先；没有过程状态才回落到会话的终态归类（`runNarration` 的同一口径）。 */}
-          <span
-            data-sess-line="meta"
-            style={{
-              marginTop: 2,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              minWidth: 0,
-              fontFamily: tokens.fontMono,
-              fontSize: 10.5,
-              color: tokens.textSecondary,
-            }}
-          >
-            <Dot
-              color={narr.tone === 'wait' || narr.tone === 'interrupted' ? tokens.warning : meta.color}
-              pulse={running}
-              size={6}
-            />
-            <span
-              style={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                color:
-                  narr.tone === 'wait' || narr.tone === 'interrupted'
-                    ? tokens.warning
-                    : running
-                      ? tokens.text
-                      : tokens.textSecondary,
-              }}
-            >
-              {narr.label || meta.label}
-            </span>
-            {/* 来源标记：由定时任务触发的会话（`origin=automation:<id>`）——人工与会话流混在一起时，
-                "这条是谁开的"必须一眼可见，而不是靠时间去猜。 */}
-            {isAutomationOrigin(sm.origin) && (
-              <span
-                title={`由定时任务 ${automationIDFromOrigin(sm.origin)} 触发`}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  border: `1px solid ${tokens.border}`,
-                  borderRadius: 999,
-                  padding: '1px 7px',
-                  color: tokens.primary,
-                  whiteSpace: 'nowrap',
-                  flex: 'none',
-                }}
-              >
-                ⏱ 定时
-              </span>
-            )}
-            <span style={{ marginLeft: 'auto', flex: 'none' }} title={sm.updated_at}>
+            <span className="fg-sess-time" title={sm.updated_at}>
               {relTime(sm.updated_at)}
             </span>
           </span>
         </button>
-        {/* 行尾「更多」：绝对定位在第 1 行右端（原型 `.sess .ops`）。
-            放在按钮**外面**是为了不出现嵌套 button；`paddingRight` 已在标题行预留它的宽度。 */}
+        {/* 行尾「更多」：绝对定位在行右端（原型 `.sess .ops`）。
+            放在按钮**外面**是为了不出现嵌套 button；它与时间抢同一块空间，所以 hover / 当前行
+            让时间淡出（D11），而不是把时间挤到左边。 */}
         <Dropdown menu={{ items: menuItems, onClick: onMenu }} trigger={['click']} placement="bottomRight">
           <button
             type="button"
@@ -606,7 +544,9 @@ export function SessionPane({ onCreate }: Props) {
         writable={workspaces?.writable ?? false}
       />
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px 12px' }} role="list">
+      {/* 左栏永远不横滚（需求 5）：只写 overflowY 时浏览器把另一轴算成 auto，
+          任何长子节点都会带回横向滚动条。这里显式裁掉横轴。 */}
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '4px 8px 12px' }} role="list">
         {searchBusy ? (
           <div style={{ padding: '14px 12px', color: tokens.textPlaceholder, fontSize: 12.5 }}>搜索中…</div>
         ) : hits !== null ? (

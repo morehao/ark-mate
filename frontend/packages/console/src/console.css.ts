@@ -1336,6 +1336,19 @@ export const consoleStyleSheet = `
     line-height: 1.6;
   }
 
+  /* 会话行右端相对时间（需求 9）：与标题同一基线、不参与收缩。
+     ⋯ 与它共用行右端——静止态时间在最右，hover / 当前行时时间淡出让位，位置不跳（D11）。 */
+  .fg-sess-time {
+    flex: none;
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    color: ${tokens.textSecondary};
+    white-space: nowrap;
+    transition: opacity 0.12s ease;
+  }
+  .fg-sess-item:hover .fg-sess-time,
+  .fg-sess-item.fg-on .fg-sess-time { opacity: 0; }
+
   /* 会话行「更多」按钮：悬停浮现；触屏（移动抽屉态）常显 */
   .fg-sess-more { opacity: 0; transition: opacity 0.12s ease; }
   .fg-sess-item:hover .fg-sess-more,
