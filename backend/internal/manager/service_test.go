@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"sync"
 	"testing"
 	"time"
@@ -178,12 +179,12 @@ func TestDisconnectIdleSession(t *testing.T) {
 	// 字段与 `seedBuiltinAgents` 播出来的那条逐字同形（尤其是 `State: stopped`：后面那条断言
 	// 验的是"断连不把 agent 状态改坏"，起点错成空串就变成一句空话）。
 	as := &ActiveSession{ID: "s1", Runtime: "rtx"} // client nil
-	rc := &runtimeConn{client: nil}                // client 亦 nil → 相等匹配
+	rc := &runtimeconn.Conn{}                      // client 亦 nil → 相等匹配
 	orch.sessions["s1"] = as
 	svc.registerSession(&SessionRec{ID: "s1", Status: session.SessionStatusCompleted})
 	before := bus.Published()
 
-	orch.dropConn(rc)
+	orch.pool.Drop(rc)
 
 	if got, _ := svc.sessionPlane.Lookup("s1"); got.Status != session.SessionStatusCompleted {
 		t.Fatalf("空闲会话的上一轮终态不应被断连改写: %s", got.Status)
@@ -206,8 +207,8 @@ func TestDisconnectIdleSession(t *testing.T) {
 		t.Fatalf("底座诊断应记录 connection_lost: %+v", le)
 	}
 
-	// 二次 dropConn：句柄已 dead → 幂等。
-	orch.dropConn(rc)
+	// 二次 Drop（池）：句柄已 dead → 幂等。
+	orch.pool.Drop(rc)
 	if bus.Published() != before {
 		t.Fatalf("重复断连不应发布事件: published=%d", bus.Published())
 	}
@@ -218,13 +219,13 @@ func TestDisconnectIdleSession(t *testing.T) {
 func TestIntentionalTeardownKeepsIdleSession(t *testing.T) {
 	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "rtx", Name: "rtx"})
 	as := &ActiveSession{ID: "s1", Runtime: "rtx"}
-	rc := &runtimeConn{client: nil}
-	rc.intentional.Store(true)
+	rc := &runtimeconn.Conn{}
+	rc.Intentional.Store(true)
 	orch.sessions["s1"] = as
 	svc.registerSession(&SessionRec{ID: "s1", Status: session.SessionStatusCompleted})
 	before := bus.Published()
 
-	orch.dropConn(rc)
+	orch.pool.Drop(rc)
 
 	if got, _ := svc.sessionPlane.Lookup("s1"); got.Status != session.SessionStatusCompleted {
 		t.Fatalf("主动停机不得改写会话状态（completed 应保持）: %s", got.Status)
@@ -245,7 +246,7 @@ func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
 		ID: "s1", Runtime: "rtx",
 		sess: &stubSession{cancelOnCtx: true}, // 阻塞到 ctx 取消，模拟生成中的轮次
 	}
-	rc := &runtimeConn{client: nil}
+	rc := &runtimeconn.Conn{}
 	orch.sessions["s1"] = as
 	svc.registerSession(&SessionRec{ID: "s1"})
 
@@ -253,8 +254,8 @@ func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
 		t.Fatalf("Prompt: %v", err)
 	}
 
-	rc.intentional.Store(true)
-	orch.dropConn(rc)
+	rc.Intentional.Store(true)
+	orch.pool.Drop(rc)
 	// 等 executeRun 收尾（t.cancel 解除阻塞 → 写 interrupted）：轮询平台记录，避免裸读 as.run。
 	got := ""
 	deadline := time.Now().Add(2 * time.Second)

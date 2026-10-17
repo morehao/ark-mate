@@ -51,6 +51,18 @@ var runtimeconnAnchors = []string{
 	"func (pl *Plane) RegisterProc(",
 	"func (pl *Plane) UnregisterProc(",
 	"procReg *procreg.Registry",
+	// 第五十四刀：**连接池**（`Pool` / `Conn`）与它的三个新端口。
+	"type Pool struct {",
+	"type Conn struct {",
+	"func (pl *Pool) Add(",
+	"func (pl *Pool) Drop(",
+	"func (pl *Pool) KeyFor(",
+	"func (pl *Pool) AdmitGeneration(",
+	"func (pl *Pool) ReapIdle(",
+	"func (pl *Pool) ConnOfClient(",
+	"type ProviderEnvSource interface {",
+	"type ConfigDigestSource interface {",
+	"type DropSink interface {",
 }
 
 // TestRuntimeBindingLivesInRuntimeconn 绑定与诊断状态必须在 `internal/runtimeconn`，
@@ -117,6 +129,35 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 	// 这一族与供应商那七条（第四十六刀）同形：一行转发的正确性完全等价于被转发的那一行，
 	// 所以它写错与否都不会让任何测试变红，而它让「这段实现在哪一层」重新不可见。
 	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "manager"))
+	// 第五十四刀：**连接表与连接对象**也不许回到 manager。
+	//
+	// 三种失效都不让别的测试变红：
+	//   - `conns map[string]*runtimeConn` 与池里的表并存 ⇒ 迁移判据读一张、拨号写另一张；
+	//   - `type runtimeConn struct` 复活 ⇒ 两个连接对象、两套字段语义（`Client` vs `client`）；
+	//   - `o.conns` 的任意读写 ⇒ 有人绕过池锁与键派生（"同一份配置共享暖进程"当场失效）。
+	for _, dead := range []string{"conns map[string]*runtimeConn", "type runtimeConn struct", "o.conns"} {
+		if strings.Contains(mgrAll, dead) {
+			t.Errorf("`internal/manager` 里出现 %q：连接池与连接对象**只有一份**，在 `internal/runtimeconn`"+
+				"（P4a 正文第五十四刀）。两份的表现不是报错：迁移判据读一张表、acquire 写另一张，"+
+				"「同配置共享暖进程」静默失效。", dead)
+		}
+	}
+	// 装配与两端的接线：池必须在 `NewService` 造出来（且有 env / 指纹两个事实来源），
+	// 拆除的应用面必须在编排器回挂时接上。漏任何一个的表现都是静默的（键少维度 / 会话不收尾）。
+	for _, c := range []struct{ file, want, why string }{
+		{"internal/manager/service.go", "runtimeconn.NewPool(", "执行面的连接池"},
+		{"internal/manager/service.go", "SetProviderEnvSource(", "子进程 env 的来源（同时是基础键的输入）"},
+		{"internal/manager/service.go", "SetConfigDigestSource(", "模型清单指纹的来源（进代际键）"},
+		{"internal/manager/service.go", "SetLiveClientSource(s.runtimePool)", "诊断的连接池读面"},
+		{"internal/manager/service.go", "SetDropSink(o)", "拆除的应用面（会话收尾）"},
+		{"internal/manager/connection.go", "func (o *Orchestrator) OnConnDropped(", "拆除的应用实现"},
+		{"internal/manager/connection.go", "func (o *Orchestrator) InUseOn(", "回收判据的应用实现"},
+	} {
+		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, c.file))), c.want) {
+			t.Errorf("`%s` 里找不到 `%s`（%s）：这是执行面端口的接线点，漏了不会有编译错——"+
+				"表现是键少一维、或连接拆了会话却不收尾。", c.file, c.want, c.why)
+		}
+	}
 	for _, dead := range []string{
 		"func (s *Service) runtimeBindingSnapshot(",
 		"func (s *Service) setRuntimeState(",
@@ -128,10 +169,14 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 				"（调用点直连 `runtimePlane`）。", dead)
 		}
 	}
+	//
+	// 第五十四刀：前两条的锚**跟着对象走**——连接池搬进执行面之后，"建连/拆连时的进程状态"
+	// 的**唯一写入方**就是池（`Add` → running、`Drop` 摘到当前连接 → stopped）。判据本身不变，
+	// 仍是"这两个状态转移必须在执行面、且调用点直连"；留在 manager 的话它就只能是转发。
 	for _, c := range []struct{ file, want, why string }{
-		{"internal/manager/connection.go", "o.svc.runtimePlane.SetState(", "建连/拆连时的进程状态"},
+		{"internal/runtimeconn/pool.go", "SetState(session.AgentStateRunning)", "建连时的进程状态"},
+		{"internal/runtimeconn/pool.go", "SetState(session.AgentStateStopped)", "拆连时的状态回落"},
 		{"internal/manager/session_start.go", "o.svc.runtimePlane.SelectedSpec(", "建会话时的 spec 解析"},
-		{"internal/manager/orchestrator.go", "o.svc.runtimePlane.SetState(", "句柄作废时的状态回落"},
 	} {
 		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, c.file))), c.want) {
 			t.Errorf("`%s` 里找不到 `%s`（%s）：调用点必须直连执行面。"+

@@ -251,7 +251,9 @@ func TestProviderProbeUseCaseLivesInProviderSvc(t *testing.T) {
 			"serve 的目录入口"},
 		{"internal/gateway/source.go", "s.svc.ProviderPlane().ReloadProviderDefinitionsFromStore(",
 			"gateway 的换代重载"},
-		{"internal/manager/connection.go", "o.svc.providerPlane.ProviderEnvFor(",
+		// 第五十四刀：建连时的密钥注入经**执行面端口**取（池的 `ProviderEnvSource`），
+		// 适配器在 `runtime_pool.go`。锚跟着对象走，判据不变：调用点必须直连域平面。
+		{"internal/manager/runtime_pool.go", "s.providerPlane.ProviderEnvFor(",
 			"建连时的密钥注入"},
 		{"internal/manager/provider_effect.go", "s.providerPlane.ProviderModelRefsReadOnly(",
 			"写面回执的引用统计"},

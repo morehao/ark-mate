@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/object/objid"
@@ -320,7 +321,7 @@ func (s *Service) fetchCatalogByResume(ctx context.Context, spec runtime.Spec) (
 	if err != nil {
 		return nil, false, err
 	}
-	caps := rc.client.Capabilities()
+	caps := rc.Client.Capabilities()
 	if !caps.SessionResume && !caps.Raw.LoadSession {
 		return nil, false, acl.NewError(acl.ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
@@ -340,9 +341,9 @@ func (s *Service) fetchCatalogByResume(ctx context.Context, spec runtime.Spec) (
 		var sess *acl.Session
 		var rerr error
 		if caps.Raw.LoadSession {
-			sess, rerr = rc.client.LoadSession(ctx, t.RawID, acl.SessionOptions{Cwd: t.Cwd})
+			sess, rerr = rc.Client.LoadSession(ctx, t.RawID, acl.SessionOptions{Cwd: t.Cwd})
 		} else {
-			sess, rerr = rc.client.ResumeSession(ctx, t.RawID, acl.SessionOptions{Cwd: t.Cwd})
+			sess, rerr = rc.Client.ResumeSession(ctx, t.RawID, acl.SessionOptions{Cwd: t.Cwd})
 		}
 		if rerr != nil {
 			return nil, rerr
@@ -371,7 +372,7 @@ func (s *Service) fetchCatalogByResume(ctx context.Context, spec runtime.Spec) (
 //
 // 不合法的记录**跳过**而不是整体失败：取样是"尽力读到目录"，不是校验库里的旧值——为了
 // 一条残留把整个目录打成空，正是这条链最不该有的行为。
-func (s *Service) catalogResumeCandidates(ctx context.Context, rc *runtimeConn) []resumeTarget {
+func (s *Service) catalogResumeCandidates(ctx context.Context, rc *runtimeconn.Conn) []resumeTarget {
 	// 1) 平台记录（内存集合 + sqlite 兜底）。
 	//
 	// **快照读不持 `s.mu`**（P2b 前置）：`st` 是装配期一次性写的引用（见 `attachStore`），
@@ -403,7 +404,7 @@ func (s *Service) catalogResumeCandidates(ctx context.Context, rc *runtimeConn) 
 	}
 
 	// 2) 兜底：底座的 session/list（顺序即底座给的"最近优先"）。
-	items, err := rc.client.ListSessions(ctx, "")
+	items, err := rc.Client.ListSessions(ctx, "")
 	if err != nil {
 		return nil
 	}
@@ -563,11 +564,11 @@ func (s *Service) authGuidanceFor() []dtomodel.AuthGuidanceResp {
 	if s.orch == nil {
 		return nil
 	}
-	rc := s.orch.connForRuntime(runtime.SelectedRuntime())
+	rc := s.runtimePool.ConnForRuntime(runtime.SelectedRuntime())
 	if rc == nil {
 		return nil
 	}
-	caps := rc.client.Capabilities()
+	caps := rc.Client.Capabilities()
 	if len(caps.AuthGuidance) == 0 {
 		return nil
 	}
@@ -592,11 +593,11 @@ func (s *Service) promptImageSupported() *bool {
 	if s.orch == nil {
 		return nil
 	}
-	rc := s.orch.connForRuntime(runtime.SelectedRuntime())
+	rc := s.runtimePool.ConnForRuntime(runtime.SelectedRuntime())
 	if rc == nil {
 		return nil
 	}
-	v := rc.client.Capabilities().Images
+	v := rc.Client.Capabilities().Images
 	return &v
 }
 

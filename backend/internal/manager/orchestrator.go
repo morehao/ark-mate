@@ -5,9 +5,9 @@ import (
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -20,9 +20,6 @@ const agentCancelTimeout = 3 * time.Second
 
 // DefaultHandoffMaxChars bounded handoff memo 默认字符预算（§18 D-3；env MATE_HANDOFF_MAX_CHARS 覆盖）。
 const DefaultHandoffMaxChars = 6000
-
-// DefaultGenerationLimit 同一配置下的能力代际上限默认值（风险表第 12 行；env MATE_GENERATION_LIMIT）。
-const DefaultGenerationLimit = 4
 
 // acpSession 是 acl.Session 的最小接口（测试可注入桩；真实实现为 *acl.Session）。
 type acpSession interface {
@@ -89,15 +86,19 @@ type CreateResult struct {
 type Orchestrator struct {
 	svc *Service
 	reg *runtime.Registry
+	// pool 连接池（P4a 正文第五十四刀起归执行面 `internal/runtimeconn`）。
+	//
+	// **它与会话表不共用锁**：池自持一把只保护连接表的锁，本结构体的 `mu` 只保护
+	// `sessions` / `byProvider`。此前三样东西挤在一把锁下，于是"持锁请求会话快照"这类
+	// 锁序反转只能靠人眼防（§3.1.49 踩过，表现是 `go test ./...` 挂死而不是红）。
+	pool *runtimeconn.Pool
 
 	mu       sync.Mutex
-	conns    map[string]*runtimeConn // key = connKey(runtime, 原生权限 env)；同配置共享暖进程
 	sessions map[string]*ActiveSession
 	// byProvider：原生 provider session id → 平台会话 uuid（P3 双 id）。事件/权限等底层
 	// 回调只携带原生 id（acl.Event.SessionID / PermissionRequest.SessionID），host 侧经此
-	// 解析为平台会话 id 再发布/键控；会话失活（dropConn）时随 victim 一并清除。
+	// 解析为平台会话 id 再发布/键控；会话失活（`DropSink.OnConnDropped`）时随 victim 一并清除。
 	byProvider map[string]string
-	reapStop   context.CancelFunc // 空闲回收 goroutine 停止（Close 时调用）
 
 	// inflight 记录每连接上正在执行 run 的会话（session.InFlightTracker：§17 E1 显式化簿记，
 	// 语义同 §1.5 决策修订——连接上唯一在途才归属，多会话并发在途不猜测）。
@@ -122,29 +123,6 @@ type Orchestrator struct {
 	// handoffMaxChars bounded handoff memo 字符预算（§5.6/§18 D-3；见 SetHandoffMaxChars /
 	// MATE_HANDOFF_MAX_CHARS）。0 = 关闭 memo 兜底。
 	handoffMaxChars int
-
-	// generationLimit 同一基础键（runtime + 原生权限 + provider）下允许并存的代际上限
-	// （见 SetGenerationLimit / MATE_GENERATION_LIMIT）。0 = 不限制。
-	generationLimit int
-}
-
-type runtimeConn struct {
-	client *acl.Client
-	spec   runtime.Spec
-	// key 连接缓存键（B5：runtime ID + 原生权限 env 签名 + 代际维度）。同一 runtime 但原生权限
-	// 配置不同的会话必须各自独立进程（权限开关是进程级），配置相同则共享暖进程。
-	key string
-	// baseKey 该连接的基础键（= 不含代际维度的 key）。停机用它一次性找到**该配置的
-	// 全部代际**——只按 key 找的话，代际机制一旦真的产生多代际就会漏关。
-	baseKey string
-	// configDigest 该连接建立时的平台模型配置指纹（T5）。代际裁决用它判断"清单变了没有"。
-	configDigest string
-	started      time.Time // 连接建立时刻（空闲回收计时起点）
-	pid          int       // 子进程 pid（进程注册表登记用；0 = 未登记）
-	// intentional 该连接是**我方主动关闭**的（daemon 停机 / 空闲回收），
-	// 而非对端或子进程意外断开。拆除方在 Close 之前置位，dropConn 据此判定拆除原因；
-	// 主动拆除不得把会话写成失败态（见 disconnectSession 的状态语义）。
-	intentional atomic.Bool
 }
 
 // RunOptions 一次 RunOnce（demo）的入参。
@@ -204,7 +182,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	o := &Orchestrator{
 		svc:             svc,
 		reg:             reg,
-		conns:           make(map[string]*runtimeConn),
+		pool:            svc.runtimePool,
 		sessions:        make(map[string]*ActiveSession),
 		byProvider:      make(map[string]string),
 		inflight:        session.NewInFlightTracker(),
@@ -212,7 +190,6 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		elic:            interaction.NewElicitationManager(interaction.DefaultElicitationTimeout),
 		usage:           make(map[string]objusage.UsageInfo),
 		handoffMaxChars: DefaultHandoffMaxChars,
-		generationLimit: DefaultGenerationLimit,
 	}
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
 	// （session.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。
@@ -280,26 +257,6 @@ func (o *Orchestrator) SetRunTimeout(d time.Duration) { o.runTimeout = d }
 // SetHandoffMaxChars 设置 bounded handoff memo 字符预算（0 = 关闭 memo 兜底）。见 ensureSession。
 func (o *Orchestrator) SetHandoffMaxChars(n int) { o.handoffMaxChars = n }
 
-// SetGenerationLimit 设置同一配置下的能力代际上限（0 = 不限制）。见 admitGeneration。
-//
-// 是**软上限**：达到上限时先显式淘汰「无会话引用且空闲」的代际，只有全都还在用时才拒绝新建。
-// 拒绝而不是复用：复用错的能力集是安全 bug（底座会给 A 会话的能力投给 B），宁可报错。
-func (o *Orchestrator) SetGenerationLimit(n int) {
-	if n < 0 {
-		n = 0
-	}
-	o.mu.Lock()
-	o.generationLimit = n
-	o.mu.Unlock()
-}
-
-// GenerationLimit 当前上限（0 = 不限制；诊断/测试用）。
-func (o *Orchestrator) GenerationLimit() int {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.generationLimit
-}
-
 // session 按 ID 取活跃会话（连接存活期内）。查找不存在（如进程重启后）按未找到处理。
 func (o *Orchestrator) session(id string) *ActiveSession {
 	o.mu.Lock()
@@ -308,29 +265,10 @@ func (o *Orchestrator) session(id string) *ActiveSession {
 }
 
 // Close 关闭全部连接并清理（daemon 退出/测试收尾）。
+//
+// 连接的关闭（含空闲回收停止、进程登记摘除、进程状态回落、会话收尾）整体归执行面：
+// 这里只剩"叫它关" + transcript 收尾。会话收尾仍回到本层的 `OnConnDropped`（`DropSink`）。
 func (o *Orchestrator) Close() {
-	o.mu.Lock()
-	if o.reapStop != nil {
-		o.reapStop()
-		o.reapStop = nil
-	}
-	o.mu.Unlock()
-	o.mu.Lock()
-	conns := make([]*runtimeConn, 0, len(o.conns))
-	for _, rc := range o.conns {
-		conns = append(conns, rc)
-	}
-	o.conns = make(map[string]*runtimeConn)
-	o.mu.Unlock()
-	for _, rc := range conns {
-		// 主动停机：先置原因再拆除 —— 停机不是连接故障，不能把会话写成失败态。
-		rc.intentional.Store(true)
-		o.disconnectSessionAll(rc)
-		o.svc.runtimePlane.SetState(session.AgentStateStopped)
-		o.unregisterProc(rc)
-		if rc.client != nil {
-			_ = rc.client.Close()
-		}
-	}
+	o.pool.CloseAll()
 	o.svc.closeTranscripts()
 }

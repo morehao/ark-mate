@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/morehao/ark-mate/internal/domain/skill"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"os"
 	"strings"
 	"testing"
@@ -199,7 +200,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	if got := numericCode(err); got != 40001 {
 		t.Fatalf("不可达选定的码 = %d，期望 40001", got)
 	}
-	if n := len(orch.conns); n != 0 {
+	if n := orch.pool.Len(); n != 0 {
 		t.Fatalf("校验失败不该建立任何连接，got %d", n)
 	}
 	list, _ := st.ListSessions(ctx, nil)
@@ -226,7 +227,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("可达选定应建会话成功: %v", err)
 	}
-	if n := len(orch.conns); n != 1 {
+	if n := orch.pool.Len(); n != 1 {
 		t.Fatalf("应建立一个连接，got %d", n)
 	}
 	detail, err := detailSvc(svc).GetSession(ctx, res.ID)
@@ -291,8 +292,8 @@ func TestCreateSessionDefaultPathUnchanged(t *testing.T) {
 	}
 	spec, _ := orch.reg.Get("stub")
 	// v19：基础键只剩"构建期底座 + 声明默认模型的供应商 env"（原生权限面没有策略来源）。
-	base := connKey(spec.ID, svc.providerPlane.ProviderEnvFor(spec.ID, svc.providerPlane.InjectedProviderID(context.Background())))
-	if got := generationKey(base, rec.Fingerprint, ""); got != base {
+	base := runtimeconn.ConnKey(spec.ID, svc.providerPlane.ProviderEnvFor(spec.ID, svc.providerPlane.InjectedProviderID(context.Background())))
+	if got := runtimeconn.GenerationKey(base, rec.Fingerprint, ""); got != base {
 		t.Fatal("缺省路径的代际键必须与基础键逐字相同（R11）")
 	}
 	// 落库形态同样是空串（旧行与新行的默认值同形）。
@@ -330,7 +331,7 @@ func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 		t.Fatalf("声明与未声明的指纹应不同: declared=%q plain=%q", recD.Fingerprint, recP.Fingerprint)
 	}
 	// 两个不同的代际 → 两条连接（能力集是按进程绑定的）。
-	if n := len(orch.conns); n != 2 {
+	if n := orch.pool.Len(); n != 2 {
 		t.Fatalf("声明与未声明应是两个代际（2 条连接），got %d", n)
 	}
 	detail, err := detailSvc(svc).GetSession(ctx, declared.ID)

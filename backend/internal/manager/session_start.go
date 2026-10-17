@@ -96,7 +96,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	// P2 MCP 注入：平台注册表 MCP 子集按「会话选定 > 全量」+ runtime 传输能力过滤后
 	// 随 session/new 下发（§5.2/§5.3；会话级选定见 M3）。**必须传 opt.Selection**：
 	// 指纹就是按它算出来的，注入若用别的口径，会话拿到的东西会与代际台账不符。
-	sess, err := rc.client.NewSession(ctx, acl.SessionOptions{
+	sess, err := rc.Client.NewSession(ctx, acl.SessionOptions{
 		Cwd:        cwd,
 		McpServers: o.svc.McpServersFor(spec.ID, opt.Selection),
 	})
@@ -107,7 +107,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	// P3 双 id（D-1，用户已授权破坏性变更）：会话对外 id = 平台铸造的 `ses_<ULID>`（隐藏底座 id 形状、
 	// 跨重启稳定定位）；原生 provider id 存 sess/RuntimeSessionID 列，供恢复承载（load/resume）。
 	as := &ActiveSession{ID: convID, Runtime: spec.ID, Fingerprint: fingerprint,
-		client: rc.client, sess: sess, providerID: sess.ID(), proj: runtime.NewProjection(spec, sess)}
+		client: rc.Client, sess: sess, providerID: sess.ID(), proj: runtime.NewProjection(spec, sess)}
 	// 会话级模型应用（运行时派生模型面的落地，决策记录）：
 	//   - 值由 `modelCfg` 给出（平台行 → adapter 现算，见 `resolveSessionModel`）；
 	//   - 运行时**拒绝**该值 → 建会话失败（错误上抛给调用方，绝不静默回落到底座默认模型）；
@@ -238,7 +238,7 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 	// `sessions.capability_json` 读回。漏了这一步的后果是会话重启后注入集悄悄换一套，
 	// 而且没有任何报错——用户只会发现"昨天能用的 MCP 今天不见了"。
 	opts := acl.SessionOptions{Cwd: cwd, McpServers: o.svc.McpServersFor(spec.ID, sel)}
-	caps := rc.client.Capabilities()
+	caps := rc.Client.Capabilities()
 	sameRuntime := spec.ID == rec.RuntimeID && rec.RuntimeID != ""
 	// `nativeID` 是**平台侧的值**（`rt_` 壳）；给底座的必须是**原文**。
 	//
@@ -263,9 +263,9 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 	switch {
 	case resumeOK:
 		if caps.Raw.LoadSession {
-			sess, err = rc.client.LoadSession(ctx, rawNativeID, opts)
+			sess, err = rc.Client.LoadSession(ctx, rawNativeID, opts)
 		} else {
-			sess, err = rc.client.ResumeSession(ctx, rawNativeID, opts)
+			sess, err = rc.Client.ResumeSession(ctx, rawNativeID, opts)
 		}
 		if err != nil {
 			glog.Warnw(ctx, "原生恢复失败，转 handoff memo 兜底", "session", rec.ID,
@@ -279,7 +279,7 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 				fmt.Sprintf("会话 %q 无法原生恢复（runtime %q 无 load/resume 或 provider 会话无效），且 memo 兜底关闭",
 					rec.ID, spec.ID), nil)
 		}
-		sess, err = rc.client.NewSession(ctx, opts)
+		sess, err = rc.Client.NewSession(ctx, opts)
 		if err != nil {
 			return nil, "", err
 		}
@@ -303,7 +303,7 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 	}
 	o.svc.registerSession(&rec)
 	as := &ActiveSession{ID: rec.ID, Runtime: spec.ID, Fingerprint: fingerprint,
-		client: rc.client, sess: sess, providerID: sess.ID(),
+		client: rc.Client, sess: sess, providerID: sess.ID(),
 		proj: runtime.NewProjection(spec, sess), memo: memo}
 	// 会话级模型在恢复后重新断言一次（平台记录是权威意图；原生恢复未必带回该状态）：
 	// **best-effort** —— 恢复不是用户在选模型，运行时若已不再提供该值（换了 provider/档案），

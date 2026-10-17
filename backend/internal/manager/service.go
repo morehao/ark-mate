@@ -77,7 +77,11 @@ type Service struct {
 	// runtimePlane 执行面（P3a-2 分批搬入）：本批装"本进程认的那个底座"的绑定，
 	// 诊断组装面随后一批跟进。它自持锁（`bindingLocked` 那类"须持 s.mu"的约定随之消失）。
 	runtimePlane *runtimeconn.Plane
-	autoVer      map[string]int64 // 自动化事件的版本计数（`automation:<id>` 聚合）；会话侧那张表在 domain/session
+	// runtimePool 连接池（P4a 正文第五十四刀搬进执行面）：连接表、代际上限与空闲回收。
+	// 它自持一把**与会话表无关**的锁——这正是这次分锁的原因（此前 `Orchestrator.mu`
+	// 同时保护连接表与会话表，持锁请求会话快照就是锁序反转的雏形）。
+	runtimePool *runtimeconn.Pool
+	autoVer     map[string]int64 // 自动化事件的版本计数（`automation:<id>` 聚合）；会话侧那张表在 domain/session
 
 	// memDefaultWorkspace memory 模式的**默认工作空间**（登记表不存在时的那一份）。
 	//
@@ -202,9 +206,16 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 	for _, opt := range opts {
 		opt(s)
 	}
-	// 执行面的两个口子：凭据面（供应商域）现在就能接；连接池读面要等编排器造出来
-	// （见 `attachOrchestrator`）——**早一行拿到的是 nil**，表现是诊断永远报"未连接"（静默）。
+	// 执行面的口子：凭据面（供应商域）与连接池。池必须在这里造——它需要**最终那个**平面
+	// （`WithRuntimePlane` 可能已经换过实例），且装配层（`app`）要用它设代际上限/空闲回收。
 	s.runtimePlane.SetCredentialSource(s)
+	s.runtimePool = runtimeconn.NewPool(s.runtimePlane)
+	// env 与配置指纹都是**本层的事实**，池只认端口（执行面不认识供应商档案与模型清单）。
+	s.runtimePool.SetProviderEnvSource(s)
+	s.runtimePool.SetConfigDigestSource(s)
+	// 连接池读面：诊断要问"此刻哪条连接活着"。**早一行拿到的是 nil**，表现是诊断永远报
+	// 「未连接」、stderr 尾巴恒空——而它只在底座真的在跑时才该现形（开发态多半看不见）。
+	s.runtimePlane.SetLiveClientSource(s.runtimePool)
 	return s
 }
 
@@ -218,6 +229,13 @@ func (s *Service) SetBus(bus *eventbus.Bus) { s.bus = bus }
 // 与 `runtimeconn.NewPlaneFor`/`WithRuntimePlane` 的分工同形：**同一个实例**交给两个消费面，
 // 两份平面 = 两个事实源。
 func (s *Service) ProviderPlane() *provider.Plane { return s.providerPlane }
+
+// RuntimePool 连接池的事实出口（P4a 正文第五十四刀）。
+//
+// 装配期（`app` 的 serve）要用它设代际上限与空闲回收；这两个动作的实现只有
+// `internal/runtimeconn` 那一份，manager 侧不再有一行转发（`SetGenerationLimit` /
+// `StartIdleReaper` 已随本刀从 `Orchestrator` 删除）。
+func (s *Service) RuntimePool() *runtimeconn.Pool { return s.runtimePool }
 
 // CredentialStore 凭据机制的事实出口（P4a 正文第五十一刀）。
 //
@@ -298,7 +316,8 @@ func (s *Service) attachOrchestrator(o *Orchestrator) {
 	// 会话域的用量端口：读的是执行面内存里的"每会话最近一次上报"（`LatestUsage`）。
 	if o != nil {
 		s.sessionPlane.SetUsageSource(o.LatestUsage)
-		// 执行面的连接池读面：诊断要问"此刻哪条连接活着"。
-		s.runtimePlane.SetLiveClientSource(o)
+		// 连接拆除的**应用**面：池只负责摘除与通知，会话/在途/诊断怎么收尾由编排侧决定
+		// （`DropSink`）。接在这一刻而不是 `NewService`：编排器在此之前还不存在。
+		s.runtimePool.SetDropSink(o)
 	}
 }

@@ -27,6 +27,12 @@ var keyDerivationMarkers = []string{
 	`"gen:" + strconv.Itoa(len(`,
 	`strings.Join(parts, "\x00")`,
 	`strings.LastIndex(k, ":")`,
+	// 第五十四刀：**取键点**也只许有一处（池的 `KeyFor`）。在 manager 里再算一次键——
+	// 哪怕只是 `key = connKey(...)` 这一行——都会让"哪一把是权威键"重新有两个答案。
+	// 判据只钉"自己拼键"的形态：调用 `o.pool.KeyFor(` 是**消费**那一处实现，恰恰是本刀要的形状。
+	"ConnKey(",
+	"GenerationKey(",
+	"key = connKey(",
 }
 
 // TestConnectionKeysLiveInRuntimeconn 见文件头。
@@ -46,32 +52,29 @@ func TestConnectionKeysLiveInRuntimeconn(t *testing.T) {
 		}
 	}
 
-	// manager 侧：转发文件里不得再有派生本体。
+	// 池侧：取键点在 `Pool.KeyFor`（与键的派生同包，且**只此一处**）。
+	pool := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "runtimeconn", "pool.go")))
+	if !strings.Contains(pool, "func (pl *Pool) KeyFor(") {
+		t.Error("internal/runtimeconn/pool.go 里找不到 `func (pl *Pool) KeyFor(`：取键点被改名/搬走了？" +
+			"（这条守卫的判据挂在它身上，失锚等于空转）")
+	}
+
+	// manager 侧：**全部**生产文件（第五十四刀起不再有"转发文件"豁免——`connection.go` 里
+	// 那五个键派生转发已随本刀删除）。
 	dir := filepath.Join(root, "internal", "manager")
 	files := productionGoFiles(t, dir)
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：守卫失去检查对象", dir)
 	}
 	for _, path := range files {
-		if filepath.Base(path) == "connection.go" {
-			continue // 转发文件（只许是 `return runtimeconn.Xxx(...)`）
-		}
 		body := stripLineComments(readFileOrFatal(t, path))
 		for _, m := range keyDerivationMarkers {
 			if strings.Contains(body, m) {
-				t.Errorf("internal/manager/%s 里出现连接键/代际键的派生本体 %q：它**只有一份实现**，"+
-					"在 `internal/runtimeconn/keys.go`（P3a-2 第三刀）。\n"+
+				t.Errorf("internal/manager/%s 里出现连接键/代际键的派生本体或取键点 %q：它**只有一份实现**，"+
+					"在 `internal/runtimeconn`（P3a-2 第三刀派生、P4a 第五十四刀取键）。\n"+
 					"两份的后果不是报错而是静默分叉：迁移判据说「不用换进程」而 acquire 换了——"+
 					"表现为改了能力选择之后一部分会话仍跑在旧配置的进程上。", filepath.Base(path), m)
 			}
-		}
-	}
-
-	// connection.go 只许转发（不得出现上面的痕迹）。
-	conn := stripLineComments(readFileOrFatal(t, filepath.Join(dir, "connection.go")))
-	for _, m := range keyDerivationMarkers {
-		if strings.Contains(conn, m) {
-			t.Errorf("internal/manager/connection.go 里出现派生本体 %q：它只剩转发（见文件头注释）。", m)
 		}
 	}
 }

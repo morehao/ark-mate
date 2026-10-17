@@ -424,7 +424,8 @@ func (a *App) Init(ctx context.Context) error {
 	// handoff memo 字符预算（P3 F3；MATE_HANDOFF_MAX_CHARS 覆盖，默认 6000）。
 	a.orch.SetHandoffMaxChars(cfg.HandoffMaxChars)
 	// 能力代际上限（M3-7；MATE_GENERATION_LIMIT，0 = 不限制）。
-	a.orch.SetGenerationLimit(cfg.GenerationLimit)
+	// P4a 正文第五十四刀起连接池归执行面：装配层经**事实出口**直连池，不再经编排器转发。
+	a.svc.RuntimePool().SetGenerationLimit(cfg.GenerationLimit)
 	// 权限/elicitation 挂起超时（默认 30min；MATE_PERMISSION_TIMEOUT / MATE_ELICITATION_TIMEOUT 覆盖）。
 	a.orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	a.orch.SetElicitationTimeout(cfg.ElicitationTimeout)
@@ -443,7 +444,7 @@ func (a *App) Init(ctx context.Context) error {
 		glog.Infow(ctx, "serve: 原生权限映射已关闭（MATE_NATIVE_PERMISSION=off；当前平台无策略来源，该开关不改变注入结果）")
 	}
 	// 空闲回收（P2）：StartAgent 暖进程闲置超阈值自动停（MATE_IDLE_TIMEOUT，默认 5m；0 = 关闭）。
-	a.orch.StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
+	a.svc.RuntimePool().StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
 	// M4-4 调度循环：`MATE_AUTOMATION_TICK=0` 关闭（装配期同步跑一次启动恢复 pass）。
 	a.svc.StartAutomationScheduler(cfg.AutomationTick)
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"strings"
 	"testing"
 	"time"
@@ -326,20 +327,20 @@ func TestConnKeyModelScoping(t *testing.T) {
 	keyE := []string{"OPENAI_API_KEY=sk-x"}
 	modelE := []string{"RTX_MODEL=gpt-5"}
 
-	base := connKey("rtx", native)
-	if base == connKey("rtx", native, keyE) {
+	base := runtimeconn.ConnKey("rtx", native)
+	if base == runtimeconn.ConnKey("rtx", native, keyE) {
 		t.Fatalf("provider 密钥 env 应并入连接键（B5 修复）")
 	}
-	if connKey("rtx", native, keyE) != connKey("rtx", native, keyE) {
+	if runtimeconn.ConnKey("rtx", native, keyE) != runtimeconn.ConnKey("rtx", native, keyE) {
 		t.Fatalf("同 env 组应得同键")
 	}
-	if connKey("rtx", native, keyE) == connKey("rtx", native, keyE, modelE) {
+	if runtimeconn.ConnKey("rtx", native, keyE) == runtimeconn.ConnKey("rtx", native, keyE, modelE) {
 		t.Fatalf("rtx（进程级模型）模型 env 应并入连接键（改模型 = 换连接）")
 	}
-	if connKey("dsh", native, keyE) != connKey("dsh", native, keyE, nil) {
+	if runtimeconn.ConnKey("dsh", native, keyE) != runtimeconn.ConnKey("dsh", native, keyE, nil) {
 		t.Fatalf("dsh（会话级模型）不应因不含模型 env 而改变键")
 	}
-	if connKey("stub") != "stub" {
+	if runtimeconn.ConnKey("stub") != "stub" {
 		t.Fatalf("无 env 应仅返回 runtimeID")
 	}
 }

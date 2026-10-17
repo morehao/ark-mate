@@ -7,25 +7,25 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // connCount 读连接池条数（**持锁**读）。
 //
-// 为什么要一个访问器而不是直接 `len(o.conns)`：拆除是异步的（见 waitConnCount），
+// 为什么要一个访问器而不是直接读池里的表：拆除是异步的（见 waitConnCount），
 // 断言前后随时可能有 goroutine 在改这张表——裸读在 `-race` 下就是数据竞争，而本轮把
-// 断言从"看一眼"改成了"等到满足"，窗口比原来大得多，必须持锁。
+// 断言从"看一眼"改成了"等到满足"，窗口比原来大得多，必须持锁（P4a 第五十四刀起那把锁
+// 在池里：`Pool.Len` 就是"持池锁读"）。
 func connCount(o *Orchestrator) int {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return len(o.conns)
+	return o.pool.Len()
 }
 
 // waitConnCount 等连接池到达期望条数（上限 2s），超时才判失败。
 //
-// 为什么要等（T12 的根因，2026-09-29）：`dropConn` 由 `watchConn` 在 `client.Done()` 之后
+// 为什么要等（T12 的根因，2026-09-29）：`Drop` 由池的 `watch` 在 `client.Done()` 之后
 // **异步**执行，而 `stopAgent` 等的正是同一个 Done——两者被同一件事唤醒，谁先跑完没有保证。
-// 生产路径**刻意**容忍这个窗口：`dropConn` 用 `ownerBefore`（`o.conns[key] == rc`）判定所有权，
+// 生产路径**刻意**容忍这个窗口：`Drop` 用 `wasCurrent`（`conns[key] == conn`）判定所有权，
 // 所以旧连接的晚收尾不会删掉/覆盖新连接；`acquire` 也先用非阻塞 `<-client.Done()` 验活，
 // 撞上"已断开但还没摘表"的条目会落到重拨。因此"停 agent 返回时表已空"**不是** API 保证，
 // 断言它就会在整包负载下随机红（历史记录见计划 §13 T12）。
@@ -49,58 +49,59 @@ func waitConnCount(t *testing.T, r *rig, want int) {
 // 同配置的两个会话就会各起一个进程（"配置相同共享暖进程"这条既有规则被静默破坏，代价是进程数
 // 与内存翻倍，而且没人会立刻发现）。
 func TestGenerationKeyZeroRegression(t *testing.T) {
-	base := connKey("rtx", []string{"A=1"}, []string{"B=2"})
-	if got := generationKey(base, "", ""); got != base {
+	base := runtimeconn.ConnKey("rtx", []string{"A=1"}, []string{"B=2"})
+	if got := runtimeconn.GenerationKey(base, "", ""); got != base {
 		t.Fatalf("空指纹必须原样返回基础键（R11）：\n%s\n%s", base, got)
 	}
 	// 非空指纹必须改键（否则两套不同的能力会共用一个进程）。
-	if got := generationKey(base, "abc123", ""); got == base {
+	if got := runtimeconn.GenerationKey(base, "abc123", ""); got == base {
 		t.Fatal("非空指纹必须产生不同的键")
 	}
 	// 同指纹稳定、不同指纹不同。
-	if generationKey(base, "abc123", "") != generationKey(base, "abc123", "") {
+	if runtimeconn.GenerationKey(base, "abc123", "") != runtimeconn.GenerationKey(base, "abc123", "") {
 		t.Fatal("同指纹应得同键")
 	}
-	if generationKey(base, "abc123", "") == generationKey(base, "def456", "") {
+	if runtimeconn.GenerationKey(base, "abc123", "") == runtimeconn.GenerationKey(base, "def456", "") {
 		t.Fatal("不同指纹应得不同键")
 	}
 }
 
 // TestGenerationKeyNoPrefixAmbiguity 代际键不得与"另一个基础键"撞车。
 //
-// connKey 的组间分隔符就是 `\x00`，所以 `connKey("r", g1)` 是 `connKey("r", g1, g2)` 的字符串
+// ConnKey 的组间分隔符就是 `\x00`，所以 `ConnKey("r", g1)` 是 `ConnKey("r", g1, g2)` 的字符串
 // 前缀。若代际后缀是裸拼接，`("r",g1) + gen:X` 就可能与另一个基础键/代际键重合——基础键里
 // 恰好出现 `gen:` 这种文本并非不可能（env 组是 `KEY=VALUE`，VALUE 由用户/provider 决定）。
 // 长度前缀让基础键自我定界，从结构上排除这类碰撞。
 func TestGenerationKeyNoPrefixAmbiguity(t *testing.T) {
-	short := connKey("r", []string{"A=1"})
-	long := connKey("r", []string{"A=1"}, []string{"gen:1"})
+	short := runtimeconn.ConnKey("r", []string{"A=1"})
+	long := runtimeconn.ConnKey("r", []string{"A=1"}, []string{"gen:1"})
 
 	// 短键 + 指纹 vs 长键本身：必须不同（否则"给短键指定了能力"会被当成"长键的缺省代际"，
 	// 两套不同的能力共用一个进程）。
-	if generationKey(short, "zz", "") == long {
-		t.Fatalf("代际键与另一个基础键撞车：\nshort=%q\nlong =%q", generationKey(short, "zz", ""), long)
+	if runtimeconn.GenerationKey(short, "zz", "") == long {
+		t.Fatalf("代际键与另一个基础键撞车：\nshort=%q\nlong =%q", runtimeconn.GenerationKey(short, "zz", ""), long)
 	}
 	// 同指纹下两个不同基础键的键也必须不同。
-	if generationKey(short, "zz", "") == generationKey(long, "zz", "") {
+	if runtimeconn.GenerationKey(short, "zz", "") == runtimeconn.GenerationKey(long, "zz", "") {
 		t.Fatal("不同基础键的同指纹代际键不该相同")
 	}
 }
 
 // TestGenerationKeyFindsAllGenerations 代际池必须能找到**该配置的全部代际**。
 func TestGenerationKeyFindsAllGenerations(t *testing.T) {
-	base := connKey("stub", nil)
-	o := &Orchestrator{conns: map[string]*runtimeConn{}}
+	base := runtimeconn.ConnKey("stub", nil)
+	// 池只需要"连接表"这一份状态就能回答这个问题（binder/sink 都可为 nil）。
+	pool := runtimeconn.NewPool(nil)
 	// 一个缺省代际 + 两个能力代际 + 一个别的配置（不该被匹配到）。
-	o.conns[base] = &runtimeConn{key: base, baseKey: base}
+	pool.Add(&runtimeconn.Conn{Key: base, BaseKey: base})
 	for _, fp := range []string{"fp1", "fp2"} {
-		k := generationKey(base, fp, "")
-		o.conns[k] = &runtimeConn{key: k, baseKey: base}
+		k := runtimeconn.GenerationKey(base, fp, "")
+		pool.Add(&runtimeconn.Conn{Key: k, BaseKey: base})
 	}
-	otherBase := connKey("stub", []string{"DSH_PERMISSION_MODE=read-only"})
-	o.conns[otherBase] = &runtimeConn{key: otherBase, baseKey: otherBase}
+	otherBase := runtimeconn.ConnKey("stub", []string{"DSH_PERMISSION_MODE=read-only"})
+	pool.Add(&runtimeconn.Conn{Key: otherBase, BaseKey: otherBase})
 
-	got := o.generationKeysFor(base)
+	got := pool.GenerationKeysFor(base)
 	if len(got) != 3 {
 		t.Fatalf("应找到 3 个代际键（含基础键），got %d: %v", len(got), got)
 	}
@@ -187,15 +188,15 @@ func TestGenerationPerFingerprint(t *testing.T) {
 		t.Fatalf("同指纹应复用连接，got %d 条", n)
 	}
 	// 全部代际都在同一个基础键下：代际**池上限**正是按这个数判的（超了要淘汰无人引用的那条）。
-	base := connKey(spec.ID, r.Svc.providerPlane.ProviderEnvFor(spec.ID, r.Svc.providerPlane.InjectedProviderID(ctx)))
-	if n := len(r.Orch.generationKeysFor(base)); n != 3 {
+	base := runtimeconn.ConnKey(spec.ID, r.Svc.providerPlane.ProviderEnvFor(spec.ID, r.Svc.providerPlane.InjectedProviderID(ctx)))
+	if n := len(r.Orch.pool.GenerationKeysFor(base)); n != 3 {
 		t.Fatalf("三代际应同属一个基础键: %d", n)
 	}
 	// v19 撤销了"显式停某个 agent"那一面（用户不能选底座 → 也没有按底座停的入口），
 	// 停机只剩整进程 Close 一条路：三条连接全关。
 	r.Orch.Close()
 	// 等**最终**一致：连接已被关掉（Close + Done）是同步保证的；表里那条登记由
-	// watchConn→dropConn 异步摘除（见 waitConnCount 的注释）。
+	// 池的 watch→Drop 异步摘除（见 waitConnCount 的注释）。
 	waitConnCount(t, r, 0)
 }
 

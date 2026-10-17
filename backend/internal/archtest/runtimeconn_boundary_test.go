@@ -33,11 +33,17 @@ import (
 //
 // 反证（实跑）：往 `runtimeconn` 加一个含 `o.svc.` 的文件 → 红（第一条）；
 // 给它加一个 6 方法的接口 → 红（第二条）。
+//
+// 第五十四刀扩面（仍两条，不增条数）：第一条的禁词表加上 `*session.Plane` /
+// `session.MutateAll(` / `session.Mutate(`——连接池搬进来之后，最容易被顺手写下的编排痕迹
+// 就是"池自己把会话写成什么状态"（`OnConnDropped` 负控的判据）。
 
 // maxRuntimeconnPortMethods 执行面声明的端口方法数上限。
 //
-// 取 4 是**按实测**定的：现有三个端口是 `CredentialSource`（2）、`LiveClientSource`（1），
-// 加上"建连/拆连"这类还需要的一两个，4 是够用的上限。真正的判据不是这个数字，而是
+// 取 4 是**按实测**定的：第五十四刀之后本域共五个端口——`CredentialSource`（2）、
+// `LiveClientSource`（1）、`ProviderEnvSource`（1）、`ConfigDigestSource`（1）、`DropSink`（2），
+// 最宽 2 个方法；4 仍是"建连/拆连这类事实"够用的上限（拆连接时真正需要的第二、三条事实被
+// 拆成了独立的窄端口，而不是往同一个接口上堆）。真正的判据不是这个数字，而是
 // **"端口一旦宽到能表达编排，就说明搬错了东西"**——31 是反例的规模。
 const maxRuntimeconnPortMethods = 4
 
@@ -45,6 +51,12 @@ const maxRuntimeconnPortMethods = 4
 var runtimeconnOrchestrationMarkers = []string{
 	"o.svc.",
 	"type Orchestrator",
+	// 第五十四刀：**执行面不许认识会话表**。连接被摘除之后怎么收尾是编排侧的事，池只发通知
+	// （`DropSink`）。在池里直接改会话表的表现是静默的：编译过、测试绿，而"谁拥有会话状态"
+	// 重新没有答案——那正是这条守卫要拦的形态。
+	"*session.Plane",
+	"session.MutateAll(",
+	"session.Mutate(",
 }
 
 // TestRuntimeconnHoldsNoOrchestration 执行面里不得出现编排层的形态。

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/domain/interaction"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objid"
@@ -155,14 +156,14 @@ func TestNativePermissionEnabledSwitch(t *testing.T) {
 func TestConnKeyIsolatesNativePermission(t *testing.T) {
 	ro := []string{"DSH_PERMISSION_MODE=read-only"}
 	full := []string{"DSH_PERMISSION_MODE=danger-full-access"}
-	if connKey("dsh", ro) == connKey("dsh", full) {
+	if runtimeconn.ConnKey("dsh", ro) == runtimeconn.ConnKey("dsh", full) {
 		t.Fatal("不同原生权限配置应产生不同连接键")
 	}
-	if connKey("dsh", ro) != connKey("dsh", ro) {
+	if runtimeconn.ConnKey("dsh", ro) != runtimeconn.ConnKey("dsh", ro) {
 		t.Fatal("相同配置应产生相同连接键（可共享暖进程）")
 	}
-	if connKey("stub", nil) != "stub" {
-		t.Fatalf("无原生配置时应退化为 runtime ID: %q", connKey("stub", nil))
+	if runtimeconn.ConnKey("stub", nil) != "stub" {
+		t.Fatalf("无原生配置时应退化为 runtime ID: %q", runtimeconn.ConnKey("stub", nil))
 	}
 	// 同一策略两次计算结果一致（env 顺序稳定）。这里直接调 `interaction.NativePermissionEnv`
 	// ——它是那条**端口契约**（原生权限 → 环境变量）的唯一实现，行为侧与实现侧各调一次，
@@ -172,7 +173,7 @@ func TestConnKeyIsolatesNativePermission(t *testing.T) {
 		e, _ := interaction.NativePermissionEnv(runtime.AllBuiltinRegistry(), "dsh", pol)
 		return e
 	}
-	if connKey("dsh", envOf()) != connKey("dsh", envOf()) {
+	if runtimeconn.ConnKey("dsh", envOf()) != runtimeconn.ConnKey("dsh", envOf()) {
 		t.Fatal("同一策略的连接键应稳定")
 	}
 }

@@ -154,7 +154,7 @@ func (r *genRig) row(t *testing.T, convID string) (fingerprint, capJSON string) 
 	return row.CapabilityFingerprint, row.CapabilityJSON
 }
 
-// waitConns 轮询等连接数落到 want（拆除是异步的：watchConn 观察到 Done 之后才 dropConn 摘除）。
+// waitConns 轮询等连接数落到 want（拆除是异步的：池的 watch 观察到 Done 之后才 Drop 摘除）。
 func (r *genRig) waitConns(t *testing.T, want int) int {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -169,7 +169,7 @@ func (r *genRig) waitConns(t *testing.T, want int) int {
 func (r *genRig) conns() int {
 	r.orch.mu.Lock()
 	defer r.orch.mu.Unlock()
-	return len(r.orch.conns)
+	return r.orch.pool.Len()
 }
 
 // TestGenerationMigration 轮次边界的迁移：指纹真变了才切、只按白名单内的变化切，
@@ -420,14 +420,14 @@ func TestGenerationPool(t *testing.T) {
 	ctx := context.Background()
 	spec, _ := r.orch.reg.Get(r.runtme)
 
-	r.orch.SetGenerationLimit(2)
+	r.orch.pool.SetGenerationLimit(2)
 	// 一条**无人引用**的代际（默认指纹，没有会话挂它）+ 一条**有会话引用**的代际（选定不同 → 指纹不同）。
 	idle, err := r.orch.acquire(ctx, spec, "")
 	if err != nil {
 		t.Fatalf("acquire(缺省): %v", err)
 	}
 	_, as1 := r.start(t, &CapabilitySelection{Mcps: ptrOf([]string{"fs"})})
-	if as1.client == idle.client {
+	if as1.client == idle.Client {
 		t.Fatal("不同能力集必须各起一个代际")
 	}
 	if n := r.conns(); n != 2 {
@@ -447,7 +447,7 @@ func TestGenerationPool(t *testing.T) {
 	if n := r.conns(); n != 2 {
 		t.Fatalf("淘汰空闲代际后池子应仍为 2，got %d", n)
 	}
-	if r.orch.connOfClient(idle.client) != nil {
+	if r.orch.pool.ConnOfClient(idle.Client) != nil {
 		t.Fatal("无人引用的那条代际应已被淘汰")
 	}
 	// 换一条有会话引用的代际（git）：仍靠淘汰"fp-third"（此刻无人引用）腾位置。
@@ -484,7 +484,7 @@ func TestGenerationPool(t *testing.T) {
 		t.Fatalf("复用不该新增代际，got %d", n)
 	}
 	// 0 = 不限制（显式关掉护栏）。
-	r.orch.SetGenerationLimit(0)
+	r.orch.pool.SetGenerationLimit(0)
 	for _, fp := range []string{"fp-x", "fp-y", "fp-z"} {
 		if _, err := r.orch.acquire(ctx, spec, fp); err != nil {
 			t.Fatalf("0 = 不限制时不该拒绝（fp=%s）: %v", fp, err)
@@ -515,7 +515,7 @@ func TestMigrationReclaimsSharedGenerationOnlyWhenUnreferenced(t *testing.T) {
 	if n := r.conns(); n != 1 {
 		t.Fatalf("最后一个会话迁走后应回收旧代际，got %d", n)
 	}
-	if r.orch.connOfClient(oldClient) != nil {
+	if r.orch.pool.ConnOfClient(oldClient) != nil {
 		t.Fatal("旧代际应已被回收")
 	}
 }

@@ -26,9 +26,6 @@ func (s *Service) registerSession(rec *SessionRec) { s.sessionPlane.RegisterSess
 func (s *Service) markSession(id, status string) { s.sessionPlane.MarkSession(id, status) }
 
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）
-func (s *Service) hasSession(id string) bool { return s.sessionPlane.HasSession(id) }
-
-// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
 func (s *Service) sessionRec(id string) *SessionRec { return s.sessionPlane.Rec(id) }
 
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）
