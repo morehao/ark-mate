@@ -18,7 +18,7 @@ import (
 //   - 费用（CostAmount）同为会话累计快照，按会话取最后一条（不跨会话累加多轮，避免重复计费）；
 //     多币种不混加：金额置零 + CostCurrency=MIXED + CostByCurrency 明细；
 //   - 上报率分两个计数：UsageReported（上下文）/ CostReported（费用），二者不可互相替代；
-//   - group_by=day 时日期键取 started_at 的 UTC 日期（确定性，不受服务器时区影响）。
+//   - group_by=day 时日期键取 started_at 在 `Location`（客户端时区；nil = UTC）下的日历日。
 //
 // v19：随 agent 概念整体取消，本面不再有 `agent` 维度（不选 `agent_id`、不按它分组、
 // 也不再有 `?agent_id=` 过滤）——分组只剩 day 一类。
@@ -27,6 +27,9 @@ import (
 type UsageQuery struct {
 	From time.Time // 零值 = 不限起点
 	To   time.Time // 零值 = 不限终点（半开区间）
+	// Location 分桶用的日历时区（nil = UTC）。由用例层从客户端的 tz_offset 造出来，
+	// 存储层不认识"偏移分钟"这种传输形态。
+	Location *time.Location
 }
 
 // 费用币种约定：
@@ -85,9 +88,14 @@ func (s *Store) UsageSummary(ctx context.Context, q UsageQuery) (*UsageSummaryRe
 		return nil, err
 	}
 	res := &UsageSummaryResult{Totals: aggregateUsage(rows)}
+	// 分桶的日历日属于**用户**，不属于服务器：UTC 的 16:00 在 UTC+8 已是次日 00:00。
+	loc := q.Location
+	if loc == nil {
+		loc = time.UTC
+	}
 	byKey := make(map[string][]usageRow)
 	for _, r := range rows {
-		key := r.startedAt.UTC().Format("2006-01-02")
+		key := r.startedAt.In(loc).Format("2006-01-02")
 		byKey[key] = append(byKey[key], r)
 	}
 	keys := make([]string, 0, len(byKey))

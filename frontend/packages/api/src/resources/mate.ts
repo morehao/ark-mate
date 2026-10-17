@@ -552,11 +552,12 @@ export const syncModels = (runtime?: string): Promise<ModelSyncResp> =>
 
 // ——— M3 用量统计 ———
 
-/** 用量汇总（GET /usage/summary）：from/to 半开区间、group_by=day（v19 起没有 agent 维度）。 */
+/** 用量汇总（GET /usage/summary）：from/to 半开区间、group_by=day、tz_offset 决定日历日（v19 起没有 agent 维度）。 */
 export const usageSummary = (q: UsageQuery = {}): Promise<UsageSummary> => {
   const p = new URLSearchParams()
   if (q.from) p.set('from', q.from)
   if (q.to) p.set('to', q.to)
+  if (q.tz_offset != null) p.set('tz_offset', String(q.tz_offset))
   if (q.group_by) p.set('group_by', q.group_by)
   const qs = p.toString()
   return http.get<UsageSummary>(`/mate/usage/summary${qs ? `?${qs}` : ''}`)

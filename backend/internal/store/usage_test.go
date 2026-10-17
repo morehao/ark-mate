@@ -114,6 +114,36 @@ func TestUsageSummaryAggregate(t *testing.T) {
 	}
 }
 
+// TestUsageBucketsFollowClientZone day 桶的日历日属于**客户端**：UTC 的 16:30 在 UTC+8
+// 已是次日 00:30。按 UTC 分桶（旧行为）会把 UTC+8 用户每天 00:00–08:00 的轮次算进前一天，
+// 而界面上看不出来——数字只是"对不上"。
+func TestUsageBucketsFollowClientZone(t *testing.T) {
+	s := openTestDB(t)
+	// 2026-09-01 16:30 UTC = 2026-09-02 00:30 (UTC+8)。
+	at := time.Date(2026, 9, 1, 16, 30, 0, 0, time.UTC)
+	seedRun(t, s, "r1", "c1", "completed", at, at.Add(time.Second), `{"used":1,"size":10}`)
+
+	utc, err := s.UsageSummary(ctxT(), UsageQuery{})
+	if err != nil {
+		t.Fatalf("UsageSummary(utc): %v", err)
+	}
+	if len(utc.Buckets) != 1 || utc.Buckets[0].Key != "2026-09-01" {
+		t.Fatalf("缺省（UTC）分桶应为 2026-09-01: %+v", utc.Buckets)
+	}
+
+	east8, err := s.UsageSummary(ctxT(), UsageQuery{Location: time.FixedZone("client", 8*3600)})
+	if err != nil {
+		t.Fatalf("UsageSummary(+08:00): %v", err)
+	}
+	if len(east8.Buckets) != 1 || east8.Buckets[0].Key != "2026-09-02" {
+		t.Fatalf("UTC+8 下同一轮应落在 2026-09-02: %+v", east8.Buckets)
+	}
+	// 分桶只影响 key，不影响聚合值。
+	if east8.Buckets[0].Runs != 1 || east8.Totals.Runs != 1 {
+		t.Fatalf("时区不得改变聚合值: %+v", east8)
+	}
+}
+
 // TestUsageInfoReported 用量快照「无上报」判定（全零不计入上报会话）；
 // 上下文与费用分开判定，供统计分别计数。
 func TestUsageInfoReported(t *testing.T) {

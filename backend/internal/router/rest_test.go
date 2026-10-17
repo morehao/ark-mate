@@ -873,7 +873,7 @@ func TestUsageSummaryRoute(t *testing.T) {
 		t.Fatalf("data 解析: %v", err)
 	}
 	// 日期形式按"该日 00:00 UTC"解析后**原样回带**（半开区间语义靠它成立）——这就是参数透传的证据。
-	if resp.GroupBy != "day" || resp.Source != "sqlite" ||
+	if resp.GroupBy != "day" || resp.Source != "sqlite" || resp.TZOffset != 0 ||
 		resp.From != "2026-09-01T00:00:00Z" || resp.To != "2026-09-09T00:00:00Z" {
 		t.Fatalf("响应载荷不符: %+v", resp)
 	}
@@ -882,9 +882,26 @@ func TestUsageSummaryRoute(t *testing.T) {
 		t.Fatalf("空库应回零值合计与空桶数组: %s", env.Data)
 	}
 
-	// ③ 非法 group_by / 反向区间 → 40001（域里判，控制器不代判）。
+	// ②b 客户端时区：日期参数按 tz_offset 解释（UTC+8 的 9 月 1 日 = 8 月 31 日 16:00Z），
+	// 响应回显生效偏移。不带它 = UTC（上一段已验），所以这条边只会被"传了但没生效"打破。
+	env, code = do(t, r, "GET", "/v1/mate/usage/summary?from=2026-09-01&to=2026-09-09&tz_offset=480", "")
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("tz_offset 信封不符: http=%d env=%+v", code, env)
+	}
+	resp = dtousage.UsageSummaryResp{}
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("tz_offset data 解析: %v", err)
+	}
+	if resp.TZOffset != 480 || resp.From != "2026-08-31T16:00:00Z" || resp.To != "2026-09-08T16:00:00Z" {
+		t.Fatalf("tz_offset=480 应把日期解释成 +08:00 的当日零点: %+v", resp)
+	}
+
+	// ③ 非法 group_by / 反向区间 / 越界时区 → 40001（域里判，控制器不代判）。
 	if env, _ := do(t, r, "GET", "/v1/mate/usage/summary?group_by=tool", ""); env.Code != 40001 {
 		t.Fatalf("非法 group_by 应 40001: %+v", env)
+	}
+	if env, _ := do(t, r, "GET", "/v1/mate/usage/summary?tz_offset=999", ""); env.Code != 40001 {
+		t.Fatalf("越界 tz_offset 应 40001: %+v", env)
 	}
 	if env, _ := do(t, r, "GET", "/v1/mate/usage/summary?from=2026-09-09&to=2026-09-01", ""); env.Code != 40001 {
 		t.Fatalf("反向区间应 40001: %+v", env)

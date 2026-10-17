@@ -100,7 +100,15 @@ export function UsagePage() {
       const { from, to } = rangeToQuery(mode, fromDay, toDay)
       // v19：`group_by` 只有 day 一个取值，写死它而不是留个 state——
       // 留 state 就得留一个改它的控件，而那个控件没有第二个选项可给。
-      setData(await usageSummary({ from, to, group_by: 'day' }))
+      //
+      // tz_offset 每轮现算（夏令时下同一台机器的偏移会变）：界面上的「9 月 1 日」是**用户
+      // 日历上的**那一天，后端按它解释日期参数、也按它给 day 桶分键。
+      setData(await usageSummary({
+        from,
+        to,
+        group_by: 'day',
+        tz_offset: -new Date().getTimezoneOffset(),
+      }))
     } catch (e) {
       setData(null)
       setErr(toErrorMessage(e))

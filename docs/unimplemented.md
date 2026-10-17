@@ -43,25 +43,20 @@
 | D8 | **阶段/进度不可观测**：ACP 服务端只发 6 种 `sessionUpdate`（thought/message chunk、`tool_call`、`tool_call_update`、`usage_update`、`config_option_update`），`phase`/`progress`/`_meta` 全包零命中。所以 `run.status` 的 `phase` 段**恒空**，`retrying`/`compacting` 两档**永不出现**（P0-2 当时"没找到观察点"的选择，现在有了实测依据） | 底座补 `agent_phase` / `progress` 类元数据 | 2026-10-16 探针 · P0-2 · `backend/internal/domain/session/runstatus.go` |
 | D9 | **终端与 plan 不可见**：ACP 的 `terminal/*`（内嵌终端）与 `plan`（`sessionUpdate` 的 plan 变体）平台**不建模**——`normalizeUpdate` 的 `default` 分支丢弃它们。界面上没有"这一轮的计划清单"，也没有内嵌终端 | 底座把 plan 当常规更新推送、或出现内嵌终端的真实需求 | `pkg/acl/client.go` 的 `default:` 分支 |
 | D10 | **沙箱形态读不到（两半）**：① ACP 面**没有** `SandboxEnforcement`（`full`/`partial`）——`packages/acp/**` 搜 `enforcement`/`permissionMode`/`sandboxMode` 零命中，`session/new` 只回 `{sessionId, configOptions}`。② 沙箱失败的结构化码（`SANDBOX_UNAVAILABLE`）在 `tool/result.data.error.code` 里，而 ACP 只转发 `message.content`，**那串字连文本里都不出现** ⇒ 平台只能按**文本签名**归类（`sandbox_denied` / `sandbox_unavailable`，见 `pkg/runtime/dsh/tool_failure.go`），**不能**用 `status` 判（被拒绝的那一帧 `status` 是 `completed`）。**因此界面不得声称「文件修改都被限制在工作空间内」**——平台没有能支撑这句承诺的事实 | 底座在 ACP 面透出 enforcement 与结构化错误码 | 2026-10-16 探针 · P1-b · `backend/pkg/runtime/dsh/tool_failure.go` |
+| D11 | **会话级权限模式只能在进程边界上区分**（原 O14 改判为 DEGRADED）：`/permission` 命令面在 ACP 上**不存在**——底座从不发 `available_commands_update`（见 D10），所以模式只能以进程 env（`DSH_PERMISSION_MODE`）下发。数据模型 v29 起模式进 `ConnKey` 基础键 ⇒ **不同模式各起一个暖进程**；**同一进程内按会话切模式不可达**（不是平台没做，是底座没有运行时切换面）。代价：进程数随模式数增加 | 底座补命令面或运行时切换面（届时才谈同进程切换） | `backend/internal/runtimeconn/pool.go` · 决策 v29 |
 
 ## 2. 平台自身未做（OPEN）
 
-| # | 内容 | 触发条件 | 记录 |
+> **2026-10-17 L2 决策**：本节原有的 14 条已**逐条决策**（决定与理由见 `docs/decisions.md` v29）：
+> 11 条移入 §3（其中 O14 改判为 D11、O10 的第一条并入 D2），3 条**保留**——O3 排期 L3 第 6 项，
+> O4 / O5 归属云端 B 段（方向阶段，不在本地排期）。只有「决定做、但还没做」的条目留在这里：
+> §2 的语义是**已决定待实现**，不再是"待评估"。
+
+| # | 内容（决定） | 触发条件 | 记录 |
 |---|---|---|---|
-| O2 | **无配置热重载**：`config.json` / 能力定义目录 / `runtimes.json` 变更需重启（与连接/进程生命周期强耦合）；新增 MCP server 也需重启。**唯一的 watcher 是开发态的资产重建通知**（`MATE_ASSET_WATCH`，默认关闭，交付形态下那条路由根本不存在），它不是配置热重载 | 运维要求不重启变更时 | §19.13 · §19.14 · §19.17 |
-| O3 | **MCP 侧的工程化缺口**（2026-10-17 复核）：连接池**已有**（`pkg/mcp/pool.go`：按 server 池化、同会话串行、有界 + 空闲回收、定义/密钥变更即作废重建），**仍缺**：无全局并发限流/排队（只有每会话串行）、调用结果不进事件流与审计表（网关只在 stderr 留一行 `(server, tool, outcome, latency_ms)`）、无定时/变更监听探测。同名工具冲突已关闭（C18） | 生产化 MCP 接入（并发量 / 审计 / 命名空间需求） | `backend/pkg/mcp/pool.go` |
-| O4 | **鉴权只有单操作员令牌**：`MATE_TOKEN` 一个静态串（默认空 = 不鉴权，仅回环可访问），无用户/角色/审计、无速率限制与防爆破、无令牌轮换与过期、静态资源不鉴权、`?token=` 可能进反代日志 | 多租户或公网暴露——**这是云端阶段的第一批工作** | §19.15 |
-| O5 | **远程 runtime 无鉴权面**：`headers` 可带 token，平台不做 OAuth/mTLS；HTTP 形态的 GET 长流在建会话前会被 404（降级记进诊断）；服务端半场的会话只在内存 | 跨机 / 跨组织接入 | §19.14 |
-| O6 | **进程回收边界**：非 unix 平台无进程组信号（降级不支持）；已 `setsid` 脱离进程组的孙进程不在回收范围；进程注册表无跨实例锁 | 非 unix 部署，或需要更严的回收 | §19.10 |
-| O7 | **导出与检索的增强面**：导出无 zip 打包、无「导出全部会话」的服务端游标（`ids` 上限 50）；检索为子串匹配，无分词与相关性排序 | 大规模导出，或需要相关性排序 | §19.11 |
-| O8 | **用量视图增强**：无图表（不引图表库）；前端时间区间按本地日期而后端按 UTC 半开区间（跨时区 ≤1 天偏差）；逐轮 token/费用明细仍受 ACP 通道限制（仅上下文快照 + 可选累计费用）。`buckets_additive` 已把「day 桶不可加」显式标注，`runs` 的每轮 `usage` 已暴露并在会话视图渲染 | 需要图表 / 时区精确 / 逐轮输入输出 token 明细 | §19.21 · §19.7 · §19.7.1 · §19.7.2 |
-| O9 | **历史分页增强**：前端「加载更早」50 条/页、无虚拟滚动；`after` 与 `before` **互斥**，不支持组合区间；空视图点击「加载更早」等价取末尾一页 | 长会话性能，或区间查询需求 | §19.22 |
-| O10 | **skill 投影增强**：无「按会话/cwd 动态 root」（见 D2 结论）、无 skill 文件变更热重载 | 会话级 skill 隔离 / 免重启更新 | §19.24 · §19.26 |
-| O12 | **排障可见性**：跨会话 elicitation 决策与「未知 id」**同码同文案**（细节只在服务端 WARN）；决策回执里的 `always` 是请求意图，不是「记忆是否真的写入」（记忆以 memories 读面为准） | 需要更强的审计/排障信息 | §19.23 · §19.25 |
-| O13 | **事件持久化的边角**：`store.AppendEvent` 写库失败的事件不出现在 REST 历史（事件总线侧仍有，且打 WARN），位次退化为进程内分配 | 需要历史与事件总线完全一致 | §19.22 |
-| O14 | **会话级权限模式只能在进程边界上区分**：`/permission` 命令面在 ACP 上**不存在**（底座根本不发 `available_commands_update`，见 D10），所以模式只能以进程 env（`DSH_PERMISSION_MODE`）下发。v29 起模式进 `ConnKey` 基础键 ⇒ **不同模式各起一个暖进程**；**同一进程内按会话切模式仍不可达**。代价是进程数随模式数增加 | 底座补命令面（届时才谈同进程切换）；或愿意接受"每模式一个进程"的开销 | `backend/internal/runtimeconn/pool.go` |
-| O15 | **队列项不能原子替换正文**：队列只补了三个动作（重排 / 立即发送 / 取出编辑），**没有** `surfaceOp: replace` 那类"就地改写一条已排队输入"。取出编辑会把它作废、让用户改完重新入队——语义上等价，但**位次会变**（改完排到队尾） | 出现"改一句话但保留排队位置"的真实需求 | `docs/decisions.md` v28 偏离 ④（刻意不做 17 方法队列） |
-| O19 | **确认区一次只显示一张卡**：权限优先、其余以「还有 N 条」计数，**不能**并列处理。同时挂起多条时用户需要逐条处理 | 出现"一次要确认很多条"的真实场景 | `frontend/packages/console/src/components/ConfirmArea.tsx` |
+| O3 | **MCP 侧的工程化缺口**（2026-10-17 复核）：连接池**已有**（`pkg/mcp/pool.go`：按 server 池化、同会话串行、有界 + 空闲回收、定义/密钥变更即作废重建）。**决定：做**，拆两批——① **全局并发限流/排队**（今天是每会话串行，N 条会话可同时打到同一个远端 server）；② **调用结果进事件流与审计表**（网关现在只在 stderr 留一行 `(server, tool, outcome, latency_ms)`）。**不做**定时/变更监听探测：触发条件未到，且常驻探测会给远端 server 增加无谓请求。同名工具冲突已关闭（C18） | 生产化 MCP 接入（并发量 / 审计需求） | `backend/pkg/mcp/pool.go` · 决策 v29 |
+| O4 | **鉴权只有单操作员令牌**：`MATE_TOKEN` 一个静态串（默认空 = 不鉴权，仅回环可访问），无用户/角色/审计、无速率限制与防爆破、无令牌轮换与过期、静态资源不鉴权、`?token=` 可能进反代日志。**决定：做**，但属**云端阶段**（roadmap B 段方向，不在本地阶段排期）——本地形态是单机单操作员，多租户不是当前产品面的缺口 | 多租户或公网暴露——**这是云端阶段的第一批工作** | `backend/internal/middleware/credential.go` · 决策 v29 |
+| O5 | **远程 runtime 无鉴权面**：`headers` 可带 token，平台不做 OAuth/mTLS；HTTP 形态的 GET 长流在建会话前会被 404（降级记进诊断）；服务端半场的会话只在内存。**决定：做**，随**云端远端接入**（B 段）一起——跨机/跨组织接入之前，本地形态不需要这层 | 跨机 / 跨组织接入 | `backend/pkg/runtime/connect.go` · 决策 v29 |
 
 ## 3. 已关闭（CLOSED，保留追溯）
 
@@ -80,7 +75,7 @@
 | C11 | 单 root 投影下多 runtime 共用只取首个 format | §19.24 C4 |
 | C12 | 共享 root 下目录可能残留 | §19.26 C6 |
 | C13 | `POST /conversations/:id/permission` 回显请求 `allowed` 而非有效决策 | §19.25 C5（当时的路径词 `conversations` 已在决策 v12/数据模型 v15 统一为 `sessions`） |
-| C14 | §16.3「backend-wide Runtime 多会话重构」评审点 | §17（E1/E2 完成 + 采用收口；其开放项分别落在 D1、O14、O15） |
+| C14 | §16.3「backend-wide Runtime 多会话重构」评审点 | §17（E1/E2 完成 + 采用收口；其开放项分别落在 D1、D11、C34） |
 | C15 | **浏览器渲染自动化/视觉走查缺失**（原 O1：仓库无 Playwright/Puppeteer，页面仅由 typecheck/build/bundle 断言覆盖） | `frontend/package.json` 的 `ui:accept`（CDP 驱动真 Chrome + 真服务，自造自清夹具）与 `ui:accept:desktop`（真 Electron + 真核心）已落地且**零新依赖**；另有三条桌面专项验收（skill 投影 / 无宿主机依赖 / 打包态）。**仍未做的是像素级对比**（那是另一种判据，不属本条） |
 | C16 | **Resume 未接入平台恢复流程**（原 O14） | `internal/manager/session_start.go` 已按 `acl.Client.ResumeSession(resume=true)` 恢复**同一底座会话**（`session.resumed` 带 `reason=restart`）；未声明原生恢复能力的底座走 handoff memo。模型目录取样也复用同一条 resume 通道 |
 | C17 | **会话的底座会话 id 未持久化**（原 O15，当时叫 `provider_session_id`） | 数据模型 v17 起该列持久化为 `sessions.runtime_session_id`（实体 / DAO / 迁移 / 恢复四处同源，`backend/internal/model/session.go`），决策 v13④ 同时把词汇从 `provider_*` 收敛为 `runtime_*` |
@@ -91,3 +86,14 @@
 | C22 | **会话行仍是单行式**（原 O21） | 已实现两行式（`frontend/packages/console/src/components/SessionPane.tsx`）：第 1 行 = 标题单行省略 + 置顶标记，第 2 行 = 状态点 + 阶段文案 + 来源 + 时间；行尾「更多」绝对定位在第 1 行右端（不嵌套 button）。守卫 `TestSessionRowIsTwoLine` 用 `data-sess-line` 两个锚点钉住；反证（实跑）：删 meta 锚点 / 把 `WebkitLineClamp: 2` 加回标题行，两者皆红 |
 | C23 | **命令门禁没有编辑面**（原 O20） | 规则文件 + 裁决点 + 设置「命令规则」编辑面均已落地：`GET/PUT /command-policy`（`backend/internal/controller/ctrcommandpolicy` + `backend/internal/service/svccommandpolicy`）、`frontend/packages/console/src/components/settings/CommandPolicyPanel.tsx`；保存**先校验再原子落盘**并热生效（`Apply` 回调）。**边界**：`match_samples`/`not_match_samples` 仍只能手写文件（面板原样保留、不提供编辑）；只对简单命令自动裁决，复杂命令一律 prompt |
 | C24 | **既有会话归属自愈**（原 O18） | 判定为**不做（by design）**：`sessions.workspace_id` 指向登记本身没有坏；坏的是登记指向的目录不存在了（`dir_status: missing`）。用户的「确认过的新位置」= `PATCH /workspaces/:id {path}`（设置里『选择新目录…』，`frontend/packages/console/src/components/WorkspaceGroupPane.tsx`）；平台**不**把「目录没了」猜成「搬到哪」——猜错会把会话归属悄悄改到另一个项目。**会话的 `cwd` 是执行事实，刻意不批量改写**：旧 transcript / 上下文仍指当时的工作目录，改写等于让历史会话在另一个目录里续跑。读面如实上报 + 显式改路径就是完整出路；将来若要批量重挂，应作为**独立的显式动作**（逐会话确认），不是自愈 |
+| C25 | **无配置热重载**（原 O2） | 判定**不做（本阶段）**：热重载的正确形态是「整进程重建」（`runtimes.json` 决定 adapter、能力定义决定 MCP 客户端集合、`config` 决定 store/addr），半热只会制造「配置说 A、进程跑 B」的静默分叉；本地形态有显式重启这条等价出路（秒级）。触发条件（运维要求不重启变更）出现时按整进程重建做，新开 O 条目，不复用本号。决策 v29 ① · `backend/internal/app/app.go` |
+| C26 | **进程回收边界**（原 O6） | 判定**不做（本阶段）**：单实例是架构前提（跨实例锁没有对象）；`setsid` 孙进程是底座自主 detach，追它等于越过进程边界；非 unix（Windows）当前**不在交付矩阵**（`Makefile` 的桌面 recipe 只出 macOS），M4-3 接 Windows 出包时用 Job Object 重做回收——不在本阶段做半套。决策 v29 ① · `backend/pkg/procreg/procreg_other.go` |
+| C27 | **导出与检索的增强面**（原 O7） | 判定**不做**：三条都是规模触发——zip 打包与「导出全部会话」的服务端游标在本地形态没有对象（`ids` 上限 50 已覆盖一次导出）；分词与相关性排序要引入索引与词典，而子串匹配在单机数据量下是毫秒级。决策 v29 ① · `backend/internal/controller/ctrexport/export.go` |
+| C28 | **用量视图增强**（原 O8） | 判定**部分做，其余不做**：**时区已对齐**（`?tz_offset=`：日期参数与 day 桶按客户端时区解释，缺省 UTC 向后兼容）——此前 UTC+8 用户每天 00:00–08:00 的轮次会被算进前一天，而界面上看不出来。**边界**：偏移按请求时刻取一个固定值，区间跨夏令时切换时那一天的日界仍会差 1 小时（要精确得传 IANA 时区名，而界面只需要「我看到的日期」）；**不做**：图表（不引图表库）、逐轮输入/输出 token 明细（受 ACP 通道限制，见 D4）。决策 v29 ③ · `backend/internal/domain/session/usage.go` |
+| C29 | **历史分页增强**（原 O9） | 判定**不做**：虚拟滚动是长会话性能项（`TRANSCRIPT_WINDOW` 尾部窗口 + 「显示更早」已覆盖可读性）；`after`/`before` 组合区间没有查询消费者（服务端两者互斥）；50 条/页在真实会话长度下够用；「空视图点加载更早等价取末尾一页」在界面上**不可达**——按钮只在有内容时渲染。决策 v29 ① · `frontend/packages/console/src/pages/ChatPage.tsx` |
+| C30 | **skill 投影增强**（原 O10） | 改判并关闭：① 「按会话/cwd 动态 root」**就是 D2 的事实**（底座读根不可按会话覆盖，平台侧写根跟着分叉只会静默不投放），已并入 D2，不单列；② 「skill 文件变更热重载」**不做**，与 C25 同口径（变更走重启）。决策 v29 ① · `backend/internal/domain/skill/projections.go` |
+| C31 | **排障可见性**（原 O12） | 判定**不做（by design）**：跨会话决策与「未知 id」同码同文案是**会话归属校验**的防泄露口径（`domain/interaction` 的 resolve scope 判据：决策会话必须与挂起项归属一致）（两者都回 `elicitation_not_found`，细节只在服务端 WARN）——区分它们等于告诉调用方「那个 id 在别的会话里存在」。`always` 回执是**请求意图**，记忆是否真的写入以 `GET /sessions/:id/permission-memories` 读面为准；回执里再补一个「已记住」会让同一件事有两处事实。决策 v29 ① · `backend/internal/service/svcsession/interaction.go` |
+| C32 | **事件持久化的边角**（原 O13） | 判定**不做**：事件写库失败不阻断会话（总线侧仍有 + WARN，位次退回进程内分配）是刻意的取舍——一轮跑到一半因为 append 失败而中断，比「这条事件不在 REST 历史里」更糟。要让两侧完全一致需要事务性 outbox（发布路径改两阶段），代价大于收益。决策 v29 ① · `backend/internal/domain/session/publish.go` |
+| C33 | **会话级权限模式只能在进程边界上区分**（原 O14） | 改判为 **D11**（底座能力缺口，不是平台未做）：同一进程内按会话切模式需要底座提供运行时切换面，而 `/permission` 命令面在 ACP 上不存在；平台已用「每模式一个暖进程」做到不同会话不同沙箱边界。决策 v29 ① · `backend/internal/runtimeconn/pool.go` |
+| C34 | **队列项不能原子替换正文**（原 O15） | 判定**不做**，与决策 v28 ④ 同一条：取出编辑（pop）已覆盖用户意图，就地替换会引入「身份不变、正文变了」的状态，代价是位次变化（改完排到队尾）——这个代价我们接受。决策 v28 ④ · `backend/internal/domain/session/inputqueue.go` |
+| C35 | **确认区一次只显示一张卡**（原 O19） | 已实现：确认区**并列显示全部未结算卡**（权限在前、同优先级按入流顺序），标题吸顶、整块限高 46vh 自行滚动（不把输入框挤出屏幕）。守卫 `TestPendingCardsLiveOutsideTranscript` 加两段：必须 `ordered.map(...)` 且每张带 `key={en.id}`，并禁止 `pending[0]` / `pending.length - 1`（单卡形态的痕迹）。决策 v29 ④ · `frontend/packages/console/src/components/ConfirmArea.tsx` |
