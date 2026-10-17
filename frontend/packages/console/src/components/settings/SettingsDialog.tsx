@@ -1,6 +1,7 @@
 import { Modal } from 'antd'
 import { SETTINGS_MENU, settingsSectionOf, settingsSections } from '../../console/settingsView'
 import { useMate } from '../../store'
+import { CommandPolicyPanel } from './CommandPolicyPanel'
 import { GeneralSettingsPanel } from './GeneralSettingsPanel'
 import { ModelSettingsPanel } from './ModelSettingsPanel'
 import { TokenSettingsPanel } from './TokenSettingsPanel'
@@ -60,6 +61,7 @@ export function SettingsDialog() {
 
         <div className="fg-setdlg-body">
           {active?.id === 'general' && <GeneralSettingsPanel />}
+          {active?.id === 'command' && <CommandPolicyPanel />}
           {active?.id === 'model' && <ModelSettingsPanel />}
           {active?.id === 'token' && <TokenSettingsPanel />}
         </div>

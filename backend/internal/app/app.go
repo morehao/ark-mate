@@ -481,6 +481,7 @@ func (a *App) Init(ctx context.Context) error {
 		// 导出（P4a 正文第八刀）：三份**依赖事实**（模型面已在上面交出 Store）——事实来源
 		// （`svcsystem.NewSource`）与用例实例（`svcsystem.New`）都由 ctrexport 造。
 		SessionPlane: a.svc.SessionPlane(), Bus: a.bus,
+		CommandPolicyPath: cfg.CommandPolicyPath, CommandPolicyApply: a.svc.SetCommandPolicy,
 	}
 	// 资产层（M2-1）：资产来自调用方给的目录（`--web-dir` / `MATE_WEB_DIR`），
 	// 没给即**拒绝启动**（退出码 3）。放在监听之前：装错资产时不该先占住端口再报错。

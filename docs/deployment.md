@@ -303,7 +303,7 @@ curl -H "Authorization: Bearer $MATE_TOKEN" http://127.0.0.1:10001/v1/mate/sessi
   `echo a; rm -rf /` 会得到错误的 token，那正是"以为门禁看过了"的来源。
 - **顺序**：`forbidden` 先于会话级记忆——用户说过"这类工具始终允许"，也不能放行规则里
   明确禁止的命令；`allow` 直接放行，`prompt`/未命中才回到记忆与人工审批。
-- **没有编辑面**：规则要手写 JSON（`docs/unimplemented.md` O20 记录的就是这一半）。
+- **编辑面**：设置 · 命令规则（`GET /command-policy` / `PUT /command-policy`）。保存**先校验再原子落盘**并立即生效；`match_samples` / `not_match_samples` 仍只能手写文件（面板原样保留，不提供编辑）。
 
 ### 2.4 底座前置条件
 

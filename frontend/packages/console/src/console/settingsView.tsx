@@ -13,7 +13,7 @@
  * 含义不同的手风琴。一体式弹窗还有个直接好处：从任何页面都能就地改设置，且分节之间一步切换。
  */
 import type { ReactNode } from 'react'
-import { ApiOutlined, KeyOutlined, SettingOutlined } from '@ant-design/icons'
+import { ApiOutlined, KeyOutlined, SafetyCertificateOutlined, SettingOutlined } from '@ant-design/icons'
 import { isDesktopEntry } from '../capabilityFacts'
 
 export interface SettingsSection {
@@ -42,6 +42,7 @@ export const SETTINGS_MENU = {
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'general', label: '通用', hint: '工作区目录白名单', icon: <SettingOutlined />, order: 10 },
   { id: 'model', label: '模型', hint: '供应商 / 模型清单 / 默认模型 / 生效结论', icon: <ApiOutlined />, order: 15 },
+  { id: 'command', label: '命令规则', hint: '哪些命令可直接执行 / 必须确认 / 禁止', icon: <SafetyCertificateOutlined />, order: 20 },
   { id: 'token', label: '访问令牌', hint: '后端启用 MATE_TOKEN 时必填', icon: <KeyOutlined />, order: 30 },
 ]
 
