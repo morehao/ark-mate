@@ -216,9 +216,25 @@ func (pl *Plane) PatchWorkspace(id string, req dtoworkspace.WorkspacePatchReq) (
 	if pl.st == nil {
 		return nil, WorkspaceReadOnlyError()
 	}
+	// 改登记路径（W4）：**id 不变、既有会话不动**。走与建会话**同一条**校验（绝对 / 存在 /
+	// 是目录 / 符号链接规范化），所以"能改过去"与"能在那里建会话"不可能一个能过一个不能过。
 	if req.Path != nil {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "workspace_path_immutable",
-			"改登记路径尚未支持（W4 落地之前显式拒绝，不静默忽略）", nil))
+		canonical, verr := ValidateWorkspace(*req.Path)
+		if verr != nil {
+			return nil, verr
+		}
+		ok, rerr := pl.st.RelocateWorkspace(context.Background(), id, canonical)
+		switch {
+		case errors.Is(rerr, store.ErrWorkspacePathTaken):
+			return nil, workspaceExistsErr(canonical)
+		case errors.Is(rerr, store.ErrWorkspaceDefaultImmutable):
+			return nil, acl.NewError(acl.ClassRequest, "workspace_default_immutable",
+				"默认工作空间的路径由装配期决定，不能改", nil)
+		case rerr != nil:
+			return nil, rerr
+		case !ok:
+			return nil, WorkspaceNotFoundError(id)
+		}
 	}
 	resp, err := pl.RenameRegisteredWorkspace(id, req.Title)
 	if err != nil {

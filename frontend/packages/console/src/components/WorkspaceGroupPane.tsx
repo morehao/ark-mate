@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Input, Modal, Tooltip } from 'antd'
+import { toErrorMessage } from '@ark-mate/api'
 import {
   CaretRightOutlined,
   DownOutlined,
@@ -12,6 +13,8 @@ import type { SessionSummary, Workspace } from '@ark-mate/types'
 import { useMate } from '../store'
 import { GROUP_IDLE_LIMIT, quotaSessions } from '../console/railView'
 import { WorkspaceManageMenu, workspaceLabel } from './WorkspacePicker'
+import { DirectoryBrowser } from './DirectoryBrowser'
+import { directoryPickerKind, pickDirectoryNative } from '../directoryPicker'
 
 /** 折叠态的前端本地持久键（**不进 db**：它是"这台机器的视图偏好"，不是跨设备的事实）。 */
 const COLLAPSED_KEY = 'mate.web.wsCollapsed'
@@ -72,9 +75,40 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
   const renameWorkspace = useMate((s) => s.renameWorkspace)
   const deleteWorkspace = useMate((s) => s.deleteWorkspace)
   const moveWorkspace = useMate((s) => s.moveWorkspace)
+  const relocateWorkspace = useMate((s) => s.relocateWorkspace)
+  const showToast = useMate((s) => s.showToast)
+
+  /**
+   * 行内补救（Q10 选①）：目录失效时把这条登记指到一个新目录。
+   *
+   * 两态与「添加工作区」**同一条判据**（`directoryPickerKind()` 读服务端能力声明，
+   * 不看客户端）：原生可用就只用原生，否则开应用内浏览。**不在这里另写一套判定**——
+   * 两处各判一次，就是"同一台机器上添加能弹面板、补救不能"。
+   */
+  const repairPath = async (id: string) => {
+    if (directoryPickerKind() === 'native') {
+      const picked = await pickDirectoryNative()
+      if ('cancelled' in picked) return
+      await applyRepair(id, picked.path)
+      return
+    }
+    setRepairingID(id)
+  }
+
+  /** 真正提交改路径：失败原因**就地**显示（占着 / 默认工作空间不可改，两种处置完全不同）。 */
+  const applyRepair = async (id: string, path: string) => {
+    try {
+      await relocateWorkspace(id, path)
+      setRepairingID(null)
+    } catch (err) {
+      showToast(toErrorMessage(err))
+    }
+  }
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed)
   const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null)
+  /** 正在补救的工作空间 id（非空 = 应用内目录浏览开着）。 */
+  const [repairingID, setRepairingID] = useState<string | null>(null)
   // 重命名走**对话框**（v14.2，对齐 dsh）：初值 = 屏幕上显示的名字（未命名项 = 末级目录名），
   // 确认一段没改过的初值 = 把自动名钉成一个显式标题。行内输入框下线的原因不是好看：
   // 行内编辑要和"点行 = 折叠/展开"抢同一个点击区，还得为它一处特殊处理，而对话框天然
@@ -211,7 +245,15 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
 
             {isOpen && broken && (
               <div className="fg-wsgroup-note">
-                目录已不存在，登记仍然保留；可重命名或删除登记。
+                目录已不存在，登记仍然保留；可以**选择新目录**把这条登记指过去，也可以重命名或删除登记。
+                <button
+                  type="button"
+                  className="fg-wsgroup-more"
+                  onClick={() => void repairPath(ws.id)}
+                  style={{ marginLeft: 6 }}
+                >
+                  选择新目录…
+                </button>
               </div>
             )}
             {isOpen && !broken && groupSessions.length === 0 && (
@@ -235,6 +277,16 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
           </div>
         )
       })}
+
+      {/* 应用内目录浏览（目录失效时的行内补救；宿主抬不起系统面板才走到这里）。 */}
+      {repairingID && (
+        <DirectoryBrowser
+          title="把工作空间指向新目录"
+          pickLabel="用这个目录"
+          onPick={(p) => void applyRepair(repairingID, p)}
+          onCancel={() => setRepairingID(null)}
+        />
+      )}
 
       {/* 重命名对话框（v14.2）：初值 = **屏幕上显示的名字**（未命名项 = 末级目录名）。
           确认一段没改过的初值 = 把自动名钉成一个显式标题：这是用户能预期到的结果，

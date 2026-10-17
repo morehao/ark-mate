@@ -596,6 +596,20 @@ export const renameWorkspace = (id: string, title: string): Promise<Workspace> =
   http.patch<Workspace>(`/mate/workspaces/${encodeURIComponent(id)}`, { title })
 
 /**
+ * **改登记路径**（W4）：把这条工作空间指向另一个目录。
+ *
+ * **id 不变、既有会话一个字节都不动**——它们的 `cwd` 是执行事实（ACP cwd + 沙箱边界），
+ * transcript 也落在那个目录里。所以这个动作的语义是"以后在这个工作空间里新建的会话落在哪"，
+ * 不是"把已有的会话搬过去"。
+ *
+ * 服务端按与建会话**同一条**校验处理（绝对 / 存在 / 是目录 / 规范化）；目标目录已被另一条登记
+ * 占着 → 40901（**不**静默复用，那会让"改成功"与"那个目录已经是别人的"分不清楚）；
+ * 默认工作空间的路径不可改 → 40001（`workspace_default_immutable`）。
+ */
+export const relocateWorkspace = (id: string, path: string): Promise<Workspace> =>
+  http.patch<Workspace>(`/mate/workspaces/${encodeURIComponent(id)}`, { path })
+
+/**
  * 删除一条登记**而保留数据**：目录、文件、会话历史一概不动，其会话回到默认工作空间。
  * 返回的 `released_sessions` 是给界面说清"这 N 个会话回到了默认工作空间"的事实。
  */

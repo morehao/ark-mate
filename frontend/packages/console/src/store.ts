@@ -17,6 +17,7 @@ import {
   listWorkspaces,
   moveWorkspace as apiMoveWorkspace,
   renameWorkspace as apiRenameWorkspace,
+  relocateWorkspace as apiRelocateWorkspace,
   promptSession,
   resolveElicitation,
   resolvePermission,
@@ -531,6 +532,11 @@ export interface MateActions {
   createNamedWorkspace: (name: string, title?: string) => Promise<Workspace>
   /** 改名（不改身份）。 */
   renameWorkspace: (id: string, title: string) => Promise<void>
+  /**
+   * **改登记路径**（W4）：目录被删/搬走之后就地补救。`id` 不变、既有会话不动
+   * （它们的 `cwd` 是执行事实，跟着搬等于把历史指到别处）。
+   */
+  relocateWorkspace: (id: string, path: string) => Promise<void>
   /** 删除登记（**不删目录、不删会话**）；其会话回到默认工作空间，页面随之刷新。 */
   deleteWorkspace: (id: string) => Promise<void>
   /** 重排（beforeId 缺省 = 追加到尾部）。 */
@@ -881,6 +887,14 @@ export const useMate = create<MateStore>((set, get) => {
       // 本地插在中间或末尾都可能与服务端不一致，而那种不一致下次刷新会"跳一下"。
       await get().loadWorkspaces()
       return ws
+    },
+
+    relocateWorkspace: async (id, path) => {
+      // 失败**不吞**：目录不存在 / 被另一条登记占着 / 默认工作空间——三种原因的处置完全不同
+      // （换一个目录 / 换一个工作空间 / 根本不该改），必须让调用方就地显示服务端文案。
+      const ws = await apiRelocateWorkspace(id, path)
+      await get().loadWorkspaces()
+      showToast(`已把工作空间「${ws.title || ws.path}」指向新目录`)
     },
 
     renameWorkspace: async (id, title) => {

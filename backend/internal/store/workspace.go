@@ -224,6 +224,37 @@ func (s *Store) DeleteWorkspace(ctx context.Context, id string) (int64, error) {
 	return released, nil
 }
 
+// RelocateWorkspace 改写一条登记的**路径**（W4）：id 不变，`sessions` 一个字节都不动。
+//
+// 三件事刻意都在这一处：
+//
+//	① **只改 `workspaces.path`**：既有会话的 `cwd` 是**执行事实**（ACP 的 cwd、沙箱边界），
+//	   而且它们的 transcript 就落在那个目录里。跟着搬等于把历史指到别处；
+//	② **冲突显式报错**（`ErrWorkspacePathTaken`），不 get-or-create：改路径的意图是"这个工作空间
+//	   现在指着那个目录"，如果那个目录已被**另一条登记**占着，静默返回那条既有行会让用户以为
+//	   自己改成功了，而实际上他改的那个工作空间还在老地方——两个入口给出同一个"成功"；
+//	③ **默认工作空间的路径不可改**（装配期钉死，ADR-4）：它是"建会话未指定 cwd"的落点。
+func (s *Store) RelocateWorkspace(ctx context.Context, id, canonicalPath string) (bool, error) {
+	row, err := s.workspaces.GetByID(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	if row == nil {
+		return false, nil
+	}
+	if row.IsDefault {
+		return false, errWorkspaceDefaultImmutable
+	}
+	if err := s.workspaces.SetPath(ctx, id, canonicalPath); err != nil {
+		// 唯一索引撞上 = 那个目录已被另一条登记占着。**不吞**（不重读既有行）。
+		if isUniqueViolation(err) {
+			return false, ErrWorkspacePathTaken
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // MoveWorkspace 把 id 移到 beforeID 之前（beforeID 为空 = 追加到尾部），返回重排后的完整 id 顺序。
 //
 // **顺序是对的**（`0..n-1` 的一个排列），不是"尽力而为"：
