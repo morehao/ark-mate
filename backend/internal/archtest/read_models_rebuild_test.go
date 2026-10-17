@@ -65,7 +65,7 @@ func TestReadModelsAreRebuildable(t *testing.T) {
 	g := collectRebuildGuard(t, root)
 
 	if !g.hasImpl {
-		t.Fatalf("`internal/manager` 里找不到 `func (s *Service) RebuildSessionReadModels`：\n" +
+		t.Fatalf("`internal/sessionruntime` 里找不到 `func (s *Service) RebuildSessionReadModels`：\n" +
 			"J7 的实现点不见了（守卫的事实源消失，fail-closed）")
 	}
 	// ① 唯一实现：调用点只许一个，且在唯一的重建循环里。
@@ -119,7 +119,7 @@ func collectRebuildGuard(t *testing.T, root string) rebuildGuard {
 
 	// ① 实现与触发者侧：`internal/` 全树的非测试源码（**递归**）。
 	//
-	// 为什么是整棵树而不是 `internal/manager/*.go`：实现与两个触发者会随包搬家
+	// 为什么是整棵树而不是 `internal/sessionruntime/*.go`：实现与两个触发者会随包搬家
 	// （`persist.go` → 目标 `internal/domain/session`、`read_model_doctor.go` → 目标
 	// `internal/mechanism/doctor`），而 `os.ReadDir` **不递归**——文件一进子目录，扫描要么
 	// 静默空转、要么"解析到一些但恰好漏掉关键的那几个"。放宽到整棵树同时是**更强**的判据：

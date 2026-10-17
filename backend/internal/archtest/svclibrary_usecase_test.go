@@ -33,7 +33,7 @@ import (
 //
 // 反证（实跑）：把 `func (s *Service) ListLibrary(` 加回 `manager`（真实现的形态，能编译）→ 红；
 // 抽掉 `ctrlibrary` 的 `svclibrary.NewLibrary(` → 红；把 `McpSecrets` 从 `router.Ports` 拿掉 → 红；
-// 把 `Capabilities: a.svc.CapabilityRegistry()` 从 `app.go` 抽掉 → 红；把 `manager` 里
+// 把 `Capabilities: a.svc.Planes().Capabilities` 从 `app.go` 抽掉 → 红；把 `manager` 里
 // `s.reg.McpTransportsFor(` 换回本地的 `len(spec.McpTransports) == 0` → 红。
 
 // libraryUseCaseAnchors 用例层的实现锚（**实现**，不是转发）。
@@ -98,7 +98,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	// 这一层的依赖**全是事实**：它既不该认识过渡期的 `manager`，也不该自己去读库
 	// （读模型 join 的是注册表与投影，`store` 出现在这里意味着有人把"数据面"又接了一遍）。
 	for _, m := range []string{
-		`"github.com/morehao/ark-mate/internal/manager"`,
+		`"github.com/morehao/ark-mate/internal/sessionruntime"`,
 		`"github.com/morehao/ark-mate/internal/store"`,
 	} {
 		if strings.Contains(src, m) {
@@ -108,7 +108,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	}
 
 	// ① manager 侧：实现痕迹一律不得回来；文件本身也不得复活。
-	mgr := filepath.Join(root, "internal", "manager")
+	mgr := filepath.Join(root, "internal", "sessionruntime")
 	mgrFiles := productionGoFiles(t, mgr)
 	if len(mgrFiles) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：守卫失去检查对象", mgr)
@@ -116,13 +116,13 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	for _, path := range mgrFiles {
 		base := filepath.Base(path)
 		if base == "library.go" || base == "library_read.go" {
-			t.Errorf("internal/manager/%s 复活了：读模型**只有一份实现**，在 `internal/service/svclibrary`"+
+			t.Errorf("internal/sessionruntime/%s 复活了：读模型**只有一份实现**，在 `internal/service/svclibrary`"+
 				"（P4a 正文第六刀）。两份并存的后果是同一个资源在两个入口显示不同的可达性。", base)
 		}
 		mgrBody := stripLineComments(readFileOrFatal(t, path))
 		for _, m := range libraryRelocationMarkers {
 			if strings.Contains(mgrBody, m) {
-				t.Errorf("internal/manager/%s 里出现读模型的实现痕迹 %q：它只有一份实现，在 "+
+				t.Errorf("internal/sessionruntime/%s 里出现读模型的实现痕迹 %q：它只有一份实现，在 "+
 					"`internal/service/svclibrary`。在这里再写一遍的后果是聚合口径与可达性判决静默分叉。",
 					base, m)
 			}
@@ -160,7 +160,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	for _, path := range mgrFiles {
 		base := filepath.Base(path)
 		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "func (s *Service) ListTools(") {
-			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) ListTools(`：工具目录的实现只有一份，"+
+			t.Errorf("internal/sessionruntime/%s 里又出现 `func (s *Service) ListTools(`：工具目录的实现只有一份，"+
 				"在 `internal/service/svccapability`（P4a 正文第十二刀）。两份并存的后果是同一个工具"+
 				"在 `/tools` 与别处的可见范围静默分叉。", base)
 		}
@@ -194,7 +194,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	}
 	for _, path := range mgrFiles {
 		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "func (s *Service) ListSkills(") {
-			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) ListSkills(`：那一行转发已删"+
+			t.Errorf("internal/sessionruntime/%s 里又出现 `func (s *Service) ListSkills(`：那一行转发已删"+
 				"（P4a 正文第十三刀），读模型的调用点直接用域平面。", filepath.Base(path))
 		}
 	}
@@ -229,7 +229,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 		body := stripLineComments(readFileOrFatal(t, path))
 		for _, dead := range []string{"func (s *Service) ListMcpServers(", "func (s *Service) mcpToolCounts(", "func (s *Service) mcpProbeSnapshot("} {
 			if strings.Contains(body, dead) {
-				t.Errorf("internal/manager/%s 里又出现 `%s`：MCP 注册表读模型只有一份实现，在 "+
+				t.Errorf("internal/sessionruntime/%s 里又出现 `%s`：MCP 注册表读模型只有一份实现，在 "+
 					"`internal/service/svccapability`（P4a 正文第十四刀）；那两条私有转发已随调用点消失。",
 					filepath.Base(path), dead)
 			}
@@ -254,7 +254,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	for _, path := range mgrFiles {
 		body := stripLineComments(readFileOrFatal(t, path))
 		if strings.Contains(body, "len(spec.McpTransports) == 0") {
-			t.Errorf("internal/manager/%s 里又自己判了一次 MCP 传输默认（`len(spec.McpTransports) == 0`）："+
+			t.Errorf("internal/sessionruntime/%s 里又自己判了一次 MCP 传输默认（`len(spec.McpTransports) == 0`）："+
 				"默认约定只有一处实现——`runtime.Registry.McpTransportsFor`。", filepath.Base(path))
 		}
 	}

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
@@ -74,12 +74,12 @@ func TestProbeAndGatewayFacesMatch(t *testing.T) {
 	r.seedMcp("gh", httpDef("gh", remote.srv.URL, "MCP_TOKEN_PARITY"), 0)
 
 	// 探测面：管理器装载同一份定义后探测（真实入口，走真远端）。
-	svc := manager.NewService(runtime.AllBuiltinRegistry(), nil)
+	svc := sessionruntime.NewService(runtime.AllBuiltinRegistry(), nil)
 	svc.EnableStore(r.st)
 	if n := svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, ""); n == 0 {
 		t.Fatal("装载能力定义：应读到 1 条")
 	}
-	probe, err := svc.McpPlane().Probe(ctx, "gh")
+	probe, err := svc.Planes().Mcp.Probe(ctx, "gh")
 	if err != nil {
 		t.Fatalf("探测: %v", err)
 	}

@@ -73,8 +73,8 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 	// 与用例同包，而它**必须**读库——把 store 的禁令留在整包上，等于逼适配器搬到别处去
 	// （那正是"实现与它的名字分家"的老毛病）。禁止项拆成两半：整包禁 `manager`（用例层
 	// 不认识过渡层），`export.go` 另禁 `store`。
-	if strings.Contains(src+sourceSrc, `"github.com/morehao/ark-mate/internal/manager"`) {
-		t.Error("`internal/service/svcsystem` 里出现 `internal/manager`：用例层通过**端口**取事实（ADR-6），" +
+	if strings.Contains(src+sourceSrc, `"github.com/morehao/ark-mate/internal/sessionruntime"`) {
+		t.Error("`internal/service/svcsystem` 里出现 `internal/sessionruntime`：用例层通过**端口**取事实（ADR-6），" +
 			"它不认识过渡层。")
 	}
 	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/store"`) {
@@ -83,7 +83,7 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 	}
 
 	// manager 侧：不得再有实现痕迹。
-	dir := filepath.Join(root, "internal", "manager")
+	dir := filepath.Join(root, "internal", "sessionruntime")
 	files := productionGoFiles(t, dir)
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：守卫失去检查对象", dir)
@@ -92,7 +92,7 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 		body := stripLineComments(readFileOrFatal(t, path))
 		for _, m := range exportImplementationMarkers {
 			if strings.Contains(body, m) {
-				t.Errorf("internal/manager/%s 里出现导出用例的实现痕迹 %q：它**只有一份实现**，"+
+				t.Errorf("internal/sessionruntime/%s 里出现导出用例的实现痕迹 %q：它**只有一份实现**，"+
 					"在 `internal/service/svcsystem`（P4a 正文第一刀）。\n"+
 					"manager 只留适配器（`export_source.go`：把库/内存镜像/事件总线读成 `Source` 要的形状）。\n"+
 					"在这里再写一遍的后果是渲染口径与上限口径静默分叉，而两边都编译得过。",
@@ -155,9 +155,9 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 // 它比"文件里的痕迹"更硬：`manager/export.go` 回来 = 两份实现并存的起点。
 func TestManagerExportFileIsGone(t *testing.T) {
 	root := backendRoot(t)
-	old := filepath.Join(root, "internal", "manager", "export.go")
+	old := filepath.Join(root, "internal", "sessionruntime", "export.go")
 	if _, err := os.Stat(old); err == nil {
-		t.Error("`internal/manager/export.go` 又存在了：导出的实现归 `internal/service/svcsystem`" +
+		t.Error("`internal/sessionruntime/export.go` 又存在了：导出的实现归 `internal/service/svcsystem`" +
 			"（P4a）。\n两边并存的表现是**渲染口径与上限口径分叉**——例如一边按 4 MiB 截断、" +
 			"另一边没有，而两条路径都编译得过。")
 	}
@@ -207,7 +207,7 @@ func TestSystemSourceAdapterLivesInSystemSvc(t *testing.T) {
 	}
 
 	// ① 适配器不得回流 manager。
-	mgr := filepath.Join(root, "internal", "manager")
+	mgr := filepath.Join(root, "internal", "sessionruntime")
 	mgrFiles := productionGoFiles(t, mgr)
 	if len(mgrFiles) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：守卫失去检查对象", mgr)
@@ -216,13 +216,13 @@ func TestSystemSourceAdapterLivesInSystemSvc(t *testing.T) {
 		mgrBody := stripLineComments(readFileOrFatal(t, path))
 		for _, m := range []string{"func (s *Service) SessionMeta(", "func (s *Service) SessionEvents("} {
 			if strings.Contains(mgrBody, m) {
-				t.Errorf("internal/manager/%s 里出现 %q：事实来源的适配器只有一份，在 "+
+				t.Errorf("internal/sessionruntime/%s 里出现 %q：事实来源的适配器只有一份，在 "+
 					"`internal/service/svcsystem`（P4a 正文第八刀）。", filepath.Base(path), m)
 			}
 		}
 	}
 	if _, err := os.Stat(filepath.Join(mgr, "export_source.go")); err == nil {
-		t.Error("`internal/manager/export_source.go` 又存在了：两份取数口径（sqlite/memory）会静默分叉。")
+		t.Error("`internal/sessionruntime/export_source.go` 又存在了：两份取数口径（sqlite/memory）会静默分叉。")
 	}
 }
 

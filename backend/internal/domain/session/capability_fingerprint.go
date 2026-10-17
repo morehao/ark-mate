@@ -60,7 +60,7 @@ func FingerprintOf(facts CapabilityFacts, runtimeID string, sel *CapabilitySelec
 	if facts.SpecOK {
 		in.Runtimes[0] = RuntimeFingerprintPart(facts.Spec)
 	}
-	in.Skills = projectedSkillParts(facts, sel)
+	in.Skills = ProjectedSkillParts(facts, sel)
 	// 事实里给的是**注入计划**：指纹拿它、注入也拿它（两处各算一遍必然漂移）。
 	in.Mcps = mcpFingerprintParts(facts)
 	return runtime.Fingerprint(in)
@@ -73,7 +73,7 @@ func FingerprintOf(facts CapabilityFacts, runtimeID string, sel *CapabilitySelec
 // 声明——会话声明是用户的显式选择，求交会让白名单外的技能永远选不上且无法解释）。
 //
 // 事实侧（`facts.Skills`）已经过"启用 + 投给该 runtime + 有投影"三关；这里只做白名单那一道。
-func projectedSkillParts(facts CapabilityFacts, sel *CapabilitySelection) []runtime.SkillPart {
+func ProjectedSkillParts(facts CapabilityFacts, sel *CapabilitySelection) []runtime.SkillPart {
 	if len(facts.Skills) == 0 {
 		return nil
 	}

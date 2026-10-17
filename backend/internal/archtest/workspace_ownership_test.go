@@ -96,11 +96,11 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 
 	// manager 侧：整个生产目录都不得再出现实现痕迹（扫描面按目录，不按写死的文件名——
 	// 转发文件已删，按文件名读会直接 Fatal，而"换个文件放回来"反而溜过去）。
-	managerDir := filepath.Join(root, "internal", "manager")
+	managerDir := filepath.Join(root, "internal", "sessionruntime")
 	mgrAll := dirProductionBody(t, managerDir)
 	for _, m := range workspaceManagerImplMarkers {
 		if strings.Contains(mgrAll, m) {
-			t.Errorf("`internal/manager` 里出现实现痕迹 %q：工作空间的浏览/校验/落盘**只有一份实现**，"+
+			t.Errorf("`internal/sessionruntime` 里出现实现痕迹 %q：工作空间的浏览/校验/落盘**只有一份实现**，"+
 				"在 `internal/domain/workspace`（P2b）。\n"+
 				"在 manager 里再写一遍的后果是两份语义静默分叉——当年那条「浏览得到、创建被拒」的裂缝"+
 				"就是这么来的。", m)
@@ -110,10 +110,10 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	//
 	// `WorkspaceRegistry` 曾在 `svcworkspace` 的接口里、由 manager 一行转发到 `workspace.Plane`；
 	// 那个包已在第三十四刀整体删除（见本文件末尾的"端口包不存在"判据）。
-	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "sessionruntime")) {
 		body := stripLineComments(readFileOrFatal(t, path))
 		if strings.Contains(body, "func (s *Service) WorkspaceRegistry(") {
-			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) WorkspaceRegistry(`："+
+			t.Errorf("internal/sessionruntime/%s 里又出现 `func (s *Service) WorkspaceRegistry(`："+
 				"那一行转发已删（P4a 正文第十八刀）。", filepath.Base(path))
 		}
 	}
@@ -128,7 +128,7 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	if vm := mgrAll; strings.Contains(vm, "func (s *Service) BrowseWorkspace(") ||
 		strings.Contains(vm, "func (s *Service) CreateWorkspaceDir(") || strings.Contains(vm, "func (s *Service) ListWorkspaceFiles(") ||
 		strings.Contains(vm, "func (s *Service) RecentWorkspaces(") {
-		t.Error("`internal/manager` 里又出现只读辅助面的转发：那四条已删（扫描面是整目录）。")
+		t.Error("`internal/sessionruntime` 里又出现只读辅助面的转发：那四条已删（扫描面是整目录）。")
 	}
 	view := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "view.go")))
 	for _, must := range []string{"func (pl *Plane) BrowseWorkspace(", "func (pl *Plane) CreateWorkspaceDir(", "func (pl *Plane) ListWorkspaceFiles(", "func (pl *Plane) RecentWorkspaces("} {
@@ -141,7 +141,7 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 语义码 + 落盘都在域里），接口声明与 manager 转发一起删。控制器侧不再有替身可伪造语义码 ——
 	// "锁定 / 只读 / 非法目录"三条由配置面测试用真策略钉。
 	if strings.Contains(mgrAll, "func (s *Service) UpdateWorkspaceSettings(") {
-		t.Error("`internal/manager` 里又出现 `UpdateWorkspaceSettings(` 转发：那一行已删（扫描面是整目录）。")
+		t.Error("`internal/sessionruntime` 里又出现 `UpdateWorkspaceSettings(` 转发：那一行已删（扫描面是整目录）。")
 	}
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "settings.go"))),
 		"func (pl *Plane) UpdateSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error)") {
@@ -150,9 +150,9 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 
 	// 设置面快照（P4a 正文第十九刀）：域里 `Plane.Settings()` 同样已经折好 DTO（含
 	// configured / prefer_roots / source / locked_by），用例层再包一层就只是一行转发。
-	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "sessionruntime")) {
 		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "func (s *Service) WorkspaceSettings(") {
-			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) WorkspaceSettings(`："+
+			t.Errorf("internal/sessionruntime/%s 里又出现 `func (s *Service) WorkspaceSettings(`："+
 				"那一行转发已删（P4a 正文第十九刀）。", filepath.Base(path))
 		}
 	}
@@ -166,11 +166,11 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 装配侧同理只有一处入口：`WorkspacePlane().SetRootsStore(...)`。
 	settingsMgr := mgrAll
 	if strings.Contains(settingsMgr, "type WorkspaceRootsStore =") {
-		t.Error("`internal/manager` 里又出现 `type WorkspaceRootsStore =`：" +
+		t.Error("`internal/sessionruntime` 里又出现 `type WorkspaceRootsStore =`：" +
 			"端口别名为第三条硬规矩所禁（一个类型只有一处定义）。")
 	}
 	if strings.Contains(settingsMgr, "func (s *Service) SetWorkspaceSettingsStore(") {
-		t.Error("`internal/manager` 里又出现 `func (s *Service) SetWorkspaceSettingsStore(`：" +
+		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) SetWorkspaceSettingsStore(`：" +
 			"装配期接线也只有一处入口（`WorkspacePlane().SetRootsStore`）。")
 	}
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "policy.go"))),
@@ -180,11 +180,11 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	}
 	// 策略事实的读取（P4a 正文第二十一刀）：`WorkspaceDir()` / `WorkspaceRoots()` 是**纯事实读取**
 	// （无 DTO、无错误码），`Service` 上那两条转发连同零调用点的 `SetWorkspaceRoots` 一起删。
-	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "sessionruntime")) {
 		body := stripLineComments(readFileOrFatal(t, path))
 		for _, dead := range []string{"func (s *Service) WorkspaceDir(", "func (s *Service) WorkspaceRoots(", "func (s *Service) SetWorkspaceRoots("} {
 			if strings.Contains(body, dead) {
-				t.Errorf("internal/manager/%s 里又出现 `%s`：策略事实只有一处入口"+
+				t.Errorf("internal/sessionruntime/%s 里又出现 `%s`：策略事实只有一处入口"+
 					"（`WorkspacePlane()`），多一层转发就会有人读到另一个平面（P4a 正文第二十一刀）。",
 					filepath.Base(path), dead)
 			}
@@ -194,7 +194,7 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 策略只有一处入口（`WorkspacePlane()`），多一层转发就会出现"策略写进了 A 平面、读的时候看 B 平面"。
 	{
 		if strings.Contains(mgrAll, "func (s *Service) SetWorkspacePolicy(") {
-			t.Error("`internal/manager` 里又出现 `func (s *Service) SetWorkspacePolicy(`：" +
+			t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) SetWorkspacePolicy(`：" +
 				"装配期写事实只有一处入口（`WorkspacePlane().SetWorkspacePolicy`）。")
 		}
 		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "policy.go"))),
@@ -212,7 +212,7 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		"func ValidateWorkspace(", "func ResolveWorkspace(", "func DiscardWorkspace(",
 	} {
 		if strings.Contains(wsMgr, dead) {
-			t.Errorf("`internal/manager/workspace.go` 里又出现 `%s`：域是这些类型与纯函数的主人"+
+			t.Errorf("`internal/sessionruntime/workspace.go` 里又出现 `%s`：域是这些类型与纯函数的主人"+
 				"（第三条硬规矩禁别名），调用点直接依赖 `internal/domain/workspace`。", dead)
 		}
 	}
@@ -223,38 +223,16 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		}
 	}
 
-	// **别名不许再新开**：`manager` 生产文件里剩下的别名必须**登记在册**（P4a 正文第二十三刀起
-	// 用它挡"顺手再加一个别名"，同时如实记下还没清完的那几笔账——清一个删一行）。
-	// 判据只认顶格的 `type X = `：方法体里的类型断言/赋值不在此列。
-	registeredAliases := map[string]string{
-		"CapabilitySelection": "internal/manager/capability_facts.go",
-		"SessionRec":          "internal/manager/session_forward.go",
-	}
+	// **别名归零**（P4b）：过渡期的两个端口别名（`CapabilitySelection` / `SessionRec`）已
+	// 全部删掉，调用点直接依赖 `domain/session`。判据只认顶格的 `type X = `：方法体里的
+	// 类型断言/赋值不在此列。再出现任何别名即红——"一个类型只有一处定义"是硬规矩。
 	aliasRe := regexp.MustCompile(`(?m)^type ([A-Za-z0-9_]+) = `)
-	aliasSeen := 0
-	aliasFound := map[string]bool{}
-	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "sessionruntime")) {
 		for _, m := range aliasRe.FindAllStringSubmatch(stripLineComments(readFileOrFatal(t, path)), -1) {
-			aliasSeen++
-			aliasFound[m[1]] = true
-			if _, ok := registeredAliases[m[1]]; !ok {
-				t.Errorf("internal/manager/%s 里出现未登记的端口别名 `type %s = `："+
-					"第三条硬规矩禁别名（一个类型只有一处定义，接错线时两边都编译过）。"+
-					"若是清理过渡期账目，请**先迁走调用点再删这一行**；确需保留请登记进 registeredAliases 并写明理由。",
-					filepath.Base(path), m[1])
-			}
+			t.Errorf("internal/sessionruntime/%s 里出现端口别名 `type %s = `："+
+				"第三条硬规矩禁别名（一个类型只有一处定义，接错线时两边都编译过）。"+
+				"调用点应直接依赖 `internal/domain/session`。", filepath.Base(path), m[1])
 		}
-	}
-	// **双向对账**：登记了但磁盘上没有 = 清理时忘删登记行（这种漂移会让"还有几笔账"变成假数，
-	// 而下面的"一个都没扫到"只在全清空时才响，中间状态它抓不到）。
-	for name := range registeredAliases {
-		if !aliasFound[name] {
-			t.Errorf("`registeredAliases` 里登记着 %q，但 `internal/manager` 生产文件里已经没有这个别名了："+
-				"清完一笔账要**同时删掉登记行**（判据与被判对象同生共死）。", name)
-		}
-	}
-	if aliasSeen == 0 {
-		t.Error("`internal/manager` 下一个别名都没扫到：判据失锚＝空转（登记表与扫描面必须同步收敛）。")
 	}
 
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "policy.go"))),
@@ -283,16 +261,17 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 写面的三条（P4a 正文第二十七刀）：Rename/Delete/Move 的投影（DTO + 三个错误码）都在域平面，
 	// 用例层接口里**不许再留声明**——留着就只是给"一行转发"留位置。
 	{
-		regMgr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_registry.go")))
+		// 扫描面是**整个生产目录**（workspace_registry.go 已删；痕迹换文件放回来也要红）。
+		regMgr := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
 		for _, dead := range []string{"func (s *Service) RenameRegisteredWorkspace(", "func (s *Service) DeleteRegisteredWorkspace(", "func (s *Service) MoveRegisteredWorkspace("} {
 			if strings.Contains(regMgr, dead) {
-				t.Errorf("`internal/manager/workspace_registry.go` 里又出现 `%s`：那一行转发已删。", dead)
+				t.Errorf("`internal/sessionruntime` 里又出现 `%s`：那一行转发已删。", dead)
 			}
 		}
 		// 登记表最后一条写面（P4a 正文第二十九刀）：`CreateRegisteredWorkspace` 也走域平面，
 		// 接口与 manager 转发一起删（接口里留声明 = `*manager.Service` 还得实现它 = 一行转发）。
 		if strings.Contains(regMgr, "func (s *Service) CreateRegisteredWorkspace(") {
-			t.Error("`internal/manager/workspace_registry.go` 里又出现 `func (s *Service) CreateRegisteredWorkspace(`：" +
+			t.Error("`internal/sessionruntime/workspace_registry.go` 里又出现 `func (s *Service) CreateRegisteredWorkspace(`：" +
 				"那一行转发已删。")
 		}
 
@@ -300,7 +279,7 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		// 也走域平面——它们是"这个平面自己的默认项"，读/建都只有一处入口。
 		for _, dead := range []string{"func (s *Service) EnsureDefaultWorkspace(", "func (s *Service) DefaultWorkspace("} {
 			if strings.Contains(regMgr, dead) {
-				t.Errorf("`internal/manager/workspace_registry.go` 里又出现 `%s`：默认工作空间归域平面"+
+				t.Errorf("`internal/sessionruntime/workspace_registry.go` 里又出现 `%s`：默认工作空间归域平面"+
 					"（`WorkspacePlane()`），转发会让「谁建的那一行」不可判定。", dead)
 			}
 		}
@@ -315,7 +294,7 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		// 没有接口声明，所以它们不会被"接口里少一行"这类判据抓到——只能按符号名点掉。
 		for _, dead := range []string{"func (s *Service) resolveTargetWorkspace(", "func (s *Service) workspaceIDByPath("} {
 			if strings.Contains(regMgr, dead) {
-				t.Errorf("`internal/manager/workspace_registry.go` 里又出现 `%s`：包内调用点直接写"+
+				t.Errorf("`internal/sessionruntime/workspace_registry.go` 里又出现 `%s`：包内调用点直接写"+
 					"`s.planner.*`／`WorkspacePlane()`，私有转发同样是「多一层就多一处可读错的地方」。", dead)
 			}
 		}
@@ -360,9 +339,9 @@ func TestWorkspaceWiringIsAttached(t *testing.T) {
 			"表现**只在 sqlite 模式**现形——`RecentWorkspaces` 会把默认工作空间与已登记项当成" +
 			"「未登记」推回来（memory 模式的登记表在域自己的字段里，开发态多半看不见）。")
 	}
-	service := readFileOrFatal(t, filepath.Join(root, "internal", "manager", "service.go"))
+	service := readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "service.go"))
 	if !strings.Contains(service, "SetSessionSource(s)") {
-		t.Error("`internal/manager/service.go` 的 `NewService` 里找不到 `SetSessionSource(s)`：" +
+		t.Error("`internal/sessionruntime/service.go` 的 `NewService` 里找不到 `SetSessionSource(s)`：" +
 			"工作空间域没有会话事实来源，`RecentWorkspaces` 恒空（用户会说「我明明用过这个目录」）。")
 	}
 }

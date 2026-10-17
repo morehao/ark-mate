@@ -27,7 +27,7 @@ import (
 // "装配起来的那份 Service + 真用例"这条链路，那正是端到端用例该做的事；把它们算进来只会逼
 // 守卫加一张越来越长的白名单，白名单一长这条判据就废了。生产文件的边界是清楚的：**进二进制的那部分**。
 //
-// 反证（实跑）：往 `internal/manager` 的任一生产文件加一行 `import ".../internal/service/svcsystem"`
+// 反证（实跑）：往 `internal/sessionruntime` 的任一生产文件加一行 `import ".../internal/service/svcsystem"`
 // （并用一下那个符号，否则只是 build failure）→ 红；把扫描根指到不存在的目录 → Fatal。
 
 // svcImportPrefix 用例层包的 import 路径前缀（`internal/service/svc*`）。
@@ -149,7 +149,7 @@ func TestUseCaseInstancesAreBuiltByControllers(t *testing.T) {
 		if strings.Contains(app, banned) {
 			t.Errorf("`internal/app/app.go` 里出现 %q：装配点不认识用例层。\n"+
 				"它该交出的是**端口要的事实**（执行面 `a.rconn`、事实来源 `a.svc`、域平面 "+
-				"`a.svc.ProviderPlane()`），用例实例由控制器造（见本用例上半段）。", banned)
+				"`a.svc.Planes().Providers`），用例实例由控制器造（见本用例上半段）。", banned)
 		}
 	}
 }

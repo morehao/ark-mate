@@ -9,7 +9,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
@@ -25,18 +25,18 @@ import (
 // （新增固定字面量路径最典型的坏法就是被 `/workspaces/:id` 抢走，那种坏法只有走真路由才看得见）。
 
 // browseApp 装配真路由 + 真 manager，白名单可指定（nil = 不限制）。
-func browseApp(t *testing.T, roots []string) *manager.Service {
+func browseApp(t *testing.T, roots []string) *sessionruntime.Service {
 	t.Helper()
-	svc := manager.NewService(runtime.NewRegistry(), eventbus.New())
+	svc := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New())
 	provision := filepath.Join(t.TempDir(), "workspaces")
-	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, roots); err != nil {
+	if err := svc.Planes().Workspaces.SetWorkspacePolicy(provision, roots); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 	return svc
 }
 
 // doRawEnvelope 与 doRaw 同一套装配，但**不**把非零 code 当失败：拒绝路径本身就是要验的东西。
-func doRawEnvelope(t *testing.T, svc *manager.Service, method, path, body string) envelope {
+func doRawEnvelope(t *testing.T, svc *sessionruntime.Service, method, path, body string) envelope {
 	t.Helper()
 	var env envelope
 	if err := json.Unmarshal(doRaw(t, svc, method, path, body), &env); err != nil {

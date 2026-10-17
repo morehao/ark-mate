@@ -101,7 +101,7 @@ func TestRuntimeIdentityUseCaseLivesInRuntimeSvc(t *testing.T) {
 	}
 
 	// ③ manager 侧不得长回那两条转发。
-	mgr := filepath.Join(root, "internal", "manager")
+	mgr := filepath.Join(root, "internal", "sessionruntime")
 	mgrFiles := productionGoFiles(t, mgr)
 	if len(mgrFiles) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：守卫失去检查对象", mgr)
@@ -110,7 +110,7 @@ func TestRuntimeIdentityUseCaseLivesInRuntimeSvc(t *testing.T) {
 		mgrBody := stripLineComments(readFileOrFatal(t, path))
 		for _, m := range []string{"func (s *Service) RuntimeIdentity(", "func (s *Service) RuntimeDiagnostics("} {
 			if strings.Contains(mgrBody, m) {
-				t.Errorf("internal/manager/%s 里出现 %q：底座面的用例只有一份实现，在 "+
+				t.Errorf("internal/sessionruntime/%s 里出现 %q：底座面的用例只有一份实现，在 "+
 					"`internal/service/svcruntime`（P4a 正文第七刀）。", filepath.Base(path), m)
 			}
 		}

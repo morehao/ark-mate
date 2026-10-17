@@ -13,13 +13,13 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
-	"github.com/morehao/ark-mate/internal/manager"
 	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/registry"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/config"
 	"github.com/morehao/ark-mate/pkg/procreg"
@@ -55,6 +55,10 @@ type assembly struct {
 	ln     net.Listener
 	origin *middleware.OriginPolicy
 	ports  router.Ports
+
+	// cmdRules 命令门禁规则（加载期已校验）。装配期**先读**（坏文件拒绝启动），
+	// 编排器造出来之后再交给裁决点——早一步交给一个还不存在的编排器等于把规则丢掉。
+	cmdRules []interaction.PrefixRule
 }
 
 // steps 声明启动序列（顺序即语义；关闭按它的逆序执行）。
@@ -123,7 +127,7 @@ func (as *assembly) startCommandPolicy(ctx context.Context) error {
 	if len(rules) == 0 {
 		return nil
 	}
-	as.a.svc.SetCommandPolicy(rules)
+	as.cmdRules = rules
 	glog.Infow(ctx, "命令门禁已启用", "rules", len(rules), "path", cfg.CommandPolicyPath)
 	return nil
 }
@@ -191,7 +195,7 @@ func (as *assembly) startStore(ctx context.Context) error {
 		as.a.planes.Providers.SetProviderDir(cfg.ProviderDir)
 	case config.StoreModeMemory, "":
 		// 会话 wire transcript（~/.ark-mate/transcripts 或 MATE_TRANSCRIPTS）。
-		as.a.svc.SetTranscriptDir(cfg.TranscriptDir)
+		as.a.svc.SessionPlane().SetTranscriptDir(cfg.TranscriptDir)
 	default:
 		// 不可达：pkg/config 的 materialize 已按 ValidStoreModes 校验并把 auto 归一成空串。
 		// 保留为内部错误（不是 usageErr——这不是用户输入错，是代码不一致）。
@@ -243,7 +247,7 @@ func (as *assembly) startLegacySecretMigration(ctx context.Context) error {
 
 // startStoreWiring 把库句柄接到所有持有它的部件，并做装配期同步。
 //
-// 实现只有 `manager.EnableStore` / `registry.Planes.EnableStore` 一份：**漏接任一个**的表现
+// 实现只有 `sessionruntime.EnableStore` / `registry.Planes.EnableStore` 一份：**漏接任一个**的表现
 // 都是静默的（该走库的走了文件、或反过来——定义只写进内存、凭据读不到库）。
 func (as *assembly) startStoreWiring(ctx context.Context) error {
 	if as.st == nil {
@@ -319,7 +323,7 @@ func (as *assembly) startRestore(ctx context.Context) error {
 		return nil
 	}
 	cfg := as.cfg
-	sessions, events, err := as.a.svc.RestoreFromStore(ctx)
+	sessions, events, err := as.a.svc.SessionPlane().Restore(ctx)
 	if err != nil {
 		glog.Warnw(ctx, "serve: 从持久层恢复失败", "err", err)
 	}
@@ -361,7 +365,13 @@ func (as *assembly) startWorkspaceRootsStore(ctx context.Context) error {
 
 // startOrchestrator 构造编排器并回挂到 Service。
 func (as *assembly) startOrchestrator(ctx context.Context) error {
-	as.a.orch = manager.NewOrchestrator(as.a.svc, as.a.reg)
+	as.a.orch = sessionruntime.NewOrchestrator(as.a.svc, as.a.reg)
+	// 命令门禁规则在**加载期**就读完了（坏文件拒绝启动），这里交给裁决点。
+	// 改造前 `Service.SetCommandPolicy` 在编排器还不存在时静默丢掉这批规则——那是"门禁
+	// 有实现、没接线"的另一种形态；现在交接点只有一个。
+	if len(as.cmdRules) > 0 {
+		as.a.orch.SetCommandPolicy(as.cmdRules)
+	}
 	return nil
 }
 
@@ -453,7 +463,7 @@ func (as *assembly) startNativePermission(ctx context.Context) error {
 	if as.cfg.NativePermission != config.NativePermissionOff {
 		return nil
 	}
-	as.a.svc.SetNativePermission(false)
+	as.a.planes.SetNativePermission(false)
 	glog.Infow(ctx, "serve: 原生权限映射已关闭（MATE_NATIVE_PERMISSION=off；当前平台无策略来源，该开关不改变注入结果）")
 	return nil
 }
@@ -489,7 +499,7 @@ func (as *assembly) startPorts(ctx context.Context) error {
 		ProviderPlane: as.a.planes.Providers, ProviderCatalog: as.a.svc,
 		// 模型面：读（含取样）仍在本进程的 manager，同步已在 registry；两者由装配点拼成
 		// `svcmodel.ModelSvc` / `Host` 需要的形状（`ModelFace` 是组合，不是转发层）。
-		Store: as.st, Model: manager.NewModelFace(as.a.svc), ModelHost: manager.NewModelFace(as.a.svc),
+		Store: as.st, Model: sessionruntime.NewModelFace(as.a.svc), ModelHost: sessionruntime.NewModelFace(as.a.svc),
 		AutomationPlane: as.a.planes.Automation,
 		// Library 读模型：交出三份**域/包事实** + 一个运行期读取口。
 		Capabilities: as.a.planes.Capabilities, SkillPlane: as.a.planes.Skills,
@@ -498,7 +508,7 @@ func (as *assembly) startPorts(ctx context.Context) error {
 		McpGatewayEnabled: as.a.planes.McpGatewayEnabled,
 		// 导出：三份**依赖事实**（模型面已在上面交出 Store）——事实来源与用例实例都由 ctrexport 造。
 		SessionPlane: as.a.svc.SessionPlane(), Bus: as.a.bus,
-		CommandPolicyPath: as.cfg.CommandPolicyPath, CommandPolicyApply: as.a.svc.SetCommandPolicy,
+		CommandPolicyPath: as.cfg.CommandPolicyPath, CommandPolicyApply: as.a.orch.SetCommandPolicy,
 	}
 	return nil
 }

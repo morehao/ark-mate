@@ -65,7 +65,7 @@ func TestNativeModeIsDeliveredPerSession(t *testing.T) {
 	}
 
 	// ④ adapter 的 `Env()` 必须有**生产调用点**（本轮之前它是死代码）。
-	poolPort := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "runtime_pool.go")))
+	poolPort := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "runtime_pool.go")))
 	if !strings.Contains(poolPort, "adapter.Env(mode, \"\", nil)") {
 		t.Fatalf("`runtime_pool.go` 里没有 `adapter.Env(`：原生权限投影会退回死代码——" +
 			"映射写得再完整，没人喊它就不生效")

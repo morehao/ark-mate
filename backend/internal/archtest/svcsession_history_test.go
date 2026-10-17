@@ -67,13 +67,13 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	}
 
 	// ① manager 侧不得再有这份实现。
-	mgrBody := dirProductionBody(t, filepath.Join(root, "internal", "manager"))
+	mgrBody := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
 	if strings.Contains(mgrBody, "func (s *Service) SessionHistory(") {
-		t.Error("`internal/manager` 里又出现 `func (s *Service) SessionHistory(`：历史读面的实现" +
+		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) SessionHistory(`：历史读面的实现" +
 			"只有一份，在 `internal/service/svcsession`（P4a 正文第十刀）。")
 	}
 	if strings.Contains(mgrBody, `"history_read_failed"`) {
-		t.Error("`internal/manager` 里又出现 `history_read_failed`：错误码出口跟实现走，" +
+		t.Error("`internal/sessionruntime` 里又出现 `history_read_failed`：错误码出口跟实现走，" +
 			"两边各铸一次会让同一个失败在两条路径上给出不同的码。")
 	}
 
@@ -139,7 +139,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		"func (s *Service) ListPermissionMemories(", "func (s *Service) ListPendingElicitations(",
 		"func toPermissionResp(", "func toElicitationResp("} {
 		if strings.Contains(mgrBody, dead) {
-			t.Errorf("`internal/manager` 里又出现 `%s`：详情读面的实现与投影只有一份，"+
+			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：详情读面的实现与投影只有一份，"+
 				"在 `internal/service/svcsession`（P4a 正文第四十刀）。", dead)
 		}
 	}
@@ -205,7 +205,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		"func (s *Service) ResolveElicitation(ctx context.Context,",
 		"func (s *Service) RevokeMemory(ctx context.Context,"} {
 		if strings.Contains(mgrBody, dead) {
-			t.Errorf("`internal/manager` 里又出现 `%s`：动作面已归用例层，"+
+			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：动作面已归用例层，"+
 				"manager 侧只剩**投递适配器**（签名只吃域值对象，见 `InteractionDelivery`）。", dead)
 		}
 	}
@@ -216,7 +216,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	// 另一份回显请求参数，而「界面说已允许、底座收到取消」就是这么来的。
 	for _, dead := range []string{"dtosession.PermissionDecisionResp{", "dtosession.ElicitationResp{"} {
 		if strings.Contains(mgrBody, dead) {
-			t.Errorf("`internal/manager` 里又出现 `%s`：这两个 DTO 的装配已归 `service/svcsession`"+
+			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：这两个 DTO 的装配已归 `service/svcsession`"+
 				"（`Interaction`），manager 侧只交**域值对象**。", dead)
 		}
 	}
@@ -262,7 +262,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 			"收回去等于同一个用例有两条取用路径。")
 	}
 	if strings.Contains(mgrBody, "func (s *Service) DeleteQueuedInput(") {
-		t.Error("`internal/manager` 里又出现 `func (s *Service) DeleteQueuedInput(`：那一层转发已随" +
+		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) DeleteQueuedInput(`：那一层转发已随" +
 			"P4a 正文第四十二刀删除（私有 `deleteQueuedInput` 仍留着——`run.go` 的回滚路径用它，且那条路径**刻意不发事件**）。")
 	}
 	if !strings.Contains(body, "svcsession.NewQueue(") {
@@ -303,7 +303,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 			"收回去等于同一个用例有两条取用路径。")
 	}
 	if strings.Contains(mgrBody, "func (s *Service) UpdateSession(") {
-		t.Error("`internal/manager` 里又出现 `func (s *Service) UpdateSession(`：那一层实现已随" +
+		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) UpdateSession(`：那一层实现已随" +
 			"P4a 正文第四十四刀删除（`manager` 侧只剩 `ResolveModel` / `ApplyModel` / `UpdateMeta` 三个适配器）。")
 	}
 	if !strings.Contains(body, "svcsession.NewMeta(") {

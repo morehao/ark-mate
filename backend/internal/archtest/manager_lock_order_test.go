@@ -17,7 +17,7 @@ import (
 // 的同一个家族）：会话域会回调 workspace 侧（`SetWorkspaceDisplay` 端口），一旦被调的域在自己
 // 的锁下再请求 manager 侧，就得到互指的两条边。
 //
-// 判据（静态、可解析）：`internal/manager/**` 的生产文件里，任何**同一函数体内**既出现
+// 判据（静态、可解析）：`internal/sessionruntime/**` 的生产文件里，任何**同一函数体内**既出现
 // `s.mu.Lock()` 又出现**任一域平面**的 `<动作>(` 的地方即红。
 //
 // 两条实现上的讲究，都是**实测踩出来的**：
@@ -137,7 +137,7 @@ func TestManagerDoesNotHoldMutexWhileCallingDomainPlane(t *testing.T) {
 	// P5a 起同步面搬进 registry，最后一个 `s.mu` 随之消失；判据的检查对象改为
 	// **manager + registry** 两个装配/同步面（任一处在锁内调域平面都算红色）。
 	dirs := []string{
-		filepath.Join(root, "internal", "manager"),
+		filepath.Join(root, "internal", "sessionruntime"),
 		filepath.Join(root, "internal", "registry"),
 	}
 	var files []string

@@ -24,10 +24,10 @@ import (
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/registry"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/version"
 	"github.com/morehao/ark-mate/pkg/config"
@@ -72,8 +72,8 @@ type App struct {
 	sources config.Sources
 
 	bus  *eventbus.Bus
-	svc  *manager.Service
-	orch *manager.Orchestrator
+	svc  *sessionruntime.Service
+	orch *sessionruntime.Orchestrator
 	// planes 领域平面的**唯一实例**（P5a；核心、网关子进程与 doctor 共用同一套构造）。
 	planes *registry.Planes
 	// lifecycle 本次启停的声明序列（Close 按它的逆序执行）。
@@ -187,9 +187,9 @@ func (a *App) Init(ctx context.Context) error {
 	// P4a：执行面由**装配层**造，同一个实例同时交给 Service（记账）与 API 面（读面）——
 	// 两个平面各自记账会让"诊断说 stopped、连接却活着"立刻发生。
 	a.rconn = runtimeconn.NewPlaneFor(reg)
-	// P5a：领域平面由 registry 造**一次**，核心与网关共用同一套（不再各自 manager.NewService）。
+	// P5a：领域平面由 registry 造**一次**，核心与网关共用同一套（不再各自 sessionruntime.NewService）。
 	a.planes = registry.NewPlanes(reg)
-	a.svc = manager.NewService(reg, a.bus, manager.WithPlanes(a.planes), manager.WithRuntimePlane(a.rconn))
+	a.svc = sessionruntime.NewService(reg, a.bus, sessionruntime.WithPlanes(a.planes), sessionruntime.WithRuntimePlane(a.rconn))
 	a.reg = reg
 
 	asm := &assembly{a: a, cfg: cfg, mode: cfg.ResolvedStoreMode()}
@@ -361,7 +361,7 @@ func (a *App) Run(ctx context.Context) error {
 	// 不阻塞服务启动；结果与显式 POST /mcps/:id/probe 一致（写 Tool 目录 + 探测状态）。
 	//
 	// P4a 正文第三十八刀：`manager` 那两条转发已删，这里直接经**事实出口** `McpPlane()` 取平面
-	// （与 `a.svc.Picker().NativePickerMode()` 同一形状：装配点交事实，不交转发）。
+	// （与 `a.svc.Planes().Picker.NativePickerMode()` 同一形状：装配点交事实，不交转发）。
 	if a.cfg.McpAutoProbe == config.McpAutoProbeStartup {
 		go func() {
 			glog.Infow(ctx, "serve: MCP 自动探测已启用（startup 模式，后台逐个探测已注册 server）")
@@ -394,7 +394,7 @@ func (a *App) Close() {
 			a.assetWatch.Stop()
 		}
 		if a.svc != nil {
-			a.svc.AutomationPlane().StopAutomationScheduler()
+			a.svc.Planes().Automation.StopAutomationScheduler()
 		}
 		if a.orch != nil {
 			a.orch.Close()

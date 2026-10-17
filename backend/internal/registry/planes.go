@@ -54,6 +54,14 @@ type Planes struct {
 	mu        sync.Mutex
 	defWarned map[string]bool
 
+	// B5 原生权限映射开关（MATE_NATIVE_PERMISSION=off 关闭；默认开启）。
+	//
+	// 它今天**不改变任何注入结果**（v19 起平台没有策略来源），但它是进程级配置事实：
+	// 放在装配面而不是编排面，网关与核心读同一个值；保留读取口是为了让"部署脚本设了它"
+	// 这件事至少可观测（静默失效比读一次并如实说出当前没有策略来源更糟）。
+	nativePermMu      sync.Mutex
+	nativePermEnabled bool
+
 	// mcpGatewayEnabled 平台侧 MCP 网关开关（M7-3；MATE_MCP_GATEWAY=off 回退）。
 	// 放在装配面而不是编排面：它是**进程级配置事实**，网关子进程与核心必须读同一个值。
 	// 零值 false 会被 NewPlanes 显式置成 true——"忘了设"不该等于"静默关掉网关"。
@@ -84,6 +92,8 @@ func NewPlanes(reg *runtime.Registry) *Planes {
 	p.Resources = NewResources(reg, p.Providers)
 	// 默认开启（config 的 auto）：显式置位，避免 atomic.Bool 零值把默认关掉。
 	p.mcpGatewayEnabled.Store(true)
+	// 原生权限映射默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
+	p.nativePermEnabled = true
 	return p
 }
 
@@ -103,6 +113,20 @@ func (p *Planes) EnableStore(st *store.Store) {
 	p.Workspaces.SetStore(st)
 	p.Automation.SetStore(st)
 	p.Resources.EnableStore(st)
+}
+
+// SetNativePermission 开关 B5 原生权限映射（false = 不向底座注入权限配置）。
+func (p *Planes) SetNativePermission(enabled bool) {
+	p.nativePermMu.Lock()
+	defer p.nativePermMu.Unlock()
+	p.nativePermEnabled = enabled
+}
+
+// NativePermissionEnabled 读取 B5 开关（默认 true）。
+func (p *Planes) NativePermissionEnabled() bool {
+	p.nativePermMu.Lock()
+	defer p.nativePermMu.Unlock()
+	return p.nativePermEnabled
 }
 
 // SetMcpGatewayEnabled 设置平台 MCP 网关开关（装配期与测试用）。

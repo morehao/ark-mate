@@ -9,7 +9,7 @@ import (
 // ——— P3b-2b「transcript 归会话域」守卫 ———
 //
 // transcript（会话 wire JSONL 旁路）在 P3b-2b 之前是**跨层**的：recorder 本体在
-// `internal/manager`，域只经一个临时端口 `TranscriptSink` 往它写一行；装载、检索、handoff
+// `internal/sessionruntime`，域只经一个临时端口 `TranscriptSink` 往它写一行；装载、检索、handoff
 // 摘要又各自散在 manager 的几个文件里。搬完之后它们全在 `internal/domain/session`，
 // 端口的唯一存在理由（"另外那半还在 manager"）也随之消失。
 //
@@ -31,7 +31,7 @@ import (
 //	   （serve / demo）都真的调了它，而且调用点必须在 `NewService` **之后**（早一行 = 域还没造出来）。
 //
 // 反证（实跑，见计划 §3.1.47）：把 recorder 的 `wireTranscriptSchema` 常量复制到
-// `internal/manager` 的一个新生产文件里 → 红；把 `internal/app/app.go` 里的
+// `internal/sessionruntime` 的一个新生产文件里 → 红；把 `internal/app/app.go` 里的
 // `a.svc.SetTranscriptDir(cfg.TranscriptDir)` 删掉 → 红。
 
 // transcriptOwnerDir 是 transcript 面**唯一**允许的归属包（相对仓库根的斜杠路径）。
@@ -51,12 +51,12 @@ var transcriptOwnerLiterals = []string{
 // transcriptNonOwnerRoots 是"**绝不能**认识 transcript 内部形状"的包（生产文件；测试文件
 // 需要按文件名造夹具，`_test.go` 一律跳过）。
 //
-// 为什么点这两个：`internal/manager` 是拆分中的实现层、`internal/service/svc*` 是用例端口层
+// 为什么点这两个：`internal/sessionruntime` 是拆分中的实现层、`internal/service/svc*` 是用例端口层
 // ——两处都只该经会话域的动作面碰 transcript。CLI（`internal/app/command`）与装配根
 // （`internal/app`）**刻意不在名单里**：它们的职责就是"按目录扫文件"（`mate migrate` /
 // `transcripts prune` / `doctor` / serve 的空库提示），ban 了它们等于让守卫与产品行为对打。
 var transcriptNonOwnerRoots = []string{
-	filepath.Join("internal", "manager"),
+	filepath.Join("internal", "sessionruntime"),
 	filepath.Join("internal", "service"),
 }
 
