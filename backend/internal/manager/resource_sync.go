@@ -482,7 +482,7 @@ func capacitySentinel(v *int64) string {
 
 // declaredDefaultModelID 读**单一**默认模型（未设 → ""）。
 func (s *Service) declaredDefaultModelID(ctx context.Context) (string, bool) {
-	row, ok, err := s.defaultModelRow(ctx)
+	row, ok, err := s.providerPlane.DefaultModelRow(ctx)
 	if err != nil || !ok {
 		return "", false
 	}
@@ -644,7 +644,7 @@ func outcomeToDTO(runtimeID string, o resource.Outcome) dtomodel.RuntimeSyncResp
 // `runtimeID` 非空 = 只看那一个 runtime 的明细；`effective`/`effective_at` 恒为**聚合**值
 // （ADR-22：用户面只有一个结论）。
 func (s *Service) ModelsView(ctx context.Context, runtimeID string, refresh bool) (*dtomodel.ModelsResp, error) {
-	models, err := s.ListModels(ctx)
+	models, err := s.providerPlane.ListModels(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -696,7 +696,7 @@ func (s *Service) ModelsView(ctx context.Context, runtimeID string, refresh bool
 // 判据是**同一份生成规则**（`modelValueFor`）：平台声明 → 该 runtime 认得的不透明值，再与广告
 // 集合比对。两处各写一遍迟早分叉——"界面说生效了、实际目录里其实没有"正是这条要挡的。
 func missingDeclaredModelsFor(ctx context.Context, s *Service, runtimeID string, advertised []string) []string {
-	declared, err := s.ListModels(ctx)
+	declared, err := s.providerPlane.ListModels(ctx)
 	if err != nil {
 		return nil
 	}
@@ -706,7 +706,7 @@ func missingDeclaredModelsFor(ctx context.Context, s *Service, runtimeID string,
 	}
 	out := []string{}
 	for i := range declared {
-		v, verr := modelValueFor(s.reg, runtimeID, declared[i].ProviderID, declared[i].Model)
+		v, verr := s.providerPlane.ModelValueFor(runtimeID, declared[i].ProviderID, declared[i].Model)
 		if verr != nil || v == "" {
 			continue
 		}

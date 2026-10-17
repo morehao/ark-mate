@@ -40,7 +40,6 @@ type Service struct {
 	// planner 工作空间域（起始点偏好策略：代建根 + 生效名单）。P2b 起策略字段归它自持锁；
 	// `Service` 上**不再复刻**一份（两份 = 两个事实源，表现是面板改了名单、校验却按旧的走）。
 	planner *workspace.Plane
-	catalog *catalogStore        // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
 	caps    *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
 	// capabilityDir 能力定义目录。**语义按持久层模式分叉**（M6-2）：
 	//   - memory 模式：装载源 + 启停写回位置（文件是唯一持久形态）；
@@ -124,7 +123,6 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 		bus:   bus,
 		// 网关默认开启（config 的 auto）：显式在这里置位，避免 atomic.Bool 零值把默认关掉。
 		mcpGatewayWarned: make(map[string]bool),
-		catalog:          newCatalogStore(),
 		caps:             capability.NewRegistry(),
 		// 默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
 		nativePermEnabled: true,
@@ -161,14 +159,14 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 	// 以及恢复期"作废重启前排队输入"的钩子（**临时**：输入队列 P3b-2 搬进来后就地调用）。
 	s.sessionPlane.SetBus(bus)
 	s.sessionPlane.SetModelValueSource(func(runtimeID, providerID, model string) (string, error) {
-		return modelValueFor(s.reg, runtimeID, providerID, model)
+		return s.providerPlane.ModelValueFor(runtimeID, providerID, model)
 	})
 	s.sessionPlane.SetStaleInputsOnRestore(s.staleQueuedInputsOnRestore)
 	// 两个端口都读会话/模型面（编排侧），在装配期接上；`demo`/`migrate` 这类没有编排器的
 	// 场景下 `effect` 恒 nil（回执为 nil，与拆分前逐字同义）。
 	s.providerPlane.SetEffect(s.providerEffect)
 	s.providerPlane.SetDefaultModel(func(ctx context.Context) (string, bool) {
-		row, ok, err := s.defaultModelRow(ctx)
+		row, ok, err := s.providerPlane.DefaultModelRow(ctx)
 		if err != nil || !ok {
 			return "", false
 		}

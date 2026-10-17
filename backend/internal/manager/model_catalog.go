@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
@@ -42,117 +41,6 @@ const rejectedValueTTL = 10 * time.Minute
 // 每次取数都跑满一遍。取 3 是这两件事的折中：足够跳过"最近一条或两条恰好坏了"，
 // 又让最坏情况有界（目录取数在面板打开/会话变化时触发，不是轮询）。
 const maxCatalogSampleAttempts = 3
-
-// catalogEntry 一次目录取样的结果（内存缓存，不落盘：任何一次真实会话都会刷新它）。
-type catalogEntry struct {
-	runtime   string
-	options   []acl.ConfigOption
-	fetchedAt time.Time
-}
-
-// rejectedValue 运行时拒绝过的一个取值（用于目录里的「不可用」标注）。
-type rejectedValue struct {
-	reason string
-	at     time.Time
-}
-
-// catalogStore 目录缓存与拒绝值反馈（独立锁，避免与 s.mu / o.mu 交叉）。
-//
-// 键是 **runtime id**（v19 之前是 agent id）：单底座下它只有一个取值，但保留这一维让
-// "这条目录是谁说的"在缓存里显式可见——换成裸单例会让将来多底座时又多一处要改的隐式前提。
-type catalogStore struct {
-	mu       sync.Mutex
-	entries  map[string]*catalogEntry            // key = runtimeID
-	rejected map[string]map[string]rejectedValue // key = runtimeID → value → 拒绝记录
-}
-
-func newCatalogStore() *catalogStore {
-	return &catalogStore{
-		entries:  map[string]*catalogEntry{},
-		rejected: map[string]map[string]rejectedValue{},
-	}
-}
-
-// put 记录一次目录取样（options 为空也记录：表示「运行时确实没给」）。
-func (c *catalogStore) put(runtimeID string, options []acl.ConfigOption) {
-	c.mu.Lock()
-	c.entries[runtimeID] = &catalogEntry{runtime: runtimeID, options: cloneOptions(options), fetchedAt: time.Now().UTC()}
-	c.mu.Unlock()
-}
-
-// get 取未过期缓存。
-func (c *catalogStore) get(runtimeID string, ttl time.Duration) (*catalogEntry, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	e, ok := c.entries[runtimeID]
-	if !ok || len(e.options) == 0 {
-		return nil, false
-	}
-	if ttl > 0 && time.Since(e.fetchedAt) > ttl {
-		return nil, false
-	}
-	out := &catalogEntry{runtime: e.runtime, options: cloneOptions(e.options), fetchedAt: e.fetchedAt}
-	return out, true
-}
-
-// markRejected 记录一次「运行时拒绝了该值」（按 runtime 维度）。
-// 只在运行时明确拒绝（invalidParams 类）时调用；网络/超时等暂态失败不在此列。
-func (c *catalogStore) markRejected(runtimeID, value, reason string) {
-	if runtimeID == "" || value == "" {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	m := c.rejected[runtimeID]
-	if m == nil {
-		m = map[string]rejectedValue{}
-		c.rejected[runtimeID] = m
-	}
-	m[value] = rejectedValue{reason: reason, at: time.Now()}
-}
-
-// rejection 取某值最近的拒绝记录（过期 → 无）。
-func (c *catalogStore) rejection(runtimeID, value string) (string, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	m := c.rejected[runtimeID]
-	if m == nil {
-		return "", false
-	}
-	r, ok := m[value]
-	if !ok {
-		return "", false
-	}
-	if time.Since(r.at) > rejectedValueTTL {
-		delete(m, value)
-		return "", false
-	}
-	return r.reason, true
-}
-
-// clearRejection 运行时接受了该值时清除拒绝标记（自愈）。
-func (c *catalogStore) clearRejection(runtimeID, value string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if m := c.rejected[runtimeID]; m != nil {
-		delete(m, value)
-	}
-}
-
-// cloneOptions 深拷贝选项（含每个选项的值切片），避免缓存与调用方共享底层数组。
-func cloneOptions(in []acl.ConfigOption) []acl.ConfigOption {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]acl.ConfigOption, len(in))
-	for i, o := range in {
-		out[i] = o
-		if len(o.Values) > 0 {
-			out[i].Values = append([]acl.ConfigOptionValue(nil), o.Values...)
-		}
-	}
-	return out
-}
 
 // ModelCatalog 返回该 runtime 的运行时模型目录。
 //
@@ -190,19 +78,19 @@ func (s *Service) ModelCatalog(ctx context.Context) (*dtomodel.ModelCatalogResp,
 			return s.catalogResp(ctx, spec.ID, catalogFromSession, nil, time.Time{},
 				s.catalogEmptyNote(ctx, true, nil)), nil
 		}
-		s.catalog.put(spec.ID, opts)
+		s.providerPlane.PutConfigOptions(spec.ID, opts)
 		return s.catalogResp(ctx, spec.ID, catalogFromSession, opts, time.Now().UTC(), ""), nil
 	}
 
 	// 2) 缓存。
-	if e, ok := s.catalog.get(spec.ID, defaultCatalogTTL); ok {
-		return s.catalogResp(ctx, e.runtime, catalogFromCache, e.options, e.fetchedAt, ""), nil
+	if e, ok := s.providerPlane.ConfigOptions(spec.ID, defaultCatalogTTL); ok {
+		return s.catalogResp(ctx, e.Runtime, catalogFromCache, e.Options, e.FetchedAt, ""), nil
 	}
 
 	// 3) resume 历史会话读取（只读取样：读完立即 close，不留下任何新会话）。
 	opts, sampled, err := s.fetchCatalogByResume(ctx, spec)
 	if err == nil && len(opts) > 0 {
-		s.catalog.put(spec.ID, opts)
+		s.providerPlane.PutConfigOptions(spec.ID, opts)
 		return s.catalogResp(ctx, spec.ID, catalogFromResume, opts, time.Now().UTC(), ""), nil
 	}
 	if err != nil {
@@ -488,7 +376,7 @@ func (s *Service) modelIDByValue(ctx context.Context, runtimeID string) map[stri
 	seen := make(map[string]string, len(rows))
 	dup := map[string]bool{}
 	for i := range rows {
-		v, verr := modelValueFor(s.reg, runtimeID, rows[i].ProviderID, rows[i].Model)
+		v, verr := s.providerPlane.ModelValueFor(runtimeID, rows[i].ProviderID, rows[i].Model)
 		if verr != nil || v == "" {
 			// 该底座不消费平台清单 / 这一行编不出值：它没有可注解的候选。
 			continue
@@ -538,7 +426,7 @@ func (s *Service) catalogResp(ctx context.Context, runtimeID, source string, opt
 				Group:       v.Group,
 				GroupName:   v.GroupName,
 			}
-			if reason, bad := s.catalog.rejection(runtimeID, v.Value); bad {
+			if reason, bad := s.providerPlane.ModelRejection(runtimeID, v.Value); bad {
 				val.Unavailable = true
 				val.UnavailableReason = reason
 			}

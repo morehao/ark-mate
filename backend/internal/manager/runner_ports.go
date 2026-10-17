@@ -31,26 +31,26 @@ func (d runnerDiagnostics) StderrTail(client *acl.Client) []string {
 type runnerCatalog struct{ svc *Service }
 
 func (c runnerCatalog) PutConfigOptions(runtimeID string, options []acl.ConfigOption) {
-	if c.svc.catalog == nil {
+	if c.svc.providerPlane == nil {
 		return
 	}
-	c.svc.catalog.put(runtimeID, options)
+	c.svc.providerPlane.PutConfigOptions(runtimeID, options)
 }
 
 // MarkRejected 记录某取值被运行时拒绝（目录里标灰；建会话/恢复/改模型共用）。
 func (c runnerCatalog) MarkRejected(runtimeID, value, reason string) {
-	if c.svc.catalog == nil {
+	if c.svc.providerPlane == nil {
 		return
 	}
-	c.svc.catalog.markRejected(runtimeID, value, reason)
+	c.svc.providerPlane.MarkModelRejected(runtimeID, value, reason)
 }
 
 // ClearRejection 清掉曾失败值的标记（同一取值再次被接受时）。
 func (c runnerCatalog) ClearRejection(runtimeID, value string) {
-	if c.svc.catalog == nil {
+	if c.svc.providerPlane == nil {
 		return
 	}
-	c.svc.catalog.clearRejection(runtimeID, value)
+	c.svc.providerPlane.ClearModelRejection(runtimeID, value)
 }
 
 // acquireClient 是 `Lifecycle.Acquire` 的实现：拨号仍归编排侧（回调与凭据检查在这里），

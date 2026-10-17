@@ -95,19 +95,19 @@ func TestResolveSessionModelRejectsUnknown(t *testing.T) {
 	row := createProviderAndModel(t, r.svc, "p1", "m-1")
 
 	// ① 旧形态（运行时目录的不透明值）：形状就不对。
-	_, _, err := r.svc.resolveSessionModel(ctx, r.runtme, `["p1","m-1"]`)
+	_, _, err := r.svc.providerPlane.ResolveSessionModel(ctx, r.runtme, `["p1","m-1"]`)
 	if errCode(err) != "model_not_found" || numericCode(err) != 40401 {
 		t.Fatalf("旧形态的不透明值应 40401 model_not_found，got %q/%d（%v）", errCode(err), numericCode(err), err)
 	}
 
 	// ② 形状对但查不到行。
 	ghost := objid.New(objid.Model)
-	if _, _, err := r.svc.resolveSessionModel(ctx, r.runtme, ghost); errCode(err) != "model_not_found" {
+	if _, _, err := r.svc.providerPlane.ResolveSessionModel(ctx, r.runtme, ghost); errCode(err) != "model_not_found" {
 		t.Fatalf("清单里没有的 %s 应 model_not_found，got %q（%v）", ghost, errCode(err), err)
 	}
 
 	// ③ 形状对且在清单里 → 返回**平台行 id** 与**派生值**（两层词汇各归各的）。
-	id, cfg, err := r.svc.resolveSessionModel(ctx, r.runtme, row.ID)
+	id, cfg, err := r.svc.providerPlane.ResolveSessionModel(ctx, r.runtme, row.ID)
 	if err != nil {
 		t.Fatalf("清单里的模型行应解析成功: %v", err)
 	}
@@ -123,13 +123,13 @@ func TestResolveSessionModelRejectsUnknown(t *testing.T) {
 	}
 
 	// ④ 空串 = 用默认那一行；没有默认 → 不下发（不是错误）。
-	if _, cfg, err := r.svc.resolveSessionModel(ctx, r.runtme, ""); err != nil || cfg.Model != "" {
+	if _, cfg, err := r.svc.providerPlane.ResolveSessionModel(ctx, r.runtme, ""); err != nil || cfg.Model != "" {
 		t.Fatalf("未设默认模型时应回「不下发」而不是报错: cfg=%+v err=%v", cfg, err)
 	}
 	if err := r.svc.st.SetDefaultModelID(ctx, row.ID); err != nil {
 		t.Fatalf("设默认模型: %v", err)
 	}
-	id, cfg, err = r.svc.resolveSessionModel(ctx, r.runtme, "")
+	id, cfg, err = r.svc.providerPlane.ResolveSessionModel(ctx, r.runtme, "")
 	if err != nil || id != row.ID || cfg.Model != "p1/m-1" {
 		t.Fatalf("设了默认之后空串应解析成那一行: id=%q cfg=%+v err=%v", id, cfg, err)
 	}
@@ -333,7 +333,7 @@ func TestSessionModelValueAgreesWithCatalogAnnotation(t *testing.T) {
 		t.Fatalf("回填的映射与目录注解不一致：want %q，got %q（两处各算一遍派生值，口径漂了就分叉）", row.ID, got)
 	}
 	// 写面接受的行 → 同一个 id 与同一个值。
-	id, cfg, err := r.svc.resolveSessionModel(ctx, r.runtme, row.ID)
+	id, cfg, err := r.svc.providerPlane.ResolveSessionModel(ctx, r.runtme, row.ID)
 	if err != nil || id != row.ID || cfg.Model != value {
 		t.Fatalf("会话写面的解析与另外两条链不一致: id=%q cfg=%+v err=%v", id, cfg, err)
 	}

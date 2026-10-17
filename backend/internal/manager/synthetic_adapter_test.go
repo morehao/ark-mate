@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
@@ -129,16 +130,16 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 	// 这段知识此前写在内核的 `switch runtimeID` 里（一个 `case` 一个内置底座 id），
 	// 接第三个底座就得回去加 case。判据两侧都钉：合成底座拿到它自己的形态；而**没有登记**
 	// 这一维的底座如实报 `model_value_unsupported`，内核不替它猜。
-	got, err := modelValueFor(reg, runtimetest.ID, "acme", "acme-v1")
+	got, err := provider.ModelValueFor(reg, runtimetest.ID, "acme", "acme-v1")
 	if err != nil || got != "acme/acme-v1" {
 		t.Fatalf("合成底座的模型值形态应由它自己声明（<provider>/<model>），实际 %q err=%v", got, err)
 	}
-	if _, err := modelValueFor(reg, "stub", "acme", "acme-v1"); errCode(err) != "model_value_unsupported" {
+	if _, err := provider.ModelValueFor(reg, "stub", "acme", "acme-v1"); errCode(err) != "model_value_unsupported" {
 		t.Fatalf("未登记模型值形态的底座应报 model_value_unsupported（不猜形状），got %q", errCode(err))
 	}
 	// 反向：dsh 的形态（JSON 数组）**不在**这份注册表里——它由 dsh 自己登记。
 	// v25：第一段是**派生路由键**（`mate-` + 平台供应商 id），不再是平台 id 本身。
-	if v, err := modelValueFor(runtime.AllBuiltinRegistry(), runtime.DefaultBuildRuntime, "p", "m"); err != nil ||
+	if v, err := provider.ModelValueFor(runtime.AllBuiltinRegistry(), runtime.DefaultBuildRuntime, "p", "m"); err != nil ||
 		v != `["mate-p","m"]` {
 		t.Fatalf("内置底座的形态应由它的 adapter 声明，实际 %q err=%v", v, err)
 	}

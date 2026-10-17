@@ -21,7 +21,7 @@ import (
 // 实现是 manager 既有的那一段（默认行 / 按 id 取行 / 行 → 运行时值换算，见 `model_list.go`）：
 // 这条链要读模型清单（store）与供应商面，属模型面的判据，用例层只认端口。
 func (s *Service) ResolveModel(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error) {
-	return s.resolveSessionModel(ctx, runtimeID, modelID)
+	return s.providerPlane.ResolveSessionModel(ctx, runtimeID, modelID)
 }
 
 // ApplyModel 把模型投给活跃会话（不活跃 → false，不报错）。

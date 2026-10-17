@@ -31,7 +31,7 @@ func (p providerModelFacts) RuntimeStates(ctx context.Context) map[string]dtomod
 }
 
 func (p providerModelFacts) DeclaredModels(ctx context.Context) ([]dtomodel.ModelResp, error) {
-	return p.svc.ListModels(ctx)
+	return p.svc.providerPlane.ListModels(ctx)
 }
 
 func (p providerModelFacts) Advertised(ctx context.Context) (doctor.AdvertisedSample, error) {
@@ -47,7 +47,7 @@ func (p providerModelFacts) Advertised(ctx context.Context) (doctor.AdvertisedSa
 }
 
 func (p providerModelFacts) ModelValue(runtimeID, providerID, model string) (string, error) {
-	return modelValueFor(p.svc.reg, runtimeID, providerID, model)
+	return p.svc.providerPlane.ModelValueFor(runtimeID, providerID, model)
 }
 
 // CollectRuntimeModelFacts 逐 runtime 采集模型清单事实（**只读**）。

@@ -30,6 +30,9 @@ type Plane struct {
 	effect EffectFn
 	// defaultModel 平台默认模型落在哪条供应商上（空 = 没有默认模型 → 不注入密钥）。
 	defaultModel DefaultModelProvider
+
+	// catalog 运行时模型目录缓存与拒绝值反馈（独立锁；见 catalog.go）。
+	catalog *configCatalog
 }
 
 // EffectFn 计算"这次改动对谁何时生效"的回执。
@@ -52,6 +55,7 @@ func NewPlane(reg *goruntime.Registry, creds *credential.Store) *Plane {
 		providers: make(map[string]*Def),
 		reg:       reg,
 		creds:     creds,
+		catalog:   newConfigCatalog(),
 	}
 }
 

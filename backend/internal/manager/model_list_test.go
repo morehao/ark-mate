@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"strings"
 	"testing"
 
@@ -153,7 +154,7 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 // 把运行时给的 value 存回清单就是把"事实"当"意图"）。
 func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 	builtin := runtime.AllBuiltinRegistry()
-	v, err := modelValueFor(builtin, runtime.DefaultBuildRuntime, "deepseek-main", "deepseek-v4-flash")
+	v, err := provider.ModelValueFor(builtin, runtime.DefaultBuildRuntime, "deepseek-main", "deepseek-v4-flash")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +168,7 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 	}
 	// 合成底座的形态来自**它自己登记的实现**（内核从未听说过 `<provider>/<model>`）。
 	synthetic, _ := runtimetest.NewRegistry(runtime.LaunchSpec{})
-	v, err = modelValueFor(synthetic, runtimetest.ID, "deepseek-main", "deepseek-v4-flash")
+	v, err = provider.ModelValueFor(synthetic, runtimetest.ID, "deepseek-main", "deepseek-v4-flash")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,12 +176,12 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 		t.Fatalf("合成底座的模型值形态不符: %q", v)
 	}
 	// 两个形态**必须不同**：相同的话，"内核按 id 挑形态"这条失效方式就测不出来了。
-	builtinV, _ := modelValueFor(builtin, runtime.DefaultBuildRuntime, "p", "m")
-	syntheticV, _ := modelValueFor(synthetic, runtimetest.ID, "p", "m")
+	builtinV, _ := provider.ModelValueFor(builtin, runtime.DefaultBuildRuntime, "p", "m")
+	syntheticV, _ := provider.ModelValueFor(synthetic, runtimetest.ID, "p", "m")
 	if builtinV == syntheticV {
 		t.Fatalf("两条形态退化成同一个（%q）：本判据失去区分度，内核里的 id 特判会假绿", builtinV)
 	}
-	if _, err := modelValueFor(builtin, "some-third-runtime", "p", "m"); errCode(err) != "model_value_unsupported" {
+	if _, err := provider.ModelValueFor(builtin, "some-third-runtime", "p", "m"); errCode(err) != "model_value_unsupported" {
 		t.Fatalf("未登记形态的 runtime 应拒绝猜模型值形状，got %q", errCode(err))
 	}
 	// 行里不得出现**生成的值**（平台只存输入：provider_id + model_id）。
@@ -205,7 +206,7 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 func TestModelListReadsEmptyWithoutSQLite(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(runtime.AllBuiltinRegistry(), eventbus.New())
-	items, err := svc.ListModels(ctx)
+	items, err := svc.providerPlane.ListModels(ctx)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("memory 模式的清单读面应回空列表: %+v err=%v", items, err)
 	}
@@ -219,20 +220,20 @@ func TestModelListReadsEmptyWithoutSQLite(t *testing.T) {
 func TestResolveDefaultModelFallbackChain(t *testing.T) {
 	ctx := context.Background()
 	r := newModelRig(t)
-	v, err := r.svc.DefaultModelValueFor(ctx, runtimetest.ID)
+	v, err := r.svc.providerPlane.DefaultModelValueFor(ctx, runtimetest.ID)
 	if err != nil || v != "" {
 		t.Fatalf("无默认应回空串（不下发）: %q err=%v", v, err)
 	}
 	r.createModel(t, "p1", "m-a", func(req *dtomodel.ModelCreateReq) { req.IsDefault = ptr(true) })
-	v, err = r.svc.DefaultModelValueFor(ctx, runtimetest.ID)
+	v, err = r.svc.providerPlane.DefaultModelValueFor(ctx, runtimetest.ID)
 	if err != nil || v != "p1/m-a" {
 		t.Fatalf("有默认应回生成的值: %q err=%v", v, err)
 	}
 	// dsh 的形态是 JSON 数组（同一个平台模型 id，两种底座各自的词汇）。
-	if _, err := r.svc.DefaultModelValueFor(ctx, "dsh"); err != nil {
+	if _, err := r.svc.providerPlane.DefaultModelValueFor(ctx, "dsh"); err != nil {
 		t.Fatalf("dsh 也该能算出它的值: %v", err)
 	}
-	if v, err := r.svc.DefaultModelValueFor(ctx, "stub"); err != nil || v != "" {
+	if v, err := r.svc.providerPlane.DefaultModelValueFor(ctx, "stub"); err != nil || v != "" {
 		t.Fatalf("未声明模型值形态的 runtime 应回空串: %q err=%v", v, err)
 	}
 }

@@ -205,7 +205,7 @@ func TestModelListOrderIsProviderThenModelID(t *testing.T) {
 		}
 	}
 
-	got, err := r.svc.ListModels(ctx)
+	got, err := r.svc.providerPlane.ListModels(ctx)
 	if err != nil {
 		t.Fatalf("ListModels: %v", err)
 	}

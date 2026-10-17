@@ -141,7 +141,7 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	}}}
 	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: "stub",
 		Session: &stubSession{}, Projection: proj}))
-	svc.catalog.markRejected("stub", "test/other", "旧失败")
+	svc.providerPlane.MarkModelRejected("stub", "test/other", "旧失败")
 	applied, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Model: "test/other"})
 	if err != nil || !applied {
 		t.Fatalf("应用应成功: applied=%v err=%v", applied, err)
@@ -149,12 +149,12 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	if len(proj.applied) != 1 || proj.applied[0].Model != "test/other" {
 		t.Fatalf("下发值应原样透传: %+v", proj.applied)
 	}
-	if reason, bad := svc.catalog.rejection("stub", "test/other"); bad {
+	if reason, bad := svc.providerPlane.ModelRejection("stub", "test/other"); bad {
 		t.Fatalf("成功后应清除不可用标记: %s", reason)
 	}
 	// 缓存被成功状态刷新（活会话优先级更高，故直接查缓存）。
-	entry, ok := svc.catalog.get("stub", defaultCatalogTTL)
-	if !ok || acl.CurrentConfigValue(entry.options, acl.CategoryModel) != "test/other" {
+	entry, ok := svc.providerPlane.ConfigOptions("stub", defaultCatalogTTL)
+	if !ok || acl.CurrentConfigValue(entry.Options, acl.CategoryModel) != "test/other" {
 		t.Fatalf("目录缓存应被成功状态刷新: %+v", entry)
 	}
 
@@ -163,7 +163,7 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	if _, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Model: "nope"}); err == nil {
 		t.Fatal("运行时拒绝应上抛")
 	}
-	if _, bad := svc.catalog.rejection("stub", "nope"); !bad {
+	if _, bad := svc.providerPlane.ModelRejection("stub", "nope"); !bad {
 		t.Fatal("拒绝的取值应记入不可用反馈")
 	}
 

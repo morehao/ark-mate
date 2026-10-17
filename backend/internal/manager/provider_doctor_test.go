@@ -225,7 +225,7 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	//    这正是"写了完全没生效"的形态 → 高危。
 	m := r.createModel(t, "p1", "m-1")
 	// 运行时目录里的取值是**不透明串**，由平台的同一份生成规则折出来（v12 起清单行不再回带它）。
-	value, err := modelValueFor(r.svc.reg, runtimetest.ID, m.ProviderID, m.Model)
+	value, err := provider.ModelValueFor(r.svc.reg, runtimetest.ID, m.ProviderID, m.Model)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	// `ModelCatalog` 去 resume 历史会话——那是一条会**真的拉起底座**的路（测试不得碰用户装的那份）。
 	// 摘掉编排器走的正是 CLI 离线那条路。
 	r.svc.orch = nil
-	r.svc.catalog = newCatalogStore()
+	r.svc.providerPlane.ResetConfigCatalog()
 	facts = r.svc.runtimeModelFacts(ctx, runtimetest.ID, state)
 	if facts.AdvertisedKnown || facts.HighRisk {
 		t.Fatalf("取不到广告时不许判定：%+v", facts)
@@ -293,7 +293,7 @@ func TestCollectProviderDoctorFactsNoStoreNoHome(t *testing.T) {
 // 而 `ModelCatalog` 在无活会话时读它（source=cache）。用真会话造这一侧会让单测依赖真底座，
 // 而本用例要钉的是**对账算法**本身。缓存键是 runtime id（v19）。
 func seedCatalog(svc *Service, runtimeID string, values ...acl.ConfigOptionValue) {
-	svc.catalog.put(runtimeID, []acl.ConfigOption{{
+	svc.providerPlane.PutConfigOptions(runtimeID, []acl.ConfigOption{{
 		ID: "model", Name: "Model", Category: acl.CategoryModel, Type: "select",
 		Values: values,
 	}})
