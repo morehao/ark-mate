@@ -11,9 +11,11 @@ import {
 import { tokens } from '@ark-mate/ui'
 import type { SessionSummary, Workspace } from '@ark-mate/types'
 import { useMate } from '../store'
-import { GROUP_IDLE_LIMIT, quotaSessions } from '../console/railView'
+import { GROUP_IDLE_LIMIT, quotaSessions, shortenPath, relTime } from '../console/railView'
+import { copyText } from '../console/clipboard'
 import { WorkspaceManageMenu, workspaceLabel } from './WorkspacePicker'
 import { DirectoryBrowser } from './DirectoryBrowser'
+import { AddWorkspaceButton } from './AddWorkspaceButton'
 import { directoryPickerKind, pickDirectoryNative } from '../directoryPicker'
 
 /** 折叠态的前端本地持久键（**不进 db**：它是"这台机器的视图偏好"，不是跨设备的事实）。 */
@@ -145,9 +147,18 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
   }
 
   if (items.length === 0) {
+    // 空态**直接给两个动作**（W5 / Q11 选②）：原来只有一句"在新建面板里添加…"——那要用户先
+    // 找到新建面板、再找到那个菜单。空态是"你还没开始"的那一屏，动作就该在这一屏上。
     return (
       <div className="fg-wsgroup-note" style={{ padding: '2px 10px 8px' }}>
-        还没有工作空间。在新建面板里「添加工作空间…」选一个目录即可。
+        还没有工作空间。
+        {/* 两个动作**复用**区头那颗 `⊕` 的同一个组件（W5 / Q11 选②）：它内部已经实现了
+            「选择已有目录…」与「新建工作空间…」两条路、以及落盘根为空时只给前者。
+            在这里再画一套按钮 = 两套入口各有各的对话框与错误处理，而用户在两个位置看到的
+            行为迟早不一样。 */}
+        <span style={{ display: 'inline-flex', gap: 6, marginLeft: 6, verticalAlign: 'middle' }}>
+          <AddWorkspaceButton />
+        </span>
       </div>
     )
   }
@@ -198,8 +209,30 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
             <div
               className={`fg-wsgroup-row${isOpen ? ' fg-open' : ''}${menuOpenID === ws.id ? ' fg-menu-open' : ''}`}
               onClick={() => toggle(ws.id)}
-              title={ws.path}
             >
+              {/* hover 卡（W5）：原来只有浏览器原生的 `title=路径`，只能看不能复制、也不说创建时间。
+                  这里给一张**应用内**的卡：标题 / 缩写路径 / 创建时间 / 复制路径。
+                  刻意不用 antd Tooltip：它的内容是纯展示，而这张卡里有一颗要点的按钮。 */}
+              <span className="fg-wsgroup-tip" role="tooltip">
+                <span className="fg-wsgroup-tip-title">{workspaceLabel(ws)}</span>
+                <span className="fg-wsgroup-tip-path" title={ws.path}>
+                  {shortenPath(ws.path)}
+                </span>
+                {ws.created_at && (
+                  <span className="fg-wsgroup-tip-meta">创建于 {relTime(ws.created_at)}</span>
+                )}
+                <button
+                  type="button"
+                  className="fg-wsgroup-tip-copy"
+                  onClick={(ev) => {
+                    // 复制路径**不**冒泡：行本身是"折叠/展开"的点击区。
+                    ev.stopPropagation()
+                    void copyText(ws.path)
+                  }}
+                >
+                  复制路径
+                </button>
+              </span>
               {/* leading 槽：**一颗实心三角，鼠标放不放上去都是它**（v14.2 修订）。
                   上一版照 dsh 抄的是"静止 folder、悬停换三角"，用户复核后否掉了：
                   一个图标不该因为鼠标在不在一块儿就变成另一个东西。展开态由它自己旋转
@@ -210,7 +243,9 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
                 {broken && <WarningOutlined className="fg-wsgroup-warn" />}
               </span>
               <span className={`fg-wsgroup-name${unnamed ? ' fg-unnamed' : ''}`}>{workspaceLabel(ws)}</span>
-              <span className="fg-wsgroup-count">{ws.sessions || ''}</span>
+              {/* **撤掉行上的会话数**（W5）：它的来源是服务端计数 `ws.sessions`，而组内实际渲染的是
+                  `groupSessions`——两条来源，展开时用户能同时看到两个数。原型里这一栏本来就没有，
+                  而"这一组有几个会话"在展开之后一目了然，收起来时也不影响任何操作。 */}
               {/* 行内动作（v14.1）：`⋯` = 管理（重命名 / 上移下移 / 删除），`⊕` = 在此工作空间
                   新建会话。两者悬停浮现——但它们的位置**一直占着**（CSS 用 `visibility` 而不是
                   `display`），所以鼠标移上去只有这两颗按钮出现，名字不会被挤、会话数不会消失。 */}

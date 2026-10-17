@@ -557,10 +557,10 @@ export function SessionPane({ onCreate }: Props) {
               style={{ marginLeft: 'auto', flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
               title={sm.updated_at}
             >
+              {/* **撤掉 `seq N`**（W5）：位次是**续传游标**，不是用户能用的东西——它既不告诉你
+                  "这条会话有多新"（那件事由左边的时间回答），也不告诉你"还有多少没读"。
+                  改前它和相对时间挤在同一格，行尾因此常年比标题还长。 */}
               <span>{relTime(sm.updated_at)}</span>
-              {view && view.lastSeq >= 0 && (
-                <span style={{ color: tokens.textPlaceholder }}>seq {view.lastSeq}</span>
-              )}
             </span>
           </span>
         </button>
