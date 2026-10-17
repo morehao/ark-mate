@@ -273,8 +273,8 @@
 >    由 `APIContract` `v1 → v2` 与发布说明负责。
 > ⑥ **代价**：`~/.ark-mate/mate.db` 是 `make dev` 与桌面核**共用的同一个库**，所以这次破坏同时命中
 >    两种形态；既有的会话/事件/轮次/消息/排队输入/权限记忆/工作空间登记会被清空
->    （`automations.last_fired_at` 刻意保留，ADR-10）。旧 transcript（文件名即旧会话 id）在装载期被
->    **跳过 + WARN**，处置靠 `mate transcripts prune`（ADR-5 不自动删）——`mate doctor` 新增一条体检项
+>    （`automations.last_fired_at` 刻意保留：它是认领游标）。旧 transcript（文件名即旧会话 id）在装载期被
+>    **跳过 + WARN**，处置靠 `mate transcripts prune`（不自动删）——`mate doctor` 新增一条体检项
 >    把这件事变成随时可查（R3）。**不为旧数据写任何兼容或派生代码**（用户 2026-10-11 拍板）。
 > ⑦ **不变**——v3 三条红线、v2②、v7②、v8①②、v10、v11 逐条不变；wire 上的 `session.*` 事件与
 >    `session_id` 字段**冻结不动**（v15 只是让平台领域词追上它们）。
@@ -313,7 +313,7 @@
 >    刻意不改**：那是 v8 已删除的选择面留下的**拒绝键名**（`runtime_selection_removed`），
 >    改名会让旧请求从"显式 40001"退化成静默忽略。
 > ⑤ **transcript 格式 v2**（`ark-mate.wire-transcript.v2`：事件行新增 `id`）：v1 文件**不再可读**，
->    装载期**跳过 + WARN**，处置靠 `mate transcripts prune`（ADR-5：不自动删）；
+>    装载期**跳过 + WARN**，处置靠 `mate transcripts prune`（不自动删）；
 >    跳过计数与"旧会话 id 形状"分开统计（`legacySchemaSkips` vs `legacyTranscriptSkips`）。
 > ⑥ **迁移是"有序追加 + 数据搬运"**（回到 v15 立下的常态）：`migrate_v17.go` 是本仓**第一个
 >    O(全部事件行) 的 Go 迁移步骤**——keyset 分页（`WHERE seq > ? ORDER BY seq LIMIT n`）逐行铸号、
@@ -361,7 +361,7 @@
 >    `backend/pkg/runtime/model_value.go`）；未登记该形态的 id 如实返回 `model_value_unsupported`，
 >    **不替它猜形状**（`backend/internal/manager/model_list.go` 的 `modelValueFor` 只剩分发）。于是
 >    `Registry` 的形状固定为 `map[string]Spec`（**声明半场**）+ **三张可执行端口表**
->    （`Syncer` / `NativePermissionAdapter` / `ModelValueAdapter`；ADR-2：可执行对象不进 `Spec`）。
+>    （`Syncer` / `NativePermissionAdapter` / `ModelValueAdapter`；可执行对象不进 `Spec`）。
 > ④ **新增守卫（这次收口的机器判据）**，三条挂在
 >    `backend/internal/archtest/knowledge_dependency_test.go`：
 >    `TestInternalDoesNotImportRuntimeAdapters`（`internal/**` 不得 import `pkg/runtime/<adapter>`）、
@@ -692,7 +692,7 @@
 
 ### ⑤ 不做 17 方法的队列
 
-它的待发送队列有 17 个方法。我们**只补三件**：重排 / 立即发送 / 取出编辑（ADR-10）。
+它的待发送队列有 17 个方法。我们**只补三件**：重排 / 立即发送 / 取出编辑（刻意不做 17 个方法）。
 判据是"有用户看得见的后果"——这三件各自对应一句用户会说的话（「顺序不对」「不想等了」
 「发错了」）。其余十几件在我们的交互里没有对应的话。
 

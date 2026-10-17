@@ -778,7 +778,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
   主动拆除（daemon 停机 / `POST /agents/:id/stop` / 空闲回收）在途轮次归 `interrupted`（无终态、可续聊
   重发），空闲会话**保持原状态**、不发 `run.error`；只有对端/子进程意外断开才可能把在途轮次收成
   失败，且空闲会话同样不被改写（只落 agent 诊断 `last_error.code=connection_lost`）。会话句柄在断连时
-  作废但**会话本身归平台所有**（ADR-4：执行可丢弃）→ 下一次 prompt 经 native resume / handoff memo
+  作废但**会话本身归平台所有**（执行可丢弃）→ 下一次 prompt 经 native resume / handoff memo
   重建，因此重启后历史会话可继续提问。
 - 孤儿回收（A1）：真实 daemon 下 `POST /agents/:id/start`（opencode）→ 注册表出现条目
   （`pid/pgid/command/runtime/agent/instance`）；`stop` 后条目摘除。启动回收用「上一实例登记 +
