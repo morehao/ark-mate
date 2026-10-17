@@ -323,13 +323,14 @@ export function ChatPage() {
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 12,
-          flexWrap: 'wrap',
+          // 长名字**截断**，不把右侧动作按钮挤到第二行（需求 7）。左侧块可伸缩、右侧不参与压缩。
+          flexWrap: 'nowrap',
           padding: '10px 20px',
           borderBottom: `1px solid ${tokens.border}`,
           background: tokens.surface,
         }}
       >
-        <div style={{ minWidth: 0 }}>
+        <div style={{ flex: '1 1 auto', minWidth: 0 }}>
           <div style={{ fontSize: 14.5, fontWeight: 650, letterSpacing: '-0.01em', lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={title}>
             {title}
           </div>
