@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
-	"github.com/morehao/ark-mate/internal/manager"
+	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/version"
 	"github.com/morehao/ark-mate/pkg/config"
@@ -88,10 +88,10 @@ type doctorReport struct {
 	//
 	// 它与人话的 `checks` 并存而不是互替：`checks[]` 回答"这一项过没过"，这一段回答
 	// "事实到底是几"。结构体定义在 manager（事实的构造函数也在那里），键名即它的字段序。
-	Providers manager.ProviderDoctorFacts `json:"providers"`
-	Failed    int                         `json:"failed"`
-	Warnings  int                         `json:"warnings"`
-	Passed    bool                        `json:"passed"`
+	Providers doctorfacts.ProviderDoctorFacts `json:"providers"`
+	Failed    int                             `json:"failed"`
+	Warnings  int                             `json:"warnings"`
+	Passed    bool                            `json:"passed"`
 }
 
 // payloadManifestDoc 是随包载荷清单 `payload.json` 的读取形状（M3-1 的产出，M4-5 的复算对象）。

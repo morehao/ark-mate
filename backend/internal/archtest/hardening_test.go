@@ -259,7 +259,13 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 	}
 
 	// d. 宿主实现必须在 Go 里存在，且三条判据逐条可查（对齐 dsh 的 resolveDirectoryPickerBackend）。
-	hostPath := filepath.Join(backendRoot(t), "internal", "manager", "workspace_picker.go")
+	//
+	// P0：原先钉着一个精确文件路径（`workspace_picker.go`）。该文件随工作区域搬进
+	// `domain/workspace`（设计 §3.4），钉路径在搬家后只会"读不到文件"（假红）。判据改锚在
+	// **符号**上：`nativePickerMode`（宿主判定的纯函数入口）由 `uniqueSourceFile` 保证全仓
+	// 恰好一处声明——0 处 = 判据失去对象（fail-closed），≥2 处 = 出现了第二份宿主判定。
+	hostPath := uniqueSourceFile(t, filepath.Join(backendRoot(t), "internal"), nil,
+		declREFor("nativePickerMode").String(), "宿主目录选择判定 `nativePickerMode`")
 	raw, err := os.ReadFile(hostPath)
 	if err != nil {
 		t.Fatalf("读 %s 失败: %v（宿主实现被删/改名了？守卫失效）", hostPath, err)
@@ -274,11 +280,86 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 		"ErrNativePickUnsupported",   //  无可用选择器必须是可判定错误
 	} {
 		if !strings.Contains(host, want) {
-			t.Errorf("workspace_picker.go 缺少 %q（宿主判定/配方被改动了？）", want)
+			t.Errorf("%s 缺少 %q（宿主判定/配方被改动了？）", hostPath, want)
 		}
 	}
 	if strings.Contains(host, "exec.Command(") == false && strings.Contains(host, "exec.CommandContext(") == false {
-		t.Error("workspace_picker.go 最终必须真的 spawn 宿主命令（否则原生那半是空的）")
+		t.Errorf("%s 最终必须真的 spawn 宿主命令（否则原生那半是空的）", hostPath)
+	}
+
+	// ——— 读模型不进用例层：宿主选目录**判定**这一格（P4a 正文第十五刀）———
+	//
+	// `NativePickerMode` 曾在 `svcworkspace` 的接口里（那个包已于第三十四刀整体删除）、由 `manager`
+	// 一行转发到 `domain/workspace.Picker`。它是**纯事实读取**（没有校验、没有错误码、没有响应装配），
+	// 用例层再包一层就是一行转发——与第十一刀会话读模型、第十三刀技能目录同一条口径。失效方式两种，
+	// 都不会让别的测试变红：
+	//   ① 转发回潮（接口里重新声明，或 manager 里重新出现同名方法）；
+	//   ② **事实出口被绕过**：调用点不去取"装配好的那个 picker"，而是自己造一个
+	//      ——新造的 picker 没有 `bindAddr` 事实，判定会静默变成 browse（本机浏览器入口
+	//      明明能用系统面板却被降级，正是这条口径当年踩过的坑）。
+	root := backendRoot(t)
+	var skillsBody strings.Builder
+	_ = skillsBody
+	// `svcworkspace` 那一格（第十五刀的判据）随端口包在第三十四刀整体删除而撤掉：包不存在了，
+	// "接口里不许再声明 `NativePickerMode(`"这条判据已由 `TestWorkspaceImplementationLivesInDomain`
+	// 末尾的"端口包不存在"接住（一条判据取代一族判据）。
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+		body := stripLineComments(readFileOrFatal(t, path))
+		if strings.Contains(body, "func (s *Service) NativePickerMode(") {
+			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) NativePickerMode(`："+
+				"那是一行转发（P4a 正文第十五刀）。", filepath.Base(path))
+		}
+	}
+	pickerFact := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_picker.go")))
+	if strings.Contains(pickerFact, "func (s *Service) SetBindAddr(") {
+		t.Error("`internal/manager` 里又出现 `func (s *Service) SetBindAddr(`：装配期写事实也只有一处入口" +
+			"（`Picker().SetBindAddr`），多一层转发会让「到底写进了哪个 picker」重新变成可以搞错的事" +
+			"（P4a 正文第十六刀）。")
+	}
+	// ——— 真动作的转发也要走同一条口径，且"替身缝在哪层，契约就在哪层"（P4a 正文第十七刀）———
+	//
+	// `PickDirectoryHost` 是**真动作**（spawn 宿主命令）而不只是读：搬走 manager 那条转发之后，
+	// 控制器直接持 `*workspace.Picker`——于是路由测试再也注入不了"选定 / 取消"两个结局。这条
+	// 守卫钉两件事：① 那层转发不许回潮；② 三个结局的契约测试必须**留在控制器级**（替身缝在
+	// 控制器的窄端口上），否则"搬完就少了一种结局"会静默发生。
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+		body := stripLineComments(readFileOrFatal(t, path))
+		if strings.Contains(body, "func (s *Service) PickDirectoryHost(") {
+			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) PickDirectoryHost(`："+
+				"那是真动作的一行转发（P4a 正文第十七刀），控制器经窄端口直接持域平面。", filepath.Base(path))
+		}
+	}
+	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "workspace.go")))
+	if !strings.Contains(ctrWork, "path, cancelled, err := h.picker.PickDirectoryHost(c.Request.Context())") {
+		t.Error("`ctrworkspace` 的 PickDirectory 里找不到 `h.picker.PickDirectoryHost(...)`：" +
+			"宿主选择器要么经控制器窄端口、要么经过渡转发，没有第三条路。")
+	}
+	if !strings.Contains(ctrWork, "type DirectoryPicker interface {") {
+		t.Error("`ctrworkspace` 里找不到 `type DirectoryPicker interface {`：窄端口是替身缝，" +
+			"删了它三个结局的契约就只能靠真 spawn 宿主命令来验。")
+	}
+	pickCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "pick_test.go")))
+	for _, want := range []string{"选定", "取消不是错误", "无可用选择器可判定", "native_pick_unsupported"} {
+		if !strings.Contains(pickCtr, want) {
+			t.Errorf("控制器级选择器契约测试里找不到 %q：三个结局（选定 / 取消 / 不支持）必须逐个在，", want)
+		}
+	}
+
+	appSrcForBind := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	if !strings.Contains(appSrcForBind, "a.svc.Picker().SetBindAddr(") {
+		t.Error("`internal/app/app.go` 里找不到 `a.svc.Picker().SetBindAddr(`：监听地址是**装配好的那个 " +
+			"picker** 的事实（它参与面板判定），不许经中间层或就地新造。")
+	}
+	if !strings.Contains(pickerFact, "func (s *Service) Picker() *workspace.Picker") {
+		t.Error("`internal/manager/workspace_picker.go` 里找不到 `func (s *Service) Picker() *workspace.Picker`：" +
+			"判定必须从**装配好的那个 picker**读（它自持 bindAddr 事实），不许就地新造。" +
+			"（判据失锚＝空转）")
+	}
+	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	if !strings.Contains(appSrc, "a.svc.Picker().NativePickerMode()") {
+		t.Error("`internal/app/app.go` 的 HostFacts 里找不到 `a.svc.Picker().NativePickerMode()`：" +
+			"系统面板可用性是从装配好的 picker 读出来的事实；就地 `workspace.NewPicker()` 会丢掉 " +
+			"bindAddr，判定静默变 browse。")
 	}
 }
 

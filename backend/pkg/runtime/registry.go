@@ -238,6 +238,42 @@ func (r *Registry) List() []Spec {
 // （真值只有连接期 initialize 的 `promptCapabilities` 知道）。没有出口 = 没有误用路径，
 // 由 archtest 的 `TestStaticCapsImagesHasNoConsumer` 钉住。
 
+// IDs 已注册 runtime id（升序）。
+//
+// 与 `List()` 的区别只在"要不要 Spec"：调用方往往只要 id（交付矩阵要按 runtime 逐条展开、
+// 医生要枚举全部内置底座），拿一整份 Spec 再取 id 会让人以为"没读 Spec 就是没判据"。
+// **升序是刻意的**：它经 `/providers`、`/library` 这类读面外露，顺序漂了会让响应字节随 map
+// 迭代顺序抖动。
+func (r *Registry) IDs() []string {
+	ids := make([]string, 0, len(r.specs))
+	for id := range r.specs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// McpTransportsFor 该 runtime 声明承载的 MCP 传输。
+//
+// **未声明 → 仅 stdio**（ACP 要求所有 agent 至少支持 stdio）；未知 runtime → `ok=false`
+// （调用方据此区分"这个底座不在册"与"它什么都不承载"——两者混一起会让不可达的 runtime 报成可达）。
+//
+// 为什么这条约定归注册表：它有两个消费面（Library 的逐 runtime 可达性、MCP 注入时的传输判据），
+// 各写一遍必然漂移，而漂移的表现是"面板说可达、注入时被跳过"。它读的又只有 Spec。
+//
+// 用字面量 `"stdio"` 而不是 `capability.TransportStdio`：`pkg/runtime` **零依赖 `pkg/capability`**
+// （P-1 定的包边界，见 projection.go 顶部），同包 `adapters.go` 的 Spec 声明也是这么写的。
+func (r *Registry) McpTransportsFor(id string) ([]string, bool) {
+	spec, ok := r.Get(id)
+	if !ok {
+		return nil, false
+	}
+	if len(spec.McpTransports) == 0 {
+		return []string{"stdio"}, true
+	}
+	return spec.McpTransports, true
+}
+
 // Require 返回 Spec；未知 ID 返回可读错误（供上层做参数校验）。
 func (r *Registry) Require(id string) (Spec, error) {
 	s, ok := r.Get(id)

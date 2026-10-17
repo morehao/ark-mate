@@ -91,24 +91,24 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveSession, rec *SessionRec) 
 	}
 	// ③ 探针不可读 → 保守当忙。连接反查不到（正在拆/已拆）时无法判断这条句柄挂在什么上面，
 	// 那就当它不可动——真正的重建由 ensureSession 负责，不在这里猜。
-	rc := o.connOfClient(as.client)
+	rc := o.pool.ConnOfClient(as.client)
 	if rc == nil {
 		return generationPlan{Action: genActionKeep, Reason: "连接不可读：不动（保守）"}
 	}
-	baseNow := o.baseKeyFor(spec)
 	wantFP := as.Fingerprint
 	if sel := ParseCapabilitySelection(rec.CapabilityJSON); sel != nil {
 		if fp := o.svc.capabilityFingerprint(spec.ID, sel); fp != "" {
 			wantFP = fp
 		}
 	}
-	// T5：平台生成的模型配置指纹也是代际维度（配置文件在进程启动时读）。
-	wantCfg := o.svc.runtimeConfigDigest(spec.ID)
+	// 目标键由池一次算完（基础键 + 能力指纹 + T5 的模型配置指纹，三个维度同源）。
+	// T5：平台生成的模型配置指纹也是代际维度——配置文件在**进程启动时**读。
+	keys := o.pool.KeyFor(spec, wantFP)
 	plan := generationPlan{
-		From: rc.key, To: generationKey(baseNow, wantFP, wantCfg),
-		PermChanged:        baseNow != rc.baseKey,
+		From: rc.Key, To: keys.Key,
+		PermChanged:        keys.BaseKey != rc.BaseKey,
 		FingerprintChanged: wantFP != as.Fingerprint,
-		ConfigChanged:      wantCfg != rc.configDigest,
+		ConfigChanged:      keys.ConfigDigest != rc.ConfigDigest,
 	}
 	if plan.To == plan.From {
 		plan.Action = genActionKeep
@@ -125,7 +125,7 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveSession, rec *SessionRec) 
 		plan.Reason = "会话忙碌状态不可读：保守顺延"
 		return plan
 	}
-	if o.perm.pendingCount(as.ID) > 0 || o.elic.pendingCount(as.ID) > 0 {
+	if o.perm.PendingCount(as.ID) > 0 || o.elic.PendingCount(as.ID) > 0 {
 		plan.Action = genActionDefer
 		plan.Reason = "有未应答的权限/提问：顺延到下一轮"
 		return plan
@@ -197,7 +197,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveSes
 			targetFP = fp
 		}
 	}
-	oldRC := o.connOfClient(as.client)
+	oldRC := o.pool.ConnOfClient(as.client)
 	// 预热新代际并按既有 resume 语义把会话挂上去（`connectSession` 内完成，
 	// 与"进程死掉重建"共用同一条路径——两条路径共用才不会出现"重启后能力集悄悄换一套"）。
 	next, _, err := o.connectSession(ctx, rec, spec, rec.Cwd, sel, targetFP)
@@ -221,7 +221,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveSes
 	// 缩权/换代后立刻淘汰**已无人引用**的旧代际（不等空闲阈值）：旧进程代表的可能是一套
 	// 已经不该存在的权限/能力面，留着它既占内存又违反"缩权立刻生效"的直觉。
 	// 仍有别的会话引用时不动它（那些会话会在自己的下一个轮次边界迁走）。
-	if o.reclaimGeneration(oldRC) {
+	if o.pool.ReclaimGeneration(oldRC) {
 		glog.Infow(ctx, "代际迁移后回收旧代际（已无人引用）", "key", plan.From)
 	}
 	return next, nil

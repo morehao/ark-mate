@@ -3,6 +3,9 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,11 +41,14 @@ func newProviderDoctorFixture(t *testing.T) *providerDoctorFixture {
 	return &providerDoctorFixture{home: home, providerDir: providerDir, st: st}
 }
 
-func (f *providerDoctorFixture) facts(t *testing.T) ProviderDoctorFacts {
+func (f *providerDoctorFixture) facts(t *testing.T) doctorfacts.ProviderDoctorFacts {
 	t.Helper()
-	return CollectProviderDoctorFacts(context.Background(), f.st, ProviderDoctorOptions{
+	return doctorfacts.CollectProviderDoctorFacts(context.Background(), f.st, doctorfacts.ProviderDoctorOptions{
 		Home: f.home, ProviderDir: f.providerDir, DBPath: filepath.Join(f.home, "mate.db"),
-	})
+		ProvidersFileName:   provider.ProvidersFileName,
+		BackupName:          provider.ProvidersBackupName,
+		MismatchExtraMarker: provider.ProviderMismatchExtraMarker,
+	}, CollectRuntimeModelFacts)
 }
 
 // TestCollectProviderDoctorFactsReadsEverything 一次把五件事都放上：没有密钥的档案、
@@ -89,13 +95,21 @@ func TestCollectProviderDoctorFactsReadsEverything(t *testing.T) {
 	}
 	// 托管文档：库里有 2 条 provider 密钥面（ok-key 有值）+ 2 条 MCP 密钥；镜像里缺一条、
 	// 多一条（两边的差异都要如实报出来）。
-	writeMirrorFile(t, f.home, 0o600, map[string]string{
+	// 直接写托管文档（不走 Service）：这里要造的是**任意形状**的现场——包括镜像里多一条、
+	// 少一条这种"库与镜像对不上"的形态。
+	mirrorRaw, err := json.Marshal(map[string]string{
 		"providers/ok-key": "sk-ok",
 		"store:mcp/used":   "sk-used",
 		"providers/ghost":  "sk-ghost",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(credential.CredentialsPath(f.home), mirrorRaw, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	// 旧机制遗留物：目录 + 主密钥文件都在（**只读不删**，这一条永远只是 warn）。
-	legacyDir, legacyKey := LegacySecretPaths(LegacySecretAnchor(f.home, f.providerDir))
+	legacyDir, legacyKey := doctorfacts.LegacySecretPaths(doctorfacts.LegacySecretAnchor(f.home, f.providerDir))
 	if err := os.MkdirAll(filepath.Join(legacyDir, "providers"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -163,18 +177,6 @@ func TestCollectProviderDoctorFactsReadsEverything(t *testing.T) {
 	}
 }
 
-// writeMirrorFile 直接写托管文档（不走 Service：这里要造的是**任意形状**的现场）。
-func writeMirrorFile(t *testing.T, home string, perm os.FileMode, values map[string]string) {
-	t.Helper()
-	raw, err := json.Marshal(values)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(CredentialsPath(home), raw, perm); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // TestCollectProviderDoctorFactsMemoryMode 没有持久层（memory 模式）时：DB 派生的事实
 // 全部记 unknown，**不许**把 0 条当成事实（那会假绿），也不许因为读不到就判失败。
 func TestCollectProviderDoctorFactsMemoryMode(t *testing.T) {
@@ -183,10 +185,12 @@ func TestCollectProviderDoctorFactsMemoryMode(t *testing.T) {
 	if err := os.MkdirAll(providerDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(providerDir, providersFileName), []byte(`{"p1":{"type":"deepseek"}}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(providerDir, provider.ProvidersFileName), []byte(`{"p1":{"type":"deepseek"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := CollectProviderDoctorFacts(context.Background(), nil, ProviderDoctorOptions{Home: home, ProviderDir: providerDir})
+	got := doctorfacts.CollectProviderDoctorFacts(context.Background(), nil, doctorfacts.ProviderDoctorOptions{
+		Home: home, ProviderDir: providerDir, ProvidersFileName: provider.ProvidersFileName,
+	}, CollectRuntimeModelFacts)
 	if got.Carrier != "unknown" || got.CarrierNote == "" {
 		t.Fatalf("没有持久层时载体应记 unknown 并给出原因：%+v", got)
 	}
@@ -197,37 +201,11 @@ func TestCollectProviderDoctorFactsMemoryMode(t *testing.T) {
 		t.Fatalf("没有 DB 时不该凭空造出 DB 事实：%+v", got)
 	}
 	// 载体无关的那几条仍然要报：托管文档还没有（可重建，不是故障）、没有旧机制遗留物。
-	if got.CredentialsExists || got.CredentialsPermOK || got.CredentialsPath != CredentialsPath(home) {
+	if got.CredentialsExists || got.CredentialsPermOK || got.CredentialsPath != credential.CredentialsPath(home) {
 		t.Fatalf("托管文档面应照常探测并如实报「还没有」：%+v", got)
 	}
 	if got.LegacySecretDir || got.LegacySecretKeyFile || got.LegacySecretCount != 0 {
 		t.Fatalf("没有遗留物时不该报有：%+v", got)
-	}
-}
-
-// TestProviderMismatchBenignOnly 对账分档：只有"库里有、文件里没有"才算快照滞后。
-//
-// 这条分档的判据就是写入侧拼串里的那个标记（`providerMismatchExtraMarker`），所以这里
-// 直接用它造串——**两侧共用同一个常量**，改文案不会让分档悄悄失效。
-func TestProviderMismatchBenignOnly(t *testing.T) {
-	cases := []struct {
-		name    string
-		entries []string
-		want    bool
-	}{
-		{"空", nil, false},
-		{"只有快照滞后", []string{"a: " + providerMismatchExtraMarker + "（写面新建？）"}, true},
-		{"文件里有库里没有", []string{"a: 文件里有、DB 里没有"}, false},
-		{"type 不一致", []string{"a: type 不一致（文件 \"x\" / DB \"y\"）"}, false},
-		{"混合", []string{
-			"a: " + providerMismatchExtraMarker + "（写面新建？）",
-			"b: 文件里有、DB 里没有",
-		}, false},
-	}
-	for _, tc := range cases {
-		if got := providerMismatchBenignOnly(tc.entries); got != tc.want {
-			t.Errorf("%s：got %t want %t", tc.name, got, tc.want)
-		}
 	}
 }
 
@@ -294,79 +272,9 @@ func aclValue(value string) acl.ConfigOptionValue {
 	return acl.ConfigOptionValue{Value: value}
 }
 
-// TestLegacySecretAnchor 旧机制遗留物的锚点：**ProviderDir 的父目录**优先（与搬运扫描同源）。
-//
-// 两个文件名不在这里断言（它们由 `internal/store` 的历史面拥有，见 v20 词规），这里只钉锚点。
-func TestLegacySecretAnchor(t *testing.T) {
-	if got := LegacySecretAnchor("/h", "/h/providers"); got != "/h" {
-		t.Fatalf("应取 ProviderDir 的父目录：%q", got)
-	}
-	if got := LegacySecretAnchor("/h", "/data/providers/"); got != filepath.Clean("/data") {
-		t.Fatalf("尾斜杠应被 Clean 掉：%q", got)
-	}
-	if got := LegacySecretAnchor("/h", ""); got != "/h" {
-		t.Fatalf("ProviderDir 为空时回落到 mate home：%q", got)
-	}
-	if dir, key := LegacySecretPaths(""); dir != "" || key != "" {
-		t.Fatalf("锚点为空 → 两个路径都为空（不给出会指向当前目录的假路径）：%q %q", dir, key)
-	}
-}
-
-// TestReadCredentialsMirror 托管文档的**只读**探测：不存在 / 权限合规 / 权限过宽 / 形状坏掉，
-// 四条路各自给出结论，且**不建文件、不改权限**（医生没有落笔权）。
-func TestReadCredentialsMirror(t *testing.T) {
-	home := t.TempDir()
-
-	// ① 还没有：可重建，不是故障。
-	got := readCredentialsMirror(home)
-	if got.Exists || got.PermOK || !strings.Contains(got.Note, "尚未生成") {
-		t.Fatalf("还没有文档时应如实报「尚未生成」：%+v", got)
-	}
-	if _, err := os.Lstat(CredentialsPath(home)); !os.IsNotExist(err) {
-		t.Fatalf("探测不许创建文档（err=%v）", err)
-	}
-
-	// ② 合规：0600 + 合法映射。
-	writeMirrorFile(t, home, 0o600, map[string]string{"providers/p1": "sk-1"})
-	got = readCredentialsMirror(home)
-	if !got.Exists || !got.PermOK || got.Perm != "0600" || len(got.Raw) != 1 {
-		t.Fatalf("合规文档应读得出来：%+v", got)
-	}
-
-	// ③ 权限过宽：**硬失败**那一档，且探测不许顺手 chmod。
-	if err := os.Chmod(CredentialsPath(home), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got = readCredentialsMirror(home)
-	if got.PermOK || !strings.Contains(got.Note, "chmod 600") {
-		t.Fatalf("权限过宽应报出来并给出路：%+v", got)
-	}
-	if fi, err := os.Stat(CredentialsPath(home)); err != nil || fi.Mode().Perm() != 0o644 {
-		t.Fatalf("探测不许改权限（mode=%v err=%v）", fi.Mode().Perm(), err)
-	}
-	_ = os.Chmod(CredentialsPath(home), 0o600)
-
-	// ④ 形状坏掉（不是 `引用 → 值` 对象）：可重建，但要说清。
-	if err := os.WriteFile(CredentialsPath(home), []byte("[1,2,3]"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got = readCredentialsMirror(home)
-	if got.Exists && len(got.Raw) != 0 {
-		t.Fatalf("坏形状不该被解析成值表：%+v", got)
-	}
-	if !strings.Contains(got.Note, "JSON 对象") {
-		t.Fatalf("坏形状应说清是什么问题：%+v", got)
-	}
-
-	// ⑤ home 解析不出来：给出结论而不是 panic。
-	if got := readCredentialsMirror(""); got.Path != "" || got.Note == "" {
-		t.Fatalf("空 home 应老实报出来：%+v", got)
-	}
-}
-
 // TestCollectProviderDoctorFactsNoStoreNoHome 极端输入：什么都没有时不许 panic。
 func TestCollectProviderDoctorFactsNoStoreNoHome(t *testing.T) {
-	got := CollectProviderDoctorFacts(context.Background(), nil, ProviderDoctorOptions{})
+	got := doctorfacts.CollectProviderDoctorFacts(context.Background(), nil, doctorfacts.ProviderDoctorOptions{}, CollectRuntimeModelFacts)
 	if got.Carrier != "unknown" || got.LegacySecretAnchor != "" {
 		t.Fatalf("空输入应老实报 unknown 且不给假锚点：%+v", got)
 	}

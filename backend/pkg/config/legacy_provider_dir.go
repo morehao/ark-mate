@@ -10,7 +10,7 @@ import (
 //
 // v19 之前 `<MATE_HOME>/agents/` 装两件事：agent 定义（`<id>.json`、`default.json`）与
 // `providers.json`。agent 概念并入 runtime 之后只剩后者，目录随之改名为 `providers/`
-// （一词一目录，见 docs/design-and-roadmap.md「决策变更 v19」③）。
+// （一词一目录，见 docs/decisions.md「决策 v19」③）。
 const (
 	legacyProviderSubdir = "agents"
 	providerFileBase     = "providers.json"

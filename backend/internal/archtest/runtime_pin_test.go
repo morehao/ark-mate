@@ -56,35 +56,47 @@ var (
 
 // selectionSurfaceTarget 一处扫描面：ban 哪些形状。
 //
-// 为什么按文件给不同的形状集（而不是一套扫全部）：`SessionRec` 上"这条会话上一次跑在哪个
+// 为什么按承载处给不同的形状集（而不是一套扫全部）：`SessionRec` 上"这条会话上一次跑在哪个
 // 底座上"是**执行事实**（该字段 v17 前叫 `RuntimeHint`，现在叫 `RuntimeID`），恢复路径要靠它
-// 判 `sameRuntime`。它是读出来的账，不是用户能填的选择面，因此 service.go 只 ban 前两条。
+// 判 `sameRuntime`。它是读出来的账，不是用户能填的选择面，因此会话记录只 ban 前两条。
 // 禁词形状本身仍是 `RuntimeHint string`——那是**已删除**的选择面字段名，改名之后（v17）
 // 它不再是一条"放行豁免"，而只是一句历史说明：这个名字出现即红。
+//
+// `path` 一律是**绝对路径**：会话记录那一处按**符号**定位（`uniqueSourceFile`，见下面
+// `TestNoAgentRuntimeSelectionSurface` 的注释），另两处是仍然稳定的精确路径（`dto` 与
+// `pkg/automation` 不在本次「manager 解散」的重划范围内）。
 type selectionSurfaceTarget struct {
-	rel      string
+	path     string
 	patterns []*regexp.Regexp
 }
 
 // TestNoAgentRuntimeSelectionSurface 用户面不得再有"按 agent / 会话选底座"的字段声明。
 //
-// 扫描面是**还活着的那些承载处**（v19 起 agent 定义整个没了，所以原来的
-// `manager/agents.go` 与 `dto/dtoagent/*` 三处随之删除——把它们留在清单里会让这条守卫
-// 一上来就"读不到文件"而红，而不是静默空转）：会话请求、automation 目标、manager 的会话记录。
-// 刻意用**目录级清单**而不是全仓扫描：`capability.Skill.Runtimes` 等**投放声明**仍然合法
+// 扫描面是**还活着的那些承载处**（v19 起 agent 定义整个没了，所以当时 agent 定义与
+// `dto/dtoagent/*` 那几处随之删除——把它们留在清单里会让这条守卫一上来就"读不到文件"而红，
+// 而不是静默空转）：会话请求、automation 目标、会话记录。
+// 刻意用**逐个承载处**而不是全仓扫描：`capability.Skill.Runtimes` 等**投放声明**仍然合法
 // （`runtimes` 在 v19 之后依然是 skill 的正经字段），全仓扫会误伤，而误伤的守卫迟早被人放宽到失效。
+//
+// P0：会话记录那一处原先钉着精确文件路径（`service.go`）。该文件是 §3.4「改判」的
+// 解散对象（45 个字段按归属拆到领域包），钉路径必然在搬家后烂掉。判据改锚在**符号**上——
+// `type SessionRec struct` 是"会话记录"这条承载处的声明行，它随会话域搬进 `domain/session`；
+// `uniqueSourceFile` 已经 fail-closed（0 处 = 判据失去对象；≥2 处 = 有人又抄了一份），
+// 而旧写法只读钉死的那一个文件、看不见第二处。
 func TestNoAgentRuntimeSelectionSurface(t *testing.T) {
 	root := backendRoot(t)
+	internalDir := filepath.Join(root, "internal")
 	targets := []selectionSurfaceTarget{
-		{rel: filepath.Join("internal", "manager", "service.go"),
+		{path: uniqueSourceFile(t, internalDir, nil,
+			`(?m)^type\s+SessionRec\s+struct`, "会话记录 `SessionRec` 的类型声明"),
 			patterns: []*regexp.Regexp{reRuntimesList, reRoutingPolicy}},
-		{rel: filepath.Join("internal", "dto", "dtosession", "request.go"),
+		{path: filepath.Join(root, "internal", "dto", "dtosession", "request.go"),
 			patterns: []*regexp.Regexp{reRuntimeHintStr}},
-		{rel: filepath.Join("pkg", "automation", "types.go"),
+		{path: filepath.Join(root, "pkg", "automation", "types.go"),
 			patterns: []*regexp.Regexp{reRuntimeHintStr}},
 	}
 	for _, tgt := range targets {
-		path := filepath.Join(root, tgt.rel)
+		path := tgt.path
 		src, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("读不到 %s: %v（路径改了请同步本守卫）", path, err)
@@ -94,8 +106,8 @@ func TestNoAgentRuntimeSelectionSurface(t *testing.T) {
 			if m := re.FindString(clean); m != "" {
 				t.Errorf("%s 里出现了选择面字段声明 %q：底座由构建期固定，"+
 					"用户面不得再有按 agent/会话选底座的字段（要拒绝请求请用 json.RawMessage，"+
-					"见 `dtosession.Request.AgentID` 与 `manager/reject_removed_keys.go`）",
-					tgt.rel, strings.TrimSpace(m))
+					"见 `dtosession.Request.AgentID` 与被撤键的显式拒绝实现 `rejectRemovedAgentSelection`）",
+					path, strings.TrimSpace(m))
 			}
 		}
 	}
@@ -129,11 +141,19 @@ func TestNoAgentRuntimeSelectionSurface(t *testing.T) {
 // 那个键被 JSON 绑定悄悄丢掉，用户以为"我改了底座/我指定了 agent"，实际什么都没发生。
 // 这类静默 no-op 是本仓的 B1 类风险，而它**不会让任何别的测试变红**。
 //
-// v19 的面：会话写面（`agent_id`）与用量读面（`?agent_id=`）走 `reject_removed_keys.go` 里的
-// 两个函数，automation 补丁里的 `target.runtime_hint` 走 `automation.go` 的那一对
-// （拒绝 + 老键自愈）。三处各自的"定义"与"调用"都要在，缺一处就是一条写路径静默忽略。
+// v19 的面：会话写面（`agent_id`）与用量读面（`?agent_id=`）走会话与用量两个写面上对
+// `rejectRemovedAgentSelection` / `rejectRemovedUsageDimension` 的调用，automation 补丁里的
+// `target.runtime_hint` 走 automation 写面的那一对（拒绝 + 老键自愈）。三处各自的"定义"与
+// "调用"都要在，缺一处就是一条写路径静默忽略。
+//
+// P0：判据一律锚在**符号**上。原先它钉着四个精确文件路径（`reject_removed_keys.go` /
+// `sessions.go` / `usage.go` / `automation.go`）——它们在重构里分别归 `mechanism/definition`
+// 与 `domain/session`、`domain/automation`
+// （设计 §3.4），钉路径在搬家后只会"读不到文件"（假红）或静默空转。锚在符号上之后：
+// 0 处 = 判据失去对象（fail-closed），≥2 处 = 有人又抄了一份实现/调用点（旧写法只读钉死的那一个文件，看不见第二处）。
 func TestRuntimeSelectionRejectionsExist(t *testing.T) {
 	root := backendRoot(t)
+	internalDir := filepath.Join(root, "internal")
 
 	// ① DTO 必须保留**只为拒绝**的原始 JSON 字段（类型是 json.RawMessage）。
 	dto := filepath.Join(root, "internal", "dto", "dtosession", "request.go")
@@ -147,48 +167,38 @@ func TestRuntimeSelectionRejectionsExist(t *testing.T) {
 			"才能 40001 显式拒绝（删掉它 = 请求静默成功、什么都不发生）", dto)
 	}
 
-	// ② 拒绝的**实现**必须存在（两个函数各一处定义）。
-	rej := filepath.Join(root, "internal", "manager", "reject_removed_keys.go")
-	src, err = os.ReadFile(rej)
-	if err != nil {
-		t.Fatalf("读不到 %s: %v", rej, err)
-	}
-	clean = stripTSComments(string(src))
-	for _, want := range []string{"func rejectRemovedAgentSelection(", "func rejectRemovedUsageDimension("} {
-		if !strings.Contains(clean, want) {
-			t.Errorf("%s 里找不到 %q：被撤掉的键的显式拒绝实现没了（写面会静默成功）", rej, want)
+	// ② 拒绝的**实现**必须存在，且**恰好一处**（按符号定位，不钉文件路径）。
+	for _, fn := range []string{"rejectRemovedAgentSelection", "rejectRemovedUsageDimension"} {
+		impl := uniqueSourceFile(t, internalDir, nil, declREFor(fn).String(),
+			"被撤键的显式拒绝实现 `"+fn+"`")
+		if !strings.Contains(stripTSComments(readSourceFor(t, impl)), "func "+fn+"(") {
+			t.Errorf("%s 里找不到 `func %s(`：被撤掉的键的显式拒绝实现没了（写面会静默成功）", impl, fn)
 		}
 	}
 
 	// ②' 拒绝必须被**调用**——只有定义没有调用等于一条没人执行的规矩。
+	// 锚 = 那次交接本身（把接住的 raw 值交给拒绝函数）：调用点随会话/用量写面搬走，判据不跟着搬。
 	for _, site := range []struct {
-		rel  string
+		expr string
 		call string
 	}{
-		{filepath.Join("internal", "manager", "sessions.go"), "rejectRemovedAgentSelection("},
-		{filepath.Join("internal", "manager", "usage.go"), "rejectRemovedUsageDimension("},
+		{"rejectRemovedAgentSelection(req.AgentID)", "rejectRemovedAgentSelection("},
+		{"rejectRemovedUsageDimension(q)", "rejectRemovedUsageDimension("},
 	} {
-		path := filepath.Join(root, site.rel)
-		src, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("读不到 %s: %v", path, err)
-		}
-		if !strings.Contains(stripTSComments(string(src)), site.call) {
-			t.Errorf("%s 里找不到 %q：这条写/读路径会静默忽略被撤掉的键", site.rel, site.call)
+		path := uniqueSourceFile(t, internalDir, nil, regexp.QuoteMeta(site.expr),
+			"被撤键的拒绝调用点 `"+site.expr+"`")
+		if !strings.Contains(stripTSComments(readSourceFor(t, path)), site.call) {
+			t.Errorf("%s 里找不到 %q：这条写/读路径会静默忽略被撤掉的键", path, site.call)
 		}
 	}
 
-	// ③ automation 写面必须有 runtime_hint 的拒绝 + 老键自愈。
-	auto := filepath.Join(root, "internal", "manager", "automation.go")
-	src, err = os.ReadFile(auto)
-	if err != nil {
-		t.Fatalf("读不到 %s: %v", auto, err)
-	}
-	clean = stripTSComments(string(src))
-	for _, want := range []string{"func rejectRuntimeHintInPatch(", "func dropLegacyRuntimeHint("} {
-		if !strings.Contains(clean, want) {
-			t.Errorf("%s 里找不到 %q：automation 写面对 target.runtime_hint "+
-				"既要显式拒绝（40001）也要对老定义的残留键自愈（否则存量定义永远存不回去）", auto, want)
+	// ③ automation 写面必须有 runtime_hint 的拒绝 + 老键自愈。锚同样是符号。
+	for _, fn := range []string{"rejectRuntimeHintInPatch", "dropLegacyRuntimeHint"} {
+		impl := uniqueSourceFile(t, internalDir, nil, declREFor(fn).String(),
+			"automation 写面的 `"+fn+"`")
+		if !strings.Contains(stripTSComments(readSourceFor(t, impl)), "func "+fn+"(") {
+			t.Errorf("%s 里找不到 `func %s(`：automation 写面对 target.runtime_hint "+
+				"既要显式拒绝（40001）也要对老定义的残留键自愈（否则存量定义永远存不回去）", impl, fn)
 		}
 	}
 }

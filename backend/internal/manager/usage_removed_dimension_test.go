@@ -31,14 +31,14 @@ func TestUsageSummaryRejectsRemovedAgentDimension(t *testing.T) {
 	defer st.Close()
 	svc.EnableStore(st)
 
-	_, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{AgentID: "stub"})
+	_, err := sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{AgentID: "stub"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40001 || !strings.Contains(ge.Msg, "[agent_selection_removed]") {
 		t.Fatalf("期望 40001/agent_selection_removed，got %v", err)
 	}
 
 	// 反证：没有这个键时照常出数（拒绝不能误伤正常查询）。
-	if _, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"}); err != nil {
+	if _, err := sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"}); err != nil {
 		t.Fatalf("不带已下线键应照常出数: %v", err)
 	}
 }

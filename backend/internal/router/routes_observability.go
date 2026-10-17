@@ -12,12 +12,12 @@ import (
 // registerUsage 用量统计（M3 首项）：runs 计数/时长 + 会话上下文/费用快照聚合
 // （memory 模式返回 40501）。只读，挂在 rest 面凭据中间件之后。
 func registerUsage(v1 *gin.RouterGroup, ports Ports) {
-	usage := ctrusage.NewUsageCtr(ports.Usage)
+	usage := ctrusage.NewUsageCtr(ports.SessionPlane)
 	v1.GET("/usage/summary", usage.Summary)
 }
 
 // registerStream 实时事件通道（`/ws/events`）：订阅 eventbus → 按会话聚合推送
-// event/snapshot 帧，契约见 docs/design-and-roadmap.md §4.5。
+// event/snapshot 帧，契约见 docs/architecture.md §6.2。
 //
 // **鉴权在带内**：这条路由不挂 REST 凭据中间件，因为浏览器无法为 WS 握手设置请求头，
 // 而令牌又不允许进 URL（M1-1）。取而代之的是首帧 `attach` 携带 stream 面凭据，

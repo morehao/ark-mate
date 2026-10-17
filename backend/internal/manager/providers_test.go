@@ -20,7 +20,7 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 	svc := providerTestSvc(t, dir)
 
 	key := "sk-secret-abc"
-	resp, err := svc.CreateProvider(ctx, providerReq("default", &key))
+	resp, err := svc.providerPlane.CreateProvider(ctx, providerReq("default", &key))
 	if err != nil {
 		t.Fatalf("UpdateProvider: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 		t.Fatal("应 has_key=true")
 	}
 	// 列出时 key 字段应缺席（结构不含 Key；再断言序列化不含明文）。
-	items, _ := svc.ListProviders(context.Background())
+	items, _ := svc.providerPlane.ListProviders(context.Background())
 	if len(items) != 1 || items[0].HasKey != true {
 		t.Fatalf("ListProviders: %+v", items)
 	}
@@ -43,12 +43,12 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 	// env 注入：**逐供应商派生的引用名**（v11 的 `<TYPE>_API_KEY` 已删，ADR-16）。
 	// 判据不是"名字长什么样"而是"两条供应商拿到两个不同的名字"——同一把密钥命中两条 route
 	// 正是 v11 的真实缺陷（A12 的回归点）。
-	envs := svc.providerEnvFor(runtimetest.ID, "default")
+	envs := svc.providerPlane.ProviderEnvFor(runtimetest.ID, "default")
 	if len(envs) != 1 || !strings.HasPrefix(envs[0], "MATE_DEFAULT_") || !strings.HasSuffix(envs[0], "_API_KEY=sk-secret-abc") {
 		t.Fatalf("env 注入不符（应为逐供应商派生名）: %+v", envs)
 	}
-	_, _ = svc.CreateProvider(ctx, providerReq("ds", &key))
-	got := svc.providerEnvFor(runtimetest.ID, "ds")
+	_, _ = svc.providerPlane.CreateProvider(ctx, providerReq("ds", &key))
+	got := svc.providerPlane.ProviderEnvFor(runtimetest.ID, "ds")
 	if len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DS_") {
 		t.Fatalf("第二条供应商也该有自己的引用名: %+v", got)
 	}
@@ -58,11 +58,11 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 
 	// 清除：key 空串 → has_key=false、env nil。
 	clear := ""
-	_, _ = svc.UpdateProvider(ctx, "default", dtoprovider.ProviderPatchReq{APIKey: &clear})
-	if svc.providerEnvFor(runtimetest.ID, "default") != nil {
+	_, _ = svc.providerPlane.UpdateProvider(ctx, "default", dtoprovider.ProviderPatchReq{APIKey: &clear})
+	if svc.providerPlane.ProviderEnvFor(runtimetest.ID, "default") != nil {
 		t.Fatal("清除后不应注入 env")
 	}
-	items, _ = svc.ListProviders(context.Background())
+	items, _ = svc.providerPlane.ListProviders(context.Background())
 	for _, it := range items {
 		if it.ID == "default" && it.HasKey {
 			t.Fatalf("清除后 has_key 应为 false: %+v", it)
@@ -71,10 +71,10 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 
 	// 重启（新 Service 同目录）→ 档案装载（含 ds 仍有 key、default 无 key）。
 	svc2 := providerTestSvc(t, dir)
-	if svc2.providerEnvFor(runtimetest.ID, "ds") == nil {
+	if svc2.providerPlane.ProviderEnvFor(runtimetest.ID, "ds") == nil {
 		t.Fatal("重启后 ds key 应仍在")
 	}
-	if svc2.providerEnvFor(runtimetest.ID, "default") != nil {
+	if svc2.providerPlane.ProviderEnvFor(runtimetest.ID, "default") != nil {
 		t.Fatal("重启后 default 清除应保持")
 	}
 }

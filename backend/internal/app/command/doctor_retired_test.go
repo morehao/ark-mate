@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/manager"
+	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/config"
@@ -224,20 +224,20 @@ func TestDoctorRetiredSectionWithoutStoreNeverClaimsClean(t *testing.T) {
 func TestRenderRetiredChecksSingleFaceFailureIsNeverClean(t *testing.T) {
 	cases := []struct {
 		name    string
-		facts   manager.RetiredRuntimeFacts
+		facts   doctorfacts.RetiredRuntimeFacts
 		broken  string
 		healthy string
 	}{
 		{
 			name: "会话面读失败、定义面正常",
-			facts: manager.RetiredRuntimeFacts{KnownRuntimeIDs: []string{"in-service"},
+			facts: doctorfacts.RetiredRuntimeFacts{KnownRuntimeIDs: []string{"in-service"},
 				SessionScan: "unreadable", SkillScan: "ok", SessionRefCount: 0},
 			broken:  "retired sessions",
 			healthy: "retired skills",
 		},
 		{
 			name: "定义面读失败、会话面正常",
-			facts: manager.RetiredRuntimeFacts{KnownRuntimeIDs: []string{"in-service"},
+			facts: doctorfacts.RetiredRuntimeFacts{KnownRuntimeIDs: []string{"in-service"},
 				SessionScan: "ok", SkillScan: "unreadable"},
 			broken:  "retired skills",
 			healthy: "retired sessions",

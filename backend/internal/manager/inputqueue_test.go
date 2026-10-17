@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"sync"
 	"testing"
@@ -65,7 +66,7 @@ func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orch
 	as := &ActiveSession{ID: "conv-1", Runtime: "stub", sess: sess}
 	r.Orch.sessions[as.ID] = as
 	r.Svc.registerSession(&SessionRec{
-		ID: as.ID, RuntimeID: "stub", Status: SessionStatusInProgress, Generation: 1,
+		ID: as.ID, RuntimeID: "stub", Status: session.SessionStatusInProgress, Generation: 1,
 	})
 	t.Cleanup(func() {
 		// 放行所有阻塞中的轮次，**等到在途轮次真正收尾**，最后才摘句柄——否则清库时还有 executeRun 在写。
@@ -219,7 +220,7 @@ func TestPromptAfterRunQueuesWhenBusy(t *testing.T) {
 	// 事件：input_queued（含文本与投递模式——前端队列靠它建项）。
 	var found bool
 	for _, ev := range busEvents(svc) {
-		if ev.Type != BusInputQueued {
+		if ev.Type != session.BusInputQueued {
 			continue
 		}
 		found = true
@@ -269,12 +270,12 @@ func TestQueuedInputDeliveredAfterRunEnds(t *testing.T) {
 	var delivered, cancelled int
 	for _, ev := range busEvents(svc) {
 		switch ev.Type {
-		case BusInputDelivered:
+		case session.BusInputDelivered:
 			delivered++
 			if payloadOf(ev)["reason"] != ReasonRunFinished {
 				t.Fatalf("delivered 应带 reason=run_finished: %+v", ev.Payload)
 			}
-		case BusInputCancelled:
+		case session.BusInputCancelled:
 			cancelled++
 		}
 	}
@@ -343,7 +344,7 @@ func TestQueuedInputInterruptThenPrompt(t *testing.T) {
 	}
 	var sawCancelled bool
 	for _, ev := range busEvents(svc) {
-		if ev.Type == BusRunCancelled {
+		if ev.Type == session.BusRunCancelled {
 			sawCancelled = true
 		}
 	}
@@ -362,23 +363,23 @@ func TestDeleteQueuedInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err := svc.DeleteQueuedInput(context.Background(), "conv-1", resp.InputID)
+	ok, err := queueSvc(svc).DeleteQueuedInput(context.Background(), "conv-1", resp.InputID)
 	if err != nil || !ok {
 		t.Fatalf("撤下失败: ok=%v err=%v", ok, err)
 	}
 	if left := svc.listQueuedInputs(context.Background(), "conv-1"); len(left) != 0 {
 		t.Fatalf("撤下后队列应为空: %+v", left)
 	}
-	if again, err := svc.DeleteQueuedInput(context.Background(), "conv-1", resp.InputID); err != nil || again {
+	if again, err := queueSvc(svc).DeleteQueuedInput(context.Background(), "conv-1", resp.InputID); err != nil || again {
 		t.Fatalf("重复撤下应幂等 false: %v/%v", again, err)
 	}
 	// 跨会话撤下：换个会话 id 撤不掉（归属由 SQL 双条件钉住）。
-	if other, err := svc.DeleteQueuedInput(context.Background(), "conv-other", resp.InputID); err != nil || other {
+	if other, err := queueSvc(svc).DeleteQueuedInput(context.Background(), "conv-other", resp.InputID); err != nil || other {
 		t.Fatalf("跨会话撤下必须失败: %v/%v", other, err)
 	}
 	var cancelled bool
 	for _, ev := range busEvents(svc) {
-		if ev.Type == BusInputCancelled && payloadOf(ev)["reason"] == ReasonUserCancel {
+		if ev.Type == session.BusInputCancelled && payloadOf(ev)["reason"] == ReasonUserCancel {
 			cancelled = true
 		}
 	}
@@ -389,7 +390,7 @@ func TestDeleteQueuedInput(t *testing.T) {
 	g.release <- struct{}{}
 	waitQueueDrain(t, svc, "conv-1")
 	for _, ev := range busEvents(svc) {
-		if ev.Type == BusInputDelivered {
+		if ev.Type == session.BusInputDelivered {
 			t.Fatalf("撤下的项不该被投递: %+v", ev.Payload)
 		}
 	}
@@ -495,7 +496,7 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 	}
 	found := false
 	for _, e := range evs {
-		if e.Type != BusInputCancelled {
+		if e.Type != session.BusInputCancelled {
 			continue
 		}
 		p, _ := decodePayload(e.PayloadJSON).(map[string]any)

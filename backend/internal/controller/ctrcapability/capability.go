@@ -9,8 +9,11 @@ import (
 	"io"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/domain/mcp"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
+	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -39,18 +42,45 @@ type CapabilityCtr interface {
 var _ CapabilityCtr = (*capabilityCtr)(nil)
 
 // CapabilityHandler 处理能力数据面 REST（P1：Skill/MCP/Tool 目录列出；注入属 P2）。
+//
+// P4a 正文第三十九刀之后这里**没有** `svc svccapability.CapabilitySvc` 字段：那个接口已经空了
+// （写面 / 探测面 / live 五条都归了域平面），空接口留在控制器上只会让人以为"还有一格端口"。
+// 现在持有的全是**依赖事实**（能力注册表 / 技能平面 / MCP 平面 / 密钥面）与本包内构造的两个
+// 读模型用例。
 type capabilityCtr struct {
-	svc svccapability.CapabilitySvc
+	// tools 工具目录**读模型**（P4a 正文第十二刀起在本包内构造）。
+	//
+	// 它留在用例层而不是让控制器直接用注册表：工具目录要**投影**
+	// （`capability.Tool` → DTO，而 `pkg/` 不能 import `internal/dto`）。
+	tools svccapability.ToolCatalog
+	// skills 技能目录（P4a 正文第十三刀起由域平面直接提供）。
+	//
+	// 与 `tools` 的区别值得记：技能目录的投影在域平面里（`skill.Plane.ListSkills`
+	// 已经把 `capability.Skill` 折成 `dtocapability.SkillResp`，含 warnings 与 scope 判定），
+	// 用例层再包一层就只是一行转发——那正是第十一刀判定为骚操作的形状。
+	skills *skill.Plane
+	// mcpPlane MCP 域平面（P4a 正文第三十七/三十八/三十九刀：写面、探测面、live 五条全在这里，
+	// 控制器直接调——DTO 与错误码本来就在域里折好）。
+	mcpPlane *mcp.Plane
+	// mcp MCP 注册表**读模型**（P4a 正文第十四刀起在本包内构造）。
+	//
+	// 与 `tools` 同族：条目本体在注册表里、探测态在 MCP 平面里、悬空引用体检在密钥面里，
+	// 三个源折成一个响应 ⇒ 投影只能落用例层。
+	mcp svccapability.McpCatalog
 }
 
-// NewCapabilityCtr 构造 CapabilityCtr。
-func NewCapabilityCtr(svc svccapability.CapabilitySvc) CapabilityCtr {
-	return &capabilityCtr{svc: svc}
+// NewCapabilityCtr 构造 CapabilityCtr（四个参数都是**依赖事实**，用例实例在构造里造）。
+func NewCapabilityCtr(caps *capability.Registry, skills *skill.Plane,
+	mcpPlane *mcp.Plane, mcpSecrets *mcp.Secrets) CapabilityCtr {
+	return &capabilityCtr{
+		tools: svccapability.NewTools(caps), skills: skills, mcpPlane: mcpPlane,
+		mcp: svccapability.NewServers(caps, mcpPlane, mcpSecrets),
+	}
 }
 
 // ListSkills 列出 Skill 目录（平台唯一事实源；按 ID 排序）。
 func (h *capabilityCtr) ListSkills(c *gin.Context) {
-	items, err := h.svc.ListSkills()
+	items, err := h.skills.ListSkills()
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -66,7 +96,7 @@ func (h *capabilityCtr) CreateSkill(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.CreateSkill(c.Request.Context(), req)
+	resp, err := h.skills.WriteSkill(c.Request.Context(), "", req, true)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -82,7 +112,7 @@ func (h *capabilityCtr) UpdateSkill(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.UpdateSkill(c.Request.Context(), c.Param("id"), req)
+	resp, err := h.skills.WriteSkill(c.Request.Context(), c.Param("id"), req, false)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -92,7 +122,7 @@ func (h *capabilityCtr) UpdateSkill(c *gin.Context) {
 
 // DeleteSkill 删除一个 skill 定义并撤回已物化副本（幂等：不存在 → `deleted:false` 且 code=0）。
 func (h *capabilityCtr) DeleteSkill(c *gin.Context) {
-	resp, err := h.svc.DeleteSkill(c.Request.Context(), c.Param("id"))
+	resp, err := h.skills.DeleteSkill(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -108,7 +138,7 @@ func (h *capabilityCtr) CreateMcpServer(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.CreateMcpServer(c.Request.Context(), req)
+	resp, err := h.mcpPlane.WriteServer(c.Request.Context(), "", req, true)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -123,7 +153,7 @@ func (h *capabilityCtr) UpdateMcpServer(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.UpdateMcpServer(c.Request.Context(), c.Param("id"), req)
+	resp, err := h.mcpPlane.WriteServer(c.Request.Context(), c.Param("id"), req, false)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -133,7 +163,7 @@ func (h *capabilityCtr) UpdateMcpServer(c *gin.Context) {
 
 // DeleteMcpServer 删除一个 MCP server 定义，并**一并摘除**归属它的工具条目。
 func (h *capabilityCtr) DeleteMcpServer(c *gin.Context) {
-	resp, err := h.svc.DeleteMcpServer(c.Request.Context(), c.Param("id"))
+	resp, err := h.mcpPlane.DeleteServer(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -150,7 +180,7 @@ func (h *capabilityCtr) SetSkillEnabled(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.SetSkillEnabled(c.Request.Context(), id, req.Enabled)
+	resp, err := h.skills.SetSkillEnabled(c.Request.Context(), id, req.Enabled)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -161,7 +191,7 @@ func (h *capabilityCtr) SetSkillEnabled(c *gin.Context) {
 // SkillMaterialization 某 skill 的物化体检（§13.4 S2）：每处物化目标的期望摘要 vs 实测摘要、
 // 以及 status（in_sync/missing/tampered/stale/disabled/user_owned/not_applicable）。只读。
 func (h *capabilityCtr) SkillMaterialization(c *gin.Context) {
-	resp, err := h.svc.SkillMaterialization(c.Param("id"))
+	resp, err := h.skills.SkillMaterialization(c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -171,7 +201,7 @@ func (h *capabilityCtr) SkillMaterialization(c *gin.Context) {
 
 // ListMcpServers 列出 MCP 注册表（按 ID 排序；headers/凭证不读回）。
 func (h *capabilityCtr) ListMcpServers(c *gin.Context) {
-	items, err := h.svc.ListMcpServers()
+	items, err := h.mcp.ListMcpServers()
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -181,7 +211,7 @@ func (h *capabilityCtr) ListMcpServers(c *gin.Context) {
 
 // ListTools 列出 Tool 目录（按 name 排序）。
 func (h *capabilityCtr) ListTools(c *gin.Context) {
-	items, err := h.svc.ListTools()
+	items, err := h.tools.ListTools()
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -189,8 +219,6 @@ func (h *capabilityCtr) ListTools(c *gin.Context) {
 	gincontext.Success(c, items)
 }
 
-// ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测（P2 §5.2）：结果写 Tool 目录并
-// 返回本轮增删。失败时错误码进信封（并已记录 last_probe_error，可由 GET /mcps 读回）。
 // CallMcpTool 调用 MCP server 的工具（B1：tools/call）。
 func (h *capabilityCtr) CallMcpTool(c *gin.Context) {
 	var req dtocapability.McpToolCallReq
@@ -199,7 +227,7 @@ func (h *capabilityCtr) CallMcpTool(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.CallMcpTool(c.Request.Context(), c.Param("id"), c.Param("tool"), req)
+	resp, err := h.mcpPlane.CallTool(c.Request.Context(), c.Param("id"), c.Param("tool"), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -209,7 +237,7 @@ func (h *capabilityCtr) CallMcpTool(c *gin.Context) {
 
 // ListMcpResources 拉取 MCP server 的资源列表（B2：resources/list + resources/templates/list）。
 func (h *capabilityCtr) ListMcpResources(c *gin.Context) {
-	resp, err := h.svc.ListMcpResources(c.Request.Context(), c.Param("id"))
+	resp, err := h.mcpPlane.ListResources(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -224,7 +252,7 @@ func (h *capabilityCtr) ReadMcpResource(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.ReadMcpResource(c.Request.Context(), c.Param("id"), req.URI)
+	resp, err := h.mcpPlane.ReadResource(c.Request.Context(), c.Param("id"), req.URI)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -234,7 +262,7 @@ func (h *capabilityCtr) ReadMcpResource(c *gin.Context) {
 
 // ListMcpPrompts 拉取 MCP server 的提示词模板（B2：prompts/list）。
 func (h *capabilityCtr) ListMcpPrompts(c *gin.Context) {
-	resp, err := h.svc.ListMcpPrompts(c.Request.Context(), c.Param("id"))
+	resp, err := h.mcpPlane.ListPrompts(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -250,7 +278,7 @@ func (h *capabilityCtr) GetMcpPrompt(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.GetMcpPrompt(c.Request.Context(), c.Param("id"), c.Param("name"), req)
+	resp, err := h.mcpPlane.GetPrompt(c.Request.Context(), c.Param("id"), c.Param("name"), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -258,8 +286,13 @@ func (h *capabilityCtr) GetMcpPrompt(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
+// ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测（P2 §5.2）：结果写 Tool 目录并
+// 返回本轮增删。失败时错误码进信封（并已记录 last_probe_error，可由 GET /mcps 读回）。
+//
+// P4a 正文第三十八刀：探测面归域平面——用例层再包一层只会得到一行转发，故控制器直接调
+// `h.mcpPlane.Probe`（DTO 与错误码本来就在 `domain/mcp` 里折好）。
 func (h *capabilityCtr) ProbeMcpServer(c *gin.Context) {
-	resp, err := h.svc.ProbeMcpServer(c.Request.Context(), c.Param("id"))
+	resp, err := h.mcpPlane.Probe(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

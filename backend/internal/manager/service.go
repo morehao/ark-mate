@@ -2,76 +2,26 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/domain/mcp"
+	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/domain/skill"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
+	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/credentials"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
-	"github.com/morehao/golib/glog"
 )
-
-// SessionRec 是进程内会话终态记录（内存镜像；sqlite 模式下与 sessions 行同源）。
-//
-// **身份只有 runtime**（v19）：v17 时这里写着"P0 起不再记录 runtime 身份"，本轮反过来——
-// 底座由构建期固定、用户不可自定义，所以 `runtime_id` 就是唯一身份事实（它同时是 DB 列
-// `sessions.runtime_id`、事件 payload 的 `runtime`、诊断面的 `runtime`）。v19 之前那半个
-// `agent_id` 与它指向同一个东西，收成一个。
-type SessionRec struct {
-	ID string
-	// Cwd 会话工作空间（canonical 绝对路径）。它同时是 ACP session/new 的 cwd 与
-	// 原生权限 workspace-write 的边界（见 workspace.go）。
-	Cwd string
-	// WorkspaceTemporary 该工作空间是否由**平台**给出（= 默认工作空间）。
-	// 落库 + 写 transcript header：**权威标志**，前端与离线回放都不得从路径形状反推。
-	WorkspaceTemporary bool
-	// WorkspaceID 归属的工作空间登记 id（v14；'' = 未登记/登记已删 → 读面归默认工作空间）。
-	//
-	// 与 Cwd 的分工（设计 ADR-2，最容易踩的一处）：Cwd 是**执行事实**（底座 ACP session 的
-	// cwd、原生权限 workspace-write 的边界、不可变），WorkspaceID 是**归属事实**（左栏分组）。
-	// 两者不一致是允许的（工作空间登记被删、或目录后来不可用），执行**恒**用 Cwd。
-	WorkspaceID string
-	// ModelID 会话引用的**平台模型行 id**（`mdl_…`；空 = 底座默认）。
-	//
-	// v26 起语义是"存身份、运行时值现算"（定案「辰」，设计 §5.4）：库/内存里只留平台行 id，
-	// 底座认的不透明值由 adapter 每次现算（`modelValueFor`）——路由键改名后旧会话照样活得下来。
-	// 它**不是** `models.model`（那是发给上游的模型名，一个外部世界的字符串）。
-	//
-	// 这里曾有 `ProviderID`：v19 删 agent 面后它没有任何写入点（恒空），v26 删列——
-	// 供应商由**模型行**给出（`models.provider_id`），再存一份就是第二事实源。
-	ModelID string
-	// RuntimeID 本会话的 runtime 身份（v17 起列 `runtime_id`；v19 起它是**唯一的**身份事实）。
-	RuntimeID string
-	// Generation 会话**执行代际**：每次重建执行上下文（连接断开后重连 / 会话被重开）自增。
-	// §6 排队输入据此判断「排队时依赖的那一轮上下文还在不在」——不等即作废（见 inputqueue.go）。
-	// 只在内存：重启本身就让所有排队行作废，没有跨重启比对的语义。
-	Generation int64
-	// RuntimeSessionID 原生底座会话 id（P3 双 id；session id = 平台 uuid，本字段存
-	// 原生 id 供 load/resume 恢复承载，v17 前叫 ProviderSessionID / `provider_session_id`。
-	// memory 模式下仅在活跃集合期间可用）。
-	RuntimeSessionID string
-	// Fingerprint 该会话钉住的**能力指纹**（代际；空 = 未声明能力选择）。
-	// 恢复路径据此回到同一代际。M3-1 起落库列 `capability_fingerprint`（v7），
-	// RestoreFromStore 原样读回——否则重启后指纹变空、会话悄悄换到默认能力集。
-	Fingerprint string
-	// Origin 会话来源（'' = 人工；'automation:<id>' = 该 automation 触发产生）。M4 写入，M3 只落列。
-	Origin string
-	// CapabilityJSON 创建时解析出的**能力选定明细**（JSON；'' = 未声明 → 全量按 runtime 过滤）。
-	// 与 Fingerprint 的分工：指纹回答"是不是同一套"（比较/回收用），明细回答"到底是哪几个"
-	// （回显、诊断、以及指纹算法变化后的一次性迁移判据）。
-	CapabilityJSON string
-	Status         string
-	Title          string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
-	Pinned         bool   // 置顶（侧栏/管理面用）
-	Archived       bool   // 归档（软删除；会话列表默认不展示）
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
 
 // Service 实现 handler.Service（替换 mock），为控制面提供「真实」数据与动作：
 // runtime 来自注册表（构建期固定，见 runtime_binding.go）；会话来自本进程内存存储；
@@ -80,8 +30,7 @@ type Service struct {
 	reg  *runtime.Registry
 	bus  *eventbus.Bus
 	orch *Orchestrator
-	tx   *transcriptRecorder // 会话 wire transcript（nil = 未启用，见 SetTranscriptDir）
-	st   *store.Store        // SQLite 持久层（nil = 未启用；启用后见 EnableStore）
+	st   *store.Store // SQLite 持久层（nil = 未启用；启用后见 EnableStore）
 	// runtimeCfgDigests 各 runtime 已物化的模型配置指纹（T5）。它**并进代际键**
 	// （见 connection.go 的 generationKey）：不并进键，暖进程会继续用旧清单而界面显示"已保存"。
 	runtimeCfgDigests map[string]string
@@ -91,67 +40,49 @@ type Service struct {
 	// providerDir 定义目录（v19 起只装 `providers.json`；空 = 不落盘，仅内存）。
 	// v20 起它与凭据面无关：密钥在库里，托管文档锚在 `MATE_HOME`（见 SetProviderDir）。
 	providerDir string
-	providers   map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）
-	// workspaceDir 代建工作空间的根目录（未指定 cwd 时在 <root>/<会话id>/ 建）。
-	// 空 = 关闭代建（未指定 cwd 直接报 workspace_required，不回落 os.Getwd()）。
-	// 见 SetWorkspacePolicy / ResolveWorkspace。
-	workspaceDir string
-	// workspaceRoots 允许作为工作空间的根白名单（MATE_WORKSPACE_ROOTS；空 = 不限制）。
-	// 非空时显式 cwd 与目录浏览都被收在内，浏览也不允许越过根向上。
-	// 这里存的是**显式配置**的那一份；对外生效名单还要并上代建根（effectiveWorkspaceRootsLocked）。
-	// 见 SetWorkspacePolicy / withinRoots。
-	workspaceRoots []string
-	// bindAddr 本进程**实际监听**的地址（装配期 net.Listen 之后注入）。
-	// 用途只有一个：判定"宿主能不能抬起系统目录面板"（绑回环才可能，见 workspace_picker.go）。
-	bindAddr string
-	// workspaceRootsStore 白名单的持久化端口（面板 PUT 时写回配置目录；nil = 只读）。
-	// 端口而非直接实现：manager 不碰配置文件，优先级/锁定判定由 infra 报告（见 workspace_settings.go）。
-	workspaceRootsStore WorkspaceRootsStore
-	catalog             *catalogStore        // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
-	caps                *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
+	// planner 工作空间域（起始点偏好策略：代建根 + 生效名单）。P2b 起策略字段归它自持锁；
+	// `Service` 上**不再复刻**一份（两份 = 两个事实源，表现是面板改了名单、校验却按旧的走）。
+	planner *workspace.Plane
+	catalog *catalogStore        // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
+	caps    *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
 	// capabilityDir 能力定义目录。**语义按持久层模式分叉**（M6-2）：
 	//   - memory 模式：装载源 + 启停写回位置（文件是唯一持久形态）；
 	//   - sqlite 模式：**只作导入/导出目录**——事实源是 DB（v8 的 skills/mcp_servers），
 	//     装载走 LoadCapabilityDefinitionsFromStore，写面走 store 的 CAS（M6-3）。
 	// 两种模式都由 LoadCapabilityDefinitions / LoadCapabilityDefinitionsFromStore 登记。
-	capabilityDir string
-	// automationDir / automations 自动化定义目录与注册表（M4-3；LoadAutomationDefinitions 登记）。
-	// 运行态 overlay 写在定义文件里（last_fired_at/state/...），内存只留调度态（nextDue/startup）。
-	automationDir string
-	automations   map[string]*automationRec
-	// automationStop 调度 goroutine 的停止函数（非 nil = 已启动；StartAutomationScheduler 幂等判据）。
-	automationStop context.CancelFunc
-	// automationDone 调度 goroutine 的退出信号（Stop 等它关闭再返回：停机后不该再有新触发起步）。
-	automationDone chan struct{}
-	// automationRunMu 把「认领判定 → 建会话 → 写回游标」串成临界区。
+	// automationPlane 自动化域（定义注册表 + 排期 + 调度循环；P2b 起状态归它自持锁）。
+	automationPlane *automation.Plane
+	// skillPlane 技能平面（读面 + 重校；与 mcp 平面共用同一份 caps 注册表）。
+	skillPlane *skill.Plane
+	// mcpSecrets 连接器平面的密钥解析面（引用 → 明文；与 creds 共用同一份凭据机制）。
+	mcpSecrets *mcp.Secrets
+	// mcpPlane 连接器平面（实时调用 + 探测；与 skill 平面共用同一份 caps 注册表）。
+	// 探测状态（预算 + 最近一次探测结果）自持在平面内，不再挂在 Service 上。
+	mcpPlane *mcp.Plane
+	// sessionPlane 会话域（自持一把只保护域内字段的锁；P3b 分批搬入）。
+	sessionPlane *session.Plane
+	// providerPlane 供应商域（内存档案表 + 载体 + 凭据面；自持一把只保护域内字段的锁）。
 	//
-	// 认领判定（`automation.Decide`）是纯函数，纯函数**不提供互斥**：tick 与
-	// `POST /automations/:id/run` 若同时看到"这个 occurrence 还没认领过"，两边都会建会话——
-	// 而 automation 的 prompt 常常有副作用（改代码、发通知），重复跑一次是不可接受的。
-	// 临界区里唯一的慢动作是建会话（子进程握手），而 automation 触发本身稀疏，串行化代价可忽略。
-	automationRunMu sync.Mutex
-	// skillTargets skill 物化目标（app 启动重校时登记；启停后立刻重校同一组目标）。
-	skillProjections []SkillProjection
+	// P4a 起它的**读面**经 `ProviderPlane()` 交给 `ctrprovider`：自检的用例实现落
+	// `service/svcprovider`，而「谁把域与用例接起来」的落点是**控制器**（除它之外的层不许引用
+	// `service/svc*`）。于是本对象不再持有一个 `*svcprovider.Probe` 字段。
+	providerPlane *provider.Plane
+	// picker 原生目录选择器（宿主事实判定 + 命令配方 + spawn）。自持"监听地址"一个事实。
+	picker *workspace.Picker
 
-	mu sync.Mutex
-	// binding 本进程认的那个底座（v19：单实例、构造期建好；见 runtime_binding.go）。
-	binding  *runtimeBinding
-	sessions map[string]*SessionRec
-	// inputs 会话待投递输入队列（**仅 memory 模式**；sqlite 模式的事实源是 inputs 表）。
-	inputs    map[string][]QueuedInput
-	ver       map[string]int64 // 每 agg(session) 的版本计数（域事件递增）
-	restoring bool             // RestoreFromStore 进行中：registerSession 跳过 DB 回写
+	mu   sync.Mutex
+	defs *definition.Mechanism
+	// creds 凭据机制的状态（四层凭据面 + 凭据 cwd；见 mechanism/credential）。
+	creds *credential.Store
+	// runtimePlane 执行面（P3a-2 分批搬入）：本批装"本进程认的那个底座"的绑定，
+	// 诊断组装面随后一批跟进。它自持锁（`bindingLocked` 那类"须持 s.mu"的约定随之消失）。
+	runtimePlane *runtimeconn.Plane
+	// runtimePool 连接池（P4a 正文第五十四刀搬进执行面）：连接表、代际上限与空闲回收。
+	// 它自持一把**与会话表无关**的锁——这正是这次分锁的原因（此前 `Orchestrator.mu`
+	// 同时保护连接表与会话表，持锁请求会话快照就是锁序反转的雏形）。
+	runtimePool *runtimeconn.Pool
+	autoVer     map[string]int64 // 自动化事件的版本计数（`automation:<id>` 聚合）；会话侧那张表在 domain/session
 
-	// MCP live 探测状态（P2 §5.2）：独立锁——探测可能耗时，不阻塞会话面。
-	mcpMu           sync.Mutex
-	mcpProbes       map[string]mcpProbeStatus
-	mcpProbeTimeout time.Duration
-
-	// A3 诊断：底座最近一次失败（含 stderr 尾巴）。独立锁，避免与 s.mu 交叉。
-	// 单底座 ⇒ 一份记录（v19 之前是 per-agent 的 map）。
-	diagMu    sync.Mutex
-	lastErr   *runtimeLastErr
-	ambiguous *ambiguityNote
 	// memDefaultWorkspace memory 模式的**默认工作空间**（登记表不存在时的那一份）。
 	//
 	// 它不是"登记项的缓存"：默认工作空间是**平台代建**的东西（进程没起来时它是库里的第一行；
@@ -163,27 +94,7 @@ type Service struct {
 	memDefaultWorkspace *model.WorkspaceEntity
 
 	// coalescer ③ 文本增量合并器（NewService 构造时创建；见 chunk_coalescer.go）。
-	coalescer *chunkCoalescer
-	// creds 四层凭据面（v20；见 credentials.go 与 SetCredentials）：provider 拨号密钥的**唯一**
-	// 解析入口 = 继承环境 > 托管文档（`<MATE_HOME>/credentials.json`）> `<cwd>/.env` > `<home>/.env`
-	// （顺序实现只有 `pkg/credentials` 一份）。
-	//
-	// nil = 未装配（网关/测试的某些路径）：此时只有库里的那一份可用，读面会在 problems 里明说。
-	// **装配期写一次、之后只读**——所以它和 `st` 一样不加锁访问（解析路径会被反复走到，
-	// 而持 `s.mu` 的读模型也要用它）。
-	creds *credentials.Layered
-
-	// credCwd **凭据 cwd**（v20）：`<cwd>/.env` 那一层的 cwd = **用户启动 `mate serve` 的那个
-	// 目录**，由装配期经 `SetCredentialCwd` 显式登记（不是用到时 `os.Getwd()`）。
-	//
-	// 它存在的唯一理由是**要交下去**：网关条目把同一个值经 `mcp.GatewayCredCwdEnv` 交给网关
-	// 子进程，否则底座 spawn 的网关会拿自己的 cwd（会话工作区）去解析同一个引用——两个进程给出
-	// 两个答案，且完全静默。空 = 装配时没登记：条目不带它，网关侧 WARN 后回落（这条 WARN 就是
-	// "两个进程可能不同"的可见性）。
-	//
-	// **装配期写一次、之后只读**（同 `creds`：读它的 `gatewayEntry` 在请求路径上被并发走到，
-	// 加锁反而会让持 `s.mu` 的调用点死锁）。
-	credCwd string
+	coalescer *session.Coalescer
 
 	// defWarned 装载期"同一条定义问题只 WARN 一次"的记账（key = 域:id@revision）。
 	// 装载会被反复调用（启动、导入、**网关每次取数**），不记账就会把一条坏定义刷成日志洪水，
@@ -203,39 +114,163 @@ type Service struct {
 }
 
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。
-func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
+// Option 装配期的可选注入。
+//
+// **为什么是"可选"而不是必填参数**：`NewService` 有 130+ 处调用点（几乎全在 manager 自己的
+// 测试里，它们只需要"一个能跑的 Service"），而**装配层需要的是"同一个执行面实例"**
+// （它要把这个实例也交给 API 面：P4a 起 `svcruntime.New` 由 `ctrruntime` 在构造函数里调，
+// 用的就是这一份执行面）。必填参数会让 130+ 处跟着改，
+// 换来的信息量与这里一样。P5a 的 `registry` 装配表会取代这个缝。
+type Option func(*Service)
+
+// WithRuntimePlane 用装配层提供的执行面（而不是本函数自己造一个）。
+//
+// **必须与 `svcruntime.New` 拿到同一个实例**（P4a 起那个调用在 `ctrruntime` 里）：
+// 两个平面各自记账时，"诊断说 stopped、
+// 连接却活着"这种分叉会立刻发生（`runtimeconn.Plane` 的进程状态是它自己的字段）。
+func WithRuntimePlane(pl *runtimeconn.Plane) Option { return func(s *Service) { s.runtimePlane = pl } }
+
+func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Service {
 	s := &Service{
-		reg: reg,
-		bus: bus,
+		reg:   reg,
+		defs:  definition.New(),
+		creds: credential.New(reg),
+		bus:   bus,
 		// 网关默认开启（config 的 auto）：显式在这里置位，避免 atomic.Bool 零值把默认关掉。
 		mcpGatewayWarned: make(map[string]bool),
-		sessions:         make(map[string]*SessionRec),
-		inputs:           make(map[string][]QueuedInput),
-		ver:              make(map[string]int64),
-		providers:        make(map[string]*providerDef),
 		catalog:          newCatalogStore(),
 		caps:             capability.NewRegistry(),
-		mcpProbes:        make(map[string]mcpProbeStatus),
-		mcpProbeTimeout:  defaultMCPProbeTimeout,
 		// 默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
 		nativePermEnabled: true,
 	}
+	// 技能平面与 RegisterSkill 共用**同一份**注册表（两份注册表 = 两个事实源）。
+	s.skillPlane = skill.NewPlane(s.caps, s.defs)
+	// 密钥解析面与 provider 凭据面共用**同一份** `credential.Store`（两份 = 同一份引用解析出两个结果）。
+	s.mcpSecrets = mcp.NewSecrets(s.creds)
+	// 连接器平面与 RegisterMcpServer 共用**同一份**注册表与**同一份**密钥解析面。
+	s.mcpPlane = mcp.NewPlane(s.caps, s.defs, s.mcpSecrets)
+	// 选择器无外部依赖（宿主事实每次调用现采），构造期建一个即可。
+	s.picker = workspace.NewPicker()
+	// 工作空间域：策略状态在它自己的锁下（P2b 起不再是 Service 的字段）。
+	s.planner = workspace.NewPlane()
+	// 自动化域：定义注册表与调度态都在它自己的锁下（P2b 起不再是 Service 的字段）。
+	// 它需要两样家当（库句柄 + 宿主端口），分别在 `attachStore` 与这里接上——**早一行是 nil**，
+	// 而表现是"该走库的走了内存"或"触发时找不到宿主"（静默）。
+	s.automationPlane = automation.NewPlane()
+	s.automationPlane.SetHost(automationHostAdapter{svc: s})
+	// 会话事实端口（P2b）：workspace 域不拥有会话，只消费这里的两个动作。
+	s.planner.SetSessionSource(s)
+	s.providerPlane = provider.NewPlane(reg, s.creds)
+	// 会话域：本批只装库句柄与用量端口（其余端口随 P3b-1b/2 接上）。
+	s.sessionPlane = session.NewPlane()
+	// 会话读面的端口：归属展示（工作空间登记面）P2b 起也在域内（`Plane.WorkspaceDisplayOf`）。
+	// 能力选定回显与指纹装配点 P3c 起同样在域内，不再需要回显端口。
+	s.sessionPlane.SetWorkspaceDisplay(s.planner.WorkspaceDisplayOf)
+	// 能力事实提供者（P3c）：指纹的装配点在域，事实（注册表 / skill 投影 / MCP 注入计划）在这边。
+	// **必须紧跟 `caps`/`reg` 的就位**：早一行登记会让指纹少算一段——静默，且只在"代际该不该切"
+	// 这种慢变量上现形。
+	s.sessionPlane.SetCapabilityFacts(s)
+	s.sessionPlane.SetCapabilityLookup(s)
+	// 会话域的其余端口：事件总线（恢复时按库位次注回）、模型行↔底座运行时值的换算、
+	// 以及恢复期"作废重启前排队输入"的钩子（**临时**：输入队列 P3b-2 搬进来后就地调用）。
+	s.sessionPlane.SetBus(bus)
+	s.sessionPlane.SetModelValueSource(func(runtimeID, providerID, model string) (string, error) {
+		return modelValueFor(s.reg, runtimeID, providerID, model)
+	})
+	s.sessionPlane.SetStaleInputsOnRestore(s.staleQueuedInputsOnRestore)
+	// 两个端口都读会话/模型面（编排侧），在装配期接上；`demo`/`migrate` 这类没有编排器的
+	// 场景下 `effect` 恒 nil（回执为 nil，与拆分前逐字同义）。
+	s.providerPlane.SetEffect(s.providerEffect)
+	s.providerPlane.SetDefaultModel(func(ctx context.Context) (string, bool) {
+		row, ok, err := s.defaultModelRow(ctx)
+		if err != nil || !ok {
+			return "", false
+		}
+		return strings.TrimSpace(row.ProviderID), true
+	})
+
 	// 网关默认开启（config 的 auto）。放在构造末尾而不是结构体字面量里：atomic.Bool 没法写成
 	// 复合字面量字段，且这里"默认值"的意图要一眼可见（off 由装配期显式关）。
 	s.mcpGatewayEnabled.Store(true)
 	// ③ 流式增量合并：flushFn 直连 publishRaw（绕过合并入口，避免自递归）。
-	s.coalescer = newChunkCoalescer(func(typ, sessionID string, payload any) {
+	s.coalescer = session.NewCoalescer(func(typ, sessionID string, payload any) {
 		s.publishRaw(typ, sessionID, payload)
 	})
+	// **必须紧跟创建点**：会话域持有的是合并器本身，早一行它还是 nil——表现是"文本增量不再
+	// 合并"（每条增量各占一个位次），而编译、vet、构造期都看不出来（§3.1.38 的同一课）。
+	s.sessionPlane.SetCoalescer(s.coalescer)
 	// 绑定构建期选定的那个底座（v19：单实例）。`specOK=false`（未注册）不是这里报错——
 	// 装配期的 `runtime.ProductRegistry` 已经 fail-closed，这里只是把事实记下来供诊断如实外露。
 	spec, specOK := reg.Get(runtime.SelectedRuntime())
-	s.binding = newRuntimeBinding(spec, specOK)
+	s.runtimePlane = runtimeconn.NewPlane(reg, spec, specOK)
+	for _, opt := range opts {
+		opt(s)
+	}
+	// 执行面的口子：凭据面（供应商域）与连接池。池必须在这里造——它需要**最终那个**平面
+	// （`WithRuntimePlane` 可能已经换过实例），且装配层（`app`）要用它设代际上限/空闲回收。
+	s.runtimePlane.SetCredentialSource(s)
+	s.runtimePool = runtimeconn.NewPool(s.runtimePlane)
+	// env 与配置指纹都是**本层的事实**，池只认端口（执行面不认识供应商档案与模型清单）。
+	s.runtimePool.SetProviderEnvSource(s)
+	s.runtimePool.SetConfigDigestSource(s)
+	// 连接池读面：诊断要问"此刻哪条连接活着"。**早一行拿到的是 nil**，表现是诊断永远报
+	// 「未连接」、stderr 尾巴恒空——而它只在底座真的在跑时才该现形（开发态多半看不见）。
+	s.runtimePlane.SetLiveClientSource(s.runtimePool)
 	return s
 }
 
 // SetBus 注入事件总线（Orchestrator 构造时调用；与 handler.New 共用同一 bus）。
 func (s *Service) SetBus(bus *eventbus.Bus) { s.bus = bus }
+
+// ProviderPlane 交出**供应商域**（`ctrprovider` 自检用例的事实来源）。
+//
+// 为什么把域整个交出去而不是转发几个方法：自检的用例层（`service/svcprovider`）已经用
+// `Ports` 把"它只要这四件事实"写清楚了，中间再垫一层同名转发只会多一处需要同步的清单。
+// 与 `runtimeconn.NewPlaneFor`/`WithRuntimePlane` 的分工同形：**同一个实例**交给两个消费面，
+// 两份平面 = 两个事实源。
+func (s *Service) ProviderPlane() *provider.Plane { return s.providerPlane }
+
+// RuntimePool 连接池的事实出口（P4a 正文第五十四刀）。
+//
+// 装配期（`app` 的 serve）要用它设代际上限与空闲回收；这两个动作的实现只有
+// `internal/runtimeconn` 那一份，manager 侧不再有一行转发（`SetGenerationLimit` /
+// `StartIdleReaper` 已随本刀从 `Orchestrator` 删除）。
+func (s *Service) RuntimePool() *runtimeconn.Pool { return s.runtimePool }
+
+// CredentialStore 凭据机制的事实出口（P4a 正文第五十一刀）。
+//
+// 装配期（`app.go` 的 serve 与 `gateway/source.go`）要用它登记四层凭据面、cwd 与镜像对账；
+// 这些动作的实现只有 `mechanism/credential` 那一份，manager 侧的八个同名转发已随本刀删除。
+func (s *Service) CredentialStore() *credential.Store { return s.creds }
+
+// SessionPlane 交会话域平面（**依赖事实**）：导出用例的事实来源（`svcsystem.NewSource`）
+// 由 `ctrexport` 用它与 Store/Bus 一起在自己的构造函数里造（P4a 正文第八刀）。
+func (s *Service) SessionPlane() *session.Plane { return s.sessionPlane }
+
+// AutomationPlane 交出自动化域平面（装配点按**依赖事实**把它交给 router，P4a 正文第九刀）。
+//
+// 自动化面的用例（DTO 折叠 + 错误码出口）在 `service/svcautomation`，由 `ctrautomation`
+// 自己造；装配点只交事实。
+func (s *Service) AutomationPlane() *automation.Plane { return s.automationPlane }
+
+// CapabilityRegistry / SkillPlane / McpSecrets 交出能力面的三份**事实来源**
+// （`ctrlibrary` 的读模型用例要用它们，P4a 正文第六刀）。
+//
+// 与 `ProviderPlane()` 同一条理由：用例层已经用构造函数把"它要哪几件事实"写清楚了，
+// 中间再垫一层同名转发只会多一处需要同步的清单；**同一个实例**交给两个消费面，
+// 两份平面 = 两个事实源。这三个都是**域/包类型**（不是 `service/*` 的类型）——所以装配点
+// 把它们放进 `router.Ports` 不违反"除控制器外不许引用 svc*"。
+func (s *Service) CapabilityRegistry() *capability.Registry { return s.caps }
+
+// McpPlane MCP 平面（连接器注册表 + 实时调用 + 探测态）。装配点把它当**依赖事实**交给用例层
+// （P4a 正文第十四刀：`svccapability` 的 MCP 目录读模型要用探测态与工具计数）。
+func (s *Service) McpPlane() *mcp.Plane { return s.mcpPlane }
+
+// SkillPlane 技能平面（读面 + 投影；与 mcp 平面共用同一份能力注册表）。
+func (s *Service) SkillPlane() *skill.Plane { return s.skillPlane }
+
+// McpSecrets 连接器密钥解析面（引用 → 明文 / 存在性体检）。
+func (s *Service) McpSecrets() *mcp.Secrets { return s.mcpSecrets }
 
 // SetNativePermission 开关 B5 原生权限映射（false = 不向底座注入权限配置）。
 func (s *Service) SetNativePermission(enabled bool) {
@@ -255,113 +290,34 @@ func (s *Service) NativePermissionEnabled() bool {
 // SetTranscriptDir 启用会话 wire transcript 落盘（目录不存在会自动创建；
 // dir 为空 = 禁用）。须在任何会话开始前调用（serve/demo 装配时）。
 // 启用后立即回读已落盘 transcript，重建会话列表与历史（会话重启存活）。
-func (s *Service) SetTranscriptDir(dir string) {
-	if dir == "" {
-		s.tx = nil
-		return
-	}
-	s.tx = newTranscriptRecorder(dir)
-	s.loadTranscripts()
-}
+//
+// P3b-2b：recorder 与装载/检索面整体落 `domain/session`，这一层只剩**装配转发**
+// （域自己持有目录、文件句柄与启动回读，manager 不再认识 transcript 的文件布局）。
+//
+// TODO(P4b): 删转发（装配侧直接依赖 session.Plane）
+func (s *Service) SetTranscriptDir(dir string) { s.sessionPlane.SetTranscriptDir(dir) }
 
-// beginTranscript 为会话写 transcript header（首行）；失败只告警不阻断。
+// beginTranscript 为会话写 transcript header（首行）；失败只告警不阻断（域内实现自己判空）。
+//
+// TODO(P4b): 删转发（写面直接依赖 session.Plane）
 func (s *Service) beginTranscript(sessionID, runtimeID, cwd string, workspaceTemporary bool) {
-	if s.tx == nil {
-		return
-	}
-	s.tx.begin(sessionID, runtimeID, cwd, workspaceTemporary)
+	s.sessionPlane.BeginTranscript(sessionID, runtimeID, cwd, workspaceTemporary)
 }
 
 // closeTranscripts 关闭全部 transcript 文件（daemon 退出/orchestrator.Close 收尾）。
 // 先落掉合并器里的尾部文本增量，再关文件——否则长回复的最后一段会丢。
-func (s *Service) closeTranscripts() {
-	s.flushChunks()
-	if s.tx == nil {
-		return
-	}
-	s.tx.closeAll()
-	s.tx = nil
-}
-
-// registerSession 登记一个新会话（已存在则覆盖）；未提供的时间落为当前 UTC。
-// loadTranscripts 回灌时保留原 created_at/updated_at。
-// sqlite 模式下（st != nil 且非恢复过程）同步写库。
-func (s *Service) registerSession(rec *SessionRec) {
-	s.mu.Lock()
-	now := time.Now().UTC()
-	if rec.CreatedAt.IsZero() {
-		rec.CreatedAt = now
-	}
-	if rec.UpdatedAt.IsZero() {
-		rec.UpdatedAt = now
-	}
-	s.sessions[rec.ID] = rec
-	restoring := s.restoring
-	s.mu.Unlock()
-	if !restoring {
-		s.persistSession(rec)
-	}
-}
-
-// bumpGeneration 会话执行代际自增（执行上下文重建时调用；见 SessionRec.Generation）。
-func (s *Service) bumpGeneration(id string) int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.sessions[id]
-	if !ok {
-		return 0
-	}
-	rec.Generation++
-	return rec.Generation
-}
-
-// sessionGeneration 读会话当前执行代际（会话不存在 → 0，此时任何排队项都不匹配 → 作废）。
-func (s *Service) sessionGeneration(id string) int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.sessions[id]
-	if !ok {
-		return 0
-	}
-	return rec.Generation
-}
-
-// sessionRec 返回某会话的进程内记录副本（断点恢复/内部查询用；不存在返回 nil）。
-func (s *Service) sessionRec(id string) *SessionRec {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.sessions[id]
-	if !ok {
-		return nil
-	}
-	cp := *rec
-	return &cp
-}
-
-// markSession 更新会话终态（sqlite 模式下同步写库 status）。
-func (s *Service) markSession(id, status string) {
-	s.mu.Lock()
-	if r, ok := s.sessions[id]; ok {
-		r.Status = status
-		r.UpdatedAt = time.Now().UTC()
-	}
-	s.mu.Unlock()
-	if s.st != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		if err := s.st.UpdateSessionMeta(ctx, id, model.SessionMetaPatch{Status: &status}); err != nil {
-			glog.Warnw(context.Background(), "store: mark session failed", "session", id, "err", err)
-		}
-	}
-}
+//
+// TODO(P4b): 删转发（装配侧直接依赖 session.Plane）
+func (s *Service) closeTranscripts() { s.sessionPlane.CloseTranscripts() }
 
 // attachOrchestrator 由 NewOrchestrator 回挂；Service 的会话动作委托给它。
-func (s *Service) attachOrchestrator(o *Orchestrator) { s.orch = o }
-
-// hasSession 判断会话是否在本进程登记。
-func (s *Service) hasSession(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.sessions[id]
-	return ok
+func (s *Service) attachOrchestrator(o *Orchestrator) {
+	s.orch = o
+	// 会话域的用量端口：读的是执行面内存里的"每会话最近一次上报"（`LatestUsage`）。
+	if o != nil {
+		s.sessionPlane.SetUsageSource(o.LatestUsage)
+		// 连接拆除的**应用**面：池只负责摘除与通知，会话/在途/诊断怎么收尾由编排侧决定
+		// （`DropSink`）。接在这一刻而不是 `NewService`：编排器在此之前还不存在。
+		s.runtimePool.SetDropSink(o)
+	}
 }

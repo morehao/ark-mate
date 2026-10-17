@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"strings"
 	"testing"
 	"time"
@@ -77,7 +79,7 @@ func TestPromptRunEnded(t *testing.T) {
 	if len(evts) < 3 {
 		t.Fatalf("期望 run.started+user+run.ended，got %d 事件", len(evts))
 	}
-	if evts[0].Type != BusRunStarted || evts[1].Type != BusUserMessage || evts[len(evts)-1].Type != BusRunEnded {
+	if evts[0].Type != session.BusRunStarted || evts[1].Type != session.BusUserMessage || evts[len(evts)-1].Type != session.BusRunEnded {
 		t.Fatalf("事件序列不符: %+v", evts)
 	}
 	// 开轮与终态必须报**同一支** run_id：它们指的是同一轮（runs 行的身份在开轮时就定了）。
@@ -86,8 +88,8 @@ func TestPromptRunEnded(t *testing.T) {
 	if startedID == "" || startedID != endedID {
 		t.Fatalf("run.started/run.ended 的 run_id 应同源: started=%q ended=%q", startedID, endedID)
 	}
-	rec, ok := svc.sessions["s1"]
-	if !ok || rec.Status != SessionStatusCompleted {
+	rec, ok := svc.sessionPlane.Lookup("s1")
+	if !ok || rec.Status != session.SessionStatusCompleted {
 		t.Fatalf("会话状态应 completed: %+v", rec)
 	}
 }
@@ -125,11 +127,11 @@ func TestCancelRun(t *testing.T) {
 		t.Fatalf("CancelRun: %v", err)
 	}
 	evts := feed(bus, "s1", 3)
-	if evts[len(evts)-1].Type != BusRunCancelled {
+	if evts[len(evts)-1].Type != session.BusRunCancelled {
 		t.Fatalf("期望 run.cancelled，got %+v", evts)
 	}
-	if svc.sessions["s1"].Status != SessionStatusCancelled {
-		t.Fatalf("状态应 cancelled: %v", svc.sessions["s1"].Status)
+	if st, _ := svc.sessionPlane.Lookup("s1"); st.Status != session.SessionStatusCancelled {
+		t.Fatalf("状态应 cancelled: %v", func() string { s, _ := svc.sessionPlane.Lookup("s1"); return s.Status }())
 	}
 }
 
@@ -195,18 +197,18 @@ func TestCancelRunAgentUnresponsive(t *testing.T) {
 		t.Fatalf("CancelRun 被无响应 agent 拖住: %v（agentCancelTimeout=%v）", el, agentCancelTimeout)
 	}
 	evts := feed(bus, "s1", 3)
-	if len(evts) < 3 || evts[len(evts)-1].Type != BusRunCancelled {
+	if len(evts) < 3 || evts[len(evts)-1].Type != session.BusRunCancelled {
 		t.Fatalf("期望 run.cancelled，got %+v", evts)
 	}
-	if svc.sessions["s1"].Status != SessionStatusCancelled {
-		t.Fatalf("状态应 cancelled: %v", svc.sessions["s1"].Status)
+	if st, _ := svc.sessionPlane.Lookup("s1"); st.Status != session.SessionStatusCancelled {
+		t.Fatalf("状态应 cancelled: %v", func() string { s, _ := svc.sessionPlane.Lookup("s1"); return s.Status }())
 	}
 }
 
-// TestBusyAttributionHelpers 验证在途归属表（§17 E1：inFlightTracker 语义同 §1.5 修订）：
+// TestBusyAttributionHelpers 验证在途归属表（§17 E1：session.InFlightTracker 语义同 §1.5 修订）：
 // 登记/撤销/唯一性判定/nil 安全（经 Orchestrator 委托方法覆盖）。
 func TestBusyAttributionHelpers(t *testing.T) {
-	orch := &Orchestrator{inflight: newInFlightTracker()}
+	orch := &Orchestrator{inflight: session.NewInFlightTracker()}
 	c1 := &acl.Client{}
 	c2 := &acl.Client{}
 
@@ -290,10 +292,10 @@ func TestEnsureSessionResumeGating(t *testing.T) {
 	svc, orch, _ := newTestRig(t) // 空 runtime 注册表
 	ctx := context.Background()
 	svc.registerSession(&SessionRec{
-		ID: "c-stub", RuntimeID: "stub", Status: SessionStatusInterrupted, // 无 RuntimeSessionID → memo 兜底候选
+		ID: "c-stub", RuntimeID: "stub", Status: session.SessionStatusInterrupted, // 无 RuntimeSessionID → memo 兜底候选
 	})
 	svc.registerSession(&SessionRec{
-		ID: "c-term", RuntimeID: "no-such-runtime", Status: SessionStatusCompleted,
+		ID: "c-term", RuntimeID: "no-such-runtime", Status: session.SessionStatusCompleted,
 		RuntimeSessionID: "x-1",
 	})
 
@@ -315,41 +317,8 @@ func TestEnsureSessionResumeGating(t *testing.T) {
 	}
 }
 
-// TestHandoffMemoBudget P3 F3 memo 压缩：用户原文收录 + 助手聚合、跨轮分隔、预算截断保最新。
-func TestHandoffMemoBudget(t *testing.T) {
-	svc, _, _ := newTestRig(t)
-	svc.publish(BusUserMessage, "cv1", map[string]any{"text": "任务A：第一轮要求"})
-	svc.publish(BusMessage, "cv1", map[string]any{"text": "收到A"})
-	svc.publish(BusMessage, "cv1", map[string]any{"text": "补充A"})
-	svc.publish(BusThought, "cv1", map[string]any{"text": "噪音思考"}) // 不入 memo
-	svc.publish(BusUserMessage, "cv1", map[string]any{"text": "任务B：第二轮要求"})
-	svc.publish(BusMessage, "cv1", map[string]any{"text": "收到B"})
-	svc.flushChunks() // ③ 合并缓冲落盘后再算 memo
-
-	memo := svc.HandoffMemo("cv1", 6000)
-	for _, want := range []string{"任务A", "任务B", "收到A补充A", "收到B"} {
-		if !strings.Contains(memo, want) {
-			t.Fatalf("memo 应含 %q，got: %s", want, memo)
-		}
-	}
-	if strings.Contains(memo, "噪音思考") {
-		t.Fatalf("memo 不应含 thought 噪音: %s", memo)
-	}
-	// 预算收紧：小到只能放下 header 片段 → 历史轮次被丢弃、输出不超预算。
-	tight := svc.HandoffMemo("cv1", 24)
-	if strings.Contains(tight, "任务A") || strings.Contains(tight, "任务B") {
-		t.Fatalf("紧预算应丢弃历史轮：%s", tight)
-	}
-	if runeLen(tight) > 24 {
-		t.Fatalf("memo 不应超过预算：%d > 24", runeLen(tight))
-	}
-	if got := svc.HandoffMemo("cv1", 0); got != "" {
-		t.Fatalf("0 预算应返回空: %q", got)
-	}
-	if got := svc.HandoffMemo("no-such", 6000); got != "" {
-		t.Fatalf("无事件会话应返回空: %q", got)
-	}
-}
+// TestHandoffMemoBudget 已随 handoff 面搬进 `domain/session`（P3b-2b）：它现在直接验域的
+// `HandoffMemo`，不再经 Service 转发（判据一字未改，见该包的 `TestHandoffMemoBudget`）。
 
 // TestConnKeyModelScoping 连接缓存键：provider 密钥 env 与进程级模型 env 都影响共享键
 // （B5 修复 + Phase B 模型作用域）。会话级模型（dsh，模型经 set_config_option）不进键。
@@ -358,20 +327,20 @@ func TestConnKeyModelScoping(t *testing.T) {
 	keyE := []string{"OPENAI_API_KEY=sk-x"}
 	modelE := []string{"RTX_MODEL=gpt-5"}
 
-	base := connKey("rtx", native)
-	if base == connKey("rtx", native, keyE) {
+	base := runtimeconn.ConnKey("rtx", native)
+	if base == runtimeconn.ConnKey("rtx", native, keyE) {
 		t.Fatalf("provider 密钥 env 应并入连接键（B5 修复）")
 	}
-	if connKey("rtx", native, keyE) != connKey("rtx", native, keyE) {
+	if runtimeconn.ConnKey("rtx", native, keyE) != runtimeconn.ConnKey("rtx", native, keyE) {
 		t.Fatalf("同 env 组应得同键")
 	}
-	if connKey("rtx", native, keyE) == connKey("rtx", native, keyE, modelE) {
+	if runtimeconn.ConnKey("rtx", native, keyE) == runtimeconn.ConnKey("rtx", native, keyE, modelE) {
 		t.Fatalf("rtx（进程级模型）模型 env 应并入连接键（改模型 = 换连接）")
 	}
-	if connKey("dsh", native, keyE) != connKey("dsh", native, keyE, nil) {
+	if runtimeconn.ConnKey("dsh", native, keyE) != runtimeconn.ConnKey("dsh", native, keyE, nil) {
 		t.Fatalf("dsh（会话级模型）不应因不含模型 env 而改变键")
 	}
-	if connKey("stub") != "stub" {
+	if runtimeconn.ConnKey("stub") != "stub" {
 		t.Fatalf("无 env 应仅返回 runtimeID")
 	}
 }

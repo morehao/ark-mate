@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/model"
 )
 
@@ -66,9 +67,9 @@ func newRetiredFixture(t *testing.T) *retiredFixture {
 }
 
 // facts 按"只有 inService 在册"的口径采集（= 一个底座下线之后的现场）。
-func (f *retiredFixture) facts(t *testing.T) RetiredRuntimeFacts {
+func (f *retiredFixture) facts(t *testing.T) doctor.RetiredRuntimeFacts {
 	t.Helper()
-	return CollectRetiredRuntimeFacts(context.Background(), f.st, RetiredRuntimeOptions{
+	return doctor.CollectRetiredRuntimeFacts(context.Background(), f.st, doctor.RetiredRuntimeOptions{
 		Home:            f.home,
 		KnownRuntimeIDs: []string{f.inService},
 		ProjectionDirs: map[string]string{
@@ -142,7 +143,7 @@ func TestCollectRetiredRuntimeFactsFollowsTheCallersKnownSet(t *testing.T) {
 	ctx := context.Background()
 
 	// 一、只认 inService → gone 是遗留。
-	before := CollectRetiredRuntimeFacts(ctx, f.st, RetiredRuntimeOptions{
+	before := doctor.CollectRetiredRuntimeFacts(ctx, f.st, doctor.RetiredRuntimeOptions{
 		Home: f.home, KnownRuntimeIDs: []string{f.inService},
 	})
 	if len(before.HomeDirs) != 1 || before.SessionRefCount != 1 || len(before.SkillRefs) != 1 {
@@ -150,7 +151,7 @@ func TestCollectRetiredRuntimeFactsFollowsTheCallersKnownSet(t *testing.T) {
 	}
 
 	// 二、把 gone 也算在册 → **同一个现场**必须一条都不报。
-	after := CollectRetiredRuntimeFacts(ctx, f.st, RetiredRuntimeOptions{
+	after := doctor.CollectRetiredRuntimeFacts(ctx, f.st, doctor.RetiredRuntimeOptions{
 		Home: f.home, KnownRuntimeIDs: []string{f.inService, f.gone},
 	})
 	if len(after.HomeDirs) != 0 || after.SessionRefCount != 0 || len(after.SkillRefs) != 0 {
@@ -170,7 +171,7 @@ func TestCollectRetiredRuntimeFactsNeverTreatsUnreadableAsEmpty(t *testing.T) {
 	ctx := context.Background()
 
 	// ① 没有可读的持久层：磁盘那半照报，DB 那半**不许**报 0 条，而要留下 note。
-	noDB := CollectRetiredRuntimeFacts(ctx, nil, RetiredRuntimeOptions{
+	noDB := doctor.CollectRetiredRuntimeFacts(ctx, nil, doctor.RetiredRuntimeOptions{
 		Home: f.home, KnownRuntimeIDs: []string{f.inService},
 	})
 	if len(noDB.HomeDirs) != 1 {
@@ -191,7 +192,7 @@ func TestCollectRetiredRuntimeFactsNeverTreatsUnreadableAsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
-	unreadable := CollectRetiredRuntimeFacts(ctx, f.st, RetiredRuntimeOptions{
+	unreadable := doctor.CollectRetiredRuntimeFacts(ctx, f.st, doctor.RetiredRuntimeOptions{
 		Home: f.home, KnownRuntimeIDs: []string{f.inService},
 	})
 	if unreadable.HomeScan == "ok" && len(unreadable.HomeDirs) == 1 {
@@ -216,7 +217,7 @@ func TestCollectRetiredRuntimeFactsHandlesMissingRoot(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(f.home, "runtime")); err != nil {
 		t.Fatal(err)
 	}
-	facts := CollectRetiredRuntimeFacts(context.Background(), f.st, RetiredRuntimeOptions{
+	facts := doctor.CollectRetiredRuntimeFacts(context.Background(), f.st, doctor.RetiredRuntimeOptions{
 		Home: f.home, KnownRuntimeIDs: []string{f.inService},
 	})
 	if facts.HomeScan != "missing" {
@@ -226,7 +227,7 @@ func TestCollectRetiredRuntimeFactsHandlesMissingRoot(t *testing.T) {
 		t.Fatalf("没有隔离根时不该报出目录: %+v", facts.HomeDirs)
 	}
 	// 未配置 home 与"配置了但目录不存在"是两件事，结论不同（无法校验 vs 不可能有遗留）。
-	noHome := CollectRetiredRuntimeFacts(context.Background(), f.st, RetiredRuntimeOptions{
+	noHome := doctor.CollectRetiredRuntimeFacts(context.Background(), f.st, doctor.RetiredRuntimeOptions{
 		KnownRuntimeIDs: []string{f.inService},
 	})
 	if noHome.HomeScan != "no_home" {

@@ -11,6 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
@@ -40,10 +41,10 @@ func registryApp(t *testing.T) (*manager.Service, string, string) {
 
 	// 工作空间根放在**私有临时目录**下（本机隔离纪律：绝不碰 ~/.ark-mate）。
 	provision := filepath.Join(t.TempDir(), "workspaces")
-	if err := svc.SetWorkspacePolicy(provision, nil); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	if err := svc.EnsureDefaultWorkspace(); err != nil {
+	if err := svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 
@@ -151,7 +152,7 @@ func TestWorkspaceRegistryHTTPFlow(t *testing.T) {
 	}
 
 	// ⑦ 删除（DELETE）：只删登记，目录仍在（数据保留）。
-	if _, err := svc.CreateRegisteredWorkspace(dirA, "", false); err != nil {
+	if _, err := svc.WorkspacePlane().CreateRegisteredWorkspace(dirA, "", false); err != nil {
 		t.Fatalf("前置登记: %v", err)
 	}
 	_, dataDel := callJSON(t, svc, "DELETE", "/v1/mate/workspaces/"+wsA.ID, "")
@@ -181,25 +182,25 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	svc := manager.NewService(runtime.NewRegistry(), eventbus.New())
 	svc.EnableStore(st)
 	provision := filepath.Join(t.TempDir(), "workspaces")
-	if err := svc.SetWorkspacePolicy(provision, nil); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	if err := svc.EnsureDefaultWorkspace(); err != nil {
+	if err := svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 	dir1, dir2 := t.TempDir(), t.TempDir()
-	if _, err := svc.CreateRegisteredWorkspace(dir1, "第一个", false); err != nil {
+	if _, err := svc.WorkspacePlane().CreateRegisteredWorkspace(dir1, "第一个", false); err != nil {
 		t.Fatalf("登记 1: %v", err)
 	}
-	ws2, err := svc.CreateRegisteredWorkspace(dir2, "第二个", false)
+	ws2, err := svc.WorkspacePlane().CreateRegisteredWorkspace(dir2, "第二个", false)
 	if err != nil {
 		t.Fatalf("登记 2: %v", err)
 	}
 	// 把第二个移到最前，落一个**非创建顺序**的顺序进库。
-	if _, err := svc.MoveRegisteredWorkspace(ws2.ID, ""); err != nil {
+	if _, err := svc.WorkspacePlane().MoveRegisteredWorkspace(ws2.ID, ""); err != nil {
 		t.Fatalf("重排: %v", err)
 	}
-	before, err := svc.WorkspaceRegistry()
+	before, err := svc.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}
@@ -210,14 +211,14 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	t.Cleanup(func() { _ = st2.Close() })
 	svc2 := manager.NewService(runtime.NewRegistry(), eventbus.New())
 	svc2.EnableStore(st2)
-	if err := svc2.SetWorkspacePolicy(provision, nil); err != nil {
+	if err := svc2.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy(重启): %v", err)
 	}
 	// 幂等：默认工作空间已存在 → 不重建、不改顺序。
-	if err := svc2.EnsureDefaultWorkspace(); err != nil {
+	if err := svc2.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace(重启): %v", err)
 	}
-	after, err := svc2.WorkspaceRegistry()
+	after, err := svc2.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry(重启): %v", err)
 	}
@@ -274,8 +275,17 @@ func TestWorkspaceRegistryMemoryModeIsReadOnlyHTTP(t *testing.T) {
 func doRaw(t *testing.T, svc *manager.Service, method, path, body string) []byte {
 	t.Helper()
 	engine := router.New(router.Ports{
-		Session: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
+		Session:        svc,
+		WorkspacePlane: svc.WorkspacePlane(), Picker: svc.Picker(),
+		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
+		Runtime:       runtimeconn.NewPlaneFor(nil),
+		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,
+		Model: svc,
+		// Library 读模型（P4a 正文第六刀）：这条夹具只走工作空间路由，但**不埋 nil**——
+		// 读模型拿的是真注册表与真能力面（注册表另起一份：本文件不断言读模型）。
+		Capabilities: svc.CapabilityRegistry(), SkillPlane: svc.SkillPlane(),
+		Registry: runtime.AllBuiltinRegistry(), McpSecrets: svc.McpSecrets(),
+		McpGatewayEnabled: svc.McpGatewayEnabled,
 	}, eventbus.New())
 	var rd *strings.Reader
 	rd = strings.NewReader(body)

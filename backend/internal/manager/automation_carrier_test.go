@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	domainautomation "github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"strings"
 	"testing"
 	"time"
@@ -73,12 +75,12 @@ func mustSeedAutomationRow(t *testing.T, st *store.Store, row *model.AutomationE
 // 这里不收进夹具是因为 DB 用例不需要整个 schedRig）。
 func automationSessions(t *testing.T, svc *Service, id string) []*SessionRec {
 	t.Helper()
-	svc.mu.Lock()
-	defer svc.mu.Unlock()
+	// **不持 `s.mu`**：`Snapshot` 自己取会话域的锁。
+	snap := svc.sessionPlane.Snapshot()
 	var out []*SessionRec
-	for _, c := range svc.sessions {
-		if c.Origin == automationOrigin(id) {
-			out = append(out, c)
+	for i := range snap {
+		if snap[i].Origin == automationOrigin(id) {
+			out = append(out, &snap[i])
 		}
 	}
 	return out
@@ -172,7 +174,7 @@ func TestAutomationDefinitionsStoreRoundTrip(t *testing.T) {
 	}
 	// 被拒的写与重复新建/覆盖不存在的尝试都不得留下审计。
 	for _, r := range revs {
-		if r.Actor != definitionWriteActor {
+		if r.Actor != definition.DefinitionWriteActor {
 			t.Fatalf("审计 actor 不符: %+v", r)
 		}
 	}
@@ -224,7 +226,7 @@ func TestAutomationStoreLoaderToleranceAndRuntime(t *testing.T) {
 		t.Fatalf("认领游标/state 不符: %+v", goodResp)
 	}
 	// 坏行的运行史读不出来是**定义不可执行**（40001，而不是"没有运行史"）。
-	if _, err := svc.ListAutomationRuns("broken"); errCode(err) != "definition_invalid" {
+	if _, err := autoSvc(svc).ListAutomationRuns("broken"); errCode(err) != "definition_invalid" {
 		t.Fatalf("坏定义的运行史应报 definition_invalid，got %v", err)
 	}
 }
@@ -248,7 +250,7 @@ func TestAutomationRuntimeWriteKeepsDefinitionRevision(t *testing.T) {
 		"last_fired_at": fired.Format(time.RFC3339Nano),
 		"last_status":   automation.RunCompleted,
 		"state":         automation.StateInactive,
-	}, automationLastFiredText(rec.def.LastFiredAt)); err != nil {
+	}, automationLastFiredText(rec.Def.LastFiredAt)); err != nil {
 		t.Fatalf("运行态写回: %v", err)
 	}
 	after, _, _ := st.GetAutomationDefinition(ctx, "daily")
@@ -267,7 +269,7 @@ func TestAutomationRuntimeWriteKeepsDefinitionRevision(t *testing.T) {
 	if err := svc.saveAutomationOverlay(ctx, "daily", map[string]any{
 		"last_status": automation.RunFailed,
 		"state":       automation.StateInactive,
-	}, automationLastFiredText(rec.def.LastFiredAt)); err != nil {
+	}, automationLastFiredText(rec.Def.LastFiredAt)); err != nil {
 		t.Fatalf("运行态写回（第二次）: %v", err)
 	}
 	after, _, _ = st.GetAutomationDefinition(ctx, "daily")
@@ -302,15 +304,15 @@ func TestAutomationClaimIsAtMostOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec, _ := svc.automationRecByID("daily")
-	occurrence := rec.nextDue
+	occurrence := rec.NextDue
 	stale := rec // 第二个触发者手里的旧快照
 
 	first := svc.automationRunOnce(ctx, rec, occurrence, automation.TriggerScheduled)
-	if first.status != automation.RunClaimed {
+	if first.Status != automation.RunClaimed {
 		t.Fatalf("第一次应认领成功: %+v", first)
 	}
 	second := svc.automationRunOnce(ctx, stale, occurrence, automation.TriggerScheduled)
-	if second.status != automation.RunDuplicate || !second.noRecord {
+	if second.Status != automation.RunDuplicate || !second.NoRecord {
 		t.Fatalf("同一 occurrence 的第二次触发必须判 duplicate: %+v", second)
 	}
 	if convs := automationSessions(t, svc, "daily"); len(convs) != 1 {
@@ -341,12 +343,12 @@ func TestAutomationClaimFailureRetriesNextTick(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec, _ := svc.automationRecByID("daily")
-	occurrence := rec.nextDue
+	occurrence := rec.NextDue
 
 	dead, cancel := context.WithCancel(ctx)
 	cancel()
 	out := svc.automationRunOnce(dead, rec, occurrence, automation.TriggerScheduled)
-	if !out.failure || out.status != automation.RunSkipped || !strings.Contains(out.reason, "认领失败") {
+	if !out.Failure || out.Status != automation.RunSkipped || !strings.Contains(out.Reason, "认领失败") {
 		t.Fatalf("认领失败的结果不符: %+v", out)
 	}
 	if convs := automationSessions(t, svc, "daily"); len(convs) != 0 {
@@ -357,16 +359,16 @@ func TestAutomationClaimFailureRetriesNextTick(t *testing.T) {
 		t.Fatalf("认领失败不得推进库里的游标: %q", row.LastFiredAt)
 	}
 	mem, _ := svc.automationRecByID("daily")
-	if mem.def.LastFiredAt != nil {
-		t.Fatalf("认领失败不得推进内存游标: %+v", mem.def.LastFiredAt)
+	if mem.Def.LastFiredAt != nil {
+		t.Fatalf("认领失败不得推进内存游标: %+v", mem.Def.LastFiredAt)
 	}
 	// 内存 nextDue 保持原样 → 下一次触发仍然认定"这个 occurrence 到期"。
-	if !mem.nextDue.Equal(occurrence) {
-		t.Fatalf("认领失败后 nextDue 不应变化: %s vs %s", mem.nextDue, occurrence)
+	if !mem.NextDue.Equal(occurrence) {
+		t.Fatalf("认领失败后 nextDue 不应变化: %s vs %s", mem.NextDue, occurrence)
 	}
 
 	retry := svc.automationRunOnce(ctx, mem, occurrence, automation.TriggerScheduled)
-	if retry.status != automation.RunClaimed {
+	if retry.Status != automation.RunClaimed {
 		t.Fatalf("修好后的重试应认领成功: %+v", retry)
 	}
 	if convs := automationSessions(t, svc, "daily"); len(convs) != 1 {
@@ -385,25 +387,25 @@ func TestAutomationRecordFailureKeepsCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec, _ := svc.automationRecByID("daily")
-	occurrence := rec.nextDue
-	nextDueBefore := rec.nextDue
+	occurrence := rec.NextDue
+	nextDueBefore := rec.NextDue
 
 	// 关掉库 = 事务一定失败（比"取消 ctx"更彻底：连重载也做不了）。
 	if err := st.Close(); err != nil {
 		t.Fatalf("关库: %v", err)
 	}
-	out := svc.finishAutomationRun(ctx, rec, automationRunOutcome{
-		scheduledFor: occurrence, status: automation.RunOverlap, trigger: automation.TriggerScheduled,
-		advance: true, reason: "上一次还在跑；下一次 occurrence 照常",
+	out := svc.finishAutomationRun(ctx, rec, domainautomation.RunOutcome{
+		ScheduledFor: occurrence, Status: automation.RunOverlap, Trigger: automation.TriggerScheduled,
+		Advance: true, Reason: "上一次还在跑；下一次 occurrence 照常",
 	})
-	if out.state != automation.StateActive {
+	if out.State != automation.StateActive {
 		t.Fatalf("结果状态应由调用方推导: %+v", out)
 	}
 	mem, _ := svc.automationRecByID("daily")
-	if mem.def.LastFiredAt != nil {
-		t.Fatalf("事务失败不得推进内存游标: %+v", mem.def.LastFiredAt)
+	if mem.Def.LastFiredAt != nil {
+		t.Fatalf("事务失败不得推进内存游标: %+v", mem.Def.LastFiredAt)
 	}
-	if !mem.nextDue.Equal(nextDueBefore) {
-		t.Fatalf("事务失败不得重算 nextDue: %s vs %s", mem.nextDue, nextDueBefore)
+	if !mem.NextDue.Equal(nextDueBefore) {
+		t.Fatalf("事务失败不得重算 nextDue: %s vs %s", mem.NextDue, nextDueBefore)
 	}
 }

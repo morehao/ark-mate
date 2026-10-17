@@ -11,8 +11,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -43,11 +46,50 @@ var _ SessionCtr = (*sessionCtr)(nil)
 // SessionHandler 处理会话相关 REST 请求（列表 + search + create/prompt/cancel/history + 元数据 + 权限）。
 type sessionCtr struct {
 	svc svcsession.SessionSvc
+	// hist 会话历史**读面**（P4a 正文第十刀起在用例层，与 `svc` 分开按面持有）。
+	hist svcsession.HistorySvc
+	// detail 会话详情**读面**（P4a 正文第四十刀起在用例层）：单会话详情 + 三份交互快照。
+	//
+	// 与读模型（`plane` 那一族）的分界是"有没有请求校验与错误码出口"：这一面要回
+	// `session_not_found`，而四条出口共用同一份投影（详情里的 pending/memories 就是那两条列表的
+	// 结果），所以它们一起搬、一起持有。
+	detail svcsession.DetailSvc
+	// interaction 会话交互的**动作面**（P4a 正文第四十一刀起在用例层）：权限/提问决策 + 记忆撤销。
+	//
+	// 与 detail（只读）分开持有：这一族有副作用（把决定投给底座），两族吃的窄端口也因此不同
+	// （`InteractionSource` 纯读 vs `InteractionDelivery` 投递）。
+	interaction svcsession.InteractionSvc
+	// queue 排队输入的**撤下**用例（P4a 正文第四十二刀起在用例层）：请求形状校验 + 幂等口径 +
+	// 「真撤下必须发一条 `session.input_cancelled`」三条语义都在它里面。
+	queue svcsession.QueueSvc
+	// meta 会话**元数据写面**用例（P4a 正文第四十四刀起在用例层）：子集更新 + 会话内改模型。
+	//
+	// 它吃两个依赖：域平面（就地改 + 回读投影）与一个三方法窄端口（模型解析 / 投递 / 落库）。
+	meta svcsession.MetaSvc
+	// plane 会话域平面：**只读模型**直接由它提供（P4a 正文第十一刀）。
+	//
+	// 读模型（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）没有请求校验、错误码出口与响应装配，
+	// 它们的实现与域自己的锁和状态绑在一起（`ListSessions` 要持 `pl.mu` 遍历注册表、
+	// 释放锁后再补齐归属展示字段）。给它们造一层用例只会得到**一行转发**——
+	// 那正是 2026-10-16 被判定为"转发骚操作"的形状，所以这一面按 P4b 的原口径收口：
+	// 调用点直接依赖域平面（`manager` 侧那份 TODO(P4b) 转发随之删除）。
+	plane *session.Plane
 }
 
 // NewSessionCtr 构造 SessionCtr。
-func NewSessionCtr(svc svcsession.SessionSvc) SessionCtr {
-	return &sessionCtr{svc: svc}
+//
+// 拿到的是**依赖事实**（会话面过渡期端口 + 库句柄 + 会话域平面 + 事件总线 + 交互事实来源）：
+// 历史读面（第十刀）与详情读面（第四十刀）两个用例在这里造，其余方法的实现仍在 `manager`（逐刀搬）。
+func NewSessionCtr(svc svcsession.SessionSvc, st *store.Store, plane *session.Plane, bus *eventbus.Bus,
+	src svcsession.InteractionSource, deliver svcsession.InteractionDelivery,
+	metaDeps svcsession.MetaDeps) SessionCtr {
+	return &sessionCtr{
+		svc: svc, hist: svcsession.NewHistory(st, plane, bus), plane: plane,
+		detail:      svcsession.NewDetail(plane, src),
+		interaction: svcsession.NewInteraction(plane, deliver),
+		queue:       svcsession.NewQueue(plane),
+		meta:        svcsession.NewMeta(plane, metaDeps),
+	}
 }
 
 // List 列出全部会话（query `archived` 控制是否包含已归档；默认仅未归档）。
@@ -64,7 +106,7 @@ func (h *sessionCtr) List(c *gin.Context) {
 		return
 	}
 	workspaceID := strings.TrimSpace(c.Query("workspace_id"))
-	sessions, err := h.svc.ListSessions(archived, cwd, workspaceID)
+	sessions, err := h.plane.ListSessions(archived, cwd, workspaceID)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -85,7 +127,7 @@ func (h *sessionCtr) Search(c *gin.Context) {
 			limit = n
 		}
 	}
-	hits, err := h.svc.SearchSessions(c.Request.Context(), q, limit)
+	hits, err := h.plane.SearchSessions(c.Request.Context(), q, limit)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -95,7 +137,7 @@ func (h *sessionCtr) Search(c *gin.Context) {
 
 // Get 返回单会话详情（元数据 + 挂起权限）。
 func (h *sessionCtr) Get(c *gin.Context) {
-	resp, err := h.svc.GetSession(c.Request.Context(), c.Param("id"))
+	resp, err := h.detail.GetSession(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -110,7 +152,7 @@ func (h *sessionCtr) Update(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.UpdateSession(c.Request.Context(), c.Param("id"), req)
+	resp, err := h.meta.UpdateSession(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -120,7 +162,7 @@ func (h *sessionCtr) Update(c *gin.Context) {
 
 // Permissions 列出会话的挂起权限请求。
 func (h *sessionCtr) Permissions(c *gin.Context) {
-	resp, err := h.svc.ListPendingPermissions(c.Request.Context(), c.Param("id"))
+	resp, err := h.detail.ListPendingPermissions(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -130,7 +172,7 @@ func (h *sessionCtr) Permissions(c *gin.Context) {
 
 // PermissionMemories 列出会话级权限记忆（allow/reject 双侧，详情/撤销 UI 数据源）。
 func (h *sessionCtr) PermissionMemories(c *gin.Context) {
-	resp, err := h.svc.ListPermissionMemories(c.Request.Context(), c.Param("id"))
+	resp, err := h.detail.ListPermissionMemories(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -145,7 +187,7 @@ func (h *sessionCtr) RevokeMemory(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	if err := h.svc.RevokeMemory(c.Request.Context(), c.Param("id"), req.Title, req.Kind); err != nil {
+	if err := h.interaction.RevokeMemory(c.Request.Context(), c.Param("id"), req.Title, req.Kind); err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
 	}
@@ -159,7 +201,7 @@ func (h *sessionCtr) ResolvePermission(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.ResolvePermission(c.Request.Context(), c.Param("id"), req.CallID, req.OptionID, req.Always, req.Allowed)
+	resp, err := h.interaction.ResolvePermission(c.Request.Context(), c.Param("id"), req.CallID, req.OptionID, req.Always, req.Allowed)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -169,7 +211,7 @@ func (h *sessionCtr) ResolvePermission(c *gin.Context) {
 
 // Elicitations 列出会话的挂起结构化提问（elicitation/create 表单/URL 卡）。
 func (h *sessionCtr) Elicitations(c *gin.Context) {
-	resp, err := h.svc.ListPendingElicitations(c.Request.Context(), c.Param("id"))
+	resp, err := h.detail.ListPendingElicitations(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -184,7 +226,7 @@ func (h *sessionCtr) ResolveElicitation(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	if err := h.svc.ResolveElicitation(c.Request.Context(), c.Param("id"), req.ElicitationID, req.Action, req.Content); err != nil {
+	if err := h.interaction.ResolveElicitation(c.Request.Context(), c.Param("id"), req.ElicitationID, req.Action, req.Content); err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
 	}
@@ -227,7 +269,7 @@ func (h *sessionCtr) Prompt(c *gin.Context) {
 
 // QueuedInputs 列出待投递的排队输入（§6 当前态；前端冷挂载/刷新后重建队列视图）。
 func (h *sessionCtr) QueuedInputs(c *gin.Context) {
-	resp, err := h.svc.ListQueuedInputs(c.Request.Context(), c.Param("id"))
+	resp, err := h.plane.ListQueuedInputs(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -238,7 +280,7 @@ func (h *sessionCtr) QueuedInputs(c *gin.Context) {
 // DeleteQueuedInput 撤下一条尚未投递的排队输入（§6；已投递/已作废不可撤，幂等）。
 func (h *sessionCtr) DeleteQueuedInput(c *gin.Context) {
 	id, inputID := c.Param("id"), c.Param("input_id")
-	ok, err := h.svc.DeleteQueuedInput(c.Request.Context(), id, inputID)
+	ok, err := h.queue.DeleteQueuedInput(c.Request.Context(), id, inputID)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -304,7 +346,7 @@ func (h *sessionCtr) History(c *gin.Context) {
 	if q.Limit > 1000 {
 		q.Limit = 1000
 	}
-	resp, err := h.svc.SessionHistory(c.Request.Context(), id, q)
+	resp, err := h.hist.SessionHistory(c.Request.Context(), id, q)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -315,7 +357,7 @@ func (h *sessionCtr) History(c *gin.Context) {
 // Runs 列出某会话的轮次明细（runs 表读模型；内存模式返回空数组）。
 func (h *sessionCtr) Runs(c *gin.Context) {
 	id := c.Param("id")
-	runs, err := h.svc.ListRuns(c.Request.Context(), id)
+	runs, err := h.plane.ListRuns(c.Request.Context(), id)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

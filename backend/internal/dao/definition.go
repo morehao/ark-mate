@@ -156,6 +156,5 @@ func (d *AutomationDao) WithTx(tx *gorm.DB) *AutomationDao {
 	return &AutomationDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
 }
 
-
 // providers / models 的 DAO 在 `row.go`：v13 起它们是**资源表**（列 + revision CAS），
 // 与这里三个「定义载体」的表不是同一种行形态（ADR-2）。

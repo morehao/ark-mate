@@ -37,15 +37,15 @@ func TestAutomationPortWriteFaceCreate(t *testing.T) {
 	ctx := context.Background()
 
 	// 缺 id → 40000（这是**请求形态**问题，不是定义内容问题）
-	if _, err := svc.CreateAutomation(ctx, rawReq(t, map[string]any{"name": "x"})); numericCode(err) != 40000 {
+	if _, err := autoSvc(svc).CreateAutomation(ctx, rawReq(t, map[string]any{"name": "x"})); numericCode(err) != 40000 {
 		t.Fatalf("缺 id 应 40000，got %v（%d）", err, numericCode(err))
 	}
 	// id 类型不符 → 40000（而不是当成"没传 id"让脏值落盘）
-	if _, err := svc.CreateAutomation(ctx, rawReq(t, map[string]any{"id": 7})); numericCode(err) != 40000 {
+	if _, err := autoSvc(svc).CreateAutomation(ctx, rawReq(t, map[string]any{"id": 7})); numericCode(err) != 40000 {
 		t.Fatalf("id 非字符串应 40000，got %v（%d）", err, numericCode(err))
 	}
 	// 正常新建：文件落盘、id 归一、未知键保留
-	resp, err := svc.CreateAutomation(ctx, rawReq(t, map[string]any{
+	resp, err := autoSvc(svc).CreateAutomation(ctx, rawReq(t, map[string]any{
 		"id": "daily", "name": "巡检", "enabled": true,
 		"schedule":  map[string]any{"kind": "daily", "timezone": "Asia/Shanghai", "hour": 9, "minute": 0},
 		"target":    map[string]any{"cwd": "/tmp/ws", "prompt": "x"},
@@ -65,14 +65,14 @@ func TestAutomationPortWriteFaceCreate(t *testing.T) {
 		t.Fatalf("未知键必须原样保留: %#v", got)
 	}
 	// 重复新建 → 40901
-	if _, err := svc.CreateAutomation(ctx, rawReq(t, map[string]any{"id": "daily"})); numericCode(err) != 40901 {
+	if _, err := autoSvc(svc).CreateAutomation(ctx, rawReq(t, map[string]any{"id": "daily"})); numericCode(err) != 40901 {
 		t.Fatalf("重复新建应 40901，got %v（%d）", err, numericCode(err))
 	}
 	// 取单条 / 不存在
-	if _, err := svc.GetAutomation("daily"); err != nil {
+	if _, err := autoSvc(svc).GetAutomation("daily"); err != nil {
 		t.Fatalf("GetAutomation: %v", err)
 	}
-	if _, err := svc.GetAutomation("nope"); numericCode(err) != 40401 {
+	if _, err := autoSvc(svc).GetAutomation("nope"); numericCode(err) != 40401 {
 		t.Fatalf("未知 id 应 40401，got %v（%d）", err, numericCode(err))
 	}
 }
@@ -81,7 +81,7 @@ func TestAutomationPortWriteFaceCreate(t *testing.T) {
 func TestAutomationPortWriteFaceUpdate(t *testing.T) {
 	svc, dir := automationRig(t)
 	ctx := context.Background()
-	if _, err := svc.CreateAutomation(ctx, rawReq(t, map[string]any{
+	if _, err := autoSvc(svc).CreateAutomation(ctx, rawReq(t, map[string]any{
 		"id": "daily", "name": "旧名", "enabled": true,
 		"schedule": map[string]any{"kind": "daily", "timezone": "Asia/Shanghai", "hour": 9, "minute": 0},
 		"target":   map[string]any{"cwd": "/tmp/ws", "prompt": "x"},
@@ -89,7 +89,7 @@ func TestAutomationPortWriteFaceUpdate(t *testing.T) {
 		t.Fatalf("准备: %v", err)
 	}
 	// 只改 name：其余键（schedule/target）必须原样保留
-	if _, err := svc.UpdateAutomation(ctx, "daily", rawReq(t, map[string]any{"name": "新名"})); err != nil {
+	if _, err := autoSvc(svc).UpdateAutomation(ctx, "daily", rawReq(t, map[string]any{"name": "新名"})); err != nil {
 		t.Fatalf("覆盖写: %v", err)
 	}
 	got := fileOnDisk(t, filepath.Join(dir, "daily.json"))
@@ -100,7 +100,7 @@ func TestAutomationPortWriteFaceUpdate(t *testing.T) {
 		t.Fatalf("未出现的键必须保留: %#v", got["schedule"])
 	}
 	// null 删键
-	if _, err := svc.UpdateAutomation(ctx, "daily", rawReq(t, map[string]any{"name": nil})); err != nil {
+	if _, err := autoSvc(svc).UpdateAutomation(ctx, "daily", rawReq(t, map[string]any{"name": nil})); err != nil {
 		t.Fatalf("null 删键: %v", err)
 	}
 	if _, ok := fileOnDisk(t, filepath.Join(dir, "daily.json"))["name"]; ok {
@@ -111,7 +111,7 @@ func TestAutomationPortWriteFaceUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读前: %v", err)
 	}
-	if _, err := svc.UpdateAutomation(ctx, "daily", rawReq(t, map[string]any{
+	if _, err := autoSvc(svc).UpdateAutomation(ctx, "daily", rawReq(t, map[string]any{
 		"last_fired_at": "2030-01-01T00:00:00Z",
 	})); numericCode(err) != 40001 || !strings.Contains(err.Error(), "平台") {
 		t.Fatalf("写保留键应 40001，got %v（%d）", err, numericCode(err))
@@ -123,16 +123,16 @@ func TestAutomationPortWriteFaceUpdate(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("被拒的写面不该改动文件")
 	}
-	if _, ok := svc.GetAutomation("daily"); ok != nil {
+	if _, ok := autoSvc(svc).GetAutomation("daily"); ok != nil {
 		t.Fatal("daily 应仍在注册表里")
 	}
 	// 删不存在的 → 幂等 deleted:false
-	del, err := svc.DeleteAutomation(ctx, "nope")
+	del, err := autoSvc(svc).DeleteAutomation(ctx, "nope")
 	if err != nil || del.Deleted {
 		t.Fatalf("删不存在应 deleted:false 且无错: %+v %v", del, err)
 	}
 	// 删存在的
-	del, err = svc.DeleteAutomation(ctx, "daily")
+	del, err = autoSvc(svc).DeleteAutomation(ctx, "daily")
 	if err != nil || !del.Deleted {
 		t.Fatalf("删除应 deleted:true: %+v %v", del, err)
 	}
@@ -149,7 +149,7 @@ func TestAutomationPortPreview(t *testing.T) {
 		Schedule: json.RawMessage(`{"kind":"weekly","timezone":"Asia/Shanghai","hour":9,"minute":0,"days_of_week":[3,1,3]}`),
 		Count:    3,
 	}
-	resp, err := svc.PreviewAutomation(req)
+	resp, err := autoSvc(svc).PreviewAutomation(req)
 	if err != nil {
 		t.Fatalf("预览应成功: %v", err)
 	}
@@ -169,15 +169,15 @@ func TestAutomationPortPreview(t *testing.T) {
 		t.Fatalf("预览不该进注册表: %+v", items)
 	}
 	// 缺 schedule / 非法 from / 超上限
-	if _, err := svc.PreviewAutomation(dtoautomation.AutomationPreviewReq{}); numericCode(err) != 40000 {
+	if _, err := autoSvc(svc).PreviewAutomation(dtoautomation.AutomationPreviewReq{}); numericCode(err) != 40000 {
 		t.Fatalf("缺 schedule 应 40000，got %v", err)
 	}
-	if _, err := svc.PreviewAutomation(dtoautomation.AutomationPreviewReq{
+	if _, err := autoSvc(svc).PreviewAutomation(dtoautomation.AutomationPreviewReq{
 		Schedule: json.RawMessage(`{"kind":"daily","timezone":"UTC","hour":9,"minute":0}`), From: "昨天",
 	}); numericCode(err) != 40000 {
 		t.Fatalf("非法 from 应 40000，got %v", err)
 	}
-	if _, err := svc.PreviewAutomation(dtoautomation.AutomationPreviewReq{
+	if _, err := autoSvc(svc).PreviewAutomation(dtoautomation.AutomationPreviewReq{
 		Schedule: json.RawMessage(`{"kind":"daily","timezone":"UTC","hour":9,"minute":0}`), Count: 999,
 	}); err == nil {
 		t.Fatal("count 超上限应报错（预览是给人看的，不是导出工具）")
@@ -189,11 +189,11 @@ func TestAutomationPortRunsAndRunNow(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "")
 	// 运行史：空史也是合法应答（limit 回带）
-	runs, err := r.svc.ListAutomationRuns("daily")
+	runs, err := autoSvc(r.svc).ListAutomationRuns("daily")
 	if err != nil || runs.Limit == 0 || runs.ID != "daily" {
 		t.Fatalf("运行史: %+v %v", runs, err)
 	}
-	if _, err := r.svc.ListAutomationRuns("nope"); numericCode(err) != 40401 {
+	if _, err := autoSvc(r.svc).ListAutomationRuns("nope"); numericCode(err) != 40401 {
 		t.Fatalf("未知 id 的运行史应 40401，got %v", err)
 	}
 	// 定义坏了 → 40001（不假装没有运行史）。注意 LoadAutomationDefinitions 的返回值是
@@ -203,18 +203,18 @@ func TestAutomationPortRunsAndRunNow(t *testing.T) {
 	if _, ok := r.svc.AutomationByID("daily"); !ok {
 		t.Fatal("坏定义也必须留在列表里（带 error），否则用户只看到它凭空消失")
 	}
-	if _, err := r.svc.ListAutomationRuns("daily"); numericCode(err) != 40001 {
+	if _, err := autoSvc(r.svc).ListAutomationRuns("daily"); numericCode(err) != 40001 {
 		t.Fatalf("坏定义的运行史应 40001，got %v（%d）", err, numericCode(err))
 	}
 	// 手动触发：claimed 回带会话 id
 	r.writeDaily(t, "daily", "")
 	r.svc.LoadAutomationDefinitions(r.dir)
-	out, err := r.svc.RunAutomationNow(context.Background(), "daily")
+	out, err := autoSvc(r.svc).RunAutomationNow(context.Background(), "daily")
 	if err != nil || out.Status != "claimed" || out.SessionID == "" || out.Trigger != "manual" {
 		t.Fatalf("手动触发应 claimed 且带会话: %+v %v", out, err)
 	}
 	// 会话在跑 → 再触发一次是 overlap（手动不等于可以并发）
-	out2, err := r.svc.RunAutomationNow(context.Background(), "daily")
+	out2, err := autoSvc(r.svc).RunAutomationNow(context.Background(), "daily")
 	if err != nil || out2.Status != "overlap" {
 		t.Fatalf("并发手动触发应 overlap: %+v %v", out2, err)
 	}
@@ -222,11 +222,11 @@ func TestAutomationPortRunsAndRunNow(t *testing.T) {
 	if _, err := r.svc.writeAutomation(context.Background(), "daily", map[string]any{"enabled": false}, false); err != nil {
 		t.Fatalf("停用: %v", err)
 	}
-	if _, err := r.svc.RunAutomationNow(context.Background(), "daily"); numericCode(err) != 40001 {
+	if _, err := autoSvc(r.svc).RunAutomationNow(context.Background(), "daily"); numericCode(err) != 40001 {
 		t.Fatalf("停用后手动触发应 40001，got %v（%d）", err, numericCode(err))
 	}
 	// 运行史里能看到刚才这几笔（claimed → overlap，手动触发不推进游标故 claim 仍算一次）
-	got, err := r.svc.ListAutomationRuns("daily")
+	got, err := autoSvc(r.svc).ListAutomationRuns("daily")
 	if err != nil || len(got.Runs) < 2 {
 		t.Fatalf("运行史应留痕: %+v %v", got, err)
 	}

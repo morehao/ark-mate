@@ -16,7 +16,7 @@ import (
 //     （string+enum/oneOf=单选，array+items=多选，string/integer/number/boolean=对应输入）。
 //   - url：{message, mode:"url", url, elicitationId}。
 //
-// 会话归属（过渡实现，决策见 docs/agent-interactions-acp-v1-design-20260907.md）：
+// 会话归属（过渡实现，能力缺口见 docs/unimplemented.md D1）：
 // SDK v0.13.5 的 UnstableCreateElicitationForm/Url 未建模规范 scope 字段，顶层 sessionId/
 // requestId 在 SDK 解码时被丢弃，但**变体里的 `_meta` 会被完整保留**。因此归属分两段：
 //  1. 本层先读 `_meta`（sessionId/session_id/sessionId/session_id，

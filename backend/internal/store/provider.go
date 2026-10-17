@@ -16,7 +16,7 @@ import (
 // 本包只回答"库里那一行"，不回答"这台机器上有哪些上游凭据"。
 //
 // **密钥现在也在库里**（v20）：`providers.key` 一列与内容列同表同行，ADR-8 的"结构上没有能放明文的列"
-// 已被 v20 推翻（理由与代价见 `docs/design-and-roadmap.md`「决策变更 v20」）。但**本包仍不碰它**：
+// 已被 v20 推翻（理由与代价见 `docs/decisions.md`「决策 v20」）。但**本包仍不碰它**：
 // `SetProviderKey` / `ProviderKey` 是单独一对方法（`credentials.go`），因为密钥与内容有**两条不同的
 // 写路径**——内容走 CAS + 审计（`commitDefinitionChange`），密钥只 bump revision、不落审计行。
 // 于是 manager 的写面顺序是「① 校验 → ② 本行内容 CAS + 审计 → ③ `key` 列 → ④ 更新内存 → ⑤ 双写镜像」，

@@ -24,11 +24,11 @@ func mustConfig() (config.Config, config.Sources) {
 	return cfg, sources
 }
 
-const usageText = `mate — ark-mate 控制面 daemon（release 单二进制内嵌前端面板）
+const usageText = `mate — ark-mate 控制面 daemon
 
 用法：
   mate serve [--addr 127.0.0.1:10001]
-                                启动控制面（REST 会话动作 + WS /ws/events 实时通道 + 内嵌面板）
+                                启动控制面（REST 会话动作 + WS /ws/events 实时通道；面板资产由 --web-dir 指过去）
   mate demo [flags]            在指定 runtime 上跑一次真实 fresh 会话并打印事件（冒烟）
   mate migrate [flags]         transcript → SQLite 迁移（P1：幂等 + 事务整体回滚 + 数量校验）
   mate transcripts prune       transcript 目录显式清理（--older-than；ADR-5：不设自动删除）

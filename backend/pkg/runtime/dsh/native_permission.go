@@ -5,7 +5,8 @@ import "strings"
 // ——— B5：dsh 的原生权限投影（`DSH_PERMISSION_MODE`） ———
 //
 // 该变量同时决定 dsh 的 **sandbox 模式**与 **approval 策略**：仅 `danger-full-access` 时
-// approval=never。平台把 per-agent 的权限策略投影到它，形成"原生层 + 平台拦截面"的双层。
+// approval=never。平台把权限策略投影到它，形成「原生层 + 平台拦截面」的双层——**v19 起平台没有
+// 策略来源**（per-agent 默认策略随 agent 面撤销），所以今天不会注入该变量；词表与端口照旧保留。
 //
 // 形态见 `pkg/runtime/native_permission.go` 的文件头（为什么是端口而不是内核里的 switch）。
 

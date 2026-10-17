@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
@@ -10,6 +11,34 @@ import (
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
+
+// TestListSessionsArchivedFilter 归档是软删除：默认列表不展示，`archived=true` 才展示。
+//
+// 为什么单开一条：这个过滤位随读面搬进 `domain/session` 时**没有判据**——实测把
+// `r.Archived != archived` 整个抽掉，全量 `go test ./...` **一条都不会红**。它的失效方式是静默的：
+// 归档过的会话重新出现在默认列表里，用户看到的是"我删掉的又回来了"。
+func TestListSessionsArchivedFilter(t *testing.T) {
+	reg := testutil.StubRegistry()
+	svc := NewService(reg, eventbus.New())
+	svc.EnableStore(testutil.OpenStore(t, testutil.TempDBPath(t)))
+	svc.registerSession(&SessionRec{ID: "s-live", Title: "在用的", RuntimeID: "stub"})
+	svc.registerSession(&SessionRec{ID: "s-archived", Title: "归档的", RuntimeID: "stub", Archived: true})
+
+	live, err := sessionPlaneOf(svc).ListSessions(false, "", "")
+	if err != nil {
+		t.Fatalf("ListSessions(false): %v", err)
+	}
+	if len(live) != 1 || live[0].ID != "s-live" {
+		t.Fatalf("默认列表只该有未归档的那条: %+v", live)
+	}
+	archived, err := sessionPlaneOf(svc).ListSessions(true, "", "")
+	if err != nil {
+		t.Fatalf("ListSessions(true): %v", err)
+	}
+	if len(archived) != 1 || archived[0].ID != "s-archived" {
+		t.Fatalf("`archived=true` 只该有归档的那条: %+v", archived)
+	}
+}
 
 // sessionMaxSeq 读某会话当前的最高位次。
 //
@@ -45,15 +74,15 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 
 	svc1.registerSession(&SessionRec{ID: "s-live"})
 	// 首个用户消息 → 标题自动推导（应同步写库）。
-	eUser := svc1.publish(BusUserMessage, "s-live", map[string]any{"session_id": "s-live", "text": "计算 1+1"})
+	eUser := svc1.publish(session.BusUserMessage, "s-live", map[string]any{"session_id": "s-live", "text": "计算 1+1"})
 	// ③ 文本增量合并：publish 进缓冲并返回零值事件，号序在 flush 落库时才分配。
-	svc1.publish(BusMessage, "s-live", map[string]any{"text": "答案是 2"})
+	svc1.publish(session.BusMessage, "s-live", map[string]any{"text": "答案是 2"})
 	svc1.flushChunks()
 	eMsgSeq := eUser.Seq + 1
-	svc1.markSession("s-live", SessionStatusCompleted)
+	svc1.markSession("s-live", session.SessionStatusCompleted)
 	pinned := true
 	title := "用户改的标题"
-	if _, err := svc1.UpdateSession(ctx, "s-live", dtosession.SessionPatch{Pinned: &pinned, Title: &title}); err != nil {
+	if _, err := metaSvc(svc1).UpdateSession(ctx, "s-live", dtosession.SessionPatch{Pinned: &pinned, Title: &title}); err != nil {
 		t.Fatalf("UpdateSession: %v", err)
 	}
 	if eMsgSeq != eUser.Seq+1 {
@@ -63,7 +92,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 		t.Fatalf("DB 会话位次=%d want %d", got, eMsgSeq)
 	}
 	sess1, ok, _ := st1.GetSession(ctx, "s-live")
-	if !ok || sess1.Status != SessionStatusCompleted || sess1.LastSeq != eMsgSeq || !sess1.Pinned {
+	if !ok || sess1.Status != session.SessionStatusCompleted || sess1.LastSeq != eMsgSeq || !sess1.Pinned {
 		t.Fatalf("DB 会话元数据未同步: %+v ok=%v", sess1, ok)
 	}
 	_ = st1.Close() // 释放文件句柄，模拟进程退出
@@ -82,8 +111,8 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	if n != 1 || injected != 2 {
 		t.Fatalf("恢复统计: sessions=%d events=%d", n, injected)
 	}
-	list, _ := svc2.ListSessions(false, "", "")
-	if len(list) != 1 || list[0].Status != SessionStatusCompleted || list[0].Title != "用户改的标题" || !list[0].Pinned {
+	list, _ := sessionPlaneOf(svc2).ListSessions(false, "", "")
+	if len(list) != 1 || list[0].Status != session.SessionStatusCompleted || list[0].Title != "用户改的标题" || !list[0].Pinned {
 		t.Fatalf("恢复后会话元数据不符: %+v", list)
 	}
 	// bus 按 DB 位次回放（旧游标可续传）：after=eUser.Seq → 只剩 eMsg。
@@ -92,7 +121,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 		t.Fatalf("重启后回放应带 DB 号序: %+v", replay)
 	}
 	// 新事件 seq 跨重启连续（③ 合并：publish 进缓冲，flush 后才分配号序）。
-	svc2.publish(BusMessage, "s-live", map[string]any{"text": "继续"})
+	svc2.publish(session.BusMessage, "s-live", map[string]any{"text": "继续"})
 	svc2.flushChunks()
 	eNextSeq := eMsgSeq + 1
 	if got := sessionMaxSeq(t, st2, "s-live"); got != eNextSeq {
@@ -119,9 +148,9 @@ func TestSQLiteRestoreAcrossSessions(t *testing.T) {
 	// 手动制造交错号序：s-a 先事件、s-b 后事件、s-a 再事件（ListSessions 按 updated_at 降序可能先 s-a 后 s-b）。
 	svc.registerSession(&SessionRec{ID: "s-a"})
 	svc.registerSession(&SessionRec{ID: "s-b"})
-	_ = svc.publish(BusMessage, "s-a", map[string]any{"i": 1})
-	_ = svc.publish(BusMessage, "s-b", map[string]any{"i": 1})
-	_ = svc.publish(BusMessage, "s-a", map[string]any{"i": 2})
+	_ = svc.publish(session.BusMessage, "s-a", map[string]any{"i": 1})
+	_ = svc.publish(session.BusMessage, "s-b", map[string]any{"i": 1})
+	_ = svc.publish(session.BusMessage, "s-a", map[string]any{"i": 2})
 	svc.flushChunks() // ③ 落盘后再关库（否则缓冲里的增量随进程消失）
 	_ = st.Close()
 
@@ -156,7 +185,7 @@ func TestSQLiteRestoreAcrossSessions(t *testing.T) {
 		t.Fatalf("每会话条数不符: %v", byAgg)
 	}
 	// 新事件接续**本会话**最大号（③ 合并：先 flush 再查库）。
-	svc2.publish(BusMessage, "s-a", map[string]any{"i": 3})
+	svc2.publish(session.BusMessage, "s-a", map[string]any{"i": 3})
 	svc2.flushChunks()
 	if got, want := sessionMaxSeq(t, st2, "s-a"), int64(2); got != want {
 		t.Fatalf("接续号错误: got %d want %d", got, want)
@@ -179,7 +208,7 @@ func TestRestoreRebuildsStaleReadModels(t *testing.T) {
 	svc1.EnableStore(st1)
 	svc1.registerSession(&SessionRec{ID: "s-rebuild"})
 	runID, _, _ := beginRun(t, svc1, "s-rebuild", "重建我")
-	endRun(svc1, "s-rebuild", runID, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	endRun(svc1, "s-rebuild", runID, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 	svc1.flushChunks()
 	msgs, err := st1.ListMessages(ctx, "s-rebuild")
 	if err != nil || len(msgs) == 0 {
@@ -225,5 +254,37 @@ func TestRestoreRebuildsStaleReadModels(t *testing.T) {
 	// 标记必须被消费掉（留着它 = 每次启动都白重建一遍，且掩盖"重建其实失败了"这件事）。
 	if v, ok, err := st2.GetMeta(ctx, "read_models_rebuild"); err != nil || ok {
 		t.Fatalf("重建成功后标记应被清掉：ok=%v value=%q err=%v", ok, v, err)
+	}
+}
+
+// TestFirstUserMessageDerivesTitleInMemory 首条用户消息推导出的标题必须**同时**落内存与库。
+//
+// 为什么单开一条：这条路径曾经**没有任何判据**（`derive_title_test.go` 只测纯函数）。于是
+// P3b-1b-ii 把 `s.sessions[id]` 换成返回**副本**的 `Lookup` 之后，`r.Title = derived` 改的是
+// 副本——库里写上了、内存里永远空着（列表读内存 ⇒ 界面看不到标题，重启后才回来），
+// 而当时全量测试**一条都不红**。判据就钉这两侧（内存镜像 + 库），漏一侧都要红。
+func TestFirstUserMessageDerivesTitleInMemory(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(testutil.StubRegistry(), eventbus.New())
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
+	defer st.Close()
+	svc.EnableStore(st)
+	svc.registerSession(&SessionRec{ID: "s-title", RuntimeID: "stub"})
+
+	svc.publish(session.BusUserMessage, "s-title", map[string]any{"session_id": "s-title", "text": "第一条用户消息"})
+
+	list, err := sessionPlaneOf(svc).ListSessions(false, "", "")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ListSessions: n=%d err=%v", len(list), err)
+	}
+	if list[0].Title != "第一条用户消息" {
+		t.Fatalf("内存镜像里应已有推导出的标题（列表读的是它）: %q", list[0].Title)
+	}
+	rows, err := st.ListSessions(ctx, nil)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("库里应有 1 条: n=%d err=%v", len(rows), err)
+	}
+	if rows[0].Title != "第一条用户消息" {
+		t.Fatalf("库里也应落上标题: %q", rows[0].Title)
 	}
 }

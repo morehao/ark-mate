@@ -25,7 +25,7 @@ import (
 //
 // `preview` 必须在 `:id` 之前注册，否则会被当成一个 id。
 func registerAutomation(v1 *gin.RouterGroup, ports Ports) {
-	ctr := ctrautomation.NewAutomationCtr(ports.Automation)
+	ctr := ctrautomation.NewAutomationCtr(ports.AutomationPlane)
 	v1.GET("/automations", ctr.ListAutomations)
 	v1.POST("/automations", ctr.CreateAutomation)
 	v1.POST("/automations/preview", ctr.PreviewAutomation)

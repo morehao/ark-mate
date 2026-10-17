@@ -16,6 +16,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/domain/skill"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
+	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
+	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,11 +30,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
-	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/version"
 	"github.com/morehao/ark-mate/pkg/config"
@@ -75,6 +83,9 @@ type App struct {
 	bus  *eventbus.Bus
 	svc  *manager.Service
 	orch *manager.Orchestrator
+	// rconn 本次装配的**执行面**（底座绑定 + 诊断状态 + 连接键派生）。
+	// 它由装配层造、同一个实例交给 `svc`（记账）与 API 面 `svcruntime`（读面）——见 WithRuntimePlane。
+	rconn *runtimeconn.Plane
 	// reg 是本次装配的 runtime 注册表（内置 + runtimes.json 的远程端点）。
 	// 留着它是为了在装载定义时能枚举「有哪些 runtime」——skill 投影目标是从**声明**推出来的，
 	// 不是从配置里读出来的（配置只是覆盖）。
@@ -180,7 +191,10 @@ func (a *App) Init(ctx context.Context) error {
 	}
 
 	a.bus = eventbus.New()
-	a.svc = manager.NewService(reg, a.bus)
+	// P4a：执行面由**装配层**造，同一个实例同时交给 Service（记账）与 API 面（读面）——
+	// 两个平面各自记账会让"诊断说 stopped、连接却活着"立刻发生。
+	a.rconn = runtimeconn.NewPlaneFor(reg)
+	a.svc = manager.NewService(reg, a.bus, manager.WithRuntimePlane(a.rconn))
 	a.reg = reg
 
 	// v19 的目录改名一次性导入（`agents/providers.json` → `providers/providers.json`）：
@@ -206,12 +220,12 @@ func (a *App) Init(ctx context.Context) error {
 	cwd, _ := os.Getwd()
 	// 凭据 cwd **显式登记**（不是让用到的每一处各自 `os.Getwd()`）：它要随网关条目交给网关
 	// **子进程**，而网关的 cwd 是底座给的（会话工作区）——见 `mcp.GatewayCredCwdEnv`。
-	a.svc.SetCredentialCwd(cwd)
-	if layered, mirrorPath, cErr := manager.OpenCredentialSource(cfg.HomeDir, cwd); cErr != nil {
+	a.svc.CredentialStore().SetCwd(cwd)
+	if layered, mirrorPath, cErr := credmech.OpenCredentialSource(cfg.HomeDir, cwd); cErr != nil {
 		glog.Warnw(ctx, "serve: 凭据分层未装配（只有库里的那一份可用）", "err", cErr,
 			"home", config.DisplayHome(cfg.HomeDir))
 	} else {
-		a.svc.SetCredentials(layered)
+		a.svc.CredentialStore().SetLayered(layered)
 		glog.Infow(ctx, "serve: 凭据面已装配（层序：继承环境 > 托管文档 > <cwd>/.env > <MATE_HOME>/.env）",
 			"credentials", mirrorPath)
 	}
@@ -219,6 +233,10 @@ func (a *App) Init(ctx context.Context) error {
 	// 持久层装配（P1）：MATE_STORE=sqlite → SQLite（DB 为事实源，transcript 停写保留只读）；
 	// =memory → 维持 transcript 落盘 + 启动回读；auto（默认）→ DB 文件已存在则 sqlite，否则 memory。
 	mode := cfg.ResolvedStoreMode()
+	// st 提到 switch 之外：装配面（`Ports.Store`）与 `Close` 都要看它。
+	// 此前它只在 sqlite 分支里存活，于是 `a.st` 永远是 nil、`a.st.Close()` 从来没被执行过
+	// ——存储句柄的关闭是一次**静默的 no-op**（本轮修掉：既是端口要的事实，也是个真缺口）。
+	var st *store.Store
 	switch mode {
 	case config.StoreModeSQLite:
 		// 配置目录化后 DB 路径可由文件指定，父目录未必存在：先补齐（此前只依赖用户手建目录）。
@@ -227,14 +245,16 @@ func (a *App) Init(ctx context.Context) error {
 				return fatalErr("serve: 创建 DB 目录 %s: %v", dir, err)
 			}
 		}
-		st, err := store.Open(cfg.DBPath)
+		opened, err := store.Open(cfg.DBPath)
 		if err != nil {
 			return fatalErr("serve: 打开持久层 %s: %v", cfg.DBPath, err)
 		}
+		st = opened
+		a.st = opened
 		// 定义目录**先行登记**（顺序敏感，2026-10-11 修）：下面 `EnableStore` 会立刻做一次
 		// 装配期 runtime 同步，那一刻 `providerLocator` 已经要有确定值（否则报错文案指向空路径）。
 		// v20 起它与密钥无关——密钥面在库与托管文档里，都不依赖这个目录（见 `SetProviderDir`）。
-		a.svc.SetProviderDir(cfg.ProviderDir)
+		a.svc.ProviderPlane().SetProviderDir(cfg.ProviderDir)
 
 		// 旧密钥的一次性搬运（v20 迁移的第二步）：**必须在 EnableStore 之前**——那一次同步就要
 		// 读 provider 密钥，而此刻库里的密钥可能还只在旧密文里。搬完再同步，"哪些供应商有密钥"
@@ -244,7 +264,7 @@ func (a *App) Init(ctx context.Context) error {
 		// 都能跑，主密钥晚点修好也能补上）、单条失败进 Problems 不拖垮整批、**只读不删**
 		// （旧密文目录与主密钥原样留着，删除由用户确认后自己做，`mate doctor` 报"可删"）。
 		// 日志只带引用与条数，**绝不含密钥值**。
-		if anchor := manager.LegacySecretAnchor(cfg.HomeDir, cfg.ProviderDir); anchor != "" {
+		if anchor := doctorfacts.LegacySecretAnchor(cfg.HomeDir, cfg.ProviderDir); anchor != "" {
 			if move, mErr := st.ImportLegacyVault(ctx, anchor); mErr != nil {
 				glog.Warnw(ctx, "serve: 旧密钥搬运未执行（库里的密钥不受影响；跑 `mate doctor` 看遗留物）",
 					"err", mErr, "anchor", anchor)
@@ -274,8 +294,8 @@ func (a *App) Init(ctx context.Context) error {
 		// 幂等靠目录指纹（`meta.imported_capabilities`），且**按行判重**（导入绝不覆盖）：
 		// 目录没变 → 一个字节都不写；目录变了 → 只补缺失的行。失败只 WARN 不阻断启动
 		// （能力面为空是可见的，而"起不来"是更坏的一种失败），出路是显式 `mate capability import`。
-		if imp, iErr := manager.ImportCapabilityDir(ctx, st, cfg.CapabilityDir,
-			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
+		if imp, iErr := definition.ImportCapabilityDir(ctx, st, cfg.CapabilityDir,
+			definition.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
 			glog.Warnw(ctx, "serve: 导入存量能力定义失败（能力面可能为空；可跑 `mate capability import` 重试）",
 				"err", iErr, "dir", cfg.CapabilityDir)
 		} else if !imp.Already && imp.Inserted+imp.Existing+imp.Invalid+imp.Tools > 0 {
@@ -290,8 +310,8 @@ func (a *App) Init(ctx context.Context) error {
 		// ——所以搬运是"一个文件 → 一行里的两类列"，同一事务，不出现半截状态。
 		//
 		// 两个域各自记指纹（`meta.imported_automations`）：只改 automation 目录不该让能力面重跑。
-		if imp, iErr := manager.ImportAutomationDir(ctx, st, cfg.AutomationDir,
-			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
+		if imp, iErr := automation.ImportAutomationDir(ctx, st, cfg.AutomationDir,
+			definition.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
 			glog.Warnw(ctx, "serve: 导入存量 automation 定义失败（定时任务面可能为空；可跑 `mate automation import` 重试）",
 				"err", iErr, "dir", cfg.AutomationDir)
 		} else if !imp.Already && imp.Automations+imp.Inserted+imp.Existing+imp.Invalid > 0 {
@@ -306,8 +326,8 @@ func (a *App) Init(ctx context.Context) error {
 		// 与其余三个域的两处形态差异：① 幂等依据是**文件内容指纹**（整个域只有一个文件，而它的内容
 		// 就是全部事实）；② 迁移前**备份** `providers.json.bak-v11`（这是全篇唯一一个不可逆动作——
 		// 回退窗口在导入完成后关闭），备份失败即拒绝导入（无备份就没有回退路径）。
-		if imp, iErr := manager.ImportProviderFile(ctx, st, cfg.ProviderDir,
-			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
+		if imp, iErr := provider.ImportProviderFile(ctx, st, cfg.ProviderDir,
+			definition.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
 			glog.Warnw(ctx, "serve: 导入存量 provider 档案失败（供应商面可能为空；可跑 `mate provider import` 重试）",
 				"err", iErr, "dir", cfg.ProviderDir)
 		} else if !imp.Already && imp.Providers+imp.Inserted+imp.Existing > 0 {
@@ -323,12 +343,12 @@ func (a *App) Init(ctx context.Context) error {
 		// `<MATE_HOME>/credentials.json`。**合并、非破坏**：库里有值的那几条被补齐，
 		// 镜像里的其它键**不动**（"镜像有而库里没有"是 doctor 要报的事实，装配期顺手删掉它
 		// 那条判据就永远看不到东西了）。失败只 WARN：镜像是可重建副本，不阻断启动。
-		if changed, sErr := a.svc.SyncCredentialMirror(ctx, "serve 装配期"); sErr != nil {
+		if changed, sErr := a.svc.CredentialStore().SyncCredentialMirror(ctx, "serve 装配期"); sErr != nil {
 			glog.Warnw(ctx, "serve: 托管凭据文档未能按库对账（库是权威，键不受影响；`mate doctor` 会列出差异）",
-				"err", sErr, "path", manager.CredentialsPath(cfg.HomeDir))
+				"err", sErr, "path", credmech.CredentialsPath(cfg.HomeDir))
 		} else if changed > 0 {
 			glog.Infow(ctx, "serve: 托管凭据文档已按库对账",
-				"changed", changed, "path", manager.CredentialsPath(cfg.HomeDir))
+				"changed", changed, "path", credmech.CredentialsPath(cfg.HomeDir))
 		}
 		sessions, events, rErr := a.svc.RestoreFromStore(ctx)
 		if rErr != nil {
@@ -356,19 +376,19 @@ func (a *App) Init(ctx context.Context) error {
 	// 不回落 serve 进程目录）；workspace_roots 非空时把显式 cwd、目录浏览与**工作空间登记**
 	// 收在白名单内，代建根**自动并入**生效名单（平台自己的目录本就该天然合法，
 	// 不再要求运维成对配置）。
-	if err := a.svc.SetWorkspacePolicy(cfg.WorkspaceDir, cfg.WorkspaceRoots); err != nil {
+	if err := a.svc.WorkspacePlane().SetWorkspacePolicy(cfg.WorkspaceDir, cfg.WorkspaceRoots); err != nil {
 		return usageErr("serve: 工作空间策略非法: %v", err)
 	}
 	// 默认工作空间的建立**必须在配置装载之后**（迁移里拿不到 workspace_dir，见
 	// store/migrate_v14.go）：幂等，且只在登记表为空时创建——删掉它之后不再自动重建
 	// （用户删了它、下次启动它又回来，而界面上没有任何东西解释这件事）。
-	if err := a.svc.EnsureDefaultWorkspace(); err != nil {
+	if err := a.svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		return usageErr("serve: 建立默认工作空间失败: %v", err)
 	}
 	// 白名单的持久化端口：面板 PUT /settings/workspace 经它写回配置目录（config.json）。
 	// 传入该键的**最终来源**：来源高于配置文件（进程 env / env 文件 / flag）时端口会报"锁定"，
 	// 面板随之转只读——这比"面板显示保存成功、重启后被 env 覆盖"诚实。
-	a.svc.SetWorkspaceSettingsStore(config.NewSettingsStore(cfg.ConfigDir, a.sources["workspace_roots"]))
+	a.svc.WorkspacePlane().SetRootsStore(config.NewSettingsStore(cfg.ConfigDir, a.sources["workspace_roots"]))
 
 	a.orch = manager.NewOrchestrator(a.svc, reg)
 	// 进程注册表（M3 v4③）：登记本 daemon 拉起的 runtime 子进程；启动时回收上一实例遗留的
@@ -378,8 +398,8 @@ func (a *App) Init(ctx context.Context) error {
 		if prErr != nil {
 			glog.Warnw(ctx, "serve: 打开进程注册表失败（孤儿回收已禁用）", "path", p, "err", prErr)
 		} else {
-			a.orch.SetProcRegistry(pr)
-			if rep, rErr := a.orch.ReapOrphans(cfg.ReapGrace); rErr != nil {
+			a.rconn.SetProcRegistry(pr)
+			if rep, rErr := a.rconn.ReapOrphans(cfg.ReapGrace); rErr != nil {
 				glog.Warnw(ctx, "serve: 孤儿进程回收失败", "err", rErr)
 			} else if rep.Total() > 0 {
 				glog.Infow(ctx, "serve: 孤儿进程回收", "reaped", len(rep.Reaped),
@@ -404,7 +424,8 @@ func (a *App) Init(ctx context.Context) error {
 	// handoff memo 字符预算（P3 F3；MATE_HANDOFF_MAX_CHARS 覆盖，默认 6000）。
 	a.orch.SetHandoffMaxChars(cfg.HandoffMaxChars)
 	// 能力代际上限（M3-7；MATE_GENERATION_LIMIT，0 = 不限制）。
-	a.orch.SetGenerationLimit(cfg.GenerationLimit)
+	// P4a 正文第五十四刀起连接池归执行面：装配层经**事实出口**直连池，不再经编排器转发。
+	a.svc.RuntimePool().SetGenerationLimit(cfg.GenerationLimit)
 	// 权限/elicitation 挂起超时（默认 30min；MATE_PERMISSION_TIMEOUT / MATE_ELICITATION_TIMEOUT 覆盖）。
 	a.orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	a.orch.SetElicitationTimeout(cfg.ElicitationTimeout)
@@ -423,15 +444,32 @@ func (a *App) Init(ctx context.Context) error {
 		glog.Infow(ctx, "serve: 原生权限映射已关闭（MATE_NATIVE_PERMISSION=off；当前平台无策略来源，该开关不改变注入结果）")
 	}
 	// 空闲回收（P2）：StartAgent 暖进程闲置超阈值自动停（MATE_IDLE_TIMEOUT，默认 5m；0 = 关闭）。
-	a.orch.StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
+	a.svc.RuntimePool().StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
 	// M4-4 调度循环：`MATE_AUTOMATION_TICK=0` 关闭（装配期同步跑一次启动恢复 pass）。
 	a.svc.StartAutomationScheduler(cfg.AutomationTick)
 
 	// 装配各领域服务端口。当前 manager.Service 是单一聚合，同时满足全部端口；
 	// 端口声明与实现分离后，装配点成为"谁提供什么能力"的唯一可见处。
+	// P4a 起端口按 ADR-2 收口：`Runtime` 只管底座身份与诊断，档案与模型清单各有主人；
+	// 检索/用量并入 `Session`，导出归 `System`。
 	ports := router.Ports{
-		Session: a.svc, Workspace: a.svc, Runtime: a.svc,
-		Capability: a.svc, Automation: a.svc, Library: a.svc, Usage: a.svc, Search: a.svc, Export: a.svc,
+		Session: a.svc, InteractionSource: a.svc, InteractionDelivery: a.svc, SessionMetaDeps: a.svc,
+		// 底座身份与诊断的**用例实现**在 svcruntime（P4a 正文第二刀）：这里交出的是**执行面**
+		// （`*runtimeconn.Plane`），用例实例由 ctrruntime 自己造——`app` 不 import `service/svc*`。
+		Runtime: a.rconn,
+		// 档案四动作 + 自检的两个事实端口：自检用例（svcprovider.Probe）由 ctrprovider 造。
+		ProviderPlane: a.svc.ProviderPlane(), ProviderCatalog: a.svc,
+		// 模型清单写面（P4a 第五刀）：交出**清单载体**与供应商域平面（依赖事实）+ 一个过渡端口
+		// （读一条的投影 / 生效面回执 / 同步触发仍在 manager），写面用例由 ctrmodel 自己造。
+		Store: st, Model: a.svc, ModelHost: a.svc,
+		AutomationPlane: a.svc.AutomationPlane(),
+		// Library 读模型（P4a 正文第六刀）：交出三份**域/包事实** + 一个运行期读取口，
+		// 用例实例由 ctrlibrary 自己造。
+		Capabilities: a.svc.CapabilityRegistry(), SkillPlane: a.svc.SkillPlane(),
+		Registry: a.reg, Picker: a.svc.Picker(), WorkspacePlane: a.svc.WorkspacePlane(), McpPlane: a.svc.McpPlane(), McpSecrets: a.svc.McpSecrets(), McpGatewayEnabled: a.svc.McpGatewayEnabled,
+		// 导出（P4a 正文第八刀）：三份**依赖事实**（模型面已在上面交出 Store）——事实来源
+		// （`svcsystem.NewSource`）与用例实例（`svcsystem.New`）都由 ctrexport 造。
+		SessionPlane: a.svc.SessionPlane(), Bus: a.bus,
 	}
 	// 资产层（M2-1）：资产来自调用方给的目录（`--web-dir` / `MATE_WEB_DIR`），
 	// 没给即**拒绝启动**（退出码 3）。放在监听之前：装错资产时不该先占住端口再报错。
@@ -463,7 +501,7 @@ func (a *App) Init(ctx context.Context) error {
 	}
 	// 宿主原生目录选择器的第一条判据就是"绑的是不是回环"，而真端口只有 Listen 之后才有
 	// （桌面态 `127.0.0.1:0`）——所以在这里把**实际监听地址**交给 manager（v14.5）。
-	a.svc.SetBindAddr(ln.Addr().String())
+	a.svc.Picker().SetBindAddr(ln.Addr().String())
 	originPolicy := middleware.NewOriginPolicy(ln.Addr().String(), cfg.AllowedOrigins)
 	if originPolicy.Enabled() {
 		glog.Infow(ctx, "serve: 已启用回环 Host 白名单 + Origin 矩阵（M3-5）",
@@ -480,7 +518,7 @@ func (a *App) Init(ctx context.Context) error {
 
 	a.srv = newHTTPServerOn(ln, router.New(ports, a.bus, router.Options{
 		Credentials: a.credentials(),
-		HostFacts:   func() bool { return a.svc.NativePickerMode() == string(manager.NativePickerHost) },
+		HostFacts:   func() bool { return a.svc.Picker().NativePickerMode() == string(workspace.NativePickerHost) },
 		Meta:        a.metaInfo,
 		Web:         assets,
 		AssetWatch:  a.assetWatch,
@@ -551,9 +589,9 @@ func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 	// providers.json 仍在文件侧（计划 §7 P-9）：memory 模式下它是事实源，sqlite 模式下它是
 	// 导入/导出载体（v20 起它**不再是任何密钥的锚点**——密钥在库与 `<MATE_HOME>/credentials.json`）。
 	if mode == config.StoreModeSQLite {
-		a.svc.LoadProviderDefinitionsFromStore(ctx, cfg.ProviderDir)
+		a.svc.ProviderPlane().LoadProviderDefinitionsFromStore(ctx, cfg.ProviderDir)
 	} else {
-		a.svc.LoadProviderDefinitions(cfg.ProviderDir)
+		a.svc.ProviderPlane().LoadProviderDefinitions(cfg.ProviderDir)
 	}
 	// 能力数据面（P1 / M6-2）：**按持久层模式分派**——sqlite 模式下 DB 是事实源（v8 的
 	// skills/mcp_servers），memory 模式下文件仍是装载源。
@@ -594,7 +632,7 @@ func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 func (a *App) reconcileSkillProjections() {
 	specs := a.reg.List()
 	sort.Slice(specs, func(i, j int) bool { return specs[i].ID < specs[j].ID })
-	projections := make([]manager.SkillProjection, 0, len(specs))
+	projections := make([]skill.Projection, 0, len(specs))
 	claimed := make(map[string]bool, len(specs))
 	for _, sp := range specs {
 		claimed[sp.ID+":"+string(runtime.ProjectionSkill)] = true
@@ -602,14 +640,14 @@ func (a *App) reconcileSkillProjections() {
 		switch {
 		case err != nil:
 			glog.Warnw(context.Background(), "serve: skill 投影解析失败（该 runtime 不会收到任何技能）", "runtime", sp.ID, "err", err)
-			projections = append(projections, manager.SkillProjection{Runtime: sp.ID, Err: err.Error()})
+			projections = append(projections, skill.Projection{Runtime: sp.ID, Err: err.Error()})
 			continue
 		case !ok:
 			// 该 runtime 没声明 skill 投影（远程端点即此）：不是错误，什么都不做。
 			continue
 		}
-		proj := manager.SkillProjection{Runtime: sp.ID, Projection: p}
-		w, r, mErr := a.svc.ReconcileSkillProjection(proj)
+		proj := skill.Projection{Runtime: sp.ID, Projection: p}
+		w, r, mErr := a.svc.SkillPlane().ReconcileSkillProjection(proj)
 		if mErr != nil {
 			glog.Warnw(context.Background(), "serve: skill 物化重校失败", "runtime", sp.ID, "root", p.Root, "err", mErr)
 		} else if w > 0 || r > 0 {
@@ -621,7 +659,7 @@ func (a *App) reconcileSkillProjections() {
 		}
 		projections = append(projections, proj)
 	}
-	a.svc.SetSkillProjections(projections)
+	a.svc.SkillPlane().Projections().Set(projections)
 	for _, key := range sortedKeys(a.cfg.ProjectionDirs) {
 		if !claimed[key] {
 			glog.Warnw(context.Background(), "serve: MATE_PROJECTION_DIRS 的这一项没有对应的已注册 runtime:skill，未生效（拼写？该 runtime 未注册？）",
@@ -655,10 +693,13 @@ func (a *App) Run(ctx context.Context) error {
 
 	// MCP 自动探测（B4；MATE_MCP_AUTO_PROBE=startup，默认 off）：HTTP 起来后后台逐个探测，
 	// 不阻塞服务启动；结果与显式 POST /mcps/:id/probe 一致（写 Tool 目录 + 探测状态）。
+	//
+	// P4a 正文第三十八刀：`manager` 那两条转发已删，这里直接经**事实出口** `McpPlane()` 取平面
+	// （与 `a.svc.Picker().NativePickerMode()` 同一形状：装配点交事实，不交转发）。
 	if a.cfg.McpAutoProbe == config.McpAutoProbeStartup {
 		go func() {
 			glog.Infow(ctx, "serve: MCP 自动探测已启用（startup 模式，后台逐个探测已注册 server）")
-			_ = a.svc.AutoProbeMcpServers(ctx)
+			_ = a.svc.McpPlane().AutoProbe(ctx)
 		}()
 	}
 

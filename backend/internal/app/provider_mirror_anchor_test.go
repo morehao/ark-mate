@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/config"
 )
@@ -100,7 +100,7 @@ func TestStartupResolvesStoredProviderKeyAndWritesMirror(t *testing.T) {
 	})
 
 	// ③ 用户可见的结论：这条档案"有密钥"，且没有任何待处理项。
-	items, err := a.svc.ListProviders(ctx)
+	items, err := a.svc.ProviderPlane().ListProviders(ctx)
 	if err != nil {
 		t.Fatalf("ListProviders: %v", err)
 	}
@@ -154,7 +154,7 @@ const credentialsSourceManaged = "managed"
 // assertCredentialsMirror 断言托管镜像存在、0600、且那一条引用的值与库一致。
 func assertCredentialsMirror(t *testing.T, home, ref, want string) {
 	t.Helper()
-	path := manager.CredentialsPath(home)
+	path := credential.CredentialsPath(home)
 	fi, err := os.Lstat(path)
 	if err != nil {
 		t.Fatalf("托管镜像应已生成（%s）: %v", path, err)

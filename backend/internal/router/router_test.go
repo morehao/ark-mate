@@ -2,6 +2,8 @@ package router_test
 
 import (
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
+	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -18,6 +20,7 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/config"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -49,19 +52,31 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	// 文档没装配会被**显式拒绝**（`credentials_write_failed`：拒绝一次只在内存里成功的写入）。
 	// home 与 providerDir 都在 `t.TempDir()` 下，绝不碰用户环境（`~/.ark-mate`）。
 	home := t.TempDir()
-	creds, _, err := manager.OpenCredentialSource(home, home)
+	creds, _, err := credmech.OpenCredentialSource(home, home)
 	if err != nil {
 		t.Fatalf("装配凭据分层: %v", err)
 	}
 	// 继承环境那一层置空：这条夹具不该被跑测试的机器上恰好存在的同名变量影响
 	// （层序本身由 `pkg/credentials` 的用例与 manager 的用例覆盖）。
 	creds.Env = func(string) string { return "" }
-	svc.SetCredentials(creds)
-	svc.SetProviderDir(filepath.Join(home, "providers"))
+	svc.CredentialStore().SetLayered(creds)
+	svc.ProviderPlane().SetProviderDir(filepath.Join(home, "providers"))
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
-		Session: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
+		Session:        svc,
+		WorkspacePlane: svc.WorkspacePlane(),
+		Picker:         svc.Picker(),
+		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
+		Runtime:       runtimeconn.NewPlaneFor(nil),
+		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,
+		Model: svc,
+		// Library 读模型（P4a 正文第六刀）：域/包事实由装配点交下来，用例实例在控制器里造。
+		Capabilities: svc.CapabilityRegistry(), SkillPlane: svc.SkillPlane(), Registry: reg,
+		McpSecrets: svc.McpSecrets(), McpGatewayEnabled: svc.McpGatewayEnabled,
+		// 会话域平面与总线是**依赖事实**（P4a 正文第十/十一刀）：历史读面与读模型都从它们取数。
+		// 这条夹具用真 `manager.Service`（memory 模式），所以平面是**装配好的那个**——
+		// 归属展示端口也由它接好；自造一个空平面会在 `ListSessions` 补齐展示字段时 nil panic。
+		SessionPlane: svc.SessionPlane(), Bus: bus,
 	}, bus, router.Options{Web: assets})
 	return engine, svc
 }
@@ -374,8 +389,18 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
-		Session: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
+		Session:        svc,
+		WorkspacePlane: svc.WorkspacePlane(),
+		Picker:         svc.Picker(),
+		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
+		Runtime:       runtimeconn.NewPlaneFor(nil),
+		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,
+		Model: svc,
+		// Library 读模型（P4a 正文第六刀）：域/包事实由装配点交下来，用例实例在控制器里造。
+		Capabilities: svc.CapabilityRegistry(), SkillPlane: svc.SkillPlane(), Registry: reg,
+		McpSecrets: svc.McpSecrets(), McpGatewayEnabled: svc.McpGatewayEnabled,
+		// 同 `newEngineWithService`：会话域平面与总线是依赖事实（读模型/历史读面从它们取数）。
+		SessionPlane: svc.SessionPlane(), Bus: bus,
 	}, bus, router.Options{Credentials: creds})
 	return engine
 }
@@ -592,7 +617,7 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 		}
 	}
 	e, svc := newEngineWithService(t)
-	if err := svc.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 
@@ -650,10 +675,10 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 		t.Fatalf("写 config.json: %v", err)
 	}
 	e, svc := newEngineWithService(t)
-	if err := svc.SetWorkspacePolicy(provision, nil); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	svc.SetWorkspaceSettingsStore(config.NewSettingsStore(cfgDir, ""))
+	svc.WorkspacePlane().SetRootsStore(config.NewSettingsStore(cfgDir, ""))
 
 	// 起步：没有偏好起点（prefer_roots=false），可写，来源 = 默认值。
 	env := get(t, e, "/v1/mate/settings/workspace")
@@ -697,7 +722,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	if err := os.MkdirAll(defDir, 0o755); err != nil {
 		t.Fatalf("mkdir default: %v", err)
 	}
-	if _, err := manager.ResolveWorkspace("", &manager.DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}); err != nil {
+	if _, err := workspace.ResolveWorkspace("", &workspace.DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}); err != nil {
 		t.Fatalf("默认工作空间应仍可用（代建根隐式并入）: %v", err)
 	}
 
@@ -724,7 +749,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	}
 
 	// 被更高优先级来源锁定 → 拒绝写并自报只读（面板据此转只读，而不是假装保存成功）。
-	svc.SetWorkspaceSettingsStore(config.NewSettingsStore(cfgDir, config.SourceEnv))
+	svc.WorkspacePlane().SetRootsStore(config.NewSettingsStore(cfgDir, config.SourceEnv))
 	env = put(t, e, "/v1/mate/settings/workspace", `{"roots":[]}`)
 	if env.Code != 40001 || !strings.Contains(env.Msg, "settings_locked") {
 		t.Fatalf("锁定时应 settings_locked: %+v", env)
@@ -782,7 +807,7 @@ func TestWorkspaceFilesRoute(t *testing.T) {
 	e, svc := newEngineWithService(t)
 
 	// 即便配了"起始点偏好"，看资料也不受它限制（v14.5：名录不是边界）。
-	if err := svc.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 

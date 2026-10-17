@@ -16,7 +16,8 @@ import (
 // 因此：新增事件是**兼容变更**（改这个列表 + 前端），改名/删除是**破坏性变更**
 // （会让历史 events 行与前端联合类型同时失配）。本快照让后者无法静默发生。
 //
-// 权威定义在 internal/manager/events.go（P2/P4 拆包后随之迁移，本测试同步更新）。
+// 权威定义在内核的 `events.go`（`Bus*` 事件 type 常量族，重构后随它归 `domain/session`；
+// 本测试的冻结清单与它逐条对应）。
 var frozenEventTypes = []string{
 	"session.created",
 	"session.resumed",
@@ -45,14 +46,24 @@ var frozenEventTypes = []string{
 	"automation.run",
 }
 
+// busEventSourceFile 按**符号**定位事件 type 常量的事实源：`internal/**` 下声明
+// `Bus* = "…"` 的那个文件（不钉文件路径——它随重构搬进领域层后判据照旧），且要求恰好一处。
+func busEventSourceFile(t *testing.T) string {
+	t.Helper()
+	return uniqueSourceFile(t, filepath.Join(backendRoot(t), "internal"),
+		map[string]bool{"archtest": true}, `(?m)^\s*Bus[A-Za-z0-9_]*\s*=\s*"`,
+		"内核侧 `Bus*` 事件 type 常量的声明处")
+}
+
 // TestEventTypeContractFrozen 冻结域事件 type 字面量。
 func TestEventTypeContractFrozen(t *testing.T) {
-	// 从 events.go **源码**里扫出全部 `Bus* = "..."`，而不是在守卫里再手抄一份清单：
+	// 从 `events.go` **源码**里扫出全部 `Bus* = "..."`，而不是在守卫里再手抄一份清单：
 	// 手抄那份有个洞——新增常量时若忘了往守卫里加一行，守卫照样绿（它根本没看见新常量），
 	// 而"新增事件 type 忘了同步契约"正是这个守卫存在的唯一理由。
-	raw, err := os.ReadFile(filepath.Join(backendRoot(t), "internal", "manager", "events.go"))
+	path := busEventSourceFile(t)
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("读 events.go 失败: %v", err)
+		t.Fatalf("读 %s 失败: %v", path, err)
 	}
 	re := regexp.MustCompile(`(?m)^\s*(Bus[A-Za-z0-9_]*)\s*=\s*"([^"]+)"`)
 	got := make([]string, 0, len(frozenEventTypes))

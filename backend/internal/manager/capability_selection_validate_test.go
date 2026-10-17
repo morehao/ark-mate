@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/skill"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"os"
 	"strings"
 	"testing"
@@ -32,7 +34,7 @@ func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 	// server 对每个已注册 runtime 都可达，故"不承载 http"这条不再成立——那条新语义由
 	// `TestSelectionValidationRemoteReachableViaGateway` 负责。
 	svc.SetMcpGatewayEnabled(false)
-	svc.SetSkillProjections([]SkillProjection{{
+	svc.skillPlane.Projections().Set([]skill.Projection{{
 		Runtime:    "stub",
 		Projection: rtxSkillProjectionForTest(),
 	}})
@@ -134,7 +136,7 @@ func TestValidateSelectionVerdicts(t *testing.T) {
 	}
 
 	// 判定与 Library 同源：Library 说不可达的，这里也必须拒（反之亦然）。
-	lib, err := svc.ListLibrary(libQueryAll())
+	lib, err := listLibrary(t, svc).ListLibrary(libQueryAll())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,12 +182,12 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	svc.EnableStore(st)
 	wsDir := t.TempDir()
-	if err := svc.SetWorkspacePolicy(wsDir, nil); err != nil { // 允许代建、白名单不限制
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(wsDir, nil); err != nil { // 允许代建、白名单不限制
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 	// 默认工作空间（v14）= "未指定 cwd"的落点。生产里由装配期建立；测试里必须显式建，
 	// 否则未指定 cwd 的请求会报 workspace_required 而不是走到它要验的那一步。
-	if err := svc.EnsureDefaultWorkspace(); err != nil {
+	if err := svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 
@@ -198,14 +200,14 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	if got := numericCode(err); got != 40001 {
 		t.Fatalf("不可达选定的码 = %d，期望 40001", got)
 	}
-	if n := len(orch.conns); n != 0 {
+	if n := orch.pool.Len(); n != 0 {
 		t.Fatalf("校验失败不该建立任何连接，got %d", n)
 	}
 	list, _ := st.ListSessions(ctx, nil)
 	if len(list) != 0 {
 		t.Fatalf("校验失败不该写库，got %+v", list)
 	}
-	if list, _ := svc.ListSessions(false, "", ""); len(list) != 0 {
+	if list, _ := sessionPlaneOf(svc).ListSessions(false, "", ""); len(list) != 0 {
 		t.Fatalf("校验失败不该登记会话，got %+v", list)
 	}
 	// 副作用面：工作空间目录下**只能有** default/（v14：未指定 cwd 落在共享的默认工作空间，
@@ -225,10 +227,10 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("可达选定应建会话成功: %v", err)
 	}
-	if n := len(orch.conns); n != 1 {
+	if n := orch.pool.Len(); n != 1 {
 		t.Fatalf("应建立一个连接，got %d", n)
 	}
-	detail, err := svc.GetSession(ctx, res.ID)
+	detail, err := detailSvc(svc).GetSession(ctx, res.ID)
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
@@ -269,7 +271,7 @@ func TestCreateSessionDefaultPathUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	detail, err := svc.GetSession(ctx, res.ID)
+	detail, err := detailSvc(svc).GetSession(ctx, res.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,8 +292,8 @@ func TestCreateSessionDefaultPathUnchanged(t *testing.T) {
 	}
 	spec, _ := orch.reg.Get("stub")
 	// v19：基础键只剩"构建期底座 + 声明默认模型的供应商 env"（原生权限面没有策略来源）。
-	base := connKey(spec.ID, svc.providerEnvFor(spec.ID, svc.injectedProviderID(context.Background())))
-	if got := generationKey(base, rec.Fingerprint, ""); got != base {
+	base := runtimeconn.ConnKey(spec.ID, svc.providerPlane.ProviderEnvFor(spec.ID, svc.providerPlane.InjectedProviderID(context.Background())))
+	if got := runtimeconn.GenerationKey(base, rec.Fingerprint, ""); got != base {
 		t.Fatal("缺省路径的代际键必须与基础键逐字相同（R11）")
 	}
 	// 落库形态同样是空串（旧行与新行的默认值同形）。
@@ -329,10 +331,10 @@ func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 		t.Fatalf("声明与未声明的指纹应不同: declared=%q plain=%q", recD.Fingerprint, recP.Fingerprint)
 	}
 	// 两个不同的代际 → 两条连接（能力集是按进程绑定的）。
-	if n := len(orch.conns); n != 2 {
+	if n := orch.pool.Len(); n != 2 {
 		t.Fatalf("声明与未声明应是两个代际（2 条连接），got %d", n)
 	}
-	detail, err := svc.GetSession(ctx, declared.ID)
+	detail, err := detailSvc(svc).GetSession(ctx, declared.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +371,7 @@ func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 	if recN.Fingerprint == recD.Fingerprint {
 		t.Fatal("「不限制」与「一个都不要」是不同的能力集，必须不同指纹")
 	}
-	detailNone, err := svc.GetSession(ctx, none.ID)
+	detailNone, err := detailSvc(svc).GetSession(ctx, none.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +422,7 @@ func TestSelectionValidationRemoteReachableViaGateway(t *testing.T) {
 		t.Fatalf("网关在环时应通过（平台代连）：%v", err)
 	}
 	// 读面同向：Library 的该 (server, runtime) 判据也必须转为可达，且理由说明"经网关代连"。
-	lib, err := svc.ListLibrary(libQueryAll())
+	lib, err := listLibrary(t, svc).ListLibrary(libQueryAll())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +447,7 @@ func TestSelectionValidationRemoteReachableViaGateway(t *testing.T) {
 
 	// 关掉网关 → 读面也随之回到"不承载"，两侧永不同向漂移。
 	svc.SetMcpGatewayEnabled(false)
-	lib2, err := svc.ListLibrary(libQueryAll())
+	lib2, err := listLibrary(t, svc).ListLibrary(libQueryAll())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,18 +16,22 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/domain/mcp"
+	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/domain/skill"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/middleware"
-	"github.com/morehao/ark-mate/internal/service/svcautomation"
-	"github.com/morehao/ark-mate/internal/service/svccapability"
-	"github.com/morehao/ark-mate/internal/service/svcexport"
-	"github.com/morehao/ark-mate/internal/service/svclibrary"
-	"github.com/morehao/ark-mate/internal/service/svcruntime"
-	"github.com/morehao/ark-mate/internal/service/svcsearch"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/service/svcmodel"
+	"github.com/morehao/ark-mate/internal/service/svcprovider"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
-	"github.com/morehao/ark-mate/internal/service/svcusage"
-	"github.com/morehao/ark-mate/internal/service/svcworkspace"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/biz/gserver/ginserver"
 )
 
@@ -38,16 +42,70 @@ const AppName = "mate"
 //
 // 与"一个汇总大接口"的区别：这里只是装配点把实现分发给各控制器时的中转结构，
 // 控制器自身仍只持有自己那一片窄接口（见 internal/controller/ctr*）。
+//
+// **最终形状：每一格都是"依赖事实"**（域平面 / 执行面 / 注册表 / 库句柄 / 配置读取口），
+// 用例实例一律由控制器在自己的构造函数里造（`svcruntime.New` / `svcsystem.New` /
+// `svclibrary.NewLibrary` / `svcautomation.New`…）。本包**不 import `internal/service/svc*`**：
+// 依赖链是 `router → controller → service`，路由装配只该认识控制器。
+// 这条由 `internal/archtest/svc_layer_consumer_test.go` 钉住——它的失效是静默的
+// （多加一行 svc import 也能编译，只是把一条本该单向的边变成双向）。
+//
+// **过渡期**：仍有几格是 `service/svc*` 的类型（`Session`/`ProviderCatalog`/`Model`/`ModelHost`）
+// ——它们各自的实现还在 `manager`，控制器暂时造不出来。每迁完一个域就少一格
+// （已消失的：`Library`/`Runtime`/`System`/`Automation`/`Capability`，见 P4a 正文各刀的记录），
+// 全部迁完时这几行会**自己消失**（白名单 `transitionalServiceImporters` 也是同一张进度表）。
+// 别在过渡期往里加新的 svc 格：那正是 2026-10-16 被判定为"骚操作"的那批别名的来路。
 type Ports struct {
-	Session    svcsession.SessionSvc
-	Workspace  svcworkspace.WorkspaceSvc
-	Runtime    svcruntime.RuntimeSvc
-	Capability svccapability.CapabilitySvc
-	Automation svcautomation.AutomationSvc
-	Library    svclibrary.LibrarySvc
-	Usage      svcusage.UsageSvc
-	Search     svcsearch.SearchSvc
-	Export     svcexport.ExportSvc
+	Session svcsession.SessionSvc
+	// InteractionSource 会话交互面的三份只读事实（挂起权限 / 权限记忆 / 挂起提问）。
+	//
+	// 那份状态归**执行面**持有（`Orchestrator` 私有字段），而详情读面用例（`svcsession.NewDetail`）
+	// 在 ctrsession 里造——所以装配点交的是这三条**窄端口**，不是执行面本身（P4a 正文第四十刀）。
+	InteractionSource svcsession.InteractionSource
+	// InteractionDelivery 三条动作面的投递口（权限决策 / 提问决策 / 记忆撤销）。
+	//
+	// 与只读那三条分开：这一族有副作用（把决定送进正在跑的那一轮）。签名只吃**域值对象**，
+	// 所以实现它的是 `manager` 侧的适配器，而不是执行面本身（P4a 正文第四十一刀）。
+	InteractionDelivery svcsession.InteractionDelivery
+	// SessionMetaDeps 会话元数据写面的三份依赖（模型解析 / 投递 / 落库）。
+	//
+	// 端口签名只吃**域/pkg 类型**（`runtime.ModelConfig` / `model.SessionMetaPatch`），
+	// 所以实现它的是 `manager` 侧的适配器（P4a 正文第四十四刀）。
+	SessionMetaDeps svcsession.MetaDeps
+	// Runtime 底座**执行面本身**（`*runtimeconn.Plane`；P4a 正文第七刀）——`app` 交的是依赖事实，
+	// 底座面的用例（`svcruntime.New`）由 `ctrruntime` 在自己的构造函数里造。
+	Runtime *runtimeconn.Plane
+	// ProviderPlane 供应商域平面（**依赖事实**：域的类型，不是 `service/*` 的类型）；
+	// ProviderCatalog 是自检要的模型目录读面。两者一起交给 `ctrprovider.NewProviderCtr`，
+	// 档案用例与自检用例**都在控制器里造**（P4a 正文第四刀）。
+	ProviderPlane   *provider.Plane
+	ProviderCatalog svcprovider.Catalog
+	// Store 持久层句柄（**依赖事实**：memory 模式为 nil）；模型清单的写面用它落库。
+	Store *store.Store
+	// Model 还没搬完的那半边模型面（读清单 / 运行时目录 / 同步），过渡期由 manager 满足。
+	Model svcmodel.ModelSvc
+	// ModelHost 写面之外的模型面（读一条的投影 / 生效面回执 / 同步触发），过渡期端口；
+	// 与 Store、ProviderPlane 一起交给 `ctrmodel.NewModelCtr`，写面用例在控制器里造。
+	ModelHost       svcmodel.Host
+	AutomationPlane *automation.Plane
+	// Library 读模型的事实来源（P4a 正文第六刀）：三张能力表 + 技能投影 + 运行期事实。
+	// 用例实例（`svclibrary.NewLibrary`）由 ctrlibrary 自己造——`app`/`router` 都不 import svc。
+	Capabilities *capability.Registry
+	SkillPlane   *skill.Plane
+	Registry     *runtime.Registry
+	// WorkspacePlane 工作空间域平面（登记表读模型等事实的来源）。
+	WorkspacePlane *workspace.Plane
+	// Picker 宿主目录选择器平面（判定/配方/spawn 全在领域里；控制器的窄端口消费它）。
+	Picker *workspace.Picker
+	// McpPlane MCP 注册表/探测态平面（连接器目录读模型的事实来源之一）。
+	McpPlane   *mcp.Plane
+	McpSecrets *mcp.Secrets
+	// McpGatewayEnabled 平台 MCP 网关开关（**运行期可变**，所以是读取口而不是快照值）。
+	McpGatewayEnabled func() bool
+	// SessionPlane 会话域平面 + Bus 事件总线（**依赖事实**）：导出用例与它的事实来源都由
+	// ctrexport 在自己的构造函数里造（P4a 正文第八刀）；`Store` 那一格复用上面模型面的句柄。
+	SessionPlane *session.Plane
+	Bus          *eventbus.Bus
 }
 
 // CapabilityHostFacts 报告"宿主能不能抬起系统目录面板"（`native-dialog` 的可用性判据）。
@@ -101,7 +159,7 @@ type Options struct {
 // New 构建 gin.Engine 并注册控制面 REST + WS 实时事件路由。
 //
 // bus 是传输层设施（WS 通道的订阅源）而非领域端口，故与 Ports 并列传入。
-// 实时通道契约见 docs/design-and-roadmap.md §4.5。
+// 实时通道契约见 docs/architecture.md §6.2。
 func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	o := opts0(opts)
 	creds := o.Credentials
@@ -160,7 +218,9 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 		if ports.Runtime == nil {
 			return dtoruntime.IdentityResp{}
 		}
-		return ports.Runtime.RuntimeIdentity(context.Background())
+		// 这里取的是**执行面**的 `Identity`（P4a：`ports.Runtime` 交的是 `*runtimeconn.Plane`）：
+		// 底座身份本来就是它的读面，用例层那一层只是把名字适配成 API 的口语。
+		return ports.Runtime.Identity(context.Background())
 	})
 
 	MountWeb(r, o.Web)

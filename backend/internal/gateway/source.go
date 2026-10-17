@@ -26,6 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"strings"
 	"sync"
@@ -181,10 +182,10 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	} else {
 		glog.Infow(ctx, "mcp 网关: 凭据 cwd 已确定", "cwd", credCwd, "source", credCwdSource)
 	}
-	if layered, _, cErr := manager.OpenCredentialSource(opts.Cfg.HomeDir, credCwd); cErr != nil {
+	if layered, _, cErr := credential.OpenCredentialSource(opts.Cfg.HomeDir, credCwd); cErr != nil {
 		glog.Warnw(ctx, "mcp 网关: 凭据分层未装配（只有库里的那一份可用）", "err", cErr)
 	} else {
-		s.svc.SetCredentials(layered)
+		s.svc.CredentialStore().SetLayered(layered)
 	}
 
 	// 持久层：sqlite 走 DB（事实源），memory 走文件目录——两侧都必须拿到 `ProviderDir`
@@ -200,11 +201,11 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	}
 	if s.st != nil {
 		s.svc.EnableStore(s.st)
-		s.svc.LoadProviderDefinitionsFromStore(ctx, opts.Cfg.ProviderDir)
+		s.svc.ProviderPlane().LoadProviderDefinitionsFromStore(ctx, opts.Cfg.ProviderDir)
 		s.svc.LoadCapabilityDefinitionsFromStore(ctx, opts.Cfg.CapabilityDir)
 	} else {
 		// memory 模式没有持久层：文件是唯一事实源（与核心进程逐条一致）。
-		s.svc.LoadProviderDefinitions(opts.Cfg.ProviderDir)
+		s.svc.ProviderPlane().LoadProviderDefinitions(opts.Cfg.ProviderDir)
 		s.svc.LoadCapabilityDefinitions(opts.Cfg.CapabilityDir)
 	}
 	s.lastReload = s.now()
@@ -361,14 +362,14 @@ func (s *MateSource) servers(ctx context.Context) ([]gatewayServer, error) {
 	if err := s.reload(ctx); err != nil {
 		return nil, err
 	}
-	defs, err := s.svc.GatewayMcpFace(runtime.SelectedRuntime(), s.pinned)
+	defs, err := s.svc.McpPlane().GatewayFace(runtime.SelectedRuntime(), s.pinned)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]gatewayServer, 0, len(defs))
 	for _, def := range defs {
 		// 远程传输只用得到 header（env 是 stdio 子进程的注入面，而 stdio 不进网关）。
-		_, headers, problems := s.svc.ResolveMcpSecrets(def)
+		_, headers, problems := s.svc.McpPlane().ResolveSecrets(def)
 		if len(problems) > 0 {
 			if !s.warnOnce("secret:" + def.ID) {
 				glog.Warnw(ctx, "mcp 网关: 密钥引用解析失败，跳过该 server", "server", def.ID, "problems", problems)
@@ -411,7 +412,7 @@ func (s *MateSource) reload(ctx context.Context) error {
 	// provider 面也要重读：密钥引用解析与"这条档案还在不在"都在它上面。
 	// `providerDir` 必须原样传回：`providers.json` 在文件侧（locator 的取值来源），传空会静默
 	// 把密钥解析面砍掉（症状是"所有引用都解析不了"，而不是报错）。
-	s.svc.ReloadProviderDefinitionsFromStore(ctx, s.providerDir)
+	s.svc.ProviderPlane().ReloadProviderDefinitionsFromStore(ctx, s.providerDir)
 	return nil
 }
 

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,21 +25,21 @@ func TestPublishRedactsSecretsAtSingleGate(t *testing.T) {
 	dir := t.TempDir()
 	svc.SetTranscriptDir(dir)
 	svc.registerSession(&SessionRec{ID: "conv-redact"})
-	svc.tx.begin("conv-redact", "stub", "/tmp", false)
-	defer svc.tx.closeAll()
+	transcriptPlane(svc).BeginTranscript("conv-redact", "stub", "/tmp", false)
+	defer transcriptPlane(svc).CloseTranscripts()
 
 	payload := map[string]any{
 		"session_id": "conv-redact",
 		"msg_id":     "m1",
 		"text":       "runtime 报错原文：OPENAI_API_KEY=" + secret,
 	}
-	svc.publish(BusMessage, "conv-redact", payload)
+	svc.publish(session.BusMessage, "conv-redact", payload)
 	svc.flushChunks() // ③ 文本增量攒批：断言三个落点前先落盘
 
 	// 1) WS 帧（bus 事件 —— 订阅者/WS 收到的同一份）
 	var frame eventbus.Event
 	for _, e := range svc.bus.EventsAll() {
-		if e.Type == BusMessage && e.AggregID == "conv-redact" {
+		if e.Type == session.BusMessage && e.AggregID == "conv-redact" {
 			frame = e
 		}
 	}
@@ -83,7 +84,7 @@ func TestPublishRedactsDynamicProviderKey(t *testing.T) {
 	unregister := redact.RegisterDynamicSecret(key)
 	defer unregister()
 
-	evt := svc.publish(BusRunError, "conv-dyn", map[string]any{
+	evt := svc.publish(session.BusRunError, "conv-dyn", map[string]any{
 		"session_id": "conv-dyn",
 		"details":    "上游拒绝：key=" + key,
 	})
@@ -97,7 +98,7 @@ func TestPublishRedactsDynamicProviderKey(t *testing.T) {
 func TestRunErrorPayloadRedactsStderrTail(t *testing.T) {
 	svc, _ := newSearchRig(t)
 	const secret = "sk-abcdefghijklmnop1234"
-	evt := svc.publish(BusRunError, "conv-tail", map[string]any{
+	evt := svc.publish(session.BusRunError, "conv-tail", map[string]any{
 		"session_id":  "conv-tail",
 		"details":     "进程退出",
 		"stderr_tail": []string{"OPENAI_API_KEY=" + secret, "listening on :8080"},
@@ -122,17 +123,17 @@ func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
 	ctx := context.Background()
 	svc, st := newSearchRig(t)
 	home := t.TempDir()
-	svc.SetCredentials(newTestCredentials(t, home))
-	svc.SetProviderDir(filepath.Join(home, "providers"))
+	svc.creds.SetLayered(newTestCredentials(t, home))
+	svc.providerPlane.SetProviderDir(filepath.Join(home, "providers"))
 
 	key := "zq7-not-a-known-shape-42" // 形状上谁都认不出来
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	if _, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
 		ID: "dyn", Protocol: "openai", APIKey: &key,
 	}); err != nil {
 		t.Fatalf("写面存密钥: %v", err)
 	}
 	// 写面回执本身不得回显明文（另一条判据，但放在同一现场里更省事）。
-	items, err := svc.ListProviders(ctx)
+	items, err := svc.providerPlane.ListProviders(ctx)
 	if err != nil || len(items) != 1 || !items[0].HasKey {
 		t.Fatalf("装回读面: n=%d err=%v", len(items), err)
 	}
@@ -143,9 +144,9 @@ func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
 	dir := t.TempDir()
 	svc.SetTranscriptDir(dir)
 	svc.registerSession(&SessionRec{ID: "conv-dyn-v20"})
-	svc.tx.begin("conv-dyn-v20", "stub", "/tmp", false)
-	defer svc.tx.closeAll()
-	svc.publish(BusMessage, "conv-dyn-v20", map[string]any{
+	transcriptPlane(svc).BeginTranscript("conv-dyn-v20", "stub", "/tmp", false)
+	defer transcriptPlane(svc).CloseTranscripts()
+	svc.publish(session.BusMessage, "conv-dyn-v20", map[string]any{
 		"session_id": "conv-dyn-v20",
 		"msg_id":     "m1",
 		"text":       "底座报错原文：" + key,
@@ -155,7 +156,7 @@ func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
 	// 1) WS 帧 2) events 表 3) transcript 文件
 	var frame eventbus.Event
 	for _, e := range svc.bus.EventsAll() {
-		if e.Type == BusMessage && e.AggregID == "conv-dyn-v20" {
+		if e.Type == session.BusMessage && e.AggregID == "conv-dyn-v20" {
 			frame = e
 		}
 	}
@@ -187,8 +188,8 @@ func TestMcpSecretValueIsRedactedAfterResolution(t *testing.T) {
 	ctx := context.Background()
 	svc, st := newSearchRig(t)
 	home := t.TempDir()
-	svc.SetCredentials(newTestCredentials(t, home))
-	svc.SetProviderDir(filepath.Join(home, "providers"))
+	svc.creds.SetLayered(newTestCredentials(t, home))
+	svc.providerPlane.SetProviderDir(filepath.Join(home, "providers"))
 	svc.EnableStore(st)
 
 	const ref = "store:mcp/dyn-token"
@@ -210,9 +211,9 @@ func TestMcpSecretValueIsRedactedAfterResolution(t *testing.T) {
 	dir := t.TempDir()
 	svc.SetTranscriptDir(dir)
 	svc.registerSession(&SessionRec{ID: "conv-mcp-dyn"})
-	svc.tx.begin("conv-mcp-dyn", "stub", "/tmp", false)
-	defer svc.tx.closeAll()
-	svc.publish(BusRunError, "conv-mcp-dyn", map[string]any{
+	transcriptPlane(svc).BeginTranscript("conv-mcp-dyn", "stub", "/tmp", false)
+	defer transcriptPlane(svc).CloseTranscripts()
+	svc.publish(session.BusRunError, "conv-mcp-dyn", map[string]any{
 		"session_id":  "conv-mcp-dyn",
 		"details":     "子进程退出",
 		"stderr_tail": []string{"401 Unauthorized: token=" + val},
@@ -221,7 +222,7 @@ func TestMcpSecretValueIsRedactedAfterResolution(t *testing.T) {
 
 	var frame eventbus.Event
 	for _, e := range svc.bus.EventsAll() {
-		if e.Type == BusRunError && e.AggregID == "conv-mcp-dyn" {
+		if e.Type == session.BusRunError && e.AggregID == "conv-mcp-dyn" {
 			frame = e
 		}
 	}

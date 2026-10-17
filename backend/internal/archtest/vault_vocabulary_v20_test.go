@@ -1,7 +1,6 @@
 package archtest
 
 import (
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -36,6 +35,9 @@ func TestNoVaultVocabulary(t *testing.T) {
 		t.Fatalf("扫描面只拿到 %d 个文件——路径写错了？（fail-closed：解析不到即失败）", len(files))
 	}
 
+	// 先自检登记，再扫判据：登记烂了的话，"绿"是假的。
+	vaultWhitelistSelfCheck(t, files)
+
 	scanned := 0
 	var hits []string
 	for _, path := range files {
@@ -44,25 +46,16 @@ func TestNoVaultVocabulary(t *testing.T) {
 			t.Fatalf("相对路径: %v", err)
 		}
 		relSlash := filepath.ToSlash(rel)
-		if allowedByVaultVocabularyWhitelist(t, relSlash) {
-			continue
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("读不到 %s: %v", rel, err)
-		}
-		src := string(raw)
-		if strings.HasSuffix(path, ".go") {
-			src = stripLineComments(src)
-		} else {
-			src = stripTSComments(src)
-		}
+		src := strippedSourceOrFatal(t, path)
 		if strings.HasSuffix(relSlash, "README.md") {
 			// README 是契约文档：它**必须**能解释 v20 删了什么，但**不许**把退役机制重新
 			// 写成当下的用法。见 readmeRetiredVaultQuotes 的注释。
 			for _, quote := range readmeRetiredVaultQuotes {
 				src = strings.ReplaceAll(src, quote, "")
 			}
+		}
+		if allowedByVaultVocabularyWhitelist(t, relSlash, src) {
+			continue
 		}
 		scanned++
 		if idx := strings.Index(strings.ToLower(src), "vault"); idx >= 0 {
@@ -83,15 +76,36 @@ func TestNoVaultVocabulary(t *testing.T) {
 	}
 }
 
-// vaultVocabularyWhitelist 是**允许**出现 `vault` 的扫描点（相对仓库根路径前缀）与理由。
+// vaultVocabularyWhitelistEntry 一条登记：**目录/文件前缀**或**路径无关锚**恰好一种，外加理由。
+//
+//   - `path`：相对仓库根的前缀（豁免整棵目录时用）。只给**落点稳定**的登记——本次分层重构不动
+//     `internal/store`、`pkg/capability`、`internal/app`。
+//   - `anchor`：**路径无关锚**——一个只出现在**唯一一个**被扫描文件里的符号；含它的那个文件被豁免。
+//     `manager` 包里的 `provider_doctor.go` 会搬到 `mechanism/doctor/`（设计 §3.4 文件去向表），
+//     所以它只有锚、没有路径：符号跟着文件走，登记不会因为一次搬家而悬空。
+//
+// 两种锚都必须带非空判据（`strings.HasPrefix(rel, "")` 恒为真，空 `path` 会**静默豁免每一个文件**）；
+// 锚型的"恰好一个文件 + 那个文件里真的有 `vault`"由 vaultWhitelistSelfCheck 在扫描前自检。
+type vaultVocabularyWhitelistEntry struct {
+	path   string
+	anchor string
+	reason string
+}
+
+// key 只用于报错文案。
+func (w vaultVocabularyWhitelistEntry) key() string {
+	if w.anchor != "" {
+		return "锚 " + w.anchor
+	}
+	return w.path
+}
+
+// vaultVocabularyWhitelist 是**允许**出现 `vault` 的扫描点与理由。
 //
 // 每一处都要能回答「这是谁的原文」：是**历史那一版**的名字（迁移与夹具），还是**用户磁盘上的
 // 东西**（旧密文与旧 keyfile），还是**必须认出旧词才能翻译**的翻译点。白名单是"这次确实不该改"
 // 的登记簿，不是"懒得改"的垃圾桶。
-var vaultVocabularyWhitelist = []struct {
-	path   string
-	reason string
-}{
+var vaultVocabularyWhitelist = []vaultVocabularyWhitelistEntry{
 	{
 		path: "backend/internal/store/legacy_vault.go",
 		reason: "**一次性搬运**：它必须认识旧格式（目录名、keyfile 名与环境变量、AES-GCM 的 AAD " +
@@ -123,7 +137,10 @@ var vaultVocabularyWhitelist = []struct {
 			"装配层知道旧物在哪（`LegacySecretAnchor`），搬运器知道怎么解",
 	},
 	{
-		path: "backend/internal/manager/provider_doctor.go",
+		// 锚 = 报告面那个导出函数的签名。`provider_doctor.go` 随 P1a 从 `manager` 搬进
+		// `mechanism/doctor/`，写路径的话搬完就得回来改，而"回来改"正是 P0 要消灭的东西；
+		// 副作用是这条登记从"钉住一个文件"变成"钉住那个符号"，`LegacySecretPaths` 被删/改名时当场红。
+		anchor: "func LegacySecretPaths(",
 		reason: "**只读体检的遗留物报告面**：医生必须**指名** `vault/` 与 `vault.key` 这两个具体" +
 			"路径，用户才知道盘上该删什么（报告是「已迁移，可删」，绝不代删）。它与「显式拒绝面必须" +
 			"点名被撤掉的键」同形：只说「有遗留物」等于让用户去猜",
@@ -152,6 +169,49 @@ var vaultVocabularyWhitelist = []struct {
 	},
 }
 
+// vaultWhitelistSelfCheck 是**登记自检**（在扫判据之前跑），全部 fail-closed：
+//
+//  1. 理由非空——登记必须能回答「这是谁的原文」；
+//  2. 锚型登记必须命中**恰好一个**被扫描文件。0 个 = 文件没了 / 那个符号被改名了：登记已经悬空，
+//     **而悬空是静默的**（同一条纪律下，`agentVocabularyWhitelist` 里 `migrate_v19_test.go` 那条
+//     今天就指向一个不存在的文件而没有任何判据会红）；≥2 个 = 锚太宽——换一个包放一个同符号的文件
+//     就能蹭到整份豁免，比原来的路径登记**更松**，必须当场红；
+//  3. 命中的那个文件剥注释后必须**真的**含 `vault`。否则这条登记豁免不到任何东西，留着只会在下一个
+//     被撤的词写进来时静默顶掉判据。
+//
+// 前缀型登记这里只查理由：它们指向的是本次分层重构**不动**的落点，"前缀悬空"是另一批账。
+func vaultWhitelistSelfCheck(t *testing.T, files []string) {
+	t.Helper()
+	for _, w := range vaultVocabularyWhitelist {
+		if strings.TrimSpace(w.reason) == "" {
+			t.Fatalf("白名单 %q 的理由是空的——登记必须能回答「这是谁的原文」", w.key())
+		}
+		if w.anchor == "" {
+			if w.path == "" {
+				t.Fatalf("白名单里有既没有 path 也没有 anchor 的登记（理由：%q）——"+
+					"两种锚都没有的登记会静默豁免**每一个**文件", w.reason)
+			}
+			continue
+		}
+		got := anchoredFiles(t, files, w.anchor)
+		switch {
+		case len(got) == 0:
+			t.Fatalf("白名单锚 %q 在扫描面里**一个文件都没命中**——文件没了，或者那个符号被改名了。"+
+				"这条登记已经悬空：悬空**不会**让任何判据变红（只会让本来该豁免的那处旧词变成假红）。"+
+				"请把锚重新指到那个落点上（按符号，不按路径）", w.anchor)
+		case len(got) > 1:
+			t.Fatalf("白名单锚 %q 命中 %d 个文件：%v——锚太宽。按锚登记的前提是「含这个符号的文件"+
+				"**恰好一个**」；放宽了就等于多开一条豁免通道（换一个包放一个同符号的文件即可）。"+
+				"请换一个只出现在目标文件里的符号", w.anchor, len(got), got)
+		}
+		if !strings.Contains(strings.ToLower(strippedSourceOrFatal(t, got[0])), "vault") {
+			t.Fatalf("白名单锚 %q 定位到 %s，但那里剥注释后已经没有 `vault` 了——这条登记豁免不到任何"+
+				"东西。留着的死登记挡不住任何东西，却会在下一个被撤的词写进来时**静默**顶掉判据："+
+				"要么删掉它，要么把锚指到真正需要豁免的那一处", w.anchor, got[0])
+		}
+	}
+}
+
 // readmeRetiredVaultQuotes 是 README 里**只作为历史引用**出现的旧机制物件的**精确**写法。
 //
 // 为什么给 README 一组精确 token，而不是整份豁免、也不是"反引号里随便写"：这份文档必须能解释
@@ -170,17 +230,22 @@ var readmeRetiredVaultQuotes = []string{
 	"`key_ref: \"vault:providers/<id>\"`",
 }
 
-// allowedByVaultVocabularyWhitelist 命中白名单即跳过（前缀匹配，便于豁免整棵目录）。
-func allowedByVaultVocabularyWhitelist(t *testing.T, rel string) bool {
+// allowedByVaultVocabularyWhitelist 命中白名单即跳过。
+//
+// 匹配两种锚：`path` 是前缀（对 `rel`），`anchor` 是**内容**（对 `src`）。两处都带非空判据：空 `path` 的
+// `strings.HasPrefix(rel, "")` 恒为真，会把**每一个**文件都静默豁免掉。
+func allowedByVaultVocabularyWhitelist(t *testing.T, rel, src string) bool {
 	t.Helper()
 	for _, w := range vaultVocabularyWhitelist {
-		if !strings.HasPrefix(rel, w.path) {
-			continue
-		}
 		if strings.TrimSpace(w.reason) == "" {
-			t.Fatalf("白名单 %s 的理由是空的——登记必须能回答「这是谁的原文」", w.path)
+			t.Fatalf("白名单 %s 的理由是空的——登记必须能回答「这是谁的原文」", w.key())
 		}
-		return true
+		if w.path != "" && strings.HasPrefix(rel, w.path) {
+			return true
+		}
+		if w.anchor != "" && strings.Contains(src, w.anchor) {
+			return true
+		}
 	}
 	return false
 }

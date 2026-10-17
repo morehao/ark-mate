@@ -16,11 +16,16 @@ package manager
 // （`import cycle not allowed in test`）。详见 internal/testutil 的包注释。
 
 import (
+	"context"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
@@ -56,8 +61,8 @@ func providerTestSvc(t *testing.T, providerDir string) *Service {
 		// 与装配期同一条路径：先装配凭据分层（镜像落在 provider 目录的父目录下，即"mate home"），
 		// 再装载 `providers.json`（它顺带登记定义目录）。顺序与 `internal/app` 逐条同形——
 		// 反过来，memory 模式下装载时读到的密钥就会按"凭据面未装配"处理。
-		svc.SetCredentials(newTestCredentials(t, filepath.Dir(providerDir)))
-		svc.LoadProviderDefinitions(providerDir)
+		svc.creds.SetLayered(newTestCredentials(t, filepath.Dir(providerDir)))
+		svc.providerPlane.LoadProviderDefinitions(providerDir)
 	}
 	return svc
 }
@@ -72,7 +77,7 @@ func newTestCredentials(t *testing.T, home string) *credentials.Layered {
 	if err := os.MkdirAll(cwd, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	l, _, err := OpenCredentialSource(home, cwd)
+	l, _, err := credential.OpenCredentialSource(home, cwd)
 	if err != nil {
 		t.Fatalf("装配凭据面: %v", err)
 	}
@@ -161,11 +166,11 @@ func newRig(t *testing.T, mutate ...func(*rigConfig)) *rig {
 func beginRun(t *testing.T, svc *Service, sessionID, text string) (runID string, started, user eventbus.Event) {
 	t.Helper()
 	runID = objid.New(objid.Run)
-	started = svc.publish(BusRunStarted, sessionID, map[string]any{
+	started = svc.publish(session.BusRunStarted, sessionID, map[string]any{
 		"session_id": sessionID, "run_id": runID, "runtime": "stub", "text": text,
 	})
 	svc.openRun(sessionID, runID, text, started.Seq)
-	user = svc.publish(BusUserMessage, sessionID, map[string]any{
+	user = svc.publish(session.BusUserMessage, sessionID, map[string]any{
 		"session_id": sessionID, "runtime": "stub", "text": text,
 	})
 	return runID, started, user
@@ -280,4 +285,35 @@ func newSearchRig(t *testing.T) (*Service, *store.Store) {
 		c.stub, c.bus, c.store = true, true, true
 	})
 	return r.Svc, r.St
+}
+
+// transcriptPlane 取 Service 的会话域（**测试专用**：P3b-2b 把 transcript recorder 整体搬进
+// 域后，`Service.tx` 字段就没了——这些装配级用例仍要经"真 Service + 真域"这条链造 transcript
+// 夹具，所以由这里提供唯一的可达入口）。
+//
+// 它刻意是**测试文件里的包内助手**而不是 Service 的导出方法：生产装配不需要"把域拿出来"，
+// 加一个导出 getter 等于给 P4b 留一条新的一行转发。
+func transcriptPlane(svc *Service) *session.Plane { return svc.sessionPlane }
+
+// seedModelRow 直接往库里插一条模型行（**绕开写面**），返回行 id。
+//
+// 写面（`CreateModel`/`UpdateModel`/`DeleteModel`）已搬进 `service/svcmodel`（P4a 正文第五刀）：
+// 还留在 manager 的用例要的是"清单里有一条（甚至是默认那条）"这个**前提**，不是写面的行为
+// ——写面自己的判据跟着实现走（`internal/service/svcmodel/declared_test.go`）。
+func (r *genRig) seedModelRow(t *testing.T, providerID, model string, isDefault bool) string {
+	t.Helper()
+	ctx := context.Background()
+	id := objid.New(objid.Model)
+	ok, err := r.svc.st.CreateModelDefinition(ctx, store.ModelColumns{
+		ID: id, ProviderID: providerID, Model: model, InputModalities: resource.ModalityText,
+	}, definition.DefinitionWriteActor)
+	if err != nil || !ok {
+		t.Fatalf("插模型行 %s/%s: ok=%v err=%v", providerID, model, ok, err)
+	}
+	if isDefault {
+		if err := r.svc.st.SetDefaultModelID(ctx, id); err != nil {
+			t.Fatalf("置默认模型 %s: %v", id, err)
+		}
+	}
+	return id
 }

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"testing"
 	"time"
@@ -34,17 +35,17 @@ func TestUsageSummaryService(t *testing.T) {
 
 	// 每轮都走开轮三连（v22：轮次是实体，没有开轮行就没有 runs 行可聚合）。
 	runA1, _, _ := beginRun(t, svc, "u1", "第一问")
-	svc.publish(BusMessage, "u1", map[string]any{"text": "答一"})
-	endRun(svc, "u1", runA1, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusMessage, "u1", map[string]any{"text": "答一"})
+	endRun(svc, "u1", runA1, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	orch.recordUsage("u1", objusage.UsageInfo{Used: 250, Size: 1000, CostAmount: 0.5, CostCurrency: "USD"})
 	runA2, _, _ := beginRun(t, svc, "u1", "第二问")
-	endRun(svc, "u1", runA2, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	endRun(svc, "u1", runA2, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	runB1, _, _ := beginRun(t, svc, "u2", "第三问")
-	endRun(svc, "u2", runB1, BusRunError, map[string]any{"code": "agent_error", "class": "agent"})
+	endRun(svc, "u2", runB1, session.BusRunError, map[string]any{"code": "agent_error", "class": "agent"})
 
-	resp, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{})
+	resp, err := sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{})
 	if err != nil {
 		t.Fatalf("UsageSummary: %v", err)
 	}
@@ -76,7 +77,7 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// group_by=day：UTC 日期桶（今日 1 个桶）；快照口径下日桶不可相加（前端据此标注）。
-	dayResp, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{GroupBy: "day"})
+	dayResp, err := sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{GroupBy: "day"})
 	if err != nil || len(dayResp.Buckets) != 1 || len(dayResp.Buckets[0].Key) != 10 {
 		t.Fatalf("day 分桶不符: %+v err=%v", dayResp, err)
 	}
@@ -85,7 +86,7 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// 日期形式时间参数：from/to 回显为 UTC RFC3339（date → 当日 00:00）。
-	r2, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
+	r2, err := sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
 	if err != nil {
 		t.Fatalf("日期参数应合法: %v", err)
 	}
@@ -109,7 +110,7 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := svc.UsageSummary(ctx, tc.q)
+			_, err := sessionPlaneOf(svc).UsageSummary(ctx, tc.q)
 			var ge gerror.Error
 			if !errors.As(err, &ge) || ge.Code != tc.code || !strings.Contains(ge.Msg, tc.token) {
 				t.Fatalf("期望 code=%d 含 %s，got %v", tc.code, tc.token, err)
@@ -118,14 +119,14 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// 空区间（没有落在窗口里的轮次）→ 零值，不报错。
-	resp, err = svc.UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
+	resp, err = sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
 	if err != nil || resp.Totals.Runs != 0 || len(resp.Buckets) != 0 {
 		t.Fatalf("空区间应为零值: %+v err=%v", resp, err)
 	}
 
 	// 内存模式（无 store）→ 明确 unsupported（不返回假零值）。
 	svcMem := NewService(reg, eventbus.New())
-	_, err = svcMem.UsageSummary(ctx, dtousage.UsageQueryReq{})
+	_, err = sessionPlaneOf(svcMem).UsageSummary(ctx, dtousage.UsageQueryReq{})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40501 || !strings.Contains(ge.Msg, "[usage_stats_unsupported]") {
 		t.Fatalf("无 store 应 40501/usage_stats_unsupported，got %v", err)
@@ -147,8 +148,8 @@ func TestOrchestratorUsageEvent(t *testing.T) {
 
 	select {
 	case e := <-sub.C:
-		if e.Type != BusUsage || e.AggregID != "c1" {
-			t.Fatalf("期望 %s/c1，got %s/%s", BusUsage, e.Type, e.AggregID)
+		if e.Type != session.BusUsage || e.AggregID != "c1" {
+			t.Fatalf("期望 %s/c1，got %s/%s", session.BusUsage, e.Type, e.AggregID)
 		}
 		p, _ := e.Payload.(map[string]any)
 		if p["session_id"] != "c1" || p["runtime"] != "stub" ||

@@ -3,9 +3,11 @@ package manager
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -45,13 +47,12 @@ func (o *Orchestrator) StartSession(ctx context.Context, opt StartOptions) (*Cre
 // startSessionOn 在**构建期选定的** runtime 上建立持久 ACP 会话（Service.CreateSession
 // 与 RunOnce 都汇聚于此）。返回的 CreateResult.Runtime 为实际选中的 runtime。
 func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*CreateResult, error) {
-	runtimeID, err := o.svc.ResolveRuntime()
+	// **单点铸码**（P4a）：`runtime_not_found` 只由执行面铸（`runtimeconn.SelectedSpec`）。
+	// 这里原来先 `ResolveRuntime()` 再自己 `reg.Get` 判一次——第二次判定**永远不成立**
+	// （id 就是刚解析出来的那个），而它铸的是**同一个码的第二份文本**：两份文本迟早只改一处。
+	spec, err := o.svc.runtimePlane.SelectedSpec()
 	if err != nil {
 		return nil, err
-	}
-	spec, ok := o.reg.Get(runtimeID)
-	if !ok {
-		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
 	}
 	// 能力选定校验（M3-3）：**在建连之前**。位次很关键——它既要在已知 runtime 之后
 	// （可达性是 runtime 相关的），又要在任何副作用之前（不建会话/不拉进程/不写库）。
@@ -72,7 +73,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	fingerprint := o.svc.capabilityFingerprint(spec.ID, opt.Selection)
 	rc, err := o.acquire(ctx, spec, fingerprint)
 	if err != nil {
-		o.svc.setRuntimeState(AgentStateStopped)
+		o.svc.runtimePlane.SetState(session.AgentStateStopped)
 		// A3：底座起不来 / 握手失败时记诊断（含该阶段的 stderr 尾巴），供
 		// `GET /runtime/diagnostics` 外露。这一句原来在 `StartAgent`（v19 之前那个"暖启动"入口，
 		// 已随 agent 面删除）；今天唯一的启动路径就是"建会话把它拉起来"，所以落在这里。
@@ -95,7 +96,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	// P2 MCP 注入：平台注册表 MCP 子集按「会话选定 > 全量」+ runtime 传输能力过滤后
 	// 随 session/new 下发（§5.2/§5.3；会话级选定见 M3）。**必须传 opt.Selection**：
 	// 指纹就是按它算出来的，注入若用别的口径，会话拿到的东西会与代际台账不符。
-	sess, err := rc.client.NewSession(ctx, acl.SessionOptions{
+	sess, err := rc.Client.NewSession(ctx, acl.SessionOptions{
 		Cwd:        cwd,
 		McpServers: o.svc.McpServersFor(spec.ID, opt.Selection),
 	})
@@ -106,7 +107,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	// P3 双 id（D-1，用户已授权破坏性变更）：会话对外 id = 平台铸造的 `ses_<ULID>`（隐藏底座 id 形状、
 	// 跨重启稳定定位）；原生 provider id 存 sess/RuntimeSessionID 列，供恢复承载（load/resume）。
 	as := &ActiveSession{ID: convID, Runtime: spec.ID, Fingerprint: fingerprint,
-		client: rc.client, sess: sess, providerID: sess.ID(), proj: runtime.NewProjection(spec, sess)}
+		client: rc.Client, sess: sess, providerID: sess.ID(), proj: runtime.NewProjection(spec, sess)}
 	// 会话级模型应用（运行时派生模型面的落地，决策记录）：
 	//   - 值由 `modelCfg` 给出（平台行 → adapter 现算，见 `resolveSessionModel`）；
 	//   - 运行时**拒绝**该值 → 建会话失败（错误上抛给调用方，绝不静默回落到底座默认模型）；
@@ -133,15 +134,15 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 		WorkspaceID: opt.WorkspaceID, WorkspaceTemporary: opt.WorkspaceTemporary,
 		// **落库的是身份**（平台模型行 id），不是运行时值——定案「辰」的核心。
 		ModelID: platformModelID, RuntimeID: spec.ID, Fingerprint: fingerprint, Origin: opt.Origin,
-		RuntimeSessionID: providerSessID, Status: SessionStatusInProgress,
+		RuntimeSessionID: providerSessID, Status: session.SessionStatusInProgress,
 		// 钉住的选定**与指纹一起**落库（M3-3 起）：两者必须同源，缺一则恢复路径
 		// 要么注入集不对、要么代际挂错。
 		CapabilityJSON: MarshalCapabilitySelection(opt.Selection)})
 	o.svc.beginTranscript(as.ID, spec.ID, cwd, opt.WorkspaceTemporary) // wire transcript header（未启用时 no-op）
-	evt := o.svc.publish(BusSessionCreated, as.ID, map[string]any{
+	evt := o.svc.publish(session.BusSessionCreated, as.ID, map[string]any{
 		"session_id": as.ID, "runtime": spec.ID,
 	})
-	return &CreateResult{SessionID: as.ID, Runtime: spec.ID, Status: SessionStatusInProgress, EventSeq: evt.Seq}, nil
+	return &CreateResult{SessionID: as.ID, Runtime: spec.ID, Status: session.SessionStatusInProgress, EventSeq: evt.Seq}, nil
 }
 
 // ensureSession 返回活跃会话；不在活跃集合但平台有记录时按需重建。
@@ -178,14 +179,10 @@ func (o *Orchestrator) ensureSession(ctx context.Context, sessionID string) (*Ac
 	// （跨 runtime 续聊，§18 F3）。产品钉在单一底座之后没有第二个候选——若会话记录里的原生 runtime
 	// 与当前不同（改过构建 / 老数据），下面 `connectSession` 的 `sameRuntime` 判据自然为 false，
 	// 走 fresh + handoff memo 重灌，会话照样能续。**这条路径要有真实用例**（M5 验收项）。
-	runtimeID, err := o.svc.ResolveRuntime()
+	// 同 `startSessionOn`：`runtime_not_found` 只由执行面铸（单点）。
+	spec, err := o.svc.runtimePlane.SelectedSpec()
 	if err != nil {
 		return nil, err
-	}
-	spec, ok := o.reg.Get(runtimeID)
-	if !ok {
-		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found",
-			fmt.Sprintf("runtime %q 未注册，无法重建会话 %q", runtimeID, sessionID), nil)
 	}
 	cwd := rec.Cwd
 	if cwd == "" {
@@ -241,7 +238,7 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 	// `sessions.capability_json` 读回。漏了这一步的后果是会话重启后注入集悄悄换一套，
 	// 而且没有任何报错——用户只会发现"昨天能用的 MCP 今天不见了"。
 	opts := acl.SessionOptions{Cwd: cwd, McpServers: o.svc.McpServersFor(spec.ID, sel)}
-	caps := rc.client.Capabilities()
+	caps := rc.Client.Capabilities()
 	sameRuntime := spec.ID == rec.RuntimeID && rec.RuntimeID != ""
 	// `nativeID` 是**平台侧的值**（`rt_` 壳）；给底座的必须是**原文**。
 	//
@@ -266,9 +263,9 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 	switch {
 	case resumeOK:
 		if caps.Raw.LoadSession {
-			sess, err = rc.client.LoadSession(ctx, rawNativeID, opts)
+			sess, err = rc.Client.LoadSession(ctx, rawNativeID, opts)
 		} else {
-			sess, err = rc.client.ResumeSession(ctx, rawNativeID, opts)
+			sess, err = rc.Client.ResumeSession(ctx, rawNativeID, opts)
 		}
 		if err != nil {
 			glog.Warnw(ctx, "原生恢复失败，转 handoff memo 兜底", "session", rec.ID,
@@ -282,11 +279,11 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 				fmt.Sprintf("会话 %q 无法原生恢复（runtime %q 无 load/resume 或 provider 会话无效），且 memo 兜底关闭",
 					rec.ID, spec.ID), nil)
 		}
-		sess, err = rc.client.NewSession(ctx, opts)
+		sess, err = rc.Client.NewSession(ctx, opts)
 		if err != nil {
 			return nil, "", err
 		}
-		memo = o.svc.HandoffMemo(rec.ID, o.handoffMaxChars)
+		memo = o.svc.handoffMemo(rec.ID, o.handoffMaxChars)
 		reason = "handoff"
 		// W2（最容易漏的一处：它在"原生恢复失败/迁移"分支里）：新会话的底座原文同样要加壳，
 		// 否则换底座/换会话之后 id 会退化成裸值——库里的形状就变成了两种。
@@ -306,7 +303,7 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 	}
 	o.svc.registerSession(&rec)
 	as := &ActiveSession{ID: rec.ID, Runtime: spec.ID, Fingerprint: fingerprint,
-		client: rc.client, sess: sess, providerID: sess.ID(),
+		client: rc.Client, sess: sess, providerID: sess.ID(),
 		proj: runtime.NewProjection(spec, sess), memo: memo}
 	// 会话级模型在恢复后重新断言一次（平台记录是权威意图；原生恢复未必带回该状态）：
 	// **best-effort** —— 恢复不是用户在选模型，运行时若已不再提供该值（换了 provider/档案），
@@ -327,7 +324,7 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 				"session", rec.ID, "runtime", spec.ID, "model", rec.ModelID, "err", rerr)
 		} else if _, err := as.proj.ApplyModel(ctx, recCfg); err != nil {
 			if ae, ok := acl.As(err); !ok || !strings.HasPrefix(ae.Code, "unsupported_") {
-				o.svc.catalog.markRejected(spec.ID, recCfg.Model, modelApplyReason(err))
+				o.svc.catalog.markRejected(spec.ID, recCfg.Model, provider.ModelApplyReason(err))
 			}
 			glog.Warnw(ctx, "恢复后重放会话模型失败（忽略，继续用运行时当前值）",
 				"session", rec.ID, "runtime", spec.ID, "model", recCfg.Model, "err", err)
@@ -369,7 +366,7 @@ func (o *Orchestrator) attachSession(as *ActiveSession, reason string) {
 	// §6：执行上下文刚被重建（本次拿到了新的连接/会话）→ 会话执行代际自增。
 	// 排队输入比对的就是这个值：重建之后，为旧上下文排的队不再成立（见 inputqueue.go）。
 	o.svc.bumpGeneration(as.ID)
-	o.svc.markSession(as.ID, SessionStatusInProgress)
+	o.svc.markSession(as.ID, session.SessionStatusInProgress)
 	payload := map[string]any{
 		"session_id": as.ID, "runtime": as.Runtime, "reason": reason,
 	}
@@ -377,7 +374,7 @@ func (o *Orchestrator) attachSession(as *ActiveSession, reason string) {
 		// 迁移事件：把**换到了哪一代**带上（审计要把"第 N 轮到第 M 轮用的哪套能力"串起来）。
 		payload["capability_fingerprint"] = as.Fingerprint
 	}
-	o.svc.publish(BusSessionResumed, as.ID, payload)
+	o.svc.publish(session.BusSessionResumed, as.ID, payload)
 }
 
 // applyModelOnSession 把模型应用到一条会话上（建会话与「会话内改模型」共用同一路径）。
@@ -417,7 +414,7 @@ func (o *Orchestrator) applyModelOnSession(ctx context.Context, as *ActiveSessio
 			"[model_not_supported] runtime "+spec.ID+" 未提供模型配置项，无法应用所选模型", nil)
 	}
 	// 运行时明确拒绝：记录该取值不可用（目录里标灰）后原样上抛。
-	o.svc.catalog.markRejected(spec.ID, model.Model, modelApplyReason(err))
+	o.svc.catalog.markRejected(spec.ID, model.Model, provider.ModelApplyReason(err))
 	glog.Warnw(ctx, "apply model rejected by runtime",
 		"session", as.ID, "runtime", spec.ID, "model", model.Model, "err", err)
 	return err

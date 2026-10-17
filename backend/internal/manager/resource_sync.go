@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,10 +31,6 @@ import (
 //
 //	① 同步失败**不回滚资源**（资源已提交，失败如实回带）——沿用 v11 的诚实语义；
 //	② 同一份声明重复同步**不换代际**（摘要由声明算出，不由产物算出）；
-//	③ 凭据通道**二选一**（原生文档 / env），绝不两者同时启用（否则轮换静默失效）。
-
-// runtimeConfigState 是 `RuntimeConfigState` 的别名（对外形状 = 机器面的逐 runtime 同步结论）。
-type RuntimeConfigState = dtomodel.RuntimeSyncResp
 
 // runtimeConfigDigestEntry meta 里某 runtime 的同步记录（**保留 v11 的键名** `runtime_config_digest`
 // ——改名只会造成无收益的迁移，Q8）。
@@ -411,16 +409,15 @@ func (s *Service) resolveCredentialDoc(spec runtime.Spec) (string, error) {
 //
 // 密钥走 `resolveProviderKey`（四层回落的唯一入口）：内存里那条与库里的那一列都是它的输入，
 // 所以这里不再有"两条取密钥的路"（v13–v19 的 `Key` / `KeyRef + 密文句柄` 二选一就是那种分叉）。
-func (s *Service) providerForSync(providerID string) (*providerDef, string, error) {
+func (s *Service) providerForSync(providerID string) (*provider.Def, string, error) {
 	ctx := context.Background()
-	s.mu.Lock()
-	d := s.providers[providerID]
-	var cp *providerDef
+	// **不持 `s.mu`**（P4a 守卫）：`Snapshot` 自己取供应商域的锁并返回值语义副本。
+	d, _ := s.providerPlane.Snapshot(providerID)
+	var cp *provider.Def
 	if d != nil {
 		c := *d
 		cp = &c
 	}
-	s.mu.Unlock()
 	if cp == nil {
 		// sqlite 载体可能比内存先有（导入/并发装配）：回落到行（v13 起是纯列投影）。
 		if s.st != nil {
@@ -428,16 +425,16 @@ func (s *Service) providerForSync(providerID string) (*providerDef, string, erro
 			if err != nil || !found {
 				return nil, "", err
 			}
-			cp = &providerDef{
+			cp = &provider.Def{
 				ID: row.ID, Name: row.Name, Protocol: row.Protocol, BaseURL: row.BaseURL,
-				Note: row.Note, KeyRef: providerRef(row.ID), Revision: row.Revision,
+				Note: row.Note, KeyRef: credential.ProviderRef(row.ID), Revision: row.Revision,
 			}
 		}
 	}
 	if cp == nil {
 		return nil, "", nil
 	}
-	res := s.resolveProviderKey(ctx, cp)
+	res := s.providerPlane.KeyFor(ctx, cp)
 	if res.Value == "" && len(res.Problems) > 0 {
 		return cp, "", errors.New(strings.Join(res.Problems, "；"))
 	}
@@ -555,12 +552,16 @@ func (s *Service) recordSyncOutcome(ctx context.Context, runtimeID string, set r
 	return s.st.SetMeta(ctx, model.MetaKeyRuntimeConfigDigest, string(b))
 }
 
+// TrySyncModels 「提交就同步」：写面提交后把清单推给各底座，返回一句给用户看的话。
+//
+// 导出是**过渡期的端口实现**（`svcmodel.Host`，P4a 正文第五刀）：清单写面在 `service/svcmodel`，
+// 而同步要写各底座的配置（Syncer + 凭据通道），随读面/同步面一起搬（P4b 第二刀）。
 // trySyncModels 写面末尾的尽力同步：资源行**已经提交**，所以同步失败不回滚它，
 // 而是把失败如实带回写面回执（note），并留一条 WARN。
 //
 // 为什么不直接返回错误：那会让前端以为"清单没保存"——它保存了。真实情况是
 // "清单已保存，但交付没成功"，这两件事必须分开说。
-func (s *Service) trySyncModels(ctx context.Context) string {
+func (s *Service) TrySyncModels(ctx context.Context) string {
 	if s.st == nil {
 		return ""
 	}
@@ -584,8 +585,8 @@ func (s *Service) trySyncModels(ctx context.Context) string {
 }
 
 // RuntimeConfigStates 返回各 runtime 最后一次同步的结论（`mate doctor` 与读面用）。
-func (s *Service) RuntimeConfigStates(ctx context.Context) map[string]RuntimeConfigState {
-	out := map[string]RuntimeConfigState{}
+func (s *Service) RuntimeConfigStates(ctx context.Context) map[string]dtomodel.RuntimeSyncResp {
+	out := map[string]dtomodel.RuntimeSyncResp{}
 	s.mu.Lock()
 	outcomes := map[string]resource.Outcome{}
 	for k, v := range s.runtimeSyncOutcomes {

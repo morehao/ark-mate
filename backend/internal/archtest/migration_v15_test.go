@@ -116,7 +116,7 @@ var v15InPlaceDrops = []migrationDrop{
 // v19（2026-10-14，决策 v19）：agent 概念整个并入 runtime，底座由构建期固定、用户不可自定义，
 // 于是 `agents` 表被 DROP。依据是「这个域没有独立身份」——agent 的每个字段要么是派生事实
 // （`is_default`/`session_count`/`default_model`）、要么是平台事实（`permission_policy`/`provider`），
-// 撤掉写面后没有剩余字段可写。全文见 docs/design-and-roadmap.md「决策变更 v19」。
+// 撤掉写面后没有剩余字段可写。全文见 docs/decisions.md「决策 v19」。
 var v19WholeTableDrops = []migrationDrop{
 	{File: "migrate.go", Table: "agents", Reason: "v19：agent 概念并入 runtime，定义面整体删除（决策 v19 拍板）——" +
 		"行**确实**丢弃（定义行 + `default_agent`/`imported_agents` 两个 meta 键），所以它登记在这里而不是 v15InPlaceDrops"},

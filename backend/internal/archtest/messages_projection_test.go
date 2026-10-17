@@ -46,11 +46,14 @@ type projectionSource struct {
 	flushDropsEmpty bool
 }
 
-// parseMessagesProjection 解析 `internal/manager/messages_materialize.go` 并读出上面那份事实。
+// parseMessagesProjection 解析声明 `messageRowSourceTypes` 的那个文件（**按符号**定位，不钉
+// 文件路径：它随重构搬 `domain/session` 后判据照旧）并读出上面那份事实。
 func parseMessagesProjection(t *testing.T) projectionSource {
 	t.Helper()
 	root := backendRoot(t)
-	path := filepath.Join(root, "internal", "manager", "messages_materialize.go")
+	path := uniqueSourceFile(t, filepath.Join(root, "internal"),
+		map[string]bool{"archtest": true}, `messageRowSourceTypes\s*=\s*\[\]string\{`,
+		"消息白名单投影的事实源（`messageRowSourceTypes` 的声明处）")
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, 0)
 	if err != nil {
@@ -217,6 +220,14 @@ func identLiteral(t *testing.T, e ast.Expr) string {
 	t.Helper()
 	if id, ok := e.(*ast.Ident); ok {
 		return id.Name
+	}
+	// 限定名（`session.BusMessage`）：声明面随投影搬进 `domain/session` 之后，常量就带包前缀了。
+	// 判据要的是**取值集合**，包前缀不改变它的含义——但只认一层选择器，更复杂的表达式一律拒绝
+	// （fail-closed：读不懂就别假装读过）。
+	if se, ok := e.(*ast.SelectorExpr); ok {
+		if _, ok := se.X.(*ast.Ident); ok {
+			return se.Sel.Name
+		}
 	}
 	t.Fatalf("白名单里的元素不是标识符（守卫读不懂）：%T", e)
 	return ""

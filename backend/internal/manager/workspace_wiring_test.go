@@ -34,7 +34,7 @@ func newConvRig(t *testing.T) *convRig {
 	t.Cleanup(func() { _ = st.Close() })
 	svc.EnableStore(st)
 	mustWorkspacePolicy(t, svc, filepath.Join(t.TempDir(), "workspaces"), nil)
-	if err := svc.EnsureDefaultWorkspace(); err != nil {
+	if err := svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 	return &convRig{svc: svc, orch: orch, st: st}
@@ -48,7 +48,7 @@ func newConvRig(t *testing.T) *convRig {
 //     而读面兜不住"用户取消默认登记"之后的形态。
 func TestCreateSessionUnspecifiedUsesDefaultWorkspace(t *testing.T) {
 	r := newConvRig(t)
-	def, ok, err := r.svc.DefaultWorkspace()
+	def, ok, err := r.svc.WorkspacePlane().DefaultWorkspace()
 	if err != nil || !ok {
 		t.Fatalf("默认工作空间: ok=%v err=%v", ok, err)
 	}
@@ -103,7 +103,7 @@ func TestCreateSessionExplicitCwdKeepsEmptyAssignment(t *testing.T) {
 		t.Fatalf("库里也不该替它登记: %q", row.WorkspaceID)
 	}
 	// 且**没有**因此产生登记行：只有默认工作空间那一条。
-	list, err := r.svc.WorkspaceRegistry()
+	list, err := r.svc.WorkspacePlane().WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestCreateSessionExplicitCwdKeepsEmptyAssignment(t *testing.T) {
 func TestCreateSessionByWorkspaceID(t *testing.T) {
 	r := newConvRig(t)
 	dir := t.TempDir()
-	ws, err := r.svc.CreateRegisteredWorkspace(dir, "我的项目", false)
+	ws, err := r.svc.WorkspacePlane().CreateRegisteredWorkspace(dir, "我的项目", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestCreateSessionWorkspaceConflict(t *testing.T) {
 	r := newConvRig(t)
 	dirA := t.TempDir()
 	dirB := t.TempDir()
-	wsA, err := r.svc.CreateRegisteredWorkspace(dirA, "A", false)
+	wsA, err := r.svc.WorkspacePlane().CreateRegisteredWorkspace(dirA, "A", false)
 	if err != nil {
 		t.Fatalf("登记 A: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestCreateSessionWorkspaceConflict(t *testing.T) {
 	if c := gerrCode(t, err); c != code.InvalidRequest {
 		t.Fatalf("冲突应为 40001，实际 %d: %v", c, err)
 	}
-	list, _ := r.svc.ListSessions(false, "", "")
+	list, _ := sessionPlaneOf(r.svc).ListSessions(false, "", "")
 	if len(list) != 0 {
 		t.Fatalf("冲突请求不该建出会话: %+v", list)
 	}
@@ -190,9 +190,9 @@ func TestCreateSessionWorkspaceConflict(t *testing.T) {
 // 这条是"默认工作空间显示 N 个会话、点进去却是空的"这类不一致的唯一防线。
 func TestListSessionsByWorkspaceFilter(t *testing.T) {
 	r := newConvRig(t)
-	def, _, _ := r.svc.DefaultWorkspace()
+	def, _, _ := r.svc.WorkspacePlane().DefaultWorkspace()
 	dir := t.TempDir()
-	ws, err := r.svc.CreateRegisteredWorkspace(dir, "项目", false)
+	ws, err := r.svc.WorkspacePlane().CreateRegisteredWorkspace(dir, "项目", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestListSessionsByWorkspaceFilter(t *testing.T) {
 	r.svc.registerSession(&SessionRec{ID: "c-legacy", Cwd: def.Path})
 
 	// 按项目过滤 → 只有那一条。
-	proj, err := r.svc.ListSessions(false, "", ws.ID)
+	proj, err := sessionPlaneOf(r.svc).ListSessions(false, "", ws.ID)
 	if err != nil {
 		t.Fatalf("按项目过滤: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestListSessionsByWorkspaceFilter(t *testing.T) {
 	}
 
 	// 按默认工作空间过滤 → 显式归默认的 + 历史行都在。
-	dflt, err := r.svc.ListSessions(false, "", def.ID)
+	dflt, err := sessionPlaneOf(r.svc).ListSessions(false, "", def.ID)
 	if err != nil {
 		t.Fatalf("按默认过滤: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestListSessionsByWorkspaceFilter(t *testing.T) {
 	}
 
 	// 无过滤 → 三条都在（参数为空 = 不过滤，与历史行为逐字相同）。
-	all, _ := r.svc.ListSessions(false, "", "")
+	all, _ := sessionPlaneOf(r.svc).ListSessions(false, "", "")
 	if len(all) != 3 {
 		t.Fatalf("无过滤应返回 3 条，实际 %d", len(all))
 	}
@@ -257,10 +257,10 @@ func TestListSessionsByWorkspaceFilter(t *testing.T) {
 // 否则用户会看到"已经是我的工作空间"的条目出现在"未登记"里，而点它的语义（登记）已经无意义。
 func TestRecentWorkspacesExcludesRegistered(t *testing.T) {
 	r := newConvRig(t)
-	def, _, _ := r.svc.DefaultWorkspace()
+	def, _, _ := r.svc.WorkspacePlane().DefaultWorkspace()
 	registeredDir := t.TempDir()
 	looseDir := t.TempDir()
-	ws, err := r.svc.CreateRegisteredWorkspace(registeredDir, "已登记", false)
+	ws, err := r.svc.WorkspacePlane().CreateRegisteredWorkspace(registeredDir, "已登记", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestRecentWorkspacesExcludesRegistered(t *testing.T) {
 	r.svc.registerSession(&SessionRec{ID: "c-reg", Cwd: ws.Path, WorkspaceID: ws.ID})
 	r.svc.registerSession(&SessionRec{ID: "c-loose", Cwd: mustEval(t, looseDir)})
 
-	recent, err := r.svc.RecentWorkspaces(10)
+	recent, err := r.svc.WorkspacePlane().RecentWorkspaces(10)
 	if err != nil {
 		t.Fatalf("RecentWorkspaces: %v", err)
 	}
@@ -306,9 +306,9 @@ func TestRecentWorkspacesExcludesRegistered(t *testing.T) {
 // 库是对的、界面是空的，而中间没有任何报错，所以必须由测试钉住。
 func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	r := newConvRig(t)
-	def, _, _ := r.svc.DefaultWorkspace()
+	def, _, _ := r.svc.WorkspacePlane().DefaultWorkspace()
 	dir := t.TempDir()
-	ws, err := r.svc.CreateRegisteredWorkspace(dir, "要被移除的", false)
+	ws, err := r.svc.WorkspacePlane().CreateRegisteredWorkspace(dir, "要被移除的", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	}
 
 	// 删登记（模型层 + store 层都要清）。
-	del, err := r.svc.DeleteRegisteredWorkspace(ws.ID)
+	del, err := r.svc.WorkspacePlane().DeleteRegisteredWorkspace(ws.ID)
 	if err != nil {
 		t.Fatalf("DeleteRegisteredWorkspace: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	}
 
 	// **立刻**按默认工作空间过滤：那条会话必须已经在这儿（内存镜像已同步）。
-	got, err := r.svc.ListSessions(false, "", def.ID)
+	got, err := sessionPlaneOf(r.svc).ListSessions(false, "", def.ID)
 	if err != nil {
 		t.Fatalf("按默认过滤: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	}
 
 	// 按被删的那个归属过滤 → 空（id 已不存在，不该再返回任何东西）。
-	if stale, _ := r.svc.ListSessions(false, "", ws.ID); len(stale) != 0 {
+	if stale, _ := sessionPlaneOf(r.svc).ListSessions(false, "", ws.ID); len(stale) != 0 {
 		t.Fatalf("已删登记不该再返回会话: %+v", stale)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/pkg/automation"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
@@ -35,10 +36,18 @@ func writeAutomationFile(t *testing.T, path, body string) {
 	}
 }
 
+// autoSvc 取自动化面的**用例层**（P4a 正文第九刀起 REST 面在 `svcautomation`，不再由 Service 提供）。
+//
+// 测试经它与"真 Service + 真域平面"驱动——这层的实现搬走了，但夹具链一个字不用改：
+// 平面还是那个平面，用例只是换了个所有者。
+func autoSvc(svc *Service) svcautomation.AutomationSvc {
+	return svcautomation.New(svc.automationPlane)
+}
+
 // mustListAutomations 列出注册表（端口签名带 error，测试里不关心 err）。
 func (s *Service) mustListAutomations(t *testing.T) []dtoautomation.AutomationResp {
 	t.Helper()
-	items, err := s.ListAutomations()
+	items, err := autoSvc(s).ListAutomations()
 	if err != nil {
 		t.Fatalf("ListAutomations: %v", err)
 	}
@@ -300,8 +309,8 @@ func TestAutomationLoadBadDefinitions(t *testing.T) {
 	// due 快照：坏定义与 disabled 都不在
 	due := svc.automationDueSnapshot(time.Now().Add(48 * time.Hour))
 	for _, rec := range due {
-		if rec.def.ID == "broken" || rec.def.ID == "mismatch" || rec.def.ID == "disabled" {
-			t.Fatalf("不该出现在 due 快照里: %s", rec.def.ID)
+		if rec.Def.ID == "broken" || rec.Def.ID == "mismatch" || rec.Def.ID == "disabled" {
+			t.Fatalf("不该出现在 due 快照里: %s", rec.Def.ID)
 		}
 	}
 }
@@ -334,20 +343,20 @@ func TestAutomationDueSnapshot(t *testing.T) {
 		t.Fatalf("装载应为 4，got %d", n)
 	}
 	due := svc.automationDueSnapshot(time.Now())
-	if len(due) != 1 || due[0].def.ID != "a1" {
+	if len(due) != 1 || due[0].Def.ID != "a1" {
 		t.Fatalf("只有 a1 该到期，got %+v", due)
 	}
 	rec, ok := svc.automationRecByID("d4")
-	if !ok || rec.startup != automation.StartupExpire || !rec.nextDue.IsZero() {
-		t.Fatalf("过期的 once 应记 expire 且无 next_due: %+v（startup=%s）", rec, rec.startup)
+	if !ok || rec.Startup != automation.StartupExpire || !rec.NextDue.IsZero() {
+		t.Fatalf("过期的 once 应记 expire 且无 next_due: %+v（startup=%s）", rec, rec.Startup)
 	}
 	// once 未到期 → wait（future）
-	if rec, _ := svc.automationRecByID("b2"); rec.startup != automation.StartupWait {
-		t.Fatalf("未到期的 once 应记 wait，got %s", rec.startup)
+	if rec, _ := svc.automationRecByID("b2"); rec.Startup != automation.StartupWait {
+		t.Fatalf("未到期的 once 应记 wait，got %s", rec.Startup)
 	}
 	// daily + 陈旧的 last_fired_at → recover（ADR-9 的补跑判据）
-	if rec, _ := svc.automationRecByID("a1"); rec.startup != automation.StartupRecover {
-		t.Fatalf("停机错过的 daily 应记 recover，got %s", rec.startup)
+	if rec, _ := svc.automationRecByID("a1"); rec.Startup != automation.StartupRecover {
+		t.Fatalf("停机错过的 daily 应记 recover，got %s", rec.Startup)
 	}
 }
 

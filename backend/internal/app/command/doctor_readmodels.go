@@ -6,7 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/domain/session"
+	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/config"
@@ -14,7 +15,7 @@ import (
 
 // 本文件是 `mate doctor` 的 **read-models（读模型）** 那一段（v21–v23）。
 //
-// 分工与 provider 段逐条同形：**事实由 `manager.CollectReadModelDoctorFacts` 构造**（SQL 与
+// 分工与 provider 段逐条同形：**事实由 `doctorfacts.CollectReadModelDoctorFacts` 构造**（SQL 与
 // 不变量都在那一侧），本文件只做两件事——打开只读句柄、把事实翻成三档结论与人话。
 //
 // 分档口径（`doctor.go` 的既有三档，逐条对应，避免下一个人凭感觉调档）：
@@ -59,7 +60,7 @@ func checkReadModels(opts doctorOptions) []doctorCheck {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	facts := manager.CollectReadModelDoctorFacts(ctx, st)
+	facts := doctorfacts.CollectReadModelDoctorFacts(ctx, st, session.MessageRowSourceTypes())
 	if facts.Note != "" {
 		return []doctorCheck{{name, doctorWarn, readModelUnverifiableDetail(ctx, st, facts.Note)}}
 	}
@@ -100,7 +101,11 @@ func checkReadModelRebuild(opts doctorOptions) []doctorCheck {
 	// 先记下标记：重建成功后要把它清掉（否则下一次启动会**再**全量重建一遍——结果一样，
 	// 但白花一次启动时间，而"标记"这件事本身就变成噪声）。
 	pending, hadPending, _ := st.GetMeta(ctx, model.MetaKeyReadModelsRebuild)
-	total, failed, err := manager.RebuildAllReadModels(ctx, st)
+	// 循环在机制层；"重建一个会话"的实现（与启动钩子共用同一份）在会话域——组合根直接把
+	// 会话平面交下去（`domain/session` 是下层，命令层 import 它没有任何越界）。
+	pl := session.NewPlane()
+	pl.SetStore(st)
+	total, failed, err := doctorfacts.RebuildAllReadModels(ctx, st, pl)
 	if err != nil {
 		return []doctorCheck{{name, doctorFail, "重建读模型失败：" + err.Error()}}
 	}
@@ -143,7 +148,7 @@ func readModelUnverifiableDetail(ctx context.Context, st *store.Store, note stri
 //
 // ok 时也把**规模**报出来（messages/runs 行数）：一条只说"没问题"的检查在排障时没有信息量，
 // 而"这个库有多少行"是下一个问题必问的。
-func readModelCheck(name string, f manager.ReadModelDoctorFacts) doctorCheck {
+func readModelCheck(name string, f doctorfacts.ReadModelDoctorFacts) doctorCheck {
 	pending := ""
 	if f.PendingRebuild != "" {
 		pending = fmt.Sprintf("；meta.read_models_rebuild=%s（下一次启动会整会话重建，重建前序号可能还没铺好）",

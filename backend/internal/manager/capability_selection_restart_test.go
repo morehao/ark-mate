@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -64,8 +65,8 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	if row.CapabilityFingerprint != rec1.Fingerprint {
 		t.Fatalf("capability_fingerprint 落库 = %q，内存 = %q", row.CapabilityFingerprint, rec1.Fingerprint)
 	}
-	baseKey := connKey("stub", nil, nil)
-	genKey1 := generationKey(baseKey, rec1.Fingerprint, "")
+	baseKey := runtimeconn.ConnKey("stub", nil, nil)
+	genKey1 := runtimeconn.GenerationKey(baseKey, rec1.Fingerprint, "")
 
 	// 进程退出。
 	orch1.Close()
@@ -96,7 +97,7 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	if rec2.Fingerprint != rec1.Fingerprint {
 		t.Fatalf("重启后指纹漂移: %q → %q", rec1.Fingerprint, rec2.Fingerprint)
 	}
-	if genKey2 := generationKey(baseKey, rec2.Fingerprint, ""); genKey2 != genKey1 {
+	if genKey2 := runtimeconn.GenerationKey(baseKey, rec2.Fingerprint, ""); genKey2 != genKey1 {
 		t.Fatalf("重启后代际键漂移:\n%s\n%s", genKey1, genKey2)
 	}
 	// ③ 恢复路径算出的注入集 = 会话钉住的那一份（不是"现在的默认"）。

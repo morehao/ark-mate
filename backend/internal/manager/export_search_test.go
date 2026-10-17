@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoexport"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/object/objid"
@@ -34,7 +36,7 @@ func seedSearchSession(t *testing.T, svc *Service, st *store.Store, id, title st
 	var msgs []model.MessageEntity
 	for i, pair := range texts {
 		role, text := pair[0], pair[1]
-		seq, err := st.AppendEvent(ctx, objid.New(objid.Event), id, BusUserMessage, map[string]any{"text": text})
+		seq, err := st.AppendEvent(ctx, objid.New(objid.Event), id, session.BusUserMessage, map[string]any{"text": text})
 		if err != nil {
 			t.Fatalf("AppendEvent: %v", err)
 		}
@@ -59,7 +61,7 @@ func TestSearchMessagesSQLite(t *testing.T) {
 	seedSearchSession(t, svc, st, "c-2", "无关会话",
 		[2]string{"user", "今天天气不错"})
 
-	resp, err := svc.SearchMessages(ctx, "502", 10)
+	resp, err := sessionPlaneOf(svc).SearchMessages(ctx, "502", 10)
 	if err != nil {
 		t.Fatalf("SearchMessages: %v", err)
 	}
@@ -77,7 +79,7 @@ func TestSearchMessagesSQLite(t *testing.T) {
 	}
 
 	// 助手消息也命中（角色不限）。
-	resp2, err := svc.SearchMessages(ctx, "upstream", 10)
+	resp2, err := sessionPlaneOf(svc).SearchMessages(ctx, "upstream", 10)
 	if err != nil {
 		t.Fatalf("SearchMessages(assistant): %v", err)
 	}
@@ -88,7 +90,7 @@ func TestSearchMessagesSQLite(t *testing.T) {
 	// 大小写不敏感 + limit 截断语义。
 	seedSearchSession(t, svc, st, "c-3", "大写",
 		[2]string{"user", "UPSTREAM 再问一次"})
-	resp3, err := svc.SearchMessages(ctx, "upstream", 1)
+	resp3, err := sessionPlaneOf(svc).SearchMessages(ctx, "upstream", 1)
 	if err != nil {
 		t.Fatalf("SearchMessages(limit): %v", err)
 	}
@@ -97,7 +99,7 @@ func TestSearchMessagesSQLite(t *testing.T) {
 	}
 
 	// 空关键词 → 明确 40001。
-	if _, err := svc.SearchMessages(ctx, "   ", 10); err == nil {
+	if _, err := sessionPlaneOf(svc).SearchMessages(ctx, "   ", 10); err == nil {
 		t.Fatal("空关键词应报错")
 	} else if ge, ok := err.(gerror.Error); !ok || ge.Code != 40001 || !strings.Contains(ge.Msg, "invalid_search_query") {
 		t.Fatalf("错误码不符: %v", err)
@@ -106,22 +108,23 @@ func TestSearchMessagesSQLite(t *testing.T) {
 
 func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	// memory 模式（无 store）：回扫 transcript，source 明确标注 transcript。
+	//
+	// P3b-2b：检索实现搬进了 `domain/session`，域内已有一条同判据的用例
+	// （`TestSearchMessagesTranscriptFallback`）；这一条留在 manager 是因为它走的是
+	// **真 Service 装配链**（`SetTranscriptDir` → 域、`publish` → 域）——验的是"接上了没有"。
 	dir := t.TempDir()
-	reg := testutil.StubRegistry()
-	svc := NewService(reg, eventbus.New())
+	svc := NewService(testutil.StubRegistry(), eventbus.New())
 	svc.SetTranscriptDir(dir)
-	orch := NewOrchestrator(svc, reg)
-	t.Cleanup(orch.Close)
+	t.Cleanup(svc.closeTranscripts)
 
 	svc.registerSession(&SessionRec{ID: "t-1", Title: "内存会话"})
 	svc.beginTranscript("t-1", "stub", "/tmp", false)
-	defer svc.closeTranscripts()
-	svc.publish(BusUserMessage, "t-1", map[string]any{"text": "内存里的关键词 needle"})
-	svc.publish(BusMessage, "t-1", map[string]any{"text": "助手也提到 needle"})
+	svc.publish(session.BusUserMessage, "t-1", map[string]any{"text": "内存里的关键词 needle"})
+	svc.publish(session.BusMessage, "t-1", map[string]any{"text": "助手也提到 needle"})
 	// ③ 文本增量攒批：断言前手动落盘（生产由 25ms 窗口 / 终态事件 / 阈值触发）。
 	svc.flushChunks()
 
-	resp, err := svc.SearchMessages(context.Background(), "needle", 10)
+	resp, err := sessionPlaneOf(svc).SearchMessages(context.Background(), "needle", 10)
 	if err != nil {
 		t.Fatalf("SearchMessages: %v", err)
 	}
@@ -135,6 +138,14 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	}
 }
 
+// exportSystemSvc 按**装配点的形状**造导出用例：三份依赖事实 → `NewSource` → `New`。
+//
+// 与 `app.go` 的 `SessionPlane: a.svc.SessionPlane(), Bus: a.bus` 逐条对应（用例实例在
+// `ctrexport` 里造；测试里由这里造——`internal/service/svcsystem` 不能 import `manager`）。
+func exportSystemSvc(svc *Service) svcsystem.SystemSvc {
+	return svcsystem.New(svcsystem.NewSource(svc.st, svc.sessionPlane, svc.bus))
+}
+
 func TestExportSessions(t *testing.T) {
 	ctx := context.Background()
 	svc, st := newSearchRig(t)
@@ -142,13 +153,13 @@ func TestExportSessions(t *testing.T) {
 		[2]string{"user", "第一问"},
 		[2]string{"assistant", "第一答"})
 	// 追加思考/工具/终态事件（导出渲染覆盖）。
-	svc.publish(BusThought, "e-1", map[string]any{"text": "先想一下"})
-	svc.publish(BusToolCall, "e-1", map[string]any{"title": "运行 ls", "kind": "execute", "status": "in_progress"})
-	svc.publish(BusRunEnded, "e-1", map[string]any{"stop_reason": "end_turn"})
-	svc.publish(BusUserMessage, "e-2", map[string]any{"text": "另一会话"})
+	svc.publish(session.BusThought, "e-1", map[string]any{"text": "先想一下"})
+	svc.publish(session.BusToolCall, "e-1", map[string]any{"title": "运行 ls", "kind": "execute", "status": "in_progress"})
+	svc.publish(session.BusRunEnded, "e-1", map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusUserMessage, "e-2", map[string]any{"text": "另一会话"})
 
 	for _, format := range []string{"markdown", "text", "json"} {
-		resp, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-1"}, Format: format})
+		resp, err := exportSystemSvc(svc).ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-1"}, Format: format})
 		if err != nil {
 			t.Fatalf("ExportSessions(%s): %v", format, err)
 		}
@@ -187,26 +198,26 @@ func TestExportSessions(t *testing.T) {
 	}
 
 	// 批量：未知会话进 skipped（不静默丢弃），格式校验与上限校验明确报错。
-	resp, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-1", "no-such"}, Format: "text"})
+	resp, err := exportSystemSvc(svc).ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-1", "no-such"}, Format: "text"})
 	if err != nil {
 		t.Fatalf("批量导出: %v", err)
 	}
 	if resp.Exported != 1 || len(resp.Skipped) != 1 || resp.Skipped[0] != "no-such" {
 		t.Fatalf("skipped 语义不符: %+v", resp)
 	}
-	if _, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-1"}, Format: "pdf"}); err == nil {
+	if _, err := exportSystemSvc(svc).ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-1"}, Format: "pdf"}); err == nil {
 		t.Fatal("非法格式应报错")
 	} else if ge, ok := err.(gerror.Error); !ok || ge.Code != 40001 || !strings.Contains(ge.Msg, "invalid_export_format") {
 		t.Fatalf("格式错误码不符: %v", err)
 	}
-	if _, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{}}); err == nil {
+	if _, err := exportSystemSvc(svc).ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{}}); err == nil {
 		t.Fatal("空 ids 应报错")
 	}
-	ids := make([]string, maxExportIDs+1)
+	ids := make([]string, svcsystem.MaxExportIDs+1)
 	for i := range ids {
 		ids[i] = fmt.Sprintf("x-%d", i) // 互不相同：去重后仍超上限
 	}
-	if _, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: ids}); err == nil {
+	if _, err := exportSystemSvc(svc).ExportSessions(ctx, dtoexport.ExportReq{IDs: ids}); err == nil {
 		t.Fatal("超上限应报错")
 	} else if ge, ok := err.(gerror.Error); !ok || ge.Code != 40001 || !strings.Contains(ge.Msg, "export_too_many_ids") {
 		t.Fatalf("上限错误码不符: %v", err)
@@ -220,7 +231,7 @@ func TestExportMarkdownFileWritable(t *testing.T) {
 	// 标题含路径分隔符与控制字符 → 文件名应被净化。
 	seedSearchSession(t, svc, st, "e-9", "a/b:c\n标题",
 		[2]string{"user", "内容"})
-	resp, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-9"}, Format: "markdown"})
+	resp, err := exportSystemSvc(svc).ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-9"}, Format: "markdown"})
 	if err != nil {
 		t.Fatal(err)
 	}

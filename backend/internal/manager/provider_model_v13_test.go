@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"sort"
@@ -43,12 +45,12 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	svc := NewService(v12ProviderRegistry(), nil)
 	svc.EnableStore(st)
-	svc.SetCredentials(newTestCredentials(t, home))
-	svc.LoadProviderDefinitionsFromStore(ctx, dir)
+	svc.creds.SetLayered(newTestCredentials(t, home))
+	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	// ① 写面：带密钥新建 → 落进那一列，回执不回显明文。
 	key := secret
-	resp, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	resp, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
 		ID: "write-face", Protocol: "openai", APIKey: &key,
 	})
 	if err != nil {
@@ -66,7 +68,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 
 	// ② 覆盖写：同一列被换成新值，旧值不留在任何地方。
 	key2 := "sk-rotated-value"
-	if _, err := svc.UpdateProvider(ctx, "write-face", dtoprovider.ProviderPatchReq{APIKey: &key2}); err != nil {
+	if _, err := svc.providerPlane.UpdateProvider(ctx, "write-face", dtoprovider.ProviderPatchReq{APIKey: &key2}); err != nil {
 		t.Fatal(err)
 	}
 	if hits := secretHitsAnywhere(t, st, secret); len(hits) != 0 {
@@ -75,11 +77,11 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 
 	// ③ 导入：档案里的历史明文进**同一列**（明文不再"跳过"，因为它有落点了）。
 	legacy := `{"legacy":{"id":"legacy","type":"openai","key":"` + secret + `"}}`
-	if err := os.WriteFile(filepath.Join(dir, providersFileName), []byte(legacy), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, provider.ProvidersFileName), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ImportProviderFile(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil); err != nil {
-		t.Fatalf("ImportProviderFile: %v", err)
+	if _, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
+		t.Fatalf("provider.ImportProviderFile: %v", err)
 	}
 	row, found, _ := st.GetProviderDefinition(ctx, "legacy")
 	if !found {
@@ -93,10 +95,10 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 	}
 	// 装载面如实报"有密钥"。
 	svc.mu.Lock()
-	delete(svc.providers, "legacy")
+	svc.providerPlane.DeleteForTest("legacy")
 	svc.mu.Unlock()
-	svc.LoadProviderDefinitionsFromStore(ctx, dir)
-	items, _ := svc.ListProviders(ctx)
+	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
+	items, _ := svc.providerPlane.ListProviders(ctx)
 	for _, it := range items {
 		if it.ID == "legacy" && !it.HasKey {
 			t.Fatalf("库里那一列有值 → has_key 应为 true: %+v", it)

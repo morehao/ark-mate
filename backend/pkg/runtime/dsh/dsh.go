@@ -1,7 +1,7 @@
 // Package dsh 声明 deepseek-harness（dsh）的 ACP server 启动形态与
 // 能力基线（纯数据，不依赖父包）。
 //
-// 形态说明（基于 deepseek-harness 源码 2026-08 快照核实，见
+// 形态说明（结论自 2026-08 快照起成立、现况见
 // docs/dsh-acp-adaptation.md）：当前版本不再提供独立 `dsh-acp-demo`
 // bin，ACP server 是统一启动器 `dsh` 的一个 profile：`dsh --profile acp`。
 package dsh
@@ -63,7 +63,9 @@ const SkillFormat = "SKILL.md+frontmatter"
 //  4. 需绝对路径 cwd 且先校验；provider/model 在 profile 行配置（默认 deepseek-official/deepseek-v4-flash），
 //     DEEPSEEK_API_KEY 由 provider 从其进程环境读取（无需额外注入，可随子进程环境透传）。
 //  5. 接口迭代快，可能 breaking（README 明示开发者预览期）。
-//  6. 版本要求：须含 acp profile 模板的 dsh（实测 npm latest=0.1.1-rc.2 缺 acp profile，
-//     报 "profile \"acp\" does not exist"；用 `@deepseek-ai/dsh@next` 0.1.2-rc.1 或更新，
-//     或随 deepseek-harness 仓库源码构建）。
-const Notes = "ACP server 由统一 dsh 启动器提供（dsh --profile acp）；无鉴权；会话可持久化（list/resume/close 跨进程）；不支持 load/fork/删除/附加目录/终端/客户端 FS；DEEPSEEK_API_KEY 走子进程环境透传；需含 acp profile 模板的 dsh（npm latest 0.1.1-rc.2 缺失，用 @next 0.1.2-rc.1+）；迭代快可能 breaking"
+//  6. 版本要求：须是**含 `acp` profile 模板**的 dsh——缺模板时报
+//     `profile "acp" does not exist`，那就换一个更新的版本，或随 deepseek-harness 源码构建。
+//     **随包载荷 pin 的那个版本满足这条**（唯一取值处是 `apps/desktop/release.json` 的 `payloads[]`）。
+//     **本条刻意不写具体版本号**：那是会变的量，写死就会像它的上一版那样过期——上一版写的是
+//     「npm latest 0.1.1-rc.2 缺该模板、用 @next 0.1.2-rc.1+」，而随包 pin 早已是 0.2.0-rc.2。
+const Notes = "ACP server 由统一 dsh 启动器提供（dsh --profile acp）；无鉴权；会话可持久化（list/resume/close 跨进程）；不支持 load/fork/删除/附加目录/终端/客户端 FS；DEEPSEEK_API_KEY 走子进程环境透传；需含 acp profile 模板的 dsh（缺模板时报 profile \"acp\" does not exist；随包载荷 pin 的版本满足）；迭代快可能 breaking"

@@ -31,10 +31,17 @@ var sessionModelIDForm = regexp.MustCompile(`^mdl_[0-9A-HJKMNP-TV-Z]{26}$`)
 //
 //	① 实体层：`SessionEntity.ModelID` 带 `column:model_id`——实体标签写错编译期无感，
 //	   只有运行时那条 SQL 才报 `no such column`；
-//	② 写入点：`manager` 里那两处（建会话时落 rec、PATCH 时落元数据）**不得**把请求里的原值
+//	② 写入点：会话的两个写面（建会话时落 rec、PATCH 时落元数据）**不得**把请求里的原值
 //	   直接赋上去（`opt.Model.Model` / `*patch.Model`），必须先经 `resolveSessionModel` 解析成
 //	   "平台行 + 运行时值"。直接赋值 = 把"运行时的不透明值"又写回库里（而它编译得过、跑得通）。
+//
+// P0：两个写入点原先各钉着一个精确文件路径（`session_start.go` / `sessions.go`）。那两个文件随会话域
+// 搬进 `domain/session`（设计 §3.4），钉路径在搬家后只会"读不到文件"（假红）。判据改锚在
+// **符号**上：建会话那一处锚 `startSessionOn`（建会话写路径，落 rec 就在它体内），PATCH 那一处
+// 锚 `UpdateSession`（PATCH 写路径），两者都由 `uniqueSourceFile` 保证全仓恰好一处声明
+// （0 处 = 判据失去对象；≥2 处 = 第二个真相源）。
 func TestSessionModelRefIsPlatformID(t *testing.T) {
+	internalDir := filepath.Join(backendRoot(t), "internal")
 	entityPath := filepath.Join(backendRoot(t), "internal", "model", "session.go")
 	entity := readStripped(t, entityPath)
 	if !strings.Contains(entity, "column:model_id") {
@@ -45,35 +52,47 @@ func TestSessionModelRefIsPlatformID(t *testing.T) {
 		t.Fatalf("%s 里出现了 `column:provider_id`：v26 已让该列出列（v19 之后它没有任何写入点）", entityPath)
 	}
 
-	// 两个写入点：建会话（session_start.go）与 PATCH（sessions.go）。
-	start := readStripped(t, filepath.Join(backendRoot(t), "internal", "manager", "session_start.go"))
+	// 两个写入点：建会话（符号锚 `startSessionOn`）与 PATCH（符号锚 `UpdateSession`）。
+	start := readStripped(t, uniqueSourceFile(t, internalDir, nil,
+		declREFor("startSessionOn").String(), "建会话的落 rec 写路径 `startSessionOn`"))
 	if !strings.Contains(start, "resolveSessionModel(") {
-		t.Fatal("session_start.go 里找不到 `resolveSessionModel(`：建会话的模型入参必须先解析成" +
+		t.Fatal("建会话写路径里找不到 `resolveSessionModel(`：模型入参必须先解析成" +
 			"「平台行 + 运行时值」，否则库里又会存底座的不透明串")
 	}
 	if strings.Contains(start, "ModelID: opt.Model.Model,") {
-		t.Fatal("session_start.go 里仍在把 `opt.Model.Model`（请求原值）直接落库——" +
+		t.Fatal("建会话写路径里仍在把 `opt.Model.Model`（请求原值）直接落库——" +
 			"它是**平台行 id**，落库前必须经解析（否则存回去的是运行时值）")
 	}
 	// 求解一次、用两处（落库用行 id、下发用运行时值）——判据是"解析的返回值真的被用到了"。
 	for _, want := range []string{"platformModelID, modelCfg", "ModelID: platformModelID,"} {
 		if !strings.Contains(start, want) {
-			t.Fatalf("session_start.go 里找不到 %q：解析的产物必须**都被用上**"+
+			t.Fatalf("建会话写路径里找不到 %q：解析的产物必须**都被用上**"+
 				"（行 id 落库、运行时值下发），少一个就是把其中一条链留成了旧形态", want)
 		}
 	}
 
-	sess := readStripped(t, filepath.Join(backendRoot(t), "internal", "manager", "sessions.go"))
-	if !strings.Contains(sess, "resolveSessionModel(ctx, sessionRuntime, *patch.Model)") {
-		t.Fatal("sessions.go 的 PATCH 路径没有把 `*patch.Model` 当**平台行 id** 解析" +
-			"（`resolveSessionModel(ctx, sessionRuntime, *patch.Model)`）")
+	sess := readStripped(t, uniqueSourceFile(t, internalDir, nil,
+		declREFor("UpdateSession").String(), "PATCH 写面 `UpdateSession`"))
+	// P4a 正文第四十四刀把 PATCH 写面搬进了 `service/svcsession`（`Meta.UpdateSession`），模型解析
+	// 改经 `MetaDeps.ResolveModel` 端口——**判据一字不改，锚跟着对象走**：链路变成两段，判据也分两段。
+	// 缺任一段都有一种静默失效：只钉用例侧，适配器忘了转发就没人拦；只钉适配器侧，用例自己
+	// 把请求原值落库也看不出来。
+	if !strings.Contains(sess, "ResolveModel(ctx, sessionRuntime, *patch.Model)") {
+		t.Fatal("PATCH 路径没有把 `*patch.Model` 当**平台行 id** 交给解析端口" +
+			"（`... ResolveModel(ctx, sessionRuntime, *patch.Model)`）")
+	}
+	depsSrc := readStripped(t, uniqueSourceFile(t, internalDir, nil,
+		`(?m)^func \(s \*Service\) ResolveModel\(`, "模型解析端口的实现 `ResolveModel`"))
+	if !strings.Contains(depsSrc, "s.resolveSessionModel(ctx, runtimeID, modelID)") {
+		t.Fatal("`ResolveModel` 适配器没有走 `resolveSessionModel`：解析链断在适配器上时，" +
+			"表现正是「把底座的不透明串写回库里」——而两端各自看都像在正常工作")
 	}
 	if strings.Contains(sess, "r.ModelID = *patch.Model") {
-		t.Fatal("sessions.go 里仍在把 `*patch.Model`（请求原值）直接落库——必须先解析")
+		t.Fatal("PATCH 路径里仍在把 `*patch.Model`（请求原值）直接落库——必须先解析")
 	}
 	// 解析失败必须**在落库之前**上抛（`appliedModelID` 只在解析成功后才被改写成行 id）。
 	if !strings.Contains(sess, "appliedModelID = &platformID") {
-		t.Fatal("sessions.go 里找不到 `appliedModelID = &platformID`：落库的必须是**解析后的行 id**" +
+		t.Fatal("PATCH 路径里找不到 `appliedModelID = &platformID`：落库的必须是**解析后的行 id**" +
 			"（直接落请求原值 = 把运行时的不透明串写回库里）")
 	}
 }
@@ -152,10 +171,16 @@ func mustReadFile(t *testing.T, path string) []byte {
 // 而且它得真的连到两个写面上（建会话 + PATCH）。
 //
 // 反证（实跑）：把 `resolveSessionModel` 的拒绝分支改成"回落默认" → 本用例红。
+//
+// P0：本条原先钉着一个**目录字面量**（四个承载文件都从它下面读）。目录级依赖
+// 在搬家后最危险——目录还在、文件搬走了，扫描面变成"读一个不存在的路径"（假红）或干脆
+// 什么也看不见（静默空转）。四个承载文件一律改按**符号**定位：`resolveSessionModel`（解析本
+// 体）、`startSessionOn` / `UpdateSession`（两个写面）、`modelIDByValue`（目录注解产出点）。
 func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
-	dir := filepath.Join(backendRoot(t), "internal", "manager")
+	internalDir := filepath.Join(backendRoot(t), "internal")
 	// ① 拒绝路径存在且聚在一处：定义 + 两个调用面。
-	modelList := readStripped(t, filepath.Join(dir, "model_list.go"))
+	modelList := readStripped(t, uniqueSourceFile(t, internalDir, nil,
+		declREFor("resolveSessionModel").String(), "`resolveSessionModel` 的实现"))
 	if c := strings.Count(modelList, "func (s *Service) resolveSessionModel("); c != 1 {
 		t.Fatalf("`resolveSessionModel` 应恰好定义 1 处，实际 %d 处（多一处就是第二个真相源）", c)
 	}
@@ -165,7 +190,7 @@ func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
 		"objid.Model",                      // 形状判据：平台模型行 id 的前缀
 	} {
 		if !strings.Contains(modelList, want) {
-			t.Fatalf("model_list.go 里找不到 %q：解析失败的**显式拒绝**路径必须存在"+
+			t.Fatalf("`resolveSessionModel` 的实现里找不到 %q：解析失败的**显式拒绝**路径必须存在"+
 				"（静默回落 = 用户以为选中了 A、实际跑 B）", want)
 		}
 	}
@@ -193,10 +218,17 @@ func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
 			"出现在拒绝之后 = 「先拒、再回落」，同样是把用户的显式选择换成了另一个模型")
 	}
 	// ② 两个写面都走它（少一个就是"某一条路径还能把不透明值落库"）。
-	start := readStripped(t, filepath.Join(dir, "session_start.go"))
-	sess := readStripped(t, filepath.Join(dir, "sessions.go"))
-	if !strings.Contains(start, "resolveSessionModel(") || !strings.Contains(sess, "resolveSessionModel(") {
-		t.Fatal("建会话与 PATCH 两条写面都必须经 `resolveSessionModel`")
+	start := readStripped(t, uniqueSourceFile(t, internalDir, nil,
+		declREFor("startSessionOn").String(), "建会话的落 rec 写路径 `startSessionOn`"))
+	sess := readStripped(t, uniqueSourceFile(t, internalDir, nil,
+		declREFor("UpdateSession").String(), "PATCH 写面 `UpdateSession`"))
+	// P4a 正文第四十四刀之后 PATCH 那半的链路分两段（用例 → 端口 → 适配器），判据随之分两段。
+	depsSrc := readStripped(t, uniqueSourceFile(t, internalDir, nil,
+		`(?m)^func \(s \*Service\) ResolveModel\(`, "模型解析端口的实现 `ResolveModel`"))
+	if !strings.Contains(start, "resolveSessionModel(") || !strings.Contains(sess, "ResolveModel(") ||
+		!strings.Contains(depsSrc, "resolveSessionModel(") {
+		t.Fatal("建会话与 PATCH 两条写面都必须经 `resolveSessionModel`（PATCH 那一半现在是" +
+			"「用例调端口 `ResolveModel` → 适配器调 `resolveSessionModel`」两段，缺任一段都等于绕过解析）")
 	}
 	// ③ 复用既有错误码（E9）：`model_not_found` 仍映射到 40401。
 	aclCode := readStripped(t, filepath.Join(backendRoot(t), "pkg", "code", "acl.go"))
@@ -205,7 +237,8 @@ func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
 			"（会话引用了一个查不到的模型行 = 同一个码、同一份引导：刷新列表）")
 	}
 	// ④ 目录注解的产出点**只有一处**（`modelIDByValue`）：第二个产出点迟早与它分叉。
-	catalog := readStripped(t, filepath.Join(dir, "model_catalog.go"))
+	catalog := readStripped(t, uniqueSourceFile(t, internalDir, nil,
+		declREFor("modelIDByValue").String(), "目录注解产出点 `modelIDByValue`"))
 	if c := strings.Count(catalog, "func (s *Service) modelIDByValue("); c != 1 {
 		t.Fatalf("`modelIDByValue` 应恰好定义 1 处，实际 %d 处", c)
 	}

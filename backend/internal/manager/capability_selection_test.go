@@ -2,6 +2,7 @@ package manager
 
 import (
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"strings"
 	"testing"
 
@@ -31,7 +32,7 @@ func selRig(t *testing.T) *Service {
 			t.Fatal(err)
 		}
 	}
-	svc.SetSkillProjections([]SkillProjection{{
+	svc.skillPlane.Projections().Set([]skill.Projection{{
 		Runtime:    "rtx",
 		Projection: rtxSkillProjectionForTest(),
 	}})

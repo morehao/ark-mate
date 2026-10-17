@@ -10,8 +10,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/manager"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
@@ -31,7 +29,7 @@ func browseApp(t *testing.T, roots []string) *manager.Service {
 	t.Helper()
 	svc := manager.NewService(runtime.NewRegistry(), eventbus.New())
 	provision := filepath.Join(t.TempDir(), "workspaces")
-	if err := svc.SetWorkspacePolicy(provision, roots); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, roots); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 	return svc
@@ -180,47 +178,8 @@ func TestWorkspaceDirCreateHTTPFlow(t *testing.T) {
 	}
 }
 
-// TestWorkspacePickDirectoryRoute 宿主原生选择器的端点（v14.5）。
-//
-// 桩只透传，所以这里证的是三件事：路径与参数原样到端口、三种结局的**信封形状**、
-// 以及"指名错误可判定"（`native_pick_unsupported` 而不是笼统 50000——前端要据此回落应用内浏览）。
-func TestWorkspacePickDirectoryRoute(t *testing.T) {
-	// 选定：`{path}`。
-	svc := &stubSvc{pickPath: "/Users/me/proj"}
-	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/mate/workspaces/pick-directory", "")
-	if env.Code != 0 || !svc.pickCalled {
-		t.Fatalf("选定路径应成功且真的打到端口: %+v called=%v", env, svc.pickCalled)
-	}
-	var ok dtoworkspace.WorkspacePickResp
-	if err := json.Unmarshal(env.Data, &ok); err != nil {
-		t.Fatalf("解析 pick 响应: %v", err)
-	}
-	if ok.Path != "/Users/me/proj" || ok.Cancelled {
-		t.Fatalf("选定结局不符: %+v", ok)
-	}
-
-	// 取消：**不是错误**，且必须能与"选了个空路径"分辨（前端据此静默收手）。
-	svc = &stubSvc{pickCancelled: true}
-	r = newRestEngine(stubDeps(svc))
-	env, _ = do(t, r, "POST", "/v1/mate/workspaces/pick-directory", "")
-	if env.Code != 0 {
-		t.Fatalf("取消不该是错误: %+v", env)
-	}
-	var cancelled dtoworkspace.WorkspacePickResp
-	if err := json.Unmarshal(env.Data, &cancelled); err != nil {
-		t.Fatalf("解析 pick 响应: %v", err)
-	}
-	if !cancelled.Cancelled || cancelled.Path != "" {
-		t.Fatalf("取消结局不符: %+v", cancelled)
-	}
-
-	// 宿主没有可用选择器：**可判定**错误（40501），而不是笼统 50000——前端据此回落应用内浏览。
-	// 判据只认码：报文正文由 manager 给（对外是给用户看的中文），拿它当契约会捆住文案。
-	svc = &stubSvc{pickErr: acl.NewError(acl.ClassUnsupported, "native_pick_unsupported", "宿主没有可用的原生选择器", nil)}
-	r = newRestEngine(stubDeps(svc))
-	env, _ = do(t, r, "POST", "/v1/mate/workspaces/pick-directory", "")
-	if env.Code != code.NotSupported {
-		t.Fatalf("不支持应 40501: %+v", env)
-	}
-}
+// 宿主原生选择器端点的三个结局（选定 / 取消 / 不支持）改在**控制器级**用替身钉：
+// `TestWorkspacePickDirectoryThreeOutcomes`（internal/controller/ctrworkspace/pick_test.go）。
+// 原因：搬走 manager 那条转发之后控制器直接持域平面 `*workspace.Picker`，而"选定 / 取消"
+// 要真的 spawn 宿主命令（osascript/zenity），路由级拿真对象跑不出来——**替身缝在哪一层，
+// 契约测试就在哪一层**（P4a 正文第十七刀）。

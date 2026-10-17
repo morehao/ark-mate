@@ -62,7 +62,7 @@ func TestMcpSecretResolution(t *testing.T) {
 	}
 
 	// 读模型：明文键给键名，密钥侧**只给键名**（连引用都不回），并标出解析不了的键。
-	list, err := svc.ListMcpServers()
+	list, err := mcpCatalog(svc).ListMcpServers()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestMcpSecretResolution(t *testing.T) {
 // dumpMcpServers 把 MCP 列表响应序列化成 JSON（用于"读模型不得泄漏值/引用"的字符串断言）。
 func dumpMcpServers(t *testing.T, svc *Service) string {
 	t.Helper()
-	list, err := svc.ListMcpServers()
+	list, err := mcpCatalog(svc).ListMcpServers()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 	}
 
 	// 1) 调用面（mcpLiveServer）：明文 + 解析后的密钥一起进 mcp.Server。
-	got, err := svc.mcpLiveServer("live")
+	got, err := svc.McpPlane().LiveServer("live")
 	if err != nil {
 		t.Fatalf("mcpLiveServer: %v", err)
 	}
@@ -281,20 +281,20 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.mcpLiveServer("broken"); err == nil {
+	if _, err := svc.McpPlane().LiveServer("broken"); err == nil {
 		t.Fatal("密钥解析失败时调用面应报错")
 	} else if numericCode(err) != code.InvalidRequest {
 		t.Fatalf("应是 40001（配置问题），got %d（%v）", numericCode(err), err)
 	} else if !strings.Contains(err.Error(), "mcp_secret_unresolved") {
 		t.Fatalf("错误里应有稳定 code，便于排障：%v", err)
 	}
-	if _, err := svc.ProbeMcpServer(context.Background(), "broken"); err == nil {
+	if _, err := svc.McpPlane().Probe(context.Background(), "broken"); err == nil {
 		t.Fatal("密钥解析失败时探测应报错")
 	} else if numericCode(err) != code.InvalidRequest {
 		t.Fatalf("探测路径同样应是 40001，got %d（%v）", numericCode(err), err)
 	}
 	// 失败要留痕（GET /mcps 的 last_probe_*），否则用户只看到一次性的响应。
-	list, err := svc.ListMcpServers()
+	list, err := mcpCatalog(svc).ListMcpServers()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestMcpSecretStaleMirrorNotAdopted(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	svc.EnableStore(st)
-	doc := svc.credentialDoc()
+	doc := svc.providerPlane.CredentialDoc()
 	if doc == nil {
 		t.Fatal("夹具应装配出托管文档")
 	}

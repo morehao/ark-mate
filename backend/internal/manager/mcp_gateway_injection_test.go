@@ -278,7 +278,7 @@ func TestGatewayEntryCarriesCredentialCwd(t *testing.T) {
 	svc, _ := newSearchRig(t)
 
 	// ① 登记过（= 用户在某个目录下启动了 mate serve）→ 条目把这个值交下去。
-	svc.SetCredentialCwd("/tmp/serve-cwd")
+	svc.creds.SetCwd("/tmp/serve-cwd")
 	entry, err := svc.gatewayEntry("stub", nil)
 	if err != nil {
 		t.Fatalf("合成网关条目: %v", err)
@@ -291,7 +291,7 @@ func TestGatewayEntryCarriesCredentialCwd(t *testing.T) {
 	// ② 没登记（`mate demo`、测试这类不经装配的入口）→ **不带**这个键：网关侧据此 WARN 并回落，
 	//    而不是收到一个被 `os.Getwd()` 冒充成"核心的答案"的值。
 	for _, v := range []string{"", "   "} {
-		svc.SetCredentialCwd(v)
+		svc.creds.SetCwd(v)
 		entry, err := svc.gatewayEntry("stub", nil)
 		if err != nil {
 			t.Fatalf("合成网关条目: %v", err)
@@ -310,7 +310,7 @@ func TestGatewayCredentialCwdDoesNotChangeFingerprint(t *testing.T) {
 	r := newGenRig(t)
 	log := sessionNewLog(t)
 
-	r.svc.SetCredentialCwd("/tmp/cwd-a")
+	r.svc.creds.SetCwd("/tmp/cwd-a")
 	convID, as1 := r.start(t, NewCapabilitySelection())
 	if as1.Fingerprint == "" {
 		t.Fatal("这条用例需要真实指纹（否则证明不了「值不入指纹」）")
@@ -331,7 +331,7 @@ func TestGatewayCredentialCwdDoesNotChangeFingerprint(t *testing.T) {
 	}
 
 	// 换一个 cwd 值 → 同一代际（值不进指纹）。
-	r.svc.SetCredentialCwd("/tmp/cwd-b-other")
+	r.svc.creds.SetCwd("/tmp/cwd-b-other")
 	if got := r.boundary(t, convID); got != as1 {
 		t.Fatalf("凭据 cwd 的**取值**不得换代际（它是值；换了目录启动不该重启底座进程）")
 	}

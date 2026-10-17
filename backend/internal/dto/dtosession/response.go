@@ -42,7 +42,7 @@ type SessionResp struct {
 	//
 	// v14 起语义从"平台按会话代建的一次性目录"变成"这是共享的默认工作空间"（设计 ADR-9）：
 	// wire key 与字段名保留是因为前端两处按它渲染，换名是纯破坏且没有信息增益。
-	WorkspaceTemporary bool   `json:"workspace_temporary"`
+	WorkspaceTemporary bool `json:"workspace_temporary"`
 	// Model 会话引用的**平台模型行 id**（`mdl_…`；空 = 由平台默认/底座默认决定）。
 	//
 	// v26 起含义是"平台行身份"（**破坏性 wire 变更**，与 v15 同档）：此前它是**运行时目录里的
@@ -50,9 +50,9 @@ type SessionResp struct {
 	// 注意与 `/models` 行的 `model` **同词不同义**：那边是"发给上游的模型名"，这边是平台行 id。
 	//
 	// 这里曾有 `Provider string`（恒空，v19 后无写入点）；v26 连列一起删了。
-	Model string `json:"model,omitempty"`
-	CreatedAt          string `json:"created_at"`
-	UpdatedAt          string `json:"updated_at"`
+	Model     string `json:"model,omitempty"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 	// Origin 会话来源（平台判定，非用户输入）：空 = 人工创建，`automation:<id>` = 该定时任务触发。
 	// 回显的意义与 capabilities 同一条：用户要能看见"这条会话是谁开的"，而不是靠时间去猜。
 	Origin string `json:"origin,omitempty"`

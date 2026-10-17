@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,7 +55,7 @@ func readProvidersFile(t *testing.T, dir string) string {
 // readMirrorValues 读托管镜像（`<home>/credentials.json`）的 `引用 → 值` 映射。
 func readMirrorValues(t *testing.T, home string) map[string]string {
 	t.Helper()
-	raw, err := os.ReadFile(CredentialsPath(home))
+	raw, err := os.ReadFile(credential.CredentialsPath(home))
 	if err != nil {
 		t.Fatalf("读托管文档: %v", err)
 	}
@@ -89,10 +90,10 @@ func TestProviderKeyMovedFromFileToStoreOnLoad(t *testing.T) {
 		t.Fatalf("托管文档里应有这条密钥，得到 %q", got)
 	}
 	// 3) 注入仍可用（内存里是解出来的明文），has_key 不变。
-	if got := svc.providerEnvFor(runtimetest.ID, "default"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DEFAULT_") || !strings.HasSuffix(got[0], "_API_KEY="+secret) {
+	if got := svc.providerPlane.ProviderEnvFor(runtimetest.ID, "default"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DEFAULT_") || !strings.HasSuffix(got[0], "_API_KEY="+secret) {
 		t.Fatalf("搬运后注入不符: %v", got)
 	}
-	items, _ := svc.ListProviders(context.Background())
+	items, _ := svc.providerPlane.ListProviders(context.Background())
 	if len(items) != 1 || !items[0].HasKey {
 		t.Fatalf("has_key 应保持 true: %+v", items)
 	}
@@ -101,7 +102,7 @@ func TestProviderKeyMovedFromFileToStoreOnLoad(t *testing.T) {
 	if got := readProvidersFile(t, dir); got != raw {
 		t.Fatalf("二次装载应幂等: %s", got)
 	}
-	if got := svc2.providerEnvFor(runtimetest.ID, "default"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DEFAULT_") || !strings.HasSuffix(got[0], "_API_KEY="+secret) {
+	if got := svc2.providerPlane.ProviderEnvFor(runtimetest.ID, "default"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DEFAULT_") || !strings.HasSuffix(got[0], "_API_KEY="+secret) {
 		t.Fatalf("重启后注入不符: %v", got)
 	}
 	// 5) 同一份托管文档被两个 Service 读写：值不重复搬、也不被覆盖成空。
@@ -118,7 +119,7 @@ func TestProviderUpdateWritesKeyAndClearRemovesIt(t *testing.T) {
 	svc := providerTestSvc(t, dir)
 
 	key := "sk-live-secret-xyz"
-	resp, err := svc.CreateProvider(context.Background(), providerReq("ds", &key))
+	resp, err := svc.providerPlane.CreateProvider(context.Background(), providerReq("ds", &key))
 	if err != nil {
 		t.Fatalf("CreateProvider: %v", err)
 	}
@@ -135,15 +136,15 @@ func TestProviderUpdateWritesKeyAndClearRemovesIt(t *testing.T) {
 	if got := readMirrorValues(t, home)["providers/ds"]; got != key {
 		t.Fatalf("托管文档应记下这条密钥，得到 %q", got)
 	}
-	if got := svc.providerEnvFor(runtimetest.ID, "ds"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DS_") || !strings.HasSuffix(got[0], "_API_KEY="+key) {
+	if got := svc.providerPlane.ProviderEnvFor(runtimetest.ID, "ds"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DS_") || !strings.HasSuffix(got[0], "_API_KEY="+key) {
 		t.Fatalf("注入不符: %v", got)
 	}
 	// 覆盖写同一档案：镜像里仍是 1 条（值被换成新的），新值生效。
 	key2 := "sk-live-secret-2"
-	if _, err := svc.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{APIKey: &key2}); err != nil {
+	if _, err := svc.providerPlane.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{APIKey: &key2}); err != nil {
 		t.Fatal(err)
 	}
-	if got := svc.providerEnvFor(runtimetest.ID, "ds"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DS_") || !strings.HasSuffix(got[0], "_API_KEY="+key2) {
+	if got := svc.providerPlane.ProviderEnvFor(runtimetest.ID, "ds"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DS_") || !strings.HasSuffix(got[0], "_API_KEY="+key2) {
 		t.Fatalf("覆盖后注入不符: %v", got)
 	}
 	values := readMirrorValues(t, home)
@@ -153,23 +154,23 @@ func TestProviderUpdateWritesKeyAndClearRemovesIt(t *testing.T) {
 
 	// 清除：has_key=false、env nil、镜像里那条没了。
 	clear := ""
-	if _, err := svc.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{APIKey: &clear}); err != nil {
+	if _, err := svc.providerPlane.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{APIKey: &clear}); err != nil {
 		t.Fatalf("清除失败: %v", err)
 	}
-	if svc.providerEnvFor(runtimetest.ID, "ds") != nil {
+	if svc.providerPlane.ProviderEnvFor(runtimetest.ID, "ds") != nil {
 		t.Fatal("清除后不应注入")
 	}
 	if values := readMirrorValues(t, home); len(values) != 0 {
 		t.Fatalf("清除后镜像里不该留这一条: %+v", values)
 	}
-	items, _ := svc.ListProviders(context.Background())
+	items, _ := svc.providerPlane.ListProviders(context.Background())
 	for _, it := range items {
 		if it.ID == "ds" && it.HasKey {
 			t.Fatalf("清除后 has_key 应为 false: %+v", it)
 		}
 	}
 	// 幂等：再清除一次不报错。
-	if _, err := svc.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{APIKey: &clear}); err != nil {
+	if _, err := svc.providerPlane.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{APIKey: &clear}); err != nil {
 		t.Fatalf("重复清除应幂等: %v", err)
 	}
 }
@@ -191,8 +192,8 @@ func TestProviderStaleMirrorKeyNotAdopted(t *testing.T) {
 
 	svc := NewService(v12ProviderRegistry(), nil)
 	svc.EnableStore(st)
-	svc.SetProviderDir(dir)
-	svc.SetCredentials(newTestCredentials(t, home))
+	svc.providerPlane.SetProviderDir(dir)
+	svc.creds.SetLayered(newTestCredentials(t, home))
 	// 库里一条**没有密钥**的档案（面板上刚清掉，或从来没设过）。
 	if _, err := st.ImportProviderDefinition(ctx, store.ProviderColumns{
 		ID: "default", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
@@ -208,23 +209,23 @@ func TestProviderStaleMirrorKeyNotAdopted(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 镜像里那份是陈旧的（库里已经被清掉了）。
-	doc := svc.credentialDoc()
+	doc := svc.providerPlane.CredentialDoc()
 	if doc == nil {
 		t.Fatal("夹具应装配出托管文档")
 	}
 	if err := doc.Set("providers/default", "sk-stale-from-mirror"); err != nil {
 		t.Fatal(err)
 	}
-	if n := svc.LoadProviderDefinitionsFromStore(ctx, dir); n != 1 {
+	if n := svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir); n != 1 {
 		t.Fatalf("应装载 1 条档案，得到 %d", n)
 	}
 
 	// ① 不注入：镜像里那一条不构成"这条档案有密钥"。
-	if got := svc.providerEnvFor(runtimetest.ID, "default"); got != nil {
+	if got := svc.providerPlane.ProviderEnvFor(runtimetest.ID, "default"); got != nil {
 		t.Fatalf("库里没有密钥时不许采用镜像里那一份: %v", got)
 	}
 	// ② has_key 如实为 false，原因是"镜像陈旧"而不是"没有密钥"（两者处置不同）。
-	items, err := svc.ListProviders(ctx)
+	items, err := svc.providerPlane.ListProviders(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,12 +254,12 @@ func TestProviderInvalidIDRejected(t *testing.T) {
 	svc := providerTestSvc(t, filepath.Join(t.TempDir(), "providers"))
 	key := "sk-x"
 	for _, id := range []string{"../escape", "a/b", "a b", ".."} {
-		if _, err := svc.CreateProvider(context.Background(),
+		if _, err := svc.providerPlane.CreateProvider(context.Background(),
 			providerReq(id, &key)); err == nil {
 			t.Fatalf("非法 provider id 应被拒绝: %q", id)
 		}
 		// PATCH 走同一条词法校验。
-		if _, err := svc.UpdateProvider(context.Background(), id,
+		if _, err := svc.providerPlane.UpdateProvider(context.Background(), id,
 			dtoprovider.ProviderPatchReq{APIKey: &key}); err == nil {
 			t.Fatalf("非法 provider id 的 PATCH 应被拒绝: %q", id)
 		}
@@ -275,29 +276,29 @@ func TestProviderKeyRejectedWithoutCredentialDoc(t *testing.T) {
 	// 未装配凭据面（数据目录没解析出来）→ 没有落点。
 	svc := NewService(v12ProviderRegistry(), nil)
 	key := "sk-memory-only"
-	_, err := svc.CreateProvider(ctx, providerReq("default", &key))
+	_, err := svc.providerPlane.CreateProvider(ctx, providerReq("default", &key))
 	if errCode(err) != "credentials_write_failed" {
 		t.Fatalf("没有落点时应 credentials_write_failed，got %q（%v）", errCode(err), err)
 	}
 	// 出路必须可执行（用户要知道该修什么）。
-	if !strings.Contains(err.Error(), CredentialsFileName) {
+	if !strings.Contains(err.Error(), credential.CredentialsFileName) {
 		t.Fatalf("出路文案应指向托管文档: %v", err)
 	}
 	// 拒绝 = **一行内存都不留**（不是"半条档案"）。
-	if items, _ := svc.ListProviders(ctx); len(items) != 0 {
+	if items, _ := svc.providerPlane.ListProviders(ctx); len(items) != 0 {
 		t.Fatalf("被拒的写入不该留下任何档案: %+v", items)
 	}
 	// 不带密钥的档案照常可建（"先建后补密钥"是合法用法）。
-	if _, err := svc.CreateProvider(ctx, providerReq("default", nil)); err != nil {
+	if _, err := svc.providerPlane.CreateProvider(ctx, providerReq("default", nil)); err != nil {
 		t.Fatalf("不带密钥时应该可以建: %v", err)
 	}
 	// PATCH 补密钥同样被拒（两条入口同一判据）。
-	if _, err := svc.UpdateProvider(ctx, "default", dtoprovider.ProviderPatchReq{APIKey: &key}); errCode(err) != "credentials_write_failed" {
+	if _, err := svc.providerPlane.UpdateProvider(ctx, "default", dtoprovider.ProviderPatchReq{APIKey: &key}); errCode(err) != "credentials_write_failed" {
 		t.Fatalf("PATCH 补密钥也应被拒，got %q（%v）", errCode(err), err)
 	}
 	// 重启 = 新 Service → 内存档案不复存在（没有任何落盘）。
 	svc2 := NewService(v12ProviderRegistry(), nil)
-	if got := svc2.providerEnvFor(runtimetest.ID, "default"); got != nil {
+	if got := svc2.providerPlane.ProviderEnvFor(runtimetest.ID, "default"); got != nil {
 		t.Fatalf("没有落点时不该有任何持久化: %v", got)
 	}
 }
@@ -313,13 +314,13 @@ func TestProviderEnvLayerShadowsStore(t *testing.T) {
 
 	svc := NewService(v12ProviderRegistry(), nil)
 	svc.EnableStore(st)
-	svc.SetProviderDir(dir)
+	svc.providerPlane.SetProviderDir(dir)
 	l := newTestCredentials(t, home)
 	const envValue = "sk-from-process-env"
 	// 候选变量名由注册表的 `RefPattern` 派生（不是手抄常量）：夹具跟着它走，
 	// 换模板时这条用例仍然验的是"继承环境遮住密钥面"这件事。
 	envName := ""
-	for _, n := range NewService(v12ProviderRegistry(), nil).providerEnvKeyNames("default") {
+	for _, n := range NewService(v12ProviderRegistry(), nil).creds.ProviderEnvKeyNames("default") {
 		if strings.Contains(n, "DEFAULT") {
 			envName = n
 			break
@@ -334,7 +335,7 @@ func TestProviderEnvLayerShadowsStore(t *testing.T) {
 		}
 		return ""
 	}
-	svc.SetCredentials(l)
+	svc.creds.SetLayered(l)
 	if _, err := st.ImportProviderDefinition(ctx, store.ProviderColumns{
 		ID: "default", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
 	}); err != nil {
@@ -343,14 +344,14 @@ func TestProviderEnvLayerShadowsStore(t *testing.T) {
 	if written, err := st.SetProviderKey(ctx, "default", "sk-from-store"); err != nil || !written {
 		t.Fatalf("写库里的密钥: written=%v err=%v", written, err)
 	}
-	if n := svc.LoadProviderDefinitionsFromStore(ctx, dir); n != 1 {
+	if n := svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir); n != 1 {
 		t.Fatalf("应装载 1 条档案，得到 %d", n)
 	}
 
-	if got := svc.providerEnvFor(runtimetest.ID, "default"); len(got) != 1 || !strings.HasSuffix(got[0], "_API_KEY="+envValue) {
+	if got := svc.providerPlane.ProviderEnvFor(runtimetest.ID, "default"); len(got) != 1 || !strings.HasSuffix(got[0], "_API_KEY="+envValue) {
 		t.Fatalf("继承环境应遮住密钥面那一条: %v", got)
 	}
-	items, err := svc.ListProviders(ctx)
+	items, err := svc.providerPlane.ListProviders(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

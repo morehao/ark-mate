@@ -128,7 +128,7 @@ func TestDevAssetWatchIsOptIn(t *testing.T) {
 // TestDevAssetWatchKeepsEventStreamsSeparate 断言重建通知**不骑业务事件流**。
 //
 // 为什么单列一条：这是本仓最容易"顺手做错"的地方——业务事件流（WS `/ws/events` + `session.*`
-// 事件 type）是冻结的对外契约，三处手工同步（`internal/manager/events.go` 常量、README/文档、
+// 事件 type）是冻结的对外契约，三处手工同步（内核 `events.go` 的 `Bus*` 常量、README/文档、
 // 前端 `@ark-mate/types` 的 `Ev`），且它的凭据走带内首帧 attach。重建是**宿主内部事实**，
 // 不是会话事件：塞进去会同时污染对外契约与语义（参照实现 DSH 也把它放在独立的 `/plugins/events`）。
 //

@@ -333,7 +333,7 @@ func TestSourceUsesCoreCredCwd(t *testing.T) {
 		if src.credCwd != credCwd {
 			t.Fatalf("凭据 cwd 未按显式入参生效：%q（want %q）", src.credCwd, credCwd)
 		}
-		items, err := src.svc.ListProviders(ctx)
+		items, err := src.svc.ProviderPlane().ListProviders(ctx)
 		if err != nil {
 			t.Fatalf("读 provider 面: %v", err)
 		}
@@ -358,7 +358,7 @@ func TestSourceUsesCoreCredCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = src.Close() })
-	items, err := src.svc.ListProviders(ctx)
+	items, err := src.svc.ProviderPlane().ListProviders(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

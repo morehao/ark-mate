@@ -1,4 +1,4 @@
-// Package capability 实现 P1 能力数据面（docs/agent-runtime-refactor-design-20260908.md §4.4）：
+// Package capability 实现能力数据面（见 docs/architecture.md §7）：
 // Skill 目录 + MCP 注册表 + Tool 目录（平台唯一事实源）。
 //
 // 与 Agent definitions / provider 档案同范式：目录 + JSON 文件为事实源，

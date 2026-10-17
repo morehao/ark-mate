@@ -37,20 +37,14 @@ func (s *Service) providerEffect(providerID string) *dtoprovider.ProviderEffect 
 
 	// 受影响面：v19 起一条供应商"在不在环上"只由它有没有模型条目挂靠决定（agent 面撤销后
 	// 没有"某个 agent 选了它"这回事）；不在环上，下发给底座的声明里就没有它，改了什么都不会发生。
-	if len(s.providerModelRefsReadOnly(context.Background(), providerID)) == 0 {
+	if len(s.providerPlane.ProviderModelRefsReadOnly(context.Background(), providerID)) == 0 {
 		eff.Note = "当前没有模型条目挂靠在这条供应商上：改动不会下发给底座（先在「设置 · 模型」里让它承载模型条目）"
 		return eff
 	}
 
 	// 在环上 → 这份声明变了，本机所有会话下一条命轮都会按新声明重开连接（逐会话判是否顺延）。
-	s.mu.Lock()
-	recs := make([]SessionRec, 0, len(s.sessions))
-	for _, rec := range s.sessions {
-		if rec != nil {
-			recs = append(recs, *rec)
-		}
-	}
-	s.mu.Unlock()
+	// **不持 `s.mu`**（P2b 守卫）：快照读与下面的循环都只碰副本与会话域自己的动作。
+	recs := s.sessionPlane.Snapshot()
 
 	for i := range recs {
 		rec := &recs[i]
