@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"strings"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
@@ -50,7 +49,7 @@ func (o *Orchestrator) acquireSession(ctx context.Context, sessionID string) (*s
 	as := o.session(sessionID)
 	if as != nil && as.Dead() {
 		// 连接已断的死句柄（拆连后理应已被摘除；这里兜住拿到旧指针的竞态）：摘除并按需重建。
-		o.evictSession(as)
+		o.runner.Evict(as)
 		as = nil
 	}
 	if as == nil {
@@ -85,14 +84,4 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opt RunOptions) (*RunResult,
 		return &RunResult{SessionID: res.SessionID, Runtime: res.Runtime, StopReason: stop}, err
 	}
 	return &RunResult{SessionID: res.SessionID, Runtime: res.Runtime, StopReason: stop}, nil
-}
-
-// resolveArgs 替换 Launch.Args 中的 {config} 占位（保留给自定义 adapter 模板；
-// 当前内置 runtime 的 Args 均已不含占位，此函数为幂等空操作）。
-func resolveArgs(args []string, opt RunOptions) []string {
-	out := make([]string, len(args))
-	for i, a := range args {
-		out[i] = strings.ReplaceAll(a, "{config}", opt.ConfigPath)
-	}
-	return out
 }

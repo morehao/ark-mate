@@ -523,7 +523,7 @@ func TestEnsureSessionMigratesOnRebuild(t *testing.T) {
 	oldFP := as1.Fingerprint
 
 	// 模拟进程死掉：句柄作废并摘除（与拆连路径的收尾一致）。
-	r.orch.disconnectSession(as1, true)
+	r.orch.runner.Disconnect(as1, true)
 
 	r.registerMcp(t, fsServer("v2"))
 	sel := ParseCapabilitySelection(r.svc.sessionRec(convID).CapabilityJSON)

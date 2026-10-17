@@ -150,7 +150,7 @@ func TestIntentionalRunEmitsNoCloser(t *testing.T) {
 		t.Fatalf("Prompt: %v", err)
 	}
 	// 主动拆除（daemon 停机 / 显式停 agent）：收尾归 interrupted，不按失败/用户取消处理。
-	orch.disconnectSession(as, true)
+	orch.runner.Disconnect(as, true)
 
 	// 收集 2s 内该聚合的全部事件（`feedAll` 到点即返回已有的）。
 	evts := feedAll(bus, "s1", 64)

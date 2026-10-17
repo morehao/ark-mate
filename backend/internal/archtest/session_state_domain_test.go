@@ -95,7 +95,13 @@ func TestSessionStateLivesInSessionDomain(t *testing.T) {
 		},
 		filepath.Join("internal", "manager", "connection.go"): {
 			"o.runner.EventSink(",
-			"o.handles.ForClient(",
+			"o.pool.Dial(",
+			"o.runner.DropConn(",
+			"o.runner.InUse(",
+		},
+		filepath.Join("internal", "domain", "session", "runner.go"): {
+			"r.handles.ForClient(",
+			"r.busy.Clear(",
 		},
 		filepath.Join("internal", "domain", "session", "lifecycle.go"): {
 			"func (l *Lifecycle) StartSession(",

@@ -36,6 +36,8 @@ const AgentCancelTimeout = 3 * time.Second
 type BusyTracker interface {
 	Mark(client *acl.Client, sessionID string)
 	Unmark(client *acl.Client, sessionID string)
+	Clear(client *acl.Client)
+	Len(client *acl.Client) int
 }
 
 // DiagnosticsSink 运行期诊断的写口（错误分类 + stderr 尾巴）。
@@ -435,6 +437,87 @@ func errLooksCancelled(err error) bool {
 		return strings.Contains(s, "cancel") || strings.Contains(s, "abort")
 	}
 	return false
+}
+
+// DropConn 一条连接刚被池摘除（池锁已释放）：作废其上的会话句柄、清在途登记与原生 id 映射。
+//
+// 拆除原因决定会话状态怎么收尾（`disconnectSession` 的注释是本仓对这条语义的唯一说明）：
+// 把停机当成故障，会让上一轮已 completed 的会话在每次重启后被改写成 failed。
+func (r *Runner) DropConn(client *acl.Client, intentional bool) {
+	// 连接断开：在途登记一并作废（executeRun 的 unmark 对已清键为 no-op）。
+	r.busy.Clear(client)
+	victims := r.handles.ForClient(client)
+	for _, as := range victims {
+		r.handles.ForgetSession(as.ID) // 连接断开：原生→平台映射一并清除（迟到事件丢弃）
+	}
+	for _, as := range victims {
+		r.disconnectSession(as, intentional)
+	}
+	if len(victims) > 0 {
+		glog.Infow(context.Background(), "连接拆除：会话句柄作废（会话保留，下次 prompt 按需重建）",
+			"sessions", len(victims), "intentional", intentional)
+	}
+}
+
+// InUse 这条连接还有人用吗：有在途轮次、或仍挂着会话（含已完成态）。
+//
+// 这是空闲回收与代际回收的**唯一判据**；池在池锁之外问它，句柄表的锁与池锁不互指。
+func (r *Runner) InUse(client *acl.Client) bool {
+	if r.busy.Len(client) > 0 {
+		// 有在途 run：绝不打断。（挂起权限/提问只在某一轮的执行期间存在，而那一轮就是在途 run。）
+		return true
+	}
+	return len(r.handles.ForClient(client)) > 0 // 仍有会话引用（含已完成态），不回收
+}
+
+// Evict 把句柄从活跃集合摘除（仅当仍是当前句柄；已被新句柄顶替时不动）。
+func (r *Runner) Evict(as *ActiveSession) { r.handles.RemoveIf(as.ID, as) }
+
+// Disconnect 作废单个句柄（拆连路径按连接批量调用它；测试/运维也可显式停用一条）。
+func (r *Runner) Disconnect(as *ActiveSession, intentional bool) {
+	r.disconnectSession(as, intentional)
+}
+
+// disconnectSession 把某断连连接上的会话句柄作废并摘出活跃集合。
+//
+// 本函数是「连接生命周期」写会话状态的**唯一入口**，因此必须区分拆除原因——把停机当成故障，
+// 会让上一轮已 completed 的会话在每次重启后被改写成 failed（并往历史里追加假的 run.error）：
+//
+//   - 在途 run：主动拆除（daemon 停机 / 显式停 agent）→ 收尾归 interrupted（无终态、可续聊重发，
+//     与崩溃恢复同义，不发错误事件）；意外断开 → 解除阻塞，由 executeRun 按错误收尾。
+//   - 空闲会话：**不改写状态**。上一轮的终态是轮次结果的事实，连接掉了并不改变它；意外断开
+//     只落 agent 级诊断（last_error + stderr 尾巴）与日志，不伪造会话失败。
+//
+// 会话记录本身（Plane/store）不动：执行可丢弃、会话平台拥有（ADR-4），下次 prompt 经
+// `Lifecycle.Ensure` 走 native resume / handoff memo 重建句柄。
+func (r *Runner) disconnectSession(as *ActiveSession, intentional bool) {
+	t, newly := as.MarkDead(intentional)
+	if !newly {
+		return
+	}
+	r.handles.RemoveIf(as.ID, as)
+
+	// 连接没了，挂起的权限/提问永远等不到决策：随拆除一并收敛，不留「待确认」幽灵卡。
+	if r.interacts != nil {
+		r.interacts.CancelSession(as.ID)
+	}
+
+	if t != nil {
+		t.Cancel()
+		return
+	}
+	if intentional {
+		return
+	}
+	ae := acl.NewError(acl.ClassConnection, "connection_lost",
+		"runtime 连接断开（会话句柄已作废；下次 prompt 按需重建）", nil)
+	if r.diagnostics != nil {
+		tail := r.diagnostics.StderrTail(as.Client())
+		ae.StderrTail = tail
+		r.diagnostics.RecordRuntimeError(as.ID, ae, tail)
+	}
+	glog.Warnw(context.Background(), "连接意外断开：空闲会话保持原状态（会话可续聊）",
+		"session", as.ID, "runtime", as.Runtime)
 }
 
 // LiveConfigOptions 返回任一活跃会话的配置项（模型目录的**首选来源**：运行时此刻

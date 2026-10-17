@@ -112,7 +112,7 @@ func newQueueRig(t *testing.T, sess session.ACP, withStore bool) (*Service, *Orc
 				break
 			}
 		}
-		r.Orch.evictSession(as)
+		r.Orch.runner.Evict(as)
 	})
 	return r.Svc, r.Orch, g, as
 }
