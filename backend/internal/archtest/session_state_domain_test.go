@@ -87,15 +87,22 @@ func TestSessionStateLivesInSessionDomain(t *testing.T) {
 		filepath.Join("internal", "manager", "orchestrator.go"): {
 			"session.NewHandles(",
 			"session.NewRunner(",
-			"Acquire:      o.acquireSession,",
+			"session.NewLifecycle(",
+			"o.acquireSession",
+			"o.acquireClient",
 			"Busy:         o.inflight,",
+			"o.handles",
 		},
 		filepath.Join("internal", "manager", "connection.go"): {
 			"o.runner.EventSink(",
 			"o.handles.ForClient(",
 		},
-		filepath.Join("internal", "manager", "session_start.go"): {
-			"o.handles.Put(",
+		filepath.Join("internal", "domain", "session", "lifecycle.go"): {
+			"func (l *Lifecycle) StartSession(",
+			"func (l *Lifecycle) Ensure(",
+			"func (l *Lifecycle) ConnectSession(",
+			"func (l *Lifecycle) Attach(",
+			"l.handles.Put(",
 		},
 		filepath.Join("internal", "manager", "run.go"): {
 			"o.runner.Prompt(",

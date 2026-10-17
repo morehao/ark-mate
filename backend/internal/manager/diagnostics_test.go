@@ -66,7 +66,7 @@ func TestRuntimeDiagnosticsStartFailure(t *testing.T) {
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
-	if _, err := orch.startSessionOn(context.Background(), StartOptions{Cwd: t.TempDir()}); err == nil {
+	if _, err := orch.startSessionOn(context.Background(), session.StartOptions{Cwd: t.TempDir()}); err == nil {
 		t.Fatal("期望底座起不来")
 	}
 	diag, err := svcruntime.New(svc.runtimePlane).RuntimeDiagnostics(context.Background())
@@ -99,7 +99,7 @@ func TestRuntimeDiagnosticsLiveTail(t *testing.T) {
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
-	if _, err := orch.startSessionOn(context.Background(), StartOptions{Cwd: t.TempDir()}); err != nil {
+	if _, err := orch.startSessionOn(context.Background(), session.StartOptions{Cwd: t.TempDir()}); err != nil {
 		t.Fatalf("建会话: %v", err)
 	}
 	diag, err := svcruntime.New(svc.runtimePlane).RuntimeDiagnostics(context.Background())
@@ -233,7 +233,7 @@ func TestRuntimeDiagnosticsRemediation(t *testing.T) {
 	setBuildRuntime(t, "stub")
 	orch3 := NewOrchestrator(svc3, reg3)
 	t.Cleanup(orch3.Close)
-	if _, err := orch3.startSessionOn(ctx, StartOptions{Cwd: t.TempDir()}); err != nil {
+	if _, err := orch3.startSessionOn(ctx, session.StartOptions{Cwd: t.TempDir()}); err != nil {
 		t.Fatalf("建会话: %v", err)
 	}
 	diag3, err := svcruntime.New(svc3.runtimePlane).RuntimeDiagnostics(ctx)

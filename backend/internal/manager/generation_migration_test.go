@@ -123,7 +123,7 @@ func (r *genRig) start(t *testing.T, sel *CapabilitySelection) (string, *session
 func (r *genRig) startAs(t *testing.T, sel *CapabilitySelection) (string, *session.ActiveSession) {
 	t.Helper()
 	res, err := r.orch.startSessionOn(context.Background(),
-		StartOptions{Cwd: t.TempDir(), Selection: sel})
+		session.StartOptions{Cwd: t.TempDir(), Selection: sel})
 	if err != nil {
 		t.Fatalf("建会话: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestMigrationFallback(t *testing.T) {
 	oldFP := as1.Fingerprint
 
 	r.registerMcp(t, fsServer("v2"))
-	r.orch.handoffMaxChars = 0 // 关掉兜底：新代际上开不出会话来
+	r.orch.life.SetHandoffMaxChars(0) // 关掉兜底：新代际上开不出会话来
 
 	got := r.boundary(t, convID)
 	if got != as1 {

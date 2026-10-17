@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"sort"
 	"strings"
 	"testing"
@@ -36,7 +37,7 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	orch1 := NewOrchestrator(svc1, reg)
 
 	pinned := &CapabilitySelection{Mcps: ptrOf([]string{"git"})}
-	res, err := orch1.startSessionOn(ctx, StartOptions{Cwd: cwd, Selection: pinned})
+	res, err := orch1.startSessionOn(ctx, session.StartOptions{Cwd: cwd, Selection: pinned})
 	if err != nil {
 		t.Fatalf("建会话: %v", err)
 	}

@@ -1,8 +1,11 @@
 package manager
 
 import (
+	"context"
+
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— `domain/session.Runner` 的四张窄端口在编排侧的实现（P4a 正文第五十五刀）———
@@ -32,6 +35,36 @@ func (c runnerCatalog) PutConfigOptions(runtimeID string, options []acl.ConfigOp
 		return
 	}
 	c.svc.catalog.put(runtimeID, options)
+}
+
+// MarkRejected 记录某取值被运行时拒绝（目录里标灰；建会话/恢复/改模型共用）。
+func (c runnerCatalog) MarkRejected(runtimeID, value, reason string) {
+	if c.svc.catalog == nil {
+		return
+	}
+	c.svc.catalog.markRejected(runtimeID, value, reason)
+}
+
+// ClearRejection 清掉曾失败值的标记（同一取值再次被接受时）。
+func (c runnerCatalog) ClearRejection(runtimeID, value string) {
+	if c.svc.catalog == nil {
+		return
+	}
+	c.svc.catalog.clearRejection(runtimeID, value)
+}
+
+// acquireClient 是 `Lifecycle.Acquire` 的实现：拨号仍归编排侧（回调与凭据检查在这里），
+// 域只拿到 ACP 客户端去开/恢复会话。
+func (o *Orchestrator) acquireClient(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acl.Client, error) {
+	rc, err := o.acquire(ctx, spec, fingerprint, nativeMode)
+	if err != nil {
+		return nil, err
+	}
+	if rc == nil || rc.Client == nil {
+		return nil, acl.NewError(acl.ClassConnection, "connection_unavailable",
+			"连接已建立但没有可用的 ACP 客户端", nil)
+	}
+	return rc.Client, nil
 }
 
 // runnerToolMemory 工具调用详情的短期记忆（仍归编排侧：它的生命周期按 toolCallId，不按轮次）。

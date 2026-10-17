@@ -391,7 +391,7 @@ func TestServiceRESTValidation(t *testing.T) {
 // "构建期选定的那个不在注册表里"。
 func TestStartSessionUnknownRuntime(t *testing.T) {
 	_, orch, _ := newTestRig(t) // 空注册表 → 构建期底座（默认 dsh）必然未装配
-	_, err := orch.StartSession(context.Background(), StartOptions{Cwd: "/tmp"})
+	_, err := orch.StartSession(context.Background(), session.StartOptions{Cwd: "/tmp"})
 	var ae *acl.Error
 	if !errors.As(err, &ae) || ae.Code != "runtime_not_found" {
 		t.Fatalf("期望 runtime_not_found，got %v", err)

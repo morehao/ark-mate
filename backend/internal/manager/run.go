@@ -69,7 +69,7 @@ func (o *Orchestrator) acquireSession(ctx context.Context, sessionID string) (*s
 
 // RunOnce 在**构建期选定的** runtime 上跑一次 fresh session + prompt 并等待结束（mate demo 用）。
 func (o *Orchestrator) RunOnce(ctx context.Context, opt RunOptions) (*RunResult, error) {
-	res, err := o.startSessionOn(ctx, StartOptions{Cwd: opt.Cwd})
+	res, err := o.startSessionOn(ctx, session.StartOptions{Cwd: opt.Cwd})
 	if err != nil {
 		return nil, err
 	}

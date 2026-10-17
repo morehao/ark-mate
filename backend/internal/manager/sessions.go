@@ -128,7 +128,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 		}
 	}
 	// 底座不由请求指定（构建期固定，见 pkg/runtime/build.go）：这里没有 runtime 参数要校验。
-	res, err := s.startSession(runCtx, StartOptions{
+	res, err := s.startSession(runCtx, session.StartOptions{
 		SessionID:          convID,
 		Cwd:                ws.Path,
 		WorkspaceTemporary: ws.Temporary,
@@ -160,7 +160,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 
 // startSession 建会话。**底座不由调用方指定**：编排器内部取构建期选定的那一个
 // （见 pkg/runtime/build.go 与 Orchestrator.StartSession）。
-func (s *Service) startSession(ctx context.Context, opt StartOptions) (*CreateResult, error) {
+func (s *Service) startSession(ctx context.Context, opt session.StartOptions) (*session.CreateResult, error) {
 	return s.orch.StartSession(ctx, opt)
 }
 

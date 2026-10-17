@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -146,7 +147,7 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 	// ⑤ 真子进程：上面这些 env **真的**到了进程里。
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
-	res, err := orch.startSessionOn(context.Background(), StartOptions{Cwd: t.TempDir()})
+	res, err := orch.startSessionOn(context.Background(), session.StartOptions{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("用合成底座建会话（= 真拨号 + 拉起桩子进程）: %v", err)
 	}

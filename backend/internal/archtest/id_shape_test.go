@@ -45,13 +45,13 @@ type runtimeShellCallSite struct {
 // 让下一个人搬完文件后知道该去哪儿核对，而不是靠 grep 找。
 var runtimeShellCallSites = []runtimeShellCallSite{
 	{
-		Func: "startSessionOn", Wrap: 1, Unwrap: 0,
-		Why: "W1 首次建会话落 rec（源 `manager/session_start.go`，目标包 `internal/domain/session`）",
+		Func: "StartSession", Wrap: 1, Unwrap: 0,
+		Why: "W1 首次建会话落 rec（P4a 第五十六刀已落 `internal/domain/session/lifecycle.go`）",
 	},
 	{
-		Func: "connectSession", Wrap: 1, Unwrap: 1,
+		Func: "ConnectSession", Wrap: 1, Unwrap: 1,
 		Why: "W2 原生恢复失败或迁移后换会话（最容易被漏的一处）/ U1 原生恢复前解包" +
-			"（源 `manager/session_start.go`，目标包 `internal/domain/session`）",
+			"（P4a 第五十六刀已落 `internal/domain/session/lifecycle.go`）",
 	},
 	{
 		// v26.1：这一支**只剩解包**了。v15 的 W3（"`session/list` 直出底座原文，包装后才是平台侧的

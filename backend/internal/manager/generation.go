@@ -210,7 +210,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *session.A
 					plan.Reason, err.Error()), nil)
 		}
 		// ④ 回退：旧代际继续跑。诊断留痕（与 `connection_lost` 同一类事实），但不改会话状态。
-		o.noteGenerationFallback(as.ID, as.Runtime, plan.From, plan.To, err)
+		o.life.NoteGenerationFallback(as.ID, as.Runtime, plan.From, plan.To, err)
 		return as, nil
 	}
 	glog.Infow(ctx, "代际迁移完成", "session", as.ID, "runtime", spec.ID,
@@ -224,17 +224,4 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *session.A
 		glog.Infow(ctx, "代际迁移后回收旧代际（已无人引用）", "key", plan.From)
 	}
 	return next, nil
-}
-
-// noteGenerationFallback 迁移失败的留痕：一条 WARN + 一条 runtime 诊断。
-//
-// 刻意**不**发事件、**不**改会话状态：用户这一轮照常发出去（可用性优先），"能力还没换过来"
-// 是运维/诊断层面的事实，不是会话的终态。
-func (o *Orchestrator) noteGenerationFallback(sessionID, runtimeID, from, to string, cause error) {
-	glog.Warnw(context.Background(), "代际迁移失败：回退旧代际继续跑",
-		"session", sessionID, "runtime", runtimeID,
-		"from", from, "to", to, "err", cause)
-	ae := acl.NewError(acl.ClassConnection, "generation_switch_failed",
-		"迁移到新能力集失败（已回退到旧代际继续会话）："+cause.Error(), nil)
-	o.svc.recordRuntimeError(sessionID, ae, nil)
 }

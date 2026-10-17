@@ -54,10 +54,15 @@ func TestSessionModelRefIsPlatformID(t *testing.T) {
 
 	// 两个写入点：建会话（符号锚 `startSessionOn`）与 PATCH（符号锚 `UpdateSession`）。
 	start := readStripped(t, uniqueSourceFile(t, internalDir, nil,
-		declREFor("startSessionOn").String(), "建会话的落 rec 写路径 `startSessionOn`"))
-	if !strings.Contains(start, "resolveSessionModel(") {
-		t.Fatal("建会话写路径里找不到 `resolveSessionModel(`：模型入参必须先解析成" +
+		`(?m)^func \(l \*Lifecycle\) StartSession\(`, "建会话的落 rec 写路径 `Lifecycle.StartSession`"))
+	if !strings.Contains(start, "l.resolveModel(") {
+		t.Fatal("建会话写路径里找不到 `l.resolveModel(`：模型入参必须先解析成" +
 			"「平台行 + 运行时值」，否则库里又会存底座的不透明串")
+	}
+	// 适配器那一段：域只认端口，实现必须直连 `resolveSessionModel`（缺任一段都等于绕过解析）。
+	wiring := readStripped(t, filepath.Join(backendRoot(t), "internal", "manager", "orchestrator.go"))
+	if !strings.Contains(wiring, "svc.resolveSessionModel") {
+		t.Fatal("装配点没有把 `svc.resolveSessionModel` 接到 `Lifecycle.ResolveModel` 端口")
 	}
 	if strings.Contains(start, "ModelID: opt.Model.Model,") {
 		t.Fatal("建会话写路径里仍在把 `opt.Model.Model`（请求原值）直接落库——" +
@@ -219,14 +224,16 @@ func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
 	}
 	// ② 两个写面都走它（少一个就是"某一条路径还能把不透明值落库"）。
 	start := readStripped(t, uniqueSourceFile(t, internalDir, nil,
-		declREFor("startSessionOn").String(), "建会话的落 rec 写路径 `startSessionOn`"))
+		`(?m)^func \(l \*Lifecycle\) StartSession\(`, "建会话的落 rec 写路径 `Lifecycle.StartSession`"))
 	sess := readStripped(t, uniqueSourceFile(t, internalDir, nil,
 		declREFor("UpdateSession").String(), "PATCH 写面 `UpdateSession`"))
-	// P4a 正文第四十四刀之后 PATCH 那半的链路分两段（用例 → 端口 → 适配器），判据随之分两段。
+	// P4a 正文第四十四/五十六刀之后两条写面的链路都分两段（用例/域 → 端口 → 适配器），判据随之分两段。
 	depsSrc := readStripped(t, uniqueSourceFile(t, internalDir, nil,
 		`(?m)^func \(s \*Service\) ResolveModel\(`, "模型解析端口的实现 `ResolveModel`"))
-	if !strings.Contains(start, "resolveSessionModel(") || !strings.Contains(sess, "ResolveModel(") ||
-		!strings.Contains(depsSrc, "resolveSessionModel(") {
+	wiring := readStripped(t, filepath.Join(backendRoot(t), "internal", "manager", "orchestrator.go"))
+	if !strings.Contains(start, "l.resolveModel(") || !strings.Contains(sess, "ResolveModel(") ||
+		!strings.Contains(depsSrc, "resolveSessionModel(") ||
+		!strings.Contains(wiring, "svc.resolveSessionModel") {
 		t.Fatal("建会话与 PATCH 两条写面都必须经 `resolveSessionModel`（PATCH 那一半现在是" +
 			"「用例调端口 `ResolveModel` → 适配器调 `resolveSessionModel`」两段，缺任一段都等于绕过解析）")
 	}

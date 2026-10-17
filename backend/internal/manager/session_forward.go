@@ -54,13 +54,6 @@ func (s *Service) openRun(sessionID, runID, text string, firstSeq int64) {
 	s.sessionPlane.OpenRun(sessionID, runID, text, firstSeq)
 }
 
-// TODO(P4b): 删转发（原生恢复兜底面直接依赖 session.Plane）
-//
-// HandoffMemo 读的是**会话域的事件面**（`pl.bus`），P3b-2b 随会话域搬走。
-func (s *Service) handoffMemo(sessionID string, maxChars int) string {
-	return s.sessionPlane.HandoffMemo(sessionID, maxChars)
-}
-
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）
 func (s *Service) persistMemoryAdd(it interaction.MemoryItem) {
 	s.sessionPlane.PersistMemoryAdd(it.SessionID(), it.Title, it.Kind, it.Decision,

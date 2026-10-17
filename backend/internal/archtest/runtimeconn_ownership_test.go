@@ -176,7 +176,8 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 	for _, c := range []struct{ file, want, why string }{
 		{"internal/runtimeconn/pool.go", "SetState(session.AgentStateRunning)", "建连时的进程状态"},
 		{"internal/runtimeconn/pool.go", "SetState(session.AgentStateStopped)", "拆连时的状态回落"},
-		{"internal/manager/session_start.go", "o.svc.runtimePlane.SelectedSpec(", "建会话时的 spec 解析"},
+		{"internal/manager/orchestrator.go", "svc.runtimePlane.SelectedSpec", "建会话时的 spec 解析（装配点直连执行面）"},
+		{"internal/domain/session/lifecycle.go", "spec, err := l.selectedSpec()", "建会话/恢复时的 spec 解析（域经端口调用）"},
 	} {
 		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, c.file))), c.want) {
 			t.Errorf("`%s` 里找不到 `%s`（%s）：调用点必须直连执行面。"+
