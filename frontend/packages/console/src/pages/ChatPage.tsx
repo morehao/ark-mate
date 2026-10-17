@@ -406,6 +406,10 @@ export function ChatPage() {
           gap: 12,
           // 长名字**截断**，不把右侧动作按钮挤到第二行（需求 7）。左侧块可伸缩、右侧不参与压缩。
           flexWrap: 'nowrap',
+          // nowrap 会让这个 flex 项在**列方向**上的自动最小尺寸变成 min-content（长标题 + 右侧按钮
+          // 的宽度），把整个会话区撑出视口。显式 minWidth:0 才允许它随窗口收缩。
+          minWidth: 0,
+          overflow: 'hidden',
           padding: '10px 20px',
           borderBottom: `1px solid ${tokens.border}`,
           background: tokens.surface,
@@ -577,8 +581,8 @@ export function ChatPage() {
   }
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: tokens.bg }}>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative' }}>
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', background: tokens.bg }}>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', position: 'relative' }}>
         <section style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, background: tokens.bg }}>
           {!activeId ? (
             // 未选中会话 = 新建会话面板（不再有独立的「开始问答」空态页）；
