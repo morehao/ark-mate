@@ -750,6 +750,11 @@ var schemaMigrations = []migration{
 	// `sessions`**——默认值只影响以后建的会话，理由写在该文件头。`permission_memories` 的
 	// `scope` 重建挪到 v28 / P2-a：一列加上用它的写面属于同一件事）。
 	migrationV27,
+
+	// v28 的版本步本体在 `migrate_v28.go`（权限记忆带上**授权形态**：`scope` + 授权时那条工具
+	// 入参的摘要。**唯一键刻意不变**——把入参并进键会把"这类工具始终允许"拆成"这一个参数组合
+	// 始终允许"；理由写在该文件头）。
+	migrationV28,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

@@ -49,7 +49,7 @@ func (pl *Plane) persistSession(rec *SessionRec) {
 }
 
 // PersistMemoryAdd 写一条权限记忆（permission_memories 表；同键覆盖，since 为授予时刻）。
-func (pl *Plane) PersistMemoryAdd(sessionID, title, kind, decision string, since time.Time) {
+func (pl *Plane) PersistMemoryAdd(sessionID, title, kind, decision, scope, grantInputDigest string, since time.Time) {
 	if pl.st == nil {
 		return
 	}
@@ -57,7 +57,8 @@ func (pl *Plane) PersistMemoryAdd(sessionID, title, kind, decision string, since
 	defer cancel()
 	if err := pl.st.AddMemory(ctx, model.PermissionMemoryEntity{
 		ID:        objid.New(objid.PermissionMemory),
-		SessionID: sessionID, Title: title, Kind: kind, Decision: decision, CreatedAt: since,
+		SessionID: sessionID, Title: title, Kind: kind, Decision: decision,
+		Scope: scope, GrantInputDigest: grantInputDigest, CreatedAt: since,
 	}); err != nil {
 		glog.Warnw(context.Background(), "store: add permission memory failed", "session", sessionID, "title", title, "err", err)
 	}

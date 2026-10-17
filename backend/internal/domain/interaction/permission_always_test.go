@@ -2,6 +2,7 @@ package interaction
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -249,5 +250,53 @@ func TestAutoDecisionSkipsOnceOnlyRequests(t *testing.T) {
 	}
 	if d, ok := pm.AutoDecision("s1", onceOnly); ok {
 		t.Fatalf("只给 once 档的请求**不得**被记忆自动放行（那是升权请求），got %+v", d)
+	}
+}
+
+// TestRememberCarriesGrantShape 授权形态随记忆一起落库（P2-a / v28）。
+//
+// 三件事：`scope` 恒 `session`（"一次"不落库，所以它没有第二个取值可写）、入参**只进摘要**
+// （不存原文）、同一 (title,kind) 被**重新授权**时摘要跟着刷新（否则库里记的是上一次那条调用，
+// 审计会指到一次与当前授权无关的调用上）。
+func TestRememberCarriesGrantShape(t *testing.T) {
+	pm := NewPermissionManager(time.Minute)
+	var got []MemoryItem
+	pm.SetMemoryHooks(func(it MemoryItem) { got = append(got, it) },
+		func(_, _, _ string) {}, func(_ string) {})
+
+	first := acl.ToolCallInfo{ID: "tc1", Title: "bash", Kind: "execute",
+		Input: map[string]any{"command": "rm -rf build"}}
+	pm.Remember("s1", first, memDecisionAllow, "allow-always")
+	if len(got) != 1 {
+		t.Fatalf("应落一条记忆，got %d", len(got))
+	}
+	if got[0].Scope != MemoryScopeSession {
+		t.Fatalf("scope 应恒 %q（「一次」不落库所以没有第二档），got %q", MemoryScopeSession, got[0].Scope)
+	}
+	if got[0].GrantInputDigest == "" {
+		t.Fatal("入参非空时摘要不该为空")
+	}
+	if strings.Contains(got[0].GrantInputDigest, "rm -rf") {
+		t.Fatalf("摘要里出现了入参原文 %q：入参可能含路径/token/命令里的密钥，**只进摘要**",
+			got[0].GrantInputDigest)
+	}
+
+	// 同一 (title,kind) 换一条入参重新授权 → 摘要必须刷新。
+	second := first
+	second.Input = map[string]any{"command": "ls"}
+	pm.Remember("s1", second, memDecisionAllow, "allow-always")
+	if len(got) != 2 {
+		t.Fatalf("重新授权应再落一次（同键覆盖），got %d 条", len(got))
+	}
+	if got[1].GrantInputDigest == got[0].GrantInputDigest {
+		t.Fatal("入参变了摘要必须跟着变：否则库里记的是上一次那条调用，审计会指到一次与当前授权无关的调用上")
+	}
+	if got[1].Title != "bash" || got[1].Kind != "execute" {
+		t.Fatalf("同键覆盖不该改 title/kind，got %q/%q", got[1].Title, got[1].Kind)
+	}
+	// 空入参 → 空摘要（不是"空对象的摘要"）。
+	pm.Remember("s1", acl.ToolCallInfo{Title: "write", Kind: "edit"}, memDecisionReject, "reject-always")
+	if last := got[len(got)-1]; last.GrantInputDigest != "" {
+		t.Fatalf("空入参的摘要应为空串，got %q", last.GrantInputDigest)
 	}
 }

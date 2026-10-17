@@ -28,9 +28,10 @@ func TestMigrationV27AddsWorkspaceDefaults(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	// ① 版本前进到 27。
-	if v, err := st.SchemaVersion(ctx); err != nil || v != 27 {
-		t.Fatalf("schema 版本应为 27，got %d (err=%v)", v, err)
+	// ① 两列存在即可（**不再断言"最新版本是 27"**：迁移是累积的，v28 之后这条断言会年年假红，
+	//    而它想钉的从来不是版本号本身）。
+	if v, err := st.SchemaVersion(ctx); err != nil || v < 27 {
+		t.Fatalf("schema 版本应 ≥ 27，got %d (err=%v)", v, err)
 	}
 
 	// ② 两列存在、且**不写就有值**（`NOT NULL DEFAULT ''`）——新建一行只给旧列。

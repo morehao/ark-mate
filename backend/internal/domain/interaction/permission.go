@@ -49,7 +49,7 @@ type PermissionManager struct {
 
 	// 会话级记忆持久化挂钩（sqlite 模式：写 permission_memories 表；nil = 不持久化）。
 	// 所有记忆变更（Remember/Revoke/ForgetSession）都经此旁路，进程内存与 DB 保持一致。
-	memAdd    func(sessionID, title, kind, decision string, since time.Time)
+	memAdd    func(it MemoryItem)
 	memDel    func(sessionID, title, kind string)
 	memDelAll func(sessionID string)
 }

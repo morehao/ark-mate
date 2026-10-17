@@ -55,7 +55,6 @@
 | O13 | **事件持久化的边角**：`store.AppendEvent` 写库失败的事件不出现在 REST 历史（事件总线侧仍有，且打 WARN），位次退化为进程内分配 | 需要历史与事件总线完全一致 | §19.22 |
 | O14 | **会话级权限模式不可达**：`/permission` 命令面在 ACP 上**不存在**（底座根本不发 `available_commands_update`，见 D10），所以"会话级模式下发"只能退化成「每模式一个暖进程 + `DSH_PERMISSION_MODE`」。今天是**每部署一个模式**：模式不同的两个会话共享同一个暖进程，各自拿不到自己的模式 | 底座补命令面，或愿意接受"进程池按模式分桶"的开销 | P1-a ③(b) · P1-f 偏离 ② |
 | O15 | **队列项不能原子替换正文**：队列只补了三个动作（重排 / 立即发送 / 取出编辑），**没有** `surfaceOp: replace` 那类"就地改写一条已排队输入"。取出编辑会把它作废、让用户改完重新入队——语义上等价，但**位次会变**（改完排到队尾） | 出现"改一句话但保留排队位置"的真实需求 | ADR-10（刻意不做 17 个方法） |
-| O16 | **权限记忆只有一种形态**：`permission_memories` 的唯一键是 `(session_id, title, kind)`，所以"只允许这一次"与"这个会话内始终允许"**压在同一行**——要么把一次性的允许永久记住，要么把"始终"降级成一次。`scope` 列（v28）与写面改造尚未落地 | 需要区分"一次 / 会话内始终"两种授权形态时（P2-a） | P1-f 偏离 ① |
 | O17 | **工作空间不能改登记路径**：`PATCH /workspaces/:id` 收 `path` 但**显式拒绝**（`workspace_path_immutable`）。改路径要先定"既有会话的 `cwd` 怎么办"——它们的历史就在那个目录里，跟着搬等于把历史指到别处 | W4 落地时（归属自愈 + 改 path 同批） | P1-f `PatchWorkspace` 注释 |
 | O18 | **既有会话的归属不自愈**：工作空间改名/搬迁/删除之后，`sessions.workspace_id` 仍指向那条登记，而登记指向的目录可能已经不存在（`dir_status: missing`）。今天只有读面如实上报，没有自愈路径（不自动重挂、也不批量改归属） | W4 落地时 | 计划 P1-g |
 | O19 | **确认区一次只显示一张卡**：权限优先、其余以「还有 N 条」计数，**不能**并列处理。同时挂起多条时用户需要逐条处理 | 出现"一次要确认很多条"的真实场景 | P1-e `ConfirmArea.tsx` |
@@ -83,3 +82,4 @@
 | C16 | **Resume 未接入平台恢复流程**（原 O14） | `internal/manager/session_start.go` 已按 `acl.Client.ResumeSession(resume=true)` 恢复**同一底座会话**（`session.resumed` 带 `reason=restart`）；未声明原生恢复能力的底座走 handoff memo。模型目录取样也复用同一条 resume 通道 |
 | C17 | **会话的底座会话 id 未持久化**（原 O15，当时叫 `provider_session_id`） | 数据模型 v17 起该列持久化为 `sessions.runtime_session_id`（实体 / DAO / 迁移 / 恢复四处同源），决策 v13④ 同时把词汇从 `provider_*` 收敛为 `runtime_*` |
 | C18 | **MCP 同名工具冲突「后探测者覆盖前者」**（原 O3 的一部分） | `backend/pkg/capability/mcp_tool_name.go` 的 `NamespaceTools` 做 fail-closed 裁决：工具暴露名 `<serverID>__<toolName>`，跨 server 撞名（`a`+`b__x` vs `a__b`+`x`）**整组丢弃并 ERROR 留痕**。**边界**：这只覆盖走平台网关的远程 MCP；stdio server 由底座直连，不在此列 |
+| O16 | **权限记忆只有一种形态** → **已关闭（数据模型 v28）** | `permission_memories` 补两列 `scope`（授权形态，今天恒 `session`）与 `grant_input_digest`（当初那条工具入参的 sha256 前 16 位），`Upsert` 写入、启动装载 `WithGrantShape` 复原。**唯一键保持三元组**——把形态或入参并进去会让"这类工具始终允许"退化成"这一个参数组合始终允许"。原条目里"一次性的允许被永久记住"这一条**前提不成立**：`Remember` 只被 `always` 决策调用，`once` 从不落库 |

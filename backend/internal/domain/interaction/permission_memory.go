@@ -1,6 +1,9 @@
 package interaction
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"sort"
 	"strings"
 	"time"
@@ -38,6 +41,10 @@ type MemoryItem struct {
 	Kind      string    `json:"kind"`
 	Decision  string    `json:"decision"` // allow | reject
 	Since     time.Time `json:"since"`
+	// Scope 授权形态（v28；今天恒 `session`）。
+	Scope string `json:"scope"`
+	// GrantInputDigest 当初那条工具入参的摘要（**不是**原文；见 `grantInputDigest`）。
+	GrantInputDigest string `json:"grant_input_digest,omitempty"`
 }
 
 // NewMemoryItem 造一条记忆项。
@@ -49,9 +56,25 @@ func NewMemoryItem(sessionID, title, kind, decision string, since time.Time) Mem
 	return MemoryItem{sessionID: sessionID, Title: title, Kind: kind, Decision: decision, Since: since}
 }
 
+// WithGrantShape 补上授权形态（v28；装载路径用——`Remember` 走的是另一条构造）。
+func (it MemoryItem) WithGrantShape(scope, grantInputDigest string) MemoryItem {
+	it.Scope = scope
+	it.GrantInputDigest = grantInputDigest
+	return it
+}
+
+// SessionID 该记忆归属的会话（域外装载/落库要它；**没有 json tag**，故不会进对外载荷）。
+func (it MemoryItem) SessionID() string { return it.sessionID }
+
+// memoryItemOf 造一条**带授权形态**的记忆项（`Remember` 用；v28）。
+func memoryItemOf(sessionID string, it MemoryItem) MemoryItem {
+	it.sessionID = sessionID
+	return it
+}
+
 // SetMemoryHooks 注入会话级记忆持久化挂钩（sqlite 模式；可为 nil 表示不持久化）。
 // 挂钩在锁外调用（DB 写是 best-effort，不入关键路径）。
-func (m *PermissionManager) SetMemoryHooks(add func(sessionID, title, kind, decision string, since time.Time),
+func (m *PermissionManager) SetMemoryHooks(add func(it MemoryItem),
 	del func(sessionID, title, kind string), delAll func(sessionID string)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -121,8 +144,22 @@ func (m *PermissionManager) lookupLocked(sessionID string, t acl.ToolCallInfo) *
 	return &cp
 }
 
+// MemoryScopeSession 会话内始终（v28 的**唯一**可写授权形态）。
+//
+// "只允许这一次"没有对应取值：`Remember` 只被 always 决策调用，once 决策**从不落库**。
+// 给它留一个永远不会被写入的枚举值，只会让下一个读它的人以为平台支持那种记忆。
+const MemoryScopeSession = "session"
+
 // Remember 记录（或覆盖）一条会话级权限记忆。decision ∈ allow|reject。
 // sqlite 模式下同步旁路持久化（permission_memories 表，同键覆盖）。
+//
+// v28 起还带两样**描述这次授权**的东西（都**不进**唯一键）：
+//
+//	scope             授权形态（今天恒 `session`）
+//	grantInputDigest  当初那条工具入参的摘要
+//
+// 后者是为了**可复核**：出事时能回答"当初那句话，是在哪次具体调用上说的"。入参本身不进库
+// （它可能含密钥），只进摘要。
 func (m *PermissionManager) Remember(sessionID string, t acl.ToolCallInfo, decision, optionID string) {
 	m.mu.Lock()
 	set := m.mem[sessionID]
@@ -142,7 +179,10 @@ func (m *PermissionManager) Remember(sessionID string, t acl.ToolCallInfo, decis
 	add := m.memAdd
 	m.mu.Unlock()
 	if add != nil {
-		add(sessionID, t.Title, t.Kind, decision, since)
+		add(memoryItemOf(sessionID, MemoryItem{
+			Title: t.Title, Kind: t.Kind, Decision: decision, Since: since,
+			Scope: MemoryScopeSession, GrantInputDigest: grantInputDigest(t.Input),
+		}))
 	}
 }
 
@@ -263,4 +303,23 @@ func offersOnlyOnceOptions(req acl.PermissionRequest) bool {
 		}
 	}
 	return !hasAlways && hasOnce
+}
+
+// grantInputDigest 当初那条工具入参的摘要（`sha256` 前 16 位十六进制；空入参 → 空串）。
+//
+// 为什么是摘要而不是原文：工具入参里可能有路径、token、甚至命令里的密钥。审计要的是
+// "**是不是同一次调用**"，那是摘要能回答的，而原文只会让库里多一份敏感数据。
+//
+// 为什么截到 16 位：它是**审计锚点**不是密码学承诺——碰撞在这条链上没有攻击价值
+// （能改库的人已经能改一切），而 16 位让它在日志里读得下去。
+func grantInputDigest(in any) string {
+	if in == nil {
+		return ""
+	}
+	b, err := json.Marshal(in)
+	if err != nil || len(b) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
 }

@@ -239,8 +239,11 @@ func (o *Orchestrator) RestoreMemoriesFromStore(ctx context.Context) error {
 	}
 	items := make([]interaction.MemoryItem, 0, len(rows))
 	for _, r := range rows {
+		// 恢复时把**授权形态**一并带回来（v28）：不带就等于重启后丢掉了"当初那句话是在哪次
+		// 具体调用上说的"。旧库里两列是默认值（`session` / 空串），所以老数据天然兼容。
 		items = append(items, interaction.NewMemoryItem(
-			r.SessionID, r.Title, r.Kind, r.Decision, r.CreatedAt))
+			r.SessionID, r.Title, r.Kind, r.Decision, r.CreatedAt).
+			WithGrantShape(r.Scope, r.GrantInputDigest))
 	}
 	o.perm.LoadMemories(items)
 	glog.Infow(ctx, "permission memories restored", "count", len(items))

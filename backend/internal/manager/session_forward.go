@@ -3,8 +3,8 @@ package manager
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
@@ -65,8 +65,9 @@ func (s *Service) handoffMemo(sessionID string, maxChars int) string {
 }
 
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）
-func (s *Service) persistMemoryAdd(sessionID, title, kind, decision string, since time.Time) {
-	s.sessionPlane.PersistMemoryAdd(sessionID, title, kind, decision, since)
+func (s *Service) persistMemoryAdd(it interaction.MemoryItem) {
+	s.sessionPlane.PersistMemoryAdd(it.SessionID(), it.Title, it.Kind, it.Decision,
+		it.Scope, it.GrantInputDigest, it.Since)
 }
 
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）
