@@ -140,7 +140,7 @@ func (pl *Plane) registeredRuntimeIDs() []string {
 //
 // 字段的语义与 v11–v20 的历史见 `providerFile`（磁盘形状）与 `Def.KeyRef` 的注释；
 // 导出是因为 `resource_sync.go`（运行期同步面）与 `service/svcprovider`（自检；P4a 起从
-// `manager/provider_probe.go` 搬进用例层）都要构造/拷贝它。
+// 执行面的旧实现搬进用例层）都要构造/拷贝它。
 type Def struct {
 	ID       string `json:"id"`
 	Name     string `json:"name,omitempty"`

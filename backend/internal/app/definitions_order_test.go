@@ -97,7 +97,7 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 		t.Fatalf("存量 skill 应在本轮启动就可见（导入必须先于装载）: %+v", skills)
 	}
 	// ③ 调度：startup pass 已经对**装载进来的**定义收敛过（过期 once → inactive + skipped）。
-	resp, ok := a.svc.AutomationByID("stale")
+	resp, ok := a.svc.AutomationPlane().AutomationByID("stale")
 	if !ok {
 		t.Fatal("automation 面应可见（导入必须先于装载）")
 	}

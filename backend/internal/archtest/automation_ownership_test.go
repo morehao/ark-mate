@@ -70,9 +70,6 @@ var automationDomainAnchors = map[string][]string{
 	},
 }
 
-// automationManagerThinFiles manager 侧**只许是薄转发/适配**的文件。
-var automationManagerThinFiles = []string{"automation_forward.go", "automation_host.go"}
-
 // automationManagerImplMarkers 实现痕迹（这些动作现在只许在域里做）。
 var automationManagerImplMarkers = []string{
 	"os.ReadDir(",
@@ -110,15 +107,14 @@ func TestAutomationImplementationLivesInDomain(t *testing.T) {
 				"定义与运行态，是域的知识；机制层不许 import 域）。", dead)
 		}
 	}
-	for _, f := range automationManagerThinFiles {
-		src := stripLineComments(readFileOrFatal(t, filepath.Join(managerDir, f)))
-		for _, m := range automationManagerImplMarkers {
-			if strings.Contains(src, m) {
-				t.Errorf("internal/manager/%s 里出现实现痕迹 %q：自动化的定义读写**只有一份实现**，"+
-					"在 `internal/domain/automation`（P2b）。\n"+
-					"在 manager 里再写一遍的后果是两份语义静默分叉（一份写了运行态 overlay、另一份没写）——"+
-					"而两边都编译得过。", f, m)
-			}
+	// 扫描面是**整个 manager 生产目录**（而不是一份写死的文件名清单）：转发文件删掉之后，
+	// 按文件名读会直接 Fatal，而"实现痕迹换个文件放回来"反而溜过去（P4a 一批踩过五次）。
+	for _, m := range automationManagerImplMarkers {
+		if strings.Contains(mgrAll, m) {
+			t.Errorf("`internal/manager` 里出现实现痕迹 %q：自动化的定义读写**只有一份实现**，"+
+				"在 `internal/domain/automation`（P2b）。\n"+
+				"在 manager 里再写一遍的后果是两份语义静默分叉（一份写了运行态 overlay、另一份没写）——"+
+				"而两边都编译得过。", m)
 		}
 	}
 }

@@ -44,9 +44,9 @@ type MigrationNotes struct {
 
 // frozenV11ProviderEndpoints v11 的 `type` → 上游端点（**冻结副本**）。
 //
-// 为什么在迁移里自带一份而不 import `internal/manager`：① 依赖方向是 `manager → store`，
-// 反向 import 成环（archtest 守）；② 迁移描述的是**历史**，不该依赖会继续变化的活代码
-// ——活的那张表（`internal/manager/provider_probe.go`）在 T4.5 之后会被删掉。
+// 为什么在迁移里自带一份而不 import 活实现：① 依赖方向是 `实现 → store`，反向 import 成环
+// （archtest 守）；② 迁移描述的是**历史**，不该依赖会继续变化的活代码——活的那张表
+// （当时的 `manager/provider_probe.go`）已随 P4a 搬走。
 var frozenV11ProviderEndpoints = map[string]string{
 	"openai":     "https://api.openai.com/v1",
 	"deepseek":   "https://api.deepseek.com/v1",

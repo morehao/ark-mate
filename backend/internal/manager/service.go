@@ -16,7 +16,6 @@ import (
 	"sync/atomic"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/capability"
@@ -38,9 +37,6 @@ type Service struct {
 	// runtimeSyncOutcomes 各 runtime **最后一次同步的结论**（v12：读面直接读它，不在读路径上重跑同步）。
 	runtimeSyncOutcomes map[string]resource.Outcome
 
-	// providerDir 定义目录（v19 起只装 `providers.json`；空 = 不落盘，仅内存）。
-	// v20 起它与凭据面无关：密钥在库里，托管文档锚在 `MATE_HOME`（见 SetProviderDir）。
-	providerDir string
 	// planner 工作空间域（起始点偏好策略：代建根 + 生效名单）。P2b 起策略字段归它自持锁；
 	// `Service` 上**不再复刻**一份（两份 = 两个事实源，表现是面板改了名单、校验却按旧的走）。
 	planner *workspace.Plane
@@ -82,17 +78,6 @@ type Service struct {
 	// 它自持一把**与会话表无关**的锁——这正是这次分锁的原因（此前 `Orchestrator.mu`
 	// 同时保护连接表与会话表，持锁请求会话快照就是锁序反转的雏形）。
 	runtimePool *runtimeconn.Pool
-	autoVer     map[string]int64 // 自动化事件的版本计数（`automation:<id>` 聚合）；会话侧那张表在 domain/session
-
-	// memDefaultWorkspace memory 模式的**默认工作空间**（登记表不存在时的那一份）。
-	//
-	// 它不是"登记项的缓存"：默认工作空间是**平台代建**的东西（进程没起来时它是库里的第一行；
-	// 库不存在时它就该由装配期现建一个），而登记表（用户显式产出的状态）在 memory 模式本来就
-	// 无处可存。少了它，"未指定 cwd 就发一条消息"这条最普通的路在 `MATE_STORE=memory` 下
-	// 直接报 `workspace_required` —— 用户什么都没做错。见 EnsureDefaultWorkspace。
-	//
-	// 由 s.mu 保护（与 sessions 同一把锁）。
-	memDefaultWorkspace *model.WorkspaceEntity
 
 	// coalescer ③ 文本增量合并器（NewService 构造时创建；见 chunk_coalescer.go）。
 	coalescer *session.Coalescer

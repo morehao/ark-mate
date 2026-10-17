@@ -38,7 +38,7 @@ func automationDBRig(t *testing.T, dir string) (*Service, *store.Store) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	svc.EnableStore(st)
 	if dir != "" {
-		svc.LoadAutomationDefinitionsFromStore(context.Background(), dir)
+		svc.AutomationPlane().LoadAutomationDefinitionsFromStore(context.Background(), dir)
 	}
 	return svc, st
 }
@@ -79,7 +79,7 @@ func automationSessions(t *testing.T, svc *Service, id string) []*SessionRec {
 	snap := svc.sessionPlane.Snapshot()
 	var out []*SessionRec
 	for i := range snap {
-		if snap[i].Origin == automationOrigin(id) {
+		if snap[i].Origin == domainautomation.Origin(id) {
 			out = append(out, &snap[i])
 		}
 	}
@@ -91,7 +91,7 @@ func TestAutomationDefinitionsStoreRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	svc, st := automationDBRig(t, t.TempDir())
 
-	first, err := svc.writeAutomation(ctx, "daily", dbDailyPatch(t, "daily", "9"), true)
+	first, err := svc.AutomationPlane().WriteAutomation(ctx, "daily", dbDailyPatch(t, "daily", "9"), true)
 	if err != nil {
 		t.Fatalf("新建: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestAutomationDefinitionsStoreRoundTrip(t *testing.T) {
 	// 落库的目录根本不存在（写面在 sqlite 模式下不需要 AutomationDir）——这正是"载体换了"的判据。
 
 	// 覆盖写：只改 name，其余键保留，revision 前进。
-	second, err := svc.writeAutomation(ctx, "daily", map[string]any{"name": "改名了"}, false)
+	second, err := svc.AutomationPlane().WriteAutomation(ctx, "daily", map[string]any{"name": "改名了"}, false)
 	if err != nil {
 		t.Fatalf("覆盖写: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestAutomationDefinitionsStoreRoundTrip(t *testing.T) {
 
 	// 拒写名单（既有对外契约）：保留键一律 40001，且**一个字节都没改**。
 	for _, k := range automation.ReservedKeys {
-		if _, err := svc.writeAutomation(ctx, "daily", map[string]any{k: "x"}, false); errCode(err) != "invalid_param" {
+		if _, err := svc.AutomationPlane().WriteAutomation(ctx, "daily", map[string]any{k: "x"}, false); errCode(err) != "invalid_param" {
 			t.Fatalf("保留键 %s 应被拒（40001），got %v", k, err)
 		}
 	}
@@ -135,28 +135,28 @@ func TestAutomationDefinitionsStoreRoundTrip(t *testing.T) {
 		t.Fatalf("被拒的写不该碰任何字节: rev=%d", after.Revision)
 	}
 	// `state` 刻意不在名单里（用户要能把 needs_attention 改回 active）。
-	if _, err := svc.writeAutomation(ctx, "daily", map[string]any{"state": automation.StateActive}, false); err != nil {
+	if _, err := svc.AutomationPlane().WriteAutomation(ctx, "daily", map[string]any{"state": automation.StateActive}, false); err != nil {
 		t.Fatalf("state 应可由用户写: %v", err)
 	}
 	// 新建已存在 / 覆盖不存在：两条错路各自的码。
-	if _, err := svc.writeAutomation(ctx, "daily", dbDailyPatch(t, "daily", "9"), true); errCode(err) != "automation_exists" {
+	if _, err := svc.AutomationPlane().WriteAutomation(ctx, "daily", dbDailyPatch(t, "daily", "9"), true); errCode(err) != "automation_exists" {
 		t.Fatalf("重复新建应报 automation_exists，got %v", err)
 	}
-	if _, err := svc.writeAutomation(ctx, "nope", map[string]any{"name": "x"}, false); errCode(err) != "automation_not_found" {
+	if _, err := svc.AutomationPlane().WriteAutomation(ctx, "nope", map[string]any{"name": "x"}, false); errCode(err) != "automation_not_found" {
 		t.Fatalf("覆盖不存在的定义应报 automation_not_found，got %v", err)
 	}
 
 	// 删除 + 幂等 + 内存同步摘除。
-	if removed, err := svc.DeleteAutomationByID(ctx, "daily"); err != nil || !removed {
+	if removed, err := svc.AutomationPlane().DeleteAutomationByID(ctx, "daily"); err != nil || !removed {
 		t.Fatalf("删除: removed=%v err=%v", removed, err)
 	}
 	if _, found, _ := st.GetAutomationDefinition(ctx, "daily"); found {
 		t.Fatal("行应已删除")
 	}
-	if _, ok := svc.AutomationByID("daily"); ok {
+	if _, ok := svc.AutomationPlane().AutomationByID("daily"); ok {
 		t.Fatal("内存条目应一并摘除")
 	}
-	if removed, err := svc.DeleteAutomationByID(ctx, "daily"); err != nil || removed {
+	if removed, err := svc.AutomationPlane().DeleteAutomationByID(ctx, "daily"); err != nil || removed {
 		t.Fatalf("重复删除应幂等（removed=false）: removed=%v err=%v", removed, err)
 	}
 
@@ -200,7 +200,7 @@ func TestAutomationStoreLoaderToleranceAndRuntime(t *testing.T) {
 	mustSeedAutomationRow(t, st, &model.AutomationEntity{ID: "junk", Body: `[1,2,3]`})
 
 	// 返回值是**装载成功**的条数（与文件装载同一口径）；坏的两行仍进注册表，靠 loadErr 标识。
-	if n := svc.LoadAutomationDefinitionsFromStore(ctx, t.TempDir()); n != 1 {
+	if n := svc.AutomationPlane().LoadAutomationDefinitionsFromStore(ctx, t.TempDir()); n != 1 {
 		t.Fatalf("只有 good 装载成功，got %d", n)
 	}
 	items := svc.mustListAutomations(t)
@@ -215,7 +215,7 @@ func TestAutomationStoreLoaderToleranceAndRuntime(t *testing.T) {
 		t.Fatalf("坏定义应留列表且带 error: %+v", items)
 	}
 	// 运行态列 → 视图；`state` 从正文读（默认 active）。
-	goodResp, ok := svc.AutomationByID("good")
+	goodResp, ok := svc.AutomationPlane().AutomationByID("good")
 	if !ok {
 		t.Fatal("good 应在内存里")
 	}
@@ -239,18 +239,18 @@ func TestAutomationStoreLoaderToleranceAndRuntime(t *testing.T) {
 func TestAutomationRuntimeWriteKeepsDefinitionRevision(t *testing.T) {
 	ctx := context.Background()
 	svc, st := automationDBRig(t, t.TempDir())
-	if _, err := svc.writeAutomation(ctx, "daily", dbDailyPatch(t, "daily", "9"), true); err != nil {
+	if _, err := svc.AutomationPlane().WriteAutomation(ctx, "daily", dbDailyPatch(t, "daily", "9"), true); err != nil {
 		t.Fatal(err)
 	}
 	before, _, _ := st.GetAutomationDefinition(ctx, "daily")
-	rec, _ := svc.automationRecByID("daily")
+	rec, _ := svc.AutomationPlane().RecByID("daily")
 	fired := time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
 	// 第一次：同时推进游标 + 补一个 `state`（定义键）→ 正文真的变了，前进一版。
-	if err := svc.saveAutomationOverlay(ctx, "daily", map[string]any{
+	if err := svc.AutomationPlane().SaveOverlay(ctx, "daily", map[string]any{
 		"last_fired_at": fired.Format(time.RFC3339Nano),
 		"last_status":   automation.RunCompleted,
 		"state":         automation.StateInactive,
-	}, automationLastFiredText(rec.Def.LastFiredAt)); err != nil {
+	}, domainautomation.LastFiredText(rec.Def.LastFiredAt)); err != nil {
 		t.Fatalf("运行态写回: %v", err)
 	}
 	after, _, _ := st.GetAutomationDefinition(ctx, "daily")
@@ -265,11 +265,11 @@ func TestAutomationRuntimeWriteKeepsDefinitionRevision(t *testing.T) {
 	}
 	// 第二次：**只**改运行态列（`state` 已是那个值，正文逐字节不变）→ revision 不动。
 	before = after
-	rec, _ = svc.automationRecByID("daily")
-	if err := svc.saveAutomationOverlay(ctx, "daily", map[string]any{
+	rec, _ = svc.AutomationPlane().RecByID("daily")
+	if err := svc.AutomationPlane().SaveOverlay(ctx, "daily", map[string]any{
 		"last_status": automation.RunFailed,
 		"state":       automation.StateInactive,
-	}, automationLastFiredText(rec.Def.LastFiredAt)); err != nil {
+	}, domainautomation.LastFiredText(rec.Def.LastFiredAt)); err != nil {
 		t.Fatalf("运行态写回（第二次）: %v", err)
 	}
 	after, _, _ = st.GetAutomationDefinition(ctx, "daily")
@@ -280,7 +280,7 @@ func TestAutomationRuntimeWriteKeepsDefinitionRevision(t *testing.T) {
 		t.Fatalf("运行态列未更新: %+v", after)
 	}
 	// 认领 CAS：拿**过期**的认领值再写一次必须被拒（0 行），且一个字节都不改。
-	if err := svc.saveAutomationOverlay(ctx, "daily", map[string]any{"last_status": automation.RunCompleted},
+	if err := svc.AutomationPlane().SaveOverlay(ctx, "daily", map[string]any{"last_status": automation.RunCompleted},
 		"2020-01-01T00:00:00Z"); errCode(err) != "definition_changed" {
 		t.Fatalf("过期的运行态写回应被拒（40901），got %v", err)
 	}
@@ -289,7 +289,7 @@ func TestAutomationRuntimeWriteKeepsDefinitionRevision(t *testing.T) {
 		t.Fatalf("被拒的写不该落任何列: %+v", still)
 	}
 	// 内存与载体一致（写回后重载）。
-	resp, _ := svc.AutomationByID("daily")
+	resp, _ := svc.AutomationPlane().AutomationByID("daily")
 	if resp.State != automation.StateInactive || resp.LastStatus != automation.RunFailed {
 		t.Fatalf("内存态未跟上载体: %+v", resp)
 	}
@@ -300,18 +300,18 @@ func TestAutomationRuntimeWriteKeepsDefinitionRevision(t *testing.T) {
 func TestAutomationClaimIsAtMostOnce(t *testing.T) {
 	ctx := context.Background()
 	svc, st := automationDBRig(t, t.TempDir())
-	if _, err := svc.writeAutomation(ctx, "daily", dbDailyPatch(t, "daily", "9"), true); err != nil {
+	if _, err := svc.AutomationPlane().WriteAutomation(ctx, "daily", dbDailyPatch(t, "daily", "9"), true); err != nil {
 		t.Fatal(err)
 	}
-	rec, _ := svc.automationRecByID("daily")
+	rec, _ := svc.AutomationPlane().RecByID("daily")
 	occurrence := rec.NextDue
 	stale := rec // 第二个触发者手里的旧快照
 
-	first := svc.automationRunOnce(ctx, rec, occurrence, automation.TriggerScheduled)
+	first := svc.AutomationPlane().RunOnce(ctx, rec, occurrence, automation.TriggerScheduled)
 	if first.Status != automation.RunClaimed {
 		t.Fatalf("第一次应认领成功: %+v", first)
 	}
-	second := svc.automationRunOnce(ctx, stale, occurrence, automation.TriggerScheduled)
+	second := svc.AutomationPlane().RunOnce(ctx, stale, occurrence, automation.TriggerScheduled)
 	if second.Status != automation.RunDuplicate || !second.NoRecord {
 		t.Fatalf("同一 occurrence 的第二次触发必须判 duplicate: %+v", second)
 	}
@@ -339,15 +339,15 @@ func TestAutomationClaimIsAtMostOnce(t *testing.T) {
 func TestAutomationClaimFailureRetriesNextTick(t *testing.T) {
 	ctx := context.Background()
 	svc, st := automationDBRig(t, t.TempDir())
-	if _, err := svc.writeAutomation(ctx, "daily", dbDailyPatch(t, "daily", "9"), true); err != nil {
+	if _, err := svc.AutomationPlane().WriteAutomation(ctx, "daily", dbDailyPatch(t, "daily", "9"), true); err != nil {
 		t.Fatal(err)
 	}
-	rec, _ := svc.automationRecByID("daily")
+	rec, _ := svc.AutomationPlane().RecByID("daily")
 	occurrence := rec.NextDue
 
 	dead, cancel := context.WithCancel(ctx)
 	cancel()
-	out := svc.automationRunOnce(dead, rec, occurrence, automation.TriggerScheduled)
+	out := svc.AutomationPlane().RunOnce(dead, rec, occurrence, automation.TriggerScheduled)
 	if !out.Failure || out.Status != automation.RunSkipped || !strings.Contains(out.Reason, "认领失败") {
 		t.Fatalf("认领失败的结果不符: %+v", out)
 	}
@@ -358,7 +358,7 @@ func TestAutomationClaimFailureRetriesNextTick(t *testing.T) {
 	if row.LastFiredAt != "" {
 		t.Fatalf("认领失败不得推进库里的游标: %q", row.LastFiredAt)
 	}
-	mem, _ := svc.automationRecByID("daily")
+	mem, _ := svc.AutomationPlane().RecByID("daily")
 	if mem.Def.LastFiredAt != nil {
 		t.Fatalf("认领失败不得推进内存游标: %+v", mem.Def.LastFiredAt)
 	}
@@ -367,7 +367,7 @@ func TestAutomationClaimFailureRetriesNextTick(t *testing.T) {
 		t.Fatalf("认领失败后 nextDue 不应变化: %s vs %s", mem.NextDue, occurrence)
 	}
 
-	retry := svc.automationRunOnce(ctx, mem, occurrence, automation.TriggerScheduled)
+	retry := svc.AutomationPlane().RunOnce(ctx, mem, occurrence, automation.TriggerScheduled)
 	if retry.Status != automation.RunClaimed {
 		t.Fatalf("修好后的重试应认领成功: %+v", retry)
 	}
@@ -383,10 +383,10 @@ func TestAutomationClaimFailureRetriesNextTick(t *testing.T) {
 func TestAutomationRecordFailureKeepsCursor(t *testing.T) {
 	ctx := context.Background()
 	svc, st := automationDBRig(t, t.TempDir())
-	if _, err := svc.writeAutomation(ctx, "daily", dbDailyPatch(t, "daily", "9"), true); err != nil {
+	if _, err := svc.AutomationPlane().WriteAutomation(ctx, "daily", dbDailyPatch(t, "daily", "9"), true); err != nil {
 		t.Fatal(err)
 	}
-	rec, _ := svc.automationRecByID("daily")
+	rec, _ := svc.AutomationPlane().RecByID("daily")
 	occurrence := rec.NextDue
 	nextDueBefore := rec.NextDue
 
@@ -394,14 +394,14 @@ func TestAutomationRecordFailureKeepsCursor(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatalf("关库: %v", err)
 	}
-	out := svc.finishAutomationRun(ctx, rec, domainautomation.RunOutcome{
+	out := svc.AutomationPlane().FinishAutomationRun(ctx, rec, domainautomation.RunOutcome{
 		ScheduledFor: occurrence, Status: automation.RunOverlap, Trigger: automation.TriggerScheduled,
 		Advance: true, Reason: "上一次还在跑；下一次 occurrence 照常",
 	})
 	if out.State != automation.StateActive {
 		t.Fatalf("结果状态应由调用方推导: %+v", out)
 	}
-	mem, _ := svc.automationRecByID("daily")
+	mem, _ := svc.AutomationPlane().RecByID("daily")
 	if mem.Def.LastFiredAt != nil {
 		t.Fatalf("事务失败不得推进内存游标: %+v", mem.Def.LastFiredAt)
 	}

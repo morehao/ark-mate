@@ -199,8 +199,8 @@ func TestAutomationPortRunsAndRunNow(t *testing.T) {
 	// 定义坏了 → 40001（不假装没有运行史）。注意 LoadAutomationDefinitions 的返回值是
 	// "装载成功的条数"，坏定义**在册但不算成功**——所以这里断言的是注册表里有它。
 	writeAutomationFile(t, filepath.Join(r.dir, "daily.json"), "{不是 JSON")
-	r.svc.LoadAutomationDefinitions(r.dir)
-	if _, ok := r.svc.AutomationByID("daily"); !ok {
+	r.svc.AutomationPlane().LoadAutomationDefinitions(r.dir)
+	if _, ok := r.svc.AutomationPlane().AutomationByID("daily"); !ok {
 		t.Fatal("坏定义也必须留在列表里（带 error），否则用户只看到它凭空消失")
 	}
 	if _, err := autoSvc(r.svc).ListAutomationRuns("daily"); numericCode(err) != 40001 {
@@ -208,7 +208,7 @@ func TestAutomationPortRunsAndRunNow(t *testing.T) {
 	}
 	// 手动触发：claimed 回带会话 id
 	r.writeDaily(t, "daily", "")
-	r.svc.LoadAutomationDefinitions(r.dir)
+	r.svc.AutomationPlane().LoadAutomationDefinitions(r.dir)
 	out, err := autoSvc(r.svc).RunAutomationNow(context.Background(), "daily")
 	if err != nil || out.Status != "claimed" || out.SessionID == "" || out.Trigger != "manual" {
 		t.Fatalf("手动触发应 claimed 且带会话: %+v %v", out, err)
@@ -219,7 +219,7 @@ func TestAutomationPortRunsAndRunNow(t *testing.T) {
 		t.Fatalf("并发手动触发应 overlap: %+v %v", out2, err)
 	}
 	// 停用后拒绝
-	if _, err := r.svc.writeAutomation(context.Background(), "daily", map[string]any{"enabled": false}, false); err != nil {
+	if _, err := r.svc.AutomationPlane().WriteAutomation(context.Background(), "daily", map[string]any{"enabled": false}, false); err != nil {
 		t.Fatalf("停用: %v", err)
 	}
 	if _, err := autoSvc(r.svc).RunAutomationNow(context.Background(), "daily"); numericCode(err) != 40001 {

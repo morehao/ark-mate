@@ -18,10 +18,10 @@ import (
 // 类型当签名"）。别名让既有调用点与守卫的错误文案保持可读。
 type Query = skill.Query
 
-// LibrarySvc Library 读模型端口（实现方 internal/manager）。
+// LibrarySvc Library 读模型端口（实现方本包的 `Library`，由控制器构造）。
 //
-// 断言**不写在实现包里**（那会要求 manager import 控制器侧的名字）：装配点 `app.go` 的
-// `Library: a.svc` 就是断言——`a.svc` 少实现一个方法，那里当场编译失败。
+// 断言**不写在实现包里**：装配点交的是依赖事实（三张能力表 / 技能投影 / 运行期事实），
+// 控制器在自己的构造函数里造 `NewLibrary(...)`。
 type LibrarySvc interface {
 	// ListLibrary 返回统一能力清单（按 kind、id 排序）+ 逐 runtime 可达性。
 	ListLibrary(q Query) ([]dtolibrary.LibraryItem, error)

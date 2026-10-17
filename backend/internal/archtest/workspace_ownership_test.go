@@ -60,11 +60,6 @@ var workspaceDomainAnchors = map[string][]string{
 	},
 }
 
-// workspaceManagerThinFiles manager 侧**只许是薄转发**的文件：它们不得再出现实现痕迹。
-var workspaceManagerThinFiles = []string{
-	"workspace_view.go", "workspace_settings.go", "workspace_registry.go", "workspace.go",
-}
-
 // workspaceManagerImplMarkers 实现痕迹（这些动作现在只许在域里做）。
 var workspaceManagerImplMarkers = []string{
 	"os.ReadDir(",
@@ -99,17 +94,16 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		t.Fatal("工作空间域一个入口文件都没解析到（判据失效）")
 	}
 
-	// manager 侧：薄转发文件里不得再出现实现痕迹。
+	// manager 侧：整个生产目录都不得再出现实现痕迹（扫描面按目录，不按写死的文件名——
+	// 转发文件已删，按文件名读会直接 Fatal，而"换个文件放回来"反而溜过去）。
 	managerDir := filepath.Join(root, "internal", "manager")
-	for _, f := range workspaceManagerThinFiles {
-		src := stripLineComments(readFileOrFatal(t, filepath.Join(managerDir, f)))
-		for _, m := range workspaceManagerImplMarkers {
-			if strings.Contains(src, m) {
-				t.Errorf("internal/manager/%s 里出现实现痕迹 %q：工作空间的浏览/校验/落盘**只有一份实现**，"+
-					"在 `internal/domain/workspace`（P2b）。\n"+
-					"在 manager 里再写一遍的后果是两份语义静默分叉——当年那条「浏览得到、创建被拒」的裂缝"+
-					"就是这么来的。", f, m)
-			}
+	mgrAll := dirProductionBody(t, managerDir)
+	for _, m := range workspaceManagerImplMarkers {
+		if strings.Contains(mgrAll, m) {
+			t.Errorf("`internal/manager` 里出现实现痕迹 %q：工作空间的浏览/校验/落盘**只有一份实现**，"+
+				"在 `internal/domain/workspace`（P2b）。\n"+
+				"在 manager 里再写一遍的后果是两份语义静默分叉——当年那条「浏览得到、创建被拒」的裂缝"+
+				"就是这么来的。", m)
 		}
 	}
 	// ——— 读模型不进用例层：登记表列表（P4a 正文第十八刀）———
@@ -131,10 +125,10 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 只读辅助四条（P4a 正文第三十二刀）：浏览 / 建目录 / 列内容 / 最近使用——接口声明与 manager
 	// 转发一起删，控制器直接 `h.plane.*`。它们虽然**带错误出口**，但码与 DTO 都在域里铸（`workspace_invalid`
 	// / `workspace_exists` / `workspace_not_found`），所以用例层再包一层仍然只是一行转发。
-	if vm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_view.go"))); strings.Contains(vm, "func (s *Service) BrowseWorkspace(") ||
+	if vm := mgrAll; strings.Contains(vm, "func (s *Service) BrowseWorkspace(") ||
 		strings.Contains(vm, "func (s *Service) CreateWorkspaceDir(") || strings.Contains(vm, "func (s *Service) ListWorkspaceFiles(") ||
 		strings.Contains(vm, "func (s *Service) RecentWorkspaces(") {
-		t.Error("`internal/manager/workspace_view.go` 里又出现只读辅助面的转发：那四条已删。")
+		t.Error("`internal/manager` 里又出现只读辅助面的转发：那四条已删（扫描面是整目录）。")
 	}
 	view := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "view.go")))
 	for _, must := range []string{"func (pl *Plane) BrowseWorkspace(", "func (pl *Plane) CreateWorkspaceDir(", "func (pl *Plane) ListWorkspaceFiles(", "func (pl *Plane) RecentWorkspaces("} {
@@ -146,8 +140,8 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 设置面写（P4a 正文第三十一刀）：`UpdateWorkspaceSettings` 同样归域平面（写面：校验 + 三个
 	// 语义码 + 落盘都在域里），接口声明与 manager 转发一起删。控制器侧不再有替身可伪造语义码 ——
 	// "锁定 / 只读 / 非法目录"三条由配置面测试用真策略钉。
-	if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_settings.go"))), "func (s *Service) UpdateWorkspaceSettings(") {
-		t.Error("`internal/manager/workspace_settings.go` 里又出现 `UpdateWorkspaceSettings(` 转发：那一行已删。")
+	if strings.Contains(mgrAll, "func (s *Service) UpdateWorkspaceSettings(") {
+		t.Error("`internal/manager` 里又出现 `UpdateWorkspaceSettings(` 转发：那一行已删（扫描面是整目录）。")
 	}
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "settings.go"))),
 		"func (pl *Plane) UpdateSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error)") {
@@ -170,9 +164,9 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 别名与装配期转发（P4a 正文第二十刀）：`type WorkspaceRootsStore = workspace.WorkspaceRootsStore`
 	// 正是第三条硬规矩点名的"端口别名"——一个类型两处定义，接错线时编译器不会拦（两边都满足）。
 	// 装配侧同理只有一处入口：`WorkspacePlane().SetRootsStore(...)`。
-	settingsMgr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_settings.go")))
+	settingsMgr := mgrAll
 	if strings.Contains(settingsMgr, "type WorkspaceRootsStore =") {
-		t.Error("`internal/manager/workspace_settings.go` 里又出现 `type WorkspaceRootsStore =`：" +
+		t.Error("`internal/manager` 里又出现 `type WorkspaceRootsStore =`：" +
 			"端口别名为第三条硬规矩所禁（一个类型只有一处定义）。")
 	}
 	if strings.Contains(settingsMgr, "func (s *Service) SetWorkspaceSettingsStore(") {
@@ -199,9 +193,8 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 装配期写事实（P4a 正文第二十二刀）：`SetWorkspacePolicy` 与第十六刀的 `SetBindAddr` 同类——
 	// 策略只有一处入口（`WorkspacePlane()`），多一层转发就会出现"策略写进了 A 平面、读的时候看 B 平面"。
 	{
-		policyMgr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace.go")))
-		if strings.Contains(policyMgr, "func (s *Service) SetWorkspacePolicy(") {
-			t.Error("`internal/manager/workspace.go` 里又出现 `func (s *Service) SetWorkspacePolicy(`：" +
+		if strings.Contains(mgrAll, "func (s *Service) SetWorkspacePolicy(") {
+			t.Error("`internal/manager` 里又出现 `func (s *Service) SetWorkspacePolicy(`：" +
 				"装配期写事实只有一处入口（`WorkspacePlane().SetWorkspacePolicy`）。")
 		}
 		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "policy.go"))),
@@ -213,7 +206,7 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 别名与纯函数转发（P4a 正文第二十三刀）：`manager/workspace.go` 里那两个别名
 	// （`WorkspaceResolution` / `DefaultWorkspaceRef`）与三个纯函数转发一起删。**别名最危险的
 	// 地方不是"多一份定义"，而是"谁是这个类型的主人"变得不可判定**——接错线时两边都编译过。
-	wsMgr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace.go")))
+	wsMgr := mgrAll
 	for _, dead := range []string{
 		"type WorkspaceResolution =", "type DefaultWorkspaceRef =",
 		"func ValidateWorkspace(", "func ResolveWorkspace(", "func DiscardWorkspace(",

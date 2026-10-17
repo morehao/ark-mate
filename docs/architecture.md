@@ -99,13 +99,14 @@ Electron 主进程（桌面态）
 cmd/mate  →  internal/app（装配 + 启停生命周期）
                 →  internal/router（唯一传输层装配点，按领域分 routes_*.go）
                       →  internal/controller/ctr<领域>
-                            →  internal/service/svc<领域>（领域**端口**）
-                                  ←  internal/manager（唯一实现）
+                            →  internal/service/svc<领域>（**业务逻辑层**：接口 + 实现）
+                                  →  internal/domain/* · dao · store
+                internal/manager（**过渡期**：尚未搬完的实现与 ACP 回调适配；逐域搬空后整体删除）
 ```
 
 - `internal/router` 声明自己需要哪些端口（`router.Ports`），由 `internal/app` 注入实现；每个领域一个 `routes_*.go`，各自构造控制器并注册自己的路由。
-- `internal/service/svc*` 是**窄接口**，没有实现、没有逻辑；`internal/manager` 是纯实现侧，编译期断言每个端口都被满足（`ports.go`）。
-- `internal/dto/dto<领域>` 被控制器与 manager 两侧共用，自身不依赖任何应用层。
+- `internal/service/svc<领域>` 是**业务逻辑层**：包内声明接口 + 实现 + 构造函数，控制器在自己的构造函数里造实例；`internal/manager` 是**过渡期实现**（逐域并入 `svc<领域>` / `domain/*` 后整体删除）。
+- `internal/dto/dto<领域>` 被控制器、用例层与过渡期实现共用，自身不依赖任何应用层。
 
 ### 4.2 持久侧
 
@@ -237,7 +238,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 能力集是**进程级**的（ACP 没有「给活会话换能力」的通道），所以每套能力各自一个底座子进程，**同指纹共享**：
 
 - **连接键** = runtime id + 影响线程行为的 env 组签名；**代际键** = 连接键 + 能力指纹 + 平台生成的模型配置指纹。三者必须都在键里——缺一项就会出现「暖进程继续用旧清单，而界面显示已保存」。
-- **指纹输入只有一个决定点**（`manager/capability_fingerprint.go`），算法在 `pkg/runtime`。三条边界：密钥值绝不进指纹（只用键名与引用名）；正文摘要复用物化 sidecar 的同一算法；**只纳入真正会生效的东西**（禁用的 skill、不投给该 runtime 的 skill、该底座不支持的传输的 MCP 都不进）。
+- **指纹输入只有一个决定点**（`internal/domain/session/capability_fingerprint.go`），算法在 `pkg/runtime`。三条边界：密钥值绝不进指纹（只用键名与引用名）；正文摘要复用物化 sidecar 的同一算法；**只纳入真正会生效的东西**（禁用的 skill、不投给该 runtime 的 skill、该底座不支持的传输的 MCP 都不进）。
 - **生效边界只有一条规则：下一个轮次**，但四个方向处置不同——扩权/改内容下一轮迁移过去；**缩权立刻生效且失败不回退**（宁可带码拒发这一轮，也不用已被收回的权限面继续跑）；忙则顺延；纯内容变化迁移失败可回退旧代际继续跑。
 - 同一配置下代际有上限，达限时先淘汰「无会话引用且空闲」的代际，仍超限则要求复用现有能力集——**绝不静默复用错误的能力集**（猜细了是安全 bug）。
 - 会话可钉住能力**子集**（`capabilities` 逐 kind 三态：键缺失 = 未声明、`[]` = 一个都不要、非空 = 白名单且**覆盖**而非求交）。
@@ -282,8 +283,11 @@ backend/
 │   │   └── command/          子命令参数解析与命令行输出（serve/demo/doctor/migrate/…）
 │   ├── router/               唯一传输层装配点；按领域分 routes_*.go；资产管理（web.go）
 │   ├── controller/ctr<域>/   传输层控制器（一域一包）
-│   ├── service/svc<域>/      领域端口声明（窄接口，无实现）
-│   ├── manager/              领域实现与编排（Service / Orchestrator / 事件 / 权限；按领域分文件，不设 god file）
+│   ├── service/svc<域>/      业务逻辑层（接口 + 实现；控制器内构造）
+│   ├── domain/<域>/          领域平面（会话 / 工作空间 / 供应商 / 技能 / MCP / 自动化 / 交互）
+│   ├── mechanism/            机制层（定义装载 / 凭据 / doctor）
+│   ├── runtimeconn/          执行面（连接池 / 拨号 / 代际 / 诊断）
+│   ├── manager/              过渡期实现（逐域搬空后整体删除；只剩装配适配与权限/提问回调）
 │   ├── dto/dto<域>/          请求/响应 DTO（两侧共用，自身不依赖应用层）
 │   ├── model/                持久层实体（一表一文件 + enum/serializer/time）
 │   ├── dao/                  单表数据访问（gormdao）

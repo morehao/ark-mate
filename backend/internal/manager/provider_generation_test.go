@@ -19,10 +19,7 @@ import (
 func TestProviderKeyChangeSwitchesGenerationNextRun(t *testing.T) {
 	ctx := context.Background()
 	r := newGenRig(t)
-	// 让密钥面可用：密钥要真写进库，拨号基键才会带上注入的那条 env。
-	r.svc.mu.Lock()
-	r.svc.providerDir = t.TempDir()
-	r.svc.mu.Unlock()
+	// 密钥要真写进库，拨号基键才会带上注入的那条 env。
 
 	const secret = "sk-a2-secret"
 	if _, err := r.svc.providerPlane.CreateProvider(ctx, providerReq("p1", ptrOf(secret))); err != nil {

@@ -147,12 +147,6 @@ func New(cfg config.Config, sources config.Sources, opts ...Option) *App {
 	return a
 }
 
-// Service 返回领域服务实现（供命令层做迁移等直连操作，如 mate demo）。
-func (a *App) Service() *manager.Service { return a.svc }
-
-// Orchestrator 返回编排器（供命令层直接驱动一次性会话，如 mate demo）。
-func (a *App) Orchestrator() *manager.Orchestrator { return a.orch }
-
 // Engine 返回底层 gin.Engine（供测试挂载/断言路由）。
 func (a *App) Engine() *gin.Engine {
 	if a.srv == nil {
@@ -457,7 +451,7 @@ func (a *App) Init(ctx context.Context) error {
 	// 空闲回收（P2）：StartAgent 暖进程闲置超阈值自动停（MATE_IDLE_TIMEOUT，默认 5m；0 = 关闭）。
 	a.svc.RuntimePool().StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
 	// M4-4 调度循环：`MATE_AUTOMATION_TICK=0` 关闭（装配期同步跑一次启动恢复 pass）。
-	a.svc.StartAutomationScheduler(cfg.AutomationTick)
+	a.svc.AutomationPlane().StartAutomationScheduler(cfg.AutomationTick)
 
 	// 装配各领域服务端口。当前 manager.Service 是单一聚合，同时满足全部端口；
 	// 端口声明与实现分离后，装配点成为"谁提供什么能力"的唯一可见处。
@@ -623,9 +617,9 @@ func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 	// `automations` 表里（存量文件由 M6-7 的导入器一次性灌进去），memory 模式仍是
 	// `MATE_AUTOMATIONS/<id>.json`（定义与运行态同文件）。
 	if mode == config.StoreModeSQLite {
-		a.svc.LoadAutomationDefinitionsFromStore(ctx, cfg.AutomationDir)
+		a.svc.AutomationPlane().LoadAutomationDefinitionsFromStore(ctx, cfg.AutomationDir)
 	} else {
-		a.svc.LoadAutomationDefinitions(cfg.AutomationDir)
+		a.svc.AutomationPlane().LoadAutomationDefinitions(cfg.AutomationDir)
 	}
 	// skill 投影（§16.5 切片 D / design §5.4）：把注册表里的 skill 投影到各 runtime 的原生目录。
 	// 目标根与形态来自 **runtime 的投影声明**；MATE_PROJECTION_DIRS 只在需要覆盖根时才出现。
@@ -740,7 +734,7 @@ func (a *App) Close() {
 			a.assetWatch.Stop()
 		}
 		if a.svc != nil {
-			a.svc.StopAutomationScheduler()
+			a.svc.AutomationPlane().StopAutomationScheduler()
 		}
 		if a.orch != nil {
 			a.orch.Close()
