@@ -292,7 +292,10 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
         entries: settleCards(
           push('system', undefined, {
             tone: 'ok',
-            text: `完成 · ${String(e.payload?.stop_reason ?? '')}`.replace(/ · $/, ''),
+            // D9：正文只说用户词「已完成」；协议词 `stop_reason` 进「本轮用量」悬浮，
+            // 时长由 Transcript 从本轮用量（runInfo.durationMS）现算——事件到达时拿不到它。
+            text: '已完成',
+            stopReason: String(e.payload?.stop_reason ?? '') || undefined,
           }),
           '已结束',
         ),

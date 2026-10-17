@@ -787,6 +787,10 @@ export function EntryView({
     case 'system': {
       const tone = (e.tone ?? 'info') as NonNullable<StreamEntry['tone']>
       const retry = tone === 'err' && !!onRetry
+      // 轮末（tone='ok'）只在这里补时长：事件到达时还没有本轮用量，`runInfo` 是稍后到达的
+      // 事实；拿不到就只显示「已完成」，不编一个 0.0s。
+      const endSuffix =
+        tone === 'ok' && runInfo && runInfo.durationMS > 0 ? ` · ${(runInfo.durationMS / 1000).toFixed(1)}s` : ''
       return (
         <div
           style={{
@@ -811,7 +815,10 @@ export function EntryView({
             }}
           >
             {systemIcon[tone]}
-            <span>{e.text}</span>
+            <span>
+              {e.text}
+              {endSuffix}
+            </span>
             {usageText && (
               <Popover
                 title="本轮用量"
@@ -829,6 +836,12 @@ export function EntryView({
                           <span style={{ fontFamily: tokens.fontMono }}>{r.value}</span>
                         </div>
                       ))}
+                      {e.stopReason && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, padding: '2px 0' }}>
+                          <span style={{ color: tokens.textSecondary }}>结束原因</span>
+                          <span style={{ fontFamily: tokens.fontMono }}>{e.stopReason}</span>
+                        </div>
+                      )}
                       <div
                         style={{
                           marginTop: 6,
