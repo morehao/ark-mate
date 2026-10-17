@@ -230,6 +230,8 @@ export const consoleStyleSheet = `
     display: flex;
     flex-direction: column;
     border-top: 1px solid ${tokens.border};
+    /* 这栏永远不横滚（需求 5）：内容是单行省略的目录，横向滚动只可能是布局溢出。 */
+    overflow-x: hidden;
   }
 
   /* 左栏 footer：固定左下，点「设置」在**它上方**展开二级菜单（向上生长）。这一行只有「设置」一个入口
@@ -1274,31 +1276,30 @@ export const consoleStyleSheet = `
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 8px 5px 6px;
+    padding: 5px 8px 5px 8px;
     border-radius: 8px;
     cursor: pointer;
     font-size: 12.5px;
     font-weight: 600;
     color: ${tokens.text};
+    /* 内容再多也不外溢：名字是单行省略，动作按钮一直占位（需求 5 的第二道保险）。 */
+    overflow: hidden;
+    transition: background 0.12s ease;
   }
   .fg-wsgroup-row:hover { background: ${tokens.softFill}; }
-  /* leading 槽：**一颗实心三角，鼠标放不放上去都是它**（v14.2 修订）。
-     上一版是"静止 folder、悬停换三角"（对齐 dsh 的 projectRow），用户复核后否掉了：
-     一个图标不该因为鼠标在不在一块儿就变成另一个东西。展开态由三角自己旋转 90° 表达，
-     含当前会话的组用主色——"你在哪"必须在未悬停时也看得见。 */
+  /* 展开态不再靠箭头：底色 + 组内会话行左缩进（需求 3）。
+     含当前会话的组用主色名——"你在哪"必须在未悬停时也看得见。 */
+  .fg-wsgroup-row.fg-open { background: ${tokens.softFill}; }
+  .fg-wsgroup-row.fg-current .fg-wsgroup-name { color: ${tokens.primary}; }
+  .fg-wsgroup-body { padding-left: 10px; }
+  /* 目录不可用时的警示图标：窄槽，不再承担方向指示。 */
   .fg-wsgroup-lead {
     flex: none;
-    width: 16px;
-    height: 18px;
     display: inline-flex;
     align-items: center;
-    gap: 3px;
     font-size: 11px;
-    color: ${tokens.textPlaceholder};
+    color: ${tokens.warning};
   }
-  .fg-wsgroup-lead.fg-current { color: ${tokens.primary}; }
-  .fg-wsgroup-lead .anticon { transition: transform 0.12s ease; }
-  .fg-wsgroup-row.fg-open .fg-wsgroup-lead .anticon { transform: rotate(90deg); }
   .fg-wsgroup-name {
     flex: 1;
     min-width: 0;
@@ -1307,18 +1308,6 @@ export const consoleStyleSheet = `
     white-space: nowrap;
   }
   .fg-wsgroup-name.fg-unnamed { font-style: italic; font-weight: 500; color: ${tokens.textSecondary}; }
-  /* 会话数：**恒常显示**，悬停时不让位（v14.2 修订）。原先它在悬停时淡出让位给 ⋯ / ⊕，
-     于是"鼠标放不放上去是两个样子"；现在动作按钮的位置一直占着（见 .fg-ws-manage），
-     名字宽度与会话数在两种状态下逐像素相同。 */
-  .fg-wsgroup-count {
-    flex: none;
-    max-width: 40px;
-    overflow: hidden;
-    font-size: 11px;
-    font-weight: 500;
-    color: ${tokens.textPlaceholder};
-    font-variant-numeric: tabular-nums;
-  }
   .fg-wsgroup-warn { flex: none; color: ${tokens.warning}; font-size: 11.5px; }
   /* 组内配额：「展开其余 N 个会话」/「收起」——一行文字按钮，不做成大块空态。 */
   .fg-wsgroup-more {

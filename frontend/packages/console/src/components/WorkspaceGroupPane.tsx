@@ -2,7 +2,6 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { Input, Modal, Tooltip } from 'antd'
 import { toErrorMessage } from '@ark-mate/api'
 import {
-  CaretRightOutlined,
   DownOutlined,
   PlusCircleOutlined,
   UpOutlined,
@@ -11,8 +10,7 @@ import {
 import { tokens } from '@ark-mate/ui'
 import type { SessionSummary, Workspace } from '@ark-mate/types'
 import { useMate } from '../store'
-import { GROUP_IDLE_LIMIT, quotaSessions, shortenPath, relTime } from '../console/railView'
-import { copyText } from '../console/clipboard'
+import { GROUP_IDLE_LIMIT, quotaSessions } from '../console/railView'
 import { WorkspaceManageMenu, workspaceLabel } from './WorkspacePicker'
 import { DirectoryBrowser } from './DirectoryBrowser'
 import { AddWorkspaceButton } from './AddWorkspaceButton'
@@ -172,7 +170,9 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
   }
 
   const startRename = (ws: Workspace) => {
-    setDraft(workspaceLabel(ws))
+    // 默认工作空间的初值留空、placeholder 显示「默认」：确认空串就回到哨兵标题，
+    // **不会**把中文名写进库（跨语言切换/跨端仍一致）。
+    setDraft(ws.is_default ? '' : workspaceLabel(ws))
     setRenaming(ws)
   }
 
@@ -194,7 +194,7 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
         // store 那份叫 `conversations`，两个词合并后才撞名）。
         const groupSessions = byWorkspace.get(ws.id) ?? []
         const broken = ws.dir_status !== 'ok'
-        const unnamed = !ws.title
+        const unnamed = !ws.title && !ws.is_default
         // 含当前会话的组：leading 的 folder 用主色——"你在哪"必须在**未悬停**时也看得见，
         // 不能只存在于悬停态里（对齐 dsh 的 folderActive）。
         const containsCurrent = groupSessions.some((c) => c.id === activeId)
@@ -207,41 +207,19 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
         return (
           <div key={ws.id}>
             <div
-              className={`fg-wsgroup-row${isOpen ? ' fg-open' : ''}${menuOpenID === ws.id ? ' fg-menu-open' : ''}`}
+              className={`fg-wsgroup-row${isOpen ? ' fg-open' : ''}${containsCurrent ? ' fg-current' : ''}${menuOpenID === ws.id ? ' fg-menu-open' : ''}`}
+              title={workspaceLabel(ws)}
+              aria-expanded={isOpen}
               onClick={() => toggle(ws.id)}
             >
-              {/* hover 卡（W5）：原来只有浏览器原生的 `title=路径`，只能看不能复制、也不说创建时间。
-                  这里给一张**应用内**的卡：标题 / 缩写路径 / 创建时间 / 复制路径。
-                  刻意不用 antd Tooltip：它的内容是纯展示，而这张卡里有一颗要点的按钮。 */}
-              <span className="fg-wsgroup-tip" role="tooltip">
-                <span className="fg-wsgroup-tip-title">{workspaceLabel(ws)}</span>
-                <span className="fg-wsgroup-tip-path" title={ws.path}>
-                  {shortenPath(ws.path)}
+              {/* 工作区行不再有方向图标位（需求 3）：整行点击折叠/展开，展开态由
+                  `.fg-open` 的底色 + 组内会话行左缩进表达。**目录不可用**这条安全事实仍然
+                  用警示图标常显——它不能只活在 hover 里。 */}
+              {broken && (
+                <span className="fg-wsgroup-lead" title="目录不可用">
+                  <WarningOutlined className="fg-wsgroup-warn" />
                 </span>
-                {ws.created_at && (
-                  <span className="fg-wsgroup-tip-meta">创建于 {relTime(ws.created_at)}</span>
-                )}
-                <button
-                  type="button"
-                  className="fg-wsgroup-tip-copy"
-                  onClick={(ev) => {
-                    // 复制路径**不**冒泡：行本身是"折叠/展开"的点击区。
-                    ev.stopPropagation()
-                    void copyText(ws.path)
-                  }}
-                >
-                  复制路径
-                </button>
-              </span>
-              {/* leading 槽：**一颗实心三角，鼠标放不放上去都是它**（v14.2 修订）。
-                  上一版照 dsh 抄的是"静止 folder、悬停换三角"，用户复核后否掉了：
-                  一个图标不该因为鼠标在不在一块儿就变成另一个东西。展开态由它自己旋转
-                  90° 表达（▶ → ▼），所以状态照样看得见，而且比开/合文件夹在 13px 下清楚得多。
-                  含当前会话的组用主色——"你在哪"必须在未悬停时也看得见。 */}
-              <span className={`fg-wsgroup-lead${containsCurrent ? ' fg-current' : ''}`}>
-                <CaretRightOutlined />
-                {broken && <WarningOutlined className="fg-wsgroup-warn" />}
-              </span>
+              )}
               <span className={`fg-wsgroup-name${unnamed ? ' fg-unnamed' : ''}`}>{workspaceLabel(ws)}</span>
               {/* **撤掉行上的会话数**（W5）：它的来源是服务端计数 `ws.sessions`，而组内实际渲染的是
                   `groupSessions`——两条来源，展开时用户能同时看到两个数。原型里这一栏本来就没有，
@@ -296,7 +274,9 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
             )}
             {isOpen && !broken && groupSessions.length > 0 && (
               <>
-                {renderBody(rows, archived)}
+                {/* 组内会话行左缩进 10px：去掉箭头后，展开态靠这层缩进 + 行底色读出来。
+                    缩进放在容器上而不是会话行上——会话行的 padding 是内联样式，类选择器压不过它。 */}
+                <div className="fg-wsgroup-body">{renderBody(rows, archived)}</div>
                 {quota.hidden > 0 && (
                   <button
                     type="button"
@@ -343,7 +323,7 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onPressEnter={submitRename}
-              placeholder="工作空间名称"
+              placeholder={renaming?.is_default ? '默认' : '工作空间名称'}
               autoFocus
               maxLength={80}
             />
