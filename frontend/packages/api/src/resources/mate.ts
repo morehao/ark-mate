@@ -544,6 +544,19 @@ export const listWorkspaces = (): Promise<WorkspaceListResp> =>
 export const createWorkspace = (path: string, title?: string, strict = false): Promise<Workspace> =>
   http.post<Workspace>('/mate/workspaces', { path, title, strict })
 
+/**
+ * **新建**一个工作空间（ADR-2 的 `name` 模式）：在 `create_root` 下建一个同名目录并登记，**一步**。
+ *
+ * 与 `createWorkspace(path)` 的区别不是"参数不同"，而是**用户意图不同**：这个是从零造一个目录，
+ * 那个是登记一个已经存在的目录。服务端两个都走同一条路径校验（`ValidateWorkspaceName` /
+ * `ValidateWorkspace`），所以"能新建"与"能选已有"不会分叉。
+ *
+ * 服务端错误码：名字非法 40001（`invalid_workspace_name`）、同名目录已存在 40901
+ * （`workspace_exists`，**绝不静默复用**）、未配置落盘根 40001（`workspace_create_root_unset`）。
+ */
+export const createNamedWorkspace = (name: string, title?: string): Promise<Workspace> =>
+  http.post<Workspace>('/mate/workspaces', { name, title })
+
 /** 改写展示名（**不改身份**：id 与 path 都不动）。空串 = 清空，界面按末级目录名渲染。 */
 export const renameWorkspace = (id: string, title: string): Promise<Workspace> =>
   http.patch<Workspace>(`/mate/workspaces/${encodeURIComponent(id)}`, { title })

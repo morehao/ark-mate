@@ -27,9 +27,11 @@ import (
 var workspaceDomainAnchors = map[string][]string{
 	"policy.go": {
 		"func ValidateWorkspace(",
+		"func ValidateWorkspaceName(",
 		"func ResolveWorkspace(",
 		"func (pl *Plane) SetWorkspacePolicy(",
 		"func (pl *Plane) PolicySnapshot(",
+		"func (pl *Plane) CreateRoot(",
 	},
 	"settings.go": {
 		"func (pl *Plane) Settings(",
@@ -48,6 +50,8 @@ var workspaceDomainAnchors = map[string][]string{
 	},
 	"registry.go": {
 		"func (pl *Plane) WorkspaceRegistry(",
+		"func (pl *Plane) CreateWorkspace(",
+		"func (pl *Plane) CreateNamedWorkspace(",
 		"func (pl *Plane) CreateRegisteredWorkspace(",
 		"func (pl *Plane) DeleteRegisteredWorkspace(",
 		"func (pl *Plane) EnsureDefaultWorkspace(",
@@ -367,5 +371,172 @@ func TestWorkspaceWiringIsAttached(t *testing.T) {
 	if !strings.Contains(service, "SetSessionSource(s)") {
 		t.Error("`internal/manager/service.go` 的 `NewService` 里找不到 `SetSessionSource(s)`：" +
 			"工作空间域没有会话事实来源，`RecentWorkspaces` 恒空（用户会说「我明明用过这个目录」）。")
+	}
+}
+
+// ——— v27 · ADR-2「创建分两模式」与 ADR-3「落盘根」 ———
+//
+// 两条守卫各钉一种**静默分叉**（都不会让既有测试变红）：
+//
+//	① **两条建目录路径的问法不一样**：本仓有两处"造一个新目录"（目录浏览面的「新建文件夹」
+//	   与工作空间面的「新建工作空间…」）。它们问的是同一个问题（"这个名字能不能当一段目录名"），
+//	   而各写一份判据的表现不是报错——是接受集悄悄分叉，于是「文件夹能建、工作空间建不了」
+//	   （或反过来）看起来像两个不相干的 bug；
+//	② **落盘根有第二个来源**：`create_root` 一旦在 `registry.go` 里再读一次 env/flag，
+//	   就会出现「设置里显示一个位置、新建却落到别处」，而两处都"看起来在工作"。
+
+// TestWorkspaceCreateModesAreExplicit 守卫 1（ADR-2）：两模式显式 + 名字校验单点。
+func TestWorkspaceCreateModesAreExplicit(t *testing.T) {
+	root := backendRoot(t)
+	domainDir := filepath.Join(root, "internal", "domain", "workspace")
+	read := func(name string) string {
+		return stripLineComments(readFileOrFatal(t, filepath.Join(domainDir, name)))
+	}
+
+	// ① 唯一入口在域里，两条路各自是一个方法（`CreateWorkspace` 只做分派）。
+	registry := read("registry.go")
+	for _, anchor := range []string{
+		"func (pl *Plane) CreateWorkspace(",
+		"func (pl *Plane) CreateNamedWorkspace(",
+		"func (pl *Plane) CreateRegisteredWorkspace(",
+	} {
+		if !strings.Contains(registry, anchor) {
+			t.Fatalf("registry.go 里找不到 %q（fail-closed：两模式的唯一入口/两条实现都在这里）", anchor)
+		}
+	}
+
+	// ② 名字校验**只有一处声明**（全 internal 数）。
+	declared := 0
+	var declaredAt string
+	for _, p := range goFilesUnder(t, filepath.Join(root, "internal")) {
+		if strings.HasSuffix(p, "_test.go") || strings.Contains(filepath.ToSlash(p), "/archtest/") {
+			continue
+		}
+		if strings.Contains(stripLineComments(readFileOrFatal(t, p)), "func ValidateWorkspaceName(") {
+			declared++
+			declaredAt = p
+		}
+	}
+	if declared != 1 {
+		t.Fatalf("`func ValidateWorkspaceName(` 在 internal/ 里声明了 %d 处（want 1），最后一处 %s：\n"+
+			"这个名字校验必须单点——两条建目录路径（「新建文件夹」与「新建工作空间…」）问的是同一个问题，"+
+			"各写一份的表现是**接受集悄悄分叉**，而不是报错", declared, declaredAt)
+	}
+
+	// ③ **两条路都在调它**（这才是"单点"的证据：有一处没调，就说明那一处自己判了）。
+	if !strings.Contains(registry, "ValidateWorkspaceName(") {
+		t.Fatalf("registry.go 的 `name` 模式没有调用 `ValidateWorkspaceName(`：它必然另写了一份名字校验")
+	}
+	view := read("view.go")
+	if !strings.Contains(view, "ValidateWorkspaceName(") {
+		t.Fatalf("view.go 的 `CreateWorkspaceDir`（目录浏览面的「新建文件夹」）没有调用 `ValidateWorkspaceName(`：" +
+			"它与「新建工作空间…」问的是同一个问题，各判一份就会分叉")
+	}
+
+	// ④ `name` 模式**不得静默复用**已有目录：必须显式看它存不存在、且报 40901。
+	if !strings.Contains(registry, "os.Lstat(target)") {
+		t.Fatalf("`CreateNamedWorkspace` 里没有对目标路径的显式存在性检查（`os.Lstat(target)`）：\n" +
+			"`os.Mkdir` 的 `IsExist` 只兜住「恰好并发」的那一瞬，而「同名目录早就存在」必须在这里被明确拒绝——" +
+			"静默复用会让用户以为「我新建的那个」就是「原来那个」")
+	}
+	if !strings.Contains(registry, "workspaceExistsErr(") {
+		t.Fatalf("`CreateNamedWorkspace` 没有走 `workspaceExistsErr(`（40901 / workspace_exists）：" +
+			"与本仓「同名目录已存在 → 40901，绝不静默复用」的既有口径必须一致")
+	}
+
+	// ⑤ 分派判决不许写回控制器（控制器只做绑定与回响应）。
+	//
+	// 判据只看 **`Create` 这个 handler 的函数体**：同文件里的 `CreateDir` 处理的是**另一种请求**
+	// （`WorkspaceDirCreateReq` 的 `name` 是"在已存在目录下建一层"，不是"新建工作空间"），
+	// 按文件扫会把那一处正常的字段读取当成回流（本守卫第一版就是这么假红的）。
+	ctrDir := filepath.Join(root, "internal", "controller", "ctrworkspace")
+	foundCreate := false
+	for _, p := range goFilesUnder(t, ctrDir) {
+		if strings.HasSuffix(p, "_test.go") {
+			continue
+		}
+		src := stripLineComments(readFileOrFatal(t, p))
+		body, ok := goFuncBody(src, "func (h *workspaceCtr) Create(c *gin.Context) {")
+		if !ok {
+			continue
+		}
+		foundCreate = true
+		if strings.Contains(body, "req.Name") || strings.Contains(body, "req.Path") {
+			t.Errorf("%s 的 `Create` handler 里读了 `req.Path`/`req.Name`：`path` / `name` 的二选一是"+
+				"**业务判决**，归域里的 `Plane.CreateWorkspace`。放在控制器里会让「两模式」出现在一个"+
+				"不懂工作空间语义的地方，而且第二次加模式时必然再写一遍同一段分派", filepath.Base(p))
+		}
+		if !strings.Contains(body, "plane.CreateWorkspace(req)") {
+			t.Errorf("%s 的 `Create` handler 里没有 `plane.CreateWorkspace(req)`：创建入口必须是那一个", filepath.Base(p))
+		}
+	}
+	if !foundCreate {
+		t.Fatalf("%s 里找不到 `Create` handler（fail-closed：改名/搬迁会让本判据静默空转）", ctrDir)
+	}
+}
+
+// TestWorkspaceCreateRootIsDeclared 守卫 2（ADR-3）：`create_root` 取值单点 + 前端为空时隐藏入口。
+func TestWorkspaceCreateRootIsDeclared(t *testing.T) {
+	root := backendRoot(t)
+	domainDir := filepath.Join(root, "internal", "domain", "workspace")
+
+	// ① 取值单点：`pl.dir` 只许出现在 policy.go（它是"落盘根"的唯一读者）。
+	for _, p := range goFilesUnder(t, domainDir) {
+		if strings.HasSuffix(p, "_test.go") || filepath.Base(p) == "policy.go" {
+			continue
+		}
+		src := stripLineComments(readFileOrFatal(t, p))
+		if strings.Contains(src, "pl.dir") {
+			t.Errorf("%s 里直接读了 `pl.dir`：落盘根的取值只有一处实现（`Plane.CreateRoot`），\n"+
+				"别处再读一次就会出现「设置里显示一个位置、新建却落到别处」——而两处都「看起来在工作」", filepath.Base(p))
+		}
+	}
+
+	// ② 域里不许再读 env/flag（换来源时只改 `createRootLocked`，不改调用方）。
+	//
+	// **`picker.go` 刻意不在扫描面里**：它采样的是**宿主事实**（回环绑定 / SSH / 显示会话），
+	// 其中 SSH 那几个变量只能从 env 读——那与"工作空间落在哪"是两件事，扫进来只会是噪声
+	// （同 `desktop_host_path_test.go` 里"构建期脚本刻意不扫"的那条理由）。
+	for _, p := range goFilesUnder(t, domainDir) {
+		if strings.HasSuffix(p, "_test.go") || filepath.Base(p) == "picker.go" {
+			continue
+		}
+		src := stripLineComments(readFileOrFatal(t, p))
+		for _, banned := range []string{"os.Getenv(", "os.LookupEnv(", "flag."} {
+			if strings.Contains(src, banned) {
+				t.Errorf("%s 里出现了 %q：工作空间的策略来源由装配根交下来（`SetWorkspacePolicy`），"+
+					"域里自己读环境变量会让「配置说一套、运行另一套」", filepath.Base(p), banned)
+			}
+		}
+	}
+
+	// ③ 快照必须把 create_root 一并发出来（三样一起取，见 PolicySnapshot 注释），且 Settings 用它。
+	policy := stripLineComments(readFileOrFatal(t, filepath.Join(domainDir, "policy.go")))
+	if !strings.Contains(policy, "func (pl *Plane) PolicySnapshot() (effective, configured []string, provisionDir, createRoot string)") {
+		t.Fatalf("`PolicySnapshot` 的签名里没有 `createRoot` 出参：设置面与列表响应都要它，" +
+			"分三次取会让面板看到「配置改了、这一项还没改」的中间态")
+	}
+	if !strings.Contains(policy, "func (pl *Plane) createRootLocked() string") {
+		t.Fatalf("policy.go 里找不到 `createRootLocked`：落盘根的解析必须单点（`CreateRoot` 与 `PolicySnapshot` 共用它）")
+	}
+	settings := stripLineComments(readFileOrFatal(t, filepath.Join(domainDir, "settings.go")))
+	if !strings.Contains(settings, "CreateRoot:        createRoot") && !strings.Contains(settings, "CreateRoot:") {
+		t.Fatalf("settings.go 的 `Settings()` 没有填 `CreateRoot`：设置面读不到落盘根")
+	}
+
+	// ④ 前端：落盘根为空时**不渲染**「新建工作空间…」入口（Go 读 TS）。
+	feRoot := filepath.Join(root, "..", "frontend")
+	addPath := filepath.Join(feRoot, "packages", "console", "src", "components", "AddWorkspaceButton.tsx")
+	add := stripTSComments(readFileOrFatal(t, addPath))
+	if !strings.Contains(add, "create_root") {
+		t.Fatalf("%s 没有读 `create_root`：区头那颗按钮无从知道「新建该不该给入口」", addPath)
+	}
+	if !strings.Contains(add, "createRoot ?") {
+		t.Fatalf("%s 里没有 `createRoot ?` 这个条件渲染：\n"+
+			"落盘根为空时「新建工作空间…」是一个**必然失败**的按钮（ADR-3 的入口纪律，同 ADR-11）。"+
+			"把入口改成常显不会让任何测试变红，只会让用户点了才发现不行", addPath)
+	}
+	if !strings.Contains(add, "新建工作空间…") {
+		t.Fatalf("%s 里找不到「新建工作空间…」这一项（被判据引用的目标不见了？fail-closed）", addPath)
 	}
 }

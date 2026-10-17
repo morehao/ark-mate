@@ -6,6 +6,7 @@ import {
   sessionHistory,
   createSession,
   createWorkspace as apiCreateWorkspace,
+  createNamedWorkspace as apiCreateNamedWorkspace,
   deleteWorkspace as apiDeleteWorkspace,
   listSessions,
   listModelCatalog,
@@ -506,6 +507,11 @@ export interface MateActions {
    * 所以调用方用 toast（旧的内嵌弹层那种"留在原地换个目录"的交互已不存在）。
    */
   createWorkspace: (path: string, title?: string) => Promise<Workspace>
+  /**
+   * **新建**工作空间（ADR-2 的 name 模式）：在落盘根下建同名目录并登记，一步。
+   * 与 `createWorkspace(path)` 是两条用户意图不同的路（造一个 vs 登记一个）。
+   */
+  createNamedWorkspace: (name: string, title?: string) => Promise<Workspace>
   /** 改名（不改身份）。 */
   renameWorkspace: (id: string, title: string) => Promise<void>
   /** 删除登记（**不删目录、不删会话**）；其会话回到默认工作空间，页面随之刷新。 */
@@ -830,6 +836,16 @@ export const useMate = create<MateStore>((set, get) => {
         set({ workspaces: null })
         reportApiError(err)
       }
+    },
+
+    createNamedWorkspace: async (name, title) => {
+      // 失败**不吞**（同 `createWorkspace`）：名字非法 / 重名 / 未配置落盘根三种原因都要回到调用方，
+      // 由弹层就地显示服务端文案——不在前端编一句更"好懂"的话（那会把三种处置不同的情况
+      // 说成同一件事：改名重试 / 换个名字 / 改用「选择已有目录…」）。
+      const ws = await apiCreateNamedWorkspace(name, title)
+      // 刷新而不是本地插入（理由同 createWorkspace：顺序由服务端的 list_order 决定）。
+      await get().loadWorkspaces()
+      return ws
     },
 
     createWorkspace: async (path, title) => {

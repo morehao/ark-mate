@@ -812,10 +812,13 @@ func TestCreateWorkspaceDir(t *testing.T) {
 		t.Fatalf("目录应真的建出来了: %v", serr)
 	}
 
-	// 名字规则：单段、非 "." / ".."。
+	// 名字规则：单段、非 "." / ".."——错误码是 `invalid_workspace_name`（ADR-2 定案的稳定码名，
+	// 与工作空间面的「新建工作空间…」共用同一条校验 `workspace.ValidateWorkspaceName`）。
+	// 这里刻意钉**具体码名**而不是"只要 40001 就行"：两条建目录路径的错误码一旦分叉，
+	// 界面对同一个原因会给出两种引导（改名重试 vs 改参数）。
 	for _, bad := range []string{"", "  ", "a/b", `a\b`, ".", ".."} {
-		if _, err := svc.WorkspacePlane().CreateWorkspaceDir(proj, bad); aclCode(t, err) != "workspace_invalid" {
-			t.Fatalf("名字 %q 应被拒: %v", bad, err)
+		if _, err := svc.WorkspacePlane().CreateWorkspaceDir(proj, bad); aclCode(t, err) != "invalid_workspace_name" {
+			t.Fatalf("名字 %q 应被拒（invalid_workspace_name）: %v", bad, err)
 		}
 	}
 	// 已存在 → 40901（不覆盖、不静默复用："我建的那个"与"原来就有那个"是两件事）。

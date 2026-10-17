@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/code"
@@ -453,5 +454,106 @@ func TestWorkspaceRegistryMemoryNoProvisionNoDefault(t *testing.T) {
 	}
 	if len(list.Items) != 0 || list.DefaultID != "" {
 		t.Fatalf("代建关闭时应是空登记表: %+v", list)
+	}
+}
+
+// TestCreateNamedWorkspace ADR-2 的 `name` 模式：建目录 + 登记**一步**，三条错误码可分辨。
+//
+// 这一条钉的是 DoD 的字面要求：
+//
+//	`{"name":"foo"}` → 目录建出来并登记；`{"name":"../x"}` → 40001；重名 → 40901；
+//	未配置落盘根 → 40001（且这一档界面**不给入口**，见 archtest 的
+//	`TestWorkspaceCreateRootIsDeclared`）。
+//
+// 为什么值得一条独立用例：它把**两个可失败的动作**合成了一个。此前要建一个新工作空间，
+// 用户得先「新建文件夹」再「选择该目录」——中间任何一步失败都会留下「目录建了但没登记」
+// 或「登记失败但目录在」的半成品，而用户看不到哪一半成了。
+func TestCreateNamedWorkspace(t *testing.T) {
+	r, provision := registryRig(t, nil)
+	plane := r.Svc.WorkspacePlane()
+	if err := plane.EnsureDefaultWorkspace(); err != nil {
+		t.Fatalf("EnsureDefaultWorkspace: %v", err)
+	}
+	root := plane.CreateRoot()
+	if root == "" {
+		t.Fatal("装配了代建根之后 create_root 不该为空")
+	}
+	// 取值同源（今天 = provision_dir）：比**真身**，因为配置值原样透出、而登记路径是规范化的
+	// （macOS 的 /var 与 /private/var 是同一处，直接比字符串会得到一个假红）。
+	if got, want := mustEval(t, root), mustEval(t, provision); got != want {
+		t.Fatalf("create_root = %q，期望与 provision_dir 同源 %q", got, want)
+	}
+
+	// ① 正常：目录真的建出来、登记真的落库，且两者指的是同一个路径。
+	ws, err := plane.CreateNamedWorkspace("pay-refactor", "")
+	if err != nil {
+		t.Fatalf("CreateNamedWorkspace: %v", err)
+	}
+	wantPath := mustEval(t, filepath.Join(root, "pay-refactor"))
+	if ws.Path != wantPath {
+		t.Fatalf("登记路径 = %q，期望 %q（登记路径是**规范化**后的绝对路径）", ws.Path, wantPath)
+	}
+	if st, serr := os.Stat(ws.Path); serr != nil || !st.IsDir() {
+		t.Fatalf("目录应真的建出来了: %v", serr)
+	}
+	if ws.DirStatus != "ok" || ws.IsDefault {
+		t.Fatalf("新登记的目录现状应为 ok 且不是默认工作空间: %+v", ws)
+	}
+	// 它在列表里（登记真的落库了，不只是建了个目录）。
+	list, err := plane.WorkspaceRegistry()
+	if err != nil {
+		t.Fatalf("WorkspaceRegistry: %v", err)
+	}
+	found := false
+	for _, it := range list.Items {
+		if it.ID == ws.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("新登记不在列表里: %+v", list.Items)
+	}
+
+	// ② 重名：**40901，绝不静默复用**，且不覆盖既有目录内容。
+	if err := os.WriteFile(filepath.Join(ws.Path, "keep.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("写哨兵文件: %v", err)
+	}
+	// 判据用**对外码**（40901）而不是 code 名：域名下两条创建路径的错误载体历史上不统一
+	// （一条铸 gerror、一条铸 acl.Error），而对外码是同一支——判据要钉的是用户看到的那个数。
+	if _, err := plane.CreateNamedWorkspace("pay-refactor", ""); numericCode(err) != 40901 {
+		t.Fatalf("同名应 40901（workspace_exists）: %v", err)
+	}
+	if _, serr := os.Stat(filepath.Join(ws.Path, "keep.txt")); serr != nil {
+		t.Fatalf("重名失败不该动既有目录里的东西: %v", serr)
+	}
+
+	// ③ 非法名：40001 且**目录不能建出来**。
+	for _, bad := range []string{"", "  ", "../x", "a/b", "..", ".", "/abs", `a\b`} {
+		if _, err := plane.CreateNamedWorkspace(bad, ""); numericCode(err) != 40001 {
+			t.Fatalf("名字 %q 应被拒（40001）: %v", bad, err)
+		}
+	}
+	for _, leftover := range []string{"x", "abs"} {
+		if _, serr := os.Stat(filepath.Join(root, leftover)); serr == nil {
+			t.Fatalf("非法名不该在落盘根下留下 %q", leftover)
+		}
+	}
+
+	// ④ 未配置落盘根：显式拒绝（不是"回落到家目录"），错误码可判定。
+	r2 := newRig(t, func(c *rigConfig) { c.store = true })
+	plane2 := r2.Svc.WorkspacePlane()
+	if err := plane2.SetWorkspacePolicy("", nil); err != nil {
+		t.Fatalf("SetWorkspacePolicy: %v", err)
+	}
+	if _, err := plane2.CreateNamedWorkspace("x", ""); numericCode(err) != 40001 {
+		t.Fatalf("未配置落盘根应 40001（workspace_create_root_unset）: %v", err)
+	}
+
+	// ⑤ 两条路互斥（域里判决，控制器不猜）。
+	if _, err := plane.CreateWorkspace(dtoworkspace.WorkspaceCreateReq{Path: ws.Path, Name: "x"}); numericCode(err) != 40001 {
+		t.Fatalf("同时给 path 与 name 应被拒（40001）: %v", err)
+	}
+	if _, err := plane.CreateWorkspace(dtoworkspace.WorkspaceCreateReq{}); numericCode(err) != 40001 {
+		t.Fatalf("两者都不给应被拒（40001）: %v", err)
 	}
 }

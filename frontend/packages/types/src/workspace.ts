@@ -107,6 +107,16 @@ export interface WorkspaceListResp {
   writable: boolean
   /** 平台默认工作空间的所在目录（缺省 = 代建关闭）。 */
   provision_dir?: string
+  /**
+   * **新建工作空间的落盘根**（缺省 = 未声明）。
+   *
+   * 它与 `provision_dir` 今天取同一个值，但是两件事：那个是"平台代建的默认工作空间落哪"，
+   * 这个是"用户新建的工作空间落哪"。
+   *
+   * 缺省时界面**不渲染**「新建工作空间…」入口——不给一个必然失败的按钮（ADR-3 的入口纪律，
+   * 同 ADR-11）。
+   */
+  create_root?: string
 }
 
 /** `POST /workspaces` 请求体（登记一个已存在的目录）。 */
@@ -190,6 +200,8 @@ export interface WorkspaceSettings {
   prefer_roots: boolean
   /** 平台代建工作空间的根目录（空 = 代建关闭）。 */
   provision_dir?: string
+  /** 新建工作空间的落盘根（空 = 未声明 → 不给「新建工作空间…」入口）。 */
+  create_root?: string
   /** 代建根是否已隐式并入生效名单。 */
   provision_included: boolean
   /** 偏好起点的最终来源：default | config.json | env | env(process) | flag | unavailable。 */
