@@ -176,6 +176,7 @@ cd frontend && pnpm run typecheck && pnpm run build
 | D9 | terminal 与 plan 不建模 | 底座把 plan 当常规更新推、或出现内嵌终端需求 |
 | D10 | 沙箱形态与结构化错误码读不到（只能按文本签名归类） | 底座透出 enforcement 与错误码 |
 | D11 | 会话级权限模式只能按进程区分（无运行时切换面） | 底座补 `/permission` 命令面或运行时切换面 |
+| D12 | 工具结果的结构化字段拿不到（dsh 不下发 `rawOutput`，正文未上线） | 底座补 `rawOutput`/结构化结果；或平台决定把 `ContentText` 作为新结果键上线 |
 
 ---
 
@@ -186,6 +187,8 @@ cd frontend && pnpm run typecheck && pnpm run build
 | V1 | 真 Chrome 跑一次 `pnpm ui:accept`，看 O19 的多卡 + 46vh 滚动 | 构建级验证已过；多卡是视觉判断，需要人看一眼 |
 | V2 | `make test-race`（会话读面 / 执行面键 / manager） | 本批没动这几处；改动它们时再跑 |
 | V3 | `smoke:e2e` 补一条 `tz_offset` 断言 | 路由测试已覆盖（`tz_offset=480` 边界回显 + 越界 40001），再补是重复 |
+| V4 | 真 Chrome 跑一次 `pnpm ui:accept`，看第二轮的分类工具详情（read 预览 / diff / command / search）、已结算确认卡在过程流、搜索命中折叠块内部时的精确滚动。顺带确认：命中折叠块内部会自动展开且**保持展开**（有意，避免刚定位到就被收起） | 本轮已过 typecheck / 纯函数测试 / 构建 / archtest；这几项是视觉与真实数据判断，需要人看一眼 |
+| V5 | 造一条「已结算确认卡先于 user 出现」的恢复历史，确认轮次形态（当前会形成一个只有 notice 的轮次片段 + 身份头） | 未出现该形态样本；本轮要求的主序列（user → tool → permission → tool → assistant）已有测试。出现样本再决定是否改成独立 entry 行 |
 
 ---
 
@@ -206,6 +209,7 @@ cd frontend && pnpm run typecheck && pnpm run build
 | C33 | 同进程内切权限模式（原 O14） | 同 D11 |
 | C34 | 队列项原子替换（原 O15） | 不重开：pop-edit 已覆盖意图，位次变化是接受的代价 |
 | C35 | 确认区单卡（原 O19） | 已实现并列显示；不要再加"还有 N 条"折叠 |
+| C36 | 工具详情路径点击打开（原 `open-path`） | 产品明确要求点击路径打开文件，且先定浏览器态的等价出路（例如只复制路径） |
 
 ---
 

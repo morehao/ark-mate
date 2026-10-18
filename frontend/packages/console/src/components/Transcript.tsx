@@ -1,13 +1,39 @@
-import { useState, type CSSProperties, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button, Checkbox, Input, InputNumber, Popover, Radio } from 'antd'
-import { CheckOutlined, CloseOutlined, CopyOutlined, ReloadOutlined } from '@ant-design/icons'
+import {
+  CheckOutlined,
+  CloseOutlined,
+  CodeOutlined,
+  CopyOutlined,
+  DeleteOutlined,
+  DownOutlined,
+  EditOutlined,
+  EyeOutlined,
+  FolderOpenOutlined,
+  GlobalOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  ToolOutlined,
+} from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import type { ElicitationFieldSchema, PermissionOption, StreamEntry } from '@ark-mate/types'
 import { useMate, type PermissionDecision } from '../store'
 import { copyText } from '../console/clipboard'
 import { parseMsg } from '../console/message'
 import { runStatRows, type RunUsageInfo } from '../console/usageView'
+import {
+  isThoughtFold,
+  toolDetail,
+  toolView,
+  type ProcessBlock,
+  type ToolDetail,
+  type ToolIconName,
+  type ThoughtFold,
+  type ToolView,
+  type TurnModel,
+} from '../console/transcriptView'
 import { Md } from './Md'
+import { ThoughtFoldView } from './ThoughtFoldView'
 
 const roleLabel: CSSProperties = {
   fontFamily: tokens.fontMono,
@@ -24,13 +50,7 @@ function Role({ children }: { children: ReactNode }) {
   return <div style={roleLabel}>{children}</div>
 }
 
-function toolStatusMeta(status: string): { label: string; color: string; pulse?: boolean } {
-  const st = status.toLowerCase()
-  if (['completed', 'ok', 'success', 'done'].includes(st)) return { label: 'ok', color: tokens.success }
-  if (['running', 'started', 'pending', 'queued'].includes(st)) return { label: status || 'running', color: tokens.primary, pulse: true }
-  if (['failed', 'error', 'err'].includes(st)) return { label: 'failed', color: tokens.error }
-  return { label: status || '…', color: tokens.textSecondary }
-}
+
 
 const toneColor: Record<NonNullable<StreamEntry['tone']>, string> = {
   ok: tokens.success,
@@ -611,6 +631,757 @@ function RichText({ text }: { text: string }) {
   )
 }
 
+/** 品牌标记：ark·mate favicon 的渐变 A（与左栏品牌位同源，不复刻参照产品头像）。 */
+function AgentAvatar() {
+  return (
+    <span className="fg-agent-avatar" aria-hidden="true">
+      <svg viewBox="0 0 64 64">
+        <path d="M20 46 32 18l12 28h-7.2l-4.8-12-4.8 12z" />
+      </svg>
+    </span>
+  )
+}
+
+function UserMessage({ e, index }: { e: StreamEntry; index?: number }) {
+  const text = e.text ?? ''
+  if (!text.trim()) return null
+  return (
+    <div className="fg-turn-user" data-fg-idx={index} data-fg-entry={e.id}>
+      <div className="fg-user-bubble">
+        <RichText text={text} />
+      </div>
+      <div className="fg-user-actions">
+        <MsgCopy text={text} />
+      </div>
+    </div>
+  )
+}
+
+function AnswerText({ text, index, entryId }: { text: string; index?: number; entryId?: string }) {
+  if (!text.trim()) return null
+  return (
+    <div className="fg-answer" data-fg-idx={index} data-fg-entry={entryId}>
+      <RichText text={text} />
+    </div>
+  )
+}
+
+function ToolGlyph({ icon }: { icon: ToolIconName }) {
+  switch (icon) {
+    case 'read':
+      return <EyeOutlined />
+    case 'edit':
+      return <EditOutlined />
+    case 'command':
+      return <CodeOutlined />
+    case 'search':
+      return <SearchOutlined />
+    case 'folder':
+      return <FolderOpenOutlined />
+    case 'research':
+      return <GlobalOutlined />
+    case 'delete':
+      return <DeleteOutlined />
+    default:
+      return <ToolOutlined />
+  }
+}
+
+function detailText(value: unknown): string | null {
+  if (value === undefined || value === null) return null
+  let text: string
+  if (typeof value === 'string') {
+    text = value
+  } else {
+    try {
+      text = JSON.stringify(value, null, 2)
+    } catch {
+      text = String(value)
+    }
+  }
+  if (!text.trim()) return null
+  return text.length > 20000 ? `${text.slice(0, 20000)}\n…` : text
+}
+
+/**
+ * 工具详情的**分类渲染器**：read/list → 路径 + 代码预览；edit/write → diff 行；
+ * execute → 命令行 + stdout/stderr + 退出码；search/web → 查询 + 结果列表。
+ *
+ * 每一类只在事件载荷**确实给了**对应数据时才画那一块；缺的部分由 `notes` 如实说明
+ * （「结果不可用（底座未上报）」），不拿标题/状态补一个看起来合理的值。
+ */
+function ToolDetailBody({ detail }: { detail: ToolDetail }) {
+  const notes = detail.notes.map((note) => (
+    <div className="fg-tool-note" key={note}>
+      {note}
+    </div>
+  ))
+
+  if (detail.kind === 'read') {
+    const lines = detail.lines ?? []
+    return (
+      <>
+        <div className="fg-tool-detail-kicker">文件预览</div>
+        {detail.path && (
+          <div className="fg-tool-detail-path" title={detail.path}>
+            {detail.path}
+          </div>
+        )}
+        {lines.length > 0 && (
+          <div className="fg-tool-code" role="region" aria-label="文件内容预览">
+            {lines.map((line, index) => (
+              <div className="fg-tool-code-line" key={index}>
+                {line.no != null && <span className="fg-tool-line-no">{line.no}</span>}
+                <span className="fg-tool-code-text">{line.text || ' '}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {detail.truncated && <div className="fg-tool-note">仅显示前 {lines.length} 行（其余未展开）。</div>}
+        {notes}
+      </>
+    )
+  }
+
+  if (detail.kind === 'diff') {
+    return (
+      <>
+        <div className="fg-tool-detail-kicker">改动</div>
+        <div className="fg-tool-diff">
+          {(detail.diff ?? []).map((line, index) => (
+            <div className={`fg-diff-line fg-diff-${line.kind}`} key={index}>
+              <span className="fg-diff-sign">
+                {line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '}
+              </span>
+              <span className="fg-diff-text">{line.text || ' '}</span>
+            </div>
+          ))}
+        </div>
+        {notes}
+      </>
+    )
+  }
+
+  if (detail.kind === 'command') {
+    return (
+      <>
+        <div className="fg-tool-detail-kicker">命令</div>
+        <div className="fg-tool-command">
+          <span className="fg-tool-command-sign">$</span>
+          <span className="fg-tool-command-text">{detail.command}</span>
+        </div>
+        {detail.stdout !== undefined && (
+          <>
+            <div className="fg-tool-detail-kicker">stdout</div>
+            <pre className="fg-tool-output">{detail.stdout}</pre>
+          </>
+        )}
+        {detail.stderr !== undefined && (
+          <>
+            <div className="fg-tool-detail-kicker">stderr</div>
+            <pre className="fg-tool-output fg-tool-output-err">{detail.stderr}</pre>
+          </>
+        )}
+        {detail.output !== undefined && (
+          <>
+            <div className="fg-tool-detail-kicker">输出</div>
+            <pre className="fg-tool-output">{detail.output}</pre>
+          </>
+        )}
+        {detail.exitCode !== undefined && (
+          <div className={`fg-tool-exit${detail.exitCode !== 0 ? ' fg-tool-exit-bad' : ''}`}>
+            退出码 {detail.exitCode}
+          </div>
+        )}
+        {notes}
+      </>
+    )
+  }
+
+  if (detail.kind === 'search') {
+    const results = detail.results ?? []
+    return (
+      <>
+        {detail.query && (
+          <>
+            <div className="fg-tool-detail-kicker">查询</div>
+            <div className="fg-tool-query">{detail.query}</div>
+          </>
+        )}
+        {detail.url && (
+          <div className="fg-tool-query" title={detail.url}>
+            {detail.url}
+          </div>
+        )}
+        {results.length > 0 && (
+          <>
+            <div className="fg-tool-detail-kicker">结果 · {results.length}</div>
+            <ol className="fg-tool-results">
+              {results.map((line, index) => (
+                <li key={index}>{line}</li>
+              ))}
+            </ol>
+          </>
+        )}
+        {notes}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <div className="fg-tool-detail-kicker">结果</div>
+      {detail.summary ? <pre className="fg-tool-output">{detail.summary}</pre> : null}
+      {notes}
+    </>
+  )
+}
+
+/** 一条工具过程：默认只是一行，详情（分类预览 / 入参 / 结果 / 失败归类）按需展开。 */
+function ToolRow({
+  entry,
+  view,
+  onSettled,
+}: {
+  entry: StreamEntry
+  view?: ToolView
+  onSettled?: () => void
+}) {
+  const tool = view ?? toolView(entry)
+  const [open, setOpen] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  const settleRef = useRef<number | null>(null)
+  useEffect(
+    () => () => {
+      if (settleRef.current) window.clearTimeout(settleRef.current)
+    },
+    [],
+  )
+  const detail = toolDetail(entry, tool)
+  const input = detailText(tool.input)
+  const output = detailText(tool.output)
+  const canExpand = detail !== null || input !== null || output !== null || !!tool.failReason || !!tool.bizCode
+  return (
+    <div className={`fg-tool${open ? ' fg-open' : ''}`} data-fg-entry={entry.id}>
+      <button
+        type="button"
+        className={`fg-tool-head${canExpand ? ' fg-tool-expandable' : ''}`}
+        disabled={!canExpand}
+        aria-expanded={canExpand ? open : undefined}
+        onClick={() => {
+          if (!canExpand) return
+          if (!open) setMounted(true)
+          setOpen((value) => !value)
+          if (onSettled) {
+            if (settleRef.current) window.clearTimeout(settleRef.current)
+            settleRef.current = window.setTimeout(onSettled, 300)
+          }
+        }}
+      >
+        <span className="fg-tool-icon">
+          <ToolGlyph icon={tool.icon} />
+        </span>
+        {tool.statusLabel && <span className="fg-tool-status">{tool.statusLabel}</span>}
+        {tool.primary && (
+          <span
+            className={`fg-tool-primary${tool.link ? ' fg-tool-link' : ''}`}
+            title={tool.title}
+          >
+            {tool.primary}
+          </span>
+        )}
+        {tool.secondary && <span className="fg-tool-secondary">{tool.secondary}</span>}
+        {canExpand && <DownOutlined className="fg-tool-arrow" />}
+      </button>
+      {canExpand && mounted && (
+        <div className="fg-tool-body">
+          <div className="fg-tool-body-inner">
+            <div className="fg-tool-detail">
+              {tool.failReason && (
+                <div className="fg-tool-detail-error">{toolFailReasonLabel(tool.failReason)}</div>
+              )}
+              {tool.bizCode && <div className="fg-tool-detail-meta">{tool.bizCode}</div>}
+              {detail ? (
+                <ToolDetailBody detail={detail} />
+              ) : (
+                <>
+                  {input && (
+                    <>
+                      <div className="fg-tool-detail-kicker">参数</div>
+                      <pre>{input}</pre>
+                    </>
+                  )}
+                  {output && (
+                    <>
+                      <div className="fg-tool-detail-kicker">结果</div>
+                      <pre>{output}</pre>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface FoldProps {
+  title: string
+  variant: 'completed' | 'process' | 'summary'
+  lead?: ReactNode
+  defaultOpen?: boolean
+  /** 搜索命中了这块里的条目：这一次渲染就展开（否则命中的条目不在 DOM 里，锚点只能落到轮首）。 */
+  autoOpen?: boolean
+  onSettled?: () => void
+  children: ReactNode
+}
+
+/** 过程流里的折叠原语：completed / 过程消息 / 语义摘要共用同一套 0fr→1fr 动画。 */
+function Fold({ title, variant, lead, defaultOpen = false, autoOpen = false, onSettled, children }: FoldProps) {
+  const [open, setOpen] = useState(defaultOpen)
+  const [mounted, setMounted] = useState(defaultOpen)
+  const settleRef = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (settleRef.current) window.clearTimeout(settleRef.current)
+  }, [])
+  // 自动展开过就保持展开：搜索闪一下之后又把用户正在看的内容收起来是反直觉的。
+  useEffect(() => {
+    if (!autoOpen) return
+    setMounted(true)
+    setOpen(true)
+  }, [autoOpen])
+  const shown = open || autoOpen
+  return (
+    <div className={`fg-fold fg-fold-${variant}${shown ? ' fg-open' : ''}`}>
+      <button
+        type="button"
+        className="fg-fold-head"
+        aria-expanded={shown}
+        onClick={() => {
+          if (!shown) setMounted(true)
+          setOpen(!shown)
+          if (onSettled) {
+            if (settleRef.current) window.clearTimeout(settleRef.current)
+            settleRef.current = window.setTimeout(onSettled, 300)
+          }
+        }}
+      >
+        {lead && <span className="fg-fold-lead">{lead}</span>}
+        <span className="fg-fold-title">{title}</span>
+        <DownOutlined className="fg-fold-chevron" />
+      </button>
+      <div className="fg-fold-body" aria-hidden={!shown}>
+        <div className="fg-fold-inner">{mounted || autoOpen ? children : null}</div>
+      </div>
+    </div>
+  )
+}
+
+interface ProcessRenderProps {
+  onThoughtToggle?: (id: string, open: boolean) => void
+  onSettled?: () => void
+  /** 搜索命中的条目 id：含它的折叠块本次渲染自动展开，锚点才能落到轮内较深的条目。 */
+  flashId?: string | null
+  /** 条目 id → 原始条目下标（搜索锚点用；窗口逻辑不变）。 */
+  indexOf?: (id: string) => number
+}
+
+/** 已结算的确认卡 = 过程流里的历史节点（未结算的由输入区上方的确认区独占）。 */
+function NoticeView({ entry }: { entry: StreamEntry }) {
+  return entry.kind === 'permission' ? <PermissionCard e={entry} /> : <ElicitationCard e={entry} />
+}
+
+function blockId(block: ProcessBlock): string {
+  if (block.kind === 'tool-group') return block.id
+  if (block.kind === 'thought') return block.fold.id
+  return block.entry.id
+}
+
+function blocksContain(blocks: ProcessBlock[], id: string | null | undefined): boolean {
+  if (!id) return false
+  return blocks.some((block) => {
+    if (block.kind === 'tool-group') return block.id === id || block.items.some((item) => item.id === id)
+    return blockId(block) === id
+  })
+}
+
+function ProcessItems({
+  items,
+  onThoughtToggle,
+  onSettled,
+  indexOf,
+}: { items: Array<StreamEntry | ThoughtFold> } & Omit<ProcessRenderProps, 'flashId'>) {
+  return (
+    <>
+      {items.map((item) => {
+        const index = indexOf?.(item.id)
+        if (isThoughtFold(item)) {
+          return (
+            <div key={item.id} className="fg-process-item" data-fg-idx={index} data-fg-entry={item.id}>
+              <ThoughtFoldView
+                fold={item}
+                onUserToggle={onThoughtToggle}
+                onSettled={onSettled}
+              />
+            </div>
+          )
+        }
+        if (item.kind === 'tool') {
+          return (
+            <div key={item.id} className="fg-process-item" data-fg-idx={index} data-fg-entry={item.id}>
+              <ToolRow entry={item} onSettled={onSettled} />
+            </div>
+          )
+        }
+        if (item.kind === 'assistant') {
+          return <AnswerText key={item.id} text={item.text ?? ''} index={index} entryId={item.id} />
+        }
+        if (item.kind === 'permission' || item.kind === 'elicitation') {
+          if (!item.resolved) return null
+          return (
+            <div key={item.id} className="fg-process-item" data-fg-idx={index} data-fg-entry={item.id}>
+              <NoticeView entry={item} />
+            </div>
+          )
+        }
+        return null
+      })}
+    </>
+  )
+}
+
+function ProcessBlockView({
+  block,
+  onThoughtToggle,
+  onSettled,
+  flashId,
+  indexOf,
+}: { block: ProcessBlock } & ProcessRenderProps) {
+  if (block.kind === 'thought') {
+    const index = indexOf?.(block.fold.id)
+    return (
+      <div className="fg-process-item" data-fg-idx={index} data-fg-entry={block.fold.id}>
+        <ThoughtFoldView
+          fold={block.fold}
+          onUserToggle={onThoughtToggle}
+          onSettled={onSettled}
+        />
+      </div>
+    )
+  }
+  if (block.kind === 'tool') {
+    return (
+      <div className="fg-process-item" data-fg-idx={indexOf?.(block.entry.id)} data-fg-entry={block.entry.id}>
+        <ToolRow entry={block.entry} view={block.tool} onSettled={onSettled} />
+      </div>
+    )
+  }
+  if (block.kind === 'notice') {
+    return (
+      <div className="fg-process-item" data-fg-idx={indexOf?.(block.entry.id)} data-fg-entry={block.entry.id}>
+        <NoticeView entry={block.entry} />
+      </div>
+    )
+  }
+  if (block.kind === 'tool-group') {
+    return (
+      <Fold
+        title={block.summary.text}
+        variant="summary"
+        lead={<ToolGlyph icon={block.summary.icon} />}
+        autoOpen={blocksContain([block], flashId)}
+        onSettled={onSettled}
+      >
+        <ProcessItems
+          items={block.items}
+          onThoughtToggle={onThoughtToggle}
+          onSettled={onSettled}
+          indexOf={indexOf}
+        />
+      </Fold>
+    )
+  }
+  return <AnswerText text={block.entry.text ?? ''} index={indexOf?.(block.entry.id)} entryId={block.entry.id} />
+}
+
+function ProcessBlocks({
+  blocks,
+  onThoughtToggle,
+  onSettled,
+  flashId,
+  indexOf,
+}: { blocks: ProcessBlock[] } & ProcessRenderProps) {
+  return (
+    <div className="fg-process-list">
+      {blocks.map((block) => (
+        <ProcessBlockView
+          key={blockId(block)}
+          block={block}
+          onThoughtToggle={onThoughtToggle}
+          onSettled={onSettled}
+          flashId={flashId}
+          indexOf={indexOf}
+        />
+      ))}
+    </div>
+  )
+}
+
+function collectTurnText(turn: TurnModel): string {
+  const parts: string[] = []
+  const pushItem = (item: StreamEntry | ThoughtFold) => {
+    if (!isThoughtFold(item) && item.kind === 'assistant') {
+      const text = item.text?.trim()
+      if (text) parts.push(text)
+    }
+  }
+  const pushBlocks = (blocks: ProcessBlock[]) => {
+    for (const block of blocks) {
+      if (block.kind === 'text') {
+        const text = block.entry.text?.trim()
+        if (text) parts.push(text)
+      } else if (block.kind === 'tool-group') {
+        block.items.forEach(pushItem)
+      }
+    }
+  }
+  for (const anchor of turn.anchors) {
+    const text = anchor.text?.trim()
+    if (text) parts.push(text)
+  }
+  if (parts.length === 0) {
+    pushBlocks(turn.blocks)
+    if (turn.completed) pushBlocks(turn.completed.before)
+  }
+  return parts.join('\n\n')
+}
+
+function TurnCopy({ text }: { text: string }) {
+  const toast = useMate((s) => s.showToast)
+  if (!text.trim()) return null
+  return (
+    <Button
+      type="text"
+      size="small"
+      icon={<CopyOutlined />}
+      title="复制本轮回复"
+      aria-label="复制本轮回复"
+      className="fg-turn-copy"
+      onClick={async () => {
+        const ok = await copyText(text)
+        toast(ok ? '已复制本轮回复' : '复制失败，请手动选择文本')
+      }}
+    />
+  )
+}
+
+function TurnUsage({
+  usageText,
+  info,
+  stopReason,
+}: {
+  usageText?: string
+  info?: RunUsageInfo
+  stopReason?: string
+}) {
+  if (!usageText) return null
+  const content = info ? (
+    <div style={{ minWidth: 230 }}>
+      {runStatRows(info).map((row) => (
+        <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 24, padding: '2px 0' }}>
+          <span style={{ color: tokens.textSecondary }}>{row.label}</span>
+          <span style={{ fontFamily: tokens.fontMono }}>{row.value}</span>
+        </div>
+      ))}
+      {stopReason && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, padding: '2px 0' }}>
+          <span style={{ color: tokens.textSecondary }}>结束原因</span>
+          <span style={{ fontFamily: tokens.fontMono }}>{stopReason}</span>
+        </div>
+      )}
+      <div
+        style={{
+          marginTop: 6,
+          paddingTop: 6,
+          borderTop: `1px solid ${tokens.border}`,
+          color: tokens.textPlaceholder,
+          fontSize: 11,
+          lineHeight: 1.5,
+        }}
+      >
+        上下文为窗口快照（非增量）；token 明细未由底座上报。
+      </div>
+    </div>
+  ) : null
+  return (
+    <Popover title="本轮用量" trigger="hover" placement="bottom" content={content}>
+      <span className="fg-turn-usage">
+        <span className="fg-turn-usage-sep">·</span>
+        {usageText}
+      </span>
+    </Popover>
+  )
+}
+
+/** 一轮对话：用户气泡 + Agent 身份头 + 过程流 / 整轮折叠 + 流式尾部。 */
+export function TurnView({
+  turn,
+  elapsed,
+  stage,
+  showCaret,
+  onThoughtToggle,
+  onSettled,
+  usageText,
+  runInfo,
+  stopReason,
+  flashId,
+  indexOf,
+}: {
+  turn: TurnModel
+  elapsed?: string
+  stage?: string
+  showCaret?: boolean
+  onThoughtToggle?: (id: string, open: boolean) => void
+  onSettled?: () => void
+  usageText?: string
+  runInfo?: RunUsageInfo
+  stopReason?: string
+  flashId?: string | null
+  indexOf?: (id: string) => number
+}) {
+  const hasAgent =
+    turn.live ||
+    turn.blocks.length > 0 ||
+    !!turn.completed ||
+    !!turn.completion ||
+    turn.anchors.length > 0
+  const copyTextValue = collectTurnText(turn)
+  return (
+    <section
+      className={`fg-turn${turn.live ? ' fg-turn-live' : ''}`}
+      data-fg-idx={turn.index}
+      data-fg-turn={turn.id}
+    >
+      {turn.user && <UserMessage e={turn.user} index={indexOf?.(turn.user.id)} />}
+      {hasAgent && (
+        <div className="fg-agent-head">
+          <AgentAvatar />
+          <span className="fg-agent-name">
+            ark<span className="fg-agent-dot">·</span>mate
+          </span>
+          <span className="fg-agent-ai">AI</span>
+          <TurnCopy text={copyTextValue} />
+        </div>
+      )}
+      {turn.live && elapsed && <div className="fg-agent-status">已处理 {elapsed}</div>}
+
+      {turn.completed ? (
+        <>
+          {turn.completed.before.length > 0 ? (
+            <Fold
+              title={turn.completed.title}
+              variant="completed"
+              autoOpen={blocksContain(turn.completed.before, flashId)}
+              onSettled={onSettled}
+            >
+              <ProcessBlocks
+                blocks={turn.completed.before}
+                onThoughtToggle={onThoughtToggle}
+                onSettled={onSettled}
+                flashId={flashId}
+                indexOf={indexOf}
+              />
+            </Fold>
+          ) : (
+            <div className="fg-agent-completion">{turn.completed.title}</div>
+          )}
+          {turn.anchors.map((anchor, index) => {
+            const gap = turn.completed?.between[index]
+            return (
+              <Fragment key={anchor.id}>
+                <AnswerText
+                  text={anchor.text ?? ''}
+                  index={indexOf?.(anchor.id)}
+                  entryId={anchor.id}
+                />
+                {gap && gap.blocks.length > 0 && (
+                  <Fold
+                    title="过程消息"
+                    variant="process"
+                    autoOpen={blocksContain(gap.blocks, flashId)}
+                    onSettled={onSettled}
+                  >
+                    <ProcessBlocks
+                      blocks={gap.blocks}
+                      onThoughtToggle={onThoughtToggle}
+                      onSettled={onSettled}
+                      flashId={flashId}
+                      indexOf={indexOf}
+                    />
+                  </Fold>
+                )}
+              </Fragment>
+            )
+          })}
+          {turn.completed.after.length > 0 && (
+            <Fold
+              title="过程消息"
+              variant="process"
+              autoOpen={blocksContain(turn.completed.after, flashId)}
+              onSettled={onSettled}
+            >
+              <ProcessBlocks
+                blocks={turn.completed.after}
+                onThoughtToggle={onThoughtToggle}
+                onSettled={onSettled}
+                flashId={flashId}
+                indexOf={indexOf}
+              />
+            </Fold>
+          )}
+        </>
+      ) : (
+        <>
+          {!turn.live && turn.completion && (
+            <div className="fg-agent-completion">{turn.completion}</div>
+          )}
+          {!turn.live && !turn.failed && turn.anchors.length > 0 && turn.anchors.map((anchor) => (
+            <AnswerText
+              key={anchor.id}
+              text={anchor.text ?? ''}
+              index={indexOf?.(anchor.id)}
+              entryId={anchor.id}
+            />
+          ))}
+          {turn.blocks.length > 0 && (
+            <div className="fg-agent-body">
+              <ProcessBlocks
+                blocks={turn.blocks}
+                onThoughtToggle={onThoughtToggle}
+                onSettled={onSettled}
+                flashId={flashId}
+                indexOf={indexOf}
+              />
+            </div>
+          )}
+        </>
+      )}
+
+      {turn.live && stage && (
+        <div className="fg-turn-footer">
+          <span className="fg-shimmer">{stage}</span>
+          {showCaret && <span className="fg-turn-footer-caret" aria-hidden="true" />}
+        </div>
+      )}
+      {usageText && (
+        <TurnUsage usageText={usageText} info={runInfo} stopReason={stopReason} />
+      )}
+    </section>
+  )
+}
+
 /** 一条流式会话条目（console.html .msg 家族：气泡 / 思考 / 工具卡 / meta 行）。 */
 export function EntryView({
   e,
@@ -636,54 +1407,10 @@ export function EntryView({
     case 'elicitation':
       return e.resolved ? <ElicitationCard e={e} /> : null
     case 'user':
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
-            <MsgCopy text={e.text ?? ''} />
-            <Role>user</Role>
-          </div>
-          <div
-            style={{
-              alignSelf: 'flex-end',
-              maxWidth: 'min(78%, 560px)',
-              background: tokens.softFill,
-              border: `1px solid ${tokens.border}`,
-              borderRadius: '14px 14px 4px 14px',
-              padding: '9px 13px',
-              fontSize: 15,
-              lineHeight: 1.65,
-              whiteSpace: 'pre-wrap',
-              overflowWrap: 'anywhere',
-              color: tokens.text,
-              minWidth: 0,
-            }}
-          >
-            <RichText text={e.text ?? ''} />
-          </div>
-        </div>
-      )
+      return <UserMessage e={e} />
 
     case 'assistant':
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
-            <Role>assistant</Role>
-            <MsgCopy text={e.text ?? ''} />
-          </div>
-          <div
-            style={{
-              color: tokens.text,
-              fontSize: 15,
-              lineHeight: 1.72,
-              whiteSpace: 'pre-wrap',
-              overflowWrap: 'anywhere',
-              padding: '0 2px',
-            }}
-          >
-            <RichText text={e.text ?? ''} />
-          </div>
-        </div>
-      )
+      return <AnswerText text={e.text ?? ''} />
 
     case 'thought':
       // 单条思考**不在这里直接渲染**：相邻的 thought 会被 `foldThoughts` 收成一折，
@@ -691,98 +1418,8 @@ export function EntryView({
       // 把原始思考又摊回条目流里——它应该是一个可见的缺口，而不是两套标签并存。
       return null
 
-    case 'tool': {
-      const meta = toolStatusMeta(e.status ?? '')
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-          <Role>assistant · tool</Role>
-          <div
-            style={{
-              border: `1px solid ${tokens.border}`,
-              borderRadius: 12,
-              background: tokens.surface,
-              padding: '10px 13px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              maxWidth: 720,
-              minWidth: 0,
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 7,
-                fontFamily: tokens.fontMono,
-                fontSize: 11.5,
-                minWidth: 0,
-              }}
-            >
-              <span style={{ color: tokens.text, fontWeight: 600 }}>tool_call</span>
-              <span style={{ color: tokens.textPlaceholder }}>·</span>
-              <span
-                style={{
-                  color: tokens.textSecondary,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  minWidth: 0,
-                }}
-              >
-                {e.title}
-              </span>
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                fontFamily: tokens.fontMono,
-                fontSize: 10.5,
-                color: tokens.textSecondary,
-              }}
-            >
-              {meta.pulse ? (
-                <span
-                  className="fg-anim-pulse"
-                  style={{ flex: 'none', width: 7, height: 7, borderRadius: '50%', background: meta.color, display: 'inline-block' }}
-                />
-              ) : meta.label === 'ok' ? (
-                <CheckOutlined style={{ fontSize: 11, color: meta.color }} />
-              ) : (
-                <span style={{ flex: 'none', width: 7, height: 7, borderRadius: '50%', background: meta.color, display: 'inline-block' }} />
-              )}
-              <span style={{ color: tokens.text, fontWeight: 500 }}>{meta.label}</span>
-              <span style={{ marginLeft: 'auto' }}>tool_result · {e.status || 'running'}</span>
-            </div>
-            {/* 失败原因（S4 / 原型场景 E）：**服务端**归类出来的，客户端不从 status 推。
-                `sandbox_denied` 与 `sandbox_unavailable` 的处置相反，文案也必须分开写——
-                前者可以引导"换成允许写的工作空间"，后者不能（再试一次也一样失败）。 */}
-            {e.failReason && (
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 2,
-                  borderTop: `1px solid ${tokens.border}`,
-                  paddingTop: 7,
-                }}
-              >
-                <span style={{ fontSize: 11.5, color: tokens.error }}>
-                  {toolFailReasonLabel(e.failReason)}
-                </span>
-                {e.bizCode && (
-                  <span style={{ fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textPlaceholder }}>
-                    {e.bizCode}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )
-    }
+    case 'tool':
+      return <ToolRow entry={e} />
 
     case 'system': {
       const tone = (e.tone ?? 'info') as NonNullable<StreamEntry['tone']>
@@ -852,7 +1489,7 @@ export function EntryView({
                           lineHeight: 1.5,
                         }}
                       >
-                        上下文为窗口快照（非增量）；input/output 明细未由底座上报。
+                        上下文为窗口快照（非增量）；token 明细未由底座上报。
                       </div>
                     </div>
                   ) : null

@@ -49,7 +49,12 @@ import type {
 import { BizCode, Ev } from '@ark-mate/types'
 import { resolveStreamConfig, type StreamConfig } from './carrier'
 import { WsTransport } from './transport/ws'
-import { olderCursor, prependOlder } from './console/transcriptView'
+import {
+  mergeToolUpdate,
+  olderCursor,
+  prependOlder,
+  type ToolUpdatePatch,
+} from './console/transcriptView'
 import { setExpanded } from './console/navView'
 import {
   cancelNotice,
@@ -206,7 +211,18 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       const id = String(e.payload?.tool_call_id ?? '')
       const title = String(e.payload?.title ?? id)
       const status = String(e.payload?.status ?? '')
-      return { ...v, entries: push('tool', undefined, { toolId: id, title, status }), lastSeq }
+      return {
+        ...v,
+        entries: push('tool', undefined, {
+          toolId: id,
+          title,
+          status,
+          toolKind: String(e.payload?.kind ?? ''),
+          input: e.payload?.input,
+          output: e.payload?.output,
+        }),
+        lastSeq,
+      }
     }
     case Ev.ToolUpdate: {
       const id = String(e.payload?.tool_call_id ?? '')
@@ -215,18 +231,24 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       // 靠 status 猜只会把"跑完了"和"被拒了"说成同一件事。
       const failReason = String(e.payload?.fail_reason ?? '')
       const bizCode = String(e.payload?.biz_code ?? '')
+      const toolKind = String(e.payload?.kind ?? '')
+      const input = e.payload?.input
+      const output = e.payload?.output
+      // 终态 update 的 title 常为空（dsh 只在 tool_call 那一帧给 bash/web_search）：
+      // 合并规则（空 title 不覆盖旧标题、缺省 input/output 保留旧值）是纯函数，Node 侧可测。
+      const patch: ToolUpdatePatch = {
+        title: String(e.payload?.title ?? ''),
+        status: String(e.payload?.status ?? ''),
+        toolKind,
+        input,
+        output,
+        failReason,
+        bizCode,
+      }
       return {
         ...v,
         entries: entries.map((en) =>
-          en.kind === 'tool' && en.toolId === id
-            ? {
-                ...en,
-                title: String(e.payload?.title ?? en.title ?? id),
-                status: String(e.payload?.status ?? en.status ?? ''),
-                failReason: failReason || en.failReason,
-                bizCode: bizCode || en.bizCode,
-              }
-            : en,
+          en.kind === 'tool' && en.toolId === id ? mergeToolUpdate(en, patch) : en,
         ),
         lastSeq,
       }

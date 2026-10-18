@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { tokens } from '@ark-mate/ui'
 import type { ThoughtFold } from '../console/transcriptView'
 
 interface Props {
@@ -101,7 +100,7 @@ export function ThoughtFoldView({ fold, onUserToggle, onSettled }: Props) {
         aria-hidden={!open}
       >
         {mounted && (
-          <div ref={bodyRef} className="fg-thought-body" style={{ color: tokens.textSecondary }}>
+          <div ref={bodyRef} className="fg-thought-body">
             {fold.text}
           </div>
         )}
