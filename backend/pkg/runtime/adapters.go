@@ -48,8 +48,10 @@ func dshSpec() Spec {
 		// （catalog 认识的 id 保留 catalog、平台新造 id 落到 defaultInput=["text"]），
 		// 于是"平台声明的模型能不能收图"变成一件取决于底座目录版本、用户改不动也看不见的事。
 		DeclaresModelInput: true,
-		McpTransports:      []string{"stdio", "streamable_http"}, // §6.2：dsh 拒 sse
-		ManagesOwnContext:  true,                                 // §6.2：后端自管上下文/工具
+		// 0.2.1 起 dsh 的模型目录按凭据过滤：apiKeyEnv 缺失 → 该 route 不列模型。
+		ModelCatalogNeedsCredential: true,
+		McpTransports:               []string{"stdio", "streamable_http"}, // §6.2：dsh 拒 sse
+		ManagesOwnContext:           true,                                 // §6.2：后端自管上下文/工具
 		// 模型走 ACP 会话配置项（session/set_config_option，会话级、可共享连接）：
 		// 目录与取值全部由 dsh 自报（option id "model"、值 JSON.stringify([provider,model])），
 		// 平台只按 category 消费，不在此声明任何 id/格式。
@@ -82,12 +84,12 @@ func dshSpec() Spec {
 			RefPattern:      "MATE_%s_API_KEY",
 			FallbackEnv:     false,
 			Tested:          true,
-			TestedOnVersion: "0.2.0-rc.2",
-			Note: "原生凭据文档**已端到端实测**（H6 探针 7/7 PASS，2026-10-10，dsh 0.2.0-rc.2）：" +
+			TestedOnVersion: "0.2.1-rc.2",
+			Note: "原生凭据文档**已端到端实测**（H6 探针 7/7 PASS，2026-10-18，dsh 0.2.1-rc.2）：" +
 				"① **热生效成立**——同一进程内把文档的 refs 从 key-A 改成 key-B（平台式临时文件 + 原子 rename），" +
 				"下一轮请求的 `Authorization` 就是 key-B，**未重启**；" +
-				"② **env 赢**——文档与子进程 env 同时给时实际用的是 env（所以同一 runtime 的 env 与文档" +
-				"**绝不能同时启用**，否则轮换后的旧值被陈旧 env 永久遮蔽且无任何报错）；" +
+				"② **文档赢**（0.2.1 起；0.2.0 是 env 赢）——文档与子进程 env 同时给时实际用的是文档。" +
+				"所以同一 runtime 的 env 与文档**绝不能同时启用**：另一条会变成静默死值，轮换后没有任何报错；" +
 				"③ **0644 是拒用不是告警**——凭据插件在启动期 `loadInitial` 抛错、该 route 报 `no credential`，" +
 				"文案指向 `chmod 600`；" +
 				"④ **dsh 从不回写该文件**——平台读-改-写（只替换 refs）逐字保住注释与 `records:` 分节，" +
@@ -96,7 +98,7 @@ func dshSpec() Spec {
 				"因此**该存储无法向 agent 隔离机密**」——所以这是**用持久化换热生效**，不是安全改进（B10）。" +
 				"五条纪律（§安全）：① 权限 0600（父目录 0700）且**落盘后读回校验**，不满足即中止（dsh 拒启）；" +
 				"② 密钥绝不进日志/错误文案/事件/API/doctor/导出（诊断只许出现**键名**）；" +
-				"③ 同一 runtime 的 env 与文档不得同时启用（`FallbackEnv:false` 就是这条的声明）；" +
+				"③ 同一 runtime 的 env 与文档不得同时启用（`FallbackEnv:false` 就是这条的声明；0.2.1 起文档赢，注入 env 只会是死值）；" +
 				"④ 只写平台独占根，绝不写用户的 `~/.dsh`；" +
 				"⑤ 空集撤回只移除**平台自己写过的** refs 条目，用户自己的 refs 与 `records:`/注释逐字节保留。" +
 				"残余未取证：平台与 dsh 自身写路径「同一瞬间都写」未被压测（由 dsh 的 watch 对账与平台侧" +
@@ -111,7 +113,7 @@ func dshSpec() Spec {
 
 // dshModelConfigEvidence dsh 清单通道（`--patch` overlay）的实测结论与三条已知坑
 // （原先写在已删除的 `ConfigProjection.Note` 上；写入权是用实测换的，依据不能丢）。
-const dshModelConfigEvidence = "清单通道端到端实测（2026-10-10，随包 0.2.0-rc.2）。" +
+const dshModelConfigEvidence = "清单通道端到端实测（2026-10-10，随包 0.2.0-rc.2；2026-10-18 在 0.2.1-rc.2 复测通过）。" +
 	"① 机制（最小 ACP 客户端直接问底座，见 .dsh/docs/notes/probes/dsh-acp-catalog.mjs）：" +
 	"在 `llm-pi-ai.config.providers.<route>` 上声明一条自定义 route（api + baseURL + apiKeyEnv + models 齐备）" +
 	"**确实**会以一组出现在 ACP 的 `options[category=model]` 里（实测候选 `[\"arkprobe\",\"ark-probe-x\"]` " +
@@ -142,10 +144,10 @@ const dshModelConfigEvidence = "清单通道端到端实测（2026-10-10，随�
 //  1. **形态**：`<root>/<id>/SKILL.md` + 强制 frontmatter，于 2026-09-09 用 `dsh-skill-filesystem`
 //     真实 provider 实测过（无 frontmatter / 只有 name / 只有 description 三种都丢弃，嵌套不扫）
 //     ——与上面的「只扫根下一层」互相印证（见 pkg/capability/skill_materialize.go 顶部实测记录）。
-//  2. **端到端**：「平台默认根下写进去、底座开箱即读到」，于 2026-10-08 用 dsh **0.2.0-rc.2** 确认
+//  2. **端到端**：「平台默认根下写进去、底座开箱即读到」，于 2026-10-08 用 dsh **0.2.0-rc.2** 确认（2026-10-18 在 **0.2.1-rc.2** 复测通过）
 //     （报告：.dsh/docs/notes/2026-10-08-skill-projection-e2e-probe-notes.md §B-6）。取证分两路：
 //     · **源码链**（读本机安装版本 app.asar 内的实际代码）：`PROFILE_TEMPLATES.acp = [dsh-base, dsh-acp-app]`
-//     → `dsh-base@0.2.0-rc.2` 的 `cordis.patch.yml` 常态启用 `id: skill-filesystem` 与 `id: tool-skill`
+//     → `dsh-base@0.2.1-rc.2` 的 `cordis.patch.yml` 常态启用 `id: skill-filesystem` 与 `id: tool-skill`
 //     → provider 的 `includeDefaultRoots` 默认 true，rank 500 根 = `join(agentsHome,"skills")`，
 //     而 `agentsHome = resolve(config.agentsHome ?? process.env.DSH_AGENTS_HOME ?? join(homedir(),".agents"))`
 //     ⇒ 默认落点正是 `${HOME}/.agents/skills`。注意这条链对 **acp / web / headless 三个 profile 同款**
@@ -164,7 +166,7 @@ func dshSkillProjection() Projection {
 		Note: "dsh-skill-filesystem 源码确认 user 级根为 `$DSH_HOME/skills` 与 `~/.agents/skills`，取后者以与 DSH_HOME 解耦；" +
 			"**只扫根下一层**（`<n>.md` 或 `<n>/SKILL.md`），故落点必须扁平；frontmatter 必填 name+description 且 " +
 			"**name 强制 `^[a-z0-9]+(?:-[a-z0-9]+)*$`（不合规静默丢弃）**；" +
-			"形态于 2026-09-09 用真实 provider 实测通过，**默认根端到端于 2026-10-08 用 v0.2.0-rc.2 确认通过**" +
+			"形态于 2026-09-09 用真实 provider 实测通过，**默认根端到端于 2026-10-08 用 v0.2.0-rc.2 确认、2026-10-18 用 v0.2.1-rc.2 复测通过**" +
 			"（源码链：acp 模板含 dsh-base，其 patch 常态启用 skill-filesystem/tool-skill，agentsHome 默认 `<HOME>/.agents`；" +
 			"运行级：仅存在于该根的 officecli 被真实会话投给模型，且非内置）。" +
 			"两条边界：① 该根是**最低优先**（rank 500），项目级 `<cwd>/.agents/skills`(200) 与 `~/.dsh/skills`(400) 会遮蔽它；" +

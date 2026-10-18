@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
@@ -152,6 +153,9 @@ func newRig(t *testing.T, mutate ...func(*rigConfig)) *rig {
 		t.Cleanup(func() { _ = st.Close() })
 	}
 	orch := NewOrchestrator(svc, reg)
+	// 取消后的结算窗口在测试里压到 50ms：生产默认 10s（等 dsh drain），照默认跑会让每个
+	// 「取消 → 等终态」的用例都挂满 10s 并被 feed 的 2s 超时判红。
+	orch.SetSettleTimeout(50 * time.Millisecond)
 	t.Cleanup(orch.Close)
 
 	return &rig{Svc: svc, Orch: orch, Bus: bus, St: st}

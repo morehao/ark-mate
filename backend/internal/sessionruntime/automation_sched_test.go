@@ -81,6 +81,7 @@ func newSchedRig(t *testing.T) *schedRig {
 	svc := NewService(reg, bus)
 	setBuildRuntime(t, "silent") // 夹具注册表只有 silent
 	orch := NewOrchestrator(svc, reg)
+	orch.SetSettleTimeout(50 * time.Millisecond) // 取消用例不按生产 10s 等
 	t.Cleanup(orch.Close)
 	dir := t.TempDir()
 	cwd := t.TempDir()

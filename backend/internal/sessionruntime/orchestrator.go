@@ -90,17 +90,18 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	// 轮次运行期状态机的四张窄端口：句柄取自本结构体、在途登记沿用同一份 tracker，
 	// 其余三样（诊断 / 模型目录 / 工具记忆 / 交互取消）都是编排侧的事实，用适配器交出。
 	o.life = session.NewLifecycle(session.LifecycleDeps{
-		Plane:           svc.sessionPlane,
-		Handles:         o.handles,
-		Registry:        reg,
-		SelectedSpec:    svc.runtimePlane.SelectedSpec,
-		Acquire:         o.acquireClient,
-		ResolveModel:    svc.planes.Providers.ResolveSessionModel,
-		McpServers:      svc.McpServersFor,
-		Catalog:         runnerCatalog{svc: svc},
-		Diagnostics:     runnerDiagnostics{o: o},
-		SetRuntimeState: svc.runtimePlane.SetState,
-		ApplyReason:     provider.ModelApplyReason,
+		Plane:            svc.sessionPlane,
+		Handles:          o.handles,
+		Registry:         reg,
+		SelectedSpec:     svc.runtimePlane.SelectedSpec,
+		Acquire:          o.acquireClient,
+		ResolveModel:     svc.planes.Providers.ResolveSessionModel,
+		ProviderKeyReady: svc.planes.Providers.ProviderKeyReady,
+		McpServers:       svc.McpServersFor,
+		Catalog:          runnerCatalog{svc: svc},
+		Diagnostics:      runnerDiagnostics{o: o},
+		SetRuntimeState:  svc.runtimePlane.SetState,
+		ApplyReason:      provider.ModelApplyReason,
 	})
 	o.runner = session.NewRunner(session.RunnerDeps{
 		Plane:        svc.sessionPlane,
@@ -187,6 +188,11 @@ func (o *Orchestrator) SetElicitationTimeout(d time.Duration) { o.elic.SetTimeou
 
 // SetRunTimeout 设置单轮 run 看门狗超时（0 = 关闭）。见 watchdogRun。
 func (o *Orchestrator) SetRunTimeout(d time.Duration) { o.runner.SetRunTimeout(d) }
+
+// SetSettleTimeout 覆盖取消后的结算等待窗口（0 = 默认 10s）。
+//
+// 生产装配不调用它；测试用它把窗口压到毫秒级，避免每个取消用例都等满 10s。
+func (o *Orchestrator) SetSettleTimeout(d time.Duration) { o.runner.SetSettleTimeout(d) }
 
 // SetCommandPolicy 装配期登记命令门禁规则（nil = 未启用）。规则表由 app 从
 // `<MATE_HOME>/command_policy.json` 加载并**加载期校验**；这里只持有，不再校验。

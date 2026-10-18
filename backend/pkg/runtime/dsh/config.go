@@ -31,7 +31,7 @@ const (
 	PatchFlag = "--patch"
 	// dumpSchemaFlag dsh 的配置转储子命令。
 	//
-	// 判据落在 `--dump-config-schema` 上（**已对 0.2.0-rc.2 实测核对**）：只有它输出 JSON 并带
+	// 判据落在 `--dump-config-schema` 上（**已对 0.2.1-rc.2 实测核对**）：只有它输出 JSON 并带
 	// `x-cordis.{complete,diagnostics}`；`--dump-config` 输出的是 YAML、诊断只写 stderr，判据不好机器化。
 	// 代价：schema dump 会 import 各插件模块（可能初始化 profile）——所以 staging home 是必需的。
 	dumpSchemaFlag = "--dump-config-schema"

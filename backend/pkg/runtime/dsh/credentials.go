@@ -1,6 +1,6 @@
 // 本文件是 dsh 的**原生凭据面**：`<$DSH_HOME>/.credentials.yaml` 的读-改-写（M3.5）。
 //
-// 事实源是随包载荷里的官方文档 `@deepseek-ai/dsh-credentials-local/README.zh.md`（0.2.0-rc.2），
+// 事实源是随包载荷里的官方文档 `@deepseek-ai/dsh-credentials-local/README.zh.md`（0.2.1-rc.2），
 // 平台只依赖它写明的形态，不猜：
 //
 //	version: 1
@@ -12,8 +12,8 @@
 // 三条官方口径决定了本文件的实现形态：
 //
 //   - **可以直接编辑文件**，`watch` 默认 true（改盘即热重载）⇒ 平台的写入能立刻生效（B9）；
-//   - 查找优先级是「继承环境 > 存储文档 > 两个 `.env`」⇒ 同一 runtime **绝不**同时注入同名 env
-//     （否则轮换后的旧值被陈旧 env 永久遮蔽，且没有任何报错——R11/纪律③）；
+//   - 0.2.1 起查找优先级是「存储文档 > 继承环境 > 两个 `.env`」（0.2.0 是 env 赢）⇒ 同一 runtime
+//     **绝不**同时注入同名 env：两条通道同时开，总有一条是静默死值，且没有任何报错（R11/纪律③）；
 //   - 权限必须只对属主可读：官方在**启动与重载**都拒绝"可被属主之外读取"的文档，
 //     错误文案指向 `chmod 600` ⇒ 权限不合不是"更松"而是**拒启**，所以这条是 fail-loud（纪律①）。
 //
@@ -87,7 +87,7 @@ func (s *syncer) syncCredentials(set resource.Set) (resource.CredentialOutcome, 
 		Status:  status,
 		Where:   path + "（底座私有凭据文档，权限 0600；dsh 的 watch 默认热重载）",
 		Effect:  resource.EffectNextRun,
-		// dsh 的原生凭据文档通道在 **0.2.0-rc.2** 上实测 7/7 PASS（H6 探针，见设计 §实测事实）。
+		// dsh 的原生凭据文档通道在 **0.2.1-rc.2** 上实测 7/7 PASS（H6 探针，2026-10-18）。
 		// 版本绑定：载荷升级时由 `Spec.Credential.Tested` 先置回 false，编排层据此**不再走 native_doc**
 		// （不给路径、不给明文），这条路径自然就不会被走到。
 		Tested: true,

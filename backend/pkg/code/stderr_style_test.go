@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// 真实形态（dsh 0.2.0-rc.2 从含保留键 .env 的目录启动时，核心日志里的 stderr 顺序）：
+// 真实形态（dsh 0.2.0-rc.2 从含保留键 .env 的目录启动时，核心日志里的 stderr 顺序；0.2.1-rc.2 复测同形）：
 // 先一段 Node 的源码片段 + `Error: <真因>`，再是栈帧，最后是 Node 版本。
 func TestStderrMsgSuffixNodeStyle(t *testing.T) {
 	tail := []string{

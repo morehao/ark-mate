@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,6 +122,29 @@ func (pl *Plane) KeyFor(ctx context.Context, d *Def) credential.ProviderKey {
 		return credential.ProviderKey{}
 	}
 	return pl.creds.ResolveProviderKey(ctx, d.ID, d.KeyRef)
+}
+
+// ProviderKeyReady 该供应商当前是否有可用密钥；false 时 reason 是可执行的原因。
+//
+// 读时现解析（与 providerRespLocked 同一条链）：库、托管文档、两份 `.env` 与进程环境都可能
+// 在进程外被改动，缓存一份必然漂移。只回「有没有 + 为什么」，**绝不回密钥值**。
+func (pl *Plane) ProviderKeyReady(ctx context.Context, providerID string) (bool, string) {
+	pl.mu.Lock()
+	d := pl.providers[providerID]
+	if d == nil {
+		pl.mu.Unlock()
+		return false, "供应商不存在"
+	}
+	d.applyResolution(pl.KeyFor(ctx, d))
+	hasKey, problems := d.Key != "", append([]string(nil), d.KeyProblems...)
+	pl.mu.Unlock()
+	if hasKey {
+		return true, ""
+	}
+	if len(problems) > 0 {
+		return false, strings.Join(problems, "；")
+	}
+	return false, "尚未设置密钥"
 }
 
 func (pl *Plane) mirrorSet(ref, value string) error {

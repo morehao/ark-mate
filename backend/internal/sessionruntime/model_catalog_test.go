@@ -193,6 +193,29 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	}
 }
 
+// TestApplySessionModelFailsFastOnMissingCredential 按凭据过滤目录的底座：缺密钥时在平台侧
+// 给出可执行错误，不把底座的 invalidParams 原样甩给用户，也不下发到运行时。
+func TestApplySessionModelFailsFastOnMissingCredential(t *testing.T) {
+	reg := runtime.NewRegistry(runtime.Spec{ID: "stub", Name: "Stub", ModelCatalogNeedsCredential: true})
+	svc := NewService(reg, eventbus.New())
+	setBuildRuntime(t, "stub")
+	orch := NewOrchestrator(svc, reg)
+	t.Cleanup(orch.Close)
+
+	proj := &fakeProjection{}
+	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: "stub",
+		Session: &stubSession{}, Projection: proj}))
+
+	_, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Provider: "ghost", Model: "x"})
+	ae, ok := acl.As(err)
+	if !ok || ae.Code != "model_credential_missing" {
+		t.Fatalf("缺密钥应报 model_credential_missing，got %v", err)
+	}
+	if len(proj.applied) != 0 {
+		t.Fatalf("缺密钥不应把值下发到运行时: %+v", proj.applied)
+	}
+}
+
 // TestPickListedSession session/list 兜底：优先带绝对 cwd 的条目（resume 需要 cwd），
 // 无绝对 cwd 的条目一律跳过（宁可退回「无来源」也不做无 cwd 的恢复猜测）。
 func TestPickListedSession(t *testing.T) {

@@ -370,8 +370,8 @@ type credentialPlan struct {
 
 // applyCredentialChannel 按 `CredentialSpec.Tested` 二选一（ADR-4 / 风险 R11）。
 //
-// 两条通道**绝不**同时启用：dsh 的优先级实测是"继承环境 > 存储文档"，同时启用会让已存文档被
-// 陈旧的 env 永久遮蔽——用户轮换了密钥、文档也更新了，而生效的仍是旧值，**且没有任何报错**。
+// 两条通道**绝不**同时启用：dsh 0.2.1 的优先级是"存储文档 > 继承环境"（0.2.0 相反），同时启用
+// 会让其中一条变成静默死值——用户轮换了密钥、另一条还在，而生效的仍是旧值，**且没有任何报错**。
 func (r *Resources) applyCredentialChannel(
 	ctx context.Context, spec runtime.Spec, set *resource.Set, _ map[string][]resource.Model,
 ) (credentialPlan, []string) {

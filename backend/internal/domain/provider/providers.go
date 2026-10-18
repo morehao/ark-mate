@@ -347,8 +347,8 @@ func providerProblems(d *Def) []string {
 // 一律决定，必须问该底座自己的声明：
 //
 //	`Credential.Tested && NativeDoc != ""` → 走原生文档，**平台不注入同名 env**
-//	  （实测：dsh 的优先级是"继承环境 > 存储文档"，同时启用会让已存文档被陈旧的 env 永久遮蔽，
-//	   用户轮换了密钥、文档也更新了，而生效的仍是旧值，**且没有任何报错**）；
+//	  （dsh 0.2.1 的优先级是"存储文档 > 继承环境"；两条同时启用时其中一条必然是静默死值，
+//	   用户轮换了密钥、另一条还在，而生效的仍是旧值，**且没有任何报错**）；
 //	否则 → 按该底座的 `RefPattern` 派生**逐供应商唯一**的引用名并注入（ADR-16：
 //	  v11 的 `envKeyOf(type)` 让同 type 的两个供应商共用一把密钥，至少一条 route 用错密钥）。
 func (pl *Plane) ProviderEnvFor(runtimeID, providerID string) []string {

@@ -39,8 +39,9 @@ ARG GO_IMAGE=golang:1.26-bookworm
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 ARG NPM_REGISTRY=https://registry.npmjs.org
 ARG GO_PROXY=https://proxy.golang.org,direct
-# 底座版本（默认 latest；dsh 需含 acp profile 模板，即 >= 0.1.2-rc.1，见 pkg/runtime/adapters.go）
-ARG DSH_VERSION=latest
+# 底座版本：与随包载荷/适配器实测声明同源（dsh 需含 acp profile 模板，见 pkg/runtime/adapters.go）。
+# 刻意不用 latest：镜像重建必须可复现，且升级要与 TestedOnVersion 一起走。
+ARG DSH_VERSION=0.2.1-rc.2
 
 # —— 阶段 1：前端产物（Node 主版本对齐 frontend/.nvmrc；pnpm 版本取 package.json 的 packageManager）——
 FROM ${NODE_IMAGE} AS web
@@ -142,7 +143,7 @@ CMD ["serve"]
 FROM ${NODE_IMAGE} AS runtimes-pkg
 ARG NPM_REGISTRY
 ARG WITH_DSH=true
-ARG DSH_VERSION=latest
+ARG DSH_VERSION=0.2.1-rc.2
 ENV npm_config_registry=${NPM_REGISTRY}
 RUN --mount=type=cache,target=/root/.npm,id=npm-cache \
     set -eux; \
