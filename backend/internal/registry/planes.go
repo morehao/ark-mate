@@ -49,6 +49,12 @@ type Planes struct {
 	// Resources 资源同步面（模型清单向各底座交付 + 同步结论/指纹）。
 	Resources *Resources
 
+	// Identity 产品身份的交付面（部署级常量；不落库、不读库）。
+	//
+	// 它与会话域的分工：本面负责"把身份交给底座"与"本进程生效的是哪一份"，
+	// 会话域只读它的 Spec 去拼首轮块。两边共用同一份事实 ⇒ 系统提示与首轮块不会各说一套。
+	Identity *IdentityDelivery
+
 	// mu/defWarned 装载期"同一条定义问题只 WARN 一次"的记账。
 	// 装载会被反复调用（启动、导入、**网关每次取数**），不记账就会把一条坏定义刷成日志洪水。
 	mu        sync.Mutex
@@ -90,6 +96,7 @@ func NewPlanes(reg *runtime.Registry) *Planes {
 	p.Mcp = mcp.NewPlane(p.Capabilities, p.Definitions, p.McpSecrets)
 	p.Providers = provider.NewPlane(reg, p.Credentials)
 	p.Resources = NewResources(reg, p.Providers)
+	p.Identity = NewIdentityDelivery(reg)
 	// 默认开启（config 的 auto）：显式置位，避免 atomic.Bool 零值把默认关掉。
 	p.mcpGatewayEnabled.Store(true)
 	// 原生权限映射默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。

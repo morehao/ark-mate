@@ -11,6 +11,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/acl"
+	pkgidentity "github.com/morehao/ark-mate/pkg/identity"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -87,6 +88,14 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		elic:     interaction.NewElicitationManager(interaction.DefaultElicitationTimeout),
 		tools:    session.NewToolCallMemory(),
 	}
+	// 产品身份是**装配面**的事实（模式算完才定稿），这里只交出读取口：会话在第一个 prompt
+	// 时才问它，因此不需要"先塞空值再补一个 setter"（那会变成两个持有者）。
+	//
+	// `planes.Identity` 在 `NewPlanes` 里必造；nil 判据只服务"自造 Planes 的测试夹具"。
+	var identityOf func() pkgidentity.Spec
+	if svc.planes.Identity != nil {
+		identityOf = svc.planes.Identity.Spec
+	}
 	// 轮次运行期状态机的四张窄端口：句柄取自本结构体、在途登记沿用同一份 tracker，
 	// 其余三样（诊断 / 模型目录 / 工具记忆 / 交互取消）都是编排侧的事实，用适配器交出。
 	o.life = session.NewLifecycle(session.LifecycleDeps{
@@ -102,6 +111,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		Diagnostics:      runnerDiagnostics{o: o},
 		SetRuntimeState:  svc.runtimePlane.SetState,
 		ApplyReason:      provider.ModelApplyReason,
+		Identity:         identityOf,
 	})
 	o.runner = session.NewRunner(session.RunnerDeps{
 		Plane:        svc.sessionPlane,

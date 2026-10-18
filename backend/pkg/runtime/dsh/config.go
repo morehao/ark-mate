@@ -76,10 +76,20 @@ type Options struct {
 	Timeout time.Duration
 	// RefPattern 平台凭据引用名模板；用来识别凭据文档里"平台自己写过的"条目。空 = DefaultRefPattern。
 	RefPattern string
+	// PatchArgs `--patch` 取值列表的共享管理器（模型清单与产品身份共用同一个 flag）。
+	//
+	// 由父包在登记可执行半场时造**一个**实例、交给需要它的所有 adapter 实现；nil = 本实现
+	// 自己造一个（单测/独立使用）。**绝不能各造各的**：两个 `SetArg` 会互相覆盖，
+	// 表现为"装了身份、模型清单没了"（或反之），而两边都报 applied。
+	PatchArgs *PatchArgs
 }
 
 // NewSyncer 构造 dsh 的清单同步实现（装配形态见 `pkg/runtime/registerBuiltinSyncers`）。
 func NewSyncer(opts Options, delivery resource.Delivery) resource.Syncer {
+	patches := opts.PatchArgs
+	if patches == nil {
+		patches = NewPatchArgs(delivery)
+	}
 	return &syncer{
 		patchPath:   strings.TrimSpace(opts.PatchPath),
 		credDocPath: strings.TrimSpace(opts.CredentialDocPath),
@@ -88,6 +98,7 @@ func NewSyncer(opts Options, delivery resource.Delivery) resource.Syncer {
 		timeout:     opts.Timeout,
 		refPattern:  opts.RefPattern,
 		delivery:    delivery,
+		patches:     patches,
 	}
 }
 
@@ -120,21 +131,12 @@ type syncer struct {
 	timeout     time.Duration
 	refPattern  string
 	delivery    resource.Delivery
-	// 启动参数面的**进程内影子**。`resource.Delivery` 只有两个写方法（没有读回），所以"这次到底
-	// 改没改"只能自己记：契约②要求幂等（同一份 Set 重复调用收敛、不换代际），而"首发装参"确实是
-	// 一次改动（新进程才会读到 `--patch`），"重复装同一个值"不是。零值 `lastArg == ""` 恰好等于
-	// "当前没有装 --patch"——启动期注册表里本来就没有它，所以首次空集撤回会正确地报 unchanged。
-	mu      sync.Mutex
-	lastArg string
-}
-
-// trackArg 记录本次参数值并返回"与上次相比是否变了"。
-func (s *syncer) trackArg(v string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	changed := s.lastArg != v
-	s.lastArg = v
-	return changed
+	// patches `--patch` 取值列表（与身份 adapter 共用同一个实例）。
+	//
+	// 为什么不再自己记一个 `lastArg`：`--patch` 有**两个**独立写者（模型清单与产品身份），
+	// 各自记影子必然分叉——A 以为列表是 `[模型]`、B 以为 `[身份]`，最后一次 `SetArg` 把它们
+	// 变成一个，而两边的幂等判据都还停在各自的旧值上。收成 `PatchArgs` 之后只有一份影子。
+	patches *PatchArgs
 }
 
 // SyncModels 生成 overlay → 自校验 → 底座级校验门 → 落盘 + 装参数 + 写凭据文档；清单为空时**撤回**。
@@ -200,8 +202,11 @@ func (s *syncer) SyncModels(ctx context.Context, set resource.Set) (resource.Out
 	}
 	// 参数**每次同步都要装**：启动参数住在注册表的内存里，重启后必须靠一次同步重建。
 	// `--patch` 的路径必须是**绝对**路径（dsh 侧按调用目录解析，而平台拉底座的 cwd 是用户会话目录）。
-	argChanged := s.trackArg(abs)
-	if err := s.setArg(PatchFlag, abs); err != nil {
+	//
+	// 走 `PatchArgs` 而不是直接 `SetArg`：`--patch` 有两个独立写者（模型清单与产品身份），
+	// 任何一方直接 `SetArg` 都会把另一方挤掉——而两边都会报 applied。
+	argChanged, err := s.patches.SetModel(abs)
+	if err != nil {
 		return resource.Outcome{}, fmt.Errorf("装载 dsh 启动参数失败（%s）：%w", PatchFlag, err)
 	}
 
@@ -235,8 +240,8 @@ func (s *syncer) revoke(set resource.Set) (resource.Outcome, error) {
 	} else if !os.IsNotExist(err) {
 		return resource.Outcome{}, fmt.Errorf("检查 dsh overlay 失败（%s）：%w", s.patchPath, err)
 	}
-	argChanged := s.trackArg("")
-	if err := s.setArg(PatchFlag, ""); err != nil {
+	argChanged, err := s.patches.SetModel("")
+	if err != nil {
 		return resource.Outcome{}, fmt.Errorf("摘除 dsh 启动参数失败（%s）：%w", PatchFlag, err)
 	}
 	if existed {
@@ -263,12 +268,89 @@ func (s *syncer) revoke(set resource.Set) (resource.Outcome, error) {
 	}, nil
 }
 
-// setArg 走端口改启动面；delivery 为 nil（单测只验生成）时退化成无操作。
-func (s *syncer) setArg(flag, value string) error {
-	if s.delivery == nil {
-		return nil
+// ——— `--patch` 取值列表（模型清单与产品身份共用） ———
+
+// PatchArgs 管理 dsh 的 `--patch` 取值列表：模型清单在**前**、产品身份在**后**。
+//
+// 为什么需要它（而不是让两个 adapter 各自 `SetArg`）：`--patch` 是可重复参数，而
+// `resource.Delivery.SetArg` 的语义是"这一个 flag 只有一个值"——两个写者各调一次，后一次
+// 会把前一次**挤掉**。两处都会报 applied，用户看到"模型清单已同步、身份已交付"，而底座只拿到
+// 后装的那一层。收成一个列表管理器之后，"这个 flag 的完整取值"只有一处知道。
+//
+// 顺序固定为 **model → identity**：身份 patch 只碰系统提示，与模型 patch 的路由条目不冲突；
+// 但顺序仍要钉住——`--patch` 按传入顺序叠加，而"谁在最后"决定同名条目谁赢。
+type PatchArgs struct {
+	mu       sync.Mutex
+	delivery resource.Delivery
+	model    string
+	identity string
+	// last 已装进启动面那一份的指纹（`\x00` 拼接）。
+	//
+	// 它是**唯一的影子**：`Delivery` 只有写没有读回。零值 `""` 恰好等于"当前没有装任何
+	// `--patch`"——启动期注册表里本来就没有它，所以首次同步会正确地报 changed。
+	last string
+}
+
+// NewPatchArgs 造一个列表管理器。delivery 为 nil（单测只验生成）= 不真的改启动面。
+func NewPatchArgs(delivery resource.Delivery) *PatchArgs {
+	return &PatchArgs{delivery: delivery}
+}
+
+// SetModel 设置/撤销模型清单那一层（空 = 撤销），返回**启动面是否真的变了**。
+//
+// 幂等判据是"与已装的那一份比"，不是"与本次入参比"：同一个路径重复同步 → false；
+// 上一次装失败了（`SetArgs` 报错，`last` 没动）→ 下一次仍会重试。
+func (p *PatchArgs) SetModel(path string) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.model = path
+	return p.applyLocked()
+}
+
+// SetIdentity 设置/撤销产品身份那一层（空 = 撤销）。
+func (p *PatchArgs) SetIdentity(path string) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.identity = path
+	return p.applyLocked()
+}
+
+// Current 返回当前**这次会话进程里想装上**的取值列表（诊断/测试用；不改启动面）。
+func (p *PatchArgs) Current() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.valuesLocked()
+}
+
+// valuesLocked 非空的取值，顺序固定 model → identity。
+func (p *PatchArgs) valuesLocked() []string {
+	values := make([]string, 0, 2)
+	if strings.TrimSpace(p.model) != "" {
+		values = append(values, p.model)
 	}
-	return s.delivery.SetArg(flag, value)
+	if strings.TrimSpace(p.identity) != "" {
+		values = append(values, p.identity)
+	}
+	return values
+}
+
+// applyLocked 把当前期望值写进启动面；返回是否发生变化。
+//
+// 失败时**不更新 `last`**：那样下一次同值同步会被判成 changed 并重试（"参数没装上"这件事
+// 必须能被一次重试修好，而不是被自己的幂等影子锁死）。
+func (p *PatchArgs) applyLocked() (bool, error) {
+	values := p.valuesLocked()
+	key := strings.Join(values, "\x00")
+	if key == p.last {
+		return false, nil
+	}
+	if p.delivery != nil {
+		if err := p.delivery.SetArgs(PatchFlag, values); err != nil {
+			return false, err
+		}
+	}
+	p.last = key
+	return true, nil
 }
 
 // ——— 生成（纯函数） ———

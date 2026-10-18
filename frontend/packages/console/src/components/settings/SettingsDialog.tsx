@@ -1,6 +1,7 @@
 import { Modal } from 'antd'
 import { SETTINGS_MENU, settingsSectionOf, settingsSections } from '../../console/settingsView'
 import { useMate } from '../../store'
+import { AboutPanel } from './AboutPanel'
 import { CommandPolicyPanel } from './CommandPolicyPanel'
 import { GeneralSettingsPanel } from './GeneralSettingsPanel'
 import { ModelSettingsPanel } from './ModelSettingsPanel'
@@ -64,6 +65,7 @@ export function SettingsDialog() {
           {active?.id === 'command' && <CommandPolicyPanel />}
           {active?.id === 'model' && <ModelSettingsPanel />}
           {active?.id === 'token' && <TokenSettingsPanel />}
+          {active?.id === 'about' && <AboutPanel />}
         </div>
       </div>
     </Modal>

@@ -16,14 +16,33 @@ import (
 type fakeDelivery struct {
 	env  map[string]string
 	args map[string]string
+	// multi 可重复 flag 的完整取值列表（`SetArgs` 的落点；`--patch` 用它）。
+	multi map[string][]string
 }
 
 func newFakeDelivery() *fakeDelivery {
-	return &fakeDelivery{env: map[string]string{}, args: map[string]string{}}
+	return &fakeDelivery{env: map[string]string{}, args: map[string]string{}, multi: map[string][]string{}}
 }
 
-func (f *fakeDelivery) SetEnv(key, value string) error  { f.env[key] = value; return nil }
-func (f *fakeDelivery) SetArg(flag, value string) error { f.args[flag] = value; return nil }
+func (f *fakeDelivery) SetEnv(key, value string) error {
+	f.env[key] = value
+	return nil
+}
+
+func (f *fakeDelivery) SetArg(flag, value string) error {
+	f.args[flag] = value
+	return nil
+}
+
+// SetArgs 记录**完整**取值列表（空 = 摘除）。`--patch` 的两个写者（清单/身份）都落在这里。
+func (f *fakeDelivery) SetArgs(flag string, values []string) error {
+	if len(values) == 0 {
+		delete(f.multi, flag)
+		return nil
+	}
+	f.multi[flag] = append([]string(nil), values...)
+	return nil
+}
 
 func testSet(docPath string) resource.Set {
 	return resource.Set{
@@ -88,9 +107,9 @@ func TestSyncModelsWritesOverlayAndArg(t *testing.T) {
 	if !anyContains(out.Problems, "未跑底座级校验") {
 		t.Fatalf("DshBin 为空时必须如实标注未跑底座级校验，实际 problems=%v", out.Problems)
 	}
-	// `--patch` 必须是**绝对**路径。
-	if got := d.args[PatchFlag]; got != patch || !filepath.IsAbs(got) {
-		t.Fatalf("应装载 %s=%q（绝对路径），实际 %q", PatchFlag, patch, got)
+	// `--patch` 必须是**绝对**路径，且只装模型这一层（身份那一层此刻还没交付）。
+	if got := d.multi[PatchFlag]; len(got) != 1 || got[0] != patch || !filepath.IsAbs(got[0]) {
+		t.Fatalf("应装载 %s=[%q]（绝对路径、仅模型一层），实际 %v", PatchFlag, patch, got)
 	}
 	b, err := os.ReadFile(patch)
 	if err != nil {
@@ -164,8 +183,8 @@ func TestSyncModelsEmptySetRevokes(t *testing.T) {
 	if _, err := os.Stat(patch); !os.IsNotExist(err) {
 		t.Fatalf("空集必须删除 overlay（空 patch 会让 dsh 拒启），实际 err=%v", err)
 	}
-	if v, ok := d.args[PatchFlag]; !ok || v != "" {
-		t.Fatalf("空集必须摘除 %s（值为空 = 摘掉），实际 %q", PatchFlag, v)
+	if got := d.multi[PatchFlag]; len(got) != 0 {
+		t.Fatalf("空集必须摘除 %s 的模型那一层，实际 %v", PatchFlag, got)
 	}
 	if txt := readFile(t, doc); strings.Contains(txt, "MATE_GW_") {
 		t.Fatalf("空集必须移除平台自己写过的 refs 条目，实际：\n%s", txt)

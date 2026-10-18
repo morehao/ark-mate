@@ -1,5 +1,7 @@
 package ctrsystem
 
+import productidentity "github.com/morehao/ark-mate/internal/domain/identity"
+
 // `/meta` 的内容定义（M2-3）：**谁填什么**在这里一次说清，装配点只负责把值凑齐。
 //
 //	字段            来源
@@ -11,6 +13,7 @@ package ctrsystem
 //	home            数据目录（默认 ~/.ark-mate）
 //	payloads        随包运行时载荷（M3-4 起由壳经 --payloads 交来的已解析清单；非桌面态为空数组）
 //	runtime         构建期固定的底座身份（id/name/version，v19）
+//	product         产品面事实（internal/domain/identity：产品名/版本/身份版本/定位）
 //
 // 2026-10-10 起没有 `webSource` 字段：核心只有"调用方给的目录"这一种资产来源，一个恒为 `dir`
 // 的字段不携带信息（改看 `webPath` 就知道核心读的是哪一份）。
@@ -49,6 +52,42 @@ type RuntimeInfo struct {
 	Version string `json:"version"`
 }
 
+// ProductInfo 产品面事实（`/meta` 的 `product` 段；「关于」面板只消费它）。
+//
+// **刻意没有执行引擎字段**：`/meta.runtime` 仍然存在（诊断页读它），但产品面不消费它——
+// 用户问"这个产品是什么"时，答案不该是"它跑在哪个底座上"。这条边界由前端「关于」面板的
+// 文案守卫钉住（不许出现底座名/底座词）。
+//
+// 与前端 `packages/types/src/runtime.ts` 的 `ProductInfo` **逐字段一致**（两侧手工一致，
+// 由界面验收脚本端到端覆盖）。
+type ProductInfo struct {
+	// Name 产品标识（`ark-mate`）。
+	Name string `json:"name"`
+	// DisplayName 展示名（界面标题用它；空 = 回落 Name）。
+	DisplayName string `json:"displayName"`
+	// Version 产品版本（= 核心版本；**不另造第二事实源**）。
+	Version string `json:"version"`
+	// IdentityVersion 产品身份版本（提示词文案的代数）。它只进 `/meta` 与日志，不进 prompt。
+	IdentityVersion string `json:"identityVersion"`
+	// Tagline 一句话定位（「关于」面板与产品名同屏出现）。
+	Tagline string `json:"tagline"`
+}
+
+// ProductInfoOf 组装产品面事实（`/meta.product` 与「关于」面板的唯一来源）。
+//
+// 为什么收成一个构造函数：装配层与路由默认值两处都要填它，各写一份字段列表的结果是
+// "`/meta` 有 tagline、面板没有"——而两者都不报错。核心版本由调用方给（它不在产品域的
+// 事实范围里），身份版本/产品名/定位词一律从 `internal/domain/identity` 取。
+func ProductInfoOf(coreVersion string) ProductInfo {
+	return ProductInfo{
+		Name:            productidentity.Name,
+		DisplayName:     productidentity.DisplayName,
+		Version:         coreVersion,
+		IdentityVersion: productidentity.Version,
+		Tagline:         productidentity.Tagline,
+	}
+}
+
 // MetaInfo `/v1/mate/meta` 的响应（字段契约见计划 §5 M1-7/M2-3）。
 type MetaInfo struct {
 	CoreVersion string `json:"coreVersion"`
@@ -62,6 +101,11 @@ type MetaInfo struct {
 	Payloads  []PayloadInfo `json:"payloads"`
 	// Runtime 底座身份（构建期固定）。它**总是出现**（不是可空字段）：装配层一定知道它是谁。
 	Runtime RuntimeInfo `json:"runtime"`
+	// Product 产品面事实（产品名/版本/身份版本/定位）。**总是出现**，且**不含**执行引擎字段。
+	//
+	// 与 `Runtime` 并存是刻意的：诊断面要知道"这份部署跑在哪个底座上"，而产品面要知道
+	// "用户拿到的是什么产品"。两者的消费者不同，合并成一个段会让"关于"面板顺手读到底座名。
+	Product ProductInfo `json:"product"`
 }
 
 // MetaAssets 资产层交给 `/meta` 的那部分（由 internal/router 从 AssetInfo 投影过来）。
@@ -85,6 +129,8 @@ type MetaSource struct {
 	// Runtime 底座身份（装配层或路由层从 `svcruntime.RuntimeSvc.RuntimeIdentity` 取；
 	// 两条路都没给 = 未装配，如实发空串而不是编一个）。
 	Runtime RuntimeInfo
+	// Product 产品面事实（`ProductInfoOf(version.Version)` 的产物；空 = 由路由层补）。
+	Product ProductInfo
 }
 
 // Snapshot 组装一份响应值。
@@ -101,6 +147,7 @@ func (s MetaSource) Snapshot() MetaInfo {
 		Payloads:    s.Payloads,
 		WebBuildID:  s.Assets.BuildID,
 		Runtime:     s.Runtime,
+		Product:     s.Product,
 	}
 	if m.Payloads == nil {
 		m.Payloads = []PayloadInfo{}

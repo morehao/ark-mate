@@ -30,12 +30,12 @@ func TestActiveSessionRunLifecycle(t *testing.T) {
 		t.Fatal("新句柄应为空闲且存活")
 	}
 
-	run, memo, err := as.BeginRun(context.Background())
+	run, prefix, err := as.BeginRun(context.Background())
 	if err != nil {
 		t.Fatalf("开轮: %v", err)
 	}
-	if memo != "摘要" {
-		t.Fatalf("首轮应取走 memo，got %q", memo)
+	if prefix.Memo != "摘要" {
+		t.Fatalf("首轮应取走 memo，got %q", prefix.Memo)
 	}
 	if !as.Busy() || as.RunID() != run.ID() {
 		t.Fatalf("开轮后应忙且 run_id 指向本轮: busy=%v run=%q", as.Busy(), as.RunID())
@@ -51,8 +51,8 @@ func TestActiveSessionRunLifecycle(t *testing.T) {
 		t.Fatal("收尾后应空闲且没有在途轮")
 	}
 	// memo 只消费一次：收尾后再开一轮，不应再取到它。
-	if _, memo2, err := as.BeginRun(context.Background()); err != nil || memo2 != "" {
-		t.Fatalf("memo 只应注入首轮: memo=%q err=%v", memo2, err)
+	if _, prefix2, err := as.BeginRun(context.Background()); err != nil || !prefix2.Empty() {
+		t.Fatalf("memo 只应注入首轮: prefix=%+v err=%v", prefix2, err)
 	}
 	as.FinishRun()
 

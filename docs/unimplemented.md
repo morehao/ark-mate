@@ -58,6 +58,9 @@
 | O3 | **MCP 侧的工程化缺口**（2026-10-17 复核）：连接池**已有**（`pkg/mcp/pool.go`：按 server 池化、同会话串行、有界 + 空闲回收、定义/密钥变更即作废重建）。**决定：做**，拆两批——① **全局并发限流/排队**（今天是每会话串行，N 条会话可同时打到同一个远端 server）；② **调用结果进事件流与审计表**（网关现在只在 stderr 留一行 `(server, tool, outcome, latency_ms)`）。**不做**定时/变更监听探测：触发条件未到，且常驻探测会给远端 server 增加无谓请求。同名工具冲突已关闭（C18） | 生产化 MCP 接入（并发量 / 审计需求） | `backend/pkg/mcp/pool.go` · 决策 v29 |
 | O4 | **鉴权只有单操作员令牌**：`MATE_TOKEN` 一个静态串（默认空 = 不鉴权，仅回环可访问），无用户/角色/审计、无速率限制与防爆破、无令牌轮换与过期、静态资源不鉴权、`?token=` 可能进反代日志。**决定：做**，但属**云端阶段**（roadmap B 段方向，不在本地阶段排期）——本地形态是单机单操作员，多租户不是当前产品面的缺口 | 多租户或公网暴露——**这是云端阶段的第一批工作** | `backend/internal/middleware/credential.go` · 决策 v29 |
 | O5 | **远程 runtime 无鉴权面**：`headers` 可带 token，平台不做 OAuth/mTLS；HTTP 形态的 GET 长流在建会话前会被 404（降级记进诊断）；服务端半场的会话只在内存。**决定：做**，随**云端远端接入**（B 段）一起——跨机/跨组织接入之前，本地形态不需要这层 | 跨机 / 跨组织接入 | `backend/pkg/runtime/connect.go` · 决策 v29 |
+| O6 | **身份交付不做启动期底座级校验**：身份 overlay 只有两个键（`includeHarnessIdentity` + `personaPrefix`）、目标条目在载荷 pin 版本上已验证，所以启动期只做静态校验 + golden + 版本 pin，**不跑** `--dump-config-schema`（用户已拍板：不为一次性校验吃掉启动预算）。真实底座校验只在一次性 probe/CI 里跑。代价如实记：一份被静态校验放过、而底座实际不认的 patch 会让底座**拒启**，那时只能靠诊断 + `MATE_IDENTITY_MODE=user` 回退 | 线上出现一次身份 patch 导致的拒启 → 升级为启动期校验（那时再评估"只校验身份这份候选"的秒级开销） | `backend/pkg/runtime/dsh/identity.go` · 设计 §3.7/§3.17 |
+| O7 | **不做会话级身份快照 / 用户改名**：身份是部署级常量（`identity.Version` 跟构建走），`sessions` 表**刻意没有** `identity_version` 列——原生 resume 用历史、handoff 用当前身份，两者都不需要按会话回放旧模板。用户自定义人格/昵称/onboarding（WorkBuddy 的 SOUL/BOOTSTRAP 那一路）是另一条产品线，本期只固定产品身份为 ark-mate | 要做"产品名 vs 昵称"的优先级、或需要回答"这段历史是哪一代身份生成的"时 | `backend/internal/domain/identity/identity.go` · 设计 §3.11/§3.17 |
+| O8 | **身份不做运行期热更新**：改 `MATE_IDENTITY_MODE` 或改身份文案都需要重启应用（与底座"启动期 `--patch`"的语义一致）。运行期切模式还会让同一份 transcript 里的自述随打开顺序变化——那不是产品行为。另：**不改写历史 transcript**（旧会话里的旧自述保留原样，只有新的执行上下文才重新声明） | 出现"不重启就要换身份"的真实需求（届时要先回答 transcript 里两代自述并存的读面口径） | `backend/internal/app/assembly.go` · 设计 §3.12/§3.17 |
 
 ## 3. 已关闭（CLOSED，保留追溯）
 

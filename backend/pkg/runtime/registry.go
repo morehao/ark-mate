@@ -28,8 +28,14 @@ type Registry struct {
 	nativePermissions map[string]NativePermissionAdapter
 	// modelValues 第三张可执行端口表：该底座的「模型值生成」实现（见 model_value.go）。
 	modelValues map[string]ModelValueAdapter
-	// toolFailures 各 runtime 的**工具失败签名归类**（第四张可执行端口表，见 tool_failure.go）。
+	// toolFailures 各 runtime 的**工具失败归类**（第四张可执行端口表，见 tool_failure.go）。
 	toolFailures map[string]ToolFailureClassifier
+	// identities 第五张可执行端口表：该底座的「产品身份交付」实现（见 identity.go）。
+	//
+	// 为什么单独一张表而不是塞进 `Syncer`：身份不是资源（不落库、没有清单、没有凭据），
+	// 它的输入只有一个**部署级常量**；塞进同步端口会让 `SyncModels` 多一个与模型无关的职责，
+	// 而"空清单必撤回"那条契约会莫名其妙地作用到身份上。
+	identities map[string]IdentityAdapter
 }
 
 // NewRegistry 从一组 Spec 构建注册表（按 ID 去重，后注册覆盖）。
@@ -39,6 +45,8 @@ func NewRegistry(specs ...Spec) *Registry {
 		syncers:           map[string]resource.Syncer{},
 		nativePermissions: map[string]NativePermissionAdapter{},
 		modelValues:       map[string]ModelValueAdapter{},
+		toolFailures:      map[string]ToolFailureClassifier{},
+		identities:        map[string]IdentityAdapter{},
 	}
 	for _, s := range specs {
 		r.specs[s.ID] = s
@@ -66,11 +74,34 @@ func (r *Registry) Syncer(id string) (resource.Syncer, bool) {
 	return s, ok && s != nil
 }
 
+// RegisterIdentity 登记某 runtime 的产品身份交付实现（第五张可执行端口表）。
+func (r *Registry) RegisterIdentity(id string, a IdentityAdapter) {
+	if r == nil {
+		return
+	}
+	if r.identities == nil {
+		r.identities = map[string]IdentityAdapter{}
+	}
+	r.identities[id] = a
+}
+
+// Identity 取某 runtime 的身份交付实现（`ok=false` = 该底座不承载产品身份）。
+//
+// 不可用的语义是**如实降级**：调用方据此只走首轮块（或干脆无身份），而不是假装交付过。
+// 它不报错——"这个底座没有身份面"与"交付失败了"是两件事。
+func (r *Registry) Identity(id string) (IdentityAdapter, bool) {
+	if r == nil || r.identities == nil {
+		return nil, false
+	}
+	a, ok := r.identities[id]
+	return a, ok && a != nil
+}
+
 // DeliveryFor 返回**绑定到某 runtime** 的窄交付面（`resource.Delivery`）。
 //
-// 为什么要绑定：端口接口只有两个方法（`SetEnv(key,value)` / `SetArg(flag,value)`），
+// 为什么要绑定：端口接口只有三个方法（`SetEnv(key,value)` / `SetArg(flag,value)` / `SetArgs(flag,values)`），
 // 而注册表的方法要带 runtimeID。adapter 不该知道自己在注册表里的键是什么——那是父包的事，
-// 也是「父子 import 环」这条约束的另一面（adapter 拿不到注册表，只拿到这个两方法的窗口）。
+// 也是「父子 import 环」这条约束的另一面（adapter 拿不到注册表，只拿到这个三方法的窗口）。
 func (r *Registry) DeliveryFor(runtimeID string) resource.Delivery {
 	return &runtimeDelivery{reg: r, id: runtimeID}
 }
@@ -100,29 +131,60 @@ func (d *runtimeDelivery) SetArg(flag, value string) error {
 	if d == nil || d.reg == nil {
 		return nil
 	}
+	values := []string(nil)
+	if value != "" {
+		values = []string{value}
+	}
+	return d.SetArgs(flag, values)
+}
+
+// SetArgs 覆盖**可重复**启动参数的全部取值（按 values 顺序；空 = 摘掉该 flag 的所有出现）。
+//
+// 与 `SetArg` 是同一条落点（`replaceArgs`），区别只在"这个 flag 的完整取值列表"由谁给：
+// 由一处给（`SetArgs`）时，两条独立交付面可以共用同一个 flag 而不互相吃掉。
+func (d *runtimeDelivery) SetArgs(flag string, values []string) error {
+	if d == nil || d.reg == nil {
+		return nil
+	}
 	spec, ok := d.reg.specs[d.id]
 	if !ok {
 		return fmt.Errorf("runtime %q 未注册", d.id)
 	}
-	next := replaceArg(spec.Launch.Args, flag, value)
+	next := replaceArgs(spec.Launch.Args, flag, values)
 	return d.reg.SetLaunchArgs(d.id, next)
 }
 
-// replaceArg 在 args 里按 flag 增删一个参数（value 为空 = 删掉 flag 与它的值）。
-func replaceArg(args []string, flag, value string) []string {
-	out := make([]string, 0, len(args)+2)
+// matchesFlag 判断一个 token 是不是该 flag（两种形态：`--flag` 与 `--flag=value`）。
+//
+// 为什么不能只比 `==`：旧实现只写了"值也可能在 `=` 后面"的注释，却按 `==` 匹配——于是
+// `--patch=/x` 永远不会被摘掉。那种参数在底座侧等同一条额外覆盖层，表现为"改了但像是没改"。
+func matchesFlag(token, flag string) bool {
+	return token == flag || strings.HasPrefix(token, flag+"=")
+}
+
+// replaceArgs 在 args 里按 flag 增删**一组**参数（values 为空 = 删掉该 flag 的所有出现）。
+//
+// 三条形态都认：`--flag <value>`（值紧随其后）与 `--flag=<value>`。摘除时**所有出现**都摘——
+// 只摘第一条会让第二次同步留下一条重复参数，而重复的 `--patch` 在底座侧是"叠加两层"，
+// 表现为"改了但像是没改"（旧层仍压在上面）。
+func replaceArgs(args []string, flag string, values []string) []string {
+	out := make([]string, 0, len(args)+2*len(values))
 	for i := 0; i < len(args); i++ {
-		if args[i] != flag {
+		if !matchesFlag(args[i], flag) {
 			out = append(out, args[i])
 			continue
 		}
-		// 值可能是紧随其后的一个 token（`--patch <path>`），也可能是 `--patch=<path>`。
+		// 值可能是紧随其后的一个 token（`--patch <path>`），也可能是 `--patch=<path>`（后者
+		// 自带值，不需要多看一个 token）。
 		if !strings.Contains(args[i], "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 			i++
 		}
 	}
-	if value != "" {
-		out = append(out, flag, value)
+	for _, v := range values {
+		if strings.TrimSpace(v) == "" {
+			continue
+		}
+		out = append(out, flag, v)
 	}
 	return out
 }

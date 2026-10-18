@@ -55,6 +55,12 @@ type ActiveSession struct {
 	busy bool
 	run  *Run
 	dead bool // 连接已断开，本句柄作废（下次 prompt 经 ensureSession 按需重建）
+	// identity 产品身份的首轮块（每个执行上下文一次）。
+	//
+	// 它与 memo 分开、但同一种消费语义（首个 BeginRun 取走）：身份是**产品级、稳定**的，
+	// memo 是历史摘要。分成两个字段而不是拼成一个串，是为了让"谁先谁后"成为可读的判据
+	// （identity 在前——先立产品的规矩，再讲上一段历史）。
+	identity string
 	// memo bounded handoff memo（P3 F3）：跨 runtime / 无原生 resume 兜底建的 fresh session
 	// 首条 prompt 注入（Prompt 消费后清空，仅生效一次）。
 	memo string
@@ -68,9 +74,14 @@ type HandleParams struct {
 	NativeMode  string
 	ProviderID  string
 	Memo        string
-	Client      *acl.Client
-	Session     ACP
-	Projection  runtime.Runtime
+	// Identity 产品身份的首轮块（空 = 本次执行上下文不注入；见 LifecycleDeps.Identity）。
+	//
+	// 它随**句柄**交付（而不是随会话记录）：每建一次执行上下文（新建、原生恢复、handoff、
+	// 代际迁移）都重新声明一次身份——那是刻意的"重新锚定"，代价是每个上下文多 ~100 tokens。
+	Identity   string
+	Client     *acl.Client
+	Session    ACP
+	Projection runtime.Runtime
 }
 
 // NewActiveSession 造一个句柄。字段在构造后**不可变**（除轮次/存活/memo 这些由方法改的状态），
@@ -79,7 +90,7 @@ func NewActiveSession(p HandleParams) *ActiveSession {
 	return &ActiveSession{
 		ID: p.ID, Runtime: p.Runtime, Fingerprint: p.Fingerprint, NativeMode: p.NativeMode,
 		client: p.Client, sess: p.Session, providerID: p.ProviderID, proj: p.Projection,
-		memo: p.Memo,
+		memo: p.Memo, identity: p.Identity,
 	}
 }
 
@@ -159,22 +170,55 @@ func (as *ActiveSession) CancelACP(ctx context.Context) error {
 	return as.sess.Cancel(ctx)
 }
 
-// BeginRun 开一轮：忙时返回 run_in_progress；成功时把 memo 一次性取走。
+// RunPrefix 一轮开跑时**一次性**取走的前缀（身份 → memo）。
 //
-// 返回的 memo 只给调用方拼进**首条 prompt**（事件里的 user_message 保持用户原文，不含摘要）。
-func (as *ActiveSession) BeginRun(ctx context.Context) (*Run, string, error) {
+// 它只进发给底座的 prompt 正文，**不进事件**：`session.user_message` 与 transcript 保存的是
+// 用户原文（与 memo 的既有口径一致）。把它收成一个值对象而不是两个 string 返回值，是因为
+// 拼接顺序本身是判据（identity 在前），而顺序写在调用点就会被下一次改动悄悄对调。
+type RunPrefix struct {
+	// Identity 产品身份首轮块（空 = 本上下文不注入）。
+	Identity string
+	// Memo bounded handoff memo（空 = 无历史摘要）。
+	Memo string
+}
+
+// Empty 两个面都为空（调用方可据此跳过拼接）。
+func (p RunPrefix) Empty() bool { return p.Identity == "" && p.Memo == "" }
+
+// Compose 把前缀按 **identity → memo → 用户原文** 的顺序拼成实际发给底座的文本。
+//
+// 为什么 identity 在 memo 之前：身份是产品级、稳定的；memo 是历史摘要，可能含旧的自述
+// （"我是 coding agent"）。先立产品的规矩，再讲上一段历史——顺序反了等于让历史覆盖身份。
+func (p RunPrefix) Compose(text string) string {
+	// 先挂 memo、后挂身份：两次都是"往前面插"，所以**后插的在前**。
+	// 反过来写（先插身份再插 memo）得到的实际顺序是 memo → identity → 原文，正好把判据颠倒。
+	if p.Memo != "" {
+		text = p.Memo + "\n\n" + text
+	}
+	if p.Identity != "" {
+		text = p.Identity + "\n\n" + text
+	}
+	return text
+}
+
+// BeginRun 开一轮：忙时返回 run_in_progress；成功时把身份块与 memo 一次性取走。
+//
+// 返回的前缀只给调用方拼进**首条 prompt**（事件里的 user_message 保持用户原文，不含前缀）。
+// 「一次性」是刻意的：身份每个**执行上下文**声明一次（不是每轮一次）——每轮重复会让
+// 系统提示之外又多出一份每轮 token 成本，而它想解决的问题（锚定产品身份）首轮就解决了。
+func (as *ActiveSession) BeginRun(ctx context.Context) (*Run, RunPrefix, error) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	if as.busy {
-		return nil, "", acl.NewError(acl.ClassLimit, "run_in_progress", "该会话正有 run 在执行，请等待结束", nil)
+		return nil, RunPrefix{}, acl.NewError(acl.ClassLimit, "run_in_progress", "该会话正有 run 在执行，请等待结束", nil)
 	}
-	memo := as.memo
-	as.memo = ""
+	prefix := RunPrefix{Identity: as.identity, Memo: as.memo}
+	as.identity, as.memo = "", ""
 	tctx, cancel := context.WithCancel(ctx)
 	t := &Run{id: objid.New(objid.Run), done: make(chan struct{}), cancel: cancel, ctx: tctx}
 	as.run = t
 	as.busy = true
-	return t, memo, nil
+	return t, prefix, nil
 }
 
 // FinishRun 收尾一轮：清 busy/run 并把所属连接一并交回（取消在途登记要用它）。

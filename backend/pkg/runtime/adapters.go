@@ -176,8 +176,9 @@ func dshSkillProjection() Projection {
 	}
 }
 
-// RegisterBuiltinPorts 把各 adapter 的**可执行半场**登记进 `Registry` 的三张执行表
-// （syncer + 原生权限投影 + 模型值投影）。ADR-2 的分工：`Spec` 只装纯数据，行为一律走这几张表。
+// RegisterBuiltinPorts 把各 adapter 的**可执行半场**登记进 `Registry` 的五张执行表
+// （syncer + 原生权限投影 + 模型值投影 + 工具失败归类 + 产品身份交付）。
+// ADR-2 的分工：`Spec` 只装纯数据，行为一律走这几张表。
 //
 // **只登记 `r` 里已经在册的 id**（按 id 查表，不新增 Spec）。产品装配由 `ProductRegistry` /
 // `AllBuiltinRegistry` 调用；导出它是给"自造 Spec 但要求与产品同形"的调用方（测试夹具、诊断）用的——
@@ -189,8 +190,9 @@ func dshSkillProjection() Projection {
 // ——约束⑦）。所以 syncer 的装配形态是"先 `ResolveConfigLocation` → 再把 `Path` 传进去"，
 // adapter 永远不自己拼 HOME。
 //
-// 原生权限与模型值都不需要落点（一个只产出 env、一个只做字符串投影），因此不受"隔离 env 还没应用"
-// 的时序影响；三条登记都做成幂等（同 ID 覆盖），这样装机期重跑一次不会翻倍。
+// 原生权限、模型值与工具失败归类都不需要落点（只产出 env / 只做字符串投影），因此不受"隔离 env
+// 还没应用"的时序影响；身份交付与清单同步共用同一个落点（平台独占根），所以在同一处一起登记。
+// 五条登记都做成幂等（同 ID 覆盖），这样装机期重跑一次不会翻倍。
 func RegisterBuiltinPorts(r *Registry) {
 	if r == nil {
 		return
@@ -264,7 +266,8 @@ func registerBuiltinToolFailures(r *Registry) {
 	}
 }
 
-// registerBuiltinSyncers 把各 adapter 的同步实现登记进 `Registry` 的第一张可执行端口表。
+// registerBuiltinSyncers 把各 adapter 的同步实现登记进 `Registry` 的第一张可执行端口表，
+// 同时登记**产品身份交付**（第五张表；两者共用平台独占根与同一个 `--patch` 列表）。
 //
 // 落点解析失败（声明非法 / 隔离 env 没应用）时**不登记**：此时该 runtime 的 `sync[]` 会如实报
 // `unsupported`——比登记一个会写错地方的实现好得多（写错落点等于去动用户自己的目录，隔离纪律的硬红线）。
@@ -281,11 +284,16 @@ func registerBuiltinSyncers(r *Registry) {
 		if err != nil || !declared {
 			continue
 		}
+		// `--patch` 是**可重复**参数，而模型清单与产品身份是两个独立写者。它们必须共用**同一个**
+		// `PatchArgs`：各造一个的话，后装的那一方会把另一方从启动参数里挤掉，而两边都报 applied
+		// （用户看到"清单已同步、身份已交付"，底座只拿到一层）。
+		patches := dsh.NewPatchArgs(r.DeliveryFor(id))
 		// 同上：保留 switch 形态，接新底座 = 加一个 case（而不是重写循环体）。
 		switch id {
 		case dsh.ID:
 			r.RegisterSyncer(id, dsh.NewSyncer(dsh.Options{
 				PatchPath:         loc.Path,
+				PatchArgs:         patches,
 				CredentialDocPath: loc.CredentialDocPath,
 				RefPattern:        spec.Credential.RefPattern,
 				// 底座级校验门要用的那两个参数（T3.2）：
@@ -302,6 +310,9 @@ func registerBuiltinSyncers(r *Registry) {
 				DshBin:      resolveLaunchBinary(spec.Launch.Command),
 				StagingHome: filepath.Join(loc.RootAbs, "validate-staging"),
 			}, r.DeliveryFor(id)))
+			// 身份交付与清单同步同住平台独占根（`loc.RootAbs`）：身份 patch 的文件名由 adapter 自己
+			// 决定（`mate-identity.patch.yml`），内核只知道"这个 runtime 有交付面"。
+			r.RegisterIdentity(id, dsh.NewIdentity(dsh.IdentityOptions{RootAbs: loc.RootAbs}, patches))
 		}
 	}
 }

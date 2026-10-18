@@ -22,6 +22,25 @@ export interface RuntimeInfo {
   version: string
 }
 
+/**
+ * 产品面事实（`GET /meta` 的 `product`）。
+ *
+ * **刻意没有执行引擎字段**：`runtime` 段仍然存在（诊断页读它），但产品面不消费它——
+ * 用户问"这个产品是什么"时，答案不该是"它跑在哪个底座上"。设置里的「关于」面板只读本结构。
+ */
+export interface ProductInfo {
+  /** 产品标识（`ark-mate`）。 */
+  name: string
+  /** 展示名（界面标题用它；空 = 回落 `name`）。 */
+  displayName: string
+  /** 产品版本（= 核心版本；不另造第二事实源）。 */
+  version: string
+  /** 产品身份版本（提示词文案的代数；只用于展示与排障，不进模型上下文）。 */
+  identityVersion: string
+  /** 一句话定位。 */
+  tagline: string
+}
+
 /** 随包/命中载荷的一条（`GET /meta` 的 `payloads[]`）。 */
 export interface MetaPayload {
   name: string
@@ -35,7 +54,7 @@ export interface MetaPayload {
  * `GET /meta` 的响应：这份部署的装配事实（版本 + 资产 + 数据目录 + 底座身份）。
  *
  * 字段性质分三类，读的时候要分清：
- *  - **恒有值**：`coreVersion` / `webBuildId` / `apiContract` / `home` / `runtime`；
+ *  - **恒有值**：`coreVersion` / `webBuildId` / `apiContract` / `home` / `runtime` / `product`；
  *  - **可空字段**（缺值时是显式 `null`，不是缺字段——两者会在消费方分出两条判断分支）：
  *    `webPath` / `webDigest`；
  *  - **恒为数组**（无载荷时是 `[]` 而不是 `null`）：`payloads`。
@@ -56,6 +75,13 @@ export interface MetaResp {
   payloads: MetaPayload[]
   /** 构建期固定的那个底座的身份（v19 新增）。 */
   runtime: RuntimeInfo
+  /**
+   * 产品面事实（产品名/版本/身份版本/定位）。**恒有值**，且不含执行引擎字段。
+   *
+   * 与 `runtime` 并存是刻意的：诊断面要知道"跑在哪个底座上"，而产品面要知道"用户拿到的是
+   * 什么产品"。两者的消费者不同，合并成一个段会让「关于」面板顺手读到底座名。
+   */
+  product: ProductInfo
 }
 
 /** 底座进程状态（诊断面的 `state`；与界面上"运行中/已停止"的语义色同源）。 */

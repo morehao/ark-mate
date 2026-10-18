@@ -6,10 +6,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/domain/automation"
+	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
@@ -21,8 +23,11 @@ import (
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/config"
+	pkgidentity "github.com/morehao/ark-mate/pkg/identity"
 	"github.com/morehao/ark-mate/pkg/procreg"
+	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/golib/glog"
 )
 
@@ -67,6 +72,9 @@ func (as *assembly) steps() []registry.Step {
 		{Name: "命令门禁", Phase: registry.PhasePlatform, Critical: true, Start: as.startCommandPolicy},
 		{Name: "旧定义目录导入", Phase: registry.PhasePlatform, Timeout: 10 * time.Second, Start: as.startLegacyProviderImport},
 		{Name: "凭据面", Phase: registry.PhasePlatform, Timeout: 10 * time.Second, Start: as.startCredentials},
+		// 产品身份（部署级常量）：必须在**任何连接被拉起之前**把系统提示面装进启动参数。
+		// 非 critical：交付失败只让模型的自述退回首轮块（`auto`），不该拒绝启动。
+		{Name: "产品身份", Phase: registry.PhasePlatform, Timeout: 10 * time.Second, Start: as.startIdentity},
 		{
 			Name: "持久层打开", Phase: registry.PhasePersistence, Critical: true,
 			Timeout: 30 * time.Second, Start: as.startStore, Stop: as.stopStore, StopTimeout: 10 * time.Second,
@@ -440,6 +448,47 @@ func (as *assembly) startRuntimeSettings(ctx context.Context) error {
 	// 权限/elicitation 挂起超时（默认 30min）。
 	as.a.orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	as.a.orch.SetElicitationTimeout(cfg.ElicitationTimeout)
+	return nil
+}
+
+// startIdentity 产品身份：把构建期常量按模式作用后交付给构建期选定的底座。
+//
+// 三件事的顺序是语义的：
+//  1. **先算模式**（`MATE_IDENTITY_MODE`）：它决定两个面（系统提示 / 首轮块）各要不要用；
+//  2. **先把 Spec 落到平面**：交付失败时首轮块仍要能用——`auto` 的兜底正是这么工作的；
+//  3. **再交付**：结论如实记录（失败不阻塞启动，但必须留痕，否则"模型还叫 coding agent"
+//     会变成一条无从追查的现象）。
+//
+// 为什么它不是 critical：身份只影响"模型怎么自称"，不影响任何会话能不能跑。把它做成 critical
+// 会让一次磁盘只读/权限异常把整个应用挡在门外——那是把产品面缺陷升级成可用性事故。
+func (as *assembly) startIdentity(ctx context.Context) error {
+	mode, err := pkgidentity.ParseMode(as.cfg.IdentityMode)
+	if err != nil {
+		// 配置层已校验过；走到这里说明装配绕过了校验 ⇒ fail-closed，不静默回落 auto
+		// （回落会让"我以为关掉了身份"与"其实还在交付"长得一模一样）。
+		return usageErr("serve: identity_mode: %v", err)
+	}
+	spec := mode.Apply(productidentity.Render())
+	as.a.planes.Identity.SetSpec(spec)
+	outcome, derr := as.a.planes.Identity.Deliver(ctx, spec)
+	if derr != nil || outcome.Status == resource.StatusFailed {
+		cause := ""
+		if derr != nil {
+			cause = derr.Error()
+		}
+		glog.Warnw(ctx, "serve: 产品身份的系统提示面未交付（模型的自述会退回首轮块或无名）",
+			"mode", string(mode), "status", outcome.Status, "problems", strings.Join(outcome.Problems, "；"), "err", cause)
+		if as.a.rconn != nil {
+			ae := acl.NewError(acl.ClassService, "identity_patch_failed",
+				"产品身份的系统提示面未交付（会话仍可用；模型的自述退回首轮块或无身份）："+
+					strings.Join(outcome.Problems, "；"), nil)
+			as.a.rconn.RecordRuntimeError("", ae, nil)
+		}
+		return nil
+	}
+	glog.Infow(ctx, "serve: 产品身份已装配",
+		"mode", string(mode), "status", outcome.Status,
+		"system_prompt", spec.UsesSystemPrompt(), "first_turn_block", spec.UsesUserContext())
 	return nil
 }
 
