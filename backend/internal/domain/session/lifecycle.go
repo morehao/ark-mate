@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/pkg/acl"
+	pkgidentity "github.com/morehao/ark-mate/pkg/identity"
 	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
@@ -108,6 +109,14 @@ type LifecycleDeps struct {
 	SetRuntimeState func(state string)
 	// ApplyReason 把运行时拒绝模型的错误翻成给用户看的「不可用原因」。
 	ApplyReason func(err error) string
+	// Identity 本部署的产品身份（**读取口**，不是值）。
+	//
+	// 为什么是函数而不是一份 `Spec` 值：编排器在装配早期就被造出来，而身份的最终形态要等
+	// 装配步骤算完模式（`MATE_IDENTITY_MODE`）——传值就得在"身份还没定"时先塞一个空串，
+	// 之后只能靠另一个 setter 补，于是"两个持有者"又回来了。读一次是廉价的（进程内值）。
+	//
+	// nil = 本部署不声明身份（`off`；也是绝大多数测试的形态）。
+	Identity func() pkgidentity.Spec
 }
 
 // Lifecycle 会话的启动/恢复/换句柄。
@@ -125,6 +134,7 @@ type Lifecycle struct {
 	diagnostics      DiagnosticsSink
 	setState         func(state string)
 	applyReason      func(err error) string
+	identity         func() pkgidentity.Spec
 
 	handoffMaxChars int
 }
@@ -137,8 +147,20 @@ func NewLifecycle(d LifecycleDeps) *Lifecycle {
 		providerKeyReady: d.ProviderKeyReady,
 		mcpServers:       d.McpServers, catalog: d.Catalog, diagnostics: d.Diagnostics,
 		setState: d.SetRuntimeState, applyReason: d.ApplyReason,
+		identity:        d.Identity,
 		handoffMaxChars: DefaultHandoffMaxChars,
 	}
+}
+
+// identityUserContext 本次执行上下文该注入的首轮身份块（未声明/该模式不交付 → 空串）。
+//
+// **每建一次句柄取一次**（不是每会话一次）：原生 resume 会新建句柄、代际迁移会新建句柄，
+// 那两次都是"重新锚定身份"的时机——它们也正是旧自述最容易回流的地方。
+func (l *Lifecycle) identityUserContext() string {
+	if l.identity == nil {
+		return ""
+	}
+	return l.identity().UserContext
 }
 
 // SetHandoffMaxChars 设置 bounded handoff memo 字符预算（0 = 关闭 memo 兜底）。
@@ -211,6 +233,7 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 		ID: convID, Runtime: spec.ID, Fingerprint: fingerprint, NativeMode: opt.NativeMode,
 		ProviderID: sess.ID(), Client: client, Session: sess,
 		Projection: runtime.NewProjection(spec, sess),
+		Identity:   l.identityUserContext(),
 	})
 	// 会话级模型应用（运行时派生模型面的落地）：
 	//   - 值由 `modelCfg` 给出（平台行 → adapter 现算）；
@@ -404,6 +427,8 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 		ID: rec.ID, Runtime: spec.ID, Fingerprint: fingerprint, NativeMode: rec.NativeMode,
 		ProviderID: sess.ID(), Client: client, Session: sess,
 		Projection: runtime.NewProjection(spec, sess), Memo: memo,
+		// 恢复/迁移同样重新声明身份：这条路径恰恰最容易把旧自述带回来（memo 就是历史摘要）。
+		Identity: l.identityUserContext(),
 	})
 	// 会话级模型在恢复后重新断言一次（平台记录是权威意图；原生恢复未必带回该状态）：
 	// **best-effort** —— 恢复不是用户在选模型，运行时若已不再提供该值（换了 provider/档案），

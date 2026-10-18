@@ -213,8 +213,14 @@ skill 定义的 `runtimes[]` 候选集即可引用它；与内置 id 冲突、�
 `idle_timeout` `reap_interval` `run_timeout` `handoff_max_chars` `generation_limit`
 `permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace` `token` `mcp_auto_probe`
 `asset_watch`
-`native_permission` `mcp_gateway`；另可用 `MATE_*` 原名、`-` 写成分隔符，以及少量别名
+`native_permission` `mcp_gateway` `identity_mode`；另可用 `MATE_*` 原名、`-` 写成分隔符，以及少量别名
 （`transcript`/`db_path`/`provider_dir`/`capability_dir`）。
+
+`identity_mode`（`auto` 默认 | `system` | `user` | `off`）控制**产品身份的交付面**：`auto` 把身份
+写进系统提示面（平台自有 overlay，经底座官方 `--patch` 递入）并保留首轮块兜底；`system` 只走系统提示
+（失败即无身份，不静默回退）；`user` 只走首轮块；`off` 都不交付。后两者会在启动时**主动撤回**已经装上的
+身份 overlay（删文件 + 摘启动参数）——只"不写"会让上一份继续生效，而界面上没有任何一行会说这件事。
+身份只影响模型的自述，不影响任何会话能否运行；交付失败只留一条诊断（`identity_patch_failed`），不拒绝启动。
 
 `mcp_gateway`（`auto` 默认 | `off`）控制**远程 MCP 是否经平台侧网关**：`auto` 时远程传输
 （`sse`/`http`/`streamable_http`）的 MCP 由平台代连——底座只看见一条 stdio 条目

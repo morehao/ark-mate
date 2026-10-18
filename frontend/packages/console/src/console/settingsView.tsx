@@ -13,7 +13,7 @@
  * 含义不同的手风琴。一体式弹窗还有个直接好处：从任何页面都能就地改设置，且分节之间一步切换。
  */
 import type { ReactNode } from 'react'
-import { ApiOutlined, KeyOutlined, SafetyCertificateOutlined, SettingOutlined } from '@ant-design/icons'
+import { ApiOutlined, InfoCircleOutlined, KeyOutlined, SafetyCertificateOutlined, SettingOutlined } from '@ant-design/icons'
 import { isDesktopEntry } from '../capabilityFacts'
 
 export interface SettingsSection {
@@ -44,6 +44,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'model', label: '模型', hint: '供应商 / 模型清单 / 默认模型 / 生效结论', icon: <ApiOutlined />, order: 15 },
   { id: 'command', label: '命令规则', hint: '哪些命令可直接执行 / 必须确认 / 禁止', icon: <SafetyCertificateOutlined />, order: 20 },
   { id: 'token', label: '访问令牌', hint: '后端启用 MATE_TOKEN 时必填', icon: <KeyOutlined />, order: 30 },
+  // 「关于」放在最后：它是**只读的产品事实**（产品名 / 核心版本 / 产品身份），不是配置项。
+  // 它也是"用户不依赖问模型也能知道当前产品是什么"的那条出口——所以它不能藏在诊断页里，
+  // 也不显示任何执行引擎字段（见 AboutPanel 顶部的三条口径）。
+  { id: 'about', label: '关于', hint: '产品、版本与身份', icon: <InfoCircleOutlined />, order: 90 },
 ]
 
 export function settingsSectionOf(id: string): SettingsSection | undefined {

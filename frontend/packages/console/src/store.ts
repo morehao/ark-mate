@@ -34,6 +34,7 @@ import type {
   ElicitationFormSchema,
   PermissionOption,
   ConfigOption,
+  ProductInfo,
   SessionSummary,
   ModelCatalogResp,
   ModelRef,
@@ -491,6 +492,13 @@ export interface MateState {
    */
   runtime: RuntimeInfo | null
   /**
+   * 产品面事实（`GET /meta` 的 `product{}`；null = 还没取到）。
+   *
+   * 设置里的「关于」面板**只读它**：产品名、版本、身份版本与一句话定位。刻意不读 `runtime`——
+   * 产品面不回答"跑在哪个底座上"（那件事在诊断面，用户不需要为了知道"这是什么产品"而看见执行引擎）。
+   */
+  product: ProductInfo | null
+  /**
    * 底座诊断快照（`GET /runtime/diagnostics`；null = 还没取到）。
    *
    * 它是"底座进程此刻在不在、上一次为什么没起来"的唯一读面。v19 前这份快照挂在 agent 上
@@ -668,6 +676,7 @@ export type MateStore = MateState & MateActions
 
 export const initialState: MateState = {
   runtime: null,
+  product: null,
   runtimeDiagnostics: null,
   sessions: [],
   workspaces: null,
@@ -899,7 +908,7 @@ export const useMate = create<MateStore>((set, get) => {
       // 一条失败不该把另一条也吞掉（装配事实取不到时状态条仍要能报"底座未知"）。
       try {
         const meta = await getMeta()
-        set({ runtime: meta.runtime })
+        set({ runtime: meta.runtime, product: meta.product ?? null })
       } catch (err) {
         // 取不到装配事实不该挡住界面：底座身份是**展示事实**，缺它只是少一行字，
         // 会话/能力那些面各有各的失败出路，不该被这里连坐。

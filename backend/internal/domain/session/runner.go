@@ -149,7 +149,7 @@ func (r *Runner) Prompt(ctx context.Context, sessionID, text string) (int64, err
 	if err != nil {
 		return 0, err
 	}
-	t, memo, err := as.BeginRun(ctx)
+	t, prefix, err := as.BeginRun(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -172,11 +172,14 @@ func (r *Runner) Prompt(ctx context.Context, sessionID, text string) (int64, err
 	ue := r.plane.Publish(BusUserMessage, as.ID, map[string]any{
 		"session_id": as.ID, "runtime": as.Runtime, "text": text,
 	})
-	// P3 F3 memo 注入：摘要仅作为发给 runtime 的首条 prompt 引导（user_message 事件保持用户
-	// 原文，不含摘要）。SDK v0.13.5 无 provider handoff 通道 → 文本前缀承载；provider 侧拒绝
-	// 重试语义随 SDK 能力后置，不臆造。
-	if memo != "" {
-		text = memo + "\n\n" + text
+	// 首轮前缀（P3 F3 memo + 产品身份）：只作为发给 runtime 的首条 prompt 引导——上面那条
+	// `session.user_message` 发布的是**用户原文**，前缀不进事件、不进 transcript。
+	//
+	// 顺序固定 identity → memo → 用户原文（见 `RunPrefix.Compose`）：身份是产品级、稳定的，
+	// memo 是可能含旧自述的历史摘要，先立产品的规矩再讲历史，否则历史会覆盖身份。
+	// SDK v0.13.5 无 provider handoff 通道 → 文本前缀承载；provider 侧拒绝重试语义随 SDK 能力后置。
+	if !prefix.Empty() {
+		text = prefix.Compose(text)
 	}
 	go r.executeRun(as, t, text)
 	// 看门狗：runTimeout 内未收尾则自动取消（防 runtime 吞错/挂起导致 busy 永久占用）。

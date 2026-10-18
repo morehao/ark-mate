@@ -241,6 +241,8 @@ func (a *App) metaInfo() ctrsystem.MetaSource {
 		APIContract: version.APIContract,
 		Home:        a.cfg.HomeDir,
 		Payloads:    payloads,
+		// 产品面事实（产品名/版本/身份版本/定位）：**不读** runtime 段——「关于」面板只消费它。
+		Product: ctrsystem.ProductInfoOf(version.Version),
 	}
 }
 

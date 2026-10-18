@@ -1268,7 +1268,7 @@ export function TurnView({
       {hasAgent && (
         <div className="fg-agent-head">
           <AgentAvatar />
-          <span className="fg-agent-name">
+          <span className="fg-agent-name" title="ark-mate · 个人 Agent 助手">
             ark<span className="fg-agent-dot">·</span>mate
           </span>
           <span className="fg-agent-ai">AI</span>

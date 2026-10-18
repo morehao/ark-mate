@@ -28,7 +28,8 @@ import (
 // 表里的每一个值都要能回答"它是谁的私有知识"，下线的那些也一样。
 //
 //   - `opencode.json` / `OPENCODE_CONFIG_CONTENT`：某个底座的配置文件与内联通道（历史值，见上）；
-//   - `mate-models.patch.yml`：平台给 dsh 的 overlay 文件名；
+//   - `mate-models.patch.yml` / `mate-identity.patch.yml`：平台给 dsh 的两份 overlay 文件名
+//     （清单与产品身份；两个交付面共用 `--patch`，所以它们的文件名同属适配器知识）；
 //   - `.credentials.yaml`：dsh 的原生凭据文档（凭据文档的格式与路径同属适配器知识）；
 //   - `--dump-config`：dsh 的配置转储子命令（两级校验门的一半）；
 //   - `llm-pi-ai`：dsh 的 provider 路由条目 id；
@@ -38,6 +39,7 @@ var runtimeConfigLiterals = []string{
 	"opencode.json",
 	"OPENCODE_CONFIG_CONTENT",
 	"mate-models.patch.yml",
+	"mate-identity.patch.yml",
 	".credentials.yaml",
 	"--dump-config",
 	"llm-pi-ai",

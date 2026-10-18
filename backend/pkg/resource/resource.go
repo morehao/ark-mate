@@ -260,6 +260,15 @@ type Delivery interface {
 	SetEnv(key, value string) error
 	// SetArg 覆盖某个启动参数的值；value 为空 = 摘掉该参数（例：撤销 `--patch`）。
 	SetArg(flag, value string) error
+	// SetArgs 覆盖**可重复**启动参数的全部取值（按 values 顺序）；values 为空 = 摘掉该 flag 的所有出现。
+	//
+	// 为什么必须有它：agent-mate 里有两条**互相独立**的交付面共用同一个 flag——模型清单
+	// （`mate-models.patch.yml`）与产品身份（`mate-identity.patch.yml`），都经 `--patch` 递入。
+	// 只有 `SetArg` 时两边会互相覆盖：身份后装 → 模型清单被摘掉，或反之；而两处各自都"成功"。
+	// 多值形态把"这一个 flag 的完整取值列表"变成一次原子写入，谁也不会静默吃掉谁。
+	//
+	// **只有声明了多值交付的 adapter 用它**；其余 adapter 继续用 `SetArg`（等价于一条值的它）。
+	SetArgs(flag string, values []string) error
 }
 
 // Syncer 端口：把应用层声明交付给本底座。

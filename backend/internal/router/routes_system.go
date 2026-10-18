@@ -25,6 +25,12 @@ func registerSystem(v1 *gin.RouterGroup, meta func() ctrsystem.MetaSource, asset
 				src.Runtime = ctrsystem.RuntimeInfo{ID: ri.ID, Name: ri.Name, Version: ri.Version}
 			}
 		}
+		// product 段（产品面事实）：装配层通常已经填好；最小装配/测试没填时在这里补齐——
+		// 它是**恒有值**字段（前端「关于」面板与 `/meta` 的消费者都按"总是出现"写）。
+		// 不读 runtime：产品面刻意不回答"跑在哪个底座上"。
+		if src.Product.Name == "" {
+			src.Product = ctrsystem.ProductInfoOf(version.Version)
+		}
 		// 资产相关字段由本包按**已解析的资产**补全：webPath 是那份目录的绝对路径，再由 `/meta`
 		// 投影出 webDigest（内容摘要，解析期算）。build id **现场读**——它是闸门用来发现
 		// "资产被换过"的字段，缓存住就失去意义（M2-4）。
@@ -52,5 +58,6 @@ func defaultMeta() ctrsystem.MetaSource {
 		CoreVersion: version.Version,
 		APIContract: version.APIContract,
 		Payloads:    []ctrsystem.PayloadInfo{},
+		Product:     ctrsystem.ProductInfoOf(version.Version),
 	}
 }

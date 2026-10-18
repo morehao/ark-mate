@@ -99,6 +99,25 @@ make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native /
 
 排期见 [docs/roadmap.md](docs/roadmap.md)；**未实现能力与降级清单（唯一汇总口径）**见 [docs/unimplemented.md](docs/unimplemented.md)；内置底座的适配事实见 [docs/dsh-acp-adaptation.md](docs/dsh-acp-adaptation.md)。
 
+## 产品身份（模型自称 ark-mate）
+
+界面、`/meta` 与日志里都叫 `ark-mate`，但**模型的自述**是另一件事：它来自底座的系统提示。
+这一层因此单独做成一条交付链（产品身份 = 部署级常量；文案的唯一事实源是
+`backend/internal/domain/identity`，底座侧的唯一产物由 `backend/pkg/runtime/dsh/identity.go` 生成）：
+
+- **主路径（每轮生效）**：平台写自己的 overlay `<MATE_HOME>/runtime/dsh/mate-identity.patch.yml`，
+  经底座**官方** `--patch` 覆盖系统提示的 `system-prompt` 条目（`includeHarnessIdentity: false` +
+  `personaPrefix` 写 ark-mate 身份）。**底座源码/vendor 零改动**，只动平台自己的文件与启动参数。
+- **回退（每个执行上下文一次）**：会话首个 prompt 前注入一段 `<product_identity>`（新建 / 原生恢复 /
+  handoff / 代际迁移都会重新锚定）。`session.user_message` 事件与 transcript **仍是用户原文**，前缀不进历史。
+- **开关**：`MATE_IDENTITY_MODE=auto|system|user|off`（默认 `auto` = 系统提示为主、首轮块兜底；
+  `system` 只走系统提示、失败即无身份；`user` 只走首轮块；`off` 都不交付）。切到 `user`/`off` 会
+  **主动撤回**已有的身份 patch（删文件 + 摘参数），不是"不写"。
+- **产品面**：`GET /meta` 的 `product{name,displayName,version,identityVersion,tagline}`；设置 →「关于」
+  只显示产品名、核心版本与产品身份版本，**不显示执行引擎**（诊断页/日志才有那份事实）。
+- **诚实的边界**：身份是产品人格，不是让模型撒谎——用户问「你是什么模型/运行时」时它应如实回答并
+  区分产品与执行层；首版不做用户改名/人格定制、不写历史 transcript、改身份需重启（约 150–250 tokens/请求）。
+
 ## 快速开始
 
 ### 1. 前置
