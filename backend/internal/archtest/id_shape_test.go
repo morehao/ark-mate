@@ -17,7 +17,7 @@ import (
 //
 // 两个形状永不可能相等（不变式 I1），"形状即类型"这条免费检查因此回来。
 // v17 增补：`events` 也有平台铸造身份（`evt_`），**位次（`seq`）与身份（`id`）分列两列**——
-// 换掉 `provider` 这个词是因为它在「runtime 侧的 ACP 会话」上一直是个内部术语（见 AGENTS.md 消歧表）。
+// 换掉 `provider` 这个词是因为它在「runtime 侧的 ACP 会话」上一直是个内部术语（见 `docs/agents/vocabulary.md` 消歧表）。
 
 // runtimeShellCallSite 是一处**允许调用** `WrapRuntime`/`UnwrapRuntime` 的位置许可
 // （设计 §4.5.3 的 4 包装 / 3 解包表 —— 这是"包装点唯一"这条不变式的机器判据）。

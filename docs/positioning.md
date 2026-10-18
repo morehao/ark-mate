@@ -78,4 +78,4 @@
 2. **桌面只能「多给」，多给的那半必须有服务端等价路径**。差异清单与两侧靶见
    [`acceptance-matrix.md`](./acceptance-matrix.md)。
 3. **fail-closed，且必须能被机器判定**：一条纪律要么有判据，要么被显式登记为「靠人执行」。
-   判据的集中地与取向见 [`architecture.md`](./architecture.md) §10 与 `AGENTS.md`。
+   判据的集中地与取向见 [`architecture.md`](./architecture.md) §10 与 [`docs/agents/guards.md`](./agents/guards.md)。

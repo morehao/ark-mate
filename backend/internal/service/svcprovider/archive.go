@@ -14,7 +14,7 @@ import (
 // 转发层是**过渡期的形状**：它存在的唯一理由是调用点还认 `*manager.Service`——P4b 已把
 // 那四条转发与整个 `manager` 包一起删除，调用点直连域平面。
 //
-// 现在的形状（口径见 AGENTS.md「用例层（`service/svc<领域>`）的三条硬规矩」）：
+// 现在的形状（口径见 `docs/agents/layout.md`「用例层（`service/svc<领域>`）的三条硬规矩」）：
 //
 //	ctrprovider —— 只认本包声明的 `ProviderSvc`（一个 controller 只引用一份 service 接口）
 //	     ↓ 构造

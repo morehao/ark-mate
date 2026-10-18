@@ -144,7 +144,7 @@
 >    （`@ark/*` → `@ark-mate/*`）、CLI（`mate`）、数据目录（`~/.ark-mate`）、路由前缀（`/v1/mate`）、
 >    桌面 scheme（`mate-app://`）、环境变量（`FORGE_*` → `MATE_*`）。命名隐喻由「锻造所」改为「伙伴」，
 >    与 v7① 的新定位一致；**干净切断，不保留兼容层**（执行计划见
->    `.dsh/docs/plans/2026-10-09-ark-mate-rename-plan.md`，授权口径见 `AGENTS.md`「变更授权」）。
+>    `.dsh/docs/plans/2026-10-09-ark-mate-rename-plan.md`，授权口径见 `docs/agents/authorization.md`）。
 > ③ **不变的红线**——决策 v3 的三条（能力不重造 / 数据管理是平台职责 / 单机单操作员）与 v2②「无跨
 >    agent 协作」逐条不变：本次只换叙事与名字，不扩边界。「底座能力」仍指「把控制面接自己的 runtime」，
 >    不是「再做一个通用 Agent 框架」。
@@ -250,7 +250,7 @@
 >    （表名 `sessions`、路径 `/sessions`、Go 类型 `SessionEntity`、包名 `dtosession`/`svcsession`/`ctrsession`、
 >    前端 `packages/types/src/session.ts`）。收敛判据是机器判据：`internal/archtest` 的
 >    `TestNoConversationVocabulary` 在扫描面内对 `conversation` **零命中**（白名单逐条写明理由）。
->    消歧规则见 `AGENTS.md`「一个东西一个词」一节。
+>    消歧规则见 `docs/agents/vocabulary.md`。
 > ② **主键前缀化**——平台铸造的 7 类 id 从裸 uuid 统一成 `<前缀>_<26 位 ULID>`
 >    （`ses_`/`msg_`/`run_`/`inp_`/`wsp_`/`mdl_`/`pem_`，唯一实现 = `backend/pkg/object/objid`）。
 >    ULID 的字典序 = 铸造序，因此 `messages`/`inputs` 靠 `id ASC` 兜底的两处排序语义**逐字不变**；

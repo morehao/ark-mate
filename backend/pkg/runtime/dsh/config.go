@@ -60,7 +60,7 @@ const DefaultRefPattern = "MATE_%s_API_KEY"
 // Options 构造同步实现所需的**已解析落点**与底座级校验门的开关。
 //
 // 路径由父包解析后传入（见 `pkg/runtime.ResolveConfigLocation`）：adapter 拿不到注册表，
-// 也不该自己拼 `HOME`（那正是"平台写到用户真实目录"的入口，见 AGENTS.md 的隔离纪律）。
+// 也不该自己拼 `HOME`（那正是"平台写到用户真实目录"的入口，见 `docs/agents/isolation.md` 的隔离纪律）。
 type Options struct {
 	// PatchPath overlay 的绝对落点（`--patch` 指向它）。空 = 未声明清单落点（交付面不可用）。
 	PatchPath string

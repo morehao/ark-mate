@@ -35,7 +35,7 @@ const svcImportPrefix = modulePrefix + "internal/service/svc"
 
 // transitionalServiceImporters **过渡期白名单**：今天还在 `service/svc*` 上挂着类型名的包。
 //
-// 口径（AGENTS.md 的「三条硬规矩」第 1 条）是「只有 controller 可以引用 `service/svc*`」，而
+// 口径（`docs/agents/layout.md` 的「三条硬规矩」第 1 条）是「只有 controller 可以引用 `service/svc*`」，而
 // `router.Ports` 现在仍按域持有 svc 接口——那是**尚未迁移**的域留下的形状：实现还在 `manager`，
 // controller 拿不到可构造的依赖，只能由装配点把实例递下去。这批迁移的目标正是把每一格换成
 // 「依赖事实」（store / 注册表 / 执行面），controller 在自己构造函数里造 service。

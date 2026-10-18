@@ -106,7 +106,7 @@ func ResolveConfigLocation(spec Spec) (ConfigLocationPath, bool, error) {
 // 为什么**刻意不看进程环境**（这与 `Resolve` 的投影根解析不同，是有意的偏离）：
 // 这些落点变量都是平台经隔离表注入**子进程**的值（如 dsh 的 `DSH_HOME`）。若这里回落到进程环境，
 // 那么在"隔离还没应用"的任何路径上（测试、误装配、未来的新入口），平台就会解析到**用户自己**的
-// `~/.dsh` / `~/.config/opencode` ——然后往里写配置文件。那是 AGENTS.md 明令禁止的行为，
+// `~/.dsh` / `~/.config/opencode` ——然后往里写配置文件。那是 `docs/agents/isolation.md` 明令禁止的行为，
 // 而且**静默**：只有路径看起来"正常"。
 //
 // 所以这里 **fail-closed**：解析不到就报错（提示先过 `ApplyIsolationEnv`），绝不猜、绝不回落。
