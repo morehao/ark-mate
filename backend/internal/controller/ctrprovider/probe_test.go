@@ -9,6 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/service/svcprovider"
 	goruntime "github.com/morehao/ark-mate/pkg/runtime"
 )
 
@@ -45,7 +46,7 @@ func TestNewProviderCtrBuildsBothUseCases(t *testing.T) {
 	reg := goruntime.AllBuiltinRegistry()
 	plane := provider.NewPlane(reg, credential.New(reg))
 	plane.SetProviderDir(t.TempDir())
-	ctr := NewProviderCtr(plane, &fakeProviderCatalog{})
+	ctr := NewProviderCtr(svcprovider.NewProvider(plane), svcprovider.NewProbe(plane, &fakeProviderCatalog{}))
 
 	pc, ok := ctr.(*providerCtr)
 	if !ok {

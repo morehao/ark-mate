@@ -183,7 +183,7 @@ func collectRebuildGuard(t *testing.T, root string) rebuildGuard {
 	}
 
 	// ② doctor 侧：开关 + 条件分支。
-	cmdDir := filepath.Join(root, "internal", "app", "command")
+	cmdDir := filepath.Join(root, "internal", "cliops")
 	doctorFile := parseGuardFile(t, fset, filepath.Join(cmdDir, "doctor.go"), root)
 	rebuildFile := parseGuardFile(t, fset, filepath.Join(cmdDir, "doctor_readmodels.go"), root)
 

@@ -78,19 +78,19 @@ func TestInitPinsBuildRuntime(t *testing.T) {
 	if got := runtime.SelectedRuntime(); got != "dsh" {
 		t.Fatalf("默认构建期底座应是 dsh，得到 %q", got)
 	}
-	if _, ok := a.reg.Get("dsh"); !ok {
+	if _, ok := a.Result().Runtime.Get("dsh"); !ok {
 		t.Fatal("构建期选中的 dsh 未装配")
 	}
 	for _, id := range []string{"rtx", "remote-x"} {
-		if _, ok := a.reg.Get(id); ok {
+		if _, ok := a.Result().Runtime.Get(id); ok {
 			t.Fatalf("%s 不该出现在装配结果里（构建期固定在 dsh）", id)
 		}
 	}
-	spec, _ := a.reg.Get("dsh")
+	spec, _ := a.Result().Runtime.Get("dsh")
 	if want := runtime.IsolationEnv("dsh", home); !reflect.DeepEqual(spec.Launch.Env, want) {
 		t.Fatalf("dsh 的隔离环境未接上:\n got %v\nwant %v", spec.Launch.Env, want)
 	}
-	if got := a.metaInfo().Home; got != home {
+	if got := a.Meta().Home; got != home {
 		t.Fatalf("/meta 的 home 不符: got %q want %q", got, home)
 	}
 }
@@ -104,7 +104,7 @@ func TestInitPinsSelectedRemoteRuntime(t *testing.T) {
 
 	a, _ := newIsolationRig(t)
 
-	spec, ok := a.reg.Get("remote-x")
+	spec, ok := a.Result().Runtime.Get("remote-x")
 	if !ok {
 		t.Fatal("构建期选中的 remote-x 未装配")
 	}
@@ -112,7 +112,7 @@ func TestInitPinsSelectedRemoteRuntime(t *testing.T) {
 		t.Fatalf("远程端点不应注入 env: %v", spec.Launch.Env)
 	}
 	for _, id := range []string{"rtx", "dsh"} {
-		if _, ok := a.reg.Get(id); ok {
+		if _, ok := a.Result().Runtime.Get(id); ok {
 			t.Fatalf("%s 不该出现在装配结果里（构建期固定在 remote-x）", id)
 		}
 	}

@@ -3,7 +3,6 @@ package archtest
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -178,39 +177,19 @@ func TestProviderProbeUseCaseLivesInProviderSvc(t *testing.T) {
 				"（`*provider.Plane`，装配点交下来），不 import 持久层、也不 import `manager`。", banned)
 		}
 	}
-	// 装配点：`router.Ports` 交的是**依赖事实**（域平面），不是用例实例，更不是别名。
-	routerSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))
-	// 判据对 gofmt 的**字段对齐**免疫（`ProviderPlane   *provider.Plane`）——本仓栽过一次：
-	// 定长单空格的字段判据在 gofmt 之后假绿（见 `runtimeconn_ownership_test.go` 的注释）。
-	if !regexp.MustCompile(`ProviderPlane\s+\*provider\.Plane`).MatchString(routerSrc) {
-		t.Error("`internal/router/router.go` 的 `Ports` 里找不到 `ProviderPlane *provider.Plane`：" +
-			"供应商域平面是交下去的那份**依赖事实**；它不在，控制器就造不出两个用例。")
-	}
-	// 判据同样对字段对齐免疫（`Provider        svcprovider.ProviderSvc`）：第一版写成定长
-	// 单空格，gofmt 之后当场假绿——实测反证时发现的。
-	for _, banned := range []string{
-		`ProviderArchives`,
-		`Provider\s+svcprovider\.ProviderSvc`,
-		`ProviderArchives\s+svcprovider\.Ports`,
-	} {
-		if regexp.MustCompile(banned).MatchString(routerSrc) {
-			t.Errorf("`internal/router/router.go` 里又出现了禁形 %s：那是 P4a 正文第四刀删掉的"+
-				"（装配点持用例实例/端口）。装配只交依赖事实，用例在控制器里造。", banned)
+	// v3.1：装配根造两个用例；控制器只收接口。
+	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "services.go")))
+	for _, a := range []string{"svcprovider.NewProvider(", "svcprovider.NewProbe("} {
+		if !strings.Contains(asm, a) {
+			t.Errorf("`internal/assembly/services.go` 里找不到 %q：用例必须在唯一装配根造出来"+
+				"（漏了它 ⇒ 自检端点直接 500 / 档案面 nil panic，而只测另一条的用例看不见）。", a)
 		}
 	}
-
-	// 装配：控制器必须真的把用例造出来，manager 必须交出域平面。
 	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrprovider", "provider.go")))
 	for _, a := range []string{"svcprovider.NewProbe(", "svcprovider.NewProvider("} {
-		if !strings.Contains(ctr, a) {
-			t.Errorf("`internal/controller/ctrprovider/provider.go` 里找不到 %q：用例没人造 ⇒ "+
-				"自检端点直接 500 / 档案面 nil panic（而只测另一条的用例看不见）。", a)
+		if strings.Contains(ctr, a) {
+			t.Errorf("`ctrprovider` 里又出现 %q：用例实例只在装配根造，控制器只收接口。", a)
 		}
-	}
-	// 控制器拿到的必须是**域的类型**（依赖事实），不是 `service/*` 的实例。
-	if !strings.Contains(ctr, "*provider.Plane") {
-		t.Error("`internal/controller/ctrprovider/provider.go` 的构造函数里找不到 `*provider.Plane`：" +
-			"控制器该从域平面自己造两个用例，而不是等装配点把实例递进来。")
 	}
 	// P4b：`ProviderPlane()` 删了；事实出口是 `Planes()` + `registry.Planes.Providers`。
 	svcSrc := stripLineComments(readFileOrFatal(t, filepath.Join(mgr, "service.go")))
@@ -248,9 +227,9 @@ func TestProviderProbeUseCaseLivesInProviderSvc(t *testing.T) {
 	// 调用点那一头：装配与 gateway 必须**直连域平面**（少了这条，删掉转发只会把调用点改成
 	// 另一个名字的转发，判据形同虚设）。
 	for _, c := range []struct{ file, want, why string }{
-		{"internal/app/app.go", "a.planes.Providers.LoadProviderDefinitionsFromStore(",
+		{"internal/assembly/meta.go", "as.planes.Providers.LoadProviderDefinitionsFromStore(",
 			"serve 的装载入口"},
-		{"internal/app/assembly.go", "as.a.planes.Providers.SetProviderDir(",
+		{"internal/assembly/assembly.go", "as.planes.Providers.SetProviderDir(",
 			"serve 的目录入口"},
 		{"internal/gateway/source.go", "s.planes.Providers.ReloadProviderDefinitionsFromStore(",
 			"gateway 的换代重载"},

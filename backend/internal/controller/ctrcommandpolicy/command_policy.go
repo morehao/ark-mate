@@ -5,7 +5,6 @@ package ctrcommandpolicy
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/dto/dtocommandpolicy"
 	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
 	"github.com/morehao/ark-mate/pkg/code"
@@ -22,10 +21,9 @@ var _ CommandPolicyCtr = (*commandPolicyCtr)(nil)
 
 type commandPolicyCtr struct{ svc svccommandpolicy.PolicySvc }
 
-// NewCommandPolicyCtr 造控制器：`path` 是规则文件（空 = 未配置），`apply` 是执行面的
-// 立即生效回调（装配点交给 manager）。
-func NewCommandPolicyCtr(path string, apply func([]interaction.PrefixRule)) CommandPolicyCtr {
-	return &commandPolicyCtr{svc: svccommandpolicy.New(path, apply)}
+// NewCommandPolicyCtr 构造控制器（只收**已构造的用例**；规则文件路径与立即生效回调在装配根交给用例）。
+func NewCommandPolicyCtr(svc svccommandpolicy.PolicySvc) CommandPolicyCtr {
+	return &commandPolicyCtr{svc: svc}
 }
 
 // Get 当前规则（`GET /command-policy`）。

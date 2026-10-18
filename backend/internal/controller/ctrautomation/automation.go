@@ -10,7 +10,6 @@ package ctrautomation
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/pkg/code"
@@ -35,9 +34,9 @@ type automationCtr struct {
 	svc svcautomation.AutomationSvc
 }
 
-// NewAutomationCtr 构造 AutomationCtr：拿自动化域平面这个**依赖事实**，用例在这里造。
-func NewAutomationCtr(plane *automation.Plane) AutomationCtr {
-	return &automationCtr{svc: svcautomation.New(plane)}
+// NewAutomationCtr 构造 AutomationCtr（只收**已构造的用例**）。
+func NewAutomationCtr(svc svcautomation.AutomationSvc) AutomationCtr {
+	return &automationCtr{svc: svc}
 }
 
 // ListAutomations 列出全部 automation（含定义装载失败的那些，带 `error` 字段）。

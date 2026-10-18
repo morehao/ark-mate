@@ -5,12 +5,11 @@
 package ctrworkspace
 
 import (
-	"context"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/domain/workspace"
+	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
@@ -40,26 +39,14 @@ var _ WorkspaceCtr = (*workspaceCtr)(nil)
 // 存在理由：Web 端没有 Electron 那样的原生目录选择器（AionUi 用 webFsPicker 替代），
 // 因此"选一个目录"必须由控制面提供枚举能力；且**只列目录**——工作空间必须是目录
 // （见 workspace.ValidateWorkspace 的三条件）。
-// DirectoryPicker 宿主目录选择器**窄端口**（控制器侧声明）。
-//
-// 生产传装配好的那个 `*workspace.Picker`（自持 bindAddr 事实）；测试传替身——"选定 / 取消"
-// 两个结局要真的 spawn 宿主命令（osascript/zenity），路由级跑不出来。端口不放 svc 层：域里的
-// `Picker` 已经把判定、配方、错误码全做完（P2a-16），用例层再包一层就只是一行转发（第十一刀口径）。
-type DirectoryPicker interface {
-	PickDirectoryHost(ctx context.Context) (string, bool, error)
-}
-
 type workspaceCtr struct {
-	// picker 宿主目录选择器（事实来自 `router.Ports.Picker`）。
-	picker DirectoryPicker
-	// plane 工作空间域平面：**读模型**（登记表列表）直接经它取——域里已经折好 DTO，
-	// 用例层再包一层就只是一行转发（第十一刀口径）。
-	plane *workspace.Plane
+	// svc 工作空间面用例（登记表 / 派生视图 / 设置面 / 宿主目录选择器）。
+	svc svcworkspace.WorkspaceSvc
 }
 
-// NewWorkspaceCtr 构造 WorkspaceCtr。
-func NewWorkspaceCtr(picker DirectoryPicker, plane *workspace.Plane) WorkspaceCtr {
-	return &workspaceCtr{picker: picker, plane: plane}
+// NewWorkspaceCtr 构造 WorkspaceCtr（只收**已构造的用例**）。
+func NewWorkspaceCtr(svc svcworkspace.WorkspaceSvc) WorkspaceCtr {
+	return &workspaceCtr{svc: svc}
 }
 
 // Browse 列出某绝对路径下的子目录（query `path` 缺省 = 首个工作区根，未配白名单时 = 服务进程家目录；
@@ -71,7 +58,7 @@ func NewWorkspaceCtr(picker DirectoryPicker, plane *workspace.Plane) WorkspaceCt
 func (h *workspaceCtr) Browse(c *gin.Context) {
 	path := strings.TrimSpace(c.Query("path"))
 	includeHidden := c.Query("hidden") == "true"
-	resp, err := h.plane.BrowseWorkspace(path, includeHidden)
+	resp, err := h.svc.Browse(path, includeHidden)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -90,7 +77,7 @@ func (h *workspaceCtr) CreateDir(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.plane.CreateWorkspaceDir(req.Parent, req.Name)
+	resp, err := h.svc.CreateDir(req.Parent, req.Name)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -108,7 +95,7 @@ func (h *workspaceCtr) CreateDir(c *gin.Context) {
 // 前端本不该在"能力声明说没有"时打到这里（`/capabilities` 的 `native-dialog` 就是干这个的），
 // 所以这个错是"声明与实际不一致"的兜底——按可判定错误回，而不是笼统 50000。
 func (h *workspaceCtr) PickDirectory(c *gin.Context) {
-	path, cancelled, err := h.picker.PickDirectoryHost(c.Request.Context())
+	path, cancelled, err := h.svc.PickDirectory(c.Request.Context())
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -130,7 +117,7 @@ func (h *workspaceCtr) Recent(c *gin.Context) {
 		}
 		limit = n
 	}
-	list, err := h.plane.RecentWorkspaces(limit)
+	list, err := h.svc.Recent(limit)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -145,7 +132,7 @@ func (h *workspaceCtr) Recent(c *gin.Context) {
 func (h *workspaceCtr) Files(c *gin.Context) {
 	path := strings.TrimSpace(c.Query("path"))
 	includeHidden := c.Query("hidden") == "true"
-	resp, err := h.plane.ListWorkspaceFiles(path, includeHidden)
+	resp, err := h.svc.Files(path, includeHidden)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -160,7 +147,7 @@ func (h *workspaceCtr) Files(c *gin.Context) {
 func (h *workspaceCtr) Settings(c *gin.Context) {
 	// 快照从**域平面**取（P4a 正文第十九刀）：域里已折好 DTO（含 configured / prefer_roots /
 	// source / locked_by），用例层再包一层就只是一行转发；它没有错误出口（读自己的状态）。
-	gincontext.Success(c, h.plane.Settings())
+	gincontext.Success(c, h.svc.Settings())
 }
 
 // UpdateSettings 全量替换工作区根白名单（落盘 + 对新会话立即生效）。
@@ -173,7 +160,7 @@ func (h *workspaceCtr) UpdateSettings(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.plane.UpdateSettings(req.Roots)
+	resp, err := h.svc.UpdateSettings(req.Roots)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -191,7 +178,7 @@ func (h *workspaceCtr) UpdateSettings(c *gin.Context) {
 // 无参数：顺序与集合都由库里的登记决定，没有可调项——少一个参数就少一种"面板看到的和库里
 // 不一致"的可能（与 Libraries 同一条理由）。
 func (h *workspaceCtr) List(c *gin.Context) {
-	resp, err := h.plane.WorkspaceRegistry()
+	resp, err := h.svc.Registry()
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -210,7 +197,7 @@ func (h *workspaceCtr) Create(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.plane.CreateWorkspace(req)
+	resp, err := h.svc.Create(req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -228,7 +215,7 @@ func (h *workspaceCtr) Rename(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.plane.PatchWorkspace(c.Param("id"), req)
+	resp, err := h.svc.Patch(c.Param("id"), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -241,7 +228,7 @@ func (h *workspaceCtr) Rename(c *gin.Context) {
 // **不删会话、不删目录**：目录与文件一概不动，其会话读面归到默认工作空间。响应回
 // released_sessions 让界面能把这件事说清楚（"这 12 个会话回到了默认工作空间"）。
 func (h *workspaceCtr) Delete(c *gin.Context) {
-	resp, err := h.plane.DeleteRegisteredWorkspace(c.Param("id"))
+	resp, err := h.svc.Delete(c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -259,7 +246,7 @@ func (h *workspaceCtr) Move(c *gin.Context) {
 			return
 		}
 	}
-	resp, err := h.plane.MoveRegisteredWorkspace(c.Param("id"), req.BeforeID)
+	resp, err := h.svc.Move(c.Param("id"), req.BeforeID)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

@@ -20,7 +20,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/router"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/config"
@@ -63,22 +62,7 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *sessionruntime.Service) {
 	svc.Planes().Credentials.SetLayered(creds)
 	svc.Planes().Providers.SetProviderDir(filepath.Join(home, "providers"))
 	assets, _ := router.ResolveAssets("")
-	engine := router.New(router.Ports{
-		Session:        svc,
-		WorkspacePlane: svc.Planes().Workspaces,
-		Picker:         svc.Planes().Picker,
-		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
-		Runtime:       runtimeconn.NewPlaneFor(nil),
-		ProviderPlane: svc.Planes().Providers, ProviderCatalog: svc.Planes().Providers,
-		Model: sessionruntime.NewModelFace(svc),
-		// Library 读模型（P4a 正文第六刀）：域/包事实由装配点交下来，用例实例在控制器里造。
-		Capabilities: svc.Planes().Capabilities, SkillPlane: svc.Planes().Skills, Registry: reg,
-		McpSecrets: svc.Planes().McpSecrets, McpGatewayEnabled: svc.Planes().McpGatewayEnabled,
-		// 会话域平面与总线是**依赖事实**（P4a 正文第十/十一刀）：历史读面与读模型都从它们取数。
-		// 这条夹具用真 `sessionruntime.Service`（memory 模式），所以平面是**装配好的那个**——
-		// 归属展示端口也由它接好；自造一个空平面会在 `ListSessions` 补齐展示字段时 nil panic。
-		SessionPlane: svc.SessionPlane(), Bus: bus,
-	}, bus, router.Options{Web: assets})
+	engine := router.New(testRouterDeps(t, testRouterOpts{web: assets, service: svc, registry: reg, bus: bus}))
 	return engine, svc
 }
 
@@ -382,7 +366,7 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 }
 
 // newAuthEngine 装配带凭据表的引擎（M1-1）。
-func newAuthEngine(creds *credential.Set) *gin.Engine {
+func newAuthEngine(t *testing.T, creds *credential.Set) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	reg := runtime.AllBuiltinRegistry()
 	// 生产装配**总是**在构造 Service 之前注入隔离 env（`app.go`）；测试也照做，
@@ -390,20 +374,7 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
 	bus := eventbus.New()
 	svc := sessionruntime.NewService(reg, bus)
-	engine := router.New(router.Ports{
-		Session:        svc,
-		WorkspacePlane: svc.Planes().Workspaces,
-		Picker:         svc.Planes().Picker,
-		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
-		Runtime:       runtimeconn.NewPlaneFor(nil),
-		ProviderPlane: svc.Planes().Providers, ProviderCatalog: svc.Planes().Providers,
-		Model: sessionruntime.NewModelFace(svc),
-		// Library 读模型（P4a 正文第六刀）：域/包事实由装配点交下来，用例实例在控制器里造。
-		Capabilities: svc.Planes().Capabilities, SkillPlane: svc.Planes().Skills, Registry: reg,
-		McpSecrets: svc.Planes().McpSecrets, McpGatewayEnabled: svc.Planes().McpGatewayEnabled,
-		// 同 `newEngineWithService`：会话域平面与总线是依赖事实（读模型/历史读面从它们取数）。
-		SessionPlane: svc.SessionPlane(), Bus: bus,
-	}, bus, router.Options{Credentials: creds})
+	engine := router.New(testRouterDeps(t, testRouterOpts{creds: creds, service: svc, registry: reg, bus: bus}))
 	return engine
 }
 
@@ -423,7 +394,7 @@ func standaloneCreds(token string) *credential.Set {
 // 事件流的鉴权也搬到了带内（首帧 attach），所以 WS 路由本身不再由 REST 中间件把守。
 func TestAuthToken(t *testing.T) {
 	const token = "s3cret-token"
-	eng := newAuthEngine(standaloneCreds(token))
+	eng := newAuthEngine(t, standaloneCreds(token))
 
 	type probe struct {
 		name       string
@@ -481,7 +452,7 @@ func TestAuthToken(t *testing.T) {
 func TestCredentialsScopeSeparation(t *testing.T) {
 	const rest = "rest-token-2f9c"
 	const stream = "stream-token-71ab"
-	eng := newAuthEngine(credential.MustNew(
+	eng := newAuthEngine(t, credential.MustNew(
 		credential.Pair{Token: rest, Scopes: credential.ScopeREST},
 		credential.Pair{Token: stream, Scopes: credential.ScopeStream},
 	))
@@ -519,7 +490,7 @@ func TestCredentialsScopeSeparation(t *testing.T) {
 // `v1` 而不是 rest 组（或将来有人重构分组），那条端点会**静默变成免鉴权**——斜杠前面少一层
 // 就差一个 401，普通用例根本发现不了。这里直接枚举真实注册表逐条打一遍。
 func TestCredentialCoversAllRestRoutes(t *testing.T) {
-	eng := newAuthEngine(credential.MustNew(
+	eng := newAuthEngine(t, credential.MustNew(
 		credential.Pair{Token: "rest-token-2f9c", Scopes: credential.ScopeREST},
 	))
 	exempt := map[string]bool{
@@ -548,7 +519,7 @@ func TestCredentialCoversAllRestRoutes(t *testing.T) {
 
 // TestAuthTokenDisabled 未配置凭据 = 历史行为（不鉴权）。
 func TestAuthTokenDisabled(t *testing.T) {
-	eng := newAuthEngine(nil)
+	eng := newAuthEngine(t, nil)
 	req := httptest.NewRequest("GET", "/v1/mate/sessions", nil)
 	w := httptest.NewRecorder()
 	eng.ServeHTTP(w, req)

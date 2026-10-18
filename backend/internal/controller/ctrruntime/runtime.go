@@ -30,8 +30,8 @@ type runtimeCtr struct {
 //
 // `plane` 由装配侧交出（`*runtimeconn.Plane`）——`app` 交的是执行面而不是用例，因为
 // `app` 与 `router` 都不该 import `service/svc*`（`internal/archtest/svc_layer_consumer_test.go`）。
-func NewRuntimeCtr(plane svcruntime.Plane) RuntimeCtr {
-	return &runtimeCtr{svc: svcruntime.New(plane)}
+func NewRuntimeCtr(svc svcruntime.RuntimeSvc) RuntimeCtr {
+	return &runtimeCtr{svc: svc}
 }
 
 // Diagnostics 返回底座诊断快照（只读：不主动拨号，只读此刻已建立的事实）。

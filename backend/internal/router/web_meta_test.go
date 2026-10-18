@@ -15,8 +15,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/service/svcsystem"
 )
 
 // recomputeDigest 是 `webDigest` 的**独立第二实现**（照 meta.go/web.go 注释里的算法重写一遍）：
@@ -70,7 +70,7 @@ func TestMetaWebDigestIsRecomputable(t *testing.T) {
 	}
 
 	// 端到端：经真实装配取 /meta，三件套必须与解析结果一致。
-	eng := router.New(router.Ports{}, nil, router.Options{Web: assets})
+	eng := router.New(testRouterDeps(t, testRouterOpts{web: assets}))
 	w := httptest.NewRecorder()
 	eng.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/mate/meta", nil))
 	if w.Code != 200 {
@@ -107,12 +107,12 @@ func TestMetaHomeAndContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng := router.New(router.Ports{}, nil, router.Options{
-		Web: assets,
-		Meta: func() ctrsystem.MetaSource {
-			return ctrsystem.MetaSource{CoreVersion: "9.9.9", APIContract: "v1", Home: "/tmp/mate-home"}
+	eng := router.New(testRouterDeps(t, testRouterOpts{
+		web: assets,
+		metaSource: func() svcsystem.MetaSource {
+			return svcsystem.MetaSource{CoreVersion: "9.9.9", APIContract: "v1", Home: "/tmp/mate-home"}
 		},
-	})
+	}))
 	w := httptest.NewRecorder()
 	eng.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/mate/meta", nil))
 	body := w.Body.String()

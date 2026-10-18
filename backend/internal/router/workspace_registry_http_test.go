@@ -10,7 +10,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/router"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -274,19 +273,7 @@ func TestWorkspaceRegistryMemoryModeIsReadOnlyHTTP(t *testing.T) {
 // doRaw 走真实路由表发一次请求，返回原始信封字节。
 func doRaw(t *testing.T, svc *sessionruntime.Service, method, path, body string) []byte {
 	t.Helper()
-	engine := router.New(router.Ports{
-		Session:        svc,
-		WorkspacePlane: svc.Planes().Workspaces, Picker: svc.Planes().Picker,
-		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
-		Runtime:       runtimeconn.NewPlaneFor(nil),
-		ProviderPlane: svc.Planes().Providers, ProviderCatalog: svc.Planes().Providers,
-		Model: sessionruntime.NewModelFace(svc),
-		// Library 读模型（P4a 正文第六刀）：这条夹具只走工作空间路由，但**不埋 nil**——
-		// 读模型拿的是真注册表与真能力面（注册表另起一份：本文件不断言读模型）。
-		Capabilities: svc.Planes().Capabilities, SkillPlane: svc.Planes().Skills,
-		Registry: runtime.AllBuiltinRegistry(), McpSecrets: svc.Planes().McpSecrets,
-		McpGatewayEnabled: svc.Planes().McpGatewayEnabled,
-	}, eventbus.New())
+	engine := router.New(testRouterDeps(t, testRouterOpts{service: svc, bus: eventbus.New()}))
 	var rd *strings.Reader
 	rd = strings.NewReader(body)
 	req := httptest.NewRequest(method, path, rd)

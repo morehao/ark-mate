@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/dto/dtosystem"
 	"github.com/morehao/ark-mate/pkg/config"
 )
 
@@ -104,7 +104,7 @@ func getMetaPayloadsRaw(t *testing.T, a *App) string {
 // 这里断言的是**逐字**的 JSON：字段顺序（name/version/digest/source）与内容都固定，
 // entry（壳的包内路径）**不得**出现——`/meta` 的契约里没有它。
 func TestMetaPayloadsWiredThroughAssembly(t *testing.T) {
-	payloads := []ctrsystem.PayloadInfo{
+	payloads := []dtosystem.PayloadInfo{
 		{Name: "dsh", Version: "0.1.7-rc.2", Digest: "sha256:aa", Source: "bundled"},
 		{Name: "rtx", Version: "1.2.3", Digest: "sha256:bb", Source: "runtime-env"},
 		{Name: "dsh-user", Version: "", Digest: "", Source: "path"},
@@ -118,7 +118,7 @@ func TestMetaPayloadsWiredThroughAssembly(t *testing.T) {
 		t.Errorf("payloads 未原样透出：\n got %s\nwant %s", got, want)
 	}
 	// 直接读装配值也必须一致（免得只有 HTTP 路径对）。
-	if got := a.metaInfo().Payloads; len(got) != len(payloads) {
+	if got := a.Meta().Payloads; len(got) != len(payloads) {
 		t.Fatalf("metaInfo().Payloads 条数不符: %+v", got)
 	}
 }
@@ -132,13 +132,13 @@ func TestMetaPayloadsEmptyIsArrayNotNil(t *testing.T) {
 		t.Errorf("未传载荷时 payloads 应为 []，实际 %s", got)
 	}
 	// 形状约定的第二道：壳/前端也可能直接读装配值，那里同样不该是 nil。
-	if got := a.metaInfo().Payloads; got == nil {
+	if got := a.Meta().Payloads; got == nil {
 		t.Error("metaInfo().Payloads 为 nil：直接消费装配值的调用方会看到 null 语义")
 	} else if len(got) != 0 {
 		t.Errorf("未传载荷时应为空清单，实际 %+v", got)
 	}
 	// 反向哨兵：确认这不是"整份 /meta 都空着"——版本字段是真值，只有载荷清单为空。
-	if got := a.metaInfo().CoreVersion; got == "" {
+	if got := a.Meta().CoreVersion; got == "" {
 		t.Error("/meta 的 coreVersion 为空：说明响应本身没接上，本用例的空数组断言就没有意义")
 	}
 }

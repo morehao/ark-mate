@@ -13,7 +13,6 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/pkg/code"
@@ -33,7 +32,7 @@ func originEngine(t *testing.T, policy *middleware.OriginPolicy) *gin.Engine {
 	if err != nil {
 		t.Fatalf("ResolveAssets: %v", err)
 	}
-	return router.New(router.Ports{}, eventbus.New(), router.Options{Origin: policy, Web: assets})
+	return router.New(testRouterDeps(t, testRouterOpts{origin: policy, web: assets}))
 }
 
 // TestRouterOriginPolicyMountScope 白名单只覆盖 `/v1/mate` 组：API 被判定，静态入口不判定。

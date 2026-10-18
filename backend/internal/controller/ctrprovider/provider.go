@@ -6,7 +6,6 @@ package ctrprovider
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/service/svcprovider"
 	"github.com/morehao/ark-mate/pkg/code"
@@ -39,16 +38,9 @@ type providerCtr struct {
 	probe   svcprovider.Prober
 }
 
-// NewProviderCtr 构造 ProviderCtr：交出**依赖事实**，拿回一个控制器。
-//
-// 两个入参都没有"顺便给一份 Service"的口子：供应商域平面（`*provider.Plane`，域的类型，
-// 不是 `service/*` 的类型）+ 模型目录的读面（`svcprovider.Catalog`，自检要的那一个方法）。
-// 用例实例（`Provider`/`Probe`）在这里建成——`app`/`router` 都不得引用 `service/svc*`。
-func NewProviderCtr(plane *provider.Plane, catalog svcprovider.Catalog) ProviderCtr {
-	return &providerCtr{
-		actions: svcprovider.NewProvider(plane),
-		probe:   svcprovider.NewProbe(plane, catalog),
-	}
+// NewProviderCtr 构造 ProviderCtr（只收**已构造的两个用例**：档案动作与自检）。
+func NewProviderCtr(actions svcprovider.ProviderSvc, probe svcprovider.Prober) ProviderCtr {
+	return &providerCtr{actions: actions, probe: probe}
 }
 
 // List 列出供应商（密钥绝不读回，只给 has_key）。

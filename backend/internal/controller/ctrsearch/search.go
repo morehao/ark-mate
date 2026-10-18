@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/service/svcsearch"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -25,12 +25,12 @@ var _ SearchCtr = (*searchCtr)(nil)
 
 // SearchHandler 处理跨会话消息检索（M3 ②：全局消息搜索 + 锚点跳转）。
 type searchCtr struct {
-	plane *session.Plane
+	svc svcsearch.SearchSvc
 }
 
-// NewSearchCtr 构造 SearchCtr（拿到的是**会话域平面**这一份依赖事实）。
-func NewSearchCtr(plane *session.Plane) SearchCtr {
-	return &searchCtr{plane: plane}
+// NewSearchCtr 构造 SearchCtr（只收**已构造的用例**；v3.1 §3.2.1：控制器不 import domain）。
+func NewSearchCtr(svc svcsearch.SearchSvc) SearchCtr {
+	return &searchCtr{svc: svc}
 }
 
 // Messages 消息级检索：GET /search/messages?q=&limit=（q 必填；limit 默认 30、上限 200）。
@@ -49,7 +49,7 @@ func (h *searchCtr) Messages(c *gin.Context) {
 		}
 		limit = n
 	}
-	resp, err := h.plane.SearchMessages(c.Request.Context(), q, limit)
+	resp, err := h.svc.Messages(c.Request.Context(), q, limit)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

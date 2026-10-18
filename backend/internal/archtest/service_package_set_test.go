@@ -43,9 +43,12 @@ import (
 // `svcruntime` → 红。
 
 // servicePackageSet ADR-2 定下的用例层包集（**恰好**这些）。
+// v3.1 §3.2.1 起控制器不得 import `internal/domain`，于是"纯读模型"也必须有一层窄端口：
+// `svcsearch` / `svcusage` 从会话域取出，`svcworkspace` 从工作空间域取出，`svcstream` 包住事件总线。
 var servicePackageSet = []string{
 	"svcautomation", "svccapability", "svccommandpolicy", "svclibrary", "svcmodel",
-	"svcprovider", "svcruntime", "svcsession", "svcsystem",
+	"svcprovider", "svcruntime", "svcsearch", "svcsession", "svcstream", "svcsystem",
+	"svcusage", "svcworkspace",
 }
 
 // serviceRuntimeMethods `svcruntime` 的 **API 端口**（`RuntimeSvc`）允许声明的方法（多一个都红）。
@@ -80,8 +83,7 @@ func TestServicePackageSetFollowsADR2(t *testing.T) {
 	sort.Strings(want)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("`internal/service` 的包集与 ADR-2 不一致：\n  实际 %v\n  期望 %v\n"+
-			"三个单方法面（`svcsearch`/`svcusage`/`svcexport`）已并入 `svcsession`/`svcsystem`；"+
-			"`svcprovider`/`svcmodel` 已从 `svcruntime` 拆出。\n"+
+			"包集是 v3.1 的用例层清单（控制器只认它；新增/删除包时必须同步本表与 `assembly/services.go`）。\n"+
 			"旧名回潮的后果是**两个包表达同一件事**，装配点给哪个都能编译过——"+
 			"而\"收实现\"就没法判断该落到哪一边。", got, want)
 	}

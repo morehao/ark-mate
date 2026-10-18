@@ -109,14 +109,14 @@ func TestCredentialFaceHasNoTransitionalForwards(t *testing.T) {
 			"再写一层转发，而那正是本刀删掉的东西。")
 	}
 	// P5a 起凭据面由 `registry.Planes.Credentials` 拥有，装配动作在 app/assembly.go。
-	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
+	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "assembly.go")))
 	for _, want := range []string{
-		"a.planes.Credentials.SetCwd(",
-		"a.planes.Credentials.SetLayered(",
-		"a.planes.Credentials.SyncCredentialMirror(",
+		"as.planes.Credentials.SetCwd(",
+		"as.planes.Credentials.SetLayered(",
+		"as.planes.Credentials.SyncCredentialMirror(",
 	} {
 		if !strings.Contains(appSrc, want) {
-			t.Errorf("`internal/app/assembly.go` 里找不到 `%s`：装配期的凭据登记必须直连事实出口。"+
+			t.Errorf("`internal/assembly/assembly.go` 里找不到 `%s`：装配期的凭据登记必须直连事实出口。"+
 				"漏了会让这一条链悄悄退回某个中间层。", want)
 		}
 	}

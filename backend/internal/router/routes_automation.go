@@ -24,8 +24,7 @@ import (
 //     手动不等于可以并发），但**不推进认领游标**（不该静默吃掉当晚的排期）。
 //
 // `preview` 必须在 `:id` 之前注册，否则会被当成一个 id。
-func registerAutomation(v1 *gin.RouterGroup, ports Ports) {
-	ctr := ctrautomation.NewAutomationCtr(ports.AutomationPlane)
+func registerAutomation(v1 *gin.RouterGroup, ctr ctrautomation.AutomationCtr) {
 	v1.GET("/automations", ctr.ListAutomations)
 	v1.POST("/automations", ctr.CreateAutomation)
 	v1.POST("/automations/preview", ctr.PreviewAutomation)

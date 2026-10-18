@@ -15,10 +15,7 @@ import (
 //
 // 供应商密钥只写不读回；`/models` 是**应用层清单**（不带底座维度），
 // `/models/catalog` 是**运行时派生**的目录（ACP session config options）——平台不内置模型清单。
-func registerRuntime(v1 *gin.RouterGroup, ports Ports) {
-	provider := ctrprovider.NewProviderCtr(ports.ProviderPlane, ports.ProviderCatalog)
-	model := ctrmodel.NewModelCtr(ports.Model, ports.Store, ports.ProviderPlane, ports.ModelHost)
-	rt := ctrruntime.NewRuntimeCtr(ports.Runtime)
+func registerRuntime(v1 *gin.RouterGroup, provider ctrprovider.ProviderCtr, model ctrmodel.ModelCtr, rt ctrruntime.RuntimeCtr) {
 
 	v1.GET("/providers", provider.List)
 	v1.POST("/providers", provider.Create)

@@ -44,7 +44,7 @@ func TestUsageSummaryRemovedAgentKeyRejected(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
 	deps := stubDeps(t, &stubSvc{})
-	deps.SessionPlane.SetStore(st)
+	deps.plane.SetStore(st)
 	r := newRestEngine(deps)
 	env, code := do(t, r, "GET", "/v1/mate/usage/summary?agent_id=agent-stub&group_by=day", "")
 	if code != 200 || env.Code != 40001 || !strings.Contains(env.Msg, "agent_selection_removed") {

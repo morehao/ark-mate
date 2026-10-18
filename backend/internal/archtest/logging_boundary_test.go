@@ -10,7 +10,7 @@ import (
 // 本文件是「日志出口唯一」的静态守卫。
 //
 // 2026-10-10 起本仓的日志出口是 golib/glog（zap driver）：装配根注册 driver
-// （`cmd/mate` 的匿名引入）+ `internal/app/command/logging.go` 定配置，业务代码一律
+// （`cmd/mate` 的匿名引入）+ `internal/cliops/logging.go` 定配置，业务代码一律
 // 调 `glog.Xxxw(ctx, ...)`。唯一允许出现 `log/slog` 的地方是 `pkg/logging`——
 // 它把"只认 *slog.Logger"的第三方库（当前是 ACP SDK 的 SetLogger）桥进 glog。
 //

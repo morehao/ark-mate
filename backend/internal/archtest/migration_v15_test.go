@@ -282,7 +282,7 @@ func TestDestructiveRebuildIsOneShot(t *testing.T) {
 
 	// ⑥ `mate migrate` 不得出现 `--rebuild` 之类的入口（C1）。
 	cmdSrc := stripLineComments(readFileOrFatal(t,
-		filepath.Join(backendRoot(t), "internal", "app", "command", "migrate.go")))
+		filepath.Join(backendRoot(t), "internal", "cliops", "migrate.go")))
 	flagRe := regexp.MustCompile(`fs\.(?:String|Bool|Int)\(\s*"([^"]+)"`)
 	var flags []string
 	for _, m := range flagRe.FindAllStringSubmatch(cmdSrc, -1) {

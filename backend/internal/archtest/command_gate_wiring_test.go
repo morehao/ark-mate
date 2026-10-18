@@ -60,7 +60,7 @@ func TestCommandGateIsWiredToPermissionDecision(t *testing.T) {
 	}
 
 	// ③ 装配：加载 + 交给 service（P5a 起这条动作在 app/assembly.go 的声明表里）
-	app := stripGoComments(read("internal/app/assembly.go"))
+	app := stripGoComments(read("internal/assembly/assembly.go"))
 	if !strings.Contains(app, "LoadCommandPolicyFile(") {
 		t.Errorf("assembly.go 没有 LoadCommandPolicyFile(——规则文件写了但没人读")
 	}

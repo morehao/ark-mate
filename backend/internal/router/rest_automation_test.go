@@ -51,7 +51,7 @@ func autoPlane(t *testing.T) *automation.Plane {
 // autoEngine 只把 automation 那一格换成**真平面**（其余端口仍由 stubSvc 提供）。
 func autoEngine(t *testing.T, plane *automation.Plane) *gin.Engine {
 	deps := stubDeps(t, &stubSvc{})
-	deps.AutomationPlane = plane
+	deps.automationPlane = plane
 	return newRestEngine(deps)
 }
 

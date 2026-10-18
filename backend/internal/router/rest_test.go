@@ -14,6 +14,21 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/assembly"
+	"github.com/morehao/ark-mate/internal/service/svcautomation"
+	"github.com/morehao/ark-mate/internal/service/svccapability"
+	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
+	"github.com/morehao/ark-mate/internal/service/svclibrary"
+	"github.com/morehao/ark-mate/internal/service/svcmodel"
+	"github.com/morehao/ark-mate/internal/service/svcprovider"
+	"github.com/morehao/ark-mate/internal/service/svcruntime"
+	"github.com/morehao/ark-mate/internal/service/svcsearch"
+	"github.com/morehao/ark-mate/internal/service/svcsession"
+	"github.com/morehao/ark-mate/internal/service/svcstream"
+	"github.com/morehao/ark-mate/internal/service/svcsystem"
+	"github.com/morehao/ark-mate/internal/service/svcusage"
+	"github.com/morehao/ark-mate/internal/service/svcworkspace"
+	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
@@ -31,6 +46,7 @@ import (
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -494,53 +510,98 @@ func sessionPlaneForRouter() *session.Plane {
 	return pl
 }
 
-// stubDeps 用同一个测试替身填满全部领域端口（stubSvc 实现了全部端口）。
+// restFixture 路由级测试的**事实集合**：控制器在 `newRestEngine` 里按当前字段现造。
 //
-// 能力三表与技能投影是**真对象**但**空**：Library 读模型要能跑（nil 平面会判空集），
-// 而本包只验路由与信封——读模型的过滤/可达性判据在用例层自己的测试里。
-func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
+// 为什么不在 `stubDeps` 里就构造好控制器：多个用例先改事实（挂 store / 换 automation 平面 /
+// 注册会话）再起引擎；提前构造会让"改了事实、控制器还拿旧的那份"变成静默漂移。
+type restFixture struct {
+	svc             *stubSvc
+	plane           *session.Plane
+	bus             *eventbus.Bus
+	store           *store.Store
+	caps            *capability.Registry
+	providerPlane   *provider.Plane
+	automationPlane *automation.Plane
+	execution       *runtimeconn.Plane
+	registry        *goruntime.Registry
+	mcpPlane        *mcp.Plane
+	mcpSecrets      *mcp.Secrets
+	skills          *skill.Plane
+	wsPlane         *workspace.Plane
+}
+
+// stubDeps 用同一个测试替身填满会话/交互/模型那一批用例端口；域平面用**真对象**。
+//
+// v3.1 起控制器只收已构造的用例接口：这里保留"事实集合"，`newRestEngine` 用与生产同一条
+// `assembly.Services.BuildControllers` 现造控制器——路由测试既保留替身行为断言，又不与真实装配漂移。
+func stubDeps(t *testing.T, svc *stubSvc) restFixture {
 	t.Helper()
 	reg := goruntime.AllBuiltinRegistry()
 	caps := capability.NewRegistry()
 	skills := skill.NewPlane(caps, nil)
-	return router.Ports{
-		Session: svc, InteractionSource: svc, InteractionDelivery: svc, SessionMetaDeps: svc,
-		// 执行面（`Identity`/`Diagnostics`）是**真对象**：用例实例由 ctrruntime 造，而底座诊断
-		// 读的就是执行面此刻的事实——替身化它等于把"诊断读的是哪份进程态"也替身掉。
-		Runtime: runtimeconn.NewPlaneFor(goruntime.AllBuiltinRegistry()),
-		// 供应商域平面是**真对象**（P4a 正文第四刀起，档案与自检两个用例都由 ctrprovider
-		// 从这里造）：档案是域的状态，替身化它等于把"用例读的是哪份状态"也替身掉。
-		// 目录落到临时目录，且不带密钥——本包只验路由与信封，密钥/载体行为在用例层自己的测试里。
-		ProviderPlane:   testProviderPlane(t),
-		ProviderCatalog: svc, Model: svc,
-		// Library 读模型（P4a 正文第六刀起）：域/包事实是**真对象**，用例实例由 ctrlibrary 造
-		// ——替身化事实等于把"读模型读的是哪份注册表"也替身掉。
-		Capabilities: caps, SkillPlane: skills, Registry: goruntime.AllBuiltinRegistry(),
-		McpSecrets: mcp.NewSecrets(credential.New(reg)), McpGatewayEnabled: func() bool { return true },
-		// MCP 平面（P4a 正文第十四刀起）：连接器目录读模型的事实来源之一（探测态与工具计数）。
-		McpPlane: mcp.NewPlane(caps, nil, mcp.NewSecrets(credential.New(reg))),
-		// 宿主选择器平面（P4a 正文第十七刀）：控制器的窄端口消费它。
-		Picker: workspace.NewPicker(),
-		// 工作空间域平面（P4a 正文第十八刀）：登记表读模型的事实来源。
-		WorkspacePlane: workspace.NewPlane(),
-		// 导出（P4a 正文第八刀）：会话域平面与事件总线是**真对象**（事实来源由 ctrexport 造），
-		// sqlite 载体那份 Store 由具体用例按需注入（`stubDeps(...).Store = st`）。
-		// 会话域平面是**真对象**（P4a 正文第十/十一刀起，历史读面与读模型都由它提供）。
-		// 归属展示是**端口**（`SetWorkspaceDisplay`，工作空间登记仍在 manager）：这里给一个
-		// 最小实现——路由测试断言的是信封与过滤结果，不是展示名解析（那是工作空间域的事）。
-		SessionPlane: sessionPlaneForRouter(),
-		// 事件总线同理：导出（第八刀）与历史读面（第十刀）都读它。
-		Bus: eventbus.New(),
+	mcpSecrets := mcp.NewSecrets(credential.New(reg))
+	return restFixture{
+		svc:             svc,
+		plane:           sessionPlaneForRouter(),
+		bus:             eventbus.New(),
+		caps:            caps,
+		providerPlane:   testProviderPlane(t),
+		automationPlane: automation.NewPlane(),
+		execution:       runtimeconn.NewPlaneFor(reg),
+		registry:        reg,
+		mcpPlane:        mcp.NewPlane(caps, nil, mcpSecrets),
+		mcpSecrets:      mcpSecrets,
+		skills:          skills,
+		wsPlane:         workspace.NewPlane(),
 	}
 }
 
+// services 按**当前**事实构造用例集合。
+func (f restFixture) services() assembly.Services {
+	bus := f.bus
+	if bus == nil {
+		bus = eventbus.New()
+	}
+	return assembly.Services{
+		Session:            f.svc,
+		SessionHistory:     svcsession.NewHistory(f.store, f.plane, bus),
+		SessionDetail:      svcsession.NewDetail(f.plane, f.svc),
+		SessionInteraction: svcsession.NewInteraction(f.plane, f.svc),
+		SessionQueue:       svcsession.NewQueue(f.plane, f.svc),
+		SessionMeta:        svcsession.NewMeta(f.plane, f.svc),
+		SessionRead:        svcsession.NewRead(f.plane),
+		Search:             svcsearch.New(f.plane),
+		Usage:              svcusage.New(f.plane),
+		Export:             svcsystem.New(svcsystem.NewSource(f.store, f.plane, bus)),
+
+		Workspace:     svcworkspace.New(f.wsPlane, workspace.NewPicker()),
+		CommandPolicy: svccommandpolicy.New("", func([]interaction.PrefixRule) {}),
+
+		Runtime:       svcruntime.New(f.execution),
+		Model:         f.svc,
+		ModelDeclared: svcmodel.NewDeclared(f.store, f.providerPlane, nil),
+		Provider:      svcprovider.NewProvider(f.providerPlane),
+		ProviderProbe: svcprovider.NewProbe(f.providerPlane, f.svc),
+
+		Capability: svccapability.NewCapability(f.skills, f.mcpPlane,
+			svccapability.NewTools(f.caps), svccapability.NewServers(f.caps, f.mcpPlane, f.mcpSecrets)),
+		Automation: svcautomation.New(f.automationPlane),
+		Library:    svclibrary.NewLibrary(f.caps, f.skills, f.registry, f.mcpSecrets, func() bool { return true }),
+
+		Meta:         svcsystem.NewMeta(func() svcsystem.MetaSource { return svcsystem.MetaSource{} }),
+		Capabilities: svcsystem.NewCapabilities(),
+		Stream:       svcstream.New(bus),
+	}
+}
+
+// deps 现造 router.Deps（控制器在此时按当前事实构造）。
+func (f restFixture) deps() router.Deps {
+	return router.Deps{Controllers: f.services().BuildControllers(nil, nil, nil)}
+}
+
 // newRestEngine 走**真实路由装配**（router.New）：路径、鉴权与中间件形态都与线上一致。
-//
-// 历史版本在这里手工镜像了一份路由表（g.GET("/agents", ...) 逐条重敲），
-// 结果是路由一旦改名测试仍全绿——镜像表与真实表各说各话。现在直接构造真实引擎，
-// 路由表只有 router 包这一个事实源。
-func newRestEngine(deps router.Ports) *gin.Engine {
-	return router.New(deps, eventbus.New())
+func newRestEngine(deps restFixture) *gin.Engine {
+	return router.New(deps.deps())
 }
 
 // TestWorkspaceSettingsCtrPassThrough 设置面的控制器职责：GET 透出快照、PUT 把 roots 原样交给
@@ -776,7 +837,7 @@ func do(t *testing.T, r *gin.Engine, method, path, body string) (*envelope, int)
 // 所以夹具是"注册进平面的会话"而不是替身返回值。
 func TestListEndpoints(t *testing.T) {
 	deps := stubDeps(t, &stubSvc{})
-	deps.SessionPlane.RegisterSession(&session.SessionRec{
+	deps.plane.RegisterSession(&session.SessionRec{
 		ID: "s1", RuntimeID: "rtx", Status: "completed", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	})
 	r := newRestEngine(deps)
@@ -802,11 +863,11 @@ func TestListEndpoints(t *testing.T) {
 func TestListSessionsWorkspaceQuery(t *testing.T) {
 	deps := stubDeps(t, &stubSvc{})
 	now := time.Now()
-	deps.SessionPlane.RegisterSession(&session.SessionRec{
+	deps.plane.RegisterSession(&session.SessionRec{
 		ID: "c-1", RuntimeID: "rtx", Status: "completed", Cwd: "/work/alpha",
 		WorkspaceTemporary: true, CreatedAt: now, UpdatedAt: now,
 	})
-	deps.SessionPlane.RegisterSession(&session.SessionRec{
+	deps.plane.RegisterSession(&session.SessionRec{
 		ID: "c-2", RuntimeID: "rtx", Status: "completed", Cwd: "/work/beta",
 		CreatedAt: now.Add(-time.Minute), UpdatedAt: now,
 	})
@@ -861,7 +922,7 @@ func TestUsageSummaryRoute(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
 	deps := stubDeps(t, &stubSvc{})
-	deps.SessionPlane.SetStore(st)
+	deps.plane.SetStore(st)
 	r := newRestEngine(deps)
 
 	env, code := do(t, r, "GET", "/v1/mate/usage/summary?from=2026-09-01&to=2026-09-09&group_by=day", "")
@@ -975,7 +1036,7 @@ func TestCreateSessionServiceError(t *testing.T) {
 func TestUpdateSessionRoute(t *testing.T) {
 	svc := &stubSvc{}
 	deps := stubDeps(t, svc)
-	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1", Title: "旧标题", RuntimeID: "rtx"})
+	deps.plane.RegisterSession(&session.SessionRec{ID: "s1", Title: "旧标题", RuntimeID: "rtx"})
 	r := newRestEngine(deps)
 
 	// ① 子集更新：只改出现过的键，回读投影与域里的记录一致。
@@ -990,7 +1051,7 @@ func TestUpdateSessionRoute(t *testing.T) {
 	if resp.ID != "s1" || resp.Title != "新标题" || !resp.Pinned {
 		t.Fatalf("回执不符: %+v", resp)
 	}
-	rec := deps.SessionPlane.Rec("s1")
+	rec := deps.plane.Rec("s1")
 	if rec == nil || rec.Title != "新标题" || !rec.Pinned || rec.Archived {
 		t.Fatalf("域里的记录不符（`archived` 没传就不该动）: %+v", rec)
 	}
@@ -1005,7 +1066,7 @@ func TestUpdateSessionRoute(t *testing.T) {
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("改模型信封不符: http=%d env=%+v", code, env)
 	}
-	if rec := deps.SessionPlane.Rec("s1"); rec == nil || rec.ModelID != mdlID {
+	if rec := deps.plane.Rec("s1"); rec == nil || rec.ModelID != mdlID {
 		t.Fatalf("会话记录里应是平台行身份: %+v", rec)
 	}
 	if svc.resolvedModelRuntime != "rtx" || svc.resolvedModelID != mdlID {
@@ -1034,13 +1095,13 @@ func TestPromptAndCancel(t *testing.T) {
 	svc := &stubSvc{}
 	deps := stubDeps(t, svc)
 	// 排队输入的**读模型**归域平面（P4a 正文第十一刀），所以夹具要有真会话与真入队。
-	deps.SessionPlane.RegisterSession(&session.SessionRec{
+	deps.plane.RegisterSession(&session.SessionRec{
 		ID: "s1", RuntimeID: "rtx", Status: "completed", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	})
 	// 事件出口也要接上：撤下排队输入时那一条 `session.input_cancelled` 要能被观察
 	// （域平面未注入总线时事件静默丢弃，只在纯列表/单测场景出现）。
-	deps.SessionPlane.SetBus(deps.Bus)
-	queued, err := deps.SessionPlane.EnqueueInput(context.Background(), "s1", "排队一", "after_run", "t1", 3)
+	deps.plane.SetBus(deps.bus)
+	queued, err := deps.plane.EnqueueInput(context.Background(), "s1", "排队一", "after_run", "t1", 3)
 	if err != nil {
 		t.Fatalf("入队夹具失败: %v", err)
 	}
@@ -1105,7 +1166,7 @@ func TestPromptAndCancel(t *testing.T) {
 		t.Fatalf("撤下排队输入不符: env=%+v", env)
 	}
 	cancelled := false
-	for _, ev := range deps.Bus.EventsAfter("s1", -1) {
+	for _, ev := range deps.bus.EventsAfter("s1", -1) {
 		if ev.Type != session.BusInputCancelled {
 			continue
 		}
@@ -1115,7 +1176,7 @@ func TestPromptAndCancel(t *testing.T) {
 	}
 	if !cancelled {
 		t.Fatalf("撤下排队输入必须发 session.input_cancelled（input_id=%s）: %+v",
-			queued.ID, deps.Bus.EventsAfter("s1", -1))
+			queued.ID, deps.bus.EventsAfter("s1", -1))
 	}
 	// 幂等：再撤同一条 → 200 + deleted:false（不存在/已投递/已作废一律 false，不报错）。
 	env, _ = do(t, r, "DELETE", "/v1/mate/sessions/s1/inputs/"+queued.ID, "")
@@ -1145,9 +1206,9 @@ func TestPromptAndCancel(t *testing.T) {
 // 所以改成**真平面 + 真事件**：播 3 条（seq 0/1/2）再看**回来的窗口本身**。
 func TestHistoryParamParsing(t *testing.T) {
 	deps := stubDeps(t, &stubSvc{})
-	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	deps.plane.RegisterSession(&session.SessionRec{ID: "s1"})
 	for seq := int64(0); seq < 3; seq++ {
-		deps.Bus.PublishAt("s1", seq, fmt.Sprintf("evt_%d", seq), "session.message", 1, map[string]any{"n": seq})
+		deps.bus.PublishAt("s1", seq, fmt.Sprintf("evt_%d", seq), "session.message", 1, map[string]any{"n": seq})
 	}
 	r := newRestEngine(deps)
 
@@ -1187,9 +1248,9 @@ func TestHistoryParamParsing(t *testing.T) {
 	}
 	// 上限 1000：造 1001 条，恰好回 1000 + has_more。
 	depsBig := stubDeps(t, &stubSvc{})
-	depsBig.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	depsBig.plane.RegisterSession(&session.SessionRec{ID: "s1"})
 	for seq := int64(0); seq < 1001; seq++ {
-		depsBig.Bus.PublishAt("s1", seq, fmt.Sprintf("evt_%d", seq), "session.message", 1, nil)
+		depsBig.bus.PublishAt("s1", seq, fmt.Sprintf("evt_%d", seq), "session.message", 1, nil)
 	}
 	big := histPageOf(t, newRestEngine(depsBig), "/v1/mate/sessions/s1/history?limit=999999")
 	if len(big.seqs()) != 1000 || !big.HasMore || big.LastSeq != 999 {
@@ -1269,7 +1330,7 @@ func TestPermissionMemoriesList(t *testing.T) {
 		interaction.NewMemoryItem("s1", "删除文件", "execute", "reject", time.Date(2026, 1, 3, 3, 4, 5, 0, time.UTC)),
 	}}
 	deps := stubDeps(t, svc)
-	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	deps.plane.RegisterSession(&session.SessionRec{ID: "s1"})
 	r := newRestEngine(deps)
 	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/permissions/memories", "")
 	if env.Code != 0 {
@@ -1302,7 +1363,7 @@ func TestPendingPermissionsList(t *testing.T) {
 		TimeoutAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 	}}}
 	deps := stubDeps(t, svc)
-	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	deps.plane.RegisterSession(&session.SessionRec{ID: "s1"})
 	r := newRestEngine(deps)
 	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/permissions", "")
 	if env.Code != 0 {
@@ -1324,7 +1385,7 @@ func TestPendingPermissionsList(t *testing.T) {
 func TestRevokeMemory(t *testing.T) {
 	svc := &stubSvc{}
 	deps := stubDeps(t, svc)
-	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	deps.plane.RegisterSession(&session.SessionRec{ID: "s1"})
 	r := newRestEngine(deps)
 
 	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/permissions/memories/revoke",
@@ -1353,7 +1414,7 @@ func TestElicitationList(t *testing.T) {
 		Schema: map[string]any{"type": "object", "properties": map[string]any{"env": map[string]any{"type": "string", "enum": []any{"dev", "prod"}}}},
 	}}}
 	deps := stubDeps(t, svc)
-	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	deps.plane.RegisterSession(&session.SessionRec{ID: "s1"})
 	r := newRestEngine(deps)
 	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/elicitations", "")
 	if env.Code != 0 {
@@ -1385,7 +1446,7 @@ func TestElicitationList(t *testing.T) {
 func TestResolveElicitation(t *testing.T) {
 	svc := &stubSvc{}
 	deps := stubDeps(t, svc)
-	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	deps.plane.RegisterSession(&session.SessionRec{ID: "s1"})
 	r := newRestEngine(deps)
 	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/elicitation",
 		`{"elicitation_id":"el-abc","action":"accept","content":{"env":"prod"}}`)
@@ -1467,21 +1528,21 @@ func TestCapabilityRoutes(t *testing.T) {
 	deps := stubDeps(t, svc)
 	// MCP 注册表读模型也归用例层（P4a 正文第十四刀）：夹具同样是"真注册表里注册过的 server"，
 	// 探测态/工具计数/悬空引用体检三个源都来自真对象（条目本体之外的都是空态）。
-	if err := deps.Capabilities.RegisterMcpServer(&capability.McpServer{
+	if err := deps.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "fs", Transport: "stdio", Command: "/usr/bin/npx",
 	}); err != nil {
 		t.Fatalf("注册 mcp 夹具失败: %v", err)
 	}
 	// 技能目录的**读模型**由域平面直接提供（P4a 正文第十三刀）：夹具是"真注册表里注册过的
 	// 技能"，投影（warnings / scope / enabled）由 `skill.Plane` 做——用例层不再包一层转发。
-	if err := deps.Capabilities.RegisterSkill(&capability.Skill{
+	if err := deps.caps.RegisterSkill(&capability.Skill{
 		ID: "plan", Name: "plan", Description: "先规划再动手", Body: "# 先规划",
 	}); err != nil {
 		t.Fatalf("注册技能夹具失败: %v", err)
 	}
 	// 工具目录的**读模型**归用例层（P4a 正文第十二刀）：夹具是"真注册表里注册过的工具"，
 	// 而不是替身返回值——这样断言的才是"投影真的把注册表里那条读出来了"。
-	deps.Capabilities.RegisterTool(&capability.Tool{
+	deps.caps.RegisterTool(&capability.Tool{
 		Name: "web_search", Source: "builtin", Description: "联网搜索", McpServer: "fs",
 	})
 	r := newRestEngine(deps)
@@ -1576,7 +1637,7 @@ func TestProbeMcpServerRoute(t *testing.T) {
 	}
 
 	// 注册一个连不上的 http server：域会真的发请求，连接失败码（50201）原样透出。
-	if err := deps.Capabilities.RegisterMcpServer(&capability.McpServer{
+	if err := deps.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "down", Name: "down", Transport: capability.TransportHTTP, URL: "http://127.0.0.1:1/mcp",
 	}); err != nil {
 		t.Fatal(err)
@@ -1654,8 +1715,8 @@ func TestMessageSearchRoute(t *testing.T) {
 	deps := stubDeps(t, &stubSvc{})
 	// 顺序：先启用回扫（装载面会顺手把这条会话登记进来），再登记一次把标题/运行时补上
 	// （检索返回的 `title`/`runtime_id` 取自会话记录，不取自文件）。
-	deps.SessionPlane.SetTranscriptDir(dir)
-	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: sesID, Title: "部署", RuntimeID: "rtx"})
+	deps.plane.SetTranscriptDir(dir)
+	deps.plane.RegisterSession(&session.SessionRec{ID: sesID, Title: "部署", RuntimeID: "rtx"})
 	r := newRestEngine(deps)
 
 	env, http := do(t, r, "GET", "/v1/mate/search/messages?q=502", "")
@@ -1742,7 +1803,7 @@ func TestExportRoute(t *testing.T) {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	deps := stubDeps(t, &stubSvc{})
-	deps.Store = st
+	deps.store = st
 	r := newRestEngine(deps)
 
 	env, http := do(t, r, "POST", "/v1/mate/sessions/export", `{"ids":["c-1"],"format":"markdown"}`)
@@ -1867,9 +1928,9 @@ func fakeMcpServer(t *testing.T) string {
 
 // registerFakeMcp 在**装配点交下去的那份能力注册表**上注册一个指向假服务器的 http server
 // （plane 与读模型用的是同一张表，见 stubDeps）。
-func registerFakeMcp(t *testing.T, deps router.Ports, id, url string) {
+func registerFakeMcp(t *testing.T, deps restFixture, id, url string) {
 	t.Helper()
-	if err := deps.Capabilities.RegisterMcpServer(&capability.McpServer{
+	if err := deps.caps.RegisterMcpServer(&capability.McpServer{
 		ID: id, Name: id, Transport: capability.TransportHTTP, URL: url,
 	}); err != nil {
 		t.Fatal(err)
@@ -2012,7 +2073,7 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 func TestResolvePermissionReceiptShape(t *testing.T) {
 	svc := &stubSvc{}
 	deps := stubDeps(t, svc)
-	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	deps.plane.RegisterSession(&session.SessionRec{ID: "s1"})
 	r := newRestEngine(deps)
 	env, code := do(t, r, "POST", "/v1/mate/sessions/s1/permission",
 		`{"call_id":"tc1","option_id":"allow_always","always":true,"allowed":true}`)

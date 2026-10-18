@@ -2,7 +2,6 @@ package archtest
 
 import (
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -187,10 +186,6 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 
 	// ③ 装配：用例在**控制器**里造（`app` 与 `router` 都不许引用 `service/svc*`）。
 	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrmodel", "models.go")))
-	if !strings.Contains(ctr, "svcmodel.NewDeclared(") {
-		t.Error("internal/controller/ctrmodel/models.go 里没有 `svcmodel.NewDeclared(`：写面用例必须在控制器里造出来" +
-			"（装配只能自上而下；`app`/`router` 不许引用 `service/svc*`）。")
-	}
 	for _, m := range []string{"h.declared.CreateModel(", "h.declared.UpdateModel(", "h.declared.DeleteModel("} {
 		if !strings.Contains(ctr, m) {
 			t.Errorf("internal/controller/ctrmodel/models.go 里找不到 %q：三个写动作必须走用例出口。", m)
@@ -203,29 +198,16 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 		}
 	}
 
-	ports := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))
-	// 字段判据必须是**容空白**的正则：gofmt 会把字段对齐成多空格，定长空格的判据会在
-	// 格式化之后静默变绿（§3.1.53 与 P3a-2 第一刀各踩过一次）。
-	for _, want := range []*regexp.Regexp{
-		regexp.MustCompile(`Store\s+\*store\.Store`),
-		regexp.MustCompile(`ModelHost\s+svcmodel\.Host`),
-	} {
-		if !want.MatchString(ports) {
-			t.Errorf("internal/router/router.go 的 `Ports` 里找不到 %s：装配点交出的是**依赖事实**"+
-				"（store）与**过渡端口**（Host），用例实例由控制器自己造。", want)
+	// v3.1：装配根造用例；控制器只收接口。
+	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "services.go")))
+	for _, want := range []string{"svcmodel.NewDeclared(", "Model:         modelFace"} {
+		if !strings.Contains(asm, want) {
+			t.Errorf("`internal/assembly/services.go` 里找不到 %q：模型写面的依赖事实与用例实例都在装配根交出。", want)
 		}
 	}
-	if regexp.MustCompile(`DeclaredSvc`).MatchString(ports) {
-		t.Error("internal/router/router.go 里出现 `DeclaredSvc`：`Ports` 只放依赖事实与窄端口，" +
-			"用例接口不外溢到装配点（P4a 那批端口别名已判定为骚操作，别再开这条路）。")
-	}
-
-	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
-	for _, want := range []string{"ModelHost: sessionruntime.NewModelFace(as.a.svc)", "Store: as.st"} {
-		if !strings.Contains(app, want) {
-			t.Errorf("internal/app/assembly.go 里找不到 %q：模型写面的依赖事实与过渡端口都在装配点交出"+
-				"（漏了 Store ⇒ 所有模式都报「清单不可用」；漏了 ModelHost ⇒ 端口没人满足，编译期就该拦）。", want)
-		}
+	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrmodel", "models.go")))
+	if strings.Contains(ctrSrc, "svcmodel.NewDeclared(") {
+		t.Error("`ctrmodel` 里又出现 `svcmodel.NewDeclared(`：用例实例只在装配根造，控制器只收接口。")
 	}
 }
 

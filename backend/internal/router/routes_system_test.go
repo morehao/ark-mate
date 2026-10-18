@@ -75,7 +75,7 @@ func TestSystemRoutes(t *testing.T) {
 // 交叉引用：`TestCredentialCoversAllRestRoutes` 会枚举**所有**注册路由逐条断言这一点；
 // 这条则把"这两个端点确实注册了、且确实被拦"钉在同一个用例里，改动分组时更好定位。
 func TestSystemRoutesRequireCredentials(t *testing.T) {
-	eng := newAuthEngine(standaloneCreds("secret-token"))
+	eng := newAuthEngine(t, standaloneCreds("secret-token"))
 	for _, path := range []string{"/v1/mate/meta", "/v1/mate/capabilities"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()

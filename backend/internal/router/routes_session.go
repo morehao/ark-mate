@@ -12,11 +12,7 @@ import (
 //
 // 静态路径（/sessions/search、/sessions/export）先于 :id 注册，
 // 保持与历史路由表一致的解析优先级。
-func registerSession(v1 *gin.RouterGroup, ports Ports) {
-	ctr := ctrsession.NewSessionCtr(ports.Session, ports.Store, ports.SessionPlane, ports.Bus,
-		ports.InteractionSource, ports.InteractionDelivery, ports.SessionMetaDeps)
-	search := ctrsearch.NewSearchCtr(ports.SessionPlane)
-	export := ctrexport.NewExportCtr(ports.Store, ports.SessionPlane, ports.Bus)
+func registerSession(v1 *gin.RouterGroup, ctr ctrsession.SessionCtr, search ctrsearch.SearchCtr, export ctrexport.ExportCtr) {
 
 	v1.GET("/sessions", ctr.List)
 	v1.GET("/sessions/search", ctr.Search)

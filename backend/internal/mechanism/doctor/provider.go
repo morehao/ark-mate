@@ -19,7 +19,7 @@ import (
 
 // ——— K2：`mate doctor` 的 provider（供应商凭据）与模型清单体检 ———
 //
-// 分工：本文件是**事实的构造函数**（只读），`internal/app/command/doctor.go` 只负责排版。
+// 分工：本文件是**事实的构造函数**（只读），`internal/cliops/doctor.go` 只负责排版。
 // 该包是薄打印层——SQL、凭据分层与对账算法都不该出现在那里。
 //
 // 三条纪律（与 doctor 的既有口径逐条对齐）：

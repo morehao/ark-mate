@@ -8,16 +8,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/service/svcsystem"
 )
 
 // newEngine 挂上系统面控制器（最小引擎：本包只关心传输形状）。
 //
 // `nativeDialog` = 宿主能不能抬系统目录面板（v14.5 起由装配层注入的宿主事实给出）。
-func newEngine(meta ctrsystem.MetaSource, nativeDialog bool) *gin.Engine {
+func newEngine(meta svcsystem.MetaSource, nativeDialog bool) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	eng := gin.New()
 	// 控制器吃的是 provider（每次都渲染当前状态）；测试里固定返回同一份值。
-	ctr := ctrsystem.NewSystemCtr(func() ctrsystem.MetaSource { return meta }, func() bool { return nativeDialog })
+	ctr := ctrsystem.NewSystemCtr(svcsystem.NewMeta(func() svcsystem.MetaSource { return meta }), svcsystem.NewCapabilities(), func() bool { return nativeDialog })
 	eng.GET("/meta", ctr.GetMeta)
 	eng.GET("/capabilities", ctr.GetCapabilities)
 	return eng
@@ -54,7 +55,7 @@ func get(t *testing.T, eng *gin.Engine, path string, headers map[string]string) 
 
 // TestMetaShape /meta 的字段契约（设计 §6.7 / 计划 §5 M1-7）。
 func TestMetaShape(t *testing.T) {
-	eng := newEngine(ctrsystem.MetaSource{CoreVersion: "1.2.3", APIContract: "v1", Home: "/tmp/mate-home"}, false)
+	eng := newEngine(svcsystem.MetaSource{CoreVersion: "1.2.3", APIContract: "v1", Home: "/tmp/mate-home"}, false)
 	d := get(t, eng, "/meta", nil)
 
 	for _, k := range []string{"coreVersion", "webBuildId", "apiContract", "home", "payloads"} {
@@ -93,7 +94,7 @@ func TestMetaShape(t *testing.T) {
 //
 // 这是 V3/V18 的落点：声明面是两端的机器判据，因此"顺序"也在契约里（前端可以按下标渲染）。
 func TestCapabilitiesPerEntry(t *testing.T) {
-	eng := newEngine(ctrsystem.MetaSource{CoreVersion: "dev", APIContract: "v1"}, true)
+	eng := newEngine(svcsystem.MetaSource{CoreVersion: "dev", APIContract: "v1"}, true)
 	browser := get(t, eng, "/capabilities", nil)
 	desktop := get(t, eng, "/capabilities", map[string]string{"X-Mate-Carrier": "desktop"})
 
@@ -145,7 +146,7 @@ func TestCapabilitiesPerEntry(t *testing.T) {
 
 	// 宿主**抬不起来**（远程 / SSH / 无显示会话）：两个入口都退化成 browse，
 	// 其余能力仍按入口形态判——两类判据互不干扰。
-	engNo := newEngine(ctrsystem.MetaSource{CoreVersion: "test"}, false)
+	engNo := newEngine(svcsystem.MetaSource{CoreVersion: "test"}, false)
 	check("浏览器入口（宿主抬不起来）", get(t, engNo, "/capabilities", nil), false, false, false)
 	check("桌面入口（宿主抬不起来）", get(t, engNo, "/capabilities", map[string]string{"X-Mate-Carrier": "desktop"}), true, true, false)
 
@@ -172,7 +173,7 @@ func TestCapabilitiesPerEntry(t *testing.T) {
 
 // TestCarrierHeaderCaseInsensitive 入口标识大小写不敏感（HTTP 头值的大小写不该决定能力面）。
 func TestCarrierHeaderCaseInsensitive(t *testing.T) {
-	eng := newEngine(ctrsystem.MetaSource{CoreVersion: "dev", APIContract: "v1"}, false)
+	eng := newEngine(svcsystem.MetaSource{CoreVersion: "dev", APIContract: "v1"}, false)
 	d := get(t, eng, "/capabilities", map[string]string{"X-Mate-Carrier": "Desktop"})
 	entries, _ := d["entries"].(map[string]any)
 	if entries["desktop"] != true {

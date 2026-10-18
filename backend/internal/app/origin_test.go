@@ -13,9 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/middleware"
-	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/config"
 )
@@ -178,15 +176,17 @@ func TestInitOriginPolicyDoesNotGateStaticAssets(t *testing.T) {
 // TestOriginPolicyDisabledWhenNonLoopback 非回环监听（`--addr 0.0.0.0`）**不启用**白名单：
 // 设计 §9.4 把 Host/Origin 白名单列为对外产品化缺的四件事之一，本期范围外（启动打 WARN）。
 //
-// 不必真绑 0.0.0.0（那会把端口暴露到本机网络）：直接按监听地址构造策略，再放进真实路由装配里
-// 断言"任意 Host/Origin 都放行"——这正是未启用时的行为。
+// 本用例只钉**策略本身的判据**（启用/放行），不真绑 `0.0.0.0`（那会把端口暴露到本机网络）；
+// 装配链把策略装进 v1 组由 `TestOriginPolicyMountScope` 覆盖。
 func TestOriginPolicyDisabledWhenNonLoopback(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	p := middleware.NewOriginPolicy("0.0.0.0:10001", []string{"http://localhost:5173"})
 	if p.Enabled() {
 		t.Fatal("非回环监听不应启用白名单")
 	}
-	eng := router.New(router.Ports{}, eventbus.New(), router.Options{Origin: p})
+	gin.SetMode(gin.TestMode)
+	eng := gin.New()
+	eng.Use(middleware.Origin(p))
+	eng.GET("/v1/mate/health", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	req := httptest.NewRequest("GET", "/v1/mate/health", nil)
 	req.Host = "evil.com:10001"

@@ -6,11 +6,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/service/svcsystem"
 )
 
 // rawMeta 取 `/meta` 的原始 JSON（要断言"字段在不在"，不能用 map 解完再查零值）。
-func rawMeta(t *testing.T, src ctrsystem.MetaSource) map[string]json.RawMessage {
+func rawMeta(t *testing.T, src svcsystem.MetaSource) map[string]json.RawMessage {
 	t.Helper()
 	eng := newEngine(src, false)
 	w := httptest.NewRecorder()
@@ -35,7 +35,7 @@ func rawMeta(t *testing.T, src ctrsystem.MetaSource) map[string]json.RawMessage 
 // 写的是 `…|null`，因此必须**恒出现**。
 func TestMetaSnapshotShape(t *testing.T) {
 	// ① 无资产（只服务 API 的装配）：webPath/webDigest 是显式 null，payloads 是 []。
-	d := rawMeta(t, ctrsystem.MetaSource{CoreVersion: "dev", APIContract: "v1", Home: "/tmp/home"})
+	d := rawMeta(t, svcsystem.MetaSource{CoreVersion: "dev", APIContract: "v1", Home: "/tmp/home"})
 	if _, ok := d["webSource"]; ok {
 		t.Errorf("2026-10-10 起不该再有 webSource 字段，实际存在：%s", d["webSource"])
 	}
@@ -54,9 +54,9 @@ func TestMetaSnapshotShape(t *testing.T) {
 	}
 
 	// ② 有资产：webPath 是那份目录的绝对路径、webDigest 是 sha256:…、webBuildId 现场读。
-	d2 := rawMeta(t, ctrsystem.MetaSource{
+	d2 := rawMeta(t, svcsystem.MetaSource{
 		CoreVersion: "dev", APIContract: "v1", Home: "/tmp/home",
-		Assets: ctrsystem.MetaAssets{Path: "/opt/mate/web", Digest: "sha256:abc", BuildID: "bid-1"},
+		Assets: svcsystem.MetaAssets{Path: "/opt/mate/web", Digest: "sha256:abc", BuildID: "bid-1"},
 	})
 	var path, digest, buildID string
 	_ = json.Unmarshal(d2["webPath"], &path)
@@ -67,9 +67,9 @@ func TestMetaSnapshotShape(t *testing.T) {
 	}
 
 	// ③ 摘要而没有路径（理论上不会出现，客户端仍要能解析）：webPath 保持 null、摘要照发。
-	d3 := rawMeta(t, ctrsystem.MetaSource{
+	d3 := rawMeta(t, svcsystem.MetaSource{
 		CoreVersion: "dev", APIContract: "v1",
-		Assets: ctrsystem.MetaAssets{Digest: "sha256:def"},
+		Assets: svcsystem.MetaAssets{Digest: "sha256:def"},
 	})
 	if string(d3["webPath"]) != "null" {
 		t.Errorf("没有路径时 webPath 应为 null，实际 %s", d3["webPath"])

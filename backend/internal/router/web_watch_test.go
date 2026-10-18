@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/router"
 )
 
@@ -32,12 +31,12 @@ func watchEngine(t *testing.T, root string, watch bool) *gin.Engine {
 	if err != nil {
 		t.Fatalf("ResolveAssets: %v", err)
 	}
-	opts := router.Options{Web: assets}
+	opts := testRouterOpts{web: assets}
 	if watch {
-		opts.AssetWatch = router.NewAssetWatcher(assets, 20*time.Millisecond)
-		opts.AssetWatch.Start(t.Context())
+		opts.assetWatch = router.NewAssetWatcher(assets, 20*time.Millisecond)
+		opts.assetWatch.Start(t.Context())
 	}
-	return router.New(router.Ports{}, eventbus.New(), opts)
+	return router.New(testRouterDeps(t, opts))
 }
 
 // TestAssetWatchIsOptIn 开关的**默认关闭**语义：没开时这条路径必须仍是"静态资产的 SPA 回落"。
@@ -172,7 +171,7 @@ func TestAssetWatchStopsWithContext(t *testing.T) {
 
 	// 收尾之后再取一次摘要：端点仍可服务（它只读内存里的已发布值），不阻塞、不 panic。
 	gin.SetMode(gin.TestMode)
-	engine := router.New(router.Ports{}, eventbus.New(), router.Options{Web: assets, AssetWatch: w})
+	engine := router.New(testRouterDeps(t, testRouterOpts{web: assets, assetWatch: w}))
 	rec := head(t, engine, router.AssetWatchPath)
 	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/event-stream") {
 		t.Fatalf("收尾后的探测应当照常回 event-stream，得到 %d %q", rec.Code, rec.Header().Get("Content-Type"))

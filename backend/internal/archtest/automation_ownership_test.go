@@ -3,7 +3,6 @@ package archtest
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -243,28 +242,18 @@ func TestAutomationApiFaceLivesInAutomationSvc(t *testing.T) {
 			"在 `internal/service/svcautomation`（P4a 正文第九刀）。")
 	}
 
-	// ② 装配点只放依赖事实。
-	portsSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))
-	if !regexp.MustCompile(`AutomationPlane\s+\*automation\.Plane`).MatchString(portsSrc) {
-		t.Error("`internal/router/router.go` 的 `Ports` 里找不到 `AutomationPlane *automation.Plane`：" +
-			"自动化那一格必须是**依赖事实**，用例在控制器里造。")
-	}
-	if strings.Contains(portsSrc, "svcautomation") {
-		t.Error("`internal/router/router.go` 里出现 `svcautomation`：装配点不认识用例层（P4a 正文第九刀）。")
-	}
-	routesSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "routes_automation.go")))
-	if !strings.Contains(routesSrc, "ctrautomation.NewAutomationCtr(ports.AutomationPlane)") {
-		t.Error("`internal/router/routes_automation.go` 必须把 `ports.AutomationPlane` 交给控制器：" +
-			"交别的（或漏交）会让平面为 nil，第一次取数就是 nil panic。")
+	// ② 用例实例只在装配根造（v3.1 §3.4）；控制器只收接口。
+	asmSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "services.go")))
+	if !strings.Contains(asmSrc, "svcautomation.New(") {
+		t.Error("`internal/assembly/services.go` 里找不到 `svcautomation.New(`：" +
+			"用例实例必须在唯一装配根里造。")
 	}
 
-	// ③ 用例实例必须在**控制器的构造函数里**造（判据钉在函数体上，不是整文件：
-	//    同包一个中间函数就能把整文件的字面量判据喂绿——svcsystem 那一刀实测过）。
+	// ③ 控制器不得再造用例（交给它的是**用例接口**，不是域平面）。
 	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrautomation", "automation.go")))
-	body := funcBodyOf(t, ctrSrc, "func NewAutomationCtr(")
-	if !strings.Contains(body, "svcautomation.New(") {
-		t.Errorf("`ctrautomation.NewAutomationCtr` 的函数体里找不到 `svcautomation.New(`："+
-			"用例实例必须在控制器里造（交给 `automationCtr` 的必须是**用例**，不是域平面）。实际体：\n%s", body)
+	if strings.Contains(ctrSrc, "svcautomation.New(") {
+		t.Error("`ctrautomation` 里又出现 `svcautomation.New(`：用例实例只在 `internal/assembly` 造，" +
+			"控制器拿到的必须是已构造的接口。")
 	}
 }
 

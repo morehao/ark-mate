@@ -8,7 +8,7 @@ package ctrusage
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/service/svcusage"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
@@ -23,12 +23,12 @@ var _ UsageCtr = (*usageCtr)(nil)
 
 // UsageHandler 用量统计 REST（M3 首项：GET /usage/summary）。
 type usageCtr struct {
-	plane *session.Plane
+	svc svcusage.UsageSvc
 }
 
-// NewUsageCtr 构造 UsageCtr（拿到的是**会话域平面**这一份依赖事实）。
-func NewUsageCtr(plane *session.Plane) UsageCtr {
-	return &usageCtr{plane: plane}
+// NewUsageCtr 构造 UsageCtr（只收**已构造的用例**；v3.1 §3.2.1：控制器不 import domain）。
+func NewUsageCtr(svc svcusage.UsageSvc) UsageCtr {
+	return &usageCtr{svc: svc}
 }
 
 // Summary 聚合用量统计：query from/to（RFC3339 或 YYYY-MM-DD，半开区间）、group_by。
@@ -44,7 +44,7 @@ func (h *usageCtr) Summary(c *gin.Context) {
 		GroupBy:  c.Query("group_by"),
 		AgentID:  c.Query("agent_id"),
 	}
-	resp, err := h.plane.UsageSummary(c.Request.Context(), q)
+	resp, err := h.svc.Summary(c.Request.Context(), q)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

@@ -3,7 +3,6 @@ package archtest
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -101,52 +100,20 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 		}
 	}
 
-	// 装配：用例实例必须在**控制器**里造（P4a 收口后 `app` 不认识 `service/svc*`）。
-	//
-	// 这条判据的位置换过一次：第一版钉的是 "`app.go` 里有 `svcsystem.New(`"，那是当时的事实。
-	// 收口之后事实变成"`app.go` 交出的是**事实来源**、用例实例由 `ctrexport` 造"——判据跟着
-	// 事实走，否则它会一边保护一个已经不成立的形状、一边放过真正的失效（没人造用例 ⇒ 端口为 nil）。
+	// 装配：用例实例只在 `internal/assembly` 造；控制器只收接口（v3.1 §3.4）。
+	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "services.go")))
+	if !strings.Contains(asm, "Export:             svcsystem.New(") &&
+		!strings.Contains(asm, "svcsystem.New(") {
+		t.Error("`internal/assembly/services.go` 里找不到 `svcsystem.New(`：" +
+			"导出的事实来源与用例实例必须在唯一装配根造。")
+	}
 	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrexport", "export.go")))
-	if !strings.Contains(ctr, "svcsystem.New(") {
-		t.Error("`internal/controller/ctrexport/export.go` 里找不到 `svcsystem.New(`：用例实例没人造。" +
-			"`Source` 为 nil 时 `ExportSessions` 会在第一次取数时 nil panic——" +
-			"而只测校验分支的单测看不见它。")
+	if strings.Contains(ctr, "svcsystem.New") {
+		t.Error("`ctrexport` 里又出现 `svcsystem.New`：控制器只收接口，不再造用例。")
 	}
 	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
 	if strings.Contains(app, "svcsystem.") {
-		t.Error("`internal/app/app.go` 里出现 `svcsystem.`：装配点不认识用例层（P4a 收口）。" +
-			"它该交出的是**依赖事实**（`SessionPlane: a.svc.SessionPlane(), Bus: a.bus`），" +
-			"事实来源与用例实例都由 `ctrexport` 造。")
-	}
-	// P4a 正文第八刀：适配器搬进用例层、Ports 换成三份事实。
-	//
-	// 这三种失效都不会让别的测试变红：
-	//
-	//	① 适配器回流到 `manager`（两份取数，sqlite/memory 的产物口径静默分叉）；
-	//	② `Ports` 那一格写回 `svcsystem.Source`（router 又 import 用例包）；
-	//	③ 控制器不再造事实来源（`Source` 为 nil ⇒ 第一次取数 nil panic，而只测校验分支看不见）。
-	portsSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))
-	if !regexp.MustCompile(`SessionPlane\s+\*session\.Plane`).MatchString(portsSrc) ||
-		!regexp.MustCompile(`Bus\s+\*eventbus\.Bus`).MatchString(portsSrc) {
-		t.Error("`internal/router/router.go` 的 `Ports` 里找不到 `SessionPlane *session.Plane` 与 " +
-			"`Bus *eventbus.Bus`：导出的事实来源靠这两份依赖事实，用例与来源都在 `ctrexport` 里造。")
-	}
-	if strings.Contains(portsSrc, "svcsystem") {
-		t.Error("`internal/router/router.go` 里出现 `svcsystem`：装配点只放依赖事实，" +
-			"用例层的类型不外溢到 router。")
-	}
-	// 判据钉在 **`NewExportCtr` 的函数体**里，而不是整文件的字面量。
-	//
-	// 这条判据的第一版是整文件 `strings.Contains(ctr, "svcsystem.NewSource(")`，**实测假绿**：
-	// 把构造挪进同包一个中间函数（`newSystemSource(st, plane, bus)`）之后，字面量仍在文件里，
-	// 守卫照样通过——而那正是"一行转发"这条规矩要拦的形态。函数体是能被解析出来的，就按它判。
-	body := funcBodyOf(t, ctr, "func NewExportCtr(")
-	for _, a := range []string{"svcsystem.New(", "svcsystem.NewSource("} {
-		if !strings.Contains(body, a) {
-			t.Errorf("`internal/controller/ctrexport/export.go` 的 `NewExportCtr` 函数体里找不到 %q："+
-				"三份依赖事实必须在**这里**造出事实来源与用例（挪进同包的中间函数 = 一行转发，"+
-				"而跳过构造 ⇒ `Source` 为 nil，只测校验分支的单测看不见）。", a)
-		}
+		t.Error("`internal/app/app.go` 里出现 `svcsystem.`：应用壳只消费 `assembly.BuildResult`。")
 	}
 }
 

@@ -69,7 +69,7 @@
 `tz_offset?: number` / api 必须 `p.set('tz_offset'` / 页面必须 `tz_offset: -new Date().getTimezoneOffset()`。
 反证（实跑）：存储层改回 `UTC()` 分桶 → 红；抽掉 api 的 `p.set('tz_offset'` → 红。
 
-**共 161 条**——加守卫时记得同步这句话。
+**共 168 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 

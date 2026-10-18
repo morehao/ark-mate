@@ -336,12 +336,13 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 		}
 	}
 	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "workspace.go")))
-	if !strings.Contains(ctrWork, "path, cancelled, err := h.picker.PickDirectoryHost(c.Request.Context())") {
-		t.Error("`ctrworkspace` 的 PickDirectory 里找不到 `h.picker.PickDirectoryHost(...)`：" +
-			"宿主选择器要么经控制器窄端口、要么经过渡转发，没有第三条路。")
+	if !strings.Contains(ctrWork, "h.svc.PickDirectory(c.Request.Context())") {
+		t.Error("`ctrworkspace` 的 PickDirectory 里找不到 `h.svc.PickDirectory(...)`：" +
+			"宿主选择器必须经用例接口（v3.1 §3.2.1：控制器不 import domain）。")
 	}
-	if !strings.Contains(ctrWork, "type DirectoryPicker interface {") {
-		t.Error("`ctrworkspace` 里找不到 `type DirectoryPicker interface {`：窄端口是替身缝，" +
+	svcWs := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcworkspace", "workspace.go")))
+	if !strings.Contains(svcWs, "type HostPicker interface {") {
+		t.Error("`svcworkspace` 里找不到 `type HostPicker interface {`：窄端口是替身缝，" +
 			"删了它三个结局的契约就只能靠真 spawn 宿主命令来验。")
 	}
 	pickCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "pick_test.go")))
@@ -352,9 +353,9 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 	}
 
 	// P5a 起 picker 由 `registry.Planes` 拥有、监听动作在 app/assembly.go。
-	appSrcForBind := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
-	if !strings.Contains(appSrcForBind, "a.planes.Picker.SetBindAddr(") {
-		t.Error("`internal/app/assembly.go` 里找不到 `a.planes.Picker.SetBindAddr(`：监听地址是**装配好的那个 " +
+	appSrcForBind := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "assembly.go")))
+	if !strings.Contains(appSrcForBind, "as.planes.Picker.SetBindAddr(") {
+		t.Error("`internal/assembly/assembly.go` 里找不到 `as.planes.Picker.SetBindAddr(`：监听地址是**装配好的那个 " +
 			"picker** 的事实（它参与面板判定），不许经中间层或就地新造。")
 	}
 	if !strings.Contains(pickerFact, "Picker       *workspace.Picker") {
@@ -362,9 +363,10 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 			"判定必须从**装配好的那个 picker**读（它自持 bindAddr 事实），不许就地新造。" +
 			"（判据失锚＝空转）")
 	}
-	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
-	if !strings.Contains(appSrc, "a.planes.Picker.NativePickerMode()") {
-		t.Error("`internal/app/assembly.go` 的 HostFacts 里找不到 `a.planes.Picker.NativePickerMode()`：" +
+	// v3.1：宿主事实的闭包随控制器构造搬到 `internal/assembly/controllers.go`。
+	hostFactsSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "controllers.go")))
+	if !strings.Contains(hostFactsSrc, "as.planes.Picker.NativePickerMode()") {
+		t.Error("`internal/assembly/controllers.go` 的 HostFacts 里找不到 `as.planes.Picker.NativePickerMode()`：" +
 			"系统面板可用性是从装配好的 picker 读出来的事实；就地 `workspace.NewPicker()` 会丢掉 " +
 			"bindAddr，判定静默变 browse。")
 	}

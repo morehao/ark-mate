@@ -775,7 +775,7 @@ sqlite 模式下自动跑一次 `import`，幂等靠指纹 `meta.imported_automa
 
 ```
 backend/                单 Go module（github.com/morehao/ark-mate）
-  cmd/mate             进程入口：只做子命令分发（→ internal/app/command）
+  cmd/mate             进程入口：只做子命令分发（→ internal/cli）
   pkg/                  可复用基础设施（不得 import internal/，由 archtest 守卫）
     acl                 ACP 客户端（stdio 传输、能力探测、权限、elicitation（unstable）、错误分类）
     runtime/            运行时注册表 + adapter（dsh/，纯数据；新增底座 = 新目录 + `Spec` + 三张端口实现）
@@ -787,14 +787,15 @@ backend/                单 Go module（github.com/morehao/ark-mate）
     dbclient             gorm 句柄装配 + golib SQLite dialector（v1.32.22 起纯 Go，构建 `CGO_ENABLED=0`）
     object/objusage     跨层共享值对象（会话用量快照）
   internal/             应用专属逻辑
-    app                 装配 + 启停生命周期（Init/Run/Close）
-    app/command         CLI 子命令（serve / demo / migrate / transcripts / config / acp-*）
-    router              唯一路由装配点（按领域分 routes_*.go）
-    controller/ctr*     传输层控制器（接口 + 小写实现 + New 构造）
+    assembly            唯一装配根：构造 store/平面/执行面/用例/控制器/路由 + 启停序列
+    app                 应用壳：HTTP 启停、ready、信号与优雅关闭
+    cli                 命令树：子命令名、帮助、参数分发与退出码
+    cliops              命令实现（serve / demo / migrate / doctor / capability / provider / mcp / transcripts / config）
+    router              唯一路由装配点（按领域分 routes_*.go；只收已构造的控制器）
+    controller/ctr*     传输层控制器（只收 service 接口 + DTO + gin）
     middleware          HTTP 中间件（单操作员 token 鉴权）
     dto/dto*            请求/响应 DTO（按领域分包，双方共用）
-    service/svc*        领域端口（控制器依赖的窄接口，manager 实现）
-    manager             领域实现：Service + Orchestrator（会话编排、事件发布、权限策略、用量聚合）
+    service/svc*        用例层（控制器依赖的窄接口 + 实现，装配根构造）
     model               持久层实体 + 列与取值约定（gorm 映射；时间 TEXT/布尔 INTEGER 由 serializer 保证）
     dao                 单表数据访问（gormdao 泛型 Dao + 各领域 Cond）
     store               持久层门面（句柄 + 跨表事务：序号分配、导入 staging、读模型 API）

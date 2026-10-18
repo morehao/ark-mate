@@ -62,8 +62,20 @@ type Options struct {
 // 传输层使用 github.com/coder/websocket（context 化 API：Read/Write/Ping 带 ctx，
 // 控制帧（ping/pong/close）由库自动应答，Ping 需与 Reader 并发执行，见其 conn.go 注释）。
 // 契约见 docs/architecture.md §6.2。
+// EventStream 实时事件流的**订阅端口**（消费方声明；实现见 `service/svcstream`）。
+//
+// v3.1 §3.7：`ctrws` 不直接订阅 bus。订阅语义（历史回放 / `Gap()` 丢帧提示 / 淘汰水位 /
+// `LastSeq` 快照）归用例层，控制器只用 `eventbus.Event` 这些线上值类型。
+type EventStream interface {
+	Subscribe() *eventbus.Subscription
+	Unsubscribe(sub *eventbus.Subscription)
+	EvictedThrough(aggID string) int64
+	LastSeq(aggID string) int64
+	EventsAfter(aggID string, after int64) []eventbus.Event
+}
+
 type wsCtr struct {
-	bus   *eventbus.Bus
+	bus   EventStream
 	creds *credential.Set
 	// attachDeadline 首帧 attach 截止（见 Options.AttachDeadline）。
 	attachDeadline time.Duration
@@ -72,7 +84,7 @@ type wsCtr struct {
 }
 
 // NewWSCtr 构造 WSCtr。
-func NewWSCtr(bus *eventbus.Bus, opts ...Options) WSCtr {
+func NewWSCtr(bus EventStream, opts ...Options) WSCtr {
 	c := &wsCtr{bus: bus, attachDeadline: defaultAttachDeadline}
 	if len(opts) > 0 {
 		c.creds = opts[0].Credentials

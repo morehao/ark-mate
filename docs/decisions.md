@@ -413,7 +413,7 @@
 >    `collectSensitiveFiles`）都按**注册表**枚举，适配一删，那个底座在报告里就整段消失
 >    （报告一切正常，而磁盘上的东西一个没少）。
 >    新增 `backend/internal/manager/retired_runtime.go`（采事实，只读）+$
->    `backend/internal/app/command/doctor_retired.go`（排版）。判据是「**在不在册**」，不是
+>    `backend/internal/cliops/doctor_retired.go`（排版）。判据是「**在不在册**」，不是
 >    「它是不是某某」——两条理由：内核不许认识任何具体底座（写死 id 会被 ④ 的
 >    `TestInternalHasNoRuntimeIDSpecialCase` 判红），而写死也只能看见**这一次**下线的那个、
 >    下一次下线又要回内核改一处。在册集合由**调用方**给出（`AllBuiltinSpecs()` ∪ `runtimes.json`

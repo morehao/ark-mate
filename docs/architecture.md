@@ -105,8 +105,8 @@ cmd/mate  →  internal/app（装配 + 启停生命周期）
                 internal/sessionruntime（**会话编排层**：Service / Orchestrator / 权限）
 ```
 
-- `internal/router` 声明自己需要哪些端口（`router.Ports`），由 `internal/app` 注入实现；每个领域一个 `routes_*.go`，各自构造控制器并注册自己的路由。
-- `internal/service/svc<领域>` 是**业务逻辑层**：包内声明接口 + 实现 + 构造函数，控制器在自己的构造函数里造实例；`internal/sessionruntime` 是**会话编排层**（P4b 起取代 `internal/manager`：Service / Orchestrator / 权限，执行面在 `runtimeconn`、领域状态在 `domain/*`），`internal/registry` 是**装配层**（平面集合 + 启停表 + 资源同步）。
+- `internal/assembly` 是**唯一装配根**：构造 store / 领域平面 / 执行面 / 用例 / 控制器，再把控制器交给 `router`（`router.Deps`）。`internal/app` 只是应用壳（HTTP 启停/ready/信号），`internal/cli` 是命令树、`internal/cliops` 承载命令实现。每个领域一个 `routes_*.go`，只注册路由。
+- `internal/service/svc<领域>` 是**业务逻辑层**：包内声明接口 + 实现 + 构造函数，**实例只在装配根造**，控制器只收接口；`internal/sessionruntime` 是**会话编排层**（P4b 起取代 `internal/manager`：Service / Orchestrator / 权限，执行面在 `runtimeconn`、领域状态在 `domain/*`），`internal/registry` 是**装配层**（平面集合 + 启停表 + 资源同步）。
 - `internal/dto/dto<领域>` 被控制器、用例层与过渡期实现共用，自身不依赖任何应用层。
 
 ### 4.2 持久侧

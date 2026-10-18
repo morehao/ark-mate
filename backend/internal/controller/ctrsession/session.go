@@ -11,11 +11,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -70,29 +67,22 @@ type sessionCtr struct {
 	//
 	// 它吃两个依赖：域平面（就地改 + 回读投影）与一个三方法窄端口（模型解析 / 投递 / 落库）。
 	meta svcsession.MetaSvc
-	// plane 会话域平面：**只读模型**直接由它提供（P4a 正文第十一刀）。
+	// read 会话**只读列表面**用例（v3.1 §3.2.1：控制器不 import domain）。
 	//
-	// 读模型（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）没有请求校验、错误码出口与响应装配，
-	// 它们的实现与域自己的锁和状态绑在一起（`ListSessions` 要持 `pl.mu` 遍历注册表、
-	// 释放锁后再补齐归属展示字段）。给它们造一层用例只会得到**一行转发**——
-	// 那正是 2026-10-16 被判定为"转发骚操作"的形状，所以这一面按 P4b 的原口径收口：
-	// 调用点直接依赖域平面（P4b 已把过渡期转发全部删除）。
-	plane *session.Plane
+	// 列表 / 检索 / 待投递 / 轮次是纯读模型，域里已折好 DTO；用例层只复述窄接口。
+	read svcsession.ReadSvc
 }
 
 // NewSessionCtr 构造 SessionCtr。
 //
 // 拿到的是**依赖事实**（会话面过渡期端口 + 库句柄 + 会话域平面 + 事件总线 + 交互事实来源）：
 // 历史读面（第十刀）与详情读面（第四十刀）两个用例在这里造，其余方法的实现仍在 `manager`（逐刀搬）。
-func NewSessionCtr(svc svcsession.SessionSvc, st *store.Store, plane *session.Plane, bus *eventbus.Bus,
-	src svcsession.InteractionSource, deliver svcsession.InteractionDelivery,
-	metaDeps svcsession.MetaDeps) SessionCtr {
+func NewSessionCtr(svc svcsession.SessionSvc, hist svcsession.HistorySvc, detail svcsession.DetailSvc,
+	interaction svcsession.InteractionSvc, queue svcsession.QueueSvc, meta svcsession.MetaSvc,
+	read svcsession.ReadSvc) SessionCtr {
 	return &sessionCtr{
-		svc: svc, hist: svcsession.NewHistory(st, plane, bus), plane: plane,
-		detail:      svcsession.NewDetail(plane, src),
-		interaction: svcsession.NewInteraction(plane, deliver),
-		queue:       svcsession.NewQueue(plane, svc),
-		meta:        svcsession.NewMeta(plane, metaDeps),
+		svc: svc, hist: hist, detail: detail, interaction: interaction,
+		queue: queue, meta: meta, read: read,
 	}
 }
 
@@ -110,7 +100,7 @@ func (h *sessionCtr) List(c *gin.Context) {
 		return
 	}
 	workspaceID := strings.TrimSpace(c.Query("workspace_id"))
-	sessions, err := h.plane.ListSessions(archived, cwd, workspaceID)
+	sessions, err := h.read.List(archived, cwd, workspaceID)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -131,7 +121,7 @@ func (h *sessionCtr) Search(c *gin.Context) {
 			limit = n
 		}
 	}
-	hits, err := h.plane.SearchSessions(c.Request.Context(), q, limit)
+	hits, err := h.read.Search(c.Request.Context(), q, limit)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -273,7 +263,7 @@ func (h *sessionCtr) Prompt(c *gin.Context) {
 
 // QueuedInputs 列出待投递的排队输入（§6 当前态；前端冷挂载/刷新后重建队列视图）。
 func (h *sessionCtr) QueuedInputs(c *gin.Context) {
-	resp, err := h.plane.ListQueuedInputs(c.Request.Context(), c.Param("id"))
+	resp, err := h.read.QueuedInputs(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -398,7 +388,7 @@ func (h *sessionCtr) History(c *gin.Context) {
 // Runs 列出某会话的轮次明细（runs 表读模型；内存模式返回空数组）。
 func (h *sessionCtr) Runs(c *gin.Context) {
 	id := c.Param("id")
-	runs, err := h.plane.ListRuns(c.Request.Context(), id)
+	runs, err := h.read.Runs(c.Request.Context(), id)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

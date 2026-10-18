@@ -115,8 +115,15 @@ var v31Layers = map[string]v31Layer{
 	// ——— 15 层：应用壳 ———
 	"internal/app": {layer: 15, name: "app", deny: []string{"internal/service", "internal/store", "internal/dao", "internal/model", "internal/domain", "internal/controller", "internal/mechanism", "internal/runtimeconn", "internal/registry", "internal/sessionruntime", "internal/cli", "internal/gateway"}},
 
-	// ——— 16 层：命令树 ———
-	"internal/cli": {layer: 16, name: "cli", deny: []string{"internal/service", "internal/store", "internal/dao", "internal/model", "internal/domain", "internal/controller", "internal/mechanism", "internal/runtimeconn", "internal/registry", "internal/sessionruntime", "internal/router", "internal/gateway"}},
+	// ——— 16 层：命令实现（cliops）———
+	//
+	// 设计的层表只有 `cli`，但命令实现（doctor 43KB 为主）必须用到 store/domain/mechanism；
+	// 把实现留在 `cli` 就与"命令树不得 import 应用内核"冲突，搬进 `assembly` 又违背"装配根只装对象"。
+	// 故命令实现单独成层（见 `.dsh/docs/plans/2026-10-19-backend-v3.1-execution-plan.md`）。
+	"internal/cliops": {layer: 16, name: "cliops", sameLayer: true, deny: []string{"internal/cli"}},
+
+	// ——— 17 层：命令树（纯分发）———
+	"internal/cli": {layer: 17, name: "cli", sameLayer: true, deny: []string{"internal/service", "internal/store", "internal/dao", "internal/model", "internal/domain", "internal/controller", "internal/mechanism", "internal/runtimeconn", "internal/registry", "internal/sessionruntime", "internal/router", "internal/gateway"}},
 }
 
 // v31Exempt 不参与层表映射的包（§3.2.2 注）。

@@ -35,8 +35,7 @@ import (
 // （browse/files/recent/dirs）在 gin 里可以共存（gin 的 radix 树对静态段优先），
 // 但新增固定路径时要放在参数路径**之前**读一遍——顺序反了会让 `/workspaces/browse`
 // 被当成 id=browse 打到 Move/Rename 上。
-func registerWorkspace(v1 *gin.RouterGroup, ports Ports) {
-	ctr := ctrworkspace.NewWorkspaceCtr(ports.Picker, ports.WorkspacePlane)
+func registerWorkspace(v1 *gin.RouterGroup, ctr ctrworkspace.WorkspaceCtr) {
 
 	// 固定字面量路径（静态段）在前，参数路径在后。
 	v1.GET("/workspaces/browse", ctr.Browse)

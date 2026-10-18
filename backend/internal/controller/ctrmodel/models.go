@@ -6,10 +6,8 @@ package ctrmodel
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -45,8 +43,8 @@ type modelCtr struct {
 //
 // 三个入参都没有"顺便给一份 Service"的口子：写面只用到清单载体、供应商存在性和那三件事，
 // 而除控制器之外的层不许引用 `service/svc*`（`internal/archtest/svc_layer_consumer_test.go`）。
-func NewModelCtr(svc svcmodel.ModelSvc, st *store.Store, plane *provider.Plane, host svcmodel.Host) ModelCtr {
-	return &modelCtr{svc: svc, declared: svcmodel.NewDeclared(st, plane, host)}
+func NewModelCtr(svc svcmodel.ModelSvc, declared svcmodel.DeclaredSvc) ModelCtr {
+	return &modelCtr{svc: svc, declared: declared}
 }
 
 // List 返回模型读面：**平台清单 + 聚合生效结论 + 逐 runtime 机器面明细（sync[]）**。
