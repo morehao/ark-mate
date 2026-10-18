@@ -1,0 +1,307 @@
+[
+  {
+    "method": "GET",
+    "path": "/v1/mate/health",
+    "status": 200,
+    "code": 0,
+    "msg": "ok",
+    "envelope": [
+      "code",
+      "msg"
+    ],
+    "data_kind": "absent"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/meta",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "apiContract",
+      "coreVersion",
+      "home",
+      "payloads",
+      "product",
+      "runtime",
+      "webBuildId",
+      "webDigest",
+      "webPath"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/sessions",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "array",
+    "data_len": 0
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/providers",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "array",
+    "data_len": 0
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/models",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "default_model",
+      "effective",
+      "effective_at",
+      "models",
+      "note",
+      "sync"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/workspaces",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "items",
+      "writable"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/library",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "array",
+    "data_len": 0
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/search/messages?q=x",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "has_more",
+      "hits",
+      "query",
+      "source",
+      "total"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/capabilities",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "capabilities",
+      "entries"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/settings/workspace",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "configured",
+      "prefer_roots",
+      "provision_included",
+      "source",
+      "writable"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/usage/summary",
+    "status": 200,
+    "code": 40501,
+    "msg": "[usage_stats_unsupported] 内存模式（未启用 store）无 runs 读模型，用量统计不可用（请以 sqlite 模式启动）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/runtime/diagnostics",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "checked_at",
+      "command",
+      "connected",
+      "pid",
+      "runtime",
+      "runtime_name",
+      "state",
+      "stderr_source",
+      "stderr_tail"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/sessions/nope",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/providers/nope",
+    "status": 404,
+    "code": 40401,
+    "msg": "接口不存在: GET /v1/mate/providers/nope",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/mate/sessions/nope",
+    "status": 404,
+    "code": 40401,
+    "msg": "接口不存在: DELETE /v1/mate/sessions/nope",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/sessions",
+    "status": 200,
+    "code": 40000,
+    "msg": "参数错误: invalid character 'n' looking for beginning of object key string",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/sessions/nope/prompt",
+    "status": 200,
+    "code": 40000,
+    "msg": "参数错误: Key: 'PromptReq.Prompt' Error:Field validation for 'Prompt' failed on the 'required' tag",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PUT",
+    "path": "/v1/mate/settings/workspace",
+    "status": 200,
+    "code": 40000,
+    "msg": "参数错误: invalid character 'n' looking for beginning of object key string",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  }
+]
