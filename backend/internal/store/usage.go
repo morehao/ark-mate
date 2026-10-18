@@ -5,7 +5,21 @@ import (
 	"sort"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objusage"
+)
+
+// v3.1 P4：查询条件与结果行的形状上移到 `internal/model`（`domain/session` 经窄端口读库，
+// 不能 import store）。这里保留别名，落库实现与调用点一字未改。
+type (
+	UsageQuery         = model.UsageQuery
+	UsageBucket        = model.UsageBucket
+	UsageSummaryResult = model.UsageSummaryResult
+)
+
+const (
+	CostCurrencyDefault = model.CostCurrencyDefault
+	CostCurrencyMixed   = model.CostCurrencyMixed
 )
 
 // ——— 用量统计聚合（M3 首项：GET /usage/summary 的数据面） ———
@@ -22,52 +36,6 @@ import (
 //
 // v19：随 agent 概念整体取消，本面不再有 `agent` 维度（不选 `agent_id`、不按它分组、
 // 也不再有 `?agent_id=` 过滤）——分组只剩 day 一类。
-
-// UsageQuery 用量聚合查询条件（只有时间区间；分组恒为 day）。
-type UsageQuery struct {
-	From time.Time // 零值 = 不限起点
-	To   time.Time // 零值 = 不限终点（半开区间）
-	// Location 分桶用的日历时区（nil = UTC）。由用例层从客户端的 tz_offset 造出来，
-	// 存储层不认识"偏移分钟"这种传输形态。
-	Location *time.Location
-}
-
-// 费用币种约定：
-//   - 底座未给币种（空串）按 USD 归一（与前端 `$` 展示口径一致，避免同一美元被拆成两个币种）；
-//   - 一个桶内出现多种币种时不可相加：金额置零、币种标 CostCurrencyMixed，明细走 CostByCurrency。
-const (
-	// CostCurrencyDefault 底座未上报币种时的归一币种。
-	CostCurrencyDefault = "USD"
-	// CostCurrencyMixed 桶内多币种哨兵（此时 CostAmount 为 0，明细见 CostByCurrency）。
-	CostCurrencyMixed = "MIXED"
-)
-
-// UsageBucket 一行聚合结果（group_by=day → Key=YYYY-MM-DD）。
-type UsageBucket struct {
-	Key           string `json:"key"`
-	Runs          int    `json:"runs"`
-	Completed     int    `json:"completed"`
-	Failed        int    `json:"failed"`
-	Cancelled     int    `json:"cancelled"`
-	Running       int    `json:"running"`
-	Sessions      int    `json:"sessions"`
-	DurationMS    int64  `json:"duration_ms"`
-	ContextUsed   int64  `json:"context_used"`
-	ContextSize   int64  `json:"context_size"`
-	UsageReported int    `json:"usage_reported"`
-	// CostReported 上报过费用的会话数（与 UsageReported 分开：二者上报率不同）。
-	CostReported int     `json:"cost_reported"`
-	CostAmount   float64 `json:"cost_amount"`
-	CostCurrency string  `json:"cost_currency,omitempty"`
-	// CostByCurrency 多币种（CostCurrency=CostCurrencyMixed）时的分币种金额；单币种为空。
-	CostByCurrency map[string]float64 `json:"cost_by_currency,omitempty"`
-}
-
-// UsageSummaryResult 聚合结果：全区间总计 + 分组桶（day 键升序）。
-type UsageSummaryResult struct {
-	Totals  UsageBucket   `json:"totals"`
-	Buckets []UsageBucket `json:"buckets"`
-}
 
 // usageRow 聚合输入行（runs）。
 type usageRow struct {

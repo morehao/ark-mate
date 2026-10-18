@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/infra/dbclient"
+	"github.com/morehao/ark-mate/internal/model"
 )
 
 // writeLegacyVaultKey 在 vaultHome 下写 0600 的 keyfile（内容是 base64 的 32 字节主密钥）。

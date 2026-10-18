@@ -9,6 +9,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// v3.1 P4：列形状上移到 `internal/model`，这里保留别名（调用点不改）。
+type DefinitionImportItem = model.DefinitionImportItem
+
 // ——— 存量定义的**一次性导入**（M6-4 能力面；M6-7 起 automation 面共用） ———
 //
 // 与写面（Upsert*Definition）的三点不同，都是刻意的：
@@ -20,30 +23,6 @@ import (
 //  3. **审计动作是 `import`**（写面是 create/update/delete）：逐条一行，`definition_id` 指向
 //     具体那条定义，于是 `ListDefinitionRevisions(kind, id)` 能回答"这一行是从哪个目录进来的"。
 //     不共用一条聚合行：`definition_id` 是这张表的主查询键，聚合行谁也查不到。
-
-// DefinitionImportItem 一条待导入的定义（调用方已逐条过闸门）。
-type DefinitionImportItem struct {
-	// Kind 见 model.DefinitionKindSkill / DefinitionKindMcp / DefinitionKindAutomation /
-	// DefinitionKindProvider / DefinitionKindModel。
-	Kind string
-	ID   string
-	// Body 定义正文（承载未知键的完整 JSON）。
-	//
-	// **kind=provider 时不用它**：v13 起 provider 是资源表（列 + 无 body），列载荷走 Provider。
-	// 留着这个字段是给四个「定义载体」表用的（它们的正文是用户自由文档）。
-	Body string
-	// Provider 仅 kind=provider 时有意义：列化后的内容列。
-	//
-	// 单独一个字段而不是把列塞进 `Body`：Body 是"正文 JSON"，而 provider 的键集合封闭且有
-	// 库级约束（`CHECK (protocol IN ('openai'))`）——把列值编码回 JSON 再在 store 里解回来，
-	// 只是把已经消失的 body 重新造一遍。
-	Provider *ProviderColumns
-	// AutomationRuntime 仅 kind=automation 时有意义：定时任务的运行态在 DB 载体里是**列**，
-	// 而存量文件里它是同文件的一部分（`last_fired_at`/`recent_runs`/…）。导入必须把两部分
-	// **同一事务**写进去，否则会出现"定义进来了、运行史没进来"的半截状态。
-	// nil = 该定义没有任何运行态（未触发过），落成默认列值。
-	AutomationRuntime *AutomationRuntimeState
-}
 
 // DefinitionImportResult 一次导入的逐条计数。
 type DefinitionImportResult struct {
@@ -85,7 +64,7 @@ func (s *Store) ImportDefinitionRows(ctx context.Context, items []DefinitionImpo
 			digest := bodyDigest(it.Body)
 			if it.Kind == model.DefinitionKindProvider && it.Provider != nil {
 				// provider 是资源表：审计摘要取**列行的规范 JSON**（ADR-10），不是已消失的 body。
-				digest = it.Provider.digest()
+				digest = providerColumnsDigest(*it.Provider)
 			}
 			if err := s.definitionRevision.WithTx(tx).Append(ctx, &model.DefinitionRevisionEntity{
 				Kind:         it.Kind,

@@ -95,6 +95,10 @@ var v31Layers = map[string]v31Layer{
 	// ——— 9 层：领域 ———
 	"internal/domain": {layer: 9, name: "domain", deny: []string{"internal/dao", "internal/runtimeconn", "internal/registry", "internal/service", "internal/sessionruntime", "internal/middleware", "internal/gateway", "internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},
 
+	// 厚域（P4 正文）：`session`/`interaction` 连 store 都不许认识——它们经窄端口拿持久化能力。
+	"internal/domain/session":     {layer: 9, name: "domain/session", deny: []string{"internal/store", "internal/runtimeconn", "internal/registry", "internal/service", "internal/sessionruntime"}},
+	"internal/domain/interaction": {layer: 9, name: "domain/interaction", deny: []string{"internal/store", "internal/runtimeconn", "internal/registry", "internal/service", "internal/sessionruntime"}},
+
 	// ——— 10 层：执行面 / 装配平面 / 用例 / 会话编排 ———
 	"internal/runtimeconn":    {layer: 10, name: "runtimeconn", sameLayer: true, deny: []string{"internal/service", "internal/middleware", "internal/gateway", "internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},
 	"internal/registry":       {layer: 10, name: "registry", sameLayer: true, deny: []string{"internal/service", "internal/middleware", "internal/gateway", "internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},

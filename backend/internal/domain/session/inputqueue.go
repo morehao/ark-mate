@@ -8,7 +8,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/code"
 	"github.com/morehao/ark-mate/internal/object/objid"
@@ -19,15 +18,15 @@ const (
 	// DeliveryReject 忙时直接报错（缺省；不排队）。
 	DeliveryReject = "reject"
 	// DeliveryAfterRun 排队，等当前轮结束再投递。
-	DeliveryAfterRun = store.InputDeliveryAfterRun
+	DeliveryAfterRun = model.InputDeliveryAfterRun
 	// DeliveryInterruptThenPrompt 取消当前轮，随后投递。
-	DeliveryInterruptThenPrompt = store.InputDeliveryInterruptThenPrompt
+	DeliveryInterruptThenPrompt = model.InputDeliveryInterruptThenPrompt
 )
 
 // ValidDeliveries 合法投递模式（报错提示与校验共用，顺序即文档顺序）。
 var ValidDeliveries = []string{DeliveryReject, DeliveryAfterRun, DeliveryInterruptThenPrompt}
 
-// 队列项终态（事件收敛用；与 store.InputStatus* 同值）。
+// 队列项终态（事件收敛用；与 model.InputStatus* 同值）。
 const (
 	ReasonRunFinished = "run_finished"   // 队列项因上一轮结束而投递
 	ReasonUserCancel  = "user_cancel"    // 用户显式撤下
@@ -90,7 +89,7 @@ func (pl *Plane) EnqueueInput(ctx context.Context, convID, text, delivery, targe
 		row := model.InputEntity{
 			ID: in.ID, SessionID: convID, Text: text, Delivery: delivery,
 			TargetRunID: targetRun, Generation: generation,
-			Status: store.InputStatusQueued, CreatedAt: in.CreatedAt,
+			Status: model.InputStatusQueued, CreatedAt: in.CreatedAt,
 		}
 		if err := pl.st.CreateInput(ctx, row); err != nil {
 			return QueuedInput{}, err

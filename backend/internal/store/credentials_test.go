@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/infra/dbclient"
+	"github.com/morehao/ark-mate/internal/model"
 )
 
 // TestMigrationV20AddsProviderKeyAndMcpSecretsAndRewritesVaultRefs v19 → v20：加列、建表、
@@ -119,8 +119,8 @@ func TestCredentialWritePaths(t *testing.T) {
 	// digest 等价）。
 	beforeCols := ProviderColumns{ID: before.ID, Name: before.Name, Protocol: before.Protocol, BaseURL: before.BaseURL, Note: before.Note}
 	afterCols := ProviderColumns{ID: after.ID, Name: after.Name, Protocol: after.Protocol, BaseURL: after.BaseURL, Note: after.Note}
-	if beforeCols.digest() != afterCols.digest() {
-		t.Fatalf("密钥写入不该动到档案列: before=%s after=%s", beforeCols.digest(), afterCols.digest())
+	if providerColumnsDigest(beforeCols) != providerColumnsDigest(afterCols) {
+		t.Fatalf("密钥写入不该动到档案列: before=%s after=%s", providerColumnsDigest(beforeCols), providerColumnsDigest(afterCols))
 	}
 
 	// 清除也是"一次写"：值变空、revision 继续涨，行仍在。

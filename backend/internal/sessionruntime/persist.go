@@ -1,6 +1,7 @@
 package sessionruntime
 
 import (
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/store"
 )
 
@@ -23,6 +24,16 @@ import (
 // 读不到库）。装配路径与 `mate doctor --rebuild-read-models` 那条逃生口都必须经它，
 // **不要各自赋值**。
 func (s *Service) EnableStore(st *store.Store) {
-	s.sessionPlane.SetStore(st)
+	s.sessionPlane.SetStore(sessionStore(st))
 	s.planes.EnableStore(st)
+}
+
+// sessionStore 把库句柄当**窄端口**交给会话域（v3.1 P4）。
+//
+// 必须现判 nil：typed-nil 装进接口不是 nil，会话域里那句 `if pl.st == nil` 会失效。
+func sessionStore(st *store.Store) session.Store {
+	if st == nil {
+		return nil
+	}
+	return st
 }

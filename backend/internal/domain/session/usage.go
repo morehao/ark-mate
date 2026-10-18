@@ -1,13 +1,13 @@
 package session
 
 import (
+	"github.com/morehao/ark-mate/internal/model"
 	"context"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/code"
 )
@@ -72,7 +72,7 @@ func (pl *Plane) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*d
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_usage_group_by",
 			fmt.Sprintf("[invalid_usage_group_by] group_by 仅支持 day：%q", q.GroupBy), nil))
 	}
-	res, err := pl.st.UsageSummary(ctx, store.UsageQuery{From: from, To: to, Location: loc})
+	res, err := pl.st.UsageSummary(ctx, model.UsageQuery{From: from, To: to, Location: loc})
 	if err != nil {
 		return nil, code.FromError(acl.NewError(acl.ClassService, "usage_query_failed",
 			fmt.Sprintf("[usage_query_failed] 用量聚合失败: %v", err), err))
@@ -101,7 +101,7 @@ func (pl *Plane) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*d
 }
 
 // toUsageBucketResp 读模型 → REST DTO。
-func toUsageBucketResp(b store.UsageBucket) dtousage.UsageBucketResp {
+func toUsageBucketResp(b model.UsageBucket) dtousage.UsageBucketResp {
 	return dtousage.UsageBucketResp{
 		Key: b.Key, Runs: b.Runs, Completed: b.Completed, Failed: b.Failed,
 		Cancelled: b.Cancelled, Running: b.Running, Sessions: b.Sessions,

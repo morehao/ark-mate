@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/infra/dbclient"
+	"github.com/morehao/ark-mate/internal/model"
 )
 
 // openV29ForV30Test 造一个**真实的 v29 库**（完整跑 v1..v29，含各步的 Go 数据迁移）。

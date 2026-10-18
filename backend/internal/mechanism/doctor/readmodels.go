@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"github.com/morehao/ark-mate/internal/model"
 	"context"
 	"fmt"
 	"slices"
@@ -161,7 +162,12 @@ type ReadModelRebuilder interface {
 //
 // 两个入参的分工：`st` 用来**枚举**会话（机制层直接读库，无需端口）；`rb` 提供"重建一个会话"
 // 那一件机制层做不到的事。
-func RebuildAllReadModels(ctx context.Context, st *store.Store, rb ReadModelRebuilder) (total, failed int, err error) {
+// SessionLister 重建循环只需要"列出会话"这一个读能力（v3.1 P4：会话域经窄端口交过来）。
+type SessionLister interface {
+	ListSessions(ctx context.Context, archived *bool) ([]model.SessionEntity, error)
+}
+
+func RebuildAllReadModels(ctx context.Context, st SessionLister, rb ReadModelRebuilder) (total, failed int, err error) {
 	if st == nil {
 		return 0, 0, fmt.Errorf("没有可读写的库句柄")
 	}

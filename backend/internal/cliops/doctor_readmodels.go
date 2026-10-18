@@ -104,7 +104,9 @@ func checkReadModelRebuild(opts doctorOptions) []doctorCheck {
 	// 循环在机制层；"重建一个会话"的实现（与启动钩子共用同一份）在会话域——组合根直接把
 	// 会话平面交下去（`domain/session` 是下层，命令层 import 它没有任何越界）。
 	pl := session.NewPlane()
-	pl.SetStore(st)
+	if st != nil {
+		pl.SetStore(st)
+	}
 	total, failed, err := doctorfacts.RebuildAllReadModels(ctx, st, pl)
 	if err != nil {
 		return []doctorCheck{{name, doctorFail, "重建读模型失败：" + err.Error()}}

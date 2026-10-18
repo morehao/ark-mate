@@ -9,6 +9,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// v3.1 P4：列形状上移到 `internal/model`，这里保留别名（调用点不改）。
+type ProviderColumns = model.ProviderColumns
+
 // 本文件是 provider 档案事实源（v13 起是**资源表**）的门面：**一次写面 = 一行 + 一条审计**
 // （复用 `commitDefinitionChange`）。
 //
@@ -23,20 +26,8 @@ import (
 // ③ 失败时**不回滚** ②（回执的 `problems` 会说明）；要关掉这个窗口需要一个"内容 + 密钥同事务"的
 // 门面方法，本版刻意没做（残留已记进 v20 笔记）。
 
-// ProviderColumns 是 provider 行的**内容列**（身份列是 `ID`，记账列由 CAS 语义决定）。
-//
-// 它就是 `providerBodyJSON` 的替代物：列化之后不再有"未知键原样带走"这回事——键集合是封闭的，
-// 于是"写了、存了、什么都不发生"的字段结构上进不来（设计 P7）。
-type ProviderColumns struct {
-	ID       string
-	Name     string
-	Protocol string
-	BaseURL  string
-	Note     string
-}
-
 // digest 这条 provider 行的规范 JSON 摘要（ADR-10）。
-func (c ProviderColumns) digest() string {
+func providerColumnsDigest(c model.ProviderColumns) string {
 	return rowDigest(map[string]string{
 		"id": c.ID, "name": c.Name, "protocol": c.Protocol, "base_url": c.BaseURL, "note": c.Note,
 	})
@@ -68,7 +59,7 @@ func (s *Store) UpsertProviderDefinition(ctx context.Context, cols ProviderColum
 	if expectedRev == 0 {
 		action = model.DefinitionActionCreate
 	}
-	return s.commitDefinitionChange(ctx, model.DefinitionKindProvider, cols.ID, actor, action, cols.digest(), expectedRev,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindProvider, cols.ID, actor, action, providerColumnsDigest(cols), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
 				return s.providers.WithTx(tx).CreateCAS(ctx, newProviderRow(cols, 1, now, now))
@@ -84,7 +75,7 @@ func (s *Store) UpsertProviderDefinition(ctx context.Context, cols ProviderColum
 // `create`）——但那正是审计要能回答的问题："这一行是用户建的，还是升级时从文件搬过来的"。
 func (s *Store) ImportProviderDefinition(ctx context.Context, cols ProviderColumns) (bool, error) {
 	return s.commitDefinitionChange(ctx, model.DefinitionKindProvider, cols.ID, model.DefinitionActorImport,
-		model.DefinitionActionImport, cols.digest(), 0,
+		model.DefinitionActionImport, providerColumnsDigest(cols), 0,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			return s.providers.WithTx(tx).CreateCAS(ctx, newProviderRow(cols, 1, now, now))
 		})

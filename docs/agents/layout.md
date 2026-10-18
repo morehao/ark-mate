@@ -13,6 +13,7 @@
     - 应用侧：`cmd → app → router → controller → service → dao/store`；`dto` 被 **controller 与 service 共用**（跨这两条边传的就是 dto，service 也收 dto、回 dto），`dto` 自身不依赖应用层。
     - **装配只能自上而下，不许反向**：`assembly` 构造用例与控制器，`router` 只收已构造的控制器（`router.Deps`），`app` 只消费 `assembly.BuildResult`。**`app`/`router`/`cli` 都不得引用 `service/svc*`**，控制器也不得 import `domain`/`store`/`model`——判据见 `layers_v31_test.go`。
     - 持久侧：`dbclient → dao → store`，`model` 被三者依赖且自身不依赖任何一层；`dao` 不得 import `store`（会成环），`model` 不得 import `dao`/`store`。
+    - **厚域与用例都走窄端口，不 import 门面**（P4）：`domain/session` 声明 `Store` 端口（`store_port.go`），`domain/interaction` 零 `store`；用例层同理声明 `svcmodel.ModelStore` / `svcsession.EventReader` / `svcsystem.SourceFactsReader`。`*store.Store` 结构上满足它们、由装配根交下来；**交下来时必须现判 nil**——typed-nil 装进接口不是 nil，会让"内存模式 40501 / 只读镜像"那几条判据静默失效（`assembly/services.go` 的 `eventReader`/`sourceFactsReader`/`modelStore` 就是这条规矩的落点）。`model` 仍可被 `domain/session` 引用：它是纯列形状（无行为），把它也搬走只会换来 30 多个镜像结构。
   - **用例层（`service/svc<领域>`）的三条硬规矩**（2026-10-16 定案；违反者由 `internal/archtest` 拦，别靠注释）：
 
     1. **只有 `internal/controller/ctr<领域>` 可以引用 `internal/service/svc<领域>`**——「引用」包括调用、构造与**写类型名**。

@@ -2,33 +2,17 @@ package store
 
 import (
 	"context"
-	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
 )
 
+// MessageHit 一条全局消息命中（形状在 `internal/model`；v3.1 P4 上移）。
+type MessageHit = model.MessageHit
+
 // ——— messages 表（可重建读模型：轮内消息物化；events 仍为唯一事实源） ———
 
 // MessageTextHit 一条命中（搜索片段与计数用）。
-type MessageTextHit struct {
-	SessionID string
-	Role      string
-	Text      string
-}
-
-// MessageHit 一条全局消息命中（跨会话搜索 + 锚点跳转用）。
-type MessageHit struct {
-	SessionID    string
-	SessionTitle string
-	RuntimeID    string
-	Role         string
-	MessageID    string
-	RunID        string
-	Seq          int64 // 锚点：消息起始事件序号（前端据此滚动定位）
-	SeqHi        int64
-	Text         string
-	CreatedAt    time.Time
-}
+type MessageTextHit = model.MessageTextHit
 
 // ReplaceSessionMessages 单事务重铺某会话的 messages（先删会话全部旧行再插新行；
 // 空批次 = 该会话清空）。这是**生产上的唯一写路径**（manager 的整会话重建）。

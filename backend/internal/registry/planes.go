@@ -115,7 +115,7 @@ func NewPlanes(reg *runtime.Registry) *Planes {
 func (p *Planes) EnableStore(st *store.Store) {
 	p.Definitions.SetStore(st)
 	p.Credentials.SetStore(st)
-	p.Skills.SetStore(st)
+	p.Skills.SetPersistence(st != nil)
 	p.Providers.SetStore(st)
 	p.Workspaces.SetStore(st)
 	p.Automation.SetStore(st)

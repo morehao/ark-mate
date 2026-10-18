@@ -7,7 +7,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/code"
@@ -21,7 +20,7 @@ import (
 type Plane struct {
 	caps *capability.Registry
 	defs *definition.Mechanism
-	st   *store.Store
+	st   bool
 	proj *Projections
 }
 
@@ -34,7 +33,9 @@ func NewPlane(caps *capability.Registry, defs *definition.Mechanism) *Plane {
 
 // SetStore 装配期登记库句柄。**必须在装配期调用**（库在 `NewService` 之后才装上）：
 // 在构造时按值传一个当时的 `st` 会永远停在 nil，而表现是"该走库的走了文件"——静默。
-func (m *Plane) SetStore(st *store.Store) { m.st = st }
+// SetPersistence 标记本进程是否接了持久层（v3.1 P4：技能域只把它当**模式开关**用，
+// 不读库——真正的读写归 `definition.DefinitionRepo` 的载体实现）。
+func (m *Plane) SetPersistence(persistent bool) { m.st = persistent }
 
 // Projections 投影登记处（技能平面的另一半状态）。
 func (m *Plane) Projections() *Projections { return m.proj }
@@ -103,7 +104,7 @@ func (m *Plane) ReconcileAll() Tally {
 // 载体的落盘纪律（未知键保留 / 乐观锁 / 原子替换）全部委派给 `capability.DefinitionFile`
 // 与 store 的事务 CAS（见 capability_repo.go），这里只负责"启停"这一件事的顺序与出路。
 func (m *Plane) WriteSkillEnabled(ctx context.Context, id string, enabled bool) (string, error) {
-	if m.st == nil {
+	if !m.st {
 		// memory 模式：启停必须写回定义文件，没有目录就无处写回（sqlite 模式不需要目录）。
 		// 这条对外码 `skill_not_persistable` 在 sqlite 模式下不再可达——DB 里的技能都有行，
 		// 没有行就没有这条能力（M6-3 的语义变化，README 有说明）。
@@ -124,7 +125,7 @@ func (m *Plane) WriteSkillEnabled(ctx context.Context, id string, enabled bool) 
 		// 载体里没有它：代码注入/内存注册的技能无处写回。**不顺手新建**——启停不是定义的新建
 		// 路径，"点一下开关就在库里多出一条定义"比报错难查得多。两个载体的出路文案不同
 		// （一个要建文件、一个要用写面/导入落行），给出的动作必须各自可执行。
-		if m.st != nil {
+		if m.st {
 			return "", acl.NewError(acl.ClassRequest, "skill_not_persistable",
 				fmt.Sprintf("skill %q 在 %s 没有定义行（代码注入/内存注册的技能无处写回）：先用写面或导入把它落成定义后再启停",
 					id, repo.Locator(id)), nil)
