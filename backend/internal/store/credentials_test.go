@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/dbclient"
+	"github.com/morehao/ark-mate/internal/infra/dbclient"
 )
 
 // TestMigrationV20AddsProviderKeyAndMcpSecretsAndRewritesVaultRefs v19 → v20：加列、建表、

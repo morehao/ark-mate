@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/object/objdelivery"
+	"github.com/morehao/ark-mate/internal/object/objdelivery"
 )
 
 // TestApplicabilityWireShapeUnchanged 钉住 M6 迁移（类型从本包搬到 pkg/object/objdelivery）**逐字不变**的

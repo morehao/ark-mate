@@ -29,7 +29,7 @@ package sessionruntime
 
 import (
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ResolvePermission 投递一次权限决策（`svcsession.InteractionDelivery` 的实现）。

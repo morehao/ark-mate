@@ -22,7 +22,7 @@ import (
 	"github.com/morehao/ark-mate/internal/assembly"
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/dto/dtosystem"
-	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/golib/glog"
 )
 

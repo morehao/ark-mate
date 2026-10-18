@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/dbclient"
-	"github.com/morehao/ark-mate/pkg/object/objid"
+	"github.com/morehao/ark-mate/internal/infra/dbclient"
+	"github.com/morehao/ark-mate/internal/object/objid"
 )
 
 // openV21ForV22Test 造一个**真实的 v21 库**（完整跑 v1..v21，含 v21 的 Go 数据步骤）。

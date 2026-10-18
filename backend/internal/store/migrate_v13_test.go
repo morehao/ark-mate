@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/dbclient"
+	"github.com/morehao/ark-mate/internal/infra/dbclient"
 )
 
 // ——— v13 迁移（A8/A9） ———

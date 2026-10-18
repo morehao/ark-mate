@@ -24,7 +24,7 @@ export type ConfigOptionCategory = 'model' | 'thought_level' | 'mode' | 'model_c
 
 /** 一个可选值。value 是**不透明字符串**：原样回传（创建/切换会话），前端不得解析其内部结构。 */
 export interface ConfigOptionValue {
-  /** 不透明取值（形态由各 adapter 自己声明，见 `pkg/runtime/model_value.go`）。 */
+  /** 不透明取值（形态由各 adapter 自己声明，见 `internal/runtime/model_value.go`）。 */
   value: string
   /** 展示名（唯一可展示字段）。 */
   name: string
@@ -313,7 +313,7 @@ export interface ModelRef {
 }
 
 /**
- * 平台模型行 id 的形状（`mdl_` + 26 位 Crockford ULID，由 `pkg/object/objid` 铸造）。
+ * 平台模型行 id 的形状（`mdl_` + 26 位 Crockford ULID，由 `internal/object/objid` 铸造）。
  *
  * 与后端守卫里的 `sessionModelIDForm`（`internal/archtest`）**同源**：那条是"库里存的必须是
  * 平台行 id"，这条是"客户端手上拿的必须是平台行 id"。

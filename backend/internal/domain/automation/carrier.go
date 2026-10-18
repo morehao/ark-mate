@@ -11,9 +11,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/automation"
-	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/automation"
+	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/golib/glog"
 )
 

@@ -12,7 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // fakeRootsStore 记录落盘调用并支持注入失败/锁定态。

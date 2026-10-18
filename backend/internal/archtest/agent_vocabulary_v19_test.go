@@ -15,7 +15,7 @@ import (
 // 会话身份少一项而投影仍然自洽。逐处 review 挡不住这类漏，机器判据能。
 //
 // 判据**不是**「grep 到英文词 agent 就红」（那是错的）：ACP 自己的词表里 `agent` 指的就是**底座进程**
-// （SDK 的 `Agent` 接口、`AuthMethods` 的 `agent` 变体），`pkg/acl` 必须能照原文写；`~/.agents/skills`
+// （SDK 的 `Agent` 接口、`AuthMethods` 的 `agent` 变体），`internal/infra/acp` 必须能照原文写；`~/.agents/skills`
 // 是平台与底座的**共享投放根**，也与本概念无关。所以禁词表列的是**被撤掉的那批标识符**，
 // 与 v15 的 `conversation`、v16 的 `capability_revision`、v17 的 `provider_session` 同形。
 //
@@ -46,7 +46,7 @@ var legacyAgentVocabulary = []string{
 	// ⑥ 三层包名（dto/controller/service 端口）。
 	"dtoagent", "ctragent", "svcagent",
 	// ⑦ 身份列/字段的两种写法：`agent_id`（列名、json 键、日志键、路径段）与驼峰
-	//    `AgentID`/`agentID`（小写化后同形）。`pkg/procreg` 与 `pkg/mcp` 的网关 scope 曾用它，
+	//    `AgentID`/`agentID`（小写化后同形）。`internal/infra/procreg` 与 `internal/infra/mcp` 的网关 scope 曾用它，
 	//    而它们**不会让编译变红**——正是这条守卫存在的理由。
 	"agent_id", "agentid",
 	// ⑧ 路由段。刻意**不**写裸词 `agents`：`~/.agents/skills` 与旧的 `MATE_AGENTS` 都要放行。
@@ -57,7 +57,7 @@ var legacyAgentVocabulary = []string{
 // agentVocabularyWhitelistEntry 一条登记：**目录/文件前缀**或**路径无关锚**恰好一种，外加理由。
 //
 //   - `path`：相对仓库根的前缀（豁免整棵目录时用）。只给**落点稳定**的登记——本次分层重构不动
-//     `internal/store`、`internal/router`、`pkg/config`、`internal/dto`、`internal/controller`。
+//     `internal/store`、`internal/router`、`internal/config`、`internal/dto`、`internal/controller`。
 //   - `anchor`：**路径无关锚**——一个只出现在**唯一一个**被扫描文件里的符号；含它的那个文件被豁免。
 //     `manager` 包里这几个落点会搬家（设计 §3.4 文件去向表），所以它们只有锚、没有路径：
 //     符号跟着文件走，登记不会因为一次目录改名而悬空。
@@ -122,7 +122,7 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 			"这种守卫必须写出它禁的那个词，扫自己必然自证其罪（与 conversation 白名单里同一条理由同形）",
 	},
 	{
-		path: "backend/pkg/config/config.go",
+		path: "backend/internal/config/config.go",
 		reason: "一次性导入必须**指出旧目录名**：装配期要把 `<MATE_HOME>/agents/providers.json` 搬到新的 " +
 			"`providers/` 目录（v19 的目录改名），所以这里必然出现旧路径字面量。这是“指出历史”而不是“用旧词”：" +
 			"新代码路径一律只认 `ProviderDir`/`MATE_PROVIDERS`",
@@ -214,7 +214,7 @@ const negativeAssertionReason = "**反向断言的判据字面量**："
 // 写面带这个键的请求照旧 200，键被 JSON 绑定悄悄丢掉，用户以为"我给这个会话指定了 agent"。
 // 所以本仓刻意留了一条显式拒绝（40001 `agent_selection_removed`），而它要成立就必须：
 // ① 有一个同名的 raw 字段接住它；② 拒绝文案点它的名；③ 调用点把值交过去；④ 清历史键时说得清
-// 清掉了什么。四处都是"指出历史"而不是"使用旧词"，与 `pkg/config` 的改名提示同形。
+// 清掉了什么。四处都是"指出历史"而不是"使用旧词"，与 `internal/config` 的改名提示同形。
 const removedKeyRefusalReason = "**显式拒绝面**："
 
 // historicalAgentFixtureReason 是"停在 v19 之前"那批历史迁移夹具的共用理由（v15/v16/v17 各一份）。

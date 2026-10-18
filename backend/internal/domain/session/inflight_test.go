@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // TestInFlightTracker 语义（§17 E1 显式化簿记，语义同 §1.5 修订）：

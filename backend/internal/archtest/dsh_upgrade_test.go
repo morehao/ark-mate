@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/runtime"
-	"github.com/morehao/ark-mate/pkg/runtime/dsh"
+	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 )
 
 // ——— dsh 升级的「声明跟随 pin」守卫 ———
@@ -49,7 +49,7 @@ func TestDshTestedVersionMatchesPayloadPin(t *testing.T) {
 
 	var spec runtime.Spec
 	found := false
-	for _, s := range runtime.AllBuiltinSpecs() {
+	for _, s := range dsh.Specs() {
 		if s.ID == dsh.ID {
 			spec, found = s, true
 			break

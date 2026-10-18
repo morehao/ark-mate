@@ -78,7 +78,7 @@ func TestCommandGateIsWiredToPermissionDecision(t *testing.T) {
 	}
 
 	// 配置键：MATE_COMMAND_POLICY 是唯一入口。
-	cfg := read("pkg/config/config.go")
+	cfg := read("internal/config/config.go")
 	if !strings.Contains(cfg, "MATE_COMMAND_POLICY") || !strings.Contains(cfg, "CommandPolicyPath") {
 		t.Errorf("config 没有 MATE_COMMAND_POLICY / CommandPolicyPath——规则文件没有配置入口")
 	}

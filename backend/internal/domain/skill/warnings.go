@@ -2,7 +2,7 @@ package skill
 
 import (
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/internal/capability"
 )
 
 // Warnings 把一条技能定义上的告警投影成对外形态。

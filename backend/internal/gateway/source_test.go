@@ -12,6 +12,7 @@ package gateway
 // 不 mock `Source` 的内部：mock 掉哪一层，就等于放弃那一层的证据。
 
 import (
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -28,10 +29,10 @@ import (
 
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/config"
-	"github.com/morehao/ark-mate/pkg/mcp"
-	"github.com/morehao/ark-mate/pkg/resource"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/infra/mcp"
+	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // fakeRemote 一个最小的远端 MCP 服务端（http 传输；JSON 应答而非 SSE）。
@@ -211,7 +212,7 @@ func (r *sourceRig) seedMcp(id, body string, expectedRev int64) {
 // v19：网关的 scope 只有"哪个底座 + 会话钉住的 MCP 白名单"两项（agent 面已撤销）。
 func (r *sourceRig) source(pinned *[]string) *MateSource {
 	r.t.Helper()
-	src, err := NewSource(context.Background(), SourceOptions{
+	src, err := NewSource(context.Background(), SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, 
 		Cfg: r.cfg, McpsPinned: pinned, Store: r.st,
 	})
 	if err != nil {
@@ -301,7 +302,7 @@ func TestSourceUsesCoreCredCwd(t *testing.T) {
 		t.Fatalf("写 provider 行: ok=%v err=%v", ok, err)
 	}
 	// 平台注入/解析用的变量名逐供应商派生（`resource.RefFor`，与 manager 侧同一份算法）。
-	reg, err := runtime.ProductRegistry(nil)
+	reg, err := runtime.ProductRegistry([]runtime.Adapter{dsh.New()}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +326,7 @@ func TestSourceUsesCoreCredCwd(t *testing.T) {
 	}
 	hasKey := func(credCwd string) bool {
 		t.Helper()
-		src, err := NewSource(ctx, SourceOptions{Cfg: cfg, Store: st, CredCwd: credCwd})
+		src, err := NewSource(ctx, SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, Cfg: cfg, Store: st, CredCwd: credCwd})
 		if err != nil {
 			t.Fatalf("装配数据面: %v", err)
 		}
@@ -353,7 +354,7 @@ func TestSourceUsesCoreCredCwd(t *testing.T) {
 		t.Fatal("换一个没有 .env 的 cwd ⇒ 不得再解析出密钥（否则说明用的不是交下来的那个目录）")
 	}
 	// 密钥值**不得**出现在任何对外表示里（回归面）。
-	src, err := NewSource(ctx, SourceOptions{Cfg: cfg, Store: st, CredCwd: cwdWithEnv})
+	src, err := NewSource(ctx, SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, Cfg: cfg, Store: st, CredCwd: cwdWithEnv})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +395,7 @@ func TestSourceSharesDBWithCore(t *testing.T) {
 	seedVia("web", httpDef("web", remote.srv.URL, "MCP_SHARED_DB_TOKEN"))
 
 	logs := testutil.CaptureLogs(t)
-	src, err := NewSource(context.Background(), SourceOptions{
+	src, err := NewSource(context.Background(), SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, 
 		Cfg: cfg,
 	})
 	if err != nil {
@@ -628,7 +629,7 @@ func TestSourceServerTimeoutIsBounded(t *testing.T) {
 	r.seedMcp("hang", httpDef("hang", hang.URL, "MCP_TOKEN_GH"), 0)
 	r.seedMcp("ok", httpDef("ok", ok.srv.URL, "MCP_TOKEN_GH"), 0)
 
-	src, err := NewSource(ctx, SourceOptions{
+	src, err := NewSource(ctx, SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, 
 		Cfg: r.cfg, Store: r.st, PerServerTimeout: 300 * time.Millisecond,
 	})
 	if err != nil {

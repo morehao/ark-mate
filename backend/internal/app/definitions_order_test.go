@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/internal/config"
 )
 
 // TestInitOrderingImportLoadSchedule M6-9：装配期三条时序（都必须"先 store、再导入、再装载、

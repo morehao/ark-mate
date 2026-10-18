@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 已下线的查询键：**显式拒绝**（会话域这一半） ———

@@ -1,6 +1,7 @@
 package router_test
 
 import (
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"encoding/json"
 	"errors"
@@ -49,11 +50,11 @@ import (
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	goruntime "github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/object/objid"
+	goruntime "github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -536,7 +537,7 @@ type restFixture struct {
 // `assembly.Services.BuildControllers` 现造控制器——路由测试既保留替身行为断言，又不与真实装配漂移。
 func stubDeps(t *testing.T, svc *stubSvc) restFixture {
 	t.Helper()
-	reg := goruntime.AllBuiltinRegistry()
+	reg := dsh.Registry()
 	caps := capability.NewRegistry()
 	skills := skill.NewPlane(caps, nil)
 	mcpSecrets := mcp.NewSecrets(credential.New(reg))
@@ -1516,7 +1517,7 @@ func TestProviderRoutes(t *testing.T) {
 // 而这里刻意不给密钥：带密钥的写面会落托管文档，那是用例层测试的事，不是路由测试的事。
 func testProviderPlane(t *testing.T) *provider.Plane {
 	t.Helper()
-	reg := goruntime.AllBuiltinRegistry()
+	reg := dsh.Registry()
 	plane := provider.NewPlane(reg, credential.New(reg))
 	plane.SetProviderDir(t.TempDir())
 	return plane

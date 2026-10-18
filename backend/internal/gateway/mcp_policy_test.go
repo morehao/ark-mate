@@ -3,6 +3,7 @@ package gateway
 // ——— M7-4/M7-5 验收：命名策略 fail-closed、探测面/真实面对拍、调用留痕、并发语义 ———
 
 import (
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"sort"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/sessionruntime"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // TestToolsCollisionIsFailClosed 跨 server 的重名**整组丢弃**，不保留任何一个。
@@ -74,7 +74,7 @@ func TestProbeAndGatewayFacesMatch(t *testing.T) {
 	r.seedMcp("gh", httpDef("gh", remote.srv.URL, "MCP_TOKEN_PARITY"), 0)
 
 	// 探测面：管理器装载同一份定义后探测（真实入口，走真远端）。
-	svc := sessionruntime.NewService(runtime.AllBuiltinRegistry(), nil)
+	svc := sessionruntime.NewService(dsh.Registry(), nil)
 	svc.EnableStore(r.st)
 	if n := svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, ""); n == 0 {
 		t.Fatal("装载能力定义：应读到 1 条")

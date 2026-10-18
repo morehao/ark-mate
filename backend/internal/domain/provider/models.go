@@ -7,10 +7,10 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/ark-mate/pkg/resource"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/object/objid"
+	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 平台模型清单的**读面与解析链**（P4a 正文第五十九刀：从 `internal/manager/model_list.go` 搬入）———

@@ -9,9 +9,9 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/skill"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // selRig 一套「两个可注入 MCP + 一个可投影 skill」的最小装配（M3-2 的选定语义）。

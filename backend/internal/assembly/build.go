@@ -14,8 +14,8 @@ import (
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/config"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
 
@@ -101,7 +101,7 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 	for _, rt := range cfg.RemoteRuntimes {
 		remoteSpecs = append(remoteSpecs, runtime.RemoteSpec(rt.ID, rt.Name, rt.Transport, rt.Endpoint, rt.Headers))
 	}
-	reg, err := runtime.ProductRegistry(remoteSpecs)
+	reg, err := runtime.ProductRegistry(AllAdapters(), remoteSpecs)
 	if err != nil {
 		return nil, usageErr("serve: %v", err)
 	}

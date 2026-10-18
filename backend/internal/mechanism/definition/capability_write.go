@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/capability"
 )
 
 // ——— 能力定义写面：C9 落盘纪律的唯一实现 ———

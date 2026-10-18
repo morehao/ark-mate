@@ -1,6 +1,7 @@
 package cliops
 
 import (
+	"github.com/morehao/ark-mate/internal/assembly"
 	"context"
 	"flag"
 	"fmt"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // demo 在**构建期选定的** runtime 上跑一次真实会话（M0 DoD 的可执行验证路径）。
@@ -35,7 +36,7 @@ func Demo(args []string) {
 	for _, rt := range cfg.RemoteRuntimes {
 		remoteSpecs = append(remoteSpecs, runtime.RemoteSpec(rt.ID, rt.Name, rt.Transport, rt.Endpoint, rt.Headers))
 	}
-	reg, err := runtime.ProductRegistry(remoteSpecs)
+	reg, err := runtime.ProductRegistry(assembly.AllAdapters(), remoteSpecs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "demo: %v\n", err)
 		os.Exit(2)

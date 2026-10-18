@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // TestKeyForSeparatesNativeModes 原生权限模式必须**分进程**（P1-f 下半）。

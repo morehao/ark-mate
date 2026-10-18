@@ -74,8 +74,8 @@ var runtimeShellCallSites = []runtimeShellCallSite{
 // runtimeShellImplPaths 是「壳包装/解包的**实现本身**与它的单测」——两处都住在 `pkg/`，
 // **不参与**本次 `internal/` 的重划，所以这里继续钉精确路径：它们本来就只该各有一份。
 var runtimeShellImplPaths = []string{
-	"backend/pkg/object/objid/objid.go",
-	"backend/pkg/object/objid/objid_test.go",
+	"backend/internal/object/objid/objid.go",
+	"backend/internal/object/objid/objid_test.go",
 }
 
 // TestRuntimeSessionNeverOnWireAsPlatformID 守卫②：两个 id 词汇不得互串。
@@ -150,7 +150,6 @@ func TestRuntimeSessionNeverOnWireAsPlatformID(t *testing.T) {
 	got := map[string][2]int{} // 函数名 → (wrap, unwrap)
 	for _, dir := range []string{
 		filepath.Join(root, "internal"),
-		filepath.Join(root, "pkg"),
 	} {
 		for _, path := range goFilesUnder(t, dir) {
 			rel, rerr := filepath.Rel(root, path)
@@ -402,7 +401,7 @@ func TestPrimaryKeyShapesStayDeclared(t *testing.T) {
 
 	// ③ `objid` 的前缀登记表 == 8 个平台铸造前缀，**不含**任何定义类。
 	objidSrc := stripLineComments(readFileOrFatal(t,
-		filepath.Join(backendRoot(t), "pkg", "object", "objid", "objid.go")))
+		filepath.Join(backendRoot(t), "internal", "object", "objid", "objid.go")))
 	prefixRe := regexp.MustCompile(`(?m)^\s*([A-Z]\w+)\s*=\s*"([a-z]{2,3}_)\s*"`)
 	type kv struct{ name, value string }
 	var got []kv

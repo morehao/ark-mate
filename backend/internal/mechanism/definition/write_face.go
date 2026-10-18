@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/internal/code"
 )
 
 // ——— 定义写面的原文处理（skill / mcp / automation 三域共用**一份**实现） ———

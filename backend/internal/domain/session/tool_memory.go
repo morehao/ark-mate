@@ -3,7 +3,7 @@ package session
 import (
 	"sync"
 
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— 工具调用详情的短期记忆（P4a 正文第六十一刀：从 `internal/manager/tool_calls.go` 搬入）———

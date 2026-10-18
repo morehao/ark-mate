@@ -10,7 +10,7 @@ import (
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/logging"
+	"github.com/morehao/ark-mate/internal/infra/logging"
 	"github.com/morehao/golib/glog"
 )
 

@@ -1,6 +1,7 @@
 package ctrprovider
 
 import (
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"strings"
 	"testing"
@@ -10,7 +11,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/service/svcprovider"
-	goruntime "github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— P4a：自检用例的**装配判据**（用例实例由本控制器造） ———
@@ -43,7 +43,7 @@ func (f *fakeProviderCatalog) ModelCatalog(context.Context) (*dtomodel.ModelCata
 //	② 造出来的自检必须**读的是交进来的那份平面**——空平面的第一条结论必然是 `exists` 的 fail，
 //	   文案里带 id。把平面接错（或忘了接）在这里就会现形，而"编译通过 + 档案面照常工作"看不见它。
 func TestNewProviderCtrBuildsBothUseCases(t *testing.T) {
-	reg := goruntime.AllBuiltinRegistry()
+	reg := dsh.Registry()
 	plane := provider.NewPlane(reg, credential.New(reg))
 	plane.SetProviderDir(t.TempDir())
 	ctr := NewProviderCtr(svcprovider.NewProvider(plane), svcprovider.NewProbe(plane, &fakeProviderCatalog{}))

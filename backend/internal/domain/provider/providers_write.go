@@ -10,9 +10,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/object/objdelivery"
-	"github.com/morehao/ark-mate/pkg/resource"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/object/objdelivery"
+	"github.com/morehao/ark-mate/internal/resource"
 	"github.com/morehao/golib/glog"
 )
 

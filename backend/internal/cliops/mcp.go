@@ -1,6 +1,7 @@
 package cliops
 
 import (
+	"github.com/morehao/ark-mate/internal/assembly"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +10,7 @@ import (
 	"syscall"
 
 	"github.com/morehao/ark-mate/internal/gateway"
-	"github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -89,6 +90,7 @@ func mcpBridge(args []string) {
 	src, sErr := gateway.NewSource(ctx, gateway.SourceOptions{
 		Cfg:        cfg,
 		McpsPinned: scope.McpsPinned,
+		Adapters:   assembly.AllAdapters(),
 	})
 	if sErr != nil {
 		glog.Errorw(context.Background(), "mcp bridge: 数据面装配失败（本轮工具面为空）", "err", sErr)

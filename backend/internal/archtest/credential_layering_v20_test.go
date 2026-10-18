@@ -18,31 +18,30 @@ import (
 // 解析或"读哪一份"复制到第二处，等于把这条语义复制成两份必然漂移的事实。
 //
 // **判据按符号定位，不钉文件路径**（P0）：这条不变量只该落在两处——层序的**唯一实现**
-// （`pkg/credentials` 的 `Layered.Resolve`）与那个合法地"同时点名两层"的**对账消费者**
+// （`internal/infra/credentials` 的 `Layered.Resolve`）与那个合法地"同时点名两层"的**对账消费者**
 // （迁移后落 `mechanism/credential`，由符号 `ResolveProviderKey` 认领）。两处都按符号断言，
 // 所以文件搬进哪个包都不影响判据；反过来，"在第二个地方又实现了一遍层序"会因为**符号声明数
 // 变成 2** 而红。
 //
 // 判据五段（都 fail-closed）：
-//  1. `Layered.Resolve` 全仓**恰好一处**（按符号找，不钉文件），且就落在 `pkg/credentials` 包里；
+//  1. `Layered.Resolve` 全仓**恰好一处**（按符号找，不钉文件），且就落在 `internal/infra/credentials` 包里；
 //     它的函数体里四层出现的**顺序**必须是 env → managed → dotenv_cwd → dotenv_home
 //     （锚在实现体内的首次出现位置，解析不到函数即失败）；
-//  2. 除 `pkg/credentials/**` 外，全仓 Go 源码不得读 `.env` 文件（`.env` 字面量与文件读取同文件共现）；
-//  3. 除 `pkg/credentials/**` 外，同一个文件不得同时点名两层 `Source*` 常量（同时点名两层的人，
+//  2. 除 `internal/infra/credentials/**` 外，全仓 Go 源码不得读 `.env` 文件（`.env` 字面量与文件读取同文件共现）；
+//  3. 除 `internal/infra/credentials/**` 外，同一个文件不得同时点名两层 `Source*` 常量（同时点名两层的人，
 //     必然在文件里自己判了顺序）；豁免只按**符号**给——只有声明了白名单符号的那个文件拿得到；
 //  4. 四个 `Source` 取值常量在全仓**只声明一次**（`Source<词> Source = "…"` 恰好四处，且都在
-//     `pkg/credentials`）——谁复述一份词表谁就漂移；
+//     `internal/infra/credentials`）——谁复述一份词表谁就漂移；
 //  5. 白名单符号全仓**恰好一处声明**：0 处 = 登记烂成了陈旧指针（豁免再也发不出去，而"唯一实现"
 //     也没人再验），≥2 处 = 第二份对账实现也拿到了同一份豁免。
 func TestCredentialLayeringOrderIsSingleSource(t *testing.T) {
 	root := backendRoot(t)
-	creds := filepath.Join(root, "pkg", "credentials")
+	creds := filepath.Join(root, "internal", "infra", "credentials")
 	if _, err := os.Stat(creds); err != nil {
 		t.Fatalf("凭据包不存在：%s（%v）——守卫失去对象", creds, err)
 	}
 	repoRoot := filepath.Dir(root)
 	goFiles := goFilesUnder(t, filepath.Join(root, "internal"))
-	goFiles = append(goFiles, goFilesUnder(t, filepath.Join(root, "pkg"))...)
 	if len(goFiles) < 100 {
 		t.Fatalf("只扫到 %d 个 Go 文件——路径写错了？（fail-closed）", len(goFiles))
 	}
@@ -72,7 +71,7 @@ func TestCredentialLayeringOrderIsSingleSource(t *testing.T) {
 	}
 	if got := filepath.Dir(resolveFiles[0]); got != creds {
 		t.Fatalf("`Layered.Resolve` 落在 %s，而它只许在凭据包（%s）里——"+
-			"分层解析的唯一实现不能离开 `pkg/credentials`", got, creds)
+			"分层解析的唯一实现不能离开 `internal/infra/credentials`", got, creds)
 	}
 	src := readSourceFor(t, resolveFiles[0])
 	body := resolveFuncBodyFor(t, src)
@@ -96,14 +95,14 @@ func TestCredentialLayeringOrderIsSingleSource(t *testing.T) {
 	for _, path := range productGo {
 		rel := relOf[path]
 		if strings.HasPrefix(rel, "backend/internal/archtest/") ||
-			strings.HasPrefix(rel, "backend/pkg/credentials/") {
+			strings.HasPrefix(rel, "backend/internal/infra/credentials/") {
 			continue
 		}
 		scanned = append(scanned, path)
 	}
 
 	// 词表从凭据包**自取**（`Source<词> Source = "<值>"`），再拿"同名同值"去全仓找复述：
-	// 别的包另有自己的 `Source` 家族（`pkg/config` 的 `SourceFile`/`SourceFlag`/`SourceEnv` 是
+	// 别的包另有自己的 `Source` 家族（`internal/config` 的 `SourceFile`/`SourceFlag`/`SourceEnv` 是
 	// 「这份配置从哪来」，其中 `SourceEnv` 与凭据词表**同名不同值**），按名字扫会误伤，
 	// 按"同名 + 同值"扫才只认这一份词表。
 	pairRe := regexp.MustCompile(`(Source\w+)\s+Source\s*=\s*"([^"]*)"`)
@@ -176,7 +175,7 @@ func TestCredentialLayeringOrderIsSingleSource(t *testing.T) {
 
 	if len(dotenvReaders) > 0 {
 		t.Errorf("这些文件自己读 `.env`：\n  %s\n"+
-			"dotenv 的解析与「读哪一份、以什么优先级」都是层序本身——它只有一处实现（`pkg/credentials`）。"+
+			"dotenv 的解析与「读哪一份、以什么优先级」都是层序本身——它只有一处实现（`internal/infra/credentials`）。"+
 			"要拿一把钥匙请调 `Layered.Resolve`，别自己拼回落链", strings.Join(dotenvReaders, "\n  "))
 	}
 	if len(twoLayerFiles) > 0 {
@@ -190,7 +189,7 @@ func TestCredentialLayeringOrderIsSingleSource(t *testing.T) {
 			out = append(out, strings.TrimSpace(decl)+" @"+strings.Join(where, ","))
 		}
 		sort.Strings(out)
-		t.Fatalf("`Source` 取值常量只许在 `pkg/credentials` 里声明一次，别处又声明了：\n  %s\n"+
+		t.Fatalf("`Source` 取值常量只许在 `internal/infra/credentials` 里声明一次，别处又声明了：\n  %s\n"+
 			"（复述词表 = 两条必然漂移的事实：面板与 doctor 会按各自那份解释同一个值）",
 			strings.Join(out, "\n  "))
 	}

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/dbclient"
+	"github.com/morehao/ark-mate/internal/infra/dbclient"
 )
 
 // openV25ForV26Test 造一个**真实的 v25 库**（完整跑 v1..v25）。

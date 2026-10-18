@@ -1,8 +1,8 @@
 package session
 
 import (
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— P3c：能力集的事实面 ———

@@ -11,8 +11,8 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // TestCapabilitySelectionSurvivesRestart M3-2 的端到端验收：

@@ -10,8 +10,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // fpRig 一套「已注册 runtime + 一个已解析 skill 投影」的最小装配。

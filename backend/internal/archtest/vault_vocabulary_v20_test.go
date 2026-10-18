@@ -79,7 +79,7 @@ func TestNoVaultVocabulary(t *testing.T) {
 // vaultVocabularyWhitelistEntry 一条登记：**目录/文件前缀**或**路径无关锚**恰好一种，外加理由。
 //
 //   - `path`：相对仓库根的前缀（豁免整棵目录时用）。只给**落点稳定**的登记——本次分层重构不动
-//     `internal/store`、`pkg/capability`、`internal/app`。
+//     `internal/store`、`internal/capability`、`internal/app`。
 //   - `anchor`：**路径无关锚**——一个只出现在**唯一一个**被扫描文件里的符号；含它的那个文件被豁免。
 //     `manager` 包里的 `provider_doctor.go` 会搬到 `mechanism/doctor/`（设计 §3.4 文件去向表），
 //     所以它只有锚、没有路径：符号跟着文件走，登记不会因为一次搬家而悬空。
@@ -146,13 +146,13 @@ var vaultVocabularyWhitelist = []vaultVocabularyWhitelistEntry{
 			"点名被撤掉的键」同形：只说「有遗留物」等于让用户去猜",
 	},
 	{
-		path: "backend/pkg/capability/secretref.go",
+		path: "backend/internal/capability/secretref.go",
 		reason: "**旧前缀的唯一翻译点**：档案文件（`providers.json`、能力目录里的 `mcp/*.json`）不在" +
 			"库里、v20 迁移改不到它们，所以导入时必须认出旧前缀并翻成 `store:`（顺带 WARN）。" +
 			"常量名与注释都写着「这是全仓唯一一处翻译点」",
 	},
 	{
-		path: "backend/pkg/capability/secretref_test.go",
+		path: "backend/internal/capability/secretref_test.go",
 		reason: "**翻译点的判据**：它必须写出旧前缀才能证明「认得出、翻得对、并且告警」——" +
 			"与 `router_test.go` 里禁历史名的理由同形（守卫扫自己必然自证其罪）",
 	},

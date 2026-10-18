@@ -11,9 +11,10 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
+	"github.com/morehao/ark-mate/internal/assembly"
 	"github.com/morehao/ark-mate/internal/registry"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/internal/config"
 )
 
 // 本文件是 `mate doctor` 的 **provider（供应商凭据）与模型清单**那一段（K2）。
@@ -50,7 +51,10 @@ func checkProviderSection(opts doctorOptions) (doctorfacts.ProviderDoctorFacts, 
 		ProvidersFileName:   provider.ProvidersFileName,
 		BackupName:          provider.ProvidersBackupName,
 		MismatchExtraMarker: provider.ProviderMismatchExtraMarker,
-	}, registry.CollectRuntimeModelFacts)
+		RuntimeSpecs:        assembly.BuiltinSpecs(),
+	}, func(ctx context.Context, st *store.Store, home string) []doctorfacts.ProviderRuntimeFacts {
+		return registry.CollectRuntimeModelFacts(ctx, st, home, assembly.BuiltinRegistry())
+	})
 	if st != nil {
 		defer func() { _ = st.Close() }()
 	}

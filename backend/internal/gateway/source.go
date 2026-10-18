@@ -35,16 +35,19 @@ import (
 
 	"github.com/morehao/ark-mate/internal/registry"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/config"
-	"github.com/morehao/ark-mate/pkg/mcp"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/infra/mcp"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
 
 // SourceOptions 数据面参数。
 type SourceOptions struct {
 	Cfg config.Config
+	// Adapters runtime adapter 列表（v3.1：网关是装配根的兄弟进程，同样只能由装配根
+	// 提供具体 adapter；nil = 无底座可用，装配会失败）。
+	Adapters []runtime.Adapter
 	// McpsPinned 会话钉住的 MCP 白名单（nil = 未钉 → 全量）。
 	McpsPinned *[]string
 
@@ -156,7 +159,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	for _, rt := range opts.Cfg.RemoteRuntimes {
 		remoteSpecs = append(remoteSpecs, runtime.RemoteSpec(rt.ID, rt.Name, rt.Transport, rt.Endpoint, rt.Headers))
 	}
-	reg, err := runtime.ProductRegistry(remoteSpecs)
+	reg, err := runtime.ProductRegistry(opts.Adapters, remoteSpecs)
 	if err != nil {
 		return nil, fmt.Errorf("网关装配底座: %w", err)
 	}

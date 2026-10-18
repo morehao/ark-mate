@@ -238,9 +238,9 @@ func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
 			"「用例调端口 `ResolveModel` → 适配器调 `provider.Plane.ResolveSessionModel`」两段，缺任一段都等于绕过解析）")
 	}
 	// ③ 复用既有错误码（E9）：`model_not_found` 仍映射到 40401。
-	aclCode := readStripped(t, filepath.Join(backendRoot(t), "pkg", "code", "acl.go"))
+	aclCode := readStripped(t, filepath.Join(backendRoot(t), "internal", "code", "acl.go"))
 	if !strings.Contains(aclCode, `"model_not_found":`) {
-		t.Fatal("`pkg/code/acl.go` 的 notFoundCodes 里没有 model_not_found：它必须仍提档到 40401" +
+		t.Fatal("`internal/code/acl.go` 的 notFoundCodes 里没有 model_not_found：它必须仍提档到 40401" +
 			"（会话引用了一个查不到的模型行 = 同一个码、同一份引导：刷新列表）")
 	}
 	// ④ 目录注解的产出点**只有一处**（`modelIDByValue`）：第二个产出点迟早与它分叉。

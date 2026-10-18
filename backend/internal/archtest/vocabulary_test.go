@@ -28,7 +28,6 @@ func vocabularyScanFace(t *testing.T) (string, []string) {
 	root := filepath.Dir(backendRoot(t)) // 仓库根
 	for _, must := range []string{
 		filepath.Join(root, "backend", "internal"),
-		filepath.Join(root, "backend", "pkg"),
 		filepath.Join(root, "README.md"),
 	} {
 		if _, err := os.Stat(must); err != nil {
@@ -39,7 +38,6 @@ func vocabularyScanFace(t *testing.T) (string, []string) {
 	var files []string
 	for _, dir := range []string{
 		filepath.Join(root, "backend", "internal"),
-		filepath.Join(root, "backend", "pkg"),
 	} {
 		for _, p := range goFilesUnder(t, dir) {
 			rel, _ := filepath.Rel(root, p)
@@ -73,9 +71,9 @@ var conversationVocabularyWhitelist = []struct {
 	reason string
 }{
 	{
-		path: "backend/pkg/acl/scope.go",
+		path: "backend/internal/infra/acp/scope.go",
 		reason: "ACP `_meta` 的**第三方键** `conversationId`/`conversation_id`：那是底座发的，" +
-			"改了就丢 scope（README 已登记这条解析口径）。pkg/acl 是「可复用的 ACP 客户端」，" +
+			"改了就丢 scope（README 已登记这条解析口径）。internal/infra/acp 是「可复用的 ACP 客户端」，" +
 			"它不该知道 ark-mate 的词汇表",
 	},
 	{
@@ -120,7 +118,7 @@ var conversationVocabularyWhitelist = []struct {
 //
 // 为什么只豁免这一个原样词组（而不是给 README 开一条文件级白名单）：README 是路由与 JSON 键
 // 的契约文档，给整份文件开豁免等于放弃对它的检查；而这个键序列是**底座发的键**，写文档时
-// 必须原样给出，否则读者不知道要解析什么（README 已把它与 `pkg/acl/scope.go` 的处置写在同一句里）。
+// 必须原样给出，否则读者不知道要解析什么（README 已把它与 `internal/infra/acp/scope.go` 的处置写在同一句里）。
 const readmeThirdPartyMetaKeys = "`sessionId`/`session_id`/`conversationId`/`conversation_id`"
 
 // TestNoConversationVocabulary 词汇收口（T5 / B2 / R-1 的机器判据）。
@@ -238,7 +236,7 @@ var legacyCapabilityVocabulary = []string{"capability_revision", "capability_id"
 //
 // v16 把「定义变更审计」的表名与列名从 `capability_revisions` / `capability_id` 改成了
 // `definition_revisions` / `definition_id`，理由是**`capability` 在本仓是重载词**：它既指
-// 运行期声明的能力集（`capability_json`、`CapabilityScope`、`pkg/capability` = skill + mcp），
+// 运行期声明的能力集（`capability_json`、`CapabilityScope`、`internal/capability` = skill + mcp），
 // 又指这张审计表覆盖的**六种定义**（skill / mcp / agent / automation / provider / model，
 // 后四者与"运行期能力"无关）。判据与 v15 的 conversation 同形：**零命中**是可以机器判据的。
 //

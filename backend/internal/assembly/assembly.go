@@ -25,12 +25,12 @@ import (
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/config"
-	pkgidentity "github.com/morehao/ark-mate/pkg/identity"
-	"github.com/morehao/ark-mate/pkg/procreg"
-	"github.com/morehao/ark-mate/pkg/resource"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/config"
+	pkgidentity "github.com/morehao/ark-mate/internal/identity"
+	"github.com/morehao/ark-mate/internal/infra/procreg"
+	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
 

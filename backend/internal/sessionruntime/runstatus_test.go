@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // 本文件钉 **S1 `run.status` 的发射面**（P0-2）。

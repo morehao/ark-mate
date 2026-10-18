@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/object/objdelivery"
+	"github.com/morehao/ark-mate/internal/object/objdelivery"
 )
 
 // ——— 第 22 条守卫：交付矩阵完整性（每个资源 kind 都必须有交付通道声明） ———
@@ -18,7 +18,7 @@ import (
 // 为什么需要它：平台管着好几种资源（provider 凭据 / 模型清单 / skill / mcp /
 // automation），而它们在**底座侧生效的方式互不替代**——密钥走子进程 env、会话级模型走会话
 // 配置项、模型清单整份写配置文件、skill 物化到读根、MCP 注入会话能力集。这张「资源 → 交付
-// 通道 + 生效时刻」的表是静态事实表（`pkg/object/objdelivery`），**通道按资源种类固定**。
+// 通道 + 生效时刻」的表是静态事实表（`internal/object/objdelivery`），**通道按资源种类固定**。
 //
 // 它挡的是一种**静默缺口**：新增一种资源（比如再加一类可投给底座的定义）却忘了给它声明交付
 // 通道。那种缺口不会让任何东西报错——写面照常成功、界面照常显示「已保存」，而用户永远等不到
@@ -27,7 +27,7 @@ import (
 // 读出全部 kind，逐个断言 `objdelivery.For` 查得到声明；并断言**未知 kind 必须返回 false**，
 // 把这个查询本身也钉死（一条永远返回 true 的假实现不能蒙混过去）。
 //
-// 故意的红：往 `pkg/object/objdelivery` 的表里删掉任意一个 kind 的声明 →
+// 故意的红：往 `internal/object/objdelivery` 的表里删掉任意一个 kind 的声明 →
 // `TestDeliveryMatrixCoversKinds` 必须红（`missingDeliveryKinds` 的负例分支就是它的自证）。
 
 // capabilityKindConstants 从 internal/model/enum.go 读出 `DefinitionKind*` 常量（常量名 → 取值）。
@@ -101,7 +101,7 @@ func missingDeliveryKinds(kinds map[string]string) []string {
 		kind := kinds[name]
 		d, ok := objdelivery.For(kind)
 		if !ok {
-			out = append(out, name+"=\""+kind+"\" 在 pkg/object/objdelivery 里没有交付声明："+
+			out = append(out, name+"=\""+kind+"\" 在 internal/object/objdelivery 里没有交付声明："+
 				"新增资源种类时必须同时声明它走哪条通道、什么时候生效")
 			continue
 		}

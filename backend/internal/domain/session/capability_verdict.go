@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 能力可达性判决：**唯一实现** ———

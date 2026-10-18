@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/internal/config"
 )
 
 // mustConfig 解析配置（含 .ark-mate/config 目录化）。配置文件非法时打印明确错误并退出 2

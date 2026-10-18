@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/dbclient"
+	"github.com/morehao/ark-mate/internal/infra/dbclient"
 )
 
 // openV15ForV16Test 造一个**真实的 v15 库**（跑完整的 v1..v15，含 v12/v13/v15 的 Go 数据步骤）。

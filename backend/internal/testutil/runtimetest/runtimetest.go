@@ -38,9 +38,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/resource"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ID 合成底座的注册表键。

@@ -8,9 +8,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/redact"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/redact"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // maxDiagStderrLines 外露的 stderr 诊断行数上限（超出保留最近若干行）。

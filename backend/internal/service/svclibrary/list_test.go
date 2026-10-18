@@ -6,8 +6,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 可达性判决的判据（P4a 正文第六刀：随实现从 `manager/library.go` 搬来） ———

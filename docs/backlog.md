@@ -46,7 +46,7 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 ### T1 · O3-a：MCP 全局并发限流/排队
 
-- **现状**：`backend/pkg/mcp/pool.go` 按 server 池化、**同会话串行**、有界 + 空闲回收；但
+- **现状**：`backend/internal/infra/mcp/pool.go` 按 server 池化、**同会话串行**、有界 + 空闲回收；但
   N 条会话可以同时打到**同一个**远端 server——没有 server 维度的总闸。
 - **做什么**：
   1. 在 pool 层加 **per-server 并发上限 + 等待队列**（在途数超过上限时排队，而不是直接拒绝）；
@@ -141,14 +141,14 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 ### T8 · O5：远端接入鉴权（云端 B 段）
 
-- **现状**：`backend/pkg/runtime/connect.go` 的 `RemoteSpec` 支持 `headers`，平台不做 OAuth/mTLS；
+- **现状**：`backend/internal/runtime/connect.go` 的 `RemoteSpec` 支持 `headers`，平台不做 OAuth/mTLS；
   HTTP 长流在建会话前会 404（降级记进诊断）。
 - **前提**：B2「远程执行面升格」的产品形态先定（会话带 `transport=local|cloud` 那一步）。
 - **验收**：凭据不落明文日志；失效凭据有可识别错误；降级路径仍如实进诊断。
 
 ### T9 · Windows 出包 + Job Object 进程回收（M4-3）
 
-- **现状**：`Makefile` 的桌面 recipe 只出 macOS；`backend/pkg/procreg/procreg_other.go` 在非 unix
+- **现状**：`Makefile` 的桌面 recipe 只出 macOS；`backend/internal/infra/procreg/procreg_other.go` 在非 unix
   上明确降级（"当前平台不支持进程组信号"）。C26 记的第三子项就等这一步。
 - **做什么**：接 Windows NSIS 出包；用 Job Object 重做进程回收（`KILL_ON_JOB_CLOSE`），
   不再依赖进程组信号。

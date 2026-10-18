@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/pkg/object/objdelivery"
+	"github.com/morehao/ark-mate/internal/object/objdelivery"
 )
 
 // ——— provider 写面的**生效面回执**（T4 的落地形态） ———

@@ -15,7 +15,7 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrws"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/middleware"
-	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/internal/code"
 )
 
 // 本文件是 M3-5（Origin 矩阵 + Host 白名单）的判据。三块：

@@ -13,8 +13,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/capability"
-	goruntime "github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/capability"
+	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— K2：`mate doctor` 的 provider（供应商凭据）与模型清单体检 ———
@@ -60,6 +60,9 @@ type ProviderDoctorOptions struct {
 	// 它是"写入侧拼串"与"本包分档"之间唯一的耦合点：`BenignOnly` 据此把"写面新建后快照滞后"
 	// （正常，只告警）与"真不一致"（判失败）分开。空串 → 一律按"真不一致"处置（fail-closed）。
 	MismatchExtraMarker string
+	// RuntimeSpecs 在册底座的声明（v3.1：`mechanism` 不得 import adapter，装配根交下来）。
+	// 用于推出"哪些原生凭据文档该被体检"；空 = 只报载体事实，不报敏感文件。
+	RuntimeSpecs []goruntime.Spec
 }
 
 // ProviderDoctorFacts provider 与模型清单段的只读事实（`mate doctor --json` 的 `providers` 段）。
@@ -338,7 +341,7 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 			facts.ImportMismatchBenignOnly = providerMismatchBenignOnly(facts.ImportMismatch, opts.MismatchExtraMarker)
 		}
 	}
-	facts.SensitiveFiles = collectSensitiveFiles(opts.Home, providerDir, st)
+	facts.SensitiveFiles = collectSensitiveFiles(opts.Home, providerDir, st, opts.RuntimeSpecs)
 
 	// ——— 凭据面（载体无关的部分）：镜像 ↔ 库对账 + 旧机制遗留 ———
 	var mcpRefs []string
@@ -606,7 +609,7 @@ func providerMismatchBenignOnly(entries []string, marker string) bool {
 //
 // 哈希已完备的两条纪律这里都体现：① 权限宽于 0600 → **fail-loud**（dsh 对可被属主之外读取的
 // 文档是**拒启**，不是告警）；② 平台无法判定权限（Windows）→ 如实记"无法校验"，不假绿也不假红。
-func collectSensitiveFiles(home, providerDir string, st *store.Store) []SensitiveFileFacts {
+func collectSensitiveFiles(home, providerDir string, st *store.Store, specs []goruntime.Spec) []SensitiveFileFacts {
 	out := []SensitiveFileFacts{}
 	root := strings.TrimSpace(home)
 	if root == "" {
@@ -617,9 +620,9 @@ func collectSensitiveFiles(home, providerDir string, st *store.Store) []Sensitiv
 	}
 	// 逐个已注册 runtime 的**原生凭据文档**（声明在 `CredentialSpec.NativeDoc` 里，
 	// 占位符用该 runtime 自己的隔离 env 展开——与物化时同一条解析链，绝不落到用户自己的目录）。
-	// 同 `collectRuntimeModelFacts`：体检看全部内置底座，不按构建期选择裁剪（那是产品装配的事）。
-	reg := goruntime.AllBuiltinRegistry()
-	for _, spec := range reg.List() {
+	// 同 `collectRuntimeModelFacts`：体检看**全部在册底座**（装配根交下来的声明），
+	// 不按构建期选择裁剪（那是产品装配的事）。
+	for _, spec := range specs {
 		if strings.TrimSpace(spec.Credential.NativeDoc) == "" {
 			continue
 		}

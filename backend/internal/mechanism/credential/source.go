@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/credentials"
+	"github.com/morehao/ark-mate/internal/infra/credentials"
 	"github.com/morehao/golib/glog"
 )
 

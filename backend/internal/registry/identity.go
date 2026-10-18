@@ -4,9 +4,9 @@ import (
 	"context"
 	"sync"
 
-	pkgidentity "github.com/morehao/ark-mate/pkg/identity"
-	"github.com/morehao/ark-mate/pkg/resource"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	pkgidentity "github.com/morehao/ark-mate/internal/identity"
+	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 产品身份的交付面（部署级常量） ———

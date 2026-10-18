@@ -13,7 +13,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/internal/config"
 )
 
 // ——— K2：`mate doctor` 的 provider / 模型清单段（v20 凭据面） ———

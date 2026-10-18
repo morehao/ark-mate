@@ -5,7 +5,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/morehao/ark-mate/pkg/credentials"
+	"github.com/morehao/ark-mate/internal/infra/credentials"
 )
 
 // resolveProviderKey 解析一条 provider 的拨号密钥（provider 面**唯一**入口）。

@@ -12,7 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // 本文件是 v14 工作空间登记表的**进程内集成判据**（真路由 + 真 manager + 真 sqlite 库）。

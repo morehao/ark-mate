@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/object/objusage"
+	"github.com/morehao/ark-mate/internal/object/objusage"
 )
 
 // seedRun 写入一条 run（连带把会话补齐：run 挂在会话上，用量快照也按会话取最后一条）。

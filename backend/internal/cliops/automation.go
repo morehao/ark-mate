@@ -11,7 +11,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/internal/config"
 )
 
 // automationCmd 分发 `mate automation <动作>`（M6-7：定时任务定义的存量搬家，与 `mate agent` 同形）。

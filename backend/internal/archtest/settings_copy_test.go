@@ -362,7 +362,7 @@ func assertNoBannedWord(t *testing.T, where, text string) {
 // 命中的就是这一条，当时它只在"某条档案没被挂靠"这一种状态下才渲染出来）。
 //
 // 判据只看**含中文的字面量**：这一屏的用户文案在本仓一律是中文，而 ASCII 字面量是协议键与
-// 依赖路径（`"github.com/…/pkg/runtime"`、`"max_tokens"`、`"data:image/png;base64,…"`）——
+// 依赖路径（`"github.com/…/internal/runtime"`、`"max_tokens"`、`"data:image/png;base64,…"`）——
 // 用户读不到它们，判进来只会逼着守卫加白名单，而白名单是这套守卫最常见的死法。
 // fail-closed：文件读不到、或中文串少到说明提取器/文件已经失效，都当场失败（守卫不许空转）。
 //

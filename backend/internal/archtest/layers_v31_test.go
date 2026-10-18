@@ -67,7 +67,9 @@ var v31Layers = map[string]v31Layer{
 	// ——— 2 层：协议客户端 / 错误码 / 跨域机制门面 ———
 	"internal/infra/acp":  {layer: 2, name: "infra/acp"},
 	"internal/infra/mcp":  {layer: 2, name: "infra/mcp"},
-	"internal/code":       {layer: 2, name: "code"},
+	// `code` 把 ACP 的协议错误折成本仓错误码（`acl.go`）：它是 2 层里的**叶子消费者**，
+	// 允许与同层协议客户端互链（否则「错误码」这一格只能靠复制粘贴活着）。
+	"internal/code":       {layer: 2, name: "code", sameLayer: true},
 	"internal/automation": {layer: 2, name: "automation", sameLayer: true},
 	"internal/credential": {layer: 2, name: "credential", deny: []string{"internal/service", "internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},
 
@@ -135,22 +137,22 @@ var v31Exempt = []string{
 // v31LegacyPaths 过渡期路径映射：P2 之前 `pkg/*` 仍在，按目标层判定。
 // P2 完成后本表必须为空（`TestLayerLegacyPathsAreEmptyV31` 会盯着）。
 var v31LegacyPaths = map[string]string{
-	"pkg/runtime":     "internal/runtime",
-	"pkg/runtime/dsh": "internal/infra/dsh",
-	"pkg/acl":         "internal/infra/acp",
-	"pkg/mcp":         "internal/infra/mcp",
-	"pkg/logging":     "internal/infra/logging",
-	"pkg/credentials": "internal/infra/credentials",
-	"pkg/dbclient":    "internal/infra/dbclient",
-	"pkg/procreg":     "internal/infra/procreg",
-	"pkg/identity":    "internal/identity",
-	"pkg/resource":    "internal/resource",
-	"pkg/redact":      "internal/redact",
-	"pkg/object":      "internal/object",
-	"pkg/capability":  "internal/capability",
-	"pkg/automation":  "internal/automation",
-	"pkg/config":      "internal/config",
-	"pkg/code":        "internal/code",
+	"internal/runtime":     "internal/runtime",
+	"internal/infra/dsh": "internal/infra/dsh",
+	"internal/infra/acp":         "internal/infra/acp",
+	"internal/infra/mcp":         "internal/infra/mcp",
+	"internal/infra/logging":     "internal/infra/logging",
+	"internal/infra/credentials": "internal/infra/credentials",
+	"internal/infra/dbclient":    "internal/infra/dbclient",
+	"internal/infra/procreg":     "internal/infra/procreg",
+	"internal/identity":    "internal/identity",
+	"internal/resource":    "internal/resource",
+	"internal/redact":      "internal/redact",
+	"internal/object":      "internal/object",
+	"internal/capability":  "internal/capability",
+	"internal/automation":  "internal/automation",
+	"internal/config":      "internal/config",
+	"internal/code":        "internal/code",
 }
 
 // v31Exception 是一条已登记的过渡例外。
@@ -436,7 +438,7 @@ func TestRuntimeDoesNotImportRuntimeAdaptersV31(t *testing.T) {
 		}
 		return
 	}
-	for _, imp := range importedByPackage(t, dir) {
+	for _, imp := range importedByProductionPackage(t, dir) {
 		if strings.HasPrefix(imp, modulePrefix+"internal/infra/dsh") {
 			t.Errorf("adapter 边界：internal/runtime 不得 import %s", imp)
 		}
@@ -453,7 +455,9 @@ func TestOnlyAssemblyImportsRuntimeAdaptersV31(t *testing.T) {
 		if relPath == "internal/assembly" || v31IsExempt(relPath) {
 			continue
 		}
-		for _, imp := range importedByPackage(t, dir) {
+		// 只看**生产** import：测试夹具直接用真实 adapter 是合法的（v3.1 §3.2.1 规则 5 管的是
+		// 生产代码的依赖方向；把测试包也算进来会让"装配边唯一"退化成"谁都不许写测试夹具"）。
+		for _, imp := range importedByProductionPackage(t, dir) {
 			if strings.HasPrefix(imp, modulePrefix+"internal/infra/dsh") {
 				hits = append(hits, relPath+" → "+imp)
 			}

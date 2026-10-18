@@ -48,7 +48,7 @@
    runtime 选择或读取入口，带被撤掉的**选择键**的写请求一律**显式拒绝**（不静默丢弃——静默会让它变成
    「写了、存了、什么都不发生」的骗人字段）。
 5. **接边有界**。内置适配只有 `dsh` 一个，**不追求数量、不承诺接入任意 ACP 生态**。但 adapter 层是
-   完整的：接一个新底座 = 新建 `pkg/runtime/<id>/` + 一个 `<id>Spec()` + 挂三张**端口**实现
+   完整的：接一个新底座 = 新建 `internal/infra/<id>/`（实现 `runtime.Adapter`）+ 装配根加一行 + 挂三张**端口**实现
    （`resource.Syncer` / `runtime.NativePermissionAdapter` / `runtime.ModelValueAdapter`），
    **不需要改框架内核**。「配置化接入」是工程能力，不是定位承诺——真实成本在维护面
    （隔离表三份 / 投影实测 / 能力粒度声明 / 随包载荷与 ABI 断言），不在 adapter。

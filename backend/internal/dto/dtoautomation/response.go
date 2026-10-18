@@ -1,6 +1,6 @@
 package dtoautomation
 
-import "github.com/morehao/ark-mate/pkg/automation"
+import "github.com/morehao/ark-mate/internal/automation"
 
 // AutomationResp 一条 automation 的对外形态（定义 + 运行态 + 内存态 next_due）。
 //

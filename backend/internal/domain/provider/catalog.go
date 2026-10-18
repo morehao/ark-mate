@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— 运行时模型目录的**缓存与拒绝值反馈**（P4a 正文第六十刀：从 `internal/manager` 搬入）———

@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/morehao/ark-mate/pkg/automation"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/redact"
+	"github.com/morehao/ark-mate/internal/automation"
+	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/redact"
 	"github.com/morehao/golib/glog"
 )
 

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— 首轮身份注入（P2 的确定性判据） ———

@@ -15,8 +15,8 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/automation"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/automation"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— M6-7：automation 定义的 DB 载体（定义列 + 运行态列） ———

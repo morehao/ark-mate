@@ -11,7 +11,7 @@ import (
 //
 // 2026-10-10 起本仓的日志出口是 golib/glog（zap driver）：装配根注册 driver
 // （`cmd/mate` 的匿名引入）+ `internal/cliops/logging.go` 定配置，业务代码一律
-// 调 `glog.Xxxw(ctx, ...)`。唯一允许出现 `log/slog` 的地方是 `pkg/logging`——
+// 调 `glog.Xxxw(ctx, ...)`。唯一允许出现 `log/slog` 的地方是 `internal/infra/logging`——
 // 它把"只认 *slog.Logger"的第三方库（当前是 ACP SDK 的 SetLogger）桥进 glog。
 //
 // 为什么要有机器判据：迁移当天能靠人盯着，之后不行。任何一个 `slog.Info` 都能编译通过、
@@ -19,15 +19,15 @@ import (
 // 轮转、目标全都不一样，症状是"这条日志在文件出口里找不到"，而且只有出事那天才会被注意到。
 //
 // 判据是**剥注释后仍出现 `"log/slog"` 导入路径**（注释里提到 slog 是正常的，比如
-// pkg/logging 与几处说明性注释）。
+// internal/infra/logging 与几处说明性注释）。
 
 // slogAllowedDirs 允许 import "log/slog" 的包（相对 backend 根）。
 var slogAllowedDirs = []string{
 	// 第三方 slog 边界桥：只认 *slog.Logger 的库（ACP SDK）从这里接入 glog。
-	filepath.Join("pkg", "logging"),
+	filepath.Join("internal", "infra", "logging"),
 }
 
-// TestOnlyLoggingPackageImportsSlog 除 pkg/logging 外，全仓不得 import "log/slog"。
+// TestOnlyLoggingPackageImportsSlog 除 internal/infra/logging 外，全仓不得 import "log/slog"。
 func TestOnlyLoggingPackageImportsSlog(t *testing.T) {
 	root := backendRoot(t)
 	var offenders []string
@@ -60,9 +60,9 @@ func TestOnlyLoggingPackageImportsSlog(t *testing.T) {
 		t.Fatalf("全仓一个 log/slog 都没扫到：桥包还在吗？这条守卫失去了检查对象（fail-closed）")
 	}
 	if len(offenders) > 0 {
-		t.Fatalf("以下文件 import 了 \"log/slog\"（只允许 pkg/logging）：\n\t%s\n\n"+
+		t.Fatalf("以下文件 import 了 \"log/slog\"（只允许 internal/infra/logging）：\n\t%s\n\n"+
 			"业务日志一律走 glog：`glog.Infow(ctx, msg, kvs...)` / `Warnw` / `Errorw` / `Debugw`；\n"+
-			"确需喂给只认 *slog.Logger 的第三方库时，用 pkg/logging.SDKLogger()。",
+			"确需喂给只认 *slog.Logger 的第三方库时，用 internal/infra/logging.SDKLogger()。",
 			strings.Join(offenders, "\n\t"))
 	}
 }

@@ -42,7 +42,7 @@ const capabilityVerdictOwner = "internal/domain/session"
 const capabilityVerdictFile = capabilityVerdictOwner + "/capability_verdict.go"
 
 // capabilityStatusConstants 状态集的五个取值（`dtolibrary` 转出的那一套；唯一声明在
-// `pkg/object/objdelivery`）。
+// `internal/object/objdelivery`）。
 var capabilityStatusConstants = []string{
 	"StatusProjected",
 	"StatusUntested",

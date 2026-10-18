@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // 宿主原生目录选择器（v14.5，对齐 dsh 的 `directory-picker-auto` + `directory-picker-native`）。

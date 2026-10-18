@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/object/objusage"
+	"github.com/morehao/ark-mate/internal/object/objusage"
 )
 
 // UsageRow 是一条用量聚合输入行（runs，usage_json 已解析）。

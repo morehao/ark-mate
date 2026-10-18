@@ -232,10 +232,10 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 		t.Error("`capabilityCtr.ListMcpServers` 的函数体里找不到 `h.svc.ListMcpServers(`：注册表读模型必须走用例接口。")
 	}
 
-	// ③ 默认约定单点：`pkg/runtime` 必须有那个导出入口，且 manager 里不许再自己判默认。
-	regSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "pkg", "runtime", "registry.go")))
+	// ③ 默认约定单点：`internal/runtime` 必须有那个导出入口，且 manager 里不许再自己判默认。
+	regSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "runtime", "registry.go")))
 	if !strings.Contains(regSrc, "func (r *Registry) McpTransportsFor(") {
-		t.Error("pkg/runtime/registry.go 里找不到 `func (r *Registry) McpTransportsFor(`：'未声明 MCP 传输 → 仅 stdio' " +
+		t.Error("internal/runtime/registry.go 里找不到 `func (r *Registry) McpTransportsFor(`：'未声明 MCP 传输 → 仅 stdio' " +
 			"这条默认约定有两个消费面（Library 读模型与 MCP 注入判据），各写一遍必然漂移——" +
 			"漂移的表现是「面板说可达、注入时被跳过」。")
 	}

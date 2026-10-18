@@ -1,20 +1,21 @@
 package sessionruntime
 
 import (
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
 
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/object/objid"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/object/objid"
 )
 
 // 本文件是从 `elicitation_test.go` 拆出来的：那三个用例测的是 **Orchestrator / Service 侧**
@@ -172,7 +173,7 @@ func TestConnKeyIsolatesNativePermission(t *testing.T) {
 	// 正是这条用例要钉的"两侧同源"。
 	pol := &interaction.PermissionPolicy{Default: "deny"}
 	envOf := func() []string {
-		e, _ := interaction.NativePermissionEnv(runtime.AllBuiltinRegistry(), "dsh", pol)
+		e, _ := interaction.NativePermissionEnv(dsh.Registry(), "dsh", pol)
 		return e
 	}
 	if runtimeconn.ConnKey("dsh", envOf()) != runtimeconn.ConnKey("dsh", envOf()) {

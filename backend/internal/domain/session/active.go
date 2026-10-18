@@ -4,9 +4,9 @@ import (
 	"context"
 	"sync"
 
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/object/objid"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 会话的**运行期句柄**（P4a 正文第五十五刀：从 `internal/manager` 搬入）———

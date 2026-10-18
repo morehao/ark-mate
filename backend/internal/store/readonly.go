@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-mate/pkg/dbclient"
+	"github.com/morehao/ark-mate/internal/infra/dbclient"
 )
 
 // 本文件是**只读打开**（`mate doctor` 的唯一入口）。

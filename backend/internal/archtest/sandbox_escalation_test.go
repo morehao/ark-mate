@@ -54,6 +54,11 @@ func TestSandboxEscalationGoesThroughApproval(t *testing.T) {
 		if strings.HasSuffix(p, "_test.go") || strings.HasPrefix(relSlash, "internal/archtest/") || allowed[relSlash] {
 			continue
 		}
+		// v3.1：adapter 自己的词表就是底座的模式名（v3.1 §3.2.1 规则 5）——它必须能写
+		// `danger-full-access`（那是该底座的取值），判的是**平台不要顺手用它重跑**。
+		if strings.HasPrefix(relSlash, "internal/infra/dsh/") {
+			continue
+		}
 		if strings.Contains(stripLineComments(readFileOrFatal(t, p)), "danger-full-access") {
 			t.Errorf("%s 里出现了 `danger-full-access`：升权被拒之后不许「顺手用完全访问再跑一次」——\n"+
 				"那是把一次被拒绝的授权变成一次更大的授权，而用户看不到中间那一步", relSlash)

@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/redact"
+	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/redact"
 )
 
 // Secrets 密钥解析面：把定义里的**引用**变成**最终注入的明文**。

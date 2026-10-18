@@ -5,7 +5,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/internal/capability"
 )
 
 // McpCatalog MCP 注册表读面（能力数据面的**读模型**）。

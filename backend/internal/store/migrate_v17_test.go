@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/dbclient"
-	"github.com/morehao/ark-mate/pkg/object/objid"
+	"github.com/morehao/ark-mate/internal/infra/dbclient"
+	"github.com/morehao/ark-mate/internal/object/objid"
 )
 
 // openV16ForV17Test 造一个**真实的 v16 库**（完整跑 v1..v16，含 v12/v13 的 Go 数据步骤与

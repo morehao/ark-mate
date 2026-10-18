@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // TestElicitationResolveAccept 注册 → 用户提交（accept + content）→ 阻塞方拿到决策。

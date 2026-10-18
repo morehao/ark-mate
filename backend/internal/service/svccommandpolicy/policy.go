@@ -14,8 +14,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/dto/dtocommandpolicy"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/code"
 )
 
 // PolicySvc 命令门禁读写面（实现 `CommandPolicySvc`）。

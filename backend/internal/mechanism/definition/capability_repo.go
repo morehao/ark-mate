@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/capability"
 )
 
 // ——— 能力定义写面的**载体**（M6-3） ———

@@ -1,6 +1,7 @@
 package router_test
 
 import (
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"encoding/json"
 	"net/http/httptest"
 	"net/url"
@@ -21,9 +22,9 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/config"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // newEngine 走真实装配路径：sessionruntime.Service + router.New（含 /v1/mate 分组与默认中间件）。
@@ -41,7 +42,7 @@ func newEngine(t *testing.T) *gin.Engine {
 func newEngineWithService(t *testing.T) (*gin.Engine, *sessionruntime.Service) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	reg := runtime.AllBuiltinRegistry()
+	reg := dsh.Registry()
 	// 生产装配**总是**在构造 Service 之前注入隔离 env（`app.go`）；测试也照做，
 	// 否则模型配置落点会因为解析不到隔离根而报错（这是刻意的 fail-closed：绝不回落到用户目录）。
 	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
@@ -368,7 +369,7 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 // newAuthEngine 装配带凭据表的引擎（M1-1）。
 func newAuthEngine(t *testing.T, creds *credential.Set) *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	reg := runtime.AllBuiltinRegistry()
+	reg := dsh.Registry()
 	// 生产装配**总是**在构造 Service 之前注入隔离 env（`app.go`）；测试也照做，
 	// 否则模型配置落点会因为解析不到隔离根而报错（这是刻意的 fail-closed：绝不回落到用户目录）。
 	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))

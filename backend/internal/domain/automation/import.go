@@ -14,8 +14,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
-	pkgautomation "github.com/morehao/ark-mate/pkg/automation"
-	"github.com/morehao/ark-mate/pkg/capability"
+	pkgautomation "github.com/morehao/ark-mate/internal/automation"
+	"github.com/morehao/ark-mate/internal/capability"
 )
 
 // ——— 存量定时任务定义的一次性导入与导出（M6-7 下半） ———

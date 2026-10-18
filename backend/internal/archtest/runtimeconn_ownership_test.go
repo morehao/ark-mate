@@ -198,9 +198,9 @@ func TestRuntimeBindingIsNotDuplicatedOnService(t *testing.T) {
 //	manager/session_start.go       ✗ 已删（恢复路径，同上）
 //
 // 同一批还发现**同因异码**（**尚未定案，刻意没动**）：manager/model_catalog.go 的 `ModelCatalog`
-// 对**同一个条件**铸的是 `runtime_not_registered`——而那个码**不在** `pkg/code/acl.go` 的映射表里
+// 对**同一个条件**铸的是 `runtime_not_registered`——而那个码**不在** `internal/code/acl.go` 的映射表里
 // （只有 `runtime_not_found` 在），于是它落到 ClassRequest 的兜底码 40001，而 runtimeconn 那条是
-// 40401。**改它是对外契约变更**（要走 `pkg/code` + README + 前端 `BizCode` 三处同步），
+// 40401。**改它是对外契约变更**（要走 `internal/code` + README + 前端 `BizCode` 三处同步），
 // 所以登记在 §3.1.61 而不是顺手改；本条守卫只钉**已收敛的那一处**。
 //
 // 判据两段，fail-closed：

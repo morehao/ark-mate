@@ -25,7 +25,7 @@ import (
 	_ "github.com/morehao/golib/glog/driver/zap"
 
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // StubRegistry 只注册一个**测试专用 stub runtime** 的注册表。

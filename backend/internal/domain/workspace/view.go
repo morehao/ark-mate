@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // 工作空间的**只读辅助面**（浏览 + 最近使用）。

@@ -22,18 +22,25 @@ import (
 
 // TestBuildRuntimeDefaultIsDsh 不注入 `-X` 时，构建期底座必须是 dsh（dsh）。
 func TestBuildRuntimeDefaultIsDsh(t *testing.T) {
-	path := filepath.Join(backendRoot(t), "pkg", "runtime", "build.go")
+	path := filepath.Join(backendRoot(t), "internal", "runtime", "build.go")
 	src, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（路径改了请同步本守卫）", path, err)
 	}
 	clean := stripTSComments(string(src))
 
-	// 默认常量必须**指向 adapter 的 ID**（不是字面量 "dsh"，也不是别的 runtime）。
-	defRE := regexp.MustCompile(`(?m)^\s*const\s+DefaultBuildRuntime\s*=\s*dsh\.ID\s*$`)
+	// v3.1：`internal/runtime` 不得 import adapter（§3.2.1 规则 5），所以默认值是**字面量**；
+	// 它与 adapter 的 `ID` 相等由 `internal/infra/dsh` 的守卫钉住（双向：任一侧改名都会红）。
+	defRE := regexp.MustCompile(`(?m)^\s*const\s+DefaultBuildRuntime\s*=\s*"dsh"\s*$`)
 	if !defRE.MatchString(clean) {
-		t.Fatalf("%s 里找不到 `const DefaultBuildRuntime = dsh.ID`："+
+		t.Fatalf("%s 里找不到 `const DefaultBuildRuntime = \"dsh\"`："+
 			"「不指定默认 dsh」这条需求的唯一落点被改了？", path)
+	}
+	// adapter 侧必须同时声明 `ID = "dsh"`，且有一个测试断言两侧相等。
+	adapterPath := filepath.Join(backendRoot(t), "internal", "infra", "dsh", "adapter.go")
+	adapterSrc := stripTSComments(readFileOrFatal(t, adapterPath))
+	if !strings.Contains(adapterSrc, "runtime.Adapter") {
+		t.Fatalf("internal/infra/dsh/adapter.go 里找不到 `runtime.Adapter`：adapter 契约被改名/搬走了？")
 	}
 	// 注入变量必须是**空串初值**：初值一旦是别的 runtime id，`-X` 没注入时默认就不再是 dsh。
 	// 允许显式类型声明（`var BuildRuntime string`）或带初值（`var BuildRuntime = ""`）两种写法。
@@ -64,7 +71,7 @@ var (
 //
 // `path` 一律是**绝对路径**：会话记录那一处按**符号**定位（`uniqueSourceFile`，见下面
 // `TestNoAgentRuntimeSelectionSurface` 的注释），另两处是仍然稳定的精确路径（`dto` 与
-// `pkg/automation` 不在本次「manager 解散」的重划范围内）。
+// `internal/automation` 不在本次「manager 解散」的重划范围内）。
 type selectionSurfaceTarget struct {
 	path     string
 	patterns []*regexp.Regexp
@@ -92,7 +99,7 @@ func TestNoAgentRuntimeSelectionSurface(t *testing.T) {
 			patterns: []*regexp.Regexp{reRuntimesList, reRoutingPolicy}},
 		{path: filepath.Join(root, "internal", "dto", "dtosession", "request.go"),
 			patterns: []*regexp.Regexp{reRuntimeHintStr}},
-		{path: filepath.Join(root, "pkg", "automation", "types.go"),
+		{path: filepath.Join(root, "internal", "automation", "types.go"),
 			patterns: []*regexp.Regexp{reRuntimeHintStr}},
 	}
 	for _, tgt := range targets {

@@ -1,6 +1,7 @@
 package svcmodel
 
 import (
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"errors"
 	"testing"
@@ -11,10 +12,9 @@ import (
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/resource"
-	goruntime "github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/resource"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -97,7 +97,7 @@ func newDeclaredRig(t *testing.T) *declaredRig {
 	t.Cleanup(func() { _ = st.Close() })
 	// 注册表与凭据机制必须与生产同源（`provider.NewPlane` 的注释：两份 = 两个事实源）。
 	// 刻意不给密钥：带密钥的写面会落托管文档（那是供应商面的事），写面用例只需要"这条档案在"。
-	reg := goruntime.AllBuiltinRegistry()
+	reg := dsh.Registry()
 	plane := provider.NewPlane(reg, credential.New(reg))
 	plane.SetProviderDir(t.TempDir())
 	host := &stubHost{st: st}

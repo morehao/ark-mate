@@ -12,7 +12,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // stubSession 代替 acl.Session（Prompt/Cancel 可按脚本返回）。

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	goruntime "github.com/morehao/ark-mate/pkg/runtime"
+	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 逐 runtime 的模型清单事实（体检的"清单同步"那一段） ———
@@ -100,11 +100,11 @@ type ModelFactsSource interface {
 
 // CollectRuntimeModelFacts 逐 runtime 采集模型清单事实（只读）。
 //
-// 体检刻意用**全部内置**注册表（`AllBuiltinRegistry`）而不是产品装配用的 `ProductRegistry`：
+// 体检刻意用**全部在册底座**（装配根交下来的声明）而不是产品装配用的 `ProductRegistry`：
 // doctor 回答的是"**这台机器上**有哪些底座的配置物化痕迹 / 敏感文件"，不是"本二进制只认哪一个"。
 // 构建期把产品钉在 dsh 上，并不代表磁盘上不再有另一份底座的遗留物——那恰恰是体检该如实报出来的
 // 东西（换成 ProductRegistry 会让它们整段消失，表现为"报告一切正常"，而磁盘上的东西一个没少）。
-func CollectRuntimeModelFacts(ctx context.Context, src ModelFactsSource) []ProviderRuntimeFacts {
+func CollectRuntimeModelFacts(ctx context.Context, src ModelFactsSource, specs []goruntime.Spec) []ProviderRuntimeFacts {
 	out := []ProviderRuntimeFacts{}
 	if src == nil {
 		return out
@@ -116,7 +116,7 @@ func CollectRuntimeModelFacts(ctx context.Context, src ModelFactsSource) []Provi
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		out = append(out, RuntimeModelFacts(ctx, src, id, states[id]))
+		out = append(out, RuntimeModelFacts(ctx, src, specs, id, states[id]))
 	}
 	return out
 }
@@ -126,11 +126,11 @@ func CollectRuntimeModelFacts(ctx context.Context, src ModelFactsSource) []Provi
 // 导出是为了让"高危"那条判据能被**真实夹具**（带编排器的 rig + 伪造的运行时目录）端到端跑到
 // ——`CollectRuntimeModelFacts` 里的数据面天然没有编排器，永远走 unknown 分支。那个夹具在
 // 会话侧（它要真 Service），所以它经这个入口调本函数。
-func RuntimeModelFacts(ctx context.Context, src ModelFactsSource, runtimeID string, state dtomodel.RuntimeSyncResp) ProviderRuntimeFacts {
+func RuntimeModelFacts(ctx context.Context, src ModelFactsSource, specs []goruntime.Spec, runtimeID string, state dtomodel.RuntimeSyncResp) ProviderRuntimeFacts {
 	facts := ProviderRuntimeFacts{
 		Runtime: runtimeID,
 		// 该底座声明不声明输入模态：取它自己的 Spec 字段（**不是**任何静态能力基线）。
-		DeclaresModelInput: DeclaresModelInput(goruntime.AllBuiltinRegistry(), runtimeID),
+		DeclaresModelInput: DeclaresModelInput(specs, runtimeID),
 		Status:             state.Status,
 		Where:              state.Where,
 		Effect:             state.Effect,
@@ -172,11 +172,18 @@ func RuntimeModelFacts(ctx context.Context, src ModelFactsSource, runtimeID stri
 // DeclaresModelInput 该 runtime 的 Spec 是否声明"平台总是写模型的输入模态"。
 //
 // 未注册的 runtime（远程端点没在这个二进制里）→ false：**不许**把"没见过"当成"会写"。
-func DeclaresModelInput(reg *goruntime.Registry, runtimeID string) bool {
-	if reg == nil {
-		return false
+// findSpec 按 id 找声明（找不到 = false）。
+func findSpec(specs []goruntime.Spec, id string) (goruntime.Spec, bool) {
+	for _, s := range specs {
+		if s.ID == id {
+			return s, true
+		}
 	}
-	spec, ok := reg.Get(runtimeID)
+	return goruntime.Spec{}, false
+}
+
+func DeclaresModelInput(specs []goruntime.Spec, runtimeID string) bool {
+	spec, ok := findSpec(specs, runtimeID)
 	if !ok {
 		return false
 	}

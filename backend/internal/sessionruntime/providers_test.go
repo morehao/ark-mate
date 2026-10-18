@@ -10,7 +10,7 @@ import (
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // TestProviderRegistryWriteOnceReadNever 档案新建/持久化/重启装载 + 密钥只写不读回 +

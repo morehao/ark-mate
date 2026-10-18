@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/dbclient"
-	"github.com/morehao/ark-mate/pkg/object/objid"
+	"github.com/morehao/ark-mate/internal/infra/dbclient"
+	"github.com/morehao/ark-mate/internal/object/objid"
 )
 
 // v15 的形状不变式：平台模型 id = `mdl_` + 26 位 Crockford Base32。

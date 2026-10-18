@@ -1,7 +1,7 @@
 package credential
 
 import (
-	"github.com/morehao/ark-mate/pkg/credentials"
+	"github.com/morehao/ark-mate/internal/infra/credentials"
 )
 
 // ProviderKey 一条 provider 拨号密钥的**解析结果**。

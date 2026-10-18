@@ -14,7 +14,7 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
-	pkgautomation "github.com/morehao/ark-mate/pkg/automation"
+	pkgautomation "github.com/morehao/ark-mate/internal/automation"
 )
 
 // sameJSONObject 逐键比对两份 JSON 正文（顺序无关；任一份不是 JSON → 立刻失败）。

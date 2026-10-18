@@ -16,6 +16,7 @@ package sessionruntime
 // （`import cycle not allowed in test`）。详见 internal/testutil 的包注释。
 
 import (
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 
 	"os"
@@ -31,10 +32,10 @@ import (
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
-	"github.com/morehao/ark-mate/pkg/credentials"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/ark-mate/pkg/resource"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/credentials"
+	"github.com/morehao/ark-mate/internal/object/objid"
+	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // providerTestSvc 建一个三 spec 的注册表（dsh + 合成的 rtx + 无凭据声明的 stub），并把
@@ -48,7 +49,7 @@ import (
 // v19 起它只做"注册表 + provider 目录"两件事：agent 定义面撤销后，没有定义要播种了。
 func providerTestSvc(t *testing.T, providerDir string) *Service {
 	t.Helper()
-	real := runtime.AllBuiltinRegistry()
+	real := dsh.Registry()
 	dshSpec, ok := real.Get("dsh")
 	if !ok {
 		t.Fatal("默认注册表里应有 dsh")

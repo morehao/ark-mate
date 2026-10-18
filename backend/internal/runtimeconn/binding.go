@@ -6,9 +6,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/procreg"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/procreg"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // Binding 是「本进程认的那个底座」在平台侧的绑定（v19）。

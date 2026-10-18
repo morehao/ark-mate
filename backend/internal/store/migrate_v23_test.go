@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/dbclient"
+	"github.com/morehao/ark-mate/internal/infra/dbclient"
 )
 
 // openV22ForV23Test 造一个**真实的 v22 库**（完整跑 v1..v22，含 v22 的 Go 数据步骤）。

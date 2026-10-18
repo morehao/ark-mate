@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/store"
-	goruntime "github.com/morehao/ark-mate/pkg/runtime"
+	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 「不在册底座」的存量体检（v18：第二个内置适配下线时新增） ———
@@ -56,7 +56,10 @@ type RetiredRuntimeOptions struct {
 	Home string
 	// KnownRuntimeIDs **在册**的 runtime id 集合（空 = 判据失效，全部目录都会被算成遗留）。
 	KnownRuntimeIDs []string
-	// ProjectionDirs 进程配置里的投影覆盖（键形如 `<runtime>:<kind>`；见 `pkg/config`）。
+	// RuntimeSpecs 在册底座的声明（v3.1：机制层不 import adapter；装配根交下来）。
+	// 空 = 只用"历史约定"那一档推隔离根。
+	RuntimeSpecs []goruntime.Spec
+	// ProjectionDirs 进程配置里的投影覆盖（键形如 `<runtime>:<kind>`；见 `internal/config`）。
 	//
 	// 传进来而不是在这里读一遍环境变量：体检的事实来源必须与运行期同一条解析链
 	// （`config.Load`），自己再解析一遍等于把"看到的状态不是真的"引回来。
@@ -140,7 +143,7 @@ func CollectRetiredRuntimeFacts(ctx context.Context, st *store.Store, opts Retir
 		SessionScan:     "ok",
 		SkillScan:       "ok",
 	}
-	facts.IsolationRoots = retiredIsolationRoots(strings.TrimSpace(opts.Home))
+	facts.IsolationRoots = retiredIsolationRoots(strings.TrimSpace(opts.Home), opts.RuntimeSpecs)
 	homeDirs, homeScan, homeNotes := retiredHomeDirs(facts.IsolationRoots, known)
 	facts.HomeDirs, facts.HomeScan = homeDirs, homeScan
 	if facts.HomeScan == "no_home" {
@@ -203,7 +206,7 @@ func sortedIDs(known map[string]bool) []string {
 //   - **历史约定兜底**：`<MATE_HOME>/runtime`。**已下线的那份声明已经不在了**，它的落点推不出来，
 //     只能按平台自 v11 起把本地子进程隔离开在 `<MATE_HOME>/runtime/<id>/` 的约定补一次。
 //     这一条是**约定**，不是从注册表推出来的事实——改约定时这里也要跟着改。
-func retiredIsolationRoots(home string) []string {
+func retiredIsolationRoots(home string, specs []goruntime.Spec) []string {
 	// trim 后为空 = **无法扫描**（不是"扫过、没有"）：这时一个根都不给，由
 	// `retiredHomeDirs` 记 `no_home`。`filepath.Join("", "runtime")` 会拼出相对路径
 	// `runtime`（相对**进程 CWD**）——那会把一个与本机数据目录无关的目录当成判据来源。
@@ -220,7 +223,7 @@ func retiredIsolationRoots(home string) []string {
 		roots = append(roots, dir)
 	}
 	// ① 从在册声明推（父目录去重）。
-	for _, spec := range goruntime.AllBuiltinSpecs() {
+	for _, spec := range specs {
 		for _, v := range spec.Isolation {
 			if v.Kind != goruntime.IsolationPath || len(v.Path) < 2 {
 				continue

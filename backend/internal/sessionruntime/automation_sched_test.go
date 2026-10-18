@@ -14,8 +14,8 @@ import (
 
 	automationcore "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/pkg/automation"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/automation"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // silentACPSpec 一个**真子进程**的最小 ACP responder：握手与 session/new 正常应答，

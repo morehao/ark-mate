@@ -13,7 +13,7 @@ import (
 // 为什么值得一条守卫：`providers/<id>` 不是一个内部常量，是**持久化格式**——它写进
 // `<MATE_HOME>/credentials.json` 的键，也回写进 `providers.json` 的 `key_ref`。把它改掉
 // （或换个地方再拼一次）的后果是**静默**的：已有引用全部指向不存在的键，取值落空，
-// 表现为"密钥没配"；而 `pkg/credentials` 的分层顺序、provider 域的档案校验**都不会红**。
+// 表现为"密钥没配"；而 `internal/infra/credentials` 的分层顺序、provider 域的档案校验**都不会红**。
 //
 // 判据三段（都 fail-closed：找不到即失败，避免改名/搬迁后守卫静默空转——这正是 P0 里
 // 反复吃过的那类假绿）：
@@ -21,12 +21,12 @@ import (
 //  2. 那处声明在 `internal/mechanism/credential/`，取值**逐字**是 `providers/`；
 //  3. 全树只有**一个**拼接点（`ProviderMirrorRefPrefix +`），即没有人在别处手拼这个键。
 //
-// 刻意**不**断言 `"providers/"` 这个字面量全仓唯一：`pkg/config` 的旧目录告警里有同名串，
+// 刻意**不**断言 `"providers/"` 这个字面量全仓唯一：`internal/config` 的旧目录告警里有同名串，
 // 那是指目录不是指键，判进来只会逼着后续加白名单。
 func TestProviderMirrorRefFormatIsPinned(t *testing.T) {
 	const decl = "ProviderMirrorRefPrefix"
 	root := backendRoot(t)
-	roots := []string{"internal", "pkg", "cmd"}
+	roots := []string{"internal", "cmd"}
 
 	var declFiles []string
 	concatSites := 0

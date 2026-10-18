@@ -8,7 +8,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
-	"github.com/morehao/ark-mate/pkg/redact"
+	"github.com/morehao/ark-mate/internal/redact"
 )
 
 // ——— 动态密钥登记的生产装配判据（P4a：自检用例搬走之后**留下**的那一半） ———

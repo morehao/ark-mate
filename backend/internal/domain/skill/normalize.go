@@ -1,8 +1,8 @@
 package skill
 
 import (
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // NormalizeRuntimeDecls 归一一条技能的投放声明（`runtimes[]`）。

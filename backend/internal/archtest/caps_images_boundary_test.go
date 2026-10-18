@@ -9,11 +9,11 @@ import (
 
 // staticCapsImagesAllowedFiles 允许出现 `.Caps.Images` 的**唯一**地方：静态能力基线的汇入点。
 //
-// `pkg/runtime/adapters.go` 把各 adapter 自己声明的 `Caps` 值拷进 `Spec.Caps`——那是"声明"，
-// 不是判据。declaration 原地（`pkg/runtime/<adapter>/*.go`，例如 `pkg/runtime/dsh/dsh.go`）写的是
+// `internal/runtime/adapters.go` 把各 adapter 自己声明的 `Caps` 值拷进 `Spec.Caps`——那是"声明"，
+// 不是判据。declaration 原地（`internal/runtime/<adapter>/*.go`，例如 `internal/infra/dsh/dsh.go`）写的是
 // 结构体字面量字段（`Images: false`），不含 `.Caps.Images` 这个取值表达式。
 var staticCapsImagesAllowedFiles = map[string]string{
-	"pkg/runtime/adapters.go": "把 adapter 的静态基线声明汇入 Spec（值拷贝，不做任何判据）",
+	"internal/runtime/adapters.go": "把 adapter 的静态基线声明汇入 Spec（值拷贝，不做任何判据）",
 }
 
 // connectionFactImages 是**连接期事实**的取值表达式（ACP initialize 广告的能力）。
@@ -44,7 +44,7 @@ const connectionFactImagesConsumers = 1
 // 它今天已无出口（`/runtimes` 与它的 `ListItems` 一起删掉了），但"没有出口"这件事**不会**
 // 被编译期保证——下一个人写 `if spec.Caps.Images { … }` 照样能编译。这条守卫就是那个保证。
 //
-// 同时**正向**断言连接期事实真的被消费了（`pkg/acl` 解析 initialize 的 `Capabilities.Images`
+// 同时**正向**断言连接期事实真的被消费了（`internal/infra/acp` 解析 initialize 的 `Capabilities.Images`
 // 必须在某处被读）：否则"用连接期事实"只是一句没人执行的话，而门禁会悄悄退回静态值。
 func TestStaticCapsImagesHasNoConsumer(t *testing.T) {
 	backend := backendRoot(t)
@@ -94,7 +94,6 @@ func TestStaticCapsImagesHasNoConsumer(t *testing.T) {
 		}
 	}
 	walkGo(filepath.Join(backend, "internal"))
-	walkGo(filepath.Join(backend, "pkg"))
 
 	// fail-closed：一片 `.go` 都扫不到时，上面两条判据都会"照样绿"而不再看任何文件。
 	if scanned == 0 {

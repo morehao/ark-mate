@@ -99,7 +99,7 @@ func TestEventTypeContractFrozen(t *testing.T) {
 // 就写着「前端 @ark-mate/types 的 events.ts 按这些字面量做联合类型」——但**此前没有任何测试
 // 兜住前端那一份**：后端改一个事件名（或前端手滑打错一个字母），前端 Ev 会静默失配，
 // 直到某个 WS 帧在浏览器里没人认领才暴露。这与错误码的 BizCode 第三条边是同一个缺口
-// （见 pkg/code 的 TestFrontendBizCodesMatchRegistry），这里用同样办法补上：
+// （见 internal/code 的 TestFrontendBizCodesMatchRegistry），这里用同样办法补上：
 // **Go 读 TS 源码**，不引前端测试框架、不依赖 node 工具链。
 func TestFrontendEventTypesMatchRegistry(t *testing.T) {
 	path := filepath.Join(backendRoot(t), "..", "frontend", "packages", "types", "src", "events.ts")

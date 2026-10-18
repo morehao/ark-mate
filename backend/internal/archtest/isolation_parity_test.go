@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/runtime"
-	"github.com/morehao/ark-mate/pkg/runtime/dsh"
+	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 )
 
 // launcherIsolationRE 从 `gen-runtime-bin.mjs` 的一个启动器条目里抠出 `isolation: { … }` 的键名。
@@ -37,7 +37,7 @@ var reDanglingAssign = regexp.MustCompile(`isolation\.[A-Za-z_]+ *= *\n`)
 
 // TestDesktopSmokeIsolationMatchesCore V9 桌面冒烟探针自带的隔离表必须与**核心隔离表逐条对齐**（两侧相等）。
 //
-// 同一张表在仓库里存在**三份**（Go 核心 `pkg/runtime/isolation.go`、桌面私有启动器
+// 同一张表在仓库里存在**三份**（Go 核心 `internal/runtime/isolation.go`、桌面私有启动器
 // `apps/desktop/scripts/gen-runtime-bin.mjs`、桌面探针 `frontend/scripts/desktop-runtime-smoke.mjs`）。
 // 第三份此前没有守卫——而它恰恰是**最会碰本机**的那一份：探针直接以子进程拉起随包载荷，
 // 隔离表写漏一个变量的后果就是"验收脚本自己去读写用户的 `~/.dsh`"，表现为用户环境被改动，
@@ -109,9 +109,11 @@ func TestDesktopSmokeIsolationMatchesCore(t *testing.T) {
 	}
 
 	home := t.TempDir()
+	// v3.1：隔离声明是唯一事实源（`internal/runtime` 不再按 id 回查内置清单），
+	// 所以"核心给某个 id 的隔离表"要按 adapter 的**声明**算。
 	allowedOf := func(runtimeID string) map[string]bool {
 		allowed := map[string]bool{}
-		for _, kv := range runtime.IsolationEnv(runtimeID, home) {
+		for _, kv := range runtime.IsolationEnvFor(specOf(runtimeID), home) {
 			allowed[strings.SplitN(kv, "=", 2)[0]] = true
 		}
 		return allowed
@@ -171,7 +173,7 @@ func TestDesktopSmokeIsolationMatchesCore(t *testing.T) {
 		}
 		// ② 核心有、探针漏的：**危险的那一向**——探针直接以子进程拉起随包载荷，漏一个 home 变量就是
 		// 「验收脚本自己动了用户环境」而探针自报通过（2026-10-09 的 XDG_STATE_HOME 就是这个形态）。
-		for _, kv := range runtime.IsolationEnv(c.runtimeID, home) {
+		for _, kv := range runtime.IsolationEnvFor(specOf(c.runtimeID), home) {
 			k := strings.SplitN(kv, "=", 2)[0]
 			if !probe[k] {
 				t.Errorf("核心的隔离表（%s）注入了 %s，但 V9 探针的%s没有——探针直接以子进程拉起随包载荷，"+
@@ -185,7 +187,7 @@ func TestDesktopSmokeIsolationMatchesCore(t *testing.T) {
 // TestDesktopLauncherIsolationMatchesCore 桌面私有启动器的隔离表必须是**核心隔离表的子集**。
 //
 // 为什么要有这条守卫：同一张"哪个底座认哪些 home 变量"的表在仓库里存在**两份**——
-//   - Go 侧 `pkg/runtime/isolation.go`：核心拉 ACP runtime 时注入（IsolationEnv）；
+//   - Go 侧 `internal/runtime/isolation.go`：核心拉 ACP runtime 时注入（IsolationEnv）；
 //   - JS 侧 `frontend/apps/desktop/scripts/gen-runtime-bin.mjs`：壳直接跑随包载荷时在启动器里兜底
 //     （`${VAR:=…}`，显式值优先，所以两条路径本应得到同一份 home）。
 //
@@ -275,7 +277,7 @@ func TestDesktopLauncherIsolationMatchesCore(t *testing.T) {
 		}
 		// ① 启动器兜底的每一条都必须是核心也认的（没有"凭空多出来"的兜底）。
 		coreKeys := map[string]bool{}
-		for _, kv := range runtime.IsolationEnv(runtimeID, home) {
+		for _, kv := range runtime.IsolationEnvFor(specOf(runtimeID), home) {
 			coreKeys[strings.SplitN(kv, "=", 2)[0]] = true
 		}
 		launcherKeys := map[string]bool{}
@@ -290,7 +292,7 @@ func TestDesktopLauncherIsolationMatchesCore(t *testing.T) {
 		// ② 双向相等：启动器的兜底集合必须**恰好**等于该 adapter 用 `LauncherFallback` 声明的那一份。
 		// 少一条 = 壳直接跑随包载荷时没人兜底它（去读写用户真实目录，而两侧守卫都绿）；
 		// 多一条 = 声明说"核心专供"、启动器却擅自兜底（通用 XDG 被改写会连累用户其它工具）。
-		wantFallback := runtime.IsolationLauncherFallbackKeys(runtimeID)
+		wantFallback := runtime.IsolationLauncherFallbackKeys(specOf(runtimeID))
 		if len(wantFallback) == 0 {
 			t.Fatalf("adapter %q 没有声明任何 LauncherFallback 变量，但启动器 %s 兜底了 %d 条：两侧的事实源已经分叉",
 				runtimeID, name, len(launcherKeys))
@@ -317,4 +319,14 @@ func TestDesktopLauncherIsolationMatchesCore(t *testing.T) {
 			}
 		}
 	}
+}
+
+// specOf 按 id 取内置 adapter 的声明（未知 id 给一份空声明：核心对它只给公共 npm 面）。
+func specOf(runtimeID string) runtime.Spec {
+	for _, sp := range dsh.Specs() {
+		if sp.ID == runtimeID {
+			return sp
+		}
+	}
+	return runtime.Spec{ID: runtimeID}
 }

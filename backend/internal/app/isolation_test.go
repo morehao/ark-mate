@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"os"
 	"path/filepath"
@@ -9,8 +10,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/pkg/config"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // newIsolationRig 装配一台真实 App（内存持久层 + 假资产目录 + 一个远程 runtime 声明）。
@@ -87,7 +88,7 @@ func TestInitPinsBuildRuntime(t *testing.T) {
 		}
 	}
 	spec, _ := a.Result().Runtime.Get("dsh")
-	if want := runtime.IsolationEnv("dsh", home); !reflect.DeepEqual(spec.Launch.Env, want) {
+	if want := runtime.IsolationEnvFor(dsh.Spec(), home); !reflect.DeepEqual(spec.Launch.Env, want) {
 		t.Fatalf("dsh 的隔离环境未接上:\n got %v\nwant %v", spec.Launch.Env, want)
 	}
 	if got := a.Meta().Home; got != home {

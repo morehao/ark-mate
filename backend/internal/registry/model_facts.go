@@ -8,7 +8,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/store"
-	goruntime "github.com/morehao/ark-mate/pkg/runtime"
+	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— `mate doctor` 的模型事实来源（P5a 取样面的最后一块）———
@@ -69,15 +69,14 @@ func (f ModelFacts) ModelValue(runtimeID, providerID, model string) (string, err
 //	  顺带做一次装配期同步——与 `serve` 的启动路径同一个入口，体检看到的是**同一条**取值面。
 //	**不**走 `LoadProviderDefinitionsFromStore`：那条路会经 `loadProviders` 读凭据面与库，
 //	  而体检要的是"清单事实"，不是"装载档案"（装载会在缺镜像时按库重建镜像——那是落笔）。
-func CollectRuntimeModelFacts(ctx context.Context, st *store.Store, home string) []doctor.ProviderRuntimeFacts {
+func CollectRuntimeModelFacts(ctx context.Context, st *store.Store, home string, reg *goruntime.Registry) []doctor.ProviderRuntimeFacts {
 	out := []doctor.ProviderRuntimeFacts{}
-	if st == nil {
+	if st == nil || reg == nil {
 		return out
 	}
-	reg := goruntime.AllBuiltinRegistry()
 	reg.ApplyIsolationEnv(strings.TrimSpace(home))
 	planes := NewPlanes(reg)
 	planes.EnableStore(st)
 
-	return doctor.CollectRuntimeModelFacts(ctx, NewModelFacts(planes))
+	return doctor.CollectRuntimeModelFacts(ctx, NewModelFacts(planes), reg.List())
 }

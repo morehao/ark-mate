@@ -10,9 +10,9 @@ import (
 	domauto "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/pkg/acl"
-	pkgauto "github.com/morehao/ark-mate/pkg/automation"
-	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	pkgauto "github.com/morehao/ark-mate/internal/automation"
+	"github.com/morehao/ark-mate/internal/code"
 )
 
 // ——— automation 的**对外面**（P4a 正文第九刀：从 `domain/automation` 上提到这里）———

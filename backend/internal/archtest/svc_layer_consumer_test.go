@@ -37,7 +37,7 @@ const svcImportPrefix = modulePrefix + "internal/service/svc"
 func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 	root := backendRoot(t)
 	scanned, fromAllowed, violations := 0, 0, 0
-	for _, base := range []string{"internal", "pkg"} {
+	for _, base := range []string{"internal"} {
 		for _, path := range productionGoFiles(t, filepath.Join(root, base)) {
 			scanned++
 			// 剥注释后只看**引号包着的** import 路径：注释里解释这条规则的文字不算命中。

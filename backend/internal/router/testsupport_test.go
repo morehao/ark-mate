@@ -1,6 +1,7 @@
 package router_test
 
 import (
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"testing"
 
@@ -15,8 +16,8 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/version"
-	"github.com/morehao/ark-mate/pkg/config"
-	goruntime "github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/config"
+	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )
 
 // testRouterOpts 路由级测试的最小装配选项（其余事实用真实域平面 + 空会话）。
@@ -42,7 +43,7 @@ func testRouterDeps(t *testing.T, o testRouterOpts) router.Deps {
 	gin.SetMode(gin.TestMode)
 	reg := o.registry
 	if reg == nil {
-		reg = goruntime.AllBuiltinRegistry()
+		reg = dsh.Registry()
 	}
 	if o.registry == nil {
 		reg.ApplyIsolationEnv(t.TempDir())

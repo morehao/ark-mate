@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/object/objid"
+	"github.com/morehao/ark-mate/internal/object/objid"
 )
 
 // TestOnDiskFormatContract 锁定落库的**字节形态**。

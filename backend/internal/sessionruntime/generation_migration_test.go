@@ -1,6 +1,7 @@
 package sessionruntime
 
 import (
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"encoding/json"
 	"os"
@@ -14,10 +15,10 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/mcp"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/infra/mcp"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— M3-6/M3-7：轮次边界的代际迁移、缩权与代际池 ———
@@ -61,7 +62,7 @@ func newGenRigOn(t *testing.T, runtimeID string) *genRig {
 	spec.McpTransports = []string{"stdio"} // 桩只承载 stdio（保守形态）
 	reg := runtime.NewRegistry(spec)
 	// 与产品装配同形：桩 Spec 保留自己的 Launch（桩命令），只把执行半场登记进来。
-	runtime.RegisterBuiltinPorts(reg)
+	dsh.New().RegisterPorts(reg)
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/morehao/ark-mate/pkg/procreg"
+	"github.com/morehao/ark-mate/internal/infra/procreg"
 	"github.com/morehao/golib/glog"
 )
 

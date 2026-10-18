@@ -159,7 +159,7 @@
    〔接边有界的理由与成本清单〕一字不变）；
 >    **不追求数量，不承诺接入任意 ACP 生态**。「不写代码注册新 agent / 远程 ACP 端点」作为**工程能力**
 >    留在功能清单里，但**不作定位卖点、不作里程碑出口**。原因如实写：接一个 runtime 要同时过隔离表三份
->    （`backend/pkg/runtime/isolation.go`、`frontend/apps/desktop/scripts/gen-runtime-bin.mjs`、
+>    （`backend/internal/runtime/isolation.go`、`frontend/apps/desktop/scripts/gen-runtime-bin.mjs`、
 >    `frontend/scripts/desktop-runtime-smoke.mjs`）、投影声明与实测 `Tested`、能力粒度声明
 >    （`CapabilityScope`，未实测不得声明比 `process` 更细）、随包载荷与 ABI 断言——**成本在维护面，不在 adapter**。
 > ③ **聚焦桌面端**——交付重心是桌面应用（macOS / Windows；随包运行时，用户机器不需要 Go / Node / 预装底座）。
@@ -252,7 +252,7 @@
 >    `TestNoConversationVocabulary` 在扫描面内对 `conversation` **零命中**（白名单逐条写明理由）。
 >    消歧规则见 `docs/agents/vocabulary.md`。
 > ② **主键前缀化**——平台铸造的 7 类 id 从裸 uuid 统一成 `<前缀>_<26 位 ULID>`
->    （`ses_`/`msg_`/`run_`/`inp_`/`wsp_`/`mdl_`/`pem_`，唯一实现 = `backend/pkg/object/objid`）。
+>    （`ses_`/`msg_`/`run_`/`inp_`/`wsp_`/`mdl_`/`pem_`，唯一实现 = `backend/internal/object/objid`）。
 >    ULID 的字典序 = 铸造序，因此 `messages`/`inputs` 靠 `id ASC` 兜底的两处排序语义**逐字不变**；
 >    `messages`/`permission_memories` 同时消灭了 `AUTOINCREMENT`（主键 TEXT、由 Go 侧铸号）。
 >    **底座透传过来的会话 id 平台侧一律加固定壳 `rt_`**（`rt_ses_…`/`rt_<uuid>`）：平台不改底座、
@@ -286,7 +286,7 @@
 > 服从同一条判据（J4：**身份与位次必须随数据走到每一个载体**）。
 > （v16 的表/列/索引命名收口没有单独登记决策条目，见
 > `.dsh/docs/specs/2026-10-11-data-model-v16-design.md`；本条目只记 v17。）
-> ① **`events` 的身份与位次分开**——新增主键 `id`（`evt_<26 位 ULID>`，`backend/pkg/object/objid` 铸造），
+> ① **`events` 的身份与位次分开**——新增主键 `id`（`evt_<26 位 ULID>`，`backend/internal/object/objid` 铸造），
 >    `seq` 从主键**降为全局唯一游标**（`UNIQUE(seq)`，`idx_events_session` 仍是
 >    `(session_id, seq)`）。理由：事件的**位次**会被重排（重建、压实、换库），而**身份**不能——
 >    把 `seq` 当身份等于承认"同一个事件换个号就变成另一个东西"，书签与对账随之失效。
@@ -334,13 +334,13 @@
 >    `session_id` 字段**冻结不动**。
 
 > **决策变更 v18（底座接入面收口：第二个内置适配下线 + adapter 层补完，2026-10-12）**：
-> 两件事一次做完，因为它们服从同一条验收口径：**接一个新底座 = 新建 `pkg/runtime/<id>/` 目录 +
+> 两件事一次做完，因为它们服从同一条验收口径：**接一个新底座 = 新建 `internal/infra/<id>/` 目录 +
 > 一个 `<id>Spec()` + 挂端口实现，不需要改任何框架/内核文件**。这次把最后一个"回内核改代码"的
 > 入口堵掉，同时把已经能承载第二个实现的机制**补完**——而不是把 adapter 层一起删掉。
 > 编号说明：本条沿用本次收口在 `AGENTS.md`／archtest 守卫注释／前端验收脚本里**已经使用**的标号
 > **v18**；v14–v17 号已被数据模型 v15 / v17 与 v16 的命名收口占用（v16 未单独登记决策条目，见
 > `.dsh/docs/specs/2026-10-11-data-model-v16-design.md`）。
-> ① **下线第二个内置适配**——`backend/pkg/runtime/opencode/`、`frontend/apps/desktop/runtime/opencode/`、
+> ① **下线第二个内置适配**——`backend/internal/runtime/opencode/`、`frontend/apps/desktop/runtime/opencode/`、
 >    桌面随包载荷里的 opencode，以及 `Dockerfile` / `docker-compose.yml` / `Makefile` / `.env.example`
 >    里的 opencode 选项全部删除。内置适配从两个收敛到一个（`dsh`），内置种子 agent 同步收敛为
 >    `dsh` 一个（`builtinAgents`，`backend/internal/manager/agent_state.go`：每个内置 runtime 一行）。
@@ -349,10 +349,10 @@
 >    `<id>Spec()` + 端口实现，不动框架"），而它是在**下线之前**先按行为等价的抽取落实了两块——
 >    当时 opencode 还在、全绿，它正是证明"这套机制能承载第二个实现"的那一个：
 >    - **隔离表进声明**：`Spec.Isolation []IsolationVar`，三种取值 `IsolationPath` /
->      `IsolationLiteral` / `IsolationEmpty` + `LauncherFallback`；`backend/pkg/runtime/isolation.go`
+>      `IsolationLiteral` / `IsolationEmpty` + `LauncherFallback`；`backend/internal/runtime/isolation.go`
 >      不再认识任何具体底座，只做机械投影（`IsolationEnvFor` / `projectIsolation`）。
 >    - **原生权限进端口**：`NativePermissionAdapter`（`RegisterNativePermission` / `NativePermission(id)`，
->      `backend/pkg/runtime/native_permission.go`），签名只收原语
+>      `backend/internal/runtime/native_permission.go`），签名只收原语
 >      `Env(mode, def string, tools map[string]string) (env []string, desc string)`；内核
 >      `backend/internal/manager/native_permission.go` 只做"模式 → 取端口 → 转发"，动作取值与工具键
 >      一概不归一（那是该底座的词表）。
@@ -360,13 +360,13 @@
 >    `switch runtimeID { case "dsh": …; case "opencode": …; default: 报错 }`——那是**内核认识具体底座**的
 >    教科书形态（它没有 import 任何 adapter 包，所以上一条 import 守卫抓不到它）。现在改成查注册表
 >    **第三张可执行端口表** `ModelValueAdapter`（`RegisterModelValue` / `ModelValue(id)`，
->    `backend/pkg/runtime/model_value.go`）；未登记该形态的 id 如实返回 `model_value_unsupported`，
+>    `backend/internal/runtime/model_value.go`）；未登记该形态的 id 如实返回 `model_value_unsupported`，
 >    **不替它猜形状**（`backend/internal/manager/model_list.go` 的 `modelValueFor` 只剩分发）。于是
 >    `Registry` 的形状固定为 `map[string]Spec`（**声明半场**）+ **三张可执行端口表**
 >    （`Syncer` / `NativePermissionAdapter` / `ModelValueAdapter`；可执行对象不进 `Spec`）。
 > ④ **新增守卫（这次收口的机器判据）**，三条挂在
 >    `backend/internal/archtest/knowledge_dependency_test.go`：
->    `TestInternalDoesNotImportRuntimeAdapters`（`internal/**` 不得 import `pkg/runtime/<adapter>`）、
+>    `TestInternalDoesNotImportRuntimeAdapters`（`internal/**` 不得 import `internal/runtime/<adapter>`）、
 >    `TestNativePermissionModeLiteralsMatchWire`（原生权限 `native_mode` 取值在内核 wire 契约与
 >    adapter 侧逐字一致）、**`TestInternalHasNoRuntimeIDSpecialCase`**（`internal/**` 剥注释后不得出现
 >    任何内置适配 id 的 `case "<id>"` / `== "<id>"` / `!= "<id>"`；判据的 id 集合取自
@@ -378,7 +378,7 @@
 >    `RUNTIME_BIN_ABS` / `RUNTIME_BIN_SOURCE`），`Makefile` 与 `.env.example` 同改。**语义不变**：
 >    它是"显式覆盖**构建期固定的那个**底座的可执行文件"，**在任何构建上都生效**（转发 shim 名随
 >    `$(RUNTIME)`）。保留的**不是**兼容别名——旧键名 `OPENCODE_BIN` 不认。
-> ⑥ **`AllBuiltinRegistry()` / `AllBuiltinSpecs()` 的语义不变**（`backend/pkg/runtime/build.go`）：
+> ⑥ **`AllBuiltinRegistry()` / `AllBuiltinSpecs()` 的语义不变**（`backend/internal/runtime/build.go`）：
 >    产品装配走 `ProductRegistry`——**只注册构建期选中的那一个**，未注册即**启动失败**（fail-closed）；
 >    `AllBuiltin*` 只服务测试与诊断（医生与能力矩阵守卫必须看到**全部**适配面，否则只注册一个会让
 >    别的适配的守卫**静默空转**）。
@@ -405,7 +405,7 @@
 >    `TestSyntheticAdapterIsFirstClass`（`backend/internal/manager/synthetic_adapter_test.go`）就挂在它
 >    上面——断言：不指定 runtime 的 agent 回落到构建期固定那个、`modelValueFor` 对合成底座返回它
 >    自己声明的形态、对未登记 id 报 `model_value_unsupported`，且这些 env 真的落到了子进程。
->    **顺带说明**：`pkg/runtime` 的测试里另有一个自造的 `rt-alt`（`isolation_test.go` /
+>    **顺带说明**：`internal/runtime` 的测试里另有一个自造的 `rt-alt`（`isolation_test.go` /
 >    `session_runtime_test.go`），因为 `pkg/` 不能 import `internal/`。
 > ⑨ **存量数据：读面宽容 + `mate doctor` 存量体检（删掉适配不会让存量消失）**。用户 2026-10-12
 >    拍板的口径是"**不做破坏性迁移**，但存量要能被看见"；这次补上的是后半句——在此之前它是
@@ -486,7 +486,7 @@
 > **决策变更 v20（凭据去 vault 化：密钥进库 + 明文镜像 + 四层回落，2026-10-14）**：
 > 本条**推翻 v13 的硬不变量**「明文密钥结构上进不了库」，所以先写清它换来什么、代价是什么。
 > ① **为什么可以推翻**：vault 的真实收益从来不是"防本机读取"——密钥与密文同目录同属主，而 dsh 那侧的
->    原生凭据文档（`<$DSH_HOME>/.credentials.yaml`，隔离根内）本来就是**明文**（`pkg/runtime/dsh/credentials.go`
+>    原生凭据文档（`<$DSH_HOME>/.credentials.yaml`，隔离根内）本来就是**明文**（`internal/infra/dsh/credentials.go`
 >    就是写它的那一处）。vault 真正防住的是"密钥进 DB / DB 备份 / 诊断包 / 事件 / transcript"这条链。
 >    既然只要保住那一条收益就够，那么加密带来的复杂度（主密钥的保管与丢失、`vault_unavailable` 与
 >    "密文解不开"两类失败态、写面"vault 与 SQLite 无法同事务"的补偿逻辑及其 H4 故障注入面）
@@ -586,7 +586,7 @@
 > 设计全文见 `.dsh/docs/specs/2026-10-15-provider-model-identity-design.md`，执行计划见
 > `.dsh/docs/plans/2026-10-15-provider-model-identity-plan.md`。触发是用户两问——「provider 的主键 id 使用
 > 底层 runtime 的值，db 层不该有自己的主键 id 吗」「`models` 中 `id` 和 `model_id` 两个字段也很有歧义」。
-> 两点都是对的，但**根因不是"缺代理键"**：`providers.id` 本来就是**用户自己起的 slug**（`pkg/object/objid`
+> 两点都是对的，但**根因不是"缺代理键"**：`providers.id` 本来就是**用户自己起的 slug**（`internal/object/objid`
 > 早已把"provider 刻意不铸造 id"登记成判据），真正发生的是**同一个字符串被用进了底座的命名空间**。
 > 于是三次收口，各自一个迁移版本、一次原子提交、独立可回滚（`backup: "v24"/"v25"/"v26"`）：
 > ① **命名收口（v24，零行为变化）**：`models.model_id` → `models.model`。`model_id` 在本仓一词三义
@@ -594,7 +594,7 @@
 >    请求体 `{"model": …}`；各家自定义模型表也把"上游真实模型名"记为 `model`）。此后 `_id` 一律指
 >    "指向某表 `id`"。**判据就是"别的什么都不变"**：`git diff testdata/` 为空。
 > ② **路由键隔离 + 容量声明（v25）**：交给 dsh 的每个路由键带平台保留前缀 `mate-`
->    （`pkg/runtime/dsh/route_key.go` 是唯一派生点；`config.go` 两处 + `model_value.go` 一处必须同源，
+>    （`internal/infra/dsh/route_key.go` 是唯一派生点；`config.go` 两处 + `model_value.go` 一处必须同源，
 >    只改一处就是"所有选了模型的会话立刻起不来"），`displayName` 交付**供应商展示名**（空则回落路由键）。
 >    为什么必须隔离：`providers` 的 dict 键**就是交付面**——命中 pi-ai 已装 provider 时，那一家的端点/
 >    协议/展示名/模型目录会变成这条路由的**逐字段默认值**，"平台配了 A、实际按 A 的目录解析出 B"静默发生。
@@ -675,7 +675,7 @@
 它有一张"哪种模式允许写哪儿"的裁决表。我们**不建**：ACP 面读不到 `enforcement`（见
 `docs/unimplemented.md` D10），那张表在平台侧只能是**猜**——而"猜出来的裁决"比"没有裁决"更糟，
 因为它会让界面有底气说一句平台其实无法保证的话。所以沙箱的**真值**只在底座的签名表里
-（`pkg/runtime/dsh/tool_failure.go` 的失败归类），平台只做**事后归类**，不做**事前承诺**。
+（`internal/infra/dsh/tool_failure.go` 的失败归类），平台只做**事后归类**，不做**事前承诺**。
 
 ### ③ 不照抄 13 态轮次模型
 

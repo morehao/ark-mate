@@ -12,7 +12,7 @@ import (
 	"sort"
 
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/internal/capability"
 )
 
 // ——— 存量定义的导入/导出：**域无关**的那一半（M6-4 能力面、M6-6 agent 面） ———

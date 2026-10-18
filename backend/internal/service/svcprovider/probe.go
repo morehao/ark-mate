@@ -12,9 +12,9 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/pkg/credentials"
-	"github.com/morehao/ark-mate/pkg/redact"
-	"github.com/morehao/ark-mate/pkg/resource"
+	"github.com/morehao/ark-mate/internal/infra/credentials"
+	"github.com/morehao/ark-mate/internal/redact"
+	"github.com/morehao/ark-mate/internal/resource"
 )
 
 // ——— P4a：供应商连接自检（M4）的**用例层实现** ———

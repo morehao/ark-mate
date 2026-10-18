@@ -15,7 +15,7 @@
  *
  * 历史（不构成本脚本的判据）：这里原有第三条 opencode v2（2.0.26；`OPENCODE_DISABLE_EXTERNAL_SKILLS` 与
  *   `debug skill` 那套 v1 取证手段在 v2 已失效）的 skill 目录块判据——v2 只把 skill 放进模型目录块，
- *   只能看真模型请求体。**该适配已于 v18 下线**（`pkg/runtime/` 下那个 adapter、桌面随包载荷、注册表
+ *   只能看真模型请求体。**该适配已于 v18 下线**（`internal/runtime/` 下那个 adapter、桌面随包载荷、注册表
  *   与 `builtinAgents` 里的那一行均已删除，`AllBuiltinSpecs()` 只剩 dsh），判据与取证函数一并删除。
  *
  * 隔离与代价（都是刻意的）：

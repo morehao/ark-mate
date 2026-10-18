@@ -24,7 +24,7 @@ import (
 	"errors"
 
 	"github.com/morehao/ark-mate/internal/dao"
-	"github.com/morehao/ark-mate/pkg/dbclient"
+	"github.com/morehao/ark-mate/internal/infra/dbclient"
 	"gorm.io/gorm"
 )
 

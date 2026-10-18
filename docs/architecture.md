@@ -17,11 +17,11 @@ ark-mate 自上而下分两层，两层职责并列成立：
 边界的四条硬口径（不是取向，是已登记的产品约束）：
 
 - **单机单操作员**。不做多用户、团队共享、登录/RBAC；控制面默认只绑回环（`127.0.0.1`），凭据体系只解决「REST 面与事件流面分权」（见 §6）。
-- **底座由构建期固定，用户不能选 runtime**。选中的 id 由 `-X` 在编译期注入 `pkg/runtime.BuildRuntime`，不注入即 `dsh`；用户面没有任何 runtime 选择或读取入口（`GET /runtimes` 不存在）。带被撤掉的**选择键**的写请求一律显式拒绝（`40001`），不静默丢弃。
+- **底座由构建期固定，用户不能选 runtime**。选中的 id 由 `-X` 在编译期注入 `internal/runtime.BuildRuntime`，不注入即 `dsh`；用户面没有任何 runtime 选择或读取入口（`GET /runtimes` 不存在）。带被撤掉的**选择键**的写请求一律显式拒绝（`40001`），不静默丢弃。
 - **能力不重造**。skill 执行、MCP 工具调用、推理循环一律复用底座原生实现；平台只做这些能力对应的**数据与配置管理**。
 - **无跨 agent 协作**。一次会话/一次运行只绑定一个 runtime，不存在委托、子 agent、并行协作。
 
-**接边有界**：内置适配只有 `dsh` 一个。但 adapter 层是完整的——接一个新底座 = 新建 `backend/pkg/runtime/<id>/` + 一个 `<id>Spec()` + 挂三张**端口表**实现（`resource.Syncer` / `runtime.NativePermissionAdapter` / `runtime.ModelValueAdapter`），**不需要改框架内核**。内核里不得出现任何内置适配 id 的特判（守卫钉住）。
+**接边有界**：内置适配只有 `dsh` 一个。但 adapter 层是完整的——接一个新底座 = 新建 `backend/internal/infra/<id>/`（实现 `runtime.Adapter`）+ 装配根加一行 + 挂三张**端口表**实现（`resource.Syncer` / `runtime.NativePermissionAdapter` / `runtime.ModelValueAdapter`），**不需要改框架内核**。内核里不得出现任何内置适配 id 的特判（守卫钉住）。
 
 ## 2. 交付形态三态
 
@@ -67,13 +67,13 @@ Electron 主进程（桌面态）
 
 | 环节 | 事实 |
 | --- | --- |
-| 选中 id | `pkg/runtime.SelectedRuntime()`（构建期注入值，空则 `dsh`） |
+| 选中 id | `internal/runtime.SelectedRuntime()`（构建期注入值，空则 `dsh`） |
 | 产品装配 | `runtime.ProductRegistry(remotes)`：**只注册选中的那一个**，未注册即**启动失败**——不给「能启动但没底座」的进程 |
 | 全量适配面 | `AllBuiltinSpecs()` / `AllBuiltinRegistry()` 只服务测试与诊断；医生与能力矩阵守卫必须看到**全部**适配面，否则未被选中的适配守卫会静默空转 |
 
 ### 3.3 进程生命周期
 
-- **进程注册表**（`pkg/procreg`）：daemon 把拉起的子进程（pid / pgid / 命令 / runtime / 启动时刻 / daemon 实例 id）登记为 JSON；正常停止或断连时摘除。
+- **进程注册表**（`internal/infra/procreg`）：daemon 把拉起的子进程（pid / pgid / 命令 / runtime / 启动时刻 / daemon 实例 id）登记为 JSON；正常停止或断连时摘除。
 - **孤儿回收**：启动时只回收**非本实例**登记的条目，SIGTERM → 宽限期 → SIGKILL **整个进程组**；以「pgid 与登记值一致」防 PID 复用误杀（不一致只清账并留日志）。取向是**宁可漏杀，不可误杀**。
 - **按需拉起 + 空闲回收**：编排器自己按下需拉起暖进程，`reapLoop` 扫「无在途 run、无会话引用、闲置超时」的暖进程并回收；之后会话与诊断面自动按需重拨。
 
@@ -83,7 +83,7 @@ Electron 主进程（桌面态）
 
 - adapter 在自己的 `Spec.Isolation` 里声明变量名与落点（`IsolationPath` 投影到 `<MATE_HOME>/runtime/<id>/…`、`IsolationLiteral` 字面量、`IsolationEmpty` 清空），父包只做**机械投影**（`IsolationEnvFor`），不认识任何具体底座；
 - 公共 npm 面（`npm_config_cache` / `npm_config_prefix`）对所有本地子进程统一给——MCP server 常经 `npx` 拉起；
-- **同一张隔离表在仓库里有三份**：核心（`pkg/runtime/isolation.go`）、桌面私有启动器（`apps/desktop/scripts/gen-runtime-bin.mjs`）、V9 探针（`frontend/scripts/desktop-runtime-smoke.mjs`）。**改一处就得改三处**，三条 guard 分别钉住「逐变量逐取值」「启动器 ⊆ 核心」「探针与核心逐条对齐」。
+- **同一张隔离表在仓库里有三份**：核心（`internal/runtime/isolation.go`）、桌面私有启动器（`apps/desktop/scripts/gen-runtime-bin.mjs`）、V9 探针（`frontend/scripts/desktop-runtime-smoke.mjs`）。**改一处就得改三处**，三条 guard 分别钉住「逐变量逐取值」「启动器 ⊆ 核心」「探针与核心逐条对齐」。
 
 配套的读数口径：**不注入底座的 skill 家目录变量**——底座的 skill 读根必须与平台的投放写根同源，注了就会让读根与写根悄悄分叉、skill 静默不生效。
 
@@ -127,7 +127,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 | `pkg/` | 抽出去别的应用也能用 | `acl`（ACP 客户端与传输）、`runtime`（adapter 注册表 + 三张端口表）、`capability`、`mcp`、`code`（错误码）、`config`、`credentials`、`dbclient`、`logging`、`procreg`、`redact`、`resource`、`automation`、`object/{objid,objusage,objdelivery}` |
 | `internal/` | 本控制面的应用逻辑与策略 | `app`、`router`、`controller`、`service`、`manager`、`dto`、`dao`、`model`、`store`、`eventbus`、`middleware`、`credential`、`gateway`、`archtest`、`testutil`、`version` |
 
-**`pkg/` 内部不得 import `internal/`**（守卫）。这条是本仓多条「接口放哪」的根源：底座 adapter 要实现的 `resource.Syncer` 之所以定义在 `pkg/resource` 而不是 `pkg/runtime`，是因为 `pkg/runtime` 已经 import 各 adapter 子包——定义在父包会形成父子 import 环。
+**`pkg/` 内部不得 import `internal/`**（守卫）。这条是本仓多条「接口放哪」的根源：底座 adapter 要实现的 `resource.Syncer` 之所以定义在 `internal/resource` 而不是 `internal/runtime`，是因为 `internal/runtime` 已经 import 各 adapter 子包——定义在父包会形成父子 import 环。
 
 ### 4.4 一条容易踩的形状约定
 
@@ -157,7 +157,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 
 ### 5.3 身份与位次（两件不同的事）
 
-**身份**由 `pkg/object/objid` 单点铸造：`3 位小写字母 + _` + 26 位 Crockford Base32 ULID（进程内单调，字典序 = 铸造序）。
+**身份**由 `internal/object/objid` 单点铸造：`3 位小写字母 + _` + 26 位 Crockford Base32 ULID（进程内单调，字典序 = 铸造序）。
 
 | 前缀 | 实体 | 前缀 | 实体 |
 | --- | --- | --- | --- |
@@ -177,7 +177,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 - `models`：`id` 是 `mdl_…`（平台行 id）；`model` 是**发给上游的模型名**（外部世界的字符串）；`provider_id` 指向供应商；容量列（`max_input_tokens` / `max_output_tokens`）**可空、无 DEFAULT**——空 = 不下发该字段，「0」当不了「未声明」的哨兵。
 - **会话引用平台 id**：`sessions.model_id` 指向 `models.id`。底座的**不透明取值**不落库、不过 wire，由 adapter 每次现算（唯一解析点）。对不上平台清单的提交**显式拒**（`40401`），不静默回落默认模型。
 - **凭据只有一个事实源：库**。`providers.key` 列 + `mcp_secrets(ref, value, revision, updated_at)` 表；`<MATE_HOME>/credentials.json`（严格 `ref → value` 映射、0600、原子写）是**可重建的双写镜像**——删掉它不丢任何东西。
-- **读值走四层回落**，唯一实现在 `pkg/credentials`：**继承环境（只读，最高）> 托管文档 > `<cwd>/.env` > `<MATE_HOME>/.env`**。继承环境最高是因为「这次运行的显式意图」不该被静默遮蔽。
+- **读值走四层回落**，唯一实现在 `internal/infra/credentials`：**继承环境（只读，最高）> 托管文档 > `<cwd>/.env` > `<MATE_HOME>/.env`**。继承环境最高是因为「这次运行的显式意图」不该被静默遮蔽。
 - MCP 的引用词法是 `store:<ns>/<name>`（库里的一行）或 `env:<ENV_NAME>`（进程环境变量）；**明文密钥一律拒收**，引用只在注入前一刻解析成明文。
 - **代价如实写在决策登记里**：库与其备份现在含明文密钥，因此 `backups/` 0700 与备份文件 0600 是硬要求，共享机器不再安全。
 
@@ -209,7 +209,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 
 ### 6.3 错误码与凭据
 
-- **错误码的唯一事实源是 `pkg/code`**：常量 + 默认文案 + 注册表 + `FromError` 归一。信封里的 `code` 是对外契约，三处必须同步——`pkg/code`（事实源）、README 的表、前端 `packages/types/src/response.ts`。**控制器错误出口一律带码**，不得透传裸 error。
+- **错误码的唯一事实源是 `internal/code`**：常量 + 默认文案 + 注册表 + `FromError` 归一。信封里的 `code` 是对外契约，三处必须同步——`internal/code`（事实源）、README 的表、前端 `packages/types/src/response.ts`。**控制器错误出口一律带码**，不得透传裸 error。
 - **凭据分两个面**：REST 面（`Authorization: Bearer`，改数据的能力都在这里）与 stream 面（只读的事件流首帧）。桌面态两枚令牌互斥、经 **stdin** 交给核心（不进 argv / env / 文件 / URL）；独立态是同一条令牌同时具备两个面。空表 = 不鉴权，只允许出现在绑定回环的场景。
 - **Host 白名单 + Origin 矩阵只挂 `v1` 整组**（回环监听面），静态资产与 SPA 回落不在其内——真正的攻击面是 API。WS 的来源判定在控制器里做（Accept 之前），与 REST 共用**同一个** policy 对象。
 
@@ -239,7 +239,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 能力集是**进程级**的（ACP 没有「给活会话换能力」的通道），所以每套能力各自一个底座子进程，**同指纹共享**：
 
 - **连接键** = runtime id + 影响线程行为的 env 组签名；**代际键** = 连接键 + 能力指纹 + 平台生成的模型配置指纹。三者必须都在键里——缺一项就会出现「暖进程继续用旧清单，而界面显示已保存」。
-- **指纹输入只有一个决定点**（`internal/domain/session/capability_fingerprint.go`），算法在 `pkg/runtime`。三条边界：密钥值绝不进指纹（只用键名与引用名）；正文摘要复用物化 sidecar 的同一算法；**只纳入真正会生效的东西**（禁用的 skill、不投给该 runtime 的 skill、该底座不支持的传输的 MCP 都不进）。
+- **指纹输入只有一个决定点**（`internal/domain/session/capability_fingerprint.go`），算法在 `internal/runtime`。三条边界：密钥值绝不进指纹（只用键名与引用名）；正文摘要复用物化 sidecar 的同一算法；**只纳入真正会生效的东西**（禁用的 skill、不投给该 runtime 的 skill、该底座不支持的传输的 MCP 都不进）。
 - **生效边界只有一条规则：下一个轮次**，但四个方向处置不同——扩权/改内容下一轮迁移过去；**缩权立刻生效且失败不回退**（宁可带码拒发这一轮，也不用已被收回的权限面继续跑）；忙则顺延；纯内容变化迁移失败可回退旧代际继续跑。
 - 同一配置下代际有上限，达限时先淘汰「无会话引用且空闲」的代际，仍超限则要求复用现有能力集——**绝不静默复用错误的能力集**（猜细了是安全 bug）。
 - 会话可钉住能力**子集**（`capabilities` 逐 kind 三态：键缺失 = 未声明、`[]` = 一个都不要、非空 = 白名单且**覆盖**而非求交）。

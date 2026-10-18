@@ -15,7 +15,7 @@ import (
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
-	"github.com/morehao/ark-mate/pkg/resource"
+	"github.com/morehao/ark-mate/internal/resource"
 )
 
 // ——— v11 provider 写面：CRUD 的失败面、写面顺序与补偿、生效回执 ———

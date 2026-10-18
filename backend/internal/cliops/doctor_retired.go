@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
-	"github.com/morehao/ark-mate/pkg/config"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/assembly"
 )
 
 // knownRuntimeIDs 在册 runtime id 全集：**全部内置适配** ∪ `runtimes.json` 的远程端点。
@@ -16,9 +16,9 @@ import (
 //   - 少了内置那半 → 在册的内置底座被当成"已下线"，报告把正常目录列成遗留；
 //   - 少了远程那半 → 用户自己配的远程底座被当成"遗留"，同样假红。
 //
-// 内置那半取 `AllBuiltinSpecs`（**全部**），理由与 `checkRetiredSection` 文件头第 ① 条一致。
+// 内置那半取 `assembly.BuiltinSpecs()`（**全部**），理由与 `checkRetiredSection` 文件头第 ① 条一致。
 func knownRuntimeIDs(cfg config.Config) []string {
-	specs := runtime.AllBuiltinSpecs()
+	specs := assembly.BuiltinSpecs()
 	ids := make([]string, 0, len(specs)+len(cfg.RemoteRuntimes))
 	for _, spec := range specs {
 		ids = append(ids, spec.ID)
@@ -69,6 +69,7 @@ func checkRetiredSection(opts doctorOptions) []doctorCheck {
 	facts := doctorfacts.CollectRetiredRuntimeFacts(context.Background(), st, doctorfacts.RetiredRuntimeOptions{
 		Home:            opts.Home,
 		KnownRuntimeIDs: opts.KnownRuntimeIDs,
+		RuntimeSpecs:    assembly.BuiltinSpecs(),
 		ProjectionDirs:  opts.ProjectionDirs,
 	})
 	return renderRetiredChecks(facts)

@@ -25,7 +25,7 @@ import (
 	"io"
 
 	"github.com/morehao/ark-mate/internal/version"
-	"github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/golib/glog"
 )
 
