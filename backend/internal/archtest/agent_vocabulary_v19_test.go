@@ -232,6 +232,10 @@ const historicalAgentFixtureReason = "「停在 v19 之前」的历史迁移用�
 // 而漂开的方向恰好是自检看不见的那种。
 func firstHitInAgentVocabulary(src string) (string, int) {
 	lower := strings.ToLower(src)
+	// 2026-10-18：`docs/agents/` 是仓库**文档分册目录**（从仓库根 `AGENTS.md` 拆出），与 v19 撤掉的
+	// `/agents/` 路由无关。按**等长**占位替换后再扫：既不误伤文档路径，也不会放过任何真正的
+	// `/agents/...`（只吃掉 `docs/` 前缀后的那一段，命中下标仍与原文逐字对齐）。
+	lower = strings.ReplaceAll(lower, "docs/agents/", "docs/xxxxxx/")
 	for _, banned := range legacyAgentVocabulary {
 		if idx := strings.Index(lower, banned); idx >= 0 {
 			return banned, idx
@@ -371,6 +375,17 @@ func TestNoAgentVocabulary(t *testing.T) {
 
 	// 先自检登记，再扫判据：登记烂了的话，"绿"是假的。
 	agentVocabularyWhitelistSelfCheck(t, files)
+
+	// 判据自检：文档分册路径必须放行，真正的 `/agents/...` 必须仍被判红——两者共用
+	// firstHitInAgentVocabulary，这条自检钉的正是上面那条占位替换的边界（漂了当场红）。
+	for _, tc := range []struct{ src, want string }{
+		{"见 `docs/agents/build-and-runtime.md`", ""},
+		{"POST /agents/import", "/agents/"},
+	} {
+		if got, _ := firstHitInAgentVocabulary(tc.src); got != tc.want {
+			t.Fatalf("agent 词汇判据自检失败：%q 的命中 = %q，期望 %q——占位替换的边界漂了", tc.src, got, tc.want)
+		}
+	}
 
 	scanned := 0
 	var hits []string

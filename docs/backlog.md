@@ -29,7 +29,7 @@
 feat(usage): 用量按客户端时区分桶（tz_offset）
 # 2) 确认区并列显示（O19）
 feat(console): 确认区并列显示全部未结算卡
-# 3) L2 十四条逐条决策（unimplemented / decisions v29 / roadmap / AGENTS 计数）
+# 3) L2 十四条逐条决策（unimplemented / decisions v29 / roadmap / `docs/agents/guards.md` 计数）
 docs(决策): L2 十四条逐条决策（v29）
 ```
 
@@ -219,7 +219,7 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 1. **代码 + 守卫**：至少一条 fail-closed 的静态判据（解析不到即失败），并**实跑反证**——
    故意破坏判据、确认它会红，再复原。反证不能编译通过的不算数。
-2. **AGENTS.md 的守卫计数 +1**，并在同一段写清"它挡的是哪种静默失效"（照抄现有条目的写法）。
+2. **`docs/agents/guards.md` 的守卫计数 +1**，并在同一段写清"它挡的是哪种静默失效"（照抄现有条目的写法）。
 3. **`unimplemented.md`**：从 §2 移进 §3，新 `C` 号 + 关闭依据（提交号 / 决策版本 / 现存路径）。
    §2 只留"决定做但还没做"的条目。
 4. **`roadmap.md`**：对应阶段的状态行改成事实（做了就写做了，没做就写没做，别写"进行中"）。

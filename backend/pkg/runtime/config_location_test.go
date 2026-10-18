@@ -13,7 +13,7 @@ import (
 //
 // 这条是隔离纪律在模型清单落点上的落点：`RT_ALT_HOME` / `DSH_HOME` 是平台注入**子进程**的
 // 私有值，进程环境里通常没有它们。只看进程环境会解析失败——更糟的是会命中用户在 shell 里设的同名
-// 变量，于是平台去写**用户真实目录**（这正是 AGENTS.md 的硬约束禁止的事）。
+// 变量，于是平台去写**用户真实目录**（这正是 `docs/agents/isolation.md` 的硬约束禁止的事）。
 func TestResolveConfigLocationUsesIsolationEnv(t *testing.T) {
 	home := t.TempDir()
 	// 诱饵：进程环境里放一个同名变量，指向"用户自己的目录"。

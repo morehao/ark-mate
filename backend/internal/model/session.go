@@ -23,7 +23,7 @@ type SessionEntity struct {
 	//   - **WorkspaceID 是归属事实**：只用于「这条会话属于哪个分组」。它与 Cwd 在大多数行上
 	//     指向同一目录，但两者不一致是**允许的**（设计 ADR-2/ADR-5），不是脏数据。
 	//
-	// 刻意**不加外键**：本仓 SQLite driver 不注入 `foreign_keys`（AGENTS.md 已登记该代价），
+	// 刻意**不加外键**：本仓 SQLite driver 不注入 `foreign_keys`（`docs/agents/build-and-runtime.md` 已登记该代价），
 	// 写了也不生效；且删登记**本来就不该**连带删会话（设计 ADR-6），级联语义恰恰是错的。
 	WorkspaceID string `gorm:"column:workspace_id;not null;default:''"`
 	// WorkspaceTemporary 该工作空间是否由平台代建（未指定 cwd 时在 workspace_dir 下建）。

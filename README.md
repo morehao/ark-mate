@@ -160,7 +160,7 @@ dsh --profile acp --help           # 验证可用（首用会自动初始化 pro
 > 报 statically linked；反过来 `CGO_ENABLED=1` 交叉编译直接编不过）。**别退回旧写法**：2026-10-11
 > 前后那版 driver 是 CGO 的（mattn/go-sqlite3），`0` 之下编译照样过、注册的却是 stub，
 > **运行期连库才报错**——四个构建面一律取 0 这件事由 archtest 的 `TestSqliteDriverStaysPureGo`
-> 与依赖图一起钉着（见 `AGENTS.md`「运行配置要点」）。代价是体积：golib 实测最小程序 **+10.99 MiB**。
+> 与依赖图一起钉着（见 `docs/agents/build-and-runtime.md`「运行配置要点」）。代价是体积：golib 实测最小程序 **+10.99 MiB**。
 
 ```bash
 make web                                                      # 构建前端产物 → frontend/apps/web/dist
