@@ -103,9 +103,14 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/sessionruntime"`) {
 		t.Error("internal/service/svcmodel 里出现 `internal/sessionruntime` 的 import：写面通过 `Host` 端口取那半边，不 import 实现层。")
 	}
-	if !strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/store"`) {
-		t.Error("internal/service/svcmodel 里没有 `internal/store` 的 import：清单载体是这一层的**依赖事实**（P4a 起装配点交出 store），" +
-			"它被拿走意味着写面又回到了「只认 Service」的老形状。")
+	// v3.1 P4：用例层**不再 import store**，改吃装配根交下来的窄端口（`ModelStore`）。
+	// 判据双向：接口必须在本包（否则端口又跑到实现层去了）；store 不得再被 import。
+	if !strings.Contains(declaredSrc, "type ModelStore interface {") {
+		t.Error("internal/service/svcmodel 里找不到 `type ModelStore interface {`：清单载体的窄端口必须在用例层声明（v3.1 P4）。")
+	}
+	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/store"`) {
+		t.Error("internal/service/svcmodel 又 import 了 `internal/store`：清单载体走 `ModelStore` 端口，" +
+			"`internal/service` 的层表 deny 已把这条边钉死。")
 	}
 
 	// ② 接口面切分：写面在 `DeclaredSvc` 上，读/目录/同步在 `ModelSvc` 上，两边不许互相夹带。

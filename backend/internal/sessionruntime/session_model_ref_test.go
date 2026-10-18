@@ -13,7 +13,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/resource"
@@ -67,7 +66,7 @@ func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName st
 		t.Fatalf("CreateProvider(%s): %v", providerID, err)
 	}
 	id := objid.New(objid.Model)
-	ok, err := svc.planes.Resources.Store().CreateModelDefinition(ctx, store.ModelColumns{
+	ok, err := svc.planes.Resources.Store().CreateModelDefinition(ctx, model.ModelColumns{
 		ID: id, ProviderID: providerID, Model: modelName, InputModalities: resource.ModalityText,
 	}, definition.DefinitionWriteActor)
 	if err != nil || !ok {

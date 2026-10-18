@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/resource"
@@ -24,7 +24,7 @@ import (
 //
 // 于是这一层拿的是**依赖事实**加**一个过渡期端口**：
 //
-//	*store.Store      清单的载体（sqlite 模式才有；memory 模式为 nil ⇒ 写面 40501）
+//	ModelStore        清单的窄端口（sqlite 模式才有；memory 模式为 nil ⇒ 写面 40501）
 //	*provider.Plane   挂靠校验要问"这条供应商在不在"（域平面只有一份实例，见 `provider.NewPlane`）
 //	Host              写面之外的模型面（读一条的投影 / 生效面回执 / 同步触发；见下）
 //
@@ -48,15 +48,29 @@ type Host interface {
 	TrySyncModels(ctx context.Context) string
 }
 
+// ModelStore 模型清单的**窄端口**（v3.1 P4：用例层不 import store）。
+//
+// `*store.Store` 结构上满足它，装配根直接交下来；memory 模式传 nil（写面据此报 40501）。
+// 六个方法就是本用例真正用到的全部：多一个都算"这层还能动别的东西"。
+type ModelStore interface {
+	CreateModelDefinition(ctx context.Context, cols model.ModelColumns, actor string) (bool, error)
+	UpdateModelDefinition(ctx context.Context, id string, content model.ModelContent, expectedRev int64, actor string) (bool, error)
+	DeleteModelDefinitionAndClearDefault(ctx context.Context, id string, expectedRev int64, actor string) (bool, bool, error)
+	GetModelDefinition(ctx context.Context, id string) (*model.ModelEntity, bool, error)
+	GetProviderDefinition(ctx context.Context, id string) (*model.ProviderEntity, bool, error)
+	SetDefaultModelID(ctx context.Context, id string) error
+	ClearDefaultModelID(ctx context.Context, id string) (bool, error)
+}
+
 // Declared 平台模型清单的写面用例（见文件头）。
 type Declared struct {
-	st    *store.Store
+	st    ModelStore
 	plane *provider.Plane
 	host  Host
 }
 
 // NewDeclared 造写面用例。三个入参都是装配点交下来的**依赖事实/过渡端口**，控制器在这里构造。
-func NewDeclared(st *store.Store, plane *provider.Plane, host Host) DeclaredSvc {
+func NewDeclared(st ModelStore, plane *provider.Plane, host Host) DeclaredSvc {
 	return &Declared{st: st, plane: plane, host: host}
 }
 
@@ -89,7 +103,7 @@ func (m *Declared) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq)
 		return nil, err
 	}
 	id := objid.New(objid.Model)
-	ok, err := m.st.CreateModelDefinition(ctx, store.ModelColumns{
+	ok, err := m.st.CreateModelDefinition(ctx, model.ModelColumns{
 		ID: id, ProviderID: req.ProviderID, Model: strings.TrimSpace(req.Model),
 		Name: derefString(req.Name), Note: derefString(req.Note), InputModalities: modalities,
 		MaxInputTokens: maxIn, MaxOutputTokens: maxOut,
@@ -136,7 +150,7 @@ func (m *Declared) UpdateModel(ctx context.Context, id string, patch dtomodel.Mo
 		return nil, modelNotFoundErr(id)
 	}
 	// 指针更新：只改 patch 里出现过的键。
-	content := store.ModelContent{
+	content := model.ModelContent{
 		Name: row.Name, Note: row.Note,
 		// 列值归一：空列（只可能来自手写行，列默认值是 `text`）也要写成明确值——否则"只改名字"
 		// 这一步会把空串原样写回，让"默认 text"变成第三种落库形态。

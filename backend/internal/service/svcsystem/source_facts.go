@@ -5,7 +5,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/model"
 )
 
 // ——— P4a 正文第八刀：事实来源的适配器收进用例层 ———
@@ -24,12 +24,20 @@ import (
 // 两种载体的选择（`st != nil` 走库）刻意留在这一个构造函数里：它是**取数的装配事实**，
 // 不是业务判断；分成两个导出构造函数只会让"哪份载体"这件事散到接线点上。
 
+// SourceFactsReader 系统面的**窄读端口**（v3.1 P4：用例层不 import store）。
+//
+// `*store.Store` 结构上满足它；memory 模式传 nil（只能给进程内事实）。
+type SourceFactsReader interface {
+	GetSession(ctx context.Context, id string) (model.SessionEntity, bool, error)
+	EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]model.EventEntity, bool, error)
+}
+
 // Facts 是 `Source` 的实现：把库或内存镜像读成导出要的形状。
 //
 // 它**只做取数**：渲染、上限口径、错误码都在 `Exporter`（`export.go`）。两条载体的产物
 // 逐字相同，靠的是这里对同一组事实的两种读法，而不是两套渲染。
 type Facts struct {
-	st    *store.Store
+	st    SourceFactsReader
 	plane *session.Plane
 	bus   *eventbus.Bus
 }
@@ -38,7 +46,7 @@ type Facts struct {
 //
 // `plane`/`bus` 在 sqlite 模式下也用得上（会话域镜像与实时事件仍在内存里），所以三份事实
 // 一起交下来、由这里决定读哪里——接线点不再重复那个 `st != nil` 判断。
-func NewSource(st *store.Store, plane *session.Plane, bus *eventbus.Bus) Source {
+func NewSource(st SourceFactsReader, plane *session.Plane, bus *eventbus.Bus) Source {
 	return &Facts{st: st, plane: plane, bus: bus}
 }
 

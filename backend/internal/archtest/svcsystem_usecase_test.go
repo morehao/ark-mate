@@ -135,7 +135,7 @@ func TestManagerExportFileIsGone(t *testing.T) {
 // 判据挂在具体符号上而不只挂"包里有 store 的 import"：后者在适配器被换成一层薄转发
 // （例如把 `SessionEvents` 委托给别处）时照样通过，而那正是要拦的形态。
 var systemSourceAdapterAnchors = []string{
-	"func NewSource(st *store.Store, plane *session.Plane, bus *eventbus.Bus) Source",
+	"func NewSource(st SourceFactsReader, plane *session.Plane, bus *eventbus.Bus) Source",
 	"var _ Source = (*Facts)(nil)",
 	"func (f *Facts) SessionMeta(ctx context.Context, id string) (SessionMeta, bool)",
 	"func (f *Facts) SessionEvents(ctx context.Context, id string, limit int) ([]eventbus.Event, bool)",

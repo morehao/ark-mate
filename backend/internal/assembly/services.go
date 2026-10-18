@@ -106,7 +106,7 @@ func (f Facts) BuildServices() Services {
 	modelFace := sessionruntime.NewModelFace(as.Session)
 	return Services{
 		Session:            as.Session,
-		SessionHistory:     svcsession.NewHistory(as.Store, plane, as.Bus),
+		SessionHistory:     svcsession.NewHistory(eventReader(as.Store), plane, as.Bus),
 		SessionDetail:      svcsession.NewDetail(plane, as.Session),
 		SessionInteraction: svcsession.NewInteraction(plane, as.Session),
 		SessionQueue:       svcsession.NewQueue(plane, as.Session),
@@ -114,14 +114,14 @@ func (f Facts) BuildServices() Services {
 		SessionRead:        svcsession.NewRead(plane),
 		Search:             svcsearch.New(plane),
 		Usage:              svcusage.New(plane),
-		Export:             svcsystem.New(svcsystem.NewSource(as.Store, plane, as.Bus)),
+		Export:             svcsystem.New(svcsystem.NewSource(sourceFactsReader(as.Store), plane, as.Bus)),
 
 		Workspace:     svcworkspace.New(as.Planes.Workspaces, as.Planes.Picker),
 		CommandPolicy: svccommandpolicy.New(as.Cfg.CommandPolicyPath, f.orchestratorApply()),
 
 		Runtime:       svcruntime.New(as.Execution),
 		Model:         modelFace,
-		ModelDeclared: svcmodel.NewDeclared(as.Store, as.Planes.Providers, modelFace),
+		ModelDeclared: svcmodel.NewDeclared(modelStore(as.Store), as.Planes.Providers, modelFace),
 		Provider:      svcprovider.NewProvider(as.Planes.Providers),
 		ProviderProbe: svcprovider.NewProbe(as.Planes.Providers, as.Planes.Providers),
 
@@ -157,4 +157,29 @@ func (f Facts) metaSource() svcsystem.MetaSource {
 		return svcsystem.MetaSource{}
 	}
 	return f.MetaSource()
+}
+
+// ——— 端口转换：把 `*store.Store` 当接口交出去（v3.1 P4）———
+//
+// 必须现判 nil：typed-nil（`var st *store.Store = nil` 装进接口）在接口里**不是 nil**，
+// 用例里那句 `if m.st == nil { 返回 40501 }` 会失效——memory 模式下会变成一次对 nil 的方法调用。
+func eventReader(st *store.Store) svcsession.EventReader {
+	if st == nil {
+		return nil
+	}
+	return st
+}
+
+func sourceFactsReader(st *store.Store) svcsystem.SourceFactsReader {
+	if st == nil {
+		return nil
+	}
+	return st
+}
+
+func modelStore(st *store.Store) svcmodel.ModelStore {
+	if st == nil {
+		return nil
+	}
+	return st
 }

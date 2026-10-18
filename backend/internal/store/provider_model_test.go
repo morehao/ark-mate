@@ -128,7 +128,7 @@ func TestDeleteProviderDefinitionIfUnreferenced(t *testing.T) {
 	if ok, err := s.UpsertProviderDefinition(ctx, ProviderColumns{ID: "p1", Protocol: "openai"}, 0, "rest"); err != nil || !ok {
 		t.Fatalf("建供应商: ok=%v err=%v", ok, err)
 	}
-	if ok, err := s.CreateModelDefinition(ctx, ModelColumns{
+	if ok, err := s.CreateModelDefinition(ctx, model.ModelColumns{
 		ID: "m1", ProviderID: "p1", Model: "gpt-4o", InputModalities: "text",
 	}, "rest"); err != nil || !ok {
 		t.Fatalf("建模型: ok=%v err=%v", ok, err)
@@ -177,7 +177,7 @@ func TestDeleteModelDefinitionAndClearDefault(t *testing.T) {
 	ctx := ctxT()
 
 	for _, id := range []string{"a", "b"} {
-		if ok, err := s.CreateModelDefinition(ctx, ModelColumns{
+		if ok, err := s.CreateModelDefinition(ctx, model.ModelColumns{
 			ID: id, ProviderID: "p1", Model: "m-" + id, InputModalities: "text",
 		}, "rest"); err != nil || !ok {
 			t.Fatalf("建 %s: ok=%v err=%v", id, ok, err)
@@ -248,19 +248,19 @@ func TestModelDefinitionPairUnique(t *testing.T) {
 	s := openTestDB(t)
 	ctx := ctxT()
 
-	if ok, err := s.CreateModelDefinition(ctx, ModelColumns{
+	if ok, err := s.CreateModelDefinition(ctx, model.ModelColumns{
 		ID: "m1", ProviderID: "p1", Model: "v4-flash", Name: "Flash", InputModalities: "text",
 	}, "rest"); err != nil || !ok {
 		t.Fatalf("首建应命中: ok=%v err=%v", ok, err)
 	}
 	// 同 `(provider_id, model_id)`（不同 id、不同显示名）→ 拒。
-	if ok, err := s.CreateModelDefinition(ctx, ModelColumns{
+	if ok, err := s.CreateModelDefinition(ctx, model.ModelColumns{
 		ID: "m2", ProviderID: "p1", Model: "v4-flash", Name: "别名", InputModalities: "text",
 	}, "rest"); err != nil || ok {
 		t.Fatalf("重复 (provider_id, model_id) 应被拒: ok=%v err=%v", ok, err)
 	}
 	// 换 provider → 是另一条。
-	if ok, err := s.CreateModelDefinition(ctx, ModelColumns{
+	if ok, err := s.CreateModelDefinition(ctx, model.ModelColumns{
 		ID: "m4", ProviderID: "p2", Model: "v4-flash", Name: "Flash", InputModalities: "text",
 	}, "rest"); err != nil || !ok {
 		t.Fatalf("换 provider 应可建: ok=%v err=%v", ok, err)
@@ -306,12 +306,12 @@ func TestDefaultModelIsSingleValue(t *testing.T) {
 	s := openTestDB(t)
 	ctx := ctxT()
 
-	if ok, err := s.CreateModelDefinition(ctx, ModelColumns{
+	if ok, err := s.CreateModelDefinition(ctx, model.ModelColumns{
 		ID: "a", ProviderID: "p1", Model: "m-a", InputModalities: "text",
 	}, "rest"); err != nil || !ok {
 		t.Fatalf("建 a: ok=%v err=%v", ok, err)
 	}
-	if ok, err := s.CreateModelDefinition(ctx, ModelColumns{
+	if ok, err := s.CreateModelDefinition(ctx, model.ModelColumns{
 		ID: "b", ProviderID: "p1", Model: "m-b", InputModalities: "text",
 	}, "rest"); err != nil || !ok {
 		t.Fatalf("建 b: ok=%v err=%v", ok, err)
@@ -354,7 +354,7 @@ func TestDefaultModelIsSingleValue(t *testing.T) {
 		t.Fatalf("重设默认 a: %v", err)
 	}
 	row, _, _ := s.GetModelDefinition(ctx, "a")
-	if ok, err := s.UpdateModelDefinition(ctx, "a", ModelContent{
+	if ok, err := s.UpdateModelDefinition(ctx, "a", model.ModelContent{
 		Name: "别名", Note: row.Note, InputModalities: row.InputModalities,
 	}, row.Revision, "rest"); err != nil || !ok {
 		t.Fatalf("覆盖内容列: ok=%v err=%v", ok, err)

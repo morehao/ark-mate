@@ -565,7 +565,7 @@ func (f restFixture) services() assembly.Services {
 	}
 	return assembly.Services{
 		Session:            f.svc,
-		SessionHistory:     svcsession.NewHistory(f.store, f.plane, bus),
+		SessionHistory:     svcsession.NewHistory(nilSafeEventReader(f.store), f.plane, bus),
 		SessionDetail:      svcsession.NewDetail(f.plane, f.svc),
 		SessionInteraction: svcsession.NewInteraction(f.plane, f.svc),
 		SessionQueue:       svcsession.NewQueue(f.plane, f.svc),
@@ -573,14 +573,14 @@ func (f restFixture) services() assembly.Services {
 		SessionRead:        svcsession.NewRead(f.plane),
 		Search:             svcsearch.New(f.plane),
 		Usage:              svcusage.New(f.plane),
-		Export:             svcsystem.New(svcsystem.NewSource(f.store, f.plane, bus)),
+		Export:             svcsystem.New(svcsystem.NewSource(nilSafeSourceFacts(f.store), f.plane, bus)),
 
 		Workspace:     svcworkspace.New(f.wsPlane, workspace.NewPicker()),
 		CommandPolicy: svccommandpolicy.New("", func([]interaction.PrefixRule) {}),
 
 		Runtime:       svcruntime.New(f.execution),
 		Model:         f.svc,
-		ModelDeclared: svcmodel.NewDeclared(f.store, f.providerPlane, nil),
+		ModelDeclared: svcmodel.NewDeclared(nilSafeModelStore(f.store), f.providerPlane, nil),
 		Provider:      svcprovider.NewProvider(f.providerPlane),
 		ProviderProbe: svcprovider.NewProbe(f.providerPlane, f.svc),
 
@@ -2131,4 +2131,27 @@ func TestLibraryRouteShape(t *testing.T) {
 	if !strings.Contains(env.Msg, "未知 kind") {
 		t.Fatalf("错误文案应来自用例层: %s", env.Msg)
 	}
+}
+
+// 端口转换（v3.1 P4）：typed-nil 装进接口**不是 nil**，用例里 `st == nil` 的判据会失效。
+// 测试装配与 `internal/assembly` 用同一条规矩：先判 nil，再交接口。
+func nilSafeEventReader(st *store.Store) svcsession.EventReader {
+	if st == nil {
+		return nil
+	}
+	return st
+}
+
+func nilSafeSourceFacts(st *store.Store) svcsystem.SourceFactsReader {
+	if st == nil {
+		return nil
+	}
+	return st
+}
+
+func nilSafeModelStore(st *store.Store) svcmodel.ModelStore {
+	if st == nil {
+		return nil
+	}
+	return st
 }

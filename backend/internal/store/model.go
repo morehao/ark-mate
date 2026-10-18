@@ -23,40 +23,14 @@ import (
 //
 // 清单需要 sqlite 持久层：memory 模式没有 `models` 表（写面在 manager 侧报 40501）。
 
-// ModelColumns 是模型行的**全部列**（含身份列）：新建时用。
-type ModelColumns struct {
-	ID              string
-	ProviderID      string
-	Model           string
-	Name            string
-	Note            string
-	InputModalities string
-	// MaxInputTokens / MaxOutputTokens 平台声明的容量（v25；nil = 未声明）。
-	// 指针而不是 int64：nil 与 0 在这条链路上是**两件事**（0 不是合法容量，见 ModelEntity 的注释）。
-	MaxInputTokens  *int64
-	MaxOutputTokens *int64
-}
-
-// ModelContent 是模型行里**可变的内容列**（身份列 `provider_id`/`model` 不在其中——
-// 改身份等于换一条资源，不在 PATCH 语义里）。
-//
-// 容量在这里是**解析后的最终值**（调用方已把"不改"折成原值、"清除"折成 nil）：本层不做指针语义，
-// 它只写库。
-type ModelContent struct {
-	Name            string
-	Note            string
-	InputModalities string
-	MaxInputTokens  *int64
-	MaxOutputTokens *int64
-}
-
+// model.ModelColumns 是模型行的**全部列**（含身份列）：新建时用。
 // digest 这条模型行的规范 JSON 摘要（ADR-10）。
 //
 // 身份两列**进摘要**（它们是这一版内容的一部分）；`revision` / 时间列不进（记账不是内容）。
 //
 // 容量（v25）也进摘要：它是**内容**，改了它交付字节就变。nil 与 0 在这里必须**可区分**——nil 记
 // 空串（"未声明"），有值记十进制（`0` 不是合法容量，落库前已被写面折成 nil）。
-func modelRowDigest(cols ModelColumns) string {
+func modelRowDigest(cols model.ModelColumns) string {
 	return rowDigest(map[string]string{
 		"id": cols.ID, "provider_id": cols.ProviderID, "model": cols.Model,
 		"name": cols.Name, "note": cols.Note, "input_modalities": cols.InputModalities,
@@ -81,7 +55,7 @@ func capacityDigest(v *int64) string {
 // 返回 false 的两种情形都是"没写进去，也没有审计"：
 //   - 同 `(provider_id, model)` 已存在（库级唯一索引拦下；调用方翻成 `model_exists`(40901)）；
 //   - 主键 `id` 已存在（并发新建抢先，同一个对外表现）。
-func (s *Store) CreateModelDefinition(ctx context.Context, cols ModelColumns, actor string) (bool, error) {
+func (s *Store) CreateModelDefinition(ctx context.Context, cols model.ModelColumns, actor string) (bool, error) {
 	return s.commitDefinitionChange(ctx, model.DefinitionKindModel, cols.ID, actor,
 		model.DefinitionActionCreate, modelRowDigest(cols), 0,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
@@ -98,7 +72,7 @@ func (s *Store) CreateModelDefinition(ctx context.Context, cols ModelColumns, ac
 //
 // 只碰 `name` / `note` / `input_modalities` / `max_input_tokens` / `max_output_tokens` /
 // `revision` / `updated_at`——`provider_id` / `model` 是身份，改它们等于换一条资源，不在覆盖语义里。
-func (s *Store) UpdateModelDefinition(ctx context.Context, id string, content ModelContent, expectedRev int64, actor string) (bool, error) {
+func (s *Store) UpdateModelDefinition(ctx context.Context, id string, content model.ModelContent, expectedRev int64, actor string) (bool, error) {
 	digest := rowDigest(map[string]string{
 		"id": id, "name": content.Name, "note": content.Note, "input_modalities": content.InputModalities,
 		"max_input_tokens":  capacityDigest(content.MaxInputTokens),

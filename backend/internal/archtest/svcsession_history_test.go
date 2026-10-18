@@ -28,7 +28,7 @@ import (
 
 // sessionHistoryAnchors 用例层必须有的实现锚。
 var sessionHistoryAnchors = []string{
-	"func NewHistory(st *store.Store, plane *session.Plane, bus *eventbus.Bus) HistorySvc",
+	"func NewHistory(st EventReader, plane *session.Plane, bus *eventbus.Bus) HistorySvc",
 	"var _ HistorySvc = (*History)(nil)",
 	"func (h *History) SessionHistory(ctx context.Context, id string, q dtosession.HistoryQuery) (*dtosession.SessionHistoryResp, error)",
 	// 位次哨兵：缺省 after = `-1`（早于一切事件），而 `0` 是合法位次——

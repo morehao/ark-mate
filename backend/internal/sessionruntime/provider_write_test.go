@@ -1,6 +1,7 @@
 package sessionruntime
 
 import (
+	"github.com/morehao/ark-mate/internal/model"
 	"context"
 	"os"
 	"path/filepath"
@@ -353,7 +354,7 @@ func TestCredentialProblemPointsAtModelSettings(t *testing.T) {
 
 	defaultModel := func(t *testing.T, id, providerID string) {
 		t.Helper()
-		created, err := st.CreateModelDefinition(ctx, store.ModelColumns{
+		created, err := st.CreateModelDefinition(ctx, model.ModelColumns{
 			ID: id, ProviderID: providerID, Model: "m-" + id, InputModalities: "text",
 		}, "t")
 		if err != nil || !created {

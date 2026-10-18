@@ -6,6 +6,8 @@
 
 ## 当前判据清单
 
+- **层表守卫（v3.1 §3.2）**：`layers_v31_test.go` 用一张**层号表**（`internal/archtest/layers_v31_test.go` 的 `v31Layers`：object/version → model/eventbus/infra → code/credential → runtime → infra/dsh → config → dto/dao → store → mechanism → domain → runtimeconn/registry/service/sessionruntime → middleware/gateway → controller → router → assembly → app → cliops → cli）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向下 import（层号不得增大）；② 同层默认不互链，除非该层显式 `sameLayer: true`（如 `runtimeconn`/`registry`/`service` 的同族协作）；③ 每层可带 `deny` 精确排除个别下层包（如 `service` 不得 import `store`/`dao`/`registry`）。违规是**硬失败**（`v31LayerGuardBlocking = true`），例外清单 `v31Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。同文件另有三条专项：`runtime` 不得 import adapter、只有 `assembly`（生产代码）可以 import `internal/infra/dsh`、adapter 不得 import 应用内核。
+
 - [`layout.md`](layout.md) 里的六条边界都由 `internal/archtest` 的守卫测试强制（`go test ./internal/archtest/`）；同目录还另有**四条**契约/出口守卫：事件 type 冻结快照（`TestEventTypeContractFrozen`）、前端事件同步边（`TestFrontendEventTypesMatchRegistry`）、控制器错误出口带码（`TestControllerErrorExitsCarryCode`）、**能力绑定粒度不得超出已实测范围**（`TestCapabilityScopeDeclaration`：未 `Tested` 的 runtime 不得声明比 `process` 更细的 `CapabilityScope`，否则平台可能把 A 会话的能力投给 B 会话）
 
 - 再加 **4 条前端侧边界守卫**（`frontend_boundary_test.go`，Go 读 TS 源码、不引前端测试框架）：`apps/web` 的产物包纪律（`dependencies` 空 / `exports` 只开产物 / `files` 排 map / 非 private）、`apps/desktop` 只消费 `apps/web` 的 dist 产物（不引其源码）、共享 UI 够不到 Electron 与 Node API（不引 `electron`/`node:*`/`@ark-mate/desktop`、不嗅探 `window.electron`）、`packages/*` 不反向相对引入 `apps/*`（界面搬进 `packages/console` 后，这条就是"搬迁方向"的守卫）；扫描根由 `uiSrcRoots()` 单点给出（`apps/web/src` + `packages/console/src` + `packages/ui/src`）——搬迁前六个守卫各自写死 `apps/web/src`，搬完会**静默空转**（目录还在、只剩入口，"目录不存在即 fatal"不触发）

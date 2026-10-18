@@ -1,6 +1,7 @@
 package sessionruntime
 
 import (
+	"github.com/morehao/ark-mate/internal/model"
 	"context"
 	"os"
 	"path/filepath"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -187,7 +187,7 @@ func TestRuntimeDiagnosticsRemediation(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
 	svc.EnableStore(st)
-	if created, err := st.CreateModelDefinition(ctx, store.ModelColumns{
+	if created, err := st.CreateModelDefinition(ctx, model.ModelColumns{
 		ID: "mdl_gone", ProviderID: "gone", Model: "m-gone", InputModalities: "text",
 	}, "t"); err != nil || !created {
 		t.Fatalf("造默认模型行: created=%v err=%v", created, err)

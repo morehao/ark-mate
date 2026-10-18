@@ -16,6 +16,9 @@ package sessionruntime
 // （`import cycle not allowed in test`）。详见 internal/testutil 的包注释。
 
 import (
+	svcsystem "github.com/morehao/ark-mate/internal/service/svcsystem"
+	svcsession "github.com/morehao/ark-mate/internal/service/svcsession"
+	dmodel "github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 
@@ -310,7 +313,7 @@ func (r *genRig) seedModelRow(t *testing.T, providerID, model string, isDefault 
 	t.Helper()
 	ctx := context.Background()
 	id := objid.New(objid.Model)
-	ok, err := r.svc.planes.Resources.Store().CreateModelDefinition(ctx, store.ModelColumns{
+	ok, err := r.svc.planes.Resources.Store().CreateModelDefinition(ctx, dmodel.ModelColumns{
 		ID: id, ProviderID: providerID, Model: model, InputModalities: resource.ModalityText,
 	}, definition.DefinitionWriteActor)
 	if err != nil || !ok {
@@ -334,4 +337,19 @@ func setBusy(as *session.ActiveSession, busy bool) {
 		return
 	}
 	as.FinishRun()
+}
+
+// 端口转换（v3.1 P4）：typed-nil 装进接口**不是 nil**。装配根与测试用同一条规矩。
+func storeAsEventReader(st *store.Store) svcsession.EventReader {
+	if st == nil {
+		return nil
+	}
+	return st
+}
+
+func storeAsSourceFacts(st *store.Store) svcsystem.SourceFactsReader {
+	if st == nil {
+		return nil
+	}
+	return st
 }

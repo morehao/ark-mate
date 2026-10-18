@@ -27,10 +27,10 @@ import (
 //   - 某个包映射不到任何层 → 失败；
 //   - 例外清单里出现**新增**边 → 失败；例外降到 0 时条目必须删除（双向判据）。
 //
-// P0–P5 期间 `v31LayerGuardBlocking = false`（只报告，不失败）；P6 收尾时改为 true。
+// P0–P5 期间曾为 false（只报告，不失败）；**P6 起为 true**——层表判据从此是真的判据。
 
 // v31LayerGuardBlocking 是否把违规判红。P6 起为 true。
-const v31LayerGuardBlocking = false
+const v31LayerGuardBlocking = true
 
 // v31Layer 是层表的一行。
 type v31Layer struct {
