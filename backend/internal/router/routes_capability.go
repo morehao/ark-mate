@@ -19,6 +19,10 @@ func registerCapability(v1 *gin.RouterGroup, ports Ports) {
 	// POST 已存在 → skill_exists(40901)；PUT 只改 body 里出现的键（未出现的保留原值，null 删键）；
 	// DELETE 幂等（不存在 → deleted:false）。三者都走注册闸门，坏定义 → definition_invalid(40001) 且零字节落盘。
 	v1.POST("/skills", ctr.CreateSkill)
+	// D1 技能包导入：multipart（`file=<zip>`）。与 POST /skills 走**同一条写面**——
+	// 解析失败 → 40001 且零字节落盘；同名 id → 40901；正文 critical → 40001。
+	// 静态路径：POST 树里 /skills 下没有 `:id` 子路由，不存在与参数路由争抢的问题。
+	v1.POST("/skills/import", ctr.ImportSkill)
 	v1.PUT("/skills/:id", ctr.UpdateSkill)
 	v1.DELETE("/skills/:id", ctr.DeleteSkill)
 	// §13.4 S4：启停（overlay：写回定义文件的 enabled + 立刻重校物化，禁用即撤回已物化副本）。

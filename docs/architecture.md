@@ -193,7 +193,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 | --- | --- |
 | 会话 | `/sessions` · `/sessions/:id` · `…/prompt` · `…/cancel` · `…/history` · `…/runs` · `…/inputs`（排队输入的当前态与撤下）· `/sessions/export` · `/sessions/search` |
 | 交互决策 | `…/permission` · `…/permissions/memories` · `…/elicitation` |
-| 能力 | `/capabilities` · `/skills` · `/skills/:id/materialization` · `/mcps` · `/mcps/:id/probe` · `/mcps/:id/tools/:tool/call` · `/tools` |
+| 能力 | `/capabilities` · `/skills` · `/skills/import`（技能包 `.zip` 导入）· `/skills/:id/materialization` · `/mcps` · `/mcps/:id/probe` · `/mcps/:id/tools/:tool/call` · `/tools` |
 | 资源 | `/providers` · `/providers/:id/probe` · `/models` · `/models/catalog` · `/models/sync` |
 | 空间 | `/workspaces` · `…/browse` · `…/pick-directory` · `/settings/workspace` |
 | 任务与运维 | `/automations` · `…/preview` · `…/runs` · `/usage/summary` · `/search/messages` · `/library` · `/runtime/diagnostics` · `/meta` · `/health` |

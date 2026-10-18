@@ -5,8 +5,11 @@
 package ctrcapability
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
@@ -24,6 +27,7 @@ type CapabilityCtr interface {
 	CreateSkill(c *gin.Context)
 	UpdateSkill(c *gin.Context)
 	DeleteSkill(c *gin.Context)
+	ImportSkill(c *gin.Context)
 	SetSkillEnabled(c *gin.Context)
 	SkillMaterialization(c *gin.Context)
 	ListMcpServers(c *gin.Context)
@@ -123,6 +127,59 @@ func (h *capabilityCtr) UpdateSkill(c *gin.Context) {
 // DeleteSkill 删除一个 skill 定义并撤回已物化副本（幂等：不存在 → `deleted:false` 且 code=0）。
 func (h *capabilityCtr) DeleteSkill(c *gin.Context) {
 	resp, err := h.skills.DeleteSkill(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// maxSkillImportBody multipart 信封的上限：20 MiB 包 + 1 MiB 头部/边界余量。
+const maxSkillImportBody = skill.MaxPackageBytes + (1 << 20)
+
+// ImportSkill 导入一个技能包（`POST /skills/import`，multipart/form-data，字段 `file`）。
+//
+// 控制器只做传输层的事：限制请求体大小、读 multipart、把字节交给域平面。解析（front matter、
+// id 规范化、zip slip/条目数/压缩比）、写闸门与错误码都在 `domain/skill` 里——上传与手填
+// 必须经过**同一条**写面，否则两者对同一份内容会有两种结论。
+func (h *capabilityCtr) ImportSkill(c *gin.Context) {
+	// 先按请求体上限兜一层：否则一个超大包会先被 gin 读进内存（MaxMultipartMemory 只管内存阈值，
+	// 超出的部分会落临时文件），而这里的语义是"超过 20 MiB 直接拒绝"。
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSkillImportBody)
+
+	header, err := c.FormFile("file")
+	if err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam,
+			"缺少 file 字段（multipart/form-data，file=<技能包.zip>）："+err.Error()))
+		return
+	}
+	if !strings.HasSuffix(strings.ToLower(header.Filename), ".zip") {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "只接受 .zip 技能包："+header.Filename))
+		return
+	}
+	if header.Size > skill.MaxPackageBytes {
+		gincontext.Fail(c, code.Error(code.InvalidParam,
+			"技能包超过 20 MiB 上限："+header.Filename))
+		return
+	}
+	f, err := header.Open()
+	if err != nil {
+		gincontext.Fail(c, code.Error(code.Internal, "读取上传文件失败："+err.Error()))
+		return
+	}
+	defer f.Close()
+	// 再按字节数兜一层：`header.Size` 来自 multipart 头，不能当成唯一判据。
+	data, err := io.ReadAll(io.LimitReader(f, skill.MaxPackageBytes+1))
+	if err != nil {
+		gincontext.Fail(c, code.Error(code.Internal, "读取上传文件失败："+err.Error()))
+		return
+	}
+	if len(data) > skill.MaxPackageBytes {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "技能包超过 20 MiB 上限"))
+		return
+	}
+
+	resp, err := h.skills.ImportPackage(c.Request.Context(), bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
