@@ -4,6 +4,18 @@
 > 守卫全部在 `backend/internal/archtest/`；运行 `cd backend && go test ./internal/archtest/`。
 > 每条守卫**为什么存在、挡的是什么静默失效、反证怎么跑**，见 [`guards-history.md`](guards-history.md)。
 
+## 判据分类（v3.1 P0 盘点）
+
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，新增的是层表与契约基线）：
+
+| 类别 | 挡什么 | 典型 | v3.1 处置 |
+| --- | --- | --- | --- |
+| **结构/边界类** | 依赖方向、包归属、装配边 | `layers_v31_test.go`、`svc_layer_consumer_test.go`、`automation_ownership_test.go` | 名字扫描（"某包不得 import 某包"）收敛为**一张层表**；其余改写扫描根，判据不变 |
+| **语义/产品契约类** | 词汇、错误码、事件 type、契约快照、交付矩阵 | `agent_vocabulary_v19_test.go`、`event_type_contract`、`delivery_matrix_test.go`、`internal/app/contract_baseline_test.go` | **不删，只改扫描根**（语义守卫是产品事实，与目录结构无关） |
+| **路径耦合类** | 判据锚在具体文件/构造签名上 | `svcmodel_usecase_test.go`、`isolation_parity_test.go`、`runtime_pin_test.go` | 锚点随实现搬家同步；新增 `TestLayerTableCoversAllPackagesV31` 让"没登记的包"当场红 |
+
+判据纪律：**fail-closed**（扫不到对象就失败，不许静默空转）、**双向**（例外清零要删登记）、**反证**（新增守卫必须实跑一次反例）。
+
 ## 当前判据清单
 
 - **层表守卫（v3.1 §3.2）**：`layers_v31_test.go` 用一张**层号表**（`internal/archtest/layers_v31_test.go` 的 `v31Layers`：object/version → model/eventbus/infra → code/credential → runtime → infra/dsh → config → dto/dao → store → mechanism → domain → runtimeconn/registry/service/sessionruntime → middleware/gateway → controller → router → assembly → app → cliops → cli）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向下 import（层号不得增大）；② 同层默认不互链，除非该层显式 `sameLayer: true`（如 `runtimeconn`/`registry`/`service` 的同族协作）；③ 每层可带 `deny` 精确排除个别下层包（如 `service` 不得 import `store`/`dao`/`registry`）。违规是**硬失败**（`v31LayerGuardBlocking = true`），例外清单 `v31Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。同文件另有三条专项：`runtime` 不得 import adapter、只有 `assembly`（生产代码）可以 import `internal/infra/dsh`、adapter 不得 import 应用内核。
