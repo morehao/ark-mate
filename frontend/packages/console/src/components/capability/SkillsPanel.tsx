@@ -1,80 +1,117 @@
-import { Alert, Button, Modal, Space, Spin, Switch, Tag, Tooltip } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
+import { useEffect, useMemo, useState } from 'react'
+import { Button, Input, Popconfirm, Space, Switch, Tag, Tooltip } from 'antd'
+import { SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
+import type { Skill } from '@ark-mate/types'
+import { skillStatusView, skillWarningsView } from '../../console/capabilityView'
+import { AddCapabilityMenu, type CapabilityAddAction } from './AddCapabilityMenu'
+import { SkillChatCreateModal } from './SkillChatCreateModal'
+import { SkillDetailModal } from './SkillDetailModal'
+import { SkillEditorModal } from './SkillEditorModal'
+import { SkillUploadModal } from './SkillUploadModal'
 import {
-  materializationMeta,
-  materializationNeedsAttention,
-  materializationSummary,
-  skillWarningsView,
-} from '../../console/capabilityView'
-import { mono, smallTag, SectionHeader, SectionEmpty, Row, Card, SkillRuntimeTags, CapabilityEditorModal } from './shared'
+  CapabilityEmpty,
+  CapabilityEditorModal,
+  CapabilityRow,
+  SectionHeader,
+  SkillRuntimeTags,
+  StatusTag,
+  smallTag,
+} from './shared'
 import { useCapabilityData } from './useCapabilityData'
 
-/** skill 定义：正文、投放对象（runtimes / scope）、启用与物化体检——定义来自 ~/.ark-mate/capabilities/skills。 */
+/** 技能页：管理 skill 定义、投放对象与启用状态；添加 = 通过对话创建 / 上传技能。 */
 export function SkillsPanel() {
-  const {
-    skills,
-    edit,
-    setEdit,
-    editBusy,
-    editErr,
-    busy,
-    toggleBusy,
-    matTarget,
-    setMatTarget,
-    mat,
-    matBusy,
-    matErr,
-    loadAll,
-    refresh,
-    openCreate,
-    openEditSkill,
-    submitEdit,
-    doToggleSkill,
-    openMaterialization,
-    materializationButton,
-    writeButtons,
-  } = useCapabilityData('skills')
+  const d = useCapabilityData('skills')
+  const [query, setQuery] = useState('')
+  // 弹窗里关掉「详情 → 编辑」时，详情应保持关闭（一次只留一个主弹窗）。
+  useEffect(() => {
+    if (d.detail && !d.skills.some((s) => s.id === d.detail!.id)) d.closeDetail()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d.detail, d.skills])
+
+  const visible = useMemo(() => filterSkills(d.skills, query), [d.skills, query])
+  const detailSkill = d.detail?.kind === 'skill' ? (d.skills.find((s) => s.id === d.detail!.id) ?? null) : null
+
+  const onAdd = (action: CapabilityAddAction): void => {
+    if (action === 'skill-chat') d.setChatOpen(true)
+    if (action === 'skill-upload') d.setUploadOpen(true)
+  }
 
   return (
     <PageContainer
       title="技能"
-      description="skill 定义：正文、投放对象（runtimes / scope）、启用与物化体检——定义来自 ~/.ark-mate/capabilities/skills"
+      description="管理 skill 定义、投放对象与启用状态；启用即按 runtimes 投放，禁用只撤回副本。"
       extra={
-        <Space>
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadAll()}>
-            刷新
-          </Button>
+        <Space size={8}>
+          <Input
+            size="small"
+            allowClear
+            prefix={<SearchOutlined style={{ color: tokens.textPlaceholder }} />}
+            style={{ width: 210 }}
+            placeholder="搜索 skill"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <AddCapabilityMenu kind="skill" onPick={onAdd} />
         </Space>
       }
     >
-      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {/* ——— 全局：Skills ——— */}
-        <Card>
-          <SectionHeader
-            title="Skills"
-            hint="目录条目（平台唯一事实源，`~/.ark-mate/capabilities/skills/*.json`）：启用即按其 runtimes 投放（落点与格式由底座投影声明决定）、禁用即撤回副本（定义与正文保留）；「体检」看物化摘要是否被改动，并如实标注未实测/未配置的投影。新建/编辑走同一条闸门：正文扫描不过 → 40001 且**零字节落盘**"
-            count={skills.length}
-            loading={busy === 'skills'}
-            onRefresh={() => refresh('skills')}
-            extra={
-              <Button size="small" onClick={() => openCreate('skill')}>
-                新建 skill
-              </Button>
+      <SectionHeader
+        title="Skills"
+        hint="启用会写盘并投放；禁用会撤回已投放副本，定义与正文保留。目录条目是平台唯一事实源。"
+        count={visible.length}
+        loading={d.busy === 'skills'}
+        onRefresh={() => d.refresh('skills')}
+      />
+      <div style={{ maxHeight: 560, overflowY: 'auto' }}>
+        {visible.length === 0 ? (
+          <CapabilityEmpty
+            text={
+              d.skills.length === 0
+                ? '暂无 skill。新建一个后，它会出现在这里。'
+                : `没有找到匹配「${query}」的 skill。`
+            }
+            action={
+              d.skills.length === 0 ? (
+                <AddCapabilityMenu kind="skill" onPick={onAdd} label="添加技能" type="primary" />
+              ) : undefined
             }
           />
-          <div style={{ maxHeight: 340, overflowY: 'auto' }}>
-            {skills.length === 0 ? (
-              <SectionEmpty text="暂无 skill（~/.ark-mate/capabilities/skills/*.json）" />
-            ) : (
-              skills.map((s) => {
-                const warn = skillWarningsView(s.warnings)
-                const enabled = s.enabled ?? true
-                return (
-                  <Row key={s.id}>
-                    <b style={{ fontSize: 13, fontWeight: 600, minWidth: 110 }}>{s.name}</b>
-                    <Tag style={{ marginInlineEnd: 0, fontSize: 11 }}>{s.id}</Tag>
-                    {/* §13.2 S1：装载期正文扫描的非 critical 告警（critical 已拒载，不会出现在这里） */}
+        ) : (
+          visible.map((s) => {
+            const warn = skillWarningsView(s.warnings)
+            const health = skillStatusView(s)
+            const enabled = s.enabled ?? true
+            return (
+              <CapabilityRow
+                key={s.id}
+                title={
+                  <>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => d.openDetail('skill', s.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          d.openDetail('skill', s.id)
+                        }
+                      }}
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: tokens.text,
+                        cursor: 'pointer',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        minWidth: 0,
+                      }}
+                    >
+                      {s.name || s.id}
+                    </span>
+                    <span style={{ fontFamily: tokens.fontMono, fontSize: 10, color: tokens.textPlaceholder }}>{s.id}</span>
                     {warn && (
                       <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{warn.hint}</span>}>
                         <Tag color={warn.color} style={smallTag}>
@@ -82,123 +119,92 @@ export function SkillsPanel() {
                         </Tag>
                       </Tooltip>
                     )}
-                    <span style={{ flex: 1, fontSize: 12, color: tokens.textSecondary }}>{s.description}</span>
+                  </>
+                }
+                description={s.description || '（无描述）'}
+                meta={
+                  <>
                     <SkillRuntimeTags runtimes={s.runtimes} scope={s.scope} />
-                    {writeButtons('skill', s.id, s.name || s.id, () => openEditSkill(s))}
-                    {materializationButton(s)}
+                    <StatusTag label={health.label} tone={health.tone} hint={health.hint} />
+                  </>
+                }
+                actions={
+                  <>
+                    <Button size="small" onClick={() => d.openDetail('skill', s.id, 'health')}>
+                      体检
+                    </Button>
+                    <Button size="small" onClick={() => d.openSkillForm(s)}>
+                      编辑
+                    </Button>
+                    <Popconfirm
+                      title={`删除 ${s.name || s.id}？`}
+                      description="定义文件会被删除，已投放的副本会被撤回。此操作不可撤销（正文可先复制走）。"
+                      okText="删除"
+                      okButtonProps={{ danger: true }}
+                      cancelText="取消"
+                      onConfirm={() => void d.doDelete('skill', s.id)}
+                    >
+                      <Button size="small" danger loading={d.delBusy === s.id}>
+                        删除
+                      </Button>
+                    </Popconfirm>
                     <Tooltip title={enabled ? '禁用：撤回已投放副本（定义与正文保留，可恢复）' : '启用：按其 runtimes 重新投放'}>
                       <Switch
                         size="small"
                         checked={enabled}
-                        loading={toggleBusy === s.id}
-                        onChange={(next) => void doToggleSkill(s, next)}
+                        loading={d.toggleBusy === s.id}
+                        onChange={(next) => void d.doToggleSkill(s, next)}
                       />
                     </Tooltip>
-                  </Row>
-                )
-              })
-            )}
-          </div>
-        </Card>
-        {/* ——— §13.4 S2：skill 物化体检（只读；修复走启停/重校，不在这里动手） ——— */}
-        <Modal
-          title={matTarget ? `物化体检 · ${matTarget.name}` : '物化体检'}
-          open={matTarget !== null}
-          onCancel={() => setMatTarget(null)}
-          footer={null}
-          width={780}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <span style={{ flex: 1, fontSize: 12.5, color: tokens.textSecondary }}>
-              {mat ? materializationSummary(mat) : matBusy ? '正在体检…' : ''}
-            </span>
-            {mat && (
-              <Tag color={mat.enabled ? 'green' : 'default'} style={smallTag}>
-                {mat.enabled ? '已启用' : '已禁用'}
-              </Tag>
-            )}
-            <Button
-              size="small"
-              icon={<ReloadOutlined />}
-              loading={matBusy}
-              disabled={!matTarget}
-              onClick={() => matTarget && void openMaterialization(matTarget.id, matTarget.name)}
-            >
-              再体检
-            </Button>
-          </div>
-          {matErr ? (
-            <Alert type="error" showIcon message="体检失败" description={matErr} />
-          ) : !mat ? (
-            <div style={{ padding: 24, textAlign: 'center' }}>
-              <Spin />
-            </div>
-          ) : (
-            <>
-              <Alert
-                type="info"
-                showIcon
-                style={{ fontSize: 12, marginBottom: 10 }}
-                message="体检只报不修"
-                description="修复不走这里：启用/禁用 skill 会立刻重校（按平台版本覆盖回正确内容）；用户自有目录（无归属标记）平台不覆盖，需要手工处理。"
+                  </>
+                }
               />
-              {mat.states.length === 0 ? (
-                <SectionEmpty text={materializationSummary(mat)} />
-              ) : (
-                mat.states.map((st, i) => {
-                  const meta = materializationMeta(st.status)
-                  const attention = materializationNeedsAttention(st)
-                  return (
-                    <div
-                      key={`${st.root}-${st.runtime ?? ''}-${i}`}
-                      style={{
-                        border: `1px solid ${attention ? tokens.borderStrong : tokens.border}`,
-                        borderRadius: 8,
-                        padding: '10px 12px',
-                        marginBottom: 8,
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <Tooltip title={meta.hint}>
-                          <Tag color={meta.color} style={smallTag}>
-                            {meta.label}
-                          </Tag>
-                        </Tooltip>
-                        <Tag style={smallTag}>{st.runtime || '单根'}</Tag>
-                        <span style={{ ...mono, flex: 1, fontSize: 11.5 }}>{st.dir}</span>
-                      </div>
-                      <div style={{ fontSize: 11.5, color: tokens.textSecondary, marginTop: 6 }}>{meta.hint}</div>
-                      {st.hash && (
-                        <div style={{ ...mono, fontSize: 11, color: tokens.textPlaceholder, marginTop: 4 }}>
-                          期望 {st.hash.slice(0, 16)}…
-                          {attention && st.actual_hash ? ` / 实测 ${st.actual_hash.slice(0, 16)}…` : ''}
-                        </div>
-                      )}
-                      <div style={{ fontSize: 11, color: tokens.textPlaceholder, marginTop: 4 }}>
-                        {st.owners && st.owners.length > 0 ? `归属：${st.owners.join('、')}` : '归属：未登记'}
-                        {st.written_at ? ` · 写入 ${st.written_at}` : ''}
-                      </div>
-                      {st.detail && (
-                        <div style={{ fontSize: 11.5, color: tokens.textSecondary, marginTop: 4 }}>{st.detail}</div>
-                      )}
-                    </div>
-                  )
-                })
-              )}
-              {mat.notes && mat.notes.length > 0 && (
-                <Alert type="warning" showIcon style={{ fontSize: 12, marginTop: 8 }} message={mat.notes.join('；')} />
-              )}
-            </>
-          )}
-        </Modal>
-      <CapabilityEditorModal
-        edit={edit}
-        setEdit={setEdit}
-        submitEdit={submitEdit}
-        editBusy={editBusy}
-        editErr={editErr}
-      />
+            )
+          })
+        )}
       </div>
+
+      <SkillDetailModal
+        skill={detailSkill}
+        open={detailSkill !== null}
+        tab={d.detail?.tab ?? 'overview'}
+        onTabChange={d.setDetailTab}
+        onClose={d.closeDetail}
+        onEdit={() => {
+          if (!detailSkill) return
+          d.closeDetail()
+          d.openSkillForm(detailSkill)
+        }}
+      />
+      <SkillEditorModal
+        open={d.skillForm !== null}
+        skill={d.skillForm?.skill ?? null}
+        busy={d.formBusy}
+        error={d.formErr}
+        onCancel={d.closeSkillForm}
+        onSubmit={d.submitSkillForm}
+        onAdvanced={d.openSkillAdvanced}
+      />
+      <SkillChatCreateModal open={d.chatOpen} onClose={() => d.setChatOpen(false)} />
+      <SkillUploadModal open={d.uploadOpen} onClose={() => d.setUploadOpen(false)} onUpload={d.doImportSkillPackage} />
+      <CapabilityEditorModal
+        edit={d.edit}
+        setEdit={d.setEdit}
+        submitEdit={d.submitEdit}
+        editBusy={d.editBusy}
+        editErr={d.editErr}
+      />
     </PageContainer>
+  )
+}
+
+function filterSkills(skills: Skill[], query: string) {
+  const q = query.trim().toLowerCase()
+  if (!q) return skills
+  return skills.filter((s) =>
+    [s.name, s.id, s.description, ...(s.runtimes ?? []), s.scope ?? '']
+      .join(' ')
+      .toLowerCase()
+      .includes(q),
   )
 }

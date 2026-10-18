@@ -505,6 +505,13 @@ export interface MateState {
    * 再打开面板会被旧值顶掉。
    */
   preferredWorkspaceId: string | null
+  /**
+   * 一次性提示词（D2）：扩展 · 技能页「通过对话创建」把提示词交给新建会话面板。
+   *
+   * 与 `preferredWorkspaceId` 同一类桥：跨页面的**一次性意图**，不落盘、消费即清空。
+   * 读了不清会让用户下一次打开新建面板时被上一轮的提示词顶掉输入。
+   */
+  pendingPrompt: string | null
   /** A6 单操作员令牌是否已配置（true = 后端启用鉴权且本机已填令牌）。 */
   token: string
   /** 令牌设置弹窗开关（顶栏锁图标 / 收到 401 时自动打开）。 */
@@ -570,6 +577,10 @@ export interface MateActions {
   jumpToAnchor: (id: string, seq: number) => void
   /** 清除跳转锚点（ChatPage 定位完成后调用）。 */
   clearAnchor: () => void
+  /** 写入一次性提示词（技能页「去对话创建」；由新建面板消费并清空）。 */
+  setPendingPrompt: (text: string) => void
+  /** 取走并清空一次性提示词（没有则返回 null）。 */
+  consumePendingPrompt: () => string | null
   /**
    * 新建会话并起首轮。
    *
@@ -642,6 +653,7 @@ export const initialState: MateState = {
   activeId: null,
   anchorSeq: null,
   preferredWorkspaceId: null,
+  pendingPrompt: null,
   wsState: 'idle',
   carrierError: null,
   toast: null,
@@ -719,6 +731,12 @@ export const useMate = create<MateStore>((set, get) => {
       if (cur && cur.id === id) set({ toast: null })
     },
     showToast,
+    setPendingPrompt: (text) => set({ pendingPrompt: text }),
+    consumePendingPrompt: () => {
+      const cur = get().pendingPrompt
+      if (cur !== null) set({ pendingPrompt: null })
+      return cur
+    },
 
     // C2：向服务端翻页加载更早的事件（before 游标）。
     // 游标 = 当前视图最小已知位次（空视图回落到"服务端水位 + 1" = 最新那一页，见 olderCursor）；
