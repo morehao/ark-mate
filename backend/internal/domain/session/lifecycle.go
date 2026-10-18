@@ -94,6 +94,10 @@ type LifecycleDeps struct {
 	Acquire func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acl.Client, error)
 	// ResolveModel 平台模型行 id → (行 id, 运行时值)。
 	ResolveModel func(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)
+	// ProviderKeyReady 该供应商当前是否有可用密钥（false + 原因）。nil = 不做这项前置。
+	//
+	// 只对声明了 ModelCatalogNeedsCredential 的 runtime 生效（见 applyModel）。
+	ProviderKeyReady func(ctx context.Context, providerID string) (bool, string)
 	// McpServers 该会话该下发的 MCP 条目（注册表 + 传输能力 + 选定过滤后的结果）。
 	McpServers func(runtimeID string, sel *CapabilitySelection) []acl.McpServer
 	// Catalog 模型目录缓存。
@@ -112,14 +116,15 @@ type Lifecycle struct {
 	handles  *Handles
 	registry *runtime.Registry
 
-	selectedSpec func() (runtime.Spec, error)
-	acquire      func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acl.Client, error)
-	resolveModel func(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)
-	mcpServers   func(runtimeID string, sel *CapabilitySelection) []acl.McpServer
-	catalog      ConfigCatalog
-	diagnostics  DiagnosticsSink
-	setState     func(state string)
-	applyReason  func(err error) string
+	selectedSpec     func() (runtime.Spec, error)
+	acquire          func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acl.Client, error)
+	resolveModel     func(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)
+	providerKeyReady func(ctx context.Context, providerID string) (bool, string)
+	mcpServers       func(runtimeID string, sel *CapabilitySelection) []acl.McpServer
+	catalog          ConfigCatalog
+	diagnostics      DiagnosticsSink
+	setState         func(state string)
+	applyReason      func(err error) string
 
 	handoffMaxChars int
 }
@@ -129,7 +134,8 @@ func NewLifecycle(d LifecycleDeps) *Lifecycle {
 	return &Lifecycle{
 		plane: d.Plane, handles: d.Handles, registry: d.Registry,
 		selectedSpec: d.SelectedSpec, acquire: d.Acquire, resolveModel: d.ResolveModel,
-		mcpServers: d.McpServers, catalog: d.Catalog, diagnostics: d.Diagnostics,
+		providerKeyReady: d.ProviderKeyReady,
+		mcpServers:       d.McpServers, catalog: d.Catalog, diagnostics: d.Diagnostics,
 		setState: d.SetRuntimeState, applyReason: d.ApplyReason,
 		handoffMaxChars: DefaultHandoffMaxChars,
 	}
@@ -441,8 +447,9 @@ func (l *Lifecycle) Attach(as *ActiveSession, reason string) {
 		old.MarkDead(false)
 		if c, ok := old.Native().(*acl.Session); ok && c != nil {
 			// 关会话是收尾动作：用**脱离请求**的 ctx（本轮 ctx 可能已取消）并带上限等待，
-			// 免得底座吞掉 session/close 时把这一轮拖住。
-			cctx, cancel := context.WithTimeout(context.Background(), AgentCancelTimeout)
+			// 免得底座吞掉 session/close 时把这一轮拖住。0.2.1 起 close 要 drain 后代并
+			// flush，窗口用 AgentSettleTimeout（3s 的「发通知」上限不够）。
+			cctx, cancel := context.WithTimeout(context.Background(), AgentSettleTimeout)
 			_ = c.Close(cctx)
 			cancel()
 		}
@@ -494,6 +501,15 @@ func (l *Lifecycle) applyModel(ctx context.Context, as *ActiveSession, spec runt
 	}
 	if model.Model == "" {
 		return nil // 未指定模型：不下发任何设置（跟随运行时默认）
+	}
+	// 按凭据过滤目录的底座：缺密钥时它的模型根本不在广告列表里，直接下发只会得到一条
+	// 「invalidParams」——用户看不出是缺密钥。平台侧先判一次，给出可执行的出路。
+	if spec.ModelCatalogNeedsCredential && model.Provider != "" && l.providerKeyReady != nil {
+		if ok, reason := l.providerKeyReady(ctx, model.Provider); !ok {
+			return acl.NewError(acl.ClassRequest, "model_credential_missing",
+				"[model_credential_missing] 所选模型挂靠的供应商 "+model.Provider+" 没有可用密钥（"+reason+
+					"）：该底座不会把它的模型列进会话配置；先到「设置 · 模型」补一条密钥（或把环境变量设好）", nil)
+		}
 	}
 	// 不预判、但留痕：取值不在会话当前广告列表里（缓存滞后/跨会话选择）时记一条，仍然下发由
 	// 运行时裁决——协议保证运行时只接受已广告的值，平台侧预判会因快照滞后造成假阴性。

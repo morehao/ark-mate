@@ -14,9 +14,19 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// AgentCancelTimeout session/cancel RPC 的上限等待：底座无响应（如模型限流重试挂起）时
-// 不阻塞本地解除，Prompt 的 ctx 取消总是会立刻返回。
-const AgentCancelTimeout = 3 * time.Second
+const (
+	// AgentCancelSendTimeout session/cancel **通知发送**的上限等待：底座无响应（如模型限流
+	// 重试挂起）时，至少不要把「发通知」这一步拖住。
+	AgentCancelSendTimeout = 3 * time.Second
+	// AgentSettleTimeout 取消/关闭后等待底座**真正结算**的上限。
+	//
+	// 为什么需要它：dsh 0.2.1 起 `session/cancel` 会等当前根活动与已排队输出 drain 完才让
+	// `session/prompt` 返回（`packages/acp/acp/README.zh.md`）。若平台按旧口径「发完通知就
+	// 本地解除」，迟到的 `session/update` 会落进下一轮（ACP 没有 run id，界面无从分辨）。
+	// 这里给一个**有界**窗口：正常结算通常远小于它；超时才强制取消本地 Prompt（保留
+	// 「底座彻底无响应也要解除」的兜底），并留一条可读 WARN。
+	AgentSettleTimeout = 10 * time.Second
+)
 
 // ——— 会话轮次的**运行期状态机**（P4a 正文第五十五刀：从 `internal/manager` 搬入）———
 //
@@ -99,6 +109,8 @@ type Runner struct {
 
 	// runTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetRunTimeout / MATE_RUN_TIMEOUT）。
 	runTimeout time.Duration
+	// settleTimeout 取消后等待 prompt/close 真正结算的上限（见 AgentSettleTimeout）。
+	settleTimeout time.Duration
 
 	// usageMu/usage 保护「每平台会话最近一次 ACP 用量快照」（M3 用量统计：run 收口时
 	// 随 runs.usage_json 落库；底座不上报时无条目）。
@@ -112,12 +124,21 @@ func NewRunner(d RunnerDeps) *Runner {
 		plane: d.Plane, handles: d.Handles, acquire: d.Acquire, busy: d.Busy,
 		diagnostics: d.Diagnostics, catalog: d.Catalog, toolMemory: d.ToolMemory,
 		toolFailed: d.ToolFailures, interacts: d.Interactions,
-		usage: make(map[string]objusage.UsageInfo),
+		usage:         make(map[string]objusage.UsageInfo),
+		settleTimeout: AgentSettleTimeout,
 	}
 }
 
 // SetRunTimeout 设置单轮 run 看门狗超时（0 = 关闭）。
 func (r *Runner) SetRunTimeout(d time.Duration) { r.runTimeout = d }
+
+// SetSettleTimeout 覆盖取消后的结算等待窗口（0 = 用默认值；测试用它把窗口压到毫秒级）。
+func (r *Runner) SetSettleTimeout(d time.Duration) {
+	if d <= 0 {
+		d = AgentSettleTimeout
+	}
+	r.settleTimeout = d
+}
 
 // Prompt 向会话追加一轮 prompt（异步；事件经 bus/WS 出流）。
 // 返回 user_message 事件后的 bus 水位（客户端 attach 续传用）。会话正忙时返回 run_in_progress。
@@ -356,9 +377,8 @@ func (r *Runner) CancelRun(ctx context.Context, sessionID string) error {
 	// 这里直接用 `t.id` 而不是重查：`as.run` 随时可能被 executeRun 收尾清空，
 	// 重查一次会拿到空 id，于是这条状态挂到一个「不存在的轮」上。
 	r.plane.PublishRunStatus(sessionID, t.id, RunStatusCancelling, RunStatusOpts{})
-	// agent 侧取消（session/cancel）有界执行：runtime 无响应时不阻塞本地解除。
-	// 无论 RPC 是否送达，随后都 t.cancel() 让 Prompt 返回（executeRun 收尾不依赖 RPC）。
-	cctx, ccancel := context.WithTimeout(context.WithoutCancel(ctx), AgentCancelTimeout)
+	// agent 侧取消（session/cancel）有界发送：runtime 无响应时不阻塞「发通知」这一步。
+	cctx, ccancel := context.WithTimeout(context.WithoutCancel(ctx), AgentCancelSendTimeout)
 	defer ccancel()
 	done := make(chan struct{})
 	go func() {
@@ -370,14 +390,37 @@ func (r *Runner) CancelRun(ctx context.Context, sessionID string) error {
 	select {
 	case <-done:
 	case <-cctx.Done():
-		glog.Debugw(ctx, "session/cancel RPC 未在限期内响应，本地强制解除",
-			"session", sessionID, "timeout", AgentCancelTimeout.String())
+		glog.Debugw(ctx, "session/cancel RPC 未在限期内响应（继续等结算窗口）",
+			"session", sessionID, "timeout", AgentCancelSendTimeout.String())
 	}
-	t.Cancel() // 解除 SDK 阻塞
+	// **不立刻 t.Cancel()**：0.2.1 的 prompt 要等 drain 完才返回；提前本地解除会把迟到
+	// update 甩到下一轮。改为有界等待（见 awaitSettle），超时才强制解除。
+	go r.awaitSettle(sessionID, t)
 	if r.interacts != nil {
 		r.interacts.CancelSession(sessionID) // 按 ACP 规范回 Cancelled 全部挂起权限/提问
 	}
 	return nil
+}
+
+// awaitSettle 等一轮在取消后**真正收尾**；窗口外仍未结束才强制取消本地 Prompt。
+//
+// 它只动 `t`（本轮自己的 ctx/done），不碰会话表：收尾的唯一写者仍是 executeRun。
+func (r *Runner) awaitSettle(sessionID string, t *Run) {
+	timer := time.NewTimer(r.settleTimeout)
+	defer timer.Stop()
+	select {
+	case <-t.done:
+		return
+	case <-timer.C:
+	}
+	select {
+	case <-t.done:
+		return
+	default:
+	}
+	glog.Warnw(context.Background(), "取消后底座未在结算窗口内收尾，本地强制解除",
+		"session", sessionID, "timeout", r.settleTimeout.String())
+	t.Cancel()
 }
 
 // WaitRun 阻塞至当前 run 结束（demo/同步路径用）；无 run 立即返回。

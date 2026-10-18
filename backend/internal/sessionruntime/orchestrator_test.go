@@ -160,6 +160,64 @@ func TestCancelRun(t *testing.T) {
 	}
 }
 
+// gatedPromptSession 的 Prompt 一直等到 release（模拟 0.2.1 的「取消后仍要 drain 才返回」）。
+type gatedPromptSession struct {
+	stubSession
+	started  chan struct{}
+	release  chan struct{}
+	returned chan struct{}
+}
+
+func (s *gatedPromptSession) Prompt(ctx context.Context, _ string) (string, error) {
+	close(s.started)
+	defer close(s.returned)
+	select {
+	case <-s.release:
+		return "cancelled", nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// TestCancelWaitsForPromptSettlement 取消后**不立刻**清 busy：等 prompt 真正返回再收口。
+//
+// 0.2.1 的 session/cancel 会等根活动与已排队输出 drain 完才让 prompt 返回；旧口径「发完通知
+// 就 t.Cancel()」会把迟到 update 甩到下一轮（ACP 没有 run id）。这条钉住新的有界 settle：
+// 窗口内保持 in_progress，prompt 返回后才 run.cancelled。
+func TestCancelWaitsForPromptSettlement(t *testing.T) {
+	svc, orch, bus := newTestRig(t)
+	orch.SetSettleTimeout(500 * time.Millisecond)
+	gate := &gatedPromptSession{started: make(chan struct{}), release: make(chan struct{}), returned: make(chan struct{})}
+	as := session.NewActiveSession(session.HandleParams{ID: "s1", Runtime: "r", Session: gate})
+	orch.handles.Put(as)
+	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+
+	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	<-gate.started
+	if err := orch.CancelRun(context.Background(), "s1"); err != nil {
+		t.Fatalf("CancelRun: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-gate.returned:
+		t.Fatal("取消后 prompt 不应立刻返回（要等底座 drain）")
+	default:
+	}
+	if !svc.HostSessionRunning("s1") {
+		t.Fatal("prompt 尚未结算时应保持 in_progress")
+	}
+	close(gate.release)
+	evts := feed(bus, "s1", 3)
+	if len(evts) < 3 || evts[len(evts)-1].Type != session.BusRunCancelled {
+		t.Fatalf("结算后应收口为 run.cancelled，got %+v", evts)
+	}
+	if st, _ := svc.sessionPlane.Lookup("s1"); st.Status != session.SessionStatusCancelled {
+		t.Fatalf("状态应 cancelled，got %s", st.Status)
+	}
+}
+
 // TestServiceRESTErrors 会话动作错误映射为对外错误码：**参数不对是 40001、东西不在是 40401**。
 //
 // v19：建会话不再需要解析 agent（agent 面已撤销），但它**必须**落在一个工作空间里——没有 cwd
@@ -176,7 +234,7 @@ func TestServiceRESTErrors(t *testing.T) {
 	}
 }
 
-// stuckCancel 的 Cancel 仅在 ctx 到期（session.AgentCancelTimeout 兜底）时返回：
+// stuckCancel 的 Cancel 仅在 ctx 到期（session.AgentCancelSendTimeout 兜底）时返回：
 // 模拟 runtime 对 session/cancel 无响应（如模型限流重试挂起）。
 type stuckCancel struct {
 	*stubSession
@@ -205,8 +263,8 @@ func TestCancelRunAgentUnresponsive(t *testing.T) {
 	if err := orch.CancelRun(context.Background(), "s1"); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
-	if el := time.Since(start); el > session.AgentCancelTimeout+2*time.Second {
-		t.Fatalf("CancelRun 被无响应 agent 拖住: %v（session.AgentCancelTimeout=%v）", el, session.AgentCancelTimeout)
+	if el := time.Since(start); el > session.AgentCancelSendTimeout+2*time.Second {
+		t.Fatalf("CancelRun 被无响应 agent 拖住: %v（session.AgentCancelSendTimeout=%v）", el, session.AgentCancelSendTimeout)
 	}
 	evts := feed(bus, "s1", 3)
 	if len(evts) < 3 || evts[len(evts)-1].Type != session.BusRunCancelled {

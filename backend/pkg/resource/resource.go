@@ -295,9 +295,9 @@ type Syncer interface {
 // 密钥值由 `Set.Providers[i].APIKey` 进 adapter——因为「按底座的文档格式写进去」只有 adapter
 // 知道怎么做。平台不再替它注入 env，除非该底座没声明（或未实测）原生文档。
 //
-// **二选一语义（已实测，不是理论）**：NativeDoc 与 env 通道不得同时生效。dsh 的优先级实测是
-// 「继承环境 > 存储文档」——同时启用会让已存文档被陈旧的 env 永久遮蔽：用户轮换了密钥、
-// 文档也更新了，而生效的仍是旧值，且没有任何报错。所以编排层按 `Tested` 二选一。
+// **二选一语义（已实测，不是理论）**：NativeDoc 与 env 通道不得同时生效。dsh 0.2.1 的优先级是
+// 「存储文档 > 继承环境」（0.2.0 是 env 赢）——两条同时启用时总有一条是静默死值：用户轮换了
+// 一条、另一条还在，生效的仍是旧值，且没有任何报错。所以编排层按 `Tested` 二选一。
 //
 // **凭据引用名必须逐供应商**（`RefPattern` 而不是一个常量名）：见 `Provider.Ref` 的注释。
 type CredentialSpec struct {
@@ -310,12 +310,12 @@ type CredentialSpec struct {
 	// 为什么不用 `OPENAI_API_KEY` 这类"知名"名：① 逐供应商必须唯一（见上）；
 	// ② 实测 env 优先于文档，而知名名很容易出现在用户的 shell 里 → 静默遮蔽。
 	RefPattern string
-	// FallbackEnv 是否允许把同一名字当 env 通道用（dsh 实测后=false：它的原生文档优先于
-	// 继承环境，同时启用会让已存文档被陈旧 env 永久遮蔽。详见该 adapter 的 Credential 声明）。
+	// FallbackEnv 是否允许把同一名字当 env 通道用（dsh 实测后=false：0.2.1 起它的原生文档
+	// 优先于继承环境，同时启用会让 env 变成静默死值。详见该 adapter 的 Credential 声明）。
 	FallbackEnv bool
 	// Tested 原生通道是否已端到端实测；false → 必须走 env 并如实报 untested。
 	Tested bool
-	// TestedOnVersion 实测的载荷版本（dsh 侧 = "0.2.0-rc.2"；版本一变必须重测）。
+	// TestedOnVersion 实测的载荷版本（dsh 侧 = "0.2.1-rc.2"；版本一变必须重测）。
 	TestedOnVersion string
 	// Note 实测结论与已知边界（写进诊断面，避免下一个人重新踩）。
 	Note string

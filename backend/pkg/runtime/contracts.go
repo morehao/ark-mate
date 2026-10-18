@@ -136,6 +136,14 @@ type Spec struct {
 	// "仅平台记录"——否则用户会以为在那一侧勾了图片也生效了（ADR-12 的结论段）。
 	// **它不是门禁**：能不能收图一律走连接期事实（`pkg/acl.Capabilities.Images`，ADR-14）。
 	DeclaresModelInput bool
+	// ModelCatalogNeedsCredential 该 runtime 的会话模型目录是否**按凭据过滤**。
+	//
+	// dsh 0.2.1 起 `llm-pi-ai` 的 `listModels` 在 `apiKeyEnv` 解析不到时返回空目录
+	// （`deepseek-harness:packages/llm/llm-pi-ai/src/adapter.ts:302`），于是「缺密钥」的表现
+	// 从「请求失败」变成「模型不在广告列表里」，而 `session/set_config_option` 会拒绝一个
+	// 不在列表里的值。true = 平台在 applyModel 前先给出可执行的缺密钥错误，而不是把底座的
+	// invalidParams 原样甩给用户；false = 该底座不按凭据过滤目录。
+	ModelCatalogNeedsCredential bool
 	// CapabilityScope 该 runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度被确定：
 	// "process"（默认，最粗）| "directory" | "session"。**未实测一律 process**（P-2 的三条纪律）。
 	CapabilityScope string

@@ -23,7 +23,7 @@ services:
         RUNTIME_IMAGE: ${RUNTIME_IMAGE:-debian:bookworm-slim}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         GO_PROXY: ${GO_PROXY:-https://proxy.golang.org,direct}
-        DSH_VERSION: ${DSH_VERSION:-latest}
+        DSH_VERSION: ${DSH_VERSION:-0.2.1-rc.2}
     image: ${MATE_IMAGE:-ark-mate}:${MATE_TAG:-local}
     container_name: ${MATE_CONTAINER:-ark-mate}
     restart: unless-stopped

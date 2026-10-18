@@ -409,8 +409,8 @@ make image/run IMAGE_TAG=runtimes                      # 起容器
 - `MATE_RUNTIME` 只做**词法**校验（`[a-z0-9][a-z0-9_-]*`，取值拼错 → 构建即失败）；id 是否存在
   交给核心启动时的 `runtime.ProductRegistry` 判定（远程 runtime 的 id 由 `runtimes.json` 声明，
   构建期写不出起始位置偏好）。
-- 版本可用 `--build-arg DSH_VERSION=…` 钉住，默认 `latest`。**dsh 需含 acp profile
-  模板**（`>= 0.1.2-rc.1`，见 `pkg/runtime/adapters.go` 的能力说明），`latest` 满足。
+- 版本可用 `--build-arg DSH_VERSION=…` 钉住，默认 `0.2.1-rc.2`（与随包载荷 pin 同源）。**dsh 需含 acp profile
+  模板**（`>= 0.1.2-rc.1`，见 `pkg/runtime/adapters.go` 的能力说明），默认值满足。
 - 镜像只装 mate 与所选底座；agent 真要用的工具（git / ripgrep / 语言 SDK 等）请在派生镜像里补：
   `FROM ark-mate:runtimes` + `USER root` + `apt-get install -y …`。
 - **容器里给底座模型凭据**（不内置、也不该内置）：容器以 `uid=10001(mate)`、`HOME=/data` 运行，
@@ -792,7 +792,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
   - **compose 路径**：`docker compose up -d --build`（同一组镜像站变量）→ `docker compose ps` =
     `127.0.0.1:18003->10001/tcp`、health OK、`docker compose down -v` 干净回收容器与卷。
 - **含底座镜像用当前代码重建 + 容器内跑通一轮真实会话（2026-09-24 补做，T-5 收口）**：
-  - 构建：`GO_PROXY="https://goproxy.cn,direct" DSH_VERSION=0.1.5-rc.3 OPENCODE_VERSION=1.18.32
+  - 构建：`GO_PROXY="https://goproxy.cn,direct" DSH_VERSION=0.2.1-rc.2 OPENCODE_VERSION=1.18.32
     make image/runtimes WITH_DSH=true WITH_OPENCODE=true` → `ark-mate:runtimes`（**673 MB**，
     d1c6252c）。顺带修掉 Makefile 与文档不一致：该目标原来固定产出 `$(IMAGE_TAG)-runtimes`
     （默认 `ark-mate:local-runtimes`），而文档成对写的 `make image/run IMAGE_TAG=runtimes` 找的是

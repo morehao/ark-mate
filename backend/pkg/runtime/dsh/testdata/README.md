@@ -39,7 +39,7 @@
 
 ## 版本与重跑义务
 
-实测依据是随包 **dsh 0.2.0-rc.2**：
+实测依据是随包 **dsh 0.2.0-rc.2**（2026-10-18 在 **0.2.1-rc.2** 上复测：清单/凭据/目录三条链均通过）：
 
 - 清单通道：`.dsh/docs/notes/probes/dsh-acp-catalog.mjs`（机制）、
   `.dsh/docs/notes/probes/gate1-dsh-probe.mjs --platform-writes`（平台写盘全链路）；

@@ -19,7 +19,7 @@
 | --- | --- |
 | 命令 | `dsh`（统一启动器，npm 分发；ACP server 是它的一个 **profile**，不是独立 bin） |
 | 参数 | `--profile acp`（平台按需追加 `--patch <绝对路径>`，见 §5） |
-| 分发 | 随包载荷 pin **`0.2.0-rc.2`**（`frontend/apps/desktop/release.json` 的 `payloads[]`）；未安装时可 `npx` |
+| 分发 | 随包载荷 pin **`0.2.1-rc.2`**（`frontend/apps/desktop/release.json` 的 `payloads[]`）；未安装时可 `npx` |
 | 版本要求 | 必须是**含 `acp` profile 模板**的版本——模板首用会从内置模板初始化到 `$DSH_HOME/profiles/` |
 | 鉴权 | `authMethods` 为空 ⇒ authenticate 立即成功，平台不触发 agent 鉴权分支 |
 | stdio 纪律 | stdout **只**承载 NDJSON ACP 帧，诊断走 stderr；stdin EOF / 连接关闭 / SIGINT / SIGTERM 都触发有界关闭 |
@@ -41,6 +41,12 @@
 
 **不支持的面**：`session/load`、fork/delete、附加目录、终端、客户端 FS、SSE 与传输级 MCP。
 `McpTransports` 只声明 `stdio` + `streamable_http`（dsh 拒 `sse`）。
+
+**0.2.1 的结算语义**：`session/prompt` 要等**根 Agent + 受管后代 + 已提交输出 drain** 完才返回；
+`session/cancel` 也等当前根活动与已排队输出完成（之后到达的子消息不延迟取消响应）。
+所以平台不能按旧口径「发完 cancel 就本地解除」——那会把迟到的 `session/update` 甩到下一轮
+（ACP 没有 run id）。平台的对应处置是 `AgentSettleTimeout`（10s 有界）：
+`backend/internal/domain/session/runner.go`。
 
 ## 3. 配置隔离
 
@@ -70,7 +76,7 @@
 | --- | --- |
 | 引用名模板 | `MATE_%s_API_KEY`（`MATE_` 前缀是平台命名空间，读写都按它识别） |
 | 环境回落 | **关闭**（`FallbackEnv: false`）——见下「env 赢」 |
-| 实测版本 | `0.2.0-rc.2`（H6 探针 7/7 PASS，2026-10-10） |
+| 实测版本 | `0.2.1-rc.2`（H6 探针 7/7 PASS，2026-10-18） |
 
 官方文档写明的文档形态（平台只依赖它，不猜）：`version: 1` + `refs:`（按**环境变量名**存密钥值）
 + `records:`（各插件自己的凭据）。
@@ -81,8 +87,9 @@
    可被属主之外读取的文档，错误文案指向 `chmod 600`。所以权限不合是**拒启**，不是告警。
 2. **读-改-写，绝不整份覆盖**：文档是共享面（还有 `records:` 与用户自己的 refs），整份覆盖会抹掉
    用户自己的密钥；dsh 也从不回写它（平台只替换 `refs` 分节，注释与其余分节逐字保留）。
-3. **同一 runtime 的 env 与文档绝不能同时启用**：实测「env 赢」——两者同时给时实际用的是 env，
-   于是轮换后的新值会被陈旧 env **永久遮蔽且没有任何报错**。`FallbackEnv: false` 就是这条的声明。
+3. **同一 runtime 的 env 与文档绝不能同时启用**：0.2.1 起实测「文档赢」（0.2.0 是 env 赢）——
+   两者同时给时实际用的是文档，于是 env 变成**静默死值**；反过来若哪天底座改回 env 优先，
+   被遮蔽的就是文档。`FallbackEnv: false` 就是这条的声明（只启用一条通道）。
 4. **只写平台独占根**（`<MATE_HOME>/runtime/dsh/`），绝不写用户的 `~/.dsh`。
 5. **这不是安全改进，是持久化换热生效**：官方文档逐字写着「agent 的工具进程以同一 OS 用户身份运行，
    因此该存储**无法向 agent 隔离机密**」。
@@ -106,6 +113,12 @@ dsh 自报（option id `model`，值是 `JSON.stringify([provider, model])`）�
 （`pkg/runtime/dsh/route_key.go`，`config.go` 两处 + `model_value.go` 一处必须同源）——不带前缀时
 `providers` 的 dict 键会命中 dsh 内置目录，那一家的端点/协议/展示名会变成这条路由的逐字段默认值，
 「平台配了 A、实际按 A 的目录解析出 B」会**静默发生**。
+
+**0.2.1 的凭据门禁**：`llm-pi-ai` 的 `listModels` 在路由的 `apiKeyEnv` 解析不到时返回空目录——
+于是「缺密钥」的表现是**模型不在广告列表里**，而 `set_config_option` 会拒绝一个不在列表里的值。
+平台在 `applyModel` 前用 `Spec.ModelCatalogNeedsCredential` + 供应商密钥状态给出可执行的
+`model_credential_missing`，不把底座的 `invalidParams` 原样甩给用户（见
+`backend/internal/domain/session/lifecycle.go`）。
 
 ## 6. 原生权限投影
 
