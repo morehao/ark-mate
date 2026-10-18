@@ -180,6 +180,7 @@ func TestRouterRoutesRegistered(t *testing.T) {
 		"GET /v1/mate/providers",
 		"GET /v1/mate/models",
 		"GET /v1/mate/skills",
+		"POST /v1/mate/skills/import",
 		"GET /v1/mate/mcps",
 		"GET /v1/mate/tools",
 		"GET /v1/mate/ws/events",

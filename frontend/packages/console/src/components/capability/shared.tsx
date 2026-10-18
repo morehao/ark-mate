@@ -1,8 +1,8 @@
-import { type CSSProperties, type ReactNode, type Dispatch, type SetStateAction } from 'react'
+import { useState, type CSSProperties, type ReactNode, type Dispatch, type SetStateAction } from 'react'
 import { Alert, Button, Input, Modal, Tag, Tooltip } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import { skillRuntimesView } from '../../console/capabilityView'
+import { skillRuntimesView, transportLabel } from '../../console/capabilityView'
 
 /** 定义编辑器的状态（hook 与面板共用的类型）。 */
 export interface CapabilityEditState { kind: 'skill' | 'mcp'; id: string; text: string; created: boolean }
@@ -117,6 +117,148 @@ export function Card({ children }: { children: ReactNode }) {
       {children}
     </section>
   )
+}
+
+/**
+ * 两行式能力行（名称/描述/元信息 + 右侧动作）。
+ *
+ * 刻意**不改** `Row`：`OverviewPanel` 与选择器还在用单行形态，把 `Row` 改成两行会让那些
+ * 与本次改造无关的界面一起换行。这里独立成组件，两个管理页共用。
+ */
+export function CapabilityRow({
+  title,
+  description,
+  meta,
+  actions,
+}: {
+  title: ReactNode
+  description: ReactNode
+  meta: ReactNode
+  actions: ReactNode
+}) {
+  const [hover, setHover] = useState(false)
+  return (
+    <article
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 10,
+        padding: '11px 16px',
+        borderBottom: `1px solid ${tokens.border}`,
+        background: hover ? '#fbfcfe' : undefined,
+        transition: 'background .12s ease',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>{title}</div>
+        <p
+          title={typeof description === 'string' ? description : undefined}
+          style={{
+            margin: '2px 0 0',
+            fontSize: 11.5,
+            lineHeight: 1.55,
+            color: tokens.textSecondary,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {description}
+        </p>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            minWidth: 0,
+            marginTop: 5,
+            overflow: 'hidden',
+            color: tokens.textPlaceholder,
+            fontSize: 10.5,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {meta}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 'none', paddingTop: 1 }}>{actions}</div>
+    </article>
+  )
+}
+
+/** 行内状态（点 + 文案）。`tone` 只决定那个点，不把整行染色。 */
+export function StatusTag({
+  label,
+  tone = 'muted',
+  hint,
+}: {
+  label: string
+  tone?: 'muted' | 'success' | 'warning' | 'error'
+  hint?: ReactNode
+}) {
+  const color =
+    tone === 'success' ? tokens.success : tone === 'warning' ? tokens.warning : tone === 'error' ? tokens.error : tokens.textPlaceholder
+  const node = (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: tokens.textSecondary }}>
+      <span style={{ width: 5, height: 5, borderRadius: '50%', background: color, flex: 'none' }} />
+      {label}
+    </span>
+  )
+  return hint ? <Tooltip title={hint}>{node}</Tooltip> : node
+}
+
+/** 传输 tag：界面只有 STDIO / SSE / HTTP 三值（旧 http 显示为 HTTP）。 */
+export function TransportTag({ transport }: { transport: string }) {
+  return (
+    <Tag style={{ ...smallTag, fontFamily: tokens.fontMono, color: tokens.textSecondary }}>{transportLabel(transport)}</Tag>
+  )
+}
+
+/** 空态：一句说明 + 下一步动作（不画插画；空态的价值是「接下来做什么」）。 */
+export function CapabilityEmpty({ text, action }: { text: ReactNode; action?: ReactNode }) {
+  return (
+    <div style={{ padding: '28px 20px', textAlign: 'center', color: tokens.textPlaceholder, fontSize: 12.5 }}>
+      <div style={{ marginBottom: action ? 10 : 0 }}>{text}</div>
+      {action}
+    </div>
+  )
+}
+
+/** 详情弹窗里的键值网格（两列，hairline 分隔）。 */
+export function DetailGrid({ items }: { items: { label: string; value: ReactNode }[] }) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        border: `1px solid ${tokens.border}`,
+        borderRadius: tokens.radiusSm,
+        overflow: 'hidden',
+      }}
+    >
+      {items.map((it, i) => (
+        <div
+          key={`${it.label}-${i}`}
+          style={{
+            padding: '8px 10px',
+            borderTop: i >= 2 ? `1px solid ${tokens.border}` : undefined,
+            borderLeft: i % 2 === 1 ? `1px solid ${tokens.border}` : undefined,
+            minWidth: 0,
+          }}
+        >
+          <div style={{ fontSize: 10.5, color: tokens.textPlaceholder, marginBottom: 2 }}>{it.label}</div>
+          <div style={{ fontSize: 12, color: tokens.text, overflowWrap: 'anywhere' }}>{it.value}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** 弹窗小节标题（详情/编辑共用，避免每个弹窗各写一套字号）。 */
+export function SectionLabel({ children }: { children: ReactNode }) {
+  return <div style={{ fontSize: 10.5, color: tokens.textPlaceholder, margin: '12px 0 5px' }}>{children}</div>
 }
 
 // promptText 把 prompts/get 的 content（MCP 联合类型）取成可读文本：

@@ -1,8 +1,10 @@
 import type {
+  CapabilityWriteBody,
   LibraryApplicability,
   LibraryItem,
   McpProbeResult,
   McpServer,
+  Skill,
   SkillMaterializationResp,
   SkillMaterializationState,
   SkillWarning,
@@ -409,4 +411,461 @@ export function pinnedCapabilitiesView(
     hint: '该会话创建时钉住的能力选定：定义文件之后被改动也不会影响它（改动在下一次轮次边界按新代际生效）。',
     fingerprint: caps.fingerprint ?? '',
   }
+}
+
+// ——— 技能 / MCP 管理页（千问交互 · ark-mate 皮肤）的纯函数 ———
+//
+// 这一层只做「事实 → 展示 / 表单值 → 写面请求体」的纯变换，**不发请求、不碰 React**：
+// 写面语义（只提交变化键、旧 http 不被静默改型、未知键不被回写）全部在这里成文，
+// 组件只负责把结果画出来。这样 Node 侧用 `node --test` 就能逐条钉住那些
+// 「看起来工作、实际会静默改语义」的分支。
+
+/** UI 只给三种传输；类型里的 `http` 是**旧定义**，读出来一律按 Streamable HTTP 显示。 */
+export type McpTransportValue = 'stdio' | 'sse' | 'streamable_http'
+
+/** 旧 `http` 与 `streamable_http` 在界面上是同一项；未知值退化为 stdio（只影响显示，不改定义）。 */
+export function mcpTransportView(transport: string): McpTransportValue {
+  switch (transport) {
+    case 'sse':
+      return 'sse'
+    case 'http':
+    case 'streamable_http':
+      return 'streamable_http'
+    default:
+      return 'stdio'
+  }
+}
+
+/** 行内 tag（三值）。`http` 显示为 HTTP，不暴露第四种。 */
+export function transportLabel(transport: string): string {
+  const v = mcpTransportView(transport)
+  return v === 'stdio' ? 'STDIO' : v === 'sse' ? 'SSE' : 'HTTP'
+}
+
+/** 详情里的完整传输名。 */
+export function transportLongLabel(transport: string): string {
+  const v = mcpTransportView(transport)
+  return v === 'stdio' ? 'STDIO' : v === 'sse' ? 'SSE' : 'Streamable HTTP'
+}
+
+/** MCP 派生状态（**只用已有字段**，不新增后端状态列；顺序即优先级）。 */
+export type McpConnStateKey = 'disabled' | 'error' | 'needs_setup' | 'pending' | 'connected'
+
+export interface McpConnStateView {
+  key: McpConnStateKey
+  label: string
+  color: string
+  /** 行内状态点/告警文案的语义色（与 antd Tag 的 color 分开：一个给标签，一个给文字）。 */
+  tone: 'muted' | 'error' | 'warning' | 'success'
+}
+
+export function mcpConnState(row: {
+  defEnabled: boolean
+  lastProbeError?: string
+  lastProbeAt?: string
+  unresolvedSecretKeys: string[]
+}): McpConnStateView {
+  if (!row.defEnabled) return { key: 'disabled', label: '已停用', color: 'default', tone: 'muted' }
+  if (row.lastProbeError) return { key: 'error', label: '探测失败', color: 'red', tone: 'error' }
+  if (row.unresolvedSecretKeys.length > 0) {
+    return { key: 'needs_setup', label: '待配置', color: 'gold', tone: 'warning' }
+  }
+  if (!row.lastProbeAt) return { key: 'pending', label: '未探测', color: 'default', tone: 'muted' }
+  return { key: 'connected', label: '已连接', color: 'green', tone: 'success' }
+}
+
+/** MCP 行的描述行（错误/待配置时是**可行动的事实**，不是复述标签）。 */
+export function mcpRowDescription(
+  row: { toolCount: number; unresolvedSecretKeys: string[] },
+  state: McpConnStateView,
+  lastProbeError?: string,
+): string {
+  switch (state.key) {
+    case 'error':
+      return lastProbeError || '探测失败（原因未知）'
+    case 'needs_setup':
+      return row.unresolvedSecretKeys.length === 1
+        ? `缺少 ${row.unresolvedSecretKeys[0]}，注入时会被跳过。`
+        : `缺少 ${row.unresolvedSecretKeys.join('、')}，注入时会被跳过。`
+    case 'disabled':
+      return '已停用，工具不会进入模型上下文。'
+    case 'pending':
+      return '尚未探测；保存后点「探测」拉取工具列表。'
+    default:
+      return row.toolCount > 0
+        ? '工具已进入模型上下文，随会话注入。'
+        : '已连接，但该 server 没有暴露工具。'
+  }
+}
+
+/**
+ * skill 列表的状态点：**只陈述读模型里有的事实**。
+ *
+ * 不显示「一致」——列表没有逐条物化体检（那要 N 次请求），而把「没查」画成「一致」
+ * 正是这一层最不该做的事。真正的物化状态在详情「投放体检」里现拉。
+ */
+export function skillStatusView(s: Pick<Skill, 'enabled' | 'warnings'>): {
+  label: string
+  color: string
+  tone: 'muted' | 'warning' | 'success'
+  hint: string
+} {
+  if (s.enabled === false) {
+    return { label: '已停用', color: 'default', tone: 'muted', hint: '定义与正文保留；启用即按 runtimes 重新投放' }
+  }
+  if (s.warnings && s.warnings.length > 0) {
+    return {
+      label: '需处理',
+      color: 'gold',
+      tone: 'warning',
+      hint: '装载期正文扫描有告警（critical 已拒载）；详情里可看逐条规则',
+    }
+  }
+  return { label: '已启用', color: 'green', tone: 'success', hint: '启用中；物化状态在详情「投放体检」里现拉' }
+}
+
+// ——— 技能表单：读模型 → 表单值，表单值 → 写面请求体 ———
+
+export interface SkillFormValues {
+  id: string
+  name: string
+  description: string
+  runtimes: string[]
+  scope: 'global' | 'workspace'
+  body: string
+}
+
+export function skillFormValues(s: Skill): SkillFormValues {
+  return {
+    id: s.id,
+    name: s.name ?? '',
+    description: s.description ?? '',
+    runtimes: [...(s.runtimes ?? [])],
+    scope: s.scope === 'workspace' ? 'workspace' : 'global',
+    body: s.body ?? '',
+  }
+}
+
+/** 新建：提交完整最小 body（`runtimes: []` = 全部，**不写 `["*"]`**）。 */
+export function skillCreateBody(v: SkillFormValues): CapabilityWriteBody {
+  return {
+    id: v.id.trim(),
+    name: v.name,
+    description: v.description,
+    runtimes: [...v.runtimes],
+    scope: v.scope,
+    body: v.body,
+  }
+}
+
+/** runtimes 是**集合**语义（顺序不影响投放），比较时排序。 */
+function sameStringSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const sa = [...a].sort()
+  const sb = [...b].sort()
+  return sa.every((x, i) => x === sb[i])
+}
+
+/** 参数是**有序**语义（`--a --b` 与 `--b --a` 不是一回事），逐位比较。 */
+function sameOrderedList(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i])
+}
+
+/**
+ * 编辑：**只提交发生变化的键**。
+ *
+ * `id` 永远不提交（路径已带）；未变的键不出现 → 后端保留原值（含未知键与用户手写字段）。
+ * 清空 description 是显式的 `""`（清空），不是「没改」。
+ */
+export function skillFormPatch(initial: SkillFormValues, next: SkillFormValues): CapabilityWriteBody {
+  const patch: CapabilityWriteBody = {}
+  if (next.name !== initial.name) patch.name = next.name
+  if ((next.description ?? '') !== (initial.description ?? '')) patch.description = next.description
+  if ((next.body ?? '') !== (initial.body ?? '')) patch.body = next.body
+  if (!sameStringSet(next.runtimes, initial.runtimes)) patch.runtimes = [...next.runtimes]
+  if (next.scope !== initial.scope) patch.scope = next.scope
+  return patch
+}
+
+/** 编辑提交是否为空（空补丁不发请求：一次「打开又保存」不该写盘、也不该刷新 mtime）。 */
+export function isEmptyPatch(patch: CapabilityWriteBody): boolean {
+  return Object.keys(patch).length === 0
+}
+
+// ——— MCP 表单 ———
+
+export interface McpBindingRow {
+  key: string
+  value: string
+  secret: boolean
+  /** 来自已存定义（值不回读，编辑态只允许看键名）。 */
+  existed: boolean
+  removed: boolean
+}
+
+export interface McpFormValues {
+  id: string
+  name: string
+  /** UI 三值（旧 http 会显示成 streamable_http）。 */
+  transport: McpTransportValue
+  /** 定义里的原始 transport：编辑时用它判断「用户有没有改传输」。 */
+  originalTransport: string
+  command: string
+  args: string
+  url: string
+  env: McpBindingRow[]
+  headers: McpBindingRow[]
+}
+
+export function mcpFormValues(m: McpServer): McpFormValues {
+  const env: McpBindingRow[] = [
+    ...(m.env_keys ?? []).map((key) => ({ key, value: '', secret: false, existed: true, removed: false })),
+    ...(m.secret_env_keys ?? []).map((key) => ({ key, value: '', secret: true, existed: true, removed: false })),
+  ]
+  const headers: McpBindingRow[] = [
+    ...(m.secret_header_keys ?? []).map((key) => ({ key, value: '', secret: true, existed: true, removed: false })),
+  ]
+  return {
+    id: m.id,
+    name: m.name ?? '',
+    transport: mcpTransportView(m.transport ?? ''),
+    originalTransport: m.transport ?? '',
+    command: m.command ?? '',
+    args: (m.args ?? []).join(' '),
+    url: m.url ?? '',
+    env,
+    headers,
+  }
+}
+
+/** 参数串 → 数组：支持单/双引号与反斜杠转义，**不做变量展开**（这里不是 shell）。 */
+export function splitArgs(input: string): string[] {
+  const out: string[] = []
+  let cur = ''
+  let quote: '"' | "'" | null = null
+  let escaped = false
+  let started = false
+  for (const ch of input) {
+    if (escaped) {
+      cur += ch
+      escaped = false
+      started = true
+      continue
+    }
+    if (ch === '\\' && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote) {
+      if (ch === quote) quote = null
+      else cur += ch
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch
+      started = true
+      continue
+    }
+    if (/\s/.test(ch)) {
+      if (started) {
+        out.push(cur)
+        cur = ''
+        started = false
+      }
+      continue
+    }
+    cur += ch
+    started = true
+  }
+  if (started) out.push(cur)
+  return out
+}
+
+function bindingMap(rows: McpBindingRow[], secret: boolean): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const row of rows) {
+    const key = row.key.trim()
+    if (!key || row.removed) continue
+    if (row.secret !== secret) continue
+    const value = row.value.trim()
+    // 留空 = 不提交这个键（值不回读，空值既不能当引用也不能当明文）。
+    if (!value) continue
+    out[key] = value
+  }
+  return out
+}
+
+/**
+ * 新建：提交完整 body。
+ *
+ * env/header 里 `secret` 的行进 `secret_env`/`secret_headers`（只接受 `store:`/`env:` 引用），
+ * 其余进 `env`/`headers`。留空的行整个不提交——不猜「空串算已解析」。
+ */
+export function mcpCreateBody(v: McpFormValues): CapabilityWriteBody {
+  const body: CapabilityWriteBody = { id: v.id.trim(), name: v.name, transport: v.transport }
+  if (v.transport === 'stdio') {
+    body.command = v.command.trim()
+    body.args = splitArgs(v.args)
+  } else {
+    body.url = v.url.trim()
+  }
+  const env = bindingMap(v.env, false)
+  const secretEnv = bindingMap(v.env, true)
+  const headers = bindingMap(v.headers, false)
+  const secretHeaders = bindingMap(v.headers, true)
+  if (Object.keys(env).length > 0) body.env = env
+  if (Object.keys(secretEnv).length > 0) body.secret_env = secretEnv
+  if (Object.keys(headers).length > 0) body.headers = headers
+  if (Object.keys(secretHeaders).length > 0) body.secret_headers = secretHeaders
+  return body
+}
+
+/**
+ * 编辑：只提交变化键。
+ *
+ * **transport 不被静默改型**：用户没动传输时，patch 里不出现 `transport`（旧 `http` 原样保留）；
+ * 只有界面三值真的变了才提交。切换传输时把另一侧的字段显式 `null` 掉——否则 stdio→远程会留下
+ * 一个同名的 command，定义看起来「同时是两种传输」。
+ *
+ * env/header **编辑态一律不提交**：它们的值后端从不回读（只有键名），而 `env` 是**顶层键整体替换**
+ * 的语义——凭键名重建一遍等于把已存的引用全部删掉。新增/删除引用走「高级（JSON）」。
+ */
+export function mcpFormPatch(initial: McpFormValues, next: McpFormValues): CapabilityWriteBody {
+  const patch: CapabilityWriteBody = {}
+  if (next.name !== initial.name) patch.name = next.name
+  const transportChanged = mcpTransportView(initial.originalTransport) !== next.transport
+  if (transportChanged) {
+    patch.transport = next.transport
+    if (next.transport === 'stdio') {
+      patch.command = next.command.trim()
+      patch.args = splitArgs(next.args)
+      patch.url = null
+    } else {
+      patch.url = next.url.trim()
+      patch.command = null
+      patch.args = null
+    }
+    return patch
+  }
+  if (next.transport === 'stdio') {
+    if (next.command.trim() !== initial.command.trim()) patch.command = next.command.trim()
+    if (!sameOrderedList(splitArgs(next.args), splitArgs(initial.args))) patch.args = splitArgs(next.args)
+  } else if (next.url.trim() !== initial.url.trim()) {
+    patch.url = next.url.trim()
+  }
+  return patch
+}
+
+// ——— MCP JSON 导入（不新增后端批量接口：前端解析、逐条 POST） ———
+
+export interface McpJsonServer {
+  id: string
+  body: CapabilityWriteBody
+}
+
+export interface McpJsonParseResult {
+  servers: McpJsonServer[]
+  /** 整份文档级错误（不是 JSON 对象 / 没有可导入条目）。 */
+  errors: string[]
+}
+
+/**
+ * 解析 `mcpServers` 片段（也接受**省略外层**的 `{ "<id>": {...} }`）。
+ *
+ * 传输推断与千问一致：有 `command` → stdio；`url` 含 `/sse` → sse；其余 URL → streamable_http。
+ * env/header 的值以 `store:`/`env:` 开头归密钥字典，其余归明文——UI 不读回值，这一步只发生一次。
+ */
+export function parseMcpJson(text: string): McpJsonParseResult {
+  const out: McpJsonParseResult = { servers: [], errors: [] }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (err) {
+    out.errors.push(`不是合法 JSON：${err instanceof Error ? err.message : String(err)}`)
+    return out
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    out.errors.push('配置必须是 JSON 对象（形如 {"mcpServers": {…}}）')
+    return out
+  }
+  const root = parsed as Record<string, unknown>
+  const block = root.mcpServers
+  const servers =
+    block && typeof block === 'object' && !Array.isArray(block)
+      ? (block as Record<string, unknown>)
+      : root
+  for (const [rawID, rawEntry] of Object.entries(servers)) {
+    const id = rawID.trim()
+    if (!id) {
+      out.errors.push('有一条配置的 id 为空')
+      continue
+    }
+    if (!rawEntry || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) {
+      out.errors.push(`${id}：值必须是对象`)
+      continue
+    }
+    const entry = rawEntry as Record<string, unknown>
+    const command = typeof entry.command === 'string' ? entry.command : ''
+    const url = typeof entry.url === 'string' ? entry.url : ''
+    const declared = typeof entry.transport === 'string' ? entry.transport : ''
+    if (!declared && !command && !url) {
+      out.errors.push(`${id}：必须给 command（stdio）或 url（远程）`)
+      continue
+    }
+    const transport: McpTransportValue =
+      declared === 'stdio' || declared === 'sse' || declared === 'http' || declared === 'streamable_http'
+        ? mcpTransportView(declared)
+        : command
+          ? 'stdio'
+          : /\/sse(?:\/|$|\?)/.test(url)
+            ? 'sse'
+            : url
+              ? 'streamable_http'
+              : 'stdio'
+    const body: CapabilityWriteBody = {
+      id,
+      name: typeof entry.name === 'string' && entry.name ? entry.name : id,
+      transport,
+    }
+    if (transport === 'stdio') {
+      if (!command) {
+        out.errors.push(`${id}：stdio 必须给 command`)
+        continue
+      }
+      body.command = command
+      body.args = Array.isArray(entry.args) ? entry.args.map((a) => String(a)) : []
+    } else {
+      if (!url) {
+        out.errors.push(`${id}：${transport} 必须给 url`)
+        continue
+      }
+      body.url = url
+    }
+    const splitBindings = (value: unknown, plainKey: string, secretKey: string): void => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return
+      const plain: Record<string, string> = {}
+      const secret: Record<string, string> = {}
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        const s = typeof v === 'string' ? v : String(v ?? '')
+        if (s.startsWith('store:') || s.startsWith('env:')) secret[k] = s
+        else plain[k] = s
+      }
+      if (Object.keys(plain).length > 0) body[plainKey] = plain
+      if (Object.keys(secret).length > 0) body[secretKey] = secret
+    }
+    splitBindings(entry.env, 'env', 'secret_env')
+    splitBindings(entry.headers, 'headers', 'secret_headers')
+    out.servers.push({ id, body })
+  }
+  if (out.servers.length === 0 && out.errors.length === 0) {
+    out.errors.push('没有可导入的 server（mcpServers 为空）')
+  }
+  return out
+}
+
+/** 一条导入结果（逐条汇总，不只 toast：批量操作要可复核）。 */
+export interface McpImportOutcome {
+  id: string
+  status: 'created' | 'skipped' | 'failed'
+  message: string
 }

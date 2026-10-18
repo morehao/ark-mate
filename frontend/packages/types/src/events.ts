@@ -157,6 +157,15 @@ export interface StreamEntry {
   toolId?: string
   title?: string
   status?: string
+  /**
+   * 工具 kind（ACP ToolKind；权限请求与工具条目共用这个字段）。
+   * 工具条目用它选择图标/语义；为空时前端回退到 title 推断。
+   */
+  toolKind?: string
+  /** 工具原始入参（ACP rawInput；可选，用于单行工具的对象与详情）。 */
+  input?: unknown
+  /** 工具原始结果（ACP rawOutput；可选，用于展开详情）。 */
+  output?: unknown
   tone?: 'ok' | 'err' | 'cancel' | 'info'
   /**
    * 轮末收口原因（`run.ended.stop_reason`，D9）：**不进正文**（`end_turn` 是协议词），
@@ -166,7 +175,6 @@ export interface StreamEntry {
   // —— 权限确认卡（kind='permission'）——
   callId?: string // 决策回传锚点（POST /sessions/:id/permission）
   optionKinds?: PermissionOption[] // ACP 可选项（allow/reject × once/always）
-  toolKind?: string // 底层工具 kind（bash/read/write…）
   toolCallId?: string
   resolved?: boolean // 已由用户决策（按钮禁用/展示结果）
   decision?: string // resolved 时的决策摘要

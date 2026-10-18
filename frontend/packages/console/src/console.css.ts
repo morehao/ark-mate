@@ -1393,7 +1393,6 @@ export const consoleStyleSheet = `
   }
 
   /* 流式状态行：阶段词 + 内联光标 + 已处理时长（替代原来那颗孤立光标）。 */
-  .fg-turn-status { line-height: 1.6; }
   .fg-shimmer {
     background: linear-gradient(
       110deg,
@@ -1420,30 +1419,512 @@ export const consoleStyleSheet = `
     }
   }
 
-  /* 思考折叠块（需求 6 下半）：整行点击、流式中 shimmer 且无箭头、结束后出现 12px 线性箭头。 */
+  /* ── 对话流：身份头 / 过程行 / 工具行 / 整轮折叠 ───────────────── */
+
+  .fg-turn {
+    padding: 16px 0;
+    min-width: 0;
+    position: relative;
+  }
+  .fg-turn-flash {
+    border-radius: 12px;
+    box-shadow: 0 0 0 2px ${tokens.primary};
+  }
+
+  .fg-turn-user {
+    display: flex;
+    justify-content: flex-end;
+    padding-bottom: 8px;
+    position: relative;
+  }
+  .fg-user-bubble {
+    width: fit-content;
+    max-width: calc(100% - 32px);
+    background: ${tokens.softFill};
+    color: ${tokens.text};
+    border-radius: 14px 14px 0 14px;
+    padding: 8px 12px;
+    font-size: 13px;
+    line-height: 19px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  .fg-user-actions {
+    position: absolute;
+    right: 0;
+    top: -24px;
+    opacity: 0;
+    transition: opacity 0.14s ease;
+  }
+  .fg-turn-user:hover .fg-user-actions { opacity: 1; }
+
+  .fg-agent-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    min-width: 0;
+  }
+  .fg-turn-live .fg-agent-head { margin-bottom: 8px; }
+  .fg-agent-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    background: ${tokens.gradient};
+    color: #ffffff;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  }
+  .fg-agent-avatar svg {
+    width: 14px;
+    height: 14px;
+    display: block;
+    fill: currentColor;
+  }
+  .fg-agent-name {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.75;
+    color: ${tokens.text};
+    white-space: nowrap;
+  }
+  .fg-agent-dot { color: ${tokens.primary}; }
+  .fg-agent-ai {
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 14px;
+    color: ${tokens.textPlaceholder};
+    border: 1px solid ${tokens.borderStrong};
+    border-radius: 4px;
+    padding: 0 4px;
+  }
+  .fg-agent-status,
+  .fg-agent-completion {
+    width: max-content;
+    max-width: 100%;
+    color: ${tokens.textSecondary};
+    font-size: 15px;
+    line-height: 1.75;
+    margin-bottom: 12px;
+  }
+  .fg-turn-copy {
+    margin-left: auto;
+    opacity: 0;
+    transition: opacity 0.14s ease;
+  }
+  .fg-turn:hover .fg-turn-copy { opacity: 1; }
+
+  .fg-answer {
+    color: ${tokens.text};
+    font-size: 14px;
+    line-height: 1.75;
+    min-width: 0;
+  }
+  .fg-turn > .fg-answer { margin: 0 0 12px; }
+  .fg-turn > .fg-answer:last-child { margin-bottom: 0; }
+  .fg-answer p { margin: 0 0 12px; }
+  .fg-answer p:last-child { margin-bottom: 0; }
+  .fg-answer strong { font-weight: 600; }
+  .fg-answer ol,
+  .fg-answer ul { margin: 0 0 12px; padding-left: 1.45em; }
+  .fg-answer li { margin-bottom: 4px; }
+  .fg-answer li:last-child { margin-bottom: 0; }
+  .fg-answer code {
+    font-family: ${tokens.fontMono};
+    font-size: 0.92em;
+    background: ${tokens.softFill};
+    border-radius: 4px;
+    padding: 1px 4px;
+  }
+
+  .fg-process-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  /* 通用折叠：completed / 过程消息 / 语义摘要。箭头在 completed 常显，其余 hover 才出现。 */
+  .fg-fold {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .fg-fold-head {
+    width: fit-content;
+    max-width: 100%;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: ${tokens.textSecondary};
+    font-size: 15px;
+    line-height: 1.75;
+    transition: color 0.18s ease;
+  }
+  .fg-fold-head:hover { color: ${tokens.text}; }
+  .fg-fold-title {
+    display: block;
+    min-width: 0;
+    max-width: 520px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fg-fold-lead {
+    width: 14px;
+    height: 14px;
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-fold-lead svg { width: 14px; height: 14px; }
+  .fg-fold-chevron {
+    width: 12px;
+    height: 12px;
+    flex: none;
+    margin-left: -4px;
+    color: ${tokens.textPlaceholder};
+    opacity: 0;
+    transform: rotate(-90deg);
+    transform-origin: 50%;
+    transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s ease, color 0.18s ease;
+  }
+  .fg-fold-head:hover .fg-fold-chevron { opacity: 1; }
+  .fg-fold.fg-open > .fg-fold-head .fg-fold-chevron { opacity: 1; transform: rotate(0deg); }
+  .fg-fold-completed > .fg-fold-head .fg-fold-chevron { opacity: 1; }
+  .fg-fold-body {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.28s cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  .fg-fold.fg-open > .fg-fold-body { grid-template-rows: 1fr; }
+  .fg-fold-inner { min-height: 0; overflow: hidden; }
+  .fg-fold.fg-open > .fg-fold-body > .fg-fold-inner { overflow: visible; min-height: auto; }
+  .fg-fold-completed > .fg-fold-body > .fg-fold-inner,
+  .fg-fold-process > .fg-fold-body > .fg-fold-inner,
+  .fg-fold-summary > .fg-fold-body > .fg-fold-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-block: 2px;
+  }
+
+  /* ── 单行工具：图标 + 状态 + 对象 + 行号；详情按需展开 ───────── */
+  .fg-tool { min-width: 0; }
+  .fg-tool-head {
+    width: 100%;
+    min-height: 25px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    color: ${tokens.textSecondary};
+    font-size: 14px;
+    line-height: 1.75;
+    cursor: default;
+    min-width: 0;
+  }
+  .fg-tool-head:disabled { opacity: 1; }
+  .fg-tool-expandable { cursor: pointer; }
+  .fg-tool-expandable:hover,
+  .fg-tool-expandable:hover .fg-tool-icon,
+  .fg-tool-expandable:hover .fg-tool-status,
+  .fg-tool-expandable:hover .fg-tool-primary,
+  .fg-tool-expandable:hover .fg-tool-secondary { color: ${tokens.text}; }
+  .fg-tool-icon {
+    width: 14px;
+    height: 14px;
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    color: ${tokens.textPlaceholder};
+    transition: color 0.16s ease;
+  }
+  .fg-tool-icon svg { width: 14px; height: 14px; }
+  .fg-tool-status {
+    flex: none;
+    white-space: nowrap;
+    transition: color 0.16s ease;
+  }
+  .fg-tool-primary {
+    min-width: 0;
+    flex: 0 1 auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color 0.16s ease;
+  }
+  .fg-tool-link { color: ${tokens.primary}; }
+  .fg-tool-expandable:hover .fg-tool-link { color: ${tokens.primaryHover}; text-decoration: underline; }
+  .fg-tool-secondary {
+    flex: none;
+    color: ${tokens.textPlaceholder};
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .fg-tool-arrow {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    margin-left: 4px;
+    color: ${tokens.textPlaceholder};
+    opacity: 0;
+    transform: rotate(-90deg);
+    transition: transform 0.24s ease, opacity 0.18s ease, color 0.18s ease;
+  }
+  .fg-tool-expandable:hover .fg-tool-arrow { opacity: 1; }
+  .fg-tool.fg-open .fg-tool-arrow { opacity: 1; transform: rotate(0deg); }
+  .fg-tool-body {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.28s cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  .fg-tool.fg-open .fg-tool-body { grid-template-rows: 1fr; }
+  .fg-tool-body-inner { min-height: 0; overflow: hidden; }
+  .fg-tool.fg-open .fg-tool-body > .fg-tool-body-inner { min-height: auto; overflow: visible; }
+  .fg-tool-detail {
+    background: ${tokens.softFill};
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin: 4px 0 8px;
+    max-height: 420px;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: ${tokens.textSecondary};
+    font-size: 12px;
+  }
+  .fg-tool-detail-kicker {
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    color: ${tokens.textPlaceholder};
+    text-transform: lowercase;
+  }
+  .fg-tool-detail pre {
+    margin: 0;
+    font-family: ${tokens.fontMono};
+    font-size: 12px;
+    line-height: 1.65;
+    color: ${tokens.text};
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .fg-tool-detail-error {
+    color: ${tokens.error};
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+  .fg-tool-detail-meta {
+    color: ${tokens.textPlaceholder};
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+  }
+  .fg-tool-detail-path {
+    font-family: ${tokens.fontMono};
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: ${tokens.textSecondary};
+    overflow-wrap: anywhere;
+  }
+
+  /* read/list：带行号的文件预览（只在调用参数给了起始行时编号）。 */
+  .fg-tool-code {
+    border: 1px solid ${tokens.border};
+    border-radius: 8px;
+    background: ${tokens.codeBg};
+    overflow: auto;
+    max-height: 260px;
+    padding: 6px 0;
+  }
+  .fg-tool-code-line {
+    display: flex;
+    gap: 10px;
+    padding: 0 10px;
+    font-family: ${tokens.fontMono};
+    font-size: 11.5px;
+    line-height: 1.6;
+    white-space: pre;
+  }
+  .fg-tool-line-no {
+    flex: none;
+    min-width: 3.2ch;
+    text-align: right;
+    color: ${tokens.textPlaceholder};
+    user-select: none;
+  }
+  .fg-tool-code-text { color: ${tokens.text}; }
+
+  /* edit/write：diff 行（+/−/上下文），数据不足时退回结果摘要。 */
+  .fg-tool-diff {
+    border: 1px solid ${tokens.border};
+    border-radius: 8px;
+    background: ${tokens.codeBg};
+    overflow: auto;
+    max-height: 280px;
+    padding: 6px 0;
+  }
+  .fg-diff-line {
+    display: flex;
+    gap: 8px;
+    padding: 0 10px;
+    font-family: ${tokens.fontMono};
+    font-size: 11.5px;
+    line-height: 1.6;
+    white-space: pre;
+    color: ${tokens.text};
+  }
+  .fg-diff-sign {
+    flex: none;
+    width: 1ch;
+    color: ${tokens.textPlaceholder};
+    user-select: none;
+  }
+  .fg-diff-add { background: ${tokens.success}14; }
+  .fg-diff-add .fg-diff-sign { color: ${tokens.success}; }
+  .fg-diff-del { background: ${tokens.error}14; }
+  .fg-diff-del .fg-diff-sign { color: ${tokens.error}; }
+  .fg-diff-meta,
+  .fg-diff-context { color: ${tokens.textSecondary}; }
+  .fg-diff-meta { color: ${tokens.textPlaceholder}; }
+
+  /* execute：命令行 + stdout/stderr + 退出码。 */
+  .fg-tool-command {
+    display: flex;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid ${tokens.border};
+    border-radius: 8px;
+    background: ${tokens.codeBg};
+    font-family: ${tokens.fontMono};
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: ${tokens.text};
+    overflow-wrap: anywhere;
+  }
+  .fg-tool-command-sign {
+    flex: none;
+    color: ${tokens.textPlaceholder};
+    user-select: none;
+  }
+  .fg-tool-command-text { white-space: pre-wrap; }
+  .fg-tool-output {
+    border: 1px solid ${tokens.border};
+    border-radius: 8px;
+    background: ${tokens.codeBg};
+    padding: 8px 10px;
+    max-height: 240px;
+    overflow: auto;
+  }
+  .fg-tool-output-err { color: ${tokens.error}; }
+  .fg-tool-exit {
+    font-family: ${tokens.fontMono};
+    font-size: 11px;
+    color: ${tokens.textSecondary};
+  }
+  .fg-tool-exit-bad { color: ${tokens.error}; }
+
+  /* search/web：查询词 + 结果列表。 */
+  .fg-tool-query {
+    font-family: ${tokens.fontMono};
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: ${tokens.text};
+    overflow-wrap: anywhere;
+  }
+  .fg-tool-results {
+    margin: 0;
+    padding-left: 1.4em;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: ${tokens.text};
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+  .fg-tool-note {
+    color: ${tokens.textPlaceholder};
+    font-size: 11px;
+    line-height: 1.55;
+  }
+
+  /* 轮内过程块：搜索锚点用 data-fg-idx 定位，这里只负责布局。 */
+  .fg-process-item { min-width: 0; }
+
+  /* 流式尾部：阶段词 + 内联光标（与 turn-status 区分：这里是过程流末尾）。 */
+  .fg-turn-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+    width: max-content;
+    max-width: 100%;
+    color: ${tokens.textSecondary};
+    font-size: 15px;
+    line-height: 1.75;
+  }
+  .fg-turn-footer-caret {
+    width: 2px;
+    height: 17px;
+    flex: none;
+    border-radius: 1px;
+    background: ${tokens.textPlaceholder};
+    animation: fg-blink 1.1s steps(1) infinite;
+  }
+  .fg-turn-usage {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+    color: ${tokens.textPlaceholder};
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    cursor: help;
+  }
+  .fg-turn-usage-sep { color: ${tokens.border}; }
+
+  /* 思考折叠块（需求 6 下半）：15px 标题；流式中 shimmer 且无箭头；正文 13/20、左 4px 细线。 */
   .fg-thought-head {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     width: 100%;
     padding: 2px 0;
     border: 0;
     background: transparent;
     font: inherit;
-    font-size: 13px;
+    font-size: 15px;
     color: ${tokens.textSecondary};
+    line-height: 1.75;
     text-align: left;
     cursor: pointer;
   }
   .fg-thought-head:hover:not(:disabled) { color: ${tokens.text}; }
-  /* 流式中是正在生长的内容：不给收起动作，鼠标也不该变成"可点"。 */
   .fg-thought-head:disabled { cursor: default; }
   .fg-thought-chevron {
     flex: none;
     color: ${tokens.textPlaceholder};
-    transition: transform 0.12s ease;
+    opacity: 0;
+    transition: transform 0.2s ease, opacity 0.16s ease;
   }
-  .fg-thought-chevron.fg-open { transform: rotate(90deg); }
+  .fg-thought-head:hover .fg-thought-chevron { opacity: 1; }
+  .fg-thought-chevron.fg-open { opacity: 1; transform: rotate(90deg); }
   .fg-thought-clip {
     overflow: hidden;
     transition: max-height 0.28s cubic-bezier(0.33, 1, 0.68, 1), opacity 0.18s ease;
@@ -1451,11 +1932,13 @@ export const consoleStyleSheet = `
   .fg-thought-body {
     max-height: 200px;
     overflow-y: auto;
-    border-left: 2px solid ${tokens.border};
-    margin-left: 1px;
-    padding: 2px 0 2px 12px;
+    scrollbar-width: thin;
+    border-left: 4px solid ${tokens.border};
+    margin: 8px 0 4px;
+    padding: 0 0 0 12px;
     font-size: 13px;
-    line-height: 1.7;
+    line-height: 20px;
+    color: ${tokens.text};
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     transform: translateY(-6px);
@@ -1467,4 +1950,5 @@ export const consoleStyleSheet = `
     .fg-thought-body { transition: none; }
     .fg-thought-body { transform: none; }
   }
+
 `

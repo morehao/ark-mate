@@ -414,6 +414,19 @@ export const updateSkill = (id: string, body: CapabilityWriteBody): Promise<Skil
 export const deleteSkill = (id: string): Promise<SkillDeleteResp> =>
   http.delete<SkillDeleteResp>(`/mate/skills/${encodeURIComponent(id)}`)
 
+/**
+ * D1 技能包导入（`POST /mate/skills/import`，multipart/form-data）。
+ *
+ * 包格式 v1：只接受 `.zip`（≤20 MiB），根目录或唯一一层目录内有 `SKILL.md`，且**只有它**
+ * （额外的脚本/资源直接拒绝，避免「导入成功但附件没落盘」的静默丢失）。解析/校验失败 →
+ * 40001 `definition_invalid` 且零字节落盘；同名 id → 40901 `skill_exists`（不覆盖）。
+ */
+export const importSkillPackage = (file: File): Promise<SkillWriteResp> => {
+  const form = new FormData()
+  form.append('file', file, file.name)
+  return http.post<SkillWriteResp>('/mate/skills/import', form)
+}
+
 /** M2 写面：新建一个 MCP server 定义（闸门比 skill 多：transport/绝对路径/引用词法…）。 */
 export const createMcpServer = (body: CapabilityWriteBody): Promise<McpWriteResp> =>
   http.post<McpWriteResp>('/mate/mcps', body)

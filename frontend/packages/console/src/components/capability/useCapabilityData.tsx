@@ -1,7 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Button, Popconfirm, Tag, Tooltip } from 'antd'
-import { ExperimentOutlined, FileSearchOutlined, FileTextOutlined } from '@ant-design/icons'
-import { tokens } from '@ark-mate/ui'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMate } from '../../store'
 import {
   callMcpTool,
@@ -9,16 +6,12 @@ import {
   createSkill,
   deleteMcpServer,
   deleteSkill,
-  getMcpPrompt,
-  getSkillMaterialization,
-  listMcpPrompts,
+  importSkillPackage,
   listLibrary,
-  listMcpResources,
   listMcpServers,
   listSkills,
   listTools,
   probeMcpServer,
-  readMcpResource,
   setSkillEnabled,
   toErrorMessage,
   updateMcpServer,
@@ -27,39 +20,54 @@ import {
 import type {
   CapabilityWriteBody,
   LibraryItem,
-  McpPrompt,
-  McpPromptsResult,
-  McpPromptGetResult,
-  McpResourceReadResult,
-  McpResourcesResult,
   McpServer,
   McpToolCallResult,
+  McpWriteResp,
   Skill,
-  SkillMaterializationResp,
+  SkillWriteResp,
   Tool,
 } from '@ark-mate/types'
 import {
-  fmtProbeAt,
+  isEmptyPatch,
+  mcpCreateBody,
+  mcpFormPatch,
+  mcpFormValues,
   mcpRows,
+  mcpTransportView,
   probeSummary,
+  skillCreateBody,
+  skillFormPatch,
+  skillFormValues,
   writeErrorText,
+  type McpFormValues,
+  type McpImportOutcome,
+  type McpJsonServer,
   type McpRow,
+  type SkillFormValues,
 } from '../../console/capabilityView'
-import { type CapabilityEditState, smallTag, schemaSkeleton } from './shared'
+import { type CapabilityEditState } from './shared'
+
 /**
- * 能力数据的唯一加载 / 变更入口（设计 §模块划分：把 1468 行的能力页拆成「数据 + 三张面板」）。
+ * 能力数据的唯一加载 / 变更入口（设计 §模块划分：把能力页拆成「数据 + 面板」）。
  *
  * 按 scope 只拉本页要用的数据源，避免「打开技能页先发 5 个请求」。
  * 契约零改动：这里调的仍是被拆页原有的那些 REST 接口。
+ *
+ * 2026-10-18 的两页改造把「写面」从原文 JSON 编辑器搬进了表单，但**写面的语义没变**：
+ * 编辑只提交变化键（`capabilityView.ts` 的 patch 纯函数给出），成功后重新拉投影、
+ * 不用本地乐观状态覆盖服务端。原文 JSON 仍保留为「高级」入口（未知键/精确 null/[] 的出路）。
  */
 export type CapScope = 'overview' | 'skills' | 'connectors'
 
+/** 详情弹窗的目标与当前 tab（tab 的取值由两个面板各自解释）。 */
+export interface CapabilityDetailState {
+  kind: 'skill' | 'mcp'
+  id: string
+  tab: string
+}
+
 export function useCapabilityData(scope: CapScope) {
   const showToast = useMate((s) => s.showToast)
-  // v19：这里原来按 agent 拉一份「某 Agent 视角的统一能力目录」（`GET /agents/:id/capabilities`），
-  // 于是页面上多了一个 Agent 下拉 + 一整套候选底座/白名单投影。agent 并入构建期固定的 runtime 之后
-  // 那张读面撤掉了，能力面直接读**无参**的既有读面（library / skills / mcps / tools）——
-  // 少了一层"按谁裁剪"的中间态，下面几个 load* 各自的事实源都没变。
   const [skills, setSkills] = useState<Skill[]>([])
   const [mcps, setMcps] = useState<McpServer[]>([])
   const [tools, setTools] = useState<Tool[]>([])
@@ -67,37 +75,25 @@ export function useCapabilityData(scope: CapScope) {
   const [library, setLibrary] = useState<LibraryItem[]>([])
   const [libKind, setLibKind] = useState<string>('')
   const [libQ, setLibQ] = useState<string>('')
-  // M2-2/M2-3 定义写面：一个编辑器模态同时服务 skill 与 MCP（都是原文 JSON 对象）。
+  const [busy, setBusy] = useState<string | null>(null)
+  const [probing, setProbing] = useState<string | null>(null)
+  const [toggleBusy, setToggleBusy] = useState<string | null>(null)
+  const [delBusy, setDelBusy] = useState<string | null>(null)
+
+  // ——— 弹窗状态（两个页面共用一套编排，避免「哪一页能开哪个弹窗」变成两份状态机） ———
+  const [detail, setDetail] = useState<CapabilityDetailState | null>(null)
+  const [skillForm, setSkillForm] = useState<{ skill: Skill | null } | null>(null)
+  const [mcpForm, setMcpForm] = useState<{ server: McpServer | null } | null>(null)
+  const [formBusy, setFormBusy] = useState(false)
+  const [formErr, setFormErr] = useState<string | null>(null)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+
+  // 原文 JSON 编辑器（高级入口；skill 与 MCP 共用）。
   const [edit, setEdit] = useState<CapabilityEditState | null>(null)
   const [editBusy, setEditBusy] = useState(false)
   const [editErr, setEditErr] = useState<string | null>(null)
-  const [delBusy, setDelBusy] = useState<string | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
-  const [probing, setProbing] = useState<string | null>(null)
-  // §13.4 S4 启停：按 skill id 记忙碌（同名行多个时只转当前那个）。
-  const [toggleBusy, setToggleBusy] = useState<string | null>(null)
-  // §13.4 S2 体检弹窗：目标 + 结果/错误（只报不修，故无「修复」按钮，只有再体检）。
-  const [matTarget, setMatTarget] = useState<{ id: string; name: string } | null>(null)
-  const [mat, setMat] = useState<SkillMaterializationResp | null>(null)
-  const [matBusy, setMatBusy] = useState(false)
-  const [matErr, setMatErr] = useState<string | null>(null)
-  // B1 工具调用：目标（server+tool）+ 入参文本 + 结果/错误。
-  const [callTarget, setCallTarget] = useState<{ server: string; tool: string } | null>(null)
-  const [callArgs, setCallArgs] = useState('{}')
-  const [callBusy, setCallBusy] = useState(false)
-  const [callResult, setCallResult] = useState<McpToolCallResult | null>(null)
-  const [callErr, setCallErr] = useState<string | null>(null)
-
-  // B2 资源/提示词弹窗：按需 live 拉取（打开时加载，不缓存）。
-  const [liveServer, setLiveServer] = useState<{ id: string; name: string } | null>(null)
-  const [liveTab, setLiveTab] = useState<'resources' | 'prompts'>('resources')
-  const [liveBusy, setLiveBusy] = useState(false)
-  const [liveErr, setLiveErr] = useState<string | null>(null)
-  const [resResult, setResResult] = useState<McpResourcesResult | null>(null)
-  const [resRead, setResRead] = useState<{ uri: string; data?: McpResourceReadResult; err?: string } | null>(null)
-  const [promptResult, setPromptResult] = useState<McpPromptsResult | null>(null)
-  const [promptArgs, setPromptArgs] = useState<Record<string, string>>({})
-  const [promptGot, setPromptGot] = useState<{ name: string; data?: McpPromptGetResult; err?: string } | null>(null)
 
   const loadSkills = async (): Promise<void> => {
     try {
@@ -113,13 +109,6 @@ export function useCapabilityData(scope: CapScope) {
       showToast(toErrorMessage(err))
     }
   }
-  const loadLibrary = async (kind = libKind, q = libQ): Promise<void> => {
-    try {
-      setLibrary(await listLibrary({ kind: kind || undefined, q: q || undefined }))
-    } catch (err) {
-      showToast(writeErrorText(err))
-    }
-  }
   const loadTools = async (): Promise<void> => {
     try {
       setTools(await listTools())
@@ -127,10 +116,15 @@ export function useCapabilityData(scope: CapScope) {
       showToast(toErrorMessage(err))
     }
   }
-  /**
-   * 按页加载（设计 §关键逻辑）：只拉本页真正要用的数据源。
-   *   总览 = Library + MCP 行；技能 = skills；连接器 = mcp + tools。
-   */
+  const loadLibrary = async (kind = libKind, q = libQ): Promise<void> => {
+    try {
+      setLibrary(await listLibrary({ kind: kind || undefined, q: q || undefined }))
+    } catch (err) {
+      showToast(writeErrorText(err))
+    }
+  }
+
+  /** 按页加载：只拉本页真正要用的数据源。 */
   const loadAll = useCallback(async (): Promise<void> => {
     if (scope === 'skills') {
       await loadSkills()
@@ -165,98 +159,119 @@ export function useCapabilityData(scope: CapScope) {
   // MCP 行模型（合并定义级开关、逐 runtime 可达性与全局探测状态）。
   const globalMcpRows = useMemo(() => mcpRows(mcps), [mcps])
 
-  const doProbe = async (id: string): Promise<void> => {
-    setProbing(id)
+  // ——— 详情 ———
+  const openDetail = (kind: 'skill' | 'mcp', id: string, tab = 'overview'): void => {
+    setDetail({ kind, id, tab })
+  }
+  const closeDetail = (): void => setDetail(null)
+  const setDetailTab = (tab: string): void => setDetail((cur) => (cur ? { ...cur, tab } : cur))
+
+  // ——— 写面：表单 ———
+  const openSkillForm = (skill: Skill | null = null): void => {
+    setFormErr(null)
+    setSkillForm({ skill })
+  }
+  const closeSkillForm = (): void => setSkillForm(null)
+  const openMcpForm = (server: McpServer | null = null): void => {
+    setFormErr(null)
+    setMcpForm({ server })
+  }
+  const closeMcpForm = (): void => setMcpForm(null)
+
+  // 原文 JSON（高级入口）：把**当前表单值**带过去，避免「切到高级就丢掉刚填的内容」。
+  // 编辑态刻意只预填已知键：未知键不会被提交，也就不会因为没看见而被删掉。
+  const openRawEditor = (kind: 'skill' | 'mcp', body: CapabilityWriteBody, id: string, created: boolean): void => {
+    setFormErr(null)
+    setEditErr(null)
+    setSkillForm(null)
+    setMcpForm(null)
+    setEdit({ kind, id, created, text: JSON.stringify(body, null, 2) })
+  }
+
+  const openSkillAdvanced = (values: SkillFormValues): void => {
+    openRawEditor('skill', skillCreateBody(values), values.id, skillForm?.skill === null)
+  }
+
+  const openMcpAdvanced = (values: McpFormValues): void => {
+    // 编辑态不预填 env/headers（值不可读；顶层键整体替换会删掉已存引用）。
+    const body = mcpCreateBody(values)
+    if (mcpForm?.server) {
+      delete body.env
+      delete body.secret_env
+      delete body.headers
+      delete body.secret_headers
+      // 用户若在表单里改过传输，高级入口必须带着**改后的**值；没改则保留原值（旧 http 不被改型）。
+      body.transport =
+        mcpTransportView(values.originalTransport) === values.transport
+          ? values.originalTransport || values.transport
+          : values.transport
+    }
+    openRawEditor('mcp', body, values.id, mcpForm?.server === null)
+  }
+
+  const submitSkillForm = async (values: SkillFormValues): Promise<void> => {
+    if (!skillForm) return
+    const created = skillForm.skill === null
+    const body = created
+      ? skillCreateBody(values)
+      : skillFormPatch(skillFormValues(skillForm.skill as Skill), values)
+    if (!created && isEmptyPatch(body)) {
+      showToast('没有改动')
+      setSkillForm(null)
+      return
+    }
+    setFormBusy(true)
+    setFormErr(null)
     try {
-      const res = await probeMcpServer(id)
-      showToast(`探测 ${id}：${probeSummary(res)}`)
-      // 探测会改写 Tool 目录与 MCP 状态 → 刷新全局表。
-      await Promise.all([loadTools(), loadMcps()])
+      const res: SkillWriteResp = created
+        ? await createSkill(body)
+        : await updateSkill((skillForm.skill as Skill).id, body)
+      const warn = res.warnings?.length ? `（${res.warnings.length} 条告警）` : ''
+      const errs = res.materialize_errors?.length ? `；物化重校失败：${res.materialize_errors.join('；')}` : ''
+      showToast(
+        `${created ? '已新建' : '已保存'} skill ${res.id}${warn}（投放 ${res.written} / 撤回 ${res.removed}）${errs}`,
+      )
+      setSkillForm(null)
+      await loadAll()
     } catch (err) {
-      showToast(`探测 ${id} 失败：${toErrorMessage(err)}`)
-      void loadMcps() // 失败原因落 last_probe_error，刷新可读回
+      // 错误留在弹窗里：用户刚填的内容还在，改一处就能重试。
+      setFormErr(writeErrorText(err))
     } finally {
-      setProbing(null)
+      setFormBusy(false)
     }
   }
 
-  const probeButton = (id: string, probeable: boolean): ReactNode => (
-    <Tooltip title={probeable ? '拉取该 server 的 tools/list 并写入 Tool 目录' : '该传输无法探测（缺少端点声明）'}>
-      <Button
-        size="small"
-        icon={<ExperimentOutlined />}
-        disabled={!probeable}
-        loading={probing === id}
-        onClick={() => void doProbe(id)}
-      >
-        探测
-      </Button>
-    </Tooltip>
-  )
-
-  // ——— M2 定义写面（POST/PUT/DELETE /skills|/mcps） ———
-  //
-  // 编辑器收的是**原文 JSON 对象**而不是结构化表单：`PUT` 的语义是「只改出现过的键」，而表单
-  // 分不清「没填」与「填了空串」、也表达不了 `null` 删键。给用户一个能表达全部语义的输入框，
-  // 比给一组看起来很友好、但改不了未知键的表单诚实。
-
-  /** 新建模板：只放最小可用字段（其余键由用户按需补；`id` 必填）。 */
-  const newTemplate = (kind: 'skill' | 'mcp'): CapabilityWriteBody =>
-    kind === 'skill'
-      ? { id: '', name: '', description: '', body: '# 技能名\n\n说明与用法。', runtimes: [] }
-      : { id: '', name: '', transport: 'stdio', command: '/usr/local/bin/npx', args: [] }
-
-  const openCreate = (kind: 'skill' | 'mcp'): void => {
-    setEditErr(null)
-    setEdit({ kind, id: '', text: JSON.stringify(newTemplate(kind), null, 2), created: true })
-  }
-
-  /** 编辑预填：来自**读模型**（skill 的已知键齐全；MCP 的 env/密钥引用后端从不回读，故不预填）。 */
-  const openEditSkill = (sk: Skill): void => {
-    setEditErr(null)
-    setEdit({
-      kind: 'skill',
-      id: sk.id,
-      created: false,
-      text: JSON.stringify(
-        {
-          id: sk.id,
-          name: sk.name,
-          description: sk.description ?? '',
-          body: sk.body ?? '',
-          runtimes: sk.runtimes ?? [],
-          scope: sk.scope ?? 'global',
-          enabled: sk.enabled ?? true,
-        },
-        null,
-        2,
-      ),
-    })
-  }
-
-  const openEditMcp = (m: McpServer): void => {
-    setEditErr(null)
-    const base: CapabilityWriteBody = {
-      id: m.id,
-      name: m.name ?? '',
-      transport: m.transport,
+  const submitMcpForm = async (values: McpFormValues): Promise<void> => {
+    if (!mcpForm) return
+    const created = mcpForm.server === null
+    const body = created
+      ? mcpCreateBody(values)
+      : mcpFormPatch(mcpFormValues(mcpForm.server as McpServer), values)
+    if (!created && isEmptyPatch(body)) {
+      showToast('没有改动')
+      setMcpForm(null)
+      return
     }
-    if (m.transport === 'stdio') {
-      base.command = m.command ?? ''
-      base.args = m.args ?? []
-    } else {
-      base.url = m.url ?? ''
+    setFormBusy(true)
+    setFormErr(null)
+    try {
+      const res: McpWriteResp = created
+        ? await createMcpServer(body)
+        : await updateMcpServer((mcpForm.server as McpServer).id, body)
+      const unresolved = res.unresolved_secret_keys?.length
+        ? `；密钥引用当前解析不出：${res.unresolved_secret_keys.join('、')}`
+        : ''
+      showToast(`${created ? '已新建' : '已保存'} MCP server ${res.id}${unresolved}；保存后请重新「探测」`)
+      setMcpForm(null)
+      await loadAll()
+    } catch (err) {
+      setFormErr(writeErrorText(err))
+    } finally {
+      setFormBusy(false)
     }
-    setEdit({ kind: 'mcp', id: m.id, created: false, text: JSON.stringify(base, null, 2) })
   }
 
-  /**
-   * 解析编辑器文本 → 请求体。
-   *
-   * 必须是 JSON **对象**（数组/标量在语义上没有意义，前端先拦一次，报错文案与后端一致）；
-   * 覆盖写时**去掉 id**：路径上已经是那个 id，body 里再带一份只会制造「两处 id 不一致」的
-   * 40000——面板不该凭空造出这个错误。
-   */
+  /** 原文 JSON 提交（高级入口）：语义与旧编辑器完全一致（只改出现过的键、null 删键）。 */
   const parseEditBody = (): CapabilityWriteBody | null => {
     if (!edit) return null
     let parsed: unknown
@@ -297,12 +312,41 @@ export function useCapabilityData(scope: CapScope) {
         showToast(`${res.created ? '已新建' : '已覆盖写'} MCP server ${res.id}${unresolved}`)
       }
       setEdit(null)
-      await Promise.all([loadSkills(), loadMcps(), loadTools(), loadLibrary()])
+      await loadAll()
     } catch (err) {
-      // 错误留在模态里（不关窗）：用户刚写的内容还在，改一处就能重试。
       setEditErr(writeErrorText(err))
     } finally {
       setEditBusy(false)
+    }
+  }
+
+  // ——— 启停 / 删除 / 探测 ———
+  const doToggleSkill = async (s: Skill, next: boolean): Promise<void> => {
+    setToggleBusy(s.id)
+    try {
+      const res = await setSkillEnabled(s.id, next)
+      const errs = res.materialize_errors?.length ? `；重校失败：${res.materialize_errors.join('；')}` : ''
+      const action = res.next_action ? ` · ${res.next_action}` : ''
+      showToast(`${next ? '已启用' : '已禁用'} ${s.id}（写入 ${res.written} / 撤回 ${res.removed}）${errs}${action}`)
+      await loadSkills()
+    } catch (err) {
+      showToast(`切换 ${s.id} 失败：${toErrorMessage(err)}`)
+    } finally {
+      setToggleBusy(null)
+    }
+  }
+
+  // MCP 没有单独的启停路由：`PUT` 只改出现过的键，`{enabled}` 就是最小的启停写面。
+  const doToggleMcp = async (m: McpRow, next: boolean): Promise<void> => {
+    setToggleBusy(m.id)
+    try {
+      await updateMcpServer(m.id, { enabled: next })
+      showToast(`${next ? '已启用' : '已停用'} ${m.id}${next ? '' : '（工具不再进入模型上下文，配置与密钥保留）'}`)
+      await loadMcps()
+    } catch (err) {
+      showToast(`切换 ${m.id} 失败：${writeErrorText(err)}`)
+    } finally {
+      setToggleBusy(null)
     }
   }
 
@@ -320,7 +364,8 @@ export function useCapabilityData(scope: CapScope) {
             : `MCP server ${id} 本就不存在（已同步列表）`,
         )
       }
-      await Promise.all([loadSkills(), loadMcps(), loadTools(), loadLibrary()])
+      if (detail && detail.kind === kind && detail.id === id) setDetail(null)
+      await loadAll()
     } catch (err) {
       showToast(`删除 ${id} 失败：${writeErrorText(err)}`)
     } finally {
@@ -328,299 +373,141 @@ export function useCapabilityData(scope: CapScope) {
     }
   }
 
-  // doToggleSkill §13.4 S4：写回定义文件的 enabled 并立刻重校物化。
-  // 定义文件写成功即算成功；物化失败在 materialize_errors 里回（不回滚定义——禁用是安全方向）。
-  const doToggleSkill = async (s: Skill, next: boolean): Promise<void> => {
-    setToggleBusy(s.id)
+  const doProbe = async (id: string): Promise<void> => {
+    setProbing(id)
     try {
-      const res = await setSkillEnabled(s.id, next)
-      const errs = res.materialize_errors?.length ? `；重校失败：${res.materialize_errors.join('；')}` : ''
-      const action = res.next_action ? ` · ${res.next_action}` : ''
-      showToast(`${next ? '已启用' : '已禁用'} ${s.id}（写入 ${res.written} / 撤回 ${res.removed}）${errs}${action}`)
-      await loadSkills()
+      const res = await probeMcpServer(id)
+      showToast(`探测 ${id}：${probeSummary(res)}`)
+      await Promise.all([loadTools(), loadMcps()])
     } catch (err) {
-      showToast(`切换 ${s.id} 失败：${toErrorMessage(err)}`)
+      showToast(`探测 ${id} 失败：${toErrorMessage(err)}`)
+      void loadMcps() // 失败原因落 last_probe_error，刷新可读回
     } finally {
-      setToggleBusy(null)
+      setProbing(null)
     }
   }
 
-  // openMaterialization §13.4 S2：拉一次物化体检（只读，不改磁盘、不触发重校）。
-  const openMaterialization = async (id: string, name: string): Promise<void> => {
-    setMatTarget({ id, name })
-    setMat(null)
-    setMatErr(null)
-    setMatBusy(true)
-    try {
-      setMat(await getSkillMaterialization(id))
-    } catch (err) {
-      setMatErr(toErrorMessage(err))
-    } finally {
-      setMatBusy(false)
-    }
+  // ——— 技能包上传（D1）与 MCP JSON 导入 ———
+  const doImportSkillPackage = async (file: File): Promise<SkillWriteResp> => {
+    const res = await importSkillPackage(file)
+    const warn = res.warnings?.length ? `（${res.warnings.length} 条告警）` : ''
+    const errs = res.materialize_errors?.length ? `；物化重校失败：${res.materialize_errors.join('；')}` : ''
+    showToast(`${res.created ? '已安装' : '已覆盖'} skill ${res.id}${warn}（投放 ${res.written} / 撤回 ${res.removed}）${errs}`)
+    await loadAll()
+    return res
   }
 
-  const materializationButton = (s: Skill): ReactNode => (
-    <Tooltip title="看每个物化目标的摘要一致性与归属（只报不修）">
-      <Button size="small" icon={<FileSearchOutlined />} onClick={() => void openMaterialization(s.id, s.name)}>
-        体检
-      </Button>
-    </Tooltip>
-  )
-
-  // openCall 打开调用弹窗（默认参数取工具 schema 的 properties 骨架，纯便利、非校验）。
-  const openCall = (server: string, tool: Tool): void => {
-    setCallTarget({ server, tool: tool.name })
-    setCallResult(null)
-    setCallErr(null)
-    setCallArgs(schemaSkeleton(tool.schema))
-  }
-
-  const doCall = async (): Promise<void> => {
-    if (!callTarget) return
-    let args: unknown
-    try {
-      args = callArgs.trim() ? JSON.parse(callArgs) : undefined
-    } catch (err) {
-      setCallErr(`arguments 不是合法 JSON：${toErrorMessage(err)}`)
-      return
-    }
-    setCallBusy(true)
-    setCallErr(null)
-    try {
-      const res = await callMcpTool(callTarget.server, callTarget.tool, args === undefined ? {} : { arguments: args })
-      setCallResult(res)
-      showToast(res.is_error ? `${callTarget.tool} 返回工具级失败（is_error=true）` : `${callTarget.tool} 调用完成（${res.duration_ms}ms）`)
-    } catch (err) {
-      setCallResult(null)
-      setCallErr(toErrorMessage(err))
-    } finally {
-      setCallBusy(false)
-    }
-  }
-
-  // openLive 打开资源/提示词弹窗（按当前 tab 立即 live 拉取）。
-  const openLive = (m: McpRow, tab: 'resources' | 'prompts'): void => {
-    setLiveServer({ id: m.id, name: m.name })
-    setLiveTab(tab)
-    setLiveErr(null)
-    setResResult(null)
-    setResRead(null)
-    setPromptResult(null)
-    setPromptGot(null)
-    setPromptArgs({})
-    void loadLive(m.id, tab)
-  }
-
-  const loadLive = async (id: string, tab: 'resources' | 'prompts'): Promise<void> => {
-    setLiveBusy(true)
-    setLiveErr(null)
-    try {
-      if (tab === 'resources') {
-        setResResult(await listMcpResources(id))
-      } else {
-        setPromptResult(await listMcpPrompts(id))
+  /**
+   * MCP JSON 批量导入：不新增后端批量接口，逐条 `POST /mcps`。
+   *
+   * 同名跳过（不覆盖），任一条失败不阻断其他条——逐条汇总返回给弹窗（批量操作要可复核，
+   * 只 toast 会丢掉「哪几条没成功」）。
+   */
+  const doImportMcpServers = async (servers: McpJsonServer[]): Promise<McpImportOutcome[]> => {
+    const existing = new Set(mcps.map((m) => m.id))
+    const out: McpImportOutcome[] = []
+    for (const s of servers) {
+      if (existing.has(s.id)) {
+        out.push({ id: s.id, status: 'skipped', message: '同名 server 已存在，未覆盖' })
+        continue
       }
-    } catch (err) {
-      setLiveErr(toErrorMessage(err))
-    } finally {
-      setLiveBusy(false)
+      try {
+        await createMcpServer(s.body)
+        out.push({ id: s.id, status: 'created', message: '已创建' })
+      } catch (err) {
+        out.push({ id: s.id, status: 'failed', message: writeErrorText(err) })
+      }
     }
+    await loadAll()
+    return out
   }
 
-  const doReadResource = async (id: string, uri: string): Promise<void> => {
-    setResRead({ uri })
+  // ——— 详情里的工具试调用（弹窗内部用；不再占一个全局弹窗） ———
+  const doCallTool = async (
+    server: string,
+    tool: string,
+    argsText: string,
+  ): Promise<{ result?: McpToolCallResult; err?: string }> => {
+    let args: unknown
+    const text = argsText.trim()
+    if (text) {
+      try {
+        args = JSON.parse(text)
+      } catch (err) {
+        return { err: `arguments 不是合法 JSON：${toErrorMessage(err)}` }
+      }
+    }
     try {
-      setResRead({ uri, data: await readMcpResource(id, uri) })
+      const res = await callMcpTool(server, tool, args === undefined ? {} : { arguments: args })
+      return { result: res }
     } catch (err) {
-      setResRead({ uri, err: toErrorMessage(err) })
+      return { err: toErrorMessage(err) }
     }
   }
 
-  const doGetPrompt = async (id: string, p: McpPrompt): Promise<void> => {
-    setPromptGot({ name: p.name })
-    try {
-      setPromptGot({ name: p.name, data: await getMcpPrompt(id, p.name, promptArgs) })
-    } catch (err) {
-      setPromptGot({ name: p.name, err: toErrorMessage(err) })
-    }
-  }
-
-  // liveButton：MCP server 行的「资源/提示词」入口（B3 起 sse 同样可用）。
-  const liveButton = (m: McpRow): ReactNode => (
-    <Tooltip title="实时拉取该 server 的 resources/prompts（不落盘）">
-      <Button size="small" icon={<FileTextOutlined />} onClick={() => openLive(m, 'resources')}>
-        资源/提示词
-      </Button>
-    </Tooltip>
-  )
-
-  const probeStatus = (row: { toolCount: number; lastProbeAt?: string; lastProbeError?: string }): ReactNode =>
-    row.lastProbeError ? (
-      <Tooltip title={row.lastProbeError}>
-        <Tag color="red" style={{ marginInlineEnd: 0, fontSize: 10.5 }}>
-          探测失败
-        </Tag>
-      </Tooltip>
-    ) : row.lastProbeAt ? (
-      <Tooltip title={`最近探测 ${fmtProbeAt(row.lastProbeAt)}`}>
-        <Tag color="green" style={{ marginInlineEnd: 0, fontSize: 10.5 }}>
-          {row.toolCount} 工具
-        </Tag>
-      </Tooltip>
-    ) : (
-      <Tag style={{ marginInlineEnd: 0, fontSize: 10.5, color: tokens.textPlaceholder }}>
-        未探测
-      </Tag>
-    )
-
-  // secretTags §13.3 M6：只展示**键名**（值后端从不读回）；未就绪的引用单独标红——
-  // 「绑了但解析不了」以前只能在会话启动日志里撞见，现在列表就能看出来。
-  const secretTags = (m: McpRow): ReactNode =>
-    m.secretKeys.length === 0 && m.unresolvedSecretKeys.length === 0 ? null : (
-      <>
-        {m.secretKeys.length > 0 && (
-          <Tooltip title={`密钥型绑定（值只在注入时解析，界面不回）：${m.secretKeys.join('、')}`}>
-            <Tag color="geekblue" style={smallTag}>
-              密钥 {m.secretKeys.length}
-            </Tag>
-          </Tooltip>
-        )}
-        {m.unresolvedSecretKeys.length > 0 && (
-          <Tooltip
-            title={`引用已绑定但当前解析不了：${m.unresolvedSecretKeys.join('、')}。检查这个引用在库里有没有值（store: 引用看 mcp_secrets 那一行，env: 看进程环境变量）——注入时解析不了这个 server 会被跳过。`}
-          >
-            <Tag color="red" style={smallTag}>
-              密钥未就绪 {m.unresolvedSecretKeys.length}
-            </Tag>
-          </Tooltip>
-        )}
-      </>
-    )
-
-  // ——— Library 卡片（M2-4） ———
-  //
-  // 这是「这台机器上现在有什么能力」的**唯一视图**（四类同构）。此处刻意**不**给「整体可用吗」
-  // 的合并结论：逐 runtime 报可达性 + 人话原因，用户自己决定。展示顺序按 kind 分组，
-  // 因为同一个 kind 内的条目才互相可比。
-  const writeButtons = (kind: 'skill' | 'mcp', id: string, name: string, onEdit: () => void): ReactNode => (
-    <>
-      <Tooltip title={`编辑 ${name} 的定义（只改你写进去的键，其余原样保留）`}>
-        <Button size="small" onClick={onEdit}>
-          编辑
-        </Button>
-      </Tooltip>
-      <Popconfirm
-        title={`删除 ${name}？`}
-        description={
-          kind === 'skill'
-            ? '定义文件会被删除，已投放的副本会被撤回。此操作不可撤销（正文可先复制走）。'
-            : '定义文件会被删除，归属它的工具条目会一并摘除。此操作不可撤销。'
-        }
-        okText="删除"
-        okButtonProps={{ danger: true }}
-        cancelText="取消"
-        onConfirm={() => void doDelete(kind, id)}
-      >
-        <Button size="small" danger loading={delBusy === id}>
-          删除
-        </Button>
-      </Popconfirm>
-    </>
-  )
   return {
+    // 数据
     skills,
-    setSkills,
     mcps,
-    setMcps,
     tools,
-    setTools,
     library,
-    setLibrary,
     libKind,
     setLibKind,
     libQ,
     setLibQ,
+    busy,
+    globalMcpRows,
+    // 加载
+    loadSkills,
+    loadMcps,
+    loadTools,
+    loadLibrary,
+    loadAll,
+    refresh,
+    // 详情
+    detail,
+    openDetail,
+    closeDetail,
+    setDetailTab,
+    // 表单
+    skillForm,
+    openSkillForm,
+    closeSkillForm,
+    mcpForm,
+    openMcpForm,
+    closeMcpForm,
+    formBusy,
+    formErr,
+    submitSkillForm,
+    submitMcpForm,
+    openSkillAdvanced,
+    openMcpAdvanced,
+    // 原文 JSON（高级）
     edit,
     setEdit,
     editBusy,
-    setEditBusy,
     editErr,
-    setEditErr,
-    delBusy,
-    setDelBusy,
-    busy,
-    setBusy,
-    probing,
-    setProbing,
-    toggleBusy,
-    setToggleBusy,
-    matTarget,
-    setMatTarget,
-    mat,
-    setMat,
-    matBusy,
-    setMatBusy,
-    matErr,
-    setMatErr,
-    callTarget,
-    setCallTarget,
-    callArgs,
-    setCallArgs,
-    callBusy,
-    setCallBusy,
-    callResult,
-    setCallResult,
-    callErr,
-    setCallErr,
-    liveServer,
-    setLiveServer,
-    liveTab,
-    setLiveTab,
-    liveBusy,
-    setLiveBusy,
-    liveErr,
-    setLiveErr,
-    resResult,
-    setResResult,
-    resRead,
-    setResRead,
-    promptResult,
-    setPromptResult,
-    promptArgs,
-    setPromptArgs,
-    promptGot,
-    setPromptGot,
-    showToast,
-    loadSkills,
-    loadMcps,
-    loadLibrary,
-    loadTools,
-    loadAll,
-    refresh,
-    globalMcpRows,
-    doProbe,
-    probeButton,
-    newTemplate,
-    openCreate,
-    openEditSkill,
-    openEditMcp,
-    parseEditBody,
     submitEdit,
-    doDelete,
+    // 创建入口
+    chatOpen,
+    setChatOpen,
+    uploadOpen,
+    setUploadOpen,
+    importOpen,
+    setImportOpen,
+    // 动作
+    probing,
+    doProbe,
+    toggleBusy,
     doToggleSkill,
-    openMaterialization,
-    materializationButton,
-    openCall,
-    doCall,
-    openLive,
-    loadLive,
-    doReadResource,
-    doGetPrompt,
-    liveButton,
-    probeStatus,
-    secretTags,
-    writeButtons,
+    doToggleMcp,
+    delBusy,
+    doDelete,
+    doImportSkillPackage,
+    doImportMcpServers,
+    doCallTool,
+    // 展示
+    showToast,
   }
 }
 

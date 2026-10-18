@@ -96,6 +96,17 @@ export function StartPanel() {
     setPreferredWorkspace(null)
   }, [preferredWorkspaceId, setPreferredWorkspace])
 
+  // 扩展 · 技能页「通过对话创建」把提示词放进 `pendingPrompt`，这里消费并清空（D2）。
+  // 与工作空间预选同一条纪律：它是一次性意图，读了不清会让下一次打开新建面板时
+  // 被上一轮的提示词顶掉用户刚输入的内容。
+  const pendingPrompt = useMate((s) => s.pendingPrompt)
+  const consumePendingPrompt = useMate((s) => s.consumePendingPrompt)
+  useEffect(() => {
+    if (!pendingPrompt) return
+    setDraft(pendingPrompt)
+    consumePendingPrompt()
+  }, [pendingPrompt, consumePendingPrompt])
+
   // 默认值：登记表到达后（首帧它可能还在路上）预选最近使用的那一条。
   useEffect(() => {
     if (workspacePicked) return

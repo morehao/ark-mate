@@ -14,6 +14,7 @@
     "smoke:e2e": "node scripts/smoke-e2e.mjs",
     "smoke:e2e:live": "node scripts/e2e-live-run.mjs",
     "test:contract": "node --test \"packages/desktop-contract/tests/**/*.test.ts\"",
+    "test:console": "node --test \"packages/console/tests/**/*.test.ts\"",
     "ui:accept": "node scripts/web-ui-acceptance.mjs",
     "ui:accept:desktop": "node scripts/desktop-ui-acceptance.mjs",
     "smoke:desktop": "node scripts/desktop-runtime-smoke.mjs",

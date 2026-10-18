@@ -1,375 +1,266 @@
-import { Alert, Button, Empty, Input, Modal, Space, Spin, Tabs, Tag, Tooltip } from 'antd'
-import { PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import { useEffect, useMemo, useState } from 'react'
+import { Button, Input, Popconfirm, Space, Switch, Tag, Tooltip } from 'antd'
+import { SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
-import { toolSourceLabel } from '../../console/capabilityView'
-import { SOURCE_COLOR, TRANSPORT_COLOR, mono, SectionHeader, SectionEmpty, Row, Card, promptText, CapabilityEditorModal } from './shared'
+import { fmtProbeAt, mcpConnState, mcpRowDescription } from '../../console/capabilityView'
+import { AddCapabilityMenu, type CapabilityAddAction } from './AddCapabilityMenu'
+import { McpDetailModal } from './McpDetailModal'
+import { McpEditorModal } from './McpEditorModal'
+import { McpJsonImportModal } from './McpJsonImportModal'
+import {
+  CapabilityEditorModal,
+  CapabilityEmpty,
+  CapabilityRow,
+  SectionHeader,
+  TransportTag,
+  mono,
+  smallTag,
+} from './shared'
 import { useCapabilityData } from './useCapabilityData'
 
-/** MCP server 与它们承载的工具：传输、密钥引用（只显示键名）、live 探测与 tools/call 试调——定义来自 ~/.ark-mate/capabilities/{mcp,tools}。 */
+/** 连接器页：MCP server、探测与启停；工具/资源/提示词全部收进详情弹窗。 */
 export function ConnectorsPanel() {
-  const {
-    mcps,
-    tools,
-    edit,
-    setEdit,
-    editBusy,
-    editErr,
-    busy,
-    callTarget,
-    setCallTarget,
-    callArgs,
-    setCallArgs,
-    callBusy,
-    callResult,
-    callErr,
-    liveServer,
-    setLiveServer,
-    liveTab,
-    setLiveTab,
-    liveBusy,
-    liveErr,
-    setLiveErr,
-    resResult,
-    resRead,
-    promptResult,
-    promptArgs,
-    setPromptArgs,
-    promptGot,
-    loadAll,
-    refresh,
-    globalMcpRows,
-    probeButton,
-    openCreate,
-    openEditMcp,
-    submitEdit,
-    openCall,
-    doCall,
-    loadLive,
-    doReadResource,
-    doGetPrompt,
-    liveButton,
-    probeStatus,
-    secretTags,
-    writeButtons,
-  } = useCapabilityData('connectors')
+  const d = useCapabilityData('connectors')
+  const [query, setQuery] = useState('')
+
+  useEffect(() => {
+    if (d.detail && !d.globalMcpRows.some((r) => r.id === d.detail!.id)) d.closeDetail()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d.detail, d.globalMcpRows])
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return d.globalMcpRows
+    return d.globalMcpRows.filter((row) => {
+      const toolNames = d.tools
+        .filter((t) => t.mcp_server === row.id)
+        .map((t) => t.name)
+        .join(' ')
+      return [row.id, row.name, row.endpoint, row.transport, row.lastProbeError ?? '', toolNames]
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    })
+  }, [d.globalMcpRows, d.tools, query])
+
+  const detailRow = d.detail?.kind === 'mcp' ? (d.globalMcpRows.find((r) => r.id === d.detail!.id) ?? null) : null
+  const detailServer = d.detail?.kind === 'mcp' ? (d.mcps.find((m) => m.id === d.detail!.id) ?? null) : null
+
+  const onAdd = (action: CapabilityAddAction): void => {
+    if (action === 'mcp-manual') d.openMcpForm(null)
+    if (action === 'mcp-json') d.setImportOpen(true)
+  }
 
   return (
     <PageContainer
       title="连接器"
-      description="MCP server 与它们承载的工具：传输、密钥引用（只显示键名）、live 探测与 tools/call 试调——定义来自 ~/.ark-mate/capabilities/{mcp,tools}"
+      description="管理 MCP server、探测工具，并查看它们承载的资源与提示词。"
       extra={
-        <Space>
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadAll()}>
-            刷新
-          </Button>
+        <Space size={8}>
+          <Input
+            size="small"
+            allowClear
+            prefix={<SearchOutlined style={{ color: tokens.textPlaceholder }} />}
+            style={{ width: 210 }}
+            placeholder="搜索 MCP / 工具"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <AddCapabilityMenu kind="mcp" onPick={onAdd} />
         </Space>
       }
     >
-      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {/* ——— 全局：MCP Servers（含 live 探测） ——— */}
-        <Card>
-          <SectionHeader
-            title="MCP Servers"
-            hint="注册表条目（§13.3 M1/M6：只回明文与密钥的**键名**，值与引用一律不读回）；「探测」= live tools/list 写入 Tool 目录；删除会**一并摘除归属它的工具条目**（留着等于让你看见一个调不通的能力）"
-            count={globalMcpRows.length}
-            loading={busy === 'mcps'}
-            onRefresh={() => refresh('mcps')}
-            extra={
-              <Button size="small" onClick={() => openCreate('mcp')}>
-                新建 MCP server
-              </Button>
+      <SectionHeader
+        title="MCP Servers"
+        hint="传输、密钥引用与 live 探测结果；工具与资源在服务详情里查看，密钥只显示键名。删除 server 会一并摘除归属它的工具。"
+        count={visible.length}
+        loading={d.busy === 'mcps'}
+        onRefresh={() => d.refresh('mcps')}
+      />
+      <div style={{ maxHeight: 560, overflowY: 'auto' }}>
+        {visible.length === 0 ? (
+          <CapabilityEmpty
+            text={
+              d.mcps.length === 0
+                ? '暂无 MCP server。新建一个后，探测结果会写入工具目录。'
+                : `没有找到匹配「${query}」的 MCP server。`
+            }
+            action={
+              d.mcps.length === 0 ? (
+                <AddCapabilityMenu kind="mcp" onPick={onAdd} label="添加 MCP server" type="primary" />
+              ) : undefined
             }
           />
-          <div style={{ maxHeight: 340, overflowY: 'auto' }}>
-            {globalMcpRows.length === 0 ? (
-              <SectionEmpty text="暂无 MCP server（~/.ark-mate/capabilities/mcp/*.json）" />
-            ) : (
-              globalMcpRows.map((m) => (
-                <Row key={m.id}>
-                  <b style={{ fontSize: 13, fontWeight: 600, minWidth: 110 }}>{m.name}</b>
-                  <Tag color={TRANSPORT_COLOR[m.transport] ?? 'default'} style={{ marginInlineEnd: 0, fontSize: 11 }}>
-                    {m.transport}
-                  </Tag>
-                  {secretTags(m)}
-                  {probeStatus(m)}
-                  <span style={{ flex: 1 }}>
-                    <span style={mono}>{m.endpoint}</span>
-                  </span>
-                  {writeButtons('mcp', m.id, m.name, () => {
-                    const full = mcps.find((x) => x.id === m.id)
-                    if (full) openEditMcp(full)
-                  })}
-                  {probeButton(m.id, m.probeable)}
-                  {liveButton(m)}
-                </Row>
-              ))
-            )}
-          </div>
-        </Card>
-        {/* ——— 全局：Tools ——— */}
-        <Card>
-          <SectionHeader
-            title="Tools"
-            hint="平台/静态 + MCP tools/list live 探测条目（带归属 server）"
-            count={tools.length}
-            loading={busy === 'tools'}
-            onRefresh={() => refresh('tools')}
-          />
-          <div style={{ maxHeight: 340, overflowY: 'auto' }}>
-            {tools.length === 0 ? (
-              <SectionEmpty text="暂无 tool（~/.ark-mate/capabilities/tools/*.json、代码注入或 MCP 探测）" />
-            ) : (
-              tools.map((t) => (
-                <Row key={t.name}>
-                  <span style={{ ...mono, fontWeight: 600, minWidth: 150 }}>{t.name}</span>
-                  <Tag color={SOURCE_COLOR[t.source] ?? 'default'} style={{ marginInlineEnd: 0, fontSize: 11 }}>
-                    {toolSourceLabel(t)}
-                  </Tag>
-                  <Tooltip title={t.schema ? JSON.stringify(t.schema) : undefined}>
-                    <span style={{ flex: 1, fontSize: 12, color: tokens.textSecondary }}>
-                      {t.description || (t.schema ? '（含参数 Schema）' : '')}
+        ) : (
+          visible.map((row) => {
+            const state = mcpConnState(row)
+            const desc = mcpRowDescription(row, state, row.lastProbeError)
+            const full = d.mcps.find((m) => m.id === row.id)
+            const descColor =
+              state.tone === 'error' ? tokens.error : state.tone === 'warning' ? tokens.warning : tokens.textSecondary
+            const unresolved = row.unresolvedSecretKeys.length > 0
+            return (
+              <CapabilityRow
+                key={row.id}
+                title={
+                  <>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => d.openDetail('mcp', row.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          d.openDetail('mcp', row.id)
+                        }
+                      }}
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: tokens.text,
+                        cursor: 'pointer',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        minWidth: 0,
+                      }}
+                    >
+                      {row.name}
                     </span>
-                  </Tooltip>
-                  {t.mcp_server && (
-                    <Tooltip title={`调用 ${t.mcp_server}.${t.name}（tools/call，独立会话）`}>
-                      <Button size="small" icon={<PlayCircleOutlined />} onClick={() => openCall(t.mcp_server!, t)}>
-                        调用
-                      </Button>
+                    <TransportTag transport={row.transport} />
+                    <Tooltip title={state.key === 'error' ? row.lastProbeError : undefined}>
+                      <Tag color={state.color} style={smallTag}>
+                        {state.label}
+                      </Tag>
                     </Tooltip>
-                  )}
-                </Row>
-              ))
-            )}
-          </div>
-        </Card>
-        <Modal
-          title={liveServer ? `${liveServer.name} · 资源与提示词` : '资源与提示词'}
-          open={liveServer !== null}
-          onCancel={() => setLiveServer(null)}
-          footer={null}
-          width={760}
-        >
-          <div style={{ fontSize: 12.5, color: tokens.textSecondary, lineHeight: 1.8, marginBottom: 8 }}>
-            实时向该 MCP server 拉取（<code>resources/list</code> + <code>resources/templates/list</code> /
-            <code> prompts/list</code>）：**不落盘、不目录化**——资源与提示词随 server 权限/状态变化，
-            每次打开现拉最诚实。
-          </div>
-          <Tabs
-            activeKey={liveTab}
-            onChange={(k) => {
-              const tab = k as 'resources' | 'prompts'
-              setLiveTab(tab)
-              setLiveErr(null)
-              if (liveServer) void loadLive(liveServer.id, tab)
-            }}
-            items={[
-              {
-                key: 'resources',
-                label: `资源${resResult ? ` (${resResult.resources.length})` : ''}`,
-                children: (
-                  <Spin spinning={liveBusy}>
-                    {liveErr && liveTab === 'resources' ? (
-                      <Alert type="error" showIcon message="资源拉取失败" description={liveErr} />
-                    ) : !resResult || resResult.resources.length === 0 ? (
-                      <Empty description="该 server 未暴露资源（或未实现 resources/list）" />
+                    {unresolved ? (
+                      <Tooltip title={`引用已绑定但当前解析不了：${row.unresolvedSecretKeys.join('、')}。注入时会被跳过。`}>
+                        <Tag color="red" style={smallTag}>
+                          {row.unresolvedSecretKeys.length === 1
+                            ? `${row.unresolvedSecretKeys[0]} 未就绪`
+                            : `${row.unresolvedSecretKeys.length} 个密钥未就绪`}
+                        </Tag>
+                      </Tooltip>
                     ) : (
-                      <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-                        {resResult.templates_error && (
-                          <Alert
-                            type="info"
-                            showIcon
-                            style={{ marginBottom: 8 }}
-                            message="该 server 未实现 resources/templates/list（降级为空）"
-                            description={resResult.templates_error}
-                          />
-                        )}
-                        {(resResult.templates ?? []).map((t) => (
-                          <Row key={`tpl-${t.uri_template}`}>
-                            <Tag color="purple" style={{ marginInlineEnd: 0, fontSize: 10.5 }}>
-                              模板
-                            </Tag>
-                            <span style={{ ...mono, flex: 1 }}>{t.uri_template}</span>
-                            <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>{t.name}</span>
-                          </Row>
-                        ))}
-                        {resResult.resources.map((r) => (
-                          <div key={r.uri}>
-                            <Row>
-                              <span style={{ ...mono, flex: 1 }}>{r.uri}</span>
-                              <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>
-                                {r.name}
-                                {r.mime_type ? ` · ${r.mime_type}` : ''}
-                                {typeof r.size === 'number' ? ` · ${r.size}B` : ''}
-                              </span>
-                              <Button size="small" onClick={() => void doReadResource(liveServer!.id, r.uri)}>
-                                读取
-                              </Button>
-                            </Row>
-                            {resRead?.uri === r.uri && (
-                              <div style={{ padding: '0 16px 8px' }}>
-                                {resRead.err ? (
-                                  <Alert type="error" showIcon message="读取失败" description={resRead.err} />
-                                ) : (
-                                  (resRead.data?.contents ?? []).map((c, i) => (
-                                    <pre
-                                      key={i}
-                                      style={{
-                                        ...mono,
-                                        margin: '0 0 6px',
-                                        padding: 8,
-                                        maxHeight: 200,
-                                        overflow: 'auto',
-                                        background: tokens.softFill,
-                                        borderRadius: 8,
-                                        whiteSpace: 'pre-wrap',
-                                      }}
-                                    >
-                                      {c.text ?? `（二进制 blob，base64 ${c.blob?.length ?? 0} 字符，前端不自动解码）`}
-                                    </pre>
-                                  ))
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
+                      row.secretKeys.length > 0 && (
+                        <Tooltip title={`密钥型绑定（值只在注入时解析，界面不回）：${row.secretKeys.join('、')}`}>
+                          <Tag color="geekblue" style={smallTag}>
+                            密钥 {row.secretKeys.length}
+                          </Tag>
+                        </Tooltip>
+                      )
                     )}
-                  </Spin>
-                ),
-              },
-              {
-                key: 'prompts',
-                label: `提示词${promptResult ? ` (${promptResult.prompts.length})` : ''}`,
-                children: (
-                  <Spin spinning={liveBusy}>
-                    {liveErr && liveTab === 'prompts' ? (
-                      <Alert type="error" showIcon message="提示词拉取失败" description={liveErr} />
-                    ) : !promptResult || promptResult.prompts.length === 0 ? (
-                      <Empty description="该 server 未暴露提示词（或未实现 prompts/list）" />
+                  </>
+                }
+                description={<span style={{ color: descColor }}>{desc}</span>}
+                meta={
+                  <>
+                    <span
+                      title={row.endpoint}
+                      style={{ ...mono, fontSize: 10, color: tokens.textSecondary, maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                    >
+                      {row.endpoint || '（未声明端点）'}
+                    </span>
+                    <span style={{ opacity: 0.65 }}>·</span>
+                    <span>{row.toolCount} tools</span>
+                    {row.lastProbeAt && (
+                      <>
+                        <span style={{ opacity: 0.65 }}>·</span>
+                        <span>探测 {fmtProbeAt(row.lastProbeAt)}</span>
+                      </>
+                    )}
+                  </>
+                }
+                actions={
+                  <>
+                    {state.key === 'error' ? (
+                      <Button size="small" onClick={() => d.openDetail('mcp', row.id)}>
+                        诊断
+                      </Button>
                     ) : (
-                      <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-                        {promptResult.prompts.map((p) => (
-                          <div key={p.name}>
-                            <Row>
-                              <span style={{ ...mono, minWidth: 140 }}>{p.name}</span>
-                              <span style={{ flex: 1, fontSize: 12, color: tokens.textSecondary }}>{p.description}</span>
-                              <Button size="small" onClick={() => void doGetPrompt(liveServer!.id, p)}>
-                                取用
-                              </Button>
-                            </Row>
-                            {(p.arguments ?? []).length > 0 && (
-                              <div style={{ padding: '0 16px 8px', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                {(p.arguments ?? []).map((a) => (
-                                  <Input
-                                    key={a.name}
-                                    size="small"
-                                    style={{ width: 180 }}
-                                    placeholder={`${a.name}${a.required ? '（必填）' : ''}`}
-                                    value={promptArgs[a.name] ?? ''}
-                                    onChange={(e) => setPromptArgs((cur) => ({ ...cur, [a.name]: e.target.value }))}
-                                  />
-                                ))}
-                              </div>
-                            )}
-                            {promptGot?.name === p.name && (
-                              <div style={{ padding: '0 16px 8px' }}>
-                                {promptGot.err ? (
-                                  <Alert type="error" showIcon message="取用失败" description={promptGot.err} />
-                                ) : (
-                                  <pre
-                                    style={{
-                                      ...mono,
-                                      margin: 0,
-                                      padding: 8,
-                                      maxHeight: 200,
-                                      overflow: 'auto',
-                                      background: tokens.softFill,
-                                      borderRadius: 8,
-                                      whiteSpace: 'pre-wrap',
-                                    }}
-                                  >
-                                    {(promptGot.data?.messages ?? [])
-                                      .map((m) => `${m.role}: ${promptText(m.content)}`)
-                                      .join('\n')}
-                                  </pre>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
+                      <Tooltip title={row.probeable ? '拉取该 server 的 tools/list 并写入 Tool 目录' : '该传输无法探测（缺少端点声明）'}>
+                        <Button
+                          size="small"
+                          disabled={!row.probeable}
+                          loading={d.probing === row.id}
+                          onClick={() => void d.doProbe(row.id)}
+                        >
+                          探测
+                        </Button>
+                      </Tooltip>
                     )}
-                  </Spin>
-                ),
-              },
-            ]}
-          />
-        </Modal>
-        <Modal
-          title={callTarget ? `调用工具 ${callTarget.server}.${callTarget.tool}` : '调用工具'}
-          open={callTarget !== null}
-          onCancel={() => setCallTarget(null)}
-          onOk={() => void doCall()}
-          okText="调用"
-          confirmLoading={callBusy}
-          width={680}
-        >
-          <div style={{ fontSize: 12.5, color: tokens.textSecondary, lineHeight: 1.8, marginBottom: 8 }}>
-            参数为 JSON 对象（`arguments`）；后端每次调用建独立 MCP 会话（不做连接池）。
-            工具级失败（服务端 <code>isError</code>）会以 <code>is_error=true</code> 正常返回，
-            只有传输/协议/超时才报错。
-          </div>
-          <Input.TextArea
-            value={callArgs}
-            onChange={(e) => setCallArgs(e.target.value)}
-            rows={5}
-            spellCheck={false}
-            style={{ fontFamily: tokens.fontMono, fontSize: 12.5 }}
-            placeholder='{"path": "/tmp/a"}'
-          />
-          {callErr && (
-            <Alert type="error" showIcon style={{ marginTop: 10 }} message="调用失败" description={callErr} />
-          )}
-          {callResult && (
-            <div style={{ marginTop: 10 }}>
-              <Space size={8} wrap style={{ marginBottom: 6 }}>
-                <Tag color={callResult.is_error ? 'red' : 'green'} style={{ marginInlineEnd: 0, fontSize: 11 }}>
-                  {callResult.is_error ? 'is_error=true（工具级失败）' : 'ok'}
-                </Tag>
-                <span style={{ fontSize: 11.5, color: tokens.textSecondary, fontFamily: tokens.fontMono }}>
-                  {callResult.duration_ms}ms
-                  {callResult.server_name ? ` · ${callResult.server_name}` : ''}
-                  {callResult.server_version ? ` ${callResult.server_version}` : ''}
-                </span>
-              </Space>
-              <pre
-                style={{
-                  ...mono,
-                  margin: 0,
-                  padding: 10,
-                  maxHeight: 260,
-                  overflow: 'auto',
-                  background: tokens.softFill,
-                  borderRadius: 8,
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {callResult.text || JSON.stringify(callResult.content, null, 2)}
-                {callResult.structured_content
-                  ? `\n\nstructuredContent:\n${JSON.stringify(callResult.structured_content, null, 2)}`
-                  : ''}
-              </pre>
-            </div>
-          )}
-        </Modal>
-      <CapabilityEditorModal
-        edit={edit}
-        setEdit={setEdit}
-        submitEdit={submitEdit}
-        editBusy={editBusy}
-        editErr={editErr}
-      />
+                    <Button size="small" onClick={() => full && d.openMcpForm(full)}>
+                      编辑
+                    </Button>
+                    <Popconfirm
+                      title={`删除 ${row.name}？`}
+                      description="定义文件会被删除，归属它的工具条目会一并摘除。此操作不可撤销。"
+                      okText="删除"
+                      okButtonProps={{ danger: true }}
+                      cancelText="取消"
+                      onConfirm={() => void d.doDelete('mcp', row.id)}
+                    >
+                      <Button size="small" danger loading={d.delBusy === row.id}>
+                        删除
+                      </Button>
+                    </Popconfirm>
+                    <Tooltip title={row.defEnabled ? '停用：工具不再进入模型上下文（配置与密钥保留）' : '启用：下次会话/拉起时注入'}>
+                      <Switch
+                        size="small"
+                        checked={row.defEnabled}
+                        loading={d.toggleBusy === row.id}
+                        onChange={(next) => void d.doToggleMcp(row, next)}
+                      />
+                    </Tooltip>
+                  </>
+                }
+              />
+            )
+          })
+        )}
       </div>
+
+      <McpDetailModal
+        server={detailServer}
+        row={detailRow}
+        tools={d.tools}
+        open={detailServer !== null && detailRow !== null}
+        tab={d.detail?.tab ?? 'overview'}
+        onTabChange={d.setDetailTab}
+        onClose={d.closeDetail}
+        onEdit={() => {
+          if (!detailServer) return
+          d.closeDetail()
+          d.openMcpForm(detailServer)
+        }}
+        onProbe={() => {
+          if (detailServer) void d.doProbe(detailServer.id)
+        }}
+        probing={detailServer !== null && d.probing === detailServer.id}
+        onCallTool={d.doCallTool}
+      />
+      <McpEditorModal
+        open={d.mcpForm !== null}
+        server={d.mcpForm?.server ?? null}
+        busy={d.formBusy}
+        error={d.formErr}
+        onCancel={d.closeMcpForm}
+        onSubmit={d.submitMcpForm}
+        onAdvanced={d.openMcpAdvanced}
+      />
+      <McpJsonImportModal
+        open={d.importOpen}
+        onClose={() => d.setImportOpen(false)}
+        existingIds={d.mcps.map((m) => m.id)}
+        onImport={d.doImportMcpServers}
+      />
+      <CapabilityEditorModal
+        edit={d.edit}
+        setEdit={d.setEdit}
+        submitEdit={d.submitEdit}
+        editBusy={d.editBusy}
+        editErr={d.editErr}
+      />
     </PageContainer>
   )
 }

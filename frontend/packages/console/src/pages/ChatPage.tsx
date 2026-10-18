@@ -11,66 +11,20 @@ import { Composer } from '../components/Composer'
 import { ConfirmArea } from '../components/ConfirmArea'
 import { QueuedInputs } from '../components/QueuedInputs'
 import { StartPanel } from '../components/StartPanel'
-import { EntryView } from '../components/Transcript'
-import { ThoughtFoldView } from '../components/ThoughtFoldView'
+import { EntryView, TurnView } from '../components/Transcript'
 import { anchorIndex } from '../console/searchView'
 import { titleFor } from '../console/util'
 import { fmtRunDockLine, fmtRunUsageLine, toRunUsageInfo, type RunUsageInfo } from '../console/usageView'
 import {
   TRANSCRIPT_WINDOW,
+  buildTurnRows,
   foldThoughts,
-  isThoughtFold,
   stickToBottom,
   turnStatusOf,
   windowEntries,
 } from '../console/transcriptView'
 import { elapsedLabel, runNarration } from '../console/runView'
 import type { DeliveryChoice } from '../console/queueView'
-
-/**
- * 流式末尾的**状态行**：阶段词（shimmer）+ 可选内联光标 + 已处理时长。
- *
- * 它替代了原来那颗孤立的闪烁光标——光标只说明"还在动"，阶段词才说明"在干什么"。
- * 时长来自**客户端观测**（`runStartedAt`）：刷新回来没有这个事实就不显示秒数，不编数字。
- */
-function TurnStatus({ stage, showCaret, elapsed }: { stage: string; showCaret: boolean; elapsed: string }) {
-  return (
-    <div
-      className="fg-turn-status"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '2px 2px 0',
-        fontSize: 13,
-        color: tokens.textSecondary,
-        minWidth: 0,
-      }}
-    >
-      <span className="fg-shimmer" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {stage}
-      </span>
-      {showCaret && (
-        <span
-          className="fg-anim-blink"
-          style={{
-            display: 'inline-block',
-            flex: 'none',
-            width: 2,
-            height: '1em',
-            background: tokens.primary,
-            verticalAlign: '-0.12em',
-          }}
-        />
-      )}
-      {elapsed && (
-        <span style={{ flex: 'none', fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textPlaceholder }}>
-          已处理 {elapsed}
-        </span>
-      )}
-    </div>
-  )
-}
 
 /** 问答控制台主视图：会话侧栏 + 聊天（head / transcript / composer）+ 状态条。 */
 export function ChatPage() {
@@ -110,8 +64,13 @@ export function ChatPage() {
   const pendingAnchorRef = useRef<number | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   // 搜索命中跳转（M3 ②）：已应用的锚点 key（防重复滚动）+ 高亮条目 id。
+  // 滚动本身排在**高亮渲染之后**的 effect 里：命中的条目可能在被折叠的过程块里，
+  // 要先让 `flashId` 把那块展开（DOM 里才有节点），否则只能滚到轮首。
   const anchorAppliedRef = useRef<string | null>(null)
+  const pendingScrollRef = useRef<{ idx: number; id: string } | null>(null)
   const [flashEntryId, setFlashEntryId] = useState<string | null>(null)
+  // 命中同一个条目时 `flashEntryId` 不变，单靠它不会触发第二次滚动；用一个 tick 显式驱动。
+  const [scrollTick, setScrollTick] = useState(0)
   // 「已处理 Ns」的时钟：只在本来就有开始时刻时每 1s 推进一次（没有开始时刻就一个字都不显示）。
   const [nowTick, setNowTick] = useState(() => Date.now())
   // 用户手动展开过的思考折：流式中有人展开着看历史时，自动贴底要停下（D6 / 7.9）。
@@ -319,18 +278,32 @@ export function ChatPage() {
       setRevealed((n) => n + (hidden - idx)) // 展开后由下一轮 effect 完成滚动
       return
     }
-    const el = scrollRef.current
-    const node = el?.querySelector<HTMLElement>(`[data-fg-idx="${idx}"]`)
+    // 先只登记命中的条目并置高亮；滚动交给下一个 effect——命中项若在折叠块里，
+    // 那一块会因 `flashId` 在**同一次渲染**展开，节点才是可定位的。
     anchorAppliedRef.current = key
+    pendingScrollRef.current = { idx, id: entries[idx].id }
     setFlashEntryId(entries[idx].id)
+    setScrollTick((n) => n + 1)
     window.setTimeout(() => setFlashEntryId(null), 2400)
     clearAnchor()
-    if (!el || !node) return
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorSeq, activeId, hydrating, entries, revealed])
+
+  // 高亮渲染完成后再滚动：轮内每个条目/折叠块都带 `data-fg-idx`，所以命中的是轮内较深条目时
+  // 也能精确定位（而不是只滚到轮首）。窗口/锚点计算仍由 `anchorIndex` + `entryIndex` 决定。
+  useEffect(() => {
+    if (!flashEntryId) return
+    const pending = pendingScrollRef.current
+    if (!pending || pending.id !== flashEntryId) return
+    pendingScrollRef.current = null
+    const el = scrollRef.current
+    if (!el) return
+    const node = el.querySelector<HTMLElement>(`[data-fg-idx="${pending.idx}"]`)
+    if (!node) return
     const box = node.getBoundingClientRect()
     const base = el.getBoundingClientRect()
     el.scrollTo({ top: Math.max(0, el.scrollTop + (box.top - base.top) - 16), behavior: 'smooth' })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchorSeq, activeId, hydrating, entries, revealed])
+  }, [flashEntryId, scrollTick])
 
   const entryWindow = windowEntries(view?.entries ?? [], TRANSCRIPT_WINDOW, revealed)
   const turnStatus = turnStatusOf(view?.entries ?? [], streaming, narration.label)
@@ -339,6 +312,12 @@ export function ChatPage() {
   // 搜索锚点仍按**原条目下标**定位：折叠块的 id 是它首条条目的 id，所以它沿用那个下标。
   const windowBase = Math.max(0, (view?.entries.length ?? 0) - entryWindow.visible.length)
   const entryIndex = new Map(entryWindow.visible.map((e, i) => [e.id, windowBase + i]))
+  // 轮级视图：identity 头 / 过程流 / 整轮折叠都从这一层派生；窗口与搜索下标仍按原条目。
+  const rows = buildTurnRows(folded, {
+    streaming,
+    durationForSeq: (seq) => (seq != null ? runsBySeq.get(seq)?.info.durationMS : undefined),
+    indexOfId: (id) => entryIndex.get(id) ?? 0,
+  })
   const settleScroll = () => {
     const el = scrollRef.current
     if (!el) return
@@ -596,10 +575,10 @@ export function ChatPage() {
                   style={{
                     maxWidth: 840,
                     margin: '0 auto',
-                    padding: '28px 24px 12px',
+                    padding: '8px 24px 12px',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 20,
+                    gap: 0,
                     boxSizing: 'border-box',
                   }}
                 >
@@ -649,37 +628,60 @@ export function ChatPage() {
                           </Button>
                         </div>
                       )}
-                      {folded.map((e) => (
-                        <div
-                          key={e.id}
-                          data-fg-idx={entryIndex.get(e.id) ?? 0}
-                          style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            borderRadius: 12,
-                            transition: 'box-shadow .35s ease',
-                            boxShadow: flashEntryId === e.id ? `0 0 0 2px ${tokens.primary}` : 'none',
-                          }}
-                        >
-                          {isThoughtFold(e) ? (
-                            <ThoughtFoldView
-                              fold={e}
-                              onUserToggle={(id, open) => setFoldOpen((prev) => ({ ...prev, [id]: open }))}
-                              onSettled={settleScroll}
-                            />
-                          ) : (
+                      {rows.map((row) => {
+                        if (row.kind === 'turn') {
+                          const usage = row.endSeq != null ? runsBySeq.get(row.endSeq) : undefined
+                          const flash = !!flashEntryId && row.entryIds.includes(flashEntryId)
+                          return (
+                            <div
+                              key={row.id}
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                borderRadius: 12,
+                                transition: 'box-shadow .35s ease',
+                                boxShadow: flash ? `0 0 0 2px ${tokens.primary}` : 'none',
+                              }}
+                            >
+                              <TurnView
+                                turn={row}
+                                elapsed={elapsed}
+                                stage={turnStatus.stage}
+                                showCaret={turnStatus.showCaret}
+                                onThoughtToggle={(id, open) => setFoldOpen((prev) => ({ ...prev, [id]: open }))}
+                                onSettled={settleScroll}
+                                usageText={usage?.usageText}
+                                runInfo={usage?.info}
+                                stopReason={row.stopReason}
+                                flashId={flashEntryId}
+                                indexOf={(id) => entryIndex.get(id) ?? 0}
+                              />
+                            </div>
+                          )
+                        }
+                        const entry = row.entry
+                        return (
+                          <div
+                            key={entry.id}
+                            data-fg-idx={entryIndex.get(entry.id) ?? 0}
+                            data-fg-entry={entry.id}
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              borderRadius: 12,
+                              transition: 'box-shadow .35s ease',
+                              boxShadow: flashEntryId === entry.id ? `0 0 0 2px ${tokens.primary}` : 'none',
+                            }}
+                          >
                             <EntryView
-                              e={e}
-                              onRetry={e === lastEntry ? retryLast : undefined}
-                              usageText={e.seq != null ? runsBySeq.get(e.seq)?.usageText : undefined}
-                              runInfo={e.seq != null ? runsBySeq.get(e.seq)?.info : undefined}
+                              e={entry}
+                              onRetry={entry === lastEntry ? retryLast : undefined}
+                              usageText={entry.seq != null ? runsBySeq.get(entry.seq)?.usageText : undefined}
+                              runInfo={entry.seq != null ? runsBySeq.get(entry.seq)?.info : undefined}
                             />
-                          )}
-                        </div>
-                      ))}
-                      {turnStatus.stage && (
-                        <TurnStatus stage={turnStatus.stage} showCaret={turnStatus.showCaret} elapsed={elapsed} />
-                      )}
+                          </div>
+                        )
+                      })}
                     </>
                   )}
                 </div>
