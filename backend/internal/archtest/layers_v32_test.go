@@ -47,7 +47,7 @@ import (
 //
 // 与 v3.1 守卫的关系：两张表**同时生效**。v3.2 的收口过程只会删边、不会新增 v3.1 方向的边，
 // 所以 v3.1 守卫在迁移期间应始终为绿；一旦它转红，说明这一刀把某条边挪到了 v3.1 的更高层。
-// 迁移完成后（最后一刀）删除 `layers_v31_test.go`。
+// 迁移已完成（刀 11）：v3.1 表已删，本表是唯一事实源。
 const v32LayerGuardBlocking = true
 
 // v32Layer 是 v3.2 层表的一行。
@@ -262,10 +262,10 @@ func (v v32Violation) String() string {
 // collectV32Violations 计算当前全部 v3.2 违规（只看生产 import）。
 func collectV32Violations(t *testing.T) []v32Violation {
 	t.Helper()
-	pkgs := v31CollectPackages(t) // 复用 v31 的扫描器（它只读生产 import）
+	pkgs := scanProductionPackages(t) // 复用 v31 的扫描器（它只读生产 import）
 	var out []v32Violation
 	for _, p := range pkgs {
-		if v31IsExempt(p.rel) {
+		if isScanExempt(p.rel) {
 			continue
 		}
 		fromKey, fromLayer, ok := v32Resolve(p.rel)
@@ -274,8 +274,8 @@ func collectV32Violations(t *testing.T) []v32Violation {
 			continue
 		}
 		for _, imp := range p.imports {
-			relImp := v31ImportPath(imp)
-			if relImp == "" || v31IsExempt(relImp) {
+			relImp := importPathOf(imp)
+			if relImp == "" || isScanExempt(relImp) {
 				continue
 			}
 			toKey, toLayer, ok := v32Resolve(relImp)
@@ -387,12 +387,12 @@ const v32GinPath = "github.com/gin-gonic/gin"
 //
 // 与"扫到 0 个包"合并成一条：两者失效方式相同（判据静默空转），分开写只会多一处漏配。
 func TestLayerTableCoversAllPackagesV32(t *testing.T) {
-	pkgs := v31CollectPackages(t)
+	pkgs := scanProductionPackages(t)
 	if len(pkgs) == 0 {
 		t.Fatalf("v3.2 层表守卫失效：扫到 0 个包")
 	}
 	for _, p := range pkgs {
-		if v31IsExempt(p.rel) {
+		if isScanExempt(p.rel) {
 			continue
 		}
 		if _, _, ok := v32Resolve(p.rel); !ok {
@@ -452,8 +452,8 @@ func TestGinConfinedToInboundAdaptersV32(t *testing.T) {
 		budget[e.from] = e.budget
 	}
 	used := map[string]int{}
-	for _, p := range v31CollectPackages(t) {
-		if v31IsExempt(p.rel) {
+	for _, p := range scanProductionPackages(t) {
+		if isScanExempt(p.rel) {
 			continue
 		}
 		key, _, ok := v32Resolve(p.rel)

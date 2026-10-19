@@ -10,7 +10,7 @@
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
-| **结构/边界类** | 依赖方向、包归属、装配边 | `layers_v31_test.go`、`svc_layer_consumer_test.go`、`automation_ownership_test.go` | 名字扫描（"某包不得 import 某包"）收敛为**一张层表**；其余改写扫描根，判据不变 |
+| **结构/边界类** | 依赖方向、包归属、装配边 | `layers_v32_test.go`、`layers_scan_test.go`、`svc_layer_consumer_test.go`、`automation_ownership_test.go` | 名字扫描（"某包不得 import 某包"）收敛为**一张层表**；其余改写扫描根，判据不变 |
 | **语义/产品契约类** | 词汇、错误码、事件 type、契约快照、交付矩阵 | `agent_vocabulary_v19_test.go`、`event_type_contract`、`delivery_matrix_test.go`、`internal/app/contract_baseline_test.go` | **不删，只改扫描根**（语义守卫是产品事实，与目录结构无关） |
 | **路径耦合类** | 判据锚在具体文件/构造签名上 | `svcmodel_usecase_test.go`、`isolation_parity_test.go`、`runtime_pin_test.go` | 锚点随实现搬家同步；新增 `TestLayerTableCoversAllPackagesV31` 让"没登记的包"当场红 |
 
@@ -18,7 +18,8 @@
 
 ## 当前判据清单
 
-- **层表守卫（v3.1 §3.2）**：`layers_v31_test.go` 用一张**层号表**（`internal/archtest/layers_v31_test.go` 的 `v31Layers`：object/version → model/eventbus/infra → code/credential → runtime → infra/dsh → config → dto/dao → store → mechanism → domain → runtimeconn/registry/service/sessionruntime → middleware/gateway → controller → router → assembly → app → cliops → cli）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向下 import（层号不得增大）；② 同层默认不互链，除非该层显式 `sameLayer: true`（如 `runtimeconn`/`registry`/`service` 的同族协作）；③ 每层可带 `deny` 精确排除个别下层包（如 `service` 不得 import `store`/`dao`/`registry`）。违规是**硬失败**（`v31LayerGuardBlocking = true`），例外清单 `v31Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。同文件另有三条专项：`runtime` 不得 import adapter、只有 `assembly`（生产代码）可以 import `internal/infra/dsh`、adapter 不得 import 应用内核。
+- **层表守卫（v3.2）**：`layers_v32_test.go` 用一张**层号表**（`v32Layers`：L0 model → L1 值层（object/redact/identity/resource/version/credential/eventbus/code/automation/runtime/capability/infra/acp·mcp·logging/definition）→ L2 domain → L3 dto → L4 service → L5 store·dao·infra → L6 gateway·mechanism·registry·runtimeconn·config → L7 sessionruntime → L8 controller·middleware → L9 router·assembly·app·cliops·cli·maintenance）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，除非该层显式 `sameLayer: true`（`service` **永不** `sameLayer`，它 `deny` 自己的前缀，逼"svc 包之间零互相 import"）；③ 每层可带 `deny` 精确排除个别内层包（如 `cliops ↛ store`）。违规是**硬失败**，例外清单 `v32Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。
+  `layers_scan_test.go` 留着扫描器与三条专项判据：`runtime` 不得 import adapter、只有 `assembly`（生产代码）可以 import `internal/infra/dsh`、adapter 不得 import 应用内核。
 
 - **层表守卫（v3.2 六边形，`layers_v32_test.go`）**：与 v3.1 表**同时生效**，两者方向相反。v3.1 把 `domain` 放第 9 层、`store` 第 7 层、`dto`/`dao` 第 6 层、`model` 第 1 层（规则是"高层可以 import 低层"），于是 `domain → store/dto/mechanism` 被那张表定义成**合法**；v3.2 把 `domain` 压到 L2、持久化与机制压到 L5/L6、`dto` 挪到 L3，`domain` 的出边只剩 L0（`model` 纯列形状）与 L1（值对象/协议库）。判据三条同构（只能向内、同带默认不互链、`deny` 精确排除策略边），另有两条只属于 v3.2：`service` **永不** `sameLayer` 且 `deny internal/service`（同时挡兄弟 svc 与自身，是"svc 零互引"的载体）、`cliops` 是**第二入站适配器而不是第二装配根**（`deny` `store`/`dao`/`model`/`mechanism`/`domain`/`registry`/`sessionruntime`/`gateway`/`infra`）。迁移期 26 条例外（36 处命中）登记在 `v32Exceptions`，**双向**判据（新增边红、降到 0 不删也红），`TestV32ReportOnly` 是随时可跑的收口进度表。同文件另有 **gin 围栏**（`TestGinConfinedToInboundAdaptersV32`）：gin 只许落在 `router`/`controller`/`middleware`，`assembly`/`app` 的临时白名单在刀 2 清空。
 
@@ -85,7 +86,7 @@
 `tz_offset?: number` / api 必须 `p.set('tz_offset'` / 页面必须 `tz_offset: -new Date().getTimezoneOffset()`。
 反证（实跑）：存储层改回 `UTC()` 分桶 → 红；抽掉 api 的 `p.set('tz_offset'` → 红。
 
-**共 172 条**——加守卫时记得同步这句话。
+**共 168 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 
