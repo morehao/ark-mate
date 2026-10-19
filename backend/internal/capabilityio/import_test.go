@@ -1,4 +1,4 @@
-package automation
+package capabilityio
 
 import (
 	"context"

@@ -159,6 +159,9 @@ var v32Layers = map[string]v32Layer{
 		"internal/controller", "internal/router", "internal/assembly", "internal/app",
 		"internal/cliops", "internal/cli",
 	}},
+	// 刀 7 引入：定义导入/导出编排（扫目录 / 计数 / 落库 / 导出）。它吃 domain 的纯转换，
+	// 所以域里不再需要认识 mechanism/definition。
+	"internal/capabilityio": {layer: 6, name: "capabilityio", sameLayer: true},
 	// 刀 10 引入：migrate / doctor / transcripts / mcp reap 的落点。
 	"internal/maintenance": {layer: 6, name: "maintenance", sameLayer: true},
 
@@ -362,7 +365,6 @@ var v32Exceptions = []v32Exception{
 
 	// ——— 刀 7：domain/automation ———
 	{from: "internal/domain/automation", to: "internal/mechanism", budget: 1, slice: "刀7", why: "用 mechanism/definition"},
-	{from: "internal/domain/automation", to: "internal/store", budget: 1, slice: "刀7", why: "直接持 *store.Store，未经窄端口"},
 
 	// ——— 刀 8：domain/provider ———
 	{from: "internal/domain/provider", to: "internal/dto", budget: 2, slice: "刀8", why: "返回值是 dtomodel 与 dtoprovider"},

@@ -1,4 +1,4 @@
-package automation
+package capabilityio
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 
 	pkgautomation "github.com/morehao/ark-mate/internal/automation"
 	"github.com/morehao/ark-mate/internal/capability"
+	domauto "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/model"
 )
 
@@ -123,7 +124,7 @@ func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRu
 // 字符串时间）——`DefinitionFile.Set` 会把它 marshal 成紧凑 JSON 再统一缩进，所以导出物与老文件
 // 载体的写回形态一致，且两次导出逐字节相同。
 func automationFileBody(row *model.AutomationEntity) (string, error) {
-	df, err := capability.DecodeDefinitionDoc(Locator(row.ID), []byte(row.Body))
+	df, err := capability.DecodeDefinitionDoc(domauto.Locator(row.ID), []byte(row.Body))
 	if err != nil {
 		return "", err
 	}
@@ -267,7 +268,7 @@ func readAutomationDefinitionFile(path string) (string, string, *model.Automatio
 	if err != nil {
 		return "", "", nil, err
 	}
-	df, err := capability.DecodeDefinitionDoc(Locator(id), rest)
+	df, err := capability.DecodeDefinitionDoc(domauto.Locator(id), rest)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -336,7 +337,7 @@ func automationRuntimeFromDoc(doc map[string]json.RawMessage) (*model.Automation
 			if len(runs) > pkgautomation.RecentRunsMax {
 				runs = runs[:pkgautomation.RecentRunsMax]
 			}
-			rt.RecentRuns = RunsJSON(runs)
+			rt.RecentRuns = domauto.RunsJSON(runs)
 		}
 	}
 	if !found {

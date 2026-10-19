@@ -58,15 +58,22 @@ var automationDomainAnchors = map[string][]string{
 	// 知识**，而机制层不许 import 域（`TestMechanismMustNotImportUpward`），所以它的家是
 	// `domain/automation`，与 `carrier.go`（双载体 + 覆盖层）并排。
 	//
-	// 最后两条锚钉的是"**导入框架只有一份实现**"：选项与统计都取自 `mechanism/definition`，
-	// 域里只做"切成两半"的绑定。在域里另写一套导入语义 = 第二个事实源。
-	"import.go": {
-		"func ImportAutomationDir(",
-		"func ExportAutomationDir(",
-		"type ImportStats struct",
-		"definition.DefinitionImportOptions",
-		"definition.DefinitionImportStats",
-	},
+}
+
+// automationImportAnchors 导入/导出编排的**新家**（v3.2 刀 7）。
+//
+// 这两个入口原先在 `domain/automation/import.go`：它们按 `automation.ReservedKeys` 把一份文件
+// 切成"定义 + 运行态"两半，看起来是域的知识。但它们同时是**导入框架的编排**——扫目录、计数、
+// 调 `mechanism/definition` 落库、导出写文件——域为了它要认识 `store` 与 18 个机制符号，
+// 出边被钉死的那条纪律就破了。
+//
+// 现在分工是：域只留**纯转换**（`Locator` / `RunsJSON` / `RuntimeStateOf` 这类"行 ↔ 文件片段"），
+// 编排归 `internal/capabilityio`（L6 组合驱动）。导出之后域侧再也不能自己写一套导入语义——
+// 那正是这条守卫要挡的第二个事实源。
+var automationImportAnchors = []string{
+	"func ImportAutomationDir(",
+	"func ExportAutomationDir(",
+	"type ImportStats struct",
 }
 
 // automationManagerImplMarkers 实现痕迹（这些动作现在只许在域里做）。
@@ -95,6 +102,21 @@ func TestAutomationImplementationLivesInDomain(t *testing.T) {
 	}
 	if resolved == 0 {
 		t.Fatal("自动化域一个入口文件都没解析到（判据失效）")
+	}
+
+	// 导入/导出编排在新家，且域侧不许再有那份实现。
+	ioDir := filepath.Join(root, "internal", "capabilityio")
+	ioBody := dirProductionBody(t, ioDir)
+	for _, a := range automationImportAnchors {
+		if !strings.Contains(ioBody, a) {
+			t.Errorf("internal/capabilityio 里找不到 %q：导入/导出编排被改名/搬走了？（判据失锚＝空转）", a)
+		}
+	}
+
+	if domAll := dirProductionBody(t, domainDir); strings.Contains(domAll, "func ImportAutomationDir(") ||
+		strings.Contains(domAll, "func ExportAutomationDir(") {
+		t.Error("`internal/domain/automation` 里又出现导入/导出入口：编排归 `internal/capabilityio`，" +
+			"域侧回去就又会把 store 与 mechanism 拉回领域的出边里。")
 	}
 
 	managerDir := filepath.Join(root, "internal", "sessionruntime")

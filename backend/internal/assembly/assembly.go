@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/capabilityio"
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/credential"
-	"github.com/morehao/ark-mate/internal/domain/automation"
 	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/provider"
@@ -307,7 +307,7 @@ func (as *assembly) startImports(ctx context.Context) error {
 			"inserted", imp.Inserted, "existing", imp.Existing,
 			"invalid", imp.Invalid, "tools_files_skipped", imp.Tools)
 	}
-	if imp, err := automation.ImportAutomationDir(ctx, as.st, cfg.AutomationDir,
+	if imp, err := capabilityio.ImportAutomationDir(ctx, as.st, cfg.AutomationDir,
 		definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		glog.Warnw(ctx, "serve: 导入存量 automation 定义失败（定时任务面可能为空；可跑 `mate automation import` 重试）",
 			"err", err, "dir", cfg.AutomationDir)

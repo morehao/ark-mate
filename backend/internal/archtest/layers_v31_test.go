@@ -112,6 +112,9 @@ var v31Layers = map[string]v31Layer{
 	// ——— 11 层：HTTP 中间件 / MCP 网关 ———
 	"internal/middleware": {layer: 11, name: "middleware", deny: []string{"internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},
 	"internal/gateway":    {layer: 11, name: "gateway", deny: []string{"internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},
+	// 定义导入/导出编排（v3.2 刀 7 从 `domain/automation` 搬出）：它吃 domain/mechanism/store，
+	// 所以必须排在它们之上。
+	"internal/capabilityio": {layer: 11, name: "capabilityio", deny: []string{"internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},
 
 	// ——— 12 层：入站适配器 ———
 	"internal/controller": {layer: 12, name: "controller", deny: []string{"internal/store", "internal/dao", "internal/model", "internal/domain", "internal/mechanism", "internal/runtimeconn", "internal/registry", "internal/sessionruntime", "internal/router", "internal/assembly", "internal/app", "internal/cli", "internal/gateway"}},
