@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/code"
-	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -34,7 +33,7 @@ const (
 )
 
 // UsageSummary 聚合用量统计。
-func (pl *Plane) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*dtousage.UsageSummaryResp, error) {
+func (pl *Plane) UsageSummary(ctx context.Context, q UsageQuery) (*UsageSummary, error) {
 	if pl.st == nil {
 		return nil, code.FromError(acl.NewError(acl.ClassUnsupported, "usage_stats_unsupported",
 			"[usage_stats_unsupported] 内存模式（未启用 store）无 runs 读模型，用量统计不可用（请以 sqlite 模式启动）", nil))
@@ -57,13 +56,6 @@ func (pl *Plane) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*d
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_usage_range",
 			"[invalid_usage_range] from 必须早于 to（半开区间 [from, to)）", nil))
 	}
-	// 已下线的查询键：非空即显式拒绝（静默忽略会让用户以为"筛选生效了"）。
-	//
-	// 判据本体在 `reject_removed_keys.go`（本文件属「会话身份只剩 runtime_id」那条结构判据的
-	// 扫描面，零命中判据要求它连一个被撤掉的标识符都不写；显式拒绝面统一收口在那一处）。
-	if err := rejectRemovedUsageDimension(q); err != nil {
-		return nil, code.FromError(err)
-	}
 	groupBy := q.GroupBy
 	if groupBy == "" {
 		groupBy = "day"
@@ -77,7 +69,7 @@ func (pl *Plane) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*d
 		return nil, code.FromError(acl.NewError(acl.ClassService, "usage_query_failed",
 			fmt.Sprintf("[usage_query_failed] 用量聚合失败: %v", err), err))
 	}
-	out := &dtousage.UsageSummaryResp{
+	out := &UsageSummary{
 		GroupBy:          groupBy,
 		TZOffset:         tz,
 		Source:           "sqlite",
@@ -85,8 +77,8 @@ func (pl *Plane) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*d
 		CostSemantics:    usageCostSemantics,
 		// day 分组：跨天会话的累计快照会在多个日期桶重复出现 → 桶之间不可加（前端据此如实标注）。
 		BucketsAdditive: false,
-		Totals:          toUsageBucketResp(res.Totals),
-		Buckets:         make([]dtousage.UsageBucketResp, 0, len(res.Buckets)),
+		Totals:          toUsageBucket(res.Totals),
+		Buckets:         make([]UsageBucket, 0, len(res.Buckets)),
 	}
 	if !from.IsZero() {
 		out.From = from.UTC().Format(time.RFC3339)
@@ -95,14 +87,14 @@ func (pl *Plane) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*d
 		out.To = to.UTC().Format(time.RFC3339)
 	}
 	for _, b := range res.Buckets {
-		out.Buckets = append(out.Buckets, toUsageBucketResp(b))
+		out.Buckets = append(out.Buckets, toUsageBucket(b))
 	}
 	return out, nil
 }
 
 // toUsageBucketResp 读模型 → REST DTO。
-func toUsageBucketResp(b model.UsageBucket) dtousage.UsageBucketResp {
-	return dtousage.UsageBucketResp{
+func toUsageBucket(b model.UsageBucket) UsageBucket {
+	return UsageBucket{
 		Key: b.Key, Runs: b.Runs, Completed: b.Completed, Failed: b.Failed,
 		Cancelled: b.Cancelled, Running: b.Running, Sessions: b.Sessions,
 		DurationMS: b.DurationMS, ContextUsed: b.ContextUsed, ContextSize: b.ContextSize,

@@ -2,6 +2,7 @@ package svcusage
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/code"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
@@ -21,5 +22,13 @@ type usageSvc struct{ plane *session.Plane }
 func New(plane *session.Plane) UsageSvc { return &usageSvc{plane: plane} }
 
 func (s *usageSvc) Summary(ctx context.Context, q dtousage.UsageQueryReq) (*dtousage.UsageSummaryResp, error) {
-	return s.plane.UsageSummary(ctx, q)
+	// 已下线的查询键：非空即显式拒绝（静默忽略会让用户以为"筛选生效了"）。
+	if err := rejectRemovedUsageDimension(q); err != nil {
+		return nil, code.FromError(err)
+	}
+	v, err := s.plane.UsageSummary(ctx, usageQuery(q))
+	if err != nil {
+		return nil, err
+	}
+	return usageSummary(v), nil
 }

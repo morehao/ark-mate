@@ -9,7 +9,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/object/objusage"
@@ -46,7 +45,7 @@ func TestUsageSummaryService(t *testing.T) {
 	runB1, _, _ := beginRun(t, svc, "u2", "第三问")
 	endRun(svc, "u2", runB1, session.BusRunError, map[string]any{"code": "agent_error", "class": "agent"})
 
-	resp, err := sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{})
+	resp, err := sessionPlaneOf(svc).UsageSummary(ctx, session.UsageQuery{})
 	if err != nil {
 		t.Fatalf("UsageSummary: %v", err)
 	}
@@ -78,7 +77,7 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// group_by=day：UTC 日期桶（今日 1 个桶）；快照口径下日桶不可相加（前端据此标注）。
-	dayResp, err := sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{GroupBy: "day"})
+	dayResp, err := sessionPlaneOf(svc).UsageSummary(ctx, session.UsageQuery{GroupBy: "day"})
 	if err != nil || len(dayResp.Buckets) != 1 || len(dayResp.Buckets[0].Key) != 10 {
 		t.Fatalf("day 分桶不符: %+v err=%v", dayResp, err)
 	}
@@ -87,7 +86,7 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// 日期形式时间参数：from/to 回显为 UTC RFC3339（date → 当日 00:00）。
-	r2, err := sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
+	r2, err := sessionPlaneOf(svc).UsageSummary(ctx, session.UsageQuery{From: "2000-01-01", To: "2000-01-02"})
 	if err != nil {
 		t.Fatalf("日期参数应合法: %v", err)
 	}
@@ -100,14 +99,14 @@ func TestUsageSummaryService(t *testing.T) {
 	// 而本文件属「会话身份只剩 runtime_id」结构判据的近邻面，保持零命中更干净。
 	cases := []struct {
 		name  string
-		q     dtousage.UsageQueryReq
+		q     session.UsageQuery
 		code  int
 		token string
 	}{
-		{"bad_from", dtousage.UsageQueryReq{From: "2026/09/09"}, 40001, "[invalid_usage_range]"},
-		{"bad_to", dtousage.UsageQueryReq{To: "yesterday"}, 40001, "[invalid_usage_range]"},
-		{"from_after_to", dtousage.UsageQueryReq{From: "2026-09-10T00:00:00Z", To: "2026-09-09T00:00:00Z"}, 40001, "[invalid_usage_range]"},
-		{"bad_group", dtousage.UsageQueryReq{GroupBy: "tool"}, 40001, "[invalid_usage_group_by]"},
+		{"bad_from", session.UsageQuery{From: "2026/09/09"}, 40001, "[invalid_usage_range]"},
+		{"bad_to", session.UsageQuery{To: "yesterday"}, 40001, "[invalid_usage_range]"},
+		{"from_after_to", session.UsageQuery{From: "2026-09-10T00:00:00Z", To: "2026-09-09T00:00:00Z"}, 40001, "[invalid_usage_range]"},
+		{"bad_group", session.UsageQuery{GroupBy: "tool"}, 40001, "[invalid_usage_group_by]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,14 +119,14 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// 空区间（没有落在窗口里的轮次）→ 零值，不报错。
-	resp, err = sessionPlaneOf(svc).UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
+	resp, err = sessionPlaneOf(svc).UsageSummary(ctx, session.UsageQuery{From: "2000-01-01", To: "2000-01-02"})
 	if err != nil || resp.Totals.Runs != 0 || len(resp.Buckets) != 0 {
 		t.Fatalf("空区间应为零值: %+v err=%v", resp, err)
 	}
 
 	// 内存模式（无 store）→ 明确 unsupported（不返回假零值）。
 	svcMem := NewService(reg, eventbus.New())
-	_, err = sessionPlaneOf(svcMem).UsageSummary(ctx, dtousage.UsageQueryReq{})
+	_, err = sessionPlaneOf(svcMem).UsageSummary(ctx, session.UsageQuery{})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40501 || !strings.Contains(ge.Msg, "[usage_stats_unsupported]") {
 		t.Fatalf("无 store 应 40501/usage_stats_unsupported，got %v", err)
