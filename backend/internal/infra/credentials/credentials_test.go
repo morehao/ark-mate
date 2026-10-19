@@ -1,6 +1,7 @@
 package credentials
 
 import (
+	"github.com/morehao/ark-mate/internal/credential"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,10 +50,10 @@ func TestLayeringOrder(t *testing.T) {
 		name string
 		env  map[string]string
 		want string
-		src  Source
+		src  credential.Source
 	}{
-		{"四层都在 → 继承环境最高", map[string]string{"DSH_API_KEY": "from-env"}, "from-env", SourceEnv},
-		{"无继承环境 → 托管文档", nil, "from-managed", SourceManaged},
+		{"四层都在 → 继承环境最高", map[string]string{"DSH_API_KEY": "from-env"}, "from-env", credential.SourceEnv},
+		{"无继承环境 → 托管文档", nil, "from-managed", credential.SourceManaged},
 	}
 	for _, tc := range cases {
 		l := New(doc, cwd, home)
@@ -68,13 +69,13 @@ func TestLayeringOrder(t *testing.T) {
 	writeFile(t, docPath, `{"providers/other": "x"}`, 0o600)
 	l := New(doc, cwd, home)
 	l.Env = fakeEnv(nil)
-	if got := l.Resolve(req); !got.Found || got.Value != "from-cwd" || got.Source != SourceDotenvCwd {
+	if got := l.Resolve(req); !got.Found || got.Value != "from-cwd" || got.Source != credential.SourceDotenvCwd {
 		t.Fatalf("撤掉托管文档后应落到 dotenv_cwd，得到 %+v", got)
 	}
 	if err := os.Remove(filepath.Join(cwd, ".env")); err != nil {
 		t.Fatal(err)
 	}
-	if got := l.Resolve(req); !got.Found || got.Value != "from-home" || got.Source != SourceDotenvHome {
+	if got := l.Resolve(req); !got.Found || got.Value != "from-home" || got.Source != credential.SourceDotenvHome {
 		t.Fatalf("再撤掉项目级后应落到 dotenv_home，得到 %+v", got)
 	}
 	if err := os.Remove(filepath.Join(home, ".env")); err != nil {
@@ -358,12 +359,12 @@ func TestDotenvRejectsMalformed(t *testing.T) {
 // TestOnlyManagedIsWritable 钉住"哪一层能被平台写"：只有托管文档。
 // 面板要据此把继承来的密钥显示成只读——显示成可编辑会让用户改完发现不生效（下次启动又被顶掉）。
 func TestOnlyManagedIsWritable(t *testing.T) {
-	for _, s := range []Source{SourceEnv, SourceDotenvCwd, SourceDotenvHome} {
+	for _, s := range []credential.Source{credential.SourceEnv, credential.SourceDotenvCwd, credential.SourceDotenvHome} {
 		if s.Writable() {
 			t.Fatalf("%s 不该是只读层之外的可写层", s)
 		}
 	}
-	if !SourceManaged.Writable() {
+	if !credential.SourceManaged.Writable() {
 		t.Fatal("托管文档必须是可写层")
 	}
 }

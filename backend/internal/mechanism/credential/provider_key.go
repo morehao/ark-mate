@@ -1,7 +1,7 @@
 package credential
 
 import (
-	"github.com/morehao/ark-mate/internal/infra/credentials"
+	"github.com/morehao/ark-mate/internal/credential"
 )
 
 // ProviderKey 一条 provider 拨号密钥的**解析结果**。
@@ -13,7 +13,7 @@ type ProviderKey struct {
 	// Value 生效的明文（绝不落档案文件）。
 	Value string
 	// Source 这把密钥是从哪一层来的（空 = 没有密钥）。
-	Source credentials.Source
+	Source credential.Source
 	// EnvKey 生效值来自哪个环境变量名（仅 Source == env 时有值；诊断面展示用）。
 	EnvKey string
 	// Problems 解析过程中的问题（分层报"某层读不了"、库与镜像不一致等）；非空不等于失败。

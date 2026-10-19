@@ -73,7 +73,9 @@ var v31Layers = map[string]v31Layer{
 	"internal/automation": {layer: 2, name: "automation", sameLayer: true},
 	// 定义值层规则（v3.2 刀 4 抽出）：只依赖 acp/code，放在同层。
 	"internal/definition": {layer: 2, name: "definition", sameLayer: true},
-	"internal/credential": {layer: 2, name: "credential", deny: []string{"internal/service", "internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},
+	// 凭据值层（`Set` / `Source` / 来源词表）：零内部依赖，压到 0 层。
+	// v3.2 刀 7 把 `Source` 从 `infra/credentials` 挪进来，`infra/credentials`（1 层）必须能向下吃它。
+	"internal/credential": {layer: 0, name: "credential", deny: []string{"internal/service", "internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},
 
 	// ——— 3 层：adapter 契约 + 注册表 ———
 	"internal/runtime": {layer: 3, name: "runtime", deny: []string{"internal/infra/dsh", "internal/domain", "internal/service", "internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},

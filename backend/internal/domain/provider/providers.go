@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	credval "github.com/morehao/ark-mate/internal/credential"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,7 +16,6 @@ import (
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/infra/credentials"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objdelivery"
 	"github.com/morehao/ark-mate/internal/redact"
@@ -324,7 +324,7 @@ func providerProblems(d *Def) []string {
 		out = append(out, "凭据分层："+p)
 	}
 	switch {
-	case d.Key != "" && d.KeySource == credentials.SourceEnv:
+	case d.Key != "" && d.KeySource == credval.SourceEnv:
 		out = append(out, "当前生效的密钥来自**继承的进程环境**"+
 			credential.OneKeyInParens(d.KeyEnvKey)+"：它按层序遮住面板里保存的那一条——"+
 			"在面板里轮换密钥不会生效，除非先清掉这个环境变量")

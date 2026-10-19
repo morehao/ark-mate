@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/credential"
 	"net/http"
 	"sort"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/infra/credentials"
 	"github.com/morehao/ark-mate/internal/redact"
 	"github.com/morehao/ark-mate/internal/resource"
 )
@@ -192,7 +192,7 @@ func (p *Probe) probeLocal(ctx context.Context, id string, d *provider.Def, snap
 	// 三种情形分开报，因为出路完全不同：库里没有（去设一条）／分层读不了（去修那一层）／
 	// 生效值来自 `env`（**不是错误**，但必须说出来——用户会以为面板里那条在生效）。
 	switch {
-	case snap.Key != "" && snap.KeySource == credentials.SourceEnv:
+	case snap.Key != "" && snap.KeySource == credential.SourceEnv:
 		out = append(out, dtoprovider.ProviderCheckResp{
 			Name: "secret", Status: probePass,
 			Detail: "密钥生效值来自进程环境变量 " + snap.KeyEnvKey + "（层序：继承环境优先于托管文档），" +

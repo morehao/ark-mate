@@ -148,7 +148,7 @@ func TestStartupResolvesStoredProviderKeyAndWritesMirror(t *testing.T) {
 	}
 }
 
-// credentialsSourceManaged 是"托管文档那一层"的对外取值（`credentials.Source` 的字符串形）。
+// credentialsSourceManaged 是"托管文档那一层"的对外取值（`credval.Source` 的字符串形）。
 // 这里刻意写成字面量而不是 import 那个包：本用例断言的是**回执里的取值**（对外形态），
 // 常量改名不该让这条断言悄悄跟着改。
 const credentialsSourceManaged = "managed"

@@ -3,6 +3,7 @@ package svcprovider
 import (
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/credential"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +14,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/infra/credentials"
 	"github.com/morehao/ark-mate/internal/redact"
 )
 
@@ -114,7 +114,7 @@ func TestProbeDefaultMakesZeroUpstreamRequests(t *testing.T) {
 	baseURL := "https://api.openai.com/v1"
 	p := probeFixture(&provider.Def{
 		ID: "p1", Protocol: "openai", BaseURL: baseURL,
-		Key: "sk-probe", KeySource: credentials.SourceManaged,
+		Key: "sk-probe", KeySource: credential.SourceManaged,
 	}, fakeProbeCatalog{})
 
 	tr := &countingTransport{inner: http.DefaultTransport}
@@ -263,7 +263,7 @@ func TestProbeMissingProviderIsAFailedCheck(t *testing.T) {
 func TestProbeCatalogUnknownPathsStayUnknown(t *testing.T) {
 	base := func() *provider.Def {
 		return &provider.Def{ID: "p1", Protocol: "openai", BaseURL: "https://api.openai.com/v1",
-			Key: "sk-x", KeySource: credentials.SourceManaged}
+			Key: "sk-x", KeySource: credential.SourceManaged}
 	}
 
 	t.Run("nil_catalog", func(t *testing.T) {

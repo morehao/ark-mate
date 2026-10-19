@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	credval "github.com/morehao/ark-mate/internal/credential"
 	"sort"
 	"strings"
 	"sync"
@@ -190,7 +191,7 @@ type Def struct {
 	//
 	// 它必须摆到读面上：`继承的进程环境 > 托管` 这个顺序意味着**进程环境里的同名变量会遮住
 	// 面板里保存的那一条**——用户轮换了密钥却毫无变化，且没有任何报错（2026-10-10 实测）。
-	KeySource credentials.Source `json:"-"`
+	KeySource credval.Source `json:"-"`
 	// KeyEnvKey 生效值来自哪个环境变量名（仅 `KeySource == env` 时有值；诊断面展示用）。
 	KeyEnvKey string `json:"-"`
 	// KeyRef 托管文档里的键（**派生量**，= `providers/<id>`）。

@@ -32,30 +32,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/credential"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 )
-
-// Source 是"这把钥匙从哪一层来的"——它要出现在面板与 `mate doctor` 上，所以取值是**对外词表**，
-// 不能随手改（改了等于让前端与文档同时漂移）。刻意用下划线形态：它进 JSON 字段，不进 Go 标识符。
-type Source string
-
-const (
-	// SourceEnv 继承的进程环境（只读，最高优先级）。
-	SourceEnv Source = "env"
-	// SourceManaged 托管文档（可写；面板/CLI 写的密钥落在这里）。
-	SourceManaged Source = "managed"
-	// SourceDotenvCwd 调用目录下的 `.env`（只读）。
-	SourceDotenvCwd Source = "dotenv_cwd"
-	// SourceDotenvHome 数据目录下的 `.env`（只读）。
-	SourceDotenvHome Source = "dotenv_home"
-)
-
-// Writable 报告这一层能不能被平台写：只有托管文档能。面板要据此决定"这条密钥是只读继承来的、
-// 还是能在界面上改的"——把继承来的密钥显示成可编辑，用户改完发现不生效（下次启动又被环境变量顶掉）。
-func (s Source) Writable() bool { return s == SourceManaged }
 
 // Request 描述"要解析哪个凭据"。
 //
@@ -73,7 +55,7 @@ type Request struct {
 // 前者是"四层里都没有"，后者是"有一层读不了"——把它们混成一句"没有密钥"，正是本包要消灭的假绿。
 type Resolution struct {
 	Value    string
-	Source   Source
+	Source   credential.Source
 	Found    bool
 	Problems []string
 }
@@ -125,7 +107,7 @@ func (l *Layered) Resolve(req Request) Resolution {
 			continue
 		}
 		if v := env(k); strings.TrimSpace(v) != "" {
-			return Resolution{Value: v, Source: SourceEnv, Found: true}
+			return Resolution{Value: v, Source: credential.SourceEnv, Found: true}
 		}
 	}
 	// ② 托管文档。
@@ -135,15 +117,15 @@ func (l *Layered) Resolve(req Request) Resolution {
 			return Resolution{Problems: []string{"托管凭据文档不可用（不再回落到 .env）：" + err.Error()}}
 		}
 		if v, ok := values[req.Ref]; ok && strings.TrimSpace(v) != "" {
-			return Resolution{Value: v, Source: SourceManaged, Found: true}
+			return Resolution{Value: v, Source: credential.SourceManaged, Found: true}
 		}
 	}
 	// ③④ 两份 dotenv（同形，只有来源不同；项目级在前）。
 	var problems []string
 	layers := []struct {
 		path string
-		src  Source
-	}{{l.CwdFile, SourceDotenvCwd}, {l.HomeFile, SourceDotenvHome}}
+		src  credential.Source
+	}{{l.CwdFile, credential.SourceDotenvCwd}, {l.HomeFile, credential.SourceDotenvHome}}
 	for _, layer := range layers {
 		if strings.TrimSpace(layer.path) == "" {
 			continue

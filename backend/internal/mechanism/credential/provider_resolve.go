@@ -3,6 +3,7 @@ package credential
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/credential"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/infra/credentials"
@@ -32,7 +33,7 @@ func (m *Store) ResolveProviderKey(ctx context.Context, id, keyRef string) Provi
 		res = m.Layered().Resolve(req)
 	}
 	out := ProviderKey{Value: res.Value, Source: res.Source, Problems: res.Problems}
-	if out.Source == credentials.SourceEnv {
+	if out.Source == credential.SourceEnv {
 		out.EnvKey = m.MatchEnvKey(envKeys, out.Value)
 	}
 	if m.st == nil || strings.TrimSpace(id) == "" {
@@ -52,15 +53,15 @@ func (m *Store) ResolveProviderKey(ctx context.Context, id, keyRef string) Provi
 		return out
 	}
 	switch {
-	case out.Source == credentials.SourceManaged && strings.TrimSpace(dbKey) == "":
+	case out.Source == credential.SourceManaged && strings.TrimSpace(dbKey) == "":
 		return ProviderKey{Problems: []string{
 			"托管文档里有这条密钥而库里没有（镜像陈旧，或写入/删除曾失败）：**不采用**镜像里那一份" +
 				"（否则在面板上清掉的密钥会被它悄悄撤销）；在「设置 · 模型」里重设一次即可对齐"}}
-	case out.Source == credentials.SourceManaged:
+	case out.Source == credential.SourceManaged:
 		out.Value = dbKey // 两边都有时以库为准。
 		return out
 	case out.Value == "" && strings.TrimSpace(dbKey) != "":
-		return ProviderKey{Value: dbKey, Source: credentials.SourceManaged, Problems: out.Problems}
+		return ProviderKey{Value: dbKey, Source: credential.SourceManaged, Problems: out.Problems}
 	}
 	return out
 }
