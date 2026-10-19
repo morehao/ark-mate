@@ -358,7 +358,6 @@ var v32Exceptions = []v32Exception{
 
 	// ——— 刀 5：domain/mcp ———
 	{from: "internal/domain/mcp", to: "internal/dto", budget: 1, slice: "刀5", why: "返回值是 dto/dtocapability"},
-	{from: "internal/domain/mcp", to: "internal/mechanism", budget: 2, slice: "刀5", why: "用 definition 与 credential 两个机制"},
 
 	// ——— 刀 6：domain/workspace ———
 	{from: "internal/domain/workspace", to: "internal/dto", budget: 1, slice: "刀6", why: "返回值是 dto/dtoworkspace"},

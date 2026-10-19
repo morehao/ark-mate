@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/redact"
 )
 
@@ -19,11 +18,11 @@ import (
 // 依赖只有一个：`mechanism/credential`（"`store:` 引用指向哪一行"的知识在库里/托管文档里，
 // 那不属于本平面）。**没有库句柄、没有注册表**——所以它搬进域里不需要任何新端口。
 type Secrets struct {
-	creds *credential.Store
+	creds SecretResolver
 }
 
 // NewSecrets 用凭据机制造一个密钥解析面（装配期注入同一个实例：两份会让同一份引用解析出不同结果）。
-func NewSecrets(creds *credential.Store) *Secrets { return &Secrets{creds: creds} }
+func NewSecrets(creds SecretResolver) *Secrets { return &Secrets{creds: creds} }
 
 // Resolve 把 server 的明文绑定与密钥引用合成**最终注入值**：
 //

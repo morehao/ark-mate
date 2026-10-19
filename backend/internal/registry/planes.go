@@ -93,7 +93,7 @@ func NewPlanes(reg *runtime.Registry) *Planes {
 	}
 	p.Skills = skill.NewPlane(p.Capabilities, skillDefs{p.Definitions})
 	p.McpSecrets = mcp.NewSecrets(p.Credentials)
-	p.Mcp = mcp.NewPlane(p.Capabilities, p.Definitions, p.McpSecrets)
+	p.Mcp = mcp.NewPlane(p.Capabilities, mcpDefs{p.Definitions}, p.McpSecrets)
 	p.Providers = provider.NewPlane(reg, p.Credentials)
 	p.Resources = NewResources(reg, p.Providers)
 	p.Identity = NewIdentityDelivery(reg)

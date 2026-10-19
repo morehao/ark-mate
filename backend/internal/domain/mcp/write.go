@@ -28,7 +28,7 @@ func (p *Plane) WriteServer(ctx context.Context, pathID string, req dtocapabilit
 	if p.caps == nil {
 		return nil, defn.ErrCapabilityUnavailable()
 	}
-	repo, err := p.defs.DefinitionRepoFor(defn.CapSubMcps)
+	repo, err := p.defs.RepoFor(defn.CapSubMcps)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +136,7 @@ func (p *Plane) DeleteServer(ctx context.Context, id string) (*dtocapability.Mcp
 	if p.caps == nil {
 		return nil, defn.ErrCapabilityUnavailable()
 	}
-	repo, err := p.defs.DefinitionRepoFor(defn.CapSubMcps)
+	repo, err := p.defs.RepoFor(defn.CapSubMcps)
 	if err != nil {
 		return nil, err
 	}
