@@ -9,6 +9,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/maintenance"
 	"os"
 
 	"github.com/morehao/ark-mate/internal/cliops"
@@ -100,7 +101,7 @@ func Run(args []string) int {
 	case "demo":
 		cliops.Demo(args[1:])
 	case "migrate":
-		cliops.Migrate(args[1:])
+		maintenance.Migrate(args[1:])
 	case "transcripts":
 		if len(args) < 2 || args[1] != "prune" {
 			fmt.Fprintln(os.Stderr, "transcripts 用法：mate transcripts prune --older-than <duration> [--dir <dir>]")

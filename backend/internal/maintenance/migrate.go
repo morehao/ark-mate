@@ -1,4 +1,4 @@
-package cliops
+package maintenance
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
@@ -27,7 +28,7 @@ func Migrate(args []string) {
 	transcriptsDir := fs.String("transcripts", "", "transcript 目录（默认 MATE_TRANSCRIPTS 或 ~/.ark-mate/transcripts）")
 	_ = fs.Parse(args)
 
-	cfg, _ := mustConfig()
+	cfg, _ := config.MustLoad()
 	if *dbPath != "" {
 		cfg.DBPath = *dbPath
 	}

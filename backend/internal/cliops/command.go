@@ -8,9 +8,6 @@
 package cliops
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/morehao/ark-mate/internal/config"
 )
 
@@ -19,11 +16,4 @@ import (
 //
 // 连 Sources 一起返回：来源不只是排障信息，还是**权限事实**——被进程 env/flag 锁定的配置键，
 // 面板写入必然被覆盖，serve 据此把它转成"只读设置"（见 config.NewSettingsStore）。
-func mustConfig() (config.Config, config.Sources) {
-	cfg, sources, err := config.LoadResolved("")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "配置错误: %v\n\n配置目录: %s（MATE_CONFIG_DIR 可改）\n", err, config.ConfigDirFromEnv())
-		os.Exit(2)
-	}
-	return cfg, sources
-}
+func mustConfig() (config.Config, config.Sources) { return config.MustLoad() }

@@ -133,7 +133,10 @@ var v31Layers = map[string]v31Layer{
 	// 设计的层表只有 `cli`，但命令实现（doctor 43KB 为主）必须用到 store/domain/mechanism；
 	// 把实现留在 `cli` 就与"命令树不得 import 应用内核"冲突，搬进 `assembly` 又违背"装配根只装对象"。
 	// 故命令实现单独成层（见 `.dsh/docs/plans/2026-10-19-backend-v3.1-execution-plan.md`）。
-	"internal/cliops": {layer: 16, name: "cliops", sameLayer: true, deny: []string{"internal/cli"}},
+	// 运维动作（migrate / doctor / transcripts / mcp reap）的落点：v3.2 刀 10 从 `cliops` 搬出。
+	// 它吃 domain/store/mechanism/registry/sessionruntime，所以排在 12 层；命令层（16）在它之上。
+	"internal/maintenance": {layer: 12, name: "maintenance", deny: []string{"internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},
+	"internal/cliops":      {layer: 16, name: "cliops", sameLayer: true, deny: []string{"internal/cli"}},
 
 	// ——— 17 层：命令树（纯分发）———
 	"internal/cli": {layer: 17, name: "cli", sameLayer: true, deny: []string{"internal/service", "internal/store", "internal/dao", "internal/model", "internal/domain", "internal/controller", "internal/mechanism", "internal/runtimeconn", "internal/registry", "internal/sessionruntime", "internal/router", "internal/gateway"}},
