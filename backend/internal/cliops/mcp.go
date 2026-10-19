@@ -1,10 +1,10 @@
 package cliops
 
 import (
-	"github.com/morehao/ark-mate/internal/assembly"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/assembly"
 	"os"
 	"os/signal"
 	"syscall"

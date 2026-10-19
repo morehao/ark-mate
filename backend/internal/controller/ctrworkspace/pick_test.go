@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 )
 
 // pickStub 宿主选择器替身：三个结局里"选定 / 取消"要真的 spawn 宿主命令（osascript/zenity），

@@ -18,11 +18,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/dto/dtosystem"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/version"
-	"github.com/morehao/ark-mate/internal/config"
 )
 
 // 本文件是 `mate doctor`（M4-5）：**只读体检**——不装配 App、不监听、不写 MATE_HOME

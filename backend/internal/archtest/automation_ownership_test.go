@@ -163,8 +163,8 @@ var automationUseCaseAnchors = []string{
 	"func New(plane *domauto.Plane) AutomationSvc",
 	"var _ AutomationSvc = (*Service)(nil)",
 	"func (s *Service) ListAutomations() ([]dtoautomation.AutomationResp, error)",
-	`definition.RawString(req, "id")`,
-	"definition.RawPatch(req)",
+	`defn.RawString(req, "id")`,
+	"defn.RawPatch(req)",
 	"func (s *Service) PreviewAutomation(",
 	"s.plane.RunNow(ctx, id)",
 	`"automation_not_found"`,
@@ -179,9 +179,13 @@ var automationUseCaseAnchors = []string{
 // **刻意不列 `"automation_not_found"`**：域里的**运行面**（`RunNow` / 调度 tick）自己也要拒绝
 // 未知 id / 坏定义 / 已停用，那三条码是领域的判决，用例层只是**透传**——把它列成"不许出现"
 // 会逼着域去 import 用例层（反向依赖）。真正要守的是"两侧同码"，见下面的 parity 判据。
+// 注意：定义值层规则已从 `mechanism/definition` 抽到 `internal/definition`（别名 defn），
+// 所以每条痕迹都要把**两种拼写**都列出来——只留旧拼写会让守卫在改名后静默失锚。
 var automationApiFaceMarkers = []string{
 	"definition.InvalidParamErr(",
+	"defn.InvalidParamErr(",
 	"definition.RawPatch(req)",
+	"defn.RawPatch(req)",
 	"dtoautomation.AutomationWriteReq",
 }
 

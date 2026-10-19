@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/capability"
+	defn "github.com/morehao/ark-mate/internal/definition"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -26,40 +26,40 @@ import (
 // WriteServer 写面主体（create / update 共用的全部顺序与失败处理）。
 func (p *Plane) WriteServer(ctx context.Context, pathID string, req dtocapability.McpWriteReq, create bool) (*dtocapability.McpWriteResp, error) {
 	if p.caps == nil {
-		return nil, definition.ErrCapabilityUnavailable()
+		return nil, defn.ErrCapabilityUnavailable()
 	}
-	repo, err := p.defs.DefinitionRepoFor(definition.CapSubMcps)
+	repo, err := p.defs.DefinitionRepoFor(defn.CapSubMcps)
 	if err != nil {
 		return nil, err
 	}
-	patch := definition.RawPatch(req)
+	patch := defn.RawPatch(req)
 
 	id := pathID
-	bodyID, hasBodyID, err := definition.RawString(req, "id")
+	bodyID, hasBodyID, err := defn.RawString(req, "id")
 	if err != nil {
 		return nil, err
 	}
 	if create {
 		if !hasBodyID || strings.TrimSpace(bodyID) == "" {
-			return nil, definition.InvalidParamErr("新建 MCP server 必须带 id")
+			return nil, defn.InvalidParamErr("新建 MCP server 必须带 id")
 		}
 		id = bodyID
 	} else {
 		if hasBodyID && bodyID != pathID {
-			return nil, definition.InvalidParamErr(fmt.Sprintf(
+			return nil, defn.InvalidParamErr(fmt.Sprintf(
 				"路径 id %q 与 body id %q 不一致（id 不可改：要换 id 就删掉重建）", pathID, bodyID))
 		}
 		patch["id"] = pathID
 	}
 
-	if !definition.ValidDefinitionID(id) {
+	if !defn.ValidDefinitionID(id) {
 		if create {
-			return nil, definition.InvalidDefinitionIDErr("mcp", id)
+			return nil, defn.InvalidDefinitionIDErr("mcp", id)
 		}
 		if _, in := p.caps.GetMcpServer(id); !in {
 			return nil, notFoundErr(id)
 		}
-		return nil, definition.InvalidDefinitionIDErr("mcp", id)
+		return nil, defn.InvalidDefinitionIDErr("mcp", id)
 	}
 
 	_, inReg := p.caps.GetMcpServer(id)
@@ -86,7 +86,7 @@ func (p *Plane) WriteServer(ctx context.Context, pathID string, req dtocapabilit
 	}
 	var m capability.McpServer
 	if err := json.Unmarshal(merged, &m); err != nil {
-		return nil, definition.InvalidParamErr(fmt.Sprintf("MCP server 定义无法解析：%v", err))
+		return nil, defn.InvalidParamErr(fmt.Sprintf("MCP server 定义无法解析：%v", err))
 	}
 	if m.ID == "" {
 		m.ID = id
@@ -105,7 +105,7 @@ func (p *Plane) WriteServer(ctx context.Context, pathID string, req dtocapabilit
 	}
 	if conflict {
 		// 载体的乐观锁没中（文件被手改 / 行 revision 变了 / 别人抢先建出来）→ 40901。
-		return nil, definition.DefinitionChangedErr(repo.Locator(id))
+		return nil, defn.DefinitionChangedErr(repo.Locator(id))
 	}
 	// 提交成功后才入表：同一份定义刚过闸门（纯函数），这一次必然成功（详见 skill 写面）。
 	if err := p.caps.RegisterMcpServer(&m); err != nil {
@@ -134,17 +134,17 @@ func (p *Plane) WriteServer(ctx context.Context, pathID string, req dtocapabilit
 // + **一并摘除该 server 归属的工具**。幂等：不存在 → `deleted:false` 且无错。
 func (p *Plane) DeleteServer(ctx context.Context, id string) (*dtocapability.McpDeleteResp, error) {
 	if p.caps == nil {
-		return nil, definition.ErrCapabilityUnavailable()
+		return nil, defn.ErrCapabilityUnavailable()
 	}
-	repo, err := p.defs.DefinitionRepoFor(definition.CapSubMcps)
+	repo, err := p.defs.DefinitionRepoFor(defn.CapSubMcps)
 	if err != nil {
 		return nil, err
 	}
-	if !definition.ValidDefinitionID(id) {
+	if !defn.ValidDefinitionID(id) {
 		if _, in := p.caps.GetMcpServer(id); !in {
 			return deleteNoop(id, ""), nil
 		}
-		return nil, definition.InvalidDefinitionIDErr("mcp", id)
+		return nil, defn.InvalidDefinitionIDErr("mcp", id)
 	}
 	_, inReg := p.caps.GetMcpServer(id)
 	stored, err := repo.Exists(ctx, id)
@@ -161,7 +161,7 @@ func (p *Plane) DeleteServer(ctx context.Context, id string) (*dtocapability.Mcp
 		return nil, err
 	}
 	if conflict {
-		return nil, definition.DefinitionChangedErr(locator)
+		return nil, defn.DefinitionChangedErr(locator)
 	}
 	p.caps.RemoveMcpServer(id)
 	// 工具条目必须一起摘：留着已删 server 的工具，用户会在 /tools 里看见一个永远调不通的能力

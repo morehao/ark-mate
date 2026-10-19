@@ -53,7 +53,7 @@ func (s Services) BuildControllers(creds *credential.Set, origin *middleware.Ori
 		Automation:    ctrautomation.NewAutomationCtr(s.Automation),
 		Library:       ctrlibrary.NewLibraryCtr(s.Library),
 		Usage:         ctrusage.NewUsageCtr(s.Usage),
-		System: ctrsystem.NewSystemCtr(s.Meta, s.Capabilities, hostFacts),
+		System:        ctrsystem.NewSystemCtr(s.Meta, s.Capabilities, hostFacts),
 		WS: ctrws.NewWSCtr(s.Stream, ctrws.Options{
 			Credentials: creds,
 			OriginCheck: origin.CheckFunc(),

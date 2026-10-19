@@ -16,11 +16,11 @@ package sessionruntime
 // （`import cycle not allowed in test`）。详见 internal/testutil 的包注释。
 
 import (
-	svcsystem "github.com/morehao/ark-mate/internal/service/svcsystem"
-	svcsession "github.com/morehao/ark-mate/internal/service/svcsession"
-	dmodel "github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
+	dmodel "github.com/morehao/ark-mate/internal/model"
+	svcsession "github.com/morehao/ark-mate/internal/service/svcsession"
+	svcsystem "github.com/morehao/ark-mate/internal/service/svcsystem"
 
 	"os"
 	"path/filepath"
@@ -31,14 +31,14 @@ import (
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"github.com/morehao/ark-mate/internal/infra/credentials"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/resource"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 )
 
 // providerTestSvc 建一个三 spec 的注册表（dsh + 合成的 rtx + 无凭据声明的 stub），并把

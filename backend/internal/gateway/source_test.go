@@ -12,10 +12,10 @@ package gateway
 // 不 mock `Source` 的内部：mock 掉哪一层，就等于放弃那一层的证据。
 
 import (
-	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -27,12 +27,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/ark-mate/internal/resource"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/testutil"
 )
 
 // fakeRemote 一个最小的远端 MCP 服务端（http 传输；JSON 应答而非 SSE）。
@@ -212,7 +212,7 @@ func (r *sourceRig) seedMcp(id, body string, expectedRev int64) {
 // v19：网关的 scope 只有"哪个底座 + 会话钉住的 MCP 白名单"两项（agent 面已撤销）。
 func (r *sourceRig) source(pinned *[]string) *MateSource {
 	r.t.Helper()
-	src, err := NewSource(context.Background(), SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, 
+	src, err := NewSource(context.Background(), SourceOptions{Adapters: []runtime.Adapter{dsh.New()},
 		Cfg: r.cfg, McpsPinned: pinned, Store: r.st,
 	})
 	if err != nil {
@@ -395,7 +395,7 @@ func TestSourceSharesDBWithCore(t *testing.T) {
 	seedVia("web", httpDef("web", remote.srv.URL, "MCP_SHARED_DB_TOKEN"))
 
 	logs := testutil.CaptureLogs(t)
-	src, err := NewSource(context.Background(), SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, 
+	src, err := NewSource(context.Background(), SourceOptions{Adapters: []runtime.Adapter{dsh.New()},
 		Cfg: cfg,
 	})
 	if err != nil {
@@ -629,7 +629,7 @@ func TestSourceServerTimeoutIsBounded(t *testing.T) {
 	r.seedMcp("hang", httpDef("hang", hang.URL, "MCP_TOKEN_GH"), 0)
 	r.seedMcp("ok", httpDef("ok", ok.srv.URL, "MCP_TOKEN_GH"), 0)
 
-	src, err := NewSource(ctx, SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, 
+	src, err := NewSource(ctx, SourceOptions{Adapters: []runtime.Adapter{dsh.New()},
 		Cfg: r.cfg, Store: r.st, PerServerTimeout: 300 * time.Millisecond,
 	})
 	if err != nil {

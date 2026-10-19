@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	defn "github.com/morehao/ark-mate/internal/definition"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"io"
 	"os"
@@ -12,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
 	pkgautomation "github.com/morehao/ark-mate/internal/automation"
 	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // ——— 存量定时任务定义的一次性导入与导出（M6-7 下半） ———
@@ -94,7 +95,7 @@ func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRu
 	outRows := make([]definition.ExportRow, 0, len(rows))
 	for i := range rows {
 		rel := rows[i].ID + ".json"
-		if !definition.ValidDefinitionID(rows[i].ID) {
+		if !defn.ValidDefinitionID(rows[i].ID) {
 			// 行 id 非法（手工塞进去的）：**不写**——否则会造出一个下次装载就报错的文件名。
 			stats.Failed++
 			if out != nil {
@@ -255,7 +256,7 @@ func readAutomationDefinitionFile(path string) (string, string, *store.Automatio
 			id = s
 		}
 	}
-	if !definition.ValidDefinitionID(id) {
+	if !defn.ValidDefinitionID(id) {
 		return "", "", nil, fmt.Errorf("automation id %q 不能作为定义键（文件名或 id 字段非法）", id)
 	}
 	// 定义正文 = 原文去掉保留键，再把 id 钉成载体键（写面也是这么做的：`patch["id"] = id`）。

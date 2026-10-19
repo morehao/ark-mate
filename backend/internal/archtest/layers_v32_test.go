@@ -74,15 +74,18 @@ var v32Layers = map[string]v32Layer{
 	// 本带允许同层互链：`code` 要把 ACP 协议错误折成本仓错误码，`runtime` 要用
 	// `identity`/`resource` 的值类型，而 ACP 是各底座**共用的线协议**（不是可替换的外部
 	// 服务，见 plan 的 ADR-1）——把它们拆开只会得到一堆复制粘贴。
-	"internal/object":        {layer: 1, name: "object", sameLayer: true},
-	"internal/redact":        {layer: 1, name: "redact", sameLayer: true},
-	"internal/identity":      {layer: 1, name: "identity", sameLayer: true},
-	"internal/resource":      {layer: 1, name: "resource", sameLayer: true},
-	"internal/version":       {layer: 1, name: "version", sameLayer: true},
-	"internal/credential":    {layer: 1, name: "credential", sameLayer: true},
-	"internal/eventbus":      {layer: 1, name: "eventbus", sameLayer: true},
-	"internal/code":          {layer: 1, name: "code", sameLayer: true},
-	"internal/automation":    {layer: 1, name: "automation", sameLayer: true},
+	"internal/object":     {layer: 1, name: "object", sameLayer: true},
+	"internal/redact":     {layer: 1, name: "redact", sameLayer: true},
+	"internal/identity":   {layer: 1, name: "identity", sameLayer: true},
+	"internal/resource":   {layer: 1, name: "resource", sameLayer: true},
+	"internal/version":    {layer: 1, name: "version", sameLayer: true},
+	"internal/credential": {layer: 1, name: "credential", sameLayer: true},
+	"internal/eventbus":   {layer: 1, name: "eventbus", sameLayer: true},
+	"internal/code":       {layer: 1, name: "code", sameLayer: true},
+	"internal/automation": {layer: 1, name: "automation", sameLayer: true},
+	// 能力定义的**值层规则**（id 合法性、patch 键语义、参数类错误出口）：从 `mechanism/definition`
+	// 抽出来，让 `domain/*` 不必反向 import 机制层。
+	"internal/definition":    {layer: 1, name: "definition", sameLayer: true},
 	"internal/runtime":       {layer: 1, name: "runtime", sameLayer: true, deny: []string{"internal/infra/dsh"}},
 	"internal/capability":    {layer: 1, name: "capability", sameLayer: true},
 	"internal/infra/acp":     {layer: 1, name: "infra/acp", sameLayer: true},
@@ -379,7 +382,6 @@ var v32Exceptions = []v32Exception{
 	{from: "internal/domain/session", to: "internal/mechanism", budget: 1, slice: "刀9", why: "用 mechanism/doctor"},
 
 	// ——— 刀 10：service 收口 + cliops 拆分 ———
-	{from: "internal/service/svcautomation", to: "internal/mechanism", budget: 1, slice: "刀10", why: "用 mechanism/definition"},
 	{from: "internal/service/svcmodel", to: "internal/mechanism", budget: 1, slice: "刀10", why: "用 mechanism/definition"},
 	{from: "internal/service/svcprovider", to: "internal/infra/credentials", budget: 1, slice: "刀10", why: "直接读凭据文件"},
 

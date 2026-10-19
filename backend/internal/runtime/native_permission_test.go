@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"testing"
-
 )
 
 // TestBuiltinPortsAreRegistered 内置 adapter 的**可执行半场**必须真的被登记进注册表。

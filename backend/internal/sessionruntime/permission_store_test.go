@@ -7,8 +7,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/testutil"
 )
 
 // TestPermissionMemoriesPersistAcrossRestart 验证 P1 权限记忆持久化不变量：

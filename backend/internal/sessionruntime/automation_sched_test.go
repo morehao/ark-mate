@@ -12,9 +12,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
+	"github.com/morehao/ark-mate/internal/automation"
 	automationcore "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/automation"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

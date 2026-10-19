@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/code"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/testutil"
 )
 
 // TestMcpSecretResolution §13.3 M1/M6：定义文件里只有引用，注入时才解析成明文；

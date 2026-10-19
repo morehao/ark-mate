@@ -6,9 +6,9 @@ package ctrmodel
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/code"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
-	"github.com/morehao/ark-mate/internal/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 

@@ -33,4 +33,3 @@ type ModelContent struct {
 	MaxInputTokens  *int64
 	MaxOutputTokens *int64
 }
-

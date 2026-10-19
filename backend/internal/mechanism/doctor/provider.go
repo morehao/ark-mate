@@ -11,10 +11,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/model"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // ——— K2：`mate doctor` 的 provider（供应商凭据）与模型清单体检 ———

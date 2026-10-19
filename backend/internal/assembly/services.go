@@ -1,13 +1,12 @@
 package assembly
 
 import (
+	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/registry"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
 	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
@@ -22,6 +21,7 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svcusage"
 	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // Services 装配根构造出的全部用例（唯一构造点）。

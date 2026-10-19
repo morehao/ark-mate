@@ -12,9 +12,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // capabilityCmd 分发 `mate capability <动作>`。

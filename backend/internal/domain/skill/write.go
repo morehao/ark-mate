@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/capability"
+	defn "github.com/morehao/ark-mate/internal/definition"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -33,42 +33,42 @@ import (
 // WriteSkill 写面主体（create / update 共用的全部顺序与失败处理）。
 func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability.SkillWriteReq, create bool) (*dtocapability.SkillWriteResp, error) {
 	if m.caps == nil {
-		return nil, definition.ErrCapabilityUnavailable()
+		return nil, defn.ErrCapabilityUnavailable()
 	}
-	repo, err := m.defs.DefinitionRepoFor(definition.CapSubSkills)
+	repo, err := m.defs.DefinitionRepoFor(defn.CapSubSkills)
 	if err != nil {
 		return nil, err
 	}
-	patch := definition.RawPatch(req)
+	patch := defn.RawPatch(req)
 
 	id := pathID
-	bodyID, hasBodyID, err := definition.RawString(req, "id")
+	bodyID, hasBodyID, err := defn.RawString(req, "id")
 	if err != nil {
 		return nil, err
 	}
 	if create {
 		if !hasBodyID || strings.TrimSpace(bodyID) == "" {
-			return nil, definition.InvalidParamErr("新建 skill 必须带 id")
+			return nil, defn.InvalidParamErr("新建 skill 必须带 id")
 		}
 		id = bodyID
 	} else {
 		if hasBodyID && bodyID != pathID {
-			return nil, definition.InvalidParamErr(fmt.Sprintf(
+			return nil, defn.InvalidParamErr(fmt.Sprintf(
 				"路径 id %q 与 body id %q 不一致（id 不可改：要换 id 就删掉重建）", pathID, bodyID))
 		}
 		// 定义必须自带 id：手写文件漏了 id 时顺手补上（否则装载时该文件只能被跳过）。
 		patch["id"] = pathID
 	}
 
-	if !definition.ValidDefinitionID(id) {
+	if !defn.ValidDefinitionID(id) {
 		if create {
-			return nil, definition.InvalidDefinitionIDErr("skill", id)
+			return nil, defn.InvalidDefinitionIDErr("skill", id)
 		}
 		// update 的幂等友好处理：id 非法时它**不可能**存在，404 比 400 更准确。
 		if _, in := m.caps.SkillByID(id); !in {
 			return nil, notFoundErr(id)
 		}
-		return nil, definition.InvalidDefinitionIDErr("skill", id)
+		return nil, defn.InvalidDefinitionIDErr("skill", id)
 	}
 
 	_, inReg := m.caps.SkillByID(id)
@@ -102,7 +102,7 @@ func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability
 	}
 	var sk capability.Skill
 	if err := json.Unmarshal(merged, &sk); err != nil {
-		return nil, definition.InvalidParamErr(fmt.Sprintf("skill 定义无法解析：%v", err))
+		return nil, defn.InvalidParamErr(fmt.Sprintf("skill 定义无法解析：%v", err))
 	}
 	if sk.ID == "" {
 		sk.ID = id
@@ -122,7 +122,7 @@ func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability
 	if conflict {
 		// 载体的乐观锁没中：文件被手改 / 行 revision 变了（含"我以为新建、别人抢先建出来"）。
 		// 语义与 40901 的老文案一致——刷新重试，绝不 last-write-wins。
-		return nil, definition.DefinitionChangedErr(repo.Locator(id))
+		return nil, defn.DefinitionChangedErr(repo.Locator(id))
 	}
 	// 提交成功后才入表：同一份定义刚过闸门（纯函数），这一次必然成功；真出错也只可能来自
 	// "注册表被并发改坏"，那种情况下**不能**谎报写失败（载体上已经写成功了），记 WARN 更诚实。
@@ -153,17 +153,17 @@ func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability
 // 幂等：定义本来就不存在 → `deleted:false` 且无错（"让它不在"不要求"它曾在"）。
 func (m *Plane) DeleteSkill(ctx context.Context, id string) (*dtocapability.SkillDeleteResp, error) {
 	if m.caps == nil {
-		return nil, definition.ErrCapabilityUnavailable()
+		return nil, defn.ErrCapabilityUnavailable()
 	}
-	repo, err := m.defs.DefinitionRepoFor(definition.CapSubSkills)
+	repo, err := m.defs.DefinitionRepoFor(defn.CapSubSkills)
 	if err != nil {
 		return nil, err
 	}
-	if !definition.ValidDefinitionID(id) {
+	if !defn.ValidDefinitionID(id) {
 		if _, in := m.caps.SkillByID(id); !in {
 			return deleteNoop(id, ""), nil // 非法 id 不可能存在 → 幂等无操作
 		}
-		return nil, definition.InvalidDefinitionIDErr("skill", id)
+		return nil, defn.InvalidDefinitionIDErr("skill", id)
 	}
 	_, inReg := m.caps.SkillByID(id)
 	stored, err := repo.Exists(ctx, id)
@@ -180,7 +180,7 @@ func (m *Plane) DeleteSkill(ctx context.Context, id string) (*dtocapability.Skil
 		return nil, err
 	}
 	if conflict {
-		return nil, definition.DefinitionChangedErr(locator)
+		return nil, defn.DefinitionChangedErr(locator)
 	}
 	m.caps.RemoveSkill(id)
 	resp := &dtocapability.SkillDeleteResp{ID: id, Deleted: deleted, Path: locator}

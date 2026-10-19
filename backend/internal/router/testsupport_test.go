@@ -1,23 +1,23 @@
 package router_test
 
 import (
-	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/assembly"
+	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/credential"
-	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/dto/dtosystem"
+	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/router"
+	goruntime "github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/version"
-	"github.com/morehao/ark-mate/internal/config"
-	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )
 
 // testRouterOpts 路由级测试的最小装配选项（其余事实用真实域平面 + 空会话）。
@@ -29,7 +29,7 @@ type testRouterOpts struct {
 	// metaSource 覆盖诊断面的值来源；nil 时用"资产已接上"的默认值。
 	metaSource func() svcsystem.MetaSource
 	// 复用一个已装配好的会话面（调用方要先设策略/凭据时传它）。
-	service *sessionruntime.Service
+	service  *sessionruntime.Service
 	registry *goruntime.Registry
 	bus      *eventbus.Bus
 }

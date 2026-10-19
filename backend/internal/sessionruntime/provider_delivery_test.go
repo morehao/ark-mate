@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"github.com/morehao/ark-mate/internal/object/objdelivery"
+	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 )
 
 // TestProviderRespCarriesApplicability `GET /providers` 的两块派生只读面：

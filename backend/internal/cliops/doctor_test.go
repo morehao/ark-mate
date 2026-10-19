@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/dto/dtosystem"
 	"github.com/morehao/ark-mate/internal/router"
-	"github.com/morehao/ark-mate/internal/config"
 )
 
 // writeFiles 在 root 下写一组文件（rel → 内容），自动建父目录。

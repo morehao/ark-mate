@@ -7,8 +7,8 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/store"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // ——— `mate doctor` 的模型事实来源（P5a 取样面的最后一块）———

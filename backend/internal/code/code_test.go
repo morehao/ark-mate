@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/gerror"
 )
 

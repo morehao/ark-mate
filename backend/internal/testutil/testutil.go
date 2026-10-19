@@ -24,8 +24,8 @@ import (
 	// 否则会以 "unknown LoggerType zap" 失败。与 ark-go-starter 的 pkg/testsetup 同一分工。
 	_ "github.com/morehao/golib/glog/driver/zap"
 
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // StubRegistry 只注册一个**测试专用 stub runtime** 的注册表。

@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/store"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // ——— 「不在册底座」的存量体检（v18：第二个内置适配下线时新增） ———

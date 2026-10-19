@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/infra/credentials"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // Plane 供应商域的**有状态主体**：持有内存档案表、档案目录、库句柄、注册表与凭据机制。

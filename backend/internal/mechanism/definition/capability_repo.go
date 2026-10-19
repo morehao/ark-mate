@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/capability"
+	defval "github.com/morehao/ark-mate/internal/definition"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // ——— 能力定义写面的**载体**（M6-3） ———
@@ -79,7 +80,7 @@ type fileDefinitionRepo struct {
 }
 
 func (r *fileDefinitionRepo) Locator(id string) string {
-	path, err := DefinitionPath(r.dir, r.sub, id)
+	path, err := defval.DefinitionPath(r.dir, r.sub, id)
 	if err != nil {
 		return ""
 	}
@@ -94,7 +95,7 @@ func (r *fileDefinitionRepo) SourceFile(id string) string { return r.Locator(id)
 // 本次换载体不动它：真出错时后续的 open/commit 会以更准确的错误报出来，而在这里提前分流
 // 会把"文件读不了"变成一条新的失败路径（属于独立的一次行为变更，不该混在载体重构里）。
 func (r *fileDefinitionRepo) Exists(_ context.Context, id string) (bool, error) {
-	path, err := DefinitionPath(r.dir, r.sub, id)
+	path, err := defval.DefinitionPath(r.dir, r.sub, id)
 	if err != nil {
 		return false, err
 	}
@@ -138,7 +139,7 @@ type storeDefinitionRepo struct {
 }
 
 func (r *storeDefinitionRepo) Kind() string {
-	if r.sub == CapSubMcps {
+	if r.sub == defval.CapSubMcps {
 		return "mcp"
 	}
 	return "skill"
@@ -153,7 +154,7 @@ func (r *storeDefinitionRepo) SourceFile(string) string { return "" }
 
 // Read 读一行：返回 (body, revision, found)。
 func (r *storeDefinitionRepo) Read(ctx context.Context, id string) (string, int64, bool, error) {
-	if r.sub == CapSubMcps {
+	if r.sub == defval.CapSubMcps {
 		row, found, err := r.st.GetMcpServerDefinition(ctx, id)
 		if err != nil || !found {
 			return "", 0, found, err
@@ -223,7 +224,7 @@ func (r *storeDefinitionRepo) Commit(ctx context.Context, id string, doc *capabi
 }
 
 func (r *storeDefinitionRepo) Upsert(ctx context.Context, id, body string, rev int64) (bool, error) {
-	if r.sub == CapSubMcps {
+	if r.sub == defval.CapSubMcps {
 		return r.st.UpsertMcpServerDefinition(ctx, id, body, rev, r.actor)
 	}
 	return r.st.UpsertSkillDefinition(ctx, id, body, rev, r.actor)
@@ -239,7 +240,7 @@ func (r *storeDefinitionRepo) Remove(ctx context.Context, id string) (bool, bool
 		return false, false, nil // 幂等：本来就没有
 	}
 	var ok bool
-	if r.sub == CapSubMcps {
+	if r.sub == defval.CapSubMcps {
 		ok, err = r.st.DeleteMcpServerDefinition(ctx, id, rev, r.actor)
 	} else {
 		ok, err = r.st.DeleteSkillDefinition(ctx, id, rev, r.actor)
@@ -252,13 +253,4 @@ func (r *storeDefinitionRepo) Remove(ctx context.Context, id string) (bool, bool
 		return false, true, nil
 	}
 	return true, false, nil
-}
-
-// DefinitionChangedErr CAS 没中的统一出口（两个载体共用同一句话）。
-//
-// 语义与文案都必须与文件载体时代**逐字同义**：这不是"你的参数错了"（40001），而是
-// "刷新后重试，你的改动没写入"（40901）——绝不 last-write-wins。
-func DefinitionChangedErr(locator string) error {
-	return acl.NewError(acl.ClassLimit, "definition_changed",
-		fmt.Sprintf("能力定义 %s 在本次编辑期间被外部改动，请刷新后重试（你的改动未写入）", locator), nil)
 }

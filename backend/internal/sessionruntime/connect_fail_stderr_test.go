@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/code"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/code"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
 )

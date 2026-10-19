@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
 )
 
 // altID / altSpec 测试用的**第二个** adapter（不是内置底座）。

@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/infra/mcp"
+	"github.com/morehao/ark-mate/internal/testutil"
 )
 
 // fakeSource 一个记账用的数据面（Tools/Call 各自可注入错误）。

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— dsh 升级的「声明跟随 pin」守卫 ———

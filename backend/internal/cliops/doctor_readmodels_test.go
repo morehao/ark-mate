@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/internal/config"
 )
 
 // ——— `mate doctor` 的 read-models 段（v21–v23 的读模型漂移） ———

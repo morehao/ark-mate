@@ -6,11 +6,12 @@ import (
 	"path/filepath"
 	"time"
 
+	defn "github.com/morehao/ark-mate/internal/definition"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/infra/logging"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/golib/glog"
 )
 
@@ -188,7 +189,7 @@ func (pl *Plane) persistProviderDefinition(ctx context.Context, d *Def) error {
 		return err
 	}
 	if !ok {
-		return definition.DefinitionChangedErr(pl.ProviderLocator(d.ID))
+		return defn.DefinitionChangedErr(pl.ProviderLocator(d.ID))
 	}
 	d.Revision = expected + 1
 	d.UpdatedAt = time.Now().UTC()

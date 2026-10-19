@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/infra/dbclient"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objid"
+	"github.com/morehao/ark-mate/internal/store"
 
 	// 守卫 10 要开一个临时库跑真实迁移，而 `dbclient.Open` → `glog.NewLogger` 需要 zap driver：
 	// 日志出口归装配根（`cmd/mate` 的匿名引入），test 二进制不含它（同 `internal/store` 的做法）。

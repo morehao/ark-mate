@@ -6,8 +6,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/model"
 )
 
 // ——— D1 技能包导入的对外契约（两种载体各跑一遍） ———

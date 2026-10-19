@@ -1,8 +1,8 @@
 package svccapability
 
 import (
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 )
 
 // ToolCatalog 工具目录（能力数据面的**读模型**）：平台 builtin / 观察兜底 / MCP live 的并集。

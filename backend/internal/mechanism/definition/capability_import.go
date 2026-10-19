@@ -10,9 +10,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/capability"
+	defval "github.com/morehao/ark-mate/internal/definition"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/golib/glog"
 )
 
@@ -97,10 +98,10 @@ func ExportCapabilityDir(ctx context.Context, st *store.Store, dir string, dryRu
 	}
 	rows := make([]row, 0, len(skills)+len(mcps))
 	for i := range skills {
-		rows = append(rows, row{sub: CapSubSkills, id: skills[i].ID, body: skills[i].Body})
+		rows = append(rows, row{sub: defval.CapSubSkills, id: skills[i].ID, body: skills[i].Body})
 	}
 	for i := range mcps {
-		rows = append(rows, row{sub: CapSubMcps, id: mcps[i].ID, body: mcps[i].Body})
+		rows = append(rows, row{sub: defval.CapSubMcps, id: mcps[i].ID, body: mcps[i].Body})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].sub != rows[j].sub {
@@ -145,7 +146,7 @@ func scanCapabilityDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 	stats := CapabilityImportStats{DefinitionImportStats: DefinitionImportStats{Dir: dir}}
 	items := make([]store.DefinitionImportItem, 0, 8)
 
-	skillFiles := GlobSorted(filepath.Join(dir, CapSubSkills))
+	skillFiles := GlobSorted(filepath.Join(dir, defval.CapSubSkills))
 	for _, path := range skillFiles {
 		doc, err := capability.ReadDefinitionFile(path)
 		if err != nil {
@@ -179,7 +180,7 @@ func scanCapabilityDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 		stats.Skills++
 	}
 
-	mcpFiles := GlobSorted(filepath.Join(dir, CapSubMcps))
+	mcpFiles := GlobSorted(filepath.Join(dir, defval.CapSubMcps))
 	for _, path := range mcpFiles {
 		doc, err := capability.ReadDefinitionFile(path)
 		if err != nil {

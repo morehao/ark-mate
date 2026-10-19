@@ -6,9 +6,9 @@ package ctrprovider
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/code"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/service/svcprovider"
-	"github.com/morehao/ark-mate/internal/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 

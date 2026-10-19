@@ -5,11 +5,12 @@ import (
 
 	"context"
 
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/code"
+	defn "github.com/morehao/ark-mate/internal/definition"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 )
 
 // Plane 技能平面的**有状态主体**：持有能力注册表（技能定义都在这里）与投影登记处。
@@ -113,7 +114,7 @@ func (m *Plane) WriteSkillEnabled(ctx context.Context, id string, enabled bool) 
 				fmt.Sprintf("skill %q 无法启停：本进程未装载能力数据面目录（MATE_CAPABILITIES），没有可持久化的定义文件", id), nil)
 		}
 	}
-	repo, err := m.defs.DefinitionRepoFor(definition.CapSubSkills)
+	repo, err := m.defs.DefinitionRepoFor(defn.CapSubSkills)
 	if err != nil {
 		return "", err
 	}
@@ -137,7 +138,7 @@ func (m *Plane) WriteSkillEnabled(ctx context.Context, id string, enabled bool) 
 	if _, conflict, err := repo.Commit(ctx, id, doc, rev, existed); err != nil {
 		return "", err
 	} else if conflict {
-		return "", definition.DefinitionChangedErr(repo.Locator(id))
+		return "", defn.DefinitionChangedErr(repo.Locator(id))
 	}
 	return repo.Locator(id), nil
 }

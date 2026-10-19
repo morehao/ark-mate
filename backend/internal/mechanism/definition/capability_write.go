@@ -6,41 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/capability"
+	defval "github.com/morehao/ark-mate/internal/definition"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
-
-// ——— 能力定义写面：C9 落盘纪律的唯一实现 ———
-//
-// 能力定义的**事实源永远是文件**（`<CapabilityDir>/{skills,mcp,tools}/<id>.json`），面板只是
-// 编辑器。所以写面只做一件事：把"改哪几个键"落进文件，其余字节不碰。
-//
-// 这里封死 C9 的五条（见 AGENTS.md 与本计划 §0）：
-//
-//  1. 读原文件为 `map[string]any`（不存在 = 空 map → 新建）；
-//  2. **只改 patch 里的键**（patch 值为 nil = 删掉该键）；
-//  3. **未知键原样保留**——用户手写的注释性字段、未来版本新增的键，都不该被一次编辑抹掉；
-//  4. 同目录 staging + 原子 `rename` + **权限沿用**原文件（`capability.DefinitionFile`）；
-//  5. 写前比对 mtime：读→写窗口内被外部改动 → `definition_changed`，**绝不 last-write-wins**
-//     （风险表第 3 行）。
-//
-// 一个必须说清的边界：第 5 条防的是**并发写**（两个 PUT / PUT 撞上手工编辑 / 撞上
-// `mate capability migrate`），不是"客户端 GET 之后有人改了文件"。后者不需要报错也不该报错
-// ——PUT 的语义是"这几个键置成这些值"，而未知键在第 1 步就被重新读入，所以别人在你 GET 之后
-// 写的**别的键**不会丢。会丢的只有"你们改了同一个键"，那时后写者赢是 PUT 的应有语义。
-
-// capabilitySubdir 三类能力定义各自的子目录名（`<CapabilityDir>/<subdir>/<id>.json`）。
-const (
-	CapSubSkills = "skills"
-	CapSubMcps   = "mcp"
-)
-
-// ErrCapabilityUnavailable 能力数据面未装配（服务端形态问题，不是用户的参数问题）。
-func ErrCapabilityUnavailable() error {
-	return acl.NewError(acl.ClassService, "capability_unavailable", "能力数据面未装配", nil)
-}
 
 // CapabilityDirUnsetErr 未配置能力目录 → 显式报错而不是"内存生效、盘上没留痕"。
 //
@@ -59,39 +29,6 @@ func (m *Mechanism) CapabilityDirFor(sub string) (string, error) {
 		return "", CapabilityDirUnsetErr("能力定义的增删改")
 	}
 	return filepath.Join(dir, sub), nil
-}
-
-// ValidDefinitionID 定义 id 可否作为文件名。
-//
-// **这是一条安全边界，不只是格式校验**：id 来自 URL 路径与 body，直接拼进路径就成了目录穿越
-// （`PUT /skills/..%2F..%2Fetc%2Fpasswd`）。上游 `RegisterSkill`/`RegisterMcpServer` 已经按
-// 同一套规则（`nameRE`）拦过一道，但 `WriteDefinition` 也会被删除/迁移路径调用，所以在这里
-// 再判一次——**最后一道防线放在真正做路径拼接的地方**。
-func ValidDefinitionID(id string) bool {
-	if id == "" || len(id) > 64 {
-		return false
-	}
-	if id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
-		return false
-	}
-	if filepath.Base(id) != id || id != filepath.Clean(id) {
-		return false
-	}
-	return true
-}
-
-// InvalidDefinitionIDErr 非法 id 的错误（文案不回显原始字符串的长度细节，只说明规则）。
-func InvalidDefinitionIDErr(Kind, id string) error {
-	return acl.NewError(acl.ClassRequest, "invalid_param",
-		fmt.Sprintf("%s id %q 不能作为文件名（须字母数字开头、≤64 位、不含路径分隔符）", Kind, id), nil)
-}
-
-// DefinitionPath 拼出 `dir/<id>.json`；id 非法即报错（见 ValidDefinitionID）。
-func DefinitionPath(dir, Kind, id string) (string, error) {
-	if !ValidDefinitionID(id) {
-		return "", InvalidDefinitionIDErr(Kind, id)
-	}
-	return filepath.Join(dir, id+".json"), nil
 }
 
 // DefinitionDraft 一份"已合并、未落盘"的能力定义（C9 的前两步做完，第三步由调用方决定）。
@@ -120,7 +57,7 @@ func (d *DefinitionDraft) Merged() ([]byte, error) { return d.df.Marshal() }
 
 // OpenDefinition 读原文件（不存在 → 新建）→ 应用 patch（值 nil = 删键）→ 返回**未落盘**的草稿。
 func OpenDefinition(dir, Kind, id string, patch map[string]any) (*DefinitionDraft, error) {
-	path, err := DefinitionPath(dir, Kind, id)
+	path, err := defval.DefinitionPath(dir, Kind, id)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +123,7 @@ func WriteDefinition(dir, Kind, id string, patch map[string]any) error {
 
 // RemoveDefinitionPermanently 删掉 `dir/<id>.json`；文件本来就不存在 → (false, nil)（幂等删除）。
 func RemoveDefinitionPermanently(dir, Kind, id string) (bool, error) {
-	path, err := DefinitionPath(dir, Kind, id)
+	path, err := defval.DefinitionPath(dir, Kind, id)
 	if err != nil {
 		return false, err
 	}

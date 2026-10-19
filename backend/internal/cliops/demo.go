@@ -1,18 +1,18 @@
 package cliops
 
 import (
-	"github.com/morehao/ark-mate/internal/assembly"
 	"context"
 	"flag"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/assembly"
 	"os"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/sessionruntime"
 )
 
 // demo 在**构建期选定的** runtime 上跑一次真实会话（M0 DoD 的可执行验证路径）。

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/object/objid"
+	"github.com/morehao/ark-mate/internal/testutil"
 )
 
 // P3b-2b：本文件是 `manager/messages_search_test.go` 的域内那一半。

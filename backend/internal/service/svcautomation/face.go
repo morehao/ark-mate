@@ -7,12 +7,12 @@ import (
 	"sort"
 	"time"
 
-	domauto "github.com/morehao/ark-mate/internal/domain/automation"
-	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	pkgauto "github.com/morehao/ark-mate/internal/automation"
 	"github.com/morehao/ark-mate/internal/code"
+	defn "github.com/morehao/ark-mate/internal/definition"
+	domauto "github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— automation 的**对外面**（P4a 正文第九刀：从 `domain/automation` 上提到这里）———
@@ -67,17 +67,17 @@ func (s *Service) GetAutomation(id string) (*dtoautomation.AutomationResp, error
 
 // CreateAutomation 新建定义。`id` 必填（写面 DTO 的原文对象里取，非法类型 → 40000）。
 func (s *Service) CreateAutomation(ctx context.Context, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
-	id, ok, err := definition.RawString(req, "id")
+	id, ok, err := defn.RawString(req, "id")
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, definition.InvalidParamErr("缺少 id（automation 的 id 是文件名，必填且不可改）")
+		return nil, defn.InvalidParamErr("缺少 id（automation 的 id 是文件名，必填且不可改）")
 	}
 	if id == "" {
-		return nil, definition.InvalidParamErr(`字段 "id" 须为非空字符串`)
+		return nil, defn.InvalidParamErr(`字段 "id" 须为非空字符串`)
 	}
-	v, err := s.plane.WriteAutomation(ctx, id, definition.RawPatch(req), true)
+	v, err := s.plane.WriteAutomation(ctx, id, defn.RawPatch(req), true)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func (s *Service) CreateAutomation(ctx context.Context, req dtoautomation.Automa
 
 // UpdateAutomation 覆盖写：只改请求体里出现的键（未出现的保留原值；`null` 删键）。
 func (s *Service) UpdateAutomation(ctx context.Context, id string, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
-	v, err := s.plane.WriteAutomation(ctx, id, definition.RawPatch(req), false)
+	v, err := s.plane.WriteAutomation(ctx, id, defn.RawPatch(req), false)
 	if err != nil {
 		return nil, err
 	}

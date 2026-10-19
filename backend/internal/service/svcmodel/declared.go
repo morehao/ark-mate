@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strings"
 
+	defn "github.com/morehao/ark-mate/internal/definition"
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/resource"
 )
@@ -192,7 +193,7 @@ func (m *Declared) UpdateModel(ctx context.Context, id string, patch dtomodel.Mo
 			return nil, err
 		}
 		if !ok {
-			return nil, definition.DefinitionChangedErr("db:model/" + id)
+			return nil, defn.DefinitionChangedErr("db:model/" + id)
 		}
 	}
 	// 置/清默认是**两个方向**，都必须被处理：只处理 `true` 会让 `is_default:false` 静默无效。

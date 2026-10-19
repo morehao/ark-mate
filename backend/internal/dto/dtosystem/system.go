@@ -58,8 +58,8 @@ type MetaInfo struct {
 	// WebPath 资产目录的**绝对路径**；未接资产层时为 null（**显式 null**，客户端按可空字段处理）。
 	WebPath *string `json:"webPath"`
 	// WebDigest 逐文件 sha256 的确定性合成；未接资产层时为 null。
-	WebDigest *string     `json:"webDigest"`
-	Home      string      `json:"home"`
+	WebDigest *string       `json:"webDigest"`
+	Home      string        `json:"home"`
 	Payloads  []PayloadInfo `json:"payloads"`
 	// Runtime 底座身份（构建期固定）。它**总是出现**（不是可空字段）：装配层一定知道它是谁。
 	Runtime RuntimeInfo `json:"runtime"`

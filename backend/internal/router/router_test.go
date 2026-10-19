@@ -1,8 +1,8 @@
 package router_test
 
 import (
-	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -17,14 +17,14 @@ import (
 	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/router"
-	"github.com/morehao/ark-mate/internal/sessionruntime"
-	"github.com/morehao/ark-mate/internal/code"
-	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/sessionruntime"
 )
 
 // newEngine 走真实装配路径：sessionruntime.Service + router.New（含 /v1/mate 分组与默认中间件）。

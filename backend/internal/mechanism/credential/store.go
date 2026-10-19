@@ -3,9 +3,9 @@ package credential
 import (
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/infra/credentials"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // Store 是凭据机制持有的**状态**：四层凭据面与凭据 cwd。

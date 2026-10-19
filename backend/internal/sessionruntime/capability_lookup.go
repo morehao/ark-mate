@@ -1,8 +1,8 @@
 package sessionruntime
 
 import (
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/domain/session"
 )
 
 // ——— P3c：能力定义查表与可达性事实的装配适配器（域端口 `session.CapabilityLookup`） ———

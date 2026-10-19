@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
-	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

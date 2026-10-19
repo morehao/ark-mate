@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— M3-3 建会话时的能力选定校验 ———

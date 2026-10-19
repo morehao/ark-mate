@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/assembly"
+	"github.com/morehao/ark-mate/internal/config"
+	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 )
 
 // knownRuntimeIDs 在册 runtime id 全集：**全部内置适配** ∪ `runtimes.json` 的远程端点。

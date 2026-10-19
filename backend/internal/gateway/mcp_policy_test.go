@@ -3,8 +3,8 @@ package gateway
 // ——— M7-4/M7-5 验收：命名策略 fail-closed、探测面/真实面对拍、调用留痕、并发语义 ———
 
 import (
-	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"sort"
 	"strings"
 	"sync"

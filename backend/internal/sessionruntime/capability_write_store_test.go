@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	defn "github.com/morehao/ark-mate/internal/definition"
 	"github.com/morehao/ark-mate/internal/domain/skill"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -155,7 +155,7 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 	if _, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t, "id", `"cas-skill"`, "name", `"orig"`)), true); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	repo, err := r.Svc.Planes().Definitions.DefinitionRepoFor(definition.CapSubSkills)
+	repo, err := r.Svc.Planes().Definitions.DefinitionRepoFor(defn.CapSubSkills)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,8 +201,8 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 	}
 
 	// 冲突到对外信封的映射（与文件载体时代同码同义）：40901 + definition_changed。
-	// 写面里 `conflict → definition.DefinitionChangedErr` 是一行直连，所以这里钉住那一行的产物即可。
-	rawErr := definition.DefinitionChangedErr(repo.Locator("cas-skill"))
+	// 写面里 `conflict → defn.DefinitionChangedErr` 是一行直连，所以这里钉住那一行的产物即可。
+	rawErr := defn.DefinitionChangedErr(repo.Locator("cas-skill"))
 	if !strings.Contains(rawErr.Error(), "definition_changed") ||
 		!strings.Contains(rawErr.Error(), "db:skill/cas-skill") {
 		t.Fatalf("冲突错误应带稳定码与定位串: %v", rawErr)

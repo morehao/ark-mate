@@ -1,9 +1,9 @@
 package sessionruntime
 
 import (
-	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"strings"
 	"testing"
 
@@ -12,10 +12,10 @@ import (
 	"github.com/morehao/golib/gerror"
 
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
-	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/object/objid"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/service/svcruntime"
 )
 
 // 本文件是从 `elicitation_test.go` 拆出来的：那三个用例测的是 **Orchestrator / Service 侧**

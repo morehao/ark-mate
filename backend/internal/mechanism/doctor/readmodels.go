@@ -1,9 +1,9 @@
 package doctor
 
 import (
-	"github.com/morehao/ark-mate/internal/model"
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/model"
 	"slices"
 	"sort"
 

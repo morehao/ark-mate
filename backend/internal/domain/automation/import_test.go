@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
+	pkgautomation "github.com/morehao/ark-mate/internal/automation"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
-	pkgautomation "github.com/morehao/ark-mate/internal/automation"
 )
 
 // sameJSONObject 逐键比对两份 JSON 正文（顺序无关；任一份不是 JSON → 立刻失败）。
@@ -72,7 +72,7 @@ func automationSeedDir(t *testing.T) string {
 		`"schedule":{"kind":"weekly","timezone":"UTC","hour":3,"minute":30,"days_of_week":[1]},`+
 		`"target":{"agent_id":"a1","cwd":"`+cwd+`","prompt":"周报"}}`)
 	write("broken.json", `{"id":"broken",`)
-	// id 里带斜杠 = 会变成"子路径"，与写面同一道闸门（`definition.ValidDefinitionID`）→ 拒收。
+	// id 里带斜杠 = 会变成"子路径"，与写面同一道闸门（`defn.ValidDefinitionID`）→ 拒收。
 	write("slash.json", `{"id":"a/b","name":"id 带斜杠"}`)
 	// 保留键类型不对（`last_fired_at` 写成数字）：**报错**而不是静默丢掉——"我写了它为什么不生效"
 	// 比"这条导不进来"更难排查。

@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"testing"
-
 )
 
 // TestNormalizeID 历史别名归一（2026-10-11：注册表键 `deepseekharness` → `dsh`）。

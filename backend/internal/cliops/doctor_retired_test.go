@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/config"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/internal/config"
 )
 
 // ——— v18：`mate doctor` 的存量体检段（「不在册底座」的痕迹） ———

@@ -1,9 +1,9 @@
 package sessionruntime
 
 import (
-	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,13 +12,13 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
+	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/testutil"
 )
 
 // ——— M3-6/M3-7：轮次边界的代际迁移、缩权与代际池 ———

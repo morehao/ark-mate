@@ -4,16 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	defn "github.com/morehao/ark-mate/internal/definition"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"path/filepath"
 	"sort"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/automation"
 	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/golib/glog"
 )
 
@@ -113,7 +114,7 @@ func (pl *Plane) commitAutomationDraft(ctx context.Context, d *Draft, create boo
 			return acl.NewError(acl.ClassLimit, "automation_exists",
 				fmt.Sprintf("automation %s 已存在（换一个 id，或用 PUT 覆盖它）", d.ID), nil)
 		}
-		return definition.DefinitionChangedErr(d.Locator)
+		return defn.DefinitionChangedErr(d.Locator)
 	}
 	return nil
 }
@@ -142,7 +143,7 @@ func (pl *Plane) deleteAutomationDefinition(ctx context.Context, id string) (boo
 	}
 	if !ok {
 		// 删掉别人刚改过的那一版比覆盖更不可逆 → 一律报冲突让用户刷新重试。
-		return false, definition.DefinitionChangedErr(Locator(id))
+		return false, defn.DefinitionChangedErr(Locator(id))
 	}
 	return true, nil
 }

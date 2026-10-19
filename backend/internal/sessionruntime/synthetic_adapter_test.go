@@ -1,9 +1,9 @@
 package sessionruntime
 
 import (
-	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,9 +15,9 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
-	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // TestSyntheticAdapterIsFirstClass 「adapter 层还在」这句话的**可执行证据**。

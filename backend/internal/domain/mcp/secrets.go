@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/redact"
 )
 

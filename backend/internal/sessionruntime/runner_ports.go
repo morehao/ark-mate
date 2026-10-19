@@ -3,9 +3,9 @@ package sessionruntime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 )
 
 // ——— `domain/session.Runner` 的四张窄端口在编排侧的实现（P4a 正文第五十五刀）———

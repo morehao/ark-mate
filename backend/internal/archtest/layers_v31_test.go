@@ -65,12 +65,14 @@ var v31Layers = map[string]v31Layer{
 	"internal/infra/dbclient":    {layer: 1, name: "infra/dbclient"},
 
 	// ——— 2 层：协议客户端 / 错误码 / 跨域机制门面 ———
-	"internal/infra/acp":  {layer: 2, name: "infra/acp"},
-	"internal/infra/mcp":  {layer: 2, name: "infra/mcp"},
+	"internal/infra/acp": {layer: 2, name: "infra/acp"},
+	"internal/infra/mcp": {layer: 2, name: "infra/mcp"},
 	// `code` 把 ACP 的协议错误折成本仓错误码（`acl.go`）：它是 2 层里的**叶子消费者**，
 	// 允许与同层协议客户端互链（否则「错误码」这一格只能靠复制粘贴活着）。
 	"internal/code":       {layer: 2, name: "code", sameLayer: true},
 	"internal/automation": {layer: 2, name: "automation", sameLayer: true},
+	// 定义值层规则（v3.2 刀 4 抽出）：只依赖 acp/code，放在同层。
+	"internal/definition": {layer: 2, name: "definition", sameLayer: true},
 	"internal/credential": {layer: 2, name: "credential", deny: []string{"internal/service", "internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},
 
 	// ——— 3 层：adapter 契约 + 注册表 ———
@@ -141,22 +143,22 @@ var v31Exempt = []string{
 // v31LegacyPaths 过渡期路径映射：P2 之前 `pkg/*` 仍在，按目标层判定。
 // P2 完成后本表必须为空（`TestLayerLegacyPathsAreEmptyV31` 会盯着）。
 var v31LegacyPaths = map[string]string{
-	"internal/runtime":     "internal/runtime",
-	"internal/infra/dsh": "internal/infra/dsh",
+	"internal/runtime":           "internal/runtime",
+	"internal/infra/dsh":         "internal/infra/dsh",
 	"internal/infra/acp":         "internal/infra/acp",
 	"internal/infra/mcp":         "internal/infra/mcp",
 	"internal/infra/logging":     "internal/infra/logging",
 	"internal/infra/credentials": "internal/infra/credentials",
 	"internal/infra/dbclient":    "internal/infra/dbclient",
 	"internal/infra/procreg":     "internal/infra/procreg",
-	"internal/identity":    "internal/identity",
-	"internal/resource":    "internal/resource",
-	"internal/redact":      "internal/redact",
-	"internal/object":      "internal/object",
-	"internal/capability":  "internal/capability",
-	"internal/automation":  "internal/automation",
-	"internal/config":      "internal/config",
-	"internal/code":        "internal/code",
+	"internal/identity":          "internal/identity",
+	"internal/resource":          "internal/resource",
+	"internal/redact":            "internal/redact",
+	"internal/object":            "internal/object",
+	"internal/capability":        "internal/capability",
+	"internal/automation":        "internal/automation",
+	"internal/config":            "internal/config",
+	"internal/code":              "internal/code",
 }
 
 // v31Exception 是一条已登记的过渡例外。
