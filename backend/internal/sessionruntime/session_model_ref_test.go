@@ -9,8 +9,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/model"
@@ -60,7 +60,7 @@ func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName st
 	t.Helper()
 	ctx := context.Background()
 	key, baseURL := "sk-test", "https://api.example.com/v1"
-	if _, err := svc.planes.Providers.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	if _, err := svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: providerID, Protocol: "openai", BaseURL: &baseURL, APIKey: &key,
 	}); err != nil && errCode(err) != "provider_exists" {
 		t.Fatalf("CreateProvider(%s): %v", providerID, err)

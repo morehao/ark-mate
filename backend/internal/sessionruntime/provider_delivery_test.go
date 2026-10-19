@@ -2,12 +2,11 @@ package sessionruntime
 
 import (
 	"context"
-	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/object/objdelivery"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 )
@@ -65,31 +64,10 @@ func TestProviderRespCarriesApplicability(t *testing.T) {
 		}
 	}
 
-	// ③ wire 形状：`applicability` 是数组，元素键名逐字是 runtime/ok/status/reason。
-	raw, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("序列化失败: %v", err)
-	}
-	var wire map[string]any
-	if err := json.Unmarshal(raw, &wire); err != nil {
-		t.Fatalf("反序列化失败: %v", err)
-	}
-	if _, exists := wire["delivery"]; exists {
-		t.Errorf("v12 不该再有 delivery 字段（凭据通道按 runtime 分面，一条静态声明表达不了）: %s", raw)
-	}
-	list, ok := wire["applicability"].([]any)
-	if !ok || len(list) == 0 {
-		t.Fatalf("applicability 应是非空数组: %s", raw)
-	}
-	first, ok := list[0].(map[string]any)
-	if !ok {
-		t.Fatalf("applicability 的元素应是对象: %s", raw)
-	}
-	for _, k := range []string{"runtime", "ok", "status"} {
-		if _, exists := first[k]; !exists {
-			t.Errorf("applicability 元素缺键 %q: %s", k, raw)
-		}
-	}
+	// ③ wire 形状（`applicability` 是数组、元素键名逐字 runtime/ok/status/reason）由
+	// `internal/router/rest_provider_test.go` 的真实 HTTP 往返覆盖——v3.2 刀 8 起领域只产
+	// 无 tag 视图，对外 JSON 形态是 `svcprovider` 的职责，在领域测试里断言它只会测到 Go 字段名。
+
 }
 
 // TestProviderApplicabilityNotConfiguredWhenBaseURLEmpty 缺端点 → 每个 runtime 一条
@@ -110,7 +88,7 @@ func TestProviderApplicabilityNotConfiguredWhenBaseURLEmpty(t *testing.T) {
 	// 把端点清空（存量 v11 数据迁移后推不出端点的形态；PATCH 允许它，因为写面不该逼用户在
 	// 一次编辑里就填完所有东西）。
 	empty := ""
-	if _, err := svc.planes.Providers.UpdateProvider(ctx, "legacy", dtoprovider.ProviderPatchReq{BaseURL: &empty}); err != nil {
+	if _, err := svc.planes.Providers.UpdateProvider(ctx, "legacy", provider.PatchRequest{BaseURL: &empty}); err != nil {
 		t.Fatalf("UpdateProvider(清空端点): %v", err)
 	}
 

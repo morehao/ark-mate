@@ -11,7 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/redact"
 )
@@ -128,7 +128,7 @@ func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
 	svc.planes.Providers.SetProviderDir(filepath.Join(home, "providers"))
 
 	key := "zq7-not-a-known-shape-42" // 形状上谁都认不出来
-	if _, err := svc.planes.Providers.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	if _, err := svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: "dyn", Protocol: "openai", APIKey: &key,
 	}); err != nil {
 		t.Fatalf("写面存密钥: %v", err)

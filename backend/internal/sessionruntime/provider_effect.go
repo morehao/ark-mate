@@ -3,8 +3,8 @@ package sessionruntime
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/object/objdelivery"
 )
 
@@ -22,7 +22,7 @@ import (
 //
 // 返回 nil 只有一种情况：没有编排器（`demo`/`migrate`/纯列表场景）——那时没有任何活会话，
 // "哪些会话会顺延"这个问题本身不成立；而**编不出数就不编**比回一个 0 更诚实。
-func (s *Service) providerEffect(providerID string) *dtoprovider.ProviderEffect {
+func (s *Service) providerEffect(providerID string) *provider.ProviderEffect {
 	o := s.orch
 	if o == nil {
 		return nil
@@ -30,7 +30,7 @@ func (s *Service) providerEffect(providerID string) *dtoprovider.ProviderEffect 
 	// 通道/时刻**取自静态交付表**（`objdelivery`），不在这里再写一份字面量：
 	// 两处各写一遍迟早漂移，而漂移的表现是"回执说的通道与真实交付不一致"。
 	delivery, _ := objdelivery.For(objdelivery.KindProvider)
-	eff := &dtoprovider.ProviderEffect{
+	eff := &provider.ProviderEffect{
 		Channel: delivery.Channel,
 		Effect:  delivery.Effect,
 	}

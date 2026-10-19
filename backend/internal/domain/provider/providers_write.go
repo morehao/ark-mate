@@ -8,7 +8,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objdelivery"
@@ -38,7 +37,7 @@ import (
 //   - 密钥写入缺 store 侧的独立审计出口（`SetProviderKey` 只 bump revision），见汇报。
 
 // CreateProvider 新建一条供应商（POST /providers）。
-func (pl *Plane) CreateProvider(ctx context.Context, req dtoprovider.ProviderCreateReq) (*dtoprovider.ProviderResp, error) {
+func (pl *Plane) CreateProvider(ctx context.Context, req CreateRequest) (*ProviderItem, error) {
 	if err := ValidateProviderID(req.ID); err != nil {
 		return nil, err
 	}
@@ -98,7 +97,7 @@ func (pl *Plane) CreateProvider(ctx context.Context, req dtoprovider.ProviderCre
 //   - 写：`providers.key` 一列，一笔 UPDATE；写成功即整笔成功（没有第二处副本要同步）。
 //   - 清：同一列写空串。**内存与镜像都必须跟着变**——留在托管文档里的那条会在下一次解析时
 //     被"库是权威"的判据否掉（见 `KeyFor`），但把它删干净才是收尾。
-func (pl *Plane) UpdateProvider(ctx context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
+func (pl *Plane) UpdateProvider(ctx context.Context, id string, patch PatchRequest) (*ProviderItem, error) {
 	if err := ValidateProviderID(id); err != nil {
 		return nil, err
 	}
@@ -167,7 +166,7 @@ func (pl *Plane) UpdateProvider(ctx context.Context, id string, patch dtoprovide
 
 	// 生效面回执：只有驱动行为的字段变了才说"下一轮生效"；只改 name/note 就如实回 none。
 	if !secretChanged && !contentChanged {
-		resp.Effect = &dtoprovider.ProviderEffect{
+		resp.Effect = &ProviderEffect{
 			Channel: dialEnvChannel(), Effect: "none",
 			Note: "只改了不驱动行为的字段（协议/端点/密钥都未变）：本轮与后续轮次的行为都不变",
 		}
@@ -245,7 +244,7 @@ func (pl *Plane) writeProviderKey(ctx context.Context, d *Def, key string) error
 // **引用判据在 store 的同一事务里**（v13）：v12 是"manager 先查引用名单、再单独删行"，
 // 中间有窗口——并发「删供应商」+「给它加模型」会留下孤儿 model 行（P3）。
 // manager 现在只翻错误码（`provider_in_use`），文案与引用名单形状不变。
-func (pl *Plane) DeleteProvider(ctx context.Context, id string) (*dtoprovider.ProviderDeleteResp, error) {
+func (pl *Plane) DeleteProvider(ctx context.Context, id string) (*ProviderDelete, error) {
 	if err := ValidateProviderID(id); err != nil {
 		return nil, err
 	}
@@ -257,7 +256,7 @@ func (pl *Plane) DeleteProvider(ctx context.Context, id string) (*dtoprovider.Pr
 	pl.mu.Unlock()
 	if !exists {
 		// 幂等：不存在（或本来就没这一条）→ deleted:false 且 code=0。
-		return &dtoprovider.ProviderDeleteResp{Deleted: false}, nil
+		return &ProviderDelete{Deleted: false}, nil
 	}
 	// 文件载体没有事务，引用判据只能先读一次（sqlite 载体在同一事务里判，见下）。
 	// 两种载体的对外承诺相同：被引用 → `provider_in_use` + 名单，绝不级联清空。
@@ -295,7 +294,7 @@ func (pl *Plane) DeleteProvider(ctx context.Context, id string) (*dtoprovider.Pr
 		if !found {
 			// 内存里有、库里没有：**什么都不做**（不摘内存，如实报未删）——避免"界面上一闪而过、
 			// 实际库行还在"的不一致被我们主动制造出来。
-			return &dtoprovider.ProviderDeleteResp{Deleted: false}, nil
+			return &ProviderDelete{Deleted: false}, nil
 		}
 		removed, refModels, err := pl.removeProviderDefinition(ctx, id, row.Revision)
 		if err != nil {
@@ -306,7 +305,7 @@ func (pl *Plane) DeleteProvider(ctx context.Context, id string) (*dtoprovider.Pr
 				providerInUseMsg(id, refModels), nil)
 		}
 		if !removed {
-			return &dtoprovider.ProviderDeleteResp{Deleted: false}, nil
+			return &ProviderDelete{Deleted: false}, nil
 		}
 		// 行已删 → 摘内存（列表立刻不再有它）。
 		pl.mu.Lock()
@@ -315,7 +314,7 @@ func (pl *Plane) DeleteProvider(ctx context.Context, id string) (*dtoprovider.Pr
 	}
 
 	// 最后删镜像条目。失败**如实回带**（行已删、镜像里还留着），并交给 doctor 的对账段。
-	resp := &dtoprovider.ProviderDeleteResp{Deleted: true}
+	resp := &ProviderDelete{Deleted: true}
 	if d != nil && d.KeyRef != "" {
 		if derr := pl.mirrorDelete(d.KeyRef); derr != nil {
 			resp.CredentialsLeft = d.KeyRef

@@ -14,7 +14,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/code"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/resource"
@@ -101,7 +100,7 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 	ctx := context.Background()
 	key := "sk-test"
 	baseURL := "https://api.deepseek.com/v1"
-	if _, err := r.svc.planes.Providers.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	if _, err := r.svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: providerID, Protocol: "openai", BaseURL: &baseURL, APIKey: &key,
 	}); err != nil && errCode(err) != "provider_exists" {
 		t.Fatalf("CreateProvider(%s): %v", providerID, err)

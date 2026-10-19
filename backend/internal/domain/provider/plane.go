@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/infra/credentials"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
@@ -48,7 +47,7 @@ type Plane struct {
 // 为什么是端口：它要 `sessions` 与 `generation` 的裁决（编排侧的东西），而写面只是把结论塞进
 // 响应。`nil` 是**合法取值**（没有编排器时"哪些会话会顺延"这个问题本身不成立），
 // 与 `providerEffect` 今天的返回 nil 逐字同义。
-type EffectFn func(providerID string) *dtoprovider.ProviderEffect
+type EffectFn func(providerID string) *ProviderEffect
 
 // DefaultModelProvider 平台默认模型落在哪条供应商上（`ok=false` = 没有默认模型）。
 //

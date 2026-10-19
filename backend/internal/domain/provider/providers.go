@@ -14,7 +14,6 @@ import (
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objdelivery"
@@ -198,9 +197,9 @@ func providerFileOf(id string, d *Def) *ProviderFile {
 //
 // 每一条都带**引用面**（哪些模型挂靠它、它们可能落到哪些 runtime）、**模型条数**与
 // **问题清单**（缺端点/密钥缺失/凭据分层读不了）：这些都是**读取时现算的派生值**——存一份必然漂移。
-func (pl *Plane) ListProviders(ctx context.Context) ([]dtoprovider.ProviderResp, error) {
+func (pl *Plane) ListProviders(ctx context.Context) ([]ProviderItem, error) {
 	pl.mu.Lock()
-	out := make([]dtoprovider.ProviderResp, 0, len(pl.providers))
+	out := make([]ProviderItem, 0, len(pl.providers))
 	for id, d := range pl.providers {
 		if d == nil {
 			continue
@@ -221,9 +220,9 @@ func (pl *Plane) ListProviders(ctx context.Context) ([]dtoprovider.ProviderResp,
 // 引用面（谁挂靠它）读的是模型表（v19 起供应商的唯一引用者是模型条目），读库时不再持锁解析：
 // 与"档案本身"来自不同时刻的差异只会体现在引用名单上，而名单是**只读展示**、不参与任何判据
 // （删除判据在 store 的同一事务里，见 `DeleteProvider`）。
-func (pl *Plane) providerRespLocked(ctx context.Context, id string, d *Def) dtoprovider.ProviderResp {
+func (pl *Plane) providerRespLocked(ctx context.Context, id string, d *Def) ProviderItem {
 	d.applyResolution(pl.KeyFor(ctx, d))
-	resp := dtoprovider.ProviderResp{
+	resp := ProviderItem{
 		ID:            d.ID,
 		Name:          d.Name,
 		Protocol:      d.Protocol,
@@ -235,7 +234,7 @@ func (pl *Plane) providerRespLocked(ctx context.Context, id string, d *Def) dtop
 		Revision:      d.Revision,
 		ModelCount:    pl.providerModelCount(ctx, id),
 		Applicability: pl.providerApplicabilityLocked(d),
-		Refs:          dtoprovider.ProviderRefs{Models: []string{}, Runtimes: []string{}},
+		Refs:          ProviderRefs{Models: []string{}, Runtimes: []string{}},
 		Problems:      providerProblems(d),
 	}
 	if !d.UpdatedAt.IsZero() {

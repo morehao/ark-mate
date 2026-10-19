@@ -9,7 +9,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -59,7 +59,7 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 
 	// 清除：key 空串 → has_key=false、env nil。
 	clear := ""
-	_, _ = svc.planes.Providers.UpdateProvider(ctx, "default", dtoprovider.ProviderPatchReq{APIKey: &clear})
+	_, _ = svc.planes.Providers.UpdateProvider(ctx, "default", provider.PatchRequest{APIKey: &clear})
 	if svc.planes.Providers.ProviderEnvFor(runtimetest.ID, "default") != nil {
 		t.Fatal("清除后不应注入 env")
 	}
@@ -84,9 +84,9 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 //
 // v11 的 `Type`（自由串，决定注入哪个环境变量名）已被 `protocol` + `base_url` 取代，
 // 所以测试夹具也要显式给端点——缺端点的供应商**不会被交付给任何底座**（B1）。
-func providerReq(id string, key *string) dtoprovider.ProviderCreateReq {
+func providerReq(id string, key *string) provider.CreateRequest {
 	u := "https://api.example.com/v1"
-	return dtoprovider.ProviderCreateReq{ID: id, Protocol: "openai", BaseURL: &u, APIKey: key}
+	return provider.CreateRequest{ID: id, Protocol: "openai", BaseURL: &u, APIKey: key}
 }
 
 // v12ProviderRegistry 一个带**凭据交付面声明**的最小注册表。

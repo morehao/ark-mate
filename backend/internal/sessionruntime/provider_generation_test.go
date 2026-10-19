@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 )
 
 // TestProviderKeyChangeSwitchesGenerationNextRun A2 的**端到端**判据：改密钥/类型在**下一轮**生效。
@@ -41,7 +41,7 @@ func TestProviderKeyChangeSwitchesGenerationNextRun(t *testing.T) {
 	// 端点的改动不在这里验：它影响的是**交付物**（配置内容），其代际效应由同步摘要承载
 	// （ADR-13：摘要并进代际键），而那个摘要只有真正交付过的 runtime 才有。
 	next := "sk-new"
-	resp, err := r.svc.planes.Providers.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{APIKey: &next})
+	resp, err := r.svc.planes.Providers.UpdateProvider(ctx, "p1", provider.PatchRequest{APIKey: &next})
 	if err != nil {
 		t.Fatalf("改密钥: %v", err)
 	}

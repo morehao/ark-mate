@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/redact"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 )
@@ -29,7 +29,7 @@ func TestProviderEnvRegistersDynamicSecret(t *testing.T) {
 
 	key := secret
 	baseURL := "https://api.openai.com/v1"
-	if _, err := svc.planes.Providers.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	if _, err := svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: "p1", Protocol: "openai", BaseURL: &baseURL, APIKey: &key,
 	}); err != nil {
 		t.Fatal(err)

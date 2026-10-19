@@ -46,20 +46,38 @@ var _ ProviderSvc = (*Provider)(nil)
 
 // ListProviders 列出供应商概要（密钥只写不读回；带引用面、模型条数与问题清单）。
 func (p *Provider) ListProviders(ctx context.Context) ([]dtoprovider.ProviderResp, error) {
-	return p.plane.ListProviders(ctx)
+	views, err := p.plane.ListProviders(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return providerResps(views), nil
 }
 
 // CreateProvider 新建一条供应商（id 已存在 → `provider_exists`(40901)，绝不覆盖）。
 func (p *Provider) CreateProvider(ctx context.Context, req dtoprovider.ProviderCreateReq) (*dtoprovider.ProviderResp, error) {
-	return p.plane.CreateProvider(ctx, req)
+	view, err := p.plane.CreateProvider(ctx, createRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	out := providerResp(*view)
+	return &out, nil
 }
 
 // UpdateProvider 覆盖一条供应商（**只更新**；不存在 → `provider_not_found`(40401)）。
 func (p *Provider) UpdateProvider(ctx context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
-	return p.plane.UpdateProvider(ctx, id, patch)
+	view, err := p.plane.UpdateProvider(ctx, id, patchRequest(patch))
+	if err != nil {
+		return nil, err
+	}
+	out := providerResp(*view)
+	return &out, nil
 }
 
 // DeleteProvider 删除一条供应商（幂等；被 agent 或模型引用 → `provider_in_use`(40901)）。
 func (p *Provider) DeleteProvider(ctx context.Context, id string) (*dtoprovider.ProviderDeleteResp, error) {
-	return p.plane.DeleteProvider(ctx, id)
+	view, err := p.plane.DeleteProvider(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return providerDeleteResp(view), nil
 }

@@ -13,7 +13,6 @@ import (
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -171,7 +170,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("装载后档案数不符: %+v", items)
 	}
-	byID := map[string]dtoprovider.ProviderResp{}
+	byID := map[string]provider.ProviderItem{}
 	for _, it := range items {
 		byID[it.ID] = it
 	}
@@ -253,7 +252,7 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	if _, err := svc.planes.Providers.CreateProvider(ctx, providerReq("brand-new", ptr("sk-new-secret"))); err != nil {
 		t.Fatalf("CreateProvider(新建): %v", err)
 	}
-	if _, err := svc.planes.Providers.UpdateProvider(ctx, "existing", dtoprovider.ProviderPatchReq{Note: ptr("改了备注")}); err != nil {
+	if _, err := svc.planes.Providers.UpdateProvider(ctx, "existing", provider.PatchRequest{Note: ptr("改了备注")}); err != nil {
 		t.Fatalf("UpdateProvider(覆盖): %v", err)
 	}
 	// 行确实写进了 DB。

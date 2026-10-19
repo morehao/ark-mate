@@ -10,7 +10,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -142,7 +142,7 @@ func TestProviderUpdateWritesKeyAndClearRemovesIt(t *testing.T) {
 	}
 	// 覆盖写同一档案：镜像里仍是 1 条（值被换成新的），新值生效。
 	key2 := "sk-live-secret-2"
-	if _, err := svc.planes.Providers.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{APIKey: &key2}); err != nil {
+	if _, err := svc.planes.Providers.UpdateProvider(context.Background(), "ds", provider.PatchRequest{APIKey: &key2}); err != nil {
 		t.Fatal(err)
 	}
 	if got := svc.planes.Providers.ProviderEnvFor(runtimetest.ID, "ds"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DS_") || !strings.HasSuffix(got[0], "_API_KEY="+key2) {
@@ -155,7 +155,7 @@ func TestProviderUpdateWritesKeyAndClearRemovesIt(t *testing.T) {
 
 	// 清除：has_key=false、env nil、镜像里那条没了。
 	clear := ""
-	if _, err := svc.planes.Providers.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{APIKey: &clear}); err != nil {
+	if _, err := svc.planes.Providers.UpdateProvider(context.Background(), "ds", provider.PatchRequest{APIKey: &clear}); err != nil {
 		t.Fatalf("清除失败: %v", err)
 	}
 	if svc.planes.Providers.ProviderEnvFor(runtimetest.ID, "ds") != nil {
@@ -171,7 +171,7 @@ func TestProviderUpdateWritesKeyAndClearRemovesIt(t *testing.T) {
 		}
 	}
 	// 幂等：再清除一次不报错。
-	if _, err := svc.planes.Providers.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{APIKey: &clear}); err != nil {
+	if _, err := svc.planes.Providers.UpdateProvider(context.Background(), "ds", provider.PatchRequest{APIKey: &clear}); err != nil {
 		t.Fatalf("重复清除应幂等: %v", err)
 	}
 }
@@ -261,7 +261,7 @@ func TestProviderInvalidIDRejected(t *testing.T) {
 		}
 		// PATCH 走同一条词法校验。
 		if _, err := svc.planes.Providers.UpdateProvider(context.Background(), id,
-			dtoprovider.ProviderPatchReq{APIKey: &key}); err == nil {
+			provider.PatchRequest{APIKey: &key}); err == nil {
 			t.Fatalf("非法 provider id 的 PATCH 应被拒绝: %q", id)
 		}
 	}
@@ -294,7 +294,7 @@ func TestProviderKeyRejectedWithoutCredentialDoc(t *testing.T) {
 		t.Fatalf("不带密钥时应该可以建: %v", err)
 	}
 	// PATCH 补密钥同样被拒（两条入口同一判据）。
-	if _, err := svc.planes.Providers.UpdateProvider(ctx, "default", dtoprovider.ProviderPatchReq{APIKey: &key}); errCode(err) != "credentials_write_failed" {
+	if _, err := svc.planes.Providers.UpdateProvider(ctx, "default", provider.PatchRequest{APIKey: &key}); errCode(err) != "credentials_write_failed" {
 		t.Fatalf("PATCH 补密钥也应被拒，got %q（%v）", errCode(err), err)
 	}
 	// 重启 = 新 Service → 内存档案不复存在（没有任何落盘）。

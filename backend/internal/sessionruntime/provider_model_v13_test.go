@@ -13,7 +13,6 @@ import (
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -51,7 +50,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 
 	// ① 写面：带密钥新建 → 落进那一列，回执不回显明文。
 	key := secret
-	resp, err := svc.planes.Providers.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	resp, err := svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: "write-face", Protocol: "openai", APIKey: &key,
 	})
 	if err != nil {
@@ -69,7 +68,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 
 	// ② 覆盖写：同一列被换成新值，旧值不留在任何地方。
 	key2 := "sk-rotated-value"
-	if _, err := svc.planes.Providers.UpdateProvider(ctx, "write-face", dtoprovider.ProviderPatchReq{APIKey: &key2}); err != nil {
+	if _, err := svc.planes.Providers.UpdateProvider(ctx, "write-face", provider.PatchRequest{APIKey: &key2}); err != nil {
 		t.Fatal(err)
 	}
 	if hits := secretHitsAnywhere(t, st, secret); len(hits) != 0 {
