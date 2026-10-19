@@ -32,7 +32,18 @@ func (s *readSvc) Search(ctx context.Context, q string, limit int) ([]dtosession
 }
 
 func (s *readSvc) QueuedInputs(ctx context.Context, id string) ([]dtosession.QueuedInputResp, error) {
-	return s.plane.ListQueuedInputs(ctx, id)
+	items, err := s.plane.ListQueuedInputs(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dtosession.QueuedInputResp, 0, len(items))
+	for _, q := range items {
+		out = append(out, dtosession.QueuedInputResp{
+			ID: q.ID, Text: q.Text, Delivery: q.Delivery,
+			TargetRunID: q.TargetRunID, Generation: q.Generation, CreatedAt: q.CreatedAt,
+		})
+	}
+	return out, nil
 }
 
 func (s *readSvc) Runs(ctx context.Context, id string) ([]dtosession.RunResp, error) {

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/code"
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objid"
@@ -125,14 +124,14 @@ func (pl *Plane) ListQueuedInputsOf(ctx context.Context, convID string) []Queued
 //
 // 与事件的分工：事件负责「过程」（何时入队/投递/撤下），本读模型负责「当前态」——
 // 前端冷挂载时 WS 只给 snapshot 不回放历史，没有这个入口队列就会在刷新后凭空消失。
-func (pl *Plane) ListQueuedInputs(ctx context.Context, id string) ([]dtosession.QueuedInputResp, error) {
+func (pl *Plane) ListQueuedInputs(ctx context.Context, id string) ([]QueuedInputItem, error) {
 	if !pl.HasSession(id) {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	queue := pl.ListQueuedInputsOf(ctx, id)
-	out := make([]dtosession.QueuedInputResp, 0, len(queue))
+	out := make([]QueuedInputItem, 0, len(queue))
 	for _, q := range queue {
-		out = append(out, dtosession.QueuedInputResp{
+		out = append(out, QueuedInputItem{
 			ID: q.ID, Text: q.Text, Delivery: q.Delivery,
 			TargetRunID: q.TargetRunID, Generation: q.Generation,
 			CreatedAt: q.CreatedAt.UTC().Format(time.RFC3339Nano),
