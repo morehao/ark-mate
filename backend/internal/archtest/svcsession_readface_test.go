@@ -38,7 +38,7 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 	// ③′ 读模型本体必须还在域里（判据失锚的最坏表现是"守卫照样绿、什么都不检查"）。
 	domBody := dirProductionBody(t, filepath.Join(root, "internal", "domain", "session"))
 	for _, a := range []string{
-		"func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]dtosession.SessionResp, error)",
+		"func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]SessionItem, error)",
 		// 归属过滤的两条语义（ADR-6）与"持锁折叠、释放锁后补展示字段"的分界。
 		"func workspaceMatches(recWorkspaceID, wantID, defaultID string) bool",
 		"pl.fillWorkspaceDisplay(out)",

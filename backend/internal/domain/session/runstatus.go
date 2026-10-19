@@ -3,7 +3,6 @@ package session
 import (
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
 )
 
@@ -307,7 +306,7 @@ func (pl *Plane) PublishRunInterrupted(sessionID, runID string) eventbus.Event {
 //
 // 没有投影（历史会话 / 本轮还没开始）→ nil：JSON 里整个 `run` 键缺席。**不回空壳**——
 // 一个 `{status:""}` 会让界面以为「有一个状态，只是空」。
-func (pl *Plane) RunPhaseOf(id string) *dtosession.RunPhaseResp {
+func (pl *Plane) RunPhaseOf(id string) *RunPhase {
 	snap, ok := pl.RunSnapshot(id)
 	if !ok {
 		return nil
@@ -320,11 +319,11 @@ func (pl *Plane) RunPhaseOf(id string) *dtosession.RunPhaseResp {
 // 抽出来是为了 `SessionSnapshot`：它已经持着 `pl.mu`，不能再调 `RunPhaseOf`
 // （`RunSnapshot` 会二次取锁 ⇒ 自死锁）。判据只有一处（"没有投影 / 空状态 → nil"），
 // 两个入口共用。
-func runPhaseOfSnapshot(snap RunStatusSnapshot) *dtosession.RunPhaseResp {
+func runPhaseOfSnapshot(snap RunStatusSnapshot) *RunPhase {
 	if snap.Status() == "" {
 		return nil
 	}
-	return &dtosession.RunPhaseResp{
+	return &RunPhase{
 		RunID:      snap.Str("run_id"),
 		Status:     snap.Status(),
 		Phase:      snap.Str("phase"),

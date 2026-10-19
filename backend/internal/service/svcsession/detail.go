@@ -87,7 +87,7 @@ func (d *Detail) GetSession(_ context.Context, id string) (*dtosession.SessionDe
 	// 过程状态（ADR-6 的读面）来自同一次快照——**投影在域里**，这一层只把字段搬过去。
 	resp.Run = run
 	detail := dtosession.SessionDetailResp{
-		SessionResp: resp,
+		SessionResp: sessionRespDTO(resp),
 		Pending:     perms,
 		Memories:    memoryResps(d.src.PermissionMemories(id)),
 	}

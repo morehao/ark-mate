@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/object/objusage"
@@ -140,17 +139,17 @@ func (pl *Plane) OpenRun(sessionID, runID, text string, firstSeq int64) {
 
 // ListRuns 列出某会话的轮次明细（runs 表，started_at 升序；失败轮重试/统计用）。
 // 内存（无 store）模式下返回空列表（runs 是 sqlite 读模型）。
-func (pl *Plane) ListRuns(ctx context.Context, id string) ([]dtosession.RunResp, error) {
+func (pl *Plane) ListRuns(ctx context.Context, id string) ([]RunItem, error) {
 	if pl.st == nil {
-		return []dtosession.RunResp{}, nil
+		return []RunItem{}, nil
 	}
 	rows, err := pl.st.ListRuns(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]dtosession.RunResp, 0, len(rows))
+	out := make([]RunItem, 0, len(rows))
 	for _, r := range rows {
-		resp := dtosession.RunResp{
+		resp := RunItem{
 			ID: r.ID, UserText: r.UserText, Status: r.Status,
 			ErrorCode: r.ErrorCode, StopReason: r.StopReason,
 			FirstSeq: r.FirstSeq, LastSeq: r.LastSeq, FirstTokenMS: r.FirstTokenMS,
@@ -162,7 +161,7 @@ func (pl *Plane) ListRuns(ctx context.Context, id string) ([]dtosession.RunResp,
 		if r.UsageJSON != "" {
 			var u objusage.UsageInfo
 			if err := json.Unmarshal([]byte(r.UsageJSON), &u); err == nil && u.Reported() {
-				resp.Usage = &dtosession.RunUsageResp{
+				resp.Usage = &RunUsage{
 					Used: u.Used, Size: u.Size, CostAmount: u.CostAmount, CostCurrency: u.CostCurrency,
 				}
 			}

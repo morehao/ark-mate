@@ -24,11 +24,19 @@ type readSvc struct{ plane *session.Plane }
 func NewRead(plane *session.Plane) ReadSvc { return &readSvc{plane: plane} }
 
 func (s *readSvc) List(archived bool, cwd, workspaceID string) ([]dtosession.SessionResp, error) {
-	return s.plane.ListSessions(archived, cwd, workspaceID)
+	items, err := s.plane.ListSessions(archived, cwd, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return sessionRespsDTO(items), nil
 }
 
 func (s *readSvc) Search(ctx context.Context, q string, limit int) ([]dtosession.SessionSearchHit, error) {
-	return s.plane.SearchSessions(ctx, q, limit)
+	items, err := s.plane.SearchSessions(ctx, q, limit)
+	if err != nil {
+		return nil, err
+	}
+	return sessionSearchHitsDTO(items), nil
 }
 
 func (s *readSvc) QueuedInputs(ctx context.Context, id string) ([]dtosession.QueuedInputResp, error) {
@@ -47,5 +55,9 @@ func (s *readSvc) QueuedInputs(ctx context.Context, id string) ([]dtosession.Que
 }
 
 func (s *readSvc) Runs(ctx context.Context, id string) ([]dtosession.RunResp, error) {
-	return s.plane.ListRuns(ctx, id)
+	items, err := s.plane.ListRuns(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return runRespsDTO(items), nil
 }
