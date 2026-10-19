@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/object/objusage"
@@ -344,7 +343,7 @@ func (pl *Plane) closeInterruptedRuns(ctx context.Context, sessionIDs []string) 
 //
 // best-effort：任何一步失败只 WARN（标记留着，下次启动重试——比"半个库重建了一半还清了标记"好）。
 //
-// 它与 `mate doctor --rebuild-read-models` 共用机制层的 `doctor.RebuildAllReadModels`：区别只在**触发条件**
+// 它与 `mate doctor --rebuild-read-models` 共用本平面的 `RebuildAllReadModels`：区别只在**触发条件**
 // （这边看标记、那边是人工显式要求），而"重建什么"必须只有一份实现——两份的话，
 // "doctor 重建出来的"与"启动重建出来的"就能不一样，而那是最难查的一类不一致（J7 的可重建性
 // 要求"同一份 events 得到同一组读模型"，与谁触发无关）。
@@ -361,9 +360,9 @@ func (pl *Plane) rebuildStaleReadModels(ctx context.Context) {
 		return
 	}
 	// 循环在机制层（`mechanism/doctor`）：它是"遍历全部会话"这件事，与会话域无关；
-	// "重建一个会话"仍由本平面实现（`*Plane` 满足 `doctor.ReadModelRebuilder`）——
+	// "重建一个会话"也由本平面实现（`RebuildSessionReadModels`）——
 	// 这正是"逃生门"消失的那一处：不再需要造一个 Service 来满足接口。
-	total, failed, err := doctor.RebuildAllReadModels(ctx, pl.st, pl)
+	total, failed, err := pl.RebuildAllReadModels(ctx)
 	if err != nil {
 		glog.Warnw(ctx, "read models: 列会话失败（重建跳过，标记保留）", "err", err)
 		return

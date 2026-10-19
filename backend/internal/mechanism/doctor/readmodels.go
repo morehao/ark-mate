@@ -3,12 +3,10 @@ package doctor
 import (
 	"context"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/model"
 	"slices"
 	"sort"
 
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/golib/glog"
 )
 
 // ——— `mate doctor` 的 **读模型**体检与重建（v21–v23） ———
@@ -142,47 +140,4 @@ func CollectReadModelDoctorFacts(ctx context.Context, st *store.Store, messageSo
 	f.Drift = f.OrphanMessages + f.EmptyBodies + f.BadOrdinalSessions + f.BadEventSeqSessions +
 		int64(len(f.ForeignSources))
 	return f
-}
-
-// ReadModelRebuilder 重建**一个会话**的读模型（读模型重建的唯一实现由会话侧提供）。
-//
-// 为什么是端口而不是把实现搬进来：单会话重建要 events 读面与 runs/messages 写面，还要在
-// "用日志里的终态收口停在 running 的轮"时复用 live 路径的物化（`materializeRun`，它要 orch 的
-// 用量快照）。那些都是**会话域**的东西；机制层只该知道"能重建一个会话"这件事。
-type ReadModelRebuilder interface {
-	RebuildSessionReadModels(ctx context.Context, sessionID string) error
-}
-
-// RebuildAllReadModels 用 events 重建**全部会话**的读模型（J7 的字面操作）。
-//
-// 消费面两处（**只有这两处**，守卫 G7 钉住）：启动钩子 `rebuildStaleReadModels`（标记驱动——
-// 迁移改了位次/投影口径就是脏）与 `mate doctor --rebuild-read-models`（人工显式触发——
-// 体检报了漂移之后的**出路**；这也是 model/enum.go 里 `MetaKeyReadModelsRebuild` 那段注释
-// 承诺过的两个消费面）。返回会话总数与失败数；`failed > 0` 时调用方应**保留**重建标记。
-//
-// 两个入参的分工：`st` 用来**枚举**会话（机制层直接读库，无需端口）；`rb` 提供"重建一个会话"
-// 那一件机制层做不到的事。
-// SessionLister 重建循环只需要"列出会话"这一个读能力（v3.1 P4：会话域经窄端口交过来）。
-type SessionLister interface {
-	ListSessions(ctx context.Context, archived *bool) ([]model.SessionEntity, error)
-}
-
-func RebuildAllReadModels(ctx context.Context, st SessionLister, rb ReadModelRebuilder) (total, failed int, err error) {
-	if st == nil {
-		return 0, 0, fmt.Errorf("没有可读写的库句柄")
-	}
-	if rb == nil {
-		return 0, 0, fmt.Errorf("没有可用的读模型重建器（会话侧的实现未接线）")
-	}
-	list, err := st.ListSessions(ctx, nil)
-	if err != nil {
-		return 0, 0, err
-	}
-	for _, sess := range list {
-		if rerr := rb.RebuildSessionReadModels(ctx, sess.ID); rerr != nil {
-			failed++
-			glog.Warnw(ctx, "read models: 会话重建失败", "session", sess.ID, "err", rerr)
-		}
-	}
-	return len(list), failed, nil
 }

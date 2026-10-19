@@ -107,7 +107,7 @@ func checkReadModelRebuild(opts doctorOptions) []doctorCheck {
 	if st != nil {
 		pl.SetStore(st)
 	}
-	total, failed, err := doctorfacts.RebuildAllReadModels(ctx, st, pl)
+	total, failed, err := pl.RebuildAllReadModels(ctx)
 	if err != nil {
 		return []doctorCheck{{name, doctorFail, "重建读模型失败：" + err.Error()}}
 	}

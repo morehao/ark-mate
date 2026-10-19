@@ -369,7 +369,6 @@ var v32Exceptions = []v32Exception{
 
 	// ——— 刀 9：domain/session（最难，最后做）———
 	{from: "internal/domain/session", to: "internal/dto", budget: 4, slice: "刀9", why: "返回值是 dtolibrary/dtosearch/dtosession/dtousage"},
-	{from: "internal/domain/session", to: "internal/mechanism", budget: 1, slice: "刀9", why: "用 mechanism/doctor"},
 
 	// ——— 刀 10：service 收口 + cliops 拆分 ———
 
