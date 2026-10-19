@@ -45,30 +45,140 @@ type contractEntry struct {
 	DataLen  *int     `json:"data_len,omitempty"`
 }
 
-// contractCases 是基线采样面：REST 成功 + REST 错误 + 405 + 路由不存在。
+// contractCases 是基线采样面：每条已注册的 REST 路由至少一条（`TestContractBaselineCoversAllRoutes` 双向盯住）。
+//
+// 采样原则：
+//   - 路径参数一律用 `nope`，让路由命中、业务层返回"不存在"——这样响应形状只取决于信封与错误分支，
+//     不依赖任何真实数据，天然稳定；
+//   - 只读路由直接取真实形状（memory 模式下多为空集合），`data_keys` 与长度都被冻住；
+//   - 写路由两件套：`{not json` 走绑定错误、`{}` 走校验错误，都不产生副作用；
+//   - 会摸文件系统/弹窗的路由给一个**必然不存在**的路径，把结果压成确定的错误分支。
 func contractCases() []contractCase {
 	return []contractCase{
-		// 成功面（§6.1 列出的关键路径，memory 模式下可采到的部分）
 		{"GET", "/v1/mate/health", ""},
 		{"GET", "/v1/mate/meta", ""},
-		{"GET", "/v1/mate/sessions", ""},
-		{"GET", "/v1/mate/providers", ""},
-		{"GET", "/v1/mate/models", ""},
-		{"GET", "/v1/mate/workspaces", ""},
-		{"GET", "/v1/mate/library", ""},
-		{"GET", "/v1/mate/search/messages?q=x", ""},
+
+		// ——— automations ———
+		{"GET", "/v1/mate/automations", ""},
+		{"POST", "/v1/mate/automations", "{}"},
+		{"GET", "/v1/mate/automations/nope", ""},
+		{"PUT", "/v1/mate/automations/nope", "{}"},
+		{"DELETE", "/v1/mate/automations/nope", ""},
+		{"POST", "/v1/mate/automations/nope/run", "{}"},
+		{"GET", "/v1/mate/automations/nope/runs", ""},
+		{"POST", "/v1/mate/automations/preview", "{}"},
+
+		// ——— capability / command-policy ———
 		{"GET", "/v1/mate/capabilities", ""},
-		{"GET", "/v1/mate/settings/workspace", ""},
-		{"GET", "/v1/mate/usage/summary", ""},
+		{"GET", "/v1/mate/command-policy", ""},
+		{"PUT", "/v1/mate/command-policy", "{}"},
+
+		// ——— library ———
+		{"GET", "/v1/mate/library", ""},
+
+		// ——— mcp ———
+		{"GET", "/v1/mate/mcps", ""},
+		{"POST", "/v1/mate/mcps", "{}"},
+		{"PUT", "/v1/mate/mcps/nope", "{}"},
+		{"DELETE", "/v1/mate/mcps/nope", ""},
+		{"POST", "/v1/mate/mcps/nope/probe", ""},
+		{"GET", "/v1/mate/mcps/nope/prompts", ""},
+		{"POST", "/v1/mate/mcps/nope/prompts/p/get", "{}"},
+		{"GET", "/v1/mate/mcps/nope/resources", ""},
+		{"POST", "/v1/mate/mcps/nope/resources/read", "{}"},
+		{"POST", "/v1/mate/mcps/nope/tools/t/call", "{}"},
+
+		// ——— models ———
+		{"GET", "/v1/mate/models", ""},
+		{"POST", "/v1/mate/models", "{}"},
+		{"PATCH", "/v1/mate/models/nope", "{}"},
+		{"DELETE", "/v1/mate/models/nope", ""},
+		{"GET", "/v1/mate/models/catalog", ""},
+		{"POST", "/v1/mate/models/sync", "{}"},
+
+		// ——— providers ———
+		{"GET", "/v1/mate/providers", ""},
+		{"POST", "/v1/mate/providers", "{}"},
+		{"PATCH", "/v1/mate/providers/nope", "{}"},
+		{"DELETE", "/v1/mate/providers/nope", ""},
+		{"POST", "/v1/mate/providers/nope/probe", ""},
+
+		// ——— runtime / search / tools / usage ———
 		{"GET", "/v1/mate/runtime/diagnostics", ""},
-		// 错误面：不存在 / 方法不存在 / 非法请求体
-		{"GET", "/v1/mate/sessions/nope", ""},
-		{"GET", "/v1/mate/providers/nope", ""},
-		{"DELETE", "/v1/mate/sessions/nope", ""},
+		{"GET", "/v1/mate/search/messages?q=x", ""},
+		{"GET", "/v1/mate/tools", ""},
+		{"GET", "/v1/mate/usage/summary", ""},
+
+		// ——— sessions ———
+		{"GET", "/v1/mate/sessions", ""},
 		{"POST", "/v1/mate/sessions", "{not json"},
+		{"GET", "/v1/mate/sessions/nope", ""},
+		{"PATCH", "/v1/mate/sessions/nope", "{}"},
+		{"GET", "/v1/mate/__no_such_route__", ""},
+		{"GET", "/v1/mate/sessions/search", ""},
+		{"POST", "/v1/mate/sessions/export", "{}"},
+		{"GET", "/v1/mate/sessions/nope/history", ""},
+		{"GET", "/v1/mate/sessions/nope/runs", ""},
 		{"POST", "/v1/mate/sessions/nope/prompt", "{}"},
+		{"POST", "/v1/mate/sessions/nope/cancel", ""},
+		{"POST", "/v1/mate/sessions/nope/elicitation", "{}"},
+		{"GET", "/v1/mate/sessions/nope/elicitations", ""},
+		{"GET", "/v1/mate/sessions/nope/inputs", ""},
+		{"DELETE", "/v1/mate/sessions/nope/inputs/i1", ""},
+		{"POST", "/v1/mate/sessions/nope/inputs/i1/move", "{}"},
+		{"POST", "/v1/mate/sessions/nope/inputs/i1/pop", "{}"},
+		{"POST", "/v1/mate/sessions/nope/inputs/i1/send-now", "{}"},
+		{"POST", "/v1/mate/sessions/nope/permission", "{}"},
+		{"GET", "/v1/mate/sessions/nope/permissions", ""},
+		{"GET", "/v1/mate/sessions/nope/permissions/always", ""},
+		{"POST", "/v1/mate/sessions/nope/permissions/always/revoke", "{}"},
+		{"GET", "/v1/mate/sessions/nope/permissions/memories", ""},
+		{"POST", "/v1/mate/sessions/nope/permissions/memories/revoke", "{}"},
+
+		// ——— settings ———
+		{"GET", "/v1/mate/settings/workspace", ""},
 		{"PUT", "/v1/mate/settings/workspace", "{not json"},
+
+		// ——— skills ———
+		{"GET", "/v1/mate/skills", ""},
+		{"POST", "/v1/mate/skills", "{}"},
+		{"PUT", "/v1/mate/skills/nope", "{}"},
+		{"PATCH", "/v1/mate/skills/nope", "{}"},
+		{"DELETE", "/v1/mate/skills/nope", ""},
+		{"GET", "/v1/mate/skills/nope/materialization", ""},
+		{"POST", "/v1/mate/skills/import", "{}"},
+
+		// ——— workspaces ———
+		//
+		// `browse` / `files` 会真的读目录：给一个必然不存在的路径，把结果压成确定的错误分支，
+		// 否则 `data_len` 会随临时目录内容漂移。
+		{"GET", "/v1/mate/workspaces", ""},
+		{"POST", "/v1/mate/workspaces", "{}"},
+		{"PATCH", "/v1/mate/workspaces/nope", "{}"},
+		{"DELETE", "/v1/mate/workspaces/nope", ""},
+		{"POST", "/v1/mate/workspaces/nope/move", "{}"},
+		{"GET", "/v1/mate/workspaces/browse?path=/nonexistent-ark-mate-probe", ""},
+		{"GET", "/v1/mate/workspaces/recent", ""},
+		{"GET", "/v1/mate/workspaces/files?path=/nonexistent-ark-mate-probe", ""},
+		{"POST", "/v1/mate/workspaces/dirs", "{}"},
 	}
+}
+
+// contractExcluded 已注册但不是 JSON 信封的 REST 路由：落在采样面之外，必须写明理由。
+//
+// 双向判据：路由新增而未加入 `contractCases`、或本表条目对应的路由已消失，`TestContractBaselineCoversAllRoutes` 都判红。
+var contractExcluded = map[string]string{
+	"GET /v1/mate/ws/events": "websocket 升级，响应不是 JSON 信封",
+	"GET /":                  "SPA 静态入口（index.html），不是 JSON 信封",
+	// 这条不看请求体，直接抬宿主原生目录选择器（core 进程 spawn），实测阻塞约 29s，
+	// 且结果（选中/取消/无宿主）由宿主的桌面环境决定——它是宿主交互能力，不是数据契约。
+	"POST /v1/mate/workspaces/pick-directory": "抬宿主原生目录选择器，结果依赖宿主 UI",
+}
+
+// contractNoRouteCases 刻意不命中任何注册路由的采样：它们测的是 NoRoute 兜底的信封形状。
+// 键是 `方法 路径`，值写明它测什么。
+var contractNoRouteCases = map[string]string{
+	"GET /v1/mate/__no_such_route__": "NoRoute 兜底：未知路径必须回 JSON 信封而不是空响应",
 }
 
 // TestControlPlaneContractBaseline 逐条比对控制面契约基线。
@@ -195,4 +305,84 @@ func normalizeContractEntry(t *testing.T, c contractCase, w *httptest.ResponseRe
 	}
 	e.DataKind = "scalar"
 	return e
+}
+
+// routePatternMatches 判断一条已注册路由模式是否被某条具体路径命中（`:id` 视为通配）。
+func routePatternMatches(pattern, path string) bool {
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		path = path[:i]
+	}
+	pp := strings.Split(strings.Trim(pattern, "/"), "/")
+	cp := strings.Split(strings.Trim(path, "/"), "/")
+	if len(pp) != len(cp) {
+		return false
+	}
+	for i := range pp {
+		if strings.HasPrefix(pp[i], ":") || strings.HasPrefix(pp[i], "*") {
+			continue
+		}
+		if pp[i] != cp[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestContractBaselineCoversAllRoutes 双向盯住采样面。
+//
+// `TestControlPlaneContractBaseline` 只比对"采样到的那些"：新增或改名路由时它照样绿，
+// 采样面会**静默缩小**。这条守卫让"每条注册路由都有基线"成为可验证的事实：
+//   - 每条已注册路由，要么被 `contractCases` 命中，要么在 `contractExcluded` 里写明理由；
+//   - 每条采样必须命中一条真实路由（抓路由改名/删除后残留的采样）；
+//   - 排除表条目对应的路由必须仍然存在（双向判据）。
+func TestContractBaselineCoversAllRoutes(t *testing.T) {
+	a, _ := newIsolationRig(t)
+	routes := a.Engine().Routes()
+	if len(routes) == 0 {
+		t.Fatalf("路由表为空：无法校验契约采样面")
+	}
+	cases := contractCases()
+
+	for _, c := range cases {
+		if _, ok := contractNoRouteCases[c.Method+" "+strings.SplitN(c.Path, "?", 2)[0]]; ok {
+			continue // 显式 NoRoute 探针，见 contractNoRouteCases
+		}
+		hit := false
+		for _, r := range routes {
+			if r.Method == c.Method && routePatternMatches(r.Path, c.Path) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			t.Errorf("采样 %s %s 没有命中任何已注册路由（路由改名或删除后残留？）", c.Method, c.Path)
+		}
+	}
+
+	seen := make(map[string]bool, len(contractExcluded))
+	for k := range contractExcluded {
+		seen[k] = false
+	}
+	for _, r := range routes {
+		key := r.Method + " " + r.Path
+		if _, ok := contractExcluded[key]; ok {
+			seen[key] = true
+			continue
+		}
+		covered := false
+		for _, c := range cases {
+			if c.Method == r.Method && routePatternMatches(r.Path, c.Path) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			t.Errorf("路由 %s 既不在 contractCases 也不在 contractExcluded（采样面缩小了）", key)
+		}
+	}
+	for k, hit := range seen {
+		if !hit {
+			t.Errorf("排除表条目 %s 对应的路由已不存在，请删除该条", k)
+		}
+	}
 }

@@ -38,7 +38,170 @@
   },
   {
     "method": "GET",
-    "path": "/v1/mate/sessions",
+    "path": "/v1/mate/automations",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "array",
+    "data_len": 0
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/automations",
+    "status": 200,
+    "code": 40000,
+    "msg": "缺少 id（automation 的 id 是文件名，必填且不可改）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/automations/nope",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知 automation \"nope\"（列表刷新一下）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PUT",
+    "path": "/v1/mate/automations/nope",
+    "status": 200,
+    "code": 40001,
+    "msg": "未配置自动化目录（MATE_AUTOMATIONS），automation 的增删改只能内存生效、重启即失；设好目录后重试",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/mate/automations/nope",
+    "status": 200,
+    "code": 40001,
+    "msg": "未配置自动化目录（MATE_AUTOMATIONS），automation 的删除只能内存生效、重启即失；设好目录后重试",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/automations/nope/run",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知 automation \"nope\"（列表刷新一下）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/automations/nope/runs",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知 automation \"nope\"（列表刷新一下）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/automations/preview",
+    "status": 200,
+    "code": 40000,
+    "msg": "缺少 schedule（预览要算的就是它）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/capabilities",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "capabilities",
+      "entries"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/command-policy",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "enabled",
+      "rules"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/v1/mate/command-policy",
+    "status": 200,
+    "code": 40001,
+    "msg": "命令门禁未配置（MATE_COMMAND_POLICY 为空）[command_policy_disabled]",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/library",
     "status": 200,
     "code": 0,
     "msg": "success",
@@ -53,7 +216,7 @@
   },
   {
     "method": "GET",
-    "path": "/v1/mate/providers",
+    "path": "/v1/mate/mcps",
     "status": 200,
     "code": 0,
     "msg": "success",
@@ -65,6 +228,132 @@
     ],
     "data_kind": "array",
     "data_len": 0
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/mcps",
+    "status": 200,
+    "code": 40001,
+    "msg": "未配置能力目录（MATE_CAPABILITIES），能力定义的增删改只能内存生效、重启即失；设好目录后重试",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PUT",
+    "path": "/v1/mate/mcps/nope",
+    "status": 200,
+    "code": 40001,
+    "msg": "未配置能力目录（MATE_CAPABILITIES），能力定义的增删改只能内存生效、重启即失；设好目录后重试",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/mate/mcps/nope",
+    "status": 200,
+    "code": 40001,
+    "msg": "未配置能力目录（MATE_CAPABILITIES），能力定义的增删改只能内存生效、重启即失；设好目录后重试",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/mcps/nope/probe",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知 MCP server \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/mcps/nope/prompts",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知 MCP server \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/mcps/nope/prompts/p/get",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知 MCP server \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/mcps/nope/resources",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知 MCP server \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/mcps/nope/resources/read",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知 MCP server \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/mcps/nope/tools/t/call",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知 MCP server \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
   },
   {
     "method": "GET",
@@ -89,8 +378,50 @@
     ]
   },
   {
+    "method": "POST",
+    "path": "/v1/mate/models",
+    "status": 200,
+    "code": 40000,
+    "msg": "参数错误: Key: 'ModelCreateReq.ProviderID' Error:Field validation for 'ProviderID' failed on the 'required' tag\nKey: 'ModelCreateReq.Model' Error:Field validation for 'Model' failed on the 'required' tag",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PATCH",
+    "path": "/v1/mate/models/nope",
+    "status": 200,
+    "code": 40501,
+    "msg": "模型清单需要 sqlite 持久层（MATE_STORE=sqlite）：memory 模式没有平台侧清单载体，模型面仍由运行时派生",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/mate/models/nope",
+    "status": 200,
+    "code": 40501,
+    "msg": "模型清单需要 sqlite 持久层（MATE_STORE=sqlite）：memory 模式没有平台侧清单载体，模型面仍由运行时派生",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
     "method": "GET",
-    "path": "/v1/mate/workspaces",
+    "path": "/v1/mate/models/catalog",
     "status": 200,
     "code": 0,
     "msg": "success",
@@ -102,13 +433,33 @@
     ],
     "data_kind": "object",
     "data_keys": [
-      "items",
-      "writable"
+      "image_input",
+      "note",
+      "options",
+      "runtime",
+      "source"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/models/sync",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "applied"
     ]
   },
   {
     "method": "GET",
-    "path": "/v1/mate/library",
+    "path": "/v1/mate/providers",
     "status": 200,
     "code": 0,
     "msg": "success",
@@ -122,71 +473,11 @@
     "data_len": 0
   },
   {
-    "method": "GET",
-    "path": "/v1/mate/search/messages?q=x",
+    "method": "POST",
+    "path": "/v1/mate/providers",
     "status": 200,
-    "code": 0,
-    "msg": "success",
-    "envelope": [
-      "code",
-      "data",
-      "msg",
-      "requestID"
-    ],
-    "data_kind": "object",
-    "data_keys": [
-      "has_more",
-      "hits",
-      "query",
-      "source",
-      "total"
-    ]
-  },
-  {
-    "method": "GET",
-    "path": "/v1/mate/capabilities",
-    "status": 200,
-    "code": 0,
-    "msg": "success",
-    "envelope": [
-      "code",
-      "data",
-      "msg",
-      "requestID"
-    ],
-    "data_kind": "object",
-    "data_keys": [
-      "capabilities",
-      "entries"
-    ]
-  },
-  {
-    "method": "GET",
-    "path": "/v1/mate/settings/workspace",
-    "status": 200,
-    "code": 0,
-    "msg": "success",
-    "envelope": [
-      "code",
-      "data",
-      "msg",
-      "requestID"
-    ],
-    "data_kind": "object",
-    "data_keys": [
-      "configured",
-      "prefer_roots",
-      "provision_included",
-      "source",
-      "writable"
-    ]
-  },
-  {
-    "method": "GET",
-    "path": "/v1/mate/usage/summary",
-    "status": 200,
-    "code": 40501,
-    "msg": "[usage_stats_unsupported] 内存模式（未启用 store）无 runs 读模型，用量统计不可用（请以 sqlite 模式启动）",
+    "code": 40001,
+    "msg": "provider id 必填",
     "envelope": [
       "code",
       "data",
@@ -194,6 +485,57 @@
       "requestID"
     ],
     "data_kind": "object"
+  },
+  {
+    "method": "PATCH",
+    "path": "/v1/mate/providers/nope",
+    "status": 200,
+    "code": 40401,
+    "msg": "供应商 \"nope\" 不存在：PATCH 只更新、不再顺带新建（要新建用 POST /providers）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/mate/providers/nope",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "deleted"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/providers/nope/probe",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "checks",
+      "id",
+      "ok",
+      "upstream"
+    ]
   },
   {
     "method": "GET",
@@ -222,10 +564,46 @@
   },
   {
     "method": "GET",
-    "path": "/v1/mate/sessions/nope",
+    "path": "/v1/mate/search/messages?q=x",
     "status": 200,
-    "code": 40401,
-    "msg": "未知会话 \"nope\"",
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "has_more",
+      "hits",
+      "query",
+      "source",
+      "total"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/tools",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "array",
+    "data_len": 0
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/usage/summary",
+    "status": 200,
+    "code": 40501,
+    "msg": "[usage_stats_unsupported] 内存模式（未启用 store）无 runs 读模型，用量统计不可用（请以 sqlite 模式启动）",
     "envelope": [
       "code",
       "data",
@@ -236,31 +614,18 @@
   },
   {
     "method": "GET",
-    "path": "/v1/mate/providers/nope",
-    "status": 404,
-    "code": 40401,
-    "msg": "接口不存在: GET /v1/mate/providers/nope",
+    "path": "/v1/mate/sessions",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
     "envelope": [
       "code",
       "data",
       "msg",
       "requestID"
     ],
-    "data_kind": "object"
-  },
-  {
-    "method": "DELETE",
-    "path": "/v1/mate/sessions/nope",
-    "status": 404,
-    "code": 40401,
-    "msg": "接口不存在: DELETE /v1/mate/sessions/nope",
-    "envelope": [
-      "code",
-      "data",
-      "msg",
-      "requestID"
-    ],
-    "data_kind": "object"
+    "data_kind": "array",
+    "data_len": 0
   },
   {
     "method": "POST",
@@ -277,6 +642,108 @@
     "data_kind": "object"
   },
   {
+    "method": "GET",
+    "path": "/v1/mate/sessions/nope",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PATCH",
+    "path": "/v1/mate/sessions/nope",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/__no_such_route__",
+    "status": 404,
+    "code": 40401,
+    "msg": "接口不存在: GET /v1/mate/__no_such_route__",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/sessions/search",
+    "status": 200,
+    "code": 40000,
+    "msg": "参数错误: q 必填",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/sessions/export",
+    "status": 200,
+    "code": 40000,
+    "msg": "参数错误: Key: 'ExportReq.IDs' Error:Field validation for 'IDs' failed on the 'required' tag",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/sessions/nope/history",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/sessions/nope/runs",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "id",
+      "runs"
+    ]
+  },
+  {
     "method": "POST",
     "path": "/v1/mate/sessions/nope/prompt",
     "status": 200,
@@ -291,11 +758,463 @@
     "data_kind": "object"
   },
   {
+    "method": "POST",
+    "path": "/v1/mate/sessions/nope/cancel",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/sessions/nope/elicitation",
+    "status": 200,
+    "code": 40000,
+    "msg": "参数错误: Key: 'ElicitationResolveReq.ElicitationID' Error:Field validation for 'ElicitationID' failed on the 'required' tag\nKey: 'ElicitationResolveReq.Action' Error:Field validation for 'Action' failed on the 'required' tag",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/sessions/nope/elicitations",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/sessions/nope/inputs",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/mate/sessions/nope/inputs/i1",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "deleted",
+      "id",
+      "input_id"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/sessions/nope/inputs/i1/move",
+    "status": 200,
+    "code": 40401,
+    "msg": "待投递输入 \"i1\" 不存在或已不在队列里",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/sessions/nope/inputs/i1/pop",
+    "status": 200,
+    "code": 40401,
+    "msg": "待投递输入 \"i1\" 不存在或已不在队列里",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/sessions/nope/inputs/i1/send-now",
+    "status": 200,
+    "code": 40401,
+    "msg": "待投递输入 \"i1\" 不存在或已不在队列里",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/sessions/nope/permission",
+    "status": 200,
+    "code": 40000,
+    "msg": "参数错误: Key: 'PermissionResolveReq.CallID' Error:Field validation for 'CallID' failed on the 'required' tag",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/sessions/nope/permissions",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/sessions/nope/permissions/always",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/sessions/nope/permissions/always/revoke",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/sessions/nope/permissions/memories",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/sessions/nope/permissions/memories/revoke",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/settings/workspace",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "configured",
+      "prefer_roots",
+      "provision_included",
+      "source",
+      "writable"
+    ]
+  },
+  {
     "method": "PUT",
     "path": "/v1/mate/settings/workspace",
     "status": 200,
     "code": 40000,
     "msg": "参数错误: invalid character 'n' looking for beginning of object key string",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/skills",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "array",
+    "data_len": 0
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/skills",
+    "status": 200,
+    "code": 40001,
+    "msg": "未配置能力目录（MATE_CAPABILITIES），能力定义的增删改只能内存生效、重启即失；设好目录后重试",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PUT",
+    "path": "/v1/mate/skills/nope",
+    "status": 200,
+    "code": 40001,
+    "msg": "未配置能力目录（MATE_CAPABILITIES），能力定义的增删改只能内存生效、重启即失；设好目录后重试",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PATCH",
+    "path": "/v1/mate/skills/nope",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知 skill \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/mate/skills/nope",
+    "status": 200,
+    "code": 40001,
+    "msg": "未配置能力目录（MATE_CAPABILITIES），能力定义的增删改只能内存生效、重启即失；设好目录后重试",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/skills/nope/materialization",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知 skill \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/skills/import",
+    "status": 200,
+    "code": 40000,
+    "msg": "缺少 file 字段（multipart/form-data，file=\u003c技能包.zip\u003e）：request Content-Type isn't multipart/form-data",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/workspaces",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "items",
+      "writable"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/workspaces",
+    "status": 200,
+    "code": 40001,
+    "msg": "需要 `path`（登记已有目录）或 `name`（在落盘根下新建）之一",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PATCH",
+    "path": "/v1/mate/workspaces/nope",
+    "status": 200,
+    "code": 40501,
+    "msg": "[workspace_schema_read_only] 当前持久层为 memory：工作空间登记需要 sqlite（MATE_STORE=sqlite）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/mate/workspaces/nope",
+    "status": 200,
+    "code": 40501,
+    "msg": "[workspace_schema_read_only] 当前持久层为 memory：工作空间登记需要 sqlite（MATE_STORE=sqlite）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/workspaces/nope/move",
+    "status": 200,
+    "code": 40501,
+    "msg": "[workspace_schema_read_only] 当前持久层为 memory：工作空间登记需要 sqlite（MATE_STORE=sqlite）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/workspaces/browse?path=/nonexistent-ark-mate-probe",
+    "status": 200,
+    "code": 40001,
+    "msg": "工作空间不存在或不可访问: /nonexistent-ark-mate-probe",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/workspaces/recent",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "array",
+    "data_len": 0
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/workspaces/files?path=/nonexistent-ark-mate-probe",
+    "status": 200,
+    "code": 40001,
+    "msg": "工作空间不存在或不可访问: /nonexistent-ark-mate-probe",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/workspaces/dirs",
+    "status": 200,
+    "code": 40000,
+    "msg": "参数错误: Key: 'WorkspaceDirCreateReq.Parent' Error:Field validation for 'Parent' failed on the 'required' tag\nKey: 'WorkspaceDirCreateReq.Name' Error:Field validation for 'Name' failed on the 'required' tag",
     "envelope": [
       "code",
       "data",
