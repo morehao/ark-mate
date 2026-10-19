@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/model"
 	"os"
 	"path/filepath"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 
 	"github.com/morehao/ark-mate/internal/infra/logging"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/golib/glog"
 )
 
@@ -167,8 +167,8 @@ func (pl *Plane) loadProvidersFromStore(ctx context.Context, dir string) {
 }
 
 // providerColumnsOf 把内存档案投影成 store 的列载荷（sqlite 载体的提交物）。
-func providerColumnsOf(d *Def) store.ProviderColumns {
-	return store.ProviderColumns{
+func providerColumnsOf(d *Def) model.ProviderColumns {
+	return model.ProviderColumns{
 		ID: d.ID, Name: d.Name, Protocol: d.Protocol, BaseURL: d.BaseURL, Note: d.Note,
 	}
 }

@@ -369,7 +369,6 @@ var v32Exceptions = []v32Exception{
 	{from: "internal/domain/provider", to: "internal/dto", budget: 2, slice: "刀8", why: "返回值是 dtomodel 与 dtoprovider"},
 	{from: "internal/domain/provider", to: "internal/infra/credentials", budget: 1, slice: "刀8", why: "直接读凭据文件，应经 mechanism/credential"},
 	{from: "internal/domain/provider", to: "internal/mechanism", budget: 2, slice: "刀8", why: "用 definition 与 credential 两个机制"},
-	{from: "internal/domain/provider", to: "internal/store", budget: 1, slice: "刀8", why: "直接持 *store.Store，未经窄端口"},
 
 	// ——— 刀 9：domain/session（最难，最后做）———
 	{from: "internal/domain/session", to: "internal/dto", budget: 4, slice: "刀9", why: "返回值是 dtolibrary/dtosearch/dtosession/dtousage"},

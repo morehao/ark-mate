@@ -11,7 +11,6 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/credentials"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/store"
 )
 
 // Plane 供应商域的**有状态主体**：持有内存档案表、档案目录、库句柄、注册表与凭据机制。
@@ -23,7 +22,7 @@ type Plane struct {
 	mu          sync.Mutex
 	providers   map[string]*Def
 	providerDir string
-	st          *store.Store
+	st          ProviderStore
 	reg         *goruntime.Registry
 	creds       *credential.Store
 
@@ -68,7 +67,7 @@ func NewPlane(reg *goruntime.Registry, creds *credential.Store) *Plane {
 
 // SetStore 装配期登记库句柄（**必须在装配期调用**：构造时按值传一个当时的 `st` 会永远停在
 // nil，而表现是"该走库的走了文件"——静默）。
-func (pl *Plane) SetStore(st *store.Store) { pl.st = st }
+func (pl *Plane) SetStore(st ProviderStore) { pl.st = st }
 
 // SetEffect 装配期登记写面回执（没有编排器时不登记 → 回执为 nil，与今天同义）。
 func (pl *Plane) SetEffect(fn EffectFn) { pl.effect = fn }
