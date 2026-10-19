@@ -15,7 +15,6 @@ import (
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/golib/glog"
 )
 
@@ -52,13 +51,12 @@ func WithPayloads(payloads []dtosystem.PayloadInfo) Option {
 
 // BuildResult 一次装配的产物（应用壳与命令树只消费它）。
 //
-// 字段全是**已构造/已就绪**的对象：Store 在 memory 模式为 nil；Handler/Listener 在装配成功后
+// 字段全是**已构造/已就绪**的对象；Handler/Listener 在装配成功后
 // 一定非 nil（HTTP 服务由 `internal/app` 用这两者构造，装配根不持有 `http.Server`）。
 //
 // `Handler` 是 `http.Handler` 而不是 `*gin.Engine`：装配根可以知道具体适配器，但**不必**把
 // 框架类型写进自己的产物类型——应用壳与命令树只消费 `Handler`，Web 框架止步于入站适配层。
 type BuildResult struct {
-	Store        *store.Store
 	Planes       *registry.Planes
 	Runtime      *runtime.Registry
 	Execution    *runtimeconn.Plane
@@ -145,7 +143,6 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 	}
 
 	res := &BuildResult{
-		Store:        as.st,
 		Planes:       as.planes,
 		Runtime:      as.reg,
 		Execution:    as.rconn,
