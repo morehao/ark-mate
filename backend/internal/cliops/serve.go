@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/maintenance"
 	"io"
 	"os"
 	"os/signal"
@@ -78,7 +79,7 @@ func Serve(args []string) {
 	// 校验失败按"用法/配置错误"处理（退出码 2，与 --web-dir 指错目录同一档——
 	// 都是"调用方把参数给错了"，而不是核心自己崩了）。
 	if *payloads != "" {
-		ps, err := parsePayloads(*payloads)
+		ps, err := maintenance.ParsePayloads(*payloads)
 		if err != nil {
 			exitWith(&assembly.ExitError{Code: 2, Err: err})
 		}
@@ -101,8 +102,8 @@ func Serve(args []string) {
 	if *exitWithParent {
 		// 壳一死，核心的 stdout/stderr 就没读者了——不忽略 SIGPIPE 的话，停机过程中的
 		// 第一条日志就会把进程当场打死，优雅停机形同虚设（见 ignoreSIGPIPE 的注释）。
-		ignoreSIGPIPE()
-		go watchParentExit(ctx, os.Getppid, parentPollInterval, func() {
+		maintenance.IgnoreSIGPIPE()
+		go maintenance.WatchParentExit(ctx, os.Getppid, maintenance.ParentPollInterval, func() {
 			glog.Warnw(context.Background(), "serve: 父进程已消失（壳被强杀？），开始优雅停机")
 			cancel()
 		})

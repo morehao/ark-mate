@@ -2,12 +2,11 @@ package doctor
 
 import (
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/credential"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 )
 
 // mismatchMarkerLiteral 导入对账标记的**字面量**（刻意不引用供应商域的常量）。

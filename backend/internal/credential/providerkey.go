@@ -1,6 +1,9 @@
 package credential
 
-import "strings"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // ——— 供应商拨号密钥的词汇（v3.2 刀 8）———
 //
@@ -40,4 +43,14 @@ func OneKeyInParens(name string) string {
 		return ""
 	}
 	return "（" + name + "）"
+}
+
+// CredentialsPath 托管文档的落盘路径（`<MATE_HOME>/credentials.json`；home 为空 → 空串，
+// 表示"没有落点"而不是"落在当前目录"）。
+func CredentialsPath(homeDir string) string {
+	h := strings.TrimSpace(homeDir)
+	if h == "" {
+		return ""
+	}
+	return filepath.Join(h, CredentialsFileName)
 }

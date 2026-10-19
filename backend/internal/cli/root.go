@@ -78,8 +78,8 @@ func Run(args []string) int {
 		return 1
 	}
 	// 进程日志出口（zap driver 的匿名引入在 cmd/mate）：必须先于任何子命令动作，
-	// 且 `mcp` 要按 stdout 协议纪律换成文件 writer（见 cliops.InitProcessLogger）。
-	cliops.InitProcessLogger(args)
+	// 且 `mcp` 要按 stdout 协议纪律换成文件 writer（见 maintenance.InitProcessLogger）。
+	maintenance.InitProcessLogger(args)
 	defer func() { _ = glog.Close() }()
 	switch args[0] {
 	case "--version", "-version", "-v":
@@ -99,7 +99,7 @@ func Run(args []string) int {
 	case "serve":
 		cliops.Serve(args[1:])
 	case "demo":
-		cliops.Demo(args[1:])
+		maintenance.Demo(args[1:])
 	case "migrate":
 		maintenance.Migrate(args[1:])
 	case "transcripts":
@@ -107,19 +107,19 @@ func Run(args []string) int {
 			fmt.Fprintln(os.Stderr, "transcripts 用法：mate transcripts prune --older-than <duration> [--dir <dir>]")
 			os.Exit(2)
 		}
-		cliops.TranscriptsPrune(args[2:])
+		maintenance.TranscriptsPrune(args[2:])
 	case "config":
 		cliops.Config(args[1:])
 	case "capability":
-		cliops.Capability(args[1:])
+		maintenance.Capability(args[1:])
 	case "automation":
-		cliops.Automation(args[1:])
+		maintenance.Automation(args[1:])
 	case "provider":
-		cliops.Provider(args[1:])
+		maintenance.Provider(args[1:])
 	case "mcp":
-		cliops.MCP(args[1:])
+		maintenance.MCP(args[1:])
 	case "doctor":
-		cliops.Doctor(args[1:])
+		maintenance.Doctor(args[1:])
 	case "-h", "--help", "help":
 		fmt.Print(usageText)
 		return 0

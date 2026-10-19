@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	credval "github.com/morehao/ark-mate/internal/credential"
-	"path/filepath"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/infra/credentials"
@@ -16,22 +15,13 @@ import (
 // 全部是**参数化**的（库句柄与 home 目录都由调用方传入），与 `*Service` 无关——这也是它们
 // 能先搬、不必等 `credentials.go` 主体那 12 个方法的原因。
 
-// CredentialsPath 托管镜像的路径（home 为空 → 空串 = 未配置）。
-func CredentialsPath(homeDir string) string {
-	h := strings.TrimSpace(homeDir)
-	if h == "" {
-		return ""
-	}
-	return filepath.Join(h, credval.CredentialsFileName)
-}
-
 // OpenCredentialSource 按约定装配四层凭据面：`<homeDir>/credentials.json` +
 // `<cwdDir>/.env` + `<homeDir>/.env`。返回的第二个值是镜像路径（诊断面要打印它）。
 //
 // 打开镜像**不读内容**（`credentials.Open` 只登记路径）：读动作发生在每一次解析上，而权限
 // 过宽时那次读会硬失败——"权限不合 fail-loud"因此落在真正读它的地方，而不是伪装成装配失败。
 func OpenCredentialSource(homeDir, cwdDir string) (*credentials.Layered, string, error) {
-	path := CredentialsPath(homeDir)
+	path := credval.CredentialsPath(homeDir)
 	if path == "" {
 		return nil, "", errors.New("数据目录为空（MATE_HOME 未解析出来）：托管凭据文档没有落点")
 	}
@@ -51,7 +41,7 @@ func SyncCredentialMirrorFromStore(ctx context.Context, st *store.Store, homeDir
 	if st == nil || strings.TrimSpace(homeDir) == "" {
 		return 0, nil
 	}
-	doc, err := credentials.Open(CredentialsPath(homeDir))
+	doc, err := credentials.Open(credval.CredentialsPath(homeDir))
 	if err != nil {
 		return 0, err
 	}

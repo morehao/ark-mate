@@ -1,4 +1,4 @@
-package cliops
+package maintenance
 
 import (
 	"strings"
@@ -12,7 +12,7 @@ func TestParsePayloadsValid(t *testing.T) {
 	raw := `[{"name":"dsh","version":"0.1.7-rc.2","digest":"sha256:aa","entry":"/abs/lib/bin.js","source":"bundled"},` +
 		`{"name":"rtx","version":"1.2.3","digest":"sha256:bb","source":"runtime-env"},` +
 		`{"name":"dsh-extra","version":"","digest":"","source":"path"}]`
-	got, err := parsePayloads(raw)
+	got, err := ParsePayloads(raw)
 	if err != nil {
 		t.Fatalf("合法清单不应报错: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestParsePayloadsValid(t *testing.T) {
 // 而 Go 里 nil 切片会 marshal 成 `null`——两者在 JS 里行为不同。这里守住前半段，
 // 响应形状由 ctrsystem 的 Snapshot 与 internal/app 的透出用例共同守住。
 func TestParsePayloadsEmptyArrayStaysArray(t *testing.T) {
-	got, err := parsePayloads("[]")
+	got, err := ParsePayloads("[]")
 	if err != nil {
 		t.Fatalf("空数组应合法（= 壳解析出零份载荷）: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestParsePayloadsRejectsInvalid(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parsePayloads(tc.raw)
+			got, err := ParsePayloads(tc.raw)
 			if err == nil {
 				t.Fatalf("应报错，实际通过: %+v", got)
 			}

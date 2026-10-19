@@ -1,10 +1,11 @@
-package cliops
+package maintenance
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"github.com/morehao/ark-mate/internal/assembly"
+	"github.com/morehao/ark-mate/internal/config"
 	"os"
 	"os/signal"
 	"syscall"
@@ -69,16 +70,16 @@ func mcpBridge(args []string) {
 	// `Serve` 读到 EOF → 正常退出（首要机制，见函数尾的 switch）。但 EOF 不够覆盖两种情形：
 	// ① 底座被强杀时写端可能仍被别处持着（管道被继承），EOF 不会到达；② stdin 上正阻塞着一次
 	// 读写时退出会被拖住。故补一条 ppid 轮询兜底——与 `serve --exit-with-parent` 同一个
-	// `watchParentExit`，语义也一致（POSIX 下父进程一死会被 reparent，`os.Getppid()` 随之变化）。
+	// `WatchParentExit`，语义也一致（POSIX 下父进程一死会被 reparent，`os.Getppid()` 随之变化）。
 	//
 	// SIGPIPE 必须一并忽略：底座死后再往 stdout/stderr 写一行，Go 运行时对 fd 1/2 的 EPIPE 走
 	// **默认动作**——当场终止进程，于是下面 `defer src.Close()`（关连接池与远端会话）根本来不及跑。
 	// 这与 M1-6 在核心侧抓到的是同一条坑。
-	ignoreSIGPIPE()
+	IgnoreSIGPIPE()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	go watchParentExit(ctx, os.Getppid, parentPollInterval, func() {
+	go WatchParentExit(ctx, os.Getppid, ParentPollInterval, func() {
 		glog.Warnw(context.Background(), "mcp bridge: 父进程（底座）已消失，开始停机")
 		cancel()
 	})
@@ -86,7 +87,7 @@ func mcpBridge(args []string) {
 	// 数据面（M7-2）：自己读平台的库（定义 + `mcp_secrets`）。取数失败**不**让网关起不来——起不来的症状是
 	// 底座那边"这个 MCP server 没起来"（连工具面都看不到），而"起来了但这一轮没有工具"是
 	// 看得见的降级，且日志里有原因。
-	cfg, _ := mustConfig()
+	cfg, _ := config.MustLoad()
 	src, sErr := gateway.NewSource(ctx, gateway.SourceOptions{
 		Cfg:        cfg,
 		McpsPinned: scope.McpsPinned,

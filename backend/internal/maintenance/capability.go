@@ -1,4 +1,4 @@
-package cliops
+package maintenance
 
 import (
 	"context"
@@ -56,7 +56,7 @@ func capabilityImport(args []string) {
 	dryRun := fs.Bool("dry-run", false, "只扫描与校验，不写库")
 	_ = fs.Parse(args)
 
-	cfg, _ := mustConfig()
+	cfg, _ := config.MustLoad()
 	root := capabilityRoot(cfg, *dir)
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
@@ -96,7 +96,7 @@ func capabilityExport(args []string) {
 	dryRun := fs.Bool("dry-run", false, "只打印将要写出的内容，不改任何文件")
 	_ = fs.Parse(args)
 
-	cfg, _ := mustConfig()
+	cfg, _ := config.MustLoad()
 	root := capabilityRoot(cfg, *dir)
 	if root == "" {
 		fmt.Fprintln(os.Stderr, "capability export: 能力目录为空（用 --dir 指定，或设置 MATE_CAPABILITIES）")
@@ -175,7 +175,7 @@ func capabilityMigrate(args []string) {
 	dryRun := fs.Bool("dry-run", false, "只打印将要写入的内容，不改任何文件")
 	_ = fs.Parse(args)
 
-	cfg, _ := mustConfig()
+	cfg, _ := config.MustLoad()
 	root := strings.TrimSpace(*dir)
 	if root == "" {
 		root = cfg.CapabilityDir

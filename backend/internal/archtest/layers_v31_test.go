@@ -135,7 +135,7 @@ var v31Layers = map[string]v31Layer{
 	// 故命令实现单独成层（见 `.dsh/docs/plans/2026-10-19-backend-v3.1-execution-plan.md`）。
 	// 运维动作（migrate / doctor / transcripts / mcp reap）的落点：v3.2 刀 10 从 `cliops` 搬出。
 	// 它吃 domain/store/mechanism/registry/sessionruntime，所以排在 12 层；命令层（16）在它之上。
-	"internal/maintenance": {layer: 12, name: "maintenance", deny: []string{"internal/controller", "internal/router", "internal/assembly", "internal/app", "internal/cli"}},
+	"internal/maintenance": {layer: 15, name: "maintenance", deny: []string{"internal/cli"}},
 	"internal/cliops":      {layer: 16, name: "cliops", sameLayer: true, deny: []string{"internal/cli"}},
 
 	// ——— 17 层：命令树（纯分发）———

@@ -163,7 +163,9 @@ var v32Layers = map[string]v32Layer{
 	// 所以域里不再需要认识 mechanism/definition。
 	"internal/capabilityio": {layer: 6, name: "capabilityio", sameLayer: true},
 	// 刀 10 引入：migrate / doctor / transcripts / mcp reap 的落点。
-	"internal/maintenance": {layer: 6, name: "maintenance", sameLayer: true},
+	// 运维动作的落点。**与组合根同级**：`mate doctor` 要真的把 app 装起来自检（装配 + 路由 +
+	// 注册表都在它的扫描面上），所以它必须能向下吃 assembly/router，而不是一个小小的 L6 助手。
+	"internal/maintenance": {layer: 9, name: "maintenance", sameLayer: true},
 
 	// ——— L7：执行面 ———
 	"internal/sessionruntime": {layer: 7, name: "sessionruntime", deny: []string{
@@ -371,14 +373,6 @@ var v32Exceptions = []v32Exception{
 
 	// ——— 刀 10：service 收口 + cliops 拆分 ———
 
-	{from: "internal/cliops", to: "internal/domain", budget: 3, slice: "刀10", why: "命令实现里有业务判断，应下沉到 svc"},
-	{from: "internal/cliops", to: "internal/gateway", budget: 1, slice: "刀10", why: "命令直接开网关"},
-	{from: "internal/cliops", to: "internal/infra/mcp", budget: 1, slice: "刀10", why: "mcp reap 运维动作，应搬 maintenance"},
-	{from: "internal/cliops", to: "internal/mechanism", budget: 3, slice: "刀10", why: "doctor 直接调机制，应搬 maintenance"},
-	{from: "internal/cliops", to: "internal/model", budget: 1, slice: "刀10", why: "读模型里直接拼表行"},
-	{from: "internal/cliops", to: "internal/registry", budget: 1, slice: "刀10", why: "命令直接操作执行平面"},
-	{from: "internal/cliops", to: "internal/sessionruntime", budget: 1, slice: "刀10", why: "命令直接开会话编排"},
-	{from: "internal/cliops", to: "internal/store", budget: 1, slice: "刀10", why: "命令直接持有 *store.Store（第二装配根）"},
 }
 
 // v32GinAllowlist gin 围栏的白名单。刀 2 已清空——`assembly` 交 `http.Handler`，

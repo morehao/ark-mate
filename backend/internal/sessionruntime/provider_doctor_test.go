@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/morehao/ark-mate/internal/capabilityio"
+	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"os"
 	"path/filepath"
@@ -11,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/registry"
 

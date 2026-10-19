@@ -1,4 +1,4 @@
-package cliops
+package maintenance
 
 import (
 	"fmt"
@@ -51,11 +51,11 @@ func InitProcessLogger(args []string) {
 	}
 }
 
-// raiseLogVerbosity 把本进程日志降到 debug（`mate demo` 冒烟要看 runtime stderr 与每一步诊断）。
+// RaiseLogVerbosity 把本进程日志降到 debug（`mate demo` 冒烟要看 runtime stderr 与每一步诊断）。
 //
 // glog 是包级单例，重装一份配置即可——这也是它取代 slog 后"提级"的唯一姿势
 // （slog 时代是 slog.SetLogLoggerLevel）。
-func raiseLogVerbosity() {
+func RaiseLogVerbosity() {
 	installLogger(consoleLogConfig(logServiceName, glog.DebugLevel))
 }
 

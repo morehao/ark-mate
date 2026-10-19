@@ -1,4 +1,4 @@
-package cliops
+package maintenance
 
 import (
 	"context"
@@ -18,7 +18,7 @@ func TestWatchParentExit(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		watchParentExit(context.Background(), getppid, 5*time.Millisecond, func() {
+		WatchParentExit(context.Background(), getppid, 5*time.Millisecond, func() {
 			atomic.AddInt32(&calls, 1)
 			close(done)
 		})
@@ -46,7 +46,7 @@ func TestWatchParentExitStopsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var calls int32
 	var ppid int32 = 100
-	go watchParentExit(ctx, func() int { return int(atomic.LoadInt32(&ppid)) }, 5*time.Millisecond, func() {
+	go WatchParentExit(ctx, func() int { return int(atomic.LoadInt32(&ppid)) }, 5*time.Millisecond, func() {
 		atomic.AddInt32(&calls, 1)
 	})
 	cancel()

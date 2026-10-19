@@ -1,4 +1,4 @@
-package cliops
+package maintenance
 
 // 测试二进制里的日志 driver 注册（见 internal/app/logging_test.go 的说明）。
 //

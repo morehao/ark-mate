@@ -3,14 +3,13 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/model"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/config"

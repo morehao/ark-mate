@@ -2,13 +2,12 @@ package sessionruntime
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/model"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"

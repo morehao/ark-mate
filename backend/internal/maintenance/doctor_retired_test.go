@@ -1,4 +1,4 @@
-package cliops
+package maintenance
 
 import (
 	"context"

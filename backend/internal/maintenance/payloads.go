@@ -1,4 +1,4 @@
-package cliops
+package maintenance
 
 import (
 	"encoding/json"
@@ -42,7 +42,7 @@ type payloadWire struct {
 	Source  string `json:"source"`
 }
 
-// parsePayloads 解析并校验桌面壳交来的**已解析**载荷清单（唯一真源是壳：只有它做了三级解析）。
+// ParsePayloads 解析并校验桌面壳交来的**已解析**载荷清单（唯一真源是壳：只有它做了三级解析）。
 //
 // 校验全部发生在启动期，且一律**报错退出**（命令层转成退出码 2）——宁可起不来，也不要让
 // `/meta` 展示一个假来源：诊断面一旦说谎，"机器上恰好装过 dsh"这类问题就再也查不出来。
@@ -50,7 +50,7 @@ type payloadWire struct {
 // 刻意**不**校验 version / digest 非空：`path` 命中（PATH 上捡到的用户自带底座）可能根本
 // 报不出可靠版本，更算不出摘要，而那正是需要如实展示"命中级别 = path"的场景。身份键是
 // name（唯一性）与 source（命中级别），这两个必须有。
-func parsePayloads(raw string) ([]dtosystem.PayloadInfo, error) {
+func ParsePayloads(raw string) ([]dtosystem.PayloadInfo, error) {
 	s := strings.TrimSpace(raw)
 	if s == "" {
 		// 命令层用 `!= ""` 把"没传"与"传了空串"一起挡在外面；到这里说明调用方漏了门。

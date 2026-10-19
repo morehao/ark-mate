@@ -1,13 +1,14 @@
-package cliops
+package maintenance
 
 import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/credential"
+	mechcred "github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/capabilityio"
@@ -60,7 +61,7 @@ func providerImport(args []string) {
 	dryRun := fs.Bool("dry-run", false, "只扫描与校验，不写库也不写托管凭据文档")
 	_ = fs.Parse(args)
 
-	cfg, _ := mustConfig()
+	cfg, _ := config.MustLoad()
 	root := providerRoot(cfg, *dir)
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
@@ -78,7 +79,7 @@ func providerImport(args []string) {
 	// 导入把密钥写进了库 → 顺手把托管镜像按库对账（幂等合并；失败只告警，不改变导入结论：
 	// 库已经写成功了，镜像是可重建副本）。
 	if !*dryRun {
-		if changed, sErr := credential.SyncCredentialMirrorFromStore(context.Background(), st, cfg.HomeDir, "mate provider import"); sErr != nil {
+		if changed, sErr := mechcred.SyncCredentialMirrorFromStore(context.Background(), st, cfg.HomeDir, "mate provider import"); sErr != nil {
 			fmt.Fprintf(os.Stderr, "  ⚠ 托管凭据文档未按库对账（库是权威、键不受影响）：%v\n", sErr)
 		} else if changed > 0 {
 			fmt.Printf("  托管凭据文档已按库对账：%d 条（%s）\n", changed, credential.CredentialsPath(cfg.HomeDir))
@@ -118,7 +119,7 @@ func providerExport(args []string) {
 	dryRun := fs.Bool("dry-run", false, "只打印将要写出的内容，不改任何文件")
 	_ = fs.Parse(args)
 
-	cfg, _ := mustConfig()
+	cfg, _ := config.MustLoad()
 	root := providerRoot(cfg, *dir)
 	if root == "" {
 		fmt.Fprintln(os.Stderr, "provider export: Agent 目录为空（用 --dir 指定，或设置 MATE_AGENTS）")

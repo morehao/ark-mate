@@ -1,4 +1,4 @@
-package cliops
+package maintenance
 
 import (
 	"context"
@@ -55,7 +55,7 @@ func automationImport(args []string) {
 	dryRun := fs.Bool("dry-run", false, "只扫描与校验，不写库")
 	_ = fs.Parse(args)
 
-	cfg, _ := mustConfig()
+	cfg, _ := config.MustLoad()
 	root := automationRoot(cfg, *dir)
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
@@ -91,7 +91,7 @@ func automationExport(args []string) {
 	dryRun := fs.Bool("dry-run", false, "只打印将要写出的内容，不改任何文件")
 	_ = fs.Parse(args)
 
-	cfg, _ := mustConfig()
+	cfg, _ := config.MustLoad()
 	root := automationRoot(cfg, *dir)
 	if root == "" {
 		fmt.Fprintln(os.Stderr, "automation export: Automation 目录为空（用 --dir 指定，或设置 MATE_AUTOMATIONS）")

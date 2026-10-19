@@ -1,4 +1,4 @@
-package cliops
+package maintenance
 
 import (
 	"crypto/sha256"
@@ -203,7 +203,7 @@ func Doctor(args []string) {
 			"默认路径仍然只读——它只在体检报出 read-models 漂移之后当出路用")
 	_ = fset.Parse(args)
 
-	cfg, _ := mustConfig()
+	cfg, _ := config.MustLoad()
 	opts := doctorOptions{
 		Home:          cfg.HomeDir,
 		WebDir:        cfg.WebDir,
@@ -234,7 +234,7 @@ func Doctor(args []string) {
 		opts.Addr = *addr
 	}
 	if *payloads != "" {
-		ps, err := parsePayloads(*payloads)
+		ps, err := ParsePayloads(*payloads)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			os.Exit(2)

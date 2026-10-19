@@ -332,10 +332,10 @@ func (as *assembly) startImports(ctx context.Context) error {
 	// 托管镜像按库对账（v20）：**合并、非破坏**。失败只 WARN：镜像是可重建副本。
 	if changed, err := as.planes.Credentials.SyncCredentialMirror(ctx, "serve 装配期"); err != nil {
 		glog.Warnw(ctx, "serve: 托管凭据文档未能按库对账（库是权威，键不受影响；`mate doctor` 会列出差异）",
-			"err", err, "path", credmech.CredentialsPath(cfg.HomeDir))
+			"err", err, "path", credential.CredentialsPath(cfg.HomeDir))
 	} else if changed > 0 {
 		glog.Infow(ctx, "serve: 托管凭据文档已按库对账",
-			"changed", changed, "path", credmech.CredentialsPath(cfg.HomeDir))
+			"changed", changed, "path", credential.CredentialsPath(cfg.HomeDir))
 	}
 	return nil
 }

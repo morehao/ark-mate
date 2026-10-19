@@ -1,10 +1,11 @@
-package cliops
+package maintenance
 
 import (
 	"context"
 	"flag"
 	"fmt"
 	"github.com/morehao/ark-mate/internal/assembly"
+	"github.com/morehao/ark-mate/internal/config"
 	"os"
 	"time"
 
@@ -29,9 +30,9 @@ func Demo(args []string) {
 	_ = fs.Parse(args)
 
 	// 冒烟输出含 runtime stderr（登录提示/诊断），降到 Debug 便于排查。
-	raiseLogVerbosity()
+	RaiseLogVerbosity()
 
-	cfg, _ := mustConfig()
+	cfg, _ := config.MustLoad()
 	remoteSpecs := make([]runtime.Spec, 0, len(cfg.RemoteRuntimes))
 	for _, rt := range cfg.RemoteRuntimes {
 		remoteSpecs = append(remoteSpecs, runtime.RemoteSpec(rt.ID, rt.Name, rt.Transport, rt.Endpoint, rt.Headers))

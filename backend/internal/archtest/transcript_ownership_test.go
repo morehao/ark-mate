@@ -127,7 +127,7 @@ func TestTranscriptWiringIsAttached(t *testing.T) {
 		why  string
 	}{
 		{"internal/assembly/assembly.go", "serve：sqlite/memory 分流里 memory 那一支把目录交给会话域"},
-		{"internal/cliops/demo.go", "demo：演示会话也落 transcript（wire 事实源）"},
+		{"internal/maintenance/demo.go", "demo：演示会话也落 transcript（wire 事实源）"},
 	}
 	for _, c := range cases {
 		path := filepath.Join(root, filepath.FromSlash(c.file))

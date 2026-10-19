@@ -1,8 +1,9 @@
-package cliops
+package maintenance
 
 import (
 	"flag"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/config"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,7 +17,7 @@ func TranscriptsPrune(args []string) {
 	olderThan := fs.String("older-than", "", "删除修改时间早于此时长的 *.jsonl（必填；支持 30d / 168h / 72h30m 等）")
 	dir := fs.String("dir", "", "transcript 目录（默认 MATE_TRANSCRIPTS 或 ~/.ark-mate/transcripts）")
 	_ = fs.Parse(args)
-	cfg, _ := mustConfig()
+	cfg, _ := config.MustLoad()
 	if *dir != "" {
 		cfg.TranscriptDir = *dir
 	}

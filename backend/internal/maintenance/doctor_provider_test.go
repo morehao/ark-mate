@@ -1,14 +1,14 @@
-package cliops
+package maintenance
 
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/credential"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 
 	"github.com/morehao/ark-mate/internal/config"
