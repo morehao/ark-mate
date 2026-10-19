@@ -77,7 +77,19 @@ func (pl *Plane) sessionViews() []SessionView {
 //
 // 方法签名与 `*store.Store` 逐字相同（除三条 `Is*`），所以适配体只需嵌一层再加三个方法——
 // 那三个方法不是转发，是把"载体说这是什么错"翻成"领域该判什么"。
+// WorkspaceTx 一段原子写里的三个窄操作（v3.2 刀 3）。
+//
+// 事务的**开合**在仓储（它才有库句柄），**顺序与判定**在这里——"默认工作空间不可删"是域的
+// 策略，不该住在仓储里被所有调用方继承。
+type WorkspaceTx interface {
+	WorkspaceRow(ctx context.Context, id string) (*model.WorkspaceEntity, bool, error)
+	ReleaseSessions(ctx context.Context, id string) (int64, error)
+	DeleteRow(ctx context.Context, id string) (bool, error)
+}
+
 type WorkspaceStore interface {
+	// Atomically 开一个事务执行 fn（fn 返回错误即整体回滚）。
+	Atomically(ctx context.Context, fn func(WorkspaceTx) error) error
 	BootstrapDefaultWorkspace(ctx context.Context, dir string) (*model.WorkspaceEntity, error)
 	DefaultWorkspace(ctx context.Context) (model.WorkspaceEntity, bool, error)
 	ListWorkspaces(ctx context.Context) ([]model.WorkspaceEntity, error)
@@ -85,7 +97,6 @@ type WorkspaceStore interface {
 	WorkspaceByPath(ctx context.Context, path string) (model.WorkspaceEntity, bool, error)
 	CreateWorkspace(ctx context.Context, path, title string) (model.WorkspaceEntity, error)
 	RenameWorkspace(ctx context.Context, id, title string) error
-	DeleteWorkspace(ctx context.Context, id string) (int64, error)
 	RelocateWorkspace(ctx context.Context, id, canonicalPath string) (bool, error)
 	MoveWorkspace(ctx context.Context, id, beforeID string) ([]string, error)
 	CountWorkspacesByID(ctx context.Context) (map[string]int64, error)

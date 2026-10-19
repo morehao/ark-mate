@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -340,6 +341,12 @@ func (pl *Plane) RenameRegisteredWorkspace(id, title string) (*WorkspaceItem, er
 	return pl.workspaceRespByID(ctx, id)
 }
 
+// 事务内的两条判定结果：只在 `DeleteRegisteredWorkspace` 的回调里出现，出事务前就翻成对外错误码。
+var (
+	errWorkspaceTxNotFound         = errors.New("workspace: 登记不存在")
+	errWorkspaceTxDefaultImmutable = errors.New("workspace: 默认工作空间不可删")
+)
+
 // DeleteRegisteredWorkspace 删除一条登记（**不删会话、不删目录**，设计 ADR-6）。
 //
 // 默认工作空间不可删：它是"建会话未指定 cwd"这条路的落点，删掉等于让那条路无路可走。
@@ -350,11 +357,34 @@ func (pl *Plane) DeleteRegisteredWorkspace(id string) (*WorkspaceDelete, error) 
 		return nil, WorkspaceReadOnlyError()
 	}
 	ctx := context.Background()
-	released, err := pl.st.DeleteWorkspace(ctx, id)
+	// 判定与顺序在**域里**（v3.2 刀 3）：一个事务内读行 → 判"默认不可删" → 释放会话归属 → 删行。
+	// 事务的开合仍归仓储（它才有库句柄），但"能不能删"不再由仓储替所有调用方决定。
+	var released int64
+	err := pl.st.Atomically(ctx, func(tx WorkspaceTx) error {
+		row, found, err := tx.WorkspaceRow(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return errWorkspaceTxNotFound
+		}
+		if row.IsDefault {
+			return errWorkspaceTxDefaultImmutable
+		}
+		n, err := tx.ReleaseSessions(ctx, id)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.DeleteRow(ctx, id); err != nil {
+			return err
+		}
+		released = n
+		return nil
+	})
 	switch {
-	case pl.st.IsNotFound(err):
+	case errors.Is(err, errWorkspaceTxNotFound):
 		return nil, WorkspaceNotFoundError(id)
-	case pl.st.IsDefaultImmutable(err):
+	case errors.Is(err, errWorkspaceTxDefaultImmutable):
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "workspace_default_immutable",
 			"默认工作空间不可删除：它是未指定工作目录的会话的落点", nil))
 	case err != nil:

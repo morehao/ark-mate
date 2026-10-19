@@ -130,9 +130,22 @@ func TestWorkspaceDeleteKeepsSessions(t *testing.T) {
 		t.Fatalf("UpsertSession: %v", err)
 	}
 
-	released, err := s.DeleteWorkspace(ctxT(), ws.ID)
+	// v3.2 刀 3：判定与顺序已上移领域，这里测的是**三个原语能拼成一个原子写**。
+	var released int64
+	err = s.Atomically(ctxT(), func(tx *WorkspaceTx) error {
+		if _, found, err := tx.WorkspaceRow(ctxT(), ws.ID); err != nil || !found {
+			return err
+		}
+		n, err := tx.ReleaseSessions(ctxT(), ws.ID)
+		if err != nil {
+			return err
+		}
+		released = n
+		_, err = tx.DeleteRow(ctxT(), ws.ID)
+		return err
+	})
 	if err != nil {
-		t.Fatalf("DeleteWorkspace: %v", err)
+		t.Fatalf("Atomically: %v", err)
 	}
 	if released != 1 {
 		t.Fatalf("被释放的会话数 = %d，期望 1", released)
@@ -156,29 +169,6 @@ func TestWorkspaceDeleteKeepsSessions(t *testing.T) {
 	// 目录本身还在（删除用户数据不是删登记该做的事）。
 	if _, statErr := os.Stat(dir); statErr != nil {
 		t.Fatalf("目录不该被删: %v", statErr)
-	}
-}
-
-// TestWorkspaceDeleteDefaultRefused 默认工作空间不可删（它是"未指定 cwd"的落点）。
-func TestWorkspaceDeleteDefaultRefused(t *testing.T) {
-	s := openTestDB(t)
-	def, err := s.BootstrapDefaultWorkspace(ctxT(), filepath.Join(t.TempDir(), "default"))
-	if err != nil || def == nil {
-		t.Fatalf("bootstrap: %+v / %v", def, err)
-	}
-	if _, err := s.DeleteWorkspace(ctxT(), def.ID); err != ErrWorkspaceDefaultImmutable {
-		t.Fatalf("删默认应报 ErrWorkspaceDefaultImmutable，实际 %v", err)
-	}
-	if _, ok, _ := s.GetWorkspace(ctxT(), def.ID); !ok {
-		t.Fatal("拒绝删除后默认行必须还在")
-	}
-}
-
-// TestWorkspaceDeleteUnknown 删除不存在的登记 → 稳定信号（由 manager 翻成 40401）。
-func TestWorkspaceDeleteUnknown(t *testing.T) {
-	s := openTestDB(t)
-	if _, err := s.DeleteWorkspace(ctxT(), "wsp-nope"); err != ErrWorkspaceNotFound {
-		t.Fatalf("未知 id 应报 ErrWorkspaceNotFound，实际 %v", err)
 	}
 }
 

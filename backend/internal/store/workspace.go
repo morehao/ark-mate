@@ -183,40 +183,6 @@ func (s *Store) RenameWorkspace(ctx context.Context, id, title string) error {
 	return s.workspaces.UpdateTitle(ctx, id, strings.TrimSpace(title))
 }
 
-// DeleteWorkspace 删除一条登记，并把它名下会话的归属清空（**不删会话**，设计 ADR-6）。
-//
-// 返回被释放的会话数。整个动作在一个事务里：登记行与归属列必须一起变，否则中断会留下
-// "登记没了、会话还指着不存在的 id"——那种行在界面上表现为会话凭空消失。
-//
-// **默认工作空间不可删**：它是"建会话未指定 cwd"这条路的落点，删掉等于让那条路无路可走。
-// 这条判定在这里（而不只在 manager）兜底：任何调用方都不该能删出一个没有落点的库。
-func (s *Store) DeleteWorkspace(ctx context.Context, id string) (int64, error) {
-	var released int64
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		row, err := s.workspaces.WithTx(tx).GetByID(ctx, id)
-		if err != nil {
-			return err
-		}
-		if row == nil {
-			return errWorkspaceNotFound
-		}
-		if row.IsDefault {
-			return errWorkspaceDefaultImmutable
-		}
-		res := tx.Model(&model.SessionEntity{}).Where("workspace_id = ?", id).
-			Updates(map[string]any{"workspace_id": ""})
-		if res.Error != nil {
-			return res.Error
-		}
-		released = res.RowsAffected
-		return tx.Delete(&model.WorkspaceEntity{}, "id = ?", id).Error
-	})
-	if err != nil {
-		return 0, err
-	}
-	return released, nil
-}
-
 // RelocateWorkspace 改写一条登记的**路径**（W4）：id 不变，`sessions` 一个字节都不动。
 //
 // 三件事刻意都在这一处：

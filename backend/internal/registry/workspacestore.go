@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"errors"
 
 	"github.com/morehao/ark-mate/internal/domain/workspace"
@@ -26,6 +27,15 @@ func (w workspaceStore) IsPathTaken(err error) bool {
 // IsDefaultImmutable 该登记项是默认工作空间，路径与存在性都不可改。
 func (w workspaceStore) IsDefaultImmutable(err error) bool {
 	return errors.Is(err, store.ErrWorkspaceDefaultImmutable)
+}
+
+// Atomically 一段跨聚合原子写（v3.2 刀 3）。
+//
+// 一次**可赋值收窄**：仓储的句柄是 `*store.WorkspaceTx`，领域声明的是
+// `workspace.WorkspaceTx`（三个方法的窄接口）。Go 的返回类型不协变，所以闭包的参数类型
+// 只能在这里改一次形——句柄本身结构上已经满足领域接口。
+func (w workspaceStore) Atomically(ctx context.Context, fn func(workspace.WorkspaceTx) error) error {
+	return w.Store.Atomically(ctx, func(tx *store.WorkspaceTx) error { return fn(tx) })
 }
 
 // IsNotFound 该登记项不存在。
