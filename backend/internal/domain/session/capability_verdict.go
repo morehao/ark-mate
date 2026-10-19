@@ -2,10 +2,10 @@ package session
 
 import (
 	"fmt"
+	"github.com/morehao/ark-mate/internal/object/objdelivery"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -81,22 +81,22 @@ func SkillVerdict(sk capability.Skill, facts SkillVerdictFacts) SkillVerdictResu
 	p := facts.Projection
 	switch {
 	case !sk.IsEnabled():
-		return SkillVerdictResult{Status: dtolibrary.StatusDisabled,
+		return SkillVerdictResult{Status: objdelivery.StatusDisabled,
 			Reason: "该 skill 已被禁用（enabled:false）：改回 enabled:true 即可恢复"}
 	case !sk.AppliesToRuntime(rt):
-		return SkillVerdictResult{Status: dtolibrary.StatusNotApplicable,
+		return SkillVerdictResult{Status: objdelivery.StatusNotApplicable,
 			Reason: fmt.Sprintf("该 skill 的 runtimes 白名单没有 %q（要投给它就把 %q 加进 runtimes，或清空 runtimes 表示全部）", rt, rt)}
 	case !facts.ProjectionOK:
-		return SkillVerdictResult{Status: dtolibrary.StatusNotConfigured,
+		return SkillVerdictResult{Status: objdelivery.StatusNotConfigured,
 			Reason: fmt.Sprintf("%s 没有解析出 skill 投影（该 runtime 上技能无处安放）", rt)}
 	case p.Err != "":
-		return SkillVerdictResult{Status: dtolibrary.StatusNotConfigured,
+		return SkillVerdictResult{Status: objdelivery.StatusNotConfigured,
 			Reason: fmt.Sprintf("%s 声明了 skill 投影但本进程没解析出落点：%s（检查 MATE_PROJECTION_DIRS 是否配了 %s:skill）", rt, p.Err, rt)}
 	case !p.Projection.Tested:
-		return SkillVerdictResult{OK: true, Status: dtolibrary.StatusUntested,
+		return SkillVerdictResult{OK: true, Status: objdelivery.StatusUntested,
 			Reason: fmt.Sprintf("%s 的投影声明尚未经实测：会照常投放到 %s，但不担保底座开箱读到它", rt, p.Projection.Root)}
 	default:
-		return SkillVerdictResult{OK: true, Status: dtolibrary.StatusProjected,
+		return SkillVerdictResult{OK: true, Status: objdelivery.StatusProjected,
 			Reason: fmt.Sprintf("投放到 %s（%s）", p.Projection.Root, p.Projection.Layout)}
 	}
 }
@@ -113,17 +113,17 @@ func McpVerdict(m capability.McpServer, facts McpVerdictFacts) McpVerdictResult 
 	}
 	switch {
 	case !m.IsEnabled():
-		return McpVerdictResult{Status: dtolibrary.StatusDisabled, Reason: "该 server 已被禁用（enabled:false）"}
+		return McpVerdictResult{Status: objdelivery.StatusDisabled, Reason: "该 server 已被禁用（enabled:false）"}
 	case facts.GatewayEnabled && capability.IsRemoteTransport(m.Transport):
 		// M7-3：远程 server 对每个已注册 runtime 都可达——底座拿到的是**一条 stdio 条目**，
 		// 真正的 sse/http 由平台网关代连。故这里不再按底座声明的承载能力判"不适用"。
-		return McpVerdictResult{OK: true, Status: dtolibrary.StatusProjected,
+		return McpVerdictResult{OK: true, Status: objdelivery.StatusProjected,
 			Reason: fmt.Sprintf("经平台 MCP 网关代连（对底座是一条 stdio 条目；远端传输 %s）——开关 MATE_MCP_GATEWAY=off 可回到直连口径", m.Transport)}
 	case !carried:
-		return McpVerdictResult{Status: dtolibrary.StatusNotApplicable,
+		return McpVerdictResult{Status: objdelivery.StatusNotApplicable,
 			Reason: fmt.Sprintf("%s 不承载 %s 传输（它支持：%s）", rt, m.Transport, strings.Join(facts.Supported, "/"))}
 	default:
-		return McpVerdictResult{OK: true, Status: dtolibrary.StatusProjected,
+		return McpVerdictResult{OK: true, Status: objdelivery.StatusProjected,
 			Reason: fmt.Sprintf("以 %s 传输注入（会话的 mcps 选定未声明时默认全量）", m.Transport)}
 	}
 }
