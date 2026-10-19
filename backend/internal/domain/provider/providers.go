@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/credential"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/infra/acp"
@@ -92,7 +91,7 @@ func (pl *Plane) loadProvidersFile(dir string) {
 		p.KeyRef = credential.ProviderRef(id)
 		if legacy := d.KeyRef; legacy != "" {
 			if translated, ok := capability.TranslateLegacySecretRef(legacy); ok {
-				definition.WarnLegacySecretRef(ctx, legacy, "providers.json 的 key_ref")
+				capability.WarnLegacySecretRef(ctx, legacy, "providers.json 的 key_ref")
 				d.KeyRef = translated
 			}
 		}

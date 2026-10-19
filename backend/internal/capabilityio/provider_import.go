@@ -269,7 +269,7 @@ func scanProviderFile(
 		keyRef := domprovider.BodyString(entry, "key_ref")
 		if keyRef != "" {
 			if translated, ok := capability.TranslateLegacySecretRef(keyRef); ok {
-				definition.WarnLegacySecretRef(ctx, keyRef, path+" 的 key_ref")
+				capability.WarnLegacySecretRef(ctx, keyRef, path+" 的 key_ref")
 				keyRef = translated
 			}
 		}

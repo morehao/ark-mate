@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/golib/glog"
 )
 
 // ——— 定义形状的历史迁移（旧 sources[] / legacy mcp ref → 新形状）———
@@ -28,7 +27,7 @@ func TranslateLegacyMcpRefs(ctx context.Context, doc *capability.DefinitionFile,
 		changed := false
 		for k, ref := range bindings {
 			if translated, legacy := capability.TranslateLegacySecretRef(ref); legacy {
-				WarnLegacySecretRef(ctx, ref, where+" 的 "+key)
+				capability.WarnLegacySecretRef(ctx, ref, where+" 的 "+key)
 				bindings[k] = translated
 				changed = true
 				n++
@@ -39,10 +38,4 @@ func TranslateLegacyMcpRefs(ctx context.Context, doc *capability.DefinitionFile,
 		}
 	}
 	return n
-}
-
-// WarnLegacySecretRef 旧前缀被显式翻译时的 WARN（**唯一的翻译点在 `pkg/capability`**，
-// 文案也由它给：把字面量与判据收在一处，别处只负责说"是在哪儿翻的"）。
-func WarnLegacySecretRef(ctx context.Context, ref, where string) {
-	glog.Warnw(ctx, capability.LegacySecretRefWarning(ref), "ref", ref, "where", where)
 }
