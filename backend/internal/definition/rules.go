@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/code"
@@ -66,6 +67,16 @@ func DefinitionPath(dir, Kind, id string) (string, error) {
 		return "", InvalidDefinitionIDErr(Kind, id)
 	}
 	return filepath.Join(dir, id+".json"), nil
+}
+
+// SortedPatchKeys 把 patch 的键排好序（写面日志与"改了哪几个键"的稳定输出都用它）。
+func SortedPatchKeys(patch map[string]any) []string {
+	out := make([]string, 0, len(patch))
+	for k := range patch {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // DefinitionChangedErr CAS 没中的统一出口（两个载体共用同一句话）。

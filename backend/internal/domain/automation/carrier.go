@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	defn "github.com/morehao/ark-mate/internal/definition"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"path/filepath"
 	"sort"
 	"time"
@@ -48,7 +47,7 @@ type Draft struct {
 	// Existed 打开时载体里是否已有这一条（`automation_exists` / `automation_not_found` 的判据）。
 	Existed bool
 	// File 非 nil = 文件载体（落盘走它的 mtime 乐观锁）；nil = DB 载体（走行 revision CAS）。
-	File *definition.DefinitionDraft
+	File DefinitionDraft
 	// Rev DB 载体的行 revision（CAS 期望值）。
 	Rev int64
 }
@@ -60,7 +59,7 @@ func (pl *Plane) openAutomationDraft(ctx context.Context, id string) (*Draft, er
 		if err != nil {
 			return nil, err
 		}
-		d, err := definition.OpenDefinition(dir, "automation", id, nil)
+		d, err := pl.files.Open(dir, "automation", id, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -90,7 +89,7 @@ func (pl *Plane) openAutomationDraft(ctx context.Context, id string) (*Draft, er
 // commitAutomationDraft 提交草稿（DB：行 CAS + 审计；文件：mtime 乐观锁）。
 func (pl *Plane) commitAutomationDraft(ctx context.Context, d *Draft, create bool) error {
 	if d.File != nil {
-		return definition.SaveDefinition(d.File)
+		return pl.files.Save(d.File)
 	}
 	body, err := d.DF.Marshal()
 	if err != nil {
@@ -125,7 +124,7 @@ func (pl *Plane) deleteAutomationDefinition(ctx context.Context, id string) (boo
 		if err != nil {
 			return false, err
 		}
-		return definition.RemoveDefinitionPermanently(dir, "automation", id)
+		return pl.files.Remove(dir, "automation", id)
 	}
 	row, found, err := pl.st.GetAutomationDefinition(ctx, id)
 	if err != nil {
@@ -280,7 +279,7 @@ func (pl *Plane) SaveOverlay(ctx context.Context, id string, overlay map[string]
 		if err != nil {
 			return err
 		}
-		if err := definition.WriteDefinition(dir, "automation", id, overlay); err != nil {
+		if err := pl.files.Write(dir, "automation", id, overlay); err != nil {
 			return err
 		}
 		rec := loadAutomationFile(filepath.Join(dir, id+".json"), id, time.Now())

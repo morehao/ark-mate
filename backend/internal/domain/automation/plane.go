@@ -42,7 +42,8 @@ type Plane struct {
 	runMu sync.Mutex
 
 	// st 库句柄（DB 载体；nil = memory 模式，走文件载体或纯内存）。装配期一次性注入。
-	st AutomationStore
+	st    AutomationStore
+	files DefinitionFiles
 	// host 宿主端口（建会话 / 取消 / 事件出口）。装配期一次性注入。
 	host Host
 }

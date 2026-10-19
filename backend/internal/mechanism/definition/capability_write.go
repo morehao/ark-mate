@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/morehao/ark-mate/internal/capability"
 	defval "github.com/morehao/ark-mate/internal/definition"
@@ -87,7 +86,7 @@ func OpenDefinition(dir, Kind, id string, patch map[string]any) (*DefinitionDraf
 		return nil, acl.NewError(acl.ClassService, "definition_write_failed",
 			fmt.Sprintf("读取能力定义 %s 失败：%v", path, err), err)
 	}
-	for _, k := range SortedPatchKeys(patch) {
+	for _, k := range defval.SortedPatchKeys(patch) {
 		if patch[k] == nil {
 			df.Delete(k)
 			continue
@@ -152,15 +151,4 @@ func DefinitionSaveErr(path string, err error) error {
 	}
 	return acl.NewError(acl.ClassService, "definition_write_failed",
 		fmt.Sprintf("写入能力定义 %s 失败：%v", path, err), err)
-}
-
-// SortedPatchKeys patch 的键按字典序（落盘顺序稳定 → 同一请求产物逐字可复现，也方便单测比对）。
-// 顺序本身不影响语义（DefinitionFile 内部按 key 排序序列化），这里只是让"先删后设"的意图可读。
-func SortedPatchKeys(patch map[string]any) []string {
-	out := make([]string, 0, len(patch))
-	for k := range patch {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

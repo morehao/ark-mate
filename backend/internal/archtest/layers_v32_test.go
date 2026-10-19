@@ -364,7 +364,6 @@ var v32Exceptions = []v32Exception{
 	// ——— 刀 6：domain/workspace ———
 
 	// ——— 刀 7：domain/automation ———
-	{from: "internal/domain/automation", to: "internal/mechanism", budget: 1, slice: "刀7", why: "用 mechanism/definition"},
 
 	// ——— 刀 8：domain/provider ———
 	{from: "internal/domain/provider", to: "internal/dto", budget: 2, slice: "刀8", why: "返回值是 dtomodel 与 dtoprovider"},

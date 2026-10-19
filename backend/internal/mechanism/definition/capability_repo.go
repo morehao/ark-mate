@@ -185,7 +185,7 @@ func (r *storeDefinitionRepo) Open(ctx context.Context, id string, patch map[str
 				fmt.Sprintf("能力定义 %s 不是合法 JSON 对象，先修好或删掉它再写：%v", locator, err), err)
 		}
 	}
-	for _, k := range SortedPatchKeys(patch) {
+	for _, k := range defval.SortedPatchKeys(patch) {
 		if patch[k] == nil {
 			doc.Delete(k)
 			continue
