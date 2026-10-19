@@ -37,7 +37,11 @@ func (f ModelFacts) RuntimeStates(ctx context.Context) map[string]dtomodel.Runti
 
 // DeclaredModels 平台声明的模型清单。
 func (f ModelFacts) DeclaredModels(ctx context.Context) ([]dtomodel.ModelResp, error) {
-	return f.providers.ListModels(ctx)
+	views, err := f.providers.ListModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return modelResps(views), nil
 }
 
 // Advertised 运行时目录取样（带来源判定：`Known=false` = 无法校验）。
@@ -48,7 +52,7 @@ func (f ModelFacts) Advertised(ctx context.Context) (doctor.AdvertisedSample, er
 	}
 	// `Known()` 的来源词汇（session|cache|resume|none）是目录域的；端口只带判定结果过去。
 	return doctor.AdvertisedSample{
-		Runtime: sample.Runtime, Models: sample.Models,
+		Runtime: sample.Runtime, Models: advertisedModels(sample.Models),
 		Known: sample.Known(), Note: sample.Note,
 	}, nil
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objid"
@@ -26,10 +25,10 @@ import (
 // 清单需要 sqlite 持久层：memory 模式没有 `models` 表，读面回空列表、写面在用例层报 40501。
 
 // ListModels 列出全部平台清单（**不分页**：清单上限 200 条，全量返回）。
-func (pl *Plane) ListModels(ctx context.Context) ([]dtomodel.ModelResp, error) {
+func (pl *Plane) ListModels(ctx context.Context) ([]ModelItem, error) {
 	// memory 模式没有清单载体：读面回空列表（写面在 `service/svcmodel`，那里报 40501）。
 	if pl.st == nil {
-		return []dtomodel.ModelResp{}, nil
+		return []ModelItem{}, nil
 	}
 	rows, err := pl.st.ListModelDefinitions(ctx)
 	if err != nil {
@@ -37,7 +36,7 @@ func (pl *Plane) ListModels(ctx context.Context) ([]dtomodel.ModelResp, error) {
 	}
 	// **不再在 Go 侧排序**：顺序由 SQL 的 `ORDER BY provider_id, model_id` 给出（ADR-6）。
 	// 这里再排一次会让"库里的顺序"与"对外顺序"变成两份可能分叉的事实。
-	out := make([]dtomodel.ModelResp, 0, len(rows))
+	out := make([]ModelItem, 0, len(rows))
 	for i := range rows {
 		out = append(out, modelRespFromRow(&rows[i]))
 	}
@@ -48,7 +47,7 @@ func (pl *Plane) ListModels(ctx context.Context) ([]dtomodel.ModelResp, error) {
 //
 // 形状是"查得到/查不到"而不是"查不到就报错"：错误码与文案属于**用例**（写面提交后读不回来
 // 是 40401），留在 `service/svcmodel` 一处，不让同一个码在两层各铸一遍。
-func (pl *Plane) ModelRow(ctx context.Context, id string) (*dtomodel.ModelResp, bool, error) {
+func (pl *Plane) ModelRow(ctx context.Context, id string) (*ModelItem, bool, error) {
 	if pl.st == nil {
 		return nil, false, nil
 	}
@@ -191,8 +190,8 @@ func SessionModelNotFoundErr(modelID string) error {
 // modelRespFromRow 把一行模型条目投影成对外表示（**不含任何 runtime 维度**）。
 //
 // v13 起是**纯列投影，不可能失败**：没有 JSON 可比坏，于是"一行坏 body 打不开整页"在结构上消失了。
-func modelRespFromRow(row *model.ModelEntity) dtomodel.ModelResp {
-	out := dtomodel.ModelResp{
+func modelRespFromRow(row *model.ModelEntity) ModelItem {
+	out := ModelItem{
 		ID: row.ID, ProviderID: row.ProviderID, Model: row.Model,
 		Name: row.Name, Note: row.Note,
 		InputModalities: resource.ModalitiesFromColumn(row.InputModalities),

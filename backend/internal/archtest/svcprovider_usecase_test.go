@@ -55,7 +55,7 @@ var probePortAnchors = []string{
 	"type Ports interface {",
 	"Snapshot(id string) (*provider.Def, bool)",
 	"type Catalog interface {",
-	"ModelCatalog(ctx context.Context) (*dtomodel.ModelCatalogResp, error)",
+	"ModelCatalog(ctx context.Context) (*provider.CatalogView, error)",
 }
 
 // probeImplementationMarkers 实现回流到 `manager` 的痕迹（判据口径 + 上游段口径）。

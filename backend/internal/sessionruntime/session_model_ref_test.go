@@ -10,7 +10,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/model"
@@ -56,7 +55,7 @@ func (byModelNameOnly) Value(_, model string) (string, error) { return "m:" + mo
 //
 // 模型行**直接插库**（写面已搬进 `service/svcmodel`：这些用例测的是会话侧怎么解析模型，
 // 不是写面，见 `seedModelRow`）。
-func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName string) *dtomodel.ModelResp {
+func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName string) *provider.ModelItem {
 	t.Helper()
 	ctx := context.Background()
 	key, baseURL := "sk-test", "https://api.example.com/v1"

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/redact"
 )
@@ -54,11 +53,11 @@ func (f fakeProbePorts) ProviderModelRefsReadOnly(context.Context, string) []str
 // fakeProbeCatalog 模型目录读面：`err` 非 nil 时模拟"目录读不动"，`resp` 为 nil 时模拟
 // "端口回了空结论"（两者都必须记 unknown 而不是崩）。
 type fakeProbeCatalog struct {
-	resp *dtomodel.ModelCatalogResp
+	resp *provider.CatalogView
 	err  error
 }
 
-func (f fakeProbeCatalog) ModelCatalog(context.Context) (*dtomodel.ModelCatalogResp, error) {
+func (f fakeProbeCatalog) ModelCatalog(context.Context) (*provider.CatalogView, error) {
 	return f.resp, f.err
 }
 
@@ -303,9 +302,9 @@ func TestProbeCatalogUnknownPathsStayUnknown(t *testing.T) {
 	})
 
 	t.Run("readable", func(t *testing.T) {
-		p := probeFixture(base(), fakeProbeCatalog{resp: &dtomodel.ModelCatalogResp{
+		p := probeFixture(base(), fakeProbeCatalog{resp: &provider.CatalogView{
 			Runtime: "dsh", Source: "session",
-			Options: []dtomodel.ConfigOptionResp{{ID: "model", Name: "模型"}},
+			Options: []provider.CatalogOption{{ID: "model", Name: "模型"}},
 		}})
 		resp, err := p.ProbeProvider(context.Background(), "p1", dtoprovider.ProviderProbeReq{})
 		if err != nil {

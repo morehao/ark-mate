@@ -1,6 +1,7 @@
 package sessionruntime
 
 import (
+	"context"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/registry"
 )
@@ -58,4 +59,26 @@ type ModelFace struct {
 // NewModelFace 造一个模型面组合（装配点与测试共用）。
 func NewModelFace(s *Service) ModelFace {
 	return ModelFace{ModelViews: registry.NewModelViews(s.Planes()), Service: s}
+}
+
+// ——— 对外投影（v3.2 刀 8）———
+//
+// 领域（`provider.Plane`）返回无 tag 视图；`svcmodel` 的接口面向控制器，要的是 DTO。
+// 这里显式遮蔽（shadow）嵌入值提升上来的同名方法，把投影钉在一个地方——否则
+// `ModelFace` 会因为嵌入值返回领域类型而不再满足 `svcmodel.ModelSvc`。
+func (f ModelFace) ModelCatalog(ctx context.Context) (*dtomodel.ModelCatalogResp, error) {
+	v, err := f.Planes().Providers.ModelCatalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return registry.CatalogResp(v), nil
+}
+
+// ModelRow 单条模型行（`found=false` = 不存在，不是错误）。
+func (f ModelFace) ModelRow(ctx context.Context, id string) (*dtomodel.ModelResp, bool, error) {
+	v, found, err := f.Planes().Providers.ModelRow(ctx, id)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	return registry.ModelResp(v), true, nil
 }

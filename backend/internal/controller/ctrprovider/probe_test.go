@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/service/svcprovider"
@@ -29,9 +28,9 @@ import (
 // fakeProviderCatalog 模型目录读面替身（`svcprovider.Catalog`）。
 type fakeProviderCatalog struct{ called bool }
 
-func (f *fakeProviderCatalog) ModelCatalog(context.Context) (*dtomodel.ModelCatalogResp, error) {
+func (f *fakeProviderCatalog) ModelCatalog(context.Context) (*provider.CatalogView, error) {
 	f.called = true
-	return &dtomodel.ModelCatalogResp{}, nil
+	return &provider.CatalogView{}, nil
 }
 
 // TestNewProviderCtrBuildsBothUseCases 见文件头。

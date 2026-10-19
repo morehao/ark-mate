@@ -231,6 +231,21 @@ func (s *stubSvc) ModelsView(_ context.Context, runtimeID string, refresh bool) 
 	}
 	return &dtomodel.ModelsResp{}, nil
 }
+
+// stubCatalog 把 `stubSvc` 的 DTO 目录面收窄成 `svcprovider.Catalog` 要的领域形状。
+//
+// 同一个 stub 不能同时满足两个接口的同名方法（返回类型不同），而 `stubSvc` 还要供
+// `svcmodel.ModelSvc` 用——所以这里显式包一层，而不是把两个接口的签名再拉平一次。
+type stubCatalog struct{ s *stubSvc }
+
+func (c stubCatalog) ModelCatalog(ctx context.Context) (*provider.CatalogView, error) {
+	v, err := c.s.ModelCatalog(ctx)
+	if err != nil || v == nil {
+		return nil, err
+	}
+	return &provider.CatalogView{Runtime: v.Runtime, Source: v.Source, Options: nil}, nil
+}
+
 func (s *stubSvc) ModelCatalog(_ context.Context) (*dtomodel.ModelCatalogResp, error) {
 	if s.modelErr != nil {
 		return nil, s.modelErr
@@ -583,7 +598,7 @@ func (f restFixture) services() assembly.Services {
 		Model:         f.svc,
 		ModelDeclared: svcmodel.NewDeclared(nilSafeModelStore(f.store), f.providerPlane, nil),
 		Provider:      svcprovider.NewProvider(f.providerPlane),
-		ProviderProbe: svcprovider.NewProbe(f.providerPlane, f.svc),
+		ProviderProbe: svcprovider.NewProbe(f.providerPlane, stubCatalog{f.svc}),
 
 		Capability: svccapability.NewCapability(f.skills, f.mcpPlane,
 			svccapability.NewTools(f.caps), svccapability.NewServers(f.caps, f.mcpPlane, f.mcpSecrets)),

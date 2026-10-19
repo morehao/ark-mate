@@ -7,7 +7,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -41,7 +40,7 @@ func (s *Service) LiveConfigOptions() ([]acl.ConfigOption, bool) {
 // AuthGuidance 实现 `provider.CatalogConnectionFacts`。
 //
 // 连接按 **runtime** 找（不是按 agent）：单底座下"这条连接属于谁"没有第二个候选。
-func (s *Service) AuthGuidance() []dtomodel.AuthGuidanceResp {
+func (s *Service) AuthGuidance() []provider.AuthGuide {
 	if s.orch == nil {
 		return nil
 	}
@@ -53,9 +52,9 @@ func (s *Service) AuthGuidance() []dtomodel.AuthGuidanceResp {
 	if len(caps.AuthGuidance) == 0 {
 		return nil
 	}
-	out := make([]dtomodel.AuthGuidanceResp, 0, len(caps.AuthGuidance))
+	out := make([]provider.AuthGuide, 0, len(caps.AuthGuidance))
 	for _, g := range caps.AuthGuidance {
-		out = append(out, dtomodel.AuthGuidanceResp{
+		out = append(out, provider.AuthGuide{
 			MethodID:    g.MethodID,
 			Name:        g.Name,
 			Description: g.Description,

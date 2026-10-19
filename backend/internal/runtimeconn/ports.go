@@ -2,8 +2,8 @@ package runtimeconn
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -29,7 +29,7 @@ type CredentialSource interface {
 	// 返回的错误里已含出路文本（原文照用，不在本域改写）。
 	CredentialProblem(ctx context.Context) error
 	// AuthGuidance 已连接时底座自报的鉴权方式（空 = 没声明）。
-	AuthGuidance() []dtomodel.AuthGuidanceResp
+	AuthGuidance() []provider.AuthGuide
 }
 
 // LiveClientSource 连接池的"此刻有活连接吗"读面。

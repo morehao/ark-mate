@@ -13,7 +13,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -232,7 +231,7 @@ func TestModelListOrderIsProviderThenModelID(t *testing.T) {
 }
 
 // modelPairs 把清单折成 `provider/model` 串（断言失败时的可读输出）。
-func modelPairs(list []dtomodel.ModelResp) []string {
+func modelPairs(list []provider.ModelItem) []string {
 	out := make([]string, 0, len(list))
 	for i := range list {
 		out = append(out, list[i].ProviderID+"/"+list[i].Model)

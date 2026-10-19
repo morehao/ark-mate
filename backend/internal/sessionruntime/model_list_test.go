@@ -95,7 +95,7 @@ func builtinSpec(t *testing.T, id string) runtime.Spec {
 //
 // 仍借 `model.ModelColumns` 落库而不是手写 SQL：前提必须与产品落库的形态同源
 // （列化之后"清单里有一条"这句话的含义就是这些列）。
-func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate ...func(*dtomodel.ModelCreateReq)) *dtomodel.ModelResp {
+func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate ...func(*dtomodel.ModelCreateReq)) *provider.ModelItem {
 	t.Helper()
 	ctx := context.Background()
 	key := "sk-test"

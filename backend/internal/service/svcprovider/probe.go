@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/redact"
 	"github.com/morehao/ark-mate/internal/resource"
@@ -83,7 +82,7 @@ type Ports interface {
 // 认识会让"这份数据归谁"没有答案。自检要的是目录**结论**（source/options/note），
 // 至于那份结论怎么来（活会话 / 缓存 / resume 取样）是模型面的不变量。
 type Catalog interface {
-	ModelCatalog(ctx context.Context) (*dtomodel.ModelCatalogResp, error)
+	ModelCatalog(ctx context.Context) (*provider.CatalogView, error)
 }
 
 // Probe 供应商自检用例（实现 `Prober.ProbeProvider`）。
