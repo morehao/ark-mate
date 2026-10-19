@@ -51,8 +51,15 @@ func TestProviderMirrorRefFormatIsPinned(t *testing.T) {
 			decl, len(declFiles), declFiles)
 	}
 	got := declFiles[0]
-	if !strings.Contains(filepath.ToSlash(got), "internal/mechanism/credential/") {
-		t.Fatalf("镜像键格式必须由凭据机制拥有，实际声明在 %s（provider 域拥有它会让「改镜像键」看起来像改 provider）", got)
+	// 归属：**凭据词汇层**（`internal/credential`）——v3.2 刀 8 把纯值（键前缀 / `ProviderRef` /
+	// 文件名 / 解析结果）从机制层搬下来，领域与机制共享同一份词汇。
+	//
+	// 判据要挡的仍然是"provider 域拥有它"（那会让"改镜像键"看起来像"改 provider"），
+	// 所以这里只认凭据词汇层这一个家，`internal/domain/provider/` 出现即红。
+	slashed := filepath.ToSlash(got)
+	if !strings.Contains(slashed, "internal/credential/") || strings.Contains(slashed, "internal/domain/provider/") {
+		t.Fatalf("镜像键格式必须由凭据词汇层（internal/credential）拥有，实际声明在 %s"+
+			"（provider 域拥有它会让「改镜像键」看起来像改 provider）", got)
 	}
 	src, _ := os.ReadFile(got)
 	if !strings.Contains(stripLineComments(string(src)), decl+` = "providers/"`) {

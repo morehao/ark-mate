@@ -4,6 +4,7 @@ package credential
 import (
 	"context"
 	"github.com/morehao/ark-mate/internal/credential"
+	credval "github.com/morehao/ark-mate/internal/credential"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/infra/credentials"
@@ -23,7 +24,7 @@ import (
 //     只要库里那一份在，密钥就还是可用的——权威在库，"镜像坏了"不等于"密钥没了"。
 //
 // 没有库（memory 模式）时托管层就是镜像文档本身：文件即事实源。
-func (m *Store) ResolveProviderKey(ctx context.Context, id, keyRef string) ProviderKey {
+func (m *Store) ResolveProviderKey(ctx context.Context, id, keyRef string) credval.ProviderKey {
 	envKeys := m.ProviderEnvKeyNames(id)
 	req := credentials.Request{Ref: keyRef, EnvKeys: envKeys}
 	var res credentials.Resolution
@@ -32,7 +33,7 @@ func (m *Store) ResolveProviderKey(ctx context.Context, id, keyRef string) Provi
 	} else {
 		res = m.Layered().Resolve(req)
 	}
-	out := ProviderKey{Value: res.Value, Source: res.Source, Problems: res.Problems}
+	out := credval.ProviderKey{Value: res.Value, Source: res.Source, Problems: res.Problems}
 	if out.Source == credential.SourceEnv {
 		out.EnvKey = m.MatchEnvKey(envKeys, out.Value)
 	}
@@ -47,21 +48,21 @@ func (m *Store) ResolveProviderKey(ctx context.Context, id, keyRef string) Provi
 	if !found {
 		// 行不在了（装载与写面之间的窗口）：不采用镜像里那一份。
 		if out.Value != "" {
-			return ProviderKey{Problems: []string{
+			return credval.ProviderKey{Problems: []string{
 				"库里没有这条供应商了（可能刚被删掉）：不采用托管文档里那一份"}}
 		}
 		return out
 	}
 	switch {
 	case out.Source == credential.SourceManaged && strings.TrimSpace(dbKey) == "":
-		return ProviderKey{Problems: []string{
+		return credval.ProviderKey{Problems: []string{
 			"托管文档里有这条密钥而库里没有（镜像陈旧，或写入/删除曾失败）：**不采用**镜像里那一份" +
 				"（否则在面板上清掉的密钥会被它悄悄撤销）；在「设置 · 模型」里重设一次即可对齐"}}
 	case out.Source == credential.SourceManaged:
 		out.Value = dbKey // 两边都有时以库为准。
 		return out
 	case out.Value == "" && strings.TrimSpace(dbKey) != "":
-		return ProviderKey{Value: dbKey, Source: credential.SourceManaged, Problems: out.Problems}
+		return credval.ProviderKey{Value: dbKey, Source: credential.SourceManaged, Problems: out.Problems}
 	}
 	return out
 }

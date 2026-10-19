@@ -3,6 +3,7 @@ package credential
 import (
 	"context"
 	"fmt"
+	credval "github.com/morehao/ark-mate/internal/credential"
 	"os"
 	"strings"
 )
@@ -74,7 +75,7 @@ func (m *Store) ResolveStoreSecret(ctx context.Context, ref string) (string, err
 	v, ok := MirrorValue(m.Doc(), ref)
 	if !ok || strings.TrimSpace(v) == "" {
 		return "", fmt.Errorf("托管文档里没有这条密钥（引用 %s）：memory 模式下它就在 "+
-			"`<MATE_HOME>/%s` 里，或把定义里的引用改成 env:<ENV_NAME>", ref, CredentialsFileName)
+			"`<MATE_HOME>/%s` 里，或把定义里的引用改成 env:<ENV_NAME>", ref, credval.CredentialsFileName)
 	}
 	return v, nil
 }

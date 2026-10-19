@@ -3,6 +3,7 @@ package credential
 import (
 	"context"
 	"errors"
+	credval "github.com/morehao/ark-mate/internal/credential"
 	"path/filepath"
 	"strings"
 
@@ -15,16 +16,13 @@ import (
 // 全部是**参数化**的（库句柄与 home 目录都由调用方传入），与 `*Service` 无关——这也是它们
 // 能先搬、不必等 `credentials.go` 主体那 12 个方法的原因。
 
-// CredentialsFileName 托管镜像的文件名（`<MATE_HOME>/<它>`）。
-const CredentialsFileName = "credentials.json"
-
 // CredentialsPath 托管镜像的路径（home 为空 → 空串 = 未配置）。
 func CredentialsPath(homeDir string) string {
 	h := strings.TrimSpace(homeDir)
 	if h == "" {
 		return ""
 	}
-	return filepath.Join(h, CredentialsFileName)
+	return filepath.Join(h, credval.CredentialsFileName)
 }
 
 // OpenCredentialSource 按约定装配四层凭据面：`<homeDir>/credentials.json` +
@@ -85,7 +83,7 @@ func SyncMirror(ctx context.Context, st *store.Store, doc *credentials.Doc, reas
 		if strings.TrimSpace(rows[i].Key) == "" {
 			continue // 空串 = 没有密钥，镜像里不该有这一条（存量条目由 doctor 报出，不在这里删）
 		}
-		put(ProviderRef(rows[i].ID), rows[i].Key)
+		put(credval.ProviderRef(rows[i].ID), rows[i].Key)
 	}
 	secrets, err := st.ListMcpSecrets(ctx)
 	if err != nil {
@@ -103,12 +101,4 @@ func SyncMirror(ctx context.Context, st *store.Store, doc *credentials.Doc, reas
 	glog.Infow(ctx, "credentials: 托管镜像已按库对账（库是权威，镜像可重建）",
 		"changed", changed, "total", len(values), "reason", reason)
 	return changed, nil
-}
-
-// OneKeyInParens 把一个可能为空的名字渲染成括号后缀（空 → 空串，不留一对空括号）。
-func OneKeyInParens(name string) string {
-	if strings.TrimSpace(name) == "" {
-		return ""
-	}
-	return "（" + name + "）"
 }

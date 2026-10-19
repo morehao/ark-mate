@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	src "github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/infra/credentials"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
@@ -116,9 +117,9 @@ func (pl *Plane) DeleteForTest(id string) {
 //
 // 那一行的 `nil` 守卫是**类型擦除的产物、不是第二份逻辑**：调用方可能拿到 nil 档案
 // （map 查找的结果），而机制层不认识本域的 `Def`，守卫只能留在这里。
-func (pl *Plane) KeyFor(ctx context.Context, d *Def) credential.ProviderKey {
+func (pl *Plane) KeyFor(ctx context.Context, d *Def) src.ProviderKey {
 	if d == nil {
-		return credential.ProviderKey{}
+		return src.ProviderKey{}
 	}
 	return pl.creds.ResolveProviderKey(ctx, d.ID, d.KeyRef)
 }

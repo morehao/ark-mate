@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/credential"
 
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/model"

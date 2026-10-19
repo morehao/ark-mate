@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/credential"
 	defn "github.com/morehao/ark-mate/internal/definition"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 
 	"github.com/morehao/ark-mate/internal/infra/logging"
 	"github.com/morehao/golib/glog"

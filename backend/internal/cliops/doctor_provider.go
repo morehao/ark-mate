@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/credential"
 
 	"github.com/morehao/ark-mate/internal/assembly"
 	"github.com/morehao/ark-mate/internal/config"

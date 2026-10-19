@@ -3,12 +3,13 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
+	mechcred "github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/credential"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/model"
@@ -56,7 +57,7 @@ func readProvidersFile(t *testing.T, dir string) string {
 // readMirrorValues 读托管镜像（`<home>/credentials.json`）的 `引用 → 值` 映射。
 func readMirrorValues(t *testing.T, home string) map[string]string {
 	t.Helper()
-	raw, err := os.ReadFile(credential.CredentialsPath(home))
+	raw, err := os.ReadFile(mechcred.CredentialsPath(home))
 	if err != nil {
 		t.Fatalf("读托管文档: %v", err)
 	}
