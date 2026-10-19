@@ -99,7 +99,7 @@ func TestMechanismMustNotImportUpward(t *testing.T) {
 //	② 不得向上 import（`service/*` 的端口、`manager` 的实现、装配与传输面）。
 //
 // 领域层**允许**依赖 `pkg/*`、`internal/{mechanism,store,model,dto}`——机制层是它向下的支撑，
-// DTO 是它对外形态的载体（`Plane.ListSkills` 返回 `[]dtocapability.SkillResp` 是本仓的既有形态）。
+// DTO 是它对外形态的载体（v3.2 起域返回无 tag 的 `[]SkillView`，DTO 由 `svccapability` 投影）。
 //
 // 反证（实跑见计划 §4.1 的 N6/N7）：往 `domain/interaction` 里 import `domain/skill` → 红；
 // 把 `internal/domain` 指到一个不存在的目录 → Fatal（不许静默空转）。

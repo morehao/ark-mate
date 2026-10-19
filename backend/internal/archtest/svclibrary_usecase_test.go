@@ -177,18 +177,30 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	// ④′ 技能目录走**域平面**（P4a 正文第十三刀）：与工具目录同族、但落点相反，这条边界
 	// 必须钉住，否则下一个人为了"对称"会给它补一层转发。
 	//
-	// 分界线是**投影在哪一边**：`skill.Plane.ListSkills` 已经把 `capability.Skill` 折成
-	// `dtocapability.SkillResp`（含 warnings 与 scope 判定），用例层再包一层就只是一行转发
-	// ——那正是第十一刀判定为骚操作的形状；而工具目录的投影在 `pkg/` 之上（`pkg/` 不能
-	// import `internal/dto`），只能落用例层。同一个域里的两面因此落点不同，这不是不一致。
+	// 分界线是**投影在哪一边**，v3.2 起改成两段（刀 4）：
+	//   - `skill.Plane.ListSkills` 把 `capability.Skill` 折成**无 tag 的领域视图** `[]SkillView`
+	//     （含 warnings 与 scope 判定）——这是投影的**本体**，只有一份；
+	//   - `svccapability` 只做领域视图 → `dtocapability.SkillResp` 的**逐字段搬运**（`skillResps`），
+	//     不重新判定、不增删语义。
+	// 而工具目录的投影在 `pkg/` 之上（`pkg/` 不能 import `internal/dto`），只能整份落用例层。
+	// 同一个域里的两面因此落点不同，这不是不一致。
+	//
+	// 守卫随之钉两件事：域的签名是**领域视图**（不是 DTO），用例层确实调用投影函数
+	// （否则"搬运"会退化成一行透传，那正是第十一刀判定为骚操作的形状）。
 	if !strings.Contains(capsSrc, "ListSkills()") {
 		t.Error("`internal/service/svccapability` 里找不到 `ListSkills()`：v3.1 起控制器不 import domain，" +
 			"技能目录必须经用例接口。")
 	}
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "skill", "plane.go"))),
-		"func (m *Plane) ListSkills() ([]dtocapability.SkillResp, error)") {
-		t.Error("`internal/domain/skill` 里找不到 `func (m *Plane) ListSkills()`：投影的本体只有一份且在域里" +
-			"（判据失锚＝空转）。")
+		"func (m *Plane) ListSkills() ([]SkillView, error)") {
+		t.Error("`internal/domain/skill` 里找不到 `func (m *Plane) ListSkills() ([]SkillView, error)`：" +
+			"投影的本体只有一份且在域里，且域只产**领域视图**、不产对外 DTO（判据失锚＝空转）。")
+	}
+	if !strings.Contains(funcBodyOf(t,
+		readFileOrFatal(t, filepath.Join(root, "internal", "service", "svccapability", "capability.go")),
+		"func (s *capabilitySvc) ListSkills("), "skillResps(") {
+		t.Error("`capabilitySvc.ListSkills` 的函数体里找不到 `skillResps(`：领域视图必须经投影函数" +
+			"转成对外 DTO，不能退化成一行透传。")
 	}
 	for _, path := range mgrFiles {
 		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "func (s *Service) ListSkills(") {
