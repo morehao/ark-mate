@@ -10,8 +10,8 @@ import (
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
+	"github.com/morehao/ark-mate/internal/capabilityio"
 	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/store"
 )
 
@@ -69,7 +69,7 @@ func providerImport(args []string) {
 	}
 	defer st.Close()
 
-	stats, err := provider.ImportProviderFile(context.Background(), st, root,
+	stats, err := capabilityio.ImportProviderFile(context.Background(), st, root,
 		definition.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "provider import: %v\n", err)
@@ -131,7 +131,7 @@ func providerExport(args []string) {
 	}
 	defer st.Close()
 
-	stats, err := provider.ExportProviderFile(context.Background(), st, root, *dryRun, os.Stdout)
+	stats, err := capabilityio.ExportProviderFile(context.Background(), st, root, *dryRun, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "provider export: %v\n", err)
 		os.Exit(1)

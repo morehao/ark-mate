@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/capabilityio"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"os"
 	"path/filepath"
@@ -48,8 +49,8 @@ func (f *providerDoctorFixture) facts(t *testing.T) doctorfacts.ProviderDoctorFa
 	return doctorfacts.CollectProviderDoctorFacts(context.Background(), f.st, doctorfacts.ProviderDoctorOptions{
 		Home: f.home, ProviderDir: f.providerDir, DBPath: filepath.Join(f.home, "mate.db"),
 		ProvidersFileName:   provider.ProvidersFileName,
-		BackupName:          provider.ProvidersBackupName,
-		MismatchExtraMarker: provider.ProviderMismatchExtraMarker,
+		BackupName:          capabilityio.ProvidersBackupName,
+		MismatchExtraMarker: capabilityio.ProviderMismatchExtraMarker,
 	}, func(ctx context.Context, st *store.Store, home string) []doctorfacts.ProviderRuntimeFacts {
 		return registry.CollectRuntimeModelFacts(ctx, st, home, dsh.Registry())
 	})

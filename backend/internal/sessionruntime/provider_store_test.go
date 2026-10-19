@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/capabilityio"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
@@ -68,7 +69,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 
-	stats, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
+	stats, err := capabilityio.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
 	if err != nil {
 		t.Fatalf("provider.ImportProviderFile: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	}
 
 	// ① 备份存在，且内容是**迁移前**那份（含明文）。
-	backupPath := filepath.Join(dir, provider.ProvidersBackupName)
+	backupPath := filepath.Join(dir, capabilityio.ProvidersBackupName)
 	bb, err := os.ReadFile(backupPath)
 	if err != nil {
 		t.Fatalf("迁移前备份未写出: %v", err)
@@ -156,7 +157,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	}
 
 	// ⑤ 幂等：内容没变 → 整体跳过（一个字节都不写）。
-	again, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
+	again, err := capabilityio.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
 	if err != nil || !again.Already || again.Inserted != 0 {
 		t.Fatalf("重复导入应整体跳过: %+v err=%v", again, err)
 	}
@@ -240,7 +241,7 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	// 先走一次导入，让"文件里的 existing"成为 DB 行的起点（真实升级后的形态）。
-	if _, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
+	if _, err := capabilityio.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		t.Fatalf("provider.ImportProviderFile: %v", err)
 	}
 	svc := NewService(publisherRegistry(), eventbus.New())
@@ -344,7 +345,7 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	}
 	// DryRun 不写盘。
 	dry := filepath.Join(home, "dry")
-	stats, err := provider.ExportProviderFile(ctx, st, dry, true, nil)
+	stats, err := capabilityio.ExportProviderFile(ctx, st, dry, true, nil)
 	if err != nil || stats.Written != 2 {
 		t.Fatalf("dry-run 导出计数不符: %+v err=%v", stats, err)
 	}
@@ -352,12 +353,12 @@ func TestProviderExportRoundTrip(t *testing.T) {
 		t.Fatal("--dry-run 不应写盘")
 	}
 	// 真导出两次：逐字节相同（确定性）。
-	if _, err := provider.ExportProviderFile(ctx, st, dir, false, nil); err != nil {
+	if _, err := capabilityio.ExportProviderFile(ctx, st, dir, false, nil); err != nil {
 		t.Fatalf("导出: %v", err)
 	}
 	first := readProvidersFile(t, dir)
 	time.Sleep(10 * time.Millisecond)
-	if _, err := provider.ExportProviderFile(ctx, st, dir, false, nil); err != nil {
+	if _, err := capabilityio.ExportProviderFile(ctx, st, dir, false, nil); err != nil {
 		t.Fatalf("二次导出: %v", err)
 	}
 	if second := readProvidersFile(t, dir); second != first {

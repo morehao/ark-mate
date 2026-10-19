@@ -3,6 +3,7 @@ package cliops
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/capabilityio"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,8 +50,8 @@ func checkProviderSection(opts doctorOptions) (doctorfacts.ProviderDoctorFacts, 
 		// 三个"两侧约定的字符串"由**组合根**从供应商域交下去（机制层不得 import 领域）：
 		// 档案文件名、迁移备份名、导入对账的那条判据标记。
 		ProvidersFileName:   provider.ProvidersFileName,
-		BackupName:          provider.ProvidersBackupName,
-		MismatchExtraMarker: provider.ProviderMismatchExtraMarker,
+		BackupName:          capabilityio.ProvidersBackupName,
+		MismatchExtraMarker: capabilityio.ProviderMismatchExtraMarker,
 		RuntimeSpecs:        assembly.BuiltinSpecs(),
 	}, func(ctx context.Context, st *store.Store, home string) []doctorfacts.ProviderRuntimeFacts {
 		return registry.CollectRuntimeModelFacts(ctx, st, home, assembly.BuiltinRegistry())

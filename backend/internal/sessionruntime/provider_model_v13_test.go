@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/capabilityio"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
@@ -80,7 +81,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, provider.ProvidersFileName), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
+	if _, err := capabilityio.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		t.Fatalf("provider.ImportProviderFile: %v", err)
 	}
 	row, found, _ := st.GetProviderDefinition(ctx, "legacy")

@@ -15,7 +15,6 @@ import (
 	"github.com/morehao/ark-mate/internal/credential"
 	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	pkgidentity "github.com/morehao/ark-mate/internal/identity"
 	"github.com/morehao/ark-mate/internal/infra/acp"
@@ -318,7 +317,7 @@ func (as *assembly) startImports(ctx context.Context) error {
 	}
 	// provider 档案一次性导入（v11）：幂等依据是**文件内容指纹**；迁移前备份
 	// `providers.json.bak-v11`（全篇唯一不可逆动作——回退窗口在导入完成后关闭）。
-	if imp, err := provider.ImportProviderFile(ctx, as.st, cfg.ProviderDir,
+	if imp, err := capabilityio.ImportProviderFile(ctx, as.st, cfg.ProviderDir,
 		definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		glog.Warnw(ctx, "serve: 导入存量 provider 档案失败（供应商面可能为空；可跑 `mate provider import` 重试）",
 			"err", err, "dir", cfg.ProviderDir)

@@ -1,4 +1,4 @@
-package provider
+package capabilityio
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	domprovider "github.com/morehao/ark-mate/internal/domain/provider"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,17 +18,15 @@ import (
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/resource"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/golib/glog"
 )
 
-// ProvidersFileName provider 档案文件名（**目录级配置**：ProviderDir 下的保留文件）。
+// domprovider.ProvidersFileName provider 档案文件名（**目录级配置**：ProviderDir 下的保留文件）。
 //
 // 它留在文件侧：档案是"这台机器上有哪些上游凭据"，与 agent 定义的生命周期不同。
-const ProvidersFileName = "providers.json"
 
 // ——— 存量 provider 档案的一次性导入与导出（v11 下半；v13 改为列载荷；v20 换密钥面） ———
 //
@@ -87,7 +86,7 @@ func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts d
 	if dir == "" {
 		return stats, nil
 	}
-	path := filepath.Join(dir, ProvidersFileName)
+	path := filepath.Join(dir, domprovider.ProvidersFileName)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		// 文件不存在 = 没有存量档案要搬（全新机器）。不是错误。
@@ -118,7 +117,7 @@ func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts d
 	// ② 备份（只写一次）。
 	if backup, bErr := backupProviderFile(path, dir); bErr != nil {
 		// 备份失败**必须阻断**：回退窗口的关闭是不可逆动作，没有备份就没有回退路径。
-		return stats, fmt.Errorf("manager: 备份 %s 失败（拒绝在无备份的情况下关闭回退窗口）: %w", ProvidersFileName, bErr)
+		return stats, fmt.Errorf("manager: 备份 %s 失败（拒绝在无备份的情况下关闭回退窗口）: %w", domprovider.ProvidersFileName, bErr)
 	} else {
 		stats.Backup = backup
 	}
@@ -246,28 +245,28 @@ func scanProviderFile(
 			continue
 		}
 		// id 会进托管文档的键 → 必须过同一道校验；坏 id 逐条跳过并可见。
-		if err := ValidateProviderID(id); err != nil {
+		if err := domprovider.ValidateProviderID(id); err != nil {
 			fmt.Fprintf(os.Stderr, "provider import: 跳过 id %q（非法：%v）\n", id, err)
 			continue
 		}
 		// **v11 → v12 字段映射**（迁移逃生门）：文件里可能还是旧 `type`（自由串）+ `projections`。
 		// 导入保留对它的识别并映射成 `protocol` + `base_url`——映射完就不要再提旧键：
 		// 留着它们等于让"底座维度"从导入路径重新进库。
-		protocol := bodyString(entry, "protocol")
+		protocol := domprovider.BodyString(entry, "protocol")
 		if protocol == "" {
 			protocol = string(resource.ProtocolOpenAI)
 		}
-		baseURL := bodyString(entry, "base_url")
+		baseURL := domprovider.BodyString(entry, "base_url")
 		if baseURL == "" {
-			baseURL = V11FileBaseURL(&ProviderFile{
-				Type:        bodyString(entry, "type"),
+			baseURL = domprovider.V11FileBaseURL(&domprovider.ProviderFile{
+				Type:        domprovider.BodyString(entry, "type"),
 				Projections: anyToProjections(entry["projections"]),
 			})
 		}
 		// 旧前缀的**唯一翻译点**：档案文件不在库里，v20 迁移改不到它们，只能在导入时显式翻。
 		// 翻出来的值只用于**认一下这条引用**（旧前缀落到日志/报告里；`key_ref` 本身是派生量，
 		// 见下），不写回文件、也不进库。
-		keyRef := bodyString(entry, "key_ref")
+		keyRef := domprovider.BodyString(entry, "key_ref")
 		if keyRef != "" {
 			if translated, ok := capability.TranslateLegacySecretRef(keyRef); ok {
 				definition.WarnLegacySecretRef(ctx, keyRef, path+" 的 key_ref")
@@ -278,7 +277,7 @@ func scanProviderFile(
 		// （`mate provider export` 在库里那一列非空时才写它），它背后没有任何可搬的值。
 		// 把手写的 `key_ref` 也算成"文件里有密钥"，会让每次导入都报一条永远修不好的假不一致。
 		wantKey := false
-		if k := bodyString(entry, "key"); k != "" {
+		if k := domprovider.BodyString(entry, "key"); k != "" {
 			wantKey = true
 			if opts.DryRun {
 				// DryRun 只读：不写库，也不声称搬过。
@@ -290,8 +289,8 @@ func scanProviderFile(
 		items = append(items, store.DefinitionImportItem{
 			Kind: model.DefinitionKindProvider, ID: id,
 			Provider: &store.ProviderColumns{
-				ID: id, Name: bodyString(entry, "name"), Protocol: protocol,
-				BaseURL: baseURL, Note: bodyString(entry, "note"),
+				ID: id, Name: domprovider.BodyString(entry, "name"), Protocol: protocol,
+				BaseURL: baseURL, Note: domprovider.BodyString(entry, "note"),
 			},
 		})
 		expected = append(expected, providerExpected{ID: id, Protocol: protocol, BaseURL: baseURL, WantKey: wantKey})
@@ -394,17 +393,17 @@ func ExportProviderFile(ctx context.Context, st *store.Store, dir string, dryRun
 	stats.Written = len(file)
 	if dryRun {
 		if out != nil {
-			fmt.Fprintf(out, "  ── %s（--dry-run，未写盘）\n%s", ProvidersFileName, definition.IndentJSONBlock(string(body)))
+			fmt.Fprintf(out, "  ── %s（--dry-run，未写盘）\n%s", domprovider.ProvidersFileName, definition.IndentJSONBlock(string(body)))
 		}
 		return stats, nil
 	}
-	if err := writeFileAtomic(filepath.Join(stats.Dir, ProvidersFileName), body, 0o600); err != nil {
+	if err := writeFileAtomic(filepath.Join(stats.Dir, domprovider.ProvidersFileName), body, 0o600); err != nil {
 		stats.Written = 0
 		stats.Failed++
 		return stats, err
 	}
 	if out != nil {
-		fmt.Fprintf(out, "  ✓ %s（%d 条档案）\n", ProvidersFileName, len(file))
+		fmt.Fprintf(out, "  ✓ %s（%d 条档案）\n", domprovider.ProvidersFileName, len(file))
 	}
 	return stats, nil
 }
@@ -458,93 +457,6 @@ func anyToProjections(v any) map[string]any {
 		return nil
 	}
 	return m
-}
-
-// ProviderFile providers.json 的磁盘形状。
-//
-// Key 字段**只读**：用于把 v20 之前的明文档案搬进托管文档；之后一律不再写出（写它等于把
-// 明文放回一个可被复制/备份的文件里，而那正是 v20 想去掉的那份重复）。
-type ProviderFile struct {
-	ID       string `json:"id"`
-	Name     string `json:"name,omitempty"`
-	Protocol string `json:"protocol,omitempty"`
-	BaseURL  string `json:"base_url,omitempty"`
-	Note     string `json:"note,omitempty"`
-	KeyRef   string `json:"key_ref,omitempty"`
-	Key      string `json:"key,omitempty"`
-	// Type/Projections 是 v11 的遗留（导入时按 v11 → v12 字段映射转换，见 provider_import.go）。
-	Type        string         `json:"type,omitempty"`
-	Projections map[string]any `json:"projections,omitempty"`
-}
-
-// V11FileBaseURL 从 v11 的文件档案里推导端点（`projections.*.baseURL` 优先，其次 type 表）。
-func V11FileBaseURL(d *ProviderFile) string {
-	keys := make([]string, 0, len(d.Projections))
-	for k := range d.Projections {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		frag, ok := d.Projections[k].(map[string]any)
-		if !ok {
-			continue
-		}
-		if v, ok := frag["baseURL"].(string); ok && v != "" {
-			return v
-		}
-	}
-	if ep, ok := v11KnownEndpoints[strings.ToLower(d.Type)]; ok {
-		return ep
-	}
-	return ""
-}
-
-// v11KnownEndpoints v11 的 `type` → 端点（**冻结副本**：`internal/store/migrate_v12.go`
-// 里有一份同源的，那是迁移用的历史快照，这里是导入（逃生门）用的；两处都描述历史，不复用活代码）。
-var v11KnownEndpoints = map[string]string{
-	"openai":     "https://api.openai.com/v1",
-	"deepseek":   "https://api.deepseek.com/v1",
-	"openrouter": "https://openrouter.ai/api/v1",
-	"groq":       "https://api.groq.com/openai/v1",
-}
-
-// bodyString 从已解析的 JSON 对象里取一个字符串键（缺失/类型不符 → 空串）。
-//
-// v13 之后它**只服务文件载体与导入路径**（`providers.json` 的条目仍是自由 JSON）；
-// DB 行是列，不经过这里。
-func bodyString(body map[string]any, key string) string {
-	v, ok := body[key]
-	if !ok {
-		return ""
-	}
-	s, _ := v.(string)
-	return s
-}
-
-// ValidateProviderID id 词法校验（它进托管文档的键 `providers/<id>` → 必须过引用校验，
-// 防的是一个带 `/` 或 `..` 的 id 把别的条目覆盖掉）。
-func ValidateProviderID(id string) error {
-	if id == "" {
-		return acl.NewError(acl.ClassRequest, "invalid_provider_id", "provider id 必填", nil)
-	}
-	if strings.TrimSpace(id) != id || len(id) > 64 {
-		return acl.NewError(acl.ClassRequest, "invalid_provider_id",
-			fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符，且不含首尾空白）", id), nil)
-	}
-	for i := 0; i < len(id); i++ {
-		c := id[i]
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '_', c == '-':
-		default:
-			return acl.NewError(acl.ClassRequest, "invalid_provider_id",
-				fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符）", id), nil)
-		}
-	}
-	if id == "." || id == ".." {
-		return acl.NewError(acl.ClassRequest, "invalid_provider_id",
-			fmt.Sprintf("provider id %q 非法（不得为 . 或 ..）", id), nil)
-	}
-	return nil
 }
 
 // ProvidersBackupName 迁移前备份的文件名（同目录，0600；**已存在则不覆盖**——
