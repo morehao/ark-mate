@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/code"
-	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objid"
@@ -35,7 +34,7 @@ import (
 //
 // 目录状态、会话数、最近使用都是**读时现算**：登记表只存身份、标题与顺序（设计 ADR-1），
 // 其余是事实的投影——存一份就多一份会与事实漂移的副本。
-func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error) {
+func (pl *Plane) WorkspaceRegistry() (*WorkspaceList, error) {
 	if pl.st == nil {
 		// memory 模式：**用户登记表**不存在（没有地方存"用户显式登记的东西"），所以
 		// `writable=false`（前端据此不渲染创建入口，设计 ADR-11）。
@@ -43,8 +42,8 @@ func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error) {
 		// 但**默认工作空间照常列出**：它是平台代建的那一条（见 EnsureDefaultWorkspace），
 		// 而不是用户登记项。把它藏起来会让左栏少一个分组、让"未指定 cwd 建的会话"在界面上
 		// 无处可挂——而它确实存在、确实可用。
-		out := &dtoworkspace.WorkspaceListResp{
-			Items:        []dtoworkspace.WorkspaceResp{},
+		out := &WorkspaceList{
+			Items:        []WorkspaceItem{},
 			Writable:     false,
 			ProvisionDir: pl.WorkspaceDir(),
 			CreateRoot:   pl.CreateRoot(),
@@ -78,15 +77,15 @@ func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error) {
 			break
 		}
 	}
-	out := &dtoworkspace.WorkspaceListResp{
-		Items:        make([]dtoworkspace.WorkspaceResp, 0, len(rows)),
+	out := &WorkspaceList{
+		Items:        make([]WorkspaceItem, 0, len(rows)),
 		DefaultID:    defaultID,
 		Writable:     true,
 		ProvisionDir: pl.WorkspaceDir(),
 		CreateRoot:   pl.CreateRoot(),
 	}
 	for _, r := range rows {
-		resp := dtoworkspace.WorkspaceResp{
+		resp := WorkspaceItem{
 			ID:        r.ID,
 			Path:      r.Path,
 			Title:     r.Title,
@@ -118,7 +117,7 @@ func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error) {
 //
 // 为什么在域里而不是控制器里：这是**业务判决**（哪条路、哪条错误码），而控制器的职责只有
 // 参数绑定与回响应。放控制器里还会让"两模式"这件事出现在一个不懂工作空间语义的地方。
-func (pl *Plane) CreateWorkspace(req dtoworkspace.WorkspaceCreateReq) (*dtoworkspace.WorkspaceResp, error) {
+func (pl *Plane) CreateWorkspace(req CreateRequest) (*WorkspaceItem, error) {
 	path := strings.TrimSpace(req.Path)
 	name := strings.TrimSpace(req.Name)
 	switch {
@@ -155,7 +154,7 @@ func (pl *Plane) CreateWorkspace(req dtoworkspace.WorkspaceCreateReq) (*dtoworks
 //	登记了没目录   → 一条 `dir_status: missing` 的登记（会话建不了，得靠 P1-g 的补救路径修）
 //
 // 后者更糟：它是一条**指向不存在东西的**记录，而前者只是多了一个空文件夹。
-func (pl *Plane) CreateNamedWorkspace(name, title string) (*dtoworkspace.WorkspaceResp, error) {
+func (pl *Plane) CreateNamedWorkspace(name, title string) (*WorkspaceItem, error) {
 	if pl.st == nil {
 		return nil, WorkspaceReadOnlyError()
 	}
@@ -210,7 +209,7 @@ func (pl *Plane) CreateNamedWorkspace(name, title string) (*dtoworkspace.Workspa
 // **改登记路径不在本批**（`req.Path` 由 W4 / P1-g 接）：那要先定"改路径之后既有会话的 cwd
 // 怎么办"，而那不是本批的判断。本批显式拒绝它，而不是悄悄忽略——悄悄忽略等于让前端以为
 // 改成功了。
-func (pl *Plane) PatchWorkspace(id string, req dtoworkspace.WorkspacePatchReq) (*dtoworkspace.WorkspaceResp, error) {
+func (pl *Plane) PatchWorkspace(id string, req PatchRequest) (*WorkspaceItem, error) {
 	if pl.st == nil {
 		return nil, WorkspaceReadOnlyError()
 	}
@@ -296,7 +295,7 @@ func workspaceExistsErr(target string) error {
 //
 // 路径走 `ValidateWorkspace(spec, roots)`：与建会话**同一条校验**。这不是"顺手复用"，
 // 而是本条设计的一半——两处各写一套，就必然出现"这里能选、那里建不了"的死路。
-func (pl *Plane) CreateRegisteredWorkspace(path, title string, strict bool) (*dtoworkspace.WorkspaceResp, error) {
+func (pl *Plane) CreateRegisteredWorkspace(path, title string, strict bool) (*WorkspaceItem, error) {
 	if pl.st == nil {
 		return nil, WorkspaceReadOnlyError()
 	}
@@ -325,7 +324,7 @@ func (pl *Plane) CreateRegisteredWorkspace(path, title string, strict bool) (*dt
 }
 
 // RenameRegisteredWorkspace 改写展示名。**不改身份**：id 与 path 都不动。
-func (pl *Plane) RenameRegisteredWorkspace(id, title string) (*dtoworkspace.WorkspaceResp, error) {
+func (pl *Plane) RenameRegisteredWorkspace(id, title string) (*WorkspaceItem, error) {
 	if pl.st == nil {
 		return nil, WorkspaceReadOnlyError()
 	}
@@ -346,7 +345,7 @@ func (pl *Plane) RenameRegisteredWorkspace(id, title string) (*dtoworkspace.Work
 // 默认工作空间不可删：它是"建会话未指定 cwd"这条路的落点，删掉等于让那条路无路可走。
 // 这条判定在 store 层也有一道（任何调用方都删不出一个没有落点的库），这里只是把它翻成
 // 一个用户能读懂的错。
-func (pl *Plane) DeleteRegisteredWorkspace(id string) (*dtoworkspace.WorkspaceDeleteResp, error) {
+func (pl *Plane) DeleteRegisteredWorkspace(id string) (*WorkspaceDelete, error) {
 	if pl.st == nil {
 		return nil, WorkspaceReadOnlyError()
 	}
@@ -366,11 +365,11 @@ func (pl *Plane) DeleteRegisteredWorkspace(id string) (*dtoworkspace.WorkspaceDe
 	// （内存里还挂着已经不存在的 id），要等重启才回来。库是对的、界面是空的，
 	// 而中间没有任何报错。
 	pl.clearWorkspaceAssignment(id)
-	return &dtoworkspace.WorkspaceDeleteResp{ID: id, ReleasedSessions: released}, nil
+	return &WorkspaceDelete{ID: id, ReleasedSessions: released}, nil
 }
 
 // MoveRegisteredWorkspace 重排（DOM insertBefore 语义），返回重排后的完整顺序。
-func (pl *Plane) MoveRegisteredWorkspace(id, beforeID string) (*dtoworkspace.WorkspaceMoveResp, error) {
+func (pl *Plane) MoveRegisteredWorkspace(id, beforeID string) (*WorkspaceMove, error) {
 	if pl.st == nil {
 		return nil, WorkspaceReadOnlyError()
 	}
@@ -382,7 +381,7 @@ func (pl *Plane) MoveRegisteredWorkspace(id, beforeID string) (*dtoworkspace.Wor
 	case err != nil:
 		return nil, err
 	}
-	return &dtoworkspace.WorkspaceMoveResp{IDs: seq}, nil
+	return &WorkspaceMove{IDs: seq}, nil
 }
 
 // EnsureDefaultWorkspace 装配期建立默认工作空间（幂等；代建关闭时什么也不做）。
@@ -449,8 +448,8 @@ func (pl *Plane) provisionMemoryDefaultWorkspace(dir string) error {
 // 请求会话快照会把"workspace 锁 → session 锁"这条边固化下来，等 workspace 状态搬进域平面
 // 就与 `workspaceDisplayOf` 的反向回调合成**锁序反转**——表现是挂死，不是红（见
 // `workspace_view.go` 的 `workspaceUsage` 同一条注释）。
-func (pl *Plane) workspaceRespForMemDefault(def model.WorkspaceEntity) dtoworkspace.WorkspaceResp {
-	resp := dtoworkspace.WorkspaceResp{
+func (pl *Plane) workspaceRespForMemDefault(def model.WorkspaceEntity) WorkspaceItem {
+	resp := WorkspaceItem{
 		ID:        def.ID,
 		Path:      def.Path,
 		Title:     def.Title,
@@ -489,7 +488,7 @@ func (pl *Plane) DefaultWorkspace() (model.WorkspaceEntity, bool, error) {
 }
 
 // workspaceRespByID 取单条登记的展示投影（创建/改名后回读用）。
-func (pl *Plane) workspaceRespByID(ctx context.Context, id string) (*dtoworkspace.WorkspaceResp, error) {
+func (pl *Plane) workspaceRespByID(ctx context.Context, id string) (*WorkspaceItem, error) {
 	list, err := pl.WorkspaceRegistry()
 	if err != nil {
 		return nil, err
@@ -508,21 +507,21 @@ func dirStatusOf(path string) string {
 	st, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return dtoworkspace.DirStatusMissing
+			return DirStatusMissing
 		}
-		return dtoworkspace.DirStatusUnreadable
+		return DirStatusUnreadable
 	}
 	if !st.IsDir() {
-		return dtoworkspace.DirStatusNotDir
+		return DirStatusNotDir
 	}
 	// 目录存在且是目录：再确认**读得动**（权限/挂载故障时 os.Stat 会成功而列出内容会失败，
 	// 而用户在界面上看到"可用"却进不去，比看到"不可读"更糟）。
 	f, err := os.Open(path)
 	if err != nil {
-		return dtoworkspace.DirStatusUnreadable
+		return DirStatusUnreadable
 	}
 	_ = f.Close()
-	return dtoworkspace.DirStatusOK
+	return DirStatusOK
 }
 
 // WorkspaceNotFoundError 未知工作空间 id（ClassRequest + 稳定 code 名，由 pkg/code 提档到 40401）。

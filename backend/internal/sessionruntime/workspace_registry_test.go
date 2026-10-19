@@ -12,7 +12,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 
 	"github.com/morehao/ark-mate/internal/code"
-	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/store"
@@ -551,10 +550,10 @@ func TestCreateNamedWorkspace(t *testing.T) {
 	}
 
 	// ⑤ 两条路互斥（域里判决，控制器不猜）。
-	if _, err := plane.CreateWorkspace(dtoworkspace.WorkspaceCreateReq{Path: ws.Path, Name: "x"}); numericCode(err) != 40001 {
+	if _, err := plane.CreateWorkspace(workspace.CreateRequest{Path: ws.Path, Name: "x"}); numericCode(err) != 40001 {
 		t.Fatalf("同时给 path 与 name 应被拒（40001）: %v", err)
 	}
-	if _, err := plane.CreateWorkspace(dtoworkspace.WorkspaceCreateReq{}); numericCode(err) != 40001 {
+	if _, err := plane.CreateWorkspace(workspace.CreateRequest{}); numericCode(err) != 40001 {
 		t.Fatalf("两者都不给应被拒（40001）: %v", err)
 	}
 }

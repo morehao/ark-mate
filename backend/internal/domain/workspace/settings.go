@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -62,10 +61,10 @@ const SourceUnavailable = "unavailable"
 //
 // Configured 与 Roots 必须分开给：面板编辑的是 Configured，而"代建根"是平台派生的、
 // 用户删不掉的那一条；只给生效名单，面板就永远无法表达"删掉这一条"。
-func (pl *Plane) Settings() *dtoworkspace.WorkspaceSettingsResp {
+func (pl *Plane) Settings() *SettingsView {
 	effective, configured, provisionDir, createRoot := pl.PolicySnapshot()
 	store := pl.rootsStoreRef()
-	resp := &dtoworkspace.WorkspaceSettingsResp{
+	resp := &SettingsView{
 		Configured:        append([]string{}, configured...),
 		Roots:             effective,
 		PreferRoots:       len(configured) > 0,
@@ -90,7 +89,7 @@ func (pl *Plane) Settings() *dtoworkspace.WorkspaceSettingsResp {
 // 与配置文件入口的严格度差异：这里要求每个根**存在且是目录**（配置文件只校验绝对路径）。
 // 理由是交互式设置的反馈必须在当下给（否则面板保存成功、下次进来看到的是错误页），
 // 而声明式配置允许"挂载还没到"这种编排顺序——两处的取舍不同是有意的。
-func (pl *Plane) UpdateSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error) {
+func (pl *Plane) UpdateSettings(roots []string) (*SettingsView, error) {
 	store := pl.rootsStoreRef()
 	if store == nil {
 		return nil, acl.NewError(acl.ClassRequest, "settings_readonly",

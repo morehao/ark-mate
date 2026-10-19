@@ -49,47 +49,91 @@ func New(plane *workspace.Plane, picker HostPicker) WorkspaceSvc {
 }
 
 func (s *workspaceSvc) Browse(path string, includeHidden bool) (*dtoworkspace.WorkspaceBrowseResp, error) {
-	return s.plane.BrowseWorkspace(path, includeHidden)
+	view, err := s.plane.BrowseWorkspace(path, includeHidden)
+	if err != nil {
+		return nil, err
+	}
+	return browseViewResp(view), nil
 }
 
 func (s *workspaceSvc) CreateDir(parent, name string) (*dtoworkspace.WorkspaceDirCreateResp, error) {
-	return s.plane.CreateWorkspaceDir(parent, name)
+	view, err := s.plane.CreateWorkspaceDir(parent, name)
+	if err != nil {
+		return nil, err
+	}
+	return workspaceDirCreateResp(view), nil
 }
 
 func (s *workspaceSvc) Recent(limit int) ([]dtoworkspace.WorkspaceRecentResp, error) {
-	return s.plane.RecentWorkspaces(limit)
+	views, err := s.plane.RecentWorkspaces(limit)
+	if err != nil {
+		return nil, err
+	}
+	return recentWorkspaceResps(views), nil
 }
 
 func (s *workspaceSvc) Files(path string, includeHidden bool) (*dtoworkspace.WorkspaceFilesResp, error) {
-	return s.plane.ListWorkspaceFiles(path, includeHidden)
+	view, err := s.plane.ListWorkspaceFiles(path, includeHidden)
+	if err != nil {
+		return nil, err
+	}
+	return filesViewResp(view), nil
 }
 
 func (s *workspaceSvc) PickDirectory(ctx context.Context) (string, bool, error) {
 	return s.picker.PickDirectoryHost(ctx)
 }
 
-func (s *workspaceSvc) Settings() *dtoworkspace.WorkspaceSettingsResp { return s.plane.Settings() }
+func (s *workspaceSvc) Settings() *dtoworkspace.WorkspaceSettingsResp {
+	return settingsViewResp(s.plane.Settings())
+}
 
 func (s *workspaceSvc) UpdateSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error) {
-	return s.plane.UpdateSettings(roots)
+	view, err := s.plane.UpdateSettings(roots)
+	if err != nil {
+		return nil, err
+	}
+	return settingsViewResp(view), nil
 }
 
 func (s *workspaceSvc) Registry() (*dtoworkspace.WorkspaceListResp, error) {
-	return s.plane.WorkspaceRegistry()
+	view, err := s.plane.WorkspaceRegistry()
+	if err != nil {
+		return nil, err
+	}
+	return workspaceListResp(view), nil
 }
 
 func (s *workspaceSvc) Create(req dtoworkspace.WorkspaceCreateReq) (*dtoworkspace.WorkspaceResp, error) {
-	return s.plane.CreateWorkspace(req)
+	view, err := s.plane.CreateWorkspace(createRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	out := workspaceResp(*view)
+	return &out, nil
 }
 
 func (s *workspaceSvc) Patch(id string, req dtoworkspace.WorkspacePatchReq) (*dtoworkspace.WorkspaceResp, error) {
-	return s.plane.PatchWorkspace(id, req)
+	view, err := s.plane.PatchWorkspace(id, patchRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	out := workspaceResp(*view)
+	return &out, nil
 }
 
 func (s *workspaceSvc) Delete(id string) (*dtoworkspace.WorkspaceDeleteResp, error) {
-	return s.plane.DeleteRegisteredWorkspace(id)
+	view, err := s.plane.DeleteRegisteredWorkspace(id)
+	if err != nil {
+		return nil, err
+	}
+	return workspaceDeleteResp(view), nil
 }
 
 func (s *workspaceSvc) Move(id, beforeID string) (*dtoworkspace.WorkspaceMoveResp, error) {
-	return s.plane.MoveRegisteredWorkspace(id, beforeID)
+	view, err := s.plane.MoveRegisteredWorkspace(id, beforeID)
+	if err != nil {
+		return nil, err
+	}
+	return workspaceMoveResp(view), nil
 }

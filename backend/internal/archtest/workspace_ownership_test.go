@@ -119,12 +119,13 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	}
 	// 判据不许失锚：域里那份本体必须在。
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "registry.go"))),
-		"func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error)") {
+		"func (pl *Plane) WorkspaceRegistry() (*WorkspaceList, error)") {
 		t.Error("`internal/domain/workspace/registry.go` 里找不到登记表读模型本体：判据失锚＝空转。")
 	}
 	// 只读辅助四条（P4a 正文第三十二刀）：浏览 / 建目录 / 列内容 / 最近使用——接口声明与 manager
-	// 转发一起删，控制器直接 `h.plane.*`。它们虽然**带错误出口**，但码与 DTO 都在域里铸（`workspace_invalid`
-	// / `workspace_exists` / `workspace_not_found`），所以用例层再包一层仍然只是一行转发。
+	// 转发一起删，控制器直接 `h.plane.*`。它们虽然**带错误出口**，但码在域里铸（`workspace_invalid`
+	// / `workspace_exists` / `workspace_not_found`）；v3.2 刀 6 起域返回的是**无 tag 视图**，
+	// 对外 DTO 由 `svcworkspace` 投影——判据因此钉"域侧本体在"，不再钉 DTO 类型名。
 	if vm := mgrAll; strings.Contains(vm, "func (s *Service) BrowseWorkspace(") ||
 		strings.Contains(vm, "func (s *Service) CreateWorkspaceDir(") || strings.Contains(vm, "func (s *Service) ListWorkspaceFiles(") ||
 		strings.Contains(vm, "func (s *Service) RecentWorkspaces(") {
@@ -144,12 +145,12 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		t.Error("`internal/sessionruntime` 里又出现 `UpdateWorkspaceSettings(` 转发：那一行已删（扫描面是整目录）。")
 	}
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "settings.go"))),
-		"func (pl *Plane) UpdateSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error)") {
+		"func (pl *Plane) UpdateSettings(roots []string) (*SettingsView, error)") {
 		t.Error("`internal/domain/workspace/settings.go` 里找不到 `func (pl *Plane) UpdateSettings(...)`：判据失锚＝空转。")
 	}
 
-	// 设置面快照（P4a 正文第十九刀）：域里 `Plane.Settings()` 同样已经折好 DTO（含
-	// configured / prefer_roots / source / locked_by），用例层再包一层就只是一行转发。
+	// 设置面快照（P4a 正文第十九刀）：域里 `Plane.Settings()` 折出**设置视图**（含
+	// configured / prefer_roots / source / locked_by）；v3.2 刀 6 起投影归 `svcworkspace`。
 	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "sessionruntime")) {
 		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "func (s *Service) WorkspaceSettings(") {
 			t.Errorf("internal/sessionruntime/%s 里又出现 `func (s *Service) WorkspaceSettings(`："+
@@ -157,7 +158,7 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		}
 	}
 	settingsFam := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "settings.go")))
-	if !strings.Contains(settingsFam, "func (pl *Plane) Settings() *dtoworkspace.WorkspaceSettingsResp {") {
+	if !strings.Contains(settingsFam, "func (pl *Plane) Settings() *SettingsView {") {
 		t.Error("`internal/domain/workspace/settings.go` 里找不到 `func (pl *Plane) Settings()`：" +
 			"判据失锚＝空转。")
 	}
