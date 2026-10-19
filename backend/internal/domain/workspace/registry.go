@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +13,6 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objid"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/golib/glog"
 )
 
@@ -225,9 +223,9 @@ func (pl *Plane) PatchWorkspace(id string, req dtoworkspace.WorkspacePatchReq) (
 		}
 		ok, rerr := pl.st.RelocateWorkspace(context.Background(), id, canonical)
 		switch {
-		case errors.Is(rerr, store.ErrWorkspacePathTaken):
+		case pl.st.IsPathTaken(rerr):
 			return nil, workspaceExistsErr(canonical)
-		case errors.Is(rerr, store.ErrWorkspaceDefaultImmutable):
+		case pl.st.IsDefaultImmutable(rerr):
 			return nil, acl.NewError(acl.ClassRequest, "workspace_default_immutable",
 				"默认工作空间的路径由装配期决定，不能改", nil)
 		case rerr != nil:
@@ -355,9 +353,9 @@ func (pl *Plane) DeleteRegisteredWorkspace(id string) (*dtoworkspace.WorkspaceDe
 	ctx := context.Background()
 	released, err := pl.st.DeleteWorkspace(ctx, id)
 	switch {
-	case errors.Is(err, store.ErrWorkspaceNotFound):
+	case pl.st.IsNotFound(err):
 		return nil, WorkspaceNotFoundError(id)
-	case errors.Is(err, store.ErrWorkspaceDefaultImmutable):
+	case pl.st.IsDefaultImmutable(err):
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "workspace_default_immutable",
 			"默认工作空间不可删除：它是未指定工作目录的会话的落点", nil))
 	case err != nil:
@@ -379,7 +377,7 @@ func (pl *Plane) MoveRegisteredWorkspace(id, beforeID string) (*dtoworkspace.Wor
 	ctx := context.Background()
 	seq, err := pl.st.MoveWorkspace(ctx, id, beforeID)
 	switch {
-	case errors.Is(err, store.ErrWorkspaceNotFound):
+	case pl.st.IsNotFound(err):
 		return nil, WorkspaceNotFoundError(id)
 	case err != nil:
 		return nil, err
@@ -408,8 +406,7 @@ func (pl *Plane) EnsureDefaultWorkspace() error {
 	if pl.st == nil {
 		return pl.provisionMemoryDefaultWorkspace(provision)
 	}
-	if _, err := pl.st.BootstrapDefaultWorkspace(context.Background(),
-		store.WorkspaceProvision{Dir: provision}); err != nil {
+	if _, err := pl.st.BootstrapDefaultWorkspace(context.Background(), provision); err != nil {
 		return code.FromError(err)
 	}
 	return nil
@@ -431,7 +428,7 @@ func (pl *Plane) provisionMemoryDefaultWorkspace(dir string) error {
 		// 与 store 侧的 `BootstrapDefaultWorkspace` 用同一个铸造口径（`wsp_<ULID>`）。
 		ID:        objid.New(objid.Workspace),
 		Path:      canonical,
-		Title:     store.DefaultWorkspaceTitle,
+		Title:     model.DefaultWorkspaceTitle,
 		IsDefault: true,
 		ListOrder: 0,
 		CreatedAt: now,
@@ -660,7 +657,7 @@ func (pl *Plane) WorkspaceDisplayOf(workspaceID string) (string, string) {
 // 展示时读作「默认工作空间」——与 dsh 的 workspaceDisplayTitle 同一手法。
 // 用户手动改名过的（标题不再是那个串）原样透出。
 func defaultWorkspaceDisplayTitle(title string) string {
-	if title == store.DefaultWorkspaceTitle {
+	if title == model.DefaultWorkspaceTitle {
 		return "默认工作空间"
 	}
 	return title

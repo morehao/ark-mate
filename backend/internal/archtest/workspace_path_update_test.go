@@ -67,8 +67,10 @@ func TestWorkspacePathUpdateKeepsIdentity(t *testing.T) {
 	if !strings.Contains(patch, "RelocateWorkspace(") {
 		t.Fatalf("`PatchWorkspace` 没有走 `RelocateWorkspace(`：改路径的语义只能有一处实现")
 	}
-	if !strings.Contains(patch, "store.ErrWorkspacePathTaken") {
-		t.Fatalf("`PatchWorkspace` 没有处理 `store.ErrWorkspacePathTaken`：冲突会被当成成功")
+	// v3.2 刀 6 起错误分类走端口（`IsPathTaken`），领域层不再认识 `store.Err*`：
+	// 判据钉"冲突被显式分类"，而不是钉某个具体拼写。
+	if !strings.Contains(patch, "IsPathTaken(") && !strings.Contains(patch, "store.ErrWorkspacePathTaken") {
+		t.Fatalf("`PatchWorkspace` 没有处理路径占用冲突（`IsPathTaken(`）：冲突会被当成成功")
 	}
 	if strings.Contains(patch, "workspace_path_immutable") {
 		t.Fatalf("`PatchWorkspace` 仍然无条件拒绝改路径（`workspace_path_immutable`）：" +

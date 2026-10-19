@@ -1,9 +1,10 @@
 package workspace
 
 import (
+	"context"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/model"
 )
 
 // ——— P2b：装配侧要交下来的两样家当（端口） ———
@@ -50,7 +51,7 @@ type SessionSource interface {
 //
 // **必须在装配期调用**：构造时按值传一个当时的 `st` 会永远停在 nil，而表现是"该走库的走了内存"
 // ——静默（与 `session.Plane.SetStore` 同一条教训）。
-func (pl *Plane) SetStore(st *store.Store) { pl.st = st }
+func (pl *Plane) SetStore(st WorkspaceStore) { pl.st = st }
 
 // SetSessionSource 装配期登记会话事实来源（nil = 无会话面：`RecentWorkspaces` 返回空）。
 func (pl *Plane) SetSessionSource(src SessionSource) { pl.sessions = src }
@@ -62,4 +63,39 @@ func (pl *Plane) sessionViews() []SessionView {
 		return nil
 	}
 	return src.Sessions()
+}
+
+// ——— 登记表载体的窄端口（v3.2 刀 6）———
+//
+// 工作空间域要读写自己的登记表（`workspaces` 表），但"表怎么存"不属于领域知识。
+// 端口由消费方声明，装配根注入 `*store.Store` 的适配体。
+//
+// 为什么有 16 个方法而不是 1–3 个：这是**聚合仓储**，不是"把库交出来"。十三条读写都是
+// 工作空间这一件事的操作（列表/按 id/按路径/建/改/删/排序/挪位/默认/最后使用/计数），
+// 没有任何一条能去动别的聚合；三条 `Is*` 是**错误分类**，把载体的哨兵错误翻译成领域判决，
+// 免得领域层认识 `store.Err*`。
+//
+// 方法签名与 `*store.Store` 逐字相同（除三条 `Is*`），所以适配体只需嵌一层再加三个方法——
+// 那三个方法不是转发，是把"载体说这是什么错"翻成"领域该判什么"。
+type WorkspaceStore interface {
+	BootstrapDefaultWorkspace(ctx context.Context, dir string) (*model.WorkspaceEntity, error)
+	DefaultWorkspace(ctx context.Context) (model.WorkspaceEntity, bool, error)
+	ListWorkspaces(ctx context.Context) ([]model.WorkspaceEntity, error)
+	GetWorkspace(ctx context.Context, id string) (model.WorkspaceEntity, bool, error)
+	WorkspaceByPath(ctx context.Context, path string) (model.WorkspaceEntity, bool, error)
+	CreateWorkspace(ctx context.Context, path, title string) (model.WorkspaceEntity, error)
+	RenameWorkspace(ctx context.Context, id, title string) error
+	DeleteWorkspace(ctx context.Context, id string) (int64, error)
+	RelocateWorkspace(ctx context.Context, id, canonicalPath string) (bool, error)
+	MoveWorkspace(ctx context.Context, id, beforeID string) ([]string, error)
+	CountWorkspacesByID(ctx context.Context) (map[string]int64, error)
+	LastUsedByWorkspaceID(ctx context.Context) (map[string]string, error)
+	SetWorkspaceDefaults(ctx context.Context, id, capabilityJSON, permissionMode string) (bool, error)
+
+	// IsPathTaken 目标路径已被别的登记项占用（→ workspace_exists）。
+	IsPathTaken(err error) bool
+	// IsDefaultImmutable 该登记项是默认工作空间、不可改路径/不可删。
+	IsDefaultImmutable(err error) bool
+	// IsNotFound 该登记项不存在。
+	IsNotFound(err error) bool
 }

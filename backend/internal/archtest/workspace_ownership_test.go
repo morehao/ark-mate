@@ -337,8 +337,11 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 func TestWorkspaceWiringIsAttached(t *testing.T) {
 	root := backendRoot(t)
 	persist := readFileOrFatal(t, filepath.Join(root, "internal", "registry", "planes.go"))
-	if !strings.Contains(persist, "p.Workspaces.SetStore(st)") {
-		t.Error("`internal/registry/planes.go` 的 `EnableStore` 里找不到 `p.Workspaces.SetStore(st)`：" +
+	// v3.2 刀 6 起交下去的是**适配体**（`workspaceStore{st}`）：十三读写法由内嵌的
+	// `*store.Store` 提升，另加三条 `Is*` 把载体哨兵错误翻成领域判决。判据改钉"确实交下去
+	// 了、且确实包着 st"——只钉 `SetStore(st)` 会在适配体出现后失锚。
+	if !strings.Contains(persist, "p.Workspaces.SetStore(workspaceStore{st})") {
+		t.Error("`internal/registry/planes.go` 的 `EnableStore` 里找不到 `p.Workspaces.SetStore(workspaceStore{st})`：" +
 			"工作空间域没拿到库句柄。\n" +
 			"表现**只在 sqlite 模式**现形——`RecentWorkspaces` 会把默认工作空间与已登记项当成" +
 			"「未登记」推回来（memory 模式的登记表在域自己的字段里，开发态多半看不见）。")

@@ -360,7 +360,6 @@ var v32Exceptions = []v32Exception{
 
 	// ——— 刀 6：domain/workspace ———
 	{from: "internal/domain/workspace", to: "internal/dto", budget: 1, slice: "刀6", why: "返回值是 dto/dtoworkspace"},
-	{from: "internal/domain/workspace", to: "internal/store", budget: 1, slice: "刀6", why: "直接持 *store.Store，未经窄端口"},
 
 	// ——— 刀 7：domain/automation ———
 	{from: "internal/domain/automation", to: "internal/dto", budget: 1, slice: "刀7", why: "返回值是 dto/dtoautomation"},

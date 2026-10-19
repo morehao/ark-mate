@@ -117,7 +117,7 @@ func (p *Planes) EnableStore(st *store.Store) {
 	p.Credentials.SetStore(st)
 	p.Skills.SetPersistence(st != nil)
 	p.Providers.SetStore(st)
-	p.Workspaces.SetStore(st)
+	p.Workspaces.SetStore(workspaceStore{st})
 	p.Automation.SetStore(st)
 	p.Resources.EnableStore(st)
 }

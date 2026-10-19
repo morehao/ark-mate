@@ -28,13 +28,6 @@ import (
 //
 // 单表读写仍在 `internal/dao/workspace.go`；本包不自建 SQL 拼接之外的东西。
 
-// 默认工作空间的语言中立标题。
-//
-// 它存的是**这个串**而不是「默认工作空间」：一次安装跨语言切换时库里的值不变，只有屏幕上
-// 的字跟着变（前端按 `is_default` 渲染本地化的名字）。这跟 dsh 的
-// `DEFAULT_WORKSPACE_DIRECTORY = 'default-workspace'` 是同一手法。
-const DefaultWorkspaceTitle = "default-workspace"
-
 // ErrWorkspacePathTaken 并发创建时库级唯一索引拦下的信号（调用方据此重读既有行，
 // 把"输了竞态"变成"返回既有那一行"——get-or-create 的语义必须对并发也成立）。
 var ErrWorkspacePathTaken = errors.New("store: workspace path already registered")
@@ -55,13 +48,13 @@ type WorkspaceProvision struct {
 //   - **只在空表时创建**：删掉默认工作空间之后不再自动重建。自动重建会让"我删掉它"这个
 //     动作永远无效——用户删了它、下次启动它又回来，而界面上没有任何东西解释这件事；
 //   - **幂等**：已有默认工作空间 → 直接返回它，不解析目录、不建目录；
-//   - **可关闭**：provision.Dir 为空（代建关闭）→ 不建立，返回 nil。这不是错误：该类部署
+//   - **可关闭**：dir 为空（代建关闭）→ 不建立，返回 nil。这不是错误：该类部署
 //     强制显式传 cwd（既有的 `workspace_required`）。
 //
 // **建目录是文件系统副作用，事务回滚不了它**：目录先建、再写库；写库失败时目录留在磁盘上
 // （空目录，无害），由 v14 的迁移说明与 doctor 如实登记，不假装能回滚。
-func (s *Store) BootstrapDefaultWorkspace(ctx context.Context, provision WorkspaceProvision) (*model.WorkspaceEntity, error) {
-	dir := strings.TrimSpace(provision.Dir)
+func (s *Store) BootstrapDefaultWorkspace(ctx context.Context, dir string) (*model.WorkspaceEntity, error) {
+	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		return nil, nil
 	}
@@ -90,7 +83,7 @@ func (s *Store) createDefaultWorkspace(ctx context.Context, dir string) (*model.
 	row := model.WorkspaceEntity{
 		ID:        objid.New(objid.Workspace),
 		Path:      canonical,
-		Title:     DefaultWorkspaceTitle,
+		Title:     model.DefaultWorkspaceTitle,
 		IsDefault: true,
 		ListOrder: 0,
 		CreatedAt: now,

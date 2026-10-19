@@ -9,7 +9,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
 )
 
 // 工作空间（workspace）= 会话的 ACP cwd：一个**规范化后的绝对路径**。
@@ -411,7 +410,7 @@ type Plane struct {
 
 	// st 库句柄（登记表读写；nil = memory 模式）。**装配期一次性注入**，本锁不保护它
 	// （P2b 前置已把"持锁请求会话/库"这类边清零）。
-	st *store.Store
+	st WorkspaceStore
 	// sessions 会话事实来源（本域不拥有会话，见 ports.go）。
 	sessions SessionSource
 	// memDefaultWorkspace memory 模式的**默认工作空间**（登记表不存在时的那一份）。

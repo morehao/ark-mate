@@ -2,13 +2,17 @@ package store
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/model"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/model"
 )
+
+// DefaultWorkspaceTitle 常量已迁到 model（列的取值归 schema 层）；测试里保留短名便于阅读。
+const DefaultWorkspaceTitle = model.DefaultWorkspaceTitle
 
 // 本文件钉住 v14 工作空间登记表的**跨表不变量**（设计 ADR-1/ADR-4/ADR-5/ADR-6）。
 //
@@ -52,7 +56,7 @@ func TestWorkspaceDefaultBootstrap(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "default")
 
-	got, err := s.BootstrapDefaultWorkspace(ctxT(), WorkspaceProvision{Dir: dir})
+	got, err := s.BootstrapDefaultWorkspace(ctxT(), dir)
 	if err != nil {
 		t.Fatalf("BootstrapDefaultWorkspace: %v", err)
 	}
@@ -67,7 +71,7 @@ func TestWorkspaceDefaultBootstrap(t *testing.T) {
 	}
 
 	// 幂等：再跑一次拿到同一行，不新建目录、不新增行。
-	again, err := s.BootstrapDefaultWorkspace(ctxT(), WorkspaceProvision{Dir: dir})
+	again, err := s.BootstrapDefaultWorkspace(ctxT(), dir)
 	if err != nil {
 		t.Fatalf("重复 bootstrap: %v", err)
 	}
@@ -76,7 +80,7 @@ func TestWorkspaceDefaultBootstrap(t *testing.T) {
 	}
 
 	// 代建关闭：不建、不报错、返回 nil（该类部署强制显式 cwd，见 workspace_required）。
-	if off, err := s.BootstrapDefaultWorkspace(ctxT(), WorkspaceProvision{}); err != nil || off != nil {
+	if off, err := s.BootstrapDefaultWorkspace(ctxT(), ""); err != nil || off != nil {
 		t.Fatalf("代建关闭时应 (nil, nil)，实际 (%+v, %v)", off, err)
 	}
 }
@@ -88,7 +92,7 @@ func TestWorkspaceDefaultBootstrap(t *testing.T) {
 func TestWorkspaceDefaultNotRecreatedAfterDelete(t *testing.T) {
 	s := openTestDB(t)
 	dir := filepath.Join(t.TempDir(), "default")
-	def, err := s.BootstrapDefaultWorkspace(ctxT(), WorkspaceProvision{Dir: dir})
+	def, err := s.BootstrapDefaultWorkspace(ctxT(), dir)
 	if err != nil || def == nil {
 		t.Fatalf("bootstrap: %+v / %v", def, err)
 	}
@@ -102,7 +106,7 @@ func TestWorkspaceDefaultNotRecreatedAfterDelete(t *testing.T) {
 	}
 
 	// 表非空 → bootstrap **不**创建（这正是"删了不再回来"的实现点）。
-	got, err := s.BootstrapDefaultWorkspace(ctxT(), WorkspaceProvision{Dir: dir})
+	got, err := s.BootstrapDefaultWorkspace(ctxT(), dir)
 	if err != nil {
 		t.Fatalf("表非空时 bootstrap 不应报错: %v", err)
 	}
@@ -158,7 +162,7 @@ func TestWorkspaceDeleteKeepsSessions(t *testing.T) {
 // TestWorkspaceDeleteDefaultRefused 默认工作空间不可删（它是"未指定 cwd"的落点）。
 func TestWorkspaceDeleteDefaultRefused(t *testing.T) {
 	s := openTestDB(t)
-	def, err := s.BootstrapDefaultWorkspace(ctxT(), WorkspaceProvision{Dir: filepath.Join(t.TempDir(), "default")})
+	def, err := s.BootstrapDefaultWorkspace(ctxT(), filepath.Join(t.TempDir(), "default"))
 	if err != nil || def == nil {
 		t.Fatalf("bootstrap: %+v / %v", def, err)
 	}
