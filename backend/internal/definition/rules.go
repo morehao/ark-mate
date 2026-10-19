@@ -77,6 +77,16 @@ func DefinitionChangedErr(locator string) error {
 		fmt.Sprintf("能力定义 %s 在本次编辑期间被外部改动，请刷新后重试（你的改动未写入）", locator), nil)
 }
 
+// DefinitionWriteActor 变更审计里的"谁改的"。
+//
+// 当前没有鉴权、REST 写面是唯一调用者，所以按调用面记账；将来多了 CLI/导入等调用方，
+// 各自传自己的标识（它们不走这个常量）。**刻意不从 ctx 里猜**：审计的价值恰恰在于它写的是
+// 事实，猜出来的 actor 比"rest"更坏。
+//
+// 归在值层而不是机制层：它是**写面事实**的一部分，用例层（`svc*`）也要传它——
+// 让用例层为了一个字符串去 import 机制层，就是把"谁在写"这件事也交给机制决定。
+const DefinitionWriteActor = "rest"
+
 // InvalidParamErr 参数类写面错误（缺失/类型/取值不合法）→ 40000。
 //
 // 与"语义被拒"（40001，如正文扫描 critical）分开：前者改参数就好，后者要改内容。

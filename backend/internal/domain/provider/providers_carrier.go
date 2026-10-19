@@ -8,7 +8,6 @@ import (
 
 	defn "github.com/morehao/ark-mate/internal/definition"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/infra/logging"
 	"github.com/morehao/ark-mate/internal/store"
@@ -184,7 +183,7 @@ func (pl *Plane) persistProviderDefinition(ctx context.Context, d *Def) error {
 		return pl.persistProvidersFileWith(d)
 	}
 	expected := d.Revision
-	ok, err := pl.st.UpsertProviderDefinition(ctx, providerColumnsOf(d), expected, definition.DefinitionWriteActor)
+	ok, err := pl.st.UpsertProviderDefinition(ctx, providerColumnsOf(d), expected, defn.DefinitionWriteActor)
 	if err != nil {
 		return err
 	}
@@ -208,7 +207,7 @@ func (pl *Plane) removeProviderDefinition(ctx context.Context, id string, expect
 	if pl.st == nil {
 		return true, nil, pl.persistProvidersFile()
 	}
-	return pl.st.DeleteProviderDefinitionIfUnreferenced(ctx, id, expectedRev, definition.DefinitionWriteActor)
+	return pl.st.DeleteProviderDefinitionIfUnreferenced(ctx, id, expectedRev, defn.DefinitionWriteActor)
 }
 
 // providerFileExists `<ProviderDir>/providers.json` 是否存在（doctor 与迁移提示用）。

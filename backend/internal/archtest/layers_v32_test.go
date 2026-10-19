@@ -375,7 +375,6 @@ var v32Exceptions = []v32Exception{
 	{from: "internal/domain/session", to: "internal/mechanism", budget: 1, slice: "刀9", why: "用 mechanism/doctor"},
 
 	// ——— 刀 10：service 收口 + cliops 拆分 ———
-	{from: "internal/service/svcmodel", to: "internal/mechanism", budget: 1, slice: "刀10", why: "用 mechanism/definition"},
 	{from: "internal/service/svcprovider", to: "internal/infra/credentials", budget: 1, slice: "刀10", why: "直接读凭据文件"},
 
 	{from: "internal/cliops", to: "internal/domain", budget: 3, slice: "刀10", why: "命令实现里有业务判断，应下沉到 svc"},

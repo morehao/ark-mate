@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	defn "github.com/morehao/ark-mate/internal/definition"
 	"regexp"
 	"testing"
 	"time"
@@ -12,7 +13,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/resource"
@@ -68,7 +68,7 @@ func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName st
 	id := objid.New(objid.Model)
 	ok, err := svc.planes.Resources.Store().CreateModelDefinition(ctx, model.ModelColumns{
 		ID: id, ProviderID: providerID, Model: modelName, InputModalities: resource.ModalityText,
-	}, definition.DefinitionWriteActor)
+	}, defn.DefinitionWriteActor)
 	if err != nil || !ok {
 		t.Fatalf("插模型行(%s/%s): ok=%v err=%v", providerID, modelName, ok, err)
 	}

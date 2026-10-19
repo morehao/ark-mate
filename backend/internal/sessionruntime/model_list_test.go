@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	defn "github.com/morehao/ark-mate/internal/definition"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"github.com/morehao/ark-mate/internal/model"
 	"strings"
@@ -15,7 +16,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/resource"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -125,7 +125,7 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 	ok, err := r.svc.planes.Resources.Store().CreateModelDefinition(ctx, model.ModelColumns{
 		ID: id, ProviderID: providerID, Model: modelID, Name: name, Note: note,
 		InputModalities: modalities, MaxInputTokens: req.MaxInputTokens, MaxOutputTokens: req.MaxOutputTokens,
-	}, definition.DefinitionWriteActor)
+	}, defn.DefinitionWriteActor)
 	if err != nil || !ok {
 		t.Fatalf("插模型行: ok=%v err=%v", ok, err)
 	}

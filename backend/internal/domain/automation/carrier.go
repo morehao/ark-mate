@@ -103,7 +103,7 @@ func (pl *Plane) commitAutomationDraft(ctx context.Context, d *Draft, create boo
 		// 的 O_EXCL 语义同解），而不是覆盖别人刚建的定义。
 		expected = 0
 	}
-	ok, err := pl.st.UpsertAutomationDefinition(ctx, d.ID, string(body), expected, definition.DefinitionWriteActor)
+	ok, err := pl.st.UpsertAutomationDefinition(ctx, d.ID, string(body), expected, defn.DefinitionWriteActor)
 	if err != nil {
 		return acl.NewError(acl.ClassService, "definition_write_failed",
 			fmt.Sprintf("写入 automation 定义 %s 失败：%v", d.Locator, err), err)
@@ -135,7 +135,7 @@ func (pl *Plane) deleteAutomationDefinition(ctx context.Context, id string) (boo
 	if !found {
 		return false, nil
 	}
-	ok, err := pl.st.DeleteAutomationDefinition(ctx, id, row.Revision, definition.DefinitionWriteActor)
+	ok, err := pl.st.DeleteAutomationDefinition(ctx, id, row.Revision, defn.DefinitionWriteActor)
 	if err != nil {
 		return false, acl.NewError(acl.ClassService, "definition_delete_failed",
 			fmt.Sprintf("删除 automation 定义 %s 失败：%v", Locator(id), err), err)

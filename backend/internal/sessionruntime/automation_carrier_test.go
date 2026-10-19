@@ -3,13 +3,13 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
+	defn "github.com/morehao/ark-mate/internal/definition"
 	"strings"
 	"testing"
 	"time"
 
 	domainautomation "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/automation"
 	"github.com/morehao/ark-mate/internal/eventbus"
@@ -176,7 +176,7 @@ func TestAutomationDefinitionsStoreRoundTrip(t *testing.T) {
 	}
 	// 被拒的写与重复新建/覆盖不存在的尝试都不得留下审计。
 	for _, r := range revs {
-		if r.Actor != definition.DefinitionWriteActor {
+		if r.Actor != defn.DefinitionWriteActor {
 			t.Fatalf("审计 actor 不符: %+v", r)
 		}
 	}

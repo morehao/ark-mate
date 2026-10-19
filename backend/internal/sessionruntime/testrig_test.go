@@ -17,6 +17,7 @@ package sessionruntime
 
 import (
 	"context"
+	defn "github.com/morehao/ark-mate/internal/definition"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 	dmodel "github.com/morehao/ark-mate/internal/model"
 	svcsession "github.com/morehao/ark-mate/internal/service/svcsession"
@@ -32,7 +33,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/infra/credentials"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/resource"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -315,7 +315,7 @@ func (r *genRig) seedModelRow(t *testing.T, providerID, model string, isDefault 
 	id := objid.New(objid.Model)
 	ok, err := r.svc.planes.Resources.Store().CreateModelDefinition(ctx, dmodel.ModelColumns{
 		ID: id, ProviderID: providerID, Model: model, InputModalities: resource.ModalityText,
-	}, definition.DefinitionWriteActor)
+	}, defn.DefinitionWriteActor)
 	if err != nil || !ok {
 		t.Fatalf("插模型行 %s/%s: ok=%v err=%v", providerID, model, ok, err)
 	}

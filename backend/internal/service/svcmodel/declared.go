@@ -9,7 +9,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objid"
 	"github.com/morehao/ark-mate/internal/resource"
@@ -108,7 +107,7 @@ func (m *Declared) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq)
 		ID: id, ProviderID: req.ProviderID, Model: strings.TrimSpace(req.Model),
 		Name: derefString(req.Name), Note: derefString(req.Note), InputModalities: modalities,
 		MaxInputTokens: maxIn, MaxOutputTokens: maxOut,
-	}, definition.DefinitionWriteActor)
+	}, defn.DefinitionWriteActor)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +187,7 @@ func (m *Declared) UpdateModel(ctx context.Context, id string, patch dtomodel.Mo
 	}
 	if patch.Name != nil || patch.Note != nil || patch.InputModalities != nil ||
 		patch.MaxInputTokens != nil || patch.MaxOutputTokens != nil {
-		ok, err := m.st.UpdateModelDefinition(ctx, id, content, row.Revision, definition.DefinitionWriteActor)
+		ok, err := m.st.UpdateModelDefinition(ctx, id, content, row.Revision, defn.DefinitionWriteActor)
 		if err != nil {
 			return nil, err
 		}
@@ -240,7 +239,7 @@ func (m *Declared) DeleteModel(ctx context.Context, id string) (*dtomodel.ModelD
 		return &dtomodel.ModelDeleteResp{Deleted: false}, nil
 	}
 	// 删行 + 清默认**同一事务**（v12 是两次独立调用，中间有一个"默认指向已删行"的悬挂窗口）。
-	deleted, cleared, err := m.st.DeleteModelDefinitionAndClearDefault(ctx, id, row.Revision, definition.DefinitionWriteActor)
+	deleted, cleared, err := m.st.DeleteModelDefinitionAndClearDefault(ctx, id, row.Revision, defn.DefinitionWriteActor)
 	if err != nil {
 		return nil, err
 	}
