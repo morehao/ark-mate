@@ -21,5 +21,9 @@ type searchSvc struct{ plane *session.Plane }
 func New(plane *session.Plane) SearchSvc { return &searchSvc{plane: plane} }
 
 func (s *searchSvc) Messages(ctx context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error) {
-	return s.plane.SearchMessages(ctx, q, limit)
+	v, err := s.plane.SearchMessages(ctx, q, limit)
+	if err != nil {
+		return nil, err
+	}
+	return messageSearchResp(v), nil
 }
