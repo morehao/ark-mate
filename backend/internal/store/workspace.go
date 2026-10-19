@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/dao"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/object/objid"
+	"github.com/morehao/golib/dbaccess/gormdao"
 	"gorm.io/gorm"
 )
 
@@ -26,7 +28,13 @@ import (
 //     文件、会话历史一概不动（设计 ADR-6）。这条必须在**同一个事务**里，否则中断会留下
 //     "登记没了、会话还指着一个不存在的 id"的半截状态。
 //
-// 单表读写仍在 `internal/dao/workspace.go`；本包不自建 SQL 拼接之外的东西。
+// 单表读写经 `internal/dao` 的泛型方法 + `dao.WorkspaceCond`；**业务条件**（展示顺序、默认档、
+// "最大顺序 +1"的排列约定）住在这一层——DAO 只认识列，不认识"展示顺序"这种事。
+
+// workspaceListOrder 是登记的展示顺序（list_order 升序；同序时按 created_at 兜底稳定）。
+//
+// 它是**读面的口径**，所以放在 store 而不是 DAO：DAO 不该知道"用户看到的是哪个顺序"。
+const workspaceListOrder = "list_order ASC, created_at ASC"
 
 // ErrWorkspacePathTaken 并发创建时库级唯一索引拦下的信号（调用方据此重读既有行，
 // 把"输了竞态"变成"返回既有那一行"——get-or-create 的语义必须对并发也成立）。
@@ -58,16 +66,66 @@ func (s *Store) BootstrapDefaultWorkspace(ctx context.Context, dir string) (*mod
 	if dir == "" {
 		return nil, nil
 	}
-	n, err := s.workspaces.Count(ctx)
+	n, err := s.workspaces.CountByCond(ctx, &dao.WorkspaceCond{})
 	if err != nil {
 		return nil, err
 	}
 	if n > 0 {
 		// 表非空：可能是已有安装（用户在跑别的项目），也可能是默认被删过。
 		// 两种情况都不自动创建——这正是"删了就不再回来"的实现点。
-		return s.workspaces.GetDefault(ctx)
+		return s.defaultWorkspaceRow(ctx)
 	}
 	return s.createDefaultWorkspace(ctx, dir)
+}
+
+// workspaceRows 按展示顺序读全部登记（单表读 + 业务顺序）。
+func (s *Store) workspaceRows(ctx context.Context) (model.WorkspaceEntityList, error) {
+	return s.workspaceRowsWith(ctx, s.workspaces)
+}
+
+// workspaceRowsTx 是事务内版本（重排要读"同一事务里的当前顺序"）。
+func (s *Store) workspaceRowsTx(ctx context.Context, tx *gorm.DB) (model.WorkspaceEntityList, error) {
+	return s.workspaceRowsWith(ctx, s.workspaces.WithTx(tx))
+}
+
+func (s *Store) workspaceRowsWith(ctx context.Context, d *dao.WorkspaceDao) (model.WorkspaceEntityList, error) {
+	return d.GetListByCond(ctx, &dao.WorkspaceCond{
+		BaseCond: &gormdao.BaseCond{OrderField: workspaceListOrder},
+	})
+}
+
+// workspaceByPath 按规范化路径取一条登记（不存在 → (nil, nil)）。
+//
+// 空路径直接判"没有"：Cond 里的 Path 是可选条件，不早退会退化成"返回第一条登记"。
+func (s *Store) workspaceByPath(ctx context.Context, path string) (*model.WorkspaceEntity, error) {
+	return s.workspaceByPathWith(ctx, s.workspaces, path)
+}
+
+func (s *Store) workspaceByPathWith(ctx context.Context, d *dao.WorkspaceDao, path string) (*model.WorkspaceEntity, error) {
+	if path == "" {
+		return nil, nil
+	}
+	return d.GetByCond(ctx, &dao.WorkspaceCond{Path: path})
+}
+
+// defaultWorkspaceRow 取默认工作空间那一行（不存在 → (nil, nil)）。
+//
+// 「有且只有一个」由 `is_default = 1` 的部分唯一索引保证，所以这里不需要处理多行。
+func (s *Store) defaultWorkspaceRow(ctx context.Context) (*model.WorkspaceEntity, error) {
+	isDefault := true
+	return s.workspaces.GetByCond(ctx, &dao.WorkspaceCond{IsDefault: &isDefault})
+}
+
+// maxWorkspaceOrder 返回当前最大顺序；**空表返回 -1**（不是 0）。
+//
+// 为什么空表是 -1 而不是 0：新登记的 list_order 是「最大顺序 + 1」，而顺序的约定是 `0..n-1`
+// （见 MoveWorkspace 的对账）。若空表返回 0，第一条登记就是 1——库里从此带着一个从 1 开始的
+// 序列，与重排后的 0..n-1 不一致，而那种不一致没有任何界面能显示出来。
+func (s *Store) maxWorkspaceOrder(ctx context.Context) (int64, error) {
+	var max int64
+	err := s.db.WithContext(ctx).Model(&model.WorkspaceEntity{}).
+		Select("COALESCE(MAX(list_order), -1)").Scan(&max).Error
+	return max, err
 }
 
 // createDefaultWorkspace 建目录并登记默认工作空间（只由 BootstrapDefaultWorkspace 调用）。
@@ -92,7 +150,7 @@ func (s *Store) createDefaultWorkspace(ctx context.Context, dir string) (*model.
 	if err := s.workspaces.Insert(ctx, &row); err != nil {
 		// 并发/竞态：另一个进程刚建过 → 返回既有那一条（与 get-or-create 同一手法）。
 		if isUniqueViolation(err) {
-			if existing, gerr := s.workspaces.GetDefault(ctx); gerr == nil && existing != nil {
+			if existing, gerr := s.defaultWorkspaceRow(ctx); gerr == nil && existing != nil {
 				return existing, nil
 			}
 		}
@@ -103,7 +161,7 @@ func (s *Store) createDefaultWorkspace(ctx context.Context, dir string) (*model.
 
 // DefaultWorkspace 取默认工作空间（不存在 → (nil, false, nil)）。
 func (s *Store) DefaultWorkspace(ctx context.Context) (model.WorkspaceEntity, bool, error) {
-	row, err := s.workspaces.GetDefault(ctx)
+	row, err := s.defaultWorkspaceRow(ctx)
 	if err != nil || row == nil {
 		return model.WorkspaceEntity{}, false, err
 	}
@@ -112,7 +170,7 @@ func (s *Store) DefaultWorkspace(ctx context.Context) (model.WorkspaceEntity, bo
 
 // ListWorkspaces 按展示顺序列出全部登记。
 func (s *Store) ListWorkspaces(ctx context.Context) ([]model.WorkspaceEntity, error) {
-	rows, err := s.workspaces.ListByOrder(ctx)
+	rows, err := s.workspaceRows(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +188,7 @@ func (s *Store) GetWorkspace(ctx context.Context, id string) (model.WorkspaceEnt
 
 // WorkspaceByPath 按规范化路径取一条登记（不存在 → (nil, false, nil)）。
 func (s *Store) WorkspaceByPath(ctx context.Context, path string) (model.WorkspaceEntity, bool, error) {
-	row, err := s.workspaces.GetByPath(ctx, path)
+	row, err := s.workspaceByPath(ctx, path)
 	if err != nil || row == nil {
 		return model.WorkspaceEntity{}, false, err
 	}
@@ -147,12 +205,12 @@ func (s *Store) CreateWorkspace(ctx context.Context, path, title string) (model.
 	if canonical == "" {
 		return model.WorkspaceEntity{}, errors.New("store: 工作空间路径不能为空")
 	}
-	if existing, err := s.workspaces.GetByPath(ctx, canonical); err != nil {
+	if existing, err := s.workspaceByPath(ctx, canonical); err != nil {
 		return model.WorkspaceEntity{}, err
 	} else if existing != nil {
 		return *existing, nil
 	}
-	max, err := s.workspaces.MaxOrder(ctx)
+	max, err := s.maxWorkspaceOrder(ctx)
 	if err != nil {
 		return model.WorkspaceEntity{}, err
 	}
@@ -169,7 +227,7 @@ func (s *Store) CreateWorkspace(ctx context.Context, path, title string) (model.
 	if err := s.workspaces.Insert(ctx, &row); err != nil {
 		// 并发输了竞态：唯一索引拦下 → 重读既有行，仍然是 get-or-create 的语义。
 		if isUniqueViolation(err) {
-			if existing, gerr := s.workspaces.GetByPath(ctx, canonical); gerr == nil && existing != nil {
+			if existing, gerr := s.workspaceByPath(ctx, canonical); gerr == nil && existing != nil {
 				return *existing, nil
 			}
 		}
@@ -180,7 +238,10 @@ func (s *Store) CreateWorkspace(ctx context.Context, path, title string) (model.
 
 // RenameWorkspace 改写展示名（title 为空串 = 清空，回落到末级目录名渲染）。
 func (s *Store) RenameWorkspace(ctx context.Context, id, title string) error {
-	return s.workspaces.UpdateTitle(ctx, id, strings.TrimSpace(title))
+	return s.workspaces.UpdateMap(ctx, id, map[string]any{
+		"title":      strings.TrimSpace(title),
+		"updated_at": model.NowTS(),
+	})
 }
 
 // RelocateWorkspace 改写一条登记的**路径**（W4）：id 不变，`sessions` 一个字节都不动。
@@ -204,7 +265,10 @@ func (s *Store) RelocateWorkspace(ctx context.Context, id, canonicalPath string)
 	if row.IsDefault {
 		return false, errWorkspaceDefaultImmutable
 	}
-	if err := s.workspaces.SetPath(ctx, id, canonicalPath); err != nil {
+	if err := s.workspaces.UpdateMap(ctx, id, map[string]any{
+		"path":       canonicalPath,
+		"updated_at": model.NowTS(),
+	}); err != nil {
 		// 唯一索引撞上 = 那个目录已被另一条登记占着。**不吞**（不重读既有行）。
 		if isUniqueViolation(err) {
 			return false, ErrWorkspacePathTaken
@@ -227,8 +291,7 @@ func (s *Store) RelocateWorkspace(ctx context.Context, id, canonicalPath string)
 func (s *Store) MoveWorkspace(ctx context.Context, id, beforeID string) ([]string, error) {
 	seq := make([]string, 0)
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		txDao := s.workspaces.WithTx(tx)
-		rows, err := txDao.ListByOrder(ctx)
+		rows, err := s.workspaceRowsTx(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -264,7 +327,10 @@ func (s *Store) MoveWorkspace(ctx context.Context, id, beforeID string) ([]strin
 		}
 
 		for i, wsID := range next {
-			if err := txDao.SetOrder(ctx, wsID, int64(i)); err != nil {
+			if err := s.workspaces.WithTx(tx).UpdateMap(ctx, wsID, map[string]any{
+				"list_order": int64(i),
+				"updated_at": model.NowTS(),
+			}); err != nil {
 				return err
 			}
 		}
@@ -286,7 +352,7 @@ func (s *Store) MoveWorkspace(ctx context.Context, id, beforeID string) ([]strin
 // 这一步刻意放在**同事务内**：任何一点不符都回滚，库不会留下一个"顺序有洞"的状态
 // ——那种状态下次重排时会自己漂移，而且没有任何界面能显示它。
 func (s *Store) reconcileOrder(ctx context.Context, tx *gorm.DB, want []string) error {
-	got, err := s.workspaces.WithTx(tx).ListByOrder(ctx)
+	got, err := s.workspaceRowsTx(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -404,6 +470,18 @@ func indexOf(s []string, v string) int {
 // 这条由 archtest 的 `TestWorkspaceDefaultsDoNotRewriteSessions` 钉住。
 //
 // 返回 false = 该 id 不存在（不报错：调用方按 404 处理，与目录当前态同一口径）。
+//
+// 保留手写 UPDATE（而不是 `UpdateMap`）：调用方要区分"改到了那一行"与"那一行不存在"，
+// 而 `UpdateMap` 不返回 RowsAffected。
 func (s *Store) SetWorkspaceDefaults(ctx context.Context, id, capabilityJSON, permissionMode string) (bool, error) {
-	return s.workspaces.SetDefaults(ctx, id, capabilityJSON, permissionMode)
+	res := s.db.WithContext(ctx).Model(&model.WorkspaceEntity{}).Where("id = ?", id).
+		Updates(map[string]any{
+			"default_capability_json": capabilityJSON,
+			"default_permission_mode": permissionMode,
+			"updated_at":              model.NowTS(),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }

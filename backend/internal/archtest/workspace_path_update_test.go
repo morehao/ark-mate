@@ -41,18 +41,14 @@ func TestWorkspacePathUpdateKeepsIdentity(t *testing.T) {
 			"吞掉它 = get-or-create，而「改路径成功」与「那个目录已经是别人的」是两件必须能分辨的事")
 	}
 
-	dao := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "dao", "workspace.go")))
-	setPath, ok := goFuncBody(dao, "func (d *WorkspaceDao) SetPath(")
-	if !ok {
-		t.Fatalf("`dao/workspace.go` 里找不到 `SetPath`")
-	}
-	// 只写两列：id 是身份，改它等于让该工作空间下的会话归属悬空。
-	if !strings.Contains(setPath, `"path": path`) {
-		t.Fatalf("`SetPath` 没有写 `path`：它到底改了什么？")
+	// 写面那一句（v3.3 起在 store 里：DAO 只剩列词汇，`RelocateWorkspace` 用 UpdateMap 写两列）。
+	// 只写 `path` 与 `updated_at`：id 是身份，改它等于让该工作空间下的会话归属悬空。
+	if !strings.Contains(relocate, `"path":`) || !strings.Contains(relocate, "canonicalPath") {
+		t.Fatalf("`RelocateWorkspace` 没有写 `path`: 它到底改了什么？")
 	}
 	for _, bad := range []string{`"id":`, `"is_default":`, `"default_capability_json":`} {
-		if strings.Contains(setPath, bad) {
-			t.Errorf("`SetPath` 里出现了 %s：改路径只该动 `path` 与 `updated_at`——\n"+
+		if strings.Contains(relocate, bad) {
+			t.Errorf("`RelocateWorkspace` 的写面出现了 %s：改路径只该动 `path` 与 `updated_at`——\n"+
 				"顺带改 id 会让该工作空间下的会话归属悬空（界面上表现为「会话跑到别的分组去了」），"+
 				"改 is_default 会破坏「有且只有一个默认」的不变量", bad)
 		}

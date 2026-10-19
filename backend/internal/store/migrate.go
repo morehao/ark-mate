@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/golib/dbaccess/gormdao"
 	"gorm.io/gorm"
 )
 
@@ -762,7 +763,7 @@ var schemaMigrations = []migration{
 	migrationV29,
 
 	// v30 的版本步本体在 `migrate_v30.go`（数据归一：`runs.status` 的历史 `running` → 写入方
-	// 实际用的 `in_progress`。两个值并存让 `RunningRows` 恒空、用量 `Running` 恒 0，而这两件事
+	// 实际用的 `in_progress`。两个值并存让 `RunningRuns` 恒空、用量 `Running` 恒 0，而这两件事
 	// 都不报错——理由写在该文件头）。
 	migrationV30,
 }
@@ -770,6 +771,25 @@ var schemaMigrations = []migration{
 // latestSchemaVersion 当前支持的最新 schema 版本。
 func latestSchemaVersion() int {
 	return schemaMigrations[len(schemaMigrations)-1].version
+}
+
+// appliedMigrationVersions 返回已应用的版本集合与最大版本（空库 → 空集合 + 0）。
+//
+// 读序（version ASC）与"最大版本"的口径都属于迁移内核，所以留在 store；DAO 只负责记账。
+func (s *Store) appliedMigrationVersions(ctx context.Context) (map[int]bool, int, error) {
+	list, err := s.migrations.GetListByCond(ctx, &gormdao.BaseCond{OrderField: "version ASC"})
+	if err != nil {
+		return nil, 0, err
+	}
+	applied := make(map[int]bool, len(list))
+	maxVersion := 0
+	for _, m := range list {
+		applied[m.Version] = true
+		if m.Version > maxVersion {
+			maxVersion = m.Version
+		}
+	}
+	return applied, maxVersion, nil
 }
 
 // Migrate 幂等应用未执行的迁移（自管 schema_migrations：单事务 DDL + 记录版本）。
@@ -783,7 +803,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("store: create schema_migrations: %w", err)
 	}
 
-	applied, maxVersion, err := s.migrations.AppliedVersions(ctx)
+	applied, maxVersion, err := s.appliedMigrationVersions(ctx)
 	if err != nil {
 		return fmt.Errorf("store: read schema_migrations: %w", err)
 	}
@@ -1008,7 +1028,7 @@ func (s *Store) applyMigration(ctx context.Context, m migration) error {
 
 // SchemaVersion 返回库当前 schema 版本（0 = 空库/未迁移）。
 func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
-	_, maxVersion, err := s.migrations.AppliedVersions(ctx)
+	_, maxVersion, err := s.appliedMigrationVersions(ctx)
 	if err != nil {
 		return 0, err
 	}

@@ -83,31 +83,12 @@ func (s *Store) UsageSummary(ctx context.Context, q UsageQuery) (*UsageSummaryRe
 	return res, nil
 }
 
-// usageRows 读取区间内的 run 行（含用量快照），转成本包聚合用的行结构。
+// usageRows 读取区间内的 run 行（含用量快照）。
 //
-// 半开区间 [From, To) 的边界比较由 dao 负责（必须以落库布局格式化后再比，
-// 时间列是 RFC3339Nano 文本）。
+// 半开区间 [From, To) 的边界比较由 `usageRowsForRange` 负责（必须以落库布局格式化后再比，
+// 时间列是 RFC3339Nano 文本）；它直接产出聚合用的 `usageRow`。
 func (s *Store) usageRows(ctx context.Context, q UsageQuery) ([]usageRow, error) {
-	rows, err := s.runs.UsageRows(ctx, q.From, q.To)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]usageRow, 0, len(rows))
-	for _, r := range rows {
-		row := usageRow{
-			sessionID: r.SessionID,
-			status:    r.Status,
-			startedAt: r.StartedAt,
-			endedAt:   r.EndedAt,
-		}
-		if r.Reported {
-			row.usage = r.Usage
-			// 字段级可用性：一次上报可能只带上下文或只带费用，聚合时按字段各取「区间内最后一条」。
-			row.hasContext, row.hasCost = r.Usage.HasContext(), r.Usage.HasCost()
-		}
-		out = append(out, row)
-	}
-	return out, nil
+	return s.usageRowsForRange(ctx, q.From, q.To)
 }
 
 // aggregateUsage 聚合一组 run 行：计数/时长全量累加；上下文/费用按会话取区间内**最后一次上报**

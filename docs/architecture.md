@@ -129,8 +129,8 @@ Electron 主进程（桌面态）
 
 ```
 internal/dbclient（句柄装配 + SQLite URL 拼装）
-      →  internal/dao（单表数据访问，基于 golib gormdao）
-             →  internal/store（门面：句柄 + 跨表事务 + 读模型 API）
+      →  internal/dao（列词汇 + gormdao 泛型方法 + 机械原语；不承载业务读面）
+             →  internal/store（业务面：排序/筛选/聚合/状态迁移 + 跨表事务 + 读模型 API）
 internal/model（实体定义）被上面三者依赖，自身不依赖任何一层
 ```
 
@@ -303,8 +303,8 @@ backend/
 │   ├── manager/              过渡期实现（逐域搬空后整体删除；只剩装配适配与权限/提问回调）
 │   ├── dto/dto<域>/          请求/响应 DTO（两侧共用，自身不依赖应用层）
 │   ├── model/                持久层实体（一表一文件 + enum/serializer/time）
-│   ├── dao/                  单表数据访问（gormdao）
-│   ├── store/                持久层门面（句柄 + 跨表事务 + 读模型 + 自管迁移）
+│   ├── dao/                  列词汇（Cond）+ gormdao 泛型方法 + 机械原语
+│   ├── store/                持久层业务面（排序/筛选/聚合 + 跨表事务 + 读模型 + 自管迁移）
 │   ├── eventbus/             进程内事件总线（每聚合位次 + 历史缓冲 + 回放）
 │   ├── middleware/           凭据与 Host/Origin 矩阵
 │   ├── credential/           凭据 → scope 只读表（rest / stream 两面）

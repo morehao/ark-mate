@@ -59,7 +59,7 @@ func (s *Store) ImportBatch(ctx context.Context, items []ImportItem, marker stri
 			conv := item.Session
 			conv.CreatedAt = nonZeroTime(conv.CreatedAt)
 			conv.UpdatedAt = nonZeroTime(conv.UpdatedAt)
-			if err := s.sessions.WithTx(tx).UpsertForImport(ctx, &conv); err != nil {
+			if err := s.upsertSessionForImportTx(ctx, tx, &conv); err != nil {
 				return err
 			}
 			// `lastSeq` 初值 -1 = "这一批一条都没分配/命中"（v21 起位次从 0 起，用 0 当
@@ -78,7 +78,7 @@ func (s *Store) ImportBatch(ctx context.Context, items []ImportItem, marker stri
 			if lastSeq >= 0 {
 				// 只升不降（与 live 路径同一条语义）：跳过重复事件时最后一条在场事件的 seq
 				// 可能比既有水位小，`SetLastSeq` 会把水位拉回去。
-				if err := s.sessions.WithTx(tx).TouchLastSeq(ctx, conv.ID, lastSeq); err != nil {
+				if err := s.touchLastSeqTx(ctx, tx, conv.ID, lastSeq); err != nil {
 					return err
 				}
 			}
@@ -113,7 +113,7 @@ func (s *Store) importEventTx(ctx context.Context, tx *gorm.DB, sessionID string
 	if err := validateImportEventID(ev.ID); err != nil {
 		return 0, fmt.Errorf("store: import session %s type %s: %w", sessionID, ev.Type, err)
 	}
-	prev, ok, err := s.events.WithTx(tx).FindByID(ctx, ev.ID)
+	prev, ok, err := s.FindEventByIDTx(ctx, tx, ev.ID)
 	if err != nil {
 		return 0, err
 	}

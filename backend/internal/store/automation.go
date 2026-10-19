@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/golib/dbaccess/gormdao"
 	"gorm.io/gorm"
 )
 
@@ -50,17 +51,24 @@ func (s *Store) DeleteAutomationDefinition(ctx context.Context, id string, expec
 
 // GetAutomationDefinition 读一条定义（不存在 → (nil, false, nil)）。
 func (s *Store) GetAutomationDefinition(ctx context.Context, id string) (*model.AutomationEntity, bool, error) {
-	return s.automations.Get(ctx, id)
+	row, err := s.automations.GetByID(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if row == nil {
+		return nil, false, nil
+	}
+	return row, true, nil
 }
 
 // ListAutomationDefinitions 列出全部定义（id 升序）。
 func (s *Store) ListAutomationDefinitions(ctx context.Context) (model.AutomationEntityList, error) {
-	return s.automations.List(ctx)
+	return s.automations.GetListByCond(ctx, &gormdao.BaseCond{OrderField: definitionListOrder})
 }
 
 // CountAutomationDefinitions 返回定义行数。
 func (s *Store) CountAutomationDefinitions(ctx context.Context) (int64, error) {
-	return s.automations.Count(ctx)
+	return s.automations.CountByCond(ctx, &gormdao.BaseCond{})
 }
 
 // ClaimAutomationOccurrence 认领一个 occurrence：把 `last_fired_at` 推进到 `claimedFor`，

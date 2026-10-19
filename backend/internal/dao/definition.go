@@ -2,7 +2,6 @@ package dao
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
@@ -24,8 +23,9 @@ import (
 // 三列，`Create` 会插入整行（含运行态列的默认值），`UpdateCAS` **不会**碰运行态列——
 // 这正是"写面只 merge 定义、运行态由调度推进"想要的结构性隔离。
 //
-// 主键是 `id`，但本 DAO **只用自定义方法**，不用 gormdao 的 UpdateByID/UpdateMap/Delete
-// ——那些方法走"读实体再整行写回"的语义，会绕过 CAS。
+// 本 DAO 只保留**写面 CAS**（判据 `rowsAffected == 0`，泛型方法不返回它）；读面由 store 用
+// `GetByID`/`GetListByCond`/`CountByCond` 直接表达（排序是读面口径，归 store）。
+// **不用** UpdateByID/UpdateMap/Delete——那批方法没有 revision 判据，会绕过 CAS。
 type DefinitionDao[T gormdao.Entity, L ~[]T] struct {
 	*gormdao.Dao[T, L, string]
 }
@@ -38,33 +38,6 @@ func newDefinitionDao[T gormdao.Entity, L ~[]T](daoName string, getDB gormdao.DB
 // WithTx 返回绑定事务的新 DAO。
 func (d *DefinitionDao[T, L]) WithTx(tx *gorm.DB) *DefinitionDao[T, L] {
 	return &DefinitionDao[T, L]{Dao: d.Dao.WithTx(tx)}
-}
-
-// Get 读一条定义；不存在 → (nil, false, nil)。
-func (d *DefinitionDao[T, L]) Get(ctx context.Context, id string) (*T, bool, error) {
-	var row T
-	err := d.DB(ctx).Where("id = ?", id).Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	return &row, true, nil
-}
-
-// List 列出全部定义（id 升序，保证调用方看到的顺序确定）。
-func (d *DefinitionDao[T, L]) List(ctx context.Context) (L, error) {
-	var rows L
-	err := d.DB(ctx).Order("id ASC").Find(&rows).Error
-	return rows, err
-}
-
-// Count 返回定义行数。
-func (d *DefinitionDao[T, L]) Count(ctx context.Context) (int64, error) {
-	var n int64
-	err := d.DB(ctx).Model(new(T)).Count(&n).Error
-	return n, err
 }
 
 // CreateCAS 新建一条定义——`expected` 位置留给"仅当不存在"这层 CAS：

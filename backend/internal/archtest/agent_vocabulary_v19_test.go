@@ -429,7 +429,9 @@ func TestNoAgentVocabulary(t *testing.T) {
 // 白名单放行之后唯一的补偿。删掉迁移里那行语句不会有任何别的测试变红。
 var sessionIdentityFiles = []string{
 	filepath.Join("internal", "model", "session.go"),
-	filepath.Join("internal", "dao", "session.go"),
+	// v3.3 起写面（upsert 的列集合）从 dao 搬到 store：判据必须跟着实现走，否则它会在
+	// 只剩列词汇的 dao/session.go 上静默空转。
+	filepath.Join("internal", "store", "sessions.go"),
 	filepath.Join("internal", "store", "usage.go"),
 	filepath.Join("internal", "store", "migrate.go"),
 }

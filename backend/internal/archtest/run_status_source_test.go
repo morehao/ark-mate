@@ -41,13 +41,13 @@ func TestRunInProgressStatusIsSingleSourced(t *testing.T) {
 		t.Errorf("persist.go 的 OpenRun 不再写 SessionStatusInProgress——写入方与查询方的契约断了")
 	}
 
-	// ② DAO 过滤
-	daoRun := stripGoComments(read("internal/dao/run.go"))
+	// ② 读面过滤（v3.3 起查询口径在 store；判据跟着实现走）
+	daoRun := stripGoComments(read("internal/store/runs.go"))
 	if !strings.Contains(daoRun, `"in_progress"`) {
-		t.Errorf("dao/run.go 的 RunningRows 不含 in_progress——它必须与 OpenRun 写入的值同源")
+		t.Errorf("store/runs.go 的 RunningRuns 不含 in_progress——它必须与 OpenRun 写入的值同源")
 	}
 	if strings.Contains(daoRun, `"running"`) {
-		t.Errorf(`dao/run.go 仍过滤 "running"——写入方不写这个值，查询会再次恒空（v30 已把历史行归一）`)
+		t.Errorf(`store/runs.go 仍过滤 "running"——写入方不写这个值，查询会再次恒空（v30 已把历史行归一）`)
 	}
 
 	// ③ 用量计数

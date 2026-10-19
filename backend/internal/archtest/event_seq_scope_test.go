@@ -120,14 +120,21 @@ func TestEventsHasNoGlobalSequence(t *testing.T) {
 		t.Fatal("`internal/dao/event_sequence.go` 里找不到 `ON CONFLICT(session_id) DO UPDATE SET seq = seq + 1`：" +
 			"每会话取号必须是**单条原子的 upsert**（先 SELECT 再 UPDATE 会给并发写留下重号窗口；fail-closed）")
 	}
+	// 判据只在**触到 events 表**的文件上生效：`definition_revisions.seq` 的 `MAX(seq)` 是
+	// 另一张表的合法聚合（v3.3 把读面搬进 store 后它就在这个扫描面里），不能一并误杀。
+	maxSeqSQL := regexp.MustCompile(`(?is)SELECT\s+COALESCE\(\s*MAX\(seq\)`)
 	for _, f := range goFilesUnder(t, filepath.Join(root, "internal", "store")) {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
 		}
 		src := stripLineComments(readFileOrFatal(t, f))
-		if regexp.MustCompile(`(?is)SELECT\s+COALESCE\(\s*MAX\(seq\)`).MatchString(src) &&
-			!strings.HasSuffix(f, "migrate_v21.go") {
-			t.Fatalf("%s 里按 `MAX(seq)` 取号：v21 起 seq 只在会话内唯一，跨会话的 MAX 会把两个会话"+
+		if !maxSeqSQL.MatchString(src) {
+			continue
+		}
+		touchesEvents := strings.Contains(src, "TableNameEvent") ||
+			strings.Contains(src, "FROM events") || strings.Contains(src, "`events`")
+		if touchesEvents && !strings.HasSuffix(f, "migrate_v21.go") {
+			t.Fatalf("%s 里按 `MAX(seq)` 给事件取号：v21 起 seq 只在会话内唯一，跨会话的 MAX 会把两个会话"+
 				"的号序搅在一起（迁移里的回填是唯一允许出现它的地方）", filepath.Base(f))
 		}
 	}

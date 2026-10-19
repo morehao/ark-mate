@@ -1,18 +1,41 @@
 package dao
 
 import (
-	"context"
-
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/golib/dbaccess/gormdao"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+// WorkspaceCond 是 workspaces 表的查询条件（登记路径 / 默认档两个查询轴）。
+//
+// 两个字段都是可选的：按路径取一行只给 Path，取默认档只给 IsDefault。
+// IsDefault 用 *bool 而不是 bool：false 也是**有效筛选值**（"非默认的那几条"），
+// 零值语义会让它退化成"不过滤"。
+type WorkspaceCond struct {
+	*gormdao.BaseCond
+	Path      string
+	IsDefault *bool
+}
+
+// BuildCondition 实现 gormdao.Cond。
+func (c *WorkspaceCond) BuildCondition(db *gorm.DB, tableName string) {
+	if c.BaseCond != nil {
+		c.BaseCond.BuildCondition(db, tableName)
+	}
+	if c.Path != "" {
+		db.Where(clause.Eq{Column: clause.Column{Table: tableName, Name: "path"}, Value: c.Path})
+	}
+	if c.IsDefault != nil {
+		db.Where(clause.Eq{Column: clause.Column{Table: tableName, Name: "is_default"}, Value: model.FlagValue(*c.IsDefault)})
+	}
+}
 
 // WorkspaceDao 访问 workspaces 表（工作空间登记；v14）。
 //
-// 单表读写都在这里；**跨表不变量**（顺序重排的区间 ±1 与对账、删登记时清会话归属）
-// 归 `internal/store`（见该包 `workspace.go` 的包注释）——那些语义横跨两张表，
-// 落进任何一个 DAO 都会让它变成"不是 DAO 的东西"。
+// 本 DAO **只提供列词汇**（`WorkspaceCond`）与 gormdao 的泛型方法；"展示顺序是什么"、
+// "什么是默认档"、"新登记排在哪"这些**业务口径归 `internal/store`**——那里的
+// `ListWorkspaces`/`DefaultWorkspace`/`CreateWorkspace` 用 Cond + 泛型方法拼出来。
 type WorkspaceDao struct {
 	*gormdao.Dao[model.WorkspaceEntity, model.WorkspaceEntityList, string]
 }
@@ -25,110 +48,4 @@ func NewWorkspaceDao(getDB gormdao.DBGetter) *WorkspaceDao {
 // WithTx 返回绑定事务的新 DAO。
 func (d *WorkspaceDao) WithTx(tx *gorm.DB) *WorkspaceDao {
 	return &WorkspaceDao{Dao: d.Dao.WithTx(tx)}
-}
-
-// ListByOrder 按展示顺序列出全部登记（list_order 升序；同序时按 created_at 兜底稳定）。
-func (d *WorkspaceDao) ListByOrder(ctx context.Context) (model.WorkspaceEntityList, error) {
-	var rows model.WorkspaceEntityList
-	err := d.DB(ctx).Order("list_order ASC, created_at ASC").Find(&rows).Error
-	return rows, err
-}
-
-// GetByPath 按规范化路径取一条登记（不存在 → (nil, nil)）。
-//
-// 它服务的是 `create` 的 **get-or-create** 语义：同一个目录重复登记必须返回既有那一行，
-// 而不是报错（设计 ADR-8）——所以"查不到"是正常分支，不是错误。
-func (d *WorkspaceDao) GetByPath(ctx context.Context, path string) (*model.WorkspaceEntity, error) {
-	var row model.WorkspaceEntity
-	err := d.DB(ctx).Where("path = ?", path).Take(&row).Error
-	if err == gorm.ErrRecordNotFound {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &row, nil
-}
-
-// GetDefault 取默认工作空间（不存在 → (nil, nil)）。
-//
-// 「有且只有一个」由 `is_default = 1` 的部分唯一索引保证，所以这里不需要处理多行。
-func (d *WorkspaceDao) GetDefault(ctx context.Context) (*model.WorkspaceEntity, error) {
-	var row model.WorkspaceEntity
-	err := d.DB(ctx).Where("is_default = ?", model.FlagValue(true)).Take(&row).Error
-	if err == gorm.ErrRecordNotFound {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &row, nil
-}
-
-// MaxOrder 返回当前最大顺序；**空表返回 -1**（不是 0）。
-//
-// 为什么空表是 -1 而不是 0：调用方的用法是 `MaxOrder() + 1` = 新登记的 list_order，而顺序的
-// 约定是 `0..n-1`（见 store.MoveWorkspace 的对账）。若空表返回 0，第一条登记就是 1——
-// 库里从此带着一个从 1 开始的序列，与重排后的 0..n-1 不一致，而那种不一致没有任何界面
-// 能显示出来（顺序看起来永远是对的，只是差了一个偏移）。
-func (d *WorkspaceDao) MaxOrder(ctx context.Context) (int64, error) {
-	var max int64
-	err := d.DB(ctx).Raw(`SELECT COALESCE(MAX(list_order), -1) FROM ` + model.TableNameWorkspace).Scan(&max).Error
-	return max, err
-}
-
-// UpdateTitle 改写展示名（updated_at 一并刷新）。
-func (d *WorkspaceDao) UpdateTitle(ctx context.Context, id, title string) error {
-	return d.DB(ctx).Model(&model.WorkspaceEntity{}).Where("id = ?", id).
-		Updates(map[string]any{"title": title, "updated_at": model.NowTS()}).Error
-}
-
-// SetDefaults 改写某行的两个**默认值**（v27；`”` = 清掉该档）。
-//
-// **只动 workspaces 一行**：既有会话的快照不许被连带改写（理由见 store.SetWorkspaceDefaults）。
-func (d *WorkspaceDao) SetDefaults(ctx context.Context, id, capabilityJSON, permissionMode string) (bool, error) {
-	res := d.DB(ctx).Model(&model.WorkspaceEntity{}).Where("id = ?", id).
-		Updates(map[string]any{
-			"default_capability_json": capabilityJSON,
-			"default_permission_mode": permissionMode,
-			"updated_at":              model.NowTS(),
-		})
-	if res.Error != nil {
-		return false, res.Error
-	}
-	return res.RowsAffected > 0, nil
-}
-
-// SetPath 改写某行的登记路径（W4；**id 不变**）。
-//
-// 只写 `path` 与 `updated_at` 两列：改登记路径改的是"这个工作空间指向哪个目录"，
-// 不是它的身份。顺带改 id 会让该工作空间下的会话归属悬空，而那种悬空在界面上表现为
-// 「会话跑到别的分组里去了」。
-func (d *WorkspaceDao) SetPath(ctx context.Context, id, path string) error {
-	return d.DB(ctx).Model(&model.WorkspaceEntity{}).Where("id = ?", id).
-		Updates(map[string]any{"path": path, "updated_at": model.NowTS()}).Error
-}
-
-// SetOrder 直接设定某行的顺序（重排的原子动作在 store 层，见那里的对账）。
-func (d *WorkspaceDao) SetOrder(ctx context.Context, id string, order int64) error {
-	return d.DB(ctx).Model(&model.WorkspaceEntity{}).Where("id = ?", id).
-		Updates(map[string]any{"list_order": order, "updated_at": model.NowTS()}).Error
-}
-
-// Orders 返回 id → list_order 的映射（重排对账用；读的是**重排之后**的状态）。
-func (d *WorkspaceDao) Orders(ctx context.Context) (map[string]int64, error) {
-	var rows model.WorkspaceEntityList
-	if err := d.DB(ctx).Select("id", "list_order").Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make(map[string]int64, len(rows))
-	for _, r := range rows {
-		out[r.ID] = r.ListOrder
-	}
-	return out, nil
-}
-
-// Count 登记行数。
-func (d *WorkspaceDao) Count(ctx context.Context) (int64, error) {
-	return d.CountByCond(ctx, &gormdao.BaseCond{})
 }

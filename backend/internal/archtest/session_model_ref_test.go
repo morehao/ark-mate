@@ -129,10 +129,11 @@ func TestSessionsHasNoProviderIDColumn(t *testing.T) {
 		t.Fatalf("`sessions.model_id` 必须仍在（它指的是 `models.id`）: n=%d err=%v", n, err)
 	}
 
-	// 文本面：实体 / DAO / DTO / 前端类型。
+	// 文本面：实体 / 会话写面 / DTO / 前端类型。
+	// v3.3 起会话的列映射在 store（DAO 只剩列词汇）：扫描面跟着实现走。
 	files := []string{
 		filepath.Join(backendRoot(t), "internal", "model", "session.go"),
-		filepath.Join(backendRoot(t), "internal", "dao", "session.go"),
+		filepath.Join(backendRoot(t), "internal", "store", "sessions.go"),
 		filepath.Join(backendRoot(t), "internal", "dto", "dtosession", "response.go"),
 		filepath.Join(backendRoot(t), "internal", "dto", "dtosession", "request.go"),
 		filepath.Join(frontendRoot(t), "packages", "types", "src", "session.ts"),

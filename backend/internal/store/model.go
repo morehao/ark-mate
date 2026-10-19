@@ -6,8 +6,16 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/dao"
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/golib/dbaccess/gormdao"
 	"gorm.io/gorm"
+)
+
+// 模型清单的读序：全局按 `(provider_id, model)`（ADR-6）；按 provider 过滤时按 id。
+const (
+	modelListOrder       = "provider_id ASC, model ASC"
+	modelByProviderOrder = "id ASC"
 )
 
 // 本文件是**平台模型清单**事实源（v13 起是**资源表**）的门面。
@@ -138,25 +146,48 @@ func (s *Store) DeleteModelDefinitionAndClearDefault(
 
 // GetModelDefinition 读一条模型条目（不存在 → (nil, false, nil)）。
 func (s *Store) GetModelDefinition(ctx context.Context, id string) (*model.ModelEntity, bool, error) {
-	return s.models.Get(ctx, id)
+	row, err := s.models.GetByID(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if row == nil {
+		return nil, false, nil
+	}
+	return row, true, nil
 }
 
 // ListModelDefinitions 列出全部模型条目（**`(provider_id, model)` 升序**，ADR-6）。
 //
 // v12 起没有"列某 runtime 的清单"这个查询轴：同一份清单投给所有已注册底座。
 func (s *Store) ListModelDefinitions(ctx context.Context) (model.ModelEntityList, error) {
-	return s.models.ListAll(ctx)
+	return s.models.GetListByCond(ctx, &gormdao.BaseCond{OrderField: modelListOrder})
 }
 
 // ListModelDefinitionsByProvider 列出挂靠在某条供应商下的条目（**只读**：删除保护的判据
 // 已移进 `DeleteProviderDefinitionIfUnreferenced` 的同一事务，这里只服务文案与 doctor）。
 func (s *Store) ListModelDefinitionsByProvider(ctx context.Context, providerID string) (model.ModelEntityList, error) {
-	return s.models.ListByProvider(ctx, providerID)
+	return s.models.GetListByCond(ctx, &dao.ModelCond{
+		BaseCond:   &gormdao.BaseCond{OrderField: modelByProviderOrder},
+		ProviderID: providerID,
+	})
 }
 
 // FindModelDefinition 按 `(provider_id, model)` 取一条（`model_exists` 判定）。
+//
+// 空标识直接判"没有"：`ModelCond.Model` 是可选的（`ListModelDefinitionsByProvider` 只给
+// provider），不早退会退化成"取该 provider 下任意一条"——那是静默读错行。
 func (s *Store) FindModelDefinition(ctx context.Context, providerID, upstreamModel string) (*model.ModelEntity, bool, error) {
-	return s.models.GetByProviderModel(ctx, providerID, upstreamModel)
+	if providerID == "" || upstreamModel == "" {
+		return nil, false, nil
+	}
+	row, err := s.models.GetByCond(ctx, &dao.ModelCond{ProviderID: providerID, Model: upstreamModel})
+	if err != nil {
+		return nil, false, err
+	}
+	if row == nil {
+		return nil, false, nil
+	}
+	return row, true, nil
 }
 
 // ——— 默认模型：`meta` 里的单一值（ADR-21） ———

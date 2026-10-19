@@ -7,9 +7,14 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/dao"
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/golib/dbaccess/gormdao"
 	"gorm.io/gorm"
 )
+
+// definitionListOrder 定义载体的展示顺序（id 升序：调用方看到的是确定的顺序）。
+const definitionListOrder = "id ASC"
 
 // 本文件是能力定义事实源（M6-1）的门面：**一次写面 = 一行 + 一条审计**。
 //
@@ -62,16 +67,25 @@ func (s *Store) DeleteSkillDefinition(ctx context.Context, id string, expectedRe
 
 // GetSkillDefinition 读一条 skill 定义（不存在 → (nil, false, nil)）。
 func (s *Store) GetSkillDefinition(ctx context.Context, id string) (*model.SkillEntity, bool, error) {
-	return s.skills.Get(ctx, id)
+	row, err := s.skills.GetByID(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if row == nil {
+		return nil, false, nil
+	}
+	return row, true, nil
 }
 
 // ListSkillDefinitions 列出全部 skill 定义（id 升序）。
 func (s *Store) ListSkillDefinitions(ctx context.Context) (model.SkillEntityList, error) {
-	return s.skills.List(ctx)
+	return s.skills.GetListByCond(ctx, &gormdao.BaseCond{OrderField: definitionListOrder})
 }
 
 // CountSkillDefinitions 返回 skill 定义行数（导入与装载用它判断"库里有没有"）。
-func (s *Store) CountSkillDefinitions(ctx context.Context) (int64, error) { return s.skills.Count(ctx) }
+func (s *Store) CountSkillDefinitions(ctx context.Context) (int64, error) {
+	return s.skills.CountByCond(ctx, &gormdao.BaseCond{})
+}
 
 // UpsertMcpServerDefinition 提交一次 MCP server 定义写入（语义逐字同 UpsertSkillDefinition）。
 func (s *Store) UpsertMcpServerDefinition(ctx context.Context, id, body string, expectedRev int64, actor string) (bool, error) {
@@ -100,32 +114,55 @@ func (s *Store) DeleteMcpServerDefinition(ctx context.Context, id string, expect
 
 // GetMcpServerDefinition 读一条 MCP server 定义（不存在 → (nil, false, nil)）。
 func (s *Store) GetMcpServerDefinition(ctx context.Context, id string) (*model.McpServerEntity, bool, error) {
-	return s.mcpServers.Get(ctx, id)
+	row, err := s.mcpServers.GetByID(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if row == nil {
+		return nil, false, nil
+	}
+	return row, true, nil
 }
 
 // ListMcpServerDefinitions 列出全部 MCP server 定义（id 升序）。
 func (s *Store) ListMcpServerDefinitions(ctx context.Context) (model.McpServerEntityList, error) {
-	return s.mcpServers.List(ctx)
+	return s.mcpServers.GetListByCond(ctx, &gormdao.BaseCond{OrderField: definitionListOrder})
 }
 
 // CountMcpServerDefinitions 返回 MCP server 定义行数。
 func (s *Store) CountMcpServerDefinitions(ctx context.Context) (int64, error) {
-	return s.mcpServers.Count(ctx)
+	return s.mcpServers.CountByCond(ctx, &gormdao.BaseCond{})
 }
 
 // ListDefinitionRevisions 列出某条能力的变更历史（seq 升序，含已删除的能力）。
 func (s *Store) ListDefinitionRevisions(ctx context.Context, kind, definitionID string) (model.DefinitionRevisionEntityList, error) {
-	return s.definitionRevision.ListByDefinition(ctx, kind, definitionID)
+	return s.definitionRevision.GetListByCond(ctx, &dao.DefinitionRevisionCond{
+		BaseCond:     &gormdao.BaseCond{OrderField: "seq ASC"},
+		Kind:         kind,
+		DefinitionID: definitionID,
+	})
 }
 
 // RecentDefinitionRevisions 列出最近 limit 条变更（seq 降序；limit <= 0 视为 50）。
+//
+// 保留手写查询：`BaseCond` 没有 limit 这个轴（分页要走 GetPageListByCond，那会多一次
+// 无意义的 COUNT），而这里要的是"降序取前 N 条"。
 func (s *Store) RecentDefinitionRevisions(ctx context.Context, limit int) (model.DefinitionRevisionEntityList, error) {
-	return s.definitionRevision.ListRecent(ctx, limit)
+	if limit <= 0 {
+		limit = 50
+	}
+	var rows model.DefinitionRevisionEntityList
+	err := s.definitionRevision.DB(ctx).Order("seq DESC").Limit(limit).Find(&rows).Error
+	return rows, err
 }
 
 // MaxDefinitionRevisionSeq 返回当前代际 rev（= 变更审计的最大 seq；空表 → 0）。
 func (s *Store) MaxDefinitionRevisionSeq(ctx context.Context) (int64, error) {
-	return s.definitionRevision.MaxSeq(ctx)
+	var seq int64
+	// COALESCE：空表时 MAX 返回 NULL，直接扫进 int64 会报错。
+	err := s.definitionRevision.DB(ctx).
+		Raw(`SELECT COALESCE(MAX(seq), 0) FROM ` + model.TableNameDefinitionRevision).Scan(&seq).Error
+	return seq, err
 }
 
 // commitDefinitionChange 是"定义/资源行 + 审计"的唯一提交路径。

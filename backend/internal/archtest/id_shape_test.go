@@ -531,24 +531,27 @@ func TestEventSeqStaysTheCursor(t *testing.T) {
 		t.Fatalf("`event_sequence` 的主键必须是 `session_id`（每会话一行计数器），实际 %q", pkCol)
 	}
 
-	// ③ DAO：事件查询只按 `seq` 排序/翻页，不得引入 `id` 序。
-	daoSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "dao", "event.go")))
+	// ③ 读面（store）：事件查询只按 `seq` 排序/翻页，不得引入 `id` 序。
+	//
+	// 判据作用在 `internal/store/events.go`：v3.3 起排序/游标口径归 store（DAO 只剩列词汇与
+	// 泛型方法）——这条守卫必须跟着实现走，否则它会在 dao/event.go 里对着一个空文件空转。
+	daoSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "store", "events.go")))
 	// `id > ?` 用"前一个字符不是标识符字符"锚定：复合键集比较里的 `session_id > ?` 含有子串
 	// `id > ?`，用裸 Contains 会把它误判成"按事件身份比较"（v21 的 AllBySession 就是这么被误报的）。
 	idCompare := regexp.MustCompile(`(?:^|[^A-Za-z0-9_"'])id\s*>\s*\?`)
 	for _, bad := range []string{"ORDER BY id", "Order(\"id\"", "Order(\"id "} {
 		if strings.Contains(daoSrc, bad) {
-			t.Fatalf("`internal/dao/event.go` 里出现了按 `id` 排序的写法 %q：事件的身份**不参与排序**"+
+			t.Fatalf("`internal/store/events.go` 里出现了按 `id` 排序的写法 %q：事件的身份**不参与排序**"+
 				"（位次的权威只有 `seq`；铸号顺序恰好同序会让这类错误在很长时间里看不出来）", bad)
 		}
 	}
 	if idCompare.MatchString(daoSrc) {
-		t.Fatal("`internal/dao/event.go` 里出现了按 `id` 比较的写法（`id > ?`）：事件的身份**不参与比较**" +
+		t.Fatal("`internal/store/events.go` 里出现了按 `id` 比较的写法（`id > ?`）：事件的身份**不参与比较**" +
 			"——跨会话翻页用的是复合键 `(session_id, seq)`，而 `session_id > ?` 是它的一部分，" +
 			"别把两者混起来")
 	}
 	if !strings.Contains(daoSrc, "Order(\"seq") && !strings.Contains(daoSrc, "Order(\"session_id ASC, seq ASC\"") {
-		t.Fatal("`internal/dao/event.go` 里找不到按 `seq` 的排序：事件游标只认 seq（fail-closed，" +
+		t.Fatal("`internal/store/events.go` 里找不到按 `seq` 的排序：事件游标只认 seq（fail-closed，" +
 			"否则「游标仍然是 seq」这句话没有任何判据）")
 	}
 }
@@ -657,8 +660,8 @@ func TestEventIdentityTravelsWithData(t *testing.T) {
 	//    （这一处钉的是 `internal/store` 的精确路径：该包**不在**本次重划范围内。）
 	impSrc := stripLineComments(readFileOrFatal(t,
 		filepath.Join(root, "internal", "store", "import.go")))
-	if !strings.Contains(impSrc, "FindByID(") {
-		t.Fatal("`internal/store/import.go` 里找不到 `FindByID(`：导入不做事件级判重，" +
+	if !strings.Contains(impSrc, "FindEventByIDTx(") {
+		t.Fatal("`internal/store/import.go` 里找不到 `FindEventByIDTx(`：导入不做事件级判重，" +
 			"重复导入要么写第二份同 id 的行（主键冲突）要么整批失败——两种都不是幂等")
 	}
 	if !strings.Contains(impSrc, "分叉") {

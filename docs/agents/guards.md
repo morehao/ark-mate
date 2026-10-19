@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 起为 172 条；新增的是层表、契约基线、v3.2 层表与 gin 围栏）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条；新增的是层表、契约基线、v3.2 层表与 gin 围栏）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -22,6 +22,8 @@
   `layers_scan_test.go` 留着扫描器与三条专项判据：`runtime` 不得 import adapter、只有 `assembly`（生产代码）可以 import `internal/infra/dsh`、adapter 不得 import 应用内核。
 
 - **层表守卫（v3.2 六边形，`layers_v32_test.go`）**：与 v3.1 表**同时生效**，两者方向相反。v3.1 把 `domain` 放第 9 层、`store` 第 7 层、`dto`/`dao` 第 6 层、`model` 第 1 层（规则是"高层可以 import 低层"），于是 `domain → store/dto/mechanism` 被那张表定义成**合法**；v3.2 把 `domain` 压到 L2、持久化与机制压到 L5/L6、`dto` 挪到 L3，`domain` 的出边只剩 L0（`model` 纯列形状）与 L1（值对象/协议库）。判据三条同构（只能向内、同带默认不互链、`deny` 精确排除策略边），另有两条只属于 v3.2：`service` **永不** `sameLayer` 且 `deny internal/service`（同时挡兄弟 svc 与自身，是"svc 零互引"的载体）、`cliops` 是**第二入站适配器而不是第二装配根**（`deny` `store`/`dao`/`model`/`mechanism`/`domain`/`registry`/`sessionruntime`/`gateway`/`infra`）。迁移期 26 条例外（36 处命中）登记在 `v32Exceptions`，**双向**判据（新增边红、降到 0 不删也红），`TestV32ReportOnly` 是随时可跑的收口进度表。同文件另有 **gin 围栏**（`TestGinConfinedToInboundAdaptersV32`）：gin 只许落在 `router`/`controller`/`middleware`，`assembly`/`app` 的临时白名单在刀 2 清空。
+
+- 再加 **1 条持久层边界守卫（v3.3）**：`dao_boundary_test.go` 的 `TestDaoKeepsNoBusinessReadFace`。v3.3 把 `internal/dao` 收成「列词汇（`XxxCond`）+ gormdao 泛型方法 + 机械原语（KV / 取号 / CAS / 只追加插入）」，**排序、筛选组合、分页、聚合**一律归 `internal/store`。守卫扫 `internal/dao`（剥注释）禁止 `OrderField:`/`.Order(`/`.Limit(`/`.Offset(`/`.Join(`/`.Group(`/`.Select(`/`GetListByCond(`/`GetPageListByCond(`/`CountByCond(`，以及 `tableName+` 的标识符拼接（Cond 里的表名/列名必须交给 `clause.Column` 由方言引用）；条件查询组合也只许留在 store，唯一例外是 `meta.go` 的 `GetByCond(`（键值表按 key 取一行的原语）。挡的是「把 `ListByOrder`/`RunningRuns` 这类读面方法加回 DAO」——两层各有一套顺序时，用户看到的顺序取决于调用方走了哪条路，而单表测试永远看不出来。反证（实跑）：把 `ListByOrder` 的 `OrderField` 搬回 `dao/workspace.go`、把 `RunningRuns` 的 `.Order(`/`.Limit(` 搬回 `dao/run.go`、把 `MetaCond` 的 `clause.Eq` 改回 `tableName+".key = ?"`，三者皆红。
 
 - [`layout.md`](layout.md) 里的六条边界都由 `internal/archtest` 的守卫测试强制（`go test ./internal/archtest/`）；同目录还另有**四条**契约/出口守卫：事件 type 冻结快照（`TestEventTypeContractFrozen`）、前端事件同步边（`TestFrontendEventTypesMatchRegistry`）、控制器错误出口带码（`TestControllerErrorExitsCarryCode`）、**能力绑定粒度不得超出已实测范围**（`TestCapabilityScopeDeclaration`：未 `Tested` 的 runtime 不得声明比 `process` 更细的 `CapabilityScope`，否则平台可能把 A 会话的能力投给 B 会话）
 
@@ -71,7 +73,7 @@
 
 - 再加 **3 条命名收口守卫**（v16 表/列/索引命名，`schema_naming_test.go` + `vocabulary_test.go`：① `TestIdentifiersFollowLexicalForm`（A1/D1）——判据落在**真实 schema** 上：造临时库跑完整迁移，读 `sqlite_master` + `PRAGMA table_info`，每个表名/列名/索引名必须匹配 `^[a-z][a-z0-9_]*$`；**再加**扫 `internal/model/*.go` 的 `column:` 标签（两份手工同步的约定，只查一侧另一半会静默漂移：`column:TargetRunID` 编译期无感，SELECT 拼出来才报 `no such column`）。不扫 DDL 文本是因为索引与列在 16 条迁移里建了又改又删，文本扫描要么把已删的历史名字算进来（假红），要么得写一个 DDL 模拟器（自己成了新的出错面）；② `TestIndexNamesFollowTablePrefix`（A2/D2）——**最终形态**的每条索引名必须是 `idx_<所属表>_<用途>`，并反向断言两个旧名**真的被 DROP 了**而不只是加了新名（两条并存时优化器可能选中旧的，而「新索引没生效」外观上看不出来）；③ `TestNoCapabilityRevisionVocabulary`（D3，挂在 `vocabulary_test.go` 的词汇收口家族里）——`capability_revision`/`capability_id`/`capabilityrevision` 零命中，理由与 v15 的 conversation 同形：`capability` 是**重载词**（运行期能力集 vs 这张审计表覆盖的**六种定义**）；白名单只有两处——`migrate.go`（历史 DDL 与 v16 的 `RENAME` 必须写**当时那一版**的名字）与 `migrate_test.go`（停在 v16 之前的历史夹具），**刻意不误伤 `CapabilityID`**。三条都 fail-closed。反证（实跑）：把 v16 的列改名写成 `ProviderID` → A1 红；删掉 `DROP INDEX idx_memories_session` → A2 红。
 
-- 再加 **3 条 v17「事件身份」守卫**（`id_shape_test.go` + `vocabulary_test.go`：① `TestEventSeqStaysTheCursor`（G1）——`events` 的身份是 `id`、位次是 `seq`：实体层断言 `ID` 带 `column:id;primaryKey`、`Seq` 是 `int64` 且**不带** `primaryKey`（把 seq 写回主键 = 位次的权威分配链断掉），迁移层断言 `idx_events_seq` 是**唯一**索引（seq 是**全局**位次，不是 opencode 那种 per-aggregate 稠密序号），DAO 层断言事件查询只按 `seq` 排序（`ORDER BY id` 这类写法因为「铸号顺序恰好同序」而**看起来对**，直到跨进程/时钟回拨那天才错）；② `TestEventIdentityTravelsWithData`（G2，判据 J4）——身份必须逐点跟着数据走：运行时唯一铸号点（`publish.go` 的 `objid.New(objid.Event)`）、落库/进帧/落盘三处用**同一支**值、memory 装载与 sqlite 恢复都原样注入 bus、REST/WS 两条出口都带 `e.ID`、导入把 transcript 的 id 交给 store、以及「只走实时通道的事件刻意不铸号」（`Publish("",`）这另一半；再钉导入的 `FindByID(` 判重与「分叉」报错；③ `TestNoProviderSessionVocabulary`（G3）——`provider_session`/`providersession` 小写化子串**零命中**（白名单只有 `migrate.go` 的历史 DDL/v17 `RENAME COLUMN` 与 `migrate_test.go` 的历史夹具），因为 `provider` 在本仓的主流含义是**模型供应商**，而这一列存的是「底座那边的会话 id」。三条都 fail-closed、都有实跑反证（改 `column:seq;primaryKey` → G1 红；从 `sessions.go` 删 `ID: e.ID,` → G2 红；在 `service.go` 写一个 `provider_session_id` → G3 红）
+- 再加 **3 条 v17「事件身份」守卫**（`id_shape_test.go` + `vocabulary_test.go`：① `TestEventSeqStaysTheCursor`（G1）——`events` 的身份是 `id`、位次是 `seq`：实体层断言 `ID` 带 `column:id;primaryKey`、`Seq` 是 `int64` 且**不带** `primaryKey`（把 seq 写回主键 = 位次的权威分配链断掉），迁移层断言 `idx_events_seq` 是**唯一**索引（seq 是**全局**位次，不是 opencode 那种 per-aggregate 稠密序号），读面（`store/events.go`；v3.3 起排序口径在 store）断言事件查询只按 `seq` 排序（`ORDER BY id` 这类写法因为「铸号顺序恰好同序」而**看起来对**，直到跨进程/时钟回拨那天才错）；② `TestEventIdentityTravelsWithData`（G2，判据 J4）——身份必须逐点跟着数据走：运行时唯一铸号点（`publish.go` 的 `objid.New(objid.Event)`）、落库/进帧/落盘三处用**同一支**值、memory 装载与 sqlite 恢复都原样注入 bus、REST/WS 两条出口都带 `e.ID`、导入把 transcript 的 id 交给 store、以及「只走实时通道的事件刻意不铸号」（`Publish("",`）这另一半；再钉导入的 `FindEventByIDTx(` 判重与「分叉」报错；③ `TestNoProviderSessionVocabulary`（G3）——`provider_session`/`providersession` 小写化子串**零命中**（白名单只有 `migrate.go` 的历史 DDL/v17 `RENAME COLUMN` 与 `migrate_test.go` 的历史夹具），因为 `provider` 在本仓的主流含义是**模型供应商**，而这一列存的是「底座那边的会话 id」。三条都 fail-closed、都有实跑反证（改 `column:seq;primaryKey` → G1 红；从 `sessions.go` 删 `ID: e.ID,` → G2 红；在 `service.go` 写一个 `provider_session_id` → G3 红）
 
 - 再加 **1 条 SQLite 纯 Go 守卫**（`sqlite_pure_go_test.go` 的 `TestSqliteDriverStaysPureGo`：这条链的失效方式是**编译期无感、运行期致命**——构建面写 `CGO_ENABLED=0` 而依赖是 CGO 驱动时，编得出、连库即报 `go-sqlite3 requires cgo to work. This is a stub`。判据两侧一起钉、都 fail-closed：依赖侧断言 `go.mod` 里不出现 `mattn/go-sqlite3` / `gorm.io/driver/sqlite`（用"模块路径后跟空白"匹配，避免 `mattn/go-isatty` 被误伤）且纯 Go 那一套（`morehao/golib` + `ncruces/go-sqlite3`）真的在，构建侧断言四个面（`Makefile`、`Dockerfile`、两份桌面验收脚本）一律 `CGO_ENABLED=0` 且没有别处写 1。反证（实跑）：`Makefile` 改回 `CGO_ENABLED=1` → 红；把 `gorm.io/driver/sqlite` 加回 `go.mod` → 红；验收脚本改回 `'1'` → 红）
 
@@ -86,7 +88,7 @@
 `tz_offset?: number` / api 必须 `p.set('tz_offset'` / 页面必须 `tz_offset: -new Date().getTimezoneOffset()`。
 反证（实跑）：存储层改回 `UTC()` 分桶 → 红；抽掉 api 的 `p.set('tz_offset'` → 红。
 
-**共 168 条**——加守卫时记得同步这句话。
+**共 169 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 

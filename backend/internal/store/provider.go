@@ -5,9 +5,14 @@ import (
 	"sort"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/dao"
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/golib/dbaccess/gormdao"
 	"gorm.io/gorm"
 )
+
+// providerListOrder 供应商列表的读序（id 升序）。
+const providerListOrder = "id ASC"
 
 // v3.1 P4：列形状上移到 `internal/model`，这里保留别名（调用点不改）。
 type ProviderColumns = model.ProviderColumns
@@ -102,7 +107,10 @@ func (s *Store) DeleteProviderDefinitionIfUnreferenced(
 	deleted := false
 	var refs []string
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		rows, err := s.models.WithTx(tx).ListByProvider(ctx, id)
+		rows, err := s.models.WithTx(tx).GetListByCond(ctx, &dao.ModelCond{
+			BaseCond:   &gormdao.BaseCond{OrderField: modelByProviderOrder},
+			ProviderID: id,
+		})
 		if err != nil {
 			return err
 		}
@@ -136,15 +144,22 @@ func (s *Store) DeleteProviderDefinitionIfUnreferenced(
 
 // GetProviderDefinition 读一条 provider 档案（不存在 → (nil, false, nil)）。
 func (s *Store) GetProviderDefinition(ctx context.Context, id string) (*model.ProviderEntity, bool, error) {
-	return s.providers.Get(ctx, id)
+	row, err := s.providers.GetByID(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if row == nil {
+		return nil, false, nil
+	}
+	return row, true, nil
 }
 
 // ListProviderDefinitions 列出全部 provider 档案（id 升序）。
 func (s *Store) ListProviderDefinitions(ctx context.Context) (model.ProviderEntityList, error) {
-	return s.providers.List(ctx)
+	return s.providers.GetListByCond(ctx, &gormdao.BaseCond{OrderField: providerListOrder})
 }
 
 // CountProviderDefinitions 返回 provider 档案行数（导入对账与 doctor 用它）。
 func (s *Store) CountProviderDefinitions(ctx context.Context) (int64, error) {
-	return s.providers.Count(ctx)
+	return s.providers.CountByCond(ctx, &gormdao.BaseCond{})
 }

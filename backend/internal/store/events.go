@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/morehao/ark-mate/internal/dao"
 	"github.com/morehao/ark-mate/internal/model"
 	"gorm.io/gorm"
 )
@@ -63,36 +64,118 @@ func (s *Store) appendEventTx(ctx context.Context, tx *gorm.DB, id, sessionID, t
 	if err := s.events.WithTx(tx).Insert(ctx, ev); err != nil {
 		return 0, fmt.Errorf("store: insert event: %w", err)
 	}
-	if err := s.sessions.WithTx(tx).TouchLastSeq(ctx, sessionID, seq); err != nil {
+	if err := s.touchLastSeqTx(ctx, tx, sessionID, seq); err != nil {
 		return 0, err
 	}
 	return seq, nil
 }
 
+// defaultEventPage 与 defaultEventPageAll 是游标分页的默认页大小
+// （调用方传 <=0 时生效；两者不同源：单会话回放按 200，重启恢复的跨会话分页按 2000）。
+const (
+	defaultEventPage    = int64(200)
+	defaultEventPageAll = int64(2000)
+)
+
 // EventsAfter 返回某会话 seq > after 的事件（升序，limit 上限；hasMore 表示仍有余量）。
 // 服务端事件回放（history 续传/断线补偿）从 events 表读，不再受内存环缓冲淘汰限制。
 //
 // **after = -1 = 从该会话第 0 条起**（"没有游标"的哨兵）；`after = 0` 表示"第 0 条之后"。
+//
+// 游标只认 seq：v21 起 seq 是会话内位次（0 起、稠密），所以 `seq = 0` 是合法位次，
+// 本方法一律按开区间比较（`seq > after`），哨兵语义由调用方给定。
 func (s *Store) EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]model.EventEntity, bool, error) {
-	return s.events.After(ctx, sessionID, after, limit)
+	if limit <= 0 {
+		limit = defaultEventPage
+	}
+	list, err := s.scanEvents(ctx, s.events.DB(ctx).
+		Where("session_id = ? AND seq > ?", sessionID, after).
+		Order("seq ASC").Limit(int(limit+1)))
+	return truncateEvents(list, int(limit), err)
 }
 
 // EventCount 统计某会话/全局事件行数（迁移校验用；sessionID 空 = 全库）。
 func (s *Store) EventCount(ctx context.Context, sessionID string) (int64, error) {
-	return s.events.Count(ctx, sessionID)
+	return s.events.CountByCond(ctx, &dao.EventCond{SessionID: sessionID})
 }
 
 // EventsAllBySession 全表按 `(session_id, seq)` 升序做复合 keyset 分页（跨会话）。
 //
 // 消费面只有一处：重启恢复把历史事件注入 eventbus。v21 起位次是会话内的量、**没有跨会话全序**，
 // 所以注入只需要"组内按 seq 升序"——按 `(session_id, seq)` 取自然同时满足分组与组内有序。
+//
+// 为什么不是 v17 的那条 `WHERE seq > ?`（全表全局号序游标）：v21 起 `seq` 是会话内量，
+// 它**不再全库唯一**、也**不再跨会话可比**——拿它当全表游标会在第二个会话处回首（"seq > 5"
+// 在每个会话里都成立），回放顺序与取号顺序脱钩。复合游标把排序键写进谓词，顺序由 DB 定。
 func (s *Store) EventsAllBySession(ctx context.Context, afterSessionID string, afterSeq, limit int64) ([]model.EventEntity, bool, error) {
-	return s.events.AllBySession(ctx, afterSessionID, afterSeq, limit)
+	if limit <= 0 {
+		limit = defaultEventPageAll
+	}
+	q := s.events.DB(ctx)
+	if afterSessionID != "" {
+		q = q.Where("session_id > ? OR (session_id = ? AND seq > ?)", afterSessionID, afterSessionID, afterSeq)
+	}
+	list, err := s.scanEvents(ctx, q.Order("session_id ASC, seq ASC").Limit(int(limit+1)))
+	return truncateEvents(list, int(limit), err)
 }
 
 // EventsBefore 反向分页：返回 seq < before 的最近 limit 条事件（结果仍按 seq 升序）。
 // hasMore 表示窗口之外还有更早的事件（即返回的第一条不是该会话最早的一条）。
 // **before < 0 时按「从最新往回」处理**（哨兵）；`before = 0` = "第 0 条之前" → 空页。
 func (s *Store) EventsBefore(ctx context.Context, sessionID string, before, limit int64) ([]model.EventEntity, bool, error) {
-	return s.events.Before(ctx, sessionID, before, limit)
+	if limit <= 0 {
+		limit = defaultEventPage
+	}
+	// 先按 seq 降序多取一条（判定是否还有更早），再在内存里反转成升序。
+	q := s.events.DB(ctx).Where("session_id = ?", sessionID)
+	if before >= 0 {
+		q = q.Where("seq < ?", before)
+	}
+	list, err := s.scanEvents(ctx, q.Order("seq DESC").Limit(int(limit+1)))
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := int64(len(list)) > limit
+	if hasMore {
+		list = list[:limit]
+	}
+	out := make(model.EventEntityList, 0, len(list))
+	for i := len(list) - 1; i >= 0; i-- {
+		out = append(out, list[i])
+	}
+	return out, hasMore, nil
+}
+
+// FindEventByIDTx 按行身份取一条事件（导入判重与分叉检测用；找不到返回 ok=false）。
+//
+// 事务内版本：导入判重必须读同一事务的快照。
+func (s *Store) FindEventByIDTx(ctx context.Context, tx *gorm.DB, id string) (*model.EventEntity, bool, error) {
+	ev, err := s.events.WithTx(tx).GetByID(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if ev == nil {
+		return nil, false, nil
+	}
+	return ev, true, nil
+}
+
+// scanEvents 执行查询并扫描事件行。
+func (s *Store) scanEvents(ctx context.Context, q *gorm.DB) (model.EventEntityList, error) {
+	out := model.EventEntityList{}
+	if err := q.Model(&model.EventEntity{}).Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// truncateEvents 按 limit 截断并给出 hasMore（配合「多取一条」的调用约定）。
+func truncateEvents(list model.EventEntityList, limit int, err error) (model.EventEntityList, bool, error) {
+	if err != nil {
+		return nil, false, err
+	}
+	if len(list) > limit {
+		return list[:limit], true, nil
+	}
+	return list, false, nil
 }
