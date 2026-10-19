@@ -10,7 +10,6 @@ import (
 	defn "github.com/morehao/ark-mate/internal/definition"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 )
 
 // Plane 技能平面的**有状态主体**：持有能力注册表（技能定义都在这里）与投影登记处。
@@ -20,7 +19,7 @@ import (
 // 注入在装配期完成、之后只读，所以不加锁。
 type Plane struct {
 	caps *capability.Registry
-	defs *definition.Mechanism
+	defs Definitions
 	st   bool
 	proj *Projections
 }
@@ -28,7 +27,7 @@ type Plane struct {
 // NewPlane 造一个技能平面。三个依赖都必须由装配期注入**同一个实例**：
 // `caps` 是 skill 与 mcp 共用的注册表（两份 = 两个事实源）、`defs` 是定义机制、
 // `st` 是库句柄（memory 模式为 nil）。任何一个是"自己 new 一份"都会让写面与读面各看一份状态。
-func NewPlane(caps *capability.Registry, defs *definition.Mechanism) *Plane {
+func NewPlane(caps *capability.Registry, defs Definitions) *Plane {
 	return &Plane{caps: caps, defs: defs, proj: NewProjections()}
 }
 
@@ -114,7 +113,7 @@ func (m *Plane) WriteSkillEnabled(ctx context.Context, id string, enabled bool) 
 				fmt.Sprintf("skill %q 无法启停：本进程未装载能力数据面目录（MATE_CAPABILITIES），没有可持久化的定义文件", id), nil)
 		}
 	}
-	repo, err := m.defs.DefinitionRepoFor(defn.CapSubSkills)
+	repo, err := m.defs.RepoFor(defn.CapSubSkills)
 	if err != nil {
 		return "", err
 	}

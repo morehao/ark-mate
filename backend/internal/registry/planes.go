@@ -91,7 +91,7 @@ func NewPlanes(reg *runtime.Registry) *Planes {
 		Automation:   automation.NewPlane(),
 		defWarned:    make(map[string]bool),
 	}
-	p.Skills = skill.NewPlane(p.Capabilities, p.Definitions)
+	p.Skills = skill.NewPlane(p.Capabilities, skillDefs{p.Definitions})
 	p.McpSecrets = mcp.NewSecrets(p.Credentials)
 	p.Mcp = mcp.NewPlane(p.Capabilities, p.Definitions, p.McpSecrets)
 	p.Providers = provider.NewPlane(reg, p.Credentials)

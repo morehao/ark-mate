@@ -35,7 +35,7 @@ func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability
 	if m.caps == nil {
 		return nil, defn.ErrCapabilityUnavailable()
 	}
-	repo, err := m.defs.DefinitionRepoFor(defn.CapSubSkills)
+	repo, err := m.defs.RepoFor(defn.CapSubSkills)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func (m *Plane) DeleteSkill(ctx context.Context, id string) (*dtocapability.Skil
 	if m.caps == nil {
 		return nil, defn.ErrCapabilityUnavailable()
 	}
-	repo, err := m.defs.DefinitionRepoFor(defn.CapSubSkills)
+	repo, err := m.defs.RepoFor(defn.CapSubSkills)
 	if err != nil {
 		return nil, err
 	}
