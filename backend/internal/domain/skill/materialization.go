@@ -9,7 +9,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/code"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -27,7 +26,7 @@ func declaredFormats() string { return strings.Join(capability.VettedFormats(), 
 // "这个目录本该长什么样"。有了它就能回答三个具体问题：agent 实际读到的内容与注册表一致吗
 // （`in_sync` / `tampered`）、产物是老版本还是当前版本（`stale`）、某处为什么没有产物
 // （`missing` / `disabled` / `not_applicable` / `user_owned`）。修复不在这里做——重校与启停负责写。
-func (m *Plane) SkillMaterialization(id string) (*dtocapability.SkillMaterializationResp, error) {
+func (m *Plane) SkillMaterialization(id string) (*MaterializationView, error) {
 	if m.caps == nil {
 		return nil, code.FromError(acl.NewError(acl.ClassService, "capability_unavailable", "能力数据面未装配", nil))
 	}
@@ -35,16 +34,16 @@ func (m *Plane) SkillMaterialization(id string) (*dtocapability.SkillMaterializa
 	if !ok {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "skill_not_found", fmt.Sprintf("未知 skill %q", id), nil))
 	}
-	resp := &dtocapability.SkillMaterializationResp{ID: sk.ID, Enabled: sk.IsEnabled()}
+	resp := &MaterializationView{ID: sk.ID, Enabled: sk.IsEnabled()}
 	projections := m.Snapshot()
 	if len(projections) == 0 {
-		resp.States = []dtocapability.SkillMaterializationState{}
+		resp.States = []MaterializationStateView{}
 		resp.Notes = append(resp.Notes,
 			"本进程没有解析出任何 skill 投影目标：所有已注册 runtime 都没声明 skill 投影，"+
 				"或它们的投影根无法解析（占位符变量未设置）——技能只存在于注册表，未投影到任何 runtime 目录")
 		return resp, nil
 	}
-	states := make([]dtocapability.SkillMaterializationState, 0, len(projections))
+	states := make([]MaterializationStateView, 0, len(projections))
 	for _, p := range projections {
 		states = append(states, materializationState(sk, p))
 	}
@@ -62,9 +61,9 @@ func (m *Plane) SkillMaterialization(id string) (*dtocapability.SkillMaterializa
 //
 // `dir`/`hash` 都由**投影形态**算出来（不再假设 `<root>/<id>`）：落点模板换了，审计视图跟着换，
 // 两处不会漂移。
-func materializationState(sk capability.Skill, p Projection) dtocapability.SkillMaterializationState {
+func materializationState(sk capability.Skill, p Projection) MaterializationStateView {
 	spec := p.MaterializeSpec()
-	st := dtocapability.SkillMaterializationState{Root: p.Projection.Root, Runtime: p.Runtime}
+	st := MaterializationStateView{Root: p.Projection.Root, Runtime: p.Runtime}
 	if p.Err != "" {
 		// 声明了投影但根解不开：如实报 not_configured，并把人话原因带上（这是**配置**问题，
 		// 不是技能问题——所以不去检查磁盘上有没有产物）。

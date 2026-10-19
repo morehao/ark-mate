@@ -2,7 +2,6 @@ package skill
 
 import (
 	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 )
 
 // Warnings 把一条技能定义上的告警投影成对外形态。
@@ -11,10 +10,10 @@ import (
 // 认不出来这类），与"哪些技能/连接器在册"的联合视图无关；聚合面只是把它转出去。
 //
 // 纯函数（收值、返回新切片），所以它随技能平面走，不需要 `*Service` 的任何状态。
-func Warnings(sk capability.Skill) []dtocapability.SkillWarningResp {
-	out := make([]dtocapability.SkillWarningResp, 0, len(sk.Warnings))
+func Warnings(sk capability.Skill) []WarningView {
+	out := make([]WarningView, 0, len(sk.Warnings))
 	for _, w := range sk.Warnings {
-		out = append(out, dtocapability.SkillWarningResp{
+		out = append(out, WarningView{
 			Severity: w.Severity.String(), Pattern: w.Pattern, Message: w.Message,
 		})
 	}

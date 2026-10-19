@@ -149,7 +149,7 @@ type stubSvc struct {
 	// M2 写面桩
 	skillWritten  string // create|update|delete
 	skillWriteID  string
-	skillWriteReq dtocapability.SkillWriteReq
+	skillWriteReq skill.WriteRequest
 	mcpWritten    string
 	mcpWriteID    string
 	mcpWriteReq   dtocapability.McpWriteReq
@@ -247,7 +247,7 @@ func (s *stubSvc) SetSkillEnabled(_ context.Context, id string, enabled bool) (*
 }
 
 // M2 写面桩：只记录被调用与入参，返回固定结果（真实的落盘/闸门/回滚在 manager 的单测里验）。
-func (s *stubSvc) CreateSkill(_ context.Context, req dtocapability.SkillWriteReq) (*dtocapability.SkillWriteResp, error) {
+func (s *stubSvc) CreateSkill(_ context.Context, req skill.WriteRequest) (*dtocapability.SkillWriteResp, error) {
 	s.skillWritten, s.skillWriteReq = "create", req
 	if s.capErr != nil {
 		return nil, s.capErr
@@ -255,7 +255,7 @@ func (s *stubSvc) CreateSkill(_ context.Context, req dtocapability.SkillWriteReq
 	return &dtocapability.SkillWriteResp{ID: "s1", Path: "/tmp/skills/s1.json", Created: true, NextAction: "已新建"}, nil
 }
 
-func (s *stubSvc) UpdateSkill(_ context.Context, id string, req dtocapability.SkillWriteReq) (*dtocapability.SkillWriteResp, error) {
+func (s *stubSvc) UpdateSkill(_ context.Context, id string, req skill.WriteRequest) (*dtocapability.SkillWriteResp, error) {
 	s.skillWritten, s.skillWriteID, s.skillWriteReq = "update", id, req
 	if s.capErr != nil {
 		return nil, s.capErr

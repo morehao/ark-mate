@@ -50,7 +50,7 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 	id := "db-skill"
 
 	// —— 新建：落行 + 入表 + 审计 + 物化 ——
-	resp, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t,
+	resp, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", skill.WriteRequest(rawObj(t,
 		"id", `"db-skill"`, "name", `"DB Skill"`, "body", `"# DB"`, "runtimes", `["rtx"]`,
 		"my_note", `"手写字段"`)), true)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 	}
 
 	// —— 覆盖写：只改出现的键，未知键与其余键保留；revision 递增；审计追加 ——
-	resp, err = r.Svc.Planes().Skills.WriteSkill(ctx, id, dtocapability.SkillWriteReq(rawObj(t, "name", `"改名了"`)), false)
+	resp, err = r.Svc.Planes().Skills.WriteSkill(ctx, id, skill.WriteRequest(rawObj(t, "name", `"改名了"`)), false)
 	if err != nil {
 		t.Fatalf("UpdateSkill: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 	r, _ := storeCapRig(t)
 	ctx := context.Background()
 
-	if _, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t, "id", `"cas-skill"`, "name", `"orig"`)), true); err != nil {
+	if _, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", skill.WriteRequest(rawObj(t, "id", `"cas-skill"`, "name", `"orig"`)), true); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 	repo, err := r.Svc.Planes().Definitions.DefinitionRepoFor(defn.CapSubSkills)
@@ -223,7 +223,7 @@ func TestStoreWriteFaceGateRejectsWithoutWrite(t *testing.T) {
 	ctx := context.Background()
 
 	// skill：非法 scope。
-	_, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t, "id", `"bad-scope"`, "scope", `"bogus"`)), true)
+	_, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", skill.WriteRequest(rawObj(t, "id", `"bad-scope"`, "scope", `"bogus"`)), true)
 	if err == nil || !strings.Contains(err.Error(), "scope") || !strings.Contains(err.Error(), "definition_invalid") {
 		t.Fatalf("非法 scope 应被闸门以 definition_invalid 拒绝: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestStoreSkillEnabledTogglesOnlyOneKey(t *testing.T) {
 	r, root := storeCapRig(t)
 	ctx := context.Background()
 
-	if _, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t,
+	if _, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", skill.WriteRequest(rawObj(t,
 		"id", `"toggle"`, "name", `"T"`, "body", `"# T"`, "my_note", `"留着"`)), true); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestStoreWriteFaceRequiresNoCapabilityDir(t *testing.T) {
 	if dir := r.Svc.Planes().Definitions.Dir(); dir != "" {
 		t.Fatalf("本夹具刻意不配能力目录，got %q", dir)
 	}
-	if _, err := r.Svc.Planes().Skills.WriteSkill(context.Background(), "", dtocapability.SkillWriteReq(rawObj(t, "id", `"no-dir"`)), true); err != nil {
+	if _, err := r.Svc.Planes().Skills.WriteSkill(context.Background(), "", skill.WriteRequest(rawObj(t, "id", `"no-dir"`)), true); err != nil {
 		t.Fatalf("DB 模式没配目录也该能写: %v", err)
 	}
 }

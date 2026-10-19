@@ -10,6 +10,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
@@ -22,9 +23,9 @@ import (
 // 语义"，而这句话只有同一批输入分别走两种载体都被检查过才算被验证。
 
 // writeReq 把 JSON 文本解成写面请求体（测试里直接写 JSON，测的就是"键的出现与否"）。
-func writeReq(t *testing.T, body string) dtocapability.SkillWriteReq {
+func writeReq(t *testing.T, body string) skill.WriteRequest {
 	t.Helper()
-	var req dtocapability.SkillWriteReq
+	var req skill.WriteRequest
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		t.Fatalf("测试请求体不是合法 JSON 对象: %v（%s）", err, body)
 	}

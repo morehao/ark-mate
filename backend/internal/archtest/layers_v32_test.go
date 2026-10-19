@@ -355,7 +355,6 @@ type v32Exception struct {
 // 新增边一律判红；降到 0 未删除也判红（双向判据，防清单腐烂）。
 var v32Exceptions = []v32Exception{
 	// ——— 刀 4：domain/skill ———
-	{from: "internal/domain/skill", to: "internal/dto", budget: 1, slice: "刀4", why: "返回值是 dto/dtocapability"},
 
 	// ——— 刀 5：domain/mcp ———
 	{from: "internal/domain/mcp", to: "internal/dto", budget: 1, slice: "刀5", why: "返回值是 dto/dtocapability"},

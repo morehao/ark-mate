@@ -8,7 +8,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/capability"
 	defn "github.com/morehao/ark-mate/internal/definition"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
@@ -31,7 +30,7 @@ import (
 // 同一份输入刚验过就必然能再入表，所以提交成功后那次 `RegisterSkill` 是**必然成功**的。
 
 // WriteSkill 写面主体（create / update 共用的全部顺序与失败处理）。
-func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability.SkillWriteReq, create bool) (*dtocapability.SkillWriteResp, error) {
+func (m *Plane) WriteSkill(ctx context.Context, pathID string, req WriteRequest, create bool) (*WriteResult, error) {
 	if m.caps == nil {
 		return nil, defn.ErrCapabilityUnavailable()
 	}
@@ -131,7 +130,7 @@ func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability
 		glog.Warnw(ctx, "capability: skill 定义已提交但入表失败（内存视图可能落后）", "id", id, "err", err)
 	}
 
-	resp := &dtocapability.SkillWriteResp{
+	resp := &WriteResult{
 		ID: sk.ID, Path: repo.Locator(id), Created: create || created,
 		Warnings: Warnings(sk),
 	}
@@ -151,7 +150,7 @@ func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability
 // DeleteSkill 删除一个 skill 定义（DELETE /skills/:id）：删定义 + 撤回物化副本 + 摘内存条目。
 //
 // 幂等：定义本来就不存在 → `deleted:false` 且无错（"让它不在"不要求"它曾在"）。
-func (m *Plane) DeleteSkill(ctx context.Context, id string) (*dtocapability.SkillDeleteResp, error) {
+func (m *Plane) DeleteSkill(ctx context.Context, id string) (*DeleteResult, error) {
 	if m.caps == nil {
 		return nil, defn.ErrCapabilityUnavailable()
 	}
@@ -183,7 +182,7 @@ func (m *Plane) DeleteSkill(ctx context.Context, id string) (*dtocapability.Skil
 		return nil, defn.DefinitionChangedErr(locator)
 	}
 	m.caps.RemoveSkill(id)
-	resp := &dtocapability.SkillDeleteResp{ID: id, Deleted: deleted, Path: locator}
+	resp := &DeleteResult{ID: id, Deleted: deleted, Path: locator}
 	// 删定义必须一起撤回已物化副本：否则底座目录里还留着它，agent 照旧看得见。
 	t := m.ReconcileAll()
 	resp.Removed, resp.MaterializeErrors = t.Removed, t.Errors
@@ -192,8 +191,8 @@ func (m *Plane) DeleteSkill(ctx context.Context, id string) (*dtocapability.Skil
 }
 
 // deleteNoop 幂等删除的空结果。
-func deleteNoop(id, path string) *dtocapability.SkillDeleteResp {
-	return &dtocapability.SkillDeleteResp{ID: id, Deleted: false, Path: path,
+func deleteNoop(id, path string) *DeleteResult {
+	return &DeleteResult{ID: id, Deleted: false, Path: path,
 		NextAction: "该 skill 本来就不存在，无需删除"}
 }
 

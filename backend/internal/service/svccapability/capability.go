@@ -59,27 +59,51 @@ func NewCapability(skills *domskill.Plane, mcp *dommcp.Plane, tools ToolCatalog,
 }
 
 func (s *capabilitySvc) ListSkills() ([]dtocapability.SkillResp, error) {
-	return s.skills.ListSkills()
+	items, err := s.skills.ListSkills()
+	if err != nil {
+		return nil, err
+	}
+	return skillResps(items), nil
 }
 
 func (s *capabilitySvc) WriteSkill(ctx context.Context, pathID string, req dtocapability.SkillWriteReq, create bool) (*dtocapability.SkillWriteResp, error) {
-	return s.skills.WriteSkill(ctx, pathID, req, create)
+	view, err := s.skills.WriteSkill(ctx, pathID, domskill.WriteRequest(req), create)
+	if err != nil {
+		return nil, err
+	}
+	return skillWriteResp(view), nil
 }
 
 func (s *capabilitySvc) DeleteSkill(ctx context.Context, id string) (*dtocapability.SkillDeleteResp, error) {
-	return s.skills.DeleteSkill(ctx, id)
+	view, err := s.skills.DeleteSkill(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return skillDeleteResp(view), nil
 }
 
 func (s *capabilitySvc) ImportPackage(ctx context.Context, r io.ReaderAt, size int64) (*dtocapability.SkillWriteResp, error) {
-	return s.skills.ImportPackage(ctx, r, size)
+	view, err := s.skills.ImportPackage(ctx, r, size)
+	if err != nil {
+		return nil, err
+	}
+	return skillWriteResp(view), nil
 }
 
 func (s *capabilitySvc) SetSkillEnabled(ctx context.Context, id string, enabled bool) (*dtocapability.SkillToggleResp, error) {
-	return s.skills.SetSkillEnabled(ctx, id, enabled)
+	view, err := s.skills.SetSkillEnabled(ctx, id, enabled)
+	if err != nil {
+		return nil, err
+	}
+	return skillToggleResp(view), nil
 }
 
 func (s *capabilitySvc) SkillMaterialization(id string) (*dtocapability.SkillMaterializationResp, error) {
-	return s.skills.SkillMaterialization(id)
+	view, err := s.skills.SkillMaterialization(id)
+	if err != nil {
+		return nil, err
+	}
+	return skillMaterializationResp(view), nil
 }
 
 func (s *capabilitySvc) WriteServer(ctx context.Context, pathID string, req dtocapability.McpWriteReq, create bool) (*dtocapability.McpWriteResp, error) {

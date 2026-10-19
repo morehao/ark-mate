@@ -8,7 +8,6 @@ import (
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/code"
 	defn "github.com/morehao/ark-mate/internal/definition"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -44,11 +43,11 @@ func (m *Plane) Projections() *Projections { return m.proj }
 func (m *Plane) Snapshot() []Projection { return m.proj.Snapshot() }
 
 // ListSkills 技能读面：把注册表里的技能定义投影成对外形态。
-func (m *Plane) ListSkills() ([]dtocapability.SkillResp, error) {
+func (m *Plane) ListSkills() ([]SkillView, error) {
 	items := m.caps.ListSkills()
-	out := make([]dtocapability.SkillResp, 0, len(items))
+	out := make([]SkillView, 0, len(items))
 	for _, sk := range items {
-		out = append(out, dtocapability.SkillResp{
+		out = append(out, SkillView{
 			ID: sk.ID, Name: sk.Name, Description: sk.Description, Body: sk.Body,
 			Runtimes: append([]string(nil), sk.Runtimes...), Scope: sk.EffectiveScope(),
 			Enabled: sk.IsEnabled(), Warnings: Warnings(sk),
@@ -149,7 +148,7 @@ func (m *Plane) WriteSkillEnabled(ctx context.Context, id string, enabled bool) 
 //  2. 再改内存注册表（此后 agent 能力目录/物化都按新值走）；
 //  3. 最后重校物化目标（把已物化的副本写进去或撤下来），重校失败**不**回滚前两步——
 //     定义文件已经改了，此时谎报「失败」会让用户以为没生效，而重启后照样生效。失败原因随响应回带。
-func (m *Plane) SetSkillEnabled(ctx context.Context, id string, enabled bool) (*dtocapability.SkillToggleResp, error) {
+func (m *Plane) SetSkillEnabled(ctx context.Context, id string, enabled bool) (*ToggleResult, error) {
 	if id == "" {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "skill_required", "skill id 必填", nil))
 	}
@@ -166,7 +165,7 @@ func (m *Plane) SetSkillEnabled(ctx context.Context, id string, enabled bool) (*
 	}
 	after, _ := m.caps.SetSkillEnabled(id, enabled)
 
-	resp := &dtocapability.SkillToggleResp{
+	resp := &ToggleResult{
 		ID: after.ID, Enabled: after.IsEnabled(), Path: path,
 	}
 	// 立刻重校：禁用要**撤回**已物化的副本（否则 agent 下次拉起还看得见它），

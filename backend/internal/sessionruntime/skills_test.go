@@ -13,7 +13,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/code"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
@@ -238,7 +237,7 @@ func envelopeCode(t *testing.T, err error) int {
 func boolPtr(v bool) *bool { return &v }
 
 // matStatus 取某 root 的体检状态（测试断言用）。
-func matStatus(t *testing.T, svc *Service, id, root string) dtocapability.SkillMaterializationState {
+func matStatus(t *testing.T, svc *Service, id, root string) skill.MaterializationStateView {
 	t.Helper()
 	resp, err := svc.Planes().Skills.SkillMaterialization(id)
 	if err != nil {
@@ -250,7 +249,7 @@ func matStatus(t *testing.T, svc *Service, id, root string) dtocapability.SkillM
 		}
 	}
 	t.Fatalf("体检结果里没有 root=%s: %+v", root, resp.States)
-	return dtocapability.SkillMaterializationState{}
+	return skill.MaterializationStateView{}
 }
 
 // TestSkillMaterializationStatuses §13.4 S2 审计面：每个 status 都可判定、都对应一个真实情况。
