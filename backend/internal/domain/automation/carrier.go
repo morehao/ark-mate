@@ -14,7 +14,6 @@ import (
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/golib/glog"
 )
 
@@ -151,8 +150,8 @@ func (pl *Plane) deleteAutomationDefinition(ctx context.Context, id string) (boo
 // ——— 定义 ⇄ 行/文件的形态转换 ———
 
 // automationRuntimeOf 把强类型定义的运行态抽成列结构（**不含** `state`：它属于定义，见 P-10）。
-func automationRuntimeOf(def automation.Automation) store.AutomationRuntimeState {
-	return store.AutomationRuntimeState{
+func automationRuntimeOf(def automation.Automation) model.AutomationRuntimeState {
+	return model.AutomationRuntimeState{
 		LastFiredAt:         LastFiredText(def.LastFiredAt),
 		LastStatus:          def.LastStatus,
 		LastReason:          def.LastReason,
@@ -302,7 +301,7 @@ func (pl *Plane) SaveOverlay(ctx context.Context, id string, overlay map[string]
 	if !found {
 		return notFoundAutomation(id)
 	}
-	rt := store.AutomationRuntimeState{
+	rt := model.AutomationRuntimeState{
 		LastFiredAt:         stringOf(overlay, "last_fired_at", row.LastFiredAt),
 		LastStatus:          stringOf(overlay, "last_status", row.LastStatus),
 		LastReason:          stringOf(overlay, "last_reason", row.LastReason),
@@ -337,7 +336,7 @@ func (pl *Plane) SaveOverlay(ctx context.Context, id string, overlay map[string]
 			body, rev = string(next), row.Revision
 		}
 	}
-	ok, err := pl.st.SaveAutomationOverlay(ctx, id, store.AutomationOverlay{
+	ok, err := pl.st.SaveAutomationOverlay(ctx, id, model.AutomationOverlay{
 		Body: body, ExpectedRev: rev, ExpectedLastFired: expectedLastFired, Runtime: rt,
 	})
 	if err != nil {

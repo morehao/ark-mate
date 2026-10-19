@@ -7,6 +7,7 @@ import (
 	"fmt"
 	defn "github.com/morehao/ark-mate/internal/definition"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
+	"github.com/morehao/ark-mate/internal/store"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,7 +17,6 @@ import (
 	pkgautomation "github.com/morehao/ark-mate/internal/automation"
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
 )
 
 // ——— 存量定时任务定义的一次性导入与导出（M6-7 下半） ———
@@ -142,8 +142,8 @@ func automationFileBody(row *model.AutomationEntity) (string, error) {
 }
 
 // automationRuntimeStateOf 从一行取运行态（recent_runs 的 JSON 坏掉 → 报错，不静默丢运行史）。
-func automationRuntimeStateOf(row *model.AutomationEntity) (store.AutomationRuntimeState, error) {
-	rt := store.AutomationRuntimeState{
+func automationRuntimeStateOf(row *model.AutomationEntity) (model.AutomationRuntimeState, error) {
+	rt := model.AutomationRuntimeState{
 		LastFiredAt:         row.LastFiredAt,
 		LastStatus:          row.LastStatus,
 		LastReason:          row.LastReason,
@@ -161,7 +161,7 @@ func automationRuntimeStateOf(row *model.AutomationEntity) (store.AutomationRunt
 }
 
 // applyAutomationRuntime 把运行态写进文件文档（空值不写键：与"未触发过就什么都没有"一致）。
-func applyAutomationRuntime(df *capability.DefinitionFile, rt store.AutomationRuntimeState) error {
+func applyAutomationRuntime(df *capability.DefinitionFile, rt model.AutomationRuntimeState) error {
 	if rt.LastFiredAt != "" {
 		if err := df.Set("last_fired_at", rt.LastFiredAt); err != nil {
 			return err
@@ -200,10 +200,10 @@ func applyAutomationRuntime(df *capability.DefinitionFile, rt store.AutomationRu
 }
 
 // scanAutomationDir 扫描 `<AutomationDir>/*.json`：逐条切分定义/运行态并过闸门。
-func scanAutomationDir(dir string, out io.Writer) ([]store.DefinitionImportItem, ImportStats) {
+func scanAutomationDir(dir string, out io.Writer) ([]model.DefinitionImportItem, ImportStats) {
 	stats := ImportStats{DefinitionImportStats: definition.DefinitionImportStats{Dir: dir}}
 	files := definition.GlobSorted(dir)
-	items := make([]store.DefinitionImportItem, 0, len(files))
+	items := make([]model.DefinitionImportItem, 0, len(files))
 	kept := make([]string, 0, len(files))
 	for _, path := range files {
 		if strings.HasPrefix(filepath.Base(path), ".") {
@@ -216,7 +216,7 @@ func scanAutomationDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 			definition.WarnFile(out, "automation", path, err)
 			continue
 		}
-		items = append(items, store.DefinitionImportItem{
+		items = append(items, model.DefinitionImportItem{
 			Kind: model.DefinitionKindAutomation, ID: id, Body: body, AutomationRuntime: rt,
 		})
 		stats.Automations++
@@ -229,7 +229,7 @@ func scanAutomationDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 //
 // 文件里的保留键（`pkgautomation.ReservedKeys`）一律搬进运行态：不搬的话定义正文里就会留着
 // `last_fired_at` 这种"写了也不生效"的键，正是 P-10 要结构性排除的东西。
-func readAutomationDefinitionFile(path string) (string, string, *store.AutomationRuntimeState, error) {
+func readAutomationDefinitionFile(path string) (string, string, *model.AutomationRuntimeState, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", "", nil, err
@@ -285,8 +285,8 @@ func readAutomationDefinitionFile(path string) (string, string, *store.Automatio
 //
 // 类型不符一律**报错**（计入 Invalid 并 WARN）：静默丢掉一个写坏的 `last_fired_at` 会让用户
 // 拿到"我明明写了它为什么不生效"的困惑；而报错是可操作的（删掉或改对那个键再导入）。
-func automationRuntimeFromDoc(doc map[string]json.RawMessage) (*store.AutomationRuntimeState, error) {
-	rt := store.AutomationRuntimeState{}
+func automationRuntimeFromDoc(doc map[string]json.RawMessage) (*model.AutomationRuntimeState, error) {
+	rt := model.AutomationRuntimeState{}
 	found := false
 	for _, k := range pkgautomation.ReservedKeys {
 		raw, ok := doc[k]

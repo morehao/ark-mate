@@ -16,8 +16,6 @@ import (
 	"context"
 	"sync"
 	"time"
-
-	"github.com/morehao/ark-mate/internal/store"
 )
 
 // Plane 自动化域的**有状态主体**（自持一把只保护域内字段的锁）。
@@ -44,7 +42,7 @@ type Plane struct {
 	runMu sync.Mutex
 
 	// st 库句柄（DB 载体；nil = memory 模式，走文件载体或纯内存）。装配期一次性注入。
-	st *store.Store
+	st AutomationStore
 	// host 宿主端口（建会话 / 取消 / 事件出口）。装配期一次性注入。
 	host Host
 }
@@ -58,7 +56,7 @@ func NewPlane() *Plane {
 //
 // **必须在装配期调用**：构造时按值传一个当时的 `st` 会永远停在 nil，而表现是"该走库的走了
 // 内存"——静默（与 `session.Plane.SetStore` 同一条教训）。
-func (pl *Plane) SetStore(st *store.Store) { pl.st = st }
+func (pl *Plane) SetStore(st AutomationStore) { pl.st = st }
 
 // SetHost 装配期登记宿主端口（建会话/取消/事件出口；nil = 不能触发）。
 func (pl *Plane) SetHost(h Host) { pl.host = h }

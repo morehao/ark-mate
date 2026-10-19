@@ -48,10 +48,11 @@ var _ AutomationSvc = (*Service)(nil)
 // 排序在这一层：域给的是**注册表快照**（`Recs()`），"按 id 排"是对外读面的口径。
 func (s *Service) ListAutomations() ([]dtoautomation.AutomationResp, error) {
 	recs := s.plane.Recs()
-	out := make([]dtoautomation.AutomationResp, 0, len(recs))
+	views := make([]domauto.AutomationView, 0, len(recs))
 	for _, rec := range recs {
-		out = append(out, rec.View())
+		views = append(views, rec.View())
 	}
+	out := automationResps(views)
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
@@ -62,7 +63,8 @@ func (s *Service) GetAutomation(id string) (*dtoautomation.AutomationResp, error
 	if !ok {
 		return nil, notFoundAutomation(id)
 	}
-	return &v, nil
+	out := automationResp(v)
+	return &out, nil
 }
 
 // CreateAutomation 新建定义。`id` 必填（写面 DTO 的原文对象里取，非法类型 → 40000）。
@@ -81,7 +83,8 @@ func (s *Service) CreateAutomation(ctx context.Context, req dtoautomation.Automa
 	if err != nil {
 		return nil, err
 	}
-	return &v, nil
+	out := automationResp(v)
+	return &out, nil
 }
 
 // UpdateAutomation 覆盖写：只改请求体里出现的键（未出现的保留原值；`null` 删键）。
@@ -90,7 +93,8 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req dtoautoma
 	if err != nil {
 		return nil, err
 	}
-	return &v, nil
+	out := automationResp(v)
+	return &out, nil
 }
 
 // DeleteAutomation 删除定义（幂等）。
