@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，新增的是层表与契约基线）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 起为 172 条；新增的是层表、契约基线、v3.2 层表与 gin 围栏）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -19,6 +19,8 @@
 ## 当前判据清单
 
 - **层表守卫（v3.1 §3.2）**：`layers_v31_test.go` 用一张**层号表**（`internal/archtest/layers_v31_test.go` 的 `v31Layers`：object/version → model/eventbus/infra → code/credential → runtime → infra/dsh → config → dto/dao → store → mechanism → domain → runtimeconn/registry/service/sessionruntime → middleware/gateway → controller → router → assembly → app → cliops → cli）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向下 import（层号不得增大）；② 同层默认不互链，除非该层显式 `sameLayer: true`（如 `runtimeconn`/`registry`/`service` 的同族协作）；③ 每层可带 `deny` 精确排除个别下层包（如 `service` 不得 import `store`/`dao`/`registry`）。违规是**硬失败**（`v31LayerGuardBlocking = true`），例外清单 `v31Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。同文件另有三条专项：`runtime` 不得 import adapter、只有 `assembly`（生产代码）可以 import `internal/infra/dsh`、adapter 不得 import 应用内核。
+
+- **层表守卫（v3.2 六边形，`layers_v32_test.go`）**：与 v3.1 表**同时生效**，两者方向相反。v3.1 把 `domain` 放第 9 层、`store` 第 7 层、`dto`/`dao` 第 6 层、`model` 第 1 层（规则是"高层可以 import 低层"），于是 `domain → store/dto/mechanism` 被那张表定义成**合法**；v3.2 把 `domain` 压到 L2、持久化与机制压到 L5/L6、`dto` 挪到 L3，`domain` 的出边只剩 L0（`model` 纯列形状）与 L1（值对象/协议库）。判据三条同构（只能向内、同带默认不互链、`deny` 精确排除策略边），另有两条只属于 v3.2：`service` **永不** `sameLayer` 且 `deny internal/service`（同时挡兄弟 svc 与自身，是"svc 零互引"的载体）、`cliops` 是**第二入站适配器而不是第二装配根**（`deny` `store`/`dao`/`model`/`mechanism`/`domain`/`registry`/`sessionruntime`/`gateway`/`infra`）。迁移期 26 条例外（36 处命中）登记在 `v32Exceptions`，**双向**判据（新增边红、降到 0 不删也红），`TestV32ReportOnly` 是随时可跑的收口进度表。同文件另有 **gin 围栏**（`TestGinConfinedToInboundAdaptersV32`）：gin 只许落在 `router`/`controller`/`middleware`，`assembly`/`app` 的临时白名单在刀 2 清空。
 
 - [`layout.md`](layout.md) 里的六条边界都由 `internal/archtest` 的守卫测试强制（`go test ./internal/archtest/`）；同目录还另有**四条**契约/出口守卫：事件 type 冻结快照（`TestEventTypeContractFrozen`）、前端事件同步边（`TestFrontendEventTypesMatchRegistry`）、控制器错误出口带码（`TestControllerErrorExitsCarryCode`）、**能力绑定粒度不得超出已实测范围**（`TestCapabilityScopeDeclaration`：未 `Tested` 的 runtime 不得声明比 `process` 更细的 `CapabilityScope`，否则平台可能把 A 会话的能力投给 B 会话）
 
@@ -83,7 +85,7 @@
 `tz_offset?: number` / api 必须 `p.set('tz_offset'` / 页面必须 `tz_offset: -new Date().getTimezoneOffset()`。
 反证（实跑）：存储层改回 `UTC()` 分桶 → 红；抽掉 api 的 `p.set('tz_offset'` → 红。
 
-**共 168 条**——加守卫时记得同步这句话。
+**共 172 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 
