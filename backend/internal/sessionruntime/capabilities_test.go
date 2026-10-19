@@ -16,6 +16,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/capability"
+	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/eventbus"
@@ -406,7 +407,7 @@ func TestCallMcpTool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := svc.Planes().Mcp.CallTool(context.Background(), "h", "read_file", dtocapability.McpToolCallReq{Arguments: json.RawMessage(`{"path":"/tmp/a"}`)})
+	got, err := svc.Planes().Mcp.CallTool(context.Background(), "h", "read_file", dommcp.ToolCallRequest{Arguments: json.RawMessage(`{"path":"/tmp/a"}`)})
 	if err != nil {
 		t.Fatalf("CallMcpTool: %v", err)
 	}
@@ -421,7 +422,7 @@ func TestCallMcpTool(t *testing.T) {
 	}
 
 	// 工具级失败：不是平台错误。
-	gotErr, err := svc.Planes().Mcp.CallTool(context.Background(), "h", "boom", dtocapability.McpToolCallReq{})
+	gotErr, err := svc.Planes().Mcp.CallTool(context.Background(), "h", "boom", dommcp.ToolCallRequest{})
 	if err != nil {
 		t.Fatalf("工具级失败不应报错: %v", err)
 	}
@@ -430,22 +431,22 @@ func TestCallMcpTool(t *testing.T) {
 	}
 
 	// 未知 server → 40401。
-	if _, err := svc.Planes().Mcp.CallTool(context.Background(), "nope", "t", dtocapability.McpToolCallReq{}); restCode(err) != 40401 {
+	if _, err := svc.Planes().Mcp.CallTool(context.Background(), "nope", "t", dommcp.ToolCallRequest{}); restCode(err) != 40401 {
 		t.Fatalf("未知 server 应 40401，got %v", err)
 	}
 	// sse（B3 起已支持）指向不可达端点 → 连接失败 50201（不再是不支持 40501）。
 	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{ID: "s", Name: "S", Transport: capability.TransportSSE, URL: "http://127.0.0.1:1/sse"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Planes().Mcp.CallTool(context.Background(), "s", "t", dtocapability.McpToolCallReq{}); restCode(err) != 50201 {
+	if _, err := svc.Planes().Mcp.CallTool(context.Background(), "s", "t", dommcp.ToolCallRequest{}); restCode(err) != 50201 {
 		t.Fatalf("sse 不可达应 50201，got %v", err)
 	}
 	// 非法 arguments → 40001（ClassRequest）。
-	if _, err := svc.Planes().Mcp.CallTool(context.Background(), "h", "read_file", dtocapability.McpToolCallReq{Arguments: json.RawMessage(`{oops`)}); restCode(err) != 40001 {
+	if _, err := svc.Planes().Mcp.CallTool(context.Background(), "h", "read_file", dommcp.ToolCallRequest{Arguments: json.RawMessage(`{oops`)}); restCode(err) != 40001 {
 		t.Fatalf("非法 arguments 应 40001，got %v", err)
 	}
 	// 空工具名 → 40001。
-	if _, err := svc.Planes().Mcp.CallTool(context.Background(), "h", "", dtocapability.McpToolCallReq{}); restCode(err) != 40001 {
+	if _, err := svc.Planes().Mcp.CallTool(context.Background(), "h", "", dommcp.ToolCallRequest{}); restCode(err) != 40001 {
 		t.Fatalf("空工具名应 40001，got %v", err)
 	}
 }
@@ -476,7 +477,7 @@ func TestCallMcpToolTimeout(t *testing.T) {
 	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{ID: "slow", Name: "Slow", Transport: capability.TransportHTTP, URL: srv.URL}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := svc.Planes().Mcp.CallTool(context.Background(), "slow", "t", dtocapability.McpToolCallReq{TimeoutMS: 50})
+	_, err := svc.Planes().Mcp.CallTool(context.Background(), "slow", "t", dommcp.ToolCallRequest{TimeoutMS: 50})
 	if restCode(err) != 40901 {
 		t.Fatalf("超时应 40901，got %v (code=%d)", err, restCode(err))
 	}
@@ -562,14 +563,14 @@ func TestMcpResourcesPrompts(t *testing.T) {
 		t.Fatalf("提示词列表不符: %+v", ps)
 	}
 
-	gp, err := svc.Planes().Mcp.GetPrompt(context.Background(), "h", "greet", dtocapability.McpPromptGetReq{Arguments: map[string]string{"who": "世界"}})
+	gp, err := svc.Planes().Mcp.GetPrompt(context.Background(), "h", "greet", dommcp.PromptGetRequest{Arguments: map[string]string{"who": "世界"}})
 	if err != nil {
 		t.Fatalf("GetMcpPrompt: %v", err)
 	}
 	if gp.Description != "问候模板" || len(gp.Messages) != 1 || gp.Messages[0].Role != "user" {
 		t.Fatalf("提示词结果不符: %+v", gp)
 	}
-	if _, err := svc.Planes().Mcp.GetPrompt(context.Background(), "h", "", dtocapability.McpPromptGetReq{}); restCode(err) != 40001 {
+	if _, err := svc.Planes().Mcp.GetPrompt(context.Background(), "h", "", dommcp.PromptGetRequest{}); restCode(err) != 40001 {
 		t.Fatalf("空提示词名应 40001，got %v", err)
 	}
 

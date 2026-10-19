@@ -21,6 +21,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
+	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/skill"
@@ -152,7 +153,7 @@ type stubSvc struct {
 	skillWriteReq skill.WriteRequest
 	mcpWritten    string
 	mcpWriteID    string
-	mcpWriteReq   dtocapability.McpWriteReq
+	mcpWriteReq   dommcp.WriteRequest
 
 	// 会话元数据写面的三份依赖（P4a 正文第四十四刀）。
 	resolvedModelRuntime string
@@ -272,7 +273,7 @@ func (s *stubSvc) DeleteSkill(_ context.Context, id string) (*dtocapability.Skil
 		NextAction: "已删除"}, nil
 }
 
-func (s *stubSvc) CreateMcpServer(_ context.Context, req dtocapability.McpWriteReq) (*dtocapability.McpWriteResp, error) {
+func (s *stubSvc) CreateMcpServer(_ context.Context, req dommcp.WriteRequest) (*dtocapability.McpWriteResp, error) {
 	s.mcpWritten, s.mcpWriteReq = "create", req
 	if s.capErr != nil {
 		return nil, s.capErr
@@ -280,7 +281,7 @@ func (s *stubSvc) CreateMcpServer(_ context.Context, req dtocapability.McpWriteR
 	return &dtocapability.McpWriteResp{ID: "m1", Path: "/tmp/mcp/m1.json", Created: true, NextAction: "已新建"}, nil
 }
 
-func (s *stubSvc) UpdateMcpServer(_ context.Context, id string, req dtocapability.McpWriteReq) (*dtocapability.McpWriteResp, error) {
+func (s *stubSvc) UpdateMcpServer(_ context.Context, id string, req dommcp.WriteRequest) (*dtocapability.McpWriteResp, error) {
 	s.mcpWritten, s.mcpWriteID, s.mcpWriteReq = "update", id, req
 	if s.capErr != nil {
 		return nil, s.capErr

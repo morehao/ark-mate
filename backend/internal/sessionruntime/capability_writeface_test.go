@@ -10,8 +10,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/code"
+	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/skill"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -33,9 +33,9 @@ func writeReq(t *testing.T, body string) skill.WriteRequest {
 }
 
 // writeMcpReq 同上（MCP 侧）。
-func writeMcpReq(t *testing.T, body string) dtocapability.McpWriteReq {
+func writeMcpReq(t *testing.T, body string) dommcp.WriteRequest {
 	t.Helper()
-	var req dtocapability.McpWriteReq
+	var req dommcp.WriteRequest
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		t.Fatalf("测试请求体不是合法 JSON 对象: %v（%s）", err, body)
 	}

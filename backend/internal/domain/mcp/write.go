@@ -8,7 +8,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/capability"
 	defn "github.com/morehao/ark-mate/internal/definition"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
@@ -24,7 +23,7 @@ import (
 // revision CAS）③ 提交成功后才更新内存。顺序倒过来就会留下"内存里有、载体上没有"的幻影。
 
 // WriteServer 写面主体（create / update 共用的全部顺序与失败处理）。
-func (p *Plane) WriteServer(ctx context.Context, pathID string, req dtocapability.McpWriteReq, create bool) (*dtocapability.McpWriteResp, error) {
+func (p *Plane) WriteServer(ctx context.Context, pathID string, req WriteRequest, create bool) (*WriteResult, error) {
 	if p.caps == nil {
 		return nil, defn.ErrCapabilityUnavailable()
 	}
@@ -112,7 +111,7 @@ func (p *Plane) WriteServer(ctx context.Context, pathID string, req dtocapabilit
 		glog.Warnw(ctx, "capability: mcp 定义已提交但入表失败（内存视图可能落后）", "id", id, "err", err)
 	}
 
-	resp := &dtocapability.McpWriteResp{
+	resp := &WriteResult{
 		ID: id, Path: repo.Locator(id), Created: create || created,
 		UnresolvedSecretKeys: p.secrets.UnresolvedKeys(m),
 	}
@@ -132,7 +131,7 @@ func (p *Plane) WriteServer(ctx context.Context, pathID string, req dtocapabilit
 
 // DeleteServer 删除一个 MCP server 定义（DELETE /mcps/:id）：删定义 + 摘内存条目
 // + **一并摘除该 server 归属的工具**。幂等：不存在 → `deleted:false` 且无错。
-func (p *Plane) DeleteServer(ctx context.Context, id string) (*dtocapability.McpDeleteResp, error) {
+func (p *Plane) DeleteServer(ctx context.Context, id string) (*DeleteResult, error) {
 	if p.caps == nil {
 		return nil, defn.ErrCapabilityUnavailable()
 	}
@@ -167,15 +166,15 @@ func (p *Plane) DeleteServer(ctx context.Context, id string) (*dtocapability.Mcp
 	// 工具条目必须一起摘：留着已删 server 的工具，用户会在 /tools 里看见一个永远调不通的能力
 	// （agent 侧可见性过滤只看交通承载，看不出 server 已经没了）。
 	tools := p.caps.RemoveToolsForMcpServer(id)
-	resp := &dtocapability.McpDeleteResp{ID: id, Deleted: deleted, Path: locator, ToolsRemoved: tools}
+	resp := &DeleteResult{ID: id, Deleted: deleted, Path: locator, ToolsRemoved: tools}
 	resp.NextAction = fmt.Sprintf(
 		"已删除：定义已移除，归属该 server 的 %d 条工具条目已一并摘除（正在跑的会话不受影响，下一轮/下次拉起不再注入）", tools)
 	return resp, nil
 }
 
 // deleteNoop 幂等删除的空结果。
-func deleteNoop(id, path string) *dtocapability.McpDeleteResp {
-	return &dtocapability.McpDeleteResp{ID: id, Deleted: false, Path: path,
+func deleteNoop(id, path string) *DeleteResult {
+	return &DeleteResult{ID: id, Deleted: false, Path: path,
 		NextAction: "该 MCP server 本来就不存在，无需删除"}
 }
 

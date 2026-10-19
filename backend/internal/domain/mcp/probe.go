@@ -8,7 +8,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/code"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	mcpclient "github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/golib/glog"
@@ -31,7 +30,7 @@ func probeClass(err error) acl.Class {
 // 建连（stdio/http/streamable_http；sse 明确不支持）→ initialize 握手 → tools/list（翻页）
 // → **整体替换**该 server 归属的 Tool 目录条目（tools/list 是权威快照）。
 // 成功/失败都会记录探测状态（GET /mcps 可读回 last_probe_*）。未知 server → 40401。
-func (p *Plane) Probe(ctx context.Context, id string) (*dtocapability.McpProbeResp, error) {
+func (p *Plane) Probe(ctx context.Context, id string) (*ProbeResult, error) {
 	server, ok := p.caps.GetMcpServer(id)
 	if !ok {
 		return nil, code.FromError(notFoundErr(id))
@@ -90,7 +89,7 @@ func (p *Plane) Probe(ctx context.Context, id string) (*dtocapability.McpProbeRe
 	added, removed, skipped := p.caps.ReplaceToolsForMcpServer(id, tools)
 	p.recordProbe(id, nil)
 
-	out := &dtocapability.McpProbeResp{
+	out := &ProbeResult{
 		ID: id, Transport: server.Transport,
 		ServerName: res.ServerName, ServerVersion: res.ServerVersion,
 		ProbedAt: time.Now().UTC().Format(time.RFC3339),
@@ -98,7 +97,7 @@ func (p *Plane) Probe(ctx context.Context, id string) (*dtocapability.McpProbeRe
 	}
 	for _, t := range p.caps.ListTools() {
 		if t.McpServer == id {
-			out.Tools = append(out.Tools, dtocapability.ToolResp{
+			out.Tools = append(out.Tools, ToolEntry{
 				Name: t.Name, Description: t.Description, Source: t.Source,
 				McpServer: t.McpServer, Schema: t.Schema,
 			})

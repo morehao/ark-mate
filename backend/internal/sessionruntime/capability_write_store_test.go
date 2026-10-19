@@ -13,7 +13,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/code"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/golib/gerror"
 )
@@ -241,7 +241,7 @@ func TestStoreWriteFaceGateRejectsWithoutWrite(t *testing.T) {
 	}
 
 	// mcp：stdio 命令不是绝对路径（同一道闸门，MCP 侧最常踩的一条）。
-	_, err = r.Svc.Planes().Mcp.WriteServer(ctx, "", dtocapability.McpWriteReq(rawObj(t,
+	_, err = r.Svc.Planes().Mcp.WriteServer(ctx, "", dommcp.WriteRequest(rawObj(t,
 		"id", `"bad-mcp"`, "transport", `"stdio"`, "command", `"npx"`)), true)
 	if err == nil || !strings.Contains(err.Error(), "绝对路径") {
 		t.Fatalf("相对命令应被闸门拒绝: %v", err)
@@ -327,7 +327,7 @@ func TestStoreMcpWriteFaceRoundTrip(t *testing.T) {
 	r, _ := storeCapRig(t)
 	ctx := context.Background()
 
-	resp, err := r.Svc.Planes().Mcp.WriteServer(ctx, "", dtocapability.McpWriteReq(rawObj(t,
+	resp, err := r.Svc.Planes().Mcp.WriteServer(ctx, "", dommcp.WriteRequest(rawObj(t,
 		"id", `"fs"`, "transport", `"stdio"`, "command", `"/usr/bin/env"`, "args", `["node"]`,
 		"secret_env", `{"TOKEN":"store:fs/token"}`)), true)
 	if err != nil {

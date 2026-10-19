@@ -107,35 +107,67 @@ func (s *capabilitySvc) SkillMaterialization(id string) (*dtocapability.SkillMat
 }
 
 func (s *capabilitySvc) WriteServer(ctx context.Context, pathID string, req dtocapability.McpWriteReq, create bool) (*dtocapability.McpWriteResp, error) {
-	return s.mcp.WriteServer(ctx, pathID, req, create)
+	view, err := s.mcp.WriteServer(ctx, pathID, dommcp.WriteRequest(req), create)
+	if err != nil {
+		return nil, err
+	}
+	return mcpWriteResp(view), nil
 }
 
 func (s *capabilitySvc) DeleteServer(ctx context.Context, id string) (*dtocapability.McpDeleteResp, error) {
-	return s.mcp.DeleteServer(ctx, id)
+	view, err := s.mcp.DeleteServer(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return mcpDeleteResp(view), nil
 }
 
 func (s *capabilitySvc) Probe(ctx context.Context, id string) (*dtocapability.McpProbeResp, error) {
-	return s.mcp.Probe(ctx, id)
+	view, err := s.mcp.Probe(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return mcpProbeResp(view), nil
 }
 
 func (s *capabilitySvc) CallTool(ctx context.Context, id, tool string, req dtocapability.McpToolCallReq) (*dtocapability.McpToolCallResp, error) {
-	return s.mcp.CallTool(ctx, id, tool, req)
+	view, err := s.mcp.CallTool(ctx, id, tool, dommcp.ToolCallRequest{Arguments: req.Arguments, TimeoutMS: req.TimeoutMS})
+	if err != nil {
+		return nil, err
+	}
+	return mcpToolCallResp(view), nil
 }
 
 func (s *capabilitySvc) ListResources(ctx context.Context, id string) (*dtocapability.McpResourcesResp, error) {
-	return s.mcp.ListResources(ctx, id)
+	view, err := s.mcp.ListResources(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return mcpResourcesResp(view), nil
 }
 
 func (s *capabilitySvc) ReadResource(ctx context.Context, id, uri string) (*dtocapability.McpResourceReadResp, error) {
-	return s.mcp.ReadResource(ctx, id, uri)
+	view, err := s.mcp.ReadResource(ctx, id, uri)
+	if err != nil {
+		return nil, err
+	}
+	return mcpResourceReadResp(view), nil
 }
 
 func (s *capabilitySvc) ListPrompts(ctx context.Context, id string) (*dtocapability.McpPromptsResp, error) {
-	return s.mcp.ListPrompts(ctx, id)
+	view, err := s.mcp.ListPrompts(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return mcpPromptsResp(view), nil
 }
 
 func (s *capabilitySvc) GetPrompt(ctx context.Context, id, name string, req dtocapability.McpPromptGetReq) (*dtocapability.McpPromptGetResp, error) {
-	return s.mcp.GetPrompt(ctx, id, name, req)
+	view, err := s.mcp.GetPrompt(ctx, id, name, dommcp.PromptGetRequest{Arguments: req.Arguments})
+	if err != nil {
+		return nil, err
+	}
+	return mcpPromptGetResp(view), nil
 }
 
 func (s *capabilitySvc) ListTools() ([]dtocapability.ToolResp, error) { return s.tools.ListTools() }
