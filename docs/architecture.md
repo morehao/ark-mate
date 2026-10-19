@@ -93,21 +93,37 @@ Electron 主进程（桌面态）
 
 ## 4. 后端分层与依赖方向
 
-### 4.1 应用侧
+### 4.1 层带（L0–L9，v3.2 终局表）
 
-```
-cmd/mate  →  internal/app（装配 + 启停生命周期）
-                →  internal/router（唯一传输层装配点，按领域分 routes_*.go）
-                      →  internal/controller/ctr<领域>
-                            →  internal/service/svc<领域>（**业务逻辑层**：接口 + 实现）
-                                  →  internal/domain/* · dao · store
-                internal/registry（**装配层**：Planes + 启停表 + 资源同步）
-                internal/sessionruntime（**会话编排层**：Service / Orchestrator / 权限）
-```
+机器判据是 `backend/internal/archtest/layers_v32_test.go` 的 `v32Layers`：每个包按**最长前缀**归到一层，
+规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，除非该层 `sameLayer: true`
+（`service` **永不** `sameLayer`，它 deny 自己的前缀，逼"svc 包之间零互相 import"）；③ 每层可带 `deny`
+精确排除个别内层包。违规是**硬失败**，例外清单必须为空且双向。
 
-- `internal/assembly` 是**唯一装配根**：构造 store / 领域平面 / 执行面 / 用例 / 控制器，再把控制器交给 `router`（`router.Deps`）。`internal/app` 只是应用壳（HTTP 启停/ready/信号），`internal/cli` 是命令树、`internal/cliops` 承载命令实现。每个领域一个 `routes_*.go`，只注册路由。
-- `internal/service/svc<领域>` 是**业务逻辑层**：包内声明接口 + 实现 + 构造函数，**实例只在装配根造**，控制器只收接口；`internal/sessionruntime` 是**会话编排层**（P4b 起取代 `internal/manager`：Service / Orchestrator / 权限，执行面在 `runtimeconn`、领域状态在 `domain/*`），`internal/registry` 是**装配层**（平面集合 + 启停表 + 资源同步）。
-- `internal/dto/dto<领域>` 被控制器、用例层与过渡期实现共用，自身不依赖任何应用层。
+| 层 | 谁 | 一句话 |
+| --- | --- | --- |
+| **L0** | `model` | 表行形状。零依赖，被所有持久侧与部分领域引用 |
+| **L1** | `object/*` `redact` `identity` `resource` `version` `credential` `eventbus` `code` `automation` `runtime` `capability` `definition` `infra/{acp,mcp,logging}` | 值对象与协议库，**本带允许互链**（ACP 线协议、错误码折算、值类型复用） |
+| **L2** | `domain/*` | 业务规则与状态。**出边为零**：不 import dto、store、mechanism、infra |
+| **L3** | `dto/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份） |
+| **L4** | `service/svc<领域>` | 用例层：接口 + 实现 + 构造函数；校验、错误码、响应装配 |
+| **L5** | `store` `dao` `infra/{credentials,dbclient,procreg,dsh}` | 持久与基础设施 |
+| **L6** | `gateway` `mechanism` `registry` `runtimeconn` `config` `capabilityio` | 驱动侧：机制、注册表、连接面、定义导入导出编排 |
+| **L7** | `sessionruntime` | 会话编排（Service / Orchestrator / 权限） |
+| **L8** | `controller/ctr<领域>` `middleware` | 入站适配 |
+| **L9** | `router` `assembly` `app` `cliops` `cli` `maintenance` | 装配与交付 |
+
+两条容易搞混的：**`domain` 在 `dto` 里侧**（域不认识对外契约，视图由用例层投影）；**`maintenance` 与组合根同级**
+（`mate doctor` 要真的把 app 装起来自检，它向下吃 `assembly`/`router`）。
+
+### 4.1.1 三个"第二形态"
+
+- **`domain` 双载体**：`store`（sqlite）与文件/memory 各一份，由窄端口（`WorkspaceStore` / `ProviderStore` /
+  `AutomationStore` / `DefinitionFiles` / `Secrets` / `Store`）在装配期接进来；`*store.Store` 结构上满足它们。
+- **`capabilityio`（L6）**：定义导入/导出**编排**（扫目录、计数、落库、导出）。域只留纯转换
+  （文件形状、v11→v12 映射、id 词法），因为编排要认识 `store` 与 `mechanism`，而域不该认识它们。
+- **`maintenance`（L9）**：命令实现（migrate / doctor / transcripts / mcp / config / demo / automation /
+  capability / provider）。`cliops` 只剩命令分发与常驻 `serve`。
 
 ### 4.2 持久侧
 
@@ -118,20 +134,16 @@ internal/dbclient（句柄装配 + SQLite URL 拼装）
 internal/model（实体定义）被上面三者依赖，自身不依赖任何一层
 ```
 
-三条方向纪律：`dao` 不得 import `store`（成环）；`model` 不得 import `dao`/`store`；`store` 只做三件事——持有句柄、兜住跨表事务、暴露读模型 API，单表读写一律经 `dao`。
+三条方向纪律：`dao` 不得 import `store`（成环）；`model` 不得 import `dao`/`store`；`store` 只做三件事——持有句柄、兜住**单聚合**事务、暴露读模型 API，单表读写一律经 `dao`。
 
-### 4.3 `pkg/` 与 `internal/` 的分界
+跨聚合的事务（如"删工作空间 + 释放会话归属"）**不在仓储里**：策略属于领域，所以领域通过
+`Atomically` 在自己的规则里编排，仓储只提供事务开合与三个窄操作（`store/workspace_tx.go`）。
 
-| 目录 | 准入标准 | 内容 |
-| --- | --- | --- |
-| `pkg/` | 抽出去别的应用也能用 | `acl`（ACP 客户端与传输）、`runtime`（adapter 注册表 + 三张端口表）、`capability`、`mcp`、`code`（错误码）、`config`、`credentials`、`dbclient`、`logging`、`procreg`、`redact`、`resource`、`automation`、`object/{objid,objusage,objdelivery}` |
-| `internal/` | 本控制面的应用逻辑与策略 | `app`、`router`、`controller`、`service`、`manager`、`dto`、`dao`、`model`、`store`、`eventbus`、`middleware`、`credential`、`gateway`、`archtest`、`testutil`、`version` |
+### 4.3 只有一个代码层
 
-**`pkg/` 内部不得 import `internal/`**（守卫）。这条是本仓多条「接口放哪」的根源：底座 adapter 要实现的 `resource.Syncer` 之所以定义在 `internal/resource` 而不是 `internal/runtime`，是因为 `internal/runtime` 已经 import 各 adapter 子包——定义在父包会形成父子 import 环。
-
-### 4.4 一条容易踩的形状约定
-
-**adapter 子包只提供纯数据与端口实现，父包汇入统一 `Spec`**。落点里的 `${VAR}` 占位符只能靠该 runtime 自己的隔离 env 解出来，而 adapter 拿不到注册表——所以解析必须发生在父包，adapter 永远不自己拼 `HOME`。
+`backend/pkg` 已全量并入 `internal/`（v3.1 §3.1.12）：不再有"可复用基础设施 vs 应用专属"的目录分界，
+新增包时只问一句——**它落在层表的哪一层**。原先 `pkg/` 下的包现在归在 L1（协议与值对象）或 L5
+（基础设施），层号就是它们的准入标准。
 
 ## 5. 数据模型
 

@@ -6,11 +6,11 @@
 - `backend/`：唯一 Go module（`github.com/morehao/ark-mate`，go 1.26.1）。**仓库根没有 go.mod / go.work——所有 go 命令必须在 `backend/` 下运行**。
   - **`backend/pkg` 已全量并入 `internal/`**（v3.1 §3.1.12，P2）：仓库只有一个代码层，不再有"可复用基础设施 vs 应用专属"的目录分界。原先在 `pkg/` 的包按职责落到 `internal/` 下：
     - `internal/infra/{acp,mcp,dsh,logging,credentials,dbclient,procreg}`：协议客户端与运行期基础设施。`infra/dsh` 是**唯一 adapter**（实现 `runtime.Adapter`：`Spec()` + `RegisterPorts()`，五张端口表：syncer / 原生权限 / 模型值 / 工具失败归类 / 产品身份）。
-    - `internal/runtime`：注册表 + `Spec` 契约 + `Adapter` 接口 + 隔离投影。**不得 import 任何 adapter**（`TestRuntimeDoesNotImportRuntimeAdaptersV31`）。
+    - `internal/runtime`：注册表 + `Spec` 契约 + `Adapter` 接口 + 隔离投影。**不得 import 任何 adapter**（`TestRuntimeDoesNotImportRuntimeAdapters`）。
     - `internal/{code,config,capability,automation,identity,resource,redact,object/*}`：错误码、进程配置、能力装载、自动化解析、身份常量、跨层值对象等。
     - 新增/搬迁包时只问一句：**它在层表的哪一层**（见下），不再问"进 pkg 还是 internal"。
   - **依赖方向单一**：
-    - 应用侧：`cmd → app → router → controller → service → dao/store`；`dto` 被 **controller 与 service 共用**（跨这两条边传的就是 dto，service 也收 dto、回 dto），`dto` 自身不依赖应用层。
+    - 层带（L0–L9 终局表，见 [`../architecture.md`](../architecture.md) 的 §4.1）：`model` → 值/协议 → `domain` → `dto` → `service` → `store/dao/infra` → 机制与注册表 → `sessionruntime` → `controller` → 装配与交付。**只能向内 import**；`dto` 被 controller / service / CLI / WS 共用（同一份对外契约），`domain` 在它的里侧、不认识它。
     - **装配只能自上而下，不许反向**：`assembly` 构造用例与控制器，`router` 只收已构造的控制器（`router.Deps`），`app` 只消费 `assembly.BuildResult`。**`app`/`router`/`cli` 都不得引用 `service/svc*`**，控制器也不得 import `domain`/`store`/`model`——判据见 `layers_v32_test.go`。
     - 持久侧：`dbclient → dao → store`，`model` 被三者依赖且自身不依赖任何一层；`dao` 不得 import `store`（会成环），`model` 不得 import `dao`/`store`。
     - **厚域与用例都走窄端口，不 import 门面**（P4）：`domain/session` 声明 `Store` 端口（`store_port.go`），`domain/interaction` 零 `store`；用例层同理声明 `svcmodel.ModelStore` / `svcsession.EventReader` / `svcsystem.SourceFactsReader`。`*store.Store` 结构上满足它们、由装配根交下来；**交下来时必须现判 nil**——typed-nil 装进接口不是 nil，会让"内存模式 40501 / 只读镜像"那几条判据静默失效（`assembly/services.go` 的 `eventReader`/`sourceFactsReader`/`modelStore` 就是这条规矩的落点）。`model` 仍可被 `domain/session` 引用：它是纯列形状（无行为），把它也搬走只会换来 30 多个镜像结构。
