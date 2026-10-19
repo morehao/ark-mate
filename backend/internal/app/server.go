@@ -8,14 +8,12 @@ import (
 	"net"
 	"net/http"
 	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
 // stopGrace HTTP 优雅停机预算（信号到达后留给在途请求的时间）。
 const stopGrace = 5 * time.Second
 
-// httpServer 控制面 HTTP 服务，封装 gin.Engine 的启停生命周期。
+// httpServer 控制面 HTTP 服务，封装 `http.Handler` 的启停生命周期。
 //
 // 与路由分离的原因：路由（internal/router）回答"哪些路径由谁处理"，
 // 这里回答"监听在哪、超时多久、怎么优雅退出"——两者的变更理由完全不同。
@@ -43,22 +41,21 @@ func listen(addr string) (net.Listener, error) {
 }
 
 // newHTTPServer 绑定监听地址并构造 HTTP 服务（参数是配置里的地址）。
-func newHTTPServer(addr string, engine *gin.Engine) (*httpServer, error) {
+func newHTTPServer(addr string, h http.Handler) (*httpServer, error) {
 	ln, err := listen(addr)
 	if err != nil {
 		return nil, err
 	}
-	return newHTTPServerOn(ln, engine), nil
+	return newHTTPServerOn(ln, h), nil
 }
 
 // newHTTPServerOn 用**已绑定**的监听器构造 HTTP 服务（地址与端口已定，不可再改）。
 //
 // 默认值取向：只给读头超时（慢客户端攻击面），不设读写整体超时——
 // WS 是长连接，写超时会掐断实时事件流；TLS 最低 1.2。
-func newHTTPServerOn(ln net.Listener, engine *gin.Engine) *httpServer {
-	engine.ForwardedByClientIP = true
+func newHTTPServerOn(ln net.Listener, h http.Handler) *httpServer {
 	srv := &http.Server{
-		Handler:           engine,
+		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig: &tls.Config{
 			MinVersion: tls.VersionTLS12,
@@ -70,10 +67,10 @@ func newHTTPServerOn(ln net.Listener, engine *gin.Engine) *httpServer {
 	return &httpServer{ln: ln, srv: srv}
 }
 
-// Engine 返回底层 gin.Engine（供测试/扩展挂载路由）。
-func (s *httpServer) Engine() *gin.Engine {
-	return s.srv.Handler.(*gin.Engine)
-}
+// Handler 返回底层 HTTP handler（供测试挂载/断言路由）。
+//
+// 这里**不做类型断言**：应用壳不需要知道 Handler 背后是 gin 还是别的框架。
+func (s *httpServer) Handler() http.Handler { return s.srv.Handler }
 
 // Addr 返回**实际**监听地址（配置为 `:0` 时是内核分配后的真实端口）。
 func (s *httpServer) Addr() string { return s.ln.Addr().String() }

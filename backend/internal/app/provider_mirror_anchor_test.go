@@ -1,9 +1,9 @@
 package app
 
 import (
-	"github.com/morehao/ark-mate/internal/model"
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/model"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,8 +13,8 @@ import (
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // TestStartupResolvesStoredProviderKeyAndWritesMirror 装配**顺序**的回归守卫（v20 形态）。

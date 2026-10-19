@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 // ——— P0：控制面行为基线（v3.1 §6.1） ———
@@ -184,7 +186,7 @@ var contractNoRouteCases = map[string]string{
 // TestControlPlaneContractBaseline 逐条比对控制面契约基线。
 func TestControlPlaneContractBaseline(t *testing.T) {
 	a, _ := newIsolationRig(t)
-	eng := a.Engine()
+	eng := a.Handler()
 	host := a.srv.Addr()
 
 	got := make([]contractEntry, 0, len(contractCases()))
@@ -337,7 +339,7 @@ func routePatternMatches(pattern, path string) bool {
 //   - 排除表条目对应的路由必须仍然存在（双向判据）。
 func TestContractBaselineCoversAllRoutes(t *testing.T) {
 	a, _ := newIsolationRig(t)
-	routes := a.Engine().Routes()
+	routes := a.Handler().(*gin.Engine).Routes()
 	if len(routes) == 0 {
 		t.Fatalf("路由表为空：无法校验契约采样面")
 	}

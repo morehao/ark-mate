@@ -3,19 +3,19 @@ package assembly
 import (
 	"context"
 	"net"
+	"net/http"
 	"sync"
 
-	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/dto/dtosystem"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/registry"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
 
@@ -52,8 +52,11 @@ func WithPayloads(payloads []dtosystem.PayloadInfo) Option {
 
 // BuildResult 一次装配的产物（应用壳与命令树只消费它）。
 //
-// 字段全是**已构造/已就绪**的对象：Store 在 memory 模式为 nil；Router/Listener 在装配成功后
+// 字段全是**已构造/已就绪**的对象：Store 在 memory 模式为 nil；Handler/Listener 在装配成功后
 // 一定非 nil（HTTP 服务由 `internal/app` 用这两者构造，装配根不持有 `http.Server`）。
+//
+// `Handler` 是 `http.Handler` 而不是 `*gin.Engine`：装配根可以知道具体适配器，但**不必**把
+// 框架类型写进自己的产物类型——应用壳与命令树只消费 `Handler`，Web 框架止步于入站适配层。
 type BuildResult struct {
 	Store        *store.Store
 	Planes       *registry.Planes
@@ -65,7 +68,7 @@ type BuildResult struct {
 
 	Services    Services
 	Controllers router.Controllers
-	Router      *gin.Engine
+	Handler     http.Handler
 	Listener    net.Listener
 	Assets      router.AssetInfo
 	Credentials *credential.Set
@@ -151,7 +154,7 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 		Bus:          as.bus,
 		Services:     as.services,
 		Controllers:  as.controllers,
-		Router:       as.engine,
+		Handler:      as.engine,
 		Listener:     as.ln,
 		Assets:       as.assets,
 		Credentials:  as.creds,

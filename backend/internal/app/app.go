@@ -6,7 +6,7 @@
 //   - internal/assembly：**唯一装配根**（对象图 + 启停序列）；
 //   - 本包：server 启停、ready 行、信号与优雅关闭。**不构造 service/store/controller，不注册路由**。
 //
-// 为什么壳还在：`assembly.Build` 只把对象装好（含监听器与 gin.Engine），而"把 Engine 挂到
+// 为什么壳还在：`assembly.Build` 只把对象装好（含监听器与 http.Handler），而"把 Handler 挂到
 // `http.Server`、在监听成功后回写就绪行、按 ctx 优雅停机"这三件事只在进程交付面成立——
 // 命令树里的 `doctor`/`migrate` 也要装配产物，但它们不需要 HTTP。
 package app
@@ -15,14 +15,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/assembly"
+	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/dto/dtosystem"
-	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/golib/glog"
 )
 
@@ -79,12 +79,12 @@ func New(cfg config.Config, sources config.Sources, opts ...Option) *App {
 	return a
 }
 
-// Engine 返回底层 gin.Engine（供测试挂载/断言路由）。
-func (a *App) Engine() *gin.Engine {
+// Handler 返回底层 HTTP handler（供测试挂载/断言路由）。
+func (a *App) Handler() http.Handler {
 	if a.srv == nil {
 		return nil
 	}
-	return a.srv.Engine()
+	return a.srv.Handler()
 }
 
 // Result 返回本次装配的产物（`Init` 之前为 nil）。
@@ -98,7 +98,7 @@ func (a *App) Meta() dtosystem.MetaInfo {
 	return a.res.Services.Meta.Meta()
 }
 
-// Init 装配全部运行时依赖（委托 `assembly.Build`），并把 gin.Engine 挂到监听器上。
+// Init 装配全部运行时依赖（委托 `assembly.Build`），并把 HTTP handler 挂到监听器上。
 //
 // 装配失败返回的 `*assembly.ExitError` 带退出码，由命令层决定进程结局；HTTP 服务本身
 // 仍由本包启停（`Run`/`Close`），装配根不持有 `http.Server`。
@@ -109,7 +109,7 @@ func (a *App) Init(ctx context.Context) error {
 		return err
 	}
 	a.res = res
-	a.srv = newHTTPServerOn(res.Listener, res.Router)
+	a.srv = newHTTPServerOn(res.Listener, res.Handler)
 	return nil
 }
 

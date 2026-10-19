@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/dto/dtosystem"
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/dto/dtosystem"
 )
 
 // payloadTestConfig 造一份"能起得来"的最小配置（照 isolation_test 的口径）：
@@ -69,9 +69,9 @@ func initPayloadTestApp(t *testing.T, opts ...Option) *App {
 // 字段顺序变了前端契约就漂移），解析成结构体后这些信息就没了。
 func getMetaPayloadsRaw(t *testing.T, a *App) string {
 	t.Helper()
-	eng := a.Engine()
+	eng := a.Handler()
 	if eng == nil {
-		t.Fatal("Engine() 为空：Init 没有装配起 HTTP 引擎")
+		t.Fatal("Handler() 为空：Init 没有装配起 HTTP 引擎")
 	}
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/mate/meta", nil)

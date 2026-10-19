@@ -393,11 +393,10 @@ var v32Exceptions = []v32Exception{
 	{from: "internal/cliops", to: "internal/store", budget: 1, slice: "刀10", why: "命令直接持有 *store.Store（第二装配根）"},
 }
 
-// v32GinAllowlist gin 围栏的临时白名单。刀 2 完成后必须为空。
-var v32GinAllowlist = []v32Exception{
-	{from: "internal/assembly", to: v32GinPath, budget: 1, slice: "刀2", why: "BuildResult.Router 仍是 *gin.Engine"},
-	{from: "internal/app", to: v32GinPath, budget: 1, slice: "刀2", why: "server.go 仍按 *gin.Engine 断言 Handler"},
-}
+// v32GinAllowlist gin 围栏的白名单。刀 2 已清空——`assembly` 交 `http.Handler`，
+// `app` 不再知道 Web 框架；只剩 router/controller/middleware 三个入站适配层可以 import gin。
+// 若将来又要临时开口，在这里登记并要求双向判据（清零即删）。
+var v32GinAllowlist []v32Exception
 
 // v32GinPath gin 的 import 路径。
 const v32GinPath = "github.com/gin-gonic/gin"

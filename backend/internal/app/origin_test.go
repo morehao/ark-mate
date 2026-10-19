@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/code"
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/middleware"
 )
 
 // 本文件是 M3-5 的**进程内集成**判据：走真实 Init（真起服务、真建 engine、真监听端口），
@@ -78,7 +78,7 @@ func doRequest(t *testing.T, a *App, method, path, host, origin string) (int, en
 		req.Header.Set("Origin", origin)
 	}
 	w := httptest.NewRecorder()
-	a.Engine().ServeHTTP(w, req)
+	a.Handler().ServeHTTP(w, req)
 	var env envelopeOf
 	_ = json.Unmarshal(w.Body.Bytes(), &env)
 	return w.Code, env
@@ -160,7 +160,7 @@ func TestInitOriginPolicyDoesNotGateStaticAssets(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Host = "evil.com:" + strings.TrimPrefix(addr, "127.0.0.1:")
 	w := httptest.NewRecorder()
-	a.Engine().ServeHTTP(w, req)
+	a.Handler().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("静态入口不应被来源白名单拦截：got %d body=%s", w.Code, w.Body.String())
 	}

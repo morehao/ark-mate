@@ -4,33 +4,33 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/eventbus"
+	pkgidentity "github.com/morehao/ark-mate/internal/identity"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/procreg"
 	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/registry"
+	"github.com/morehao/ark-mate/internal/resource"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/config"
-	pkgidentity "github.com/morehao/ark-mate/internal/identity"
-	"github.com/morehao/ark-mate/internal/infra/procreg"
-	"github.com/morehao/ark-mate/internal/resource"
-	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
 
@@ -77,7 +77,7 @@ type assembly struct {
 	assetWatch  *router.AssetWatcher
 	services    Services
 	controllers router.Controllers
-	engine      *gin.Engine
+	engine      http.Handler
 	creds       *credential.Set
 
 	// cmdRules 命令门禁规则（加载期已校验）。装配期**先读**（坏文件拒绝启动），
@@ -565,7 +565,7 @@ func (as *assembly) startControllers(context.Context) error {
 	return nil
 }
 
-// startRouter 用已绑定的监听器与已构造的控制器装配 gin.Engine（HTTP 服务由 app 壳启停）。
+// startRouter 用已绑定的监听器与已构造的控制器装配 HTTP 引擎（HTTP 服务由 app 壳启停）。
 func (as *assembly) startRouter(ctx context.Context) error {
 	as.engine = router.New(router.Deps{
 		Controllers: as.controllers,

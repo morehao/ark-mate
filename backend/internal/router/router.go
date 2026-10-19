@@ -103,6 +103,9 @@ func New(d Deps) *gin.Engine {
 	creds := d.Credentials
 
 	r := gin.New()
+	// 反向代理场景下按 X-Forwarded-For 取客户端 IP。这是引擎自身的配置，归路由层，
+	// 不归进程壳——壳不该知道 Web 框架有什么开关。
+	r.ForwardedByClientIP = true
 	r.Use(gin.Recovery())
 	r.MaxMultipartMemory = 8 << 20
 
