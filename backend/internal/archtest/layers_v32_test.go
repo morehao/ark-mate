@@ -366,7 +366,6 @@ var v32Exceptions = []v32Exception{
 	// ——— 刀 7：domain/automation ———
 
 	// ——— 刀 8：domain/provider ———
-	{from: "internal/domain/provider", to: "internal/infra/credentials", budget: 1, slice: "刀8", why: "直接读凭据文件，应经 mechanism/credential"},
 	{from: "internal/domain/provider", to: "internal/mechanism", budget: 2, slice: "刀8", why: "用 definition 与 credential 两个机制"},
 
 	// ——— 刀 9：domain/session（最难，最后做）———

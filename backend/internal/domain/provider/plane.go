@@ -9,8 +9,6 @@ import (
 	"time"
 
 	src "github.com/morehao/ark-mate/internal/credential"
-	"github.com/morehao/ark-mate/internal/infra/credentials"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -25,7 +23,7 @@ type Plane struct {
 	providerDir string
 	st          ProviderStore
 	reg         *goruntime.Registry
-	creds       *credential.Store
+	secrets     Secrets
 
 	// effect 写面回执（读会话与代际裁决，属编排侧）。nil = 没有编排器（demo/migrate/纯列表）。
 	effect EffectFn
@@ -57,11 +55,11 @@ type DefaultModelProvider func(ctx context.Context) (providerID string, ok bool)
 
 // NewPlane 造一个供应商域。`reg` 与 `creds` 必须由装配期注入**同一个实例**（两份 = 两个事实源：
 // 注册表决定"这条档案能不能被交付"，凭据机制决定"密钥从哪一层来"）。
-func NewPlane(reg *goruntime.Registry, creds *credential.Store) *Plane {
+func NewPlane(reg *goruntime.Registry, secrets Secrets) *Plane {
 	return &Plane{
 		providers: make(map[string]*Def),
 		reg:       reg,
-		creds:     creds,
+		secrets:   secrets,
 		catalog:   newConfigCatalog(),
 	}
 }
@@ -98,9 +96,6 @@ func (pl *Plane) Snapshot(id string) (*Def, bool) {
 	return &c, true
 }
 
-// CredentialDoc 托管凭据文档（测试与诊断面读它的现状；**只读**，写入一律走本域的方法）。
-func (pl *Plane) CredentialDoc() *credentials.Doc { return pl.credentialDoc() }
-
 // DeleteForTest 从内存表里摘掉一条档案（**只给测试**：模拟"库里删了、内存还没同步"这类竞态）。
 //
 // 为什么不给生产用：档案的删除有完整路径（`DeleteProvider`：写库 + 摘表 + 撤镜像），
@@ -121,7 +116,7 @@ func (pl *Plane) KeyFor(ctx context.Context, d *Def) src.ProviderKey {
 	if d == nil {
 		return src.ProviderKey{}
 	}
-	return pl.creds.ResolveProviderKey(ctx, d.ID, d.KeyRef)
+	return pl.secrets.Resolve(ctx, d.ID, d.KeyRef)
 }
 
 // ProviderKeyReady 该供应商当前是否有可用密钥；false 时 reason 是可执行的原因。
@@ -147,15 +142,11 @@ func (pl *Plane) ProviderKeyReady(ctx context.Context, providerID string) (bool,
 	return false, "尚未设置密钥"
 }
 
-func (pl *Plane) mirrorSet(ref, value string) error {
-	return credential.MirrorSet(pl.creds.Doc(), ref, value)
-}
+func (pl *Plane) mirrorSet(ref, value string) error { return pl.secrets.MirrorSet(ref, value) }
 
-func (pl *Plane) mirrorDelete(ref string) error {
-	return credential.MirrorDelete(pl.creds.Doc(), ref)
-}
+func (pl *Plane) mirrorDelete(ref string) error { return pl.secrets.MirrorDelete(ref) }
 
-func (pl *Plane) credentialDoc() *credentials.Doc { return pl.creds.Doc() }
+func (pl *Plane) hasCredentialDoc() bool { return pl.secrets.HasDoc() }
 
 // registeredRuntimeIDs 已注册 runtime id（升序，保证响应稳定）。
 //

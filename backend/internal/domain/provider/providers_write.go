@@ -189,7 +189,7 @@ func (pl *Plane) writeProviderKey(ctx context.Context, d *Def, key string) error
 		// memory 载体：托管文档就是事实源，写不进去就是**真的没写进去**（拒绝，不假装成功）。
 		// 文档都没装配（数据目录没解析出来）时必须在这里拒绝：否则这条密钥只活在内存里，
 		// 面板回 `has_key=true`、重启后消失——那是本仓最忌讳的一类静默谎报。
-		if pl.credentialDoc() == nil {
+		if !pl.hasCredentialDoc() {
 			return acl.NewError(acl.ClassRequest, "credentials_write_failed",
 				"没有可写的凭据落点（托管文档未装配）：memory 模式下 "+credential.CredentialsFileName+
 					"就是密钥的事实源，这里拒绝一次只在内存里成功的写入", nil)

@@ -99,7 +99,7 @@ func NewPlanes(reg *runtime.Registry) *Planes {
 	p.Skills = skill.NewPlane(p.Capabilities, skillDefs{p.Definitions})
 	p.McpSecrets = mcp.NewSecrets(p.Credentials)
 	p.Mcp = mcp.NewPlane(p.Capabilities, mcpDefs{p.Definitions}, p.McpSecrets)
-	p.Providers = provider.NewPlane(reg, p.Credentials)
+	p.Providers = provider.NewPlane(reg, capabilityio.NewSecrets(p.Credentials))
 	p.Resources = NewResources(reg, p.Providers)
 	p.Identity = NewIdentityDelivery(reg)
 	// 默认开启（config 的 auto）：显式置位，避免 atomic.Bool 零值把默认关掉。

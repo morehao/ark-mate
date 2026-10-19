@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/capabilityio"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"net/http"
 	"net/http/httptest"
@@ -1534,7 +1535,7 @@ func TestProviderRoutes(t *testing.T) {
 func testProviderPlane(t *testing.T) *provider.Plane {
 	t.Helper()
 	reg := dsh.Registry()
-	plane := provider.NewPlane(reg, credential.New(reg))
+	plane := provider.NewPlane(reg, capabilityio.NewSecrets(credential.New(reg)))
 	plane.SetProviderDir(t.TempDir())
 	return plane
 }

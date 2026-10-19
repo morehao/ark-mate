@@ -319,7 +319,7 @@ func TestMcpSecretStaleMirrorNotAdopted(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	svc.EnableStore(st)
-	doc := svc.planes.Providers.CredentialDoc()
+	doc := svc.planes.Credentials.Doc()
 	if doc == nil {
 		t.Fatal("夹具应装配出托管文档")
 	}
