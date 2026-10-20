@@ -56,6 +56,19 @@ func WithPayloads(payloads []dtosystem.PayloadInfo) Option {
 //
 // `Handler` 是 `http.Handler` 而不是 `*gin.Engine`：装配根可以知道具体适配器，但**不必**把
 // 框架类型写进自己的产物类型——应用壳与命令树只消费 `Handler`，Web 框架止步于入站适配层。
+// Probe 诊断面（应用壳只经它读状态、触发启动探测，**不直接碰平面**）。
+//
+// 阶段 0.5 的第一刀：`app` 原先直接 `res.Planes.Mcp.AutoProbe(...)`——进程壳穿透到了子系统
+// 的具体结构。现在它只认这三件事；平面仍由装配根持有。
+type Probe struct {
+	// Meta 当前诊断面快照（等价于 `GET /meta` 的 data）。
+	Meta func() dtosystem.MetaInfo
+	// AutoProbeMCP 启动期 MCP 网关探测（配置开关由装配根判断，这里只执行）。
+	AutoProbeMCP func(ctx context.Context) error
+	// Runtime 构建期选定的底座注册表（只读；诊断与桌面隔离测试用）。
+	Runtime *runtime.Registry
+}
+
 type BuildResult struct {
 	Planes       *registry.Planes
 	Runtime      *runtime.Registry
@@ -70,6 +83,7 @@ type BuildResult struct {
 	Listener    net.Listener
 	Assets      router.AssetInfo
 	Credentials *credential.Set
+	Probe       Probe
 
 	closeOnce sync.Once
 	stop      func()
@@ -167,6 +181,13 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 		Listener:     as.ln,
 		Assets:       as.assets,
 		Credentials:  as.creds,
+		Probe: Probe{
+			Meta: func() dtosystem.MetaInfo { return as.services.Meta.Meta() },
+			AutoProbeMCP: func(ctx context.Context) error {
+				return as.planes.Mcp.AutoProbe(ctx)
+			},
+			Runtime: as.reg,
+		},
 	}
 	res.stop = func() { as.lifecycle.Stop(context.Background()) }
 	return res, nil

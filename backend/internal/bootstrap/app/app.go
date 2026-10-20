@@ -95,7 +95,7 @@ func (a *App) Meta() dtosystem.MetaInfo {
 	if a.res == nil {
 		return dtosystem.MetaInfo{}
 	}
-	return a.res.Services.Meta.Meta()
+	return a.res.Probe.Meta()
 }
 
 // Init 装配全部运行时依赖（委托 `assembly.Build`），并把 HTTP handler 挂到监听器上。
@@ -131,7 +131,7 @@ func (a *App) Run(ctx context.Context) error {
 	if a.cfg.McpAutoProbe == config.McpAutoProbeStartup {
 		go func() {
 			glog.Infow(ctx, "serve: MCP 自动探测已启用（startup 模式，后台逐个探测已注册 server）")
-			_ = a.res.Planes.Mcp.AutoProbe(ctx)
+			_ = a.res.Probe.AutoProbeMCP(ctx)
 		}()
 	}
 
