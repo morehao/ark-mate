@@ -192,7 +192,7 @@ func TestProviderStaleMirrorKeyNotAdopted(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	svc := NewService(v12ProviderRegistry(), nil)
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.planes.Providers.SetProviderDir(dir)
 	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
 	// 库里一条**没有密钥**的档案（面板上刚清掉，或从来没设过）。
@@ -314,7 +314,7 @@ func TestProviderEnvLayerShadowsStore(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	svc := NewService(v12ProviderRegistry(), nil)
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.planes.Providers.SetProviderDir(dir)
 	l := newTestCredentials(t, home)
 	const envValue = "sk-from-process-env"

@@ -409,7 +409,7 @@ func TestWriteFaceRequiresCapabilityDir(t *testing.T) {
 		st := testutil.OpenStore(t, testutil.TempDBPath(t))
 		t.Cleanup(func() { _ = st.Close() })
 		svc := NewService(runtime.NewRegistry(), eventbus.New())
-		svc.EnableStore(st)
+		enableStore(svc, st)
 		resp, err := svc.Planes().Skills.WriteSkill(ctx, "", writeReq(t, `{"id":"demo","body":"# d"}`), true)
 		if err != nil {
 			t.Fatalf("sqlite 模式不该因为没配能力目录而拒绝写: %v", err)

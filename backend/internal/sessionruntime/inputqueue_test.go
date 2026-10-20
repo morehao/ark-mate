@@ -462,7 +462,7 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
 	svc1 := NewService(runtime.NewRegistry(), nil)
-	svc1.EnableStore(st)
+	enableStore(svc1, st)
 	svc1.sessionPlane.RegisterSession(&session.SessionRec{ID: "c1", Generation: 1})
 	queued, err := svc1.sessionPlane.EnqueueInput(context.Background(), "c1", "重启前的排队", session.DeliveryAfterRun, "run-x", 1)
 	if err != nil {
@@ -470,7 +470,7 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 	}
 
 	svc2 := NewService(runtime.NewRegistry(), nil)
-	svc2.EnableStore(st)
+	enableStore(svc2, st)
 	if _, _, err := svc2.SessionPlane().Restore(context.Background()); err != nil {
 		t.Fatalf("恢复失败: %v", err)
 	}

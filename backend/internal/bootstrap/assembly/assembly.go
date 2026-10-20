@@ -269,13 +269,14 @@ func (as *assembly) startLegacySecretMigration(ctx context.Context) error {
 
 // startStoreWiring 把库句柄接到所有持有它的部件，并做装配期同步。
 //
-// 实现只有 `sessionruntime.EnableStore` / `registry.Planes.EnableStore` 一份：**漏接任一个**的表现
-// 都是静默的（该走库的走了文件、或反过来——定义只写进内存、凭据读不到库）。
+// 实现只有 `sessionruntime.EnableStore` 一份（两半端口见 `ports.go`）：会话域与领域平面
+// **同一次**接线——**漏接任一个**的表现都是静默的（该走库的走了文件、或反过来——定义只写进
+// 内存、凭据读不到库）。
 func (as *assembly) startStoreWiring(ctx context.Context) error {
 	if as.st == nil {
 		return nil
 	}
-	as.svc.EnableStore(as.st)
+	as.svc.EnableStore(as.sessionRuntimeStore(), as.planeStore())
 	// v15 破坏性重建的**启动 WARN**（§8.5 R2，强制项）：升级既有库时静默清空会话历史是最坏的
 	// 一种失败——用户只会觉得"我的会话没了"。所以这里必须说出来，并带上回退路径。
 	if note := as.st.DestructiveRebuildNote(); note != "" {

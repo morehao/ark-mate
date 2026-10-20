@@ -34,7 +34,7 @@ func newConvRig(t *testing.T) *convRig {
 	svc, orch, _ := validateRig(t)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	mustWorkspacePolicy(t, svc, filepath.Join(t.TempDir(), "workspaces"), nil)
 	if err := svc.Planes().Workspaces.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)

@@ -29,7 +29,7 @@ func newMsgRig(t *testing.T, sessionID string) (*Service, *store.Store) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
 	svc := NewService(testutil.StubRegistry(), eventbus.New())
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: sessionID})
 	return svc, st
 }
@@ -303,7 +303,7 @@ func TestSearchSessionsPrefersMessagesTable(t *testing.T) {
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-s"})
 	runID, _, _ := beginRun(t, svc, "s-s", "帮我部署 mate 服务")
 	svc.sessionPlane.Publish(session.BusMessage, "s-s", map[string]any{"text": "好的"})

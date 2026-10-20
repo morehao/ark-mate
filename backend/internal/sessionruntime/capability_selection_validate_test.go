@@ -182,7 +182,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	st := testutil.OpenStore(t, dbPath)
 	defer func() { _ = st.Close() }()
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	wsDir := t.TempDir()
 	if err := svc.Planes().Workspaces.SetWorkspacePolicy(wsDir, nil); err != nil { // 允许代建、白名单不限制
 		t.Fatalf("SetWorkspacePolicy: %v", err)
@@ -268,7 +268,7 @@ func TestCreateSessionDefaultPathUnchanged(t *testing.T) {
 	// 带库：缺省路径的落库形态（v7 三列都该是空串）也是"逐字节等同今天"的一部分。
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)

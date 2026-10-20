@@ -154,7 +154,7 @@ func newRig(t *testing.T, mutate ...func(*rigConfig)) *rig {
 	var st *store.Store
 	if cfg.store {
 		st = testutil.OpenStore(t, testutil.TempDBPath(t))
-		svc.EnableStore(st)
+		enableStore(svc, st)
 		t.Cleanup(func() { _ = st.Close() })
 	}
 	orch := NewOrchestrator(svc, reg)
@@ -353,4 +353,17 @@ func storeAsSourceFacts(st *store.Store) svcsystem.SourceFactsReader {
 		return nil
 	}
 	return st
+}
+
+// enableStore 测试夹具：会话域与领域平面**同一次**接库。
+//
+// 生产装配里两半分别由 `Service.EnableStore` 与装配根提供的 `PlaneStore` 完成；包内测试
+// 没有装配根，所以在同一个入口里把两半都做全——只接会话域会让能力/供应商/工作空间用例
+// 静默读到空平面（那正是 `EnableStore` 注释里说的"漏接任一个都是静默的"）。
+func enableStore(svc *Service, st *store.Store) {
+	svc.EnableStore(st, func() {
+		if svc.planes != nil {
+			svc.planes.EnableStore(st)
+		}
+	})
 }

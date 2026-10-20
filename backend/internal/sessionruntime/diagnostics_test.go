@@ -187,7 +187,7 @@ func TestRuntimeDiagnosticsRemediation(t *testing.T) {
 	// 这就是装配期 `CredentialProblem` 会拦下的那种半配置状态，诊断面必须给得出出路。
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	if created, err := st.CreateModelDefinition(ctx, model.ModelColumns{
 		ID: "mdl_gone", ProviderID: "gone", Model: "m-gone", InputModalities: "text",
 	}, "t"); err != nil || !created {

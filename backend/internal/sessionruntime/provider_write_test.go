@@ -138,7 +138,7 @@ func TestProviderCreateDoesNotWriteKeyWhenRowExists(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
 	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)
 
@@ -180,7 +180,7 @@ func TestProviderUpdateKeepsKeyWhenContentCasFails(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
 	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)
 
@@ -350,7 +350,7 @@ func TestCredentialProblemPointsAtModelSettings(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.planes.Providers.SetProviderDir(filepath.Join(home, "providers"))
-	svc.EnableStore(st)
+	enableStore(svc, st)
 
 	defaultModel := func(t *testing.T, id, providerID string) {
 		t.Helper()

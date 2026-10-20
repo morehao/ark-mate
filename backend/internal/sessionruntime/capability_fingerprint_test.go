@@ -64,7 +64,7 @@ func TestCapabilityFingerprintMCPSecretValueNotInFingerprint(t *testing.T) {
 	svc := providerTestSvc(t, filepath.Join(home, "providers"))
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	ctx := context.Background()
 	const ref = "store:mcp/fs-token"
 	if err := st.SetMcpSecret(ctx, ref, "secret-one"); err != nil {

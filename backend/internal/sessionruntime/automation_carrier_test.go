@@ -39,7 +39,7 @@ func automationDBRig(t *testing.T, dir string) (*Service, *store.Store) {
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	if dir != "" {
 		svc.Planes().Automation.LoadAutomationDefinitionsFromStore(context.Background(), dir)
 	}

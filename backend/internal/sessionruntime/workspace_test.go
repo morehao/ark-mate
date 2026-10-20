@@ -284,7 +284,7 @@ func TestCreateSessionFailureLeavesNoPerSessionDir(t *testing.T) {
 	// 于是未指定 cwd 会停在 workspace_required，测不到这条路径。
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	if err := svc.Planes().Workspaces.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}

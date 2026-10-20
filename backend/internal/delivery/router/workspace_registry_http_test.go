@@ -36,7 +36,7 @@ func registryApp(t *testing.T) (*sessionruntime.Service, string, string) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	svc := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New())
-	svc.EnableStore(st)
+	svc.EnableStore(st, func() { svc.Planes().EnableStore(st) })
 
 	// 工作空间根放在**私有临时目录**下（本机隔离纪律：绝不碰 ~/.ark-mate）。
 	provision := filepath.Join(t.TempDir(), "workspaces")
@@ -179,7 +179,7 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	st := testutil.OpenStore(t, dbPath)
 	svc := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New())
-	svc.EnableStore(st)
+	svc.EnableStore(st, func() { svc.Planes().EnableStore(st) })
 	provision := filepath.Join(t.TempDir(), "workspaces")
 	if err := svc.Planes().Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
@@ -209,7 +209,7 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	st2 := testutil.OpenStore(t, dbPath)
 	t.Cleanup(func() { _ = st2.Close() })
 	svc2 := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New())
-	svc2.EnableStore(st2)
+	svc2.EnableStore(st2, func() { svc2.Planes().EnableStore(st2) })
 	if err := svc2.Planes().Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy(重启): %v", err)
 	}

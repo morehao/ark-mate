@@ -24,7 +24,7 @@ func TestUsageSummaryService(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 

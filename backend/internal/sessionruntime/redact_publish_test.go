@@ -191,7 +191,7 @@ func TestMcpSecretValueIsRedactedAfterResolution(t *testing.T) {
 	home := t.TempDir()
 	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
 	svc.planes.Providers.SetProviderDir(filepath.Join(home, "providers"))
-	svc.EnableStore(st)
+	enableStore(svc, st)
 
 	const ref = "store:mcp/dyn-token"
 	const val = "mcp-7f-not-a-known-shape" // 无形状：只能靠登记值那一档

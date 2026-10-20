@@ -48,7 +48,7 @@ func writeFaceDB(t *testing.T, specs ...runtime.Spec) *writeFace {
 	ctx := context.Background()
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	svc := NewService(runtime.NewRegistry(specs...), eventbus.New())
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	// 与生产装配同源：装载走 store 分支，导入/导出目录给一个空目录。
 	svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, t.TempDir())
 	t.Cleanup(func() { _ = st.Close() })

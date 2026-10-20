@@ -31,7 +31,7 @@ func TestUsageSummaryRejectsRemovedAgentDimension(t *testing.T) {
 	svc := NewService(testutil.StubRegistry(), eventbus.New())
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
-	svc.EnableStore(st)
+	enableStore(svc, st)
 
 	// 拒绝面在**用例层**（v3.2 刀 9）：已下线的键是"请求形状"的事，领域只收它要用的维度。
 	usageSvc := svcusage.New(sessionPlaneOf(svc))

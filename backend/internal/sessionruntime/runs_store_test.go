@@ -33,7 +33,7 @@ func TestRunMaterializationAtRunEnd(t *testing.T) {
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-run"})
 
 	// 第一轮：成功。
@@ -114,7 +114,7 @@ func TestRunWindowStartsAtRunStarted(t *testing.T) {
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-win"})
 
 	// 会话前置事件（真实路径由 session_start / ensureSession 发出，先于本轮 run.started）。
@@ -183,7 +183,7 @@ func TestOpenRunIsIdempotent(t *testing.T) {
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-idem"})
 
 	// 两条真实的 `run.started`（开轮行的起点**必须**是库里真有的那条事件：位次或 type 对不上
@@ -231,7 +231,7 @@ func TestRunningRunSurvivesRestart(t *testing.T) {
 
 	st1 := testutil.OpenStore(t, dbPath)
 	svc1 := NewService(reg, eventbus.New())
-	svc1.EnableStore(st1)
+	enableStore(svc1, st1)
 	svc1.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-crash"})
 	runID, started, _ := beginRun(t, svc1, "s-crash", "这一轮会中断")
 	svc1.sessionPlane.Publish(session.BusMessage, "s-crash", map[string]any{"text": "答到一半"})
@@ -253,7 +253,7 @@ func TestRunningRunSurvivesRestart(t *testing.T) {
 	}
 	// 读模型可以被后续收口（接管它的那一轮重新开一行，起点不同 → 不冲突）。
 	svc2 := NewService(reg, eventbus.New())
-	svc2.EnableStore(st2)
+	enableStore(svc2, st2)
 	if _, _, err := svc2.SessionPlane().Restore(ctx); err != nil {
 		t.Fatalf("RestoreFromStore: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestRunUsageExposedInListRuns(t *testing.T) {
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-usage"})
 
 	now := time.Now().UTC()
@@ -322,7 +322,7 @@ func TestRunUsageLandsInRunRowThroughTheSessionPlane(t *testing.T) {
 	svc := NewService(reg, eventbus.New())
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	// 造编排器 = 走真实接线（`NewOrchestrator` 末尾回挂，端口在那里接上）。
 	orch := NewOrchestrator(svc, reg)
 	defer orch.Close()
@@ -363,7 +363,7 @@ func TestRebuildRepairsMissingRunRow(t *testing.T) {
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-repair"})
 
 	runID, started, _ := beginRun(t, svc, "s-repair", "重建这一轮")

@@ -24,7 +24,7 @@ func TestMcpSecretResolution(t *testing.T) {
 	svc := providerTestSvc(t, dir)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
-	svc.EnableStore(st)
+	enableStore(svc, st)
 
 	const ref = "store:mcp/fs-token"
 	const token = "sk-mcp-secret-xyz"
@@ -155,7 +155,7 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 	st3 := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st3.Close() }()
 	svc3 := providerTestSvc(t, filepath.Join(home, "providers"))
-	svc3.EnableStore(st3)
+	enableStore(svc3, st3)
 	const leaked = "sk-should-never-appear"
 	if err := st3.SetMcpSecret(context.Background(), "store:mcp/present", leaked); err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 	svc := providerTestSvc(t, filepath.Join(home, "providers"))
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	const ref = "store:mcp/live"
 	const token = "sk-live-secret"
 	if err := st.SetMcpSecret(context.Background(), ref, token); err != nil {
@@ -318,7 +318,7 @@ func TestMcpSecretStaleMirrorNotAdopted(t *testing.T) {
 	svc := providerTestSvc(t, filepath.Join(home, "providers"))
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	doc := svc.planes.Credentials.Doc()
 	if doc == nil {
 		t.Fatal("夹具应装配出托管文档")

@@ -68,7 +68,7 @@ func newGenRigOn(t *testing.T, runtimeID string) *genRig {
 	svc := NewService(reg, bus)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	// v20：密钥写进库（`providers.key`）而不是盘上密文，所以"带密钥的供应商"夹具只要给它一个
 	// 可写的落点（库里那一列，或 memory 模式下的托管文档）就行。
 	// 都必须给一个真实（且私有）的 mate home——正是生产形态。目录在 t.TempDir 下，绝不碰用户环境。

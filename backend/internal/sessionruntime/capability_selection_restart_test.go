@@ -33,7 +33,7 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	// —— 进程一：建会话并钉住 "只要 git"（未钉的对照组 = 全量，才有区分度）——
 	st1 := testutil.OpenStore(t, dbPath)
 	svc1 := NewService(reg, eventbus.New())
-	svc1.EnableStore(st1)
+	enableStore(svc1, st1)
 	registerStdioMcps(t, svc1)
 	orch1 := NewOrchestrator(svc1, reg)
 
@@ -80,7 +80,7 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	st2 := testutil.OpenStore(t, dbPath)
 	defer func() { _ = st2.Close() }()
 	svc2 := NewService(reg, eventbus.New())
-	svc2.EnableStore(st2)
+	enableStore(svc2, st2)
 	// MCP 定义的事实源是能力目录（不是库）：重启后由 `mcp/*.json` 重新装载。
 	// 只恢复库、不装载定义，会得到"库里有选定、注册表里没有 server"的假象。
 	registerStdioMcps(t, svc2)

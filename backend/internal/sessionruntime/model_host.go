@@ -47,19 +47,38 @@ func (s *Service) ModelEffect(defaultTouched bool) *dtomodel.ModelEffect {
 
 // ——— 派生只读：`GET /agents` 的 `default_model` ———
 
-// ModelFace 把「模型读面（registry.ModelViews：清单/目录/同步）」与「生效面回执
+// ModelFace 把「模型读面（`ModelViews` 端口：清单/目录/同步）」与「生效面回执
 // （本层 ModelEffect）」拼成 `svcmodel.ModelSvc` / `Host` 需要的形状。
 //
 // 这是装配点的**组合**，不是转发层：读面与同步各自来自一份真实现，生效面回执要问代际裁决
 // （随 Orchestrator 留在这里）。两份事实拼成一个接口实现——这就是它的全部职责。
+//
+// 阶段 0.3：读面由**端口**注入，不再内嵌 `*registry.ModelViews`——本层的方法集不再由
+// "嵌了谁"决定，换一份读面实现也不必改这里。
 type ModelFace struct {
-	*registry.ModelViews
+	views ModelViews
 	*Service
 }
 
-// NewModelFace 造一个模型面组合（装配点与测试共用）。
-func NewModelFace(s *Service) ModelFace {
-	return ModelFace{ModelViews: registry.NewModelViews(s.Planes()), Service: s}
+// NewModelFace 造一个模型面组合（装配点与测试共用）。views 由装配层用
+// `registry.NewModelViews(planes)` 造好交进来。
+func NewModelFace(s *Service, views ModelViews) ModelFace {
+	return ModelFace{views: views, Service: s}
+}
+
+// ModelsView 读面（转发到端口）。
+func (f ModelFace) ModelsView(ctx context.Context, runtimeID string, refresh bool) (*dtomodel.ModelsResp, error) {
+	return f.views.ModelsView(ctx, runtimeID, refresh)
+}
+
+// SyncModels 同步（转发到端口）。
+func (f ModelFace) SyncModels(ctx context.Context, runtimeID string) (*dtomodel.ModelSyncResp, error) {
+	return f.views.SyncModels(ctx, runtimeID)
+}
+
+// TrySyncModels 提交后立即同步（转发到端口）。
+func (f ModelFace) TrySyncModels(ctx context.Context) string {
+	return f.views.TrySyncModels(ctx)
 }
 
 // ——— 对外投影（v3.2 刀 8）———

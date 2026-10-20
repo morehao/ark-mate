@@ -102,7 +102,7 @@ func (as *assembly) buildServices() Services { return as.facts().BuildServices()
 func (f Facts) BuildServices() Services {
 	as := f
 	plane := as.Session.SessionPlane()
-	modelFace := sessionruntime.NewModelFace(as.Session)
+	modelFace := sessionruntime.NewModelFace(as.Session, registry.NewModelViews(as.Planes))
 	return Services{
 		Session:            as.Session,
 		SessionHistory:     svcsession.NewHistory(eventReader(as.Store), plane, as.Bus),

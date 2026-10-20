@@ -43,7 +43,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 	}
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	svc := NewService(v12ProviderRegistry(), nil)
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
 	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)
 

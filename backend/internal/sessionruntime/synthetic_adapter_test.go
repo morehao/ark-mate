@@ -87,7 +87,7 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 
 	svc := NewService(reg, eventbus.New())
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	t.Cleanup(func() { _ = st.Close() })
 
 	// ② 原生权限：内核按注册表第三张表取端口，**不认识** `RTX_PERMISSION_MODE` 这个名字。

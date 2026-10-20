@@ -131,7 +131,7 @@ func TestSessionHistoryStoreBacked(t *testing.T) {
 	}
 
 	svc, _, _ := newTestRig(t)
-	svc.EnableStore(st)
+	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
 	for i := 0; i < 5; i++ {
 		svc.sessionPlane.Publish(session.BusMessage, "s1", map[string]any{"msg_id": fmt.Sprintf("m%d", i), "text": fmt.Sprintf("m%d", i)})
