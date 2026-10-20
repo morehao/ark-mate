@@ -127,10 +127,12 @@
   界面回执说"已允许"而底座收到取消（那一轮静默卡住），或反过来**静默放行**一次未被批准的调用，
   而两侧各自的单测都绿。反证（实跑）：把「放行但选项越界」的兜底从"第一个选项"改成"取消" → 红。
 
-- 再加 **1 条「已收口领域包协议无关」守卫**（`layer_isolation_test.go` 的
-  `TestProtocolFreeDomainPackagesStayClean`，2026-10-20 C2）：`protocolFreeDomainPackages`
-  里登记的领域包（当前 interaction / automation / workspace / skill / mcp / identity 六个）**生产
-  import 不得出现 `internal/infra/acp`**（只剩 session 与 provider 两块未收口：连接/生命周期与配置项）。
+- 再加 **1 条「已收口包协议无关」守卫**（`layer_isolation_test.go` 的
+  `TestProtocolFreePackagesStayClean`，2026-10-20 C2）：`protocolFreePackages` 里登记的内圈包
+  （当前 interaction / automation / workspace / skill / mcp / identity 六个域包 +
+  `core/definition` / `core/automation` 两个值包）**生产 import 不得出现 `internal/infra/acp`**
+  （只剩 `domain/session` 与 `domain/provider` 两块未收口：连接/生命周期与配置项；
+  `core/code` 是协议错误 → 平台视图的唯一转换点，按 B4 随连接边界搬走）。
   这是一张**逐步增长的收口表**：C2 每完成一块（事件与轮次 → 错误构造 → 权限/elicitation →
   配置项 → 连接与生命周期）登记一个包，全部登记完才收成"domain 不得 import acp"的全量判据。
   挡的是已完成边界的**静默回退**：翻译层还在，域里再直接写一个 acp 类型照样编译、照样跑，
