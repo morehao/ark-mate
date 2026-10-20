@@ -29,7 +29,7 @@ import (
 const maxCatalogSampleAttempts = 3
 
 // LiveConfigOptions 实现 `provider.LiveConfigOptionsSource`。
-func (s *Service) LiveConfigOptions() ([]acp.ConfigOption, bool) {
+func (s *Service) LiveConfigOptions() ([]runtime.ConfigOption, bool) {
 	if s.orch == nil {
 		return nil, false
 	}
@@ -81,7 +81,7 @@ func (s *Service) PromptImageSupported() *bool {
 }
 
 // SampleConfigOptions 实现 `provider.CatalogSampler`：枚举候选、逐条退避取样。
-func (s *Service) SampleConfigOptions(ctx context.Context) ([]acp.ConfigOption, bool, error) {
+func (s *Service) SampleConfigOptions(ctx context.Context) ([]runtime.ConfigOption, bool, error) {
 	if s.orch == nil {
 		return nil, false, provider.ErrNoSampleCandidate
 	}
@@ -108,7 +108,7 @@ func (s *Service) SampleConfigOptions(ctx context.Context) ([]acp.ConfigOption, 
 	}
 	// 逐条退避：最近那条读不通就试下一条。**没有候选时**返回 `ErrNoSampleCandidate`
 	// （正常状态：第一条消息发送前就是这样），说明文案据此与"读不通"分开。
-	return sampleCandidates(cands, func(t resumeTarget) ([]acp.ConfigOption, error) {
+	return sampleCandidates(cands, func(t resumeTarget) ([]runtime.ConfigOption, error) {
 		return s.runtimePlane.SampleConfigOptions(ctx, rc, t.RawID, t.Cwd)
 	})
 }
@@ -126,7 +126,7 @@ type resumeTarget struct {
 //
 // 三态：opts 非空；sampled=true（读通但零候选）；sampled=false + err（全部读不通）。
 // 没有候选时返回 `provider.ErrNoSampleCandidate`，而不是把"没有候选"讲成"取样失败"。
-func sampleCandidates[T any](cands []T, sample func(T) ([]acp.ConfigOption, error)) ([]acp.ConfigOption, bool, error) {
+func sampleCandidates[T any](cands []T, sample func(T) ([]runtime.ConfigOption, error)) ([]runtime.ConfigOption, bool, error) {
 	var lastErr error
 	sampled := false
 	for _, c := range cands {

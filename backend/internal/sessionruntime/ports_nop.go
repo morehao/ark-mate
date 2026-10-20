@@ -41,7 +41,7 @@ func (nopRuntimePlane) SelectedSpec() (runtime.Spec, error) {
 
 func (nopRuntimePlane) SetState(string) {}
 
-func (nopRuntimePlane) SampleConfigOptions(context.Context, session.Conn, string, string) ([]acp.ConfigOption, error) {
+func (nopRuntimePlane) SampleConfigOptions(context.Context, session.Conn, string, string) ([]runtime.ConfigOption, error) {
 	return nil, errRuntimeNotWired
 }
 

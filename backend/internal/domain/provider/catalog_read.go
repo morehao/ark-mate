@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -38,7 +37,7 @@ const DefaultCatalogTTL = 5 * time.Minute
 
 // LiveConfigOptionsSource 任一活跃会话的配置项（`ok=false` = 没有活跃会话）。
 type LiveConfigOptionsSource interface {
-	LiveConfigOptions() ([]acp.ConfigOption, bool)
+	LiveConfigOptions() ([]runtime.ConfigOption, bool)
 }
 
 // CatalogSampler 恢复已有会话读取目录（**不新建会话**）。
@@ -46,7 +45,7 @@ type LiveConfigOptionsSource interface {
 // 三态：`opts` 非空 = 读到；`sampled=true, err=nil` = 至少一条候选读通但运行时零候选；
 // `sampled=false, err!=nil` = 全部候选读不通（`ErrNoSampleCandidate` = 一条候选都没有）。
 type CatalogSampler interface {
-	SampleConfigOptions(ctx context.Context) (opts []acp.ConfigOption, sampled bool, err error)
+	SampleConfigOptions(ctx context.Context) (opts []runtime.ConfigOption, sampled bool, err error)
 }
 
 // CatalogConnectionFacts 目录响应里的连接期事实（没有活跃连接时返回空/nil）。
@@ -217,7 +216,7 @@ func (pl *Plane) ModelIDByValue(ctx context.Context, runtimeID string) map[strin
 }
 
 // catalogResp 组装对外响应：选项投影 + 拒绝值标注 + 鉴权引导。
-func (pl *Plane) catalogResp(ctx context.Context, runtimeID, source string, opts []acp.ConfigOption,
+func (pl *Plane) catalogResp(ctx context.Context, runtimeID, source string, opts []runtime.ConfigOption,
 	fetchedAt time.Time, note string) *CatalogView {
 	// 注解表一次算好（逐候选查表，不逐候选扫清单）。
 	byValue := pl.ModelIDByValue(ctx, runtimeID)

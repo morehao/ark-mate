@@ -254,6 +254,7 @@ var protocolFreePackages = []string{
 	modulePrefix + "internal/domain/skill",
 	modulePrefix + "internal/domain/mcp",
 	modulePrefix + "internal/domain/identity",
+	modulePrefix + "internal/domain/provider",
 	modulePrefix + "internal/core/definition",
 	modulePrefix + "internal/core/automation",
 }

@@ -536,7 +536,7 @@ func (l *Lifecycle) applyModel(ctx context.Context, as *ActiveSession, spec runt
 	}
 	// 不预判、但留痕：取值不在会话当前广告列表里（缓存滞后/跨会话选择）时记一条，仍然下发由
 	// 运行时裁决——协议保证运行时只接受已广告的值，平台侧预判会因快照滞后造成假阴性。
-	if !acp.HasConfigValue(as.Projection().ConfigOptions(), acp.CategoryModel, model.Model) {
+	if !runtime.HasConfigValue(as.Projection().ConfigOptions(), runtime.CategoryModel, model.Model) {
 		glog.Debugw(ctx, "模型取值不在当前广告列表中，交由运行时裁决",
 			"session", as.ID, "model", model.Model)
 	}

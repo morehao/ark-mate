@@ -58,8 +58,8 @@ func (r *sessionRuntime) ApplyMode(_ context.Context, _ Mode) error {
 }
 
 // ConfigOptions 返回本会话的会话配置项（模型目录等，全部由运行时自报）。
-func (r *sessionRuntime) ConfigOptions() []acp.ConfigOption {
-	return r.sess.ConfigOptions()
+func (r *sessionRuntime) ConfigOptions() []ConfigOption {
+	return ConfigOptionsOfACP(r.sess.ConfigOptions())
 }
 
 // ApplyModel 切换模型，返回应用后的全量配置项状态。
@@ -75,9 +75,9 @@ func (r *sessionRuntime) ConfigOptions() []acp.ConfigOption {
 //
 // 思考档位（category=thought_level）不在平台侧下发：运行时若提供该选项，只随全量状态原样
 // 透出（展示/可观测），平台不代为选择。
-func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) ([]acp.ConfigOption, error) {
-	opts := r.sess.ConfigOptions()
-	mOpt, ok := acp.FindConfigOption(opts, acp.CategoryModel)
+func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) ([]ConfigOption, error) {
+	opts := ConfigOptionsOfACP(r.sess.ConfigOptions())
+	mOpt, ok := FindConfigOption(opts, CategoryModel)
 	if !ok {
 		return opts, unsupported("unsupported_model",
 			"runtime "+r.spec.ID+" 未广告模型配置项（category=model），无法在会话内切换模型")
@@ -85,7 +85,11 @@ func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) ([]acp.C
 	if m.Model == "" {
 		return opts, nil // 空值 = 用运行时默认，不下发设置
 	}
-	return r.sess.SetConfigOption(ctx, mOpt.ID, m.Model)
+	opts2, err := r.sess.SetConfigOption(ctx, mOpt.ID, m.Model)
+	if err != nil {
+		return nil, err
+	}
+	return ConfigOptionsOfACP(opts2), nil
 }
 
 // Resume 热切换会话。会话恢复的 ACP 承载为 acp.Client.ResumeSession（session/resume 支持随

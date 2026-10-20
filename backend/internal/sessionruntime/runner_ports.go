@@ -31,7 +31,7 @@ func (d runnerDiagnostics) StderrTail(client *acp.Client) []string {
 // runnerCatalog 运行时配置项（模型目录）的缓存写口。
 type runnerCatalog struct{ svc *Service }
 
-func (c runnerCatalog) PutConfigOptions(runtimeID string, options []acp.ConfigOption) {
+func (c runnerCatalog) PutConfigOptions(runtimeID string, options []runtime.ConfigOption) {
 	if c.svc.facts.Providers == nil {
 		return
 	}

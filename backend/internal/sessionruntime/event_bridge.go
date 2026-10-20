@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— ACP → 领域信号的**翻译边界**（C2 第一刀：事件与轮次）———
@@ -71,7 +72,7 @@ func (o *Orchestrator) acpEventSink(runtimeID string) func(acp.Event) {
 	return func(ev acp.Event) {
 		if ev.Kind == acp.KindConfigOptions {
 			if d, ok := ev.Payload.(acp.ConfigOptionsInfo); ok && d.SessionID != "" {
-				catalog.PutConfigOptions(runtimeID, d.Options)
+				catalog.PutConfigOptions(runtimeID, runtime.ConfigOptionsOfACP(d.Options))
 			}
 		}
 		sink(acpSignal(ev))

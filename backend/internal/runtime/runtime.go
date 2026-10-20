@@ -68,9 +68,9 @@ type Runtime interface {
 	ApplyMode(ctx context.Context, mode Mode) error
 	// ApplyModel 切换模型，返回应用后的**全量**会话配置项状态。
 	// runtime 无模型配置项时返回不支持错误；值非法/不可用时返回运行时原始错误（不得吞）。
-	ApplyModel(ctx context.Context, m ModelConfig) ([]acp.ConfigOption, error)
+	ApplyModel(ctx context.Context, m ModelConfig) ([]ConfigOption, error)
 	// ConfigOptions 返回该会话当前的会话配置项（运行时自报：模型目录及其它选项，空 = 未提供）。
-	ConfigOptions() []acp.ConfigOption
+	ConfigOptions() []ConfigOption
 	// Resume 使 Runtime 回到指定会话（RuntimeSessionID）；无持久会话的 runtime 返回不支持错误。
 	Resume(ctx context.Context, sessionID string) error
 }

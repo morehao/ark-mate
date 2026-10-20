@@ -127,7 +127,7 @@ type RuntimePlane interface {
 	SetState(state string)
 	// SampleConfigOptions 恢复/装载一条已有会话，读它的配置项，然后关闭（只读取样）。
 	// **不新建会话**：那是执行面的责任，调用方只管候选枚举与退避。
-	SampleConfigOptions(ctx context.Context, conn Conn, rawSessionID, cwd string) ([]acp.ConfigOption, error)
+	SampleConfigOptions(ctx context.Context, conn Conn, rawSessionID, cwd string) ([]runtime.ConfigOption, error)
 }
 
 // MaxDiagStderrLines 诊断留痕里 stderr 尾巴的保留行数（执行面与编排侧共用同一份上限）。

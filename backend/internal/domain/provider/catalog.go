@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 运行时模型目录的**缓存与拒绝值反馈**（P4a 正文第六十刀：从 `internal/manager` 搬入）———
@@ -19,7 +19,7 @@ const rejectedValueTTL = 10 * time.Minute
 // ConfigCatalogEntry 一次目录取样的结果（内存缓存，不落盘：任何一次真实会话都会刷新它）。
 type ConfigCatalogEntry struct {
 	Runtime   string
-	Options   []acp.ConfigOption
+	Options   []runtime.ConfigOption
 	FetchedAt time.Time
 }
 
@@ -47,7 +47,7 @@ func newConfigCatalog() *configCatalog {
 }
 
 // put 记录一次目录取样（options 为空也记录：表示「运行时确实没给」）。
-func (c *configCatalog) put(runtimeID string, options []acp.ConfigOption) {
+func (c *configCatalog) put(runtimeID string, options []runtime.ConfigOption) {
 	c.mu.Lock()
 	c.entries[runtimeID] = &ConfigCatalogEntry{Runtime: runtimeID, Options: cloneOptions(options), FetchedAt: time.Now().UTC()}
 	c.mu.Unlock()
@@ -112,15 +112,15 @@ func (c *configCatalog) clearRejection(runtimeID, value string) {
 }
 
 // cloneOptions 深拷贝选项（含每个选项的值切片），避免缓存与调用方共享底层数组。
-func cloneOptions(in []acp.ConfigOption) []acp.ConfigOption {
+func cloneOptions(in []runtime.ConfigOption) []runtime.ConfigOption {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]acp.ConfigOption, len(in))
+	out := make([]runtime.ConfigOption, len(in))
 	for i, o := range in {
 		out[i] = o
 		if len(o.Values) > 0 {
-			out[i].Values = append([]acp.ConfigOptionValue(nil), o.Values...)
+			out[i].Values = append([]runtime.ConfigOptionValue(nil), o.Values...)
 		}
 	}
 	return out
@@ -129,7 +129,7 @@ func cloneOptions(in []acp.ConfigOption) []acp.ConfigOption {
 // ——— Plane 上的事实出口（编排侧只认这四个方法）———
 
 // PutConfigOptions 记录一次目录取样（运行时推送 / 会话模型应用 / 目录取样共用）。
-func (pl *Plane) PutConfigOptions(runtimeID string, options []acp.ConfigOption) {
+func (pl *Plane) PutConfigOptions(runtimeID string, options []runtime.ConfigOption) {
 	pl.catalog.put(runtimeID, options)
 }
 

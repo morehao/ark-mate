@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -50,6 +49,11 @@ func (o *Orchestrator) attachSession(as *session.ActiveSession, reason string) {
 }
 
 // liveConfigOptions 返回任一活跃会话的配置项（模型目录的**首选来源**：运行时此刻的真实状态）。
-func (o *Orchestrator) liveConfigOptions() ([]acp.ConfigOption, bool) {
-	return o.runner.LiveConfigOptions()
+func (o *Orchestrator) liveConfigOptions() ([]runtime.ConfigOption, bool) {
+	opts, ok := o.runner.LiveConfigOptions()
+	if !ok {
+		return nil, false
+	}
+	// 活跃会话的选项来自协议形状（会话句柄仍是 ACP 会话）；在**编排边界**折成平台值。
+	return runtime.ConfigOptionsOfACP(opts), true
 }

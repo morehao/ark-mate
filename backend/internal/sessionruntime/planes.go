@@ -13,7 +13,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	wkrow "github.com/morehao/ark-mate/internal/domain/workspace/row"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -46,7 +45,7 @@ type ProviderFacts interface {
 	ProviderModelRefsReadOnly(ctx context.Context, providerID string) []string
 	ResolveSessionModel(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)
 	ProviderKeyReady(ctx context.Context, providerID string) (bool, string)
-	PutConfigOptions(runtimeID string, options []acp.ConfigOption)
+	PutConfigOptions(runtimeID string, options []runtime.ConfigOption)
 	MarkModelRejected(runtimeID, value, reason string)
 	ClearModelRejection(runtimeID, value string)
 	ModelCatalog(ctx context.Context) (*provider.CatalogView, error)

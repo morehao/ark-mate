@@ -35,13 +35,13 @@ func catalogRig(t *testing.T) (*Service, *Orchestrator) {
 type fakeProjection struct {
 	runtime.Runtime
 	applied []runtime.ModelConfig
-	state   []acp.ConfigOption
+	state   []runtime.ConfigOption
 	err     error
 }
 
-func (f *fakeProjection) ConfigOptions() []acp.ConfigOption { return f.state }
+func (f *fakeProjection) ConfigOptions() []runtime.ConfigOption { return f.state }
 
-func (f *fakeProjection) ApplyModel(_ context.Context, m runtime.ModelConfig) ([]acp.ConfigOption, error) {
+func (f *fakeProjection) ApplyModel(_ context.Context, m runtime.ModelConfig) ([]runtime.ConfigOption, error) {
 	f.applied = append(f.applied, m)
 	if f.err != nil {
 		return nil, f.err
@@ -52,6 +52,7 @@ func (f *fakeProjection) ApplyModel(_ context.Context, m runtime.ModelConfig) ([
 // TestModelCatalogLiveSession 活会话是首选来源：直接读运行时会话自报的配置项（分组展平）。
 func TestModelCatalogLiveSession(t *testing.T) {
 	svc, orch := catalogRig(t)
+	// 这条用例喂的是**协议形状**（假会话本身仍是 ACP 会话）：转换在编排边界做。
 	opts := []acp.ConfigOption{{
 		ID: "model", Name: "Model", Category: acp.CategoryModel, Type: acp.OptionTypeSelect,
 		CurrentValue: `["deepseek","deepseek-chat"]`, Grouped: true,
@@ -136,10 +137,10 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	svc, orch := catalogRig(t)
 
 	// 1) 成功：全量状态回填目录缓存，且曾失败的标记被清除。
-	proj := &fakeProjection{state: []acp.ConfigOption{{
+	proj := &fakeProjection{state: []runtime.ConfigOption{{
 		ID: "model", Name: "Model", Category: acp.CategoryModel, Type: acp.OptionTypeSelect,
 		CurrentValue: "test/other",
-		Values:       []acp.ConfigOptionValue{{Value: "test/other", Name: "Other"}},
+		Values:       []runtime.ConfigOptionValue{{Value: "test/other", Name: "Other"}},
 	}}}
 	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: "stub",
 		Session: &stubSession{}, Projection: proj}))
@@ -156,7 +157,7 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	}
 	// 缓存被成功状态刷新（活会话优先级更高，故直接查缓存）。
 	entry, ok := planesOf(svc).Providers.ConfigOptions("stub", provider.DefaultCatalogTTL)
-	if !ok || acp.CurrentConfigValue(entry.Options, acp.CategoryModel) != "test/other" {
+	if !ok || runtime.CurrentConfigValue(entry.Options, runtime.CategoryModel) != "test/other" {
 		t.Fatalf("目录缓存应被成功状态刷新: %+v", entry)
 	}
 
@@ -244,14 +245,14 @@ func TestPickListedSession(t *testing.T) {
 // ④ 全读通但都零候选 = 取样成功（**不是**失败）；⑤ 空候选列表不伪装成"读到了但没有"。
 func TestSampleCandidatesFallsBackPastBrokenCandidate(t *testing.T) {
 	broken := errors.New(`no adapter registered for provider "old"`)
-	opts := []acp.ConfigOption{{
+	opts := []runtime.ConfigOption{{
 		ID: "model", Category: acp.CategoryModel,
-		Values: []acp.ConfigOptionValue{{Value: "v1"}},
+		Values: []runtime.ConfigOptionValue{{Value: "v1"}},
 	}}
 	names := []string{"newest", "middle", "oldest"}
 
 	// ① 第一条报错、第二条有候选 → 用第二条的，且 sampled=true、无错。
-	got, sampled, err := sampleCandidates(names, func(n string) ([]acp.ConfigOption, error) {
+	got, sampled, err := sampleCandidates(names, func(n string) ([]runtime.ConfigOption, error) {
 		if n == "newest" {
 			return nil, broken
 		}
@@ -266,7 +267,7 @@ func TestSampleCandidatesFallsBackPastBrokenCandidate(t *testing.T) {
 	}
 
 	// ② 第一条**读通但零候选**（底座没有选中的模型）、第二条有候选 → 仍然用第二条。
-	got, sampled, err = sampleCandidates(names, func(n string) ([]acp.ConfigOption, error) {
+	got, sampled, err = sampleCandidates(names, func(n string) ([]runtime.ConfigOption, error) {
 		if n == "newest" {
 			return nil, nil
 		}
@@ -282,7 +283,7 @@ func TestSampleCandidatesFallsBackPastBrokenCandidate(t *testing.T) {
 
 	// ③ 全部报错 → sampled=false，err 是**最后一个**（它最接近"此刻为什么没有目录"）。
 	last := errors.New("oldest failed")
-	got, sampled, err = sampleCandidates(names, func(n string) ([]acp.ConfigOption, error) {
+	got, sampled, err = sampleCandidates(names, func(n string) ([]runtime.ConfigOption, error) {
 		if n == "oldest" {
 			return nil, last
 		}
@@ -293,14 +294,14 @@ func TestSampleCandidatesFallsBackPastBrokenCandidate(t *testing.T) {
 	}
 
 	// ④ 全部读通、都零候选 → 取样成功（底座确实没给），不是"我们没读到"。
-	if got, sampled, err := sampleCandidates(names, func(string) ([]acp.ConfigOption, error) {
+	if got, sampled, err := sampleCandidates(names, func(string) ([]runtime.ConfigOption, error) {
 		return nil, nil
 	}); !sampled || err != nil || got != nil {
 		t.Fatalf("全读通且零候选应记为取样成功: opts=%+v sampled=%v err=%v", got, sampled, err)
 	}
 
 	// ⑤ 没有候选：不能伪装成"读到了但没有"。
-	if _, sampled, err := sampleCandidates[string](nil, func(string) ([]acp.ConfigOption, error) {
+	if _, sampled, err := sampleCandidates[string](nil, func(string) ([]runtime.ConfigOption, error) {
 		t.Fatal("没有候选时不该调用取样")
 		return nil, nil
 	}); sampled || err == nil {
@@ -391,7 +392,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 	//    这里的错误值**必须从产出它的那一处取**（`sampleCandidates`），不是直接引用那个哨兵：
 	//    隔离环境实测时 `fetchCatalogByResume` 自己又早退造了一个同码错误，于是用户看到"取样失败"
 	//    ——而单测只要引用哨兵就照样绿。⑤ 的取法现在钉住了"产出 → 说明"这条边。
-	_, _, noCandErr := sampleCandidates[string](nil, func(string) ([]acp.ConfigOption, error) {
+	_, _, noCandErr := sampleCandidates[string](nil, func(string) ([]runtime.ConfigOption, error) {
 		return nil, nil
 	})
 	noCandidate := planesOf(r.svc).Providers.CatalogEmptyNote(ctx, false, noCandErr)

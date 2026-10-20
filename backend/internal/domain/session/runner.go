@@ -60,7 +60,7 @@ type DiagnosticsSink interface {
 
 // ConfigOptionsSink 运行时配置项（模型目录）的缓存写口。
 type ConfigOptionsSink interface {
-	PutConfigOptions(runtimeID string, options []acp.ConfigOption)
+	PutConfigOptions(runtimeID string, options []runtime.ConfigOption)
 }
 
 // ToolFailureClassifier 按 runtime 归类一条工具结果文本（底层是注册表的签名表）。

@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，阶段 0.6 进程壳端口守卫为 173 条，C1 领域自持类型守卫为 174 条，C2 错误分类词对照为 175 条、权限回执矩阵对照与已收口领域包的协议无关性各 1 条为 177 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性、进程壳端口边界与领域自持类型）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，阶段 0.6 进程壳端口守卫为 173 条，C1 领域自持类型守卫为 174 条，C2 错误分类词对照为 175 条、权限回执矩阵对照与已收口包的协议无关性各 1 条为 177 条、配置项值类型对照为 178 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性、进程壳端口边界与领域自持类型）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -129,9 +129,9 @@
 
 - 再加 **1 条「已收口包协议无关」守卫**（`layer_isolation_test.go` 的
   `TestProtocolFreePackagesStayClean`，2026-10-20 C2）：`protocolFreePackages` 里登记的内圈包
-  （当前 interaction / automation / workspace / skill / mcp / identity 六个域包 +
+  （当前 interaction / automation / workspace / skill / mcp / identity / provider 七个域包 +
   `core/definition` / `core/automation` 两个值包）**生产 import 不得出现 `internal/infra/acp`**
-  （只剩 `domain/session` 与 `domain/provider` 两块未收口：连接/生命周期与配置项；
+  （只剩 `domain/session` 一块未收口：连接与生命周期；
   `core/code` 是协议错误 → 平台视图的唯一转换点，按 B4 随连接边界搬走）。
   这是一张**逐步增长的收口表**：C2 每完成一块（事件与轮次 → 错误构造 → 权限/elicitation →
   配置项 → 连接与生命周期）登记一个包，全部登记完才收成"domain 不得 import acp"的全量判据。
@@ -139,7 +139,15 @@
   测试全绿，而"域不认识协议"这件事悄悄退回起点。fail-closed（登记的包不存在即红）。
   反证（实跑）：在 `domain/interaction` 放一个 acp 空白 import → 红。
 
-**共 177 条**——加守卫时记得同步这句话。
+- 再加 **1 条「配置项值类型」对照守卫**（`config_option_parity_test.go` 的
+  `TestConfigOptionValueTypesMatchACP`，2026-10-20 C2）：`runtime.ConfigOption` /
+  `ConfigOptionValue`（平台值，内核契约与目录缓存的语言）与 `acp.ConfigOption` /
+  `ConfigOptionValue`（协议）**逐字段、逐 json tag、逐类型形状**相等（用反射比，不手抄字段表）。
+  挡的是：这两份结构会被**直接序列化**给前端（`session.config_options` 事件与 `/models` 目录），
+  tag 就是 wire 契约；字段集少一个 = 转换时静默丢一个键（事件里少一个字段，前端永远读不到，
+  两侧测试都绿）。反证（实跑）：把平台侧 `description,omitempty` 改成 `description` → 红。
+
+**共 178 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 
