@@ -163,7 +163,15 @@ var v32Layers = map[string]v32Layer{
 	"internal/bootstrap/maintenance": {layer: 9, name: "maintenance", sameLayer: true},
 
 	// ——— L7：执行面 ———
+	//
+	// 阶段 0.6 第一版：`store` / `dao` / `infra/dsh` 三条进 deny——阶段 0.1 已把接库改成
+	// 端口（`sessionruntime/ports.go`），执行面生产代码不再 import 它们；这条 deny 是那次
+	// 改动的机器判据，防止下一个人"顺手"把库句柄或 DSH 适配器再塞回来。
+	//
+	// `registry` / `runtimeconn` 尚未进 deny：它们对应阶段 0.2（`PlaneFacts`）与 0.4
+	// （`ConnPool` / `RuntimePlane` 端口），那两步完成后再加（见计划 §0 与 §2）。
 	"internal/sessionruntime": {layer: 7, name: "sessionruntime", deny: []string{
+		"internal/persistence/store", "internal/persistence/dao", "internal/infra/dsh",
 		"internal/drivers/gateway", "internal/delivery/controller", "internal/delivery/middleware", "internal/delivery/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
