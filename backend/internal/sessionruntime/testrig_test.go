@@ -21,7 +21,6 @@ import (
 
 	defn "github.com/morehao/ark-mate/internal/core/definition"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
-	dmodel "github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
 	svcsystem "github.com/morehao/ark-mate/internal/service/svcsystem"
 
@@ -38,6 +37,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/resource"
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/infra/credentials"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -317,7 +317,7 @@ func (r *genRig) seedModelRow(t *testing.T, providerID, model string, isDefault 
 	t.Helper()
 	ctx := context.Background()
 	id := objid.New(objid.Model)
-	ok, err := planesOf(r.svc).Resources.Store().CreateModelDefinition(ctx, dmodel.ModelColumns{
+	ok, err := planesOf(r.svc).Resources.Store().CreateModelDefinition(ctx, provrow.ModelColumns{
 		ID: id, ProviderID: providerID, Model: model, InputModalities: resource.ModalityText,
 	}, defn.DefinitionWriteActor)
 	if err != nil || !ok {

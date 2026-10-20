@@ -190,7 +190,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	// v19：注入的档案由**默认模型**那条清单决定（agent 上的 provider 字段已随 agent 面撤销）。
 	// v20：挂到**有密钥**的那条上（`legacy-openai`）——只有引用、没有值的那条会把
 	// `credential_missing` 如实报出来（那是正确行为，见下面的反证）。
-	created, err := st.CreateModelDefinition(ctx, model.ModelColumns{
+	created, err := st.CreateModelDefinition(ctx, provrow.ModelColumns{
 		ID: "mdl_a2probe", ProviderID: "legacy-openai", Model: "m-a2probe", InputModalities: "text",
 	}, "t")
 	if err != nil || !created {
@@ -204,7 +204,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	}
 	// 反证：挂到"只有引用、库里没有值"的那条上必须报出来——否则"引用即有效"这个错觉会在
 	// v20 里复活（文件里的 `key_ref` 不携带任何东西）。
-	created, err = st.CreateModelDefinition(ctx, model.ModelColumns{
+	created, err = st.CreateModelDefinition(ctx, provrow.ModelColumns{
 		ID: "mdl_nokey", ProviderID: "deepseek-main", Model: "m-nokey", InputModalities: "text",
 	}, "t")
 	if err != nil || !created {

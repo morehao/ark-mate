@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/core/credential"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -354,7 +354,7 @@ func TestCredentialProblemPointsAtModelSettings(t *testing.T) {
 
 	defaultModel := func(t *testing.T, id, providerID string) {
 		t.Helper()
-		created, err := st.CreateModelDefinition(ctx, model.ModelColumns{
+		created, err := st.CreateModelDefinition(ctx, provrow.ModelColumns{
 			ID: id, ProviderID: providerID, Model: "m-" + id, InputModalities: "text",
 		}, "t")
 		if err != nil || !created {

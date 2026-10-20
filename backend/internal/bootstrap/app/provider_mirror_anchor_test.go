@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/credential"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/config"
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 
@@ -58,7 +58,7 @@ func TestStartupResolvesStoredProviderKeyAndWritesMirror(t *testing.T) {
 	}, 0, "test"); err != nil || !ok {
 		t.Fatalf("种子 provider 行: ok=%v err=%v", ok, err)
 	}
-	if ok, err := seed.CreateModelDefinition(ctx, model.ModelColumns{
+	if ok, err := seed.CreateModelDefinition(ctx, provrow.ModelColumns{
 		ID: "m1", ProviderID: "yygu", Model: "gpt-x", InputModalities: "text",
 	}, "test"); err != nil || !ok {
 		t.Fatalf("种子 model 行: ok=%v err=%v", ok, err)

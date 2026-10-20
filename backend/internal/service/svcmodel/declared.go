@@ -12,7 +12,6 @@ import (
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // ——— P4a 正文第五刀：平台模型清单的**写面**用例 ———
@@ -54,8 +53,8 @@ type Host interface {
 // `*store.Store` 结构上满足它，装配根直接交下来；memory 模式传 nil（写面据此报 40501）。
 // 六个方法就是本用例真正用到的全部：多一个都算"这层还能动别的东西"。
 type ModelStore interface {
-	CreateModelDefinition(ctx context.Context, cols model.ModelColumns, actor string) (bool, error)
-	UpdateModelDefinition(ctx context.Context, id string, content model.ModelContent, expectedRev int64, actor string) (bool, error)
+	CreateModelDefinition(ctx context.Context, cols provrow.ModelColumns, actor string) (bool, error)
+	UpdateModelDefinition(ctx context.Context, id string, content provrow.ModelContent, expectedRev int64, actor string) (bool, error)
 	DeleteModelDefinitionAndClearDefault(ctx context.Context, id string, expectedRev int64, actor string) (bool, bool, error)
 	GetModelDefinition(ctx context.Context, id string) (*provrow.Model, bool, error)
 	GetProviderDefinition(ctx context.Context, id string) (*provrow.Item, bool, error)
@@ -104,7 +103,7 @@ func (m *Declared) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq)
 		return nil, err
 	}
 	id := objid.New(objid.Model)
-	ok, err := m.st.CreateModelDefinition(ctx, model.ModelColumns{
+	ok, err := m.st.CreateModelDefinition(ctx, provrow.ModelColumns{
 		ID: id, ProviderID: req.ProviderID, Model: strings.TrimSpace(req.Model),
 		Name: derefString(req.Name), Note: derefString(req.Note), InputModalities: modalities,
 		MaxInputTokens: maxIn, MaxOutputTokens: maxOut,
@@ -151,7 +150,7 @@ func (m *Declared) UpdateModel(ctx context.Context, id string, patch dtomodel.Mo
 		return nil, modelNotFoundErr(id)
 	}
 	// 指针更新：只改 patch 里出现过的键。
-	content := model.ModelContent{
+	content := provrow.ModelContent{
 		Name: row.Name, Note: row.Note,
 		// 列值归一：空列（只可能来自手写行，列默认值是 `text`）也要写成明确值——否则"只改名字"
 		// 这一步会把空串原样写回，让"默认 text"变成第三种落库形态。

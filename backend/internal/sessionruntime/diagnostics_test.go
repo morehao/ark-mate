@@ -8,11 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/persistence/model"
-
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
@@ -188,7 +187,7 @@ func TestRuntimeDiagnosticsRemediation(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
 	enableStore(svc, st)
-	if created, err := st.CreateModelDefinition(ctx, model.ModelColumns{
+	if created, err := st.CreateModelDefinition(ctx, provrow.ModelColumns{
 		ID: "mdl_gone", ProviderID: "gone", Model: "m-gone", InputModalities: "text",
 	}, "t"); err != nil || !created {
 		t.Fatalf("造默认模型行: created=%v err=%v", created, err)

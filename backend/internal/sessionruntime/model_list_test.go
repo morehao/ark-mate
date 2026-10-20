@@ -9,7 +9,6 @@ import (
 
 	defn "github.com/morehao/ark-mate/internal/core/definition"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
 
@@ -17,6 +16,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/resource"
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -94,7 +94,7 @@ func builtinSpec(t *testing.T, id string) runtime.Spec {
 // 这些用例要的是"清单里有一条"这个**前提**，不是写面的行为——写面的判据跟着实现走，
 // 在 `internal/service/svcmodel/declared_test.go`。
 //
-// 仍借 `model.ModelColumns` 落库而不是手写 SQL：前提必须与产品落库的形态同源
+// 仍借 `provrow.ModelColumns` 落库而不是手写 SQL：前提必须与产品落库的形态同源
 // （列化之后"清单里有一条"这句话的含义就是这些列）。
 func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate ...func(*dtomodel.ModelCreateReq)) *provider.ModelItem {
 	t.Helper()
@@ -122,7 +122,7 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 	if req.Note != nil {
 		note = *req.Note
 	}
-	ok, err := planesOf(r.svc).Resources.Store().CreateModelDefinition(ctx, model.ModelColumns{
+	ok, err := planesOf(r.svc).Resources.Store().CreateModelDefinition(ctx, provrow.ModelColumns{
 		ID: id, ProviderID: providerID, Model: modelID, Name: name, Note: note,
 		InputModalities: modalities, MaxInputTokens: req.MaxInputTokens, MaxOutputTokens: req.MaxOutputTokens,
 	}, defn.DefinitionWriteActor)

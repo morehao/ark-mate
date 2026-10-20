@@ -11,6 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/credential"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -201,7 +202,7 @@ func TestProviderStaleMirrorKeyNotAdopted(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if created, err := st.CreateModelDefinition(ctx, model.ModelColumns{
+	if created, err := st.CreateModelDefinition(ctx, provrow.ModelColumns{
 		ID: "mdl_stale", ProviderID: "default", Model: "m-1", InputModalities: "text",
 	}, "t"); err != nil || !created {
 		t.Fatalf("造模型行: created=%v err=%v", created, err)

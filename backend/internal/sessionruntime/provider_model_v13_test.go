@@ -11,6 +11,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
 
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
@@ -189,7 +190,7 @@ func TestModelListOrderIsProviderThenModelID(t *testing.T) {
 	r := newModelRig(t)
 
 	// 三个供应商（id 升序 p1 < p2 < p3），每个下面按**平台 id 逆序**插入若干条。
-	rows := []model.ModelColumns{
+	rows := []provrow.ModelColumns{
 		{ID: "zzz", ProviderID: "p1", Model: "m-a", Name: "A", InputModalities: "text"},
 		{ID: "mmm", ProviderID: "p1", Model: "m-b", Name: "B", InputModalities: "text"},
 		{ID: "aaa", ProviderID: "p1", Model: "m-c", Name: "C", InputModalities: "text"},

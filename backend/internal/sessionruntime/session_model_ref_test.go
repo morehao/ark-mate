@@ -15,9 +15,9 @@ import (
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // ——— v26：会话模型引用 = **平台模型行 id**（定案「辰」）———
@@ -68,7 +68,7 @@ func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName st
 		t.Fatalf("CreateProvider(%s): %v", providerID, err)
 	}
 	id := objid.New(objid.Model)
-	ok, err := planesOf(svc).Resources.Store().CreateModelDefinition(ctx, model.ModelColumns{
+	ok, err := planesOf(svc).Resources.Store().CreateModelDefinition(ctx, provrow.ModelColumns{
 		ID: id, ProviderID: providerID, Model: modelName, InputModalities: resource.ModalityText,
 	}, defn.DefinitionWriteActor)
 	if err != nil || !ok {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/infra/dbclient"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
@@ -530,7 +531,7 @@ func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
 	}, 0, "rest"); err != nil || !ok {
 		t.Fatalf("升级后写供应商: ok=%v err=%v", ok, err)
 	}
-	if ok, err := s.CreateModelDefinition(ctx, model.ModelColumns{
+	if ok, err := s.CreateModelDefinition(ctx, provrow.ModelColumns{
 		ID: "md-1", ProviderID: "deepseek-main", Model: "deepseek-v4-flash",
 		Name: "Flash", InputModalities: "text",
 	}, "rest"); err != nil || !ok {
@@ -548,7 +549,7 @@ func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
 	if md, found, err := s.GetModelDefinition(ctx, "md-1"); err != nil || !found || md.Model != "deepseek-v4-flash" {
 		t.Fatalf("读回模型条目失真: found=%v err=%v row=%+v", found, err, md)
 	}
-	if ok, err := s.CreateModelDefinition(ctx, model.ModelColumns{
+	if ok, err := s.CreateModelDefinition(ctx, provrow.ModelColumns{
 		ID: "md-2", ProviderID: "deepseek-main", Model: "deepseek-v4-flash",
 	}, "rest"); err != nil || ok {
 		t.Fatalf("同 (provider_id, model_id) 应被唯一索引拦下: ok=%v err=%v", ok, err)
