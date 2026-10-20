@@ -10,8 +10,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/object/objdelivery"
 	"github.com/morehao/ark-mate/internal/core/resource"
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
 
@@ -326,10 +326,10 @@ func (pl *Plane) DeleteProvider(ctx context.Context, id string) (*ProviderDelete
 }
 
 // stProviderRow 读一条 provider 行（memory 载体没有行 → (nil,false,nil) 由调用方处理）。
-func (pl *Plane) stProviderRow(ctx context.Context, id string) (*model.ProviderEntity, bool, error) {
+func (pl *Plane) stProviderRow(ctx context.Context, id string) (*provrow.Item, bool, error) {
 	if pl.st == nil {
 		// 文件载体：没有"行"可读，revision 恒 0；删除由文件路径完成（见 removeProviderDefinition）。
-		return &model.ProviderEntity{ID: id}, true, nil
+		return &provrow.Item{ID: id}, true, nil
 	}
 	return pl.st.GetProviderDefinition(ctx, id)
 }
@@ -356,7 +356,7 @@ func normalizeProtocol(v string) (string, error) {
 
 // dialEnvChannel 凭据的交付通道（env 注入那一档；取自静态交付表，避免"一处声明"再多一个漂移点）。
 func dialEnvChannel() string {
-	d, _ := objdelivery.For(model.DefinitionKindProvider)
+	d, _ := objdelivery.For(objdelivery.KindProvider)
 	return d.Channel
 }
 

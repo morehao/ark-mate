@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/domain/session/memory"
 	"github.com/morehao/ark-mate/internal/domain/session/message"
@@ -68,7 +69,7 @@ type Store interface {
 	ListAllMemories(ctx context.Context) ([]memory.Item, error)
 
 	// ——— 模型清单（会话要认模型是否在册）———
-	ListModelDefinitions(ctx context.Context) (model.ModelEntityList, error)
+	ListModelDefinitions(ctx context.Context) ([]provrow.Model, error)
 
 	// ——— 元数据（读模型重建版本号等）———
 	GetMeta(ctx context.Context, key string) (string, bool, error)

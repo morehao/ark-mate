@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 	"github.com/morehao/ark-mate/internal/core/resource"
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -60,7 +61,7 @@ func (pl *Plane) ModelRow(ctx context.Context, id string) (*ModelItem, bool, err
 }
 
 // DefaultModelRow 读出默认模型那一行（未设 / 指向已删模型 → (nil,false,nil)）。
-func (pl *Plane) DefaultModelRow(ctx context.Context) (*model.ModelEntity, bool, error) {
+func (pl *Plane) DefaultModelRow(ctx context.Context) (*provrow.Model, bool, error) {
 	if pl.st == nil {
 		return nil, false, nil
 	}
@@ -159,7 +160,7 @@ func (pl *Plane) ResolveSessionModel(ctx context.Context, runtimeID, modelID str
 }
 
 // modelRowByID 按平台行 id 读一行（memory 模式没有清单载体 → 不在册）。
-func (pl *Plane) modelRowByID(ctx context.Context, id string) (*model.ModelEntity, bool, error) {
+func (pl *Plane) modelRowByID(ctx context.Context, id string) (*provrow.Model, bool, error) {
 	if pl.st == nil {
 		return nil, false, nil
 	}
@@ -190,7 +191,7 @@ func SessionModelNotFoundErr(modelID string) error {
 // modelRespFromRow 把一行模型条目投影成对外表示（**不含任何 runtime 维度**）。
 //
 // v13 起是**纯列投影，不可能失败**：没有 JSON 可比坏，于是"一行坏 body 打不开整页"在结构上消失了。
-func modelRespFromRow(row *model.ModelEntity) ModelItem {
+func modelRespFromRow(row *provrow.Model) ModelItem {
 	out := ModelItem{
 		ID: row.ID, ProviderID: row.ProviderID, Model: row.Model,
 		Name: row.Name, Note: row.Note,
@@ -200,7 +201,7 @@ func modelRespFromRow(row *model.ModelEntity) ModelItem {
 		Revision: row.Revision,
 	}
 	if !row.UpdatedAt.IsZero() {
-		out.UpdatedAt = model.FormatTime(row.UpdatedAt)
+		out.UpdatedAt = objtime.Format(row.UpdatedAt)
 	}
 	return out
 }

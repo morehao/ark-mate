@@ -11,6 +11,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
@@ -107,7 +108,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("providers 行数不符: n=%d err=%v", len(rows), err)
 	}
-	got := map[string]model.ProviderEntity{}
+	got := map[string]provrow.Item{}
 	for i := range rows {
 		got[rows[i].ID] = rows[i]
 	}

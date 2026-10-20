@@ -8,12 +8,12 @@ import (
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	wkrow "github.com/morehao/ark-mate/internal/domain/workspace/row"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -39,7 +39,7 @@ type ProviderFacts interface {
 	SetEffect(fn provider.EffectFn)
 	SetDefaultModel(fn provider.DefaultModelProvider)
 	ModelValueFor(runtimeID, providerID, model string) (string, error)
-	DefaultModelRow(ctx context.Context) (*model.ModelEntity, bool, error)
+	DefaultModelRow(ctx context.Context) (*provrow.Model, bool, error)
 	ProviderEnvFor(runtimeID, providerID string) []string
 	InjectedProviderID(ctx context.Context) string
 	CredentialProblem(ctx context.Context) error

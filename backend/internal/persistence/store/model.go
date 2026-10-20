@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/persistence/dao"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/dbaccess/gormdao"
@@ -145,7 +146,7 @@ func (s *Store) DeleteModelDefinitionAndClearDefault(
 }
 
 // GetModelDefinition 读一条模型条目（不存在 → (nil, false, nil)）。
-func (s *Store) GetModelDefinition(ctx context.Context, id string) (*model.ModelEntity, bool, error) {
+func (s *Store) GetModelDefinition(ctx context.Context, id string) (*provrow.Model, bool, error) {
 	row, err := s.models.GetByID(ctx, id)
 	if err != nil {
 		return nil, false, err
@@ -153,23 +154,31 @@ func (s *Store) GetModelDefinition(ctx context.Context, id string) (*model.Model
 	if row == nil {
 		return nil, false, nil
 	}
-	return row, true, nil
+	return modelRowOf(row), true, nil
 }
 
 // ListModelDefinitions 列出全部模型条目（**`(provider_id, model)` 升序**，ADR-6）。
 //
 // v12 起没有"列某 runtime 的清单"这个查询轴：同一份清单投给所有已注册底座。
-func (s *Store) ListModelDefinitions(ctx context.Context) (model.ModelEntityList, error) {
-	return s.models.GetListByCond(ctx, &gormdao.BaseCond{OrderField: modelListOrder})
+func (s *Store) ListModelDefinitions(ctx context.Context) ([]provrow.Model, error) {
+	rows, err := s.models.GetListByCond(ctx, &gormdao.BaseCond{OrderField: modelListOrder})
+	if err != nil {
+		return nil, err
+	}
+	return modelRowsOf(rows), nil
 }
 
 // ListModelDefinitionsByProvider 列出挂靠在某条供应商下的条目（**只读**：删除保护的判据
 // 已移进 `DeleteProviderDefinitionIfUnreferenced` 的同一事务，这里只服务文案与 doctor）。
-func (s *Store) ListModelDefinitionsByProvider(ctx context.Context, providerID string) (model.ModelEntityList, error) {
-	return s.models.GetListByCond(ctx, &dao.ModelCond{
+func (s *Store) ListModelDefinitionsByProvider(ctx context.Context, providerID string) ([]provrow.Model, error) {
+	rows, err := s.models.GetListByCond(ctx, &dao.ModelCond{
 		BaseCond:   &gormdao.BaseCond{OrderField: modelByProviderOrder},
 		ProviderID: providerID,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return modelRowsOf(rows), nil
 }
 
 // FindModelDefinition 按 `(provider_id, model)` 取一条（`model_exists` 判定）。
@@ -249,4 +258,26 @@ func (s *Store) MigrationNotesV13(ctx context.Context) (*MigrationNotesV13, bool
 		return nil, false, err
 	}
 	return &notes, true, nil
+}
+
+// modelRowOf 把一张 `models` 行翻成领域值（映射只有这一处）。
+func modelRowOf(r *model.ModelEntity) *provrow.Model {
+	if r == nil {
+		return nil
+	}
+	return &provrow.Model{
+		ID: r.ID, ProviderID: r.ProviderID, Model: r.Model,
+		Name: r.Name, Note: r.Note, InputModalities: r.InputModalities,
+		MaxInputTokens: r.MaxInputTokens, MaxOutputTokens: r.MaxOutputTokens,
+		Revision: r.Revision, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+// modelRowsOf 批量映射（切片恒非 nil：调用方按 len 判定，nil 与空切片同义）。
+func modelRowsOf(rows model.ModelEntityList) []provrow.Model {
+	out := make([]provrow.Model, 0, len(rows))
+	for i := range rows {
+		out = append(out, *modelRowOf(&rows[i]))
+	}
+	return out
 }

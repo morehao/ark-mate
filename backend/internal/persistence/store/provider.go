@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/persistence/dao"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/dbaccess/gormdao"
@@ -14,8 +15,8 @@ import (
 // providerListOrder 供应商列表的读序（id 升序）。
 const providerListOrder = "id ASC"
 
-// v3.1 P4：列形状上移到 `internal/persistence/model`，这里保留别名（调用点不改）。
-type ProviderColumns = model.ProviderColumns
+// 列形状归领域（`provider/row.Columns`），这里保留别名让既有调用点不改写法。
+type ProviderColumns = provrow.Columns
 
 // 本文件是 provider 档案事实源（v13 起是**资源表**）的门面：**一次写面 = 一行 + 一条审计**
 // （复用 `commitDefinitionChange`）。
@@ -32,7 +33,7 @@ type ProviderColumns = model.ProviderColumns
 // 门面方法，本版刻意没做（残留已记进 v20 笔记）。
 
 // digest 这条 provider 行的规范 JSON 摘要（ADR-10）。
-func providerColumnsDigest(c model.ProviderColumns) string {
+func providerColumnsDigest(c provrow.Columns) string {
 	return rowDigest(map[string]string{
 		"id": c.ID, "name": c.Name, "protocol": c.Protocol, "base_url": c.BaseURL, "note": c.Note,
 	})
@@ -143,7 +144,7 @@ func (s *Store) DeleteProviderDefinitionIfUnreferenced(
 }
 
 // GetProviderDefinition 读一条 provider 档案（不存在 → (nil, false, nil)）。
-func (s *Store) GetProviderDefinition(ctx context.Context, id string) (*model.ProviderEntity, bool, error) {
+func (s *Store) GetProviderDefinition(ctx context.Context, id string) (*provrow.Item, bool, error) {
 	row, err := s.providers.GetByID(ctx, id)
 	if err != nil {
 		return nil, false, err
@@ -151,15 +152,43 @@ func (s *Store) GetProviderDefinition(ctx context.Context, id string) (*model.Pr
 	if row == nil {
 		return nil, false, nil
 	}
-	return row, true, nil
+	return providerItemOf(row), true, nil
 }
 
 // ListProviderDefinitions 列出全部 provider 档案（id 升序）。
-func (s *Store) ListProviderDefinitions(ctx context.Context) (model.ProviderEntityList, error) {
-	return s.providers.GetListByCond(ctx, &gormdao.BaseCond{OrderField: providerListOrder})
+func (s *Store) ListProviderDefinitions(ctx context.Context) ([]provrow.Item, error) {
+	rows, err := s.providers.GetListByCond(ctx, &gormdao.BaseCond{OrderField: providerListOrder})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]provrow.Item, 0, len(rows))
+	for i := range rows {
+		out = append(out, *providerItemOf(&rows[i]))
+	}
+	return out, nil
 }
 
 // CountProviderDefinitions 返回 provider 档案行数（导入对账与 doctor 用它）。
 func (s *Store) CountProviderDefinitions(ctx context.Context) (int64, error) {
 	return s.providers.CountByCond(ctx, &gormdao.BaseCond{})
+}
+
+// providerItemOf 把一张 `providers` 行翻成领域值（映射只有这一处）。
+func providerItemOf(r *model.ProviderEntity) *provrow.Item {
+	if r == nil {
+		return nil
+	}
+	return &provrow.Item{
+		ID: r.ID, Name: r.Name, Protocol: r.Protocol, BaseURL: r.BaseURL, Note: r.Note,
+		Key: r.Key, Revision: r.Revision, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+// providerColumnsOfImport 把导入载荷的列结构（`model.ProviderColumns`，随
+// `model.DefinitionImportItem` 而来）翻成领域列值。
+//
+// 导入载荷是**外部正文的形状**，方向是 model → 领域，所以转换只发生在这条边界上；
+// 写面其余调用点直接提交 `ProviderColumns`（= 领域列值）。
+func providerColumnsOfImport(c model.ProviderColumns) provrow.Columns {
+	return provrow.Columns{ID: c.ID, Name: c.Name, Protocol: c.Protocol, BaseURL: c.BaseURL, Note: c.Note}
 }

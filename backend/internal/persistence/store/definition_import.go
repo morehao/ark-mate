@@ -64,7 +64,7 @@ func (s *Store) ImportDefinitionRows(ctx context.Context, items []DefinitionImpo
 			digest := bodyDigest(it.Body)
 			if it.Kind == model.DefinitionKindProvider && it.Provider != nil {
 				// provider 是资源表：审计摘要取**列行的规范 JSON**（ADR-10），不是已消失的 body。
-				digest = providerColumnsDigest(*it.Provider)
+				digest = providerColumnsDigest(providerColumnsOfImport(*it.Provider))
 			}
 			if err := s.definitionRevision.WithTx(tx).Append(ctx, &model.DefinitionRevisionEntity{
 				Kind:         it.Kind,
@@ -104,7 +104,7 @@ func (s *Store) createDefinitionTx(ctx context.Context, tx *gorm.DB, it Definiti
 			// 不可达（manager 侧构造 item 时必填）：宁可整体回滚也不要写一行空档案。
 			return false, fmt.Errorf("store: provider 导入缺少列载荷（%q）", it.ID)
 		}
-		return s.providers.WithTx(tx).CreateCAS(ctx, newProviderRow(*it.Provider, 1, now, now))
+		return s.providers.WithTx(tx).CreateCAS(ctx, newProviderRow(providerColumnsOfImport(*it.Provider), 1, now, now))
 	case model.DefinitionKindAutomation:
 		row := &model.AutomationEntity{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now, RecentRuns: "[]",

@@ -9,6 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/persistence/model"
@@ -56,8 +57,8 @@ type ModelStore interface {
 	CreateModelDefinition(ctx context.Context, cols model.ModelColumns, actor string) (bool, error)
 	UpdateModelDefinition(ctx context.Context, id string, content model.ModelContent, expectedRev int64, actor string) (bool, error)
 	DeleteModelDefinitionAndClearDefault(ctx context.Context, id string, expectedRev int64, actor string) (bool, bool, error)
-	GetModelDefinition(ctx context.Context, id string) (*model.ModelEntity, bool, error)
-	GetProviderDefinition(ctx context.Context, id string) (*model.ProviderEntity, bool, error)
+	GetModelDefinition(ctx context.Context, id string) (*provrow.Model, bool, error)
+	GetProviderDefinition(ctx context.Context, id string) (*provrow.Item, bool, error)
 	SetDefaultModelID(ctx context.Context, id string) error
 	ClearDefaultModelID(ctx context.Context, id string) (bool, error)
 }
