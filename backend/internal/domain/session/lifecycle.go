@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/infra/acp"
@@ -295,8 +296,7 @@ func (l *Lifecycle) Ensure(ctx context.Context, sessionID string) (*ActiveSessio
 	}
 	rec := l.plane.Rec(sessionID)
 	if rec == nil {
-		return nil, acp.NewError(acp.ClassRequest, "session_not_found",
-			fmt.Sprintf("未知会话 %q", sessionID), nil)
+		return nil, code.NewError(code.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
 	}
 	// runtime 选择：**构建期选定的那一个**。
 	// 若会话记录里的原生 runtime 与当前不同（改过构建 / 老数据），下面 Connect 的 `sameRuntime`
@@ -396,9 +396,8 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 	}
 	if !resumeOK {
 		if l.handoffMaxChars <= 0 {
-			return nil, "", acp.NewError(acp.ClassRequest, "resume_unavailable",
-				fmt.Sprintf("会话 %q 无法原生恢复（runtime %q 无 load/resume 或 provider 会话无效），且 memo 兜底关闭",
-					rec.ID, spec.ID), nil)
+			return nil, "", code.NewError(code.ClassRequest, "resume_unavailable", fmt.Sprintf("会话 %q 无法原生恢复（runtime %q 无 load/resume 或 provider 会话无效），且 memo 兜底关闭",
+				rec.ID, spec.ID), nil)
 		}
 		sess, err = client.NewSession(ctx, opts)
 		if err != nil {
@@ -531,9 +530,8 @@ func (l *Lifecycle) applyModel(ctx context.Context, as *ActiveSession, spec runt
 	// 「invalidParams」——用户看不出是缺密钥。平台侧先判一次，给出可执行的出路。
 	if spec.ModelCatalogNeedsCredential && model.Provider != "" && l.providerKeyReady != nil {
 		if ok, reason := l.providerKeyReady(ctx, model.Provider); !ok {
-			return acp.NewError(acp.ClassRequest, "model_credential_missing",
-				"[model_credential_missing] 所选模型挂靠的供应商 "+model.Provider+" 没有可用密钥（"+reason+
-					"）：该底座不会把它的模型列进会话配置；先到「设置 · 模型」补一条密钥（或把环境变量设好）", nil)
+			return code.NewError(code.ClassRequest, "model_credential_missing", "[model_credential_missing] 所选模型挂靠的供应商 "+model.Provider+" 没有可用密钥（"+reason+
+				"）：该底座不会把它的模型列进会话配置；先到「设置 · 模型」补一条密钥（或把环境变量设好）", nil)
 		}
 	}
 	// 不预判、但留痕：取值不在会话当前广告列表里（缓存滞后/跨会话选择）时记一条，仍然下发由
@@ -552,8 +550,7 @@ func (l *Lifecycle) applyModel(ctx context.Context, as *ActiveSession, spec runt
 	}
 	ae, _ := acp.As(err)
 	if ae != nil && ae.Code == "unsupported_model" {
-		return acp.NewError(acp.ClassRequest, "model_not_supported",
-			"[model_not_supported] runtime "+spec.ID+" 未提供模型配置项，无法应用所选模型", nil)
+		return code.NewError(code.ClassRequest, "model_not_supported", "[model_not_supported] runtime "+spec.ID+" 未提供模型配置项，无法应用所选模型", nil)
 	}
 	// 运行时明确拒绝：记录该取值不可用（目录里标灰）后原样上抛。
 	l.catalog.MarkRejected(spec.ID, model.Model, l.applyReason(err))
@@ -573,7 +570,8 @@ func (l *Lifecycle) NoteGenerationFallback(sessionID, runtimeID, from, to string
 	if l.diagnostics == nil {
 		return
 	}
-	ae := acp.NewError(acp.ClassConnection, "generation_switch_failed",
-		"迁移到新能力集失败（已回退到旧代际继续会话）："+cause.Error(), nil)
+	// 这里是**唯一**仍需具体错误类型的地方：诊断端口 (RecordRuntimeError) 还吃 `*acp.Error`。
+	// 诊断面端口化（C2 剩余）之后，这一行也换成 code.NewError。
+	ae := acp.NewError(acp.ClassConnection, "generation_switch_failed", "迁移到新能力集失败（已回退到旧代际继续会话）："+cause.Error(), nil)
 	l.diagnostics.RecordRuntimeError(sessionID, ae, nil)
 }

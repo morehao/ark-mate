@@ -55,8 +55,7 @@ func (pl *Plane) automationDirFor(what string) (string, error) {
 	dir := pl.dir
 	pl.mu.Unlock()
 	if dir == "" {
-		return "", acp.NewError(acp.ClassRequest, "automation_dir_unset",
-			fmt.Sprintf("未配置自动化目录（MATE_AUTOMATIONS），%s只能内存生效、重启即失；设好目录后重试", what), nil)
+		return "", code.NewError(code.ClassRequest, "automation_dir_unset", fmt.Sprintf("未配置自动化目录（MATE_AUTOMATIONS），%s只能内存生效、重启即失；设好目录后重试", what), nil)
 	}
 	return dir, nil
 }
@@ -222,21 +221,18 @@ func errText(err error) string {
 
 // notFoundAutomation / invalidAutomation / automationDisabled 运行面（手动触发）的三类拒绝。
 func notFoundAutomation(id string) error {
-	return acp.NewError(acp.ClassRequest, "automation_not_found",
-		fmt.Sprintf("未知 automation %q（列表刷新一下）", id), nil)
+	return code.NewError(code.ClassRequest, "automation_not_found", fmt.Sprintf("未知 automation %q（列表刷新一下）", id), nil)
 }
 
 // invalidAutomation 定义本身不可执行（装载期就发现了）→ 报出装载期记下的原因，而不是"未知错误"。
 func invalidAutomation(rec Rec) error {
-	return acp.NewError(acp.ClassRequest, "definition_invalid",
-		fmt.Sprintf("automation %s 的定义不可执行：%s", rec.Def.ID, rec.LoadErr), nil)
+	return code.NewError(code.ClassRequest, "definition_invalid", fmt.Sprintf("automation %s 的定义不可执行：%s", rec.Def.ID, rec.LoadErr), nil)
 }
 
 // automationDisabled 用户把它关了（enabled=false）→ 手动触发也拒绝：
 // 手动跑一次会绕过用户自己设的开关，而"关了还跑"是最难解释的一种行为。
 func automationDisabled(id string) error {
-	return acp.NewError(acp.ClassRequest, "automation_disabled",
-		fmt.Sprintf("automation %s 已停用（enabled=false）：先启用再手动触发", id), nil)
+	return code.NewError(code.ClassRequest, "automation_disabled", fmt.Sprintf("automation %s 已停用（enabled=false）：先启用再手动触发", id), nil)
 }
 
 // asACPError 是 errors.As 的小包装（避免本文件为了一个断言再引 errors 的命名冲突）。
@@ -270,18 +266,15 @@ func (pl *Plane) WriteAutomation(ctx context.Context, id string, patch map[strin
 	exists := draft.Existed
 	switch {
 	case create && exists:
-		return AutomationView{}, acp.NewError(acp.ClassLimit, "automation_exists",
-			fmt.Sprintf("automation %s 已存在（换一个 id，或用 PUT 覆盖它）", id), nil)
+		return AutomationView{}, code.NewError(code.ClassLimit, "automation_exists", fmt.Sprintf("automation %s 已存在（换一个 id，或用 PUT 覆盖它）", id), nil)
 	case !create && !exists:
-		return AutomationView{}, acp.NewError(acp.ClassRequest, "automation_not_found",
-			fmt.Sprintf("automation %s 不存在（列表刷新一下；平台不会\"顺便新建\"）", id), nil)
+		return AutomationView{}, code.NewError(code.ClassRequest, "automation_not_found", fmt.Sprintf("automation %s 不存在（列表刷新一下；平台不会\"顺便新建\"）", id), nil)
 	}
 	// 平台独占键（认领游标/运行史）不得由用户写面写入：`last_fired_at` 就是"这次触发过没有"
 	// 的判据，能写它就能让同一次触发重放（重复跑有副作用的 prompt），或把它永久卡住不跑。
 	for k := range patch {
 		if automation.IsReservedKey(k) {
-			return AutomationView{}, acp.NewError(acp.ClassRequest, "invalid_param",
-				fmt.Sprintf("键 %q 由平台写回（运行态），不可通过接口写入", k), nil)
+			return AutomationView{}, code.NewError(code.ClassRequest, "invalid_param", fmt.Sprintf("键 %q 由平台写回（运行态），不可通过接口写入", k), nil)
 		}
 	}
 	// 定义文件里 `id` 是路径的事实：body 与路径不一致 → 参数错（而不是悄悄按路径改掉 body）。
@@ -290,12 +283,10 @@ func (pl *Plane) WriteAutomation(ctx context.Context, id string, patch map[strin
 	if v, ok := patch["id"]; ok && v != nil {
 		s, okStr := patchID(v)
 		if !okStr {
-			return AutomationView{}, acp.NewError(acp.ClassRequest, "invalid_param",
-				`字段 "id" 须为字符串`, nil)
+			return AutomationView{}, code.NewError(code.ClassRequest, "invalid_param", `字段 "id" 须为字符串`, nil)
 		}
 		if s != "" && s != id {
-			return AutomationView{}, acp.NewError(acp.ClassRequest, "invalid_param",
-				fmt.Sprintf("路径 id %q 与 body id %q 不一致", id, s), nil)
+			return AutomationView{}, code.NewError(code.ClassRequest, "invalid_param", fmt.Sprintf("路径 id %q 与 body id %q 不一致", id, s), nil)
 		}
 	}
 	// `target.runtime_hint` / `target.agent_id` 是**已下线的选择面**（底座构建期固定；
@@ -321,16 +312,14 @@ func (pl *Plane) WriteAutomation(ctx context.Context, id string, patch map[strin
 			continue
 		}
 		if err := draft.DF.Set(k, patch[k]); err != nil {
-			return AutomationView{}, acp.NewError(acp.ClassService, "definition_write_failed",
-				fmt.Sprintf("automation 定义 %s 的键 %q 无法序列化：%v", draft.Locator, k, err), err)
+			return AutomationView{}, code.NewError(code.ClassService, "definition_write_failed", fmt.Sprintf("automation 定义 %s 的键 %q 无法序列化：%v", draft.Locator, k, err), err)
 		}
 	}
 	// 合并后的**确切字节**先解成强类型再校验：PUT 的语义是"这几个键置成这些值"，
 	// 所以必须校验**合并结果**（而不是只校验 patch 里的键）。
 	merged, err := draft.DF.Marshal()
 	if err != nil {
-		return AutomationView{}, acp.NewError(acp.ClassService, "definition_write_failed",
-			fmt.Sprintf("序列化 automation %s 失败：%v", id, err), err)
+		return AutomationView{}, code.NewError(code.ClassService, "definition_write_failed", fmt.Sprintf("序列化 automation %s 失败：%v", id, err), err)
 	}
 	merged, droppedLegacy, err := dropLegacyRuntimeHint(draft.DF, merged, id)
 	if err != nil {
@@ -342,8 +331,7 @@ func (pl *Plane) WriteAutomation(ctx context.Context, id string, patch map[strin
 	}
 	var def automation.Automation
 	if err := json.Unmarshal(merged, &def); err != nil {
-		return AutomationView{}, acp.NewError(acp.ClassRequest, "definition_invalid",
-			fmt.Sprintf("automation %s 合并后不是合法定义：%v", id, err), err)
+		return AutomationView{}, code.NewError(code.ClassRequest, "definition_invalid", fmt.Sprintf("automation %s 合并后不是合法定义：%v", id, err), err)
 	}
 	def.Schedule.Normalize()
 	if err := def.Validate(); err != nil {
@@ -362,8 +350,7 @@ func (pl *Plane) WriteAutomation(ctx context.Context, id string, patch map[strin
 				}
 				sch["days_of_week"] = days
 				if err := draft.DF.Set("schedule", sch); err != nil {
-					return AutomationView{}, acp.NewError(acp.ClassService, "definition_write_failed",
-						fmt.Sprintf("写入 automation %s 的规范化 days_of_week 失败：%v", id, err), err)
+					return AutomationView{}, code.NewError(code.ClassService, "definition_write_failed", fmt.Sprintf("写入 automation %s 的规范化 days_of_week 失败：%v", id, err), err)
 				}
 			}
 		}
@@ -498,9 +485,8 @@ func rejectRuntimeHintInPatch(id string, patch map[string]any) error {
 	if !ok || v == nil {
 		return nil
 	}
-	return acp.NewError(acp.ClassRequest, "runtime_selection_removed",
-		fmt.Sprintf("target.runtime_hint 已下线：底座由构建期固定（本机为 %s），不能在 automation 上选择；"+
-			"请从请求体里去掉这个键（automation %s）", runtime.SelectedRuntime(), id), nil)
+	return code.NewError(code.ClassRequest, "runtime_selection_removed", fmt.Sprintf("target.runtime_hint 已下线：底座由构建期固定（本机为 %s），不能在 automation 上选择；"+
+		"请从请求体里去掉这个键（automation %s）", runtime.SelectedRuntime(), id), nil)
 }
 
 // rejectAgentIDInPatch 本次请求若显式带了 `target.agent_id`（非 null）→ 40001。
@@ -516,9 +502,8 @@ func rejectAgentIDInPatch(id string, patch map[string]any) error {
 	if !ok || v == nil {
 		return nil
 	}
-	return acp.NewError(acp.ClassRequest, "agent_selection_removed",
-		fmt.Sprintf("target.agent_id 已下线：agent 概念已并入 runtime（本机为 %s），会话不再有 agent 身份；"+
-			"请从请求体里去掉这个键（automation %s）", runtime.SelectedRuntime(), id), nil)
+	return code.NewError(code.ClassRequest, "agent_selection_removed", fmt.Sprintf("target.agent_id 已下线：agent 概念已并入 runtime（本机为 %s），会话不再有 agent 身份；"+
+		"请从请求体里去掉这个键（automation %s）", runtime.SelectedRuntime(), id), nil)
 }
 
 // dropLegacyRuntimeHint 把**合并结果**里残留的 `target.runtime_hint` / `target.agent_id`
@@ -548,13 +533,11 @@ func dropLegacyRuntimeHint(df *capability.DefinitionFile, merged []byte, id stri
 		return merged, false, nil
 	}
 	if err := df.Set("target", tgt); err != nil {
-		return merged, false, acp.NewError(acp.ClassService, "definition_write_failed",
-			fmt.Sprintf("automation %s 的 target 无法序列化：%v", id, err), err)
+		return merged, false, code.NewError(code.ClassService, "definition_write_failed", fmt.Sprintf("automation %s 的 target 无法序列化：%v", id, err), err)
 	}
 	next, err := df.Marshal()
 	if err != nil {
-		return merged, false, acp.NewError(acp.ClassService, "definition_write_failed",
-			fmt.Sprintf("序列化 automation %s 失败：%v", id, err), err)
+		return merged, false, code.NewError(code.ClassService, "definition_write_failed", fmt.Sprintf("序列化 automation %s 失败：%v", id, err), err)
 	}
 	return next, true, nil
 }

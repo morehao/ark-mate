@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/object/objtime"
 	"github.com/morehao/ark-mate/internal/core/resource"
@@ -87,8 +88,7 @@ func (pl *Plane) DefaultModelRow(ctx context.Context) (*provrow.Model, bool, err
 func ModelValueFor(reg *runtime.Registry, runtimeID, providerID, model string) (string, error) {
 	a, ok := reg.ModelValue(runtimeID)
 	if !ok {
-		return "", acp.NewError(acp.ClassUnsupported, "model_value_unsupported",
-			fmt.Sprintf("runtime %q 的模型值形态未声明：平台不为未知底座猜模型值的形状", runtimeID), nil)
+		return "", code.NewError(code.ClassUnsupported, "model_value_unsupported", fmt.Sprintf("runtime %q 的模型值形态未声明：平台不为未知底座猜模型值的形状", runtimeID), nil)
 	}
 	return a.Value(providerID, model)
 }
@@ -183,9 +183,8 @@ func (pl *Plane) DefaultModelValueFor(ctx context.Context, runtimeID string) (st
 // 这里的处境是"这条会话声明的模型已不在清单里"，出路是**重新选一个**（或先把模型声明回来），
 // 而不是"你打错了 id"。码相同是刻意的（E9）。
 func SessionModelNotFoundErr(modelID string) error {
-	return acp.NewError(acp.ClassRequest, "model_not_found",
-		fmt.Sprintf("会话声明的模型 %q 不在平台清单里（或它还不是平台模型 id）："+
-			"请到「设置 · 模型」重新选一个——平台只接受自己声明过的模型", modelID), nil)
+	return code.NewError(code.ClassRequest, "model_not_found", fmt.Sprintf("会话声明的模型 %q 不在平台清单里（或它还不是平台模型 id）："+
+		"请到「设置 · 模型」重新选一个——平台只接受自己声明过的模型", modelID), nil)
 }
 
 // modelRespFromRow 把一行模型条目投影成对外表示（**不含任何 runtime 维度**）。

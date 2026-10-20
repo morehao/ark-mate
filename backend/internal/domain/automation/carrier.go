@@ -12,9 +12,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/automation"
 	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objtime"
 	arow "github.com/morehao/ark-mate/internal/domain/automation/row"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -70,8 +70,7 @@ func (pl *Plane) openAutomationDraft(ctx context.Context, id string) (*Draft, er
 	locator := Locator(id)
 	row, found, err := pl.st.GetAutomationDefinition(ctx, id)
 	if err != nil {
-		return nil, acp.NewError(acp.ClassService, "definition_write_failed",
-			fmt.Sprintf("读取 automation 定义 %s 失败：%v", locator, err), err)
+		return nil, code.NewError(code.ClassService, "definition_write_failed", fmt.Sprintf("读取 automation 定义 %s 失败：%v", locator, err), err)
 	}
 	if !found {
 		// DB 行的新建路径用**内存文档**（`NewDefinitionDoc`）：行没有文件路径，
@@ -82,8 +81,7 @@ func (pl *Plane) openAutomationDraft(ctx context.Context, id string) (*Draft, er
 	if err != nil {
 		// 库里的正文不是 JSON 对象 → 与文件载体同解：**先修它**（40001，可操作），而不是
 		// "写入失败"（用户会去重试一个永远不会成功的东西）。
-		return nil, acp.NewError(acp.ClassRequest, "definition_invalid",
-			fmt.Sprintf("automation 定义 %s 不是合法 JSON 对象，先修好或删掉它再写：%v", locator, err), err)
+		return nil, code.NewError(code.ClassRequest, "definition_invalid", fmt.Sprintf("automation 定义 %s 不是合法 JSON 对象，先修好或删掉它再写：%v", locator, err), err)
 	}
 	return &Draft{ID: id, DF: df, Locator: locator, Existed: true, Rev: row.Revision}, nil
 }
@@ -95,8 +93,7 @@ func (pl *Plane) commitAutomationDraft(ctx context.Context, d *Draft, create boo
 	}
 	body, err := d.DF.Marshal()
 	if err != nil {
-		return acp.NewError(acp.ClassService, "definition_write_failed",
-			fmt.Sprintf("序列化 automation 定义 %s 失败：%v", d.Locator, err), err)
+		return code.NewError(code.ClassService, "definition_write_failed", fmt.Sprintf("序列化 automation 定义 %s 失败：%v", d.Locator, err), err)
 	}
 	expected := d.Rev
 	if create {
@@ -106,13 +103,11 @@ func (pl *Plane) commitAutomationDraft(ctx context.Context, d *Draft, create boo
 	}
 	ok, err := pl.st.UpsertAutomationDefinition(ctx, d.ID, string(body), expected, defn.DefinitionWriteActor)
 	if err != nil {
-		return acp.NewError(acp.ClassService, "definition_write_failed",
-			fmt.Sprintf("写入 automation 定义 %s 失败：%v", d.Locator, err), err)
+		return code.NewError(code.ClassService, "definition_write_failed", fmt.Sprintf("写入 automation 定义 %s 失败：%v", d.Locator, err), err)
 	}
 	if !ok {
 		if create {
-			return acp.NewError(acp.ClassLimit, "automation_exists",
-				fmt.Sprintf("automation %s 已存在（换一个 id，或用 PUT 覆盖它）", d.ID), nil)
+			return code.NewError(code.ClassLimit, "automation_exists", fmt.Sprintf("automation %s 已存在（换一个 id，或用 PUT 覆盖它）", d.ID), nil)
 		}
 		return defn.DefinitionChangedErr(d.Locator)
 	}
@@ -130,16 +125,14 @@ func (pl *Plane) deleteAutomationDefinition(ctx context.Context, id string) (boo
 	}
 	row, found, err := pl.st.GetAutomationDefinition(ctx, id)
 	if err != nil {
-		return false, acp.NewError(acp.ClassService, "definition_delete_failed",
-			fmt.Sprintf("读取 automation 定义 %s 失败：%v", Locator(id), err), err)
+		return false, code.NewError(code.ClassService, "definition_delete_failed", fmt.Sprintf("读取 automation 定义 %s 失败：%v", Locator(id), err), err)
 	}
 	if !found {
 		return false, nil
 	}
 	ok, err := pl.st.DeleteAutomationDefinition(ctx, id, row.Revision, defn.DefinitionWriteActor)
 	if err != nil {
-		return false, acp.NewError(acp.ClassService, "definition_delete_failed",
-			fmt.Sprintf("删除 automation 定义 %s 失败：%v", Locator(id), err), err)
+		return false, code.NewError(code.ClassService, "definition_delete_failed", fmt.Sprintf("删除 automation 定义 %s 失败：%v", Locator(id), err), err)
 	}
 	if !ok {
 		// 删掉别人刚改过的那一版比覆盖更不可逆 → 一律报冲突让用户刷新重试。
@@ -345,8 +338,7 @@ func (pl *Plane) SaveOverlay(ctx context.Context, id string, overlay map[string]
 	}
 	if !ok {
 		// 两个判据之一没过：认领被别人推进（本 tick 的结论已过期）或用户改了定义。
-		return acp.NewError(acp.ClassLimit, "definition_changed",
-			fmt.Sprintf("automation %s 在本次运行期间被改动，运行态未写回（下一次触发会带上它）", id), nil)
+		return code.NewError(code.ClassLimit, "definition_changed", fmt.Sprintf("automation %s 在本次运行期间被改动，运行态未写回（下一次触发会带上它）", id), nil)
 	}
 	pl.reloadAutomationFromStore(ctx, id)
 	return nil

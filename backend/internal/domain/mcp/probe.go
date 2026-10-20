@@ -8,21 +8,20 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	mcpclient "github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/golib/glog"
 )
 
 // probeClass 探测错误 → acp 分类（决定 REST 信封码，见 restErr）。
-func probeClass(err error) acp.Class {
+func probeClass(err error) code.Class {
 	switch mcpclient.CodeOf(err) {
 	case "mcp_transport_unsupported":
-		return acp.ClassUnsupported
+		return code.ClassUnsupported
 	case "mcp_command_invalid", "mcp_url_invalid", "mcp_secret_unresolved":
 		// 密钥引用解析不了是**配置问题**（改引用或补齐库/环境），不是服务端故障 ⇒ 40001。
-		return acp.ClassRequest
+		return code.ClassRequest
 	default:
-		return acp.ClassService
+		return code.ClassService
 	}
 }
 
@@ -46,8 +45,7 @@ func (p *Plane) Probe(ctx context.Context, id string) (*ProbeResult, error) {
 		// 解析失败就**不拿空凭证去探**（同注入面纪律）：否则用户看到的是一个远处的 401，
 		// 而"哪条引用解析不了"是当下就能说清的事实。文案只含键名与引用，绝不含值。
 		// msg 里带 [:code] 是同一条排障约定（信封 code 只有分类粒度）。
-		err := acp.NewError(acp.ClassRequest, "mcp_secret_unresolved",
-			fmt.Sprintf("[mcp_secret_unresolved] 密钥引用解析失败（%s）", strings.Join(problems, "；")), nil)
+		err := code.NewError(code.ClassRequest, "mcp_secret_unresolved", fmt.Sprintf("[mcp_secret_unresolved] 密钥引用解析失败（%s）", strings.Join(problems, "；")), nil)
 		p.recordProbe(id, err)
 		return nil, code.FromError(err)
 	}
@@ -60,8 +58,7 @@ func (p *Plane) Probe(ctx context.Context, id string) (*ProbeResult, error) {
 		p.recordProbe(id, err)
 		// 信封 msg 带稳定 code（[mcp_timeout]/[mcp_spawn_failed]…）：信封 code 只有分类粒度，
 		// 排障需要精确原因（同 last_probe_error 可经 GET /mcps 读回）。
-		return nil, code.FromError(acp.NewError(probeClass(err), mcpclient.CodeOf(err),
-			fmt.Sprintf("[%s] %s", mcpclient.CodeOf(err), err.Error()), nil))
+		return nil, code.FromError(code.NewError(probeClass(err), mcpclient.CodeOf(err), fmt.Sprintf("[%s] %s", mcpclient.CodeOf(err), err.Error()), nil))
 	}
 
 	tools := make([]capability.Tool, 0, len(res.Tools))

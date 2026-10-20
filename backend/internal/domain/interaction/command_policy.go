@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/core/code"
 )
 
 // 命令门禁：**前缀规则**（A2 / v28）。
@@ -178,7 +178,7 @@ func DecideCommand(rules []PrefixRule, tokens []string) (CommandDecision, string
 
 // commandPolicyErr 命令策略的加载期错误（唯一出口：40001 + `command_policy_invalid`）。
 func commandPolicyErr(msg string) error {
-	return acp.NewError(acp.ClassRequest, "command_policy_invalid", msg, nil)
+	return code.NewError(code.ClassRequest, "command_policy_invalid", msg, nil)
 }
 
 // **刻意没有** `splitCommandTokens`：切 token 不是本域的事。

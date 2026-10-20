@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/core/code"
 )
 
 // ——— M3-3 建会话时的能力选定校验 ———
@@ -75,8 +75,7 @@ func (pl *Plane) ValidateSelection(sel *CapabilitySelection, runtimeID string) e
 	}
 	// 不存在（拼错）排前面：它更可能是用户立刻要改的那个。
 	problems := append(append([]SelectionProblem(nil), unknown...), unreachable...)
-	return acp.NewError(acp.ClassRequest, "capability_not_applicable",
-		fmt.Sprintf("能力选择对 runtime %q 不可达：%s", runtimeID, problemList(problems)), nil)
+	return code.NewError(code.ClassRequest, "capability_not_applicable", fmt.Sprintf("能力选择对 runtime %q 不可达：%s", runtimeID, problemList(problems)), nil)
 }
 
 // SelectionProblemsOf 把选定拆成「不存在」与「不可达」两组（顺序：按 id 升序，便于比对与去抖动）。

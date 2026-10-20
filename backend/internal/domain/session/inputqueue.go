@@ -9,7 +9,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/domain/session/queue"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -55,8 +54,7 @@ func NormalizeDelivery(v string) (string, error) {
 	case DeliveryInterruptThenPrompt:
 		return DeliveryInterruptThenPrompt, nil
 	default:
-		return "", acp.NewError(acp.ClassRequest, "invalid_delivery",
-			fmt.Sprintf("delivery 需为 %s 之一，得到 %q", strings.Join(ValidDeliveries, "|"), v), nil)
+		return "", code.NewError(code.ClassRequest, "invalid_delivery", fmt.Sprintf("delivery 需为 %s 之一，得到 %q", strings.Join(ValidDeliveries, "|"), v), nil)
 	}
 }
 
@@ -126,7 +124,7 @@ func (pl *Plane) ListQueuedInputsOf(ctx context.Context, convID string) []Queued
 // 前端冷挂载时 WS 只给 snapshot 不回放历史，没有这个入口队列就会在刷新后凭空消失。
 func (pl *Plane) ListQueuedInputs(ctx context.Context, id string) ([]QueuedInputItem, error) {
 	if !pl.HasSession(id) {
-		return nil, code.FromError(acp.NewError(acp.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return nil, code.FromError(code.NewError(code.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	queue := pl.ListQueuedInputsOf(ctx, id)
 	out := make([]QueuedInputItem, 0, len(queue))
@@ -243,8 +241,7 @@ func (pl *Plane) MoveQueuedInput(ctx context.Context, convID, inputID, beforeID 
 			}
 		}
 		if at < 0 {
-			return code.FromError(acp.NewError(acp.ClassRequest, "queued_input_anchor_not_found",
-				fmt.Sprintf("锚点队项 %q 不在该会话的待投递列表里", beforeID), nil))
+			return code.FromError(code.NewError(code.ClassRequest, "queued_input_anchor_not_found", fmt.Sprintf("锚点队项 %q 不在该会话的待投递列表里", beforeID), nil))
 		}
 		order = append(order[:at:at], append([]string{inputID}, order[at:]...)...)
 	}
@@ -328,8 +325,7 @@ func (pl *Plane) reorderQueued(ctx context.Context, convID string, order []strin
 
 // queuedInputNotFoundErr 队项不在该会话的待投递集里（唯一出口：40401）。
 func queuedInputNotFoundErr(inputID string) error {
-	return acp.NewError(acp.ClassRequest, "queued_input_not_found",
-		fmt.Sprintf("待投递输入 %q 不存在或已不在队列里", inputID), nil)
+	return code.NewError(code.ClassRequest, "queued_input_not_found", fmt.Sprintf("待投递输入 %q 不存在或已不在队列里", inputID), nil)
 }
 
 // StaleQueuedInputsOnRestore 启动恢复：把全库待投递输入置作废——等待的那一轮已随进程消失，

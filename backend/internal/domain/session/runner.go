@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/infra/acp"
@@ -369,7 +370,7 @@ func (r *Runner) DeliverQueued(as *ActiveSession) {
 func (r *Runner) CancelRun(ctx context.Context, sessionID string) error {
 	as := r.handles.Get(sessionID)
 	if as == nil {
-		return acp.NewError(acp.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
+		return code.NewError(code.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
 	}
 	t := as.RequestCancel()
 	if t == nil {
@@ -431,7 +432,7 @@ func (r *Runner) awaitSettle(sessionID string, t *Run) {
 func (r *Runner) WaitRun(ctx context.Context, sessionID string) (string, error) {
 	as := r.handles.Get(sessionID)
 	if as == nil {
-		return "", acp.NewError(acp.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
+		return "", code.NewError(code.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
 	}
 	t := as.ActiveRun()
 	if t == nil {
@@ -556,8 +557,8 @@ func (r *Runner) disconnectSession(as *ActiveSession, intentional bool) {
 	if intentional {
 		return
 	}
-	ae := acp.NewError(acp.ClassConnection, "connection_lost",
-		"runtime 连接断开（会话句柄已作废；下次 prompt 按需重建）", nil)
+	// 同 lifecycle.go 的那一处：诊断端口还吃 `*acp.Error`（它还要读 StderrTail）。
+	ae := acp.NewError(acp.ClassConnection, "connection_lost", "runtime 连接断开（会话句柄已作废；下次 prompt 按需重建）", nil)
 	if r.diagnostics != nil {
 		tail := r.diagnostics.StderrTail(as.Client())
 		ae.StderrTail = tail

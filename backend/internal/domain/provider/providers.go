@@ -14,11 +14,11 @@ import (
 	"github.com/morehao/ark-mate/internal/core/credential"
 
 	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objdelivery"
 	"github.com/morehao/ark-mate/internal/core/object/objtime"
 	"github.com/morehao/ark-mate/internal/core/redact"
 	"github.com/morehao/ark-mate/internal/core/resource"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -429,17 +429,14 @@ func (pl *Plane) CredentialProblem(ctx context.Context) error {
 	pl.mu.Unlock()
 	ref := fmt.Sprintf("默认模型所在的供应商 %q", providerID)
 	if d == nil {
-		return acp.NewError(acp.ClassRequest, "credential_missing",
-			ref+" 不存在：在「设置 · 模型」的供应商块里新建这条供应商，或把默认模型换到另一条", nil)
+		return code.NewError(code.ClassRequest, "credential_missing", ref+" 不存在：在「设置 · 模型」的供应商块里新建这条供应商，或把默认模型换到另一条", nil)
 	}
 	if d.Key == "" {
 		if len(d.KeyProblems) > 0 {
-			return acp.NewError(acp.ClassRequest, "credential_missing",
-				ref+" 的密钥不可用（"+d.KeyRef+"）："+strings.Join(d.KeyProblems, "；")+
-					"；到「设置 · 模型」重设密钥，或把定义里的引用改成 env:<ENV_NAME>", nil)
+			return code.NewError(code.ClassRequest, "credential_missing", ref+" 的密钥不可用（"+d.KeyRef+"）："+strings.Join(d.KeyProblems, "；")+
+				"；到「设置 · 模型」重设密钥，或把定义里的引用改成 env:<ENV_NAME>", nil)
 		}
-		return acp.NewError(acp.ClassRequest, "credential_missing",
-			ref+" 没有密钥：到「设置 · 模型」的供应商块补密钥", nil)
+		return code.NewError(code.ClassRequest, "credential_missing", ref+" 没有密钥：到「设置 · 模型」的供应商块补密钥", nil)
 	}
 	return nil
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/code"
 	defn "github.com/morehao/ark-mate/internal/core/definition"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // Plane 技能平面的**有状态主体**：持有能力注册表（技能定义都在这里）与投影登记处。
@@ -108,8 +107,7 @@ func (m *Plane) WriteSkillEnabled(ctx context.Context, id string, enabled bool) 
 		// 这条对外码 `skill_not_persistable` 在 sqlite 模式下不再可达——DB 里的技能都有行，
 		// 没有行就没有这条能力（M6-3 的语义变化，README 有说明）。
 		if m.defs.Dir() == "" {
-			return "", acp.NewError(acp.ClassRequest, "skill_not_persistable",
-				fmt.Sprintf("skill %q 无法启停：本进程未装载能力数据面目录（MATE_CAPABILITIES），没有可持久化的定义文件", id), nil)
+			return "", code.NewError(code.ClassRequest, "skill_not_persistable", fmt.Sprintf("skill %q 无法启停：本进程未装载能力数据面目录（MATE_CAPABILITIES），没有可持久化的定义文件", id), nil)
 		}
 	}
 	repo, err := m.defs.RepoFor(defn.CapSubSkills)
@@ -125,13 +123,11 @@ func (m *Plane) WriteSkillEnabled(ctx context.Context, id string, enabled bool) 
 		// 路径，"点一下开关就在库里多出一条定义"比报错难查得多。两个载体的出路文案不同
 		// （一个要建文件、一个要用写面/导入落行），给出的动作必须各自可执行。
 		if m.st {
-			return "", acp.NewError(acp.ClassRequest, "skill_not_persistable",
-				fmt.Sprintf("skill %q 在 %s 没有定义行（代码注入/内存注册的技能无处写回）：先用写面或导入把它落成定义后再启停",
-					id, repo.Locator(id)), nil)
-		}
-		return "", acp.NewError(acp.ClassRequest, "skill_not_persistable",
-			fmt.Sprintf("skill %q 没有定义文件 %s（代码注入/内存注册的技能无处写回）：请在能力目录里建成文件后再启停",
+			return "", code.NewError(code.ClassRequest, "skill_not_persistable", fmt.Sprintf("skill %q 在 %s 没有定义行（代码注入/内存注册的技能无处写回）：先用写面或导入把它落成定义后再启停",
 				id, repo.Locator(id)), nil)
+		}
+		return "", code.NewError(code.ClassRequest, "skill_not_persistable", fmt.Sprintf("skill %q 没有定义文件 %s（代码注入/内存注册的技能无处写回）：请在能力目录里建成文件后再启停",
+			id, repo.Locator(id)), nil)
 	}
 	if _, conflict, err := repo.Commit(ctx, id, doc, rev, existed); err != nil {
 		return "", err
@@ -150,14 +146,13 @@ func (m *Plane) WriteSkillEnabled(ctx context.Context, id string, enabled bool) 
 //     定义文件已经改了，此时谎报「失败」会让用户以为没生效，而重启后照样生效。失败原因随响应回带。
 func (m *Plane) SetSkillEnabled(ctx context.Context, id string, enabled bool) (*ToggleResult, error) {
 	if id == "" {
-		return nil, code.FromError(acp.NewError(acp.ClassRequest, "skill_required", "skill id 必填", nil))
+		return nil, code.FromError(code.NewError(code.ClassRequest, "skill_required", "skill id 必填", nil))
 	}
 	if m.caps == nil {
-		return nil, code.FromError(acp.NewError(acp.ClassService, "capability_unavailable", "能力数据面未装配", nil))
+		return nil, code.FromError(code.NewError(code.ClassService, "capability_unavailable", "能力数据面未装配", nil))
 	}
 	if _, ok := m.caps.SkillByID(id); !ok {
-		return nil, code.FromError(acp.NewError(acp.ClassRequest, "skill_not_found",
-			fmt.Sprintf("未知 skill %q", id), nil))
+		return nil, code.FromError(code.NewError(code.ClassRequest, "skill_not_found", fmt.Sprintf("未知 skill %q", id), nil))
 	}
 	path, err := m.WriteSkillEnabled(ctx, id, enabled)
 	if err != nil {

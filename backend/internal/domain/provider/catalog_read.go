@@ -70,8 +70,7 @@ func (pl *Plane) SetCatalogConnectionFacts(f CatalogConnectionFacts) { pl.connFa
 //
 // 它是**正常状态**（第一条消息发送前就是这样），不是故障——说明文案与留痕级别都靠它把
 // "还没有会话可供读取"与"有会话但读不通"分开（2026-10-15 的事故正是把两者讲成同一句话）。
-var ErrNoSampleCandidate = acp.NewError(acp.ClassRequest, "no_resumable_session",
-	"还没有可供取样的会话（发送一条消息后目录会自动补全）", nil)
+var ErrNoSampleCandidate = code.NewError(code.ClassRequest, "no_resumable_session", "还没有可供取样的会话（发送一条消息后目录会自动补全）", nil)
 
 // ModelCatalog 返回该 runtime 的运行时模型目录。
 //
@@ -86,8 +85,7 @@ var ErrNoSampleCandidate = acp.NewError(acp.ClassRequest, "no_resumable_session"
 func (pl *Plane) ModelCatalog(ctx context.Context) (*CatalogView, error) {
 	spec, ok := pl.reg.Get(runtime.SelectedRuntime())
 	if !ok {
-		return nil, code.FromError(acp.NewError(acp.ClassRequest, "runtime_not_registered",
-			"[runtime_not_registered] 构建期选定的 runtime 未装配", nil))
+		return nil, code.FromError(code.NewError(code.ClassRequest, "runtime_not_registered", "[runtime_not_registered] 构建期选定的 runtime 未装配", nil))
 	}
 
 	// 没有活会话端口 = 纯列表装配（测试/无执行面）：退化为空目录，不做任何拨号。

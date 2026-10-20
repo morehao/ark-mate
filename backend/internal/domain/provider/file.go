@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/core/code"
 )
 
 // ——— providers.json 的磁盘形状与词法校验（纯规则，v3.2 刀 8）———
@@ -80,24 +80,21 @@ func BodyString(body map[string]any, key string) string {
 // 防的是一个带 `/` 或 `..` 的 id 把别的条目覆盖掉）。
 func ValidateProviderID(id string) error {
 	if id == "" {
-		return acp.NewError(acp.ClassRequest, "invalid_provider_id", "provider id 必填", nil)
+		return code.NewError(code.ClassRequest, "invalid_provider_id", "provider id 必填", nil)
 	}
 	if strings.TrimSpace(id) != id || len(id) > 64 {
-		return acp.NewError(acp.ClassRequest, "invalid_provider_id",
-			fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符，且不含首尾空白）", id), nil)
+		return code.NewError(code.ClassRequest, "invalid_provider_id", fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符，且不含首尾空白）", id), nil)
 	}
 	for i := 0; i < len(id); i++ {
 		c := id[i]
 		switch {
 		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '_', c == '-':
 		default:
-			return acp.NewError(acp.ClassRequest, "invalid_provider_id",
-				fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符）", id), nil)
+			return code.NewError(code.ClassRequest, "invalid_provider_id", fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符）", id), nil)
 		}
 	}
 	if id == "." || id == ".." {
-		return acp.NewError(acp.ClassRequest, "invalid_provider_id",
-			fmt.Sprintf("provider id %q 非法（不得为 . 或 ..）", id), nil)
+		return code.NewError(code.ClassRequest, "invalid_provider_id", fmt.Sprintf("provider id %q 非法（不得为 . 或 ..）", id), nil)
 	}
 	return nil
 }
