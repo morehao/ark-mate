@@ -9,6 +9,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
+	"github.com/morehao/ark-mate/internal/domain/session/memory"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -55,7 +56,7 @@ func (pl *Plane) PersistMemoryAdd(sessionID, title, kind, decision, scope, grant
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := pl.st.AddMemory(ctx, model.PermissionMemoryEntity{
+	if err := pl.st.AddMemory(ctx, memory.Item{
 		ID:        objid.New(objid.PermissionMemory),
 		SessionID: sessionID, Title: title, Kind: kind, Decision: decision,
 		Scope: scope, GrantInputDigest: grantInputDigest, CreatedAt: since,
@@ -89,7 +90,7 @@ func (pl *Plane) PersistMemoryDelAll(sessionID string) {
 }
 
 // MemoryRows 读全库权限记忆（供 sqlite 启动恢复装载；无 store 时返回空）。
-func (pl *Plane) MemoryRows(ctx context.Context) ([]model.PermissionMemoryEntity, error) {
+func (pl *Plane) MemoryRows(ctx context.Context) ([]memory.Item, error) {
 	if pl.st == nil {
 		return nil, nil
 	}

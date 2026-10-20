@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/session/memory"
 	"github.com/morehao/ark-mate/internal/domain/session/queue"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
@@ -56,10 +57,10 @@ type Store interface {
 	StaleAllQueuedInputs(ctx context.Context) (int64, error)
 
 	// ——— 权限记忆 ———
-	AddMemory(ctx context.Context, m model.PermissionMemoryEntity) error
+	AddMemory(ctx context.Context, m memory.Item) error
 	DeleteMemory(ctx context.Context, sessionID, title, kind string) (bool, error)
 	DeleteSessionMemories(ctx context.Context, sessionID string) error
-	ListAllMemories(ctx context.Context) ([]model.PermissionMemoryEntity, error)
+	ListAllMemories(ctx context.Context) ([]memory.Item, error)
 
 	// ——— 模型清单（会话要认模型是否在册）———
 	ListModelDefinitions(ctx context.Context) (model.ModelEntityList, error)

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/domain/session/memory"
 	"github.com/morehao/ark-mate/internal/persistence/dao"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/dbaccess/gormdao"
@@ -25,8 +26,9 @@ const (
 //
 // created_at 的 CASE 是**有意的**：同侧重复授权不刷新授予时间，只有 allow↔reject
 // 翻转才更新时间——与 PermissionManager.Remember 语义对齐，不能简化成无条件覆盖。
-func (s *Store) AddMemory(ctx context.Context, m model.PermissionMemoryEntity) error {
+func (s *Store) AddMemory(ctx context.Context, m memory.Item) error {
 	m.CreatedAt = nonZeroTime(m.CreatedAt)
+	row := permissionMemoryEntityOf(m)
 	return s.memories.DB(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "session_id"}, {Name: "title"}, {Name: "kind"}},
 		DoUpdates: clause.Assignments(map[string]any{
@@ -40,22 +42,30 @@ func (s *Store) AddMemory(ctx context.Context, m model.PermissionMemoryEntity) e
 				"CASE WHEN "+model.TableNamePermissionMemory+".decision = ? THEN "+model.TableNamePermissionMemory+".created_at ELSE ? END",
 				m.Decision, model.FormatTimeOrNow(m.CreatedAt)),
 		}),
-	}).Create(&m).Error
+	}).Create(&row).Error
 }
 
 // ListMemories 列出某会话全部权限记忆（授予时间升序，decision 区分 allow/reject）。
-func (s *Store) ListMemories(ctx context.Context, sessionID string) ([]model.PermissionMemoryEntity, error) {
-	return s.memories.GetListByCond(ctx, &dao.PermissionMemoryCond{
+func (s *Store) ListMemories(ctx context.Context, sessionID string) ([]memory.Item, error) {
+	rows, err := s.memories.GetListByCond(ctx, &dao.PermissionMemoryCond{
 		BaseCond:  &gormdao.BaseCond{OrderField: memoryListOrder},
 		SessionID: sessionID,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return memoryItemsOf(rows), nil
 }
 
 // ListAllMemories 列出全库权限记忆（sqlite 启动恢复：一次装载所有会话的 allow/reject 记忆）。
-func (s *Store) ListAllMemories(ctx context.Context) ([]model.PermissionMemoryEntity, error) {
-	return s.memories.GetListByCond(ctx, &dao.PermissionMemoryCond{
+func (s *Store) ListAllMemories(ctx context.Context) ([]memory.Item, error) {
+	rows, err := s.memories.GetListByCond(ctx, &dao.PermissionMemoryCond{
 		BaseCond: &gormdao.BaseCond{OrderField: memoryListAllOrder},
 	})
+	if err != nil {
+		return nil, err
+	}
+	return memoryItemsOf(rows), nil
 }
 
 // DeleteMemory 撤销一条记忆（session+title+kind 精确匹配，不区分 decision）；返回是否删除。
@@ -74,4 +84,30 @@ func (s *Store) DeleteMemory(ctx context.Context, sessionID, title, kind string)
 func (s *Store) DeleteSessionMemories(ctx context.Context, sessionID string) error {
 	return s.memories.DB(ctx).Where("session_id = ?", sessionID).
 		Delete(&model.PermissionMemoryEntity{}).Error
+}
+
+// ——— 行 ↔ 聚合映射（C1：领域自持 memory.Item）———
+
+func memoryItemOf(r model.PermissionMemoryEntity) memory.Item {
+	return memory.Item{
+		ID: r.ID, SessionID: r.SessionID, Title: r.Title, Kind: r.Kind,
+		Decision: r.Decision, Scope: r.Scope, GrantInputDigest: r.GrantInputDigest,
+		CreatedAt: r.CreatedAt,
+	}
+}
+
+func memoryItemsOf(rows []model.PermissionMemoryEntity) []memory.Item {
+	out := make([]memory.Item, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, memoryItemOf(r))
+	}
+	return out
+}
+
+func permissionMemoryEntityOf(m memory.Item) model.PermissionMemoryEntity {
+	return model.PermissionMemoryEntity{
+		ID: m.ID, SessionID: m.SessionID, Title: m.Title, Kind: m.Kind,
+		Decision: m.Decision, Scope: m.Scope, GrantInputDigest: m.GrantInputDigest,
+		CreatedAt: m.CreatedAt,
+	}
 }

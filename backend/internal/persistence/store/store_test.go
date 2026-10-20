@@ -10,6 +10,7 @@ import (
 	// 本包的测试要注册 glog 的 zap driver：日志出口归装配根（cmd/mate 的匿名引入），
 	// 而 test 二进制不含 cmd/mate，Open → dbclient.Open → glog.NewLogger 需要它。
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/domain/session/memory"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	_ "github.com/morehao/golib/glog/driver/zap"
 )
@@ -247,14 +248,14 @@ func TestSessionCRUD(t *testing.T) {
 func TestMemoriesCRUD(t *testing.T) {
 	s := openTestDB(t)
 	seedSession(t, s, "s1")
-	if err := s.AddMemory(ctxT(), model.PermissionMemoryEntity{ID: objid.New(objid.PermissionMemory), SessionID: "s1", Title: "跑脚本", Kind: "execute", Decision: "allow"}); err != nil {
+	if err := s.AddMemory(ctxT(), memory.Item{ID: objid.New(objid.PermissionMemory), SessionID: "s1", Title: "跑脚本", Kind: "execute", Decision: "allow"}); err != nil {
 		t.Fatalf("add allow: %v", err)
 	}
 	// 同键异侧覆盖为 reject，不新增行。
-	if err := s.AddMemory(ctxT(), model.PermissionMemoryEntity{ID: objid.New(objid.PermissionMemory), SessionID: "s1", Title: "跑脚本", Kind: "execute", Decision: "reject"}); err != nil {
+	if err := s.AddMemory(ctxT(), memory.Item{ID: objid.New(objid.PermissionMemory), SessionID: "s1", Title: "跑脚本", Kind: "execute", Decision: "reject"}); err != nil {
 		t.Fatalf("add reject: %v", err)
 	}
-	if err := s.AddMemory(ctxT(), model.PermissionMemoryEntity{ID: objid.New(objid.PermissionMemory), SessionID: "s1", Title: "写文件", Kind: "write", Decision: "allow"}); err != nil {
+	if err := s.AddMemory(ctxT(), memory.Item{ID: objid.New(objid.PermissionMemory), SessionID: "s1", Title: "写文件", Kind: "write", Decision: "allow"}); err != nil {
 		t.Fatalf("add allow2: %v", err)
 	}
 	list, err := s.ListMemories(ctxT(), "s1")

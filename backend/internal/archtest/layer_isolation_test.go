@@ -112,6 +112,7 @@ func TestMechanismMustNotImportUpward(t *testing.T) {
 // 它的边界仍然很清楚：叶子包**不得** import 任何 `internal/domain` 包（下面的扫描对它同样生效）。
 var domainValueLeafPackages = []string{
 	modulePrefix + "internal/domain/session/queue",
+	modulePrefix + "internal/domain/session/memory",
 }
 
 func isDomainValueLeaf(imp string) bool {

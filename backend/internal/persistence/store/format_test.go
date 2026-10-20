@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/domain/session/memory"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
@@ -46,7 +47,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("CreateMessages: %v", err)
 	}
-	if err := s.AddMemory(ctx, model.PermissionMemoryEntity{ID: objid.New(objid.PermissionMemory), SessionID: "c1", Title: "t", Kind: "k", Decision: "allow", CreatedAt: at}); err != nil {
+	if err := s.AddMemory(ctx, memory.Item{ID: objid.New(objid.PermissionMemory), SessionID: "c1", Title: "t", Kind: "k", Decision: "allow", CreatedAt: at}); err != nil {
 		t.Fatalf("AddMemory: %v", err)
 	}
 	// v8 三张表（M6-1）：这里**直接调 dao**（而不是 store 门面），为的是钉住精确的落库文本
