@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/session/queue"
 	"github.com/morehao/ark-mate/internal/persistence/dao"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/dbaccess/gormdao"
@@ -44,7 +45,7 @@ const (
 // 取号口径是 `MAX(seq) + 1`（无行 → 0），不是"数一数有几行"：行**不会被删**（撤下/作废都是
 // 改 status 的审计行），只有 `DeleteQueuedInput` 会真删一条 queued 行，而那时它的 seq 空出来
 // 正好可以复用。
-func (s *Store) CreateInput(ctx context.Context, in model.InputEntity) error {
+func (s *Store) CreateInput(ctx context.Context, in queue.Item) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		d := s.inputs.WithTx(tx)
 		var next int64
@@ -53,35 +54,49 @@ func (s *Store) CreateInput(ctx context.Context, in model.InputEntity) error {
 			Select("COALESCE(MAX(seq), -1) + 1").Scan(&next).Error; err != nil {
 			return err
 		}
-		in.Seq = next
-		return d.Insert(ctx, &in)
+		row := inputEntityOf(in)
+		row.Seq = next
+		return d.Insert(ctx, &row)
 	})
 }
 
 // ListQueuedInputs 列出某会话待投递的输入（会话内位次升序）。
-func (s *Store) ListQueuedInputs(ctx context.Context, sessionID string) ([]model.InputEntity, error) {
-	return s.inputs.GetListByCond(ctx, &dao.InputCond{
+func (s *Store) ListQueuedInputs(ctx context.Context, sessionID string) ([]queue.Item, error) {
+	rows, err := s.inputs.GetListByCond(ctx, &dao.InputCond{
 		BaseCond:  &gormdao.BaseCond{OrderField: inputQueueOrder},
 		SessionID: sessionID,
 		Status:    model.InputStatusQueued,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return queueItemsOf(rows), nil
 }
 
 // ListAllQueuedInputs 列出全库待投递输入（跨会话，按会话分组、组内位次升序；启动恢复用）。
-func (s *Store) ListAllQueuedInputs(ctx context.Context) ([]model.InputEntity, error) {
-	return s.inputs.GetListByCond(ctx, &dao.InputCond{
+func (s *Store) ListAllQueuedInputs(ctx context.Context) ([]queue.Item, error) {
+	rows, err := s.inputs.GetListByCond(ctx, &dao.InputCond{
 		BaseCond: &gormdao.BaseCond{OrderField: inputQueueAllOrder},
 		Status:   model.InputStatusQueued,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return queueItemsOf(rows), nil
 }
 
 // HeadQueuedInput 取队首待投递输入（位次最小；无 → (nil, nil)）。
-func (s *Store) HeadQueuedInput(ctx context.Context, sessionID string) (*model.InputEntity, error) {
-	return s.inputs.GetByCond(ctx, &dao.InputCond{
+func (s *Store) HeadQueuedInput(ctx context.Context, sessionID string) (*queue.Item, error) {
+	row, err := s.inputs.GetByCond(ctx, &dao.InputCond{
 		BaseCond:  &gormdao.BaseCond{OrderField: inputQueueOrder},
 		SessionID: sessionID,
 		Status:    model.InputStatusQueued,
 	})
+	if err != nil || row == nil {
+		return nil, err
+	}
+	item := queueItemOf(*row)
+	return &item, nil
 }
 
 // ClaimQueuedInput 把一条待投递输入置为已投递；false = 已不在 queued（别人先 claim / 已被撤）。
@@ -162,4 +177,30 @@ func (s *Store) StaleAllQueuedInputs(ctx context.Context) (int64, error) {
 		return 0, res.Error
 	}
 	return res.RowsAffected, nil
+}
+
+// ——— 行 ↔ 聚合映射（C1：领域自持 `QueueItem`，行结构只在本层出现）———
+
+func queueItemOf(r model.InputEntity) queue.Item {
+	return queue.Item{
+		ID: r.ID, SessionID: r.SessionID, Text: r.Text, Delivery: r.Delivery,
+		TargetRunID: r.TargetRunID, Seq: r.Seq, Generation: r.Generation,
+		Status: r.Status, CreatedAt: r.CreatedAt, ClaimedAt: r.ClaimedAt,
+	}
+}
+
+func queueItemsOf(rows []model.InputEntity) []queue.Item {
+	out := make([]queue.Item, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, queueItemOf(r))
+	}
+	return out
+}
+
+func inputEntityOf(in queue.Item) model.InputEntity {
+	return model.InputEntity{
+		ID: in.ID, SessionID: in.SessionID, Text: in.Text, Delivery: in.Delivery,
+		TargetRunID: in.TargetRunID, Seq: in.Seq, Generation: in.Generation,
+		Status: in.Status, CreatedAt: in.CreatedAt, ClaimedAt: in.ClaimedAt,
+	}
 }

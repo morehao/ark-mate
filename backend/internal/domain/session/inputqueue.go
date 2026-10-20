@@ -8,8 +8,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/domain/session/queue"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
 
@@ -17,15 +17,15 @@ const (
 	// DeliveryReject 忙时直接报错（缺省；不排队）。
 	DeliveryReject = "reject"
 	// DeliveryAfterRun 排队，等当前轮结束再投递。
-	DeliveryAfterRun = model.InputDeliveryAfterRun
+	DeliveryAfterRun = "after_run"
 	// DeliveryInterruptThenPrompt 取消当前轮，随后投递。
-	DeliveryInterruptThenPrompt = model.InputDeliveryInterruptThenPrompt
+	DeliveryInterruptThenPrompt = "interrupt_then_prompt"
 )
 
 // ValidDeliveries 合法投递模式（报错提示与校验共用，顺序即文档顺序）。
 var ValidDeliveries = []string{DeliveryReject, DeliveryAfterRun, DeliveryInterruptThenPrompt}
 
-// 队列项终态（事件收敛用；与 model.InputStatus* 同值）。
+// 队列项终态（事件收敛用；与 `QueueStatus*` 同值）。
 const (
 	ReasonRunFinished = "run_finished"   // 队列项因上一轮结束而投递
 	ReasonUserCancel  = "user_cancel"    // 用户显式撤下
@@ -85,10 +85,10 @@ func (pl *Plane) EnqueueInput(ctx context.Context, convID, text, delivery, targe
 		TargetRunID: targetRun, Generation: generation, CreatedAt: time.Now().UTC(),
 	}
 	if pl.st != nil {
-		row := model.InputEntity{
+		row := queue.Item{
 			ID: in.ID, SessionID: convID, Text: text, Delivery: delivery,
 			TargetRunID: targetRun, Generation: generation,
-			Status: model.InputStatusQueued, CreatedAt: in.CreatedAt,
+			Status: queue.StatusQueued, CreatedAt: in.CreatedAt,
 		}
 		if err := pl.st.CreateInput(ctx, row); err != nil {
 			return QueuedInput{}, err
@@ -369,7 +369,7 @@ func (pl *Plane) StaleQueuedInputsOnRestore(ctx context.Context) {
 }
 
 // queuedFromStore 持久行 → 对外形状。
-func queuedFromStore(r model.InputEntity) QueuedInput {
+func queuedFromStore(r queue.Item) QueuedInput {
 	return QueuedInput{
 		ID: r.ID, SessionID: r.SessionID, Text: r.Text, Delivery: r.Delivery,
 		TargetRunID: r.TargetRunID, Generation: r.Generation, CreatedAt: r.CreatedAt,

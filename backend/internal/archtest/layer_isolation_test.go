@@ -1,6 +1,7 @@
 package archtest
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -103,8 +104,33 @@ func TestMechanismMustNotImportUpward(t *testing.T) {
 //
 // 反证（实跑见计划 §4.1 的 N6/N7）：往 `domain/interaction` 里 import `domain/skill` → 红；
 // 把 `internal/domain` 指到一个不存在的目录 → Fatal（不许静默空转）。
+// domainValueLeafPackages 领域内的**叶子值包**：它们是某个域自己的类型分区，不是独立平面。
+//
+// 为什么需要这个例外：`store` 适配器要实现域端口，必须 import 域类型；而域自己的**包内测试**
+// 又用真 SQLite 库（`testutil.OpenStore`），同包测试 import 一个 import 本包的包会触发 Go 的
+// `import cycle not allowed in test`。把值类型放进域内叶子包后两边都依赖它，环就断了。
+// 它的边界仍然很清楚：叶子包**不得** import 任何 `internal/domain` 包（下面的扫描对它同样生效）。
+var domainValueLeafPackages = []string{
+	modulePrefix + "internal/domain/session/queue",
+}
+
+func isDomainValueLeaf(imp string) bool {
+	for _, leaf := range domainValueLeafPackages {
+		if imp == leaf {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDomainPackagesMustNotImportEachOther(t *testing.T) {
 	root := backendRoot(t)
+	// 叶子包必须真实存在（删了/改名了要同步这份清单，否则例外变成静默空转）。
+	for _, leaf := range domainValueLeafPackages {
+		if _, err := os.Stat(filepath.Join(root, strings.TrimPrefix(leaf, modulePrefix))); err != nil {
+			t.Fatalf("领域叶子值包 %s 不存在：请同步 domainValueLeafPackages（fail-closed）", leaf)
+		}
+	}
 	upward := []string{
 		modulePrefix + "internal/service",
 		modulePrefix + "internal/sessionruntime",
@@ -116,7 +142,7 @@ func TestDomainPackagesMustNotImportEachOther(t *testing.T) {
 	for _, dir := range layerScanPackages(t, root, "internal/domain", "domain") {
 		self := packageImportPath(root, dir)
 		for _, imp := range importedByPackage(t, dir) {
-			if strings.HasPrefix(imp, modulePrefix+"internal/domain") && imp != self {
+			if strings.HasPrefix(imp, modulePrefix+"internal/domain") && imp != self && !isDomainValueLeaf(imp) {
 				t.Errorf("同层互相依赖：%s 不应 import %s（领域平面之间必须零 import：一份数据只有一个所有者）",
 					rel(root, dir), imp)
 			}

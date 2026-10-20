@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/domain/session/queue"
 )
 
 // TestInputQueueSchemaAndClaim §6 队列的持久层契约：v6 迁移建表、插入-取队首-认领，
@@ -23,11 +23,11 @@ func TestInputQueueSchemaAndClaim(t *testing.T) {
 	seedSession(t, st, "c1")
 
 	base := time.Now().UTC()
-	rows := []model.InputEntity{
-		{ID: "i2", SessionID: "c1", Text: "第二条", Delivery: model.InputDeliveryAfterRun,
-			TargetRunID: "t1", Generation: 1, Status: model.InputStatusQueued, CreatedAt: base.Add(time.Second)},
-		{ID: "i1", SessionID: "c1", Text: "第一条", Delivery: model.InputDeliveryAfterRun,
-			TargetRunID: "t1", Generation: 1, Status: model.InputStatusQueued, CreatedAt: base},
+	rows := []queue.Item{
+		{ID: "i2", SessionID: "c1", Text: "第二条", Delivery: "after_run",
+			TargetRunID: "t1", Generation: 1, Status: queue.StatusQueued, CreatedAt: base.Add(time.Second)},
+		{ID: "i1", SessionID: "c1", Text: "第一条", Delivery: "after_run",
+			TargetRunID: "t1", Generation: 1, Status: queue.StatusQueued, CreatedAt: base},
 	}
 	for _, r := range rows {
 		if err := st.CreateInput(ctx, r); err != nil {
@@ -67,24 +67,24 @@ func TestInputQueueSchemaAndClaim(t *testing.T) {
 		t.Fatalf("待投递项应可删: %v/%v", ok, err)
 	}
 	// 跨会话删：同 id 不同会话不命中。
-	if err := st.CreateInput(ctx, model.InputEntity{ID: "i3", SessionID: "c1", Text: "第三条",
-		Delivery: model.InputDeliveryInterruptThenPrompt, Generation: 1,
-		Status: model.InputStatusQueued, CreatedAt: base.Add(2 * time.Second)}); err != nil {
+	if err := st.CreateInput(ctx, queue.Item{ID: "i3", SessionID: "c1", Text: "第三条",
+		Delivery: "interrupt_then_prompt", Generation: 1,
+		Status: queue.StatusQueued, CreatedAt: base.Add(2 * time.Second)}); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err = st.DeleteQueuedInput(ctx, "c-other", "i3"); err != nil || ok {
 		t.Fatalf("跨会话删必须不命中: %v/%v", ok, err)
 	}
 	// ListAllQueuedInputs 跨会话取快照（启动恢复靠它逐条发收敛事件，故不按会话过滤）。
-	if err := st.CreateInput(ctx, model.InputEntity{ID: "i4", SessionID: "c1", Text: "会话一的待投递",
-		Delivery: model.InputDeliveryAfterRun, Generation: 1,
-		Status: model.InputStatusQueued, CreatedAt: base.Add(3 * time.Second)}); err != nil {
+	if err := st.CreateInput(ctx, queue.Item{ID: "i4", SessionID: "c1", Text: "会话一的待投递",
+		Delivery: "after_run", Generation: 1,
+		Status: queue.StatusQueued, CreatedAt: base.Add(3 * time.Second)}); err != nil {
 		t.Fatal(err)
 	}
 	seedSession(t, st, "c2")
-	if err := st.CreateInput(ctx, model.InputEntity{ID: "i5", SessionID: "c2", Text: "会话二的待投递",
-		Delivery: model.InputDeliveryAfterRun, Generation: 1,
-		Status: model.InputStatusQueued, CreatedAt: base.Add(4 * time.Second)}); err != nil {
+	if err := st.CreateInput(ctx, queue.Item{ID: "i5", SessionID: "c2", Text: "会话二的待投递",
+		Delivery: "after_run", Generation: 1,
+		Status: queue.StatusQueued, CreatedAt: base.Add(4 * time.Second)}); err != nil {
 		t.Fatal(err)
 	}
 	all, err := st.ListAllQueuedInputs(ctx)

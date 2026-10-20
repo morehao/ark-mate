@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/session/queue"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
@@ -44,12 +45,12 @@ type Store interface {
 	SearchUserMessages(ctx context.Context, sessionID, q string) ([]model.MessageTextHit, error)
 
 	// ——— 排队输入 ———
-	CreateInput(ctx context.Context, in model.InputEntity) error
+	CreateInput(ctx context.Context, in queue.Item) error
 	ClaimQueuedInput(ctx context.Context, id string, at time.Time) (bool, error)
 	DeleteQueuedInput(ctx context.Context, sessionID, id string) (bool, error)
-	HeadQueuedInput(ctx context.Context, sessionID string) (*model.InputEntity, error)
-	ListQueuedInputs(ctx context.Context, sessionID string) ([]model.InputEntity, error)
-	ListAllQueuedInputs(ctx context.Context) ([]model.InputEntity, error)
+	HeadQueuedInput(ctx context.Context, sessionID string) (*queue.Item, error)
+	ListQueuedInputs(ctx context.Context, sessionID string) ([]queue.Item, error)
+	ListAllQueuedInputs(ctx context.Context) ([]queue.Item, error)
 	ReorderQueuedInputs(ctx context.Context, sessionID string, ids []string) error
 	StaleQueuedInput(ctx context.Context, id string) (bool, error)
 	StaleAllQueuedInputs(ctx context.Context) (int64, error)
