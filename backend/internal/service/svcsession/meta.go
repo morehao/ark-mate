@@ -2,12 +2,12 @@ package svcsession
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -40,7 +40,7 @@ type MetaDeps interface {
 	ApplyModel(ctx context.Context, sessionID string, cfg runtime.ModelConfig) (bool, error)
 
 	// UpdateMeta 落库元数据（失败只告警，不阻断——所以它没有返回值）。
-	UpdateMeta(ctx context.Context, id string, meta model.SessionMetaPatch)
+	UpdateMeta(ctx context.Context, id string, meta sessionrow.MetaPatch)
 
 	// CancelElicitations 会话**归档**时作废它的挂起提问（`reason:archive`，ADR-11）。
 	//
@@ -115,7 +115,7 @@ func (m *Meta) UpdateSession(ctx context.Context, id string, patch dtosession.Se
 		appliedModelID = &platformID
 	}
 
-	m.deps.UpdateMeta(ctx, id, model.SessionMetaPatch{
+	m.deps.UpdateMeta(ctx, id, sessionrow.MetaPatch{
 		Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived, ModelID: appliedModelID,
 	})
 	resp, _, ok := m.plane.SessionSnapshot(id)

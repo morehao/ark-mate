@@ -41,7 +41,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
@@ -165,7 +164,7 @@ type stubSvc struct {
 	applyModelErr        error
 	applyModelInactive   bool // ApplyModel 回 false（会话不活跃）
 	metaPatchedID        string
-	metaPatch            model.SessionMetaPatch
+	metaPatch            sessionrow.MetaPatch
 }
 
 // RestErr 桩：与 manager 一致——已映射错误透传，acp 错误按分类映射（测试只关心 acp→信封码）。
@@ -432,7 +431,7 @@ func (s *stubSvc) ApplyModel(_ context.Context, sessionID string, cfg goruntime.
 	s.appliedModelSession, s.appliedModelCfg = sessionID, cfg
 	return !s.applyModelInactive, s.applyModelErr
 }
-func (s *stubSvc) UpdateMeta(_ context.Context, id string, meta model.SessionMetaPatch) {
+func (s *stubSvc) UpdateMeta(_ context.Context, id string, meta sessionrow.MetaPatch) {
 	s.metaPatchedID, s.metaPatch = id, meta
 }
 

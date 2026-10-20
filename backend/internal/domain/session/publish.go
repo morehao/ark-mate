@@ -2,13 +2,13 @@ package session
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"strings"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/redact"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
 
@@ -137,7 +137,7 @@ func (pl *Plane) publishSideEffects(sessionID, eventID, typ string, m map[string
 		if derived != "" && pl.st != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			if err := pl.st.UpdateSessionMeta(ctx, sessionID, model.SessionMetaPatch{Title: &derived}); err != nil {
+			if err := pl.st.UpdateSessionMeta(ctx, sessionID, sessionrow.MetaPatch{Title: &derived}); err != nil {
 				glog.Warnw(context.Background(), "store: derive title persist failed", "session", sessionID, "err", err)
 			}
 		}

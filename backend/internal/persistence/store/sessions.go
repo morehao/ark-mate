@@ -109,7 +109,7 @@ func (s *Store) ListSessions(ctx context.Context, archived *bool) ([]sessionrow.
 // updated_at 恒刷新）。
 //
 // 空补丁直接返回：不产生 `UPDATE ... SET updated_at = ...` 这种只碰时间戳的写。
-func (s *Store) UpdateSessionMeta(ctx context.Context, id string, patch model.SessionMetaPatch) error {
+func (s *Store) UpdateSessionMeta(ctx context.Context, id string, patch sessionrow.MetaPatch) error {
 	if patch.Empty() {
 		return nil
 	}

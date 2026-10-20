@@ -1,8 +1,8 @@
 package sessionruntime
 
 import (
-	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"regexp"
 	"testing"

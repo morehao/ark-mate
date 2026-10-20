@@ -232,7 +232,7 @@ func TestSessionCRUD(t *testing.T) {
 
 	pinned := true
 	title := "新标题"
-	if err := s.UpdateSessionMeta(ctxT(), "s1", model.SessionMetaPatch{Pinned: &pinned, Title: &title}); err != nil {
+	if err := s.UpdateSessionMeta(ctxT(), "s1", sessionrow.MetaPatch{Pinned: &pinned, Title: &title}); err != nil {
 		t.Fatalf("update meta: %v", err)
 	}
 	sess, ok, _ := s.GetSession(ctxT(), "s1")

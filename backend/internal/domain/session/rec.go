@@ -2,9 +2,9 @@ package session
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
 
@@ -137,7 +137,7 @@ func (pl *Plane) MarkSession(id, status string) {
 	if pl.st != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if err := pl.st.UpdateSessionMeta(ctx, id, model.SessionMetaPatch{Status: &status}); err != nil {
+		if err := pl.st.UpdateSessionMeta(ctx, id, sessionrow.MetaPatch{Status: &status}); err != nil {
 			glog.Warnw(context.Background(), "store: mark session failed", "session", id, "err", err)
 		}
 	}

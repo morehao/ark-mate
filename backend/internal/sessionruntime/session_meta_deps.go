@@ -2,10 +2,10 @@ package sessionruntime
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -13,7 +13,7 @@ import (
 // ——— 会话**元数据写面**的三份依赖（`svcsession.MetaDeps` 的实现，P4a 正文第四十四刀）———
 //
 // 适配器留在 `manager` 的理由与交互动作面同形：端口的三个签名只吃**域/pkg 类型**
-// （`runtime.ModelConfig` / `model.SessionMetaPatch`），所以它能在不认识用例层的地方实现
+// （`runtime.ModelConfig` / `sessionrow.MetaPatch`），所以它能在不认识用例层的地方实现
 // （层守卫不许 manager import `service/svc*`）。
 
 // ResolveModel 把请求里的模型引用解析成 (平台行 id, 运行时值)。
@@ -39,7 +39,7 @@ func (s *Service) ApplyModel(ctx context.Context, sessionID string, cfg runtime.
 //
 // 两个细节原样保留：脱离请求取消（`WithoutCancel`——请求断了不该让这次已经生效的元数据变更丢在
 // 半路）与 3 秒上限（写库卡住不能拖住 HTTP 响应）。
-func (s *Service) UpdateMeta(ctx context.Context, id string, meta model.SessionMetaPatch) {
+func (s *Service) UpdateMeta(ctx context.Context, id string, meta sessionrow.MetaPatch) {
 	if s.resourceStore == nil {
 		return
 	}

@@ -275,7 +275,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		"type MetaDeps interface {",
 		"ResolveModel(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)",
 		"ApplyModel(ctx context.Context, sessionID string, cfg runtime.ModelConfig) (bool, error)",
-		"UpdateMeta(ctx context.Context, id string, meta model.SessionMetaPatch)",
+		"UpdateMeta(ctx context.Context, id string, meta sessionrow.MetaPatch)",
 	}
 	for _, a := range metaAnchors {
 		if !strings.Contains(svcBody, a) {

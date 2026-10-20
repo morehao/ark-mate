@@ -28,7 +28,7 @@ type Store interface {
 	// ——— 会话行 ———
 	UpsertSession(ctx context.Context, sess sessionrow.Item) error
 	SetSessionModelID(ctx context.Context, id, modelID string) error
-	UpdateSessionMeta(ctx context.Context, id string, meta model.SessionMetaPatch) error
+	UpdateSessionMeta(ctx context.Context, id string, meta sessionrow.MetaPatch) error
 	ListSessions(ctx context.Context, archived *bool) ([]sessionrow.Item, error)
 	DefaultWorkspace(ctx context.Context) (model.WorkspaceEntity, bool, error)
 

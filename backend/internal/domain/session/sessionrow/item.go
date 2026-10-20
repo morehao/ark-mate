@@ -28,3 +28,18 @@ type Item struct {
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 }
+
+// MetaPatch 会话元数据子集更新（nil 指针 = 不更新；updated_at 恒刷新）。
+type MetaPatch struct {
+	Title    *string
+	Pinned   *bool
+	Archived *bool
+	Status   *string
+	// ModelID 平台模型行 id（nil = 不改）。
+	ModelID *string
+}
+
+// Empty 判断补丁是否为空（空补丁不产生 SQL）。
+func (p MetaPatch) Empty() bool {
+	return p.Title == nil && p.Pinned == nil && p.Archived == nil && p.Status == nil && p.ModelID == nil
+}

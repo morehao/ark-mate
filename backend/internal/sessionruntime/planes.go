@@ -124,6 +124,6 @@ var errPlaneFactsMissing = errors.New("该领域面未装配：装配根应通�
 // 这三条，于是收成端口，由装配根把同一个库句柄交进来（`EnableStore`）。
 type ResourceStore interface {
 	GetWorkspace(ctx context.Context, id string) (model.WorkspaceEntity, bool, error)
-	UpdateSessionMeta(ctx context.Context, id string, meta model.SessionMetaPatch) error
+	UpdateSessionMeta(ctx context.Context, id string, meta sessionrow.MetaPatch) error
 	ListSessions(ctx context.Context, archived *bool) ([]sessionrow.Item, error)
 }
