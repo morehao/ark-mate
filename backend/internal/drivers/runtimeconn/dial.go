@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -38,7 +39,7 @@ type DialOptions struct {
 // Dial 取（或拨）一条 runtime 连接：活着复用，断开则作废重拨；并挂断连监听。
 //
 // fingerprint 空值走的是代际键的原样返回分支，所以缺省路径与"代际机制之前"完全等价。
-func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (*Conn, error) {
+func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt session.DialOptions) (session.Conn, error) {
 	// 凭据面先校验（P2）：**默认模型所在的那条档案**缺失/无 key 属配置错误 → 显式
 	// credential_missing（文案含出路），不静默以「无密钥」姿态起进程。放 Dial 内可一处
 	// 覆盖两条入口：新建会话、按需恢复。
@@ -57,11 +58,11 @@ func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (*
 	keys := pl.KeyFor(spec, opt.Fingerprint, opt.NativeMode)
 
 	if rc := pl.Get(keys.Key); rc != nil {
-		if rc.Client == nil {
+		if rc.client == nil {
 			return rc, nil // 测试桩：没有句柄可验活，按登记事实返回
 		}
 		select {
-		case <-rc.Client.Done():
+		case <-rc.client.Done():
 			// 旧连接已断开（Drop 已/将清理）：落到下方重拨
 		default:
 			return rc, nil
@@ -93,8 +94,8 @@ func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (*
 		"fork", sc.Fork != nil,
 		"close", sc.Close != nil)
 
-	rc := &Conn{Client: client, Spec: spec, Key: keys.Key, BaseKey: keys.BaseKey,
-		ConfigDigest: keys.ConfigDigest, Started: time.Now()}
+	rc := &Conn{client: client, spec: spec, key: keys.Key, baseKey: keys.BaseKey,
+		configDigest: keys.ConfigDigest, Started: time.Now()}
 	pl.Add(rc) // 登记子进程 + 状态置 running + 入表 + 起断连监听
 	return rc, nil
 }

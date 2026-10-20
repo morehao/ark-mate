@@ -19,11 +19,11 @@ import (
 // 本函数只做"连接对象 → 注册项"的映射与 pid 落位；登记/告警/回收都在 `Plane` 里
 // （那是"哪些子进程是我的"的唯一事实源）。
 func (pl *Pool) registerProc(c *Conn) {
-	if c == nil || c.Client == nil || pl.bind == nil {
+	if c == nil || c.client == nil || pl.bind == nil {
 		return
 	}
 	// pid 先落到连接上：诊断面（A3 /diagnostics）不依赖进程注册表是否启用。
-	info := c.Client.PidInfo()
+	info := c.client.PidInfo()
 	if info.PID > 0 {
 		c.PID = info.PID
 	}
@@ -32,7 +32,7 @@ func (pl *Pool) registerProc(c *Conn) {
 	}
 	pl.bind.RegisterProc(procreg.Entry{
 		PID: info.PID, PGID: info.PGID, Command: info.Command,
-		Runtime: c.Spec.ID,
+		Runtime: c.spec.ID,
 	})
 }
 
@@ -65,8 +65,8 @@ func (pl *Pool) ReapIdle(now time.Time, idle time.Duration) int {
 		}
 		c.Intentional.Store(true) // 主动回收，不是连接故障
 		pl.Drop(c)                // 原子摘除 + 状态回落（wasCurrent 保护新连接 running）
-		if c.Client != nil {
-			_ = c.Client.Close() // watch 收尾（Drop 幂等）
+		if c.client != nil {
+			_ = c.client.Close() // watch 收尾（Drop 幂等）
 		}
 		n++
 	}

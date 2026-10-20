@@ -169,7 +169,7 @@ func (r *genRig) waitConns(t *testing.T, want int) int {
 }
 
 func (r *genRig) conns() int {
-	return r.orch.pool.Len()
+	return poolOf(r.orch).Len()
 }
 
 // TestGenerationMigration 轮次边界的迁移：指纹真变了才切、只按白名单内的变化切，
@@ -393,7 +393,7 @@ func TestMigrationFallback(t *testing.T) {
 	}
 	// 诊断留痕：失败这件事必须看得见（否则「能力没换过来」只能靠猜）。
 	// v19：留痕只有一份（单底座），不再按 agent 分桶。
-	last, hasDiag := r.svc.runtimePlane.LastError()
+	last, hasDiag := planeOf(r.svc).LastError()
 	if !hasDiag {
 		t.Fatal("迁移失败应落一条底座诊断")
 	}
@@ -414,14 +414,14 @@ func TestGenerationPool(t *testing.T) {
 	ctx := context.Background()
 	spec, _ := r.orch.reg.Get(r.runtme)
 
-	r.orch.pool.SetGenerationLimit(2)
+	poolOf(r.orch).SetGenerationLimit(2)
 	// 一条**无人引用**的代际（默认指纹，没有会话挂它）+ 一条**有会话引用**的代际（选定不同 → 指纹不同）。
 	idle, err := r.orch.acquire(ctx, spec, "", "")
 	if err != nil {
 		t.Fatalf("acquire(缺省): %v", err)
 	}
 	_, as1 := r.start(t, &session.CapabilitySelection{Mcps: ptrOf([]string{"fs"})})
-	if as1.Client() == idle.Client {
+	if as1.Client() == idle.Client() {
 		t.Fatal("不同能力集必须各起一个代际")
 	}
 	if n := r.conns(); n != 2 {
@@ -441,7 +441,7 @@ func TestGenerationPool(t *testing.T) {
 	if n := r.conns(); n != 2 {
 		t.Fatalf("淘汰空闲代际后池子应仍为 2，got %d", n)
 	}
-	if r.orch.pool.ConnOfClient(idle.Client) != nil {
+	if poolOf(r.orch).ConnOfClient(idle.Client()) != nil {
 		t.Fatal("无人引用的那条代际应已被淘汰")
 	}
 	// 换一条有会话引用的代际（git）：仍靠淘汰"fp-third"（此刻无人引用）腾位置。
@@ -478,7 +478,7 @@ func TestGenerationPool(t *testing.T) {
 		t.Fatalf("复用不该新增代际，got %d", n)
 	}
 	// 0 = 不限制（显式关掉护栏）。
-	r.orch.pool.SetGenerationLimit(0)
+	poolOf(r.orch).SetGenerationLimit(0)
 	for _, fp := range []string{"fp-x", "fp-y", "fp-z"} {
 		if _, err := r.orch.acquire(ctx, spec, fp, ""); err != nil {
 			t.Fatalf("0 = 不限制时不该拒绝（fp=%s）: %v", fp, err)
@@ -509,7 +509,7 @@ func TestMigrationReclaimsSharedGenerationOnlyWhenUnreferenced(t *testing.T) {
 	if n := r.conns(); n != 1 {
 		t.Fatalf("最后一个会话迁走后应回收旧代际，got %d", n)
 	}
-	if r.orch.pool.ConnOfClient(oldClient) != nil {
+	if poolOf(r.orch).ConnOfClient(oldClient) != nil {
 		t.Fatal("旧代际应已被回收")
 	}
 }

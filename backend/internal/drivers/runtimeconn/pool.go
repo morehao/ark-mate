@@ -25,23 +25,27 @@ import (
 // **两条边都只朝一个方向**：池可以在自己的锁**外**回调 `DropSink`（问"还有人用吗"、通知
 // "这条连接没了"），所以 `pool.mu → 会话锁` 这条边不存在；反过来编排侧也不许持 `o.mu` 调池。
 
-// Conn 一条 runtime 连接（本域的对象；字段全导出——搬过来时不再需要一批访问器）。
+// Conn 一条 runtime 连接（本域的对象；**读面经访问器**，进程记账留在本域）。
 //
-// **一次只为一条子进程**：`Key` 是内容寻址的（基础键 + 能力指纹 + 配置指纹），所以
+// **一次只为一条子进程**：`key` 是内容寻址的（基础键 + 能力指纹 + 配置指纹），所以
 // "同配置共享暖进程"这件事在键上就已经决定了。
+//
+// 阶段 0.4：`Client` / `Spec` / `Key` / `BaseKey` / `ConfigDigest` 改为未导出字段 + 访问器，
+// 使 `*Conn` 满足 `session.Conn` 端口——编排侧只认这五条事实；进程记账（Started/PID/
+// Intentional）仍导出，供本包与回收逻辑使用，不进端口。
 type Conn struct {
-	// Client ACP 客户端句柄（拨号成功后才有；测试桩可为 nil）。
-	Client *acp.Client
-	// Spec 这条连接面向的 runtime 声明（投影、日志与回收都从它取事实）。
-	Spec runtime.Spec
-	// Key 连接缓存键（B5：runtime ID + 原生权限 env 签名 + 代际维度）。同一 runtime 但原生权限
+	// client ACP 客户端句柄（拨号成功后才有；测试桩可为 nil）。
+	client *acp.Client
+	// spec 这条连接面向的 runtime 声明（投影、日志与回收都从它取事实）。
+	spec runtime.Spec
+	// key 连接缓存键（B5：runtime ID + 原生权限 env 签名 + 代际维度）。同一 runtime 但原生权限
 	// 配置不同的会话必须各自独立进程（权限开关是进程级），配置相同则共享暖进程。
-	Key string
-	// BaseKey 该连接的基础键（= 不含代际维度的 Key）。停机/回收用它一次性找到**该配置的
-	// 全部代际**——只按 Key 找的话，代际机制一旦真的产生多代际就会漏关。
-	BaseKey string
-	// ConfigDigest 该连接建立时的平台模型配置指纹（T5）。代际裁决用它判断"清单变了没有"。
-	ConfigDigest string
+	key string
+	// baseKey 该连接的基础键（= 不含代际维度的 key）。停机/回收用它一次性找到**该配置的
+	// 全部代际**——只按 key 找的话，代际机制一旦真的产生多代际就会漏关。
+	baseKey string
+	// configDigest 该连接建立时的平台模型配置指纹（T5）。代际裁决用它判断"清单变了没有"。
+	configDigest string
 	// Started 连接建立时刻（空闲回收计时起点）。
 	Started time.Time
 	// PID 子进程 pid（进程注册表登记用；0 = 未登记）。
@@ -52,6 +56,34 @@ type Conn struct {
 	Intentional atomic.Bool
 }
 
+// Client 实现 `session.Conn`：ACP 客户端句柄（未拨号/测试桩 → nil）。
+func (c *Conn) Client() *acp.Client { return c.client }
+
+// Spec 实现 `session.Conn`：这条连接面向的 runtime 声明。
+func (c *Conn) Spec() runtime.Spec { return c.spec }
+
+// Key 实现 `session.Conn`：连接缓存键。
+func (c *Conn) Key() string { return c.key }
+
+// BaseKey 实现 `session.Conn`：基础键（不含代际维度）。
+func (c *Conn) BaseKey() string { return c.baseKey }
+
+// ConfigDigest 实现 `session.Conn`：建立时的平台模型配置指纹。
+func (c *Conn) ConfigDigest() string { return c.configDigest }
+
+// NewConnForTest 造一条**只带登记事实**的连接（测试夹具用；不拨号、不登记子进程）。
+//
+// 生产路径只有 `Dial` 一处构造 `Conn`；测试要预置"某条连接挂在某键上"时用这个构造器，
+// 而不是把内部字段再导出一次。
+func NewConnForTest(key, baseKey string, spec runtime.Spec) *Conn {
+	return &Conn{key: key, baseKey: baseKey, spec: spec}
+}
+
+// NewConnWithStart 造一条带建立时刻的连接（空闲回收测试用）。
+func NewConnWithStart(key, baseKey string, spec runtime.Spec, started time.Time) *Conn {
+	return &Conn{key: key, baseKey: baseKey, spec: spec, Started: started, PID: 0}
+}
+
 // Pool 连接池：键派生、准入、回收、拆除通知。自持一把只保护连接表的锁。
 type Pool struct {
 	// bind 执行面的绑定（进程状态 running/stopped 唯一写入方就是本池的建连与拆连）。
@@ -60,7 +92,7 @@ type Pool struct {
 	// 三个装配期登记的依赖（nil = 该事实不可得：键少一维 / 不做回收 / 不应用拆除）。
 	env    ProviderEnvSource
 	digest ConfigDigestSource
-	sink   DropSink
+	sink   session.DropSink
 	// native 原生权限/沙箱 env 的来源（nil = 不注入、基础键无这一维）。
 	native NativeEnvSource
 
@@ -85,24 +117,13 @@ func (pl *Pool) SetNativeEnvSource(src NativeEnvSource) { pl.native = src }
 func (pl *Pool) SetConfigDigestSource(src ConfigDigestSource) { pl.digest = src }
 
 // SetDropSink 装配期登记拆除的应用面（编排器回挂时调——它在此之前还不存在）。
-func (pl *Pool) SetDropSink(s DropSink) { pl.sink = s }
-
-// KeyInputs 一次"取该用的连接"所需的全部键输入。
-//
-// 四个字段同源是这一刀最想要的性质：**算键用的 env 与实际注入的 env 是同一次取值**。
-// 分开取会得到"键说共享、env 却是另一套"的静默分叉（`ProviderEnvSource` 的注释）。
-type KeyInputs struct {
-	BaseKey      string
-	Env          []string
-	ConfigDigest string
-	Key          string
-}
+func (pl *Pool) SetDropSink(s session.DropSink) { pl.sink = s }
 
 // KeyFor 按当前配置算出某会话该用的连接键（`fingerprint` = 会话钉住的能力指纹，空 = 缺省代际）。
 //
 // 这是**取键点的唯一实现**：基础键的 env 维度、代际维度的两个指纹都在这里拼进去。
 // 键怎么构造、怎么匹配只在这个文件里说话（`TestConnectionKeysLiveInRuntimeconn` 钉着）。
-func (pl *Pool) KeyFor(spec runtime.Spec, fingerprint, nativeMode string) KeyInputs {
+func (pl *Pool) KeyFor(spec runtime.Spec, fingerprint, nativeMode string) session.KeyInputs {
 	var env []string
 	if pl.env != nil {
 		env = pl.env.ProviderEnv(spec.ID)
@@ -122,7 +143,7 @@ func (pl *Pool) KeyFor(spec runtime.Spec, fingerprint, nativeMode string) KeyInp
 	// 是**后建的会话悄悄跑在先进那个进程的模式里**——用户以为选了只读，实际是完全访问。
 	nativeEnv, _ := pl.nativeEnvFor(spec.ID, nativeMode)
 	base := ConnKey(spec.ID, env, nativeEnv)
-	return KeyInputs{
+	return session.KeyInputs{
 		BaseKey: base,
 		// **注入的就是算键用的那一份**（同一次取值）：分开取会得到"键说共享、env 却是另一套"
 		// 的静默分叉——那正是 `ProviderEnvSource` 注释里那条纪律，这里逐字适用。
@@ -157,19 +178,19 @@ func (pl *Pool) Add(c *Conn) {
 	}
 	pl.registerProc(c)
 	pl.mu.Lock()
-	pl.conns[c.Key] = c
+	pl.conns[c.key] = c
 	pl.mu.Unlock()
 	if pl.bind != nil {
 		pl.bind.SetState(session.AgentStateRunning)
 	}
-	if c.Client != nil {
+	if c.client != nil {
 		go pl.watch(c)
 	}
 }
 
 // watch 监听连接断开（对端或子进程结束）——摘除并通知编排侧。
 func (pl *Pool) watch(c *Conn) {
-	<-c.Client.Done()
+	<-c.client.Done()
 	pl.Drop(c)
 }
 
@@ -188,9 +209,9 @@ func (pl *Pool) Drop(c *Conn) {
 	intentional := c.Intentional.Load()
 
 	pl.mu.Lock()
-	wasCurrent := pl.conns[c.Key] == c
+	wasCurrent := pl.conns[c.key] == c
 	if wasCurrent {
-		delete(pl.conns, c.Key)
+		delete(pl.conns, c.key)
 	}
 	pl.mu.Unlock()
 
@@ -198,9 +219,9 @@ func (pl *Pool) Drop(c *Conn) {
 		pl.bind.SetState(session.AgentStateStopped)
 	}
 	if pl.sink != nil {
-		pl.sink.OnConnDropped(ConnDrop{
-			Client:      c.Client,
-			Runtime:     c.Spec.ID,
+		pl.sink.OnConnDropped(session.ConnDrop{
+			Client:      c.client,
+			Runtime:     c.spec.ID,
 			WasCurrent:  wasCurrent,
 			Intentional: intentional,
 			Cause:       ConnCauseLabel(intentional),
@@ -210,14 +231,14 @@ func (pl *Pool) Drop(c *Conn) {
 
 // ConnOfClient 反查某客户端所属的连接（无 → nil）。连接数是代际上限量级（个位数），线性扫足够；
 // 代际迁移要拿它读"这条句柄此刻挂在哪个代际键上"（那是判"要不要迁"的唯一权威来源）。
-func (pl *Pool) ConnOfClient(client *acp.Client) *Conn {
+func (pl *Pool) ConnOfClient(client *acp.Client) session.Conn {
 	if client == nil {
 		return nil
 	}
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 	for _, c := range pl.conns {
-		if c.Client == client {
+		if c.client == client {
 			return c
 		}
 	}
@@ -226,18 +247,18 @@ func (pl *Pool) ConnOfClient(client *acp.Client) *Conn {
 
 // ConnForRuntime 返回该 runtime 已建立的连接（无 → nil；runtimeID 空 = 任一条）。
 // 用于读取握手上冻结的能力断言（如鉴权引导）：不主动拨号，避免「查一次目录就起一个进程」。
-func (pl *Pool) ConnForRuntime(runtimeID string) *Conn {
+func (pl *Pool) ConnForRuntime(runtimeID string) session.Conn {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 	for _, c := range pl.conns {
-		if runtimeID != "" && c.Spec.ID != runtimeID {
+		if runtimeID != "" && c.spec.ID != runtimeID {
 			continue
 		}
-		if c.Client == nil {
+		if c.client == nil {
 			continue
 		}
 		select {
-		case <-c.Client.Done():
+		case <-c.client.Done():
 			continue // 已断开：视为无连接
 		default:
 			return c
@@ -252,10 +273,10 @@ func (pl *Pool) LiveClient(runtimeID string) (*acp.Client, int, bool) {
 	pl.mu.Lock()
 	var c *Conn
 	for _, cand := range pl.conns {
-		if runtimeID != "" && cand.Spec.ID != runtimeID {
+		if runtimeID != "" && cand.spec.ID != runtimeID {
 			continue
 		}
-		if cand.Client != nil {
+		if cand.client != nil {
 			c = cand
 			break
 		}
@@ -265,10 +286,10 @@ func (pl *Pool) LiveClient(runtimeID string) (*acp.Client, int, bool) {
 		return nil, 0, false
 	}
 	select {
-	case <-c.Client.Done():
+	case <-c.client.Done():
 		return nil, 0, false
 	default:
-		return c.Client, c.PID, true
+		return c.client, c.PID, true
 	}
 }
 
@@ -282,7 +303,7 @@ func (pl *Pool) GenerationKeysFor(base string) []string {
 	defer pl.mu.Unlock()
 	out := make([]string, 0, 2)
 	for k, c := range pl.conns {
-		if c.BaseKey == base {
+		if c.baseKey == base {
 			out = append(out, k)
 		}
 	}
@@ -310,8 +331,8 @@ func (pl *Pool) CloseAll() {
 		// 主动停机：先置原因再拆除 —— 停机不是连接故障，不能把会话写成失败态。
 		c.Intentional.Store(true)
 		pl.Drop(c)
-		if c.Client != nil {
-			_ = c.Client.Close() // watch 收尾（Drop 幂等）
+		if c.client != nil {
+			_ = c.client.Close() // watch 收尾（Drop 幂等）
 		}
 	}
 }

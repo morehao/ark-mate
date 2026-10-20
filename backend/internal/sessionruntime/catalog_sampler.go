@@ -48,7 +48,7 @@ func (s *Service) AuthGuidance() []provider.AuthGuide {
 	if rc == nil {
 		return nil
 	}
-	caps := rc.Client.Capabilities()
+	caps := rc.Client().Capabilities()
 	if len(caps.AuthGuidance) == 0 {
 		return nil
 	}
@@ -77,7 +77,7 @@ func (s *Service) PromptImageSupported() *bool {
 	if rc == nil {
 		return nil
 	}
-	v := rc.Client.Capabilities().Images
+	v := rc.Client().Capabilities().Images
 	return &v
 }
 
@@ -97,7 +97,7 @@ func (s *Service) SampleConfigOptions(ctx context.Context) ([]acp.ConfigOption, 
 	if err != nil {
 		return nil, false, err
 	}
-	caps := rc.Client.Capabilities()
+	caps := rc.Client().Capabilities()
 	if !caps.SessionResume && !caps.Raw.LoadSession {
 		return nil, false, acp.NewError(acp.ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
@@ -156,7 +156,7 @@ func sampleCandidates[T any](cands []T, sample func(T) ([]acp.ConfigOption, erro
 //  1. 本平台记录（内存集合 + sqlite）里带原生 id + cwd 的会话，按 UpdatedAt 倒序；
 //  2. 兜底：运行时的 ACP `session/list`（跨客户端可见）——仅在平台无记录时用，且优先带绝对
 //     cwd 的条目；dsh 会主动排除仍在活跃的会话，所以不会抢用户终端里正在用的那条。
-func (s *Service) catalogResumeCandidates(ctx context.Context, rc *runtimeconn.Conn) []resumeTarget {
+func (s *Service) catalogResumeCandidates(ctx context.Context, rc session.Conn) []resumeTarget {
 	// 1) 平台记录（内存集合 + sqlite 兜底）。
 	st := s.planes.Resources.Store()
 	var recs []session.SessionRec
@@ -184,7 +184,7 @@ func (s *Service) catalogResumeCandidates(ctx context.Context, rc *runtimeconn.C
 	}
 
 	// 2) 兜底：底座的 session/list（顺序即底座给的"最近优先"）。
-	items, err := rc.Client.ListSessions(ctx, "")
+	items, err := rc.Client().ListSessions(ctx, "")
 	if err != nil {
 		return nil
 	}

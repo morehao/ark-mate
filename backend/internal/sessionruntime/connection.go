@@ -3,7 +3,7 @@ package sessionruntime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -26,7 +26,7 @@ import (
 //
 // 取键 / 复用 / 代际准入 / spawn+握手 / 登记已随 P4a 第五十七刀进 `runtimeconn.Pool.Dial`；
 // 本函数只交两样编排侧事实：三个 ACP 回调与凭据检查。
-func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*runtimeconn.Conn, error) {
+func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (session.Conn, error) {
 	reqPerm := func(ctx context.Context, req acp.PermissionRequest) acp.PermissionDecision {
 		if o.allowAll {
 			return acp.PermissionDecision{Allowed: true}
@@ -58,7 +58,7 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 	completeElic := func(_ context.Context, elicitationID string) {
 		o.elic.CompleteByURLID(o.busySessionForClient(cli), elicitationID)
 	}
-	rc, err := o.pool.Dial(ctx, spec, runtimeconn.DialOptions{
+	rc, err := o.pool.Dial(ctx, spec, session.DialOptions{
 		Fingerprint:      fingerprint,
 		NativeMode:       nativeMode,
 		CheckCredentials: o.svc.CredentialProblem,
@@ -72,7 +72,7 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 	if err != nil {
 		return nil, err
 	}
-	cli = rc.Client
+	cli = rc.Client()
 	return rc, nil
 }
 
@@ -82,18 +82,18 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 //
 // 收尾的应用面（会话状态语义 / 在途登记 / 诊断留痕）已随 P4a 第五十七刀进
 // `domain/session.Runner`；本方法只是 `runtimeconn.DropSink` 的接线点。
-func (o *Orchestrator) OnConnDropped(d runtimeconn.ConnDrop) {
+func (o *Orchestrator) OnConnDropped(d session.ConnDrop) {
 	o.runner.DropConn(d.Client, d.Intentional)
 }
 
 // InUseOn 这条连接还有人用吗（有在途轮次、或仍挂着会话）。
 //
 // 判定已进 `domain/session.Runner.InUse`；本方法只是执行面回收判据的接线点。
-func (o *Orchestrator) InUseOn(c *runtimeconn.Conn) bool {
+func (o *Orchestrator) InUseOn(c session.Conn) bool {
 	if c == nil {
 		return true
 	}
-	return o.runner.InUse(c.Client)
+	return o.runner.InUse(c.Client())
 }
 
 // busySessionForClient 返回该连接上「唯一在途」的会话 id；无在途或多会话并发在途返回空串。

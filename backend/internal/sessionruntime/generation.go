@@ -104,10 +104,10 @@ func (o *Orchestrator) planGenerationSwitch(as *session.ActiveSession, rec *sess
 	// T5：平台生成的模型配置指纹也是代际维度——配置文件在**进程启动时**读。
 	keys := o.pool.KeyFor(spec, wantFP, as.NativeMode)
 	plan := generationPlan{
-		From: rc.Key, To: keys.Key,
-		PermChanged:        keys.BaseKey != rc.BaseKey,
+		From: rc.Key(), To: keys.Key,
+		PermChanged:        keys.BaseKey != rc.BaseKey(),
 		FingerprintChanged: wantFP != as.Fingerprint,
-		ConfigChanged:      keys.ConfigDigest != rc.ConfigDigest,
+		ConfigChanged:      keys.ConfigDigest != rc.ConfigDigest(),
 	}
 	if plan.To == plan.From {
 		plan.Action = genActionKeep

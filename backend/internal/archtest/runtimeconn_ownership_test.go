@@ -52,6 +52,8 @@ var runtimeconnAnchors = []string{
 	"func (pl *Plane) UnregisterProc(",
 	"procReg *procreg.Registry",
 	// 第五十四刀：**连接池**（`Pool` / `Conn`）与它的三个新端口。
+	// 阶段 0.4：`Conn` / `ConnPool` / `DropSink` 的**声明**搬进 `domain/session`（下方单独判据），
+	// 执行面保留实现与两个来源端口（`ProviderEnvSource` / `ConfigDigestSource`）。
 	"type Pool struct {",
 	"type Conn struct {",
 	"func (pl *Pool) Add(",
@@ -62,7 +64,6 @@ var runtimeconnAnchors = []string{
 	"func (pl *Pool) ConnOfClient(",
 	"type ProviderEnvSource interface {",
 	"type ConfigDigestSource interface {",
-	"type DropSink interface {",
 }
 
 // TestRuntimeBindingLivesInRuntimeconn 绑定与诊断状态必须在 `internal/drivers/runtimeconn`，
@@ -81,6 +82,15 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 		if !strings.Contains(joined, a) {
 			t.Errorf("internal/drivers/runtimeconn 里找不到 %q：执行面的绑定/诊断入口被改名/搬走了？"+
 				"（这条守卫的判据就挂在它身上，失锚等于空转）", a)
+		}
+	}
+	// 阶段 0.4：连接端口的**声明**归 `domain/session`（执行面实现它们；端口放 L7 会让 L6 的实现
+	// 变成"向上 import"）。判据跟着落点走，否则搬走就静默失锚。
+	portFile := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "session", "conn.go")))
+	for _, a := range []string{"type Conn interface {", "type ConnPool interface {", "type DropSink interface {"} {
+		if !strings.Contains(portFile, a) {
+			t.Errorf("`internal/domain/session/conn.go` 里找不到 %q：连接端口的声明被改名/搬走了？"+
+				"（阶段 0.4 的判据挂在它身上，失锚等于空转）", a)
 		}
 	}
 
@@ -108,7 +118,7 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 		{"internal/sessionruntime/service.go", "runtimeconn.NewPool(", "执行面的连接池"},
 		{"internal/sessionruntime/service.go", "SetProviderEnvSource(", "子进程 env 的来源（同时是基础键的输入）"},
 		{"internal/sessionruntime/service.go", "SetConfigDigestSource(", "模型清单指纹的来源（进代际键）"},
-		{"internal/sessionruntime/service.go", "SetLiveClientSource(s.runtimePool)", "诊断的连接池读面"},
+		{"internal/sessionruntime/service.go", "SetLiveClientSource(pool)", "诊断的连接池读面"},
 		{"internal/sessionruntime/service.go", "SetDropSink(o)", "拆除的应用面（会话收尾）"},
 		{"internal/sessionruntime/connection.go", "func (o *Orchestrator) OnConnDropped(", "拆除的应用实现"},
 		{"internal/sessionruntime/connection.go", "func (o *Orchestrator) InUseOn(", "回收判据的应用实现"},

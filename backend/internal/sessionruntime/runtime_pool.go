@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 )
 
@@ -62,7 +63,7 @@ func (s *Service) NativePermissionEnv(runtimeID, mode string) ([]string, string)
 var (
 	_ runtimeconn.ProviderEnvSource = (*Service)(nil)
 	_ runtimeconn.NativeEnvSource   = (*Service)(nil)
-	_ runtimeconn.DropSink          = (*Orchestrator)(nil)
+	_ session.DropSink              = (*Orchestrator)(nil)
 )
 
 // ——— 供应商域：只剩**端口适配器**（P4a 正文第四十六刀）———

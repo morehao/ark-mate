@@ -202,7 +202,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	if got := numericCode(err); got != 40001 {
 		t.Fatalf("不可达选定的码 = %d，期望 40001", got)
 	}
-	if n := orch.pool.Len(); n != 0 {
+	if n := poolOf(orch).Len(); n != 0 {
 		t.Fatalf("校验失败不该建立任何连接，got %d", n)
 	}
 	list, _ := st.ListSessions(ctx, nil)
@@ -229,7 +229,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("可达选定应建会话成功: %v", err)
 	}
-	if n := orch.pool.Len(); n != 1 {
+	if n := poolOf(orch).Len(); n != 1 {
 		t.Fatalf("应建立一个连接，got %d", n)
 	}
 	detail, err := detailSvc(svc).GetSession(ctx, res.ID)
@@ -333,7 +333,7 @@ func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 		t.Fatalf("声明与未声明的指纹应不同: declared=%q plain=%q", recD.Fingerprint, recP.Fingerprint)
 	}
 	// 两个不同的代际 → 两条连接（能力集是按进程绑定的）。
-	if n := orch.pool.Len(); n != 2 {
+	if n := poolOf(orch).Len(); n != 2 {
 		t.Fatalf("声明与未声明应是两个代际（2 条连接），got %d", n)
 	}
 	detail, err := detailSvc(svc).GetSession(ctx, declared.ID)

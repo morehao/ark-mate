@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
@@ -76,17 +77,21 @@ func (pl *Pool) AdmitGeneration(baseKey string) error {
 // 回收动作都走 Drop + client.Close，不另写回收器。返回回收数量。
 func (pl *Pool) ReclaimUnreferenced(onlyBase string) int {
 	return pl.reclaim(func(c *Conn) bool {
-		return onlyBase == "" || c.BaseKey == onlyBase
+		return onlyBase == "" || c.baseKey == onlyBase
 	})
 }
 
 // ReclaimGeneration 回收**指定的那一条**代际（若它已无人引用且空闲）。迁移离开旧代际后调用：
 // 只动"自己刚离开的那一代"，不波及该基础键下别的无人引用进程。返回是否真的回收了。
-func (pl *Pool) ReclaimGeneration(target *Conn) bool {
+func (pl *Pool) ReclaimGeneration(target session.Conn) bool {
 	if target == nil {
 		return false
 	}
-	return pl.reclaim(func(c *Conn) bool { return c == target }) > 0
+	want, ok := target.(*Conn)
+	if !ok || want == nil {
+		return false
+	}
+	return pl.reclaim(func(c *Conn) bool { return c == want }) > 0
 }
 
 // reclaim 回收满足 pick 且「无在途 run + 无任何会话引用」的连接。
@@ -109,8 +114,8 @@ func (pl *Pool) reclaim(pick func(*Conn) bool) int {
 		}
 		c.Intentional.Store(true) // 主动回收，不是连接故障
 		pl.Drop(c)                // 原子摘除 + 状态回落（wasCurrent 保护新连接 running）
-		if c.Client != nil {
-			_ = c.Client.Close() // watch 收尾（Drop 幂等）
+		if c.client != nil {
+			_ = c.client.Close() // watch 收尾（Drop 幂等）
 		}
 		n++
 	}

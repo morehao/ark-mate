@@ -28,9 +28,18 @@ type Service struct {
 	// sessionPlane 会话域（自持一把只保护域内字段的锁）。
 	sessionPlane *session.Plane
 	// runtimePlane 执行面（P3a-2 分批搬入）：本进程认的那个底座的绑定与诊断状态。
-	runtimePlane *runtimeconn.Plane
+	//
+	// 阶段 0.4：字段是**端口**（`session.RuntimePlane`），具体实现留在 `drivers/runtimeconn`。
+	// 只读编排要用的四件事（诊断留痕 ×2、底座绑定 ×2）；来源登记走 `planeImpl`。
+	runtimePlane session.RuntimePlane
 	// runtimePool 连接池（P4a 正文第五十四刀搬进执行面）：连接表、代际上限与空闲回收。
-	runtimePool *runtimeconn.Pool
+	//
+	// 阶段 0.4：字段是**端口**（`session.ConnPool`）。取连接与生命周期都在端口上；
+	// env / 凭据 / 配置指纹的来源登记是**装配接线**，走 `planeImpl`（本层自造路径）。
+	runtimePool session.ConnPool
+	// planeImpl **只有本层自造执行面时**非 nil：缺省建池与三个来源的登记要用具体
+	// `*runtimeconn.Plane`。装配层注入平面时这里同样被回填（同一实例），保证来源不会漏接。
+	planeImpl *runtimeconn.Plane
 
 	// coalescer ③ 文本增量合并器（NewService 构造时创建；见 chunk_coalescer.go）。
 	coalescer *session.Coalescer
@@ -56,7 +65,9 @@ type Option func(*Service)
 // **必须与 `svcruntime.New` 拿到同一个实例**（P4a 起那个调用在 `ctrruntime` 里）：
 // 两个平面各自记账时，"诊断说 stopped、
 // 连接却活着"这种分叉会立刻发生（`runtimeconn.Plane` 的进程状态是它自己的字段）。
-func WithRuntimePlane(pl *runtimeconn.Plane) Option { return func(s *Service) { s.runtimePlane = pl } }
+func WithRuntimePlane(pl session.RuntimePlane) Option {
+	return func(s *Service) { s.runtimePlane = pl }
+}
 
 // WithPlanes 使用装配层已经造好的领域平面（核心与网关共用同一套事实的前提）。
 //
@@ -121,23 +132,37 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 	// 绑定构建期选定的那个底座（v19：单实例）。`specOK=false`（未注册）不是这里报错——
 	// 装配期的 `runtime.ProductRegistry` 已经 fail-closed，这里只是把事实记下来供诊断如实外露。
 	spec, specOK := reg.Get(runtime.SelectedRuntime())
+	// 执行面的口子：凭据面（供应商域）与连接池。两半都归装配层持有，这里只保留
+	// **缺省自造**（测试与独立路径）；装配层注入平面时回填 `planeImpl`（同一实例），
+	// 来源登记仍然只走一条路。
 	if s.runtimePlane == nil {
-		s.runtimePlane = runtimeconn.NewPlane(reg, spec, specOK)
+		s.planeImpl = runtimeconn.NewPlane(reg, spec, specOK)
+		s.runtimePlane = s.planeImpl
 	}
-	// 执行面的口子：凭据面（供应商域）与连接池。池必须在这里造——它需要**最终那个**平面
-	// （`WithRuntimePlane` 可能已经换过实例），且装配层（`app`）要用它设代际上限/空闲回收。
-	s.runtimePlane.SetCredentialSource(s)
-	s.runtimePool = runtimeconn.NewPool(s.runtimePlane)
-	// env 与配置指纹都是**装配事实**，池只认端口（执行面不认识供应商档案与模型清单）。
-	s.runtimePool.SetProviderEnvSource(s)
-	// 指纹的来源是 `registry.Resources`：它是同一份 `runtimeCfgDigests`，不再经 Service 转一道。
-	s.runtimePool.SetConfigDigestSource(s.planes.Resources)
-	// 原生权限 env 的来源（P1-f 下半）：模式**进基础键**，所以这条端口不是"可选的注入"，
-	// 而是"键的第三维"——不登记它，`DSH_PERMISSION_MODE` 既不会注入、也不会分进程。
-	s.runtimePool.SetNativeEnvSource(s)
-	// 连接池读面：诊断要问"此刻哪条连接活着"。**早一行拿到的是 nil**，表现是诊断永远报
-	// 「未连接」、stderr 尾巴恒空——而它只在底座真的在跑时才该现形（开发态多半看不见）。
-	s.runtimePlane.SetLiveClientSource(s.runtimePool)
+	if s.runtimePool == nil {
+		bind := s.planeImpl
+		if bind == nil {
+			bind, _ = s.runtimePlane.(*runtimeconn.Plane)
+		}
+		if bind != nil {
+			s.planeImpl = bind
+			s.runtimePool = runtimeconn.NewPool(bind)
+		}
+	}
+	if s.planeImpl != nil {
+		s.planeImpl.SetCredentialSource(s)
+		if pool, ok := s.runtimePool.(*runtimeconn.Pool); ok {
+			// env 与配置指纹都是**装配事实**，池只认端口（执行面不认识供应商档案与模型清单）。
+			pool.SetProviderEnvSource(s)
+			// 指纹的来源是 `registry.Resources`：它是同一份 `runtimeCfgDigests`。
+			pool.SetConfigDigestSource(s.planes.Resources)
+			// 原生权限 env 的来源（P1-f 下半）：模式**进基础键**，所以这条端口不是"可选的注入"，
+			// 而是"键的第三维"——不登记它，`DSH_PERMISSION_MODE` 既不会注入、也不会分进程。
+			pool.SetNativeEnvSource(s)
+			// 连接池读面：诊断要问"此刻哪条连接活着"。
+			s.planeImpl.SetLiveClientSource(pool)
+		}
+	}
 	return s
 }
 
@@ -146,7 +171,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 // 装配期（`app` 的 serve）要用它设代际上限与空闲回收；这两个动作的实现只有
 // `internal/drivers/runtimeconn` 那一份，manager 侧不再有一行转发（`SetGenerationLimit` /
 // `StartIdleReaper` 已随本刀从 `Orchestrator` 删除）。
-func (s *Service) RuntimePool() *runtimeconn.Pool { return s.runtimePool }
+func (s *Service) RuntimePool() session.ConnPool { return s.runtimePool }
 
 // Planes 交出本次装配的**领域平面集合**（同一实例；P5a）。
 //
@@ -165,6 +190,11 @@ func (s *Service) attachOrchestrator(o *Orchestrator) {
 		s.sessionPlane.SetUsageSource(o.LatestUsage)
 		// 连接拆除的**应用**面：池只负责摘除与通知，会话/在途/诊断怎么收尾由编排侧决定
 		// （`DropSink`）。接在这一刻而不是 `NewService`：编排器在此之前还不存在。
-		s.runtimePool.SetDropSink(o)
+		//
+		// 判空是**装配不完整**的显式出口：注入了非 `*runtimeconn.Plane` 的平面时本层建不出池
+		// （端口没有构造能力），装配层必须两半一起给；这里不 panic，让诊断在别处如实报。
+		if s.runtimePool != nil {
+			s.runtimePool.SetDropSink(o)
+		}
 	}
 }

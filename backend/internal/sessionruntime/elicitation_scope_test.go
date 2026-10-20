@@ -125,9 +125,9 @@ func TestServiceResolveElicitationScope(t *testing.T) {
 // remediation 外露，给出事实 + 可执行动作（否则用户只觉得「提问卡没出现」）。
 func TestRuntimeDiagnosticsShowsScopeAmbiguous(t *testing.T) {
 	svc, _ := newSearchRig(t)
-	svc.runtimePlane.NoteScopeAmbiguous("elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 run）")
+	planeOf(svc).NoteScopeAmbiguous("elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 run）")
 
-	resp, err := svcruntime.New(svc.runtimePlane).RuntimeDiagnostics(context.Background())
+	resp, err := svcruntime.New(planeOf(svc)).RuntimeDiagnostics(context.Background())
 	if err != nil {
 		t.Fatalf("RuntimeDiagnostics: %v", err)
 	}

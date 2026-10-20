@@ -8,7 +8,7 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
-// ——— P4a 正文第五十四刀：执行面对外要的五个口子（装配期登记） ———
+// ——— P4a 正文第五十四刀：执行面对外要的四个口子（装配期登记） ———
 //
 // 本域是**执行面**：它持连接与进程。但有几样东西**不属于**它：
 //
@@ -17,8 +17,10 @@ import (
 //	                      而它同时是**基础连接键**的输入（同配置共享暖进程）；
 //	ConfigDigestSource —— 「平台物化的模型清单指纹」：供应商/模型面的事实，进代际键
 //	                      （配置在进程启动时读，不进键就会让暖进程继续用旧清单）；
-//	LiveClientSource   —— 「此刻哪条连接活着、pid 是多少」：**本域自己的**读面，装配期指向池；
-//	DropSink           —— 「一条连接被摘除之后，会话/在途/诊断该怎么收尾」：编排侧的事实。
+//	LiveClientSource   —— 「此刻哪条连接活着、pid 是多少」：**本域自己的**读面，装配期指向池。
+//
+// 第五个口子 `DropSink`（拆除的应用面）在阶段 0.4 随 `Conn` / `ConnPool` 一起搬进
+// `domain/session/conn.go`：连接端口的**声明**归域，执行面只实现它。
 //
 // 全部做成**端口**而不是让本域去 import manager/provider：执行面不该认识供应商档案的形态，
 // 也不该认识会话表——正如供应商域不该认识连接池。端口都很窄（1～2 个方法），
@@ -52,45 +54,6 @@ type ProviderEnvSource interface {
 // 它进**代际键**：不进键的话，清单改了而暖进程还活着，底座继续用旧清单，界面却显示「已保存」。
 type ConfigDigestSource interface {
 	ConfigDigest(runtimeID string) string
-}
-
-// ConnDrop 一条连接被摘除时交给编排侧的事实。
-//
-// **为什么带 `Client` 而不是会话 id 列表**：谁挂在一条连接上是**会话侧**的登记
-// （`ActiveSession.client`），执行面没有、也不该有那份表。计划早先写的是
-// `OnConnDropped(affected []string, …)`，但那样池就必须**自己算出** affected——它只能靠
-// 再存一份「连接 → 会话」的映射，而那正是「活动集在两层各存一份」这条禁令点名的形态。
-// 于是改成把**句柄**交回去，由编排侧用自己的登记算出受影响者：`affected` 的来源只有一份。
-type ConnDrop struct {
-	// Client 刚摘下的句柄（编排侧据它找出此刻挂在它上面的会话）。
-	Client *acp.Client
-	// Runtime 该连接的 runtime id（日志与诊断用）。
-	Runtime string
-	// WasCurrent 被摘的是该 runtime 的**当前**连接。进程状态回落只在这时为真——
-	// 旧连接收尾不得覆盖新连接的 running（空闲回收后立刻按需重拨的场景）。
-	WasCurrent bool
-	// Intentional 主动拆除（停机 / 空闲回收）而不是连接故障。收尾语义按它分叉：
-	// 主动拆除不是故障，在途轮次归 interrupted、空闲会话不改写状态。
-	Intentional bool
-	// Cause 拆除原因标签（`intentional` / `unexpected`，见 ConnCauseLabel）。
-	Cause string
-}
-
-// DropSink 连接拆除的**应用**面（编排侧实现）。
-//
-// 执行面只负责"摘除 + 通知"；会话状态怎么收尾、在途登记怎么作废、诊断怎么留痕，
-// 都由编排侧按同一份事实决定。这条边是本刀唯一的真决策点（§10.5.7.1 问题 3）：
-// 让池自己往会话域写的后果是**执行面认识会话表**，而它的端口上限只有 4 个方法。
-//
-// 实现约束：`OnConnDropped` 由池在**释放池锁之后**调用（实现里可以随便取别的锁）；
-// `InUseOn` 同样不在池锁下调用——两条都是为了避免"池锁 ↔ 会话锁"互指。
-type DropSink interface {
-	// OnConnDropped 一条连接刚被摘除。
-	OnConnDropped(d ConnDrop)
-	// InUseOn 这条连接此刻还有人在用吗——**在途轮次、或挂着的会话（含已完成态）**。
-	// 空闲回收与代际回收的唯一判据：回收一条还有人用的连接会把在线会话的句柄作废
-	// （下一次 prompt 才重建），那不叫回收暖进程。
-	InUseOn(conn *Conn) bool
 }
 
 // SetCredentialSource 装配期登记凭据面。

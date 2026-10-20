@@ -31,6 +31,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
@@ -366,4 +367,25 @@ func enableStore(svc *Service, st *store.Store) {
 			svc.planes.EnableStore(st)
 		}
 	})
+}
+
+// planeOf 取测试里的**具体执行面**：诊断读面（Snapshot / LastError / Resolve）只在
+// `*runtimeconn.Plane` 上，而生产代码只经 `session.RuntimePlane` 的四条方法。
+// 测试要断诊断快照，故显式回到具体类型（注入路径给的也必须是真实平面）。
+func planeOf(svc *Service) *runtimeconn.Plane {
+	p, _ := svc.runtimePlane.(*runtimeconn.Plane)
+	if p == nil {
+		panic("测试夹具的执行面不是 *runtimeconn.Plane：注入路径必须给真实平面")
+	}
+	return p
+}
+
+// poolOf 取测试里的**具体连接池**（Add / Drop / Get / Len / ReapIdle 只在它上面）。
+// 生产代码只经 `session.ConnPool` 的取连接与生命周期方法。
+func poolOf(o *Orchestrator) *runtimeconn.Pool {
+	p, _ := o.pool.(*runtimeconn.Pool)
+	if p == nil {
+		panic("测试夹具的连接池不是 *runtimeconn.Pool：注入路径必须给真实池")
+	}
+	return p
 }

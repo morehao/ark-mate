@@ -16,23 +16,23 @@ import (
 
 // stubConn 造一条只用于回收判据的连接（无句柄：本组用例不拨子进程）。
 func stubConn(key string, started time.Time) *runtimeconn.Conn {
-	return &runtimeconn.Conn{Spec: runtime.Spec{ID: key}, Key: key, Started: started}
+	return runtimeconn.NewConnWithStart(key, key, runtime.Spec{ID: key}, started)
 }
 
 // TestReapIdleOnceBasic 空闲超阈值且无会话/无 busy → 回收并置 stopped。
 func TestReapIdleOnceBasic(t *testing.T) {
 	o, svc := testReapHarness(t)
 	now := time.Now()
-	o.pool.Add(stubConn("stub", now.Add(-10*time.Minute)))
+	poolOf(o).Add(stubConn("stub", now.Add(-10*time.Minute)))
 
-	n := o.pool.ReapIdle(now, 5*time.Minute)
+	n := poolOf(o).ReapIdle(now, 5*time.Minute)
 	if n != 1 {
 		t.Fatalf("应回收 1 个，实际 %d", n)
 	}
-	if o.pool.Get("stub") != nil {
+	if poolOf(o).Get("stub") != nil {
 		t.Fatal("连接应已摘除")
 	}
-	if st := svc.runtimePlane.Snapshot().State; st != session.AgentStateStopped {
+	if st := planeOf(svc).Snapshot().State; st != session.AgentStateStopped {
 		t.Fatalf("回收后状态应 stopped: %s", st)
 	}
 }
@@ -45,19 +45,19 @@ func TestReapIdleOnceSkips(t *testing.T) {
 		return stubConn(key, now.Add(-10*time.Minute))
 	}
 	// 三条连接分下不同 key（池的槽位就是 key，避免互相覆盖）。
-	o.pool.Add(stubConn("stub", now.Add(-time.Minute))) // 未到阈值
+	poolOf(o).Add(stubConn("stub", now.Add(-time.Minute))) // 未到阈值
 	busy := old("rtx")
-	o.pool.Add(busy)
-	o.inflight.Mark(busy.Client, "s1")
+	poolOf(o).Add(busy)
+	o.inflight.Mark(busy.Client(), "s1")
 	withSession := old("dsh")
-	o.pool.Add(withSession)
-	o.handles.Put(session.NewActiveSession(session.HandleParams{Client: withSession.Client}))
+	poolOf(o).Add(withSession)
+	o.handles.Put(session.NewActiveSession(session.HandleParams{Client: withSession.Client()}))
 
-	if n := o.pool.ReapIdle(now, 5*time.Minute); n != 0 {
+	if n := poolOf(o).ReapIdle(now, 5*time.Minute); n != 0 {
 		t.Fatalf("三种情形都不应回收，实际 %d", n)
 	}
 	for _, k := range []string{"stub", "rtx", "dsh"} {
-		if o.pool.Get(k) == nil {
+		if poolOf(o).Get(k) == nil {
 			t.Fatalf("连接 %q 不应被摘除", k)
 		}
 	}
@@ -73,11 +73,11 @@ func TestReapThenReacquireState(t *testing.T) {
 	now := time.Now()
 	old := stubConn("stub", now.Add(-10*time.Minute))
 	newer := stubConn("stub", now)
-	o.pool.Add(newer)
-	svc.runtimePlane.SetState(session.AgentStateRunning)
+	poolOf(o).Add(newer)
+	planeOf(svc).SetState(session.AgentStateRunning)
 	// 旧连接收尾：wasCurrent=false → 状态不回落（仍 running）。
-	o.pool.Drop(old)
-	if st := svc.runtimePlane.Snapshot().State; st == session.AgentStateStopped {
+	poolOf(o).Drop(old)
+	if st := planeOf(svc).Snapshot().State; st == session.AgentStateStopped {
 		t.Fatal("旧连接收尾不应把新连接 running 置 stopped")
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
-	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -25,7 +24,7 @@ type Orchestrator struct {
 	// **它与会话表不共用锁**：池自持一把只保护连接表的锁，句柄表在会话域自己的锁下。
 	// 此前三样东西挤在一把锁下，于是"持锁请求会话快照"这类锁序反转只能靠人眼防
 	// （§3.1.49 踩过，表现是 `go test ./...` 挂死而不是红）。
-	pool *runtimeconn.Pool
+	pool session.ConnPool
 
 	// handles 运行期句柄表（P4a 正文第五十五刀起归 `domain/session`）：平台 id ↔ 原生 id
 	// 双索引与句柄状态都在域里。编排侧只通过它取句柄，不再自己持一份 map。

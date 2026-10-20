@@ -71,7 +71,7 @@ func TestRuntimeDiagnosticsStartFailure(t *testing.T) {
 	if _, err := orch.startSessionOn(context.Background(), session.StartOptions{Cwd: t.TempDir()}); err == nil {
 		t.Fatal("期望底座起不来")
 	}
-	diag, err := svcruntime.New(svc.runtimePlane).RuntimeDiagnostics(context.Background())
+	diag, err := svcruntime.New(planeOf(svc)).RuntimeDiagnostics(context.Background())
 	if err != nil {
 		t.Fatalf("RuntimeDiagnostics: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestRuntimeDiagnosticsLiveTail(t *testing.T) {
 	if _, err := orch.startSessionOn(context.Background(), session.StartOptions{Cwd: t.TempDir()}); err != nil {
 		t.Fatalf("建会话: %v", err)
 	}
-	diag, err := svcruntime.New(svc.runtimePlane).RuntimeDiagnostics(context.Background())
+	diag, err := svcruntime.New(planeOf(svc)).RuntimeDiagnostics(context.Background())
 	if err != nil {
 		t.Fatalf("RuntimeDiagnostics: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestRuntimeDiagnosticsLiveTail(t *testing.T) {
 
 	// 停机后连接态归位（尾巴回落到空/none）。主动拆除不是失败 → 不写 last_error。
 	orch.Close()
-	diag2, err := svcruntime.New(svc.runtimePlane).RuntimeDiagnostics(context.Background())
+	diag2, err := svcruntime.New(planeOf(svc)).RuntimeDiagnostics(context.Background())
 	if err != nil {
 		t.Fatalf("RuntimeDiagnostics(stopped): %v", err)
 	}
@@ -163,7 +163,7 @@ func TestPublishErrorCarriesStderrTail(t *testing.T) {
 		t.Fatalf("事件载荷应带 stderr 尾巴: %+v", got)
 	}
 	// 同一失败也应进入底座诊断快照（单底座：留痕只有一份，不再有"会话 → agent 反查"）。
-	le, ok := svc.runtimePlane.LastError()
+	le, ok := planeOf(svc).LastError()
 	if !ok || le.SessionID != "c-x" || len(le.StderrTail) != 2 {
 		t.Fatalf("诊断快照不符: %+v ok=%v", le, ok)
 	}
@@ -197,7 +197,7 @@ func TestRuntimeDiagnosticsRemediation(t *testing.T) {
 		t.Fatalf("置默认模型: %v", err)
 	}
 
-	diag, err := svcruntime.New(svc.runtimePlane).RuntimeDiagnostics(ctx)
+	diag, err := svcruntime.New(planeOf(svc)).RuntimeDiagnostics(ctx)
 	if err != nil {
 		t.Fatalf("RuntimeDiagnostics: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestRuntimeDiagnosticsRemediation(t *testing.T) {
 	reg2 := runtime.NewRegistry()
 	svc2 := NewService(reg2, eventbus.New())
 	setBuildRuntime(t, "ghost")
-	diag2, err := svcruntime.New(svc2.runtimePlane).RuntimeDiagnostics(ctx)
+	diag2, err := svcruntime.New(planeOf(svc2)).RuntimeDiagnostics(ctx)
 	if err != nil {
 		t.Fatalf("RuntimeDiagnostics(ghost): %v", err)
 	}
@@ -238,7 +238,7 @@ func TestRuntimeDiagnosticsRemediation(t *testing.T) {
 	if _, err := orch3.startSessionOn(ctx, session.StartOptions{Cwd: t.TempDir()}); err != nil {
 		t.Fatalf("建会话: %v", err)
 	}
-	diag3, err := svcruntime.New(svc3.runtimePlane).RuntimeDiagnostics(ctx)
+	diag3, err := svcruntime.New(planeOf(svc3)).RuntimeDiagnostics(ctx)
 	if err != nil {
 		t.Fatalf("RuntimeDiagnostics(ok): %v", err)
 	}
@@ -254,7 +254,7 @@ func waitForLiveTail(t *testing.T, svc *Service, want string) {
 	deadline := time.Now().Add(2 * time.Second)
 	var last []string
 	for {
-		diag, err := svcruntime.New(svc.runtimePlane).RuntimeDiagnostics(context.Background())
+		diag, err := svcruntime.New(planeOf(svc)).RuntimeDiagnostics(context.Background())
 		if err == nil {
 			last = diag.StderrTail
 			if strings.Contains(strings.Join(diag.StderrTail, "\n"), want) {

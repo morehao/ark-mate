@@ -60,11 +60,11 @@ func (o *Orchestrator) acquireClient(ctx context.Context, spec runtime.Spec, fin
 	if err != nil {
 		return nil, err
 	}
-	if rc == nil || rc.Client == nil {
+	if rc == nil || rc.Client() == nil {
 		return nil, acp.NewError(acp.ClassConnection, "connection_unavailable",
 			"连接已建立但没有可用的 ACP 客户端", nil)
 	}
-	return rc.Client, nil
+	return rc.Client(), nil
 }
 
 // runnerInteractions 会话取消时把挂起的权限/提问一并收敛（权限面事实）。

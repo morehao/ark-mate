@@ -3,6 +3,7 @@ package runtimeconn
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
@@ -27,12 +28,12 @@ import (
 // **不新建会话**（session/new 会在两家 runtime 里落一条持久记录，而它们都没有 delete）。
 // 能力位不支持 resume/load 时返回 `resume_session_unsupported`：那是"该交付面不支持读"的
 // 事实，不是故障——调用方据此把说明文案与留痕级别分开。
-func SampleConfigOptions(ctx context.Context, rc *Conn, rawSessionID, cwd string) ([]acp.ConfigOption, error) {
-	if rc == nil || rc.Client == nil {
+func SampleConfigOptions(ctx context.Context, rc session.Conn, rawSessionID, cwd string) ([]acp.ConfigOption, error) {
+	if rc == nil || rc.Client() == nil {
 		return nil, acp.NewError(acp.ClassConnection, "runtime_not_connected",
 			"执行面没有可用的客户端连接，无法取样模型目录", nil)
 	}
-	caps := rc.Client.Capabilities()
+	caps := rc.Client().Capabilities()
 	if !caps.SessionResume && !caps.Raw.LoadSession {
 		return nil, acp.NewError(acp.ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
@@ -40,9 +41,9 @@ func SampleConfigOptions(ctx context.Context, rc *Conn, rawSessionID, cwd string
 	var sess *acp.Session
 	var err error
 	if caps.Raw.LoadSession {
-		sess, err = rc.Client.LoadSession(ctx, rawSessionID, acp.SessionOptions{Cwd: cwd})
+		sess, err = rc.Client().LoadSession(ctx, rawSessionID, acp.SessionOptions{Cwd: cwd})
 	} else {
-		sess, err = rc.Client.ResumeSession(ctx, rawSessionID, acp.SessionOptions{Cwd: cwd})
+		sess, err = rc.Client().ResumeSession(ctx, rawSessionID, acp.SessionOptions{Cwd: cwd})
 	}
 	if err != nil {
 		return nil, err
@@ -50,7 +51,7 @@ func SampleConfigOptions(ctx context.Context, rc *Conn, rawSessionID, cwd string
 	// 取样用完即释放（close 只解除活跃态，不删该会话的持久记录）。
 	defer func() {
 		if cerr := sess.Close(context.WithoutCancel(ctx)); cerr != nil {
-			glog.Debugw(ctx, "目录取样会话 close 失败（忽略）", "runtime", rc.Spec.ID, "err", cerr)
+			glog.Debugw(ctx, "目录取样会话 close 失败（忽略）", "runtime", rc.Spec().ID, "err", cerr)
 		}
 	}()
 	return sess.ConfigOptions(), nil

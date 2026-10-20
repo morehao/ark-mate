@@ -20,7 +20,7 @@ import (
 // 断言从"看一眼"改成了"等到满足"，窗口比原来大得多，必须持锁（P4a 第五十四刀起那把锁
 // 在池里：`Pool.Len` 就是"持池锁读"）。
 func connCount(o *Orchestrator) int {
-	return o.pool.Len()
+	return poolOf(o).Len()
 }
 
 // waitConnCount 等连接池到达期望条数（上限 2s），超时才判失败。
@@ -95,13 +95,13 @@ func TestGenerationKeyFindsAllGenerations(t *testing.T) {
 	// 池只需要"连接表"这一份状态就能回答这个问题（binder/sink 都可为 nil）。
 	pool := runtimeconn.NewPool(nil)
 	// 一个缺省代际 + 两个能力代际 + 一个别的配置（不该被匹配到）。
-	pool.Add(&runtimeconn.Conn{Key: base, BaseKey: base})
+	pool.Add(runtimeconn.NewConnForTest(base, base, runtime.Spec{}))
 	for _, fp := range []string{"fp1", "fp2"} {
 		k := runtimeconn.GenerationKey(base, fp, "")
-		pool.Add(&runtimeconn.Conn{Key: k, BaseKey: base})
+		pool.Add(runtimeconn.NewConnForTest(k, base, runtime.Spec{}))
 	}
 	otherBase := runtimeconn.ConnKey("stub", []string{"DSH_PERMISSION_MODE=read-only"})
-	pool.Add(&runtimeconn.Conn{Key: otherBase, BaseKey: otherBase})
+	pool.Add(runtimeconn.NewConnForTest(otherBase, otherBase, runtime.Spec{}))
 
 	got := pool.GenerationKeysFor(base)
 	if len(got) != 3 {
@@ -191,7 +191,7 @@ func TestGenerationPerFingerprint(t *testing.T) {
 	}
 	// 全部代际都在同一个基础键下：代际**池上限**正是按这个数判的（超了要淘汰无人引用的那条）。
 	base := runtimeconn.ConnKey(spec.ID, r.Svc.planes.Providers.ProviderEnvFor(spec.ID, r.Svc.planes.Providers.InjectedProviderID(ctx)))
-	if n := len(r.Orch.pool.GenerationKeysFor(base)); n != 3 {
+	if n := len(poolOf(r.Orch).GenerationKeysFor(base)); n != 3 {
 		t.Fatalf("三代际应同属一个基础键: %d", n)
 	}
 	// v19 撤销了"显式停某个 agent"那一面（用户不能选底座 → 也没有按底座停的入口），

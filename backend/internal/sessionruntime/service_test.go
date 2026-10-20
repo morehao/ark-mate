@@ -181,12 +181,12 @@ func TestDisconnectIdleSession(t *testing.T) {
 	// 字段与 `seedBuiltinAgents` 播出来的那条逐字同形（尤其是 `State: stopped`：后面那条断言
 	// 验的是"断连不把 agent 状态改坏"，起点错成空串就变成一句空话）。
 	as := session.NewActiveSession(session.HandleParams{ID: "s1", Runtime: "rtx"}) // client nil
-	rc := &runtimeconn.Conn{}                                                      // client 亦 nil → 相等匹配
+	rc := runtimeconn.NewConnForTest("", "", runtime.Spec{})                       // client 亦 nil → 相等匹配
 	orch.handles.Put(as)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s1", Status: session.SessionStatusCompleted})
 	before := bus.Published()
 
-	orch.pool.Drop(rc)
+	poolOf(orch).Drop(rc)
 
 	if got, _ := svc.sessionPlane.Lookup("s1"); got.Status != session.SessionStatusCompleted {
 		t.Fatalf("空闲会话的上一轮终态不应被断连改写: %s", got.Status)
@@ -194,7 +194,7 @@ func TestDisconnectIdleSession(t *testing.T) {
 	if bus.Published() != before {
 		t.Fatalf("断连不应伪造会话事件（run.error 等）: published=%d want %d", bus.Published(), before)
 	}
-	if st := svc.runtimePlane.Snapshot().State; st != session.AgentStateStopped {
+	if st := planeOf(svc).Snapshot().State; st != session.AgentStateStopped {
 		t.Fatalf("底座状态应 stopped: %s", st)
 	}
 	// 句柄作废并摘出活跃集合（下次 prompt 才能重建），平台侧会话记录保留。
@@ -205,12 +205,12 @@ func TestDisconnectIdleSession(t *testing.T) {
 		t.Fatal("平台侧会话记录必须保留（会话归平台所有）")
 	}
 	// 连接诊断仍是连接事实的来源（v19：单底座，留痕只有一份）。
-	if le, ok := svc.runtimePlane.LastError(); !ok || le.Code != "connection_lost" || le.SessionID != "s1" {
+	if le, ok := planeOf(svc).LastError(); !ok || le.Code != "connection_lost" || le.SessionID != "s1" {
 		t.Fatalf("底座诊断应记录 connection_lost: %+v", le)
 	}
 
 	// 二次 Drop（池）：句柄已 dead → 幂等。
-	orch.pool.Drop(rc)
+	poolOf(orch).Drop(rc)
 	if bus.Published() != before {
 		t.Fatalf("重复断连不应发布事件: published=%d", bus.Published())
 	}
@@ -221,13 +221,13 @@ func TestDisconnectIdleSession(t *testing.T) {
 func TestIntentionalTeardownKeepsIdleSession(t *testing.T) {
 	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "rtx", Name: "rtx"})
 	as := session.NewActiveSession(session.HandleParams{ID: "s1", Runtime: "rtx"})
-	rc := &runtimeconn.Conn{}
+	rc := runtimeconn.NewConnForTest("", "", runtime.Spec{})
 	rc.Intentional.Store(true)
 	orch.handles.Put(as)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s1", Status: session.SessionStatusCompleted})
 	before := bus.Published()
 
-	orch.pool.Drop(rc)
+	poolOf(orch).Drop(rc)
 
 	if got, _ := svc.sessionPlane.Lookup("s1"); got.Status != session.SessionStatusCompleted {
 		t.Fatalf("主动停机不得改写会话状态（completed 应保持）: %s", got.Status)
@@ -248,7 +248,7 @@ func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
 		ID: "s1", Runtime: "rtx",
 		Session: &stubSession{cancelOnCtx: true}, // 阻塞到 ctx 取消，模拟生成中的轮次
 	})
-	rc := &runtimeconn.Conn{}
+	rc := runtimeconn.NewConnForTest("", "", runtime.Spec{})
 	orch.handles.Put(as)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
 
@@ -257,7 +257,7 @@ func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
 	}
 
 	rc.Intentional.Store(true)
-	orch.pool.Drop(rc)
+	poolOf(orch).Drop(rc)
 	// 等 executeRun 收尾（t.cancel 解除阻塞 → 写 interrupted）：轮询平台记录，避免裸读 as.run。
 	got := ""
 	deadline := time.Now().Add(2 * time.Second)
@@ -417,14 +417,14 @@ func TestServiceResolveRuntimeUsesBuildRuntime(t *testing.T) {
 	// 已装配：原样返回构建期常量（不是"注册表里第一个"，也不是 agent 的候选）。
 	svc, _, _ := rigWithRuntime(t, runtime.Spec{ID: "stub", Name: "Stub"})
 	setBuildRuntime(t, "stub")
-	if id, err := svc.runtimePlane.Resolve(); err != nil || id != "stub" {
+	if id, err := planeOf(svc).Resolve(); err != nil || id != "stub" {
 		t.Fatalf("应返回构建期底座 stub，id=%q err=%v", id, err)
 	}
 
 	// 未装配：明确报 runtime_not_found（不静默回落到注册表里的别的底座）。
 	empty := NewService(runtime.NewRegistry(), nil)
 	setBuildRuntime(t, "stub")
-	_, err := empty.runtimePlane.Resolve()
+	_, err := planeOf(empty).Resolve()
 	var ae *acp.Error
 	if !errors.As(err, &ae) || ae.Code != "runtime_not_found" {
 		t.Fatalf("空注册表应报 runtime_not_found，got %v", err)
