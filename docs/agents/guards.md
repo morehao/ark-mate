@@ -129,15 +129,16 @@
 
 - 再加 **1 条「已收口包协议无关」守卫**（`layer_isolation_test.go` 的
   `TestProtocolFreePackagesStayClean`，2026-10-20 C2）：`protocolFreePackages` 里登记的内圈包
-  （当前 interaction / automation / workspace / skill / mcp / identity / provider 七个域包 +
-  `core/definition` / `core/automation` 两个值包）**生产 import 不得出现 `internal/infra/acp`**
-  （只剩 `domain/session` 一块未收口：连接与生命周期；
-  `core/code` 是协议错误 → 平台视图的唯一转换点，按 B4 随连接边界搬走）。
-  这是一张**逐步增长的收口表**：C2 每完成一块（事件与轮次 → 错误构造 → 权限/elicitation →
-  配置项 → 连接与生命周期）登记一个包，全部登记完才收成"domain 不得 import acp"的全量判据。
-  挡的是已完成边界的**静默回退**：翻译层还在，域里再直接写一个 acp 类型照样编译、照样跑，
-  测试全绿，而"域不认识协议"这件事悄悄退回起点。fail-closed（登记的包不存在即红）。
-  反证（实跑）：在 `domain/interaction` 放一个 acp 空白 import → 红。
+  （**`internal/domain` 已全量收口**：18 个包逐个登记 + `core/definition` / `core/automation`
+  两个值包）**生产 import 不得出现 `internal/infra/acp`**。第二段判据是**全量覆盖**：
+  `internal/domain` 下新出现的包不登记即红（否则"新包又 import 协议库"这条回退路径没有判据）。
+  只剩 `core/code` 仍 import acp：协议错误 → 平台视图的唯一转换点，按 B4 随连接边界搬走。
+  这张表从 C2 开始**逐步增长**（事件与轮次 → 错误构造 → 权限/elicitation → 配置项 →
+  连接与生命周期），现在已覆盖整个领域。挡的是已完成边界的**静默回退**：翻译层还在，
+  域里再直接写一个 acp 类型照样编译、照样跑，测试全绿，而"域不认识协议"这件事悄悄退回起点。
+  fail-closed（登记的包不存在即红）。
+  反证（实跑）：在 `domain/interaction`（C2 第四刀）与 `domain/session`（C2 第八刀，全量收口后）
+  各放一个 acp 空白 import → 红。
 
 - 再加 **1 条「配置项值类型」对照守卫**（`config_option_parity_test.go` 的
   `TestConfigOptionValueTypesMatchACP`，2026-10-20 C2）：`runtime.ConfigOption` /

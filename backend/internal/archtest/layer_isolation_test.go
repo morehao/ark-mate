@@ -248,18 +248,38 @@ func TestInnerLayersUseNoTableRows(t *testing.T) {
 // 值层的两个包（`core/definition` / `core/automation`）也在表里：它们的错误构造改用 `code` 之后
 // 就不该再认识协议——`core/code` 是唯一例外（协议错误 → 平台视图的转换点，按 B4 随连接边界搬走）。
 var protocolFreePackages = []string{
-	modulePrefix + "internal/domain/interaction",
+	// —— 领域：已**全量**收口（每个包都在表里，新增域包不登记即红）——
 	modulePrefix + "internal/domain/automation",
-	modulePrefix + "internal/domain/workspace",
-	modulePrefix + "internal/domain/skill",
-	modulePrefix + "internal/domain/mcp",
+	modulePrefix + "internal/domain/automation/row",
 	modulePrefix + "internal/domain/identity",
+	modulePrefix + "internal/domain/interaction",
+	modulePrefix + "internal/domain/mcp",
 	modulePrefix + "internal/domain/provider",
+	modulePrefix + "internal/domain/provider/row",
+	modulePrefix + "internal/domain/session",
+	modulePrefix + "internal/domain/session/event",
+	modulePrefix + "internal/domain/session/memory",
+	modulePrefix + "internal/domain/session/message",
+	modulePrefix + "internal/domain/session/queue",
+	modulePrefix + "internal/domain/session/run",
+	modulePrefix + "internal/domain/session/sessionrow",
+	modulePrefix + "internal/domain/session/usage",
+	modulePrefix + "internal/domain/skill",
+	modulePrefix + "internal/domain/workspace",
+	modulePrefix + "internal/domain/workspace/row",
+
+	// —— 值层：错误构造改走 `core/code` 之后不该再认识协议 ——
+	// `core/code` 是唯一例外（协议错误 → 平台视图的转换点，按 B4 随连接边界搬走）。
 	modulePrefix + "internal/core/definition",
 	modulePrefix + "internal/core/automation",
 }
 
 // TestProtocolFreePackagesStayClean 已收口的内圈包不得再 import 协议库。
+//
+// 两段判据：
+//   - **已登记的包必须干净**（逐个包扫生产 import）；
+//   - **`internal/domain` 已全量收口**：该前缀下每个包都必须在表里——新增一个域包而不登记
+//     即红（否则"新包又 import acp"这条最自然的回退路径没有判据）。
 //
 // fail-closed：登记了的包必须真实存在（目录改名/搬走后不许静默空转）。
 func TestProtocolFreePackagesStayClean(t *testing.T) {
@@ -279,6 +299,19 @@ func TestProtocolFreePackagesStayClean(t *testing.T) {
 				t.Errorf("%s 已登记为「协议无关」，却仍 import %s：改用内圈值类型，翻译放连接边界",
 					pkgPath, imp)
 			}
+		}
+	}
+
+	// 领域全量收口：`internal/domain` 下的每个包都必须在表里（新增包不登记即红）。
+	registered := make(map[string]bool, len(protocolFreePackages))
+	for _, p := range protocolFreePackages {
+		registered[p] = true
+	}
+	for _, dir := range goPackagesUnder(t, filepath.Join(root, "internal", "domain")) {
+		self := packageImportPath(root, dir)
+		if !registered[self] {
+			t.Errorf("%s 没有登记进 protocolFreePackages：领域已全量收口，新增域包必须显式表态"+
+				"（否则「新包又 import 协议库」这条回退路径没有任何判据）", rel(root, dir))
 		}
 	}
 }
