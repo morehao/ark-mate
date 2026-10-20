@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/golib/gerror"
 )
 

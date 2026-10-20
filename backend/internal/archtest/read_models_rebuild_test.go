@@ -121,7 +121,7 @@ func collectRebuildGuard(t *testing.T, root string) rebuildGuard {
 	//
 	// 为什么是整棵树而不是 `internal/sessionruntime/*.go`：实现与两个触发者会随包搬家
 	// （`persist.go` → 目标 `internal/domain/session`、`read_model_doctor.go` → 目标
-	// `internal/mechanism/doctor`），而 `os.ReadDir` **不递归**——文件一进子目录，扫描要么
+	// `internal/drivers/mechanism/doctor`），而 `os.ReadDir` **不递归**——文件一进子目录，扫描要么
 	// 静默空转、要么"解析到一些但恰好漏掉关键的那几个"。放宽到整棵树同时是**更强**的判据：
 	// 下面 `implCallers` / `loopCallers` 都是**精确值**断言，少一个 = 有触发者被搬走，
 	// 多一个 = 有人在别处又写了一段循环（两份实现的开始，正是本守卫挡的第一类坏法）。
@@ -184,9 +184,9 @@ func collectRebuildGuard(t *testing.T, root string) rebuildGuard {
 
 	// ② doctor 侧：开关 + 条件分支。
 	//
-	// 扫描面跟着实现走：v3.2 刀 10 把 doctor 命令体从 `cliops` 搬进 `internal/maintenance`
+	// 扫描面跟着实现走：v3.2 刀 10 把 doctor 命令体从 `cliops` 搬进 `internal/bootstrap/maintenance`
 	// （命令层只剩分发）。判据仍然是"有开关 + 有早退拒绝 + 调唯一的重建循环"。
-	cmdDir := filepath.Join(root, "internal", "maintenance")
+	cmdDir := filepath.Join(root, "internal", "bootstrap", "maintenance")
 	doctorFile := parseGuardFile(t, fset, filepath.Join(cmdDir, "doctor.go"), root)
 	rebuildFile := parseGuardFile(t, fset, filepath.Join(cmdDir, "doctor_readmodels.go"), root)
 

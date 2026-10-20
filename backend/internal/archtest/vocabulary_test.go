@@ -77,32 +77,32 @@ var conversationVocabularyWhitelist = []struct {
 			"它不该知道 ark-mate 的词汇表",
 	},
 	{
-		path: "backend/internal/store/migrate.go",
+		path: "backend/internal/persistence/store/migrate.go",
 		reason: "v1–v14 的历史迁移语句与注释里必然有 `conversations`/`conversation_id`：" +
 			"迁移内核纪律是「追加迁移 = 在尾部新增，绝不回改历史」（v15 的 DDL 才有 `sessions`）",
 	},
 	{
-		path: "backend/internal/store/migrate_v14.go",
+		path: "backend/internal/persistence/store/migrate_v14.go",
 		reason: "同上（历史步骤只用字面量）；它还带 v14 的 JSON 键 `existing_conversations`——" +
 			"那是已经落进 meta.migration_notes_v14 的**持久事实**，改名等于让旧笔记读不出来",
 	},
 	{
-		path: "backend/internal/store/migrate_test.go",
+		path: "backend/internal/persistence/store/migrate_test.go",
 		reason: "「停在 v15 之前」的历史迁移用例要用裸 SQL 造/读 `conversations` 表" +
 			"（DAO 已改认 `sessions`，读不到历史表）。这是守卫⑤ 那条纪律的测试侧镜像",
 	},
 	{
-		path: "backend/internal/store/migrate_v15_test.go",
+		path: "backend/internal/persistence/store/migrate_v15_test.go",
 		reason: "同一个理由的测试侧：v15 的用例要在 **v14 库**上写夹具，而那时列名还是" +
 			"`last_conversation_id` / 表名还是 `conversations`（v15 才 RENAME/重建）",
 	},
 	{
-		path: "backend/internal/store/migrate_v15.go",
+		path: "backend/internal/persistence/store/migrate_v15.go",
 		reason: "`v15TablePlan` 里逐张登记「被重建的表」，`conversations` 正是**历史表名**——" +
 			"守卫⑥ 的 R6 判据（DROP 清单 ↔ 清理清单一一对应）就靠这个字面量",
 	},
 	{
-		path: "backend/internal/router/router_test.go",
+		path: "backend/internal/delivery/router/router_test.go",
 		reason: "反向断言「README 不得出现历史名 /conversations」的**判据字面量**本身——" +
 			"这种守卫必须写出它禁的那个词，扫自己必然自证其罪",
 	},
@@ -205,20 +205,20 @@ var capabilityRevisionVocabularyWhitelist = []struct {
 	reason string
 }{
 	{
-		path: "backend/internal/store/migrate.go",
+		path: "backend/internal/persistence/store/migrate.go",
 		reason: "v8 的建表语句与 v16 的 `RENAME TO`/`RENAME COLUMN` 必须写**当时那一版**的名字" +
 			"（`capability_revisions` / `capability_id` / `idx_capability_revisions_capability`）：" +
 			"迁移内核纪律是「追加迁移 = 在尾部新增，绝不回改历史」，而 v16 正是把老名字改成新名字的那一步" +
 			"——它当然得写出老名字（v15 的 `conversations` 同理，见 conversation 白名单）",
 	},
 	{
-		path: "backend/internal/store/migrate_test.go",
+		path: "backend/internal/persistence/store/migrate_test.go",
 		reason: "「停在 v16 之前」的历史迁移用例要用裸 SQL 造/读 `capability_revisions` 表" +
 			"（DAO 已改认 `definition_revisions`，读不到历史表）。这是守卫⑤ 那条纪律的测试侧镜像" +
 			"（同 `readLegacyConversation`）",
 	},
 	{
-		path: "backend/internal/store/migrate_v16_test.go",
+		path: "backend/internal/persistence/store/migrate_v16_test.go",
 		reason: "v16 自己的迁移用例：夹具必须按**当时那一版**（v15）的表名与列名写裸 SQL" +
 			"（`capability_revisions.capability_id`），再断言 v16 之后它们变成了新名字且**行没被改坏**" +
 			"——改用新名字写夹具的话，这条用例就只是在验证「新表能存东西」，对迁移本身零覆盖",
@@ -236,7 +236,7 @@ var legacyCapabilityVocabulary = []string{"capability_revision", "capability_id"
 //
 // v16 把「定义变更审计」的表名与列名从 `capability_revisions` / `capability_id` 改成了
 // `definition_revisions` / `definition_id`，理由是**`capability` 在本仓是重载词**：它既指
-// 运行期声明的能力集（`capability_json`、`CapabilityScope`、`internal/capability` = skill + mcp），
+// 运行期声明的能力集（`capability_json`、`CapabilityScope`、`internal/core/capability` = skill + mcp），
 // 又指这张审计表覆盖的**六种定义**（skill / mcp / agent / automation / provider / model，
 // 后四者与"运行期能力"无关）。判据与 v15 的 conversation 同形：**零命中**是可以机器判据的。
 //
@@ -313,13 +313,13 @@ var providerSessionVocabularyWhitelist = []struct {
 	reason string
 }{
 	{
-		path: "backend/internal/store/migrate.go",
+		path: "backend/internal/persistence/store/migrate.go",
 		reason: "v9 的建列语句与 v17 的 `RENAME COLUMN provider_session_id TO runtime_session_id`" +
 			"必须写**当时那一版**的列名（迁移内核纪律：追加迁移 = 在尾部新增，绝不回改历史；" +
 			"而 v17 正是把老名字改成新名字的那一步——它当然得写出老名字）",
 	},
 	{
-		path: "backend/internal/store/migrate_test.go",
+		path: "backend/internal/persistence/store/migrate_test.go",
 		reason: "「停在 v15 之前」的历史迁移用例要用裸 SQL 造/读 `conversations.provider_session_id`" +
 			"（DAO 已改认 `runtime_session_id`，读不到历史列）。这是守卫⑤ 那条纪律的测试侧镜像",
 	},
@@ -433,10 +433,10 @@ func itoa(n int) string {
 //     至少被一个 `TableName()` 引用（抓"加了常量忘了实体"与"加了实体忘了常量"两个方向）；
 //   - R3 实体名与常量名的**域词必须相等**（`SessionEntity` ↔ `TableNameSession`）。
 //
-// 读 `internal/model/*.go` 用 **glob**，不写死文件名：v15 把 583 行的 `entity.go` 拆成了一表
+// 读 `internal/persistence/model/*.go` 用 **glob**，不写死文件名：v15 把 583 行的 `entity.go` 拆成了一表
 // 一文件，钉死路径会让这条守卫静默空转（或反过来，改名后立刻失效）。
 func TestModelEntitiesFollowNamingConvention(t *testing.T) {
-	dir := filepath.Join(backendRoot(t), "internal", "model")
+	dir := filepath.Join(backendRoot(t), "internal", "persistence", "model")
 	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil || len(paths) == 0 {
 		t.Fatalf("扫不到 %s/*.go: %v（fail-closed）", dir, err)
@@ -542,7 +542,7 @@ func TestModelEntitiesFollowNamingConvention(t *testing.T) {
 //	① **真 schema**：跑完整迁移的库里 `models` 有 `model`、没有 `model_id`；
 //	② **DTO**：`internal/dto/dtomodel/model_*.go` 剥注释后零 `model_id`（线上键名唯一事实源）；
 //	③ **前端类型**：`packages/types/src/model.ts` 剥注释后零 `model_id`；
-//	④ **实体 gorm 标签**：`internal/model/model.go` 必须是 `column:model`——标签写错**编译期无感**，
+//	④ **实体 gorm 标签**：`internal/persistence/model/model.go` 必须是 `column:model`——标签写错**编译期无感**，
 //	   只有运行时那条 SQL 才报 `no such column`（v16 的 A1 守卫注释里写着同一件事）；
 //	⑤ **反向**（防"改过头"）：`sessions` **必须仍有** `model_id` 列——E8 的陷阱变成机器判据。
 //
@@ -639,7 +639,7 @@ func TestModelsVocabularyIsModelNotModelID(t *testing.T) {
 	}
 
 	// ④ 实体 gorm 标签。
-	entityPath := filepath.Join(backendRoot(t), "internal", "model", "model.go")
+	entityPath := filepath.Join(backendRoot(t), "internal", "persistence", "model", "model.go")
 	raw, err = os.ReadFile(entityPath)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（fail-closed）", entityPath, err)

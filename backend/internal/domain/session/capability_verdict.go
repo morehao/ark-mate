@@ -2,10 +2,11 @@ package session
 
 import (
 	"fmt"
-	"github.com/morehao/ark-mate/internal/object/objdelivery"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/core/object/objdelivery"
+
+	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

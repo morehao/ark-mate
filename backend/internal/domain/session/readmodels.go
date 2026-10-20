@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/golib/glog"
 	"sort"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/golib/glog"
 )
 
 // RebuildSessionReadModels 用 `events` 重建某会话的全部读模型（J7：读模型整体可重建）。

@@ -1,6 +1,6 @@
 package dtomodel
 
-import "github.com/morehao/ark-mate/internal/object/objdelivery"
+import "github.com/morehao/ark-mate/internal/core/object/objdelivery"
 
 // ProviderResp 一条供应商的对外表示（密钥只以 `has_key` 呈现，**绝不读回**）。
 //

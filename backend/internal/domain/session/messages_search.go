@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -25,7 +25,7 @@ import (
 func (pl *Plane) SearchMessages(_ context.Context, q string, limit int) (*MessageSearchResult, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_search_query", "搜索关键词 q 不能为空 [invalid_search_query]", nil))
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "invalid_search_query", "搜索关键词 q 不能为空 [invalid_search_query]", nil))
 	}
 	if limit <= 0 {
 		limit = 30
@@ -39,7 +39,7 @@ func (pl *Plane) SearchMessages(_ context.Context, q string, limit int) (*Messag
 		resp.Source = "sqlite"
 		hits, err := pl.st.SearchMessages(context.Background(), q, limit+1)
 		if err != nil {
-			return nil, code.FromError(acl.NewError(acl.ClassService, "message_search_failed",
+			return nil, code.FromError(acp.NewError(acp.ClassService, "message_search_failed",
 				fmt.Sprintf("消息检索失败: %v [message_search_failed]", err), err))
 		}
 		if len(hits) > limit {

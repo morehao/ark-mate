@@ -1,4 +1,4 @@
-package acl
+package acp
 
 import (
 	"context"
@@ -19,7 +19,7 @@ func TestDialErrorCarriesStderrTail(t *testing.T) {
 	}
 	ae, ok := As(err)
 	if !ok || ae == nil {
-		t.Fatalf("期望 acl.Error，got %T %v", err, err)
+		t.Fatalf("期望 acp.Error，got %T %v", err, err)
 	}
 	if len(ae.StderrTail) != 2 {
 		t.Fatalf("期望 2 行 stderr 尾巴，got %v", ae.StderrTail)

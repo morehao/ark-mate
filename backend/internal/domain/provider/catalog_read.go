@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -38,7 +38,7 @@ const DefaultCatalogTTL = 5 * time.Minute
 
 // LiveConfigOptionsSource 任一活跃会话的配置项（`ok=false` = 没有活跃会话）。
 type LiveConfigOptionsSource interface {
-	LiveConfigOptions() ([]acl.ConfigOption, bool)
+	LiveConfigOptions() ([]acp.ConfigOption, bool)
 }
 
 // CatalogSampler 恢复已有会话读取目录（**不新建会话**）。
@@ -46,7 +46,7 @@ type LiveConfigOptionsSource interface {
 // 三态：`opts` 非空 = 读到；`sampled=true, err=nil` = 至少一条候选读通但运行时零候选；
 // `sampled=false, err!=nil` = 全部候选读不通（`ErrNoSampleCandidate` = 一条候选都没有）。
 type CatalogSampler interface {
-	SampleConfigOptions(ctx context.Context) (opts []acl.ConfigOption, sampled bool, err error)
+	SampleConfigOptions(ctx context.Context) (opts []acp.ConfigOption, sampled bool, err error)
 }
 
 // CatalogConnectionFacts 目录响应里的连接期事实（没有活跃连接时返回空/nil）。
@@ -70,7 +70,7 @@ func (pl *Plane) SetCatalogConnectionFacts(f CatalogConnectionFacts) { pl.connFa
 //
 // 它是**正常状态**（第一条消息发送前就是这样），不是故障——说明文案与留痕级别都靠它把
 // "还没有会话可供读取"与"有会话但读不通"分开（2026-10-15 的事故正是把两者讲成同一句话）。
-var ErrNoSampleCandidate = acl.NewError(acl.ClassRequest, "no_resumable_session",
+var ErrNoSampleCandidate = acp.NewError(acp.ClassRequest, "no_resumable_session",
 	"还没有可供取样的会话（发送一条消息后目录会自动补全）", nil)
 
 // ModelCatalog 返回该 runtime 的运行时模型目录。
@@ -86,7 +86,7 @@ var ErrNoSampleCandidate = acl.NewError(acl.ClassRequest, "no_resumable_session"
 func (pl *Plane) ModelCatalog(ctx context.Context) (*CatalogView, error) {
 	spec, ok := pl.reg.Get(runtime.SelectedRuntime())
 	if !ok {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "runtime_not_registered",
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "runtime_not_registered",
 			"[runtime_not_registered] 构建期选定的 runtime 未装配", nil))
 	}
 
@@ -177,8 +177,8 @@ func itoa(n int) string {
 // 判据取 **Class** 而不是 code 前缀：这一类的 code 长这样——`resume_session_unsupported`、
 // `list_sessions_unsupported`——后缀在尾不在头。
 func samplingUnsupported(err error) bool {
-	ae, ok := acl.As(err)
-	return ok && ae != nil && ae.Class == acl.ClassUnsupported
+	ae, ok := acp.As(err)
+	return ok && ae != nil && ae.Class == acp.ClassUnsupported
 }
 
 // modelIDByValue 算"该 runtime 的不透明值 → 平台模型行 id"的注解表（v26，定案「辰」）。
@@ -219,7 +219,7 @@ func (pl *Plane) ModelIDByValue(ctx context.Context, runtimeID string) map[strin
 }
 
 // catalogResp 组装对外响应：选项投影 + 拒绝值标注 + 鉴权引导。
-func (pl *Plane) catalogResp(ctx context.Context, runtimeID, source string, opts []acl.ConfigOption,
+func (pl *Plane) catalogResp(ctx context.Context, runtimeID, source string, opts []acp.ConfigOption,
 	fetchedAt time.Time, note string) *CatalogView {
 	// 注解表一次算好（逐候选查表，不逐候选扫清单）。
 	byValue := pl.ModelIDByValue(ctx, runtimeID)
@@ -282,7 +282,7 @@ func (pl *Plane) logCatalogFallback(runtimeID string, err error) {
 			"runtime", runtimeID, "err", err)
 		return
 	}
-	if ae, ok := acl.As(err); ok && ae != nil {
+	if ae, ok := acp.As(err); ok && ae != nil {
 		glog.Warnw(context.Background(), "模型目录取样失败（所有候选会话都读不通）",
 			"runtime", runtimeID, "code", ae.Code, "class", string(ae.Class), "err", ae.Details)
 		return

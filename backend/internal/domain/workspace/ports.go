@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // ——— P2b：装配侧要交下来的两样家当（端口） ———

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -75,7 +75,7 @@ func (pl *Plane) ValidateSelection(sel *CapabilitySelection, runtimeID string) e
 	}
 	// 不存在（拼错）排前面：它更可能是用户立刻要改的那个。
 	problems := append(append([]SelectionProblem(nil), unknown...), unreachable...)
-	return acl.NewError(acl.ClassRequest, "capability_not_applicable",
+	return acp.NewError(acp.ClassRequest, "capability_not_applicable",
 		fmt.Sprintf("能力选择对 runtime %q 不可达：%s", runtimeID, problemList(problems)), nil)
 }
 

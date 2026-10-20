@@ -17,16 +17,16 @@ func TestElicitationResolveAccept(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var out acl.ElicitationOutcome
+	var out acp.ElicitationOutcome
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		out = m.RegisterAndWait(ctx, "s1", acl.ElicitationRequest{
+		out = m.RegisterAndWait(ctx, "s1", acp.ElicitationRequest{
 			SessionID: "s1",
 			Mode:      "form",
 			Message:   "请选择一个环境",
-			Schema: &acl.ElicitationSchema{
+			Schema: &acp.ElicitationSchema{
 				Title:      "部署目标",
 				Properties: map[string]any{"env": map[string]any{"type": "string", "enum": []any{"dev", "prod"}}},
 				Required:   []string{"env"},
@@ -64,12 +64,12 @@ func TestElicitationCompleteByURLID(t *testing.T) {
 	})
 
 	published := make(chan ElicitationItem, 1)
-	var out acl.ElicitationOutcome
+	var out acp.ElicitationOutcome
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		out = m.RegisterAndWait(context.Background(), "s1", acl.ElicitationRequest{
+		out = m.RegisterAndWait(context.Background(), "s1", acp.ElicitationRequest{
 			SessionID: "s1", Mode: "url", Message: "请打开链接", URL: "https://example.com",
 			URLID: "acp-el-1",
 		}, func(it ElicitationItem) { published <- it })
@@ -99,12 +99,12 @@ func TestElicitationCompleteByURLID(t *testing.T) {
 
 	// form 模式即便带同名字段也不收敛（只认 URL 模式）。
 	publishedForm := make(chan ElicitationItem, 1)
-	var formOut acl.ElicitationOutcome
+	var formOut acp.ElicitationOutcome
 	var fwg sync.WaitGroup
 	fwg.Add(1)
 	go func() {
 		defer fwg.Done()
-		formOut = m.RegisterAndWait(context.Background(), "s1", acl.ElicitationRequest{
+		formOut = m.RegisterAndWait(context.Background(), "s1", acp.ElicitationRequest{
 			SessionID: "s1", Mode: "form", Message: "请填表", URLID: "acp-el-2",
 		}, func(it ElicitationItem) { publishedForm <- it })
 	}()
@@ -123,7 +123,7 @@ func TestElicitationCompleteByURLID(t *testing.T) {
 func TestElicitationTimeoutAutoCancel(t *testing.T) {
 	m := NewElicitationManager(40 * time.Millisecond)
 	start := time.Now()
-	out := m.RegisterAndWait(context.Background(), "s1", acl.ElicitationRequest{
+	out := m.RegisterAndWait(context.Background(), "s1", acp.ElicitationRequest{
 		SessionID: "s1", Mode: "url", Message: "请打开链接", URL: "https://example.com",
 	}, nil)
 	if out.Action != "cancel" {
@@ -152,10 +152,10 @@ func TestElicitationResolveUnknown(t *testing.T) {
 func TestElicitationCancelSession(t *testing.T) {
 	m := NewElicitationManager(30 * time.Second)
 	registered := make(chan string, 1)
-	done := make(chan acl.ElicitationOutcome, 1)
+	done := make(chan acp.ElicitationOutcome, 1)
 	go func() {
-		out := m.RegisterAndWait(context.Background(), "s1", acl.ElicitationRequest{
-			SessionID: "s1", Mode: "form", Message: "q", Schema: &acl.ElicitationSchema{Properties: map[string]any{}},
+		out := m.RegisterAndWait(context.Background(), "s1", acp.ElicitationRequest{
+			SessionID: "s1", Mode: "form", Message: "q", Schema: &acp.ElicitationSchema{Properties: map[string]any{}},
 		}, func(it ElicitationItem) { registered <- it.ID })
 		done <- out
 	}()
@@ -178,20 +178,20 @@ func TestElicitationScopeMismatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var out acl.ElicitationOutcome
+	var out acp.ElicitationOutcome
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		out = m.RegisterAndWait(ctx, "owner", acl.ElicitationRequest{
+		out = m.RegisterAndWait(ctx, "owner", acp.ElicitationRequest{
 			SessionID: "owner", Mode: "form", Message: "q",
-			Schema: &acl.ElicitationSchema{Properties: map[string]any{}},
+			Schema: &acp.ElicitationSchema{Properties: map[string]any{}},
 		}, func(it ElicitationItem) { published <- it })
 	}()
 	it := <-published
 	if it.SessionID != "owner" {
 		t.Fatalf("载荷应带归属会话: %+v", it)
 	}
-	if it.ScopeSource != acl.ScopeInferred {
+	if it.ScopeSource != acp.ScopeInferred {
 		t.Fatalf("默认来源应为 inferred_inflight: %q", it.ScopeSource)
 	}
 	if _, _, ok := m.Owner(it.ID); !ok {
@@ -221,15 +221,15 @@ func TestElicitationScopeMismatch(t *testing.T) {
 func TestElicitationScopeSourceWire(t *testing.T) {
 	m := NewElicitationManager(2 * time.Second)
 	published := make(chan ElicitationItem, 1)
-	go m.RegisterAndWait(context.Background(), "s9", acl.ElicitationRequest{
-		SessionID: "s9", ScopeSource: acl.ScopeWire, Mode: "url", Message: "u", URL: "https://example.com",
+	go m.RegisterAndWait(context.Background(), "s9", acp.ElicitationRequest{
+		SessionID: "s9", ScopeSource: acp.ScopeWire, Mode: "url", Message: "u", URL: "https://example.com",
 	}, func(it ElicitationItem) { published <- it })
 	it := <-published
-	if it.ScopeSource != acl.ScopeWire {
+	if it.ScopeSource != acp.ScopeWire {
 		t.Fatalf("来源应为 wire: %q", it.ScopeSource)
 	}
 	_, src, ok := m.Owner(it.ID)
-	if !ok || src != acl.ScopeWire {
+	if !ok || src != acp.ScopeWire {
 		t.Fatalf("Owner 来源不符: ok=%v src=%q", ok, src)
 	}
 }
@@ -251,12 +251,12 @@ func TestElicitationTimeoutBecomesPending(t *testing.T) {
 	events := make(chan ev, 2)
 	m.SetOnResolved(func(_, _, action, reason string) { events <- ev{action, reason} })
 
-	var got acl.ElicitationOutcome
+	var got acp.ElicitationOutcome
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		got = m.RegisterAndWait(context.Background(), "s1", acl.ElicitationRequest{
+		got = m.RegisterAndWait(context.Background(), "s1", acp.ElicitationRequest{
 			SessionID: "s1", Mode: "form", Message: "用哪个库？",
 		}, nil)
 	}()
@@ -310,7 +310,7 @@ func TestElicitationResolveLateRejectsEarly(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_ = m.RegisterAndWait(context.Background(), "s1", acl.ElicitationRequest{
+		_ = m.RegisterAndWait(context.Background(), "s1", acp.ElicitationRequest{
 			SessionID: "s1", Mode: "form", Message: "还在等",
 		}, nil)
 	}()

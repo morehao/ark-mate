@@ -30,7 +30,7 @@ type WarningView struct {
 	Message  string
 }
 
-// WriteRequest 定义写面的**原文对象**：键的语义（`null` = 删键）由 `internal/definition.RawPatch` 解释。
+// WriteRequest 定义写面的**原文对象**：键的语义（`null` = 删键）由 `internal/core/definition.RawPatch` 解释。
 //
 // 用 `json.RawMessage` 而不是解成结构体：嵌套对象/数组原样落盘，不丢键、不变形。
 type WriteRequest map[string]json.RawMessage

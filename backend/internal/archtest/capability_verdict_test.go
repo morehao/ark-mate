@@ -42,7 +42,7 @@ const capabilityVerdictOwner = "internal/domain/session"
 const capabilityVerdictFile = capabilityVerdictOwner + "/capability_verdict.go"
 
 // capabilityStatusConstants 状态集的五个取值（`dtolibrary` 转出的那一套；唯一声明在
-// `internal/object/objdelivery`）。
+// `internal/core/object/objdelivery`）。
 var capabilityStatusConstants = []string{
 	"StatusProjected",
 	"StatusUntested",
@@ -268,7 +268,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 			t.Errorf("`domain/mcp/probe.go` 里找不到 %q：判据失锚＝空转（方法被改名/搬走时这条判据不会红）。", must)
 		}
 	}
-	capCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrcapability", "capability.go")))
+	capCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrcapability", "capability.go")))
 	if !regexp.MustCompile(`svc\s+svccapability\.CapabilitySvc`).MatchString(capCtr) {
 		t.Error("`ctrcapability` 里找不到 `svc svccapability.CapabilitySvc` 字段：控制器只认用例接口（v3.1 §3.2.1）。")
 	}
@@ -334,9 +334,9 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 		}
 	}
 	// v3.1：用例实例只在装配根造；控制器只收接口。
-	asmSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "services.go")))
+	asmSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
 	if !strings.Contains(asmSrc, "svccapability.NewCapability(") {
-		t.Error("`internal/assembly/services.go` 里找不到 `svccapability.NewCapability(`：能力面用例必须在装配根造。")
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svccapability.NewCapability(`：能力面用例必须在装配根造。")
 	}
 	if strings.Contains(capCtr, "svccapability.NewCapability(") {
 		t.Error("`ctrcapability` 里又出现 `svccapability.NewCapability(`：用例实例只在装配根造。")
@@ -360,10 +360,10 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 				"清零（调用点直连 `McpPlane()` / `defs`）。", dead)
 		}
 	}
-	gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "gateway", "source.go")))
+	gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "gateway", "source.go")))
 	for _, want := range []string{"s.planes.Mcp.GatewayFace(", "s.planes.Mcp.ResolveSecrets("} {
 		if !strings.Contains(gwSrc, want) {
-			t.Errorf("`internal/gateway/source.go` 里找不到 `%s`：网关装配必须直连 MCP 平面。"+
+			t.Errorf("`internal/drivers/gateway/source.go` 里找不到 `%s`：网关装配必须直连 MCP 平面。"+
 				"漏了会让这一条链悄悄退回某个中间层。", want)
 		}
 	}
@@ -384,11 +384,11 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 				"清零（调用点直连 `SkillPlane()` / `defs`）。", dead)
 		}
 	}
-	// P5a 起事实来自 `registry.Planes`；v3.1 起投影重校在 `internal/assembly/meta.go` 的装载辅助里。
-	appAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "meta.go")))
+	// P5a 起事实来自 `registry.Planes`；v3.1 起投影重校在 `internal/bootstrap/assembly/meta.go` 的装载辅助里。
+	appAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "meta.go")))
 	for _, want := range []string{"as.planes.Skills.Projections().Set(", "as.planes.Skills.ReconcileSkillProjection("} {
 		if !strings.Contains(appAll, want) {
-			t.Errorf("`internal/assembly/meta.go` 里找不到 `%s`：装配期的投影登记与物化必须直连技能平面。"+
+			t.Errorf("`internal/bootstrap/assembly/meta.go` 里找不到 `%s`：装配期的投影登记与物化必须直连技能平面。"+
 				"漏了会让这两条链悄悄退回某个中间层。", want)
 		}
 	}

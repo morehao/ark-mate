@@ -11,7 +11,7 @@ import (
 )
 
 // newTestRemote 起一个真实 ACP server（自建最小 responder，见 acp_testserver_test.go）挂在
-// 远程端点上：ws 形态走 acl.ServeWSSession，http 形态走 acl.NewRemoteHandler（均为生产服务端半场）。
+// 远程端点上：ws 形态走 acp.ServeWSSession，http 形态走 acp.NewRemoteHandler（均为生产服务端半场）。
 func newTestRemote(t *testing.T, transport string) string {
 	t.Helper()
 	r := newTestACPResponder()
@@ -41,13 +41,13 @@ func TestConnectRemoteTransport(t *testing.T) {
 			if spec.Launch.Transport != transport || spec.Launch.Endpoint != endpoint {
 				t.Fatalf("RemoteSpec 未落到 Launch: %+v", spec.Launch)
 			}
-			events := make(chan acl.Event, 64)
+			events := make(chan acp.Event, 64)
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			cl, err := Connect(ctx, spec, nil, nil, acl.ClientOptions{
-				OnEvent: func(e acl.Event) { events <- e },
-				RequestPermission: func(_ context.Context, _ acl.PermissionRequest) acl.PermissionDecision {
-					return acl.PermissionDecision{Allowed: true, OptionID: "allow-all", Always: true}
+			cl, err := Connect(ctx, spec, nil, nil, acp.ClientOptions{
+				OnEvent: func(e acp.Event) { events <- e },
+				RequestPermission: func(_ context.Context, _ acp.PermissionRequest) acp.PermissionDecision {
+					return acp.PermissionDecision{Allowed: true, OptionID: "allow-all", Always: true}
 				},
 			})
 			if err != nil {
@@ -57,7 +57,7 @@ func TestConnectRemoteTransport(t *testing.T) {
 			if cl.PidInfo().PID != 0 {
 				t.Fatalf("远程 runtime 不应报告 pid: %+v", cl.PidInfo())
 			}
-			sess, err := cl.NewSession(ctx, acl.SessionOptions{Cwd: "/tmp"})
+			sess, err := cl.NewSession(ctx, acp.SessionOptions{Cwd: "/tmp"})
 			if err != nil {
 				t.Fatalf("NewSession: %v", err)
 			}
@@ -76,9 +76,9 @@ func TestConnectRemoteTransport(t *testing.T) {
 				select {
 				case e := <-events:
 					switch e.Kind {
-					case acl.KindPermission:
+					case acp.KindPermission:
 						gotPermission = true
-					case acl.KindMessage:
+					case acp.KindMessage:
 						gotMessage = true
 					}
 					if gotPermission && gotMessage {
@@ -98,11 +98,11 @@ func TestConnectRemoteTransport(t *testing.T) {
 // TestConnectUnsupportedTransport 非法传输在 Connect 阶段即报 unsupported（不静默回落 stdio）。
 func TestConnectUnsupportedTransport(t *testing.T) {
 	spec := Spec{ID: "bad", Launch: LaunchSpec{Transport: "grpc", Endpoint: "127.0.0.1:1"}}
-	_, err := Connect(context.Background(), spec, nil, nil, acl.ClientOptions{})
+	_, err := Connect(context.Background(), spec, nil, nil, acp.ClientOptions{})
 	if err == nil {
 		t.Fatal("应报错")
 	}
-	if cls := acl.Classify(err).Class; cls != acl.ClassUnsupported {
+	if cls := acp.Classify(err).Class; cls != acp.ClassUnsupported {
 		t.Fatalf("应归类 unsupported，得到 %v (%v)", cls, err)
 	}
 }

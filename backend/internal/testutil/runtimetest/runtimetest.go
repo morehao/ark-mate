@@ -38,8 +38,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

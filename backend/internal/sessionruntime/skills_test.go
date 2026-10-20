@@ -11,9 +11,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/skill"
 
-	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/code"
-	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
 )
@@ -162,7 +162,7 @@ func TestSetSkillEnabledErrors(t *testing.T) {
 	if err := svc.planes.Capabilities.RegisterSkill(&capability.Skill{ID: "in-memory", Body: "# x"}); err != nil {
 		t.Fatal(err)
 	}
-	// acl 的稳定码不进 gerror 文案（msg = Details），故断言人话 + 信封码两条。
+	// acp 的稳定码不进 gerror 文案（msg = Details），故断言人话 + 信封码两条。
 	_, err := svc.Planes().Skills.SetSkillEnabled(context.Background(), "in-memory", false)
 	if err == nil || !strings.Contains(err.Error(), "没有定义文件") {
 		t.Fatalf("无定义文件应显式失败: %v", err)

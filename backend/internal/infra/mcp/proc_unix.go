@@ -9,7 +9,7 @@ import (
 
 // setupProcAttr 让 stdio MCP server 子进程成为独立进程组，便于 close 时整树回收。
 //
-// 与 agent 侧（`pkg/acl/transport_unix.go:12`）同一套做法。为什么必须做：`npx -y @modelcontextprotocol/
+// 与 agent 侧（`internal/infra/acp/transport_unix.go:12`）同一套做法。为什么必须做：`npx -y @modelcontextprotocol/
 // server-*` 这类命令自己会再 fork（npx → node → 真实 server），只杀直接子进程会留下**孤儿孙进程**
 // ——它们继续持有 stdio 管道与网络连接，探测结束即泄漏。
 func setupProcAttr(cmd *exec.Cmd) {

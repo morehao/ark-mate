@@ -1,7 +1,7 @@
 package sessionruntime
 
 import (
-	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/domain/session"
 )
 

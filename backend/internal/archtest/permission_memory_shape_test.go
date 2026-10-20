@@ -24,7 +24,7 @@ func TestPermissionMemoryCarriesGrantShape(t *testing.T) {
 	root := backendRoot(t)
 
 	// ① 迁移只**增列**，且唯一键保持三元组。
-	mig := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "store", "migrate_v28.go")))
+	mig := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "migrate_v28.go")))
 	if !strings.Contains(mig, "ADD COLUMN scope TEXT NOT NULL DEFAULT 'session'") {
 		t.Fatalf("v28 没有加 `scope` 列（或默认值不是 'session'）：授权形态必须有一个**可写**的落点")
 	}
@@ -38,8 +38,8 @@ func TestPermissionMemoryCarriesGrantShape(t *testing.T) {
 
 	// ② 两列**不进**写面的冲突列（冲突列 = 唯一键）。
 	//
-	// 判据作用在 `internal/store/memories.go`：v3.3 起 upsert 的列集合归 store（DAO 只剩列词汇）。
-	memSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "store", "memories.go")))
+	// 判据作用在 `internal/persistence/store/memories.go`：v3.3 起 upsert 的列集合归 store（DAO 只剩列词汇）。
+	memSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "memories.go")))
 	upsert, ok := goFuncBody(memSrc, "func (s *Store) AddMemory(")
 	if !ok {
 		t.Fatalf("`store/memories.go` 里找不到 `AddMemory(`")

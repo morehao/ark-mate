@@ -10,10 +10,10 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/redact"
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/redact"
 )
 
 // TestPublishRedactsSecretsAtSingleGate ② 脱敏闸门：publish 是事件唯一出口，
@@ -94,7 +94,7 @@ func TestPublishRedactsDynamicProviderKey(t *testing.T) {
 	}
 }
 
-// TestRunErrorPayloadRedactsStderrTail run.error 的 stderr_tail 走 acl.TailLines 出口，
+// TestRunErrorPayloadRedactsStderrTail run.error 的 stderr_tail 走 acp.TailLines 出口，
 // 已在那一步过闸（此处验证装配后的效果：事件里看不到密钥）。
 func TestRunErrorPayloadRedactsStderrTail(t *testing.T) {
 	svc, _ := newSearchRig(t)

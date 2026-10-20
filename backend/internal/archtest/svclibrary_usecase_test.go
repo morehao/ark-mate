@@ -99,7 +99,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	// （读模型 join 的是注册表与投影，`store` 出现在这里意味着有人把"数据面"又接了一遍）。
 	for _, m := range []string{
 		`"github.com/morehao/ark-mate/internal/sessionruntime"`,
-		`"github.com/morehao/ark-mate/internal/store"`,
+		`"github.com/morehao/ark-mate/internal/persistence/store"`,
 	} {
 		if strings.Contains(src, m) {
 			t.Errorf("internal/service/svclibrary 里出现 import %s：这一层的依赖是域/包事实"+
@@ -166,7 +166,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 		}
 	}
 	// 取用路径：控制器**函数体**里必须经用例（同包中间函数喂不绿它）。
-	capCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrcapability", "capability.go")))
+	capCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrcapability", "capability.go")))
 	if !regexp.MustCompile(`svc\s+svccapability\.CapabilitySvc`).MatchString(capCtr) {
 		t.Error("`ctrcapability` 里找不到 `svc svccapability.CapabilitySvc` 字段：控制器只认用例接口。")
 	}
@@ -259,12 +259,12 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 		}
 	}
 
-	// ④ 装配：用例实例只在 `internal/assembly` 造；控制器只收接口。
-	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "services.go")))
+	// ④ 装配：用例实例只在 `internal/bootstrap/assembly` 造；控制器只收接口。
+	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
 	if !strings.Contains(asm, "svclibrary.NewLibrary(") {
-		t.Error("`internal/assembly/services.go` 里没有 `svclibrary.NewLibrary(`：用例必须在唯一装配根造出来。")
+		t.Error("`internal/bootstrap/assembly/services.go` 里没有 `svclibrary.NewLibrary(`：用例必须在唯一装配根造出来。")
 	}
-	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrlibrary", "library.go")))
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrlibrary", "library.go")))
 	if strings.Contains(ctr, "svclibrary.NewLibrary(") {
 		t.Error("`ctrlibrary` 里又出现 `svclibrary.NewLibrary(`：用例实例只在装配根造，控制器只收接口。")
 	}

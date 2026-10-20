@@ -71,7 +71,7 @@ var (
 //
 // `path` 一律是**绝对路径**：会话记录那一处按**符号**定位（`uniqueSourceFile`，见下面
 // `TestNoAgentRuntimeSelectionSurface` 的注释），另两处是仍然稳定的精确路径（`dto` 与
-// `internal/automation` 不在本次「manager 解散」的重划范围内）。
+// `internal/core/automation` 不在本次「manager 解散」的重划范围内）。
 type selectionSurfaceTarget struct {
 	path     string
 	patterns []*regexp.Regexp
@@ -99,7 +99,7 @@ func TestNoAgentRuntimeSelectionSurface(t *testing.T) {
 			patterns: []*regexp.Regexp{reRuntimesList, reRoutingPolicy}},
 		{path: filepath.Join(root, "internal", "dto", "dtosession", "request.go"),
 			patterns: []*regexp.Regexp{reRuntimeHintStr}},
-		{path: filepath.Join(root, "internal", "automation", "types.go"),
+		{path: filepath.Join(root, "internal", "core", "automation", "types.go"),
 			patterns: []*regexp.Regexp{reRuntimeHintStr}},
 	}
 	for _, tgt := range targets {

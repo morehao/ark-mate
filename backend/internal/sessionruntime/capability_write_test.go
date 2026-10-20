@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	defn "github.com/morehao/ark-mate/internal/definition"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
+	defn "github.com/morehao/ark-mate/internal/core/definition"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism/definition"
 
-	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
@@ -46,9 +46,9 @@ func numericCode(err error) int {
 	return gerr.Code
 }
 
-// errCode 取 acl 错误的稳定 code（非 acl 错误 → 空串）。
+// errCode 取 acp 错误的稳定 code（非 acp 错误 → 空串）。
 func errCode(err error) string {
-	if ae, ok := acl.As(err); ok {
+	if ae, ok := acp.As(err); ok {
 		return ae.Code
 	}
 	return ""

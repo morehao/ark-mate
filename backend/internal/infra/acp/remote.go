@@ -1,4 +1,4 @@
-package acl
+package acp
 
 import (
 	"bufio"
@@ -23,7 +23,7 @@ import (
 // 连接抽象，而是**把网络连接伪装成一对流**：
 //   - Stdin()  = 客户端写入的 NDJSON 消息流（按行切分后逐条投递到远端）
 //   - Stdout() = 远端回来的 JSON-RPC 消息流（逐行写入管道）
-// 这样 acl.Dial 及其握手/权限/elicitation 逻辑对 stdio 与远程完全同构，不需要第二套客户端。
+// 这样 acp.Dial 及其握手/权限/elicitation 逻辑对 stdio 与远程完全同构，不需要第二套客户端。
 //
 // 两种形态（均由本文件实现，均无新依赖）：
 //   - ws   ：一条 WebSocket 长连接，一条消息 = 一个文本帧（ACP 的 NDJSON 语义原样保留）。

@@ -10,7 +10,7 @@ import (
 
 // ——— providers.json 的磁盘形状与词法校验（纯规则，v3.2 刀 8）———
 //
-// 导入/导出**编排**在 `internal/transfer`（它要碰 store 与 mechanism）；这里只留
+// 导入/导出**编排**在 `internal/drivers/transfer`（它要碰 store 与 mechanism）；这里只留
 // "这个文件长什么样、id 合不合法"——那两条是域自己的词汇，编排与用例层都要用。
 
 const ProvidersFileName = "providers.json"
@@ -54,7 +54,7 @@ func V11FileBaseURL(d *ProviderFile) string {
 	return ""
 }
 
-// v11KnownEndpoints v11 的 `type` → 端点（**冻结副本**：`internal/store/migrate_v12.go`
+// v11KnownEndpoints v11 的 `type` → 端点（**冻结副本**：`internal/persistence/store/migrate_v12.go`
 // 里有一份同源的，那是迁移用的历史快照，这里是导入（逃生门）用的；两处都描述历史，不复用活代码）。
 var v11KnownEndpoints = map[string]string{
 	"openai":     "https://api.openai.com/v1",
@@ -80,10 +80,10 @@ func BodyString(body map[string]any, key string) string {
 // 防的是一个带 `/` 或 `..` 的 id 把别的条目覆盖掉）。
 func ValidateProviderID(id string) error {
 	if id == "" {
-		return acl.NewError(acl.ClassRequest, "invalid_provider_id", "provider id 必填", nil)
+		return acp.NewError(acp.ClassRequest, "invalid_provider_id", "provider id 必填", nil)
 	}
 	if strings.TrimSpace(id) != id || len(id) > 64 {
-		return acl.NewError(acl.ClassRequest, "invalid_provider_id",
+		return acp.NewError(acp.ClassRequest, "invalid_provider_id",
 			fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符，且不含首尾空白）", id), nil)
 	}
 	for i := 0; i < len(id); i++ {
@@ -91,12 +91,12 @@ func ValidateProviderID(id string) error {
 		switch {
 		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '_', c == '-':
 		default:
-			return acl.NewError(acl.ClassRequest, "invalid_provider_id",
+			return acp.NewError(acp.ClassRequest, "invalid_provider_id",
 				fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符）", id), nil)
 		}
 	}
 	if id == "." || id == ".." {
-		return acl.NewError(acl.ClassRequest, "invalid_provider_id",
+		return acp.NewError(acp.ClassRequest, "invalid_provider_id",
 			fmt.Sprintf("provider id %q 非法（不得为 . 或 ..）", id), nil)
 	}
 	return nil

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	pkgidentity "github.com/morehao/ark-mate/internal/identity"
+	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 )
 
 // ——— 产品身份文案的边界（P4 的确定性判据） ———

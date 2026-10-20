@@ -22,7 +22,7 @@ const (
 // 原因取值 user | timeout | cancel | complete，随 session.elicitation_resolved 如实上报，
 // 前端据此区分「用户点了接受」与「agent 告知 URL 流程已完成」。
 type elicitationResolution struct {
-	outcome acl.ElicitationOutcome
+	outcome acp.ElicitationOutcome
 	reason  string
 }
 
@@ -124,8 +124,8 @@ func genElicitationID() string {
 	return "el-" + hex.EncodeToString(b)
 }
 
-// schemaMap 把 acl.ElicitationSchema 折叠为对外 JSON Schema 对象（bus/REST 载荷）。
-func schemaMap(s *acl.ElicitationSchema) map[string]any {
+// schemaMap 把 acp.ElicitationSchema 折叠为对外 JSON Schema 对象（bus/REST 载荷）。
+func schemaMap(s *acp.ElicitationSchema) map[string]any {
 	if s == nil {
 		return nil
 	}
@@ -165,7 +165,7 @@ func (m *ElicitationManager) CancelSessionReason(sessionID, reason string) {
 	for _, p := range victims {
 		// 直接向持有 channel 投递（此时条目已移出 map，不能走按 id 的 resolve）。
 		select {
-		case p.ch <- elicitationResolution{outcome: acl.ElicitationOutcome{Action: "cancel"}, reason: reason}:
+		case p.ch <- elicitationResolution{outcome: acp.ElicitationOutcome{Action: "cancel"}, reason: reason}:
 		default:
 		}
 	}
@@ -213,11 +213,11 @@ func (m *ElicitationManager) PendingItems(sessionID string) []ElicitationItem {
 	return out
 }
 
-func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID string, req acl.ElicitationRequest, publish func(ElicitationItem)) acl.ElicitationOutcome {
+func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID string, req acp.ElicitationRequest, publish func(ElicitationItem)) acp.ElicitationOutcome {
 	id := genElicitationID()
 	scopeSource := req.ScopeSource
 	if scopeSource == "" {
-		scopeSource = acl.ScopeInferred
+		scopeSource = acp.ScopeInferred
 	}
 	p := &pendingElicitation{
 		id:          id,
@@ -254,7 +254,7 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID stri
 	defer timer.Stop()
 
 	var (
-		d acl.ElicitationOutcome
+		d acp.ElicitationOutcome
 		// eventAction 是对**事件**说的话，可能与回给底座的 `d.Action` 不同：超时那一支回给底座的是
 		// `cancel`（那一轮的 ACP 调用必须有人应答），而事件说 `pending`（问题仍可回答）。
 		eventAction = ""
@@ -266,7 +266,7 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID stri
 		// 已决策：结果与终局原因（user / complete）由投递方一并给出
 		d, reason = r.outcome, r.reason
 	case <-ctx.Done():
-		d = acl.ElicitationOutcome{Action: "cancel"} // 取消
+		d = acp.ElicitationOutcome{Action: "cancel"} // 取消
 		reason = reasonCancel
 	case <-timer.C:
 		// **超时不等于取消**（ADR-11，对齐参照产品的 open|continued|settled 状态机）：
@@ -280,7 +280,7 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID stri
 		//      事件发 `pending`。迟到的回答走 `ResolveLate` → **作为新一轮**的用户消息进去。
 		glog.Warnw(ctx, "elicitation: request timeout, 转 pending（卡片保留可回答）",
 			"session", sessionID, "id", id)
-		d = acl.ElicitationOutcome{Action: "cancel"}
+		d = acp.ElicitationOutcome{Action: "cancel"}
 		eventAction, reason = actionPending, reasonTimeout
 		pendingLate = true
 	}
@@ -308,7 +308,7 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID stri
 // resolve 按 id 投递一次终局（决策 + 终局原因），并校验**归属会话**（C3 scope 归属）：
 // 只有登记该提问的会话才能决策——跨会话决策（陈旧标签页/串号调用）一律拒绝，
 // 既不投递也不删除挂起项，调用方拿到 mismatch=true（对外统一表现为「不存在」）。
-func (m *ElicitationManager) resolve(sessionID, id, reason string, d acl.ElicitationOutcome) (found, mismatch bool) {
+func (m *ElicitationManager) resolve(sessionID, id, reason string, d acp.ElicitationOutcome) (found, mismatch bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.pending[id]
@@ -329,17 +329,17 @@ func (m *ElicitationManager) resolve(sessionID, id, reason string, d acl.Elicita
 
 // ResolveAccept 接受（可携带用户提交的 content）；sessionID 为决策发起方会话（scope 校验）。
 func (m *ElicitationManager) ResolveAccept(sessionID, id string, content map[string]any) (found, mismatch bool) {
-	return m.resolve(sessionID, id, reasonUser, acl.ElicitationOutcome{Action: "accept", Content: content})
+	return m.resolve(sessionID, id, reasonUser, acp.ElicitationOutcome{Action: "accept", Content: content})
 }
 
 // ResolveDecline 用户拒绝提供信息。
 func (m *ElicitationManager) ResolveDecline(sessionID, id string) (found, mismatch bool) {
-	return m.resolve(sessionID, id, reasonUser, acl.ElicitationOutcome{Action: "decline"})
+	return m.resolve(sessionID, id, reasonUser, acp.ElicitationOutcome{Action: "decline"})
 }
 
 // ResolveCancel 取消本次提问。
 func (m *ElicitationManager) ResolveCancel(sessionID, id string) (found, mismatch bool) {
-	return m.resolve(sessionID, id, reasonUser, acl.ElicitationOutcome{Action: "cancel"})
+	return m.resolve(sessionID, id, reasonUser, acp.ElicitationOutcome{Action: "cancel"})
 }
 
 // 终局原因常量（随 session.elicitation_resolved 上报，前端据此区分终局来源）。
@@ -385,7 +385,7 @@ func (m *ElicitationManager) CompleteByURLID(ownerSession, urlID string) bool {
 		return false
 	}
 	select {
-	case hit.ch <- elicitationResolution{outcome: acl.ElicitationOutcome{Action: "accept"}, reason: reasonComplete}:
+	case hit.ch <- elicitationResolution{outcome: acp.ElicitationOutcome{Action: "accept"}, reason: reasonComplete}:
 	default:
 	}
 	m.mu.Unlock()

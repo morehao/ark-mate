@@ -1,4 +1,4 @@
-package acl
+package acp
 
 import (
 	"sort"
@@ -8,7 +8,7 @@ import (
 
 // ——— MCP server 注入（design doc §5.3）：平台数据面（capability.McpServer）→ ACP wire ———
 //
-// SessionOptions.McpServers 携带平台注册表选出的 MCP 子集；本文件负责把 acl.McpServer
+// SessionOptions.McpServers 携带平台注册表选出的 MCP 子集；本文件负责把 acp.McpServer
 // （传输中性表示）转换为 ACP SDK 的判别联合（每 server 一个 transport 子对象：
 // stdio/http/sse）。unknown transport 直接丢弃（防御：注册表校验已挡，转换层再兜一次）。
 

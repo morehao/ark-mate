@@ -17,9 +17,10 @@ package sessionruntime
 
 import (
 	"context"
-	defn "github.com/morehao/ark-mate/internal/definition"
+
+	defn "github.com/morehao/ark-mate/internal/core/definition"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
-	dmodel "github.com/morehao/ark-mate/internal/model"
+	dmodel "github.com/morehao/ark-mate/internal/persistence/model"
 	svcsession "github.com/morehao/ark-mate/internal/service/svcsession"
 	svcsystem "github.com/morehao/ark-mate/internal/service/svcsystem"
 
@@ -29,14 +30,14 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/infra/credentials"
-	"github.com/morehao/ark-mate/internal/object/objid"
-	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 )
@@ -65,7 +66,7 @@ func providerTestSvc(t *testing.T, providerDir string) *Service {
 	svc := NewService(reg, eventbus.New())
 	if providerDir != "" {
 		// 与装配期同一条路径：先装配凭据分层（镜像落在 provider 目录的父目录下，即"mate home"），
-		// 再装载 `providers.json`（它顺带登记定义目录）。顺序与 `internal/app` 逐条同形——
+		// 再装载 `providers.json`（它顺带登记定义目录）。顺序与 `internal/bootstrap/app` 逐条同形——
 		// 反过来，memory 模式下装载时读到的密钥就会按"凭据面未装配"处理。
 		svc.planes.Credentials.SetLayered(newTestCredentials(t, filepath.Dir(providerDir)))
 		svc.planes.Providers.LoadProviderDefinitions(providerDir)

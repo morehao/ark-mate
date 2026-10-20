@@ -4,7 +4,7 @@
 // `pkg/capability` 的注册表、`manager.agents` 与（后续）`manager.automation`。
 package dtolibrary
 
-import "github.com/morehao/ark-mate/internal/object/objdelivery"
+import "github.com/morehao/ark-mate/internal/core/object/objdelivery"
 
 // LibraryItem 一条统一能力条目（skill / mcp / agent / tool；command 见 M5）。
 //

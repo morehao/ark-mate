@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/core/credential"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 )
@@ -31,7 +31,7 @@ import (
 // 2026-10-11 那条"装配早期问一次密钥句柄就把错结论钉死整个进程"的回归守卫（旧
 // `TestProviderVaultEarlyCallDoesNotPoisonAnchor`）随旧机制一并撤销：那条缓存在结构上没了，
 // 而它真正护住的顺序问题（凭据面必须先于第一次 runtime 同步装配）改由
-// `internal/app` 的镜像锚点用例在**真实装配路径**上钉住。
+// `internal/bootstrap/app` 的镜像锚点用例在**真实装配路径**上钉住。
 
 // writeLegacyProviders 写一份「旧版本」的明文 providers.json。
 func writeLegacyProviders(t *testing.T, dir, content string) {

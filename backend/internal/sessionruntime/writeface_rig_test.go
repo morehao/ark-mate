@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	defn "github.com/morehao/ark-mate/internal/definition"
+	defn "github.com/morehao/ark-mate/internal/core/definition"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 

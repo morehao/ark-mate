@@ -76,8 +76,8 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 		t.Error("`internal/service/svcsystem` 里出现 `internal/sessionruntime`：用例层通过**端口**取事实（ADR-6），" +
 			"它不认识过渡层。")
 	}
-	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/store"`) {
-		t.Error("`internal/service/svcsystem/export.go` 里出现 `internal/store`：用例本体只认 `Source` 端口，" +
+	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/persistence/store"`) {
+		t.Error("`internal/service/svcsystem/export.go` 里出现 `internal/persistence/store`：用例本体只认 `Source` 端口，" +
 			"读库是适配器（`source_facts.go`）的事。")
 	}
 
@@ -100,20 +100,20 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 		}
 	}
 
-	// 装配：用例实例只在 `internal/assembly` 造；控制器只收接口（v3.1 §3.4）。
-	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "services.go")))
+	// 装配：用例实例只在 `internal/bootstrap/assembly` 造；控制器只收接口（v3.1 §3.4）。
+	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
 	if !strings.Contains(asm, "Export:             svcsystem.New(") &&
 		!strings.Contains(asm, "svcsystem.New(") {
-		t.Error("`internal/assembly/services.go` 里找不到 `svcsystem.New(`：" +
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsystem.New(`：" +
 			"导出的事实来源与用例实例必须在唯一装配根造。")
 	}
-	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrexport", "export.go")))
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrexport", "export.go")))
 	if strings.Contains(ctr, "svcsystem.New") {
 		t.Error("`ctrexport` 里又出现 `svcsystem.New`：控制器只收接口，不再造用例。")
 	}
-	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "app", "app.go")))
 	if strings.Contains(app, "svcsystem.") {
-		t.Error("`internal/app/app.go` 里出现 `svcsystem.`：应用壳只消费 `assembly.BuildResult`。")
+		t.Error("`internal/bootstrap/app/app.go` 里出现 `svcsystem.`：应用壳只消费 `assembly.BuildResult`。")
 	}
 }
 

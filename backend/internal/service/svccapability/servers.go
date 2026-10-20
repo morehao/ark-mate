@@ -3,7 +3,7 @@ package svccapability
 import (
 	"time"
 
-	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 )

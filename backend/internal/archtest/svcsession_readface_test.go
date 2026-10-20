@@ -71,9 +71,9 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 		{"SearchMessages", "Messages(", "h.svc.Messages("},
 		{"UsageSummary", "Summary(", "h.svc.Summary("},
 	}
-	ctrSrcAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go"))) +
-		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsearch", "search.go"))) +
-		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrusage", "usage.go")))
+	ctrSrcAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsession", "session.go"))) +
+		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsearch", "search.go"))) +
+		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrusage", "usage.go")))
 	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
 	readIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsession", "read.go")))
 	searchIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsearch", "search.go")))
@@ -111,7 +111,7 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 	}
 
 	// ③ 控制器只持用例接口。
-	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go")))
+	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsession", "session.go")))
 	if strings.Contains(ctrSrc, "*session.Plane") {
 		t.Error("`ctrsession` 里又出现 `*session.Plane`：控制器不 import domain（v3.1 §3.2.1 规则 1）。")
 	}

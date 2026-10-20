@@ -62,7 +62,7 @@ var runtimeconnOrchestrationMarkers = []string{
 // TestRuntimeconnHoldsNoOrchestration 执行面里不得出现编排层的形态。
 func TestRuntimeconnHoldsNoOrchestration(t *testing.T) {
 	root := backendRoot(t)
-	dir := filepath.Join(root, "internal", "runtimeconn")
+	dir := filepath.Join(root, "internal", "drivers", "runtimeconn")
 	files := productionGoFiles(t, dir)
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：这条守卫失去了检查对象（目录改名/搬走了？）", dir)
@@ -71,7 +71,7 @@ func TestRuntimeconnHoldsNoOrchestration(t *testing.T) {
 		src := stripLineComments(readFileOrFatal(t, path))
 		for _, m := range runtimeconnOrchestrationMarkers {
 			if strings.Contains(src, m) {
-				t.Errorf("internal/runtimeconn/%s 里出现编排层痕迹 %q：执行面**只放机制，不放编排**"+
+				t.Errorf("internal/drivers/runtimeconn/%s 里出现编排层痕迹 %q：执行面**只放机制，不放编排**"+
 					"（P3a-2 收口，理由见本文件头）。\n"+
 					"`Orchestrator` 实测回调 `Service` 的 **31 个不同方法**（会话域/能力面/供应商面/"+
 					"模型目录/记忆面），它是**用例编排层**——搬进执行面只能靠一个 31 方法的 god port，"+
@@ -93,7 +93,7 @@ var interfaceHeadRe = regexp.MustCompile(`^type\s+([A-Za-z_][A-Za-z0-9_]*)\s+int
 // fail-closed：一个接口都没扫到也判失败——那说明端口被删/改名了，判据失锚。
 func TestRuntimeconnPortsStayNarrow(t *testing.T) {
 	root := backendRoot(t)
-	dir := filepath.Join(root, "internal", "runtimeconn")
+	dir := filepath.Join(root, "internal", "drivers", "runtimeconn")
 	files := productionGoFiles(t, dir)
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：判据失去检查对象", dir)
@@ -118,7 +118,7 @@ func TestRuntimeconnPortsStayNarrow(t *testing.T) {
 				}
 			}
 			if methods > maxRuntimeconnPortMethods {
-				t.Errorf("internal/runtimeconn/%s 的 `%s` 声明了 %d 个方法（上限 %d）：执行面的端口一宽，"+
+				t.Errorf("internal/drivers/runtimeconn/%s 的 `%s` 声明了 %d 个方法（上限 %d）：执行面的端口一宽，"+
 					"就说明搬进来的不是机制而是编排。\n"+
 					"对照实测：`Orchestrator` 回调 `Service` 的 **31 个不同方法**——那正是这条路走到头的样子。\n"+
 					"处置：把该动作留在编排层（P4 分流），或拆成几个窄端口只取真正需要的那一两个事实。",
@@ -127,7 +127,7 @@ func TestRuntimeconnPortsStayNarrow(t *testing.T) {
 		}
 	}
 	if total == 0 {
-		t.Fatal("`internal/runtimeconn` 里一个 interface 都没扫到：端口被删/改名了？" +
+		t.Fatal("`internal/drivers/runtimeconn` 里一个 interface 都没扫到：端口被删/改名了？" +
 			"这条守卫的判据挂在它们身上，失锚等于空转。")
 	}
 }

@@ -2,16 +2,17 @@ package sessionruntime
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/model"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/persistence/model"
+
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
@@ -144,7 +145,7 @@ func TestPublishErrorCarriesStderrTail(t *testing.T) {
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
-	ae := acl.NewError(acl.ClassConnection, "spawn_failed", "runtime 起不来", nil)
+	ae := acp.NewError(acp.ClassConnection, "spawn_failed", "runtime 起不来", nil)
 	ae.StderrTail = []string{"line-1", "line-2"}
 	orch.runner.PublishError("c-x", "run_test0000000000000000000001", ae, nil)
 

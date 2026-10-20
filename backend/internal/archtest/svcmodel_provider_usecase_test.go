@@ -130,7 +130,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 		}
 	}
 	// 用例层不得 import 持久层或实现层（那正是两个端口的用途）。
-	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/store"`, `"github.com/morehao/ark-mate/internal/sessionruntime"`} {
+	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/persistence/store"`, `"github.com/morehao/ark-mate/internal/sessionruntime"`} {
 		if strings.Contains(probSrc+portSrc, banned) {
 			t.Errorf("`internal/service/svcmodel` 里出现 %s：用例层通过**端口**取事实（ADR-6），"+
 				"它不 import 持久层、也不 import `manager`。", banned)
@@ -181,21 +181,21 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 		}
 	}
 	// 档案用例层同样只经域平面取事实：不 import 持久层、也不 import `manager`。
-	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/store"`, `"github.com/morehao/ark-mate/internal/sessionruntime"`} {
+	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/persistence/store"`, `"github.com/morehao/ark-mate/internal/sessionruntime"`} {
 		if strings.Contains(archSrc, banned) {
 			t.Errorf("`internal/service/svcmodel/archive.go` 里出现 %s：档案用例拿的是域平面"+
 				"（`*provider.Plane`，装配点交下来），不 import 持久层、也不 import `manager`。", banned)
 		}
 	}
 	// v3.1：装配根造两个用例；控制器只收接口。
-	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "services.go")))
+	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
 	for _, a := range []string{"svcmodel.NewProvider(", "svcmodel.NewProbe("} {
 		if !strings.Contains(asm, a) {
-			t.Errorf("`internal/assembly/services.go` 里找不到 %q：用例必须在唯一装配根造出来"+
+			t.Errorf("`internal/bootstrap/assembly/services.go` 里找不到 %q：用例必须在唯一装配根造出来"+
 				"（漏了它 ⇒ 自检端点直接 500 / 档案面 nil panic，而只测另一条的用例看不见）。", a)
 		}
 	}
-	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrmodel", "provider.go")))
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrmodel", "provider.go")))
 	for _, a := range []string{"svcmodel.NewProbe(", "svcmodel.NewProvider("} {
 		if strings.Contains(ctr, a) {
 			t.Errorf("`ctrmodel` 里又出现 %q：用例实例只在装配根造，控制器只收接口。", a)
@@ -203,7 +203,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 	}
 	// P4b：`ProviderPlane()` 删了；事实出口是 `Planes()` + `registry.Planes.Providers`。
 	svcSrc := stripLineComments(readFileOrFatal(t, filepath.Join(mgr, "service.go")))
-	planesSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "registry", "planes.go")))
+	planesSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "planes.go")))
 	if !strings.Contains(svcSrc, "func (s *Service) Planes() *registry.Planes") ||
 		!strings.Contains(planesSrc, "Providers    *provider.Plane") {
 		t.Error("`Planes()` / `registry.Planes.Providers` 有一处不在：控制器拿不到供应商域平面 ⇒ " +
@@ -237,11 +237,11 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 	// 调用点那一头：装配与 gateway 必须**直连域平面**（少了这条，删掉转发只会把调用点改成
 	// 另一个名字的转发，判据形同虚设）。
 	for _, c := range []struct{ file, want, why string }{
-		{"internal/assembly/meta.go", "as.planes.Providers.LoadProviderDefinitionsFromStore(",
+		{"internal/bootstrap/assembly/meta.go", "as.planes.Providers.LoadProviderDefinitionsFromStore(",
 			"serve 的装载入口"},
-		{"internal/assembly/assembly.go", "as.planes.Providers.SetProviderDir(",
+		{"internal/bootstrap/assembly/assembly.go", "as.planes.Providers.SetProviderDir(",
 			"serve 的目录入口"},
-		{"internal/gateway/source.go", "s.planes.Providers.ReloadProviderDefinitionsFromStore(",
+		{"internal/drivers/gateway/source.go", "s.planes.Providers.ReloadProviderDefinitionsFromStore(",
 			"gateway 的换代重载"},
 		// 第五十四刀：建连时的密钥注入经**执行面端口**取（池的 `ProviderEnvSource`），
 		// 适配器在 `runtime_pool.go`。锚跟着对象走，判据不变：调用点必须直连域平面。

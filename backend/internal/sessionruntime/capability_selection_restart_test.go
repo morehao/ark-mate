@@ -8,10 +8,10 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 

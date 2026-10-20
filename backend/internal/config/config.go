@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/identity"
+	"github.com/morehao/ark-mate/internal/core/identity"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -163,7 +163,7 @@ type Config struct {
 	//
 	// **这是给跨源开发/自建反代用的显式登记口，不是默认放开**：内置矩阵只放行「无 Origin」的壳内反代
 	// /同源导航、`mate-app://app`（桌面直连）与核心**自身监听端口**上的 http 同源（见
-	// internal/middleware/origin.go，设计 §7.2 的 Origin 矩阵行）。`make dev`（vite :5173 → 代理到核心）
+	// internal/delivery/middleware/origin.go，设计 §7.2 的 Origin 矩阵行）。`make dev`（vite :5173 → 代理到核心）
 	// 与自建反代（页面 origin ≠ 核心监听 origin）都落在矩阵之外，必须在这里指名登记。
 	//
 	// 取值必须是**纯 origin**（`scheme://host[:port]`，无路径/查询/片段，可带一个尾斜杠）；
@@ -245,7 +245,7 @@ func (c Config) McpGatewayEnabled() bool { return c.McpGateway != McpGatewayOff 
 
 // 持久层模式取值。StoreModeAuto 是**显式**的 auto：Config.StoreMode 里它落成空串
 // （空串同时表示"未设置"），真正的 auto 解析在 serve 装机时做——DB 文件已存在则 sqlite，
-// 否则 memory（见 internal/app/app.go）。
+// 否则 memory（见 internal/bootstrap/app/app.go）。
 const (
 	StoreModeAuto   = "auto"
 	StoreModeSQLite = "sqlite"
@@ -255,7 +255,7 @@ const (
 // ResolvedStoreMode 把"未声明"（含显式 auto，`LoadResolved` 已归一成空串）解析成实际模式：
 // DB 文件存在且非空 → sqlite，否则 memory。
 //
-// 这一条原先只写在 `internal/app` 的 Init 里；M7 的网关进程（`mate mcp bridge`）也要按**同一
+// 这一条原先只写在 `internal/bootstrap/app` 的 Init 里；M7 的网关进程（`mate mcp bridge`）也要按**同一
 // 判据**决定去哪读定义——两处各写一遍的后果是"网关读到了另一份数据面"（比如 core 在 sqlite 模式
 // 而网关判成 memory，工具面就恒空），表现为"工具莫名不见了"。故判据收到 config 上，两边共用。
 func (c Config) ResolvedStoreMode() string {

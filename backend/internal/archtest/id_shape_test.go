@@ -23,7 +23,7 @@ import (
 // （设计 §4.5.3 的 4 包装 / 3 解包表 —— 这是"包装点唯一"这条不变式的机器判据）。
 //
 // 锚点是**包含调用点的函数名**，不是文件路径。为什么换锚：这几个点会随"哪个包拥有它"而搬家
-// （v27 起 `internal/sessionruntime` 正被拆成 `internal/domain/*` / `internal/mechanism/*`），而搬家时
+// （v27 起 `internal/sessionruntime` 正被拆成 `internal/domain/*` / `internal/drivers/mechanism/*`），而搬家时
 // 变的是**包与接收者类型**，函数名不变。钉路径的守卫在搬家后只有两种结局，都很坏：静默空转
 // （判据指向一个不存在的文件，测试照样绿却什么都没检查）或假红。
 //
@@ -74,14 +74,14 @@ var runtimeShellCallSites = []runtimeShellCallSite{
 // runtimeShellImplPaths 是「壳包装/解包的**实现本身**与它的单测」——两处都住在 `pkg/`，
 // **不参与**本次 `internal/` 的重划，所以这里继续钉精确路径：它们本来就只该各有一份。
 var runtimeShellImplPaths = []string{
-	"backend/internal/object/objid/objid.go",
-	"backend/internal/object/objid/objid_test.go",
+	"backend/internal/core/object/objid/objid.go",
+	"backend/internal/core/object/objid/objid_test.go",
 }
 
 // TestRuntimeSessionNeverOnWireAsPlatformID 守卫②：两个 id 词汇不得互串。
 //
 // 四段判据：
-//  1. `internal/router/routes_*.go` 的路径字面量不得含 `runtime_session`——底座 id 永不允许
+//  1. `internal/delivery/router/routes_*.go` 的路径字面量不得含 `runtime_session`——底座 id 永不允许
 //     出现在 URL 路径段（它一旦成了路径参数，就会有人拿它当"会话 id"用）；
 //  2. DTO 结构体里 `json:"id"` 不得绑到 `Runtime*` 字段（对外 `id` 只能是平台 id）；
 //  3. `SessionResp` 必须**同时**声明 `id` 与 `runtime_session_id` 两个 string 字段
@@ -98,9 +98,9 @@ func TestRuntimeSessionNeverOnWireAsPlatformID(t *testing.T) {
 	root := backendRoot(t)
 
 	// ① 路由路径字面量。
-	routes, err := filepath.Glob(filepath.Join(root, "internal", "router", "routes_*.go"))
+	routes, err := filepath.Glob(filepath.Join(root, "internal", "delivery", "router", "routes_*.go"))
 	if err != nil || len(routes) == 0 {
-		t.Fatalf("扫不到 internal/router/routes_*.go: %v（fail-closed）", err)
+		t.Fatalf("扫不到 internal/delivery/router/routes_*.go: %v（fail-closed）", err)
 	}
 	pathLiteral := regexp.MustCompile(`"([^"]*)"`)
 	for _, path := range routes {
@@ -319,7 +319,7 @@ func structBody(t *testing.T, src, name, where string) string {
 // primaryKeyEntity 是一个"平台铸造主键"的实体：`ID` 必须是 string + `column:id;primaryKey`。
 type primaryKeyEntity struct {
 	Name string
-	File string // 相对 internal/model
+	File string // 相对 internal/persistence/model
 }
 
 // platformIDEntities v15 起由 `objid` 铸号的平台主键实体（§4.2 的前缀登记表一一对应；
@@ -370,12 +370,12 @@ var customIDEntities = []primaryKeyEntity{
 //
 // fail-closed：一个目标实体都解析不到 → 红。
 func TestPrimaryKeyShapesStayDeclared(t *testing.T) {
-	modelDir := filepath.Join(backendRoot(t), "internal", "model")
+	modelDir := filepath.Join(backendRoot(t), "internal", "persistence", "model")
 
 	readEntity := func(e primaryKeyEntity) string {
 		t.Helper()
 		src := stripLineComments(readFileOrFatal(t, filepath.Join(modelDir, e.File)))
-		return structBody(t, src, e.Name, "internal/model/"+e.File)
+		return structBody(t, src, e.Name, "internal/persistence/model/"+e.File)
 	}
 
 	// ① 平台铸造主键：string + `column:id;primaryKey`。
@@ -401,7 +401,7 @@ func TestPrimaryKeyShapesStayDeclared(t *testing.T) {
 
 	// ③ `objid` 的前缀登记表 == 8 个平台铸造前缀，**不含**任何定义类。
 	objidSrc := stripLineComments(readFileOrFatal(t,
-		filepath.Join(backendRoot(t), "internal", "object", "objid", "objid.go")))
+		filepath.Join(backendRoot(t), "internal", "core", "object", "objid", "objid.go")))
 	prefixRe := regexp.MustCompile(`(?m)^\s*([A-Z]\w+)\s*=\s*"([a-z]{2,3}_)\s*"`)
 	type kv struct{ name, value string }
 	var got []kv
@@ -472,8 +472,8 @@ func TestEventSeqStaysTheCursor(t *testing.T) {
 	root := backendRoot(t)
 
 	// ① 实体：`id` 是主键；`seq` 在、是 int64、且**不带** primaryKey。
-	evSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "model", "event.go")))
-	body := structBody(t, evSrc, "EventEntity", "internal/model/event.go")
+	evSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "model", "event.go")))
+	body := structBody(t, evSrc, "EventEntity", "internal/persistence/model/event.go")
 	if !regexp.MustCompile(`(?m)^\s*ID\s+string\s+` + "`" + `[^` + "`" + `]*column:id;primaryKey`).MatchString(body) {
 		t.Fatalf("`EventEntity.ID` 必须是 `string` 且带 `column:id;primaryKey`（v17 起事件身份由 objid 铸："+
 			"`evt_<26 位 ULID>`）。\n实际成员体：\n%s", body)
@@ -533,25 +533,25 @@ func TestEventSeqStaysTheCursor(t *testing.T) {
 
 	// ③ 读面（store）：事件查询只按 `seq` 排序/翻页，不得引入 `id` 序。
 	//
-	// 判据作用在 `internal/store/events.go`：v3.3 起排序/游标口径归 store（DAO 只剩列词汇与
+	// 判据作用在 `internal/persistence/store/events.go`：v3.3 起排序/游标口径归 store（DAO 只剩列词汇与
 	// 泛型方法）——这条守卫必须跟着实现走，否则它会在 dao/event.go 里对着一个空文件空转。
-	daoSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "store", "events.go")))
+	daoSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "events.go")))
 	// `id > ?` 用"前一个字符不是标识符字符"锚定：复合键集比较里的 `session_id > ?` 含有子串
 	// `id > ?`，用裸 Contains 会把它误判成"按事件身份比较"（v21 的 AllBySession 就是这么被误报的）。
 	idCompare := regexp.MustCompile(`(?:^|[^A-Za-z0-9_"'])id\s*>\s*\?`)
 	for _, bad := range []string{"ORDER BY id", "Order(\"id\"", "Order(\"id "} {
 		if strings.Contains(daoSrc, bad) {
-			t.Fatalf("`internal/store/events.go` 里出现了按 `id` 排序的写法 %q：事件的身份**不参与排序**"+
+			t.Fatalf("`internal/persistence/store/events.go` 里出现了按 `id` 排序的写法 %q：事件的身份**不参与排序**"+
 				"（位次的权威只有 `seq`；铸号顺序恰好同序会让这类错误在很长时间里看不出来）", bad)
 		}
 	}
 	if idCompare.MatchString(daoSrc) {
-		t.Fatal("`internal/store/events.go` 里出现了按 `id` 比较的写法（`id > ?`）：事件的身份**不参与比较**" +
+		t.Fatal("`internal/persistence/store/events.go` 里出现了按 `id` 比较的写法（`id > ?`）：事件的身份**不参与比较**" +
 			"——跨会话翻页用的是复合键 `(session_id, seq)`，而 `session_id > ?` 是它的一部分，" +
 			"别把两者混起来")
 	}
 	if !strings.Contains(daoSrc, "Order(\"seq") && !strings.Contains(daoSrc, "Order(\"session_id ASC, seq ASC\"") {
-		t.Fatal("`internal/store/events.go` 里找不到按 `seq` 的排序：事件游标只认 seq（fail-closed，" +
+		t.Fatal("`internal/persistence/store/events.go` 里找不到按 `seq` 的排序：事件游标只认 seq（fail-closed，" +
 			"否则「游标仍然是 seq」这句话没有任何判据）")
 	}
 }
@@ -574,7 +574,7 @@ func TestEventSeqStaysTheCursor(t *testing.T) {
 // 判据是**调用点字面量**（正则容空白）：这层的正确性没有运行时信号，只有"这一行还在不在"。
 //
 // v27 起锚点是**符号在全树里的出现次数**，不是文件路径：这些点会随包搬家
-// （`internal/sessionruntime/*` → `internal/domain/*` / `internal/mechanism/*`），而钉路径的判据
+// （`internal/sessionruntime/*` → `internal/domain/*` / `internal/drivers/mechanism/*`），而钉路径的判据
 // 一搬就静默空转。次数是**实测精确值**，两侧都拦：多了说明有人又铸了一支 id / 又开了一条出口
 // （正是要拦的），少了说明某个载体丢了身份。
 //
@@ -657,15 +657,15 @@ func TestEventIdentityTravelsWithData(t *testing.T) {
 	}
 
 	// ⑧ 导入判重/分叉：同一支 id 第二次导入必须**逐字节比对内容**再决定跳过还是报错。
-	//    （这一处钉的是 `internal/store` 的精确路径：该包**不在**本次重划范围内。）
+	//    （这一处钉的是 `internal/persistence/store` 的精确路径：该包**不在**本次重划范围内。）
 	impSrc := stripLineComments(readFileOrFatal(t,
-		filepath.Join(root, "internal", "store", "import.go")))
+		filepath.Join(root, "internal", "persistence", "store", "import.go")))
 	if !strings.Contains(impSrc, "FindEventByIDTx(") {
-		t.Fatal("`internal/store/import.go` 里找不到 `FindEventByIDTx(`：导入不做事件级判重，" +
+		t.Fatal("`internal/persistence/store/import.go` 里找不到 `FindEventByIDTx(`：导入不做事件级判重，" +
 			"重复导入要么写第二份同 id 的行（主键冲突）要么整批失败——两种都不是幂等")
 	}
 	if !strings.Contains(impSrc, "分叉") {
-		t.Fatal("`internal/store/import.go` 里找不到「分叉」这条错误：" +
+		t.Fatal("`internal/persistence/store/import.go` 里找不到「分叉」这条错误：" +
 			"同 id 不同内容必须**报错**而不是静默跳过（静默跳过 = 库里留着两份同 id 不同内容的行）")
 	}
 }

@@ -21,7 +21,7 @@
 两套编号在旧文档里并行用了很久，这是最容易踩的一处：
 
 - **决策号（v2…v27）**：本文件的条目编号，登记「口径与形态」的变化。
-- **数据模型版本号（v1…v27）**：`backend/internal/store` 的迁移版本（`migrate_vNN.go`），登记 schema 的变化。
+- **数据模型版本号（v1…v27）**：`backend/internal/persistence/store` 的迁移版本（`migrate_vNN.go`），登记 schema 的变化。
 
 两者**大部分不同步**。已知的对应与空缺照实登记，不做补齐式改写：
 
@@ -252,15 +252,15 @@
 >    `TestNoConversationVocabulary` 在扫描面内对 `conversation` **零命中**（白名单逐条写明理由）。
 >    消歧规则见 `docs/agents/vocabulary.md`。
 > ② **主键前缀化**——平台铸造的 7 类 id 从裸 uuid 统一成 `<前缀>_<26 位 ULID>`
->    （`ses_`/`msg_`/`run_`/`inp_`/`wsp_`/`mdl_`/`pem_`，唯一实现 = `backend/internal/object/objid`）。
+>    （`ses_`/`msg_`/`run_`/`inp_`/`wsp_`/`mdl_`/`pem_`，唯一实现 = `backend/internal/core/object/objid`）。
 >    ULID 的字典序 = 铸造序，因此 `messages`/`inputs` 靠 `id ASC` 兜底的两处排序语义**逐字不变**；
 >    `messages`/`permission_memories` 同时消灭了 `AUTOINCREMENT`（主键 TEXT、由 Go 侧铸号）。
 >    **底座透传过来的会话 id 平台侧一律加固定壳 `rt_`**（`rt_ses_…`/`rt_<uuid>`）：平台不改底座、
 >    只加壳，于是"平台 id 与底座 id 形状可分"这条判据**由平台单方面定义**（底座换实现、换前缀、
 >    发裸 uuid 都不影响）。包装 4 处 / 解包 3 处，调用点白名单由守卫②钉住。
-> ③ **表行结构体对齐参照工程**——`internal/model` 从 583 行的单文件拆成**一表一文件**，
+> ③ **表行结构体对齐参照工程**——`internal/persistence/model` 从 583 行的单文件拆成**一表一文件**，
 >    结构体一律 `<域词>Entity` / `<域词>EntityList`、表名常量 `TableName<域词>` 随实体文件走
->    （不做汇总 `table.go`）；同时删掉 `internal/store` 的 15 个实体类型别名（一个表行类型只留一个名字）。
+>    （不做汇总 `table.go`）；同时删掉 `internal/persistence/store` 的 15 个实体类型别名（一个表行类型只留一个名字）。
 > ④ **v15 是一次性例外，不构成先例**（用户原话：「v15 重建吧，但只有这一次，而不是一个标准 sop」）——
 >    这次走**破坏性重建**（7 张表 DDL 重建 + 元数据清理，`<db>.bak-v15-<ts>` 是回退窗口），
 >    **不写逐行数据迁移**。四条约束把它钉成例外：**不给内核加能力**（`migration` 结构体字段集合不变、
@@ -286,7 +286,7 @@
 > 服从同一条判据（J4：**身份与位次必须随数据走到每一个载体**）。
 > （v16 的表/列/索引命名收口没有单独登记决策条目，见
 > `.dsh/docs/specs/2026-10-11-data-model-v16-design.md`；本条目只记 v17。）
-> ① **`events` 的身份与位次分开**——新增主键 `id`（`evt_<26 位 ULID>`，`backend/internal/object/objid` 铸造），
+> ① **`events` 的身份与位次分开**——新增主键 `id`（`evt_<26 位 ULID>`，`backend/internal/core/object/objid` 铸造），
 >    `seq` 从主键**降为全局唯一游标**（`UNIQUE(seq)`，`idx_events_session` 仍是
 >    `(session_id, seq)`）。理由：事件的**位次**会被重排（重建、压实、换库），而**身份**不能——
 >    把 `seq` 当身份等于承认"同一个事件换个号就变成另一个东西"，书签与对账随之失效。
@@ -413,7 +413,7 @@
 >    `collectSensitiveFiles`）都按**注册表**枚举，适配一删，那个底座在报告里就整段消失
 >    （报告一切正常，而磁盘上的东西一个没少）。
 >    新增 `backend/internal/manager/retired_runtime.go`（采事实，只读）+$
->    `backend/internal/cliops/doctor_retired.go`（排版）。判据是「**在不在册**」，不是
+>    `backend/internal/bootstrap/cliops/doctor_retired.go`（排版）。判据是「**在不在册**」，不是
 >    「它是不是某某」——两条理由：内核不许认识任何具体底座（写死 id 会被 ④ 的
 >    `TestInternalHasNoRuntimeIDSpecialCase` 判红），而写死也只能看见**这一次**下线的那个、
 >    下一次下线又要回内核改一处。在册集合由**调用方**给出（`AllBuiltinSpecs()` ∪ `runtimes.json`
@@ -586,7 +586,7 @@
 > 设计全文见 `.dsh/docs/specs/2026-10-15-provider-model-identity-design.md`，执行计划见
 > `.dsh/docs/plans/2026-10-15-provider-model-identity-plan.md`。触发是用户两问——「provider 的主键 id 使用
 > 底层 runtime 的值，db 层不该有自己的主键 id 吗」「`models` 中 `id` 和 `model_id` 两个字段也很有歧义」。
-> 两点都是对的，但**根因不是"缺代理键"**：`providers.id` 本来就是**用户自己起的 slug**（`internal/object/objid`
+> 两点都是对的，但**根因不是"缺代理键"**：`providers.id` 本来就是**用户自己起的 slug**（`internal/core/object/objid`
 > 早已把"provider 刻意不铸造 id"登记成判据），真正发生的是**同一个字符串被用进了底座的命名空间**。
 > 于是三次收口，各自一个迁移版本、一次原子提交、独立可回滚（`backup: "v24"/"v25"/"v26"`）：
 > ① **命名收口（v24，零行为变化）**：`models.model_id` → `models.model`。`model_id` 在本仓一词三义

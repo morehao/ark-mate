@@ -129,7 +129,7 @@ func lookupAction(m map[string]string, key string) (string, bool) {
 //   - deny  → 优先 reject_once（回落任意 reject_* 选项）。
 //
 // 找不到对应选项时返回 ok=false（调用方回落征询用户，不臆造选项）。
-func autoPermissionDecision(action string, opts []acl.PermissionOption) (acl.PermissionDecision, bool) {
+func autoPermissionDecision(action string, opts []acp.PermissionOption) (acp.PermissionDecision, bool) {
 	want := ""
 	switch action {
 	case PermissionAllow:
@@ -137,7 +137,7 @@ func autoPermissionDecision(action string, opts []acl.PermissionOption) (acl.Per
 	case PermissionDeny:
 		want = permKindRejectOnce
 	default:
-		return acl.PermissionDecision{}, false
+		return acp.PermissionDecision{}, false
 	}
 	pick := func(prefix string) (string, bool) {
 		for _, o := range opts {
@@ -155,13 +155,13 @@ func autoPermissionDecision(action string, opts []acl.PermissionOption) (acl.Per
 	if action == PermissionAllow {
 		id, ok := pick("allow")
 		if !ok {
-			return acl.PermissionDecision{}, false
+			return acp.PermissionDecision{}, false
 		}
-		return acl.PermissionDecision{Allowed: true, OptionID: id}, true
+		return acp.PermissionDecision{Allowed: true, OptionID: id}, true
 	}
 	id, ok := pick("reject")
 	if !ok {
-		return acl.PermissionDecision{}, false
+		return acp.PermissionDecision{}, false
 	}
-	return acl.PermissionDecision{Rejected: true, OptionID: id}, true
+	return acp.PermissionDecision{Rejected: true, OptionID: id}, true
 }

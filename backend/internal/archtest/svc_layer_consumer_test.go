@@ -11,8 +11,8 @@ import (
 // 依赖链是 `cmd → cli → app → assembly → controller → service(接口)`。这条链里
 // `service/svc*` 只该被两类包认识：
 //
-//	① `internal/assembly` —— 唯一装配根，**造**用例实例（`svcsystem.New(...)`）；
-//	② `internal/controller/ctr<领域>` —— 消费用例，但只写**接口类型名**，不再构造。
+//	① `internal/bootstrap/assembly` —— 唯一装配根，**造**用例实例（`svcsystem.New(...)`）；
+//	② `internal/delivery/controller/ctr<领域>` —— 消费用例，但只写**接口类型名**，不再构造。
 //
 // `app`/`router`/`domain`/`mechanism`/`store`/`pkg` 都不该 import 它。
 //
@@ -27,7 +27,7 @@ import (
 // **判据只扫生产文件**（跳过 `_test.go`）：端到端用例要真跑用例实现，那正是它们该做的事；
 // 把它们算进来只会逼守卫加一张越来越长的白名单。
 //
-// 反证（实跑）：往 `internal/app/app.go` 加一行 `import ".../internal/service/svcsystem"`
+// 反证（实跑）：往 `internal/bootstrap/app/app.go` 加一行 `import ".../internal/service/svcsystem"`
 // （并用一下那个符号）→ 红；把扫描根指到不存在的目录 → Fatal。
 
 // svcImportPrefix 用例层包的 import 路径前缀（`internal/service/svc*`）。
@@ -47,10 +47,10 @@ func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 			}
 			slashed := "/" + filepath.ToSlash(rel(root, path))
 			switch {
-			case strings.Contains(slashed, "/internal/controller/"):
+			case strings.Contains(slashed, "/internal/delivery/controller/"):
 				fromAllowed++
 				continue
-			case strings.Contains(slashed, "/internal/assembly/"):
+			case strings.Contains(slashed, "/internal/bootstrap/assembly/"):
 				fromAllowed++
 				continue
 			case strings.Contains(slashed, "/internal/service/"):
@@ -63,7 +63,7 @@ func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 			violations++
 			t.Errorf("只有装配根与控制器可以引用用例层：%s import 了 %s。\n"+
 				"依赖链是 `assembly → controller → service(接口)`：\n"+
-				"  · 用例实例只在 `internal/assembly` 造；控制器只写接口类型名；\n"+
+				"  · 用例实例只在 `internal/bootstrap/assembly` 造；控制器只写接口类型名；\n"+
 				"  · `app`/`cli`/`router` 不认识用例层（它们只消费 `assembly.BuildResult` 与控制器接口）；\n"+
 				"  · 领域层/机制层更不该认识用例层（那会让「用例可以随便改」这条消失）。",
 				rel(root, path), svcImportPrefix)
@@ -84,36 +84,36 @@ func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 
 // TestUseCaseInstancesAreBuiltByAssembly 钉住"用例实例由谁造"。
 //
-// v3.1 §3.4：用例实例**只在装配根**造（`internal/assembly/services.go`），控制器只收接口。
+// v3.1 §3.4：用例实例**只在装配根**造（`internal/bootstrap/assembly/services.go`），控制器只收接口。
 // 这条改动的失效方式是静默的——把 `svcsystem.New(...)` 挪回控制器照样能编译、行为也一样，
 // 只是"依赖方向可验证"这条目标又失效了。
 //
 // 判据两侧一起钉（都 fail-closed：文件读不到直接 Fatal）：
 //
 //	① 装配根必须有建造点（`svcsystem.New(` / `svcruntime.New(` / `svcmodel.New(`）；
-//	② `internal/app` 与 `internal/router` 侧不得出现用例层包名。
+//	② `internal/bootstrap/app` 与 `internal/delivery/router` 侧不得出现用例层包名。
 func TestUseCaseInstancesAreBuiltByAssembly(t *testing.T) {
 	root := backendRoot(t)
 	builders := []struct {
 		name, file, anchor string
 	}{
-		{"导出用例", filepath.Join("internal", "assembly", "services.go"), "svcsystem.New("},
-		{"底座用例", filepath.Join("internal", "assembly", "services.go"), "svcruntime.New("},
-		{"供应商自检用例", filepath.Join("internal", "assembly", "services.go"), "svcmodel.NewProbe("},
-		{"会话读面用例", filepath.Join("internal", "assembly", "services.go"), "svcsession.NewRead("},
+		{"导出用例", filepath.Join("internal", "bootstrap", "assembly", "services.go"), "svcsystem.New("},
+		{"底座用例", filepath.Join("internal", "bootstrap", "assembly", "services.go"), "svcruntime.New("},
+		{"供应商自检用例", filepath.Join("internal", "bootstrap", "assembly", "services.go"), "svcmodel.NewProbe("},
+		{"会话读面用例", filepath.Join("internal", "bootstrap", "assembly", "services.go"), "svcsession.NewRead("},
 	}
 	for _, b := range builders {
 		src := stripLineComments(readFileOrFatal(t, filepath.Join(root, b.file)))
 		if !strings.Contains(src, b.anchor) {
 			t.Errorf("%s 的建造点不在装配根里：%s 找不到 %q。\n"+
-				"用例实例必须由 `internal/assembly` 造——`app`/`router` 不认识 `service/svc*`。",
+				"用例实例必须由 `internal/bootstrap/assembly` 造——`app`/`router` 不认识 `service/svc*`。",
 				b.name, b.file, b.anchor)
 		}
 	}
 
 	for _, f := range []string{
-		filepath.Join("internal", "app", "app.go"),
-		filepath.Join("internal", "router", "router.go"),
+		filepath.Join("internal", "bootstrap", "app", "app.go"),
+		filepath.Join("internal", "delivery", "router", "router.go"),
 	} {
 		src := stripLineComments(readFileOrFatal(t, filepath.Join(root, f)))
 		for _, banned := range []string{"svcsystem.", "svcruntime.", "svcmodel.", "svcsession.", "service/svc"} {

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/capability"
-	defn "github.com/morehao/ark-mate/internal/definition"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	defn "github.com/morehao/ark-mate/internal/core/definition"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
@@ -111,7 +111,7 @@ func (m *Plane) WriteSkill(ctx context.Context, pathID string, req WriteRequest,
 	if err := capability.ValidateSkill(&sk); err != nil {
 		// 闸门拒绝（critical 正文 / id 非法 / scope 非法 / runtimes 重复）→ 40001。
 		// **零字节写入**：patch 只在草稿里，草稿从未提交。
-		return nil, acl.NewError(acl.ClassRequest, "definition_invalid",
+		return nil, acp.NewError(acp.ClassRequest, "definition_invalid",
 			fmt.Sprintf("skill %q 的定义被拒绝：%v", id, err), err)
 	}
 	created, conflict, err := repo.Commit(ctx, id, doc, rev, existed)
@@ -198,11 +198,11 @@ func deleteNoop(id, path string) *DeleteResult {
 
 // existsErr 新建时 id 已占用（40901：与当前状态冲突——参数没问题，是时机/状态问题）。
 func existsErr(id string) error {
-	return acl.NewError(acl.ClassLimit, "skill_exists",
+	return acp.NewError(acp.ClassLimit, "skill_exists",
 		fmt.Sprintf("skill %q 已存在：改它用 PUT /skills/%s，或换一个 id", id, id), nil)
 }
 
 // notFoundErr 目标 skill 不存在（40401，由 pkg/code 的 notFoundCodes 提档）。
 func notFoundErr(id string) error {
-	return acl.NewError(acl.ClassRequest, "skill_not_found", fmt.Sprintf("未知 skill %q", id), nil)
+	return acp.NewError(acp.ClassRequest, "skill_not_found", fmt.Sprintf("未知 skill %q", id), nil)
 }

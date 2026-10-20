@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 
 	"github.com/morehao/ark-mate/internal/runtime"
 )

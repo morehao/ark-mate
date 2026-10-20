@@ -2,18 +2,19 @@ package sessionruntime
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/credential"
-	"github.com/morehao/ark-mate/internal/model"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/resource"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 )

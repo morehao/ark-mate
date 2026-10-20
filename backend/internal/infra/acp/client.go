@@ -1,4 +1,4 @@
-package acl
+package acp
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/infra/logging"
-	"github.com/morehao/ark-mate/internal/object/objusage"
 )
 
 // defaultDialTimeout Dial 未显式配置且调用方 ctx 无截止时间时的握手上限。
@@ -18,7 +18,7 @@ const defaultDialTimeout = 15 * time.Second
 
 // ClientOptions 配置一次 ACP 连接。
 type ClientOptions struct {
-	// OnEvent 接收归一化后的 ACP notification（acl 不感知总线，由注入方决定去向）。
+	// OnEvent 接收归一化后的 ACP notification（acp 不感知总线，由注入方决定去向）。
 	OnEvent func(Event)
 	// RequestPermission 处理 agent 的一次权限请求并**阻塞等待宿主决策**（同步变体，
 	// 由 SDK 在独立的 goroutine 中调用，见 acp-go-sdk connection.go 的 go func 分发，
@@ -186,7 +186,7 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 	}, nil
 }
 
-// withStderr 把已采集的 stderr 尾巴挂到 acl.Error（非 acl.Error 时原样返回）。
+// withStderr 把已采集的 stderr 尾巴挂到 acp.Error（非 acp.Error 时原样返回）。
 func withStderr(err error, tail []string) error {
 	if len(tail) == 0 {
 		return err
@@ -312,7 +312,7 @@ func (h *hostClient) WaitForTerminalExit(context.Context, acpsdk.WaitForTerminal
 	return acpsdk.WaitForTerminalExitResponse{}, errors.New("terminal 未开放")
 }
 
-// normalizeUpdate 把一条 SessionNotification 归一化为 0..n 条 acl.Event。
+// normalizeUpdate 把一条 SessionNotification 归一化为 0..n 条 acp.Event。
 func normalizeUpdate(n acpsdk.SessionNotification) []Event {
 	u := n.Update
 	sid := string(n.SessionId)

@@ -11,15 +11,15 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 
-	"github.com/morehao/ark-mate/internal/code"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/object/objid"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 
 // 本文件是**工作空间登记表**（v14）的领域层测试（manager/workspace_registry.go）。
 //
-// 与 `internal/store/workspace_test.go` 的分工：那边钉住跨表不变量（唯一索引、顺序对账、
+// 与 `internal/persistence/store/workspace_test.go` 的分工：那边钉住跨表不变量（唯一索引、顺序对账、
 // 删登记不删会话），这边钉住领域语义——**校验与建会话同源**、**默认工作空间是历史会话的落点**、
 // **memory 是明确的不可写而不是内部错误**。后者在 store 层测不了（那里没有持久层模式的差别）。
 
@@ -519,7 +519,7 @@ func TestCreateNamedWorkspace(t *testing.T) {
 		t.Fatalf("写哨兵文件: %v", err)
 	}
 	// 判据用**对外码**（40901）而不是 code 名：域名下两条创建路径的错误载体历史上不统一
-	// （一条铸 gerror、一条铸 acl.Error），而对外码是同一支——判据要钉的是用户看到的那个数。
+	// （一条铸 gerror、一条铸 acp.Error），而对外码是同一支——判据要钉的是用户看到的那个数。
 	if _, err := plane.CreateNamedWorkspace("pay-refactor", ""); numericCode(err) != 40901 {
 		t.Fatalf("同名应 40901（workspace_exists）: %v", err)
 	}

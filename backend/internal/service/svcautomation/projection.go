@@ -8,7 +8,7 @@ import (
 // ——— 自动化域视图 → 对外 DTO 的投影（v3.2 刀 7）———
 //
 // 逐字段搬运、不重命名。`Schedule` / `Target` / `RunRecord` 两侧是同一个值类型
-// （`internal/automation`），直接赋值即可——它们本来就没有 json tag。
+// （`internal/core/automation`），直接赋值即可——它们本来就没有 json tag。
 func automationResp(v domauto.AutomationView) dtoautomation.AutomationResp {
 	return dtoautomation.AutomationResp{
 		ID:                  v.ID,

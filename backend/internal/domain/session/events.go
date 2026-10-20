@@ -25,16 +25,16 @@ const (
 	BusToolUpdate = "session.tool_update"
 	// BusUsage 用量更新（run 结束随 PromptResponse.usage 携带明细；无数据时仅占位）。
 	BusUsage = "session.usage"
-	// BusPermission 权限决策留痕（acl 决策后上抛：payload = acl.PermissionInfo）。
+	// BusPermission 权限决策留痕（acp 决策后上抛：payload = acp.PermissionInfo）。
 	BusPermission = "session.permission"
 	// BusConfigOptions 运行时主动推送的会话配置项全量更新（ACP session/config_option_update；
 	// 如 dsh 在 provider 拓扑变化时推）。payload = {session_id, runtime, options}
-	// （options = acl.ConfigOption 切片：运行时配置项的直投影，如模型目录）。
+	// （options = acp.ConfigOption 切片：运行时配置项的直投影，如模型目录）。
 	BusConfigOptions = "session.config_options"
 	// BusCommands 会话可用命令**全量**列表（ACP session/available_commands_update；
 	// 这是**可选能力**：会通告命令的底座才推，别的底座的 ACP 面不含命令、故永不产生本事件）。
 	// payload = {session_id, runtime, commands}
-	// （commands = acl.CommandInfo 切片 {name, description?, hint?}，顺序由底座给出、平台不重排）。
+	// （commands = acp.CommandInfo 切片 {name, description?, hint?}，顺序由底座给出、平台不重排）。
 	//
 	// 语义边界（ADR-17）：这是**发现面**，不是声明面——命令由底座自报、执行只是把它当
 	// 普通提示词发出去（ACP 没有独立的执行方法），平台既不拥有这些命令也不做投影/写面。
@@ -111,7 +111,7 @@ const (
 	BusRunStatus = "run.status"
 	// BusRunEnded 一轮 prompt 正常结束（stop_reason）。
 	BusRunEnded = "run.ended"
-	// BusRunError 一轮 prompt 失败（含稳定 code/分类，对齐 acl.Class）。
+	// BusRunError 一轮 prompt 失败（含稳定 code/分类，对齐 acp.Class）。
 	BusRunError = "run.error"
 	// BusRunCancelled 一轮 prompt 被取消。
 	BusRunCancelled = "run.cancelled"

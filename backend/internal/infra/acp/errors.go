@@ -1,4 +1,4 @@
-package acl
+package acp
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 
-	"github.com/morehao/ark-mate/internal/redact"
+	"github.com/morehao/ark-mate/internal/core/redact"
 )
 
 // Class 是可操作错误分类（对齐 codeg feedback.rs / AIR 词汇表，随 run.error 上抛，前端据此渲染动作）。
@@ -25,7 +25,7 @@ const (
 	ClassUnknown     Class = "unknown"
 )
 
-// Error 是 acl 层统一错误：稳定 code + 分类 + 脱敏 details，可继续 Unwrap 原始 error。
+// Error 是 acp 层统一错误：稳定 code + 分类 + 脱敏 details，可继续 Unwrap 原始 error。
 type Error struct {
 	Class   Class
 	Code    string
@@ -38,14 +38,14 @@ type Error struct {
 
 func (e *Error) Error() string {
 	if e.Err == nil {
-		return fmt.Sprintf("acl error: class=%s code=%s %s", e.Class, e.Code, e.Details)
+		return fmt.Sprintf("acp error: class=%s code=%s %s", e.Class, e.Code, e.Details)
 	}
-	return fmt.Sprintf("acl error: class=%s code=%s %s: %v", e.Class, e.Code, e.Details, e.Err)
+	return fmt.Sprintf("acp error: class=%s code=%s %s: %v", e.Class, e.Code, e.Details, e.Err)
 }
 
 func (e *Error) Unwrap() error { return e.Err }
 
-// NewError 构造 acl.Error。cause 可为 nil。
+// NewError 构造 acp.Error。cause 可为 nil。
 func NewError(class Class, code, details string, cause error) *Error {
 	return &Error{Class: class, Code: code, Details: details, Err: cause}
 }

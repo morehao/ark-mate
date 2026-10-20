@@ -92,11 +92,11 @@ func (pl *Plane) Settings() *SettingsView {
 func (pl *Plane) UpdateSettings(roots []string) (*SettingsView, error) {
 	store := pl.rootsStoreRef()
 	if store == nil {
-		return nil, acl.NewError(acl.ClassRequest, "settings_readonly",
+		return nil, acp.NewError(acp.ClassRequest, "settings_readonly",
 			"当前进程未启用设置持久化（无配置目录）：工作区根白名单只能由 MATE_WORKSPACE_ROOTS 或配置文件设置", nil)
 	}
 	if _, lockedBy := store.Status(); lockedBy != "" {
-		return nil, acl.NewError(acl.ClassRequest, "settings_locked",
+		return nil, acp.NewError(acp.ClassRequest, "settings_locked",
 			fmt.Sprintf("[settings_locked] 工作区根白名单由 %s 锁定（优先级高于配置文件）：请改该来源，或在此只读查看",
 				lockedBy), nil)
 	}
@@ -105,11 +105,11 @@ func (pl *Plane) UpdateSettings(roots []string) (*SettingsView, error) {
 		return nil, err
 	}
 	if err := store.SaveWorkspaceRoots(normalized); err != nil {
-		return nil, acl.NewError(acl.ClassService, "settings_save_failed",
+		return nil, acp.NewError(acp.ClassService, "settings_save_failed",
 			"保存工作区根白名单失败: "+err.Error(), err)
 	}
 	if err := pl.SetWorkspaceRoots(normalized); err != nil {
-		return nil, acl.NewError(acl.ClassService, "settings_save_failed",
+		return nil, acp.NewError(acp.ClassService, "settings_save_failed",
 			"已写入配置文件但热更新失败（重启后生效）: "+err.Error(), err)
 	}
 	return pl.Settings(), nil
@@ -130,16 +130,16 @@ func NormalizeSettingsRoots(roots []string) ([]string, error) {
 			continue
 		}
 		if !filepath.IsAbs(p) {
-			return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+			return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
 				fmt.Sprintf("工作区根需为绝对路径，得到 %q", p), nil)
 		}
 		st, err := os.Stat(p)
 		if err != nil {
-			return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+			return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
 				fmt.Sprintf("工作区根不存在或不可访问: %s", p), nil)
 		}
 		if !st.IsDir() {
-			return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+			return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
 				fmt.Sprintf("工作区根需为目录: %s", p), nil)
 		}
 		real := ResolveRealPath(p)

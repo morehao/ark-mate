@@ -9,10 +9,10 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	pkgidentity "github.com/morehao/ark-mate/internal/identity"
+	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
+	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/golib/glog"
 )
 
@@ -20,7 +20,7 @@ import (
 type Orchestrator struct {
 	svc *Service
 	reg *runtime.Registry
-	// pool 连接池（P4a 正文第五十四刀起归执行面 `internal/runtimeconn`）。
+	// pool 连接池（P4a 正文第五十四刀起归执行面 `internal/drivers/runtimeconn`）。
 	//
 	// **它与会话表不共用锁**：池自持一把只保护连接表的锁，句柄表在会话域自己的锁下。
 	// 此前三样东西挤在一把锁下，于是"持锁请求会话快照"这类锁序反转只能靠人眼防
@@ -126,7 +126,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	})
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
 	// （session.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。
-	o.perm.SetOnResolved(func(sessionID, callID, reason string, d acl.PermissionDecision) {
+	o.perm.SetOnResolved(func(sessionID, callID, reason string, d acp.PermissionDecision) {
 		outcome := "cancelled"
 		if d.Allowed || (d.Rejected && d.OptionID != "") {
 			outcome = "selected"

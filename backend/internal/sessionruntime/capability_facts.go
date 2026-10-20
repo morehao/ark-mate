@@ -1,7 +1,7 @@
 package sessionruntime
 
 import (
-	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -27,7 +27,7 @@ func (s *Service) CapabilityFactsFor(runtimeID string, sel *session.CapabilitySe
 	facts.Direct = injectedMcpsOfServers(plan.Direct)
 	facts.Remote = injectedMcpsOfServers(plan.Remote)
 	if plan.Gateway != nil {
-		gw := injectedMcpOfACL(*plan.Gateway)
+		gw := injectedMcpOfACP(*plan.Gateway)
 		facts.Gateway = &gw
 	}
 	return facts
@@ -95,8 +95,8 @@ func injectedMcpOfServer(m capability.McpServer) session.InjectedMcp {
 	}
 }
 
-// injectedMcpOfACL 网关条目（`acl.McpServer`）→ 域侧事实。
-func injectedMcpOfACL(m acl.McpServer) session.InjectedMcp {
+// injectedMcpOfACP 网关条目（`acp.McpServer`）→ 域侧事实。
+func injectedMcpOfACP(m acp.McpServer) session.InjectedMcp {
 	return session.InjectedMcp{
 		ID: m.Name, Transport: m.Transport,
 		Command: m.Command, Args: append([]string(nil), m.Args...), URL: m.URL,

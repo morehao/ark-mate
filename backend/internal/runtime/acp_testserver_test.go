@@ -19,11 +19,11 @@ import (
 //
 // 为什么需要它：`TestConnectRemoteTransport` 原先拿内置 echo 底座当对端（echo 已于 M0 删除）。
 // 若一并删掉该测试，`runtime.Connect` 的远程分支（ws/http）就失去覆盖，而远程 runtime 是
-// 受支持的产品形态（`runtimes.json` 可声明远端 ACP 端点）。这里照 `pkg/acl/remote_test.go`
-// 的思路重建一份——那份 `remoteAgent` 在 `package acl` 的测试文件里，**跨包不可用**，必须重写。
+// 受支持的产品形态（`runtimes.json` 可声明远端 ACP 端点）。这里照 `internal/infra/acp/remote_test.go`
+// 的思路重建一份——那份 `remoteAgent` 在 `package acp` 的测试文件里，**跨包不可用**，必须重写。
 //
-// 两端都用真 SDK：agent 侧是 `acpsdk.NewAgentSideConnection`，客户端侧是 `acl.Dial`（内部同样
-// 是真 SDK 客户端），服务端半场复用生产实现 `acl.ServeWSSession` / `acl.NewRemoteHandler`。
+// 两端都用真 SDK：agent 侧是 `acpsdk.NewAgentSideConnection`，客户端侧是 `acp.Dial`（内部同样
+// 是真 SDK 客户端），服务端半场复用生产实现 `acp.ServeWSSession` / `acp.NewRemoteHandler`。
 // 因此被测的是「传输适配 + Connect 装配」，协议语义完全由 SDK 保证，不是自造的协议。
 type testACPResponder struct {
 	mu   sync.Mutex
@@ -187,12 +187,12 @@ func (r *testACPResponder) requestPermission(ctx context.Context, sessionID acps
 
 func ptrStr(s string) *string { return &s }
 
-// ——— 服务端半场（复用生产实现 acl.ServeWSSession / acl.NewRemoteHandler） ———
+// ——— 服务端半场（复用生产实现 acp.ServeWSSession / acp.NewRemoteHandler） ———
 
 // serveResponderWS 起一个真实 ACP server 挂在 WS 端点 /acp 上，返回 ws:// URL。
 func serveResponderWS(t *testing.T, r *testACPResponder) string {
 	t.Helper()
-	opts := acl.RemoteServerOptions{Serve: func(peerInput io.Writer, peerOutput io.Reader) {
+	opts := acp.RemoteServerOptions{Serve: func(peerInput io.Writer, peerOutput io.Reader) {
 		r.setConn(acpsdk.NewAgentSideConnection(r, peerInput, peerOutput))
 	}}
 	mux := http.NewServeMux()
@@ -204,7 +204,7 @@ func serveResponderWS(t *testing.T, r *testACPResponder) string {
 		defer conn.CloseNow()
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
-		_ = acl.ServeWSSession(ctx, conn, opts)
+		_ = acp.ServeWSSession(ctx, conn, opts)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -214,13 +214,13 @@ func serveResponderWS(t *testing.T, r *testACPResponder) string {
 // serveResponderHTTP 起一个真实 ACP server（Streamable HTTP 形态），返回 http:// URL。
 func serveResponderHTTP(t *testing.T, r *testACPResponder) string {
 	t.Helper()
-	opts := acl.RemoteServerOptions{
+	opts := acp.RemoteServerOptions{
 		Serve: func(peerInput io.Writer, peerOutput io.Reader) {
 			r.setConn(acpsdk.NewAgentSideConnection(r, peerInput, peerOutput))
 		},
 		SessionIDPrefix: "sess-http",
 	}
-	srv := httptest.NewServer(acl.NewRemoteHandler(opts))
+	srv := httptest.NewServer(acp.NewRemoteHandler(opts))
 	t.Cleanup(srv.Close)
 	return srv.URL + "/acp"
 }

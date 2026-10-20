@@ -107,7 +107,7 @@ func importedByProductionPackage(t *testing.T, dir string) []string {
 }
 
 // TestTransportFreeLayersMustNotImportAppLayers 锁定传输无关的底层包不得反向依赖
-// 应用装配层：事件总线（internal/eventbus）与持久层（internal/store）都被上层广泛
+// 应用装配层：事件总线（internal/core/eventbus）与持久层（internal/persistence/store）都被上层广泛
 // 引用，一旦它们 import manager/server 就会形成环，并把"可被任意宿主复用"的能力
 // 绑死在当前装配方式上。
 func TestTransportFreeLayersMustNotImportAppLayers(t *testing.T) {
@@ -115,14 +115,14 @@ func TestTransportFreeLayersMustNotImportAppLayers(t *testing.T) {
 	forbidden := []string{
 		modulePrefix + "internal/sessionruntime",
 		modulePrefix + "internal/server",
-		modulePrefix + "internal/app",
+		modulePrefix + "internal/bootstrap/app",
 	}
-	for _, name := range []string{"eventbus", "store"} {
-		dir := filepath.Join(root, "internal", name)
+	for _, rel := range []string{"internal/core/eventbus", "internal/persistence/store"} {
+		dir := filepath.Join(root, filepath.FromSlash(rel))
 		for _, imp := range importedByPackage(t, dir) {
 			for _, bad := range forbidden {
 				if imp == bad || strings.HasPrefix(imp, bad+"/") {
-					t.Errorf("分层违规：internal/%s 不应 import %s", name, imp)
+					t.Errorf("分层违规：%s 不应 import %s", rel, imp)
 				}
 			}
 		}
@@ -144,7 +144,7 @@ func TestPortsAndDTOsMustNotImportTransport(t *testing.T) {
 	forbidden := []string{
 		modulePrefix + "internal/server",
 		modulePrefix + "internal/sessionruntime",
-		modulePrefix + "internal/app",
+		modulePrefix + "internal/bootstrap/app",
 	}
 	var walk func(dir string)
 	walk = func(dir string) {
@@ -172,7 +172,7 @@ func TestPortsAndDTOsMustNotImportTransport(t *testing.T) {
 
 // TestControllersMustNotImportImplementations 锁定控制器的依赖面：
 // 控制器只允许依赖 internal/service/svc*（端口）与 internal/dto/dto*（数据），
-// 不得 import internal/sessionruntime（实现）或 internal/router（自己所属的装配层）。
+// 不得 import internal/sessionruntime（实现）或 internal/delivery/router（自己所属的装配层）。
 //
 // 这条边界是 P2/P3 重构的核心收益：控制器与实现两边的任一侧改动，
 // 只要端口不变就不会互相牵连，也让控制器可以脱离 manager 单测。
@@ -180,11 +180,11 @@ func TestControllersMustNotImportImplementations(t *testing.T) {
 	root := backendRoot(t)
 	forbidden := []string{
 		modulePrefix + "internal/sessionruntime",
-		modulePrefix + "internal/router",
+		modulePrefix + "internal/delivery/router",
 		modulePrefix + "internal/server",
-		modulePrefix + "internal/app",
+		modulePrefix + "internal/bootstrap/app",
 	}
-	for _, dir := range subdirs(t, filepath.Join(root, "internal", "controller")) {
+	for _, dir := range subdirs(t, filepath.Join(root, "internal", "delivery", "controller")) {
 		if !hasGoFiles(dir) {
 			continue
 		}
@@ -203,26 +203,26 @@ func TestControllersMustNotImportImplementations(t *testing.T) {
 //
 // 三层的职责与允许的依赖方向（单向，不得回指）：
 //
-//	internal/infra/dbclient（句柄装配） ← internal/dao（单表数据访问） ← internal/store（跨表事务门面）
+//	internal/infra/dbclient（句柄装配） ← internal/persistence/dao（单表数据访问） ← internal/persistence/store（跨表事务门面）
 //	                 ↑                    ↑
-//	          internal/model（实体与列约定，谁都依赖它，它不依赖任何一层）
+//	          internal/persistence/model（实体与列约定，谁都依赖它，它不依赖任何一层）
 //
 // 具体边界：
-//   - internal/model 只描述"库长什么样"，不得 import dao/store/传输层——否则实体定义
+//   - internal/persistence/model 只描述"库长什么样"，不得 import dao/store/传输层——否则实体定义
 //     会被数据访问或业务语义污染，schema 契约也就不再中立；
-//   - internal/dao 不得 import store（会与 store→dao 形成环）与传输层；
-//   - internal/store 是门面，可以 import dao/model/dbclient，但不得反向 import manager/app/router。
+//   - internal/persistence/dao 不得 import store（会与 store→dao 形成环）与传输层；
+//   - internal/persistence/store 是门面，可以 import dao/model/dbclient，但不得反向 import manager/app/router。
 func TestPersistenceLayersMustNotImportAppLayers(t *testing.T) {
 	root := backendRoot(t)
 	transport := []string{
-		modulePrefix + "internal/controller",
-		modulePrefix + "internal/router",
+		modulePrefix + "internal/delivery/controller",
+		modulePrefix + "internal/delivery/router",
 		modulePrefix + "internal/dto",
 		modulePrefix + "internal/service",
 	}
 	app := []string{
 		modulePrefix + "internal/sessionruntime",
-		modulePrefix + "internal/app",
+		modulePrefix + "internal/bootstrap/app",
 	}
 
 	cases := []struct {
@@ -233,19 +233,19 @@ func TestPersistenceLayersMustNotImportAppLayers(t *testing.T) {
 	}{
 		{
 			name:      "model 不得依赖数据访问与业务层",
-			dir:       filepath.Join(root, "internal", "model"),
-			forbidden: append(append([]string{modulePrefix + "internal/store", modulePrefix + "internal/dao"}, app...), transport...),
+			dir:       filepath.Join(root, "internal", "persistence", "model"),
+			forbidden: append(append([]string{modulePrefix + "internal/persistence/store", modulePrefix + "internal/persistence/dao"}, app...), transport...),
 			reason:    "实体只描述库结构，必须保持中立",
 		},
 		{
 			name:      "dao 不得依赖 store 与上层",
-			dir:       filepath.Join(root, "internal", "dao"),
-			forbidden: append(append([]string{modulePrefix + "internal/store"}, app...), transport...),
+			dir:       filepath.Join(root, "internal", "persistence", "dao"),
+			forbidden: append(append([]string{modulePrefix + "internal/persistence/store"}, app...), transport...),
 			reason:    "store 已依赖 dao，反向依赖即成环",
 		},
 		{
 			name:      "store 不得依赖传输层与实现层",
-			dir:       filepath.Join(root, "internal", "store"),
+			dir:       filepath.Join(root, "internal", "persistence", "store"),
 			forbidden: append(append([]string{}, app...), transport...),
 			reason:    "持久层不得感知业务实现与传输形态",
 		},

@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
@@ -32,24 +32,24 @@ func rigWithRuntime(t *testing.T, specs ...runtime.Spec) (*Service, *Orchestrato
 	return svc, orch, bus
 }
 
-// TestEventSinkMapping acl 归一事件 → 域事件 type/payload（agg=平台会话 uuid；
+// TestEventSinkMapping acp 归一事件 → 域事件 type/payload（agg=平台会话 uuid；
 // P3 双 id：原生 session id 经 byProvider 解析后发布）。
 func TestEventSinkMapping(t *testing.T) {
 	_, orch, bus := newTestRig(t)
 	orch.handles.BindProvider("s1", "conv-1") // 原生底座 session id → 平台会话 uuid
 	sink := orch.runner.EventSink("rtx")
 
-	sink(acl.Event{SessionID: "s1", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "hi"}})
-	sink(acl.Event{SessionID: "s1", Kind: acl.KindThought, Payload: acl.ThoughtDelta{Text: "think"}})
+	sink(acp.Event{SessionID: "s1", Kind: acp.KindMessage, Payload: acp.MessageDelta{Text: "hi"}})
+	sink(acp.Event{SessionID: "s1", Kind: acp.KindThought, Payload: acp.ThoughtDelta{Text: "think"}})
 	// agent 回传的 user_message 是会话镜像（宿主已在 Prompt 提交时发布 session.BusUserMessage）→ eventSink 丢弃。
-	sink(acl.Event{SessionID: "s1", Kind: acl.KindUserMessage, Payload: acl.MessageDelta{Text: "me"}})
-	sink(acl.Event{SessionID: "s1", Kind: acl.KindToolCall, Payload: acl.ToolCallInfo{ID: "c1", Title: "edit", Status: "pending"}})
-	sink(acl.Event{SessionID: "s1", Kind: acl.KindToolUpdate, Payload: acl.ToolCallInfo{ID: "c1", Status: "completed"}})
-	sink(acl.Event{SessionID: "s1", Kind: acl.KindUsage, Payload: nil})
-	sink(acl.Event{SessionID: "s1", Kind: acl.KindPermission, Payload: acl.PermissionInfo{Title: "t", Allowed: false}})
+	sink(acp.Event{SessionID: "s1", Kind: acp.KindUserMessage, Payload: acp.MessageDelta{Text: "me"}})
+	sink(acp.Event{SessionID: "s1", Kind: acp.KindToolCall, Payload: acp.ToolCallInfo{ID: "c1", Title: "edit", Status: "pending"}})
+	sink(acp.Event{SessionID: "s1", Kind: acp.KindToolUpdate, Payload: acp.ToolCallInfo{ID: "c1", Status: "completed"}})
+	sink(acp.Event{SessionID: "s1", Kind: acp.KindUsage, Payload: nil})
+	sink(acp.Event{SessionID: "s1", Kind: acp.KindPermission, Payload: acp.PermissionInfo{Title: "t", Allowed: false}})
 	// 空 session id / 未知 kind → 丢弃。
-	sink(acl.Event{SessionID: "", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "x"}})
-	sink(acl.Event{SessionID: "s1", Kind: "bogus_kind", Payload: "whatever"})
+	sink(acp.Event{SessionID: "", Kind: acp.KindMessage, Payload: acp.MessageDelta{Text: "x"}})
+	sink(acp.Event{SessionID: "s1", Kind: "bogus_kind", Payload: "whatever"})
 
 	sub := bus.SubscribeAfter(nil)
 	defer bus.Unsubscribe(sub)
@@ -90,7 +90,7 @@ func TestEventSinkMapping(t *testing.T) {
 	if tc["tool_call_id"] != "c1" || tc["title"] != "edit" {
 		t.Fatalf("tool_call payload 不符: %+v", evs[2].Payload)
 	}
-	perm, _ := evs[5].Payload.(acl.PermissionInfo)
+	perm, _ := evs[5].Payload.(acp.PermissionInfo)
 	if perm.Title != "t" || perm.Allowed {
 		t.Fatalf("permission payload 应透传: %+v", evs[5].Payload)
 	}
@@ -100,14 +100,14 @@ func TestEventSinkMapping(t *testing.T) {
 func TestEventSinkWrongPayloadType(t *testing.T) {
 	_, orch, bus := newTestRig(t)
 	sink := orch.runner.EventSink("rtx")
-	sink(acl.Event{SessionID: "s1", Kind: acl.KindMessage, Payload: "not a delta"})
-	sink(acl.Event{SessionID: "s1", Kind: acl.KindToolCall, Payload: nil})
+	sink(acp.Event{SessionID: "s1", Kind: acp.KindMessage, Payload: "not a delta"})
+	sink(acp.Event{SessionID: "s1", Kind: acp.KindToolCall, Payload: nil})
 	if bus.Published() != 0 {
 		t.Fatalf("类型不匹配不应发布: published=%d", bus.Published())
 	}
 }
 
-// TestEventSinkCommands 命令发现面（ADR-17）：acl 的 available_commands_update →
+// TestEventSinkCommands 命令发现面（ADR-17）：acp 的 available_commands_update →
 // `session.commands` 域事件，agg = 平台会话 uuid，载荷带全量命令且**保序**（平台不重排）。
 // 另钉住两条容易做错的语义：空列表**照样发布**（"通告了当前没有命令"要让前端清空候选），
 // 载荷类型不匹配则被跳过。
@@ -118,9 +118,9 @@ func TestEventSinkCommands(t *testing.T) {
 	sub := bus.SubscribeAfter(nil)
 	defer bus.Unsubscribe(sub)
 
-	sink(acl.Event{SessionID: "s1", Kind: acl.KindCommands, Payload: acl.CommandsInfo{
+	sink(acp.Event{SessionID: "s1", Kind: acp.KindCommands, Payload: acp.CommandsInfo{
 		SessionID: "s1",
-		Commands: []acl.CommandInfo{
+		Commands: []acp.CommandInfo{
 			{Name: "review", Description: "审查改动", Hint: "文件路径"},
 			{Name: "init"},
 		},
@@ -142,7 +142,7 @@ func TestEventSinkCommands(t *testing.T) {
 	if p["session_id"] != "conv-1" || p["runtime"] != "rtx" {
 		t.Fatalf("载荷基础字段不符: %+v", p)
 	}
-	cmds, ok := p["commands"].([]acl.CommandInfo)
+	cmds, ok := p["commands"].([]acp.CommandInfo)
 	if !ok {
 		t.Fatalf("commands 类型不符: %#v", p["commands"])
 	}
@@ -151,8 +151,8 @@ func TestEventSinkCommands(t *testing.T) {
 	}
 
 	// 空列表也要发布：它不是"没发生"，而是"底座通告了当前没有命令"。
-	sink(acl.Event{SessionID: "s1", Kind: acl.KindCommands, Payload: acl.CommandsInfo{
-		SessionID: "s1", Commands: []acl.CommandInfo{},
+	sink(acp.Event{SessionID: "s1", Kind: acp.KindCommands, Payload: acp.CommandsInfo{
+		SessionID: "s1", Commands: []acp.CommandInfo{},
 	}})
 	select {
 	case ev = <-sub.C:
@@ -160,13 +160,13 @@ func TestEventSinkCommands(t *testing.T) {
 		t.Fatal("空列表通告也必须发布（否则前端会一直显示陈旧候选）")
 	}
 	p, _ = ev.Payload.(map[string]any)
-	if cmds, ok := p["commands"].([]acl.CommandInfo); !ok || len(cmds) != 0 {
+	if cmds, ok := p["commands"].([]acp.CommandInfo); !ok || len(cmds) != 0 {
 		t.Fatalf("空列表载荷不符: %#v", p["commands"])
 	}
 
 	// 载荷类型不匹配：跳过而不是发布一个半成品。
 	before := bus.Published()
-	sink(acl.Event{SessionID: "s1", Kind: acl.KindCommands, Payload: "not commands"})
+	sink(acp.Event{SessionID: "s1", Kind: acp.KindCommands, Payload: "not commands"})
 	if bus.Published() != before {
 		t.Fatalf("类型不匹配不应发布: published=%d", bus.Published())
 	}
@@ -393,7 +393,7 @@ func TestServiceRESTValidation(t *testing.T) {
 func TestStartSessionUnknownRuntime(t *testing.T) {
 	_, orch, _ := newTestRig(t) // 空注册表 → 构建期底座（默认 dsh）必然未装配
 	_, err := orch.StartSession(context.Background(), session.StartOptions{Cwd: "/tmp"})
-	var ae *acl.Error
+	var ae *acp.Error
 	if !errors.As(err, &ae) || ae.Code != "runtime_not_found" {
 		t.Fatalf("期望 runtime_not_found，got %v", err)
 	}
@@ -425,7 +425,7 @@ func TestServiceResolveRuntimeUsesBuildRuntime(t *testing.T) {
 	empty := NewService(runtime.NewRegistry(), nil)
 	setBuildRuntime(t, "stub")
 	_, err := empty.runtimePlane.Resolve()
-	var ae *acl.Error
+	var ae *acp.Error
 	if !errors.As(err, &ae) || ae.Code != "runtime_not_found" {
 		t.Fatalf("空注册表应报 runtime_not_found，got %v", err)
 	}

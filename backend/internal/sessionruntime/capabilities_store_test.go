@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/core/capability"
 )
 
 // TestLoadCapabilityDefinitionsFromStore M6-2 的验收核心：sqlite 模式下 DB 是能力面的事实源。

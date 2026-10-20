@@ -1,4 +1,4 @@
-package acl
+package acp
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 )
 
-// ——— 会话配置项（模型目录面的唯一来源）在 acl 层的端到端单测 ———
+// ——— 会话配置项（模型目录面的唯一来源）在 acp 层的端到端单测 ———
 
 // cfgCat/cfgStr 测试小工具（构造 SDK 指针字段）。
 func cfgCat(c acpsdk.SessionConfigOptionCategory) *acpsdk.SessionConfigOptionCategory { return &c }

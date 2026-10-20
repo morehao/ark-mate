@@ -104,7 +104,7 @@ func TestStaticCapsImagesHasNoConsumer(t *testing.T) {
 	if len(offenders) > 0 {
 		t.Fatalf("静态能力基线 `Caps.Images` 出现了新的读法：%v。\n"+
 			"它是**保守基线**而不是事实——真值只有连接期 initialize 的 `promptCapabilities.image` 知道"+
-			"（ADR-14）。要做判据请读 `acl.Capabilities.Images`（连接期事实）；"+
+			"（ADR-14）。要做判据请读 `acp.Capabilities.Images`（连接期事实）；"+
 			"确实只是声明汇入的话，把它加进 staticCapsImagesAllowedFiles 并写明理由", offenders)
 	}
 

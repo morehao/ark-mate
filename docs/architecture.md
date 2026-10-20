@@ -102,16 +102,16 @@ Electron 主进程（桌面态）
 
 | 层 | 谁 | 一句话 |
 | --- | --- | --- |
-| **L0** | `model` | 表行形状。零依赖，被所有持久侧与部分领域引用 |
-| **L1** | `object/*` `redact` `identity` `resource` `version` `credential` `eventbus` `code` `automation` `runtime` `capability` `definition` `infra/{acp,mcp,logging}` | 值对象与协议库，**本带允许互链**（ACP 线协议、错误码折算、值类型复用） |
+| **L0** | `persistence/model` | 表行形状。零依赖，被所有持久侧与部分领域引用 |
+| **L1** | `core/{object/*,redact,identity,resource,credential,eventbus,code,automation,definition,capability}` `version` `runtime` `infra/{acp,mcp,logging}` | 值对象与协议库，**本带允许互链**（ACP 线协议、错误码折算、值类型复用） |
 | **L2** | `domain/*` | 业务规则与状态。**出边为零**：不 import dto、store、mechanism、infra |
 | **L3** | `dto/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份） |
 | **L4** | `service/svc<领域>` | 用例层：接口 + 实现 + 构造函数；校验、错误码、响应装配 |
-| **L5** | `store` `dao` `infra/{credentials,dbclient,procreg,dsh}` | 持久与基础设施 |
-| **L6** | `gateway` `mechanism` `registry` `runtimeconn` `config` `transfer` | 驱动侧：机制、注册表、连接面、存量定义导入导出编排 |
+| **L5** | `persistence/{store,dao}` `infra/{credentials,dbclient,procreg,dsh}` | 持久与基础设施 |
+| **L6** | `drivers/{gateway,mechanism,registry,runtimeconn,transfer}` `config` | 驱动侧：机制、注册表、连接面、存量定义导入导出编排 |
 | **L7** | `sessionruntime` | 会话编排（Service / Orchestrator / 权限） |
-| **L8** | `controller/ctr<领域>` `middleware` | 入站适配 |
-| **L9** | `router` `assembly` `app` `cliops` `cli` `maintenance` | 装配与交付 |
+| **L8** | `delivery/controller/ctr<领域>` `delivery/middleware` | 入站适配 |
+| **L9** | `delivery/router` `bootstrap/{assembly,app,cliops,cli,maintenance}` | 装配与交付 |
 
 两条容易搞混的：**`domain` 在 `dto` 里侧**（域不认识对外契约，视图由用例层投影）；**`maintenance` 与组合根同级**
 （`mate doctor` 要真的把 app 装起来自检，它向下吃 `assembly`/`router`）。
@@ -133,9 +133,9 @@ Electron 主进程（桌面态）
 
 ```
 internal/dbclient（句柄装配 + SQLite URL 拼装）
-      →  internal/dao（列词汇 + gormdao 泛型方法 + 机械原语；不承载业务读面）
-             →  internal/store（业务面：排序/筛选/聚合/状态迁移 + 跨表事务 + 读模型 API）
-internal/model（实体定义）被上面三者依赖，自身不依赖任何一层
+      →  internal/persistence/dao（列词汇 + gormdao 泛型方法 + 机械原语；不承载业务读面）
+             →  internal/persistence/store（业务面：排序/筛选/聚合/状态迁移 + 跨表事务 + 读模型 API）
+internal/persistence/model（实体定义）被上面三者依赖，自身不依赖任何一层
 ```
 
 三条方向纪律：`dao` 不得 import `store`（成环）；`model` 不得 import `dao`/`store`；`store` 只做三件事——持有句柄、兜住**单聚合**事务、暴露读模型 API，单表读写一律经 `dao`。
@@ -161,7 +161,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 
 ### 5.2 表与实体
 
-17 张表，一表一文件（`internal/model/<域>.go`），结构体一律 `<域词>Entity` / `<域词>EntityList`，表名常量 `TableName<域词>` 随实体文件走：
+17 张表，一表一文件（`internal/persistence/model/<域>.go`），结构体一律 `<域词>Entity` / `<域词>EntityList`，表名常量 `TableName<域词>` 随实体文件走：
 
 | 分组 | 表 |
 | --- | --- |
@@ -173,7 +173,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 
 ### 5.3 身份与位次（两件不同的事）
 
-**身份**由 `internal/object/objid` 单点铸造：`3 位小写字母 + _` + 26 位 Crockford Base32 ULID（进程内单调，字典序 = 铸造序）。
+**身份**由 `internal/core/object/objid` 单点铸造：`3 位小写字母 + _` + 26 位 Crockford Base32 ULID（进程内单调，字典序 = 铸造序）。
 
 | 前缀 | 实体 | 前缀 | 实体 |
 | --- | --- | --- | --- |
@@ -201,7 +201,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 
 ### 6.1 REST
 
-前缀 `/v1/mate`（gin 版本分组 `/{version}/{appName}`，`appName = mate`）。路由由 `internal/router/routes_*.go` 按领域装配，**对外的路径集合以本包注册的为准**，README 的「控制面接口摘要」由守卫逐条比对（新增/改名路由必须同步）。
+前缀 `/v1/mate`（gin 版本分组 `/{version}/{appName}`，`appName = mate`）。路由由 `internal/delivery/router/routes_*.go` 按领域装配，**对外的路径集合以本包注册的为准**，README 的「控制面接口摘要」由守卫逐条比对（新增/改名路由必须同步）。
 
 面的一览（代表路径，完整清单见 README）：
 
@@ -225,7 +225,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 
 ### 6.3 错误码与凭据
 
-- **错误码的唯一事实源是 `internal/code`**：常量 + 默认文案 + 注册表 + `FromError` 归一。信封里的 `code` 是对外契约，三处必须同步——`internal/code`（事实源）、README 的表、前端 `packages/types/src/response.ts`。**控制器错误出口一律带码**，不得透传裸 error。
+- **错误码的唯一事实源是 `internal/core/code`**：常量 + 默认文案 + 注册表 + `FromError` 归一。信封里的 `code` 是对外契约，三处必须同步——`internal/core/code`（事实源）、README 的表、前端 `packages/types/src/response.ts`。**控制器错误出口一律带码**，不得透传裸 error。
 - **凭据分两个面**：REST 面（`Authorization: Bearer`，改数据的能力都在这里）与 stream 面（只读的事件流首帧）。桌面态两枚令牌互斥、经 **stdin** 交给核心（不进 argv / env / 文件 / URL）；独立态是同一条令牌同时具备两个面。空表 = 不鉴权，只允许出现在绑定回环的场景。
 - **Host 白名单 + Origin 矩阵只挂 `v1` 整组**（回环监听面），静态资产与 SPA 回落不在其内——真正的攻击面是 API。WS 的来源判定在控制器里做（Accept 之前），与 REST 共用**同一个** policy 对象。
 
@@ -306,9 +306,10 @@ backend/
 │   ├── runtimeconn/          执行面（连接池 / 拨号 / 代际 / 诊断）
 │   ├── manager/              过渡期实现（逐域搬空后整体删除；只剩装配适配与权限/提问回调）
 │   ├── dto/dto<域>/          请求/响应 DTO（两侧共用，自身不依赖应用层）
-│   ├── model/                持久层实体（一表一文件 + enum/serializer/time）
-│   ├── dao/                  列词汇（Cond）+ gormdao 泛型方法 + 机械原语
-│   ├── store/                持久层业务面（排序/筛选/聚合 + 跨表事务 + 读模型 + 自管迁移）
+│   ├── persistence/          持久层（实体 + 访问面 + 业务面，同一只管带）
+│   │   ├── model/            持久层实体（一表一文件 + enum/serializer/time）
+│   │   ├── dao/              列词汇（Cond）+ gormdao 泛型方法 + 机械原语
+│   │   └── store/            持久层业务面（排序/筛选/聚合 + 跨表事务 + 读模型 + 自管迁移）
 │   ├── eventbus/             进程内事件总线（每聚合位次 + 历史缓冲 + 回放）
 │   ├── middleware/           凭据与 Host/Origin 矩阵
 │   ├── credential/           凭据 → scope 只读表（rest / stream 两面）

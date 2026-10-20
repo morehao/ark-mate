@@ -78,19 +78,19 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	}
 
 	// ③ 用例实例必须在**控制器的构造函数里**造（判据钉在函数体上，不是整文件）。
-	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go")))
+	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsession", "session.go")))
 	if !regexp.MustCompile(`func NewSessionCtr\(svc svcsession\.SessionSvc, hist svcsession\.HistorySvc`).MatchString(ctrSrc) {
 		t.Error("`ctrsession.NewSessionCtr` 的签名变了：v3.1 起它只收**已构造的用例接口**。")
 	}
 	body := funcBodyOf(t, ctrSrc, "func NewSessionCtr(")
-	asmServices := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "services.go")))
+	asmServices := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
 	if !strings.Contains(asmServices, "svcsession.NewHistory(") {
-		t.Error("`internal/assembly/services.go` 里找不到 `svcsession.NewHistory(`：" +
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewHistory(`：" +
 			"用例实例必须在唯一装配根造。")
 	}
-	asmCtrls := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "controllers.go")))
+	asmCtrls := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "controllers.go")))
 	if !strings.Contains(asmCtrls, "ctrsession.NewSessionCtr(s.Session, s.SessionHistory") {
-		t.Error("`internal/assembly/controllers.go` 没有把已构造的会话面用例交给 `NewSessionCtr`。")
+		t.Error("`internal/bootstrap/assembly/controllers.go` 没有把已构造的会话面用例交给 `NewSessionCtr`。")
 	}
 	if strings.Contains(body, "svcsession.New") {
 		t.Error("`NewSessionCtr` 的函数体里又出现 `svcsession.New`：控制器只收接口，不再造用例。")
@@ -147,7 +147,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	}
 	// ③′ 用例实例同样必须在控制器构造函数里造，且装配点必须交出**事实来源**。
 	if !strings.Contains(asmServices, "svcsession.NewDetail(") {
-		t.Error("`internal/assembly/services.go` 里找不到 `svcsession.NewDetail(`：" +
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewDetail(`：" +
 			"详情读面用例必须在唯一装配根造。")
 	}
 
@@ -215,7 +215,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	}
 	// ③″ 用例实例同样在控制器构造函数里造，且装配点必须交出投递口。
 	if !strings.Contains(asmServices, "svcsession.NewInteraction(") {
-		t.Error("`internal/assembly/services.go` 里找不到 `svcsession.NewInteraction(`：" +
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewInteraction(`：" +
 			"动作面用例必须在唯一装配根造。")
 	}
 	// ——— P4a 正文第四十二刀：排队输入的**撤下**也在这一面 ———
@@ -251,7 +251,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 			"P4a 正文第四十二刀删除（私有 `deleteQueuedInput` 仍留着——`run.go` 的回滚路径用它，且那条路径**刻意不发事件**）。")
 	}
 	if !strings.Contains(asmServices, "svcsession.NewQueue(") {
-		t.Error("`internal/assembly/services.go` 里找不到 `svcsession.NewQueue(`：排队输入用例必须在唯一装配根造。")
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewQueue(`：排队输入用例必须在唯一装配根造。")
 	}
 	if b := funcBodyOf(t, ctrSrc, "func (h *sessionCtr) DeleteQueuedInput("); !strings.Contains(b, "h.queue.DeleteQueuedInput(") {
 		t.Errorf("`DeleteQueuedInput` handler 的函数体里没有 `h.queue.DeleteQueuedInput(`："+
@@ -292,7 +292,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 			"P4a 正文第四十四刀删除（`manager` 侧只剩 `ResolveModel` / `ApplyModel` / `UpdateMeta` 三个适配器）。")
 	}
 	if !strings.Contains(asmServices, "svcsession.NewMeta(") {
-		t.Error("`internal/assembly/services.go` 里找不到 `svcsession.NewMeta(`：" +
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewMeta(`：" +
 			"元数据写面用例必须在唯一装配根造。")
 	}
 	if b := funcBodyOf(t, ctrSrc, "func (h *sessionCtr) Update("); !strings.Contains(b, "h.meta.UpdateSession(") {

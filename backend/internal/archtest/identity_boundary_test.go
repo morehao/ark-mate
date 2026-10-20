@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
-	pkgidentity "github.com/morehao/ark-mate/internal/identity"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 )
 

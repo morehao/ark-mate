@@ -45,7 +45,7 @@ var historicalDocs = []struct{ name, reason string }{
 	{"agent-runtime-refactor-design-20260908", "旧的 P0–P3 重构设计与逐切片证据。§20「未实现能力与降级清单」已抽出成 docs/unimplemented.md（并逐条按代码复核），其余删除"},
 	{"desktop-architecture-design-20260928", "旧的桌面端架构设计。§7.3「桌面与浏览器的差异清单」已迁进 docs/acceptance-matrix.md，其余删除"},
 	{"agent-interactions-acp-v1-design-20260907", "旧的 ACP elicitation/权限交互设计。仍开放的 elicitation 会话归属缺口登记在 docs/unimplemented.md D1"},
-	{"p0-hardening-design-20260911", "旧的加固设计（脱敏闸门等）。闸门本身仍在 internal/redact，设计过程不再单独成文"},
+	{"p0-hardening-design-20260911", "旧的加固设计（脱敏闸门等）。闸门本身仍在 internal/core/redact，设计过程不再单独成文"},
 	{"capability-ecosystem-design-20260922", "旧的能力生态设计（三张表、投影、密钥、写面）"},
 	{"capability-change-apply-design-20261008", "旧的能力变更生效设计（指纹与代际）"},
 	{"model-selection-design-20260909", "旧的模型选择设计（模型面已由决策 v24–v27 三次收口取代）"},

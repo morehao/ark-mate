@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/core/resource"
 )
 
 // Registry 是 runtime adapter 注册表（`map[string]Spec` = **声明表**，加**三张可执行端口表**：

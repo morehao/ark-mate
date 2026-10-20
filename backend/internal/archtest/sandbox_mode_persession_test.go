@@ -27,7 +27,7 @@ func TestNativeModeIsDeliveredPerSession(t *testing.T) {
 	root := backendRoot(t)
 
 	// ① 模式必须是**基础键**的一维（与 provider env 同一层），且注入的 env 与算键的 env 同源。
-	pool := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "runtimeconn", "pool.go")))
+	pool := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "runtimeconn", "pool.go")))
 	keyFor, ok := goFuncBody(pool, "func (pl *Pool) KeyFor(")
 	if !ok {
 		t.Fatalf("`runtimeconn/pool.go` 里找不到 `KeyFor(`")
@@ -46,7 +46,7 @@ func TestNativeModeIsDeliveredPerSession(t *testing.T) {
 	}
 
 	// ② 模式必须落库 + 装载复原（"写了但不复原"是这一族最典型的静默失效）。
-	mig := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "store", "migrate_v29.go")))
+	mig := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "migrate_v29.go")))
 	if !strings.Contains(mig, "ADD COLUMN native_mode TEXT NOT NULL DEFAULT ''") {
 		t.Fatalf("v29 没有加 `native_mode` 列（或默认值不是空串）：空串 = 不注入，是刻意的平台缺省")
 	}

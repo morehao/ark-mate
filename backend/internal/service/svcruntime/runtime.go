@@ -10,7 +10,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 )
 
-// Plane 执行面（`internal/runtimeconn`）——**这两个方法名是执行面的口语，不是 API 的口语**：
+// Plane 执行面（`internal/drivers/runtimeconn`）——**这两个方法名是执行面的口语，不是 API 的口语**：
 // 执行面说"身份/诊断"，对外契约说 `RuntimeIdentity`/`RuntimeDiagnostics`（路径 `/runtime/...`）。
 // 命名适配是这一层存在的理由（它是 API 面的一部分），所以这里刻意不做成 getter + 双层转发。
 type Plane interface {

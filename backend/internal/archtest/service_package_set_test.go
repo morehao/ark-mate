@@ -55,7 +55,7 @@ var serviceRuntimeMethods = []string{"RuntimeIdentity", "RuntimeDiagnostics"}
 
 // serviceRuntimePlaneMethods `svcruntime` 的**执行面端口**（`Plane`）允许声明的方法。
 //
-// 它们是执行面的口语（`internal/runtimeconn` 的方法名）：用例层在这里只做**命名适配**
+// 它们是执行面的口语（`internal/drivers/runtimeconn` 的方法名）：用例层在这里只做**命名适配**
 // （`Identity` → `RuntimeIdentity`，路径 `/runtime/...` 是对外契约的口语）。
 // 这条判据与上一条配对：API 端口只许那 2 个、适配端口也只许那 2 个——两边同时被钉住，
 // 才挡得住"把 provider/model 又塞回这个大包"这条回头路。

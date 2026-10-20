@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // 工作空间（workspace）= 会话的 ACP cwd：一个**规范化后的绝对路径**。
@@ -71,19 +71,19 @@ type DefaultWorkspaceRef struct {
 func ValidateWorkspace(spec string) (string, error) {
 	p := strings.TrimSpace(spec)
 	if p == "" {
-		return "", acl.NewError(acl.ClassRequest, "workspace_invalid", "工作空间路径不能为空", nil)
+		return "", acp.NewError(acp.ClassRequest, "workspace_invalid", "工作空间路径不能为空", nil)
 	}
 	if !filepath.IsAbs(p) {
-		return "", acl.NewError(acl.ClassRequest, "workspace_invalid",
+		return "", acp.NewError(acp.ClassRequest, "workspace_invalid",
 			fmt.Sprintf("工作空间需为绝对路径，得到 %q", p), nil)
 	}
 	st, err := os.Stat(p)
 	if err != nil {
-		return "", acl.NewError(acl.ClassRequest, "workspace_invalid",
+		return "", acp.NewError(acp.ClassRequest, "workspace_invalid",
 			fmt.Sprintf("工作空间不存在或不可访问: %s", p), nil)
 	}
 	if !st.IsDir() {
-		return "", acl.NewError(acl.ClassRequest, "workspace_invalid",
+		return "", acp.NewError(acp.ClassRequest, "workspace_invalid",
 			fmt.Sprintf("工作空间需为目录: %s", p), nil)
 	}
 	resolved := filepath.Clean(p)
@@ -134,7 +134,7 @@ const maxWorkspaceNameRunes = 128
 
 // invalidWorkspaceNameErr 名字非法（唯一出口：40001 + 稳定 code 名 `invalid_workspace_name`）。
 func invalidWorkspaceNameErr(msg string) error {
-	return acl.NewError(acl.ClassRequest, "invalid_workspace_name", msg, nil)
+	return acp.NewError(acp.ClassRequest, "invalid_workspace_name", msg, nil)
 }
 
 // ResolveWorkspace 解析建会话时应使用的 cwd。
@@ -163,7 +163,7 @@ func ResolveWorkspace(spec string, def *DefaultWorkspaceRef) (WorkspaceResolutio
 		return WorkspaceResolution{Path: p}, nil
 	}
 	if def == nil || strings.TrimSpace(def.ID) == "" || strings.TrimSpace(def.Path) == "" {
-		return WorkspaceResolution{}, acl.NewError(acl.ClassRequest, "workspace_required",
+		return WorkspaceResolution{}, acp.NewError(acp.ClassRequest, "workspace_required",
 			"未指定工作空间，且没有可用的默认工作空间（未配置 workspace_dir，或默认工作空间已被移除）：请显式传入 cwd", nil)
 	}
 	dir := def.Path

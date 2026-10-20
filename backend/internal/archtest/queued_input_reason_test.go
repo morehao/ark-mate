@@ -97,7 +97,7 @@ func TestQueuedInputReasonVocabularyIsClosed(t *testing.T) {
 
 	// ③ 域之外**零字面量**：谁要在别处再写一个原因串，取值集就有第二份了。
 	//
-	// **`stale` 刻意不在扫描名单里**：它是本仓的**重载词**（`internal/model/enum.go` 的定义状态、
+	// **`stale` 刻意不在扫描名单里**：它是本仓的**重载词**（`internal/persistence/model/enum.go` 的定义状态、
 	// `domain/skill` 的物化状态都用它），按字面量扫会把那些正当用法算进来——那条判据唯一的产物
 	// 就是逼着下一个人加白名单，而白名单一加，这条守卫对它真正要拦的东西也就松了。
 	// 队列自己那一处走 `ReasonStale` 常量，取值集里仍然有它（上面 ② 逐条比对过）。

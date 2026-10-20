@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	pkgidentity "github.com/morehao/ark-mate/internal/identity"
-	"github.com/morehao/ark-mate/internal/resource"
+	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
+	"github.com/morehao/ark-mate/internal/core/resource"
 )
 
 // ——— 身份 overlay 的生成 / 校验 / 幂等 / 撤回（P1 的确定性判据） ———

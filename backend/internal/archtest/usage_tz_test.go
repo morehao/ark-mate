@@ -21,7 +21,7 @@ func TestUsageDayBucketsCarryClientZone(t *testing.T) {
 	frontend := filepath.Join(root, "..", "frontend")
 
 	// ① 存储层：分桶用 q.Location（UTC 固定写死 = 旧行为）。
-	storeSrc := stripGoComments(readFileOrFatal(t, filepath.Join(root, "internal", "store", "usage.go")))
+	storeSrc := stripGoComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "usage.go")))
 	if !strings.Contains(storeSrc, "r.startedAt.In(loc)") ||
 		!strings.Contains(storeSrc, `Format("2006-01-02")`) {
 		t.Fatalf("store/usage.go 的 day 分桶没有按 Location 投影：`r.startedAt.In(loc)` + `Format(\"2006-01-02\")` 必须同时出现")
@@ -41,7 +41,7 @@ func TestUsageDayBucketsCarryClientZone(t *testing.T) {
 	}
 
 	// ③ 控制器：读 `tz_offset` 查询键（gin 对不认识的键一个字都不说）。
-	ctrSrc := stripGoComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrusage", "usage.go")))
+	ctrSrc := stripGoComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrusage", "usage.go")))
 	if !strings.Contains(ctrSrc, `c.Query("tz_offset")`) {
 		t.Fatalf("ctrusage 没有读 `tz_offset`：前端传了也会被丢掉，后端静默按 UTC 分桶")
 	}

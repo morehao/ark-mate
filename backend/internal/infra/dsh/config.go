@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/core/resource"
 )
 
 const (
@@ -701,9 +701,9 @@ func diagnosticText(item any) string {
 
 // mergeChildEnv 合并子进程环境：**显式给的 env 赢、且每个键只出现一次**。
 //
-// 与 `pkg/acl` 的子进程 env 合并同一语义（POSIX getenv 取第一条、Node 取最后一条——同名两条会让
+// 与 `internal/infra/acp` 的子进程 env 合并同一语义（POSIX getenv 取第一条、Node 取最后一条——同名两条会让
 // 同一份环境在 Go 子进程与 JS 子进程里语义相反）。这里只需要"显式值赢"，所以重复实现 20 行，
-// 而不是把 acl 的内部工具导出成公共 API。
+// 而不是把 acp 的内部工具导出成公共 API。
 func mergeChildEnv(base, override []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(base)+len(override))

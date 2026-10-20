@@ -8,26 +8,26 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
-// stubSession 代替 acl.Session（Prompt/Cancel 可按脚本返回）。
+// stubSession 代替 acp.Session（Prompt/Cancel 可按脚本返回）。
 type stubSession struct {
 	stop string
 	err  error
 	// options 会话配置项桩（nil = 运行时未提供任何选项）。
-	options []acl.ConfigOption
+	options []acp.ConfigOption
 	// cancelOnCtx：ctx 被取消时返回 ctx.Err（模拟 agent 在取消后断开等待）
 	cancelOnCtx bool
 	cancelled   chan struct{}
 }
 
 // ConfigOptions 桩：默认无配置项（模型目录为空 → 目录来源走缓存/resume/空）。
-func (s *stubSession) ConfigOptions() []acl.ConfigOption { return s.options }
+func (s *stubSession) ConfigOptions() []acp.ConfigOption { return s.options }
 
 func (s *stubSession) Prompt(ctx context.Context, _ string) (string, error) {
 	if s.cancelOnCtx {
@@ -130,7 +130,7 @@ func TestPromptBusy(t *testing.T) {
 		t.Fatalf("Prompt: %v", err)
 	}
 	_, err := orch.Prompt(context.Background(), "s1", "second")
-	var ae *acl.Error
+	var ae *acp.Error
 	if !errors.As(err, &ae) || ae.Code != "run_in_progress" {
 		t.Fatalf("期望 run_in_progress，got %v", err)
 	}
@@ -279,8 +279,8 @@ func TestCancelRunAgentUnresponsive(t *testing.T) {
 // 登记/撤销/唯一性判定/nil 安全（经 Orchestrator 委托方法覆盖）。
 func TestBusyAttributionHelpers(t *testing.T) {
 	orch := &Orchestrator{inflight: session.NewInFlightTracker()}
-	c1 := &acl.Client{}
-	c2 := &acl.Client{}
+	c1 := &acp.Client{}
+	c2 := &acp.Client{}
 
 	// 未登记 / nil client → 空
 	if got := orch.busySessionForClient(c1); got != "" {
@@ -323,7 +323,7 @@ func TestBusyAttributionHelpers(t *testing.T) {
 // run 进行中能唯一归属会话，取消收尾后归属清除。
 func TestBusyAttributionLifecycle(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
-	c1 := &acl.Client{}
+	c1 := &acp.Client{}
 	as := session.NewActiveSession(session.HandleParams{
 		ID: "s1", Runtime: "r", Client: c1,
 		Session: &stubSession{cancelOnCtx: true},
@@ -371,18 +371,18 @@ func TestEnsureSessionResumeGating(t *testing.T) {
 
 	if _, err := orch.Prompt(ctx, "c-stub", "hi"); err == nil {
 		t.Fatal("可续聊但构建期底座未装配应 runtime_not_found")
-	} else if ae, ok := acl.As(err); !ok || ae.Code != "runtime_not_found" {
+	} else if ae, ok := acp.As(err); !ok || ae.Code != "runtime_not_found" {
 		t.Fatalf("期望 runtime_not_found，got %v", err)
 	}
 	// 终态会话（completed）不再按未找到处理：进入 runtime 解析 → 未注册 → runtime_not_found。
 	if _, err := orch.Prompt(ctx, "c-term", "hi"); err == nil {
 		t.Fatal("终态会话也应可续聊（应进到 runtime 解析）")
-	} else if ae, ok := acl.As(err); !ok || ae.Code != "runtime_not_found" {
+	} else if ae, ok := acp.As(err); !ok || ae.Code != "runtime_not_found" {
 		t.Fatalf("期望 runtime_not_found（终态不再拦截），got %v", err)
 	}
 	if _, err := orch.Prompt(ctx, "no-such", "hi"); err == nil {
 		t.Fatal("未知会话应 session_not_found")
-	} else if ae, ok := acl.As(err); !ok || ae.Code != "session_not_found" {
+	} else if ae, ok := acp.As(err); !ok || ae.Code != "session_not_found" {
 		t.Fatalf("期望 session_not_found，got %v", err)
 	}
 }

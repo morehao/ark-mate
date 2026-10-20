@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/core/capability"
 )
 
 // defaultProbeTimeout 单次探测预算（覆盖 spawn + initialize + tools/list 翻页）。

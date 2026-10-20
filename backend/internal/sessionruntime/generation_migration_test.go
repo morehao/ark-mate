@@ -3,18 +3,19 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
-	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/infra/dsh"
+
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -327,7 +328,7 @@ func TestGenerationMigrationDefersWhileBusy(t *testing.T) {
 	registered := make(chan struct{})
 	go func() {
 		r.orch.elic.RegisterAndWait(regCtx, convID,
-			acl.ElicitationRequest{Mode: "form", Message: "probe"},
+			acp.ElicitationRequest{Mode: "form", Message: "probe"},
 			func(interaction.ElicitationItem) { close(registered) })
 	}()
 	<-registered
@@ -453,7 +454,7 @@ func TestGenerationPool(t *testing.T) {
 	if err == nil {
 		t.Fatal("达上限且都有引用时应拒绝新建代际")
 	}
-	ae, ok := acl.As(err)
+	ae, ok := acp.As(err)
 	if !ok || ae.Code != "generation_limit_reached" {
 		t.Fatalf("错误应带码 generation_limit_reached，got %v", err)
 	}

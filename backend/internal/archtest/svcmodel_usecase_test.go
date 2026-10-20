@@ -15,7 +15,7 @@ import (
 //	  ← 两个**依赖事实**（`*store.Store` 清单载体、`*provider.Plane` 挂靠校验）
 //	  + 一个**过渡端口** `svcmodel.Host`（读一条的投影 / 生效面回执 / 同步触发——这三条还在
 //	    `manager`，随读面与同步面在 P4b 第二刀 / P5 搬进来）
-//	      ← 装配根（`internal/assembly`）把三者接上并**造出**用例（`svcmodel.NewDeclared(...)`），
+//	      ← 装配根（`internal/bootstrap/assembly`）把三者接上并**造出**用例（`svcmodel.NewDeclared(...)`），
 //	        控制器只收接口（v3.1 起实例只在装配根造）
 //
 // 为什么是"一个端口"而不是把写面也留给 `manager`：写面的判据（(provider_id, model_id) 唯一、
@@ -109,8 +109,8 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	if !strings.Contains(declaredSrc, "type ModelStore interface {") {
 		t.Error("internal/service/svcmodel 里找不到 `type ModelStore interface {`：清单载体的窄端口必须在用例层声明（v3.1 P4）。")
 	}
-	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/store"`) {
-		t.Error("internal/service/svcmodel 又 import 了 `internal/store`：清单载体走 `ModelStore` 端口，" +
+	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/persistence/store"`) {
+		t.Error("internal/service/svcmodel 又 import 了 `internal/persistence/store`：清单载体走 `ModelStore` 端口，" +
 			"`internal/service` 的层表 deny 已把这条边钉死。")
 	}
 
@@ -178,40 +178,40 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 		t.Errorf("`internal/domain/provider/models.go` 里找不到 `func (pl *Plane) ModelRow(`：" +
 			"`svcmodel.Host` 的读一条实现必须有真落点")
 	}
-	views := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "registry", "models_view.go")))
+	views := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "models_view.go")))
 	if !strings.Contains(views, "*provider.Plane") {
-		t.Errorf("`internal/registry/models_view.go` 的 ModelViews 没有嵌入 `*provider.Plane`：" +
+		t.Errorf("`internal/drivers/registry/models_view.go` 的 ModelViews 没有嵌入 `*provider.Plane`：" +
 			"ModelSvc/Host 的读面就少一份真实现")
 	}
-	regBody := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "registry", "resources.go")))
+	regBody := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "resources.go")))
 	for _, a := range registryModelPortAnchors {
 		if !strings.Contains(regBody, a) {
-			t.Errorf("internal/registry/resources.go 里找不到 %q：同步面的端口实现被改名/删掉了？", a)
+			t.Errorf("internal/drivers/registry/resources.go 里找不到 %q：同步面的端口实现被改名/删掉了？", a)
 		}
 	}
 
 	// ③ 装配：用例在**装配根**造（`app` 与 `router` 都不许引用 `service/svc*`）。
-	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrmodel", "models.go")))
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrmodel", "models.go")))
 	for _, m := range []string{"h.declared.CreateModel(", "h.declared.UpdateModel(", "h.declared.DeleteModel("} {
 		if !strings.Contains(ctr, m) {
-			t.Errorf("internal/controller/ctrmodel/models.go 里找不到 %q：三个写动作必须走用例出口。", m)
+			t.Errorf("internal/delivery/controller/ctrmodel/models.go 里找不到 %q：三个写动作必须走用例出口。", m)
 		}
 	}
 	for _, m := range []string{"h.svc.CreateModel(", "h.svc.UpdateModel(", "h.svc.DeleteModel("} {
 		if strings.Contains(ctr, m) {
-			t.Errorf("internal/controller/ctrmodel/models.go 里仍出现 %q：写面已不在 `ModelSvc` 上——"+
+			t.Errorf("internal/delivery/controller/ctrmodel/models.go 里仍出现 %q：写面已不在 `ModelSvc` 上——"+
 				"这两条路都能编译的那一天，就是「实现收了但出口没换」的那一天。", m)
 		}
 	}
 
 	// v3.1：装配根造用例；控制器只收接口。
-	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "services.go")))
+	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
 	for _, want := range []string{"svcmodel.NewDeclared(", "Model:         modelFace"} {
 		if !strings.Contains(asm, want) {
-			t.Errorf("`internal/assembly/services.go` 里找不到 %q：模型写面的依赖事实与用例实例都在装配根交出。", want)
+			t.Errorf("`internal/bootstrap/assembly/services.go` 里找不到 %q：模型写面的依赖事实与用例实例都在装配根交出。", want)
 		}
 	}
-	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrmodel", "models.go")))
+	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrmodel", "models.go")))
 	if strings.Contains(ctrSrc, "svcmodel.NewDeclared(") {
 		t.Error("`ctrmodel` 里又出现 `svcmodel.NewDeclared(`：用例实例只在装配根造，控制器只收接口。")
 	}

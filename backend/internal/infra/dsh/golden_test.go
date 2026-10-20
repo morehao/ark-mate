@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/core/resource"
 )
 
 // ——— A5：dsh 的同步链路与 v11 的**逐字节**等价性（ADR-9/ADR-12） ———

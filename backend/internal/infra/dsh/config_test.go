@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/core/resource"
 )
 
 // fakeDelivery 记录 adapter 请求平台改的启动面（真实实现是注册表的 runtimeDelivery）。

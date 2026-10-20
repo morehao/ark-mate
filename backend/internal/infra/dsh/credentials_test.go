@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/core/resource"
 )
 
 // docWithUserContent 一份**用户也在用**的凭据文档：顶层注释、平台条目的注解、用户自己的 refs、

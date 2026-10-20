@@ -11,10 +11,10 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
 
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/drivers/transfer"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/internal/transfer"
 )
 
 // ——— v13 的三条判据（设计 A2/A3/A4）在 v20 之下的形态 ———

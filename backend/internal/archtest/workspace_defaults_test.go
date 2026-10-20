@@ -72,7 +72,7 @@ func TestWorkspaceDefaultsDoNotRewriteSessions(t *testing.T) {
 	// v3.3 起 `SetDefaults` 的写面在 store（DAO 只剩列词汇与泛型方法）——判据必须跟着实现走。
 	// 找不到函数即失败：写面再搬一次时，`continue` 会让这条守卫对着一个空文件静默空转。
 	{
-		rel := filepath.Join("internal", "store", "workspace.go")
+		rel := filepath.Join("internal", "persistence", "store", "workspace.go")
 		src := stripLineComments(readFileOrFatal(t, filepath.Join(root, rel)))
 		const fn = "func (s *Store) SetWorkspaceDefaults("
 		body, ok := goFuncBody(src, fn)
@@ -90,7 +90,7 @@ func TestWorkspaceDefaultsDoNotRewriteSessions(t *testing.T) {
 	}
 
 	// ② 迁移**也不许**碰 `sessions`（v27 只加两列）。
-	mig := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "store", "migrate_v27.go")))
+	mig := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "migrate_v27.go")))
 	if strings.Contains(mig, "sessions") {
 		t.Fatalf("`migrate_v27.go` 里出现了 `sessions`：v27 只给 `workspaces` 加两列——" +
 			"一次全表写就多一次中断面，而「把存量会话的默认值也刷一遍」正是本批刻意不做的事")

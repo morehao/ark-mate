@@ -3,9 +3,10 @@ package sessionruntime
 import (
 	"context"
 	"fmt"
+
 	"github.com/morehao/ark-mate/internal/domain/provider"
 
-	"github.com/morehao/ark-mate/internal/object/objdelivery"
+	"github.com/morehao/ark-mate/internal/core/object/objdelivery"
 )
 
 // ——— provider 写面的**生效面回执**（T4 的落地形态） ———

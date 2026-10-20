@@ -3,13 +3,13 @@ package mcp
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/core/capability"
 )
 
 // ——— MCP 域的窄端口（v3.2 刀 5）———
 //
 // 与技能域同一套做法：消费方声明自己用到的几个方法，装配根把机制注进来，
-// 领域层不再 import `internal/mechanism/*`。两个域各自声明、**不共用**同一份接口：
+// 领域层不再 import `internal/drivers/mechanism/*`。两个域各自声明、**不共用**同一份接口：
 // 它们用到的形状恰好相同，但这是各自的契约——将来一个域要加方法，不该牵动另一个。
 //
 // 端口只列本域真正用到的：`DefinitionRepo` 六个方法，`SecretResolver` 一个方法。

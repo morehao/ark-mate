@@ -1,4 +1,4 @@
-package acl
+package acp
 
 import (
 	"bufio"
@@ -42,7 +42,7 @@ func TestStdioTransportSpawnFailed(t *testing.T) {
 	}
 	ae, ok := As(err)
 	if !ok {
-		t.Fatalf("期望 *acl.Error，got %T", err)
+		t.Fatalf("期望 *acp.Error，got %T", err)
 	}
 	if ae.Class != ClassConnection || ae.Code != "spawn_failed" {
 		t.Fatalf("class/code 不符: %s/%s", ae.Class, ae.Code)

@@ -2,13 +2,14 @@ package provider
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/model"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/credential"
-	defn "github.com/morehao/ark-mate/internal/definition"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+
+	"github.com/morehao/ark-mate/internal/core/credential"
+	defn "github.com/morehao/ark-mate/internal/core/definition"
 
 	"github.com/morehao/ark-mate/internal/infra/logging"
 	"github.com/morehao/golib/glog"

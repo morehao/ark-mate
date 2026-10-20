@@ -12,7 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/dto/dtocommandpolicy"
 	"github.com/morehao/ark-mate/internal/infra/acp"
@@ -45,7 +45,7 @@ func (p *Policy) Get(_ context.Context) (*dtocommandpolicy.PolicyResp, error) {
 	}
 	rules, err := interaction.LoadCommandPolicyFile(p.path)
 	if err != nil {
-		return nil, code.FromError(acl.NewError(acl.ClassService, "command_policy_unreadable",
+		return nil, code.FromError(acp.NewError(acp.ClassService, "command_policy_unreadable",
 			fmt.Sprintf("命令门禁规则文件读不出来 [command_policy_unreadable]: %v", err), nil))
 	}
 	return &dtocommandpolicy.PolicyResp{Enabled: true, Rules: toDTO(rules)}, nil
@@ -58,16 +58,16 @@ func (p *Policy) Get(_ context.Context) (*dtocommandpolicy.PolicyResp, error) {
 // 只允许"盘上是新的"才动内存。
 func (p *Policy) Put(_ context.Context, req dtocommandpolicy.PolicyReq) (*dtocommandpolicy.PolicyResp, error) {
 	if p.path == "" {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "command_policy_disabled",
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "command_policy_disabled",
 			"命令门禁未配置（MATE_COMMAND_POLICY 为空）[command_policy_disabled]", nil))
 	}
 	rules, err := interaction.LoadCommandRules(toDomain(req.Rules))
 	if err != nil {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "command_policy_invalid",
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "command_policy_invalid",
 			fmt.Sprintf("命令门禁规则不合法 [command_policy_invalid]: %v", err), nil))
 	}
 	if err := writePolicyFile(p.path, rules); err != nil {
-		return nil, code.FromError(acl.NewError(acl.ClassService, "command_policy_write",
+		return nil, code.FromError(acp.NewError(acp.ClassService, "command_policy_write",
 			fmt.Sprintf("命令门禁规则写入失败 [command_policy_write]: %v", err), nil))
 	}
 	if p.apply != nil {

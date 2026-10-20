@@ -138,7 +138,7 @@ func TestManagerDoesNotHoldMutexWhileCallingDomainPlane(t *testing.T) {
 	// **manager + registry** 两个装配/同步面（任一处在锁内调域平面都算红色）。
 	dirs := []string{
 		filepath.Join(root, "internal", "sessionruntime"),
-		filepath.Join(root, "internal", "registry"),
+		filepath.Join(root, "internal", "drivers", "registry"),
 	}
 	var files []string
 	for _, dir := range dirs {

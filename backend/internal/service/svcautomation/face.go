@@ -7,9 +7,9 @@ import (
 	"sort"
 	"time"
 
-	pkgauto "github.com/morehao/ark-mate/internal/automation"
-	"github.com/morehao/ark-mate/internal/code"
-	defn "github.com/morehao/ark-mate/internal/definition"
+	pkgauto "github.com/morehao/ark-mate/internal/core/automation"
+	"github.com/morehao/ark-mate/internal/core/code"
+	defn "github.com/morehao/ark-mate/internal/core/definition"
 	domauto "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 	"github.com/morehao/ark-mate/internal/infra/acp"
@@ -180,12 +180,12 @@ func (s *Service) RunAutomationNow(ctx context.Context, id string) (*dtoautomati
 // 两份必然并存——域不能 import 用例层，而错误码出口归用例层（本文件的头注）。
 // 码是同一个 40401，文案也用同一句，避免用户在两处看到不同的说法。
 func notFoundAutomation(id string) error {
-	return acl.NewError(acl.ClassRequest, "automation_not_found",
+	return acp.NewError(acp.ClassRequest, "automation_not_found",
 		fmt.Sprintf("未知 automation %q（列表刷新一下）", id), nil)
 }
 
 // invalidAutomationByID 定义装载失败 → 40001（只要有 id 与原因）。
 func invalidAutomationByID(id, reason string) error {
-	return acl.NewError(acl.ClassRequest, "definition_invalid",
+	return acp.NewError(acp.ClassRequest, "definition_invalid",
 		fmt.Sprintf("automation %s 的定义不可执行：%s", id, reason), nil)
 }

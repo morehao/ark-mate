@@ -31,9 +31,9 @@ func TestTestutilMustNotImportImplementations(t *testing.T) {
 	}
 	forbidden := []string{
 		modulePrefix + "internal/sessionruntime",
-		modulePrefix + "internal/controller",
-		modulePrefix + "internal/router",
-		modulePrefix + "internal/app",
+		modulePrefix + "internal/delivery/controller",
+		modulePrefix + "internal/delivery/router",
+		modulePrefix + "internal/bootstrap/app",
 	}
 	imports := importedByPackage(t, dir)
 	if len(imports) == 0 {

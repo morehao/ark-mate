@@ -25,8 +25,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	pkgidentity "github.com/morehao/ark-mate/internal/identity"
-	"github.com/morehao/ark-mate/internal/resource"
+	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
+	"github.com/morehao/ark-mate/internal/core/resource"
 )
 
 const (

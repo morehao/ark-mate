@@ -9,19 +9,19 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
-// dialTestSession 用自建 responder（acp_testserver_test.go）取一条**活的** acl.Session，
+// dialTestSession 用自建 responder（acp_testserver_test.go）取一条**活的** acp.Session，
 // 供投影身份/行为断言使用（echo 删除后不再有进程内 stdio 对端，改走 ws 远程形态）。
-func dialTestSession(t *testing.T, r *testACPResponder) (*acl.Client, *acl.Session) {
+func dialTestSession(t *testing.T, r *testACPResponder) (*acp.Client, *acp.Session) {
 	t.Helper()
-	tr, err := acl.NewRemoteTransport(acl.RemoteSpec{Transport: "ws", Endpoint: serveResponderWS(t, r)})
+	tr, err := acp.NewRemoteTransport(acp.RemoteSpec{Transport: "ws", Endpoint: serveResponderWS(t, r)})
 	if err != nil {
 		t.Fatalf("NewRemoteTransport: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
-	cl, err := acl.Dial(ctx, tr, acl.ClientOptions{
-		RequestPermission: func(_ context.Context, _ acl.PermissionRequest) acl.PermissionDecision {
-			return acl.PermissionDecision{Allowed: true}
+	cl, err := acp.Dial(ctx, tr, acp.ClientOptions{
+		RequestPermission: func(_ context.Context, _ acp.PermissionRequest) acp.PermissionDecision {
+			return acp.PermissionDecision{Allowed: true}
 		},
 	})
 	if err != nil {
@@ -29,7 +29,7 @@ func dialTestSession(t *testing.T, r *testACPResponder) (*acl.Client, *acl.Sessi
 	}
 	t.Cleanup(func() { _ = cl.Close(); _ = tr.Close() })
 
-	sess, err := cl.NewSession(context.Background(), acl.SessionOptions{Cwd: "/work"})
+	sess, err := cl.NewSession(context.Background(), acp.SessionOptions{Cwd: "/work"})
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestSessionProjectionCarriesSpecIdentity(t *testing.T) {
 		// 该会话未广告任何配置项 → 一律 unsupported_model（不臆造 env/provider 回落路径）。
 		_, err := rt.ApplyModel(ctx, ModelConfig{Model: "x"})
 		unsupported := false
-		if ae, ok := acl.As(err); ok {
+		if ae, ok := acp.As(err); ok {
 			unsupported = strings.HasPrefix(ae.Code, "unsupported_")
 		}
 		if !unsupported {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	mcpclient "github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/golib/glog"
@@ -46,7 +46,7 @@ func (p *Plane) CallTool(ctx context.Context, id, tool string, req ToolCallReque
 	res, err := mcpclient.CallTool(cctx, server, tool, req.Arguments)
 	if err != nil {
 		// 稳定 code 进信封 msg（同探测）：信封 code 只有分类粒度，排障需要精确原因。
-		return nil, code.FromError(acl.NewError(callClass(err), mcpclient.CodeOf(err),
+		return nil, code.FromError(acp.NewError(callClass(err), mcpclient.CodeOf(err),
 			fmt.Sprintf("[%s] %s", mcpclient.CodeOf(err), err.Error()), nil))
 	}
 	glog.Infow(ctx, "mcp 工具调用完成", "server", id, "tool", tool,
@@ -60,17 +60,17 @@ func (p *Plane) CallTool(ctx context.Context, id, tool string, req ToolCallReque
 }
 
 // callClass 工具调用错误的 REST 分类（与探测同构：传输不支持→Unsupported，参数/超时→Request/Service）。
-func callClass(err error) acl.Class {
+func callClass(err error) acp.Class {
 	switch mcpclient.CodeOf(err) {
 	case "mcp_transport_unsupported":
-		return acl.ClassUnsupported
+		return acp.ClassUnsupported
 	case "mcp_command_invalid", "mcp_url_invalid", "mcp_tool_name_required", "mcp_tool_args_invalid",
 		"mcp_resource_uri_required", "mcp_prompt_name_required":
-		return acl.ClassRequest
+		return acp.ClassRequest
 	case "mcp_timeout":
-		return acl.ClassLimit
+		return acp.ClassLimit
 	default:
-		return acl.ClassService
+		return acp.ClassService
 	}
 }
 
@@ -88,7 +88,7 @@ func (p *Plane) LiveServer(id string) (mcpclient.Server, error) {
 	}
 	env, headers, problems := p.secrets.Resolve(server)
 	if len(problems) > 0 {
-		return mcpclient.Server{}, code.FromError(acl.NewError(acl.ClassRequest, "mcp_secret_unresolved",
+		return mcpclient.Server{}, code.FromError(acp.NewError(acp.ClassRequest, "mcp_secret_unresolved",
 			fmt.Sprintf("[mcp_secret_unresolved] 密钥引用解析失败（%s）", strings.Join(problems, "；")), nil))
 	}
 	return mcpclient.Server{
@@ -199,5 +199,5 @@ func (p *Plane) liveErr(err error, fallbackCode string) error {
 	if c == "" {
 		c = fallbackCode
 	}
-	return code.FromError(acl.NewError(callClass(err), c, fmt.Sprintf("[%s] %s", c, err.Error()), nil))
+	return code.FromError(acp.NewError(callClass(err), c, fmt.Sprintf("[%s] %s", c, err.Error()), nil))
 }

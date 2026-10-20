@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	defn "github.com/morehao/ark-mate/internal/definition"
+	defn "github.com/morehao/ark-mate/internal/core/definition"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 
-	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
 	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -207,8 +207,8 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 		!strings.Contains(rawErr.Error(), "db:skill/cas-skill") {
 		t.Fatalf("冲突错误应带稳定码与定位串: %v", rawErr)
 	}
-	// 注意 `code.FromError` 的文案是**码的默认文案**（acl 细节不进信封），所以稳定码只在
-	// acl 错误自身上可见——面板按 40901 分流，用户看默认文案。
+	// 注意 `code.FromError` 的文案是**码的默认文案**（acp 细节不进信封），所以稳定码只在
+	// acp 错误自身上可见——面板按 40901 分流，用户看默认文案。
 	if ge, ok := code.FromError(rawErr).(gerror.Error); !ok || ge.Code != code.Conflict {
 		t.Fatalf("CAS 冲突应落 40901，got %v", code.FromError(rawErr))
 	}

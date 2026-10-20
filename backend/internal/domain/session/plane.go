@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/object/objusage"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 )
 
 // Plane 会话域的**有状态主体**（P3b-1a：先只持库句柄与一个用量端口；会话记录、输入队列

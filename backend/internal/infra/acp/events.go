@@ -1,6 +1,6 @@
-package acl
+package acp
 
-// 归一化事件 Kind（ACP notification → acl.Event，manager 再转域事件进 eventbus）。
+// 归一化事件 Kind（ACP notification → acp.Event，manager 再转域事件进 eventbus）。
 const (
 	// KindMessage 会话消息增量（agent 回复文本 chunk）。
 	KindMessage = "message"
@@ -14,7 +14,7 @@ const (
 	KindUserMessage = "user_message"
 	// KindUsage 用量更新。
 	KindUsage = "usage"
-	// KindPermission 权限请求（acl 决策后上抛供上层留痕）。
+	// KindPermission 权限请求（acp 决策后上抛供上层留痕）。
 	KindPermission = "permission"
 	// KindConfigOptions 会话配置项变更（ACP session/update: config_option_update）。
 	// 载荷为**全量**选项状态（协议保证非增量），上层据此刷新模型目录/当前值。

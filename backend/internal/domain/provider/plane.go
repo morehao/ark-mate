@@ -2,13 +2,14 @@ package provider
 
 import (
 	"context"
-	credval "github.com/morehao/ark-mate/internal/credential"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	src "github.com/morehao/ark-mate/internal/credential"
+	credval "github.com/morehao/ark-mate/internal/core/credential"
+
+	src "github.com/morehao/ark-mate/internal/core/credential"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )
 

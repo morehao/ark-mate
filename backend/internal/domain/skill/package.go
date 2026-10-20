@@ -178,7 +178,7 @@ func ParsePackage(r io.ReaderAt, size int64) (*Package, error) {
 func (m *Plane) ImportPackage(ctx context.Context, r io.ReaderAt, size int64) (*WriteResult, error) {
 	pkg, err := ParsePackage(r, size)
 	if err != nil {
-		return nil, acl.NewError(acl.ClassRequest, "definition_invalid", "技能包被拒绝："+err.Error(), err)
+		return nil, acp.NewError(acp.ClassRequest, "definition_invalid", "技能包被拒绝："+err.Error(), err)
 	}
 	req := WriteRequest{
 		"id":          rawJSONValue(pkg.ID),

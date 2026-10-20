@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
 )
@@ -109,9 +109,9 @@ func TestConnectFailurePicksCauseLineOverTail(t *testing.T) {
 // 钉的是一个真实排障场景（2026-10-09 实测）：从含保留键 `.env` 的目录起核心 → dsh 会话建不起来，
 // 而 REST 只回 `50001 Internal error`——那是 ACP SDK 对传输失败的通用文案（JSON-RPC -32603 的
 // 固定 message，见 acp-go-sdk errors.go），真因（`dsh: <dir>/.env sets "DSH_VERSION"…`）只躺在
-// 核心日志里。acl 其实早就采到了 stderr 尾巴（`acl.Error.StderrTail`），是 acl→信封那一跳把它丢了。
+// 核心日志里。acp 其实早就采到了 stderr 尾巴（`acp.Error.StderrTail`），是 acp→信封那一跳把它丢了。
 //
-// 三条断言各有分工：①真因在文案里（可用性）、②量纲有上限（msg 会进错误气泡/日志/截图，而 acl 侧
+// 三条断言各有分工：①真因在文案里（可用性）、②量纲有上限（msg 会进错误气泡/日志/截图，而 acp 侧
 // 的尾巴上限是 200 行——两者不是一个量纲）、③密钥被脱敏（stderr 常直接打印 key）。
 func TestConnectFailureSurfacesStderrTail(t *testing.T) {
 	// 写 3000 行：信封里只应出现最后 5 行（其中最后一行是带密钥的那行）。
@@ -133,7 +133,7 @@ func TestConnectFailureSurfacesStderrTail(t *testing.T) {
 		t.Fatalf("信封错误必须带业务码（否则客户端拿到 -1）：%T %v", envelope, envelope)
 	}
 	// 具体码记的是"今天这条链的落点"：SDK 的 -32603 不在 Classify 的 switch 里 → ClassUnknown
-	// → fromACL 的默认分支 UpstreamFailed。哪天有人把 -32603 归到 ClassService/ClassConnection，
+	// → fromACP 的默认分支 UpstreamFailed。哪天有人把 -32603 归到 ClassService/ClassConnection，
 	// 这里会变成 50201——那是一次有意的契约调整，测试该跟着改。
 	if ge.Code != code.UpstreamFailed {
 		t.Fatalf("码应为 %d（上游执行失败），got %d: %s", code.UpstreamFailed, ge.Code, ge.Msg)
@@ -146,7 +146,7 @@ func TestConnectFailureSurfacesStderrTail(t *testing.T) {
 		t.Fatalf("应带**最后**一行诊断（真因通常就在最后）: %q", msg)
 	}
 	if strings.Contains(msg, "boom 第 2995 行") {
-		t.Fatalf("信封文案不该带满 200 行（acl 侧上限）: %q", msg)
+		t.Fatalf("信封文案不该带满 200 行（acp 侧上限）: %q", msg)
 	}
 	if n := strings.Count(msg, " | "); n != 4 {
 		t.Fatalf("应恰好带 5 行（4 个分隔符），got %d: %q", n, msg)

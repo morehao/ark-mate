@@ -88,14 +88,14 @@ func TestRuntimeDoesNotImportRuntimeAdapters(t *testing.T) {
 	}
 }
 
-// TestOnlyAssemblyImportsRuntimeAdapters 只有 internal/assembly 可以 import runtime adapter。
+// TestOnlyAssemblyImportsRuntimeAdapters 只有 internal/bootstrap/assembly 可以 import runtime adapter。
 func TestOnlyAssemblyImportsRuntimeAdapters(t *testing.T) {
 	root := backendRoot(t)
 	pkgs := goPackagesUnder(t, filepath.Join(root, "internal"))
 	var hits []string
 	for _, dir := range pkgs {
 		relPath := filepath.ToSlash(rel(root, dir))
-		if relPath == "internal/assembly" || isScanExempt(relPath) {
+		if relPath == "internal/bootstrap/assembly" || isScanExempt(relPath) {
 			continue
 		}
 		// 只看**生产** import：测试夹具直接用真实 adapter 是合法的（v3.1 §3.2.1 规则 5 管的是
@@ -111,7 +111,7 @@ func TestOnlyAssemblyImportsRuntimeAdapters(t *testing.T) {
 	}
 	for _, h := range hits {
 		if true {
-			t.Errorf("adapter 装配边：只有 internal/assembly 可以 import infra/dsh；违规 %s", h)
+			t.Errorf("adapter 装配边：只有 internal/bootstrap/assembly 可以 import infra/dsh；违规 %s", h)
 		} else {
 			t.Logf("P0 报告（adapter 装配边）：%s", h)
 		}
@@ -126,10 +126,10 @@ func TestAdapterStaysOutsideAppCore(t *testing.T) {
 		return // P2 之前不存在
 	}
 	forbidden := []string{
-		"internal/app", "internal/cli", "internal/assembly", "internal/router", "internal/controller",
-		"internal/service", "internal/sessionruntime", "internal/registry", "internal/store",
-		"internal/dao", "internal/model", "internal/domain", "internal/mechanism", "internal/gateway",
-		"internal/runtimeconn",
+		"internal/bootstrap/app", "internal/bootstrap/cli", "internal/bootstrap/assembly", "internal/delivery/router", "internal/delivery/controller",
+		"internal/service", "internal/sessionruntime", "internal/drivers/registry", "internal/persistence/store",
+		"internal/persistence/dao", "internal/persistence/model", "internal/domain", "internal/drivers/mechanism", "internal/drivers/gateway",
+		"internal/drivers/runtimeconn",
 	}
 	for _, imp := range importedByPackage(t, dir) {
 		relImp := importPathOf(imp)

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/core/object/objdelivery"
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/object/objdelivery"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 )
 
@@ -65,7 +65,7 @@ func TestProviderRespCarriesApplicability(t *testing.T) {
 	}
 
 	// ③ wire 形状（`applicability` 是数组、元素键名逐字 runtime/ok/status/reason）由
-	// `internal/router/rest_provider_test.go` 的真实 HTTP 往返覆盖——v3.2 刀 8 起领域只产
+	// `internal/delivery/router/rest_provider_test.go` 的真实 HTTP 往返覆盖——v3.2 刀 8 起领域只产
 	// 无 tag 视图，对外 JSON 形态是 `svcmodel` 的职责，在领域测试里断言它只会测到 Go 字段名。
 
 }

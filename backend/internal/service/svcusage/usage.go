@@ -2,7 +2,8 @@ package svcusage
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/code"
+
+	"github.com/morehao/ark-mate/internal/core/code"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"

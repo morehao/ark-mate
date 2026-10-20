@@ -11,7 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -49,7 +49,7 @@ func TestWorkspaceSettingsWithoutStore(t *testing.T) {
 	if resp.Source != "unavailable" {
 		t.Fatalf("无端口时来源应标 unavailable，得到 %q", resp.Source)
 	}
-	if _, err := svc.Planes().Workspaces.UpdateSettings([]string{root}); aclCode(t, err) != "settings_readonly" {
+	if _, err := svc.Planes().Workspaces.UpdateSettings([]string{root}); acpCode(t, err) != "settings_readonly" {
 		t.Fatalf("无端口写入应 settings_readonly: %v", err)
 	}
 }
@@ -174,7 +174,7 @@ func TestUpdateWorkspaceSettingsValidation(t *testing.T) {
 		{"好项 + 坏项（逐项校验，不能被前面的合法项带过）", []string{root, "relative"}},
 	}
 	for _, tc := range cases {
-		if _, err := svc.Planes().Workspaces.UpdateSettings(tc.roots); aclCode(t, err) != "workspace_invalid" {
+		if _, err := svc.Planes().Workspaces.UpdateSettings(tc.roots); acpCode(t, err) != "workspace_invalid" {
 			t.Fatalf("%s: 应 workspace_invalid，得到 %v", tc.name, err)
 		}
 	}
@@ -211,7 +211,7 @@ func TestUpdateWorkspaceSettingsLocked(t *testing.T) {
 		t.Fatalf("锁定态应透出给面板（它据此转只读）: %+v", resp)
 	}
 	err := func() error { _, e := svc.Planes().Workspaces.UpdateSettings([]string{root}); return e }()
-	if aclCode(t, err) != "settings_locked" {
+	if acpCode(t, err) != "settings_locked" {
 		t.Fatalf("应 settings_locked: %v", err)
 	}
 	// 报错要点名去哪改（"被锁定"本身不是可执行信息）。
@@ -232,7 +232,7 @@ func TestUpdateWorkspaceSettingsSaveFailure(t *testing.T) {
 	before := svc.Planes().Workspaces.WorkspaceRoots()
 	svc.Planes().Workspaces.SetRootsStore(&fakeRootsStore{saveErr: errors.New("磁盘只读")})
 
-	if _, err := svc.Planes().Workspaces.UpdateSettings([]string{root}); aclCode(t, err) != "settings_save_failed" {
+	if _, err := svc.Planes().Workspaces.UpdateSettings([]string{root}); acpCode(t, err) != "settings_save_failed" {
 		t.Fatalf("应 settings_save_failed: %v", err)
 	}
 	after := svc.Planes().Workspaces.WorkspaceRoots()

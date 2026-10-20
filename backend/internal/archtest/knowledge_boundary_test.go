@@ -91,9 +91,9 @@ var storeLiterals = []string{
 	"DELETE FROM",
 	"gorm",
 	"dao.",
-	modulePrefix + "internal/store",
-	modulePrefix + "internal/dao",
-	modulePrefix + "internal/model",
+	modulePrefix + "internal/persistence/store",
+	modulePrefix + "internal/persistence/dao",
+	modulePrefix + "internal/persistence/model",
 }
 
 // TestAdapterHasNoStoreLiterals A9：`internal/runtime/<adapter>/**` 剥注释后不得出现持久层代码。

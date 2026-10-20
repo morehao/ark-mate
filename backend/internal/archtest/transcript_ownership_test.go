@@ -31,7 +31,7 @@ import (
 //	   （serve / demo）都真的调了它，而且调用点必须在 `NewService` **之后**（早一行 = 域还没造出来）。
 //
 // 反证（实跑，见计划 §3.1.47）：把 recorder 的 `wireTranscriptSchema` 常量复制到
-// `internal/sessionruntime` 的一个新生产文件里 → 红；把 `internal/app/app.go` 里的
+// `internal/sessionruntime` 的一个新生产文件里 → 红；把 `internal/bootstrap/app/app.go` 里的
 // `a.svc.SetTranscriptDir(cfg.TranscriptDir)` 删掉 → 红。
 
 // transcriptOwnerDir 是 transcript 面**唯一**允许的归属包（相对仓库根的斜杠路径）。
@@ -52,8 +52,8 @@ var transcriptOwnerLiterals = []string{
 // 需要按文件名造夹具，`_test.go` 一律跳过）。
 //
 // 为什么点这两个：`internal/sessionruntime` 是拆分中的实现层、`internal/service/svc*` 是用例端口层
-// ——两处都只该经会话域的动作面碰 transcript。CLI（`internal/app/command`）与装配根
-// （`internal/app`）**刻意不在名单里**：它们的职责就是"按目录扫文件"（`mate migrate` /
+// ——两处都只该经会话域的动作面碰 transcript。CLI（`internal/bootstrap/app/command`）与装配根
+// （`internal/bootstrap/app`）**刻意不在名单里**：它们的职责就是"按目录扫文件"（`mate migrate` /
 // `transcripts prune` / `doctor` / serve 的空库提示），ban 了它们等于让守卫与产品行为对打。
 var transcriptNonOwnerRoots = []string{
 	filepath.Join("internal", "sessionruntime"),
@@ -100,7 +100,7 @@ func TestTranscriptStateLivesInSessionPlane(t *testing.T) {
 						"归 %s 唯一所有（P3b-2b）。在别处再实现一份的后果是**两份实现静默分叉**"+
 						"（header 写不写、装载按会话还是按文件），而两边都编译得过；"+
 						"要写一行请调会话域的 `Plane.BeginTranscript` / 让它回读。"+
-						"\n\t（`internal/app/command` 的 CLI 与 `internal/app` 的装配按目录扫文件是有意保留的）",
+						"\n\t（`internal/bootstrap/app/command` 的 CLI 与 `internal/bootstrap/app` 的装配按目录扫文件是有意保留的）",
 						rel(root, path), lit, transcriptOwnerDir)
 				}
 			}
@@ -115,7 +115,7 @@ func TestTranscriptStateLivesInSessionPlane(t *testing.T) {
 // （`serve` 与 `demo`）都得把 transcript 目录交给会话域，且调用点在 `NewService` 之后。
 //
 // 为什么单钉装配而不是行为：`SetTranscriptDir` 忘调的后果是**完全静默**的（进程正常、会话
-// 正常、日志干净，只是重启后会话不见了），而 `internal/app` 那几条用例只跑启动与查询，
+// 正常、日志干净，只是重启后会话不见了），而 `internal/bootstrap/app` 那几条用例只跑启动与查询，
 // 不会因为"transcript 一行没写"而红——§3.1.46 的第三种错（"编译通过 ≠ 装配接上"）在这里
 // 有第二次现形的机会。判据是调用点字面量：这一层没有运行时信号，只有"这一行还在不在"。
 //
@@ -126,8 +126,8 @@ func TestTranscriptWiringIsAttached(t *testing.T) {
 		file string // 相对 backend/ 的路径
 		why  string
 	}{
-		{"internal/assembly/assembly.go", "serve：sqlite/memory 分流里 memory 那一支把目录交给会话域"},
-		{"internal/maintenance/demo.go", "demo：演示会话也落 transcript（wire 事实源）"},
+		{"internal/bootstrap/assembly/assembly.go", "serve：sqlite/memory 分流里 memory 那一支把目录交给会话域"},
+		{"internal/bootstrap/maintenance/demo.go", "demo：演示会话也落 transcript（wire 事实源）"},
 	}
 	for _, c := range cases {
 		path := filepath.Join(root, filepath.FromSlash(c.file))

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -356,7 +356,7 @@ func resolveLaunchBinary(command string) string {
 
 // Registry 全部内置适配的注册表（诊断 / 测试 / "看全部适配面"用）。
 //
-// 生产装配请走 `internal/assembly.BuiltinRegistry()`/`ProductRegistry`——它们是"认识 adapter"
+// 生产装配请走 `internal/bootstrap/assembly.BuiltinRegistry()`/`ProductRegistry`——它们是"认识 adapter"
 // 的唯一边；本函数是给 adapter 自己的测试与**同层以下**的测试夹具用的。
 func Registry() *runtime.Registry { return runtime.NewAdapterRegistry(New()) }
 

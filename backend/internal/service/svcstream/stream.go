@@ -1,6 +1,6 @@
 package svcstream
 
-import "github.com/morehao/ark-mate/internal/eventbus"
+import "github.com/morehao/ark-mate/internal/core/eventbus"
 
 // Stream 实时事件流的订阅端口（装配根持有 Bus，控制器只认这个接口）。
 //

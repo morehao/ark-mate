@@ -32,8 +32,8 @@ func LaunchesLocally(spec Spec) bool {
 
 // 连接生命周期归调用方（编排器连接回收/Close），与任一请求 ctx 无关（拨号用脱离 ctx 的
 // 派生 context，语义同 orchestrator.acquire——请求返回不杀已起子进程）。
-func Connect(ctx context.Context, spec Spec, args []string, env []string, opts acl.ClientOptions) (*acl.Client, error) {
-	var t acl.Transport
+func Connect(ctx context.Context, spec Spec, args []string, env []string, opts acp.ClientOptions) (*acp.Client, error) {
+	var t acp.Transport
 	switch strings.ToLower(strings.TrimSpace(spec.Launch.Transport)) {
 	case "", "stdio":
 		// 合并顺序＝优先级：`spec.Launch.Env` 是**平台对该 runtime 的声明**（含设计 §6.6 的配置隔离，
@@ -43,10 +43,10 @@ func Connect(ctx context.Context, spec Spec, args []string, env []string, opts a
 		// 去重还有一个更硬的理由：同名两条在 POSIX `getenv`（取第一条）与 Node `process.env`（取最后一条）
 		// 下语义相反，留着就是"同一个环境在两种子进程里行为不同"。
 		all := connectEnv(spec, env)
-		t = acl.NewStdioTransport(spec.Launch.Command, args, all)
+		t = acp.NewStdioTransport(spec.Launch.Command, args, all)
 	case "http", "ws", "websocket", "streamable_http", "streamable-http":
 		// 远程 runtime：不拉子进程，直接连远端 ACP 端点（A5）。
-		rt, err := acl.NewRemoteTransport(acl.RemoteSpec{
+		rt, err := acp.NewRemoteTransport(acp.RemoteSpec{
 			Transport: spec.Launch.Transport,
 			Endpoint:  spec.Launch.Endpoint,
 			Headers:   spec.Launch.Headers,
@@ -56,11 +56,11 @@ func Connect(ctx context.Context, spec Spec, args []string, env []string, opts a
 		}
 		t = rt
 	default:
-		return nil, acl.NewError(acl.ClassUnsupported, "unsupported_transport",
+		return nil, acp.NewError(acp.ClassUnsupported, "unsupported_transport",
 			"runtime "+spec.ID+" 声明了不支持的传输 "+spec.Launch.Transport, nil)
 	}
 
-	client, err := acl.Dial(context.WithoutCancel(ctx), t, opts)
+	client, err := acp.Dial(context.WithoutCancel(ctx), t, opts)
 	if err != nil {
 		_ = t.Close()
 		return nil, err
@@ -103,7 +103,7 @@ func firstNonEmptyStr(vals ...string) string {
 	return ""
 }
 
-// connectEnv 交给 acl 的最终附加环境：**平台声明（spec.Launch.Env）优先于调用方增量**。
+// connectEnv 交给 acp 的最终附加环境：**平台声明（spec.Launch.Env）优先于调用方增量**。
 //
 // 单独提出来是为了能直接单测这条优先级——它是"配置隔离不会被 provider 档案悄悄改掉"（M3-3）
 // 的唯一保证点，而 `Connect` 本身要拉真进程、没法在单测里断言 cmd.Env。

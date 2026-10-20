@@ -61,22 +61,22 @@ func TestRuntimeIdentityUseCaseLivesInRuntimeSvc(t *testing.T) {
 				"（判据挂在它身上，失锚等于空转）", a)
 		}
 	}
-	// 用例层只认那个两方法端口：它不该认识执行面的实现（`internal/runtimeconn`）——
+	// 用例层只认那个两方法端口：它不该认识执行面的实现（`internal/drivers/runtimeconn`）——
 	// 认识之后"可替换 occupant"就没得换了（测试也没法塞一份假执行面）。
-	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/runtimeconn"`) {
-		t.Error("internal/service/svcruntime 里出现 `internal/runtimeconn` 的 import：" +
+	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/drivers/runtimeconn"`) {
+		t.Error("internal/service/svcruntime 里出现 `internal/drivers/runtimeconn` 的 import：" +
 			"用例层只认 `Plane` 端口，执行面的形态由装配点交下来。")
 	}
 
 	// ① 装配根：用例实例由 `assembly/services.go` 造，控制器只收接口。
-	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "assembly", "services.go")))
+	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
 	if !strings.Contains(asm, "Runtime:       svcruntime.New(") &&
 		!strings.Contains(asm, "svcruntime.New(") {
-		t.Error("`internal/assembly/services.go` 里找不到 `svcruntime.New(`：底座面用例必须在装配根造。")
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcruntime.New(`：底座面用例必须在装配根造。")
 	}
-	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrruntime", "runtime.go")))
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrruntime", "runtime.go")))
 	if strings.Contains(ctr, "svcruntime.New(") {
-		t.Error("`ctrruntime` 里又出现 `svcruntime.New(`：用例实例只在 `internal/assembly` 造，控制器只收接口。")
+		t.Error("`ctrruntime` 里又出现 `svcruntime.New(`：用例实例只在 `internal/bootstrap/assembly` 造，控制器只收接口。")
 	}
 
 	// ③ manager 侧不得长回那两条转发。

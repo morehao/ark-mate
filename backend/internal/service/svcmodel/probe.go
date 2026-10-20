@@ -4,16 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/credential"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/core/credential"
+
+	"github.com/morehao/ark-mate/internal/core/redact"
+	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/redact"
-	"github.com/morehao/ark-mate/internal/resource"
 )
 
 // ——— P4a：供应商连接自检（M4）的**用例层实现** ———

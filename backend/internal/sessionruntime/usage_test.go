@@ -9,9 +9,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/object/objusage"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/golib/gerror"
 )
@@ -143,7 +143,7 @@ func TestOrchestratorUsageEvent(t *testing.T) {
 	sub := bus.Subscribe()
 	defer bus.Unsubscribe(sub)
 	sink := orch.runner.EventSink("stub")
-	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1",
+	sink(acp.Event{Kind: acp.KindUsage, SessionID: "native-1",
 		Payload: objusage.UsageInfo{Used: 42, Size: 200, CostAmount: 0.25, CostCurrency: "USD"}})
 
 	select {
@@ -165,17 +165,17 @@ func TestOrchestratorUsageEvent(t *testing.T) {
 	}
 
 	// 后到覆盖先到；全零快照忽略（不污染统计）。
-	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1", Payload: objusage.UsageInfo{Used: 80, Size: 200}})
+	sink(acp.Event{Kind: acp.KindUsage, SessionID: "native-1", Payload: objusage.UsageInfo{Used: 80, Size: 200}})
 	if u, _ := orch.LatestUsage("c1"); u.Used != 80 {
 		t.Fatalf("后到应覆盖: %+v", u)
 	}
-	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1", Payload: objusage.UsageInfo{}})
+	sink(acp.Event{Kind: acp.KindUsage, SessionID: "native-1", Payload: objusage.UsageInfo{}})
 	if u, _ := orch.LatestUsage("c1"); u.Used != 80 {
 		t.Fatalf("全零快照不应覆盖: %+v", u)
 	}
 
 	// 无 payload（旧底座/无上报）→ 事件仍发布，但不记录。
-	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1"})
+	sink(acp.Event{Kind: acp.KindUsage, SessionID: "native-1"})
 	if _, ok := orch.LatestUsage("c1"); !ok {
 		t.Fatal("已有快照不应被清除")
 	}

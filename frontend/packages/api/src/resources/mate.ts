@@ -75,7 +75,7 @@ import type {
   WorkspaceSettings,
 } from '@ark-mate/types'
 
-// ——— mate 控制面 REST（/v1/mate，见 backend/internal/router/routes_*.go） ———
+// ——— mate 控制面 REST（/v1/mate，见 backend/internal/delivery/router/routes_*.go） ———
 
 // ——— automation（定时任务，M4）：定义的事实源是文件，接口是编辑器与观察窗 ———
 

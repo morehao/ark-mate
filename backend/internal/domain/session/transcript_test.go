@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
 )
 
 // TestTranscriptJSONL 验证 wire transcript：header 首行 + 事件原语行、schema v2（事件行带

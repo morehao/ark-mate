@@ -62,7 +62,7 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 ### T2 · O3-b：MCP 调用结果进审计表（事件流第二刀）
 
-- **现状**：`backend/internal/gateway/source.go` 只在 stderr 留一行
+- **现状**：`backend/internal/drivers/gateway/source.go` 只在 stderr 留一行
   `(server, tool, outcome, latency_ms)`——**事后无法按会话复盘调用了什么**。
 - **做什么**（建议分两刀，别一次做完）：
   1. **第一刀：审计表**。新表（`server_id / tool / outcome / latency_ms / session_id / run_id /
@@ -82,16 +82,16 @@ cd frontend && pnpm run typecheck && pnpm run build
 - **现状**：`frontend/scripts/dev-loop.mjs` 有阶段监督（任一阶段死即整体回红），但缺一张
   「带预算与降级策略的启动步骤表」——启动仍是一串 `await`。
 - **做什么**：定义步骤表：每步 `{name, critical, timeout, dependsOn, 降级动作}`；把
-  `backend/internal/app` 的启动顺序与 dev-loop 的阶段表**收敛到同一份声明**（两份就是两个真相）。
+  `backend/internal/bootstrap/app` 的启动顺序与 dev-loop 的阶段表**收敛到同一份声明**（两份就是两个真相）。
 - **验收**：
   - 守卫（fail-closed）：步骤表存在、每个 `critical` 步骤都有超时与降级动作、步骤依赖不成环；
   - 动态：kill 掉一个非 critical 阶段 → 整体仍能用且诊断里写明降级；kill 掉 critical 阶段 →
     非 0 退出（这条 dev-loop 已有，别退化）。
-- **风险**：`backend/internal/app/ready.go` 已经在表达"就绪"；新表若与它各说一套，先合并再谈。
+- **风险**：`backend/internal/bootstrap/app/ready.go` 已经在表达"就绪"；新表若与它各说一套，先合并再谈。
 
 ### T4 · L3-3：审计表加哈希链
 
-- **现状**：`backend/internal/dao/definition_revision.go` 的每条 revision 独立，改过也看不出来。
+- **现状**：`backend/internal/persistence/dao/definition_revision.go` 的每条 revision 独立，改过也看不出来。
 - **做什么**：加 `prev_hash` / `hash` 两列（写这段时最新迁移是 v30，所以下一版是 v31），写入时在
   **同一事务**里取该表最后一条的 `hash` 作为 `prev_hash`；创世条用固定常量。
   提供一个只读校验函数（遍历链，发现断点返回第一条坏行的 id）。
@@ -132,7 +132,7 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 ### T7 · O4：鉴权 / 多租户（云端 B 段）
 
-- **现状**：`backend/internal/middleware/credential.go` 只认一个静态 `MATE_TOKEN`（默认空 = 不鉴权，
+- **现状**：`backend/internal/delivery/middleware/credential.go` 只认一个静态 `MATE_TOKEN`（默认空 = 不鉴权，
   仅回环），无用户/角色/审计/限速/轮换；静态资源不鉴权。
 - **前提**：B1 身份映射先落地；**不得推翻决策 v3③「单机单操作员」红线**（它是本地形态的前提，
   云端是新增形态，不是替换）。

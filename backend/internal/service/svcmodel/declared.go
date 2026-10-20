@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	defn "github.com/morehao/ark-mate/internal/definition"
+	defn "github.com/morehao/ark-mate/internal/core/definition"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/object/objid"
-	"github.com/morehao/ark-mate/internal/resource"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // ——— P4a 正文第五刀：平台模型清单的**写面**用例 ———
@@ -85,7 +85,7 @@ func (m *Declared) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq)
 		return nil, err
 	}
 	if strings.TrimSpace(req.Model) == "" {
-		return nil, acl.NewError(acl.ClassRequest, "invalid_param", "model 必填（发给上游的模型名）", nil)
+		return nil, acp.NewError(acp.ClassRequest, "invalid_param", "model 必填（发给上游的模型名）", nil)
 	}
 	if err := m.requireProvider(ctx, req.ProviderID); err != nil {
 		return nil, err
@@ -255,7 +255,7 @@ func (m *Declared) DeleteModel(ctx context.Context, id string) (*dtomodel.ModelD
 // modelListUnavailableErr memory 模式没有 `models` 表：写面明确报 40501，
 // 而不是"内存生效、盘上没留痕"。
 func modelListUnavailableErr() error {
-	return acl.NewError(acl.ClassUnsupported, "model_list_unavailable",
+	return acp.NewError(acp.ClassUnsupported, "model_list_unavailable",
 		"模型清单需要 sqlite 持久层（MATE_STORE=sqlite）：memory 模式没有平台侧清单载体，"+
 			"模型面仍由运行时派生", nil)
 }
@@ -268,7 +268,7 @@ func rejectRuntimeField(v *string) error {
 	if v == nil {
 		return nil
 	}
-	return acl.NewError(acl.ClassRequest, "invalid_param",
+	return acp.NewError(acp.ClassRequest, "invalid_param",
 		fmt.Sprintf("`runtime` 不是模型资源的字段（收到 %q）：v12 起一份清单投给所有已注册底座。"+
 			"要只为某个底座准备模型，请改用该底座自己的配置；平台侧不再有逐底座清单", *v), nil)
 }
@@ -276,7 +276,7 @@ func rejectRuntimeField(v *string) error {
 // requireProvider 校验挂靠的供应商存在（不存在 → 40401 provider_not_found）。
 func (m *Declared) requireProvider(ctx context.Context, providerID string) error {
 	if strings.TrimSpace(providerID) == "" {
-		return acl.NewError(acl.ClassRequest, "invalid_param", "provider_id 必填（模型必须挂靠在一条供应商下）", nil)
+		return acp.NewError(acp.ClassRequest, "invalid_param", "provider_id 必填（模型必须挂靠在一条供应商下）", nil)
 	}
 	if m.st != nil {
 		if _, found, err := m.st.GetProviderDefinition(ctx, providerID); err != nil {
@@ -288,7 +288,7 @@ func (m *Declared) requireProvider(ctx context.Context, providerID string) error
 	// **不持任何上层锁**：`Exists` 自己取供应商域的锁（见 `manager_lock_order_test.go`：
 	// 上层持锁去请求域平面就是锁序反转的雏形）。
 	if m.plane == nil || !m.plane.Exists(providerID) {
-		return acl.NewError(acl.ClassRequest, "provider_not_found",
+		return acp.NewError(acp.ClassRequest, "provider_not_found",
 			fmt.Sprintf("供应商 %q 不存在：模型必须挂靠在一条已登记的供应商下", providerID), nil)
 	}
 	return nil
@@ -304,7 +304,7 @@ func normalizeCapacity(field string, v *int64) (*int64, error) {
 		return nil, nil
 	}
 	if *v < 0 {
-		return nil, acl.NewError(acl.ClassRequest, "invalid_param",
+		return nil, acp.NewError(acp.ClassRequest, "invalid_param",
 			fmt.Sprintf("%s 必须是 ≥ 1 的整数（0 = 清除这条声明）：收到 %d", field, *v), nil)
 	}
 	return v, nil
@@ -320,7 +320,7 @@ func normalizeInputModalities(in *[]string) (string, error) {
 	}
 	for _, v := range *in {
 		if !resource.ValidModalities[strings.TrimSpace(v)] {
-			return "", acl.NewError(acl.ClassUnsupported, "modality_unsupported",
+			return "", acp.NewError(acp.ClassUnsupported, "modality_unsupported",
 				fmt.Sprintf("不支持的输入模态 %q：合法取值是 `text`（默认）与 `image`。"+
 					"图片输入是在文本之上追加的能力，所以 `image` 会落成 `text,image`", v), nil)
 		}
@@ -329,13 +329,13 @@ func normalizeInputModalities(in *[]string) (string, error) {
 }
 
 func modelExistsErr(providerID, modelID string) error {
-	return acl.NewError(acl.ClassLimit, "model_exists",
+	return acp.NewError(acp.ClassLimit, "model_exists",
 		fmt.Sprintf("供应商 %q 下已经声明过模型 %q：同一条模型在同一个供应商下只能有一行",
 			providerID, modelID), nil)
 }
 
 func modelNotFoundErr(id string) error {
-	return acl.NewError(acl.ClassRequest, "model_not_found", fmt.Sprintf("未知模型条目 %q", id), nil)
+	return acp.NewError(acp.ClassRequest, "model_not_found", fmt.Sprintf("未知模型条目 %q", id), nil)
 }
 
 // derefString 解引用可选字符串（nil → 空串）。

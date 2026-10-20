@@ -3,7 +3,7 @@ package automation
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // AutomationStore 自动化定义与运行态的载体（v3.2 刀 7）。

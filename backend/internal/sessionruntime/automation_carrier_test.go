@@ -3,19 +3,20 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
-	defn "github.com/morehao/ark-mate/internal/definition"
 	"strings"
 	"testing"
 	"time"
 
+	defn "github.com/morehao/ark-mate/internal/core/definition"
+
 	domainautomation "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/automation"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/core/automation"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 

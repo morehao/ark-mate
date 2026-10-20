@@ -1,4 +1,4 @@
-package acl
+package acp
 
 import (
 	"context"
@@ -48,7 +48,7 @@ const (
 
 // ElicitationRequest 是 agent 发起的一次结构化提问请求（宿主需渲染并征询用户）。
 type ElicitationRequest struct {
-	// SessionID 会话归属：acl 层先按 `_meta` 填（ScopeWire），未命中留空由宿主
+	// SessionID 会话归属：acp 层先按 `_meta` 填（ScopeWire），未命中留空由宿主
 	// （orchestrator）按连接上下文注入（ScopeInferred）。
 	SessionID string
 	// ScopeSource 归属来源（wire | inferred_inflight）：由注入方填写，供 REST/WS 载荷与排障展示。

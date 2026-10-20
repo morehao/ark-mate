@@ -94,11 +94,11 @@ func TestCredentialLayeringOrderIsSingleSource(t *testing.T) {
 	scanned := make([]string, 0, len(productGo))
 	for _, path := range productGo {
 		rel := relOf[path]
-		// 词表的**声明点**不参与扫描（v3.2 刀 7 起在凭据值层 `internal/credential`）：
+		// 词表的**声明点**不参与扫描（v3.2 刀 7 起在凭据值层 `internal/core/credential`）：
 		// 它天生会同时"点名"四个常量（那是声明，不是在判顺序）。除它之外任何地方出现同名同值
 		// 的声明都算复述——所以 `infra/credentials` 现在**要**被扫。
 		if strings.HasPrefix(rel, "backend/internal/archtest/") ||
-			strings.HasPrefix(rel, "backend/internal/credential/") {
+			strings.HasPrefix(rel, "backend/internal/core/credential/") {
 			continue
 		}
 		scanned = append(scanned, path)
@@ -109,9 +109,9 @@ func TestCredentialLayeringOrderIsSingleSource(t *testing.T) {
 	// 「这份配置从哪来」，其中 `SourceEnv` 与凭据词表**同名不同值**），按名字扫会误伤，
 	// 按"同名 + 同值"扫才只认这一份词表。
 	pairRe := regexp.MustCompile(`(Source\w+)\s+Source\s*=\s*"([^"]*)"`)
-	// v3.2 刀 7 起词表在**凭据值层**（`internal/credential`）：`infra/credentials` 只做分层解析。
+	// v3.2 刀 7 起词表在**凭据值层**（`internal/core/credential`）：`infra/credentials` 只做分层解析。
 	// 判据不变（自取词表 → 全仓找"同名同值"的复述），只是取词表的地方跟着搬。
-	vocabSrc := dirProductionBody(t, filepath.Join(root, "internal", "credential"))
+	vocabSrc := dirProductionBody(t, filepath.Join(root, "internal", "core", "credential"))
 	credsPairs := map[string]string{}
 	for _, m := range pairRe.FindAllStringSubmatch(vocabSrc, -1) {
 		credsPairs[m[1]] = m[2]
@@ -155,7 +155,7 @@ func TestCredentialLayeringOrderIsSingleSource(t *testing.T) {
 		clean := stripLineComments(string(raw))
 		// 分层**实现**（`infra/credentials`）本来就要读 `.env`、本来就要同时点名四层——
 		// 那两条启发式查的是"别人在复刻层序"，不是查它自己。但它仍要参与 `decls` 扫描：
-		// 词表已在 `internal/credential`，它若再声明一份必须当场红。
+		// 词表已在 `internal/core/credential`，它若再声明一份必须当场红。
 		isLayeringImpl := strings.HasPrefix(rel, "backend/internal/infra/credentials/")
 		if !isLayeringImpl && dotenvLiteral.MatchString(clean) && readCall.MatchString(clean) {
 			dotenvReaders = append(dotenvReaders, rel)
@@ -199,7 +199,7 @@ func TestCredentialLayeringOrderIsSingleSource(t *testing.T) {
 			out = append(out, strings.TrimSpace(decl)+" @"+strings.Join(where, ","))
 		}
 		sort.Strings(out)
-		t.Fatalf("`Source` 取值常量只许在 `internal/credential` 里声明一次，别处又声明了：\n  %s\n"+
+		t.Fatalf("`Source` 取值常量只许在 `internal/core/credential` 里声明一次，别处又声明了：\n  %s\n"+
 			"（复述词表 = 两条必然漂移的事实：面板与 doctor 会按各自那份解释同一个值）",
 			strings.Join(out, "\n  "))
 	}
@@ -322,7 +322,7 @@ var layeringWhitelist = []struct {
 	reason string
 }{
 	{
-		// P3d-2 起它落 `internal/mechanism/credential`，并因为跨包转发的要求而**导出**
+		// P3d-2 起它落 `internal/drivers/mechanism/credential`，并因为跨包转发的要求而**导出**
 		// （`ResolveProviderKey`）——判据只认符号名，所以这里跟着改名，不钉路径。
 		symbol: "ResolveProviderKey",
 		reason: "**库与镜像的对账，不是第二份层序**：四层顺序仍由 `Layered.Resolve` 一处实现，" +

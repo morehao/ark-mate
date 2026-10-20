@@ -1,4 +1,4 @@
-// 与控制面控制器（backend/internal/controller/ctr*）契约对齐的 REST 信封（gincontext 包装）。
+// 与控制面控制器（backend/internal/delivery/controller/ctr*）契约对齐的 REST 信封（gincontext 包装）。
 // 成功 code=0；业务错误 code!=0（仍以 HTTP 200 返回）。
 export interface Envelope<T> {
   code: number
@@ -8,7 +8,7 @@ export interface Envelope<T> {
 }
 
 /**
- * 业务码常量，唯一事实源是 `backend/internal/code`（与 README「业务错误码」表一致，
+ * 业务码常量，唯一事实源是 `backend/internal/core/code`（与 README「业务错误码」表一致，
  * 由后端的 TestFrontendBizCodesMatchRegistry 双向守卫本文件——改码必须三层同步）。
  *
  * 后端把「未归类错误」一律归到 Internal(50000)，信封里**不会**再出现 code=-1 这类

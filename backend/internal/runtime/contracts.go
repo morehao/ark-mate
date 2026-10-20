@@ -1,9 +1,9 @@
 package runtime
 
-import "github.com/morehao/ark-mate/internal/resource"
+import "github.com/morehao/ark-mate/internal/core/resource"
 
 // Capabilities 是 runtime 的能力基线声明（静态）。
-// 真实运行时能力以 ACP initialize 探测结果为准（acl.Capabilities）。
+// 真实运行时能力以 ACP initialize 探测结果为准（acp.Capabilities）。
 type Capabilities struct {
 	SessionsPersistent     bool // 支持 load/list/resume/fork/close 等持久会话
 	MultiSessionConcurrent bool // 同连接多会话
@@ -75,7 +75,7 @@ type IsolationVar struct {
 }
 
 // Spec 是注册表里一个 runtime 的投影描述（§6.1 ProjectionSpec 的声明式半场：
-// 启动形态 + 传输能力 + **纯数据**的落点/凭据/隔离声明；可执行半场 = acl 连接 + 该 adapter 的
+// 启动形态 + 传输能力 + **纯数据**的落点/凭据/隔离声明；可执行半场 = acp 连接 + 该 adapter 的
 // `resource.Syncer`，后者按 ADR-2 挂在 `Registry` 的第一张可执行端口表上，不进 Spec）。
 type Spec struct {
 	ID      string // 注册表键（= 该 adapter 的 id，如 "dsh"）
@@ -134,7 +134,7 @@ type Spec struct {
 	//
 	// 它存在的唯一理由是**如实可读**：用户面与 `mate doctor` 要能区分"已在该底座上声明"与
 	// "仅平台记录"——否则用户会以为在那一侧勾了图片也生效了（ADR-12 的结论段）。
-	// **它不是门禁**：能不能收图一律走连接期事实（`pkg/acl.Capabilities.Images`，ADR-14）。
+	// **它不是门禁**：能不能收图一律走连接期事实（`pkg/acp.Capabilities.Images`，ADR-14）。
 	DeclaresModelInput bool
 	// ModelCatalogNeedsCredential 该 runtime 的会话模型目录是否**按凭据过滤**。
 	//

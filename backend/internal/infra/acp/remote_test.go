@@ -1,4 +1,4 @@
-package acl
+package acp
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 // ——— A5 远程传输端到端测试的「真实 ACP server」 ——
 //
 // 两端都用真 SDK：本文件里的 server 侧是 acpsdk.NewAgentSideConnection，客户端侧是
-// acl.Dial（内部同样是 acpsdk.NewClientSideConnection）。传输层换的只是「字节怎么走」，
+// acp.Dial（内部同样是 acpsdk.NewClientSideConnection）。传输层换的只是「字节怎么走」，
 // 协议语义完全由 SDK 保证——这样测的是传输适配器，而不是自造的协议。
 
 // remoteAgent 是测试用 ACP agent（比 fakeAgent 多一层 conn 互斥，避免 -race 下
@@ -146,10 +146,10 @@ func (a *remoteAgent) requestPermission(ctx context.Context, sessionID acpsdk.Se
 	a.permResult <- "unknown"
 }
 
-// ——— 真实 ACP server（服务端用生产实现 acl.ServeWSSession / acl.NewRemoteHandler） ———
+// ——— 真实 ACP server（服务端用生产实现 acp.ServeWSSession / acp.NewRemoteHandler） ———
 
 // newWSACPServer 起一个真实 ACP server（agent 侧用 SDK）挂在 WS 端点 /acp 上，
-// 服务端半场复用生产实现（acl.ServeWSSession），因此测的是「客户端传输 ↔ 服务端传输」闭环。
+// 服务端半场复用生产实现（acp.ServeWSSession），因此测的是「客户端传输 ↔ 服务端传输」闭环。
 func newWSACPServer(t *testing.T, agent *remoteAgent) *httptest.Server {
 	t.Helper()
 	opts := RemoteServerOptions{Serve: func(peerInput io.Writer, peerOutput io.Reader) {
@@ -171,7 +171,7 @@ func newWSACPServer(t *testing.T, agent *remoteAgent) *httptest.Server {
 	return srv
 }
 
-// newHTTPACPServer 起一个真实 ACP server（Streamable HTTP 形态，生产实现 acl.NewRemoteHandler）。
+// newHTTPACPServer 起一个真实 ACP server（Streamable HTTP 形态，生产实现 acp.NewRemoteHandler）。
 func newHTTPACPServer(t *testing.T, agent *remoteAgent) (*httptest.Server, *countingHandler) {
 	t.Helper()
 	opts := RemoteServerOptions{Serve: func(peerInput io.Writer, peerOutput io.Reader) {

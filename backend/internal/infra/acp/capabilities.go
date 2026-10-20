@@ -1,4 +1,4 @@
-package acl
+package acp
 
 import acpsdk "github.com/coder/acp-go-sdk"
 

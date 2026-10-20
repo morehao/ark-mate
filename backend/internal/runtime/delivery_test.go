@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	pkgidentity "github.com/morehao/ark-mate/internal/identity"
-	"github.com/morehao/ark-mate/internal/resource"
+	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
+	"github.com/morehao/ark-mate/internal/core/resource"
 )
 
 // ——— 启动面多值参数（`--patch`）与身份端口表的静态判据 ———

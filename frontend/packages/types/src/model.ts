@@ -313,7 +313,7 @@ export interface ModelRef {
 }
 
 /**
- * 平台模型行 id 的形状（`mdl_` + 26 位 Crockford ULID，由 `internal/object/objid` 铸造）。
+ * 平台模型行 id 的形状（`mdl_` + 26 位 Crockford ULID，由 `internal/core/object/objid` 铸造）。
  *
  * 与后端守卫里的 `sessionModelIDForm`（`internal/archtest`）**同源**：那条是"库里存的必须是
  * 平台行 id"，这条是"客户端手上拿的必须是平台行 id"。

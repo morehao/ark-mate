@@ -12,10 +12,10 @@ import (
 // ——— 能力面的**注入适配**（P5a 之后本文件只剩这一半）———
 //
 // 能力定义的装配与装载（`LoadCapabilityDefinitions*` / `ReloadCapabilityDefinitions` /
-// `RegisterTool`）已随 P5a 归 `internal/registry.Planes`：那三件事只碰注册表、定义机制与库，
+// `RegisterTool`）已随 P5a 归 `internal/drivers/registry.Planes`：那三件事只碰注册表、定义机制与库，
 // 没有一样来自会话/编排，而网关子进程也要同一份实现。
 //
-// 留在本文件的是**注入适配**：把注册表里的定义折成 `acl.McpServer`（解析密钥、拼网关条目）。
+// 留在本文件的是**注入适配**：把注册表里的定义折成 `acp.McpServer`（解析密钥、拼网关条目）。
 // 它要读进程自己的可执行文件路径与凭据 cwd，属于编排侧的事实。
 
 // McpServersFor 选出可注入某 runtime 的 MCP server 子集（P2 §5.2/§5.3）：
@@ -30,9 +30,9 @@ import (
 // 会话重启后注入集悄悄变回全量默认（用户看不到任何提示）。
 //
 // v19 起没有"agent 白名单"这一层：会话没钉就是全量（按 runtime transport 过滤）。
-func (s *Service) McpServersFor(runtimeID string, sel *session.CapabilitySelection) []acl.McpServer {
+func (s *Service) McpServersFor(runtimeID string, sel *session.CapabilitySelection) []acp.McpServer {
 	plan := s.planMcpInjection(runtimeID, sel)
-	out := make([]acl.McpServer, 0, len(plan.Direct)+1)
+	out := make([]acp.McpServer, 0, len(plan.Direct)+1)
 	for _, m := range plan.Direct {
 		name := m.Name
 		if name == "" {
@@ -46,7 +46,7 @@ func (s *Service) McpServersFor(runtimeID string, sel *session.CapabilitySelecti
 			glog.Warnw(context.Background(), "mcp 注入跳过：密钥引用解析失败", "server", m.ID, "problems", problems)
 			continue
 		}
-		out = append(out, acl.McpServer{
+		out = append(out, acp.McpServer{
 			Name: name, Transport: m.Transport,
 			Command: m.Command, Args: m.Args, URL: m.URL,
 			Env: env, Headers: headers,

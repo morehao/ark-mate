@@ -2,7 +2,7 @@ package sessionruntime
 
 import (
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 
 // EnableStore 启用 SQLite 持久层（P1 live 接线）。启用后：
@@ -15,7 +15,7 @@ import (
 // 库句柄的接线分两半，**都从这里进**：
 //
 //   - 会话域（本层拥有）：`sessionPlane.SetStore`；
-//   - 领域平面与资源同步面（P5a 起归 `internal/registry`）：`planes.EnableStore` 一次接全
+//   - 领域平面与资源同步面（P5a 起归 `internal/drivers/registry`）：`planes.EnableStore` 一次接全
 //     （定义机制 / 凭据机制 / 技能平面 / 供应商域 / 工作空间域 / 自动化域 + 同步指纹装载 +
 //     装配期同步）。
 //

@@ -3,11 +3,12 @@ package session
 import (
 	"context"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/model"
 	"strconv"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -35,7 +36,7 @@ const (
 // UsageSummary 聚合用量统计。
 func (pl *Plane) UsageSummary(ctx context.Context, q UsageQuery) (*UsageSummary, error) {
 	if pl.st == nil {
-		return nil, code.FromError(acl.NewError(acl.ClassUnsupported, "usage_stats_unsupported",
+		return nil, code.FromError(acp.NewError(acp.ClassUnsupported, "usage_stats_unsupported",
 			"[usage_stats_unsupported] 内存模式（未启用 store）无 runs 读模型，用量统计不可用（请以 sqlite 模式启动）", nil))
 	}
 	tz, loc, err := parseUsageZone(q.TZOffset)
@@ -44,16 +45,16 @@ func (pl *Plane) UsageSummary(ctx context.Context, q UsageQuery) (*UsageSummary,
 	}
 	from, err := parseUsageTime(q.From, loc)
 	if err != nil {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_usage_range",
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "invalid_usage_range",
 			fmt.Sprintf("[invalid_usage_range] from 需为 RFC3339 或 YYYY-MM-DD：%q", q.From), nil))
 	}
 	to, err := parseUsageTime(q.To, loc)
 	if err != nil {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_usage_range",
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "invalid_usage_range",
 			fmt.Sprintf("[invalid_usage_range] to 需为 RFC3339 或 YYYY-MM-DD：%q", q.To), nil))
 	}
 	if !from.IsZero() && !to.IsZero() && !from.Before(to) {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_usage_range",
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "invalid_usage_range",
 			"[invalid_usage_range] from 必须早于 to（半开区间 [from, to)）", nil))
 	}
 	groupBy := q.GroupBy
@@ -61,12 +62,12 @@ func (pl *Plane) UsageSummary(ctx context.Context, q UsageQuery) (*UsageSummary,
 		groupBy = "day"
 	}
 	if groupBy != "day" {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_usage_group_by",
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "invalid_usage_group_by",
 			fmt.Sprintf("[invalid_usage_group_by] group_by 仅支持 day：%q", q.GroupBy), nil))
 	}
 	res, err := pl.st.UsageSummary(ctx, model.UsageQuery{From: from, To: to, Location: loc})
 	if err != nil {
-		return nil, code.FromError(acl.NewError(acl.ClassService, "usage_query_failed",
+		return nil, code.FromError(acp.NewError(acp.ClassService, "usage_query_failed",
 			fmt.Sprintf("[usage_query_failed] 用量聚合失败: %v", err), err))
 	}
 	out := &UsageSummary{
@@ -111,7 +112,7 @@ func parseUsageZone(v string) (int, *time.Location, error) {
 	}
 	off, err := strconv.Atoi(v)
 	if err != nil || off < -14*60 || off > 14*60 {
-		return 0, nil, acl.NewError(acl.ClassRequest, "invalid_usage_tz_offset",
+		return 0, nil, acp.NewError(acp.ClassRequest, "invalid_usage_tz_offset",
 			fmt.Sprintf("[invalid_usage_tz_offset] tz_offset 需为 -840..840 的整数分钟（东为正）：%q", v), nil)
 	}
 	if off == 0 {

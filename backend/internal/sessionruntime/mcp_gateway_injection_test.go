@@ -7,7 +7,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/capability"
+	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -123,7 +123,7 @@ func TestGatewayEntryCarriesPinnedSelectionOnly(t *testing.T) {
 	entryFor := func(sel *session.CapabilitySelection) string {
 		t.Helper()
 		entries := svc.McpServersFor("stub", sel)
-		var gw *acl.McpServer
+		var gw *acp.McpServer
 		for i := range entries {
 			if entries[i].Name == mcp.GatewayServerName {
 				gw = &entries[i]
@@ -196,8 +196,8 @@ func TestGatewayFoldingKeepsSecretValuesOutOfFingerprint(t *testing.T) {
 // directMcp 剔除**恒定的平台网关条目**：M7-3 之后，只要 MCP 面没被显式关掉
 // （`mcps: []`），注入集里永远有一条 `mate-gateway`——它不跟定义集走，也不该干扰
 // "哪几台 server 被注入"这类断言。要断言它**在不在**请用 `gatewayMcp`。
-func directMcp(servers []acl.McpServer) []acl.McpServer {
-	out := make([]acl.McpServer, 0, len(servers))
+func directMcp(servers []acp.McpServer) []acp.McpServer {
+	out := make([]acp.McpServer, 0, len(servers))
 	for _, s := range servers {
 		if s.Name == mcp.GatewayServerName {
 			continue
@@ -208,7 +208,7 @@ func directMcp(servers []acl.McpServer) []acl.McpServer {
 }
 
 // gatewayMcp 取恒定的网关条目（没有则 nil）。
-func gatewayMcp(servers []acl.McpServer) *acl.McpServer {
+func gatewayMcp(servers []acp.McpServer) *acp.McpServer {
 	for i := range servers {
 		if servers[i].Name == mcp.GatewayServerName {
 			return &servers[i]

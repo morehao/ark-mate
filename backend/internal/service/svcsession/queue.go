@@ -3,7 +3,7 @@ package svcsession
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
@@ -60,7 +60,7 @@ var _ QueueSvc = (*Queue)(nil)
 // 而前端的队列只认事件、不做本地推断——于是界面里那一行永远挂着，直到刷新页面。
 func (q *Queue) DeleteQueuedInput(ctx context.Context, id, inputID string) (bool, error) {
 	if id == "" || inputID == "" {
-		return false, code.FromError(acl.NewError(acl.ClassRequest, "input_required", "session_id 与 input_id 必填", nil))
+		return false, code.FromError(acp.NewError(acp.ClassRequest, "input_required", "session_id 与 input_id 必填", nil))
 	}
 	ok, err := q.plane.DeleteQueuedInput(ctx, id, inputID)
 	if err != nil {
@@ -84,7 +84,7 @@ func (q *Queue) DeleteQueuedInput(ctx context.Context, id, inputID string) (bool
 // requireParams 三个动作共用的参数校验（缺参 → `input_required`，与撤下那一条同码）。
 func requireParams(id, inputID string) error {
 	if id == "" || inputID == "" {
-		return code.FromError(acl.NewError(acl.ClassRequest, "input_required", "session_id 与 input_id 必填", nil))
+		return code.FromError(acp.NewError(acp.ClassRequest, "input_required", "session_id 与 input_id 必填", nil))
 	}
 	return nil
 }

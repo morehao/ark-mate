@@ -3,18 +3,19 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
-	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/infra/dsh"
+
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
@@ -55,7 +56,7 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 	t.Setenv("STUB_ACP_ENV_LOG", envLog)
 	reg, syncer := runtimetest.NewRegistry(stubACPSpec(t).Launch)
 
-	// ① 隔离：装机期投影（生产里这一步在 `internal/app` 的装配最前面）。
+	// ① 隔离：装机期投影（生产里这一步在 `internal/bootstrap/app` 的装配最前面）。
 	home := t.TempDir()
 	applied := reg.ApplyIsolationEnv(home)
 	if !reflect.DeepEqual(applied, []string{runtimetest.ID}) {

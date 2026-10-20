@@ -181,7 +181,7 @@ func TestOpenConnectionPragmasFollowGolibAndDriver(t *testing.T) {
 
 // TestOpenReadOnly 只读 URL（`?mode=ro`）必须能开、能读、不能写。
 //
-// internal/store 的只读句柄就是走这条路（readonly.go），它是「只读体检」类能力的底座。
+// internal/persistence/store 的只读句柄就是走这条路（readonly.go），它是「只读体检」类能力的底座。
 func TestOpenReadOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mate.db")
 	rw, err := Open(path)

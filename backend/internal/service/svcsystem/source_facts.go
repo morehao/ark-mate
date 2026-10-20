@@ -3,9 +3,9 @@ package svcsystem
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // ——— P4a 正文第八刀：事实来源的适配器收进用例层 ———

@@ -33,11 +33,11 @@ type ModelConfig struct {
 }
 
 // PromptRequest 一次 Prompt 的入参（§4.2 PromptRequest）。本版「会话即连接」：Text 为已接入
-// 字段；McpServers/HandoffMemo 为规划占位（当前 MCP 注入在 acl 会话层 SessionOptions 完成，
+// 字段；McpServers/HandoffMemo 为规划占位（当前 MCP 注入在 acp 会话层 SessionOptions 完成，
 // handoff 语义文档未定稿），先留签名避免将来破坏接口。
 type PromptRequest struct {
 	Text        string
-	McpServers  []acl.McpServer // 规划：本轮注入在 acl 会话层完成
+	McpServers  []acp.McpServer // 规划：本轮注入在 acp 会话层完成
 	HandoffMemo string          // 规划：handoff（未定稿）
 }
 
@@ -56,10 +56,10 @@ type Runtime interface {
 	// ManagesOwnContext 后端自管上下文/工具（§6.2 三投影均 true）。
 	ManagesOwnContext() bool
 	// Capabilities 返回底层连接握手到的能力（工具/MCP/权限面）。
-	Capabilities() acl.Capabilities
+	Capabilities() acp.Capabilities
 	// RuntimeSessionID 返回底层 ACP 会话 id（多轮续跑与诊断定位用）。
 	RuntimeSessionID() string
-	// Cancel 取消本会话进行中的 run（会话级执行原语；best-effort，见 acl.Session.Cancel）。
+	// Cancel 取消本会话进行中的 run（会话级执行原语；best-effort，见 acp.Session.Cancel）。
 	// 连接生命周期仍归 Orchestrator（§4.2 偏差），本方法只作用于会话执行面。
 	Cancel(ctx context.Context) error
 	// Prompt 发送一条用户消息并驱动到一轮停点，返回 stop reason（如 "end_turn"）。
@@ -68,9 +68,9 @@ type Runtime interface {
 	ApplyMode(ctx context.Context, mode Mode) error
 	// ApplyModel 切换模型，返回应用后的**全量**会话配置项状态。
 	// runtime 无模型配置项时返回不支持错误；值非法/不可用时返回运行时原始错误（不得吞）。
-	ApplyModel(ctx context.Context, m ModelConfig) ([]acl.ConfigOption, error)
+	ApplyModel(ctx context.Context, m ModelConfig) ([]acp.ConfigOption, error)
 	// ConfigOptions 返回该会话当前的会话配置项（运行时自报：模型目录及其它选项，空 = 未提供）。
-	ConfigOptions() []acl.ConfigOption
+	ConfigOptions() []acp.ConfigOption
 	// Resume 使 Runtime 回到指定会话（RuntimeSessionID）；无持久会话的 runtime 返回不支持错误。
 	Resume(ctx context.Context, sessionID string) error
 }

@@ -3,7 +3,7 @@
  *
  * 它解决什么：`make dev` 的循环是「构建一次 → `vite build --watch` 重写 dist → 核心服务**同一份
  * 产物**」——资产路径只有一条（P1 取消源码靶换来的），代价是**改完要手动刷新**。核心侧现
- * 在会在内容真的变了时经 SSE 推一帧（见 `backend/internal/router/web_watch.go`），这里收到
+ * 在会在内容真的变了时经 SSE 推一帧（见 `backend/internal/delivery/router/web_watch.go`），这里收到
  * 就整页刷新，把那一次手动动作省掉。
  *
  * 三条纪律：

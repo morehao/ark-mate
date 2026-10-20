@@ -36,7 +36,7 @@ func TestCommandPolicyEditorIsWired(t *testing.T) {
 		return string(raw)
 	}
 
-	routes := read("backend/internal/router/routes_commandpolicy.go")
+	routes := read("backend/internal/delivery/router/routes_commandpolicy.go")
 	if !strings.Contains(routes, `v1.GET("/command-policy"`) || !strings.Contains(routes, `v1.PUT("/command-policy"`) {
 		t.Errorf("routes_commandpolicy.go 没有同时注册 GET/PUT /command-policy——读写面缺一半")
 	}

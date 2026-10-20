@@ -8,19 +8,19 @@ import (
 
 // sessionRuntime 是 Runtime 接口（§4.2 会话边界版）在「一条活着的 ACP 会话」上的通用实现：
 // ID/ManagesOwnContext/… 均取自该 runtime 的投影 Spec（§6.1/§6.2），Prompt/Capabilities/
-// RuntimeSessionID 透传底层 acl.Session。
+// RuntimeSessionID 透传底层 acp.Session。
 //
 // 各底座的会话投影共用本实现（各自以对应 Spec 实例化，见 NewProjection）。
 // ApplyMode/ApplyModel/Resume 需底座侧原生支持或映射实测，当前统一显式返回 unsupported_*
 // 错误（§6.2 ModeMapping / §5.5 模型面为文档开放项），不静默吞掉。
 type sessionRuntime struct {
 	spec Spec
-	sess *acl.Session
+	sess *acp.Session
 }
 
-// newSessionRuntime 以给定 Spec 包装已拨活的会话。调用方负责会话生命周期（acl.Session 的
+// newSessionRuntime 以给定 Spec 包装已拨活的会话。调用方负责会话生命周期（acp.Session 的
 // Close，与 Orchestrator 持有连接回收的方式一致）。
-func newSessionRuntime(spec Spec, sess *acl.Session) *sessionRuntime {
+func newSessionRuntime(spec Spec, sess *acp.Session) *sessionRuntime {
 	return &sessionRuntime{spec: spec, sess: sess}
 }
 
@@ -29,12 +29,12 @@ var _ Runtime = (*sessionRuntime)(nil)
 
 // unsupported 构造「该投影不支持此操作」的请求类错误（REST 面可据 code 精确映射）。
 func unsupported(code, details string) error {
-	return acl.NewError(acl.ClassRequest, code, details, nil)
+	return acp.NewError(acp.ClassRequest, code, details, nil)
 }
 
 func (r *sessionRuntime) ID() string              { return r.spec.ID }
 func (r *sessionRuntime) ManagesOwnContext() bool { return r.spec.ManagesOwnContext }
-func (r *sessionRuntime) Capabilities() acl.Capabilities {
+func (r *sessionRuntime) Capabilities() acp.Capabilities {
 	return r.sess.Client().Capabilities()
 }
 func (r *sessionRuntime) RuntimeSessionID() string { return r.sess.ID() }
@@ -58,7 +58,7 @@ func (r *sessionRuntime) ApplyMode(_ context.Context, _ Mode) error {
 }
 
 // ConfigOptions 返回本会话的会话配置项（模型目录等，全部由运行时自报）。
-func (r *sessionRuntime) ConfigOptions() []acl.ConfigOption {
+func (r *sessionRuntime) ConfigOptions() []acp.ConfigOption {
 	return r.sess.ConfigOptions()
 }
 
@@ -75,9 +75,9 @@ func (r *sessionRuntime) ConfigOptions() []acl.ConfigOption {
 //
 // 思考档位（category=thought_level）不在平台侧下发：运行时若提供该选项，只随全量状态原样
 // 透出（展示/可观测），平台不代为选择。
-func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) ([]acl.ConfigOption, error) {
+func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) ([]acp.ConfigOption, error) {
 	opts := r.sess.ConfigOptions()
-	mOpt, ok := acl.FindConfigOption(opts, acl.CategoryModel)
+	mOpt, ok := acp.FindConfigOption(opts, acp.CategoryModel)
 	if !ok {
 		return opts, unsupported("unsupported_model",
 			"runtime "+r.spec.ID+" 未广告模型配置项（category=model），无法在会话内切换模型")
@@ -88,11 +88,11 @@ func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) ([]acl.C
 	return r.sess.SetConfigOption(ctx, mOpt.ID, m.Model)
 }
 
-// Resume 热切换会话。会话恢复的 ACP 承载为 acl.Client.ResumeSession（session/resume 支持随
+// Resume 热切换会话。会话恢复的 ACP 承载为 acp.Client.ResumeSession（session/resume 支持随
 // 底座而异，待实测）；投影持有单会话，不做隐式热切换，由调用方按需重建投影。
 func (r *sessionRuntime) Resume(_ context.Context, _ string) error {
 	return unsupported("unsupported_resume",
-		"runtime "+r.spec.ID+" 不支持投影内 Resume：恢复走 acl.Client.ResumeSession，需重建投影")
+		"runtime "+r.spec.ID+" 不支持投影内 Resume：恢复走 acp.Client.ResumeSession，需重建投影")
 }
 
 // ——— 会话投影的公开形态（§6.2） ———
@@ -109,6 +109,6 @@ func (r *sessionRuntime) Resume(_ context.Context, _ string) error {
 // `run.go` / `session_start.go` 都有显式判空。
 //
 // sess 为 nil 时仍返回非 nil 实例（构造不触碰会话；方法调用方负责非 nil）。
-func NewProjection(spec Spec, sess *acl.Session) Runtime {
+func NewProjection(spec Spec, sess *acp.Session) Runtime {
 	return newSessionRuntime(spec, sess)
 }

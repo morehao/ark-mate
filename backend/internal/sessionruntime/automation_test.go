@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/automation"
+	"github.com/morehao/ark-mate/internal/core/automation"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
-	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 )

@@ -18,16 +18,16 @@ import (
 // 而"例外退化成 SOP"的路径上没有任何别的测试会变红——半年后再改 schema 的人看到
 // `DROP TABLE` + `backup: "v15"`，会把它当成既有手法照抄，而每次重建都在静默清空用户历史。
 
-// migrationStepFiles 返回 `internal/store/migrate_v*.go`（版本步文件；内核本体 migrate.go 不在其中）。
+// migrationStepFiles 返回 `internal/persistence/store/migrate_v*.go`（版本步文件；内核本体 migrate.go 不在其中）。
 //
 // 测试文件（`*_test.go`）不在扫描面里：它们的职责恰恰是**用当前实体常量**去读那些表
 // （"停在 v15 之前"的用例要用裸 SQL 造历史表，其余用例走 DAO），把它们算进来等于让守卫
 // 与它自己的夹具打架。
 func migrationStepFiles(t *testing.T) []string {
 	t.Helper()
-	all, err := filepath.Glob(filepath.Join(backendRoot(t), "internal", "store", "migrate_v*.go"))
+	all, err := filepath.Glob(filepath.Join(backendRoot(t), "internal", "persistence", "store", "migrate_v*.go"))
 	if err != nil || len(all) == 0 {
-		t.Fatalf("扫不到 internal/store/migrate_v*.go: %v（fail-closed）", err)
+		t.Fatalf("扫不到 internal/persistence/store/migrate_v*.go: %v（fail-closed）", err)
 	}
 	files := make([]string, 0, len(all))
 	for _, f := range all {
@@ -53,7 +53,7 @@ var sqlStatementMarkers = []string{
 
 // TestMigrationStepsUseHistoricalLiterals 守卫⑤：版本步只许写字面量。
 //
-// 判据：`internal/store/migrate_v*.go` 剥注释后不得出现 `model.TableName*` 常量。
+// 判据：`internal/persistence/store/migrate_v*.go` 剥注释后不得出现 `model.TableName*` 常量。
 //
 // 不修会怎样：`migrate_v14.go` 的 `SELECT COUNT(*) FROM <表>` 在实体改名后会指向**当时还不
 // 存在的表**，于是**新库第一次启动**（内核从 v1 顺序重放到最新）直接失败；而本机老库测不出来
@@ -87,7 +87,7 @@ func TestMigrationStepsUseHistoricalLiterals(t *testing.T) {
 
 // migrationDrop 是一处 `DROP TABLE` 的登记项。
 type migrationDrop struct {
-	File   string // 相对 internal/store 的文件名
+	File   string // 相对 internal/persistence/store 的文件名
 	Table  string
 	Reason string // 为什么它不算"清库重建"
 }
@@ -139,7 +139,7 @@ var migrationStructFields = []string{"version", "name", "statements", "apply", "
 //
 // fail-closed：解析不到 `migration` 结构体、或 v15 条目 → 红。
 func TestDestructiveRebuildIsOneShot(t *testing.T) {
-	storeDir := filepath.Join(backendRoot(t), "internal", "store")
+	storeDir := filepath.Join(backendRoot(t), "internal", "persistence", "store")
 
 	// ① 内核结构体零改动。
 	migrateRaw, err := os.ReadFile(filepath.Join(storeDir, "migrate.go"))
@@ -248,7 +248,7 @@ func TestDestructiveRebuildIsOneShot(t *testing.T) {
 		value := strings.TrimPrefix(e.Metadata, "meta.")
 		constName, ok := metaConst[value]
 		if !ok {
-			t.Fatalf("`v15TablePlan` 登记了 %s，但 `internal/model/enum.go` 里没有值为 %q 的 MetaKey 常量"+
+			t.Fatalf("`v15TablePlan` 登记了 %s，但 `internal/persistence/model/enum.go` 里没有值为 %q 的 MetaKey 常量"+
 				"——登记表写了一个不存在的键（R6 的登记必须能落到代码上）", e.Metadata, value)
 		}
 		if !strings.Contains(applySrc, "model."+constName) {
@@ -282,10 +282,10 @@ func TestDestructiveRebuildIsOneShot(t *testing.T) {
 
 	// ⑥ `mate migrate` 不得出现 `--rebuild` 之类的入口（C1）。
 	//
-	// 扫描面跟着实现走：v3.2 刀 10 把命令体搬进了 `internal/maintenance`（命令层只剩分发）。
+	// 扫描面跟着实现走：v3.2 刀 10 把命令体搬进了 `internal/bootstrap/maintenance`（命令层只剩分发）。
 	// 判据仍然是"flag 集合恰好是 db,transcripts"——换位置不改判据。
 	cmdSrc := stripLineComments(readFileOrFatal(t,
-		filepath.Join(backendRoot(t), "internal", "maintenance", "migrate.go")))
+		filepath.Join(backendRoot(t), "internal", "bootstrap", "maintenance", "migrate.go")))
 	flagRe := regexp.MustCompile(`fs\.(?:String|Bool|Int)\(\s*"([^"]+)"`)
 	var flags []string
 	for _, m := range flagRe.FindAllStringSubmatch(cmdSrc, -1) {
@@ -317,7 +317,7 @@ func v15DropTables(t *testing.T, migrateSrc string) []string {
 	return out
 }
 
-// collectDropTables 扫 `internal/store/migrate*.go` 里全部 `DROP TABLE`。
+// collectDropTables 扫 `internal/persistence/store/migrate*.go` 里全部 `DROP TABLE`。
 func collectDropTables(t *testing.T, storeDir string) []migrationDrop {
 	t.Helper()
 	files, err := filepath.Glob(filepath.Join(storeDir, "migrate*.go"))
@@ -425,21 +425,21 @@ func parseV15RecastPlan(t *testing.T, storeDir string) []v15RecastEntry {
 	return out
 }
 
-// readMetaKeyConstants 读 `internal/model/enum.go`，返回 meta 键**值 → 常量名**的映射。
+// readMetaKeyConstants 读 `internal/persistence/model/enum.go`，返回 meta 键**值 → 常量名**的映射。
 //
 // 为什么需要它：登记表写人类可读的键名（`imported_transcripts`），代码里写常量
 // （`model.MetaKeyImportMarker`）——不建这条映射，R6 的"清理项真的在 apply 里"就只能靠
 // 字面值匹配，而字面值恰好出现在注释里，判据会永远为真。
 func readMetaKeyConstants(t *testing.T) map[string]string {
 	t.Helper()
-	src := stripLineComments(readFileOrFatal(t, filepath.Join(backendRoot(t), "internal", "model", "enum.go")))
+	src := stripLineComments(readFileOrFatal(t, filepath.Join(backendRoot(t), "internal", "persistence", "model", "enum.go")))
 	re := regexp.MustCompile(`(?m)^\s*(MetaKey\w+)\s*=\s*"([^"]+)"`)
 	out := map[string]string{}
 	for _, m := range re.FindAllStringSubmatch(src, -1) {
 		out[m[2]] = m[1]
 	}
 	if len(out) == 0 {
-		t.Fatal("在 internal/model/enum.go 里解析不到任何 `MetaKey*` 常量（fail-closed）")
+		t.Fatal("在 internal/persistence/model/enum.go 里解析不到任何 `MetaKey*` 常量（fail-closed）")
 	}
 	return out
 }

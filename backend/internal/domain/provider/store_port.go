@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // ProviderStore 供应商档案与模型定义的载体（v3.2 刀 8）。

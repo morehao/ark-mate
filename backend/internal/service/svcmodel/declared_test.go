@@ -3,17 +3,18 @@ package svcmodel
 import (
 	"context"
 	"errors"
-	"github.com/morehao/ark-mate/internal/infra/dsh"
-	"github.com/morehao/ark-mate/internal/registry"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/drivers/registry"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
+
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/resource"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/golib/gerror"
 )
@@ -39,7 +40,7 @@ func codeOf(err error) int {
 
 // errCode 取对外业务码的**符号名**（`invalid_param`/`model_exists`…）。
 func errCode(err error) string {
-	if ae, ok := acl.As(err); ok {
+	if ae, ok := acp.As(err); ok {
 		return ae.Code
 	}
 	return ""

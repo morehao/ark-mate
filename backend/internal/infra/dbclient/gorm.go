@@ -48,7 +48,7 @@ import (
 	//   - **外键从"写了也不生效"变成真的生效**：wasm 构建带
 	//     `SQLITE_DEFAULT_FOREIGN_KEYS=1`（SQLite 官方推荐编译项），DDL 里的 REFERENCES
 	//     会真的拦住孤儿行（旧 mattn 构建下 SQLite 默认关闭）。仓库里所有写子表的路径
-	//     都在父行之后写，因此这是净收益；`internal/store` 里"因为驱动不注入 foreign_keys、
+	//     都在父行之后写，因此这是净收益；`internal/persistence/store` 里"因为驱动不注入 foreign_keys、
 	//     所以写了也不生效"的老注释已随之改正。
 	//   - 内存库：每次 `dbgorm.New` 分配一个**新**库名（`file:/mem_<n>?vfs=memdb`），
 	//     所以同进程两次 `Open(":memory:")` 拿到两个互不可见的空库（旧 driver 是固定名
@@ -72,7 +72,7 @@ const (
 // Open 打开（必要时创建）SQLite 库并返回 gorm 句柄。
 // path 为文件路径（可带 `?mode=ro` 这类 SQLite URI 参数）；空串或 ":memory:" 表示内存库。
 //
-// 迁移不在这里做：schema 版本由 store 的自管迁移内核负责（见 internal/store/migrate.go）。
+// 迁移不在这里做：schema 版本由 store 的自管迁移内核负责（见 internal/persistence/store/migrate.go）。
 func Open(path string) (*gorm.DB, error) {
 	if path == "" {
 		path = memoryDB

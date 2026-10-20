@@ -18,9 +18,9 @@ import (
 //
 // 判据 = 剥注释后零命中 `vault`（大小写不敏感），只放三类正当残留（见白名单）：
 //
-//	① **一次性搬运**（`internal/store/legacy_vault.go`）：它必须认识旧格式，才能把用户盘上那份
+//	① **一次性搬运**（`internal/persistence/store/legacy_vault.go`）：它必须认识旧格式，才能把用户盘上那份
 //	   密文解出来搬进库——这是全仓唯一允许"知道 vault 是什么"的地方；
-//	② **历史那一版**（`internal/store/migrate.go` 的历史 DDL 与 v20 收口语句、以及停在那一版的
+//	② **历史那一版**（`internal/persistence/store/migrate.go` 的历史 DDL 与 v20 收口语句、以及停在那一版的
 //	   迁移夹具）：迁移内核纪律是「只追加、绝不回改历史」，v20 的前缀改写必须写出旧前缀才改得掉它，
 //	   夹具也必须按旧版写才测得到改写；
 //	③ **旧前缀的显式翻译点**：档案文件（`providers.json`、capability 目录里的 `mcp/*.json`）不在
@@ -79,7 +79,7 @@ func TestNoVaultVocabulary(t *testing.T) {
 // vaultVocabularyWhitelistEntry 一条登记：**目录/文件前缀**或**路径无关锚**恰好一种，外加理由。
 //
 //   - `path`：相对仓库根的前缀（豁免整棵目录时用）。只给**落点稳定**的登记——本次分层重构不动
-//     `internal/store`、`internal/capability`、`internal/app`。
+//     `internal/persistence/store`、`internal/core/capability`、`internal/bootstrap/app`。
 //   - `anchor`：**路径无关锚**——一个只出现在**唯一一个**被扫描文件里的符号；含它的那个文件被豁免。
 //     `manager` 包里的 `provider_doctor.go` 会搬到 `mechanism/doctor/`（设计 §3.4 文件去向表），
 //     所以它只有锚、没有路径：符号跟着文件走，登记不会因为一次搬家而悬空。
@@ -107,31 +107,31 @@ func (w vaultVocabularyWhitelistEntry) key() string {
 // 的登记簿，不是"懒得改"的垃圾桶。
 var vaultVocabularyWhitelist = []vaultVocabularyWhitelistEntry{
 	{
-		path: "backend/internal/store/legacy_vault.go",
+		path: "backend/internal/persistence/store/legacy_vault.go",
 		reason: "**一次性搬运**：它必须认识旧格式（目录名、keyfile 名与环境变量、AES-GCM 的 AAD " +
 			"绑定、引用串前缀、main key 的两种编码）才能把用户盘上那份密文解出来写进 `providers.key` " +
 			"与 `mcp_secrets`。这是全仓唯一允许知道 vault 是什么的地方——它只读不删，单条失败与缺主密钥" +
 			"都只记问题、不中断整批",
 	},
 	{
-		path: "backend/internal/store/legacy_vault_test.go",
+		path: "backend/internal/persistence/store/legacy_vault_test.go",
 		reason: "**停在 v20 之前的真实产物夹具**：那份密文字节串是用当年真实的加密实现 + 固定主密钥" +
 			"预先造好的**冻结工件**，解不开它就说明搬运逻辑与当年那份实现分叉了哪怕一位。夹具按当时" +
 			"那一版写，测的才是「旧文件还能装载」",
 	},
 	{
-		path: "backend/internal/store/migrate.go",
+		path: "backend/internal/persistence/store/migrate.go",
 		reason: "**历史那一版的 DDL 与 v20 的收口语句**：v19 及更早的语句里就有 `vault:` 引用串，" +
 			"而 `UPDATE mcp_servers SET body = replace(body,'vault:','store:')` 必须写出旧前缀才改得掉" +
 			"（迁移内核纪律：只追加，绝不回改历史语句）",
 	},
 	{
-		path: "backend/internal/store/migrate_test.go",
+		path: "backend/internal/persistence/store/migrate_test.go",
 		reason: "**迁移夹具**：断言「旧前缀被改写」「旧引用被翻译」的用例必须按当时那一版写旧前缀，" +
 			"否则测不到改写；v13 建表列集合的冻结断言也在这一类里",
 	},
 	{
-		path: "backend/internal/assembly/assembly.go",
+		path: "backend/internal/bootstrap/assembly/assembly.go",
 		reason: "**装配期的一次性搬运**：启动时调 `st.ImportLegacyVault(ctx, anchor)` 并把它搬了" +
 			"几条、哪几条失败（只带引用名与条数，绝不含值）打成 WARN。这是全仓唯一的调用点——" +
 			"装配层知道旧物在哪（`LegacySecretAnchor`），搬运器知道怎么解",
@@ -146,24 +146,24 @@ var vaultVocabularyWhitelist = []vaultVocabularyWhitelistEntry{
 			"点名被撤掉的键」同形：只说「有遗留物」等于让用户去猜",
 	},
 	{
-		path: "backend/internal/capability/secretref.go",
+		path: "backend/internal/core/capability/secretref.go",
 		reason: "**旧前缀的唯一翻译点**：档案文件（`providers.json`、能力目录里的 `mcp/*.json`）不在" +
 			"库里、v20 迁移改不到它们，所以导入时必须认出旧前缀并翻成 `store:`（顺带 WARN）。" +
 			"常量名与注释都写着「这是全仓唯一一处翻译点」",
 	},
 	{
-		path: "backend/internal/capability/secretref_test.go",
+		path: "backend/internal/core/capability/secretref_test.go",
 		reason: "**翻译点的判据**：它必须写出旧前缀才能证明「认得出、翻得对、并且告警」——" +
 			"与 `router_test.go` 里禁历史名的理由同形（守卫扫自己必然自证其罪）",
 	},
 	{
-		path: "backend/internal/store/migrate_v13_test.go",
+		path: "backend/internal/persistence/store/migrate_v13_test.go",
 		reason: "**停在 v13 那一版的历史夹具**：它用裸 SQL 造一条「文件里只留引用」形态的历史行" +
 			"（`key_ref` 指旧前缀），测的正是「旧行的密钥落点被搬进 `key` 列」这条链路；" +
 			"夹具按当时那一版写才测得到搬运",
 	},
 	{
-		path: "backend/internal/store/credentials_test.go",
+		path: "backend/internal/persistence/store/credentials_test.go",
 		reason: "**迁移夹具**：读库用例沿用它自己造出来的历史行（那些行的 `body` 里带旧前缀），" +
 			"断言读出来已是 `store:` 形态",
 	},

@@ -1,4 +1,4 @@
-package acl
+package acp
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/morehao/ark-mate/internal/object/objusage"
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 )
 
 // collect 收集 normalizeUpdate 输出的事件（按 Kind+关键文本）。

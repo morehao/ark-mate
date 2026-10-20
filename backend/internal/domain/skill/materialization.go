@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -28,11 +28,11 @@ func declaredFormats() string { return strings.Join(capability.VettedFormats(), 
 // （`missing` / `disabled` / `not_applicable` / `user_owned`）。修复不在这里做——重校与启停负责写。
 func (m *Plane) SkillMaterialization(id string) (*MaterializationView, error) {
 	if m.caps == nil {
-		return nil, code.FromError(acl.NewError(acl.ClassService, "capability_unavailable", "能力数据面未装配", nil))
+		return nil, code.FromError(acp.NewError(acp.ClassService, "capability_unavailable", "能力数据面未装配", nil))
 	}
 	sk, ok := m.caps.SkillByID(id)
 	if !ok {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "skill_not_found", fmt.Sprintf("未知 skill %q", id), nil))
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "skill_not_found", fmt.Sprintf("未知 skill %q", id), nil))
 	}
 	resp := &MaterializationView{ID: sk.ID, Enabled: sk.IsEnabled()}
 	projections := m.Snapshot()

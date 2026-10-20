@@ -7,7 +7,7 @@ package runtime
 //   - **RegisterPorts** 把可执行半场登记进注册表的五张端口表（syncer / 原生权限 / 模型值 /
 //     工具失败归类 / 产品身份）。落点解析之类"只有 adapter 知道"的知识留在 adapter 里。
 //
-// 装配根显式 `dsh.New()` → `NewAdapterRegistry(...)`：**只有 `internal/assembly` 认识具体
+// 装配根显式 `dsh.New()` → `NewAdapterRegistry(...)`：**只有 `internal/bootstrap/assembly` 认识具体
 // adapter**，`internal/runtime` 不认识任何实现（`TestRuntimeDoesNotImportRuntimeAdaptersV31`
 // 钉住这条）。第二个底座出现时在装配根加一个 `switch`，不引入 init、不写匿名 import。
 type Adapter interface {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/core/redact"
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/redact"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 )
 
@@ -15,7 +15,7 @@ import (
 //
 // 自检的判据（默认零出网、上游四种结论、目录未知档、redact 闸门）在用例层
 // （`internal/service/svcmodel/probe_test.go`），自检用例的**装配**判据在
-// `internal/controller/ctrmodel/probe_test.go`，两条合起来才完整。
+// `internal/delivery/controller/ctrmodel/probe_test.go`，两条合起来才完整。
 //
 // 本文件验的是用例级夹具验不了的那一段：**真的建档 → 密钥真值落进域平面 → `providerEnvFor`
 // 登记动态密钥**。用例层只能自己 `redact.RegisterDynamicSecret` 去模拟这一步（那证明闸门在），

@@ -1,11 +1,12 @@
 package credentials
 
 import (
-	"github.com/morehao/ark-mate/internal/credential"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/core/credential"
 )
 
 // fakeEnv 让"继承环境"这一层可测：真 os.Setenv 会让用例互相影响（并行与子进程都不安全）。

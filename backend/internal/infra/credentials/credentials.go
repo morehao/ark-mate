@@ -32,11 +32,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/credential"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/morehao/ark-mate/internal/core/credential"
 )
 
 // Request 描述"要解析哪个凭据"。

@@ -10,9 +10,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/code"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -48,7 +48,7 @@ func (s *gatedSession) Prompt(ctx context.Context, text string) (string, error) 
 }
 
 func (s *gatedSession) Cancel(context.Context) error      { return nil }
-func (s *gatedSession) ConfigOptions() []acl.ConfigOption { return nil }
+func (s *gatedSession) ConfigOptions() []acp.ConfigOption { return nil }
 
 func (s *gatedSession) prompts() []string {
 	s.mu.Lock()
@@ -398,11 +398,11 @@ func TestPromptDeliveryValidation(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
 	startFirstRun(t, orch, g, "第一轮")
 
-	// 领域层：稳定 code 在 acl 错误上（`delivery_*` 这类码由 acl.As 读出，不进文案）。
+	// 领域层：稳定 code 在 acp 错误上（`delivery_*` 这类码由 acp.As 读出，不进文案）。
 	if _, err := session.NormalizeDelivery("whenever"); err == nil {
 		t.Fatal("非法 delivery 应报错")
 	} else {
-		var ae *acl.Error
+		var ae *acp.Error
 		if !errors.As(err, &ae) || ae.Code != "invalid_delivery" {
 			t.Fatalf("应报 invalid_delivery: %v", err)
 		}
@@ -410,7 +410,7 @@ func TestPromptDeliveryValidation(t *testing.T) {
 	if got, err := session.NormalizeDelivery(""); err != nil || got != session.DeliveryReject {
 		t.Fatalf("空值应归一为 reject: %q/%v", got, err)
 	}
-	// 服务出口：信封码是 acl 分类的投影（ClassRequest → 40001，ClassLimit → 40901）。
+	// 服务出口：信封码是 acp 分类的投影（ClassRequest → 40001，ClassLimit → 40901）。
 	if _, err := svc.PromptSession(context.Background(), "conv-1",
 		dtosession.PromptReq{Prompt: "x", Delivery: "whenever"}); err == nil {
 		t.Fatal("非法 delivery 应报错")
