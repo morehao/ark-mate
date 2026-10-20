@@ -11,7 +11,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -58,7 +57,7 @@ func capabilitySelectionFromReq(req *dtosession.CapabilitiesReq) *session.Capabi
 // CreateSession 在构建期选定的底座上建立会话，若携带 prompt 则发起首轮（后台执行，事件经 WS 出流）。
 func (s *Session) CreateSession(ctx context.Context, req dtosession.SessionCreateReq) (*dtosession.SessionCreateResp, error) {
 	if s.deps.Starter == nil {
-		return nil, code.FromError(acp.NewError(acp.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+		return nil, code.FromError(code.ServiceError("orchestrator_unavailable", "服务尚未装配编排器"))
 	}
 	runCtx := context.WithoutCancel(ctx)
 	if err := rejectRemovedAgentSelection(req.AgentID); err != nil {
@@ -86,8 +85,7 @@ func (s *Session) CreateSession(ctx context.Context, req dtosession.SessionCreat
 			explicit = p
 		}
 		if explicit != "" && explicit != row.Path {
-			return nil, code.FromError(acp.NewError(acp.ClassRequest, "workspace_conflict",
-				fmt.Sprintf("workspace_id 与 cwd 指向不同目录：%s ≠ %s", row.Path, explicit), nil))
+			return nil, code.FromError(code.RequestError("workspace_conflict", fmt.Sprintf("workspace_id 与 cwd 指向不同目录：%s ≠ %s", row.Path, explicit)))
 		}
 		spec = row.Path
 	}
@@ -145,10 +143,10 @@ func (s *Session) CreateSession(ctx context.Context, req dtosession.SessionCreat
 // PromptSession 向既有会话追加一轮 prompt（后台执行）。
 func (s *Session) PromptSession(ctx context.Context, id string, req dtosession.PromptReq) (*dtosession.SessionPromptResp, error) {
 	if s.deps.Prompt == nil {
-		return nil, code.FromError(acp.NewError(acp.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+		return nil, code.FromError(code.ServiceError("orchestrator_unavailable", "服务尚未装配编排器"))
 	}
 	if id == "" || req.Prompt == "" {
-		return nil, code.FromError(acp.NewError(acp.ClassRequest, "prompt_required", "session_id 与 prompt 必填", nil))
+		return nil, code.FromError(code.RequestError("prompt_required", "session_id 与 prompt 必填"))
 	}
 	if _, err := session.NormalizeDelivery(req.Delivery); err != nil {
 		return nil, code.FromError(err)
@@ -166,7 +164,7 @@ func (s *Session) PromptSession(ctx context.Context, id string, req dtosession.P
 // CancelRun 取消会话进行中的 run（无 run 时幂等 no-op）。
 func (s *Session) CancelRun(ctx context.Context, id string) error {
 	if s.deps.Canceller == nil {
-		return code.FromError(acp.NewError(acp.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+		return code.FromError(code.ServiceError("orchestrator_unavailable", "服务尚未装配编排器"))
 	}
 	if err := s.deps.Canceller.CancelRun(ctx, id); err != nil {
 		return code.FromError(err)
@@ -188,7 +186,6 @@ func rejectRemovedAgentSelection(agentID json.RawMessage) error {
 	if session.JSONNullish(agentID) {
 		return nil
 	}
-	return acp.NewError(acp.ClassRequest, "agent_selection_removed",
-		"agent 概念已并入 runtime：底座由构建期固定（本机为 "+runtime.SelectedRuntime()+"），"+
-			"会话不再有 `agent_id`；换底座要重新构建（-X pkg/runtime.BuildRuntime=<id>）", nil)
+	return code.RequestError("agent_selection_removed", "agent 概念已并入 runtime：底座由构建期固定（本机为 "+runtime.SelectedRuntime()+"），"+
+		"会话不再有 `agent_id`；换底座要重新构建（-X pkg/runtime.BuildRuntime=<id>）")
 }

@@ -110,6 +110,9 @@ var v32Layers = map[string]v32Layer{
 	// deny `internal/service` 同时挡住兄弟 svc 与自身（自 import 不会出现在图里）。
 	"internal/service": {layer: 4, name: "service", deny: []string{
 		"internal/service", "internal/persistence/store", "internal/persistence/dao", "internal/infra/dsh",
+		// C2 第二刀：用例层不写协议分类。业务错误的构造面在 `core/code`
+		// （RequestError/ServiceError/…），分类 → 对外码的投影也住那里。
+		"internal/infra/acp",
 		"internal/drivers/mechanism", "internal/drivers/registry", "internal/drivers/runtimeconn",
 		"internal/sessionruntime", "internal/drivers/gateway", "internal/delivery/controller",
 		"internal/delivery/middleware", "internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app",

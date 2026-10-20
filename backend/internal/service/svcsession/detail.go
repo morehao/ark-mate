@@ -9,7 +9,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // DetailSvc 会话**详情读面**：单会话详情 + 三份交互快照（挂起权限 / 权限记忆 / 挂起提问）。
@@ -67,7 +66,7 @@ var _ DetailSvc = (*Detail)(nil)
 // 文案与码单点声明——四条出口各写一遍的表现是同一个原因几个文案，而 `session_not_found`
 // 是前端用来做跳转判断的稳定码，文案漂移只会让人以为遇到了另一种情况。
 func sessionNotFoundErr(id string) error {
-	return code.FromError(acp.NewError(acp.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	return code.FromError(code.RequestError("session_not_found", fmt.Sprintf("未知会话 %q", id)))
 }
 
 // GetSession 返回单会话详情（元数据 + 挂起权限 + 会话级始终允许记忆）。

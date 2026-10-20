@@ -5,7 +5,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -22,9 +22,8 @@ func rejectRemovedUsageDimension(q dtousage.UsageQueryReq) error {
 	if strings.TrimSpace(q.AgentID) == "" {
 		return nil
 	}
-	return acp.NewError(acp.ClassRequest, "agent_selection_removed",
-		"[agent_selection_removed] 用量面没有按底座筛选这个维度：底座由构建期固定（本机为 "+
-			runtime.SelectedRuntime()+"），`agent_id` 已下线；要按时间看用 group_by=day", nil)
+	return code.RequestError("agent_selection_removed", "[agent_selection_removed] 用量面没有按底座筛选这个维度：底座由构建期固定（本机为 "+
+		runtime.SelectedRuntime()+"），`agent_id` 已下线；要按时间看用 group_by=day")
 }
 
 // JSONNullish 该原始 JSON 是否"没带"（空 / null）。

@@ -189,3 +189,51 @@ func truncateRunes(s string, n int) string {
 	}
 	return string(r[:n]) + "…"
 }
+
+// ——— 业务错误的**构造面**：调用方只写"这是什么错"，不写协议怎么描述它 ———
+//
+// 为什么有这一组：`acp.NewError` 的四个参数里，第一个是 **ACP 的分类枚举**（可操作语义：重试、
+// 登录、换参数、降级），后三个才是文案与 cause。用例层为了借这套语义被迫 import 协议库
+// （`service` 里 10 个文件），于是"内圈认识外圈协议"这条裂缝从错误出口重新长回来。
+//
+// 分类 → 对外码的投影本来就住在**本包**（`fromACP`），构造与投影住在同一处才谈得上收口。
+// 返回值仍是 `*acp.Error`（class 语义是所有分类消费方的共同货币，ACP 只是它今天的载体），
+// 所以既有分类路径（`acp.Classify` / `acp.As` / 控制器出口）行为逐字不变。
+
+// RequestError 请求侧错误：调用方改参数/换资源后可以重试（Class=request）。
+func RequestError(name, msg string) error {
+	return acp.NewError(acp.ClassRequest, name, msg, nil)
+}
+
+// LimitError 与当前状态冲突或超出额度（Class=limit → 40901）。
+func LimitError(name, msg string) error {
+	return acp.NewError(acp.ClassLimit, name, msg, nil)
+}
+
+// AccessError 鉴权/授权不通过（Class=access → 40101）。
+func AccessError(name, msg string) error {
+	return acp.NewError(acp.ClassAccess, name, msg, nil)
+}
+
+// UnsupportedError 当前形态明确不支持（Class=unsupported → 40501）。
+func UnsupportedError(name, msg string) error {
+	return acp.NewError(acp.ClassUnsupported, name, msg, nil)
+}
+
+// ServiceError 平台自身失败（Class=service → 50001/50201，按 fromACP 的例外表）。
+func ServiceError(name, msg string) error {
+	return acp.NewError(acp.ClassService, name, msg, nil)
+}
+
+// ConnectionError 与上游的连接建立/传输失败（Class=connection → 50201）。
+func ConnectionError(name, msg string) error {
+	return acp.NewError(acp.ClassConnection, name, msg, nil)
+}
+
+// WrapServiceError 同 ServiceError，但把底层错误挂成 cause（诊断面据此取 stderr 尾巴）。
+//
+// 为什么不直接传 `code.FromError(err)`：分类必须在**构造那一刻**就带上，控制器出口只做投影；
+// 把裸 error 交给 FromError 会退化成 50000，把"上游连接失败"与"平台内部错误"混成一档。
+func WrapServiceError(name, msg string, cause error) error {
+	return acp.NewError(acp.ClassService, name, msg, cause)
+}

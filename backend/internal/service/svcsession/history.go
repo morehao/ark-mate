@@ -9,7 +9,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— 会话历史面（P4a 正文第十刀：从 `manager` 上提到用例层）———
@@ -63,11 +62,10 @@ var _ HistorySvc = (*History)(nil)
 // 空页的 FirstSeq/LastSeq 回 **-1**（此前是 0，而 0 现在是一个真实位次，"空"与"第 0 条"必须可分）。
 func (h *History) SessionHistory(ctx context.Context, id string, q dtosession.HistoryQuery) (*dtosession.SessionHistoryResp, error) {
 	if !h.plane.HasSession(id) {
-		return nil, code.FromError(acp.NewError(acp.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return nil, code.FromError(code.RequestError("session_not_found", fmt.Sprintf("未知会话 %q", id)))
 	}
 	if q.After != nil && q.Before != nil {
-		return nil, code.FromError(acp.NewError(acp.ClassRequest, "history_cursor_conflict",
-			"after 与 before 互斥（一个向后、一个向前）", nil))
+		return nil, code.FromError(code.RequestError("history_cursor_conflict", "after 与 before 互斥（一个向后、一个向前）"))
 	}
 	// 缺席的游标 = -1（v21 哨兵："没有游标"）。两个方向都**不夹到 0**：0 是会话第一条事件的
 	// 合法位次，夹没了它，首屏/翻页就会丢掉那一条。
@@ -102,8 +100,7 @@ func (h *History) SessionHistory(ctx context.Context, id string, q dtosession.Hi
 			batch, hasMore, err = h.st.EventsAfter(ctx, id, after, int64(q.Limit))
 		}
 		if err != nil {
-			return nil, code.FromError(acp.NewError(acp.ClassService, "history_read_failed",
-				fmt.Sprintf("读取会话历史失败：%v", err), nil))
+			return nil, code.FromError(code.ServiceError("history_read_failed", fmt.Sprintf("读取会话历史失败：%v", err)))
 		}
 		events = make([]eventbus.Event, 0, len(batch))
 		for _, e := range batch {

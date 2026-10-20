@@ -15,7 +15,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/dto/dtocommandpolicy"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // PolicySvc 命令门禁读写面（实现 `CommandPolicySvc`）。
@@ -45,8 +44,7 @@ func (p *Policy) Get(_ context.Context) (*dtocommandpolicy.PolicyResp, error) {
 	}
 	rules, err := interaction.LoadCommandPolicyFile(p.path)
 	if err != nil {
-		return nil, code.FromError(acp.NewError(acp.ClassService, "command_policy_unreadable",
-			fmt.Sprintf("命令门禁规则文件读不出来 [command_policy_unreadable]: %v", err), nil))
+		return nil, code.FromError(code.ServiceError("command_policy_unreadable", fmt.Sprintf("命令门禁规则文件读不出来 [command_policy_unreadable]: %v", err)))
 	}
 	return &dtocommandpolicy.PolicyResp{Enabled: true, Rules: toDTO(rules)}, nil
 }
@@ -58,17 +56,14 @@ func (p *Policy) Get(_ context.Context) (*dtocommandpolicy.PolicyResp, error) {
 // 只允许"盘上是新的"才动内存。
 func (p *Policy) Put(_ context.Context, req dtocommandpolicy.PolicyReq) (*dtocommandpolicy.PolicyResp, error) {
 	if p.path == "" {
-		return nil, code.FromError(acp.NewError(acp.ClassRequest, "command_policy_disabled",
-			"命令门禁未配置（MATE_COMMAND_POLICY 为空）[command_policy_disabled]", nil))
+		return nil, code.FromError(code.RequestError("command_policy_disabled", "命令门禁未配置（MATE_COMMAND_POLICY 为空）[command_policy_disabled]"))
 	}
 	rules, err := interaction.LoadCommandRules(toDomain(req.Rules))
 	if err != nil {
-		return nil, code.FromError(acp.NewError(acp.ClassRequest, "command_policy_invalid",
-			fmt.Sprintf("命令门禁规则不合法 [command_policy_invalid]: %v", err), nil))
+		return nil, code.FromError(code.RequestError("command_policy_invalid", fmt.Sprintf("命令门禁规则不合法 [command_policy_invalid]: %v", err)))
 	}
 	if err := writePolicyFile(p.path, rules); err != nil {
-		return nil, code.FromError(acp.NewError(acp.ClassService, "command_policy_write",
-			fmt.Sprintf("命令门禁规则写入失败 [command_policy_write]: %v", err), nil))
+		return nil, code.FromError(code.ServiceError("command_policy_write", fmt.Sprintf("命令门禁规则写入失败 [command_policy_write]: %v", err)))
 	}
 	if p.apply != nil {
 		p.apply(rules)
