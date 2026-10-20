@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，阶段 0.6 进程壳端口守卫为 173 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性与进程壳端口边界）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，阶段 0.6 进程壳端口守卫为 173 条，C1 领域自持类型守卫为 174 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性、进程壳端口边界与领域自持类型）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -98,7 +98,17 @@
   **适配器前缀**补上，fail-closed（一个 import 都解析不到即失败）。反证（实跑）：在 `app.go` 加
   `import _ "internal/persistence/store"` → 红。
 
-**共 173 条**——加守卫时记得同步这句话。
+- 再加 **1 条「领域自持类型」守卫**（`layer_isolation_test.go` 的 `TestDomainOwnsItsTypesNotTableRows`，
+  2026-10-20 C1）：`internal/domain/**` 的**生产 import** 不得出现 `internal/persistence/model`。
+  层表只判方向——L2 → L0 是"向内"，所以「领域端口签名里全是 `model.*Entity`」在层表里一直**合法**，
+  没有任何判据会说那不对（换存储实现要先改一遍域）。C1 把 16 个实体的行形状搬进域内叶子值包
+  （`domain/session/{queue,memory,run,message,event,sessionrow,usage}`、`domain/workspace/row`、
+  `domain/provider/row`、`domain/automation/row`），行↔值映射只留在 `persistence/store`。
+  **只扫生产 import**：域的包内测试会直插行构造夹具（真 SQLite），那正是映射的验证方式。
+  fail-closed（一个 domain 包都扫不到即失败）。反证（实跑）：在 `domain/workspace/row/item.go`
+  加 `persistence/model` 引用 → 红。
+
+**共 174 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 

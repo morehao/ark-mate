@@ -11,8 +11,8 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session/queue"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
+	"github.com/morehao/ark-mate/internal/domain/session/usage"
 	"github.com/morehao/ark-mate/internal/domain/workspace/row"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // Store 会话聚合的**持久化窄端口**（v3.1 P4）。
@@ -48,8 +48,8 @@ type Store interface {
 
 	// ——— 消息读模型 ———
 	ReplaceSessionMessages(ctx context.Context, sessionID string, msgs []message.Item) error
-	SearchMessages(ctx context.Context, q string, limit int) ([]model.MessageHit, error)
-	SearchUserMessages(ctx context.Context, sessionID, q string) ([]model.MessageTextHit, error)
+	SearchMessages(ctx context.Context, q string, limit int) ([]message.Hit, error)
+	SearchUserMessages(ctx context.Context, sessionID, q string) ([]message.TextHit, error)
 
 	// ——— 排队输入 ———
 	CreateInput(ctx context.Context, in queue.Item) error
@@ -76,5 +76,5 @@ type Store interface {
 	DeleteMeta(ctx context.Context, key string) error
 
 	// ——— 用量聚合（会话用量快照的读面）———
-	UsageSummary(ctx context.Context, q model.UsageQuery) (*model.UsageSummaryResult, error)
+	UsageSummary(ctx context.Context, q usage.Query) (*usage.Summary, error)
 }

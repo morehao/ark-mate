@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/core/object/objmeta"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 
@@ -291,7 +291,7 @@ func TestDoctorReadModelsPendingRebuildDoesNotFail(t *testing.T) {
 	r := newReadModelRig(t)
 	r.seed(t, func(st *store.Store) {
 		seedCleanReadModel(t, st)
-		if err := st.SetMeta(context.Background(), model.MetaKeyReadModelsRebuild, "23"); err != nil {
+		if err := st.SetMeta(context.Background(), objmeta.KeyReadModelsRebuild, "23"); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -366,7 +366,7 @@ func TestDoctorReadModelsRebuildFixesDrift(t *testing.T) {
 	}
 	// 标记确实清了（不能只信人话）。
 	r.seed(t, func(st *store.Store) {
-		if v, ok, err := st.GetMeta(context.Background(), model.MetaKeyReadModelsRebuild); err != nil {
+		if v, ok, err := st.GetMeta(context.Background(), objmeta.KeyReadModelsRebuild); err != nil {
 			t.Fatalf("读重建标记: %v", err)
 		} else if ok && v != "" {
 			t.Fatalf("重建标记应被清掉，实际 %q", v)

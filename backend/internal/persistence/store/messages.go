@@ -11,11 +11,11 @@ import (
 	"gorm.io/gorm"
 )
 
-// MessageHit 一条全局消息命中（形状在 `internal/persistence/model`；v3.1 P4 上移）。
-type MessageHit = model.MessageHit
+// MessageHit 一条全局消息命中（形状归领域 `message.Hit`；本包只做查询与映射）。
+type MessageHit = message.Hit
 
-// MessageTextHit 一条命中（搜索片段与计数用）。
-type MessageTextHit = model.MessageTextHit
+// MessageTextHit 一条会话内文本命中（形状归领域 `message.TextHit`）。
+type MessageTextHit = message.TextHit
 
 // ——— messages 表（可重建读模型：轮内消息物化；events 仍为唯一事实源） ———
 //

@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objmeta"
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/domain/session/memory"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -353,7 +353,7 @@ func (pl *Plane) rebuildStaleReadModels(ctx context.Context) {
 	if pl.st == nil {
 		return
 	}
-	ver, ok, err := pl.st.GetMeta(ctx, model.MetaKeyReadModelsRebuild)
+	ver, ok, err := pl.st.GetMeta(ctx, objmeta.KeyReadModelsRebuild)
 	if err != nil {
 		glog.Warnw(ctx, "read models: 读重建标记失败", "err", err)
 		return
@@ -373,7 +373,7 @@ func (pl *Plane) rebuildStaleReadModels(ctx context.Context) {
 		glog.Warnw(ctx, "read models: 重建未全部成功，标记保留待下次重试", "failed", failed, "total", total)
 		return
 	}
-	if err := pl.st.DeleteMeta(ctx, model.MetaKeyReadModelsRebuild); err != nil {
+	if err := pl.st.DeleteMeta(ctx, objmeta.KeyReadModelsRebuild); err != nil {
 		glog.Warnw(ctx, "read models: 清重建标记失败", "err", err)
 		return
 	}
@@ -402,7 +402,7 @@ func (pl *Plane) BackfillSessionModelRefs(ctx context.Context) {
 	if pl.st == nil {
 		return
 	}
-	ver, ok, err := pl.st.GetMeta(ctx, model.MetaKeySessionsModelRefBackfill)
+	ver, ok, err := pl.st.GetMeta(ctx, objmeta.KeySessionsModelRefBackfill)
 	if err != nil {
 		glog.Warnw(ctx, "session model refs: 读回填标记失败", "err", err)
 		return
@@ -461,7 +461,7 @@ func (pl *Plane) BackfillSessionModelRefs(ctx context.Context) {
 			"migration", ver, "failed", failed, "total", len(sessions))
 		return
 	}
-	if err := pl.st.DeleteMeta(ctx, model.MetaKeySessionsModelRefBackfill); err != nil {
+	if err := pl.st.DeleteMeta(ctx, objmeta.KeySessionsModelRefBackfill); err != nil {
 		glog.Warnw(ctx, "session model refs: 清回填标记失败", "err", err)
 		return
 	}

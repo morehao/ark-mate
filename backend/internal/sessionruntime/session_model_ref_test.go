@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/core/object/objmeta"
 	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"regexp"
 	"testing"
@@ -242,7 +243,7 @@ func TestBackfillSessionModelRefs(t *testing.T) {
 	seed(sesB, r.runtme, "p9/nope")       // (b) 零命中
 	seed(sesC, r.runtme, row2.ID)         // (c) 已经是平台 id
 
-	if err := planesOf(r.svc).Resources.Store().SetMeta(ctx, model.MetaKeySessionsModelRefBackfill, "26"); err != nil {
+	if err := planesOf(r.svc).Resources.Store().SetMeta(ctx, objmeta.KeySessionsModelRefBackfill, "26"); err != nil {
 		t.Fatalf("置回填标记: %v", err)
 	}
 	r.svc.sessionPlane.BackfillSessionModelRefs(ctx)
@@ -256,14 +257,14 @@ func TestBackfillSessionModelRefs(t *testing.T) {
 	if got := read(sesC); got != row2.ID {
 		t.Fatalf("(c) 已经是平台 id 的行不许被改写：want %q，got %q", row2.ID, got)
 	}
-	if _, ok, err := planesOf(r.svc).Resources.Store().GetMeta(ctx, model.MetaKeySessionsModelRefBackfill); err != nil || ok {
+	if _, ok, err := planesOf(r.svc).Resources.Store().GetMeta(ctx, objmeta.KeySessionsModelRefBackfill); err != nil || ok {
 		t.Fatalf("全部成功后应清掉回填标记: ok=%v err=%v", ok, err)
 	}
 
 	// (d) 多命中：换形态之后，两家供应商下的 `m-1` 派生出同一个值。
 	planesOf(r.svc).Registry.RegisterModelValue(r.runtme, byModelNameOnly{})
 	seed(sesD, r.runtme, "m:m-1")
-	if err := planesOf(r.svc).Resources.Store().SetMeta(ctx, model.MetaKeySessionsModelRefBackfill, "26"); err != nil {
+	if err := planesOf(r.svc).Resources.Store().SetMeta(ctx, objmeta.KeySessionsModelRefBackfill, "26"); err != nil {
 		t.Fatalf("再置回填标记: %v", err)
 	}
 	r.svc.sessionPlane.BackfillSessionModelRefs(ctx)

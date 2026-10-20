@@ -6,20 +6,20 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
-	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/domain/session/usage"
 )
 
-// v3.1 P4：查询条件与结果行的形状上移到 `internal/persistence/model`（`domain/session` 经窄端口读库，
-// 不能 import store）。这里保留别名，落库实现与调用点一字未改。
+// 查询条件与结果行的形状归领域（`domain/session/usage`）：会话用例经窄端口读库，不能 import
+// store。这里保留别名，落库实现与调用点一字未改。
 type (
-	UsageQuery         = model.UsageQuery
-	UsageBucket        = model.UsageBucket
-	UsageSummaryResult = model.UsageSummaryResult
+	UsageQuery         = usage.Query
+	UsageBucket        = usage.Bucket
+	UsageSummaryResult = usage.Summary
 )
 
 const (
-	CostCurrencyDefault = model.CostCurrencyDefault
-	CostCurrencyMixed   = model.CostCurrencyMixed
+	CostCurrencyDefault = usage.CostCurrencyDefault
+	CostCurrencyMixed   = usage.CostCurrencyMixed
 )
 
 // ——— 用量统计聚合（M3 首项：GET /usage/summary 的数据面） ———

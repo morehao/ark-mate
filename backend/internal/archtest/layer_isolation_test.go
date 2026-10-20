@@ -1,6 +1,7 @@
 package archtest
 
 import (
+	"go/build"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,6 +118,7 @@ var domainValueLeafPackages = []string{
 	modulePrefix + "internal/domain/session/message",
 	modulePrefix + "internal/domain/session/event",
 	modulePrefix + "internal/domain/session/sessionrow",
+	modulePrefix + "internal/domain/session/usage",
 	modulePrefix + "internal/domain/workspace/row",
 	modulePrefix + "internal/domain/provider/row",
 	modulePrefix + "internal/domain/automation/row",
@@ -180,5 +182,38 @@ func TestServicePortsMustNotImportEachOther(t *testing.T) {
 					rel(root, dir), imp)
 			}
 		}
+	}
+}
+
+// TestDomainOwnsItsTypesNotTableRows 领域不得引用表行形状（`persistence/model`）。
+//
+// 层表只判**方向**：L2 → L0 是"向内"，所以 `domain` import `model` 在层表里一直是**合法**的
+// ——C1 之前域的端口签名里全是 `model.*Entity`，没有任何判据会说那不对；换一份存储实现就要
+// 先改一遍域，而这正是"端口语言来自外圈"的那条裂缝。这条按**角色**补上：领域自持聚合与值
+// 类型（`domain/<agg>/row` 这类叶子值包），行形状（列、gorm tag、迁移词汇）只留在出站适配器。
+//
+// 只扫**生产** import（`pkg.Imports`）：域自己的包内测试会直插行来构造夹具（真 SQLite），
+// 那恰好是"行↔值映射在适配器里"的验证方式；把测试也禁掉只会逼夹具绕路，不会让域更干净。
+//
+// fail-closed：一个 domain 包都扫不到即失败（目录改名/搬走时不许静默空转）。
+func TestDomainOwnsItsTypesNotTableRows(t *testing.T) {
+	root := backendRoot(t)
+	modelPkg := modulePrefix + "internal/persistence/model"
+	scanned := 0
+	for _, dir := range goPackagesUnder(t, filepath.Join(root, "internal", "domain")) {
+		pkg, err := build.ImportDir(dir, 0)
+		if err != nil {
+			t.Fatalf("解析包 %s 失败: %v", rel(root, dir), err)
+		}
+		scanned++
+		for _, imp := range pkg.Imports {
+			if imp == modelPkg {
+				t.Errorf("%s 不应 import %s：领域要自持聚合与值类型，行形状只属于出站适配器"+
+					"（把该类型搬进域内叶子值包，让 store 做行↔值映射）", rel(root, dir), imp)
+			}
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("internal/domain 下没有扫到任何包（fail-closed）：领域目录被改名/搬走了？")
 	}
 }

@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/core/object/objmeta"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 
@@ -100,7 +100,7 @@ func checkReadModelRebuild(opts doctorOptions) []doctorCheck {
 	ctx := context.Background()
 	// 先记下标记：重建成功后要把它清掉（否则下一次启动会**再**全量重建一遍——结果一样，
 	// 但白花一次启动时间，而"标记"这件事本身就变成噪声）。
-	pending, hadPending, _ := st.GetMeta(ctx, model.MetaKeyReadModelsRebuild)
+	pending, hadPending, _ := st.GetMeta(ctx, objmeta.KeyReadModelsRebuild)
 	// 循环在机制层；"重建一个会话"的实现（与启动钩子共用同一份）在会话域——组合根直接把
 	// 会话平面交下去（`domain/session` 是下层，命令层 import 它没有任何越界）。
 	pl := session.NewPlane()
@@ -119,7 +119,7 @@ func checkReadModelRebuild(opts doctorOptions) []doctorCheck {
 	}
 	tail := "；没有待处理的重建标记"
 	if hadPending && pending != "" {
-		if derr := st.DeleteMeta(ctx, model.MetaKeyReadModelsRebuild); derr != nil {
+		if derr := st.DeleteMeta(ctx, objmeta.KeyReadModelsRebuild); derr != nil {
 			return []doctorCheck{{name, doctorWarn,
 				fmt.Sprintf("重建了 %d 个会话，但清重建标记失败：%v（重建本身已完成）", total, derr)}}
 		}
