@@ -101,7 +101,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		Handles:          o.handles,
 		Registry:         reg,
 		SelectedSpec:     svc.runtimePlane.SelectedSpec,
-		Acquire:          o.acquireClient,
+		Acquire:          o.acquireConn,
 		ResolveModel:     svc.facts.Providers.ResolveSessionModel,
 		ProviderKeyReady: svc.facts.Providers.ProviderKeyReady,
 		McpServers:       svc.McpServersFor,

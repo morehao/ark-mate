@@ -2,7 +2,7 @@ package session
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"sync"
 	"testing"
 	"time"
@@ -37,8 +37,14 @@ func (c *captureACP) Prompt(_ context.Context, text string) (string, error) {
 	return "end_turn", nil
 }
 
-func (c *captureACP) Cancel(context.Context) error      { return nil }
-func (c *captureACP) ConfigOptions() []acp.ConfigOption { return nil }
+func (c *captureACP) Cancel(context.Context) error          { return nil }
+func (c *captureACP) ConfigOptions() []runtime.ConfigOption { return nil }
+func (c *captureACP) ID() string                            { return "native-capture" }
+func (c *captureACP) Capabilities() runtime.CapabilityFacts { return runtime.CapabilityFacts{} }
+func (c *captureACP) Close(context.Context) error           { return nil }
+func (c *captureACP) SetConfigOption(context.Context, string, string) ([]runtime.ConfigOption, error) {
+	return nil, nil
+}
 
 func (c *captureACP) PromptAt(i int) string {
 	c.mu.Lock()

@@ -2,6 +2,7 @@ package runtimeconn
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"strings"
 	"time"
 
@@ -31,8 +32,9 @@ type DialOptions struct {
 	NativeMode string
 	// CheckCredentials 凭据面校验（nil = 跳过；离线/测试路径）。
 	CheckCredentials func(ctx context.Context) error
-	// ClientOptions ACP 的三个回调（OnEvent / RequestPermission / CreateElicitation /
-	// CompleteElicitation）。
+	// ClientOptions ACP 的四个回调（OnEvent / RequestPermission / CreateElicitation /
+	// CompleteElicitation）。它是 `session.DialOptions.Hooks` 的**具体形态**：域只做不透明
+	// 转发，断言与转换在这一层（类型不符即明确报错，不静默忽略）。
 	ClientOptions acp.ClientOptions
 }
 
@@ -73,9 +75,15 @@ func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt session.DialOpt
 		return nil, err
 	}
 
+	// hooks 是域**不透明转发**过来的回调集合；在这里断言成协议形态（唯一一处）。
+	hooks, ok := opt.Hooks.(acp.ClientOptions)
+	if !ok {
+		return nil, code.NewError(code.ClassConnection, "dial_hooks_invalid",
+			"拨号回调集合的类型不符（装配侧交下来的不是执行面的 hooks 形态）", nil)
+	}
 	args := resolveArgs(spec.Launch.Args, "")
 	// spawn + 握手由 runtime.Connect 承载（可执行投影的拨号底座）。
-	client, err := runtime.Connect(context.WithoutCancel(ctx), spec, args, keys.Env, opt.ClientOptions)
+	client, err := runtime.Connect(context.WithoutCancel(ctx), spec, args, keys.Env, hooks)
 	if err != nil {
 		return nil, err
 	}

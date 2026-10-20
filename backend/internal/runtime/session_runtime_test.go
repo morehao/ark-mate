@@ -43,7 +43,8 @@ func dialTestSession(t *testing.T, r *testACPResponder) (*acp.Client, *acp.Sessi
 // （测试夹具、下一个底座在进内置清单之前的形态）拿到的身份会与它手里那份 `Spec` 不一致，
 // 而这种不一致只会在很远的地方以"模型切不过去""取消没生效"的形式表现出来。
 func TestSessionProjectionCarriesSpecIdentity(t *testing.T) {
-	_, sess := dialTestSession(t, newTestACPResponder())
+	_, rawSess := dialTestSession(t, newTestACPResponder())
+	sess := testSessionView{sess: rawSess}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -101,4 +102,29 @@ func TestNewProjectionNeedsNoDispatch(t *testing.T) {
 			t.Fatalf("id=%q 的投影身份应逐字来自入参 Spec，实际 %q", id, rt.ID())
 		}
 	}
+}
+
+// testSessionView 把真实的 ACP 会话包成投影所需的平台视图。
+//
+// 生产路径上的这一层在 `drivers/runtimeconn`（`agentSession`）；本包测试只用真实会话验投影
+// 自身的行为，所以就地包一层——刻意不 import runtimeconn（那会成环）。
+type testSessionView struct{ sess *acp.Session }
+
+func (v testSessionView) ID() string { return v.sess.ID() }
+func (v testSessionView) Prompt(ctx context.Context, text string) (string, error) {
+	return v.sess.Prompt(ctx, text)
+}
+func (v testSessionView) Cancel(ctx context.Context) error { return v.sess.Cancel(ctx) }
+func (v testSessionView) ConfigOptions() []ConfigOption {
+	return ConfigOptionsOfACP(v.sess.ConfigOptions())
+}
+func (v testSessionView) SetConfigOption(ctx context.Context, optionID, value string) ([]ConfigOption, error) {
+	opts, err := v.sess.SetConfigOption(ctx, optionID, value)
+	if err != nil {
+		return nil, err
+	}
+	return ConfigOptionsOfACP(opts), nil
+}
+func (v testSessionView) Capabilities() CapabilityFacts {
+	return CapabilityFactsOfACP(v.sess.Client().Capabilities())
 }

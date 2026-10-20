@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"strings"
 	"testing"
 	"time"
@@ -20,14 +21,20 @@ type stubSession struct {
 	stop string
 	err  error
 	// options 会话配置项桩（nil = 运行时未提供任何选项）。
-	options []acp.ConfigOption
+	options []runtime.ConfigOption
 	// cancelOnCtx：ctx 被取消时返回 ctx.Err（模拟 agent 在取消后断开等待）
 	cancelOnCtx bool
 	cancelled   chan struct{}
 }
 
 // ConfigOptions 桩：默认无配置项（模型目录为空 → 目录来源走缓存/resume/空）。
-func (s *stubSession) ConfigOptions() []acp.ConfigOption { return s.options }
+func (s *stubSession) ConfigOptions() []runtime.ConfigOption { return s.options }
+func (s *stubSession) ID() string                            { return "" }
+func (s *stubSession) Capabilities() runtime.CapabilityFacts { return runtime.CapabilityFacts{} }
+func (s *stubSession) Close(context.Context) error           { return nil }
+func (s *stubSession) SetConfigOption(context.Context, string, string) ([]runtime.ConfigOption, error) {
+	return nil, nil
+}
 
 func (s *stubSession) Prompt(ctx context.Context, _ string) (string, error) {
 	if s.cancelOnCtx {
@@ -279,8 +286,9 @@ func TestCancelRunAgentUnresponsive(t *testing.T) {
 // 登记/撤销/唯一性判定/nil 安全（经 Orchestrator 委托方法覆盖）。
 func TestBusyAttributionHelpers(t *testing.T) {
 	orch := &Orchestrator{inflight: session.NewInFlightTracker()}
-	c1 := &acp.Client{}
-	c2 := &acp.Client{}
+	// 身份是**连接键**（协议句柄只在适配器里）：两把不同的键 = 两条不同的连接。
+	c1 := runtimeconn.NewConnForTest("c1", "c1", runtime.Spec{})
+	c2 := runtimeconn.NewConnForTest("c2", "c2", runtime.Spec{})
 
 	// 未登记 / nil client → 空
 	if got := orch.busySessionForClient(c1); got != "" {
@@ -323,9 +331,9 @@ func TestBusyAttributionHelpers(t *testing.T) {
 // run 进行中能唯一归属会话，取消收尾后归属清除。
 func TestBusyAttributionLifecycle(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
-	c1 := &acp.Client{}
+	c1 := runtimeconn.NewConnForTest("c1", "c1", runtime.Spec{})
 	as := session.NewActiveSession(session.HandleParams{
-		ID: "s1", Runtime: "r", Client: c1,
+		ID: "s1", Runtime: "r", Conn: c1,
 		Session: &stubSession{cancelOnCtx: true},
 	})
 	orch.handles.Put(as)

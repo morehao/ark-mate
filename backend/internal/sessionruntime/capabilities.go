@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/runtime"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
@@ -30,9 +31,9 @@ import (
 // 会话重启后注入集悄悄变回全量默认（用户看不到任何提示）。
 //
 // v19 起没有"agent 白名单"这一层：会话没钉就是全量（按 runtime transport 过滤）。
-func (s *Service) McpServersFor(runtimeID string, sel *session.CapabilitySelection) []acp.McpServer {
+func (s *Service) McpServersFor(runtimeID string, sel *session.CapabilitySelection) []runtime.McpServer {
 	plan := s.planMcpInjection(runtimeID, sel)
-	out := make([]acp.McpServer, 0, len(plan.Direct)+1)
+	out := make([]runtime.McpServer, 0, len(plan.Direct)+1)
 	for _, m := range plan.Direct {
 		name := m.Name
 		if name == "" {
@@ -46,7 +47,7 @@ func (s *Service) McpServersFor(runtimeID string, sel *session.CapabilitySelecti
 			glog.Warnw(context.Background(), "mcp 注入跳过：密钥引用解析失败", "server", m.ID, "problems", problems)
 			continue
 		}
-		out = append(out, acp.McpServer{
+		out = append(out, runtime.McpServer{
 			Name: name, Transport: m.Transport,
 			Command: m.Command, Args: m.Args, URL: m.URL,
 			Env: env, Headers: headers,
@@ -54,7 +55,8 @@ func (s *Service) McpServersFor(runtimeID string, sel *session.CapabilitySelecti
 	}
 	if plan.Gateway != nil {
 		// 网关条目天生无密钥（只有 scope），故直接追加；远程凭据留在网关进程里（§10.6-②）。
-		out = append(out, *plan.Gateway)
+		gw := runtime.McpServersOfACP([]acp.McpServer{*plan.Gateway})
+		out = append(out, gw...)
 		if len(plan.Remote) > 0 {
 			glog.Debugw(context.Background(), "mcp 注入：远程 server 经平台网关代连",
 				"runtime", runtimeID, "remote", len(plan.Remote))

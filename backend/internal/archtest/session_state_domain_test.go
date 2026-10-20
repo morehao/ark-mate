@@ -34,7 +34,7 @@ func TestSessionStateLivesInSessionDomain(t *testing.T) {
 			"func (as *ActiveSession) MarkDead(",
 			"func (h *Handles) Put(",
 			"func (h *Handles) ResolveProvider(",
-			"func (h *Handles) ForClient(",
+			"func (h *Handles) ForConn(",
 		},
 		filepath.Join("internal", "domain", "session", "runner.go"): {
 			"func (r *Runner) Prompt(",
@@ -89,7 +89,7 @@ func TestSessionStateLivesInSessionDomain(t *testing.T) {
 			"session.NewRunner(",
 			"session.NewLifecycle(",
 			"o.acquireSession",
-			"o.acquireClient",
+			"o.acquireConn",
 			"Busy:         o.inflight,",
 			"o.handles",
 		},
@@ -102,7 +102,7 @@ func TestSessionStateLivesInSessionDomain(t *testing.T) {
 			"o.runner.InUse(",
 		},
 		filepath.Join("internal", "domain", "session", "runner.go"): {
-			"r.handles.ForClient(",
+			"r.handles.ForConn(",
 			"r.busy.Clear(",
 		},
 		filepath.Join("internal", "domain", "session", "lifecycle.go"): {

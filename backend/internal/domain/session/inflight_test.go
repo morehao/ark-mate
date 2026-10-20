@@ -2,10 +2,9 @@ package session
 
 import (
 	"fmt"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"sync"
 	"testing"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // TestInFlightTracker 语义（§17 E1 显式化簿记，语义同 §1.5 修订）：
@@ -19,52 +18,52 @@ func TestInFlightTracker(t *testing.T) {
 		t.Fatal("nil client 应空结果")
 	}
 
-	// 造两把"伪连接"：tracker 只按指针身份记账，无需真实 acp 连接。
-	var c1, c2 acp.Client
-	if s := tr.SoleOwner(&c1); s != "" {
+	// 造两把"伪连接"：tracker 只按连接键记账，无需真实连接。
+	c1, c2 := keyedConn{key: "c1"}, keyedConn{key: "c2"}
+	if s := tr.SoleOwner(c1); s != "" {
 		t.Fatal("无在途应返回空串")
 	}
 
 	// 单在途 → 唯一归属。
-	tr.Mark(&c1, "conv-a")
-	if s := tr.SoleOwner(&c1); s != "conv-a" {
+	tr.Mark(c1, "conv-a")
+	if s := tr.SoleOwner(c1); s != "conv-a" {
 		t.Fatalf("唯一在途应归属 conv-a，got %q", s)
 	}
-	tr.Mark(&c2, "conv-b") // 另一连接独立
-	if s := tr.SoleOwner(&c2); s != "conv-b" {
+	tr.Mark(c2, "conv-b") // 另一连接独立
+	if s := tr.SoleOwner(c2); s != "conv-b" {
 		t.Fatalf("c2 唯一在途应归属 conv-b，got %q", s)
 	}
-	if s := tr.SoleOwner(&c1); s != "conv-a" {
+	if s := tr.SoleOwner(c1); s != "conv-a" {
 		t.Fatal("c1 归属不受 c2 影响")
 	}
 
 	// 多会话并发在途（同连接）→ 归属不唯一，返回空串不猜测。
-	tr.Mark(&c1, "conv-a2")
-	if s := tr.SoleOwner(&c1); s != "" {
+	tr.Mark(c1, "conv-a2")
+	if s := tr.SoleOwner(c1); s != "" {
 		t.Fatalf("并发在途应空串不猜测，got %q", s)
 	}
-	if n := tr.Len(&c1); n != 2 {
+	if n := tr.Len(c1); n != 2 {
 		t.Fatalf("c1 在途数应 2，got %d", n)
 	}
 
 	// Unmark 到唯一 → 恢复归属。
-	tr.Unmark(&c1, "conv-a2")
-	if s := tr.SoleOwner(&c1); s != "conv-a" {
+	tr.Unmark(c1, "conv-a2")
+	if s := tr.SoleOwner(c1); s != "conv-a" {
 		t.Fatalf("撤销一个后应归属 conv-a，got %q", s)
 	}
 
 	// Unmark 幂等 + 清空后键删除。
-	tr.Unmark(&c1, "conv-a")
-	tr.Unmark(&c1, "conv-a")
-	if tr.Len(&c1) != 0 || tr.SoleOwner(&c1) != "" {
+	tr.Unmark(c1, "conv-a")
+	tr.Unmark(c1, "conv-a")
+	if tr.Len(c1) != 0 || tr.SoleOwner(c1) != "" {
 		t.Fatal("清空后应无在途")
 	}
 
 	// Clear 作废连接登记。
-	tr.Mark(&c1, "conv-a")
+	tr.Mark(c1, "conv-a")
 	tr.Clear(&c1)
-	tr.Unmark(&c1, "conv-a") // 对已清键 no-op
-	if tr.Len(&c1) != 0 {
+	tr.Unmark(c1, "conv-a") // 对已清键 no-op
+	if tr.Len(c1) != 0 {
 		t.Fatal("Clear 后应无在途")
 	}
 	tr.Clear(nil) // nil 安全
@@ -74,7 +73,7 @@ func TestInFlightTracker(t *testing.T) {
 // 计数最终归零且不 panic（race 检测覆盖）。
 func TestInFlightTrackerConcurrent(t *testing.T) {
 	tr := NewInFlightTracker()
-	var c acp.Client
+	c := keyedConn{key: "concurrent"}
 	const (
 		workers = 8
 		each    = 200
@@ -86,15 +85,24 @@ func TestInFlightTrackerConcurrent(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < each; i++ {
 				id := fmt.Sprintf("w%d-%d", w, i)
-				tr.Mark(&c, id)
-				tr.Len(&c)
-				tr.SoleOwner(&c)
-				tr.Unmark(&c, id)
+				tr.Mark(c, id)
+				tr.Len(c)
+				tr.SoleOwner(c)
+				tr.Unmark(c, id)
 			}
 		}(w)
 	}
 	wg.Wait()
-	if n := tr.Len(&c); n != 0 {
+	if n := tr.Len(c); n != 0 {
 		t.Fatalf("并发结束后应 0 在途，got %d", n)
 	}
 }
+
+// keyedConn 测试用的最小连接（tracker 只认 Key）。
+type keyedConn struct{ key string }
+
+func (c keyedConn) Agent() AgentConn     { return nil }
+func (c keyedConn) Spec() runtime.Spec   { return runtime.Spec{} }
+func (c keyedConn) Key() string          { return c.key }
+func (c keyedConn) BaseKey() string      { return c.key }
+func (c keyedConn) ConfigDigest() string { return "" }

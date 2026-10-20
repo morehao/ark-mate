@@ -10,7 +10,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -48,7 +47,7 @@ func selRig(t *testing.T) *Service {
 }
 
 // names 注入结果的 server 名（升序稳定：选择顺序已规范化，但读模型顺序取决于注册表）。
-func names(servers []acp.McpServer) []string {
+func names(servers []runtime.McpServer) []string {
 	out := make([]string, 0, len(servers))
 	for _, s := range servers {
 		out = append(out, s.Name)

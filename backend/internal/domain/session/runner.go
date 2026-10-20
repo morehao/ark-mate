@@ -11,7 +11,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/domain/session/event"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -46,16 +45,16 @@ const (
 
 // BusyTracker 在途轮次登记（每连接一份台账）。
 type BusyTracker interface {
-	Mark(client *acp.Client, sessionID string)
-	Unmark(client *acp.Client, sessionID string)
-	Clear(client *acp.Client)
-	Len(client *acp.Client) int
+	Mark(conn Conn, sessionID string)
+	Unmark(conn Conn, sessionID string)
+	Clear(conn Conn)
+	Len(conn Conn) int
 }
 
 // DiagnosticsSink 运行期诊断的写口（错误分类 + stderr 尾巴）。
 type DiagnosticsSink interface {
 	RecordRuntimeError(sessionID string, ae *code.RuntimeError, tail []string)
-	StderrTail(client *acp.Client) []string
+	StderrTail(conn Conn) []string
 }
 
 // ConfigOptionsSink 运行时配置项（模型目录）的缓存写口。
@@ -155,8 +154,8 @@ func (r *Runner) Prompt(ctx context.Context, sessionID, text string) (int64, err
 	if err != nil {
 		return 0, err
 	}
-	client := as.Client()
-	r.busy.Mark(client, as.ID)
+	conn := as.Conn()
+	r.busy.Mark(conn, as.ID)
 
 	r.plane.MarkSession(as.ID, SessionStatusInProgress)
 	// 开轮三连（v22，设计 §D2）：① `run.started` 落库拿到本轮的**起点位次** → ② 开轮行
@@ -283,9 +282,9 @@ func (r *Runner) executeRun(as *ActiveSession, t *Run, text string) {
 	}
 	as.busy = false
 	as.run = nil
-	client := as.client
+	conn := as.conn
 	as.mu.Unlock()
-	r.busy.Unmark(client, as.ID)
+	r.busy.Unmark(conn, as.ID)
 	t.stop = stop
 	t.err = err
 
@@ -322,7 +321,7 @@ func (r *Runner) executeRun(as *ActiveSession, t *Run, text string) {
 	case err != nil:
 		r.CloseRunStatus(as.ID, t.id)
 		r.plane.MarkSession(as.ID, SessionStatusFailed)
-		r.PublishError(as.ID, t.id, err, client)
+		r.PublishError(as.ID, t.id, err, conn)
 	default:
 		r.CloseRunStatus(as.ID, t.id)
 		r.plane.MarkSession(as.ID, SessionStatusCompleted)
@@ -490,10 +489,10 @@ func errLooksCancelled(err error) bool {
 //
 // 拆除原因决定会话状态怎么收尾（`disconnectSession` 的注释是本仓对这条语义的唯一说明）：
 // 把停机当成故障，会让上一轮已 completed 的会话在每次重启后被改写成 failed。
-func (r *Runner) DropConn(client *acp.Client, intentional bool) {
+func (r *Runner) DropConn(conn Conn, intentional bool) {
 	// 连接断开：在途登记一并作废（executeRun 的 unmark 对已清键为 no-op）。
-	r.busy.Clear(client)
-	victims := r.handles.ForClient(client)
+	r.busy.Clear(conn)
+	victims := r.handles.ForConn(conn)
 	for _, as := range victims {
 		r.handles.ForgetSession(as.ID) // 连接断开：原生→平台映射一并清除（迟到事件丢弃）
 	}
@@ -509,12 +508,12 @@ func (r *Runner) DropConn(client *acp.Client, intentional bool) {
 // InUse 这条连接还有人用吗：有在途轮次、或仍挂着会话（含已完成态）。
 //
 // 这是空闲回收与代际回收的**唯一判据**；池在池锁之外问它，句柄表的锁与池锁不互指。
-func (r *Runner) InUse(client *acp.Client) bool {
-	if r.busy.Len(client) > 0 {
+func (r *Runner) InUse(conn Conn) bool {
+	if r.busy.Len(conn) > 0 {
 		// 有在途 run：绝不打断。（挂起权限/提问只在某一轮的执行期间存在，而那一轮就是在途 run。）
 		return true
 	}
-	return len(r.handles.ForClient(client)) > 0 // 仍有会话引用（含已完成态），不回收
+	return len(r.handles.ForConn(conn)) > 0 // 仍有会话引用（含已完成态），不回收
 }
 
 // Evict 把句柄从活跃集合摘除（仅当仍是当前句柄；已被新句柄顶替时不动）。
@@ -558,7 +557,7 @@ func (r *Runner) disconnectSession(as *ActiveSession, intentional bool) {
 	}
 	ae := code.NewRuntimeError(code.ClassConnection, "connection_lost", "runtime 连接断开（会话句柄已作废；下次 prompt 按需重建）", nil)
 	if r.diagnostics != nil {
-		tail := r.diagnostics.StderrTail(as.Client())
+		tail := r.diagnostics.StderrTail(as.Conn())
 		ae.StderrTail = tail
 		r.diagnostics.RecordRuntimeError(as.ID, ae, tail)
 	}
@@ -571,7 +570,7 @@ func (r *Runner) disconnectSession(as *ActiveSession, intentional bool) {
 //
 // 注：有活跃会话但配置项为空时同样返回 ok=true（空即运行时的真实答案：未配 provider/未登录），
 // 不走 resume 兜底去「凑一份」目录。
-func (r *Runner) LiveConfigOptions() ([]acp.ConfigOption, bool) {
+func (r *Runner) LiveConfigOptions() ([]runtime.ConfigOption, bool) {
 	sess := r.handles.AnyLive()
 	if sess == nil {
 		return nil, false

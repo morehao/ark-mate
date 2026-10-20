@@ -57,7 +57,7 @@ func TestProviderKeyChangeSwitchesGenerationNextRun(t *testing.T) {
 	if as2 == as1 {
 		t.Fatal("改密钥后应在**下一轮边界**换代际（A2）")
 	}
-	if as2.Client() == as1.Client() {
+	if as2.Conn() == as1.Conn() {
 		t.Fatal("新代际必须落在**另一个**连接上（注入是进程级的，共用连接等于旧密钥还活着）")
 	}
 	if n := r.waitConns(t, 1); n != 1 {

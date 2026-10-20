@@ -50,10 +50,6 @@ func (o *Orchestrator) attachSession(as *session.ActiveSession, reason string) {
 
 // liveConfigOptions 返回任一活跃会话的配置项（模型目录的**首选来源**：运行时此刻的真实状态）。
 func (o *Orchestrator) liveConfigOptions() ([]runtime.ConfigOption, bool) {
-	opts, ok := o.runner.LiveConfigOptions()
-	if !ok {
-		return nil, false
-	}
-	// 活跃会话的选项来自协议形状（会话句柄仍是 ACP 会话）；在**编排边界**折成平台值。
-	return runtime.ConfigOptionsOfACP(opts), true
+	// 活跃会话自报的选项已经是平台值（会话端口只交出平台值）。
+	return o.runner.LiveConfigOptions()
 }

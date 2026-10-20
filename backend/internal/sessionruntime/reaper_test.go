@@ -48,10 +48,10 @@ func TestReapIdleOnceSkips(t *testing.T) {
 	poolOf(o).Add(stubConn("stub", now.Add(-time.Minute))) // 未到阈值
 	busy := old("rtx")
 	poolOf(o).Add(busy)
-	o.inflight.Mark(busy.Client(), "s1")
+	o.inflight.Mark(busy, "s1")
 	withSession := old("dsh")
 	poolOf(o).Add(withSession)
-	o.handles.Put(session.NewActiveSession(session.HandleParams{Client: withSession.Client()}))
+	o.handles.Put(session.NewActiveSession(session.HandleParams{Conn: withSession}))
 
 	if n := poolOf(o).ReapIdle(now, 5*time.Minute); n != 0 {
 		t.Fatalf("三种情形都不应回收，实际 %d", n)

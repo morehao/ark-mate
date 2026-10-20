@@ -56,7 +56,10 @@ type Conn struct {
 	Intentional atomic.Bool
 }
 
-// Client 实现 `session.Conn`：ACP 客户端句柄（未拨号/测试桩 → nil）。
+// Client 返回底层的协议客户端句柄（**适配器内部与测试用**；领域端口 `session.Conn` 不暴露它）。
+//
+// 保留这个访问器的唯一理由是池自身的反查（`ConnOfClient`）与连接级测试断言：协议类型在
+// 本包内部合法，越出适配器边界就得走 `Agent()` 的平台视图。
 func (c *Conn) Client() *acp.Client { return c.client }
 
 // Spec 实现 `session.Conn`：这条连接面向的 runtime 声明。
@@ -220,7 +223,7 @@ func (pl *Pool) Drop(c *Conn) {
 	}
 	if pl.sink != nil {
 		pl.sink.OnConnDropped(session.ConnDrop{
-			Client:      c.client,
+			Conn:        c,
 			Runtime:     c.spec.ID,
 			WasCurrent:  wasCurrent,
 			Intentional: intentional,
@@ -229,20 +232,22 @@ func (pl *Pool) Drop(c *Conn) {
 	}
 }
 
-// ConnOfClient 反查某客户端所属的连接（无 → nil）。连接数是代际上限量级（个位数），线性扫足够；
-// 代际迁移要拿它读"这条句柄此刻挂在哪个代际键上"（那是判"要不要迁"的唯一权威来源）。
-func (pl *Pool) ConnOfClient(client *acp.Client) session.Conn {
-	if client == nil {
-		return nil
+// HasConn 这条连接对象此刻还在池里吗（回收判定与连接的测试断言用）。
+//
+// 领域端口不暴露它：编排侧只问"我手上这条还能用吗"（`Conn.Agent()` 与在途登记），
+// 不持有池的视角。连接数是代际上限量级（个位数），线性扫足够。
+func (pl *Pool) HasConn(conn session.Conn) bool {
+	if conn == nil {
+		return false
 	}
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 	for _, c := range pl.conns {
-		if c.client == client {
-			return c
+		if session.Conn(c) == conn {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 // ConnForRuntime 返回该 runtime 已建立的连接（无 → nil；runtimeID 空 = 任一条）。

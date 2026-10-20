@@ -9,7 +9,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/code"
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -92,8 +91,8 @@ type LifecycleDeps struct {
 	Registry *runtime.Registry
 	// SelectedSpec 构建期选定的那个底座（`runtime_not_found` 的唯一铸点在执行面）。
 	SelectedSpec func() (runtime.Spec, error)
-	// Acquire 取（或拨）一条连接，返回它的 ACP 客户端。
-	Acquire func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acp.Client, error)
+	// Acquire 取（或拨）一条连接（连接的能力面经 `Conn.Agent()` 取）。
+	Acquire func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (Conn, error)
 	// ResolveModel 平台模型行 id → (行 id, 运行时值)。
 	ResolveModel func(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)
 	// ProviderKeyReady 该供应商当前是否有可用密钥（false + 原因）。nil = 不做这项前置。
@@ -101,7 +100,7 @@ type LifecycleDeps struct {
 	// 只对声明了 ModelCatalogNeedsCredential 的 runtime 生效（见 applyModel）。
 	ProviderKeyReady func(ctx context.Context, providerID string) (bool, string)
 	// McpServers 该会话该下发的 MCP 条目（注册表 + 传输能力 + 选定过滤后的结果）。
-	McpServers func(runtimeID string, sel *CapabilitySelection) []acp.McpServer
+	McpServers func(runtimeID string, sel *CapabilitySelection) []runtime.McpServer
 	// Catalog 模型目录缓存。
 	Catalog ConfigCatalog
 	// Diagnostics 运行期诊断（起不来 / 恢复失败 / 模型被拒的留痕）。
@@ -127,10 +126,10 @@ type Lifecycle struct {
 	registry *runtime.Registry
 
 	selectedSpec     func() (runtime.Spec, error)
-	acquire          func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acp.Client, error)
+	acquire          func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (Conn, error)
 	resolveModel     func(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)
 	providerKeyReady func(ctx context.Context, providerID string) (bool, string)
-	mcpServers       func(runtimeID string, sel *CapabilitySelection) []acp.McpServer
+	mcpServers       func(runtimeID string, sel *CapabilitySelection) []runtime.McpServer
 	catalog          ConfigCatalog
 	diagnostics      DiagnosticsSink
 	setState         func(state string)
@@ -192,7 +191,7 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 	// 代际键与引入代际之前逐字相同（R11）。指纹与下面注入用的 opt.Selection 同源，
 	// 不存在"按 A 算指纹、按 B 注入"的可能。
 	fingerprint := l.plane.CapabilityFingerprint(spec.ID, opt.Selection)
-	client, err := l.acquire(ctx, spec, fingerprint, opt.NativeMode)
+	conn, err := l.acquire(ctx, spec, fingerprint, opt.NativeMode)
 	if err != nil {
 		if l.setState != nil {
 			l.setState(AgentStateStopped)
@@ -220,7 +219,8 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 	// P2 MCP 注入：平台注册表 MCP 子集按「会话选定 > 全量」+ runtime 传输能力过滤后
 	// 随 session/new 下发。**必须传 opt.Selection**：指纹就是按它算出来的，注入若用别的口径，
 	// 会话拿到的东西会与代际台账不符。
-	sess, err := client.NewSession(ctx, acp.SessionOptions{
+	agent := conn.Agent()
+	sess, err := agent.NewSession(ctx, SessionOptions{
 		Cwd:        cwd,
 		McpServers: l.mcpServers(spec.ID, opt.Selection),
 	})
@@ -232,7 +232,7 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 	// 形状、跨重启稳定定位）；原生 provider id 存 sess/RuntimeSessionID 列，供恢复承载（load/resume）。
 	as := NewActiveSession(HandleParams{
 		ID: convID, Runtime: spec.ID, Fingerprint: fingerprint, NativeMode: opt.NativeMode,
-		ProviderID: sess.ID(), Client: client, Session: sess,
+		ProviderID: sess.ID(), Conn: conn, Session: sess,
 		Projection: runtime.NewProjection(spec, sess),
 		Identity:   l.identityUserContext(),
 	})
@@ -352,14 +352,15 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 	rec := *recIn
 	// **恢复路径也要带上会话钉住的指纹与权限模式**：漏改这一处的后果分别是"重启后能力集悄悄换了
 	// 一套"与"重启后沙箱边界悄悄变宽/变窄"——两者都不会报错。
-	client, err := l.acquire(ctx, spec, fingerprint, rec.NativeMode)
+	conn, err := l.acquire(ctx, spec, fingerprint, rec.NativeMode)
 	if err != nil {
 		return nil, "", err
 	}
+	agent := conn.Agent()
 	// **恢复路径必须用会话钉住的选定**（不是全量）：它从 `sessions.capability_json` 读回。
 	// 漏了这一步的后果是会话重启后注入集悄悄换一套，而且没有任何报错。
-	opts := acp.SessionOptions{Cwd: cwd, McpServers: l.mcpServers(spec.ID, sel)}
-	caps := runtime.CapabilityFactsOfACP(client.Capabilities())
+	opts := SessionOptions{Cwd: cwd, McpServers: l.mcpServers(spec.ID, sel)}
+	caps := agent.Capabilities()
 	sameRuntime := spec.ID == rec.RuntimeID && rec.RuntimeID != ""
 	// `nativeID` 是**平台侧的值**（`rt_` 壳）；给底座的必须是**原文**。
 	//
@@ -378,15 +379,15 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 	resumeOK := sameRuntime && rawNativeID != "" &&
 		(caps.LoadSession || caps.SessionResume)
 
-	var sess *acp.Session
+	var sess AgentSession
 	var memo string
 	reason := "restart"
 	switch {
 	case resumeOK:
 		if caps.LoadSession {
-			sess, err = client.LoadSession(ctx, rawNativeID, opts)
+			sess, err = agent.LoadSession(ctx, rawNativeID, opts)
 		} else {
-			sess, err = client.ResumeSession(ctx, rawNativeID, opts)
+			sess, err = agent.ResumeSession(ctx, rawNativeID, opts)
 		}
 		if err != nil {
 			glog.Warnw(ctx, "原生恢复失败，转 handoff memo 兜底", "session", rec.ID,
@@ -399,7 +400,7 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 			return nil, "", code.NewError(code.ClassRequest, "resume_unavailable", fmt.Sprintf("会话 %q 无法原生恢复（runtime %q 无 load/resume 或 provider 会话无效），且 memo 兜底关闭",
 				rec.ID, spec.ID), nil)
 		}
-		sess, err = client.NewSession(ctx, opts)
+		sess, err = agent.NewSession(ctx, opts)
 		if err != nil {
 			return nil, "", err
 		}
@@ -424,7 +425,7 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 	l.plane.RegisterSession(&rec)
 	as := NewActiveSession(HandleParams{
 		ID: rec.ID, Runtime: spec.ID, Fingerprint: fingerprint, NativeMode: rec.NativeMode,
-		ProviderID: sess.ID(), Client: client, Session: sess,
+		ProviderID: sess.ID(), Conn: conn, Session: sess,
 		Projection: runtime.NewProjection(spec, sess), Memo: memo,
 		// 恢复/迁移同样重新声明身份：这条路径恰恰最容易把旧自述带回来（memo 就是历史摘要）。
 		Identity: l.identityUserContext(),
@@ -469,7 +470,7 @@ func (l *Lifecycle) Attach(as *ActiveSession, reason string) {
 	if old != nil && old != as {
 		// 旧句柄作废：拿到它旧指针的路径会走重建（而不是用一个已被顶替的会话）
 		old.MarkDead(false)
-		if c, ok := old.Native().(*acp.Session); ok && c != nil {
+		if c := old.Native(); c != nil {
 			// 关会话是收尾动作：用**脱离请求**的 ctx（本轮 ctx 可能已取消）并带上限等待，
 			// 免得底座吞掉 session/close 时把这一轮拖住。0.2.1 起 close 要 drain 后代并
 			// flush，窗口用 AgentSettleTimeout（3s 的「发通知」上限不够）。

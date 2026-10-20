@@ -52,11 +52,10 @@ func (f *fakeProjection) ApplyModel(_ context.Context, m runtime.ModelConfig) ([
 // TestModelCatalogLiveSession 活会话是首选来源：直接读运行时会话自报的配置项（分组展平）。
 func TestModelCatalogLiveSession(t *testing.T) {
 	svc, orch := catalogRig(t)
-	// 这条用例喂的是**协议形状**（假会话本身仍是 ACP 会话）：转换在编排边界做。
-	opts := []acp.ConfigOption{{
+	opts := []runtime.ConfigOption{{
 		ID: "model", Name: "Model", Category: acp.CategoryModel, Type: acp.OptionTypeSelect,
 		CurrentValue: `["deepseek","deepseek-chat"]`, Grouped: true,
-		Values: []acp.ConfigOptionValue{
+		Values: []runtime.ConfigOptionValue{
 			{Value: `["deepseek","deepseek-chat"]`, Name: "DeepSeek Chat", Group: "deepseek", GroupName: "DeepSeek"},
 			{Value: `["anthropic","claude-sonnet"]`, Name: "Claude Sonnet", Group: "anthropic", GroupName: "Anthropic"},
 		},
@@ -223,10 +222,10 @@ func TestPickListedSession(t *testing.T) {
 	if _, ok := pickListedSession(nil); ok {
 		t.Fatal("空列表不应命中")
 	}
-	if _, ok := pickListedSession([]acp.SessionInfo{{ID: "s1", Cwd: "relative/dir"}}); ok {
+	if _, ok := pickListedSession([]runtime.SessionRef{{ID: "s1", Cwd: "relative/dir"}}); ok {
 		t.Fatal("相对 cwd 不应命中")
 	}
-	got, ok := pickListedSession([]acp.SessionInfo{
+	got, ok := pickListedSession([]runtime.SessionRef{
 		{ID: "s1", Cwd: "relative"}, {ID: "s2", Cwd: "/work/b"},
 	})
 	if !ok || got.ID != "s2" || got.Cwd != "/work/b" {
@@ -324,7 +323,7 @@ func TestResumeTargetsFromOrdersAndSkipsMalformed(t *testing.T) {
 		// 同一个原生会话的两条平台记录（重复登记）：只留第一条。
 		{ID: "ses_dup", RuntimeSessionID: "rt_raw-new", Cwd: "/w/new", UpdatedAt: now.Add(-time.Minute)},
 	}
-	listed := []acp.SessionInfo{{ID: "listed", Cwd: "/w/listed"}}
+	listed := []runtime.SessionRef{{ID: "listed", Cwd: "/w/listed"}}
 
 	got := resumeTargetsFrom(ctx, recs, listed)
 	want := []resumeTarget{{RawID: "raw-new", Cwd: "/w/new"}, {RawID: "raw-old", Cwd: "/w/old"}}
@@ -340,7 +339,7 @@ func TestResumeTargetsFromOrdersAndSkipsMalformed(t *testing.T) {
 	}
 
 	// 两处都没有可用条目 → 空（"没有来源"是合法结论，不是错误）。
-	if got := resumeTargetsFrom(ctx, nil, []acp.SessionInfo{{ID: "x", Cwd: "relative"}}); len(got) != 0 {
+	if got := resumeTargetsFrom(ctx, nil, []runtime.SessionRef{{ID: "x", Cwd: "relative"}}); len(got) != 0 {
 		t.Fatalf("没有可用条目应是空候选: %+v", got)
 	}
 }

@@ -6,7 +6,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -27,7 +26,7 @@ type ACP interface {
 	Prompt(ctx context.Context, text string) (string, error)
 	Cancel(ctx context.Context) error
 	// ConfigOptions 会话配置项（模型目录等，唯一来源：运行时自报）。
-	ConfigOptions() []acp.ConfigOption
+	ConfigOptions() []runtime.ConfigOption
 }
 
 // ActiveSession 是持久会话句柄：绑定一条 ACP 会话与其所属连接，
@@ -43,8 +42,8 @@ type ActiveSession struct {
 	// 下发，所以两个模式不同的会话不能共用一个暖进程（见 `runtimeconn.Pool.KeyFor`）。
 	NativeMode string
 
-	client *acp.Client
-	sess   ACP
+	conn Conn
+	sess AgentSession
 	// providerID 底座侧的原生会话 id（`sess.ID()`）。存一份是因为换句柄（代际迁移）时要拿旧值
 	// 摘 `byProvider` 映射与关掉旧会话，而 `sess` 是接口（`ACP` 上没有 ID()）。
 	providerID string
@@ -80,8 +79,8 @@ type HandleParams struct {
 	// 它随**句柄**交付（而不是随会话记录）：每建一次执行上下文（新建、原生恢复、handoff、
 	// 代际迁移）都重新声明一次身份——那是刻意的"重新锚定"，代价是每个上下文多 ~100 tokens。
 	Identity   string
-	Client     *acp.Client
-	Session    ACP
+	Conn       Conn
+	Session    AgentSession
 	Projection runtime.Runtime
 }
 
@@ -90,16 +89,16 @@ type HandleParams struct {
 func NewActiveSession(p HandleParams) *ActiveSession {
 	return &ActiveSession{
 		ID: p.ID, Runtime: p.Runtime, Fingerprint: p.Fingerprint, NativeMode: p.NativeMode,
-		client: p.Client, sess: p.Session, providerID: p.ProviderID, proj: p.Projection,
+		conn: p.Conn, sess: p.Session, providerID: p.ProviderID, proj: p.Projection,
 		memo: p.Memo, identity: p.Identity,
 	}
 }
 
-// Client 所属连接（nil = 未拨号/测试桩）。
-func (as *ActiveSession) Client() *acp.Client { return as.client }
+// Conn 所属连接（nil = 未拨号/测试桩）。
+func (as *ActiveSession) Conn() Conn { return as.conn }
 
-// Native 原生 ACP 会话（nil = 尚未建立）。
-func (as *ActiveSession) Native() ACP { return as.sess }
+// Native 原生会话（nil = 尚未建立）。
+func (as *ActiveSession) Native() AgentSession { return as.sess }
 
 // Projection 可执行投影（nil = 该 runtime 无投影/测试桩）。
 func (as *ActiveSession) Projection() runtime.Runtime { return as.proj }
@@ -223,13 +222,13 @@ func (as *ActiveSession) BeginRun(ctx context.Context) (*Run, RunPrefix, error) 
 }
 
 // FinishRun 收尾一轮：清 busy/run 并把所属连接一并交回（取消在途登记要用它）。
-func (as *ActiveSession) FinishRun() (*Run, *acp.Client) {
+func (as *ActiveSession) FinishRun() (*Run, Conn) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	t := as.run
 	as.busy = false
 	as.run = nil
-	return t, as.client
+	return t, as.conn
 }
 
 // MarkDead 作废句柄（连接断开/被新句柄顶替）。intentional = 我方主动拆除。
@@ -384,13 +383,16 @@ func (h *Handles) ForgetSession(sessionID string) {
 	}
 }
 
-// ForClient 该连接上挂着哪些句柄（含已完成态）。
-func (h *Handles) ForClient(client *acp.Client) []*ActiveSession {
+// ForConn 该连接上挂着哪些句柄（含已完成态）。
+//
+// 按**连接键**匹配而不是接口值：同一把键在池里唯一，而"哪条连接"本来就该按身份判；
+// nil 连接（测试桩）与空键同桶，与改造前"nil 指针相等"的语义逐字一致。
+func (h *Handles) ForConn(conn Conn) []*ActiveSession {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out := make([]*ActiveSession, 0, 1)
 	for _, as := range h.byID {
-		if as.client == client {
+		if connKey(as.conn) == connKey(conn) {
 			out = append(out, as)
 		}
 	}

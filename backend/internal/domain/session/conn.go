@@ -5,7 +5,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/code"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -27,8 +26,10 @@ import (
 // （Key / BaseKey）、按哪份配置建起来（ConfigDigest）。进程记账（pid / 建立时刻 / 拆除原因）
 // 留在执行面内部——端口一旦能表达那些，就又变成"编排自己管连接"。
 type Conn interface {
-	// Client ACP 客户端句柄（拨号成功后才有；测试桩可为 nil）。
-	Client() *acp.Client
+	// Agent 这条连接的能力面（建/恢复会话、能力事实、stderr、会话列举）。
+	//
+	// nil = 未拨号/测试桩：**连接端口只交能力，不交协议句柄**——协议类型归适配器内部。
+	Agent() AgentConn
 	// Spec 这条连接面向的 runtime 声明。
 	Spec() runtime.Spec
 	// Key 连接缓存键（基础键 + 能力指纹 + 配置指纹）。
@@ -47,8 +48,16 @@ type DialOptions struct {
 	NativeMode string
 	// CheckCredentials 凭据面校验（nil = 跳过；离线/测试路径）。
 	CheckCredentials func(ctx context.Context) error
-	// ClientOptions ACP 的四个回调（事件 / 权限 / 提问 / 提问完成）。
-	ClientOptions acp.ClientOptions
+	// Hooks 拨号时挂给执行面的回调集合（事件 / 权限 / 提问 / 提问完成）。
+	//
+	// **不透明载荷**：这四个回调的载荷类型分属 `event` 与 `interaction` 两个值面，而领域之间
+	// 不许互相 import（`TestDomainPackagesMustNotImportEachOther`）。域对它一个字节都不读，
+	// 只负责把装配侧交下来的那份原样转给适配器——适配器按自己的约定断言（类型不符即报
+	// `dial_hooks_invalid`，不静默忽略：静默忽略的表现是"事件不推进、权限永远超时"）。
+	//
+	// 这是 C2 收尾刻意留下的一处 `any`：换成具体类型要么让会话域 import 另一个域的值包，
+	// 要么把两个值面下沉到共享内核（C3 的 `platform`）——两条都比"一次不透明转发"贵。
+	Hooks any
 }
 
 // KeyInputs 一次"取该用的连接"所需的全部键输入（四样同源：算键与注入用同一次取值）。
@@ -63,8 +72,8 @@ type KeyInputs struct {
 //
 // 带 `Client` 而不是会话 id 列表：谁挂在一条连接上是**会话侧**的登记，执行面没有、也不该有。
 type ConnDrop struct {
-	// Client 刚摘下的句柄（编排侧据它找出此刻挂在它上面的会话）。
-	Client *acp.Client
+	// Conn 刚摘下的那条连接（编排侧据它的键找出此刻挂在它上面的会话）。
+	Conn Conn
 	// Runtime 该连接的 runtime id（日志与诊断用）。
 	Runtime string
 	// WasCurrent 被摘的是该 runtime 的**当前**连接。
@@ -96,8 +105,6 @@ type ConnPool interface {
 	Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (Conn, error)
 	// KeyFor 按当前配置算出某会话该用的连接键。
 	KeyFor(spec runtime.Spec, fingerprint, nativeMode string) KeyInputs
-	// ConnOfClient 反查某客户端所属的连接（无 → nil）。
-	ConnOfClient(client *acp.Client) Conn
 	// ConnForRuntime 返回该 runtime 已建立的连接（无 → nil；runtimeID 空 = 任一条）。
 	ConnForRuntime(runtimeID string) Conn
 	// ReclaimGeneration 回收指定的那一条代际（若它已无人引用且空闲）。
@@ -132,6 +139,6 @@ type RuntimePlane interface {
 
 // MaxDiagStderrLines 诊断留痕里 stderr 尾巴的保留行数（执行面与编排侧共用同一份上限）。
 //
-// 放在域而不是执行面：编排侧只拿到 `acp.Client` 与端口，不 import 具体池，
+// 放在域而不是执行面：编排侧只拿到连接端口，不 import 具体池，
 // 而两边必须用**同一个数字**（两处各写一份的表现是诊断里尾巴长短不一致）。
 const MaxDiagStderrLines = 20

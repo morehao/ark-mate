@@ -47,8 +47,14 @@ func (s *gatedSession) Prompt(ctx context.Context, text string) (string, error) 
 	}
 }
 
-func (s *gatedSession) Cancel(context.Context) error      { return nil }
-func (s *gatedSession) ConfigOptions() []acp.ConfigOption { return nil }
+func (s *gatedSession) Cancel(context.Context) error          { return nil }
+func (s *gatedSession) ConfigOptions() []runtime.ConfigOption { return nil }
+func (s *gatedSession) ID() string                            { return "" }
+func (s *gatedSession) Capabilities() runtime.CapabilityFacts { return runtime.CapabilityFacts{} }
+func (s *gatedSession) Close(context.Context) error           { return nil }
+func (s *gatedSession) SetConfigOption(context.Context, string, string) ([]runtime.ConfigOption, error) {
+	return nil, nil
+}
 
 func (s *gatedSession) prompts() []string {
 	s.mu.Lock()
@@ -58,7 +64,7 @@ func (s *gatedSession) prompts() []string {
 
 // newQueueRig 队列测试架子：echo 注册表 + 总线 +（可选）临时库 + 一条**已登记
 // 且有活句柄**的会话 conv-1（句柄的 sess 由调用方给定，用于掌控轮次节奏）。
-func newQueueRig(t *testing.T, sess session.ACP, withStore bool) (*Service, *Orchestrator, *gatedSession, *session.ActiveSession) {
+func newQueueRig(t *testing.T, sess session.AgentSession, withStore bool) (*Service, *Orchestrator, *gatedSession, *session.ActiveSession) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) {
 		c.stub, c.bus, c.store = true, true, withStore

@@ -30,21 +30,23 @@ import (
 // 能力位不支持 resume/load 时返回 `resume_session_unsupported`：那是"该交付面不支持读"的
 // 事实，不是故障——调用方据此把说明文案与留痕级别分开。
 func SampleConfigOptions(ctx context.Context, rc session.Conn, rawSessionID, cwd string) ([]runtime.ConfigOption, error) {
-	if rc == nil || rc.Client() == nil {
+	if rc == nil || rc.Agent() == nil {
 		return nil, acp.NewError(acp.ClassConnection, "runtime_not_connected",
 			"执行面没有可用的客户端连接，无法取样模型目录", nil)
 	}
-	caps := rc.Client().Capabilities()
-	if !caps.SessionResume && !caps.Raw.LoadSession {
+	agent := rc.Agent()
+	caps := agent.Capabilities()
+	if !caps.SessionResume && !caps.LoadSession {
 		return nil, acp.NewError(acp.ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
 	}
-	var sess *acp.Session
+	var sess session.AgentSession
 	var err error
-	if caps.Raw.LoadSession {
-		sess, err = rc.Client().LoadSession(ctx, rawSessionID, acp.SessionOptions{Cwd: cwd})
+	opts := session.SessionOptions{Cwd: cwd}
+	if caps.LoadSession {
+		sess, err = agent.LoadSession(ctx, rawSessionID, opts)
 	} else {
-		sess, err = rc.Client().ResumeSession(ctx, rawSessionID, acp.SessionOptions{Cwd: cwd})
+		sess, err = agent.ResumeSession(ctx, rawSessionID, opts)
 	}
 	if err != nil {
 		return nil, err
@@ -55,8 +57,8 @@ func SampleConfigOptions(ctx context.Context, rc session.Conn, rawSessionID, cwd
 			glog.Debugw(ctx, "目录取样会话 close 失败（忽略）", "runtime", rc.Spec().ID, "err", cerr)
 		}
 	}()
-	// 协议形状只在适配器内部出现：交给编排面的一律是平台值。
-	return runtime.ConfigOptionsOfACP(sess.ConfigOptions()), nil
+	// 会话端口只交出平台值：这里不需要再转换。
+	return sess.ConfigOptions(), nil
 }
 
 // SampleConfigOptions 实现 `session.RuntimePlane`：把取样的机制挂在平面上，

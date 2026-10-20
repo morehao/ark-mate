@@ -47,7 +47,7 @@ func (s *Service) AuthGuidance() []provider.AuthGuide {
 	if rc == nil {
 		return nil
 	}
-	caps := rc.Client().Capabilities()
+	caps := rc.Agent().Capabilities()
 	if len(caps.AuthGuidance) == 0 {
 		return nil
 	}
@@ -76,7 +76,8 @@ func (s *Service) PromptImageSupported() *bool {
 	if rc == nil {
 		return nil
 	}
-	v := rc.Client().Capabilities().Images
+	img := rc.Agent().Capabilities().Images
+	v := img
 	return &v
 }
 
@@ -96,8 +97,8 @@ func (s *Service) SampleConfigOptions(ctx context.Context) ([]runtime.ConfigOpti
 	if err != nil {
 		return nil, false, err
 	}
-	caps := rc.Client().Capabilities()
-	if !caps.SessionResume && !caps.Raw.LoadSession {
+	caps := rc.Agent().Capabilities()
+	if !caps.SessionResume && !caps.LoadSession {
 		return nil, false, acp.NewError(acp.ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
 	}
@@ -183,7 +184,7 @@ func (s *Service) catalogResumeCandidates(ctx context.Context, rc session.Conn) 
 	}
 
 	// 2) 兜底：底座的 session/list（顺序即底座给的"最近优先"）。
-	items, err := rc.Client().ListSessions(ctx, "")
+	items, err := rc.Agent().ListSessions(ctx, "")
 	if err != nil {
 		return nil
 	}
@@ -191,7 +192,7 @@ func (s *Service) catalogResumeCandidates(ctx context.Context, rc session.Conn) 
 }
 
 // resumeTargetsFrom 把两处来源折成候选列表（无 ACP 依赖，顺序/跳过两条判据可单测）。
-func resumeTargetsFrom(ctx context.Context, recs []session.SessionRec, listed []acp.SessionInfo) []resumeTarget {
+func resumeTargetsFrom(ctx context.Context, recs []session.SessionRec, listed []runtime.SessionRef) []resumeTarget {
 	targets := make([]resumeTarget, 0, 4)
 	seen := map[string]bool{}
 	add := func(rawID, cwd string) {
@@ -230,11 +231,11 @@ func resumeTargetsFrom(ctx context.Context, recs []session.SessionRec, listed []
 
 // pickListedSession 从 session/list 结果里挑一条可恢复的会话：优先带绝对 cwd 的条目
 // （resume 需要 cwd），runtime 大多按最近活跃倒序返回（dsh 明确如此），故取首个。
-func pickListedSession(items []acp.SessionInfo) (acp.SessionInfo, bool) {
+func pickListedSession(items []runtime.SessionRef) (runtime.SessionRef, bool) {
 	for _, it := range items {
 		if it.ID != "" && strings.HasPrefix(it.Cwd, "/") {
 			return it, true
 		}
 	}
-	return acp.SessionInfo{}, false
+	return runtime.SessionRef{}, false
 }

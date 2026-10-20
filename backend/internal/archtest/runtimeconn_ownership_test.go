@@ -61,7 +61,7 @@ var runtimeconnAnchors = []string{
 	"func (pl *Pool) KeyFor(",
 	"func (pl *Pool) AdmitGeneration(",
 	"func (pl *Pool) ReapIdle(",
-	"func (pl *Pool) ConnOfClient(",
+	"func (pl *Pool) HasConn(",
 	"type ProviderEnvSource interface {",
 	"type ConfigDigestSource interface {",
 }

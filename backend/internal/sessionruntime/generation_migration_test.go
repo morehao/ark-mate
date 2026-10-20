@@ -215,7 +215,7 @@ func TestGenerationMigration(t *testing.T) {
 	if as2.Fingerprint != want {
 		t.Fatalf("新句柄指纹 = %q，期望 %q", as2.Fingerprint, want)
 	}
-	if as2.Client() == as1.Client() {
+	if as2.Conn() == as1.Conn() {
 		t.Fatal("新代际必须落在**另一个**连接上（能力集是进程级的，共用连接等于把两套能力合进一个进程）")
 	}
 	// 旧代际此刻已无人引用 → 当场回收（不等空闲阈值）：它代表的是一套已经过时的能力集。
@@ -421,7 +421,7 @@ func TestGenerationPool(t *testing.T) {
 		t.Fatalf("acquire(缺省): %v", err)
 	}
 	_, as1 := r.start(t, &session.CapabilitySelection{Mcps: ptrOf([]string{"fs"})})
-	if as1.Client() == idle.Client() {
+	if as1.Conn() == idle {
 		t.Fatal("不同能力集必须各起一个代际")
 	}
 	if n := r.conns(); n != 2 {
@@ -441,7 +441,7 @@ func TestGenerationPool(t *testing.T) {
 	if n := r.conns(); n != 2 {
 		t.Fatalf("淘汰空闲代际后池子应仍为 2，got %d", n)
 	}
-	if poolOf(r.orch).ConnOfClient(idle.Client()) != nil {
+	if poolOf(r.orch).HasConn(idle) {
 		t.Fatal("无人引用的那条代际应已被淘汰")
 	}
 	// 换一条有会话引用的代际（git）：仍靠淘汰"fp-third"（此刻无人引用）腾位置。
@@ -495,10 +495,10 @@ func TestMigrationReclaimsSharedGenerationOnlyWhenUnreferenced(t *testing.T) {
 	// 两条会话钉住**同一套**能力 → 共用同一个代际。
 	c1, a1 := r.start(t, sel)
 	c2, a2 := r.start(t, sel)
-	if a1.Client() != a2.Client() {
+	if a1.Conn() != a2.Conn() {
 		t.Fatal("同一套能力应共用代际")
 	}
-	oldClient := a1.Client()
+	oldConn := a1.Conn()
 
 	r.registerMcp(t, fsServer("v2"))
 	_ = r.boundary(t, c1)
@@ -509,7 +509,7 @@ func TestMigrationReclaimsSharedGenerationOnlyWhenUnreferenced(t *testing.T) {
 	if n := r.conns(); n != 1 {
 		t.Fatalf("最后一个会话迁走后应回收旧代际，got %d", n)
 	}
-	if poolOf(r.orch).ConnOfClient(oldClient) != nil {
+	if poolOf(r.orch).HasConn(oldConn) {
 		t.Fatal("旧代际应已被回收")
 	}
 }

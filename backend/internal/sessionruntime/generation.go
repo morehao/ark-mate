@@ -90,7 +90,7 @@ func (o *Orchestrator) planGenerationSwitch(as *session.ActiveSession, rec *sess
 	}
 	// ③ 探针不可读 → 保守当忙。连接反查不到（正在拆/已拆）时无法判断这条句柄挂在什么上面，
 	// 那就当它不可动——真正的重建由 ensureSession 负责，不在这里猜。
-	rc := o.pool.ConnOfClient(as.Client())
+	rc := as.Conn()
 	if rc == nil {
 		return generationPlan{Action: genActionKeep, Reason: "连接不可读：不动（保守）"}
 	}
@@ -119,7 +119,7 @@ func (o *Orchestrator) planGenerationSwitch(as *session.ActiveSession, rec *sess
 		plan.Reason = "有在途轮次：顺延到下一轮"
 		return plan
 	}
-	if as.Client() == nil || as.Native() == nil || o.perm == nil || o.elic == nil {
+	if as.Conn() == nil || as.Native() == nil || o.perm == nil || o.elic == nil {
 		plan.Action = genActionDefer
 		plan.Reason = "会话忙碌状态不可读：保守顺延"
 		return plan
@@ -196,7 +196,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *session.A
 			targetFP = fp
 		}
 	}
-	oldRC := o.pool.ConnOfClient(as.Client())
+	oldRC := as.Conn()
 	// 预热新代际并按既有 resume 语义把会话挂上去（`connectSession` 内完成，
 	// 与"进程死掉重建"共用同一条路径——两条路径共用才不会出现"重启后能力集悄悄换一套"）。
 	next, _, err := o.connectSession(ctx, rec, spec, rec.Cwd, sel, targetFP)

@@ -15,12 +15,26 @@ import (
 // 错误（§6.2 ModeMapping / §5.5 模型面为文档开放项），不静默吞掉。
 type sessionRuntime struct {
 	spec Spec
-	sess *acp.Session
+	sess AgentSessionView
+}
+
+// AgentSessionView 会话投影所需的最小会话视图。
+//
+// 由**域侧**的 AgentSession 结构上满足（`internal/domain/session`）：投影只调这几个方法，
+// 因此不需要认识协议会话类型。放在本包而不是引用域类型，是为了让 runtime 保持内圈最底层
+// （域 import runtime，runtime 不 import 域）。
+type AgentSessionView interface {
+	ID() string
+	Prompt(ctx context.Context, text string) (string, error)
+	Cancel(ctx context.Context) error
+	ConfigOptions() []ConfigOption
+	SetConfigOption(ctx context.Context, optionID, value string) ([]ConfigOption, error)
+	Capabilities() CapabilityFacts
 }
 
 // newSessionRuntime 以给定 Spec 包装已拨活的会话。调用方负责会话生命周期（acp.Session 的
 // Close，与 Orchestrator 持有连接回收的方式一致）。
-func newSessionRuntime(spec Spec, sess *acp.Session) *sessionRuntime {
+func newSessionRuntime(spec Spec, sess AgentSessionView) *sessionRuntime {
 	return &sessionRuntime{spec: spec, sess: sess}
 }
 
@@ -35,7 +49,7 @@ func unsupported(code, details string) error {
 func (r *sessionRuntime) ID() string              { return r.spec.ID }
 func (r *sessionRuntime) ManagesOwnContext() bool { return r.spec.ManagesOwnContext }
 func (r *sessionRuntime) Capabilities() CapabilityFacts {
-	return CapabilityFactsOfACP(r.sess.Client().Capabilities())
+	return r.sess.Capabilities()
 }
 func (r *sessionRuntime) RuntimeSessionID() string { return r.sess.ID() }
 
@@ -59,7 +73,7 @@ func (r *sessionRuntime) ApplyMode(_ context.Context, _ Mode) error {
 
 // ConfigOptions 返回本会话的会话配置项（模型目录等，全部由运行时自报）。
 func (r *sessionRuntime) ConfigOptions() []ConfigOption {
-	return ConfigOptionsOfACP(r.sess.ConfigOptions())
+	return r.sess.ConfigOptions()
 }
 
 // ApplyModel 切换模型，返回应用后的全量配置项状态。
@@ -76,7 +90,7 @@ func (r *sessionRuntime) ConfigOptions() []ConfigOption {
 // 思考档位（category=thought_level）不在平台侧下发：运行时若提供该选项，只随全量状态原样
 // 透出（展示/可观测），平台不代为选择。
 func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) ([]ConfigOption, error) {
-	opts := ConfigOptionsOfACP(r.sess.ConfigOptions())
+	opts := r.sess.ConfigOptions()
 	mOpt, ok := FindConfigOption(opts, CategoryModel)
 	if !ok {
 		return opts, unsupported("unsupported_model",
@@ -85,11 +99,7 @@ func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) ([]Confi
 	if m.Model == "" {
 		return opts, nil // 空值 = 用运行时默认，不下发设置
 	}
-	opts2, err := r.sess.SetConfigOption(ctx, mOpt.ID, m.Model)
-	if err != nil {
-		return nil, err
-	}
-	return ConfigOptionsOfACP(opts2), nil
+	return r.sess.SetConfigOption(ctx, mOpt.ID, m.Model)
 }
 
 // Resume 热切换会话。会话恢复的 ACP 承载为 acp.Client.ResumeSession（session/resume 支持随
@@ -113,6 +123,6 @@ func (r *sessionRuntime) Resume(_ context.Context, _ string) error {
 // `run.go` / `session_start.go` 都有显式判空。
 //
 // sess 为 nil 时仍返回非 nil 实例（构造不触碰会话；方法调用方负责非 nil）。
-func NewProjection(spec Spec, sess *acp.Session) Runtime {
+func NewProjection(spec Spec, sess AgentSessionView) Runtime {
 	return newSessionRuntime(spec, sess)
 }

@@ -34,13 +34,13 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 		// 领域决策 → 回给底座的协议结果（翻译在 `interaction_bridge.go`，调用点不内联）。
 		return permissionDecisionToACP(o.requestPermission(ctx, req))
 	}
-	var cli *acp.Client // Dial 成功后回填；hook 都在连接读循环里被调用，晚于 Dial 返回
+	var conn session.Conn // Dial 成功后回填；hook 都在连接读循环里被调用，晚于 Dial 返回
 	reqElic := func(ctx context.Context, req acp.ElicitationRequest) acp.ElicitationOutcome {
 		if o.allowAll {
 			// 调试/冒烟（--allow-all）：不征询，直接按空内容接受（agent 自行处理空内容）。
 			return acp.ElicitationOutcome{Action: "accept"}
 		}
-		sid, source, note := o.resolveElicitationScope(cli, req)
+		sid, source, note := o.resolveElicitationScope(conn, req)
 		if sid == "" {
 			// 既无 `_meta` scope 也无唯一在途 run（空闲 / 会话外 request-scope / 多会话并发）、
 			// 或 `_meta` 给了一个**查不到平台会话**的底座 id（D-4）→ 不猜。
@@ -57,13 +57,13 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 	// elicitationId 收敛挂起项。归属用「同连接的唯一在途 run」校验（可判定时）；不可判定时不阻断
 	// ——该 id 由 agent 生成、不可猜，且 complete 只是收敛通知（重复/迟到都不该有副作用）。
 	completeElic := func(_ context.Context, elicitationID string) {
-		o.elic.CompleteByURLID(o.busySessionForClient(cli), elicitationID)
+		o.elic.CompleteByURLID(o.busySessionForClient(conn), elicitationID)
 	}
 	rc, err := o.pool.Dial(ctx, spec, session.DialOptions{
 		Fingerprint:      fingerprint,
 		NativeMode:       nativeMode,
 		CheckCredentials: o.svc.CredentialProblem,
-		ClientOptions: acp.ClientOptions{
+		Hooks: acp.ClientOptions{
 			OnEvent:             o.acpEventSink(spec.ID),
 			RequestPermission:   reqPerm,
 			CreateElicitation:   reqElic,
@@ -73,7 +73,7 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 	if err != nil {
 		return nil, err
 	}
-	cli = rc.Client()
+	conn = rc
 	return rc, nil
 }
 
@@ -84,7 +84,7 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 // 收尾的应用面（会话状态语义 / 在途登记 / 诊断留痕）已随 P4a 第五十七刀进
 // `domain/session.Runner`；本方法只是 `runtimeconn.DropSink` 的接线点。
 func (o *Orchestrator) OnConnDropped(d session.ConnDrop) {
-	o.runner.DropConn(d.Client, d.Intentional)
+	o.runner.DropConn(d.Conn, d.Intentional)
 }
 
 // InUseOn 这条连接还有人用吗（有在途轮次、或仍挂着会话）。
@@ -94,10 +94,10 @@ func (o *Orchestrator) InUseOn(c session.Conn) bool {
 	if c == nil {
 		return true
 	}
-	return o.runner.InUse(c.Client())
+	return o.runner.InUse(c)
 }
 
 // busySessionForClient 返回该连接上「唯一在途」的会话 id；无在途或多会话并发在途返回空串。
-func (o *Orchestrator) busySessionForClient(client *acp.Client) string {
-	return o.inflight.SoleOwner(client)
+func (o *Orchestrator) busySessionForClient(conn session.Conn) string {
+	return o.inflight.SoleOwner(conn)
 }

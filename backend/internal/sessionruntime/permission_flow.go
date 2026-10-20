@@ -145,7 +145,7 @@ func (o *Orchestrator) RevokeMemory(sessionID, title, kind string) (bool, error)
 //   - inferred_inflight：`_meta` 未给，但连接上恰有一个在途 run → 按它归属；
 //   - ambiguous：两者都不成立（空闲 / 会话外 request-scope / 多会话并发）→ 空 id，调用方按取消
 //     回应并留痕，不猜测（猜错会把提问卡投到别的会话上，比不投更坏）。
-func (o *Orchestrator) resolveElicitationScope(cli *acp.Client, req acp.ElicitationRequest) (sessionID, scopeSource, ambiguousNote string) {
+func (o *Orchestrator) resolveElicitationScope(conn session.Conn, req acp.ElicitationRequest) (sessionID, scopeSource, ambiguousNote string) {
 	// D-4（v15 顺手修的既有缺陷）：`req.SessionID` 来自 ACP `_meta`，那是**底座的会话 id**，
 	// 不是平台的会话 id。v15 之前两者同形（有些底座就发 `ses_…`），于是"把提问卡挂到一个
 	// 不存在的会话上"在任何测试与人工核对里都看不出来；加了 `rt_` 壳之后形状不同了，**不查就错**。
@@ -160,7 +160,7 @@ func (o *Orchestrator) resolveElicitationScope(cli *acp.Client, req acp.Elicitat
 			"elicitation 的 wire `_meta` 带来了一个底座会话 id，但平台上没有会话登记它" +
 				"（跨会话 / 已删除 / 底座换了 id）：按不可归属处理，不猜测"
 	}
-	if sid := o.busySessionForClient(cli); sid != "" {
+	if sid := o.busySessionForClient(conn); sid != "" {
 		return sid, interaction.ScopeInferred, ""
 	}
 	return "", interaction.ScopeAmbiguous,

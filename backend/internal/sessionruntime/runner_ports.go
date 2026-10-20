@@ -5,7 +5,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/code"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -21,11 +20,12 @@ func (d runnerDiagnostics) RecordRuntimeError(sessionID string, ae *code.Runtime
 	d.o.svc.runtimePlane.RecordRuntimeError(sessionID, ae, tail)
 }
 
-func (d runnerDiagnostics) StderrTail(client *acp.Client) []string {
-	if client == nil {
+func (d runnerDiagnostics) StderrTail(conn session.Conn) []string {
+	if conn == nil {
 		return nil
 	}
-	return acp.TailLines(client.StderrTail(), session.MaxDiagStderrLines)
+	// 尾巴的采集与截断在适配器（`runtimeconn`）里做，域只拿结果。
+	return conn.Agent().StderrTail()
 }
 
 // runnerCatalog 运行时配置项（模型目录）的缓存写口。
@@ -54,18 +54,18 @@ func (c runnerCatalog) ClearRejection(runtimeID, value string) {
 	c.svc.facts.Providers.ClearModelRejection(runtimeID, value)
 }
 
-// acquireClient 是 `Lifecycle.Acquire` 的实现：拨号仍归编排侧（回调与凭据检查在这里），
-// 域只拿到 ACP 客户端去开/恢复会话。
-func (o *Orchestrator) acquireClient(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acp.Client, error) {
+// acquireConn 是 `Lifecycle.Acquire` 的实现：拨号仍归编排侧（回调与凭据检查在这里），
+// 域只拿到**连接端口**去开/恢复会话（能力面经 `Conn.Agent()` 取）。
+func (o *Orchestrator) acquireConn(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (session.Conn, error) {
 	rc, err := o.acquire(ctx, spec, fingerprint, nativeMode)
 	if err != nil {
 		return nil, err
 	}
-	if rc == nil || rc.Client() == nil {
-		return nil, acp.NewError(acp.ClassConnection, "connection_unavailable",
+	if rc == nil || rc.Agent() == nil {
+		return nil, code.NewError(code.ClassConnection, "connection_unavailable",
 			"连接已建立但没有可用的 ACP 客户端", nil)
 	}
-	return rc.Client(), nil
+	return rc, nil
 }
 
 // runnerInteractions 会话取消时把挂起的权限/提问一并收敛（权限面事实）。
