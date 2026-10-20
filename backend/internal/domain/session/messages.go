@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/domain/session/message"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
@@ -101,8 +102,8 @@ func (pl *Plane) ReplaceSessionMessages(ctx context.Context, sessionID string, a
 //
 // 进行中的轮（`last_seq = -1`）窗口右端夹到下一轮起点之前（没有下一轮 = 会话末尾）：不夹的话，
 // 一次重启后的重建会把"中断那一轮"之后的事件都算进它。
-func buildSessionMessageRows(sessionID string, all []model.EventEntity, runs []run.Item) []model.MessageEntity {
-	var out []model.MessageEntity
+func buildSessionMessageRows(sessionID string, all []model.EventEntity, runs []run.Item) []message.Item {
+	var out []message.Item
 	for i, r := range runs {
 		hi := r.LastSeq
 		if hi < 0 && i+1 < len(runs) {
@@ -119,8 +120,8 @@ func buildSessionMessageRows(sessionID string, all []model.EventEntity, runs []r
 
 // buildMessageRows 把**一个窗口**的事件投影成消息行（白名单 + 空正文丢弃 + 序号接续）。
 // `baseOrdinal` = 该窗口之前已经产出的行数（整会话重建时跨轮连续，单窗口重建时给 0）。
-func buildMessageRows(sessionID, runID string, evs []model.EventEntity, baseOrdinal int) []model.MessageEntity {
-	var out []model.MessageEntity
+func buildMessageRows(sessionID, runID string, evs []model.EventEntity, baseOrdinal int) []message.Item {
+	var out []message.Item
 	ordinal := baseOrdinal
 	var cur *msgRowBuilder
 
@@ -141,7 +142,7 @@ func buildMessageRows(sessionID, runID string, evs []model.EventEntity, baseOrdi
 			at = time.Now().UTC()
 		}
 		ordinal++
-		out = append(out, model.MessageEntity{
+		out = append(out, message.Item{
 			ID:        objid.New(objid.Message),
 			SessionID: sessionID, RunID: runID, Role: b.role, Text: b.text,
 			EventsJSON: mustJSON(b.events), ToolDetailsJSON: "[]",
@@ -163,9 +164,9 @@ func buildMessageRows(sessionID, runID string, evs []model.EventEntity, baseOrdi
 				continue
 			}
 			ordinal++
-			out = append(out, model.MessageEntity{
+			out = append(out, message.Item{
 				ID:        objid.New(objid.Message),
-				SessionID: sessionID, RunID: runID, Role: model.RoleUser, Text: text,
+				SessionID: sessionID, RunID: runID, Role: message.RoleUser, Text: text,
 				EventsJSON:      mustJSON([]map[string]any{{"seq": e.Seq, "type": e.Type, "payload": m}}),
 				ToolDetailsJSON: "[]",
 				Ordinal:         int64(ordinal), Kind: "",
@@ -176,7 +177,7 @@ func buildMessageRows(sessionID, runID string, evs []model.EventEntity, baseOrdi
 			msgID, _ := m["msg_id"].(string)
 			if cur == nil || (msgID != "" && cur.msgID != "" && msgID != cur.msgID) {
 				flush()
-				cur = &msgRowBuilder{role: model.RoleAssistant, msgID: msgID, seqLo: -1, seqHi: -1, createdAt: e.CreatedAt}
+				cur = &msgRowBuilder{role: message.RoleAssistant, msgID: msgID, seqLo: -1, seqHi: -1, createdAt: e.CreatedAt}
 			} else if cur.msgID == "" && msgID != "" && len(cur.events) > 0 {
 				// 无 msg_id 的首段之后带出 msg_id → 归属同一 assistant 消息（底座补 id 的场景）。
 				cur.msgID = msgID

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/domain/session/message"
 	"github.com/morehao/ark-mate/internal/persistence/dao"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/dbaccess/gormdao"
@@ -29,7 +30,7 @@ const messageListOrder = "seq_lo ASC, id ASC"
 //
 // 空批次**也要删**（不是 no-op）：一个会话在当前白名单下可能一行都不产出，那时"重建成功"
 // 必须意味着"库里没有该会话的旧行"，否则上一代的幽灵消息会留下。
-func (s *Store) ReplaceSessionMessages(ctx context.Context, sessionID string, msgs []model.MessageEntity) error {
+func (s *Store) ReplaceSessionMessages(ctx context.Context, sessionID string, msgs []message.Item) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("session_id = ?", sessionID).Delete(&model.MessageEntity{}).Error; err != nil {
 			return err
@@ -37,7 +38,8 @@ func (s *Store) ReplaceSessionMessages(ctx context.Context, sessionID string, ms
 		if len(msgs) == 0 {
 			return nil
 		}
-		return tx.Create(&msgs).Error
+		rows := messageEntitiesOf(msgs)
+		return tx.Create(&rows).Error
 	})
 }
 
@@ -126,4 +128,22 @@ func likePattern(q string) string {
 	s = strings.ReplaceAll(s, `%`, `\%`)
 	s = strings.ReplaceAll(s, `_`, `\_`)
 	return "%" + s + "%"
+}
+
+// ——— 行 ↔ 聚合映射（C1：领域自持 message.Item）———
+
+func messageEntityOf(m message.Item) model.MessageEntity {
+	return model.MessageEntity{
+		ID: m.ID, SessionID: m.SessionID, RunID: m.RunID, Role: m.Role, Text: m.Text,
+		EventsJSON: m.EventsJSON, ToolDetailsJSON: m.ToolDetailsJSON, Ordinal: m.Ordinal,
+		Kind: m.Kind, SeqLo: m.SeqLo, SeqHi: m.SeqHi, CreatedAt: m.CreatedAt,
+	}
+}
+
+func messageEntitiesOf(items []message.Item) []model.MessageEntity {
+	out := make([]model.MessageEntity, 0, len(items))
+	for _, m := range items {
+		out = append(out, messageEntityOf(m))
+	}
+	return out
 }

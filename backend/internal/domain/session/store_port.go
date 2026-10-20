@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session/memory"
+	"github.com/morehao/ark-mate/internal/domain/session/message"
 	"github.com/morehao/ark-mate/internal/domain/session/queue"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/persistence/model"
@@ -42,7 +43,7 @@ type Store interface {
 	RunningRuns(ctx context.Context, sessionID string) ([]run.Item, error)
 
 	// ——— 消息读模型 ———
-	ReplaceSessionMessages(ctx context.Context, sessionID string, msgs []model.MessageEntity) error
+	ReplaceSessionMessages(ctx context.Context, sessionID string, msgs []message.Item) error
 	SearchMessages(ctx context.Context, q string, limit int) ([]model.MessageHit, error)
 	SearchUserMessages(ctx context.Context, sessionID, q string) ([]model.MessageTextHit, error)
 
