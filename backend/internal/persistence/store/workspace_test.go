@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
+	wkrow "github.com/morehao/ark-mate/internal/domain/workspace/row"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +13,8 @@ import (
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
-// DefaultWorkspaceTitle 常量已迁到 model（列的取值归 schema 层）；测试里保留短名便于阅读。
-const DefaultWorkspaceTitle = model.DefaultWorkspaceTitle
+// DefaultTitle 是登记默认工作空间时的语言中立标题（权威定义在领域值包）。
+const DefaultTitle = wkrow.DefaultTitle
 
 // 本文件钉住 v14 工作空间登记表的**跨表不变量**（设计 ADR-1/ADR-4/ADR-5/ADR-6）。
 //
@@ -67,8 +68,8 @@ func TestWorkspaceDefaultBootstrap(t *testing.T) {
 	if _, statErr := os.Stat(dir); statErr != nil {
 		t.Fatalf("默认工作空间目录应被建立: %v", statErr)
 	}
-	if got.Title != DefaultWorkspaceTitle {
-		t.Fatalf("标题应为语言中立的 %q，实际 %q", DefaultWorkspaceTitle, got.Title)
+	if got.Title != DefaultTitle {
+		t.Fatalf("标题应为语言中立的 %q，实际 %q", DefaultTitle, got.Title)
 	}
 
 	// 幂等：再跑一次拿到同一行，不新建目录、不新增行。
@@ -366,7 +367,7 @@ func TestWorkspaceUniqueIndexEnforced(t *testing.T) {
 
 	// 默认工作空间的部分唯一索引：第二条 is_default=1 也必须被拦下。
 	def := model.WorkspaceEntity{
-		ID: "wsp-d1", Path: t.TempDir(), Title: DefaultWorkspaceTitle, IsDefault: true, ListOrder: 100,
+		ID: "wsp-d1", Path: t.TempDir(), Title: DefaultTitle, IsDefault: true, ListOrder: 100,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	if err := s.workspaces.Insert(ctxT(), &def); err != nil {

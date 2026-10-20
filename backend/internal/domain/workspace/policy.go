@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/morehao/ark-mate/internal/domain/workspace/row"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // 工作空间（workspace）= 会话的 ACP cwd：一个**规范化后的绝对路径**。
@@ -48,7 +48,7 @@ type WorkspaceResolution struct {
 
 // DefaultWorkspaceRef 是"默认工作空间"在解析路径上的最小承载。
 //
-// 刻意不传整个 model.WorkspaceEntity：`ResolveWorkspace` 是**纯函数**（可单测、无副作用），
+// 刻意不传一条完整的登记行（`row.Item`）：`ResolveWorkspace` 是**纯函数**（可单测、无副作用），
 // 让 store 类型渗进它的签名会把"解析"与"持久层"绑在一起——而这个函数的全部价值
 // 恰恰是它只认路径与两个判据。
 type DefaultWorkspaceRef struct {
@@ -418,7 +418,7 @@ type Plane struct {
 	// 它不是"登记项的缓存"：默认工作空间是**平台代建**的东西，而登记表（用户显式产出的状态）
 	// 在 memory 模式本来就无处可存。少了它，"未指定 cwd 就发一条消息"这条最普通的路在
 	// `MATE_STORE=memory` 下直接报 `workspace_required`——用户什么都没做错。
-	memDefaultWorkspace *model.WorkspaceEntity
+	memDefaultWorkspace *row.Item
 }
 
 // NewPlane 造一个工作空间域（策略字段默认全空 = 不限制、不代建）。

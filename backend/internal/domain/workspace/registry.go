@@ -11,8 +11,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/domain/workspace/row"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
 
@@ -452,12 +452,12 @@ func (pl *Plane) provisionMemoryDefaultWorkspace(dir string) error {
 		canonical = real
 	}
 	now := time.Now().UTC()
-	row := &model.WorkspaceEntity{
+	row := &row.Item{
 		// 每次启动一个新 id：memory 模式的进程内登记项**本来就不跨进程存活**，
 		// 与 store 侧的 `BootstrapDefaultWorkspace` 用同一个铸造口径（`wsp_<ULID>`）。
 		ID:        objid.New(objid.Workspace),
 		Path:      canonical,
-		Title:     model.DefaultWorkspaceTitle,
+		Title:     row.DefaultTitle,
 		IsDefault: true,
 		ListOrder: 0,
 		CreatedAt: now,
@@ -478,7 +478,7 @@ func (pl *Plane) provisionMemoryDefaultWorkspace(dir string) error {
 // 请求会话快照会把"workspace 锁 → session 锁"这条边固化下来，等 workspace 状态搬进域平面
 // 就与 `workspaceDisplayOf` 的反向回调合成**锁序反转**——表现是挂死，不是红（见
 // `workspace_view.go` 的 `workspaceUsage` 同一条注释）。
-func (pl *Plane) workspaceRespForMemDefault(def model.WorkspaceEntity) WorkspaceItem {
+func (pl *Plane) workspaceRespForMemDefault(def row.Item) WorkspaceItem {
 	resp := WorkspaceItem{
 		ID:        def.ID,
 		Path:      def.Path,
@@ -504,13 +504,13 @@ func (pl *Plane) workspaceRespForMemDefault(def model.WorkspaceEntity) Workspace
 //
 // memory 模式返回装配期铸的那一条（见 EnsureDefaultWorkspace）——"没有库"与"没有默认工作空间"
 // 是两件事，把它们混为一谈就是那条 40001 的成因。
-func (pl *Plane) DefaultWorkspace() (model.WorkspaceEntity, bool, error) {
+func (pl *Plane) DefaultWorkspace() (row.Item, bool, error) {
 	if pl.st == nil {
 		pl.mu.Lock()
 		def := pl.memDefaultWorkspace
 		pl.mu.Unlock()
 		if def == nil {
-			return model.WorkspaceEntity{}, false, nil
+			return row.Item{}, false, nil
 		}
 		return *def, true, nil
 	}
@@ -686,7 +686,7 @@ func (pl *Plane) WorkspaceDisplayOf(workspaceID string) (string, string) {
 // 展示时读作「默认工作空间」——与 dsh 的 workspaceDisplayTitle 同一手法。
 // 用户手动改名过的（标题不再是那个串）原样透出。
 func defaultWorkspaceDisplayTitle(title string) string {
-	if title == model.DefaultWorkspaceTitle {
+	if title == row.DefaultTitle {
 		return "默认工作空间"
 	}
 	return title

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/domain/workspace/row"
 )
 
 // ——— P2b：装配侧要交下来的两样家当（端口） ———
@@ -82,7 +82,7 @@ func (pl *Plane) sessionViews() []SessionView {
 // 事务的**开合**在仓储（它才有库句柄），**顺序与判定**在这里——"默认工作空间不可删"是域的
 // 策略，不该住在仓储里被所有调用方继承。
 type WorkspaceTx interface {
-	WorkspaceRow(ctx context.Context, id string) (*model.WorkspaceEntity, bool, error)
+	WorkspaceRow(ctx context.Context, id string) (*row.Item, bool, error)
 	ReleaseSessions(ctx context.Context, id string) (int64, error)
 	DeleteRow(ctx context.Context, id string) (bool, error)
 }
@@ -90,12 +90,12 @@ type WorkspaceTx interface {
 type WorkspaceStore interface {
 	// Atomically 开一个事务执行 fn（fn 返回错误即整体回滚）。
 	Atomically(ctx context.Context, fn func(WorkspaceTx) error) error
-	BootstrapDefaultWorkspace(ctx context.Context, dir string) (*model.WorkspaceEntity, error)
-	DefaultWorkspace(ctx context.Context) (model.WorkspaceEntity, bool, error)
-	ListWorkspaces(ctx context.Context) ([]model.WorkspaceEntity, error)
-	GetWorkspace(ctx context.Context, id string) (model.WorkspaceEntity, bool, error)
-	WorkspaceByPath(ctx context.Context, path string) (model.WorkspaceEntity, bool, error)
-	CreateWorkspace(ctx context.Context, path, title string) (model.WorkspaceEntity, error)
+	BootstrapDefaultWorkspace(ctx context.Context, dir string) (*row.Item, error)
+	DefaultWorkspace(ctx context.Context) (row.Item, bool, error)
+	ListWorkspaces(ctx context.Context) ([]row.Item, error)
+	GetWorkspace(ctx context.Context, id string) (row.Item, bool, error)
+	WorkspaceByPath(ctx context.Context, path string) (row.Item, bool, error)
+	CreateWorkspace(ctx context.Context, path, title string) (row.Item, error)
 	RenameWorkspace(ctx context.Context, id, title string) error
 	RelocateWorkspace(ctx context.Context, id, canonicalPath string) (bool, error)
 	MoveWorkspace(ctx context.Context, id, beforeID string) ([]string, error)

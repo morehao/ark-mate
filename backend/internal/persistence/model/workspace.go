@@ -9,13 +9,6 @@ const (
 	// 它是「用户的工作目录」这条线的**持久身份**（设计 ADR-1）：在这之前目录名只从会话
 	// 派生（`DISTINCT cwd`），没有可写对象、也就没有"创建工作空间"这件事可落。
 	TableNameWorkspace = "workspaces"
-
-	// DefaultWorkspaceTitle 默认工作空间的语言中立标题。
-	//
-	// 它是 workspaces 表 `title` 列的一个**取值**（因此归 schema 层，不归某个载体）：
-	// 存的是这个串而不是「默认工作空间」——一次安装跨语言切换时库里的值不变，只有屏幕上的
-	// 字跟着变（前端按 `is_default` 渲染本地化名字）。
-	DefaultWorkspaceTitle = "default-workspace"
 )
 
 // WorkspaceEntity 是 workspaces 表的一行（v14）：**工作空间登记项**。

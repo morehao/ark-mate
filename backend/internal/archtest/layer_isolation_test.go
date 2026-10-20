@@ -117,6 +117,7 @@ var domainValueLeafPackages = []string{
 	modulePrefix + "internal/domain/session/message",
 	modulePrefix + "internal/domain/session/event",
 	modulePrefix + "internal/domain/session/sessionrow",
+	modulePrefix + "internal/domain/workspace/row",
 }
 
 func isDomainValueLeaf(imp string) bool {

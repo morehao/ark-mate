@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	wkrow "github.com/morehao/ark-mate/internal/domain/workspace/row"
 	"github.com/morehao/ark-mate/internal/persistence/dao"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/dbaccess/gormdao"
@@ -61,7 +62,7 @@ type WorkspaceProvision struct {
 //
 // **建目录是文件系统副作用，事务回滚不了它**：目录先建、再写库；写库失败时目录留在磁盘上
 // （空目录，无害），由 v14 的迁移说明与 doctor 如实登记，不假装能回滚。
-func (s *Store) BootstrapDefaultWorkspace(ctx context.Context, dir string) (*model.WorkspaceEntity, error) {
+func (s *Store) BootstrapDefaultWorkspace(ctx context.Context, dir string) (*wkrow.Item, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		return nil, nil
@@ -73,9 +74,11 @@ func (s *Store) BootstrapDefaultWorkspace(ctx context.Context, dir string) (*mod
 	if n > 0 {
 		// 表非空：可能是已有安装（用户在跑别的项目），也可能是默认被删过。
 		// 两种情况都不自动创建——这正是"删了就不再回来"的实现点。
-		return s.defaultWorkspaceRow(ctx)
+		row, err := s.defaultWorkspaceRow(ctx)
+		return workspaceItemPtr(row), err
 	}
-	return s.createDefaultWorkspace(ctx, dir)
+	row, err := s.createDefaultWorkspace(ctx, dir)
+	return workspaceItemPtr(row), err
 }
 
 // workspaceRows 按展示顺序读全部登记（单表读 + 业务顺序）。
@@ -141,7 +144,7 @@ func (s *Store) createDefaultWorkspace(ctx context.Context, dir string) (*model.
 	row := model.WorkspaceEntity{
 		ID:        objid.New(objid.Workspace),
 		Path:      canonical,
-		Title:     model.DefaultWorkspaceTitle,
+		Title:     wkrow.DefaultTitle,
 		IsDefault: true,
 		ListOrder: 0,
 		CreatedAt: now,
@@ -160,39 +163,43 @@ func (s *Store) createDefaultWorkspace(ctx context.Context, dir string) (*model.
 }
 
 // DefaultWorkspace 取默认工作空间（不存在 → (nil, false, nil)）。
-func (s *Store) DefaultWorkspace(ctx context.Context) (model.WorkspaceEntity, bool, error) {
+func (s *Store) DefaultWorkspace(ctx context.Context) (wkrow.Item, bool, error) {
 	row, err := s.defaultWorkspaceRow(ctx)
 	if err != nil || row == nil {
-		return model.WorkspaceEntity{}, false, err
+		return wkrow.Item{}, false, err
 	}
-	return *row, true, nil
+	return workspaceItemOf(*row), true, nil
 }
 
 // ListWorkspaces 按展示顺序列出全部登记。
-func (s *Store) ListWorkspaces(ctx context.Context) ([]model.WorkspaceEntity, error) {
+func (s *Store) ListWorkspaces(ctx context.Context) ([]wkrow.Item, error) {
 	rows, err := s.workspaceRows(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return rows, nil
+	out := make([]wkrow.Item, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, workspaceItemOf(r))
+	}
+	return out, nil
 }
 
 // GetWorkspace 按 id 取一条登记（不存在 → (nil, false, nil)）。
-func (s *Store) GetWorkspace(ctx context.Context, id string) (model.WorkspaceEntity, bool, error) {
+func (s *Store) GetWorkspace(ctx context.Context, id string) (wkrow.Item, bool, error) {
 	row, err := s.workspaces.GetByID(ctx, id)
 	if err != nil || row == nil {
-		return model.WorkspaceEntity{}, false, err
+		return wkrow.Item{}, false, err
 	}
-	return *row, true, nil
+	return workspaceItemOf(*row), true, nil
 }
 
 // WorkspaceByPath 按规范化路径取一条登记（不存在 → (nil, false, nil)）。
-func (s *Store) WorkspaceByPath(ctx context.Context, path string) (model.WorkspaceEntity, bool, error) {
+func (s *Store) WorkspaceByPath(ctx context.Context, path string) (wkrow.Item, bool, error) {
 	row, err := s.workspaceByPath(ctx, path)
 	if err != nil || row == nil {
-		return model.WorkspaceEntity{}, false, err
+		return wkrow.Item{}, false, err
 	}
-	return *row, true, nil
+	return workspaceItemOf(*row), true, nil
 }
 
 // CreateWorkspace 登记一个工作空间（**get-or-create**：同路径已登记 → 返回既有那一行）。
@@ -200,19 +207,19 @@ func (s *Store) WorkspaceByPath(ctx context.Context, path string) (model.Workspa
 // 为什么默认是 get-or-create 而不是报错：前端的"选一个目录建工作空间"这一步会被重复触发
 // （用户多按一次、或「最近使用（未登记）」那一栏点两下），报错会让一次幂等意图看起来像失败。
 // 需要"必须新建"的调用方传 distinctPath 检查（见 manager 的 strict 分支）。
-func (s *Store) CreateWorkspace(ctx context.Context, path, title string) (model.WorkspaceEntity, error) {
+func (s *Store) CreateWorkspace(ctx context.Context, path, title string) (wkrow.Item, error) {
 	canonical := strings.TrimSpace(path)
 	if canonical == "" {
-		return model.WorkspaceEntity{}, errors.New("store: 工作空间路径不能为空")
+		return wkrow.Item{}, errors.New("store: 工作空间路径不能为空")
 	}
 	if existing, err := s.workspaceByPath(ctx, canonical); err != nil {
-		return model.WorkspaceEntity{}, err
+		return wkrow.Item{}, err
 	} else if existing != nil {
-		return *existing, nil
+		return workspaceItemOf(*existing), nil
 	}
 	max, err := s.maxWorkspaceOrder(ctx)
 	if err != nil {
-		return model.WorkspaceEntity{}, err
+		return wkrow.Item{}, err
 	}
 	now := time.Now().UTC()
 	row := model.WorkspaceEntity{
@@ -228,12 +235,12 @@ func (s *Store) CreateWorkspace(ctx context.Context, path, title string) (model.
 		// 并发输了竞态：唯一索引拦下 → 重读既有行，仍然是 get-or-create 的语义。
 		if isUniqueViolation(err) {
 			if existing, gerr := s.workspaceByPath(ctx, canonical); gerr == nil && existing != nil {
-				return *existing, nil
+				return workspaceItemOf(*existing), nil
 			}
 		}
-		return model.WorkspaceEntity{}, fmt.Errorf("store: 登记工作空间 %s: %w", canonical, err)
+		return wkrow.Item{}, fmt.Errorf("store: 登记工作空间 %s: %w", canonical, err)
 	}
-	return row, nil
+	return workspaceItemOf(row), nil
 }
 
 // RenameWorkspace 改写展示名（title 为空串 = 清空，回落到末级目录名渲染）。
@@ -484,4 +491,31 @@ func (s *Store) SetWorkspaceDefaults(ctx context.Context, id, capabilityJSON, pe
 		return false, res.Error
 	}
 	return res.RowsAffected > 0, nil
+}
+
+// workspaceItemOf 把一张 `workspaces` 行翻成领域值。
+//
+// 映射只有一处：领域端口（`workspace.WorkspaceStore` / `workspace.WorkspaceTx`）只认
+// `row.Item`，行形状不再越过适配器边界。改列时改这里，而不是改域。
+func workspaceItemOf(r model.WorkspaceEntity) wkrow.Item {
+	return wkrow.Item{
+		ID:                    r.ID,
+		Path:                  r.Path,
+		Title:                 r.Title,
+		IsDefault:             r.IsDefault,
+		DefaultCapabilityJSON: r.DefaultCapabilityJSON,
+		DefaultPermissionMode: r.DefaultPermissionMode,
+		ListOrder:             r.ListOrder,
+		CreatedAt:             r.CreatedAt,
+		UpdatedAt:             r.UpdatedAt,
+	}
+}
+
+// workspaceItemPtr 行指针 → 领域值指针（行不存在时保持 nil）。
+func workspaceItemPtr(r *model.WorkspaceEntity) *wkrow.Item {
+	if r == nil {
+		return nil
+	}
+	it := workspaceItemOf(*r)
+	return &it
 }

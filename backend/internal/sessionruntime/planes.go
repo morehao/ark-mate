@@ -11,6 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
+	wkrow "github.com/morehao/ark-mate/internal/domain/workspace/row"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -123,7 +124,7 @@ var errPlaneFactsMissing = errors.New("该领域面未装配：装配根应通�
 // 它此前经 `s.resourceStore` 拿 `*store.Store`（L5 具体句柄）；本层实际只用到
 // 这三条，于是收成端口，由装配根把同一个库句柄交进来（`EnableStore`）。
 type ResourceStore interface {
-	GetWorkspace(ctx context.Context, id string) (model.WorkspaceEntity, bool, error)
+	GetWorkspace(ctx context.Context, id string) (wkrow.Item, bool, error)
 	UpdateSessionMeta(ctx context.Context, id string, meta sessionrow.MetaPatch) error
 	ListSessions(ctx context.Context, archived *bool) ([]sessionrow.Item, error)
 }

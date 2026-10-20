@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 
+	wkrow "github.com/morehao/ark-mate/internal/domain/workspace/row"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"gorm.io/gorm"
 )
@@ -28,7 +29,7 @@ func (s *Store) Atomically(ctx context.Context, fn func(*WorkspaceTx) error) err
 }
 
 // WorkspaceRow 读一行（`found=false` = 不存在，不是错误）。
-func (t *WorkspaceTx) WorkspaceRow(ctx context.Context, id string) (*model.WorkspaceEntity, bool, error) {
+func (t *WorkspaceTx) WorkspaceRow(ctx context.Context, id string) (*wkrow.Item, bool, error) {
 	row, err := t.s.workspaces.WithTx(t.tx).GetByID(ctx, id)
 	if err != nil {
 		return nil, false, err
@@ -36,7 +37,7 @@ func (t *WorkspaceTx) WorkspaceRow(ctx context.Context, id string) (*model.Works
 	if row == nil {
 		return nil, false, nil
 	}
-	return row, true, nil
+	return workspaceItemPtr(row), true, nil
 }
 
 // ReleaseSessions 把归属该工作空间的会话清空归属（**不删会话**），返回受影响的会话数。

@@ -11,10 +11,10 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
+	wkrow "github.com/morehao/ark-mate/internal/domain/workspace/row"
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 
@@ -54,8 +54,8 @@ func TestWorkspaceRegistryDefaultIsProvisioned(t *testing.T) {
 	if !def.IsDefault {
 		t.Fatal("装配期建立的那条必须带 is_default")
 	}
-	if def.Title != model.DefaultWorkspaceTitle {
-		t.Fatalf("标题应为语言中立的 %q，实际 %q", model.DefaultWorkspaceTitle, def.Title)
+	if def.Title != wkrow.DefaultTitle {
+		t.Fatalf("标题应为语言中立的 %q，实际 %q", wkrow.DefaultTitle, def.Title)
 	}
 	if _, serr := os.Stat(def.Path); serr != nil {
 		t.Fatalf("目录应被建立: %v", serr)
@@ -389,7 +389,7 @@ func TestWorkspaceRegistryDefaultIsProvisionedInMemory(t *testing.T) {
 	if def.Path != want {
 		t.Fatalf("默认工作空间路径 = %q，期望 %q", def.Path, want)
 	}
-	if !def.IsDefault || def.Title != model.DefaultWorkspaceTitle {
+	if !def.IsDefault || def.Title != wkrow.DefaultTitle {
 		t.Fatalf("memory 模式的默认项形状应与 sqlite 侧逐字一致: %+v", def)
 	}
 	if !strings.HasPrefix(def.ID, objid.Workspace) || !objid.IsPlatformID(def.ID) {

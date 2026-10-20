@@ -10,6 +10,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session/queue"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
+	"github.com/morehao/ark-mate/internal/domain/workspace/row"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
@@ -30,7 +31,7 @@ type Store interface {
 	SetSessionModelID(ctx context.Context, id, modelID string) error
 	UpdateSessionMeta(ctx context.Context, id string, meta sessionrow.MetaPatch) error
 	ListSessions(ctx context.Context, archived *bool) ([]sessionrow.Item, error)
-	DefaultWorkspace(ctx context.Context) (model.WorkspaceEntity, bool, error)
+	DefaultWorkspace(ctx context.Context) (row.Item, bool, error)
 
 	// ——— 事件 ———
 	EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]event.Item, bool, error)

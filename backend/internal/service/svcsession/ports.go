@@ -5,7 +5,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
-	"github.com/morehao/ark-mate/internal/persistence/model"
+	wkrow "github.com/morehao/ark-mate/internal/domain/workspace/row"
 )
 
 // ——— 会话用例的**依赖端口**（P5：写面从 sessionruntime 搬进本包）———
@@ -25,7 +25,7 @@ type WorkspaceFacts interface {
 
 // WorkspaceStore 工作空间行的窄库口（只读，用于 `workspace_id` 与 `cwd` 的一致性校验）。
 type WorkspaceStore interface {
-	GetWorkspace(ctx context.Context, id string) (model.WorkspaceEntity, bool, error)
+	GetWorkspace(ctx context.Context, id string) (wkrow.Item, bool, error)
 }
 
 // SessionStarter 建会话（执行面：拨号/恢复/落库由它做）。
