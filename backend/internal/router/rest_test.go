@@ -29,7 +29,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/dto/dtosearch"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
@@ -47,7 +46,6 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
-	"github.com/morehao/ark-mate/internal/service/svcprovider"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/internal/service/svcsearch"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
@@ -233,7 +231,7 @@ func (s *stubSvc) ModelsView(_ context.Context, runtimeID string, refresh bool) 
 	return &dtomodel.ModelsResp{}, nil
 }
 
-// stubCatalog 把 `stubSvc` 的 DTO 目录面收窄成 `svcprovider.Catalog` 要的领域形状。
+// stubCatalog 把 `stubSvc` 的 DTO 目录面收窄成 `svcmodel.Catalog` 要的领域形状。
 //
 // 同一个 stub 不能同时满足两个接口的同名方法（返回类型不同），而 `stubSvc` 还要供
 // `svcmodel.ModelSvc` 用——所以这里显式包一层，而不是把两个接口的签名再拉平一次。
@@ -598,8 +596,8 @@ func (f restFixture) services() assembly.Services {
 		Runtime:       svcruntime.New(f.execution),
 		Model:         f.svc,
 		ModelDeclared: svcmodel.NewDeclared(nilSafeModelStore(f.store), f.providerPlane, nil),
-		Provider:      svcprovider.NewProvider(f.providerPlane),
-		ProviderProbe: svcprovider.NewProbe(f.providerPlane, stubCatalog{f.svc}),
+		Provider:      svcmodel.NewProvider(f.providerPlane),
+		ProviderProbe: svcmodel.NewProbe(f.providerPlane, stubCatalog{f.svc}),
 
 		Capability: svccapability.NewCapability(f.skills, f.mcpPlane,
 			svccapability.NewTools(f.caps), svccapability.NewServers(f.caps, f.mcpPlane, f.mcpSecrets)),
@@ -1497,7 +1495,7 @@ func TestResolveElicitationBadBody(t *testing.T) {
 
 // TestProviderRoutes provider 档案路由：POST 建 → GET 列出 → PATCH 只更新（不存在 → 40401）。
 //
-// 这条用例在 P4a 正文第四刀之后走的是**真域平面**（`ctrprovider` 从 `Ports.ProviderPlane`
+// 这条用例在 P4a 正文第四刀之后走的是**真域平面**（`ctrmodel` 从 `Ports.ProviderPlane`
 // 自己造用例），所以它顺带钉住两条真行为：新建不带密钥也能建（自检会把它报成可执行的 fail）、
 // 以及 PATCH 对不存在的 id **不 upsert**（v12 起 `provider_not_found`）——后者以前被替身
 // 无条件 200 盖住了。
@@ -1513,7 +1511,7 @@ func TestProviderRoutes(t *testing.T) {
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("GET providers 失败 code=%d env=%d", code, env.Code)
 	}
-	var items []dtoprovider.ProviderResp
+	var items []dtomodel.ProviderResp
 	if err := json.Unmarshal(env.Data, &items); err != nil || len(items) != 1 || items[0].ID != "default" {
 		t.Fatalf("GET providers data 不符: %s", env.Data)
 	}

@@ -15,12 +15,13 @@ import (
 //	  ← 两个**依赖事实**（`*store.Store` 清单载体、`*provider.Plane` 挂靠校验）
 //	  + 一个**过渡端口** `svcmodel.Host`（读一条的投影 / 生效面回执 / 同步触发——这三条还在
 //	    `manager`，随读面与同步面在 P4b 第二刀 / P5 搬进来）
-//	      ← `ctrmodel` 把三者接上并**造出**用例（`NewModelCtr` 里 `svcmodel.NewDeclared(...)`）
+//	      ← 装配根（`internal/assembly`）把三者接上并**造出**用例（`svcmodel.NewDeclared(...)`），
+//	        控制器只收接口（v3.1 起实例只在装配根造）
 //
 // 为什么是"一个端口"而不是把写面也留给 `manager`：写面的判据（(provider_id, model_id) 唯一、
 // 默认是单一值、删默认要如实回带 default_cleared、memory 模式 40501）是**用例**的判据，
 // 而读面那半边要**执行面**（活连接的 session 投影、spawn 采样），它随 `Orchestrator` 在 P5
-// 一起 dissolve——于是这一刀按**面**切，不按领域切（与 `svcprovider` 的档案面/自检面同一条口径）。
+// 一起 dissolve——于是这一刀按**面**切，不按领域切（与同包的档案面/自检面同一条口径）。
 //
 // 三种失效各有一条判据：
 //
@@ -29,11 +30,11 @@ import (
 //	   而两边都编译得过、都"看起来在工作"；
 //	② **接口面不清**：写面搬走了而 `ModelSvc` 上还留着那三条，于是端口与实际实现各说一份，
 //	   "这一段还剩什么"再也看不出来；
-//	③ **装配漏接**：`ctrmodel` 忘了 `svcmodel.NewDeclared(...)`（写面 nil ⇒ 一提交就 panic）
+//	③ **装配漏接**：装配根忘了 `svcmodel.NewDeclared(...)`（写面 nil ⇒ 一提交就 panic）
 //	   或 `app.go` 没交 `Store`（⇒ memory 模式的 40501 变成"所有模式都 40501"，而读面照常绿）。
 //
 // 反证（实跑）：把 `func (s *Service) CreateModel(` 加回 `manager`（真实现的形态，能编译）→ 红；
-// 抽掉 `ctrmodel` 的 `svcmodel.NewDeclared(` → 红；把 `CreateModel` 加回 `ModelSvc` 接口 → 红；
+// 抽掉装配根的 `svcmodel.NewDeclared(` → 红；把 `CreateModel` 加回 `ModelSvc` 接口 → 红；
 // 把 `app.go` 的 `Store: st` 抽掉 → 红；把 `router.Ports` 的 `ModelHost` 字段换回
 // `svcmodel.DeclaredSvc` → 红。
 
@@ -189,7 +190,7 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 		}
 	}
 
-	// ③ 装配：用例在**控制器**里造（`app` 与 `router` 都不许引用 `service/svc*`）。
+	// ③ 装配：用例在**装配根**造（`app` 与 `router` 都不许引用 `service/svc*`）。
 	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrmodel", "models.go")))
 	for _, m := range []string{"h.declared.CreateModel(", "h.declared.UpdateModel(", "h.declared.DeleteModel("} {
 		if !strings.Contains(ctr, m) {

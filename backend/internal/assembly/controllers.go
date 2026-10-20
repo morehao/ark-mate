@@ -7,7 +7,6 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrexport"
 	"github.com/morehao/ark-mate/internal/controller/ctrlibrary"
 	"github.com/morehao/ark-mate/internal/controller/ctrmodel"
-	"github.com/morehao/ark-mate/internal/controller/ctrprovider"
 	"github.com/morehao/ark-mate/internal/controller/ctrruntime"
 	"github.com/morehao/ark-mate/internal/controller/ctrsearch"
 	"github.com/morehao/ark-mate/internal/controller/ctrsession"
@@ -48,7 +47,7 @@ func (s Services) BuildControllers(creds *credential.Set, origin *middleware.Ori
 		CommandPolicy: ctrcommandpolicy.NewCommandPolicyCtr(s.CommandPolicy),
 		Runtime:       ctrruntime.NewRuntimeCtr(s.Runtime),
 		Model:         ctrmodel.NewModelCtr(s.Model, s.ModelDeclared),
-		Provider:      ctrprovider.NewProviderCtr(s.Provider, s.ProviderProbe),
+		Provider:      ctrmodel.NewProviderCtr(s.Provider, s.ProviderProbe),
 		Capability:    ctrcapability.NewCapabilityCtr(s.Capability),
 		Automation:    ctrautomation.NewAutomationCtr(s.Automation),
 		Library:       ctrlibrary.NewLibraryCtr(s.Library),

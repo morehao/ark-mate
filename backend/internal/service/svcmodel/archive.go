@@ -1,10 +1,10 @@
-package svcprovider
+package svcmodel
 
 import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 )
 
 // ——— P4a 正文第四刀：供应商**档案面**用例层实现 ———
@@ -16,9 +16,9 @@ import (
 //
 // 现在的形状（口径见 `docs/agents/layout.md`「用例层（`service/svc<领域>`）的三条硬规矩」）：
 //
-//	ctrprovider —— 只认本包声明的 `ProviderSvc`（一个 controller 只引用一份 service 接口）
+//	ctrmodel —— 只认本包声明的 `ProviderSvc`（一个 controller 只引用一份 service 接口）
 //	     ↓ 构造
-//	svcprovider.Provider（本文件）—— 档案用例的**唯一出口**：请求/响应装配、错误码出口、
+//	svcmodel.Provider（本文件）—— 档案用例的**唯一出口**：请求/响应装配、错误码出口、
 //	      "这套动作对外长什么样"都在这一层
 //	     ↓ 内部直接拿域平面
 //	domain/provider.Plane —— 域不变量与状态（"密钥只写不读回"、id 不覆盖、载体、
@@ -38,14 +38,14 @@ type Provider struct {
 }
 
 // NewProvider 造供应商档案用例。`plane` 是**依赖事实**（域平面上只有一个实例，见
-// `provider.NewPlane` 的注释：两份 = 两个事实源），由装配点交给控制器、控制器在这里构造。
+// `provider.NewPlane` 的注释：两份 = 两个事实源），由装配根构造并交给控制器（控制器只收接口）。
 func NewProvider(plane *provider.Plane) ProviderSvc { return &Provider{plane: plane} }
 
 // 断言跟着实现走（`provider.go` 里那句"断言留在装配点"随之删除）。
 var _ ProviderSvc = (*Provider)(nil)
 
 // ListProviders 列出供应商概要（密钥只写不读回；带引用面、模型条数与问题清单）。
-func (p *Provider) ListProviders(ctx context.Context) ([]dtoprovider.ProviderResp, error) {
+func (p *Provider) ListProviders(ctx context.Context) ([]dtomodel.ProviderResp, error) {
 	views, err := p.plane.ListProviders(ctx)
 	if err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ func (p *Provider) ListProviders(ctx context.Context) ([]dtoprovider.ProviderRes
 }
 
 // CreateProvider 新建一条供应商（id 已存在 → `provider_exists`(40901)，绝不覆盖）。
-func (p *Provider) CreateProvider(ctx context.Context, req dtoprovider.ProviderCreateReq) (*dtoprovider.ProviderResp, error) {
+func (p *Provider) CreateProvider(ctx context.Context, req dtomodel.ProviderCreateReq) (*dtomodel.ProviderResp, error) {
 	view, err := p.plane.CreateProvider(ctx, createRequest(req))
 	if err != nil {
 		return nil, err
@@ -64,7 +64,7 @@ func (p *Provider) CreateProvider(ctx context.Context, req dtoprovider.ProviderC
 }
 
 // UpdateProvider 覆盖一条供应商（**只更新**；不存在 → `provider_not_found`(40401)）。
-func (p *Provider) UpdateProvider(ctx context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
+func (p *Provider) UpdateProvider(ctx context.Context, id string, patch dtomodel.ProviderPatchReq) (*dtomodel.ProviderResp, error) {
 	view, err := p.plane.UpdateProvider(ctx, id, patchRequest(patch))
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ func (p *Provider) UpdateProvider(ctx context.Context, id string, patch dtoprovi
 }
 
 // DeleteProvider 删除一条供应商（幂等；被 agent 或模型引用 → `provider_in_use`(40901)）。
-func (p *Provider) DeleteProvider(ctx context.Context, id string) (*dtoprovider.ProviderDeleteResp, error) {
+func (p *Provider) DeleteProvider(ctx context.Context, id string) (*dtomodel.ProviderDeleteResp, error) {
 	view, err := p.plane.DeleteProvider(ctx, id)
 	if err != nil {
 		return nil, err

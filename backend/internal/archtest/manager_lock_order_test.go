@@ -79,7 +79,7 @@ func mutexSessionCallFunctions(t *testing.T, src string) []string {
 // 写法**在另外三个地方活得好好的——
 //
 //	provider_probe.go  probeProvider    持 s.mu 调 providerPlane.Snapshot（P4a 起该文件已搬进
-//	                                    `service/svcprovider`，这条是**当时**的证据，留档）
+//	                                    `service/svcmodel`，这条是**当时**的证据，留档）
 //	model_list.go      requireProvider   持 s.mu 调 providerPlane.Exists
 //	resource_sync.go   providerForSync   持 s.mu 调 providerPlane.Snapshot
 //

@@ -69,7 +69,7 @@ type Declared struct {
 	host  Host
 }
 
-// NewDeclared 造写面用例。三个入参都是装配点交下来的**依赖事实/过渡端口**，控制器在这里构造。
+// NewDeclared 造写面用例。三个入参都是装配根交下来的**依赖事实/过渡端口**（实例在装配根构造，控制器只收接口）。
 func NewDeclared(st ModelStore, plane *provider.Plane, host Host) DeclaredSvc {
 	return &Declared{st: st, plane: plane, host: host}
 }

@@ -19,7 +19,7 @@
     1. **只有 `internal/controller/ctr<领域>` 可以引用 `internal/service/svc<领域>`**——「引用」包括调用、构造与**写类型名**。
        `app` / `router` / `sessionruntime` / `domain` / `mechanism` / `dao` / `store` / `pkg` 一律不许出现 `svc*` 类型。
        连带的装配口径：**`app` 不引用 controller**（`cmd → app → router → controller` 是有向的），
-       `router` 拿到的只是依赖事实，controller 在自己的构造函数里把 service 造出来。
+       `router` 拿到的只是依赖事实；**用例实例只在装配根（`internal/assembly`）造**，controller 只收接口。
     2. **`service/svc*` 之间零互相 import、零互调用**（同层的另外半边由既有守卫钉）。需要别的域的事实时，
        在自己包里声明一个**窄接口**（如 `automation.Host`），由接线点（controller / router）把实现接上；
        需要共享的纯值或判决下沉到 `domain/*` / `internal/object/*`。
@@ -30,6 +30,12 @@
   - **`service/svc<领域>` 的形状**（新写一个域时照抄）：接口（`XxxSvc`，消费方只认它）+ 实现（导出结构体或私有结构体）
     + 构造函数 `NewXxx(deps...) XxxSvc`；校验、错误码、响应装配、渲染都在这一层；controller 里只做
     参数绑定、简单校验、调 service、回响应（**任何业务判断都不许写在 controller**）。
+  - **2026-10-20：provider 侧并入 `svcmodel` / `ctrmodel` / `dtomodel`**——
+    provider 与 model 同属 `domain/provider` 一个域（`models.provider_id` 是外键式的挂靠）。
+    **包名取 `model` 系**（用户面主名词是「设置 · 模型」），域仍是 `domain/provider`；注意 `internal/model`
+    是数据库实体包，不要和 `dtomodel`/`svcmodel`/`ctrmodel` 混为一谈。合并的是**目录**，不是接口：
+    `ProviderSvc` / `Prober` / `DeclaredSvc` / `ModelSvc` / `Host` / `ModelStore` 仍按**面**切开，
+    一个控制器只认自己那片。
 
 - `frontend/`：pnpm workspace（`apps/web` = **入口 + 组装**（`main.tsx` 挂载 + vite 构建配置）；`packages/{console,ui,types,api,desktop-contract,tsconfig}`——**界面本身在 `packages/console`**，2026-10-11 P5 从 `apps/web/src` 搬过来，行为零变化：搬迁保留原目录结构，所以 `internal/archtest` 里禁 `packages/*` 反向引 `apps/*` 的那条从"挡路的墙"变成了"搬迁方向的保证"）。Node 看 `frontend/.nvmrc`（24.x，团队用 fnm）、pnpm 看 `frontend/package.json` 的 `packageManager`；`engines` + Makefile 守卫 node 主版本不符即失败。
 - `docs/` 是**当前有效的对外/产品面文档**（2026-10-16 重建：`positioning` / `decisions` / `architecture` / `roadmap` / `unimplemented` / `acceptance-matrix` / `dsh-acp-adaptation` / `deployment`；2026-10-18 起另有 `agents/`——仓库根 `AGENTS.md` 的分册，见 [`docs/agents/README.md`](README.md)）。旧设计文档中仍有效的内容已抽出，历史整体留在 git 里；**外部产品的对照与逆向分析不进 `docs/`**，一律落 `.dsh/docs/`。`docs/**` 的相互引用由 `TestDocsReferencesResolve` 守卫（指向不存在的文件即红）。对外契约以 README「控制面接口摘要」与 `backend/internal/router/router.go` 为准。

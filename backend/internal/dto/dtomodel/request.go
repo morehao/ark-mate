@@ -1,4 +1,9 @@
-package dtoprovider
+// Package dtomodel 承载供应商域的对外契约：供应商档案 / 自检，以及平台模型清单与运行时目录。
+//
+// 2026-10-20：provider 侧的 DTO（原 `dtoprovider`）并入本包后，包名沿用 `dtomodel`——provider
+// 与 model 同属一个域（`domain/provider`）。`model_list.go` 是平台清单面（线上键 `model`），
+// `model_catalog.go` 是运行时目录面（目录注解 `model_id`）；两面刻意分文件，词汇判据按面限定。
+package dtomodel
 
 // ProviderPatchReq PATCH /providers/:id（**只更新，不再 upsert**）：指针语义，nil = 不改。
 //

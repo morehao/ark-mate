@@ -90,7 +90,7 @@ func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 //
 // 判据两侧一起钉（都 fail-closed：文件读不到直接 Fatal）：
 //
-//	① 装配根必须有建造点（`svcsystem.New(` / `svcruntime.New(` / `svcprovider.New(`）；
+//	① 装配根必须有建造点（`svcsystem.New(` / `svcruntime.New(` / `svcmodel.New(`）；
 //	② `internal/app` 与 `internal/router` 侧不得出现用例层包名。
 func TestUseCaseInstancesAreBuiltByAssembly(t *testing.T) {
 	root := backendRoot(t)
@@ -99,7 +99,7 @@ func TestUseCaseInstancesAreBuiltByAssembly(t *testing.T) {
 	}{
 		{"导出用例", filepath.Join("internal", "assembly", "services.go"), "svcsystem.New("},
 		{"底座用例", filepath.Join("internal", "assembly", "services.go"), "svcruntime.New("},
-		{"供应商自检用例", filepath.Join("internal", "assembly", "services.go"), "svcprovider.NewProbe("},
+		{"供应商自检用例", filepath.Join("internal", "assembly", "services.go"), "svcmodel.NewProbe("},
 		{"会话读面用例", filepath.Join("internal", "assembly", "services.go"), "svcsession.NewRead("},
 	}
 	for _, b := range builders {
@@ -116,7 +116,7 @@ func TestUseCaseInstancesAreBuiltByAssembly(t *testing.T) {
 		filepath.Join("internal", "router", "router.go"),
 	} {
 		src := stripLineComments(readFileOrFatal(t, filepath.Join(root, f)))
-		for _, banned := range []string{"svcsystem.", "svcruntime.", "svcprovider.", "svcsession.", "service/svc"} {
+		for _, banned := range []string{"svcsystem.", "svcruntime.", "svcmodel.", "svcsession.", "service/svc"} {
 			if strings.Contains(src, banned) {
 				t.Errorf("%s 里出现 %q：装配面不认识用例层。\n"+
 					"它该交出/消费的是**已构造的接口**（`assembly.BuildResult.Services` 与控制器接口）。", f, banned)

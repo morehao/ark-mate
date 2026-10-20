@@ -1,14 +1,15 @@
-// Package ctrprovider 承载provider 档案控制器（密钥只写不读回）。
+// Package ctrmodel 承载供应商域控制器：模型目录 / 平台清单写面（`ModelCtr`）与供应商档案 /
+// 连接自检（`ProviderCtr`，2026-10-20 从 `ctrprovider` 并入）。
 //
 // 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
 // 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
-package ctrprovider
+package ctrmodel
 
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/code"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/service/svcprovider"
+	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/service/svcmodel"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -25,21 +26,20 @@ var _ ProviderCtr = (*providerCtr)(nil)
 
 // providerCtr 处理 Provider 档案 REST（P2 注入面：密钥只写不读回）。
 //
-// 两个字段都是**本控制器自己造的用例**（`NewProviderCtr` 里两行构造），两个都是
-// `service/svcprovider` 包内声明的接口：
+// 两个字段都是装配根构造、由构造函数注入的用例，两个都是 `service/svcmodel` 包内声明的接口：
 //
-//	actions —— 档案面四动作（`svcprovider.NewProvider(plane)`）；
-//	probe   —— 自检（`svcprovider.NewProbe(plane, catalog)`）。
+//	actions —— 档案面四动作（`svcmodel.NewProvider(plane)`）；
+//	probe   —— 自检（`svcmodel.NewProbe(ports, catalog)`）。
 //
-// 控制器拿到的只是**依赖事实**（供应商域平面 + 模型目录读面），"用例怎么造"不离开这一层
-// ——除控制器外的层不许引用 `service/svc*`（`internal/archtest/svc_layer_consumer_test.go`）。
+// 控制器只收已构造的接口；除控制器外的层不许引用 `service/svc*`
+// （`internal/archtest/svc_layer_consumer_test.go`）。
 type providerCtr struct {
-	actions svcprovider.ProviderSvc
-	probe   svcprovider.Prober
+	actions svcmodel.ProviderSvc
+	probe   svcmodel.Prober
 }
 
 // NewProviderCtr 构造 ProviderCtr（只收**已构造的两个用例**：档案动作与自检）。
-func NewProviderCtr(actions svcprovider.ProviderSvc, probe svcprovider.Prober) ProviderCtr {
+func NewProviderCtr(actions svcmodel.ProviderSvc, probe svcmodel.Prober) ProviderCtr {
 	return &providerCtr{actions: actions, probe: probe}
 }
 
@@ -55,7 +55,7 @@ func (h *providerCtr) List(c *gin.Context) {
 
 // Create 新建一条 provider 档案（id 已存在 → 40901 `provider_exists`，绝不覆盖）。
 func (h *providerCtr) Create(c *gin.Context) {
-	var req dtoprovider.ProviderCreateReq
+	var req dtomodel.ProviderCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
@@ -71,7 +71,7 @@ func (h *providerCtr) Create(c *gin.Context) {
 // Update 覆盖一条已存在的档案（type/model/note 子集更新；key 非 nil 覆盖/清除；
 // 不存在 → 40401 `provider_not_found`——**不再 upsert**，见设计 D-4）。
 func (h *providerCtr) Update(c *gin.Context) {
-	var patch dtoprovider.ProviderPatchReq
+	var patch dtomodel.ProviderPatchReq
 	if err := c.ShouldBindJSON(&patch); err != nil {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
@@ -87,7 +87,7 @@ func (h *providerCtr) Update(c *gin.Context) {
 // Probe 连接自检：本地段无条件（零出网）；上游段仅当请求体带 `{"upstream":true}`
 // ——它会把用户密钥发到第三方，必须是用户的一次显式动作，绝不被 GET 或页面加载顺手触发。
 func (h *providerCtr) Probe(c *gin.Context) {
-	var req dtoprovider.ProviderProbeReq
+	var req dtomodel.ProviderProbeReq
 	// 允许空 body（= 只跑本地段）。
 	if c.Request.ContentLength > 0 {
 		if err := c.ShouldBindJSON(&req); err != nil {

@@ -10,7 +10,7 @@ import (
 // ——— P4a 正文第六刀「能力 Library 读模型归属」守卫 ———
 //
 // `ListLibrary`（跨四个平面的聚合读模型）从 `manager/library.go`（`*Service` 的方法）搬进
-// `internal/service/svclibrary`。这一刀与上一刀（`svcmodel` 写面）有一处**结构上的不同**，
+// `internal/service/svclibrary`。这一刀与上一刀（模型写面，现并入 `svcmodel`）有一处**结构上的不同**，
 // 值得钉住：它**不需要过渡端口**——依赖全是事实：
 //
 //	*capability.Registry  三张能力表（skill/mcp/tool）

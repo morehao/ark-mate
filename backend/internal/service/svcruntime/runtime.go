@@ -39,7 +39,7 @@ func (r *Runtime) RuntimeDiagnostics(ctx context.Context) (*dtoruntime.Diagnosti
 // RuntimeSvc 底座身份与诊断面的服务端口。
 //
 // 它只剩两个方法，是**刻意的**：这个包管的是"这个二进制认哪个底座、它此刻怎么样"，
-// 而档案与模型清单各自有主人（`svcprovider` / `svcmodel`）。
+// 而档案与模型清单都归 `svcmodel`（2026-10-20 合并前分属两个包）。
 //
 // 实现方以编译期断言 var _ RuntimeSvc = (*T)(nil) 保证一致性。
 type RuntimeSvc interface {

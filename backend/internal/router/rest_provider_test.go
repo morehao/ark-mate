@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 )
 
 // TestProviderWriteFaceREST A1：四条 provider 端点走**真实装配路径**
@@ -21,7 +21,7 @@ func TestProviderWriteFaceREST(t *testing.T) {
 	if env.Code != 0 {
 		t.Fatalf("POST /providers 应成功: %+v", env)
 	}
-	var created dtoprovider.ProviderResp
+	var created dtomodel.ProviderResp
 	if err := json.Unmarshal(env.Data, &created); err != nil {
 		t.Fatalf("解析新建响应: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestProviderWriteFaceREST(t *testing.T) {
 	if env.Code != 0 {
 		t.Fatalf("GET /providers 应成功: %+v", env)
 	}
-	var list []dtoprovider.ProviderResp
+	var list []dtomodel.ProviderResp
 	if err := json.Unmarshal(env.Data, &list); err != nil || len(list) != 1 {
 		t.Fatalf("列表面不符: n=%d err=%v body=%s", len(list), err, env.Data)
 	}
@@ -68,7 +68,7 @@ func TestProviderWriteFaceREST(t *testing.T) {
 	if env.Code != 0 {
 		t.Fatalf("PATCH /providers/p1 应成功: %+v", env)
 	}
-	var patched dtoprovider.ProviderResp
+	var patched dtomodel.ProviderResp
 	_ = json.Unmarshal(env.Data, &patched)
 	if patched.BaseURL != "https://api.openai.com/v1" || patched.HasKey {
 		t.Fatalf("PATCH 后形态不符: %+v", patched)
@@ -79,7 +79,7 @@ func TestProviderWriteFaceREST(t *testing.T) {
 	if env.Code != 0 {
 		t.Fatalf("DELETE 应成功: %+v", env)
 	}
-	var del dtoprovider.ProviderDeleteResp
+	var del dtomodel.ProviderDeleteResp
 	_ = json.Unmarshal(env.Data, &del)
 	if !del.Deleted {
 		t.Fatalf("首次删除应 deleted:true: %+v", del)

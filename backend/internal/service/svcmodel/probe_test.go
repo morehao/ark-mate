@@ -1,4 +1,4 @@
-package svcprovider
+package svcmodel
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/redact"
 )
 
@@ -69,7 +69,7 @@ func probeFixture(def *provider.Def, cat Catalog) *Probe {
 }
 
 // wantCheckNames 断言检查项的名字与顺序。
-func wantCheckNames(t *testing.T, checks []dtoprovider.ProviderCheckResp, want ...string) {
+func wantCheckNames(t *testing.T, checks []dtomodel.ProviderCheckResp, want ...string) {
 	t.Helper()
 	got := make([]string, 0, len(checks))
 	for _, c := range checks {
@@ -81,7 +81,7 @@ func wantCheckNames(t *testing.T, checks []dtoprovider.ProviderCheckResp, want .
 }
 
 // countModelsCheck 摘出某一条结论（不存在即失败）。
-func findCheck(t *testing.T, checks []dtoprovider.ProviderCheckResp, name string) dtoprovider.ProviderCheckResp {
+func findCheck(t *testing.T, checks []dtomodel.ProviderCheckResp, name string) dtomodel.ProviderCheckResp {
 	t.Helper()
 	for _, c := range checks {
 		if c.Name == name {
@@ -89,7 +89,7 @@ func findCheck(t *testing.T, checks []dtoprovider.ProviderCheckResp, name string
 		}
 	}
 	t.Fatalf("没有名为 %q 的结论：%+v", name, checks)
-	return dtoprovider.ProviderCheckResp{}
+	return dtomodel.ProviderCheckResp{}
 }
 
 // ——— M4 连接自检：默认零出网、上游段四种状态、未登记端点记 unknown、错误文本过 redact ———
@@ -117,7 +117,7 @@ func TestProbeDefaultMakesZeroUpstreamRequests(t *testing.T) {
 	}, fakeProbeCatalog{})
 
 	tr := &countingTransport{inner: http.DefaultTransport}
-	resp, err := p.probeProvider(ctx, "p1", dtoprovider.ProviderProbeReq{}, probeOptions{transport: tr})
+	resp, err := p.probeProvider(ctx, "p1", dtomodel.ProviderProbeReq{}, probeOptions{transport: tr})
 	if err != nil {
 		t.Fatalf("probe: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestProbeUpstreamFourOutcomes(t *testing.T) {
 //
 // v12 起上游段按**资源字段**探（`GET <base_url>/models`），不再有 v11 那张"type → 厂商 URL"
 // 的登记表——所以这里直接构造一条带 `BaseURL` 的档案，没有可覆盖的全局状态。
-func probeUpstreamAgainst(t *testing.T, url, protocol, key string) dtoprovider.ProviderCheckResp {
+func probeUpstreamAgainst(t *testing.T, url, protocol, key string) dtomodel.ProviderCheckResp {
 	t.Helper()
 	p := probeFixture(nil, nil)
 	return p.probeUpstream(context.Background(),
@@ -242,7 +242,7 @@ func (e *leakyError) Error() string { return e.msg }
 // 自检的产物是"逐条结论"，其中 exists 一条 fail——而不是一个 404（那会让"哪一条不对"无从回答）。
 func TestProbeMissingProviderIsAFailedCheck(t *testing.T) {
 	p := probeFixture(nil, nil)
-	resp, err := p.ProbeProvider(context.Background(), "nope", dtoprovider.ProviderProbeReq{})
+	resp, err := p.ProbeProvider(context.Background(), "nope", dtomodel.ProviderProbeReq{})
 	if err != nil {
 		t.Fatalf("档案不存在不该报错（应交出一条 fail 的 check）: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestProbeCatalogUnknownPathsStayUnknown(t *testing.T) {
 
 	t.Run("nil_catalog", func(t *testing.T) {
 		p := NewProbe(fakeProbePorts{def: base(), refName: "R"}, nil)
-		resp, err := p.ProbeProvider(context.Background(), "p1", dtoprovider.ProviderProbeReq{})
+		resp, err := p.ProbeProvider(context.Background(), "p1", dtomodel.ProviderProbeReq{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -279,7 +279,7 @@ func TestProbeCatalogUnknownPathsStayUnknown(t *testing.T) {
 
 	t.Run("catalog_error", func(t *testing.T) {
 		p := probeFixture(base(), fakeProbeCatalog{err: errors.New("boom")})
-		resp, err := p.ProbeProvider(context.Background(), "p1", dtoprovider.ProviderProbeReq{})
+		resp, err := p.ProbeProvider(context.Background(), "p1", dtomodel.ProviderProbeReq{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -291,7 +291,7 @@ func TestProbeCatalogUnknownPathsStayUnknown(t *testing.T) {
 
 	t.Run("nil_response", func(t *testing.T) {
 		p := probeFixture(base(), fakeProbeCatalog{resp: nil})
-		resp, err := p.ProbeProvider(context.Background(), "p1", dtoprovider.ProviderProbeReq{})
+		resp, err := p.ProbeProvider(context.Background(), "p1", dtomodel.ProviderProbeReq{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -306,7 +306,7 @@ func TestProbeCatalogUnknownPathsStayUnknown(t *testing.T) {
 			Runtime: "dsh", Source: "session",
 			Options: []provider.CatalogOption{{ID: "model", Name: "模型"}},
 		}})
-		resp, err := p.ProbeProvider(context.Background(), "p1", dtoprovider.ProviderProbeReq{})
+		resp, err := p.ProbeProvider(context.Background(), "p1", dtomodel.ProviderProbeReq{})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -22,7 +22,6 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrexport"
 	"github.com/morehao/ark-mate/internal/controller/ctrlibrary"
 	"github.com/morehao/ark-mate/internal/controller/ctrmodel"
-	"github.com/morehao/ark-mate/internal/controller/ctrprovider"
 	"github.com/morehao/ark-mate/internal/controller/ctrruntime"
 	"github.com/morehao/ark-mate/internal/controller/ctrsearch"
 	"github.com/morehao/ark-mate/internal/controller/ctrsession"
@@ -49,7 +48,7 @@ type Controllers struct {
 	CommandPolicy ctrcommandpolicy.CommandPolicyCtr
 	Runtime       ctrruntime.RuntimeCtr
 	Model         ctrmodel.ModelCtr
-	Provider      ctrprovider.ProviderCtr
+	Provider      ctrmodel.ProviderCtr
 	Capability    ctrcapability.CapabilityCtr
 	Automation    ctrautomation.AutomationCtr
 	Library       ctrlibrary.LibraryCtr

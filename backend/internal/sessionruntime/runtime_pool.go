@@ -70,7 +70,7 @@ var (
 // 载体/写面/读面（约 1128 行）已落 `domain/provider`（P3a-1b），域自持一把只保护域内字段的锁
 // （并发审查见计划 §3.1.35：29 处临界区零跨域），并持 `st`/`reg`/`creds` 三个注入件与两个端口。
 //
-// P4a 正文第四刀删掉**档案面四条**（用例出口换成 `service/svcprovider`），本刀再把**剩下七条**
+// P4a 正文第四刀删掉**档案面四条**（用例出口换成 `service/svcmodel`），本刀再把**剩下七条**
 // 转发清掉：四条装配入口（`SetProviderDir` / `LoadProviderDefinitions` /
 // `LoadProviderDefinitionsFromStore` / `ReloadProviderDefinitionsFromStore`）改由调用点**直连域平面**
 // （`app.go` 与 `gateway/source.go`），三条包内转发（`providerEnvFor` / `injectedProviderID` /

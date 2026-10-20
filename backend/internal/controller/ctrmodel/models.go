@@ -1,4 +1,8 @@
-// Package ctrmodel 承载模型目录控制器（运行时派生的 ACP session config options 投影）。
+// ——— 模型面控制器（运行时目录 + 平台清单写面）———
+//
+// 2026-10-20：provider 侧的控制器（`ProviderCtr`）并入本包后，包名沿用 `ctrmodel`——provider
+// 与 model 同属一个域（`domain/provider`），但两个控制器接口仍分开：`ProviderCtr`（档案 / 自检）
+// 与 `ModelCtr`（目录 / 清单）。
 //
 // 控制器只依赖 internal/service/svc* 的窄端口与**依赖事实**（清单载体、供应商域平面），不感知领域实现；
 // 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
@@ -26,10 +30,10 @@ var _ ModelCtr = (*modelCtr)(nil)
 
 // modelCtr 处理模型目录 REST（GET /models）。
 //
-// 两个字段分工是这一层"用例归谁造"的可见处：
+// 两个字段都是装配根构造、由构造函数注入的用例：
 //
-//	declared —— 平台清单的**写面**用例，**本控制器自己造**（`svcmodel.NewDeclared`，P4a 第五刀）
-//	svc      —— 还没搬完的那半边（读清单 / 运行时目录 / 同步），装配点交出
+//	declared —— 平台清单的**写面**（`svcmodel.NewDeclared`，P4a 第五刀）
+//	svc      —— 读清单 / 运行时目录 / 同步（装配点交出）
 //
 // 底座由构建期固定（v19），"问哪个底座"不是一个参数。
 type modelCtr struct {
@@ -37,12 +41,9 @@ type modelCtr struct {
 	declared svcmodel.DeclaredSvc
 }
 
-// NewModelCtr 构造 ModelCtr：交出**依赖事实**（清单载体、供应商域平面）与一个过渡端口
-// （`host`：读一条的投影 / 生效面回执 / 同步触发——三条今天仍在 `manager`），
-// 拿回写面用例与控制器。
+// NewModelCtr 构造 ModelCtr（只收**已构造的两个用例**：写面与读/目录/同步面）。
 //
-// 三个入参都没有"顺便给一份 Service"的口子：写面只用到清单载体、供应商存在性和那三件事，
-// 而除控制器之外的层不许引用 `service/svc*`（`internal/archtest/svc_layer_consumer_test.go`）。
+// 除控制器之外的层不许引用 `service/svc*`（`internal/archtest/svc_layer_consumer_test.go`）。
 func NewModelCtr(svc svcmodel.ModelSvc, declared svcmodel.DeclaredSvc) ModelCtr {
 	return &modelCtr{svc: svc, declared: declared}
 }

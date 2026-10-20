@@ -1,6 +1,6 @@
 // Package objdelivery 承载「应用层资源 → 底座生效方式」的共享值对象与**静态交付矩阵**（M6）。
 //
-// 为什么单独成包：这套形状同时被三层使用——传输层（`internal/dto/dtoprovider` 把它直接作为
+// 为什么单独成包：这套形状同时被三层使用——传输层（`internal/dto/dtomodel` 把它直接作为
 // 响应载荷、`internal/dto/dtolibrary` 的能力条目复用它）、实现层（`internal/manager` 逐 kind
 // 组装 delivery/applicability），以及模型面（M5 的清单回执）。放在其中任何一层都会让另外两层
 // 反向依赖该层；而 `pkg/` 不得 import `internal/`（`internal/archtest` 守卫），所以它只能待在

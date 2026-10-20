@@ -12,7 +12,6 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
-	"github.com/morehao/ark-mate/internal/service/svcprovider"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/internal/service/svcsearch"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
@@ -50,8 +49,8 @@ type Services struct {
 	Runtime       svcruntime.RuntimeSvc
 	Model         svcmodel.ModelSvc
 	ModelDeclared svcmodel.DeclaredSvc
-	Provider      svcprovider.ProviderSvc
-	ProviderProbe svcprovider.Prober
+	Provider      svcmodel.ProviderSvc
+	ProviderProbe svcmodel.Prober
 
 	// ——— 能力 / 自动化 / Library ———
 	Capability svccapability.CapabilitySvc
@@ -122,8 +121,8 @@ func (f Facts) BuildServices() Services {
 		Runtime:       svcruntime.New(as.Execution),
 		Model:         modelFace,
 		ModelDeclared: svcmodel.NewDeclared(modelStore(as.Store), as.Planes.Providers, modelFace),
-		Provider:      svcprovider.NewProvider(as.Planes.Providers),
-		ProviderProbe: svcprovider.NewProbe(as.Planes.Providers, as.Planes.Providers),
+		Provider:      svcmodel.NewProvider(as.Planes.Providers),
+		ProviderProbe: svcmodel.NewProbe(as.Planes.Providers, as.Planes.Providers),
 
 		Capability: svccapability.NewCapability(
 			as.Planes.Skills, as.Planes.Mcp,
