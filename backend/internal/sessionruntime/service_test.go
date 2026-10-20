@@ -12,6 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -37,7 +38,7 @@ func rigWithRuntime(t *testing.T, specs ...runtime.Spec) (*Service, *Orchestrato
 func TestEventSinkMapping(t *testing.T) {
 	_, orch, bus := newTestRig(t)
 	orch.handles.BindProvider("s1", "conv-1") // 原生底座 session id → 平台会话 uuid
-	sink := orch.runner.EventSink("rtx")
+	sink := orch.acpEventSink("rtx")
 
 	sink(acp.Event{SessionID: "s1", Kind: acp.KindMessage, Payload: acp.MessageDelta{Text: "hi"}})
 	sink(acp.Event{SessionID: "s1", Kind: acp.KindThought, Payload: acp.ThoughtDelta{Text: "think"}})
@@ -90,7 +91,9 @@ func TestEventSinkMapping(t *testing.T) {
 	if tc["tool_call_id"] != "c1" || tc["title"] != "edit" {
 		t.Fatalf("tool_call payload 不符: %+v", evs[2].Payload)
 	}
-	perm, _ := evs[5].Payload.(acp.PermissionInfo)
+	// 权限留痕的载荷是**域类型**（C2 第一刀起由适配器翻译）：字段逐条等价，JSON 键由
+	// `event.Permission` 的 tag 与 ACP wire 形状逐字相同（落库行不改）。
+	perm, _ := evs[5].Payload.(event.Permission)
 	if perm.Title != "t" || perm.Allowed {
 		t.Fatalf("permission payload 应透传: %+v", evs[5].Payload)
 	}
@@ -99,7 +102,7 @@ func TestEventSinkMapping(t *testing.T) {
 // TestEventSinkWrongPayloadType 载荷类型不匹配 → 事件被跳过（不 panic、不发布）。
 func TestEventSinkWrongPayloadType(t *testing.T) {
 	_, orch, bus := newTestRig(t)
-	sink := orch.runner.EventSink("rtx")
+	sink := orch.acpEventSink("rtx")
 	sink(acp.Event{SessionID: "s1", Kind: acp.KindMessage, Payload: "not a delta"})
 	sink(acp.Event{SessionID: "s1", Kind: acp.KindToolCall, Payload: nil})
 	if bus.Published() != 0 {
@@ -114,7 +117,7 @@ func TestEventSinkWrongPayloadType(t *testing.T) {
 func TestEventSinkCommands(t *testing.T) {
 	_, orch, bus := newTestRig(t)
 	orch.handles.BindProvider("s1", "conv-1")
-	sink := orch.runner.EventSink("rtx")
+	sink := orch.acpEventSink("rtx")
 	sub := bus.SubscribeAfter(nil)
 	defer bus.Unsubscribe(sub)
 

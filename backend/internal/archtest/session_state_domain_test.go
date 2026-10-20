@@ -94,7 +94,9 @@ func TestSessionStateLivesInSessionDomain(t *testing.T) {
 			"o.handles",
 		},
 		filepath.Join("internal", "sessionruntime", "connection.go"): {
-			"o.runner.EventSink(",
+			// C2 第一刀起，连接层接的是**适配器侧的出口**（ACP 事件先翻译成域信号）；
+			// 它必须真的把事件交给领域出口，所以下面再对 event_bridge.go 加一条正判据。
+			"o.acpEventSink(",
 			"o.pool.Dial(",
 			"o.runner.DropConn(",
 			"o.runner.InUse(",
@@ -109,6 +111,9 @@ func TestSessionStateLivesInSessionDomain(t *testing.T) {
 			"func (l *Lifecycle) ConnectSession(",
 			"func (l *Lifecycle) Attach(",
 			"l.handles.Put(",
+		},
+		filepath.Join("internal", "sessionruntime", "event_bridge.go"): {
+			"o.runner.EventSink(",
 		},
 		filepath.Join("internal", "sessionruntime", "run.go"): {
 			"o.runner.Prompt(",

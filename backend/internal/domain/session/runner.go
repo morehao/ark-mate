@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -71,7 +72,7 @@ type ToolFailureClassifier interface {
 // 它**不是**本状态机的一部分（生命周期按 toolCallId，不按轮次），所以留在编排侧，
 // 这里只认三个窄方法。
 type ToolMemory interface {
-	Remember(info acp.ToolCallInfo)
+	Remember(info event.ToolCall)
 	Forget(id string)
 }
 

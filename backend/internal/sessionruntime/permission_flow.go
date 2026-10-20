@@ -36,7 +36,8 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acp.Permission
 	// （`tool_calls.go`）。查不到就只用请求自带的字段：门禁取不到 command 时不再参与。
 	tool := req.ToolCall
 	if cached, ok := o.tools.Get(req.ToolCall.ID); ok {
-		tool = cached
+		// 工具记忆存的是**领域**形状（`event.ToolCall`）；权限面还没端口化，这里还原回 ACP 形状。
+		tool = acpToolCallOf(cached)
 	}
 	if d, rule, decided := o.commandGateDecision(tool, req.Options); decided {
 		if d.Allowed {

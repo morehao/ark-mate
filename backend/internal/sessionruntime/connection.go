@@ -63,7 +63,7 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 		NativeMode:       nativeMode,
 		CheckCredentials: o.svc.CredentialProblem,
 		ClientOptions: acp.ClientOptions{
-			OnEvent:             o.runner.EventSink(spec.ID),
+			OnEvent:             o.acpEventSink(spec.ID),
 			RequestPermission:   reqPerm,
 			CreateElicitation:   reqElic,
 			CompleteElicitation: completeElic,

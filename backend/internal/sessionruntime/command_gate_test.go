@@ -8,6 +8,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -87,7 +88,7 @@ func TestCommandGatePrecedesPermissionMemory(t *testing.T) {
 	}
 	tool := acp.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute",
 		Input: map[string]any{"command": "rm -rf /tmp/x"}}
-	o.tools.Remember(tool)
+	o.tools.Remember(acpToolCallSignal(tool))
 	// 记忆里先放一条"这类工具始终允许"。
 	o.perm.Remember("ses_1", tool, "allow", "allow-always")
 
@@ -105,10 +106,10 @@ func TestCommandGatePrecedesPermissionMemory(t *testing.T) {
 // TestToolCallMemoryMergesAndForgets 缓存的三条语义：合并非空字段 / 终态删除 / 有界。
 func TestToolCallMemoryMergesAndForgets(t *testing.T) {
 	o := &Orchestrator{tools: session.NewToolCallMemory()}
-	o.tools.Remember(acp.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute",
+	o.tools.Remember(event.ToolCall{ID: "c1", Title: "bash", Kind: "execute",
 		Input: map[string]any{"command": "ls"}})
 	// 后续 update 只带 status/正文：不得把 Input 抹掉。
-	o.tools.Remember(acp.ToolCallInfo{ID: "c1", Status: acp.ToolStatusInProgress, ContentText: "out"})
+	o.tools.Remember(event.ToolCall{ID: "c1", Status: acp.ToolStatusInProgress, ContentText: "out"})
 
 	got, ok := o.tools.Get("c1")
 	if !ok || got.Title != "bash" || got.ContentText != "out" {
@@ -124,7 +125,7 @@ func TestToolCallMemoryMergesAndForgets(t *testing.T) {
 	}
 
 	for i := 0; i < session.MaxRememberedToolCalls+20; i++ {
-		o.tools.Remember(acp.ToolCallInfo{ID: "bulk_" + strconv.Itoa(i)})
+		o.tools.Remember(event.ToolCall{ID: "bulk_" + strconv.Itoa(i)})
 	}
 	if o.tools.Len() > session.MaxRememberedToolCalls {
 		t.Fatalf("缓存无界: %d > %d", o.tools.Len(), session.MaxRememberedToolCalls)
@@ -148,7 +149,7 @@ func TestToolCallMemoryConcurrent(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < 200; i++ {
 				id := "c" + strconv.Itoa(w) + "_" + strconv.Itoa(i%20)
-				o.tools.Remember(acp.ToolCallInfo{ID: id, Title: "bash",
+				o.tools.Remember(event.ToolCall{ID: id, Title: "bash",
 					Input: map[string]any{"command": "git status"}})
 				_, _ = o.tools.Get(id)
 				if i%7 == 0 {

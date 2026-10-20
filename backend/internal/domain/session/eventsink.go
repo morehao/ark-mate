@@ -4,13 +4,15 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
 
-// ——— ACP 事件的**出口**（P4a 正文第五十五刀：从 `internal/manager` 搬入）———
+// ——— 运行期信号的**出口**（P4a 正文第五十五刀：从 `internal/manager` 搬入）———
 //
-// 底座回传的归一化事件（`acp.Event`）在这里翻译成平台事件（`Bus*`）并发布：
+// 底座回传的归一化信号（`event.Signal`，由 ACP 适配器翻译，见 `sessionruntime/event_bridge.go`）
+// 在这里翻译成平台事件（`Bus*`）并发布：
 //
 //	① 双 id 解析：底层事件只带原生 session id，先经 `Handles.ResolveProvider` 换成平台 uuid；
 //	   断连后迟到事件（映射已清）丢弃并留 debug——不落进孤儿聚合。
@@ -19,9 +21,11 @@ import (
 //
 // 纯翻译 + 两个旁路写口（工具记忆 / 模型目录缓存），不持有轮次状态——轮次状态在 `Runner`。
 
-// EventSink 把 acp 归一化事件转为域事件进 eventbus（agg = 平台会话 uuid）。
-func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
-	return func(ev acp.Event) {
+// EventSink 把运行期信号转为域事件进 eventbus（agg = 平台会话 uuid）。
+//
+// 入参是**领域语言**（`event.Signal`）：底座协议类型的翻译发生在适配器边界，本层不认识它。
+func (r *Runner) EventSink(runtimeID string) func(event.Signal) {
+	return func(ev event.Signal) {
 		if ev.SessionID == "" {
 			return
 		}
@@ -36,28 +40,28 @@ func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
 		typ := ""
 		var payload any
 		switch ev.Kind {
-		case acp.KindMessage:
+		case event.KindMessage:
 			typ = BusMessage
 			// 首个文本增量到 ⇒ 「正在收模型输出」。连发由域里的去重键吞掉（同状态同 tool 只留第一帧）。
 			r.RunStatusFor(ev.SessionID, RunStatusModelStreaming, RunStatusOpts{})
-			if d, ok := ev.Payload.(acp.MessageDelta); ok {
+			if d, ok := ev.Payload.(event.MessageDelta); ok {
 				payload = map[string]any{"session_id": ev.SessionID, "runtime": runtimeID, "text": d.Text}
 				if d.MessageID != "" {
 					payload.(map[string]any)["msg_id"] = d.MessageID
 				}
 			}
-		case acp.KindThought:
+		case event.KindThought:
 			typ = BusThought
 			r.RunStatusFor(ev.SessionID, RunStatusModelStreaming, RunStatusOpts{})
-			if d, ok := ev.Payload.(acp.ThoughtDelta); ok {
+			if d, ok := ev.Payload.(event.ThoughtDelta); ok {
 				payload = map[string]any{"session_id": ev.SessionID, "runtime": runtimeID, "text": d.Text}
 				if d.MessageID != "" {
 					payload.(map[string]any)["msg_id"] = d.MessageID
 				}
 			}
-		case acp.KindToolCall:
+		case event.KindToolCall:
 			typ = BusToolCall
-			if d, ok := ev.Payload.(acp.ToolCallInfo); ok {
+			if d, ok := ev.Payload.(event.ToolCall); ok {
 				// 权限请求只带 toolCallId（dsh 的 wire 形状）：把详情留到权限裁决那一刻。
 				r.rememberToolCall(d)
 				// 工具过程（S1）：带 `tool_name` —— 头栏那句「正在执行 Bash」正是它（Q6 选①）。
@@ -67,12 +71,12 @@ func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
 				})
 				payload = toolPayload(ev.SessionID, runtimeID, d)
 			}
-		case acp.KindToolUpdate:
+		case event.KindToolUpdate:
 			typ = BusToolUpdate
-			if d, ok := ev.Payload.(acp.ToolCallInfo); ok {
+			if d, ok := ev.Payload.(event.ToolCall); ok {
 				// 终态 update 可能只带 status：先合并（不带 input 不会抹掉命令行），再按终态删除。
 				r.rememberToolCall(d)
-				if d.Status == acp.ToolStatusCompleted || d.Status == acp.ToolStatusFailed {
+				if d.Status == event.ToolStatusCompleted || d.Status == event.ToolStatusFailed {
 					r.forgetToolCall(d.ID)
 				}
 				p := toolPayload(ev.SessionID, runtimeID, d)
@@ -92,12 +96,12 @@ func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
 				}
 				payload = p
 			}
-		case acp.KindUserMessage:
+		case event.KindUserMessage:
 			// 用户消息以宿主侧 Prompt 提交时发布的 BusUserMessage（Runner.Prompt）为唯一来源；
 			// agent 回传的 user_message 只是会话镜像（normalizeUpdate 归一），若再转发会造成
 			// 同一条用户输入在流/历史里双入。这里丢弃镜像，不再发布。
 			glog.Debugw(context.Background(), "skip agent-echoed user_message (host publishes user input)", "session", ev.SessionID)
-		case acp.KindUsage:
+		case event.KindUsage:
 			typ = BusUsage
 			// ev.SessionID 已在上方解析为平台会话 uuid（cid）。
 			p := map[string]any{"session_id": ev.SessionID, "runtime": runtimeID}
@@ -109,16 +113,15 @@ func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
 				r.RecordUsage(ev.SessionID, d)
 			}
 			payload = p
-		case acp.KindPermission:
+		case event.KindPermission:
 			typ = BusPermission
 			payload = ev.Payload
-		case acp.KindConfigOptions:
+		case event.KindConfigOptions:
 			// 运行时主动推送全量配置项（dsh 在 provider 拓扑变化时推）：
 			// 刷新平台目录缓存并转发给前端，模型下拉与「当前模型」无需轮询即可保持一致。
-			if d, ok := ev.Payload.(acp.ConfigOptionsInfo); ok {
-				if d.SessionID != "" && r.catalog != nil {
-					r.catalog.PutConfigOptions(runtimeID, d.Options)
-				}
+			if d, ok := ev.Payload.(event.ConfigOptions); ok {
+				// 目录缓存的刷新在**适配器边界**做（`Options` 是不透明载荷，域不命名它），
+				// 这里只剩对外转发。
 				typ = BusConfigOptions
 				payload = map[string]any{
 					"session_id": ev.SessionID,
@@ -126,11 +129,11 @@ func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
 					"options":    d.Options,
 				}
 			}
-		case acp.KindCommands:
+		case event.KindCommands:
 			// 运行时主动通告它的可用命令（**这是可选能力**：有的底座的 ACP 面根本不含命令，故永不产生本事件）。
 			// 纯转发：平台不缓存、不合并、不做会话快照——会话重开时本事件经 since_seq
 			// 全量回放即可重建，故无需 REST 读端点（ADR-17）。
-			if d, ok := ev.Payload.(acp.CommandsInfo); ok {
+			if d, ok := ev.Payload.(event.Commands); ok {
 				typ = BusCommands
 				payload = map[string]any{
 					"session_id": ev.SessionID,
@@ -146,7 +149,7 @@ func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
 }
 
 // rememberToolCall / forgetToolCall 是工具记忆端口的 nil 安全包装（未装配时 no-op）。
-func (r *Runner) rememberToolCall(info acp.ToolCallInfo) {
+func (r *Runner) rememberToolCall(info event.ToolCall) {
 	if r.toolMemory != nil {
 		r.toolMemory.Remember(info)
 	}
@@ -188,7 +191,7 @@ var ToolPayloadKeys = []string{
 //
 // `fail_reason` / `biz_code` 由调用方按底座的签名表补（见 `ToolPayloadFailReason`）：
 // 它们**不是** ACP 字段，而是平台从结果正文里读出来的归类。
-func toolPayload(sessionID, runtimeID string, d acp.ToolCallInfo) map[string]any {
+func toolPayload(sessionID, runtimeID string, d event.ToolCall) map[string]any {
 	p := map[string]any{
 		ToolPayloadSessionID: sessionID, ToolPayloadRuntime: runtimeID,
 		ToolPayloadToolCallID: d.ID, ToolPayloadTitle: d.Title, ToolPayloadStatus: d.Status,

@@ -142,7 +142,7 @@ func TestOrchestratorUsageEvent(t *testing.T) {
 	// live-only：订阅之后才触发 sink，断言的是"这一条新事件"。
 	sub := bus.Subscribe()
 	defer bus.Unsubscribe(sub)
-	sink := orch.runner.EventSink("stub")
+	sink := orch.acpEventSink("stub")
 	sink(acp.Event{Kind: acp.KindUsage, SessionID: "native-1",
 		Payload: objusage.UsageInfo{Used: 42, Size: 200, CostAmount: 0.25, CostCurrency: "USD"}})
 

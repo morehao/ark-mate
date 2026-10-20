@@ -3,7 +3,7 @@ package session
 import (
 	"sync"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 )
 
 // ——— 工具调用详情的短期记忆（P4a 正文第六十一刀：从 `internal/manager/tool_calls.go` 搬入）———
@@ -25,27 +25,27 @@ import (
 // 不设上限的后果是长跑进程里这个 map 只增不减（工具调用每秒都在发生）。
 const MaxRememberedToolCalls = 256
 
-// ToolMemory 工具调用详情的短期记忆：toolCallId → acp.ToolCallInfo。
+// ToolMemory 工具调用详情的短期记忆：toolCallId → event.ToolCall。
 type ToolCallMemory struct {
 	mu    sync.Mutex
-	calls map[string]acp.ToolCallInfo
+	calls map[string]event.ToolCall
 	order []string
 }
 
 // NewToolMemory 造一份空的工具调用记忆。
 func NewToolCallMemory() *ToolCallMemory {
-	return &ToolCallMemory{calls: make(map[string]acp.ToolCallInfo)}
+	return &ToolCallMemory{calls: make(map[string]event.ToolCall)}
 }
 
 // Remember 记住一次工具调用（空 id 忽略）。
-func (m *ToolCallMemory) Remember(info acp.ToolCallInfo) {
+func (m *ToolCallMemory) Remember(info event.ToolCall) {
 	if info.ID == "" {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.calls == nil {
-		m.calls = make(map[string]acp.ToolCallInfo)
+		m.calls = make(map[string]event.ToolCall)
 	}
 	if _, seen := m.calls[info.ID]; !seen {
 		m.order = append(m.order, info.ID)
@@ -85,9 +85,9 @@ func (m *ToolCallMemory) Remember(info acp.ToolCallInfo) {
 }
 
 // Get 按 id 回查工具调用详情（不存在 → false）。
-func (m *ToolCallMemory) Get(id string) (acp.ToolCallInfo, bool) {
+func (m *ToolCallMemory) Get(id string) (event.ToolCall, bool) {
 	if id == "" {
-		return acp.ToolCallInfo{}, false
+		return event.ToolCall{}, false
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

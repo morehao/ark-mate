@@ -89,7 +89,7 @@ func TestRunStatusFromEventSink(t *testing.T) {
 	}
 	orch.handles.Put(as)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
-	sink := orch.runner.EventSink("rtx")
+	sink := orch.acpEventSink("rtx")
 
 	// 两条文本增量：只应产生**一帧** `model_streaming`（同状态去重）。
 	sink(acp.Event{SessionID: "native-1", Kind: acp.KindMessage, Payload: acp.MessageDelta{Text: "a"}})
