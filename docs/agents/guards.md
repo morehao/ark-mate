@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属与层表路径存在性）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，阶段 0.6 进程壳端口守卫为 173 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性与进程壳端口边界）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -91,7 +91,14 @@
 
 - 再加 **2 条「定义导入/导出归属」守卫**（`transfer_ownership_test.go`，2026-10-20：`internal/capabilityio` 拆成 `internal/drivers/transfer` + `registry` 的两个窄端口适配体。拆之前同一个概念分居两包——capability 的导入留在 `mechanism/definition`，automation/provider 的在 `capabilityio`——而包名又和 `internal/core/capability` 只差后缀，看目录的人无法判断该 import 哪个。两种静默失效各有一条判据：① **第二个家**：六入口（3 域 × import/export）与域无关框架（`ImportDefinitionRows` / `CountDryRun` / `WriteExportRows` / Options / Stats）必须全在 `internal/drivers/transfer`，且 `mechanism/definition` 与 `domain/**` 零命中，旧目录 `internal/capabilityio` 不得复活；判据 fail-closed（transfer 目录扫不到 Go 文件即 Fatal）。② **职责回流**：`automation.DefinitionFiles` / `provider.Secrets` 的编译期断言必须留在 `internal/drivers/registry`（装配点，同时看得见域端口与机制实现），`internal/drivers/transfer` 不得出现这两个端口名。反证（实跑 5 条，均红）：把 `ExportAutomationDir` 改名 → ①红；在 `mechanism/definition` 加 `func ImportProviderFile()` 桩 → ①红；`mkdir internal/capabilityio` → ①红；把 registry 的编译期断言改成 `var _ = ...` → ②红；把 `secrets.go` 复制回 `transfer` → ②红。）
 
-**共 172 条**——加守卫时记得同步这句话。
+- 再加 **1 条「进程壳端口边界」守卫**（`app_boundary_test.go`，2026-10-20 阶段 0.6）：`bootstrap/app`
+  只认 `assembly.BuildResult` 的端口字段（Handler / Maintenance / Probe / Close），不得直接 import
+  `persistence/*`、`infra/*`、`drivers/*`、`sessionruntime`、`service`、`domain`、`delivery/*`。
+  层表按层号判方向，`app`（L9）向 L5/L6 import 是"向内"、拦不住"进程壳直接摸适配器"；这条按
+  **适配器前缀**补上，fail-closed（一个 import 都解析不到即失败）。反证（实跑）：在 `app.go` 加
+  `import _ "internal/persistence/store"` → 红。
+
+**共 173 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 

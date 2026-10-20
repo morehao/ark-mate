@@ -109,7 +109,7 @@ func (a *App) Init(ctx context.Context) error {
 		return err
 	}
 	a.res = res
-	a.srv = newHTTPServerOn(res.Listener, res.Handler)
+	a.srv = newHTTPServerOn(res.Handler.Listener, res.Handler.Handler)
 	return nil
 }
 

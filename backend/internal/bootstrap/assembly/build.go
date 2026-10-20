@@ -9,12 +9,9 @@ import (
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
-	"github.com/morehao/ark-mate/internal/delivery/router"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
-	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/dto/dtosystem"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/golib/glog"
 )
 
@@ -49,17 +46,27 @@ func WithPayloads(payloads []dtosystem.PayloadInfo) Option {
 	return func(o *Options) { o.Payloads = payloads }
 }
 
-// BuildResult 一次装配的产物（应用壳与命令树只消费它）。
+// Handler HTTP 交付面：处理器 + **已绑定的监听器**。
 //
-// 字段全是**已构造/已就绪**的对象；Handler/Listener 在装配成功后
-// 一定非 nil（HTTP 服务由 `internal/bootstrap/app` 用这两者构造，装配根不持有 `http.Server`）。
+// 两者一起走：监听器是"路由在哪个端口上"的事实，处理器是"路由是什么"。应用壳只拿这两样
+// 就能起 `http.Server`，不必知道装配根里的任何子系统。
+type Handler struct {
+	http.Handler
+	Listener net.Listener
+}
+
+// Maintenance 运维面：命令树（doctor / migrate / 导入导出）的用例入口。
 //
-// `Handler` 是 `http.Handler` 而不是 `*gin.Engine`：装配根可以知道具体适配器，但**不必**把
-// 框架类型写进自己的产物类型——应用壳与命令树只消费 `Handler`，Web 框架止步于入站适配层。
+// 与 HTTP 交付面分开：它们不需要路由与监听，只需要"已构造的用例"。今天命令树仍走各自的
+// 最小装配；这个端口是它们改走 `Build` 时的**唯一落点**。
+type Maintenance struct {
+	Services Services
+}
+
 // Probe 诊断面（应用壳只经它读状态、触发启动探测，**不直接碰平面**）。
 //
-// 阶段 0.5 的第一刀：`app` 原先直接 `res.Planes.Mcp.AutoProbe(...)`——进程壳穿透到了子系统
-// 的具体结构。现在它只认这三件事；平面仍由装配根持有。
+// 阶段 0.5：`app` 原先直接 `res.Planes.Mcp.AutoProbe(...)`——进程壳穿透到了子系统的具体结构。
+// 现在它只认这个端口；平面只作为**只读诊断**暴露给 doctor 与装配断言。
 type Probe struct {
 	// Meta 当前诊断面快照（等价于 `GET /meta` 的 data）。
 	Meta func() dtosystem.MetaInfo
@@ -67,26 +74,21 @@ type Probe struct {
 	AutoProbeMCP func(ctx context.Context) error
 	// Runtime 构建期选定的底座注册表（只读；诊断与桌面隔离测试用）。
 	Runtime *runtime.Registry
+	// Planes 只读的领域平面集合（doctor / 装配断言用）。
+	// **生产行为路径不得从这里取事实**：行为面只认用例接口与端口。
+	Planes *registry.Planes
 }
 
+// BuildResult 一次装配的产物：**只暴露端口**（阶段 0.5）。
+//
+// 不再出现 `*registry.Planes` / `*sessionruntime.Service` / `*runtimeconn.Plane` 等具体类型：
+// 应用壳只经 `Handler` 起 HTTP、经 `Probe` 读诊断、经 `Close` 收尾。
 type BuildResult struct {
-	Planes       *registry.Planes
-	Runtime      *runtime.Registry
-	Execution    *runtimeconn.Plane
-	Session      *sessionruntime.Service
-	Orchestrator *sessionruntime.Orchestrator
-	Bus          *eventbus.Bus
-
-	Services    Services
-	Controllers router.Controllers
-	Handler     http.Handler
-	Listener    net.Listener
-	Assets      router.AssetInfo
-	Credentials *credential.Set
+	Handler     Handler
+	Maintenance Maintenance
 	Probe       Probe
-
-	closeOnce sync.Once
-	stop      func()
+	closeOnce   sync.Once
+	stop        func()
 }
 
 // Close 按启动的逆序关闭本次装配（HTTP 服务请先由应用壳停掉再调用）。
@@ -153,24 +155,15 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 	}
 
 	res := &BuildResult{
-		Planes:       as.planes,
-		Runtime:      as.reg,
-		Execution:    as.rconn,
-		Session:      as.svc,
-		Orchestrator: as.orch,
-		Bus:          as.bus,
-		Services:     as.services,
-		Controllers:  as.controllers,
-		Handler:      as.engine,
-		Listener:     as.ln,
-		Assets:       as.assets,
-		Credentials:  as.creds,
+		Handler:     Handler{Handler: as.engine, Listener: as.ln},
+		Maintenance: Maintenance{Services: as.services},
 		Probe: Probe{
 			Meta: func() dtosystem.MetaInfo { return as.services.Meta.Meta() },
 			AutoProbeMCP: func(ctx context.Context) error {
 				return as.planes.Mcp.AutoProbe(ctx)
 			},
 			Runtime: as.reg,
+			Planes:  as.planes,
 		},
 	}
 	res.stop = func() { as.lifecycle.Stop(context.Background()) }

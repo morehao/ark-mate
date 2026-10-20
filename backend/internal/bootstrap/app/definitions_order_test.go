@@ -83,7 +83,7 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 	})
 
 	// ① 能力面：库里的行 + 内存注册表都可见（"导入先于装载"的合成结果）。
-	skills, err := a.Result().Planes.Skills.ListSkills()
+	skills, err := a.Result().Probe.Planes.Skills.ListSkills()
 	if err != nil {
 		t.Fatalf("能力面应可用: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 		t.Fatalf("存量 skill 应在本轮启动就可见（导入必须先于装载）: %+v", skills)
 	}
 	// ③ 调度：startup pass 已经对**装载进来的**定义收敛过（过期 once → inactive + skipped）。
-	resp, ok := a.Result().Planes.Automation.AutomationByID("stale")
+	resp, ok := a.Result().Probe.Planes.Automation.AutomationByID("stale")
 	if !ok {
 		t.Fatal("automation 面应可见（导入必须先于装载）")
 	}
