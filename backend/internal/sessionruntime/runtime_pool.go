@@ -27,7 +27,7 @@ import (
 // `resource.Set.DefaultModel` 同源。这里用 `context.Background()`：这是**连接建立**的输入，
 // 不属于任何一个请求——绑请求 ctx 会让"拨号一开始就取消"变成"env 为空"（静默少注入密钥）。
 func (s *Service) ProviderEnv(runtimeID string) []string {
-	return s.planes.Providers.ProviderEnvFor(runtimeID, s.planes.Providers.InjectedProviderID(context.Background()))
+	return s.facts.Providers.ProviderEnvFor(runtimeID, s.facts.Providers.InjectedProviderID(context.Background()))
 }
 
 // NativePermissionEnv 实现 `runtimeconn.NativeEnvSource`：该 runtime 在给定原生权限模式下
@@ -49,7 +49,7 @@ func (s *Service) NativePermissionEnv(runtimeID, mode string) ([]string, string)
 	if mode == "" {
 		return nil, "native_mode 空（不注入原生权限配置）"
 	}
-	adapter, ok := s.planes.Registry.NativePermission(runtimeID)
+	adapter, ok := s.reg.NativePermission(runtimeID)
 	if !ok {
 		return nil, "该底座未登记原生权限投影（不注入）"
 	}
@@ -72,7 +72,7 @@ var _ session.DropSink = (*Orchestrator)(nil)
 // 转发清掉：四条装配入口（`SetProviderDir` / `LoadProviderDefinitions` /
 // `LoadProviderDefinitionsFromStore` / `ReloadProviderDefinitionsFromStore`）改由调用点**直连域平面**
 // （`app.go` 与 `gateway/source.go`），三条包内转发（`providerEnvFor` / `injectedProviderID` /
-// `providerModelRefsReadOnly`）的调用点也改成 `s.planes.Providers.X(...)`。
+// `providerModelRefsReadOnly`）的调用点也改成 `s.facts.Providers.X(...)`。
 //
 // **为什么必须删**：转发层每留一条，"这段实现到底在哪一层"就少一处可见；而它的存在本身没有
 // 判据价值——一行转发的正确性完全等价于被转发的那一行。
@@ -82,5 +82,5 @@ var _ session.DropSink = (*Orchestrator)(nil)
 // 登记。也就是说它的消费者是**另一个域的执行面**，不是本包的调用点——端口实现随装配点走，
 // 与"过渡期转发"是两件事（判据：`runtimeconn` 不许 import 供应商域，所以适配器只能留在这里）。
 func (s *Service) CredentialProblem(ctx context.Context) error {
-	return s.planes.Providers.CredentialProblem(ctx)
+	return s.facts.Providers.CredentialProblem(ctx)
 }

@@ -50,7 +50,7 @@ func writeFaceDB(t *testing.T, specs ...runtime.Spec) *writeFace {
 	svc := newServiceForTest(runtime.NewRegistry(specs...), eventbus.New())
 	enableStore(svc, st)
 	// 与生产装配同源：装载走 store 分支，导入/导出目录给一个空目录。
-	svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, t.TempDir())
+	planesOf(svc).LoadCapabilityDefinitionsFromStore(ctx, t.TempDir())
 	t.Cleanup(func() { _ = st.Close() })
 	return &writeFace{name: "sqlite", svc: svc, dir: t.TempDir(), st: st}
 }
@@ -60,7 +60,7 @@ func writeFaceFile(t *testing.T, specs ...runtime.Spec) *writeFace {
 	t.Helper()
 	dir := t.TempDir()
 	svc := newServiceForTest(runtime.NewRegistry(specs...), eventbus.New())
-	svc.Planes().LoadCapabilityDefinitions(dir)
+	planesOf(svc).LoadCapabilityDefinitions(dir)
 	return &writeFace{name: "memory", svc: svc, dir: dir}
 }
 
@@ -189,7 +189,7 @@ func (w *writeFace) seed(t *testing.T, kind, id, raw string) {
 				t.Fatal(err)
 			}
 		}
-		w.svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, w.dir)
+		planesOf(w.svc).LoadCapabilityDefinitionsFromStore(ctx, w.dir)
 		return
 	}
 	path := w.defPath(kind, id)
@@ -199,7 +199,7 @@ func (w *writeFace) seed(t *testing.T, kind, id, raw string) {
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if n := w.svc.Planes().LoadCapabilityDefinitions(w.dir); n == 0 {
+	if n := planesOf(w.svc).LoadCapabilityDefinitions(w.dir); n == 0 {
 		t.Fatalf("装载应至少读到 1 条 %s", kind)
 	}
 }

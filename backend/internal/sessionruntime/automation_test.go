@@ -20,7 +20,7 @@ func automationRig(t *testing.T) (*Service, string) {
 	t.Helper()
 	dir := t.TempDir()
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
-	if n := svc.Planes().Automation.LoadAutomationDefinitions(dir); n != 0 {
+	if n := planesOf(svc).Automation.LoadAutomationDefinitions(dir); n != 0 {
 		t.Fatalf("空目录应装载 0 条，got %d", n)
 	}
 	return svc, dir
@@ -41,7 +41,7 @@ func writeAutomationFile(t *testing.T, path, body string) {
 // 测试经它与"真 Service + 真域平面"驱动——这层的实现搬走了，但夹具链一个字不用改：
 // 平面还是那个平面，用例只是换了个所有者。
 func autoSvc(svc *Service) svcautomation.AutomationSvc {
-	return svcautomation.New(svc.planes.Automation)
+	return svcautomation.New(planesOf(svc).Automation)
 }
 
 // mustListAutomations 列出注册表（端口签名带 error，测试里不关心 err）。
@@ -73,7 +73,7 @@ func TestAutomationCreateUpdateDelete(t *testing.T) {
 	svc, dir := automationRig(t)
 	path := filepath.Join(dir, "daily.json")
 
-	v, err := svc.Planes().Automation.WriteAutomation(context.Background(), "daily", dailyPatch("daily", "9"), true)
+	v, err := planesOf(svc).Automation.WriteAutomation(context.Background(), "daily", dailyPatch("daily", "9"), true)
 	if err != nil {
 		t.Fatalf("新建: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestAutomationCreateUpdateDelete(t *testing.T) {
 	}
 
 	// id 已存在 → 40901，绝不覆盖（先改内容再试，确认原文件没被动）
-	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "daily", dailyPatch("daily", "10"), true); errCode(err) != "automation_exists" ||
+	if _, err := planesOf(svc).Automation.WriteAutomation(context.Background(), "daily", dailyPatch("daily", "10"), true); errCode(err) != "automation_exists" ||
 		numericCode(err) != 40901 {
 		t.Fatalf("重复新建应 40901 automation_exists，got %v（code=%d）", err, numericCode(err))
 	}
@@ -97,7 +97,7 @@ func TestAutomationCreateUpdateDelete(t *testing.T) {
 	}
 
 	// 只改 name：schedule/target 原样保留（PUT 的"只改出现过的键"）
-	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "daily", map[string]any{"name": "改名了"}, false); err != nil {
+	if _, err := planesOf(svc).Automation.WriteAutomation(context.Background(), "daily", map[string]any{"name": "改名了"}, false); err != nil {
 		t.Fatalf("局部更新: %v", err)
 	}
 	got := readDef(t, path)
@@ -107,7 +107,7 @@ func TestAutomationCreateUpdateDelete(t *testing.T) {
 	}
 
 	// 不存在的 id → 40401（平台不会"顺便新建"）
-	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "nope", map[string]any{"name": "x"}, false); errCode(err) != "automation_not_found" ||
+	if _, err := planesOf(svc).Automation.WriteAutomation(context.Background(), "nope", map[string]any{"name": "x"}, false); errCode(err) != "automation_not_found" ||
 		numericCode(err) != 40401 {
 		t.Fatalf("更新不存在的应 40401 automation_not_found，got %v（code=%d）", err, numericCode(err))
 	}
@@ -116,16 +116,16 @@ func TestAutomationCreateUpdateDelete(t *testing.T) {
 	}
 
 	// 删除幂等
-	if removed, err := svc.Planes().Automation.DeleteAutomationByID(context.Background(), "daily"); err != nil || !removed {
+	if removed, err := planesOf(svc).Automation.DeleteAutomationByID(context.Background(), "daily"); err != nil || !removed {
 		t.Fatalf("删除: %v removed=%v", err, removed)
 	}
-	if removed, err := svc.Planes().Automation.DeleteAutomationByID(context.Background(), "daily"); err != nil || removed {
+	if removed, err := planesOf(svc).Automation.DeleteAutomationByID(context.Background(), "daily"); err != nil || removed {
 		t.Fatalf("重复删除应 removed=false: %v %v", err, removed)
 	}
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Fatal("删除后文件应消失")
 	}
-	if _, ok := svc.Planes().Automation.AutomationByID("daily"); ok {
+	if _, ok := planesOf(svc).Automation.AutomationByID("daily"); ok {
 		t.Fatal("删除后注册表应摘除条目")
 	}
 }
@@ -163,19 +163,19 @@ func TestAutomationValidationZeroBytes(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "bad", c.patch, true); errCode(err) != c.code {
+			if _, err := planesOf(svc).Automation.WriteAutomation(context.Background(), "bad", c.patch, true); errCode(err) != c.code {
 				t.Fatalf("期望码 %s，got %v（%s）", c.code, err, errCode(err))
 			}
 			if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 				t.Fatalf("被拒的定义必须零字节落盘，但 %s 存在", path)
 			}
-			if _, ok := svc.Planes().Automation.AutomationByID("bad"); ok {
+			if _, ok := planesOf(svc).Automation.AutomationByID("bad"); ok {
 				t.Fatal("被拒的定义不该进注册表")
 			}
 		})
 	}
 	// 非法 id（目录穿越）也要拒
-	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "../escape", dailyPatch("../escape", "9"), true); errCode(err) != "invalid_param" {
+	if _, err := planesOf(svc).Automation.WriteAutomation(context.Background(), "../escape", dailyPatch("../escape", "9"), true); errCode(err) != "invalid_param" {
 		t.Fatalf("非法 id 应 40000 invalid_param，got %v", err)
 	}
 }
@@ -191,16 +191,16 @@ func TestAutomationPreservesUnknownKeys(t *testing.T) {
 	  "_comment": "这是我手写的备注，平台不许动",
 	  "owner_team": "infra"
 	}`)
-	if n := svc.Planes().Automation.LoadAutomationDefinitions(dir); n != 1 {
+	if n := planesOf(svc).Automation.LoadAutomationDefinitions(dir); n != 1 {
 		t.Fatalf("期望装载 1 条，got %d", n)
 	}
 	// 用户写面：只改 name
-	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "daily", map[string]any{"name": "巡检（新）"}, false); err != nil {
+	if _, err := planesOf(svc).Automation.WriteAutomation(context.Background(), "daily", map[string]any{"name": "巡检（新）"}, false); err != nil {
 		t.Fatalf("更新: %v", err)
 	}
 	// 运行态写回
 	fired := time.Now().UTC().Truncate(time.Second)
-	if err := svc.Planes().Automation.SaveOverlay(context.Background(), "daily", map[string]any{
+	if err := planesOf(svc).Automation.SaveOverlay(context.Background(), "daily", map[string]any{
 		"last_fired_at": fired.Format(time.RFC3339Nano),
 		"last_status":   automation.RunCompleted,
 		"state":         automation.StateActive,
@@ -222,17 +222,17 @@ func TestAutomationPreservesUnknownKeys(t *testing.T) {
 // TestAutomationPatchScheduleRecomputesNextDue 改 schedule → next_due 立刻重算（M4-3 验收项）。
 func TestAutomationPatchScheduleRecomputesNextDue(t *testing.T) {
 	svc, _ := automationRig(t)
-	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "daily", dailyPatch("daily", "9"), true); err != nil {
+	if _, err := planesOf(svc).Automation.WriteAutomation(context.Background(), "daily", dailyPatch("daily", "9"), true); err != nil {
 		t.Fatalf("新建: %v", err)
 	}
-	before, _ := svc.Planes().Automation.AutomationByID("daily")
+	before, _ := planesOf(svc).Automation.AutomationByID("daily")
 	// 改到 10:00：无论"现在"在几点，next_due 都必须变（09:00 与 10:00 是同一 now 下的两个不同时刻）
-	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "daily", map[string]any{
+	if _, err := planesOf(svc).Automation.WriteAutomation(context.Background(), "daily", map[string]any{
 		"schedule": map[string]any{"kind": "daily", "timezone": "Asia/Shanghai", "hour": 10, "minute": 30},
 	}, false); err != nil {
 		t.Fatalf("改 schedule: %v", err)
 	}
-	after, _ := svc.Planes().Automation.AutomationByID("daily")
+	after, _ := planesOf(svc).Automation.AutomationByID("daily")
 	if before.NextDueAt == "" || after.NextDueAt == "" {
 		t.Fatalf("next_due 不该为空: %q → %q", before.NextDueAt, after.NextDueAt)
 	}
@@ -248,17 +248,17 @@ func TestAutomationPatchScheduleRecomputesNextDue(t *testing.T) {
 // 否则下个 tick 会拿同一个 occurrence 再来一次（重复触发）。
 func TestAutomationOverlayAdvancesNextDue(t *testing.T) {
 	svc, _ := automationRig(t)
-	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "daily", dailyPatch("daily", "9"), true); err != nil {
+	if _, err := planesOf(svc).Automation.WriteAutomation(context.Background(), "daily", dailyPatch("daily", "9"), true); err != nil {
 		t.Fatalf("新建: %v", err)
 	}
-	first, _ := svc.Planes().Automation.AutomationByID("daily")
-	if err := svc.Planes().Automation.SaveOverlay(context.Background(), "daily", map[string]any{
+	first, _ := planesOf(svc).Automation.AutomationByID("daily")
+	if err := planesOf(svc).Automation.SaveOverlay(context.Background(), "daily", map[string]any{
 		"last_fired_at": first.NextDueAt, // 认领并"跑完"了这一次
 		"last_status":   automation.RunCompleted,
 	}, ""); err != nil {
 		t.Fatalf("运行态写回: %v", err)
 	}
-	second, _ := svc.Planes().Automation.AutomationByID("daily")
+	second, _ := planesOf(svc).Automation.AutomationByID("daily")
 	if second.NextDueAt == first.NextDueAt {
 		t.Fatalf("last_fired_at 写回后 next_due 必须推进：%q 仍是 %q", second.NextDueAt, first.NextDueAt)
 	}
@@ -289,7 +289,7 @@ func TestAutomationLoadBadDefinitions(t *testing.T) {
 	  "target":{"cwd":"/tmp/ws","prompt":"跑"}
 	}`)
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
-	if n := svc.Planes().Automation.LoadAutomationDefinitions(dir); n != 2 {
+	if n := planesOf(svc).Automation.LoadAutomationDefinitions(dir); n != 2 {
 		t.Fatalf("成功装载应为 2（ok/disabled），got %d", n)
 	}
 	items := svc.mustListAutomations(t)
@@ -307,7 +307,7 @@ func TestAutomationLoadBadDefinitions(t *testing.T) {
 		t.Fatalf("好定义应无 error 且有 next_due: %+v", byID["ok"])
 	}
 	// due 快照：坏定义与 disabled 都不在
-	due := svc.Planes().Automation.DueSnapshot(time.Now().Add(48 * time.Hour))
+	due := planesOf(svc).Automation.DueSnapshot(time.Now().Add(48 * time.Hour))
 	for _, rec := range due {
 		if rec.Def.ID == "broken" || rec.Def.ID == "mismatch" || rec.Def.ID == "disabled" {
 			t.Fatalf("不该出现在 due 快照里: %s", rec.Def.ID)
@@ -339,23 +339,23 @@ func TestAutomationDueSnapshot(t *testing.T) {
 	mk("d4", `{"id":"d4","enabled":true,
 	  "schedule":{"kind":"once","timezone":"UTC","at":"2020-01-01T00:00:00Z"},
 	  "target":{"cwd":"/tmp","prompt":"p"}}`)
-	if n := svc.Planes().Automation.LoadAutomationDefinitions(dir); n != 4 {
+	if n := planesOf(svc).Automation.LoadAutomationDefinitions(dir); n != 4 {
 		t.Fatalf("装载应为 4，got %d", n)
 	}
-	due := svc.Planes().Automation.DueSnapshot(time.Now())
+	due := planesOf(svc).Automation.DueSnapshot(time.Now())
 	if len(due) != 1 || due[0].Def.ID != "a1" {
 		t.Fatalf("只有 a1 该到期，got %+v", due)
 	}
-	rec, ok := svc.Planes().Automation.RecByID("d4")
+	rec, ok := planesOf(svc).Automation.RecByID("d4")
 	if !ok || rec.Startup != automation.StartupExpire || !rec.NextDue.IsZero() {
 		t.Fatalf("过期的 once 应记 expire 且无 next_due: %+v（startup=%s）", rec, rec.Startup)
 	}
 	// once 未到期 → wait（future）
-	if rec, _ := svc.Planes().Automation.RecByID("b2"); rec.Startup != automation.StartupWait {
+	if rec, _ := planesOf(svc).Automation.RecByID("b2"); rec.Startup != automation.StartupWait {
 		t.Fatalf("未到期的 once 应记 wait，got %s", rec.Startup)
 	}
 	// daily + 陈旧的 last_fired_at → recover（ADR-9 的补跑判据）
-	if rec, _ := svc.Planes().Automation.RecByID("a1"); rec.Startup != automation.StartupRecover {
+	if rec, _ := planesOf(svc).Automation.RecByID("a1"); rec.Startup != automation.StartupRecover {
 		t.Fatalf("停机错过的 daily 应记 recover，got %s", rec.Startup)
 	}
 }
@@ -363,10 +363,10 @@ func TestAutomationDueSnapshot(t *testing.T) {
 // TestAutomationDirUnset 未配置目录 → 显式报错（不静默"内存生效、盘上没留痕"）。
 func TestAutomationDirUnset(t *testing.T) {
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
-	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "x", dailyPatch("x", "9"), true); errCode(err) != "automation_dir_unset" {
+	if _, err := planesOf(svc).Automation.WriteAutomation(context.Background(), "x", dailyPatch("x", "9"), true); errCode(err) != "automation_dir_unset" {
 		t.Fatalf("期望 automation_dir_unset，got %v", err)
 	}
-	if _, err := svc.Planes().Automation.DeleteAutomationByID(context.Background(), "x"); errCode(err) != "automation_dir_unset" {
+	if _, err := planesOf(svc).Automation.DeleteAutomationByID(context.Background(), "x"); errCode(err) != "automation_dir_unset" {
 		t.Fatalf("删除同样要报 automation_dir_unset，got %v", err)
 	}
 }
@@ -374,7 +374,7 @@ func TestAutomationDirUnset(t *testing.T) {
 // TestAutomationCreateWritesNormalizedSchedule 规范化发生在落盘之前（weekly 的 days_of_week 去重升序）。
 func TestAutomationCreateWritesNormalizedSchedule(t *testing.T) {
 	svc, dir := automationRig(t)
-	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "w", map[string]any{
+	if _, err := planesOf(svc).Automation.WriteAutomation(context.Background(), "w", map[string]any{
 		"id": "w", "enabled": true,
 		"schedule": map[string]any{
 			"kind": "weekly", "timezone": "UTC", "hour": 9, "minute": 0,

@@ -35,8 +35,8 @@ func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 	// 本组用例钉的是**按传输承载能力**拒选（`mcp_gateway=off` 的回退口径）；网关在环时远程
 	// server 对每个已注册 runtime 都可达，故"不承载 http"这条不再成立——那条新语义由
 	// `TestSelectionValidationRemoteReachableViaGateway` 负责。
-	svc.Planes().SetMcpGatewayEnabled(false)
-	svc.planes.Skills.Projections().Set([]skill.Projection{{
+	planesOf(svc).SetMcpGatewayEnabled(false)
+	planesOf(svc).Skills.Projections().Set([]skill.Projection{{
 		Runtime:    "stub",
 		Projection: rtxSkillProjectionForTest(),
 	}})
@@ -47,7 +47,7 @@ func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 		{ID: "other-skill", Body: "# other", Runtimes: []string{"rtx"}},
 	} {
 		sk := sk
-		if err := svc.planes.Capabilities.RegisterSkill(&sk); err != nil {
+		if err := planesOf(svc).Capabilities.RegisterSkill(&sk); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -57,7 +57,7 @@ func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 		{ID: "web", Transport: capability.TransportHTTP, URL: "https://x.invalid/mcp"},
 		{ID: "off-mcp", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx", Enabled: boolPtr(false)},
 	} {
-		if err := svc.planes.Capabilities.RegisterMcpServer(m); err != nil {
+		if err := planesOf(svc).Capabilities.RegisterMcpServer(m); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -184,12 +184,12 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	enableStore(svc, st)
 	wsDir := t.TempDir()
-	if err := svc.Planes().Workspaces.SetWorkspacePolicy(wsDir, nil); err != nil { // 允许代建、白名单不限制
+	if err := planesOf(svc).Workspaces.SetWorkspacePolicy(wsDir, nil); err != nil { // 允许代建、白名单不限制
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 	// 默认工作空间（v14）= "未指定 cwd"的落点。生产里由装配期建立；测试里必须显式建，
 	// 否则未指定 cwd 的请求会报 workspace_required 而不是走到它要验的那一步。
-	if err := svc.Planes().Workspaces.EnsureDefaultWorkspace(); err != nil {
+	if err := planesOf(svc).Workspaces.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 
@@ -294,7 +294,7 @@ func TestCreateSessionDefaultPathUnchanged(t *testing.T) {
 	}
 	spec, _ := orch.reg.Get("stub")
 	// v19：基础键只剩"构建期底座 + 声明默认模型的供应商 env"（原生权限面没有策略来源）。
-	base := runtimeconn.ConnKey(spec.ID, svc.planes.Providers.ProviderEnvFor(spec.ID, svc.planes.Providers.InjectedProviderID(context.Background())))
+	base := runtimeconn.ConnKey(spec.ID, planesOf(svc).Providers.ProviderEnvFor(spec.ID, planesOf(svc).Providers.InjectedProviderID(context.Background())))
 	if got := runtimeconn.GenerationKey(base, rec.Fingerprint, ""); got != base {
 		t.Fatal("缺省路径的代际键必须与基础键逐字相同（R11）")
 	}
@@ -419,7 +419,7 @@ func TestSelectionValidationRemoteReachableViaGateway(t *testing.T) {
 		t.Fatalf("回退口径应说明传输不承载: %v", err)
 	}
 
-	svc.Planes().SetMcpGatewayEnabled(true)
+	planesOf(svc).SetMcpGatewayEnabled(true)
 	if err := svc.sessionPlane.ValidateSelection(sel, "stub"); err != nil {
 		t.Fatalf("网关在环时应通过（平台代连）：%v", err)
 	}
@@ -448,7 +448,7 @@ func TestSelectionValidationRemoteReachableViaGateway(t *testing.T) {
 	}
 
 	// 关掉网关 → 读面也随之回到"不承载"，两侧永不同向漂移。
-	svc.Planes().SetMcpGatewayEnabled(false)
+	planesOf(svc).SetMcpGatewayEnabled(false)
 	lib2, err := listLibrary(t, svc).ListLibrary(libQueryAll())
 	if err != nil {
 		t.Fatal(err)

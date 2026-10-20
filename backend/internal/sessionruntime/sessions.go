@@ -57,7 +57,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	// 归属目标：显式 `workspace_id` 优先（选择器选中了某个登记项），否则用默认工作空间。
 	// 两者都给出且不一致 → 拒绝：猜用户的意图迟早猜错，而这一处猜错的后果是会话跑错目录
 	// （那个目录正是原生权限 workspace-write 的沙箱边界）。
-	target, assignment, err := s.planes.Workspaces.ResolveTargetWorkspace(req.WorkspaceID)
+	target, assignment, err := s.facts.Workspaces.ResolveTargetWorkspace(req.WorkspaceID)
 	if err != nil {
 		return nil, code.FromError(err)
 	}
@@ -68,7 +68,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	// /tmp 与 /private/tmp 会被判成冲突（macOS 上它们是同一个目录）。
 	spec := req.Cwd
 	if assignment != "" {
-		row, ok, gerr := s.planes.Resources.Store().GetWorkspace(ctx, assignment)
+		row, ok, gerr := s.resourceStore.GetWorkspace(ctx, assignment)
 		if gerr != nil {
 			return nil, code.FromError(gerr)
 		}
@@ -99,7 +99,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	if assignment != "" {
 		ws.WorkspaceID = assignment
 	} else if ws.WorkspaceID == "" {
-		ws.WorkspaceID = s.planes.Workspaces.WorkspaceIDByPath(ctx, ws.Path)
+		ws.WorkspaceID = s.facts.Workspaces.WorkspaceIDByPath(ctx, ws.Path)
 	}
 	// 能力选定（M3）：`capabilities` 未传 → nil，与引入本字段之前逐字节相同。
 	// 传了（哪怕 `{}`）→ 声明了：两个 kind 各自 nil（不限制）或白名单，由 DTO 的指针区分。
@@ -111,7 +111,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	// 这里只负责把"请求写了什么"与"工作空间声明了什么"交给它——**不在这里再写一遍 if**，
 	// 那是"某个入口不吃工作空间默认值"的唯一来源。
 	if selection == nil && ws.WorkspaceID != "" {
-		if def, ok := s.planes.Workspaces.WorkspaceDefaultsOf(ws.WorkspaceID); ok && def.CapabilityJSON != "" {
+		if def, ok := s.facts.Workspaces.WorkspaceDefaultsOf(ws.WorkspaceID); ok && def.CapabilityJSON != "" {
 			// `ParseCapabilitySelection` 对坏 JSON 回 nil（= 未声明）并留日志——默认值是**便利**，
 			// 不是"会话能不能建"的判据。
 			selection = session.ParseCapabilitySelection(def.CapabilityJSON)
@@ -125,7 +125,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	// 进程；而暖进程的键要在取连接之前已知 ⇒ 模式是会话的**快照字段**，不是每次现算的推导值。
 	nativeMode := ""
 	if ws.WorkspaceID != "" {
-		if def, ok := s.planes.Workspaces.WorkspaceDefaultsOf(ws.WorkspaceID); ok {
+		if def, ok := s.facts.Workspaces.WorkspaceDefaultsOf(ws.WorkspaceID); ok {
 			nativeMode = def.PermissionMode
 		}
 	}

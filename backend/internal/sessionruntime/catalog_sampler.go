@@ -85,7 +85,7 @@ func (s *Service) SampleConfigOptions(ctx context.Context) ([]acp.ConfigOption, 
 	if s.orch == nil {
 		return nil, false, provider.ErrNoSampleCandidate
 	}
-	spec, ok := s.planes.Registry.Get(runtime.SelectedRuntime())
+	spec, ok := s.reg.Get(runtime.SelectedRuntime())
 	if !ok {
 		return nil, false, acp.NewError(acp.ClassRequest, "runtime_not_registered",
 			"[runtime_not_registered] 构建期选定的 runtime 未装配", nil)
@@ -157,7 +157,7 @@ func sampleCandidates[T any](cands []T, sample func(T) ([]acp.ConfigOption, erro
 //     cwd 的条目；dsh 会主动排除仍在活跃的会话，所以不会抢用户终端里正在用的那条。
 func (s *Service) catalogResumeCandidates(ctx context.Context, rc session.Conn) []resumeTarget {
 	// 1) 平台记录（内存集合 + sqlite 兜底）。
-	st := s.planes.Resources.Store()
+	st := s.resourceStore
 	var recs []session.SessionRec
 	for _, r := range s.sessionPlane.Snapshot() {
 		if r.RuntimeSessionID == "" || r.Cwd == "" {

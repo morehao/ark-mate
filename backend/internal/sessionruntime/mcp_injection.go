@@ -60,10 +60,10 @@ func (p mcpInjectionPlan) empty() bool {
 // 时回到老路：远程 server 按该 runtime 声明的承载能力直连注入（能承载才注入，承载不了就跳过）。
 func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySelection) mcpInjectionPlan {
 	var plan mcpInjectionPlan
-	if s.planes.Capabilities == nil {
+	if s.facts.Capabilities == nil {
 		return plan
 	}
-	supported, ok := s.planes.Registry.McpTransportsFor(runtimeID)
+	supported, ok := s.reg.McpTransportsFor(runtimeID)
 	if !ok {
 		return plan // 未知 runtime → 不下发（维持现状）
 	}
@@ -73,9 +73,9 @@ func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySele
 	if sel != nil && sel.Mcps != nil {
 		allowIDs = sel.Mcps
 	}
-	all := s.planes.Capabilities.ListMcpServers()
+	all := s.facts.Capabilities.ListMcpServers()
 
-	if !s.planes.McpGatewayEnabled() {
+	if !s.mcpGatewayEnabled() {
 		// 回退路径（MATE_MCP_GATEWAY=off）：远程也直连，故传输判据就是该 runtime 的声明。
 		plan.Direct = capability.SelectMcpServers(all, supported, allowIDs)
 		return plan
@@ -147,7 +147,7 @@ func (s *Service) gatewayEntry(runtimeID string, sel *session.CapabilitySelectio
 	}
 	// 空 = 装配期没登记（测试、`mate demo` 这类不经装配的入口）：**不带这个键**，让网关侧
 	// 明确知道"核心没交 cwd"，回落并 WARN——不臆造一个 `os.Getwd()` 冒充核心的答案。
-	if cwd := s.planes.Credentials.Cwd(); cwd != "" {
+	if cwd := s.facts.Credentials.Cwd(); cwd != "" {
 		entry.Env = map[string]string{mcp.GatewayCredCwdEnv: cwd}
 	}
 	return entry, nil

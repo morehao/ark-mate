@@ -23,10 +23,10 @@ func TestProviderRespCarriesApplicability(t *testing.T) {
 	svc := providerTestSvc(t, dir) // 已注册 runtime：dsh / rtx / stub（升序）
 
 	key := "sk-secret-abc"
-	if _, err := svc.planes.Providers.CreateProvider(ctx, providerReq("ds", &key)); err != nil {
+	if _, err := planesOf(svc).Providers.CreateProvider(ctx, providerReq("ds", &key)); err != nil {
 		t.Fatalf("CreateProvider: %v", err)
 	}
-	items, err := svc.planes.Providers.ListProviders(context.Background())
+	items, err := planesOf(svc).Providers.ListProviders(context.Background())
 	if err != nil || len(items) != 1 {
 		t.Fatalf("ListProviders: %v (%d 条)", err, len(items))
 	}
@@ -82,17 +82,17 @@ func TestProviderApplicabilityNotConfiguredWhenBaseURLEmpty(t *testing.T) {
 	svc := providerTestSvc(t, dir)
 
 	key := "sk-secret-abc"
-	if _, err := svc.planes.Providers.CreateProvider(ctx, providerReq("legacy", &key)); err != nil {
+	if _, err := planesOf(svc).Providers.CreateProvider(ctx, providerReq("legacy", &key)); err != nil {
 		t.Fatalf("CreateProvider: %v", err)
 	}
 	// 把端点清空（存量 v11 数据迁移后推不出端点的形态；PATCH 允许它，因为写面不该逼用户在
 	// 一次编辑里就填完所有东西）。
 	empty := ""
-	if _, err := svc.planes.Providers.UpdateProvider(ctx, "legacy", provider.PatchRequest{BaseURL: &empty}); err != nil {
+	if _, err := planesOf(svc).Providers.UpdateProvider(ctx, "legacy", provider.PatchRequest{BaseURL: &empty}); err != nil {
 		t.Fatalf("UpdateProvider(清空端点): %v", err)
 	}
 
-	items, err := svc.planes.Providers.ListProviders(context.Background())
+	items, err := planesOf(svc).Providers.ListProviders(context.Background())
 	if err != nil || len(items) != 1 {
 		t.Fatalf("ListProviders: %v (%d 条)", err, len(items))
 	}

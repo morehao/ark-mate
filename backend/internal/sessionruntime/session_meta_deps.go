@@ -21,7 +21,7 @@ import (
 // 实现是 manager 既有的那一段（默认行 / 按 id 取行 / 行 → 运行时值换算，见 `model_list.go`）：
 // 这条链要读模型清单（store）与供应商面，属模型面的判据，用例层只认端口。
 func (s *Service) ResolveModel(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error) {
-	return s.planes.Providers.ResolveSessionModel(ctx, runtimeID, modelID)
+	return s.facts.Providers.ResolveSessionModel(ctx, runtimeID, modelID)
 }
 
 // ApplyModel 把模型投给活跃会话（不活跃 → false，不报错）。
@@ -40,12 +40,12 @@ func (s *Service) ApplyModel(ctx context.Context, sessionID string, cfg runtime.
 // 两个细节原样保留：脱离请求取消（`WithoutCancel`——请求断了不该让这次已经生效的元数据变更丢在
 // 半路）与 3 秒上限（写库卡住不能拖住 HTTP 响应）。
 func (s *Service) UpdateMeta(ctx context.Context, id string, meta model.SessionMetaPatch) {
-	if s.planes.Resources.Store() == nil {
+	if s.resourceStore == nil {
 		return
 	}
 	ctx2, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	if err := s.planes.Resources.Store().UpdateSessionMeta(ctx2, id, meta); err != nil {
+	if err := s.resourceStore.UpdateSessionMeta(ctx2, id, meta); err != nil {
 		glog.Warnw(ctx, "store: update session meta failed", "session", id, "err", err)
 	}
 }

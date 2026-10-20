@@ -27,7 +27,7 @@ func sessionPlaneOf(svc *Service) *session.Plane { return svc.sessionPlane }
 //
 // 夹具链不变：库句柄、会话域平面、事件总线都还是同一个，用例只是换了个所有者。
 func historySvc(svc *Service) svcsession.HistorySvc {
-	return svcsession.NewHistory(storeAsEventReader(svc.planes.Resources.Store()), svc.sessionPlane, svc.bus)
+	return svcsession.NewHistory(storeAsEventReader(planesOf(svc).Resources.Store()), svc.sessionPlane, svc.bus)
 }
 
 // 本文件是**会话历史读面的装配级用例**（此前与 transcript 落盘用例同处

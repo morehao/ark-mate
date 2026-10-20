@@ -42,14 +42,14 @@ func TestWorkspaceSettingsWithoutStore(t *testing.T) {
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, "", []string{mustEval(t, root)})
 
-	resp := svc.Planes().Workspaces.Settings()
+	resp := planesOf(svc).Workspaces.Settings()
 	if len(resp.Configured) != 1 || !resp.PreferRoots || resp.Writable {
 		t.Fatalf("快照不符: %+v", resp)
 	}
 	if resp.Source != "unavailable" {
 		t.Fatalf("无端口时来源应标 unavailable，得到 %q", resp.Source)
 	}
-	if _, err := svc.Planes().Workspaces.UpdateSettings([]string{root}); acpCode(t, err) != "settings_readonly" {
+	if _, err := planesOf(svc).Workspaces.UpdateSettings([]string{root}); acpCode(t, err) != "settings_readonly" {
 		t.Fatalf("无端口写入应 settings_readonly: %v", err)
 	}
 }
@@ -69,10 +69,10 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, provision, nil) // 未配置偏好起点
 	store := &fakeRootsStore{src: "config.json"}
-	svc.Planes().Workspaces.SetRootsStore(store)
+	planesOf(svc).Workspaces.SetRootsStore(store)
 
 	// 起步快照：没有偏好起点（prefer_roots=false，无名单可言，故 provision_included 为 false）。
-	resp := svc.Planes().Workspaces.Settings()
+	resp := planesOf(svc).Workspaces.Settings()
 	if resp.PreferRoots || len(resp.Configured) != 0 || len(resp.Roots) != 0 || resp.ProvisionIncluded {
 		t.Fatalf("未配置时不该有偏好起点: %+v", resp)
 	}
@@ -82,7 +82,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 
 	// 落盘内容必须是**显式**名单（不含代建根）：派生项写进配置文件就变成了运维的配置。
 	var err error
-	resp, err = svc.Planes().Workspaces.UpdateSettings([]string{rootA, rootB})
+	resp, err = planesOf(svc).Workspaces.UpdateSettings([]string{rootA, rootB})
 	if err != nil {
 		t.Fatalf("UpdateWorkspaceSettings: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	if err := os.MkdirAll(outside, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if _, err := svc.Planes().Workspaces.BrowseWorkspace(outside, false); err != nil {
+	if _, err := planesOf(svc).Workspaces.BrowseWorkspace(outside, false); err != nil {
 		t.Fatalf("更新偏好后名录外目录仍应可浏览（名录不是边界）: %v", err)
 	}
 	// 代建根也要放行——默认工作空间就在它下面（未指定 cwd 的落点）。
@@ -111,7 +111,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	if _, err := workspace.ResolveWorkspace("", &workspace.DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}); err != nil {
 		t.Fatalf("默认工作空间应始终可选（代建根隐式并入）: %v", err)
 	}
-	if _, err := svc.Planes().Workspaces.BrowseWorkspace(provision, false); err != nil {
+	if _, err := planesOf(svc).Workspaces.BrowseWorkspace(provision, false); err != nil {
 		t.Fatalf("代建根应始终可浏览: %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	svc.sessionPlane.RegisterSession(&session.SessionRec{
 		ID: "c-old", Cwd: mustEval(t, outside), UpdatedAt: time.Now().UTC(),
 	})
-	recent, err := svc.Planes().Workspaces.RecentWorkspaces(10)
+	recent, err := planesOf(svc).Workspaces.RecentWorkspaces(10)
 	if err != nil {
 		t.Fatalf("RecentWorkspaces: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	}
 
 	// 空名单 = 恢复不限制（面板"取消限定"的那一步）。
-	resp, err = svc.Planes().Workspaces.UpdateSettings(nil)
+	resp, err = planesOf(svc).Workspaces.UpdateSettings(nil)
 	if err != nil {
 		t.Fatalf("清空: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestUpdateWorkspaceSettingsValidation(t *testing.T) {
 	}
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	store := &fakeRootsStore{}
-	svc.Planes().Workspaces.SetRootsStore(store)
+	planesOf(svc).Workspaces.SetRootsStore(store)
 
 	cases := []struct {
 		name  string
@@ -174,14 +174,14 @@ func TestUpdateWorkspaceSettingsValidation(t *testing.T) {
 		{"好项 + 坏项（逐项校验，不能被前面的合法项带过）", []string{root, "relative"}},
 	}
 	for _, tc := range cases {
-		if _, err := svc.Planes().Workspaces.UpdateSettings(tc.roots); acpCode(t, err) != "workspace_invalid" {
+		if _, err := planesOf(svc).Workspaces.UpdateSettings(tc.roots); acpCode(t, err) != "workspace_invalid" {
 			t.Fatalf("%s: 应 workspace_invalid，得到 %v", tc.name, err)
 		}
 	}
 	if len(store.saved) != 0 {
 		t.Fatalf("校验失败不该落盘: %+v", store.saved)
 	}
-	if got := svc.Planes().Workspaces.WorkspaceRoots(); len(got) != 0 {
+	if got := planesOf(svc).Workspaces.WorkspaceRoots(); len(got) != 0 {
 		t.Fatalf("校验失败不该改动内存策略: %v", got)
 	}
 
@@ -190,7 +190,7 @@ func TestUpdateWorkspaceSettingsValidation(t *testing.T) {
 	if err := os.Symlink(root, link); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	if _, err := svc.Planes().Workspaces.UpdateSettings([]string{"  ", root, link, root}); err != nil {
+	if _, err := planesOf(svc).Workspaces.UpdateSettings([]string{"  ", root, link, root}); err != nil {
 		t.Fatalf("重复项应去重而不是报错: %v", err)
 	}
 	if len(store.saved) != 1 || len(store.saved[0]) != 1 {
@@ -204,13 +204,13 @@ func TestUpdateWorkspaceSettingsLocked(t *testing.T) {
 	root := t.TempDir()
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	store := &fakeRootsStore{src: "env(process)", locked: "MATE_WORKSPACE_ROOTS"}
-	svc.Planes().Workspaces.SetRootsStore(store)
+	planesOf(svc).Workspaces.SetRootsStore(store)
 
-	resp := svc.Planes().Workspaces.Settings()
+	resp := planesOf(svc).Workspaces.Settings()
 	if resp.Writable || resp.LockedBy != "MATE_WORKSPACE_ROOTS" {
 		t.Fatalf("锁定态应透出给面板（它据此转只读）: %+v", resp)
 	}
-	err := func() error { _, e := svc.Planes().Workspaces.UpdateSettings([]string{root}); return e }()
+	err := func() error { _, e := planesOf(svc).Workspaces.UpdateSettings([]string{root}); return e }()
 	if acpCode(t, err) != "settings_locked" {
 		t.Fatalf("应 settings_locked: %v", err)
 	}
@@ -229,13 +229,13 @@ func TestUpdateWorkspaceSettingsSaveFailure(t *testing.T) {
 	root := t.TempDir()
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, "", []string{mustEval(t, t.TempDir())})
-	before := svc.Planes().Workspaces.WorkspaceRoots()
-	svc.Planes().Workspaces.SetRootsStore(&fakeRootsStore{saveErr: errors.New("磁盘只读")})
+	before := planesOf(svc).Workspaces.WorkspaceRoots()
+	planesOf(svc).Workspaces.SetRootsStore(&fakeRootsStore{saveErr: errors.New("磁盘只读")})
 
-	if _, err := svc.Planes().Workspaces.UpdateSettings([]string{root}); acpCode(t, err) != "settings_save_failed" {
+	if _, err := planesOf(svc).Workspaces.UpdateSettings([]string{root}); acpCode(t, err) != "settings_save_failed" {
 		t.Fatalf("应 settings_save_failed: %v", err)
 	}
-	after := svc.Planes().Workspaces.WorkspaceRoots()
+	after := planesOf(svc).Workspaces.WorkspaceRoots()
 	if len(after) != len(before) || after[0] != before[0] {
 		t.Fatalf("落盘失败不该改动内存策略: before=%v after=%v", before, after)
 	}

@@ -50,7 +50,7 @@ func (v *ModelViews) ModelsView(ctx context.Context, runtimeID string, refresh b
 	}
 
 	resp := &dtomodel.ModelsResp{
-		Models:       modelResps(models),
+		Models:       dtomodel.ModelResps(models),
 		DefaultModel: defaultID,
 		Sync:         []dtomodel.RuntimeSyncResp{},
 	}

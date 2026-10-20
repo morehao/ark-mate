@@ -27,9 +27,9 @@ import (
 // browseApp 装配真路由 + 真 manager，白名单可指定（nil = 不限制）。
 func browseApp(t *testing.T, roots []string) *sessionruntime.Service {
 	t.Helper()
-	svc := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newSessionService(runtime.NewRegistry(), eventbus.New())
 	provision := filepath.Join(t.TempDir(), "workspaces")
-	if err := svc.Planes().Workspaces.SetWorkspacePolicy(provision, roots); err != nil {
+	if err := planesOf(svc).Workspaces.SetWorkspacePolicy(provision, roots); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 	return svc

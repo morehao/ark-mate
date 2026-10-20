@@ -202,11 +202,11 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 		}
 	}
 	// P4b：`ProviderPlane()` 删了；事实出口是 `Planes()` + `registry.Planes.Providers`。
-	svcSrc := stripLineComments(readFileOrFatal(t, filepath.Join(mgr, "service.go")))
+	factsSrc := stripLineComments(readFileOrFatal(t, filepath.Join(mgr, "planes.go")))
 	planesSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "planes.go")))
-	if !strings.Contains(svcSrc, "func (s *Service) Planes() *registry.Planes") ||
+	if !strings.Contains(factsSrc, "Providers    ProviderFacts") ||
 		!strings.Contains(planesSrc, "Providers    *provider.Plane") {
-		t.Error("`Planes()` / `registry.Planes.Providers` 有一处不在：控制器拿不到供应商域平面 ⇒ " +
+		t.Error("`PlaneFacts.Providers` / `registry.Planes.Providers` 有一处不在：控制器拿不到供应商域平面 ⇒ " +
 			"自检的域读面恒空，表现是**永远**报「档案不在册」（只在用户点\"测试连接\"时才现形）。")
 	}
 
@@ -245,9 +245,9 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 			"gateway 的换代重载"},
 		// 第五十四刀：建连时的密钥注入经**执行面端口**取（池的 `ProviderEnvSource`），
 		// 适配器在 `runtime_pool.go`。锚跟着对象走，判据不变：调用点必须直连域平面。
-		{"internal/sessionruntime/runtime_pool.go", "s.planes.Providers.ProviderEnvFor(",
+		{"internal/sessionruntime/runtime_pool.go", "s.facts.Providers.ProviderEnvFor(",
 			"建连时的密钥注入"},
-		{"internal/sessionruntime/provider_effect.go", "s.planes.Providers.ProviderModelRefsReadOnly(",
+		{"internal/sessionruntime/provider_effect.go", "s.facts.Providers.ProviderModelRefsReadOnly(",
 			"写面回执的引用统计"},
 	} {
 		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, c.file))), c.want) {

@@ -118,7 +118,7 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 	if before == 0 {
 		t.Fatal("装配期（EnableStore）应当已经调过一次端口——没调说明这一段链接根本没接上")
 	}
-	if _, err := svc.Planes().Resources.SyncRuntime(context.Background(), runtimetest.ID); err != nil {
+	if _, err := planesOf(svc).Resources.SyncRuntime(context.Background(), runtimetest.ID); err != nil {
 		t.Fatalf("合成底座的清单同步不该报错: %v", err)
 	}
 	if syncer.Calls != before+1 {

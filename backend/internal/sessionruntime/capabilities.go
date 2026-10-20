@@ -39,7 +39,7 @@ func (s *Service) McpServersFor(runtimeID string, sel *session.CapabilitySelecti
 			name = m.ID
 		}
 		// §13.3 M1/M6：密钥型绑定在这里**才**解析成明文（定义文件里只有引用）。
-		env, headers, problems := s.planes.McpSecrets.Resolve(m)
+		env, headers, problems := s.facts.McpSecrets.Resolve(m)
 		if len(problems) > 0 {
 			// 解析不了就不注入这个 server：半配置的 MCP server 会让 agent 侧报一堆看不懂的连不上，
 			// 而少一个工具是"看得见的降级"（日志里有原因、有引用、有出路）。**不静默**：逐条 WARN。

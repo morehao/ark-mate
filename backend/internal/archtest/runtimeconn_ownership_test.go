@@ -118,10 +118,10 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 	// 阶段 0.4b：执行面的**构造与来源接线**随"NewService 不自造执行面"搬到装配根
 	// （`bootstrap/assembly`）——判据跟落点走；`SetDropSink` 仍在编排器回挂处。
 	for _, c := range []struct{ file, want, why string }{
-		{"internal/bootstrap/assembly/build.go", "runtimeconn.NewPool(", "执行面的连接池"},
-		{"internal/bootstrap/assembly/build.go", "SetProviderEnvSource(", "子进程 env 的来源（同时是基础键的输入）"},
-		{"internal/bootstrap/assembly/build.go", "SetConfigDigestSource(", "模型清单指纹的来源（进代际键）"},
-		{"internal/bootstrap/assembly/build.go", "SetLiveClientSource(", "诊断的连接池读面"},
+		{"internal/bootstrap/assembly/ports.go", "runtimeconn.NewPool(", "执行面的连接池"},
+		{"internal/bootstrap/assembly/ports.go", "SetProviderEnvSource(", "子进程 env 的来源（同时是基础键的输入）"},
+		{"internal/bootstrap/assembly/ports.go", "SetConfigDigestSource(", "模型清单指纹的来源（进代际键）"},
+		{"internal/bootstrap/assembly/ports.go", "SetLiveClientSource(", "诊断的连接池读面"},
 		{"internal/sessionruntime/service.go", "SetDropSink(o)", "拆除的应用面（会话收尾）"},
 		{"internal/sessionruntime/connection.go", "func (o *Orchestrator) OnConnDropped(", "拆除的应用实现"},
 		{"internal/sessionruntime/connection.go", "func (o *Orchestrator) InUseOn(", "回收判据的应用实现"},
@@ -173,9 +173,9 @@ func TestRuntimeBindingIsNotDuplicatedOnService(t *testing.T) {
 			"一边说 stopped、另一边连接活着，而两边都编译得过。")
 	}
 	// 阶段 0.4b：构造与来源接线归装配根（`NewService` 不再自造执行面）。
-	build := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "build.go")))
+	build := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "ports.go")))
 	if !strings.Contains(build, "runtimeconn.NewPlaneFor(") {
-		t.Error("`internal/bootstrap/assembly/build.go` 里找不到 `runtimeconn.NewPlaneFor(`：" +
+		t.Error("`internal/bootstrap/assembly/ports.go` 里找不到 `runtimeconn.NewPlaneFor(`：" +
 			"执行面没有装配。\n" +
 			"表现是绑定恒为 nil、`Snapshot()` 回落到「构建期 id + stopped」——看起来完全正常，" +
 			"只是进程状态永远是 stopped。")

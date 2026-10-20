@@ -39,15 +39,15 @@ func (s *Service) CapabilityFactsFor(runtimeID string, sel *session.CapabilitySe
 // **会话选定的白名单那一道不在这里**（它在域的 `projectedSkillParts`）：三态语义
 // （未声明 / 空数组 / 白名单）只许有一个解释处。
 func (s *Service) projectedSkillsForFingerprint(runtimeID string, _ *session.CapabilitySelection) []capability.Skill {
-	if s.planes.Capabilities == nil {
+	if s.facts.Capabilities == nil {
 		return nil
 	}
-	p, ok := s.planes.Skills.Projections().For(runtimeID)
+	p, ok := s.facts.Skills.Projections().For(runtimeID)
 	if !ok || p.Err != "" {
 		return nil
 	}
 	var out []capability.Skill
-	for _, sk := range s.planes.Capabilities.ListSkills() {
+	for _, sk := range s.facts.Capabilities.ListSkills() {
 		if !sk.IsEnabled() || !sk.AppliesToRuntime(runtimeID) {
 			continue
 		}
@@ -67,10 +67,10 @@ func (s *Service) projectedSkillsForFingerprint(runtimeID string, _ *session.Cap
 // P3c：随指纹装配点从 `capability_fingerprint.go` 搬到这里——调用方（MCP 注入计划、能力事实
 // 适配器）都还在本包，而"注册表里有没有这个 runtime"是同一件事。
 func (s *Service) regSpec(runtimeID string) (runtime.Spec, bool) {
-	if s.planes.Registry == nil {
+	if s.reg == nil {
 		return runtime.Spec{}, false
 	}
-	return s.planes.Registry.Get(runtimeID)
+	return s.reg.Get(runtimeID)
 }
 
 // injectedMcpsOfServers 把定义列表转成域侧的事实值对象（**只带键名与引用名**）。

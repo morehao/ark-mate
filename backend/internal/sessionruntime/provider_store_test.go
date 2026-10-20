@@ -164,9 +164,9 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	// ⑥ 保存并重开（模拟重启）：装载出来的内存档案与文件时代逐字段一致。
 	svc := newServiceForTest(publisherRegistry(), eventbus.New())
 	enableStore(svc, st)
-	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
-	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)
-	items, _ := svc.planes.Providers.ListProviders(context.Background())
+	planesOf(svc).Credentials.SetLayered(newTestCredentials(t, home))
+	planesOf(svc).Providers.LoadProviderDefinitionsFromStore(ctx, dir)
+	items, _ := planesOf(svc).Providers.ListProviders(context.Background())
 	if len(items) != 2 {
 		t.Fatalf("装载后档案数不符: %+v", items)
 	}
@@ -181,7 +181,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 		t.Fatalf("legacy-openai 装载形态不符: %+v", it)
 	}
 	// 注入值就是迁移前那份（明文解出来了）。
-	if got := svc.planes.Providers.ProviderEnvFor(runtimetest.ID, "legacy-openai"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_LEGACY_OPENAI_") {
+	if got := planesOf(svc).Providers.ProviderEnvFor(runtimetest.ID, "legacy-openai"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_LEGACY_OPENAI_") {
 		t.Fatalf("迁移后注入不符: %v", got)
 	}
 	// 引用它的默认模型不再被报悬空（B3 的装载顺序判据）。
@@ -245,14 +245,14 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	}
 	svc := newServiceForTest(publisherRegistry(), eventbus.New())
 	enableStore(svc, st)
-	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
-	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)
+	planesOf(svc).Credentials.SetLayered(newTestCredentials(t, home))
+	planesOf(svc).Providers.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	// 写面：新建一条（走 store）+ 覆盖一条（走 store）。
-	if _, err := svc.planes.Providers.CreateProvider(ctx, providerReq("brand-new", ptr("sk-new-secret"))); err != nil {
+	if _, err := planesOf(svc).Providers.CreateProvider(ctx, providerReq("brand-new", ptr("sk-new-secret"))); err != nil {
 		t.Fatalf("CreateProvider(新建): %v", err)
 	}
-	if _, err := svc.planes.Providers.UpdateProvider(ctx, "existing", provider.PatchRequest{Note: ptr("改了备注")}); err != nil {
+	if _, err := planesOf(svc).Providers.UpdateProvider(ctx, "existing", provider.PatchRequest{Note: ptr("改了备注")}); err != nil {
 		t.Fatalf("UpdateProvider(覆盖): %v", err)
 	}
 	// 行确实写进了 DB。
@@ -285,7 +285,7 @@ func TestProviderMemoryCarrierStillUsesFile(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "providers")
 	svc := providerTestSvc(t, dir) // memory 模式（无持久层）
-	if _, err := svc.planes.Providers.CreateProvider(ctx, providerReq("p1", ptr("sk-memory-secret"))); err != nil {
+	if _, err := planesOf(svc).Providers.CreateProvider(ctx, providerReq("p1", ptr("sk-memory-secret"))); err != nil {
 		t.Fatalf("CreateProvider: %v", err)
 	}
 	raw := readProvidersFile(t, dir)
@@ -297,23 +297,23 @@ func TestProviderMemoryCarrierStillUsesFile(t *testing.T) {
 	}
 	// 删除必须**落盘**：文件载体是"先摘内存 → 再序列化"，顺序反了会把刚删的条目原样写回
 	// （界面上没了、文件里还在，重启后它又回来了——完全静默）。
-	if del, err := svc.planes.Providers.DeleteProvider(ctx, "p1"); err != nil || !del.Deleted {
+	if del, err := planesOf(svc).Providers.DeleteProvider(ctx, "p1"); err != nil || !del.Deleted {
 		t.Fatalf("删除应成功: %+v err=%v", del, err)
 	}
 	if raw := readProvidersFile(t, dir); strings.Contains(raw, `"p1"`) {
 		t.Fatalf("删除后文件里仍留着该条目（先落盘后摘内存的顺序反了）: %s", raw)
 	}
-	if _, err := svc.planes.Providers.CreateProvider(ctx, providerReq("p1", ptr("sk-memory-secret"))); err != nil {
+	if _, err := planesOf(svc).Providers.CreateProvider(ctx, providerReq("p1", ptr("sk-memory-secret"))); err != nil {
 		t.Fatalf("重建用于重启断言: %v", err)
 	}
 
 	// 重启（新 Service，同一目录）→ 档案与注入都还在。
 	svc2 := providerTestSvc(t, dir)
-	items, _ := svc2.Planes().Providers.ListProviders(context.Background())
+	items, _ := planesOf(svc2).Providers.ListProviders(context.Background())
 	if len(items) != 1 || items[0].ID != "p1" || !items[0].HasKey {
 		t.Fatalf("memory 模式重启后档案丢失: %+v", items)
 	}
-	if got := svc2.Planes().Providers.ProviderEnvFor(runtimetest.ID, "p1"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_P1_") || !strings.HasSuffix(got[0], "_API_KEY=sk-memory-secret") {
+	if got := planesOf(svc2).Providers.ProviderEnvFor(runtimetest.ID, "p1"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_P1_") || !strings.HasSuffix(got[0], "_API_KEY=sk-memory-secret") {
 		t.Fatalf("memory 模式重启后注入不符: %v", got)
 	}
 }
@@ -335,10 +335,10 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	svc := newServiceForTest(publisherRegistry(), eventbus.New())
 	enableStore(svc, st)
-	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
-	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)
+	planesOf(svc).Credentials.SetLayered(newTestCredentials(t, home))
+	planesOf(svc).Providers.LoadProviderDefinitionsFromStore(ctx, dir)
 	for _, id := range []string{"p-b", "p-a"} {
-		if _, err := svc.planes.Providers.CreateProvider(ctx, providerReq(id, ptr("sk-"+id))); err != nil {
+		if _, err := planesOf(svc).Providers.CreateProvider(ctx, providerReq(id, ptr("sk-"+id))); err != nil {
 			t.Fatalf("CreateProvider(%s): %v", id, err)
 		}
 	}
@@ -375,11 +375,11 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	}
 	// 回灌：同一台机器上（文件 + 本机密钥面）再装一次即用——与 A4 的"逐字段等价"反向闭合。
 	svcMemory := providerTestSvc(t, dir)
-	items, _ := svcMemory.Planes().Providers.ListProviders(context.Background())
+	items, _ := planesOf(svcMemory).Providers.ListProviders(context.Background())
 	if len(items) != 2 {
 		t.Fatalf("回灌后档案数不符: %+v", items)
 	}
-	if got := svcMemory.Planes().Providers.ProviderEnvFor(runtimetest.ID, "p-a"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_P_A_") || !strings.HasSuffix(got[0], "_API_KEY=sk-p-a") {
+	if got := planesOf(svcMemory).Providers.ProviderEnvFor(runtimetest.ID, "p-a"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_P_A_") || !strings.HasSuffix(got[0], "_API_KEY=sk-p-a") {
 		t.Fatalf("回灌后注入不符: %v", got)
 	}
 }

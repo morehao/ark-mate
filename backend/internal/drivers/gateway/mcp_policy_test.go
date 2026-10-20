@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 
 	"github.com/morehao/ark-mate/internal/sessionruntime"
@@ -75,12 +76,14 @@ func TestProbeAndGatewayFacesMatch(t *testing.T) {
 	r.seedMcp("gh", httpDef("gh", remote.srv.URL, "MCP_TOKEN_PARITY"), 0)
 
 	// 探测面：管理器装载同一份定义后探测（真实入口，走真远端）。
-	svc := sessionruntime.NewService(dsh.Registry(), nil)
-	svc.EnableStore(r.st, func() { svc.Planes().EnableStore(r.st) })
-	if n := svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, ""); n == 0 {
+	reg := dsh.Registry()
+	planes := registry.NewPlanes(reg)
+	svc := sessionruntime.NewService(reg, nil, sessionruntime.WithPlaneFacts(planeFactsForTest(planes)))
+	svc.EnableStore(r.st, r.st, func() { planes.EnableStore(r.st) })
+	if n := planes.LoadCapabilityDefinitionsFromStore(ctx, ""); n == 0 {
 		t.Fatal("装载能力定义：应读到 1 条")
 	}
-	probe, err := svc.Planes().Mcp.Probe(ctx, "gh")
+	probe, err := planes.Mcp.Probe(ctx, "gh")
 	if err != nil {
 		t.Fatalf("探测: %v", err)
 	}
@@ -216,5 +219,14 @@ func TestCallsSerializePerServerAndParallelizeAcrossServers(t *testing.T) {
 	}
 	if calls, _ := srvB.snapshot(); len(calls) != perServer {
 		t.Fatalf("gh2 应收到 %d 次调用，got %v", perServer, calls)
+	}
+}
+
+// planeFactsForTest 把具体平面折成按面端口（与 assembly.PlaneFactsOf 同形）。
+func planeFactsForTest(p *registry.Planes) sessionruntime.PlaneFacts {
+	return sessionruntime.PlaneFacts{
+		Providers: p.Providers, Capabilities: p.Capabilities, Skills: p.Skills,
+		McpSecrets: p.McpSecrets, Workspaces: p.Workspaces, Credentials: p.Credentials,
+		Automation: p.Automation, Identity: p.Identity, Gateway: p,
 	}
 }

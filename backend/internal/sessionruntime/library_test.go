@@ -30,8 +30,8 @@ func libraryRig(t *testing.T) *Service {
 		runtime.Spec{ID: "dsh", Name: "dsh", McpTransports: []string{"stdio"}},
 	)
 	svc := newServiceForTest(reg, eventbus.New())
-	svc.Planes().LoadCapabilityDefinitions(dir)
-	svc.planes.Skills.Projections().Set([]skill.Projection{{
+	planesOf(svc).LoadCapabilityDefinitions(dir)
+	planesOf(svc).Skills.Projections().Set([]skill.Projection{{
 		Runtime: "rtx",
 		Projection: runtime.Projection{Kind: runtime.ProjectionSkill, Scope: runtime.ScopeGlobal,
 			Root: t.TempDir(), Layout: runtime.LayoutIDToken + "/SKILL.md",
@@ -49,8 +49,8 @@ func libCtx() svclibrary.Query { return svclibrary.Query{} }
 // 规矩在测试里的样子：签名由编译期钉住，装配点漂了这里先红。
 func listLibrary(tb testing.TB, svc *Service) svclibrary.LibrarySvc {
 	tb.Helper()
-	return svclibrary.NewLibrary(svc.Planes().Capabilities, svc.Planes().Skills, svc.planes.Registry,
-		svc.Planes().McpSecrets, svc.Planes().McpGatewayEnabled)
+	return svclibrary.NewLibrary(planesOf(svc).Capabilities, planesOf(svc).Skills, planesOf(svc).Registry,
+		planesOf(svc).McpSecrets, planesOf(svc).McpGatewayEnabled)
 }
 
 // TestLibraryKindsAndOrigin 三类齐全 + origin 判据只看"有没有事实源文件"。
@@ -58,14 +58,14 @@ func TestLibraryKindsAndOrigin(t *testing.T) {
 	svc := libraryRig(t)
 	ctx := context.Background()
 
-	if _, err := svc.Planes().Skills.WriteSkill(ctx, "", writeReq(t, `{"id":"demo","name":"演示 skill","body":"# d"}`), true); err != nil {
+	if _, err := planesOf(svc).Skills.WriteSkill(ctx, "", writeReq(t, `{"id":"demo","name":"演示 skill","body":"# d"}`), true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Planes().Mcp.WriteServer(ctx, "", writeMcpReq(t,
+	if _, err := planesOf(svc).Mcp.WriteServer(ctx, "", writeMcpReq(t,
 		`{"id":"fs","name":"文件","transport":"stdio","command":"/usr/local/bin/npx"}`), true); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Planes().RegisterTool(capability.Tool{Name: "builtin_echo", Source: capability.ToolSourceBuiltin}); err != nil {
+	if err := planesOf(svc).RegisterTool(capability.Tool{Name: "builtin_echo", Source: capability.ToolSourceBuiltin}); err != nil {
 		t.Fatal(err)
 	}
 	items, err := listLibrary(t, svc).ListLibrary(libCtx())
@@ -112,7 +112,7 @@ func TestLibraryKindFilterAndQuery(t *testing.T) {
 	svc := libraryRig(t)
 	// id 必须符合底座词法（大写/下划线会被 dsh 静默丢弃，2026-10-08 实测），所以"大小写不敏感"
 	// 这一层改用**查询串**来测：id 全小写、查询给大写形态（`PDF-READER` 只可能命中 id 那条路）。
-	if _, err := svc.Planes().Skills.WriteSkill(context.Background(), "", writeReq(t, `{"id":"pdf-reader","name":"读 PDF","description":"解析文档"}`), true); err != nil {
+	if _, err := planesOf(svc).Skills.WriteSkill(context.Background(), "", writeReq(t, `{"id":"pdf-reader","name":"读 PDF","description":"解析文档"}`), true); err != nil {
 		t.Fatal(err)
 	}
 	items, err := listLibrary(t, svc).ListLibrary(svclibrary.Query{Kind: dtolibrary.KindSkill})
@@ -154,7 +154,7 @@ func TestLibraryKindFilterAndQuery(t *testing.T) {
 func TestLibrarySkillApplicability(t *testing.T) {
 	svc := libraryRig(t)
 	ctx := context.Background()
-	if _, err := svc.Planes().Skills.WriteSkill(ctx, "", writeReq(t, `{"id":"demo","body":"# d"}`), true); err != nil {
+	if _, err := planesOf(svc).Skills.WriteSkill(ctx, "", writeReq(t, `{"id":"demo","body":"# d"}`), true); err != nil {
 		t.Fatal(err)
 	}
 	statusFor := func(id, rt string) dtolibrary.Applicability {
@@ -185,7 +185,7 @@ func TestLibrarySkillApplicability(t *testing.T) {
 	// 所以这里断言的是"没有它的条目"而不是硬编一个状态——见下一条说明）。
 	// 落点说明：投影列表来自 adapter 声明 + 配置解析，未解析的 runtime 不会出现在列表里；
 	// not_configured 由**声明了但解析失败**的投影产生（p.Err != ""）。
-	svc.planes.Skills.Projections().Set([]skill.Projection{
+	planesOf(svc).Skills.Projections().Set([]skill.Projection{
 		{Runtime: "rtx", Projection: runtime.Projection{Kind: runtime.ProjectionSkill,
 			Root: t.TempDir(), Layout: runtime.LayoutIDToken + "/SKILL.md",
 			Format: capability.FormatSkillMD, Tested: true}},
@@ -199,10 +199,10 @@ func TestLibrarySkillApplicability(t *testing.T) {
 	}
 
 	// 白名单不含某 runtime → not_applicable（并说清怎么改）。
-	if _, err := svc.Planes().Skills.WriteSkill(ctx, "demo", writeReq(t, `{"runtimes":["rtx"]}`), false); err != nil {
+	if _, err := planesOf(svc).Skills.WriteSkill(ctx, "demo", writeReq(t, `{"runtimes":["rtx"]}`), false); err != nil {
 		t.Fatal(err)
 	}
-	if sk, ok := svc.planes.Capabilities.SkillByID("demo"); !ok || len(sk.Runtimes) != 1 {
+	if sk, ok := planesOf(svc).Capabilities.SkillByID("demo"); !ok || len(sk.Runtimes) != 1 {
 		t.Fatalf("skills 应已更新: %+v ok=%v", sk, ok)
 	}
 	if a := statusFor("demo", "dsh"); a.Status != dtolibrary.StatusNotApplicable {
@@ -210,7 +210,7 @@ func TestLibrarySkillApplicability(t *testing.T) {
 	}
 
 	// 禁用 → disabled（优先级最高：用户的显式决定最先说）。
-	if _, err := svc.Planes().Skills.WriteSkill(ctx, "demo", writeReq(t, `{"enabled":false}`), false); err != nil {
+	if _, err := planesOf(svc).Skills.WriteSkill(ctx, "demo", writeReq(t, `{"enabled":false}`), false); err != nil {
 		t.Fatal(err)
 	}
 	if a := statusFor("demo", "rtx"); a.Status != dtolibrary.StatusDisabled {
@@ -223,11 +223,11 @@ func TestLibrarySkillApplicability(t *testing.T) {
 func TestLibraryMcpAndToolApplicability(t *testing.T) {
 	svc := libraryRig(t)
 	ctx := context.Background()
-	if _, err := svc.Planes().Mcp.WriteServer(ctx, "", writeMcpReq(t,
+	if _, err := planesOf(svc).Mcp.WriteServer(ctx, "", writeMcpReq(t,
 		`{"id":"fs","transport":"stdio","command":"/usr/local/bin/npx"}`), true); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Planes().RegisterTool(capability.Tool{Name: "fs_read", Source: capability.ToolSourceMCP, McpServer: "fs"}); err != nil {
+	if err := planesOf(svc).RegisterTool(capability.Tool{Name: "fs_read", Source: capability.ToolSourceMCP, McpServer: "fs"}); err != nil {
 		t.Fatal(err)
 	}
 	items, err := listLibrary(t, svc).ListLibrary(libCtx())
@@ -253,7 +253,7 @@ func TestLibraryMcpAndToolApplicability(t *testing.T) {
 	}
 
 	// 归属 server 被删（工具条目被一并摘除）——再造一个"悬空工具"看警告分支。
-	if err := svc.Planes().RegisterTool(capability.Tool{Name: "ghost", Source: capability.ToolSourceMCP, McpServer: "gone"}); err != nil {
+	if err := planesOf(svc).RegisterTool(capability.Tool{Name: "ghost", Source: capability.ToolSourceMCP, McpServer: "gone"}); err != nil {
 		t.Fatal(err)
 	}
 	items, err = listLibrary(t, svc).ListLibrary(svclibrary.Query{Kind: dtolibrary.KindTool, Q: "ghost"})
@@ -283,7 +283,7 @@ func TestLibraryScale(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 300; i++ {
 		id := fmt.Sprintf("skill-%03d", i)
-		if _, err := svc.Planes().Skills.WriteSkill(ctx, "", writeReq(t, fmt.Sprintf(`{"id":%q,"name":"技能 %d","description":"批量"}`, id, i)), true); err != nil {
+		if _, err := planesOf(svc).Skills.WriteSkill(ctx, "", writeReq(t, fmt.Sprintf(`{"id":%q,"name":"技能 %d","description":"批量"}`, id, i)), true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -308,10 +308,10 @@ func BenchmarkLibraryList(b *testing.B) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "rtx", McpTransports: []string{"stdio"},
 		Projections: []runtime.Projection{rtxSkillProjectionForTest()}})
 	svc := newServiceForTest(reg, eventbus.New())
-	svc.Planes().LoadCapabilityDefinitions(dir)
+	planesOf(svc).LoadCapabilityDefinitions(dir)
 	for i := 0; i < 300; i++ {
 		sk := capability.Skill{ID: fmt.Sprintf("skill-%03d", i), Name: "技能", Description: "批量"}
-		if err := svc.planes.Capabilities.RegisterSkill(&sk); err != nil {
+		if err := planesOf(svc).Capabilities.RegisterSkill(&sk); err != nil {
 			b.Fatal(err)
 		}
 	}

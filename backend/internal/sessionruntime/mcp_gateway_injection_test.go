@@ -116,7 +116,7 @@ func TestGatewayEntryCarriesPinnedSelectionOnly(t *testing.T) {
 		{ID: "fs", Name: "fs", Transport: capability.TransportStdio, Command: "/bin/echo"},
 	} {
 		m := m
-		if err := svc.planes.Capabilities.RegisterMcpServer(&m); err != nil {
+		if err := planesOf(svc).Capabilities.RegisterMcpServer(&m); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -169,7 +169,7 @@ func TestGatewayFoldingKeepsSecretValuesOutOfFingerprint(t *testing.T) {
 	sel := session.NewCapabilitySelection()
 
 	// 远程密钥引用：值不进指纹（连引用都不进——远程定义完全不在指纹里）。
-	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{ID: "web", Name: "web",
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{ID: "web", Name: "web",
 		Transport: capability.TransportHTTP, URL: "https://x.invalid/mcp",
 		SecretHeaders: map[string]string{"Authorization": "store:web/sekret-value"}}); err != nil {
 		t.Fatal(err)
@@ -179,7 +179,7 @@ func TestGatewayFoldingKeepsSecretValuesOutOfFingerprint(t *testing.T) {
 		t.Fatalf("指纹不得含密钥值/引用：%s", fp)
 	}
 	// stdio 的密钥引用：引用名入指纹（换引用 = 换能力面），值仍然不入。
-	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{ID: "fs", Name: "fs",
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{ID: "fs", Name: "fs",
 		Transport: capability.TransportStdio, Command: "/bin/echo",
 		SecretEnv: map[string]string{"TOKEN": "store:fs/tok"}}); err != nil {
 		t.Fatal(err)
@@ -234,7 +234,7 @@ func TestGatewayEntryNotInjectedIntoRemoteAcpRuntime(t *testing.T) {
 		webServer("web", "https://x.invalid/mcp"),
 	} {
 		m := m
-		if err := svc.planes.Capabilities.RegisterMcpServer(&m); err != nil {
+		if err := planesOf(svc).Capabilities.RegisterMcpServer(&m); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -280,7 +280,7 @@ func TestGatewayEntryCarriesCredentialCwd(t *testing.T) {
 	svc, _ := newSearchRig(t)
 
 	// ① 登记过（= 用户在某个目录下启动了 mate serve）→ 条目把这个值交下去。
-	svc.planes.Credentials.SetCwd("/tmp/serve-cwd")
+	planesOf(svc).Credentials.SetCwd("/tmp/serve-cwd")
 	entry, err := svc.gatewayEntry("stub", nil)
 	if err != nil {
 		t.Fatalf("合成网关条目: %v", err)
@@ -293,7 +293,7 @@ func TestGatewayEntryCarriesCredentialCwd(t *testing.T) {
 	// ② 没登记（`mate demo`、测试这类不经装配的入口）→ **不带**这个键：网关侧据此 WARN 并回落，
 	//    而不是收到一个被 `os.Getwd()` 冒充成"核心的答案"的值。
 	for _, v := range []string{"", "   "} {
-		svc.planes.Credentials.SetCwd(v)
+		planesOf(svc).Credentials.SetCwd(v)
 		entry, err := svc.gatewayEntry("stub", nil)
 		if err != nil {
 			t.Fatalf("合成网关条目: %v", err)
@@ -312,7 +312,7 @@ func TestGatewayCredentialCwdDoesNotChangeFingerprint(t *testing.T) {
 	r := newGenRig(t)
 	log := sessionNewLog(t)
 
-	r.svc.planes.Credentials.SetCwd("/tmp/cwd-a")
+	planesOf(r.svc).Credentials.SetCwd("/tmp/cwd-a")
 	convID, as1 := r.start(t, session.NewCapabilitySelection())
 	if as1.Fingerprint == "" {
 		t.Fatal("这条用例需要真实指纹（否则证明不了「值不入指纹」）")
@@ -333,7 +333,7 @@ func TestGatewayCredentialCwdDoesNotChangeFingerprint(t *testing.T) {
 	}
 
 	// 换一个 cwd 值 → 同一代际（值不进指纹）。
-	r.svc.planes.Credentials.SetCwd("/tmp/cwd-b-other")
+	planesOf(r.svc).Credentials.SetCwd("/tmp/cwd-b-other")
 	if got := r.boundary(t, convID); got != as1 {
 		t.Fatalf("凭据 cwd 的**取值**不得换代际（它是值；换了目录启动不该重启底座进程）")
 	}

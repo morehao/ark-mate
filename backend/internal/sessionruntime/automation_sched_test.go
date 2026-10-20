@@ -85,7 +85,7 @@ func newSchedRig(t *testing.T) *schedRig {
 	t.Cleanup(orch.Close)
 	dir := t.TempDir()
 	cwd := t.TempDir()
-	if n := svc.Planes().Automation.LoadAutomationDefinitions(dir); n != 0 {
+	if n := planesOf(svc).Automation.LoadAutomationDefinitions(dir); n != 0 {
 		t.Fatalf("空目录应装载 0 条，got %d", n)
 	}
 	return &schedRig{svc: svc, bus: bus, dir: dir, cwd: cwd}
@@ -104,7 +104,7 @@ func (r *schedRig) writeDaily(t *testing.T, id, lastFired string) {
 	}
 	raw, _ := json.Marshal(body)
 	writeAutomationFile(t, filepath.Join(r.dir, id+".json"), string(raw))
-	if n := r.svc.Planes().Automation.LoadAutomationDefinitions(r.dir); n != 1 {
+	if n := planesOf(r.svc).Automation.LoadAutomationDefinitions(r.dir); n != 1 {
 		t.Fatalf("期望装载 1 条，got %d", n)
 	}
 }
@@ -135,7 +135,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	r := newSchedRig(t)
 	// 上一次触发是 2020 年 → 现在是"停机错过的补跑"（recover）
 	r.writeDaily(t, "daily", "2020-01-01T01:00:00Z")
-	rec, _ := r.svc.Planes().Automation.RecByID("daily")
+	rec, _ := planesOf(r.svc).Automation.RecByID("daily")
 	if rec.Startup != automation.StartupRecover {
 		t.Fatalf("期望 recover，got %s", rec.Startup)
 	}
@@ -143,7 +143,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	defer r.bus.Unsubscribe(sub)
 
 	now := time.Now()
-	r.svc.Planes().Automation.Tick(context.Background(), now)
+	planesOf(r.svc).Automation.Tick(context.Background(), now)
 
 	convs := r.sessionsOf(t, "daily")
 	if len(convs) != 1 {
@@ -200,7 +200,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 		t.Fatalf("留痕不符: %+v", first)
 	}
 	// next_due 推到下一个 occurrence（次日的 09:00 上海 = 次日 01:00Z）
-	view, _ := r.svc.Planes().Automation.AutomationByID("daily")
+	view, _ := planesOf(r.svc).Automation.AutomationByID("daily")
 	next, err := time.Parse(time.RFC3339, view.NextDueAt)
 	if err != nil {
 		t.Fatalf("next_due 解析: %v", err)
@@ -209,7 +209,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 		t.Fatalf("next_due 应恰好推进一天，got %s（%s → %s）", d, fired, next)
 	}
 	// 第二次 tick：同一 occurrence 不再触发（**一次触发一个会话**）
-	r.svc.Planes().Automation.Tick(context.Background(), now)
+	planesOf(r.svc).Automation.Tick(context.Background(), now)
 	if n := len(r.sessionsOf(t, "daily")); n != 1 {
 		t.Fatalf("第二次 tick 不该再建会话，got %d", n)
 	}
@@ -258,10 +258,10 @@ func TestAutomationTickOverlapSkips(t *testing.T) {
 	// （noRecord，automation_sched.go:184-193）——文件里的 last_status 会停在第一次的 claimed，
 	// 这条用例就假红。钉死游标同时让用例不再依赖"跑测试时真实日期是哪天"。
 	now := time.Date(2026, 10, 9, 2, 30, 0, 0, time.UTC)
-	r.svc.planes.Automation.Mutate("daily", func(rec *automationcore.Rec) {
+	planesOf(r.svc).Automation.Mutate("daily", func(rec *automationcore.Rec) {
 		rec.NextDue = time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
 	})
-	r.svc.Planes().Automation.Tick(context.Background(), now)
+	planesOf(r.svc).Automation.Tick(context.Background(), now)
 	if n := len(r.sessionsOf(t, "daily")); n != 1 {
 		t.Fatalf("首次触发应建 1 个会话，got %d", n)
 	}
@@ -270,9 +270,9 @@ func TestAutomationTickOverlapSkips(t *testing.T) {
 	// 该值**必须严格晚于 last_fired_at**（上一次认领 = 01:00Z）：这是真实调度必然满足的不变式
 	// ——NextDue 只在 latest > lastFiredAt 时才给到期点（schedule.go:91-93）。
 	past := now.Add(-time.Hour)
-	r.svc.planes.Automation.Mutate("daily", func(rec *automationcore.Rec) { rec.NextDue = past })
+	planesOf(r.svc).Automation.Mutate("daily", func(rec *automationcore.Rec) { rec.NextDue = past })
 
-	r.svc.Planes().Automation.Tick(context.Background(), now)
+	planesOf(r.svc).Automation.Tick(context.Background(), now)
 
 	if n := len(r.sessionsOf(t, "daily")); n != 1 {
 		t.Fatalf("overlap 不该建第二个会话（不排队），got %d", n)
@@ -307,7 +307,7 @@ func TestAutomationTickFailureAdvancesAndNeedsAttention(t *testing.T) {
 	// agent 面撤销后，同一类"环境里的目标不见了"只能来自底座未装配。
 	setBuildRuntime(t, "ghost")
 
-	r.svc.Planes().Automation.Tick(context.Background(), time.Now())
+	planesOf(r.svc).Automation.Tick(context.Background(), time.Now())
 
 	if n := len(r.sessionsOf(t, "daily")); n != 0 {
 		t.Fatalf("触发失败不该建会话，got %d", n)
@@ -329,7 +329,7 @@ func TestAutomationTickFailureAdvancesAndNeedsAttention(t *testing.T) {
 		t.Fatalf("连续失败应记 1，got %v", after["consecutive_failures"])
 	}
 	// 同一个 now 再 tick：没有新到期点（游标已推进到明天），不重试
-	r.svc.Planes().Automation.Tick(context.Background(), time.Now())
+	planesOf(r.svc).Automation.Tick(context.Background(), time.Now())
 	again := r.file(t, "daily")
 	if n := len(mustRuns(t, again)); n != 1 {
 		t.Fatalf("失败后不该在同一 occurrence 上重试，留痕 got %d", n)
@@ -349,10 +349,10 @@ func TestAutomationStartupPassExpireOnceOnce(t *testing.T) {
 	}
 	raw, _ := json.Marshal(body)
 	writeAutomationFile(t, filepath.Join(r.dir, "mig.json"), string(raw))
-	if n := r.svc.Planes().Automation.LoadAutomationDefinitions(r.dir); n != 1 {
+	if n := planesOf(r.svc).Automation.LoadAutomationDefinitions(r.dir); n != 1 {
 		t.Fatalf("装载应为 1，got %d", n)
 	}
-	r.svc.Planes().Automation.StartupPass(context.Background())
+	planesOf(r.svc).Automation.StartupPass(context.Background())
 	got := r.file(t, "mig")
 	if got["state"] != automation.StateInactive {
 		t.Fatalf("过期的 once 应置 inactive，got %v", got["state"])
@@ -365,20 +365,20 @@ func TestAutomationStartupPassExpireOnceOnce(t *testing.T) {
 		t.Fatalf("理由应说明 once 不补跑：%v", got["last_reason"])
 	}
 	// 不补跑：tick 也不该建会话
-	r.svc.Planes().Automation.Tick(context.Background(), time.Now())
+	planesOf(r.svc).Automation.Tick(context.Background(), time.Now())
 	if n := len(r.sessionsOf(t, "mig")); n != 0 {
 		t.Fatalf("过期的 once 不该被 tick 补跑，got %d 个会话", n)
 	}
 	// 幂等：状态已是 inactive → 再跑启动 pass 不追加留痕（否则每次重启都留一条）
-	r.svc.Planes().Automation.StartupPass(context.Background())
-	r.svc.Planes().Automation.StartupPass(context.Background())
+	planesOf(r.svc).Automation.StartupPass(context.Background())
+	planesOf(r.svc).Automation.StartupPass(context.Background())
 	if n := len(mustRuns(t, r.file(t, "mig"))); n != 1 {
 		t.Fatalf("启动 pass 应幂等，留痕 got %d", n)
 	}
 	// 反过来：用户手工把状态改回 active（"我想再试一次"）→ 平台会**再告诉他一次**
 	// "那一刻已经过去"，而不是默默不动（once 的语义是闹钟，过了就是过了）。
-	r.svc.Planes().Automation.WriteAutomation(context.Background(), "mig", map[string]any{"state": automation.StateActive}, false)
-	r.svc.Planes().Automation.StartupPass(context.Background())
+	planesOf(r.svc).Automation.WriteAutomation(context.Background(), "mig", map[string]any{"state": automation.StateActive}, false)
+	planesOf(r.svc).Automation.StartupPass(context.Background())
 	if got := r.file(t, "mig"); got["state"] != automation.StateInactive || len(mustRuns(t, got)) != 2 {
 		t.Fatalf("改回 active 后应再次收敛到 inactive 并留痕: %v", got)
 	}
@@ -388,9 +388,9 @@ func TestAutomationStartupPassExpireOnceOnce(t *testing.T) {
 func TestRunAutomationNowManualDoesNotConsumeSchedule(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "") // 从未跑过 → next_due 在未来（或今天 09:00）
-	before, _ := r.svc.Planes().Automation.AutomationByID("daily")
+	before, _ := planesOf(r.svc).Automation.AutomationByID("daily")
 
-	out, err := r.svc.Planes().Automation.RunNow(context.Background(), "daily")
+	out, err := planesOf(r.svc).Automation.RunNow(context.Background(), "daily")
 	if err != nil {
 		t.Fatalf("手动触发: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestRunAutomationNowManualDoesNotConsumeSchedule(t *testing.T) {
 	if got["last_fired_at"] != nil {
 		t.Fatalf("手动触发**不得**推进认领游标（否则会静默跳过当晚的排期），got %v", got["last_fired_at"])
 	}
-	after, _ := r.svc.Planes().Automation.AutomationByID("daily")
+	after, _ := planesOf(r.svc).Automation.AutomationByID("daily")
 	if after.NextDueAt != before.NextDueAt {
 		t.Fatalf("手动触发不得改变 next_due：%q → %q", before.NextDueAt, after.NextDueAt)
 	}
@@ -410,7 +410,7 @@ func TestRunAutomationNowManualDoesNotConsumeSchedule(t *testing.T) {
 		t.Fatalf("应有 1 条 manual 留痕: %+v", runs)
 	}
 	// 会话还在跑 → 再来一次手动触发必须 overlap（手动不等于可以并发）
-	out2, err := r.svc.Planes().Automation.RunNow(context.Background(), "daily")
+	out2, err := planesOf(r.svc).Automation.RunNow(context.Background(), "daily")
 	if err != nil {
 		t.Fatalf("第二次手动触发: %v", err)
 	}
@@ -418,13 +418,13 @@ func TestRunAutomationNowManualDoesNotConsumeSchedule(t *testing.T) {
 		t.Fatalf("上一次会话还在跑时手动触发应 overlap，got %s", out2.Status)
 	}
 	// 未注册 → 40401；被停用 → 40001
-	if _, err := r.svc.Planes().Automation.RunNow(context.Background(), "nope"); errCode(err) != "automation_not_found" {
+	if _, err := planesOf(r.svc).Automation.RunNow(context.Background(), "nope"); errCode(err) != "automation_not_found" {
 		t.Fatalf("未知 id 应 automation_not_found，got %v", err)
 	}
-	if _, err := r.svc.Planes().Automation.WriteAutomation(context.Background(), "daily", map[string]any{"enabled": false}, false); err != nil {
+	if _, err := planesOf(r.svc).Automation.WriteAutomation(context.Background(), "daily", map[string]any{"enabled": false}, false); err != nil {
 		t.Fatalf("停用: %v", err)
 	}
-	if _, err := r.svc.Planes().Automation.RunNow(context.Background(), "daily"); errCode(err) != "automation_disabled" {
+	if _, err := planesOf(r.svc).Automation.RunNow(context.Background(), "daily"); errCode(err) != "automation_disabled" {
 		t.Fatalf("停用后手动触发应 automation_disabled，got %v", err)
 	}
 }
@@ -433,7 +433,7 @@ func TestRunAutomationNowManualDoesNotConsumeSchedule(t *testing.T) {
 func TestAutomationSchedulerStartStop(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "2020-01-01T01:00:00Z")
-	r.svc.Planes().Automation.StartAutomationScheduler(20 * time.Millisecond)
+	planesOf(r.svc).Automation.StartAutomationScheduler(20 * time.Millisecond)
 	// 等第一跳（宽限 2s 防慢机器）
 	deadline := time.Now().Add(2 * time.Second)
 	for len(r.sessionsOf(t, "daily")) == 0 && time.Now().Before(deadline) {
@@ -442,7 +442,7 @@ func TestAutomationSchedulerStartStop(t *testing.T) {
 	if n := len(r.sessionsOf(t, "daily")); n != 1 {
 		t.Fatalf("调度循环应触发一次，got %d", n)
 	}
-	r.svc.Planes().Automation.StopAutomationScheduler()
+	planesOf(r.svc).Automation.StopAutomationScheduler()
 	// 停止只保证"不再有新触发起步"：已在途的那一次会照常收尾，故基线取在收尾之后。
 	time.Sleep(100 * time.Millisecond)
 	n := len(r.sessionsOf(t, "daily"))
@@ -455,11 +455,11 @@ func TestAutomationSchedulerStartStop(t *testing.T) {
 		t.Fatalf("停止后不该再留痕：%d → %d", runs, got)
 	}
 	// 幂等
-	r.svc.Planes().Automation.StopAutomationScheduler()
+	planesOf(r.svc).Automation.StopAutomationScheduler()
 	// interval=0 = 关闭（不启 goroutine）
 	r2 := newSchedRig(t)
-	r2.svc.Planes().Automation.StartAutomationScheduler(0)
-	if !r2.svc.planes.Automation.SchedulerStopped() {
+	planesOf(r2.svc).Automation.StartAutomationScheduler(0)
+	if !planesOf(r2.svc).Automation.SchedulerStopped() {
 		t.Fatal("interval=0 不该启动调度 goroutine")
 	}
 }
@@ -476,9 +476,9 @@ func TestAutomationConcurrentTriggersOnlyRunOnce(t *testing.T) {
 	var wg sync.WaitGroup
 	// 三路并发：两个 tick + 一个手动，抢同一个"停机错过的 occurrence"。
 	wg.Add(3)
-	go func() { defer wg.Done(); r.svc.Planes().Automation.Tick(context.Background(), now) }()
-	go func() { defer wg.Done(); r.svc.Planes().Automation.Tick(context.Background(), now) }()
-	go func() { defer wg.Done(); _, _ = r.svc.Planes().Automation.RunNow(context.Background(), "daily") }()
+	go func() { defer wg.Done(); planesOf(r.svc).Automation.Tick(context.Background(), now) }()
+	go func() { defer wg.Done(); planesOf(r.svc).Automation.Tick(context.Background(), now) }()
+	go func() { defer wg.Done(); _, _ = planesOf(r.svc).Automation.RunNow(context.Background(), "daily") }()
 	wg.Wait()
 
 	if n := len(r.sessionsOf(t, "daily")); n != 1 {
@@ -505,12 +505,12 @@ func TestAutomationReservedKeysRejected(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "")
 	for _, k := range []string{"last_fired_at", "last_session_id", "last_status", "last_reason", "consecutive_failures", "recent_runs"} {
-		if _, err := r.svc.Planes().Automation.WriteAutomation(context.Background(), "daily", map[string]any{k: "x"}, false); errCode(err) != "invalid_param" {
+		if _, err := planesOf(r.svc).Automation.WriteAutomation(context.Background(), "daily", map[string]any{k: "x"}, false); errCode(err) != "invalid_param" {
 			t.Fatalf("写 %s 应被拒（40000），got %v", k, err)
 		}
 	}
 	// 用户可写的（含 state）必须照旧可写
-	if _, err := r.svc.Planes().Automation.WriteAutomation(context.Background(), "daily", map[string]any{"state": automation.StateArchived}, false); err != nil {
+	if _, err := planesOf(r.svc).Automation.WriteAutomation(context.Background(), "daily", map[string]any{"state": automation.StateArchived}, false); err != nil {
 		t.Fatalf("state 应可写: %v", err)
 	}
 	if got := r.file(t, "daily"); got["state"] != automation.StateArchived {
@@ -531,7 +531,7 @@ func TestAutomationRejectsRuntimeHint(t *testing.T) {
 	r.writeDaily(t, "daily", "")
 
 	// ① 请求体里带它 → 显式拒绝。
-	_, err := r.svc.Planes().Automation.WriteAutomation(context.Background(), "daily", map[string]any{
+	_, err := planesOf(r.svc).Automation.WriteAutomation(context.Background(), "daily", map[string]any{
 		"target": map[string]any{"cwd": r.cwd, "prompt": "x", "runtime_hint": "silent"},
 	}, false)
 	if err == nil {
@@ -549,10 +549,10 @@ func TestAutomationRejectsRuntimeHint(t *testing.T) {
 	got["target"].(map[string]any)["runtime_hint"] = "silent"
 	raw, _ := json.Marshal(got)
 	writeAutomationFile(t, filepath.Join(r.dir, "daily.json"), string(raw))
-	if n := r.svc.Planes().Automation.LoadAutomationDefinitions(r.dir); n != 1 {
+	if n := planesOf(r.svc).Automation.LoadAutomationDefinitions(r.dir); n != 1 {
 		t.Fatalf("带残留 runtime_hint 的老定义应照常装载，got %d", n)
 	}
-	if _, err := r.svc.Planes().Automation.WriteAutomation(context.Background(), "daily", map[string]any{"name": "改名"}, false); err != nil {
+	if _, err := planesOf(r.svc).Automation.WriteAutomation(context.Background(), "daily", map[string]any{"name": "改名"}, false); err != nil {
 		t.Fatalf("只改别的键不该被残留键拦住: %v", err)
 	}
 	if _, has := r.file(t, "daily")["target"].(map[string]any)["runtime_hint"]; has {
@@ -564,23 +564,23 @@ func TestAutomationRejectsRuntimeHint(t *testing.T) {
 func TestAutomationReloadAfterRestart(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "2020-01-01T01:00:00Z")
-	r.svc.Planes().Automation.Tick(context.Background(), time.Now())
+	planesOf(r.svc).Automation.Tick(context.Background(), time.Now())
 	after := r.file(t, "daily")
 
 	// 新进程：新 Service + 同目录
 	r2 := newSchedRig(t)
 	raw, _ := json.Marshal(after)
 	writeAutomationFile(t, filepath.Join(r2.dir, "daily.json"), string(raw))
-	if n := r2.svc.Planes().Automation.LoadAutomationDefinitions(r2.dir); n != 1 {
+	if n := planesOf(r2.svc).Automation.LoadAutomationDefinitions(r2.dir); n != 1 {
 		t.Fatalf("装载应为 1，got %d", n)
 	}
-	view, _ := r2.svc.Planes().Automation.AutomationByID("daily")
-	first, _ := r.svc.Planes().Automation.AutomationByID("daily")
+	view, _ := planesOf(r2.svc).Automation.AutomationByID("daily")
+	first, _ := planesOf(r.svc).Automation.AutomationByID("daily")
 	if view.NextDueAt != first.NextDueAt {
 		t.Fatalf("重启后 next_due 应与停机前一致：%q vs %q", view.NextDueAt, first.NextDueAt)
 	}
 	// 重启后不重复触发同一 occurrence
-	r2.svc.Planes().Automation.Tick(context.Background(), time.Now())
+	planesOf(r2.svc).Automation.Tick(context.Background(), time.Now())
 	if n := len(r2.sessionsOf(t, "daily")); n != 0 {
 		t.Fatalf("重启后不该重跑已认领的 occurrence，got %d", n)
 	}
@@ -590,10 +590,10 @@ func TestAutomationReloadAfterRestart(t *testing.T) {
 func TestAutomationMaxRunDurationWatchdog(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "")
-	if _, err := r.svc.Planes().Automation.WriteAutomation(context.Background(), "daily", map[string]any{"max_run_duration": "80ms"}, false); err != nil {
+	if _, err := planesOf(r.svc).Automation.WriteAutomation(context.Background(), "daily", map[string]any{"max_run_duration": "80ms"}, false); err != nil {
 		t.Fatalf("设置 max_run_duration: %v", err)
 	}
-	out, err := r.svc.Planes().Automation.RunNow(context.Background(), "daily")
+	out, err := planesOf(r.svc).Automation.RunNow(context.Background(), "daily")
 	if err != nil {
 		t.Fatalf("手动触发: %v", err)
 	}

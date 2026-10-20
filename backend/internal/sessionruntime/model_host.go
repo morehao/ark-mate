@@ -3,7 +3,6 @@ package sessionruntime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 )
 
@@ -87,18 +86,24 @@ func (f ModelFace) TrySyncModels(ctx context.Context) string {
 // 这里显式遮蔽（shadow）嵌入值提升上来的同名方法，把投影钉在一个地方——否则
 // `ModelFace` 会因为嵌入值返回领域类型而不再满足 `svcmodel.ModelSvc`。
 func (f ModelFace) ModelCatalog(ctx context.Context) (*dtomodel.ModelCatalogResp, error) {
-	v, err := f.Planes().Providers.ModelCatalog(ctx)
+	if f.facts.Providers == nil {
+		return nil, errPlaneFactsMissing
+	}
+	v, err := f.facts.Providers.ModelCatalog(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return registry.CatalogResp(v), nil
+	return dtomodel.CatalogRespOf(v), nil
 }
 
 // ModelRow 单条模型行（`found=false` = 不存在，不是错误）。
 func (f ModelFace) ModelRow(ctx context.Context, id string) (*dtomodel.ModelResp, bool, error) {
-	v, found, err := f.Planes().Providers.ModelRow(ctx, id)
+	if f.facts.Providers == nil {
+		return nil, false, errPlaneFactsMissing
+	}
+	v, found, err := f.facts.Providers.ModelRow(ctx, id)
 	if err != nil || !found {
 		return nil, found, err
 	}
-	return registry.ModelResp(v), true, nil
+	return dtomodel.ModelRespOf(v), true, nil
 }

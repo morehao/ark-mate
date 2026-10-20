@@ -277,7 +277,7 @@ func (as *assembly) startStoreWiring(ctx context.Context) error {
 	if as.st == nil {
 		return nil
 	}
-	as.svc.EnableStore(as.sessionRuntimeStore(), as.planeStore())
+	as.svc.EnableStore(as.sessionRuntimeStore(), as.resourceStore(), as.planeStore())
 	// v15 破坏性重建的**启动 WARN**（§8.5 R2，强制项）：升级既有库时静默清空会话历史是最坏的
 	// 一种失败——用户只会觉得"我的会话没了"。所以这里必须说出来，并带上回退路径。
 	if note := as.st.DestructiveRebuildNote(); note != "" {

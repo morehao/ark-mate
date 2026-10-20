@@ -110,10 +110,11 @@ func TestCredentialFaceHasNoTransitionalForwards(t *testing.T) {
 	}
 	// 事实出口必须在（少了它，装配点只能再造一份转发）。
 	svcSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "service.go")))
-	// P4b：`CredentialStore()` 也删了——事实出口收敛成 `Planes()`（一份实例，一条路径）。
-	if !strings.Contains(svcSrc, "func (s *Service) Planes() *registry.Planes") {
-		t.Error("`internal/sessionruntime/service.go` 里找不到 `Planes()` 事实出口：装配期没有它就只能" +
-			"再写一层转发，而那正是本刀删掉的东西。")
+	// P4b：`CredentialStore()` 删了；阶段 0.2 起连 `Planes()` 也删了——事实出口收敛成
+	// `facts PlaneFacts`（按面端口，一份实例折出来）。
+	if !strings.Contains(svcSrc, "facts PlaneFacts") || !strings.Contains(svcSrc, "func WithPlaneFacts(") {
+		t.Error("`internal/sessionruntime/service.go` 里找不到 `facts PlaneFacts` / `WithPlaneFacts`：装配期没有它" +
+			"就只能再写一层转发，而那正是本刀删掉的东西。")
 	}
 	// P5a 起凭据面由 `registry.Planes.Credentials` 拥有，装配动作在 app/assembly.go。
 	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "assembly.go")))

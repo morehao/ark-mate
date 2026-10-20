@@ -58,7 +58,7 @@ func acpCode(t *testing.T, err error) string {
 // mustWorkspacePolicy 装配工作空间策略（测试里不自洽即视为装配错误，直接 Fatal）。
 func mustWorkspacePolicy(t *testing.T, svc *Service, dir string, roots []string) {
 	t.Helper()
-	if err := svc.Planes().Workspaces.SetWorkspacePolicy(dir, roots); err != nil {
+	if err := planesOf(svc).Workspaces.SetWorkspacePolicy(dir, roots); err != nil {
 		t.Fatalf("SetWorkspacePolicy(%q, %v): %v", dir, roots, err)
 	}
 }
@@ -285,7 +285,7 @@ func TestCreateSessionFailureLeavesNoPerSessionDir(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
 	enableStore(svc, st)
-	if err := svc.Planes().Workspaces.EnsureDefaultWorkspace(); err != nil {
+	if err := planesOf(svc).Workspaces.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 
@@ -380,7 +380,7 @@ func TestBrowseWorkspace(t *testing.T) {
 	}
 
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
-	resp, err := svc.Planes().Workspaces.BrowseWorkspace(root, false)
+	resp, err := planesOf(svc).Workspaces.BrowseWorkspace(root, false)
 	if err != nil {
 		t.Fatalf("BrowseWorkspace: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestBrowseWorkspace(t *testing.T) {
 		t.Fatalf("parent 不符: %q", resp.Parent)
 	}
 
-	withHidden, err := svc.Planes().Workspaces.BrowseWorkspace(root, true)
+	withHidden, err := planesOf(svc).Workspaces.BrowseWorkspace(root, true)
 	if err != nil {
 		t.Fatalf("BrowseWorkspace(hidden): %v", err)
 	}
@@ -407,14 +407,14 @@ func TestBrowseWorkspace(t *testing.T) {
 	}
 
 	// 非法 path（不存在/相对）与建会话同一套错误码。
-	if _, err := svc.Planes().Workspaces.BrowseWorkspace(filepath.Join(root, "nope"), false); acpCode(t, err) != "workspace_invalid" {
+	if _, err := planesOf(svc).Workspaces.BrowseWorkspace(filepath.Join(root, "nope"), false); acpCode(t, err) != "workspace_invalid" {
 		t.Fatalf("不存在的 path 应 workspace_invalid: %v", err)
 	}
-	if _, err := svc.Planes().Workspaces.BrowseWorkspace("relative", false); acpCode(t, err) != "workspace_invalid" {
+	if _, err := planesOf(svc).Workspaces.BrowseWorkspace("relative", false); acpCode(t, err) != "workspace_invalid" {
 		t.Fatalf("相对 path 应 workspace_invalid: %v", err)
 	}
 	// path 为空 → 从服务进程家目录起步（拿不到家目录时才允许报错）。
-	if resp, err := svc.Planes().Workspaces.BrowseWorkspace("", false); err == nil && resp.Path == "" {
+	if resp, err := planesOf(svc).Workspaces.BrowseWorkspace("", false); err == nil && resp.Path == "" {
 		t.Fatalf("空 path 应回落到家目录: %+v", resp)
 	}
 }
@@ -429,7 +429,7 @@ func TestRecentWorkspaces(t *testing.T) {
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "r-4", Cwd: "/work/tmp", WorkspaceTemporary: true, UpdatedAt: base.Add(3 * time.Hour)})
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "r-5", UpdatedAt: base.Add(4 * time.Hour)}) // 无 cwd（历史行）
 
-	list, err := svc.Planes().Workspaces.RecentWorkspaces(10)
+	list, err := planesOf(svc).Workspaces.RecentWorkspaces(10)
 	if err != nil {
 		t.Fatalf("RecentWorkspaces: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestRecentWorkspaces(t *testing.T) {
 	}
 
 	// limit 截断（默认 10，上限由 handler 侧收敛）。
-	if only, _ := svc.Planes().Workspaces.RecentWorkspaces(1); len(only) != 1 || only[0].Path != "/work/beta" {
+	if only, _ := planesOf(svc).Workspaces.RecentWorkspaces(1); len(only) != 1 || only[0].Path != "/work/beta" {
 		t.Fatalf("limit=1 应只回最近一条: %+v", only)
 	}
 }
@@ -579,18 +579,18 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 
 	// 形式错误仍必须挡住：相对路径的根不是边界。
-	if err := svc.Planes().Workspaces.SetWorkspacePolicy("", []string{"relative/root"}); err == nil {
+	if err := planesOf(svc).Workspaces.SetWorkspacePolicy("", []string{"relative/root"}); err == nil {
 		t.Fatalf("相对工作区根应被拒")
 	}
-	if svc.Planes().Workspaces.WorkspaceDir() != "" || len(svc.Planes().Workspaces.WorkspaceRoots()) != 0 {
-		t.Fatalf("失败的设置不应改动策略: dir=%q roots=%v", svc.Planes().Workspaces.WorkspaceDir(), svc.Planes().Workspaces.WorkspaceRoots())
+	if planesOf(svc).Workspaces.WorkspaceDir() != "" || len(planesOf(svc).Workspaces.WorkspaceRoots()) != 0 {
+		t.Fatalf("失败的设置不应改动策略: dir=%q roots=%v", planesOf(svc).Workspaces.WorkspaceDir(), planesOf(svc).Workspaces.WorkspaceRoots())
 	}
 
 	// 代建根刻意**不预先创建**：平台自己按需创建它，判定不能因为"目录还没建"就误判
 	// （macOS 上 /var 与 /private/var 会踩这个坑）。
 	provision := filepath.Join(outside, "tmp")
 	mustWorkspacePolicy(t, svc, provision, []string{root})
-	got := svc.Planes().Workspaces.WorkspaceRoots()
+	got := planesOf(svc).Workspaces.WorkspaceRoots()
 	if len(got) != 2 {
 		t.Fatalf("生效名单应为「配置的根 + 隐式并入的代建根」: %v", got)
 	}
@@ -617,7 +617,7 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	// 代建根已经落在某个配置根内时不再重复追加（避免 roots 里出现冗余项）。
 	nested := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, nested, filepath.Join(root, "tmp"), []string{root})
-	if got := nested.Planes().Workspaces.WorkspaceRoots(); len(got) != 1 {
+	if got := planesOf(nested).Workspaces.WorkspaceRoots(); len(got) != 1 {
 		t.Fatalf("代建根已在配置根内时不应重复追加: %v", got)
 	}
 
@@ -625,7 +625,7 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	// （那会让默认配置的用户突然选不了自己的项目目录）。
 	open := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, open, provision, nil)
-	if got := open.Planes().Workspaces.WorkspaceRoots(); len(got) != 0 {
+	if got := planesOf(open).Workspaces.WorkspaceRoots(); len(got) != 0 {
 		t.Fatalf("未配置白名单应保持「不限制」: %v", got)
 	}
 }
@@ -658,7 +658,7 @@ func TestBrowseWorkspacePreferenceOnly(t *testing.T) {
 	mustWorkspacePolicy(t, svc, filepath.Join(root, "tmp"), []string{mustEval(t, root)})
 
 	// 空 path → 从偏好起点起步（"从哪儿开始看"）。
-	resp, err := svc.Planes().Workspaces.BrowseWorkspace("", false)
+	resp, err := planesOf(svc).Workspaces.BrowseWorkspace("", false)
 	if err != nil {
 		t.Fatalf("BrowseWorkspace(\"\"): %v", err)
 	}
@@ -686,11 +686,11 @@ func TestBrowseWorkspacePreferenceOnly(t *testing.T) {
 	}
 
 	// 名录外的目录照样能浏览。
-	if _, err := svc.Planes().Workspaces.BrowseWorkspace(outsideDir, false); err != nil {
+	if _, err := planesOf(svc).Workspaces.BrowseWorkspace(outsideDir, false); err != nil {
 		t.Fatalf("名录外的目录应可浏览: %v", err)
 	}
 	// 只有"路径本身不能用"才报错。
-	if _, err := svc.Planes().Workspaces.BrowseWorkspace(filepath.Join(base, "nope"), false); acpCode(t, err) != "workspace_invalid" {
+	if _, err := planesOf(svc).Workspaces.BrowseWorkspace(filepath.Join(base, "nope"), false); acpCode(t, err) != "workspace_invalid" {
 		t.Fatalf("不存在的目录应 workspace_invalid: %v", err)
 	}
 }
@@ -707,7 +707,7 @@ func TestBrowseWorkspaceCrumbs(t *testing.T) {
 	}
 
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
-	resp, err := svc.Planes().Workspaces.BrowseWorkspace(deep, false)
+	resp, err := planesOf(svc).Workspaces.BrowseWorkspace(deep, false)
 	if err != nil {
 		t.Fatalf("BrowseWorkspace: %v", err)
 	}
@@ -746,7 +746,7 @@ func TestBrowseWorkspaceMarksHiddenAndTruncates(t *testing.T) {
 
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	// hidden=false：隐藏行不下发（但 visible 行必须带 Hidden=false 这个零值语义）。
-	plain, err := svc.Planes().Workspaces.BrowseWorkspace(root, false)
+	plain, err := planesOf(svc).Workspaces.BrowseWorkspace(root, false)
 	if err != nil {
 		t.Fatalf("BrowseWorkspace: %v", err)
 	}
@@ -757,7 +757,7 @@ func TestBrowseWorkspaceMarksHiddenAndTruncates(t *testing.T) {
 		t.Fatalf("小目录不该报截断: %+v", plain)
 	}
 	// hidden=true：隐藏行下发且带标记，供前端自己做显示开关。
-	withHidden, err := svc.Planes().Workspaces.BrowseWorkspace(root, true)
+	withHidden, err := planesOf(svc).Workspaces.BrowseWorkspace(root, true)
 	if err != nil {
 		t.Fatalf("BrowseWorkspace(hidden): %v", err)
 	}
@@ -781,7 +781,7 @@ func TestBrowseWorkspaceMarksHiddenAndTruncates(t *testing.T) {
 			t.Fatalf("mkdir: %v", err)
 		}
 	}
-	big, err := svc.Planes().Workspaces.BrowseWorkspace(many, false)
+	big, err := planesOf(svc).Workspaces.BrowseWorkspace(many, false)
 	if err != nil {
 		t.Fatalf("BrowseWorkspace(大目录): %v", err)
 	}
@@ -803,7 +803,7 @@ func TestCreateWorkspaceDir(t *testing.T) {
 	mustWorkspacePolicy(t, svc, filepath.Join(root, "tmp"), []string{mustEval(t, root)})
 
 	// 合法：建在根内子目录下，回**规范化后**的绝对路径（前端拿它直接当 cwd）。
-	resp, err := svc.Planes().Workspaces.CreateWorkspaceDir(proj, "新项目")
+	resp, err := planesOf(svc).Workspaces.CreateWorkspaceDir(proj, "新项目")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceDir: %v", err)
 	}
@@ -819,20 +819,20 @@ func TestCreateWorkspaceDir(t *testing.T) {
 	// 这里刻意钉**具体码名**而不是"只要 40001 就行"：两条建目录路径的错误码一旦分叉，
 	// 界面对同一个原因会给出两种引导（改名重试 vs 改参数）。
 	for _, bad := range []string{"", "  ", "a/b", `a\b`, ".", ".."} {
-		if _, err := svc.Planes().Workspaces.CreateWorkspaceDir(proj, bad); acpCode(t, err) != "invalid_workspace_name" {
+		if _, err := planesOf(svc).Workspaces.CreateWorkspaceDir(proj, bad); acpCode(t, err) != "invalid_workspace_name" {
 			t.Fatalf("名字 %q 应被拒（invalid_workspace_name）: %v", bad, err)
 		}
 	}
 	// 已存在 → 40901（不覆盖、不静默复用："我建的那个"与"原来就有那个"是两件事）。
-	if _, err := svc.Planes().Workspaces.CreateWorkspaceDir(proj, "新项目"); acpCode(t, err) != "workspace_exists" {
+	if _, err := planesOf(svc).Workspaces.CreateWorkspaceDir(proj, "新项目"); acpCode(t, err) != "workspace_exists" {
 		t.Fatalf("同名目录应 workspace_exists: %v", err)
 	}
 	// 名录外照样能建（白名单不再是边界）：落点由用户自己选。
-	if _, err := svc.Planes().Workspaces.CreateWorkspaceDir(base, "outside-ok"); err != nil {
+	if _, err := planesOf(svc).Workspaces.CreateWorkspaceDir(base, "outside-ok"); err != nil {
 		t.Fatalf("名录外的父目录应可建目录: %v", err)
 	}
 	// 父目录不存在 → workspace_invalid（与浏览面同一条校验）。
-	if _, err := svc.Planes().Workspaces.CreateWorkspaceDir(filepath.Join(proj, "nope"), "x"); acpCode(t, err) != "workspace_invalid" {
+	if _, err := planesOf(svc).Workspaces.CreateWorkspaceDir(filepath.Join(proj, "nope"), "x"); acpCode(t, err) != "workspace_invalid" {
 		t.Fatalf("不存在的父目录应 workspace_invalid: %v", err)
 	}
 }
@@ -867,7 +867,7 @@ func TestListWorkspaceFiles(t *testing.T) {
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, filepath.Join(root, "tmp"), []string{mustEval(t, root)})
 
-	resp, err := svc.Planes().Workspaces.ListWorkspaceFiles(root, false)
+	resp, err := planesOf(svc).Workspaces.ListWorkspaceFiles(root, false)
 	if err != nil {
 		t.Fatalf("ListWorkspaceFiles: %v", err)
 	}
@@ -895,7 +895,7 @@ func TestListWorkspaceFiles(t *testing.T) {
 	}
 
 	// hidden=true → 含隐藏项。
-	withHidden, err := svc.Planes().Workspaces.ListWorkspaceFiles(root, true)
+	withHidden, err := planesOf(svc).Workspaces.ListWorkspaceFiles(root, true)
 	if err != nil {
 		t.Fatalf("ListWorkspaceFiles(hidden): %v", err)
 	}
@@ -904,19 +904,19 @@ func TestListWorkspaceFiles(t *testing.T) {
 	}
 
 	// path 必填：不给 path 是调用方的错，不是"回落到某个默认目录"——看资料必须明确看哪里。
-	if _, err := svc.Planes().Workspaces.ListWorkspaceFiles("", false); acpCode(t, err) != "workspace_invalid" {
+	if _, err := planesOf(svc).Workspaces.ListWorkspaceFiles("", false); acpCode(t, err) != "workspace_invalid" {
 		t.Fatalf("空 path 应 workspace_invalid: %v", err)
 	}
 	// 名录外的目录照常可看（v14.5：不再按名录过滤）。
-	if _, err := svc.Planes().Workspaces.ListWorkspaceFiles(outside, false); err != nil {
+	if _, err := planesOf(svc).Workspaces.ListWorkspaceFiles(outside, false); err != nil {
 		t.Fatalf("名录外的目录应可列出内容: %v", err)
 	}
-	if _, err := svc.Planes().Workspaces.ListWorkspaceFiles(filepath.Join(root, "nope"), false); acpCode(t, err) != "workspace_invalid" {
+	if _, err := planesOf(svc).Workspaces.ListWorkspaceFiles(filepath.Join(root, "nope"), false); acpCode(t, err) != "workspace_invalid" {
 		t.Fatalf("不存在目录应 workspace_invalid: %v", err)
 	}
 	// 文件不是目录：看内容也要给目录（工作空间三条件之一）。
 	file := filepath.Join(root, "a.pdf")
-	if _, err := svc.Planes().Workspaces.ListWorkspaceFiles(file, false); acpCode(t, err) != "workspace_invalid" {
+	if _, err := planesOf(svc).Workspaces.ListWorkspaceFiles(file, false); acpCode(t, err) != "workspace_invalid" {
 		t.Fatalf("对文件列内容应 workspace_invalid: %v", err)
 	}
 	// 符号链接指向的目录仍按真身判定边界：根内的链接可看，根外的不可。
@@ -924,7 +924,7 @@ func TestListWorkspaceFiles(t *testing.T) {
 	if err := os.Symlink(sub, linkIn); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	if _, err := svc.Planes().Workspaces.ListWorkspaceFiles(linkIn, false); err != nil {
+	if _, err := planesOf(svc).Workspaces.ListWorkspaceFiles(linkIn, false); err != nil {
 		t.Fatalf("根内符号链接目录应可读: %v", err)
 	}
 }

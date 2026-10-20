@@ -24,7 +24,7 @@ func fpRig(t *testing.T) *Service {
 		Projections:     []runtime.Projection{rtxSkillProjectionForTest()},
 	})
 	svc := newServiceForTest(reg, eventbus.New())
-	svc.planes.Skills.Projections().Set([]skill.Projection{{
+	planesOf(svc).Skills.Projections().Set([]skill.Projection{{
 		Runtime: "rtx",
 		Projection: runtime.Projection{
 			Kind: runtime.ProjectionSkill, Scope: runtime.ScopeGlobal, Root: t.TempDir(),
@@ -70,7 +70,7 @@ func TestCapabilityFingerprintMCPSecretValueNotInFingerprint(t *testing.T) {
 	if err := st.SetMcpSecret(ctx, ref, "secret-one"); err != nil {
 		t.Fatal(err)
 	}
-	svc.planes.Skills.Projections().Set([]skill.Projection{{
+	planesOf(svc).Skills.Projections().Set([]skill.Projection{{
 		Runtime: "stub",
 		Projection: runtime.Projection{
 			Kind: runtime.ProjectionSkill, Scope: runtime.ScopeGlobal, Root: t.TempDir(),
@@ -80,8 +80,9 @@ func TestCapabilityFingerprintMCPSecretValueNotInFingerprint(t *testing.T) {
 
 	reg := func(secretRef string) {
 		t.Helper()
-		svc.planes.Capabilities = capability.NewRegistry()
-		if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{
+		planesOf(svc).Capabilities = capability.NewRegistry()
+		rewireFacts(svc)
+		if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{
 			ID: "fs", Name: "fs", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 			Args:      []string{"-y", "pkg"},
 			Env:       map[string]string{"FS_ROOT": "/tmp/root"},
@@ -110,9 +111,9 @@ func TestCapabilityFingerprintMCPSecretValueNotInFingerprint(t *testing.T) {
 	}
 	// 2) 换明文 env 的值 → 同样不改指纹（只取键名）。
 	reg(ref)
-	m := svc.planes.Capabilities.ListMcpServers()[0]
+	m := planesOf(svc).Capabilities.ListMcpServers()[0]
 	m.Env = map[string]string{"FS_ROOT": "/other/root"}
-	if err := svc.planes.Capabilities.RegisterMcpServer(&m); err != nil {
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&m); err != nil {
 		t.Fatal(err)
 	}
 	if again := svc.sessionPlane.CapabilityFingerprint("stub", session.NewCapabilitySelection()); again != base {
@@ -125,9 +126,9 @@ func TestCapabilityFingerprintMCPSecretValueNotInFingerprint(t *testing.T) {
 	}
 	// 4) 换明文 env 的**键名** → 也必须变。
 	reg(ref)
-	m2 := svc.planes.Capabilities.ListMcpServers()[0]
+	m2 := planesOf(svc).Capabilities.ListMcpServers()[0]
 	m2.Env = map[string]string{"FS_BASE": "/tmp/root"}
-	if err := svc.planes.Capabilities.RegisterMcpServer(&m2); err != nil {
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&m2); err != nil {
 		t.Fatal(err)
 	}
 	if again := svc.sessionPlane.CapabilityFingerprint("stub", session.NewCapabilitySelection()); again == base {
@@ -141,7 +142,7 @@ func TestCapabilityFingerprintSkillSelection(t *testing.T) {
 	svc := fpRig(t)
 	must := func(sk capability.Skill) {
 		t.Helper()
-		if err := svc.planes.Capabilities.RegisterSkill(&sk); err != nil {
+		if err := planesOf(svc).Capabilities.RegisterSkill(&sk); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -161,7 +162,7 @@ func TestCapabilityFingerprintSkillSelection(t *testing.T) {
 	}
 	// 改已投放 skill 的正文 → 指纹必变。
 	alpha := capability.Skill{ID: "alpha", Runtimes: []string{"rtx"}, Body: "# alpha v2"}
-	if err := svc.planes.Capabilities.RegisterSkill(&alpha); err != nil {
+	if err := planesOf(svc).Capabilities.RegisterSkill(&alpha); err != nil {
 		t.Fatal(err)
 	}
 	if got := svc.sessionPlane.CapabilityFingerprint("rtx", session.NewCapabilitySelection()); got == base {
@@ -179,7 +180,7 @@ func TestCapabilityFingerprintSkillSelection(t *testing.T) {
 // "指纹说没变"与"产物要重写"不能各说各话。
 func TestCapabilityFingerprintBodyDigestReusesSidecarHash(t *testing.T) {
 	svc := fpRig(t)
-	if err := svc.planes.Capabilities.RegisterSkill(&capability.Skill{ID: "alpha", Body: "# alpha"}); err != nil {
+	if err := planesOf(svc).Capabilities.RegisterSkill(&capability.Skill{ID: "alpha", Body: "# alpha"}); err != nil {
 		t.Fatal(err)
 	}
 	parts := session.ProjectedSkillParts(svc.CapabilityFactsFor("rtx", nil), nil)
@@ -195,21 +196,21 @@ func TestCapabilityFingerprintBodyDigestReusesSidecarHash(t *testing.T) {
 // 底座升级或投影约定变化后，"这个会话在哪个底座形态上跑的"必须可答。
 func TestCapabilityFingerprintRuntimeShape(t *testing.T) {
 	svc := fpRig(t)
-	if err := svc.planes.Capabilities.RegisterSkill(&capability.Skill{ID: "alpha", Body: "# a"}); err != nil {
+	if err := planesOf(svc).Capabilities.RegisterSkill(&capability.Skill{ID: "alpha", Body: "# a"}); err != nil {
 		t.Fatal(err)
 	}
 	base := svc.sessionPlane.CapabilityFingerprint("rtx", session.NewCapabilitySelection())
 
 	sp, _ := svc.regSpec("rtx")
 	sp.Version = "rtx acp v2"
-	svc.planes.Registry.Register(sp)
+	planesOf(svc).Registry.Register(sp)
 	if got := svc.sessionPlane.CapabilityFingerprint("rtx", session.NewCapabilitySelection()); got == base {
 		t.Fatal("底座版本变了必须改指纹")
 	}
 	// 还原版本，改投影 root → 也要变。
 	sp.Version = "rtx acp"
 	sp.Projections[0].Root = "${HOME}/.config/rtx/skill"
-	svc.planes.Registry.Register(sp)
+	planesOf(svc).Registry.Register(sp)
 	if got := svc.sessionPlane.CapabilityFingerprint("rtx", session.NewCapabilitySelection()); got == base {
 		t.Fatal("投影形态变了必须改指纹")
 	}
@@ -220,14 +221,14 @@ func TestCapabilityFingerprintRuntimeShape(t *testing.T) {
 func TestCapabilityFingerprintNoProjectionMeansNoSkillPart(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "remote", Version: "remote acp"})
 	svc := newServiceForTest(reg, eventbus.New())
-	if err := svc.planes.Capabilities.RegisterSkill(&capability.Skill{ID: "alpha", Body: "# a"}); err != nil {
+	if err := planesOf(svc).Capabilities.RegisterSkill(&capability.Skill{ID: "alpha", Body: "# a"}); err != nil {
 		t.Fatal(err)
 	}
 	if parts := session.ProjectedSkillParts(svc.CapabilityFactsFor("remote", nil), nil); len(parts) != 0 {
 		t.Fatalf("无 skill 投影的 runtime 不该有投放片段: %+v", parts)
 	}
 	base := svc.sessionPlane.CapabilityFingerprint("remote", session.NewCapabilitySelection())
-	if err := svc.planes.Capabilities.RegisterSkill(&capability.Skill{ID: "beta", Body: "# b"}); err != nil {
+	if err := planesOf(svc).Capabilities.RegisterSkill(&capability.Skill{ID: "beta", Body: "# b"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := svc.sessionPlane.CapabilityFingerprint("remote", session.NewCapabilitySelection()); got != base {
@@ -243,15 +244,15 @@ func TestCapabilityFingerprintNoProjectionMeansNoSkillPart(t *testing.T) {
 // 本身消失了——网关在环时的折叠语义见 `TestCapabilityFingerprintGatewayFolding`。
 func TestCapabilityFingerprintMCPTransportFilter(t *testing.T) {
 	svc := fpRig(t) // rtx: stdio + http
-	svc.Planes().SetMcpGatewayEnabled(false)
-	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{
+	planesOf(svc).SetMcpGatewayEnabled(false)
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{
 		ID: "fs", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	base := svc.sessionPlane.CapabilityFingerprint("rtx", session.NewCapabilitySelection())
 	// sse 不在该 runtime 的承载列表里 → 不影响指纹。
-	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{
 		ID: "sse", Transport: capability.TransportSSE, URL: "https://x.invalid/sse",
 	}); err != nil {
 		t.Fatal(err)
@@ -270,7 +271,7 @@ func TestCapabilityFingerprintMCPTransportFilter(t *testing.T) {
 		t.Fatal("白名单里的不可承载项不该改变指纹")
 	}
 	// 白名单外再放一个可承载的 server：没被选中 → 指纹不变。
-	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{
 		ID: "http-ok", Transport: capability.TransportHTTP, URL: "https://x.invalid/mcp",
 	}); err != nil {
 		t.Fatal(err)

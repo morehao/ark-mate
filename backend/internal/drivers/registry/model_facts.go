@@ -41,7 +41,7 @@ func (f ModelFacts) DeclaredModels(ctx context.Context) ([]dtomodel.ModelResp, e
 	if err != nil {
 		return nil, err
 	}
-	return modelResps(views), nil
+	return dtomodel.ModelResps(views), nil
 }
 
 // Advertised 运行时目录取样（带来源判定：`Known=false` = 无法校验）。

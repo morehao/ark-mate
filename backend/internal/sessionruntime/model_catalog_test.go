@@ -63,7 +63,7 @@ func TestModelCatalogLiveSession(t *testing.T) {
 	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: "stub",
 		Session: &stubSession{options: opts}}))
 
-	resp, err := svc.Planes().Providers.ModelCatalog(context.Background())
+	resp, err := planesOf(svc).Providers.ModelCatalog(context.Background())
 	if err != nil {
 		t.Fatalf("ModelCatalog: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestModelCatalogLiveSession(t *testing.T) {
 
 	// 活会话消失后仍可从缓存取（避免每次查询都 resume）。
 	orch.handles.Remove("c1")
-	cached, err := svc.Planes().Providers.ModelCatalog(context.Background())
+	cached, err := planesOf(svc).Providers.ModelCatalog(context.Background())
 	if err != nil {
 		t.Fatalf("ModelCatalog(cache): %v", err)
 	}
@@ -101,7 +101,7 @@ func TestModelCatalogLiveSession(t *testing.T) {
 // （**不新建探测会话**：此处若为拿到目录而 session/new，会留下无法删除的持久记录）。
 func TestModelCatalogNoSource(t *testing.T) {
 	svc, _ := catalogRig(t)
-	resp, err := svc.Planes().Providers.ModelCatalog(context.Background())
+	resp, err := planesOf(svc).Providers.ModelCatalog(context.Background())
 	if err != nil {
 		t.Fatalf("ModelCatalog: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestModelCatalogRuntimeNotRegistered(t *testing.T) {
 	setBuildRuntime(t, "ghost") // 换一个不在注册表里的构建期底座
 	// 注意：这条错误在 ModelCatalog 里已被 `code.FromError` 归一（`runtime_not_registered` 只留在
 	// 文案里），所以判据是信封码 + 文案，而不是 acp 的稳定 code。
-	if _, err := svc.Planes().Providers.ModelCatalog(context.Background()); err == nil {
+	if _, err := planesOf(svc).Providers.ModelCatalog(context.Background()); err == nil {
 		t.Fatal("构建期底座未装配应报错")
 	} else if numericCode(err) != 40001 || !strings.Contains(err.Error(), "runtime_not_registered") {
 		t.Fatalf("应是 40001 runtime_not_registered，got %d（%v）", numericCode(err), err)
@@ -143,7 +143,7 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	}}}
 	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: "stub",
 		Session: &stubSession{}, Projection: proj}))
-	svc.planes.Providers.MarkModelRejected("stub", "test/other", "旧失败")
+	planesOf(svc).Providers.MarkModelRejected("stub", "test/other", "旧失败")
 	applied, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Model: "test/other"})
 	if err != nil || !applied {
 		t.Fatalf("应用应成功: applied=%v err=%v", applied, err)
@@ -151,11 +151,11 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	if len(proj.applied) != 1 || proj.applied[0].Model != "test/other" {
 		t.Fatalf("下发值应原样透传: %+v", proj.applied)
 	}
-	if reason, bad := svc.planes.Providers.ModelRejection("stub", "test/other"); bad {
+	if reason, bad := planesOf(svc).Providers.ModelRejection("stub", "test/other"); bad {
 		t.Fatalf("成功后应清除不可用标记: %s", reason)
 	}
 	// 缓存被成功状态刷新（活会话优先级更高，故直接查缓存）。
-	entry, ok := svc.planes.Providers.ConfigOptions("stub", provider.DefaultCatalogTTL)
+	entry, ok := planesOf(svc).Providers.ConfigOptions("stub", provider.DefaultCatalogTTL)
 	if !ok || acp.CurrentConfigValue(entry.Options, acp.CategoryModel) != "test/other" {
 		t.Fatalf("目录缓存应被成功状态刷新: %+v", entry)
 	}
@@ -165,7 +165,7 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	if _, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Model: "nope"}); err == nil {
 		t.Fatal("运行时拒绝应上抛")
 	}
-	if _, bad := svc.planes.Providers.ModelRejection("stub", "nope"); !bad {
+	if _, bad := planesOf(svc).Providers.ModelRejection("stub", "nope"); !bad {
 		t.Fatal("拒绝的取值应记入不可用反馈")
 	}
 
@@ -354,7 +354,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 	r := sessionModelRig(t)
 
 	// ① 平台清单还是空的：出路是"先去添加模型"。
-	noModels := r.svc.Planes().Providers.CatalogEmptyNote(ctx, true, nil)
+	noModels := planesOf(r.svc).Providers.CatalogEmptyNote(ctx, true, nil)
 	if !strings.Contains(noModels, "设置 · 模型") || !strings.Contains(noModels, "添加") {
 		t.Fatalf("清单为空时应指向「先去添加模型」，实际：%s", noModels)
 	}
@@ -362,13 +362,13 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 	createProviderAndModel(t, r.svc, "p1", "m-1")
 
 	// ② 读通了但运行时零候选（真实成因）：出路是"选一条默认模型"。
-	noSelection := r.svc.Planes().Providers.CatalogEmptyNote(ctx, true, nil)
+	noSelection := planesOf(r.svc).Providers.CatalogEmptyNote(ctx, true, nil)
 	if !strings.Contains(noSelection, "平台已声明 1 条") || !strings.Contains(noSelection, "默认模型") {
 		t.Fatalf("读通了但零候选时应指向「选一条默认模型」，实际：%s", noSelection)
 	}
 
 	// ③ 取样失败：如实说"这次没读到"，并且**不得**冒充"还没有会话可供读取"。
-	failed := r.svc.Planes().Providers.CatalogEmptyNote(ctx, false,
+	failed := planesOf(r.svc).Providers.CatalogEmptyNote(ctx, false,
 		acp.NewError(acp.ClassRequest, "invalid_params", `no adapter registered for provider "old"`, nil))
 	if !strings.Contains(failed, "取样失败") {
 		t.Fatalf("取样失败应如实说失败，实际：%s", failed)
@@ -379,7 +379,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 
 	// ④ "该底座不支持在不新建会话的前提下读目录"是**能力事实、不是故障**：
 	//    退回"发一条消息就会补全"这条正常出路。
-	unsupported := r.svc.Planes().Providers.CatalogEmptyNote(ctx, false,
+	unsupported := planesOf(r.svc).Providers.CatalogEmptyNote(ctx, false,
 		acp.NewError(acp.ClassUnsupported, "resume_session_unsupported", "不支持 resume", nil))
 	if !strings.Contains(unsupported, "发送一条消息") {
 		t.Fatalf("底座不支持读时应给「发消息」这条路，实际：%s", unsupported)
@@ -394,7 +394,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 	_, _, noCandErr := sampleCandidates[string](nil, func(string) ([]acp.ConfigOption, error) {
 		return nil, nil
 	})
-	noCandidate := r.svc.Planes().Providers.CatalogEmptyNote(ctx, false, noCandErr)
+	noCandidate := planesOf(r.svc).Providers.CatalogEmptyNote(ctx, false, noCandErr)
 	if !strings.Contains(noCandidate, "发送一条消息") || strings.Contains(noCandidate, "取样失败") {
 		t.Fatalf("没有候选时应说「发消息就会补全」而不是取样失败，实际：%s", noCandidate)
 	}
@@ -429,7 +429,7 @@ func TestModelCatalogLiveSessionWithoutModelKeepsNote(t *testing.T) {
 	svc, orch := catalogRig(t)
 	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: "stub", Session: &stubSession{}}))
 
-	resp, err := svc.Planes().Providers.ModelCatalog(context.Background())
+	resp, err := planesOf(svc).Providers.ModelCatalog(context.Background())
 	if err != nil {
 		t.Fatalf("ModelCatalog: %v", err)
 	}

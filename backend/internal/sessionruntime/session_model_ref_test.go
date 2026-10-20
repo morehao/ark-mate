@@ -32,7 +32,7 @@ func sessionModelRig(t *testing.T) *genRig {
 	t.Helper()
 	r := newGenRig(t)
 	// 合成形态（`<provider>/<model>`）——与 `runtimetest.Register` 给 rtx 登记的是同一个实现。
-	r.svc.planes.Registry.RegisterModelValue(r.runtme, runtimetestModelValue{})
+	planesOf(r.svc).Registry.RegisterModelValue(r.runtme, runtimetestModelValue{})
 	return r
 }
 
@@ -60,19 +60,19 @@ func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName st
 	t.Helper()
 	ctx := context.Background()
 	key, baseURL := "sk-test", "https://api.example.com/v1"
-	if _, err := svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
+	if _, err := planesOf(svc).Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: providerID, Protocol: "openai", BaseURL: &baseURL, APIKey: &key,
 	}); err != nil && errCode(err) != "provider_exists" {
 		t.Fatalf("CreateProvider(%s): %v", providerID, err)
 	}
 	id := objid.New(objid.Model)
-	ok, err := svc.planes.Resources.Store().CreateModelDefinition(ctx, model.ModelColumns{
+	ok, err := planesOf(svc).Resources.Store().CreateModelDefinition(ctx, model.ModelColumns{
 		ID: id, ProviderID: providerID, Model: modelName, InputModalities: resource.ModalityText,
 	}, defn.DefinitionWriteActor)
 	if err != nil || !ok {
 		t.Fatalf("插模型行(%s/%s): ok=%v err=%v", providerID, modelName, ok, err)
 	}
-	row, found, err := svc.Planes().Providers.ModelRow(ctx, id)
+	row, found, err := planesOf(svc).Providers.ModelRow(ctx, id)
 	if err != nil || !found {
 		t.Fatalf("读回模型行 %s: found=%v err=%v", id, found, err)
 	}
@@ -95,19 +95,19 @@ func TestResolveSessionModelRejectsUnknown(t *testing.T) {
 	row := createProviderAndModel(t, r.svc, "p1", "m-1")
 
 	// ① 旧形态（运行时目录的不透明值）：形状就不对。
-	_, _, err := r.svc.planes.Providers.ResolveSessionModel(ctx, r.runtme, `["p1","m-1"]`)
+	_, _, err := planesOf(r.svc).Providers.ResolveSessionModel(ctx, r.runtme, `["p1","m-1"]`)
 	if errCode(err) != "model_not_found" || numericCode(err) != 40401 {
 		t.Fatalf("旧形态的不透明值应 40401 model_not_found，got %q/%d（%v）", errCode(err), numericCode(err), err)
 	}
 
 	// ② 形状对但查不到行。
 	ghost := objid.New(objid.Model)
-	if _, _, err := r.svc.planes.Providers.ResolveSessionModel(ctx, r.runtme, ghost); errCode(err) != "model_not_found" {
+	if _, _, err := planesOf(r.svc).Providers.ResolveSessionModel(ctx, r.runtme, ghost); errCode(err) != "model_not_found" {
 		t.Fatalf("清单里没有的 %s 应 model_not_found，got %q（%v）", ghost, errCode(err), err)
 	}
 
 	// ③ 形状对且在清单里 → 返回**平台行 id** 与**派生值**（两层词汇各归各的）。
-	id, cfg, err := r.svc.planes.Providers.ResolveSessionModel(ctx, r.runtme, row.ID)
+	id, cfg, err := planesOf(r.svc).Providers.ResolveSessionModel(ctx, r.runtme, row.ID)
 	if err != nil {
 		t.Fatalf("清单里的模型行应解析成功: %v", err)
 	}
@@ -123,13 +123,13 @@ func TestResolveSessionModelRejectsUnknown(t *testing.T) {
 	}
 
 	// ④ 空串 = 用默认那一行；没有默认 → 不下发（不是错误）。
-	if _, cfg, err := r.svc.planes.Providers.ResolveSessionModel(ctx, r.runtme, ""); err != nil || cfg.Model != "" {
+	if _, cfg, err := planesOf(r.svc).Providers.ResolveSessionModel(ctx, r.runtme, ""); err != nil || cfg.Model != "" {
 		t.Fatalf("未设默认模型时应回「不下发」而不是报错: cfg=%+v err=%v", cfg, err)
 	}
-	if err := r.svc.planes.Resources.Store().SetDefaultModelID(ctx, row.ID); err != nil {
+	if err := planesOf(r.svc).Resources.Store().SetDefaultModelID(ctx, row.ID); err != nil {
 		t.Fatalf("设默认模型: %v", err)
 	}
-	id, cfg, err = r.svc.planes.Providers.ResolveSessionModel(ctx, r.runtme, "")
+	id, cfg, err = planesOf(r.svc).Providers.ResolveSessionModel(ctx, r.runtme, "")
 	if err != nil || id != row.ID || cfg.Model != "p1/m-1" {
 		t.Fatalf("设了默认之后空串应解析成那一行: id=%q cfg=%+v err=%v", id, cfg, err)
 	}
@@ -151,7 +151,7 @@ func TestUpdateSessionModelStoresPlatformID(t *testing.T) {
 			Status: session.SessionStatusInProgress})
 	}
 	readModel := func(id string) string {
-		got, ok, err := r.svc.planes.Resources.Store().GetSession(ctx, id)
+		got, ok, err := planesOf(r.svc).Resources.Store().GetSession(ctx, id)
 		if err != nil || !ok {
 			t.Fatalf("读回会话 %s: ok=%v err=%v", id, ok, err)
 		}
@@ -214,7 +214,7 @@ func TestBackfillSessionModelRefs(t *testing.T) {
 	row2 := createProviderAndModel(t, r.svc, "p2", "m-1")
 
 	seed := func(id, runtimeID, modelID string) {
-		if err := r.svc.planes.Resources.Store().UpsertSession(ctx, model.SessionEntity{
+		if err := planesOf(r.svc).Resources.Store().UpsertSession(ctx, model.SessionEntity{
 			ID: id, Cwd: "/tmp/w", WorkspaceTemporary: false,
 			ModelID: modelID, RuntimeID: runtimeID, Status: "completed",
 			CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
@@ -223,7 +223,7 @@ func TestBackfillSessionModelRefs(t *testing.T) {
 		}
 	}
 	read := func(id string) string {
-		got, ok, err := r.svc.planes.Resources.Store().GetSession(ctx, id)
+		got, ok, err := planesOf(r.svc).Resources.Store().GetSession(ctx, id)
 		if err != nil || !ok {
 			t.Fatalf("读回会话 %s: ok=%v err=%v", id, ok, err)
 		}
@@ -241,7 +241,7 @@ func TestBackfillSessionModelRefs(t *testing.T) {
 	seed(sesB, r.runtme, "p9/nope")       // (b) 零命中
 	seed(sesC, r.runtme, row2.ID)         // (c) 已经是平台 id
 
-	if err := r.svc.planes.Resources.Store().SetMeta(ctx, model.MetaKeySessionsModelRefBackfill, "26"); err != nil {
+	if err := planesOf(r.svc).Resources.Store().SetMeta(ctx, model.MetaKeySessionsModelRefBackfill, "26"); err != nil {
 		t.Fatalf("置回填标记: %v", err)
 	}
 	r.svc.sessionPlane.BackfillSessionModelRefs(ctx)
@@ -255,14 +255,14 @@ func TestBackfillSessionModelRefs(t *testing.T) {
 	if got := read(sesC); got != row2.ID {
 		t.Fatalf("(c) 已经是平台 id 的行不许被改写：want %q，got %q", row2.ID, got)
 	}
-	if _, ok, err := r.svc.planes.Resources.Store().GetMeta(ctx, model.MetaKeySessionsModelRefBackfill); err != nil || ok {
+	if _, ok, err := planesOf(r.svc).Resources.Store().GetMeta(ctx, model.MetaKeySessionsModelRefBackfill); err != nil || ok {
 		t.Fatalf("全部成功后应清掉回填标记: ok=%v err=%v", ok, err)
 	}
 
 	// (d) 多命中：换形态之后，两家供应商下的 `m-1` 派生出同一个值。
-	r.svc.planes.Registry.RegisterModelValue(r.runtme, byModelNameOnly{})
+	planesOf(r.svc).Registry.RegisterModelValue(r.runtme, byModelNameOnly{})
 	seed(sesD, r.runtme, "m:m-1")
-	if err := r.svc.planes.Resources.Store().SetMeta(ctx, model.MetaKeySessionsModelRefBackfill, "26"); err != nil {
+	if err := planesOf(r.svc).Resources.Store().SetMeta(ctx, model.MetaKeySessionsModelRefBackfill, "26"); err != nil {
 		t.Fatalf("再置回填标记: %v", err)
 	}
 	r.svc.sessionPlane.BackfillSessionModelRefs(ctx)
@@ -292,7 +292,7 @@ func TestCatalogAnnotatesCandidatesWithPlatformRowID(t *testing.T) {
 	}}
 	r.orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: r.runtme, Session: &stubSession{options: opts}}))
 
-	resp, err := r.svc.Planes().Providers.ModelCatalog(ctx)
+	resp, err := planesOf(r.svc).Providers.ModelCatalog(ctx)
 	if err != nil {
 		t.Fatalf("ModelCatalog: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestSessionModelValueAgreesWithCatalogAnnotation(t *testing.T) {
 	row := createProviderAndModel(t, r.svc, "p1", "m-1")
 
 	// 目录注解算出来的值 → 行。
-	table := r.svc.Planes().Providers.ModelIDByValue(ctx, r.runtme)
+	table := planesOf(r.svc).Providers.ModelIDByValue(ctx, r.runtme)
 	if len(table) != 1 {
 		t.Fatalf("注解表应恰好一条（一条平台行），实际 %d 条: %v", len(table), table)
 	}
@@ -333,7 +333,7 @@ func TestSessionModelValueAgreesWithCatalogAnnotation(t *testing.T) {
 		t.Fatalf("回填的映射与目录注解不一致：want %q，got %q（两处各算一遍派生值，口径漂了就分叉）", row.ID, got)
 	}
 	// 写面接受的行 → 同一个 id 与同一个值。
-	id, cfg, err := r.svc.planes.Providers.ResolveSessionModel(ctx, r.runtme, row.ID)
+	id, cfg, err := planesOf(r.svc).Providers.ResolveSessionModel(ctx, r.runtme, row.ID)
 	if err != nil || id != row.ID || cfg.Model != value {
 		t.Fatalf("会话写面的解析与另外两条链不一致: id=%q cfg=%+v err=%v", id, cfg, err)
 	}

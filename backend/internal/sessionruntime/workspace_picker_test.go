@@ -25,11 +25,11 @@ import (
 // 这条挡的是"能力声明与执行面不一致"时的最坏形态：在远程/SSH 场景下弹出一个没人看得见的系统面板。
 func TestPickDirectoryHostUnsupportedWhenNotHost(t *testing.T) {
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
-	svc.Planes().Picker.SetBindAddr("0.0.0.0:10001") // 对外监听 → browse 形态
-	if got := svc.Planes().Picker.NativePickerMode(); got != string(workspace.NativePickerBrowse) {
+	planesOf(svc).Picker.SetBindAddr("0.0.0.0:10001") // 对外监听 → browse 形态
+	if got := planesOf(svc).Picker.NativePickerMode(); got != string(workspace.NativePickerBrowse) {
 		t.Fatalf("对外监听应为 browse 形态: %s", got)
 	}
-	_, _, err := svc.Planes().Picker.PickDirectoryHost(context.Background())
+	_, _, err := planesOf(svc).Picker.PickDirectoryHost(context.Background())
 	if err == nil || !errors.Is(err, workspace.ErrNativePickUnsupported) {
 		t.Fatalf("非 native 形态应 native_pick_unsupported: %v", err)
 	}
@@ -42,19 +42,19 @@ func TestPickDirectoryHostUnsupportedWhenNotHost(t *testing.T) {
 // 端点同样给可判定错误；支持时**不去真开面板**（那会把测试挂住）——只断言判定与错误分类。
 func TestPickDirectoryHostReportsUnsupportedOnThisPlatform(t *testing.T) {
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
-	svc.Planes().Picker.SetBindAddr("127.0.0.1:10001")
+	planesOf(svc).Picker.SetBindAddr("127.0.0.1:10001")
 
 	switch mateRuntime.GOOS {
 	case "darwin":
 		// 本机是 macOS：形态必须是 native（回环 + 非 SSH + 有显示会话）。
-		if got := svc.Planes().Picker.NativePickerMode(); got != string(workspace.NativePickerHost) {
+		if got := planesOf(svc).Picker.NativePickerMode(); got != string(workspace.NativePickerHost) {
 			t.Fatalf("macOS 本机应为 native 形态: %s", got)
 		}
 		// 刻意**不调** PickDirectoryHost：它会真的弹出系统面板并挂住测试。
 	default:
 		// 其它平台（含本仓未实现的 win32）：形态至少要是可判定的两值之一，
 		// 且"不支持"必须以 ErrNativePickUnsupported 表达，而不是笼统 50000。
-		mode := svc.Planes().Picker.NativePickerMode()
+		mode := planesOf(svc).Picker.NativePickerMode()
 		if mode != string(workspace.NativePickerHost) && mode != string(workspace.NativePickerBrowse) {
 			t.Fatalf("形态只有 native|browse 两个取值: %q", mode)
 		}
@@ -65,11 +65,11 @@ func TestPickDirectoryHostReportsUnsupportedOnThisPlatform(t *testing.T) {
 func TestSetBindAddrFeedsPickerMode(t *testing.T) {
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	// 未注入地址（""）→ 解析不出来 → 保守判 browse。
-	if got := svc.Planes().Picker.NativePickerMode(); got != string(workspace.NativePickerBrowse) {
+	if got := planesOf(svc).Picker.NativePickerMode(); got != string(workspace.NativePickerBrowse) {
 		t.Fatalf("未注入监听地址时应保守判 browse: %s", got)
 	}
-	svc.Planes().Picker.SetBindAddr("127.0.0.1:10001")
-	got := svc.Planes().Picker.NativePickerMode()
+	planesOf(svc).Picker.SetBindAddr("127.0.0.1:10001")
+	got := planesOf(svc).Picker.NativePickerMode()
 	if mateRuntime.GOOS == "darwin" && got != string(workspace.NativePickerHost) {
 		t.Fatalf("macOS 注入回环地址后应为 native: %s", got)
 	}
@@ -85,8 +85,8 @@ func TestSetBindAddrFeedsPickerMode(t *testing.T) {
 func TestPickEnvReadsSSHFromProcess(t *testing.T) {
 	t.Setenv("SSH_CONNECTION", "10.0.0.1 1 10.0.0.2 2")
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
-	svc.Planes().Picker.SetBindAddr("127.0.0.1:10001")
-	if got := svc.Planes().Picker.NativePickerMode(); got != string(workspace.NativePickerBrowse) {
+	planesOf(svc).Picker.SetBindAddr("127.0.0.1:10001")
+	if got := planesOf(svc).Picker.NativePickerMode(); got != string(workspace.NativePickerBrowse) {
 		t.Fatalf("SSH 会话应判 browse（面板会开在没人看的屏幕上）: %s", got)
 	}
 }
@@ -115,11 +115,11 @@ func TestPickDirectoryHostSpawnsAndParsesHostPicker(t *testing.T) {
 	t.Setenv("PATH", binDir) // 只留假货：确保打的是它
 
 	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
-	svc.Planes().Picker.SetBindAddr("127.0.0.1:10001") // 回环 + 非 SSH + 有显示会话 → native
-	if got := svc.Planes().Picker.NativePickerMode(); got != string(workspace.NativePickerHost) {
+	planesOf(svc).Picker.SetBindAddr("127.0.0.1:10001") // 回环 + 非 SSH + 有显示会话 → native
+	if got := planesOf(svc).Picker.NativePickerMode(); got != string(workspace.NativePickerHost) {
 		t.Fatalf("本机 macOS 应为 native 形态: %s", got)
 	}
-	path, cancelled, err := svc.Planes().Picker.PickDirectoryHost(context.Background())
+	path, cancelled, err := planesOf(svc).Picker.PickDirectoryHost(context.Background())
 	if err != nil {
 		t.Fatalf("PickDirectoryHost: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestPickDirectoryHostSpawnsAndParsesHostPicker(t *testing.T) {
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho 'execution error: User canceled. (-128)' >&2\nexit 1\n"), 0o755); err != nil {
 		t.Fatalf("改写假 osascript: %v", err)
 	}
-	path, cancelled, err = svc.Planes().Picker.PickDirectoryHost(context.Background())
+	path, cancelled, err = planesOf(svc).Picker.PickDirectoryHost(context.Background())
 	if err != nil {
 		t.Fatalf("取消不该是错误: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestPickDirectoryHostSpawnsAndParsesHostPicker(t *testing.T) {
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho 'boom' >&2\nexit 3\n"), 0o755); err != nil {
 		t.Fatalf("改写假 osascript: %v", err)
 	}
-	if _, _, err := svc.Planes().Picker.PickDirectoryHost(context.Background()); err == nil || acpCode(t, err) != "native_pick_failed" {
+	if _, _, err := planesOf(svc).Picker.PickDirectoryHost(context.Background()); err == nil || acpCode(t, err) != "native_pick_failed" {
 		t.Fatalf("非取消失败应 native_pick_failed: %v", err)
 	}
 }

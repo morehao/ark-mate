@@ -25,22 +25,22 @@ func selRig(t *testing.T) *Service {
 	// 本组钉的是**选择优先级**（会话选定 > 未声明时的全量），与"远程是否折叠成网关条目"
 	// 无关：网关开着时远程会被折叠成一条常量条目，断言里的 id 就看不出来了。故显式关掉网关，
 	// 让这组用例继续逐条断言被选中的定义；折叠语义由 gateway_folding 那组用例负责。
-	svc.Planes().SetMcpGatewayEnabled(false)
+	planesOf(svc).SetMcpGatewayEnabled(false)
 	for _, m := range []*capability.McpServer{
 		{ID: "fs", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx"},
 		{ID: "web", Transport: capability.TransportHTTP, URL: "https://x.invalid/mcp"},
 	} {
-		if err := svc.planes.Capabilities.RegisterMcpServer(m); err != nil {
+		if err := planesOf(svc).Capabilities.RegisterMcpServer(m); err != nil {
 			t.Fatal(err)
 		}
 	}
-	svc.planes.Skills.Projections().Set([]skill.Projection{{
+	planesOf(svc).Skills.Projections().Set([]skill.Projection{{
 		Runtime:    "rtx",
 		Projection: rtxSkillProjectionForTest(),
 	}})
 	for _, id := range []string{"alpha", "beta"} {
 		sk := capability.Skill{ID: id, Body: "# " + id}
-		if err := svc.planes.Capabilities.RegisterSkill(&sk); err != nil {
+		if err := planesOf(svc).Capabilities.RegisterSkill(&sk); err != nil {
 			t.Fatal(err)
 		}
 	}

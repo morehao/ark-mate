@@ -142,25 +142,9 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 		reg:     reg,
 		bus:     eventbus.New(),
 	}
-	// 执行面由**装配层**造，同一个实例同时交给 Service（记账）与 API 面（读面）——
-	// 两个平面各自记账会让"诊断说 stopped、连接却活着"立刻发生。
-	as.rconn = runtimeconn.NewPlaneFor(reg)
-	// 连接池也在装配层造：阶段 0.4b 起 `sessionruntime.NewService` **不自造**执行面
-	// （那会让 L7 import L6 的具体适配器），两半都以端口注入。
-	as.rpool = runtimeconn.NewPool(as.rconn)
-	// 领域平面由 registry 造**一次**，核心与网关共用同一套。
-	as.planes = registry.NewPlanes(reg)
-	as.svc = sessionruntime.NewService(reg, as.bus,
-		sessionruntime.WithPlanes(as.planes),
-		sessionruntime.WithRuntimePlane(as.rconn),
-		sessionruntime.WithConnPool(as.rpool))
-	// 执行面的来源接线（本文件的事，不是执行面的事）：凭据面、env、配置指纹与连接池读面。
-	// 漏接任一个的表现都是静默的（少注入密钥 / 代际键少一维 / 诊断永远报未连接）。
-	as.rconn.SetCredentialSource(as.svc)
-	as.rpool.SetProviderEnvSource(as.svc)
-	as.rpool.SetConfigDigestSource(as.planes.Resources)
-	as.rpool.SetNativeEnvSource(as.svc)
-	as.rconn.SetLiveClientSource(as.rpool)
+	// 执行面 + 领域平面 + 五个来源接线由**同一份**最小装配产出（与 `mate demo` 共用）：
+	// 两半各自记账会让"诊断说 stopped、连接却活着"立刻发生；来源漏接是静默的。
+	as.svc, as.planes, as.rconn, as.rpool = NewSessionService(reg, as.bus)
 
 	as.creds = o.Credentials
 	as.lifecycle = registry.New(as.steps()...)

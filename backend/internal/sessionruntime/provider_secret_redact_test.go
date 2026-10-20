@@ -29,18 +29,18 @@ func TestProviderEnvRegistersDynamicSecret(t *testing.T) {
 
 	key := secret
 	baseURL := "https://api.openai.com/v1"
-	if _, err := svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
+	if _, err := planesOf(svc).Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: "p1", Protocol: "openai", BaseURL: &baseURL, APIKey: &key,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	// 生产路径：注入子进程之前会把生效密钥登记进 redact（`providerEnvFor` 是唯一入口）。
-	_ = svc.planes.Providers.ProviderEnvFor(runtimetest.ID, "p1")
+	_ = planesOf(svc).Providers.ProviderEnvFor(runtimetest.ID, "p1")
 	if got := redact.String("出错时带出了 " + secret); strings.Contains(got, secret) {
 		t.Fatalf("providerEnvFor 没有登记动态密钥，redact 原样返回了真值: %q", got)
 	}
 	// 诊断/自检报的是**键名**而不是值（ADR-16）：引用名非空、且与真值不同。
-	ref := svc.planes.Providers.ProviderRefName("p1")
+	ref := planesOf(svc).Providers.ProviderRefName("p1")
 	if ref == "" {
 		t.Fatal("凭据引用名为空：自检/诊断就没法报出「密钥存在但引用是哪个」——" +
 			"adapter 的 `Credential.RefPattern` 没进注册表？")

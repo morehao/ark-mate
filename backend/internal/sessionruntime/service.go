@@ -8,7 +8,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
-	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -18,11 +17,13 @@ import (
 type Service struct {
 	bus  *eventbus.Bus
 	orch *Orchestrator
-	// planes 本次进程的领域平面集合（P5a：**装配层 `internal/drivers/registry` 拥有**）。
-	//
-	// 本层**不再复刻**一份平面字段：所有读法都直接走 `s.planes.X`（一份实例、一条路径）。
-	// P4b 之前它们是同名过渡视角，清理掉之后"这段实现在哪一层"重新可判定。
-	planes *registry.Planes
+	// facts 本次装配的领域平面**按面端口**（阶段 0.2）：本层不再认识 `*registry.Planes`。
+	// 装配根从具体平面上折出来交进（`WithPlaneFacts`），测试夹具构造同一套。
+	facts PlaneFacts
+	// reg 构建期选定的底座注册表（L1 值对象）：`Get` / `NativePermission` / `McpTransportsFor`。
+	reg *runtime.Registry
+	// resourceStore 资源同步面的窄库口（`EnableStore` 注入；nil = 未接库）。
+	resourceStore ResourceStore
 
 	// sessionPlane 会话域（自持一把只保护域内字段的锁）。
 	sessionPlane *session.Plane
@@ -72,11 +73,11 @@ func WithConnPool(pool session.ConnPool) Option {
 	return func(s *Service) { s.runtimePool = pool }
 }
 
-// WithPlanes 使用装配层已经造好的领域平面（核心与网关共用同一套事实的前提）。
+// WithPlaneFacts 使用装配层从领域平面上折出来的**按面端口**（阶段 0.2）。
 //
-// 不传时本函数自己造一套（130+ 处测试与 `mate demo` 走这条默认路径）；装配层传的是
-// **同一个实例**——两份平面 = 两个事实源（"核心能注入、网关注入不了"就是那样长出来的）。
-func WithPlanes(p *registry.Planes) Option { return func(s *Service) { s.planes = p } }
+// 不传时各面为 nil：读面走缺省语义、写面跳过（纯列表/纯状态路径不需要平面）。
+// 装配根传的是**同一份实例**折出来的端口——两份平面 = 两个事实源。
+func WithPlaneFacts(f PlaneFacts) Option { return func(s *Service) { s.facts = f } }
 
 func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Service {
 	s := &Service{bus: bus}
@@ -84,24 +85,27 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 	for _, opt := range opts {
 		opt(s)
 	}
-	if s.planes == nil {
-		s.planes = registry.NewPlanes(reg)
-	}
+	s.reg = reg
 	// 模型目录取样的三个窄端口（P5a）：活会话 / 历史会话 / 连接期事实。
 	// **必须紧跟平面创建点**：早一行它们还是 nil，表现是目录恒空且说明文案说"没有执行面"。
-	s.planes.Providers.SetLiveConfigOptionsSource(s)
-	s.planes.Providers.SetCatalogSampler(s)
-	s.planes.Providers.SetCatalogConnectionFacts(s)
+	s.writeProviderSources()
+
 	// 自动化域需要宿主端口（建会话/取消轮次）；它是编排面的事实，装配层造不了——
 	// 与库句柄一样，漏接的表现是"触发时找不到宿主"（静默）。
-	s.planes.Automation.SetHost(automationHostAdapter{svc: s})
+	if s.facts.Automation != nil {
+		s.facts.Automation.SetHost(automationHostAdapter{svc: s})
+	}
 	// 会话事实端口（P2b）：workspace 域不拥有会话，只消费这里的两个动作。
-	s.planes.Workspaces.SetSessionSource(s)
+	if s.facts.Workspaces != nil {
+		s.facts.Workspaces.SetSessionSource(s)
+	}
 	// 会话域：本批只装库句柄与用量端口（其余端口随 P3b-1b/2 接上）。
 	s.sessionPlane = session.NewPlane()
 	// 会话读面的端口：归属展示（工作空间登记面）P2b 起也在域内（`Plane.WorkspaceDisplayOf`）。
 	// 能力选定回显与指纹装配点 P3c 起同样在域内，不再需要回显端口。
-	s.sessionPlane.SetWorkspaceDisplay(s.planes.Workspaces.WorkspaceDisplayOf)
+	if s.facts.Workspaces != nil {
+		s.sessionPlane.SetWorkspaceDisplay(s.facts.Workspaces.WorkspaceDisplayOf)
+	}
 	// 能力事实提供者（P3c）：指纹的装配点在域，事实（注册表 / skill 投影 / MCP 注入计划）在这边。
 	// **必须紧跟 `caps`/`reg` 的就位**：早一行登记会让指纹少算一段——静默，且只在"代际该不该切"
 	// 这种慢变量上现形。
@@ -111,19 +115,23 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 	// 以及恢复期"作废重启前排队输入"的钩子（**临时**：输入队列 P3b-2 搬进来后就地调用）。
 	s.sessionPlane.SetBus(bus)
 	s.sessionPlane.SetModelValueSource(func(runtimeID, providerID, model string) (string, error) {
-		return s.planes.Providers.ModelValueFor(runtimeID, providerID, model)
+		return s.modelValueFor(runtimeID, providerID, model)
 	})
 	s.sessionPlane.SetStaleInputsOnRestore(s.sessionPlane.StaleQueuedInputsOnRestore)
 	// 两个端口都读会话/模型面（编排侧），在装配期接上；`demo`/`migrate` 这类没有编排器的
 	// 场景下 `effect` 恒 nil（回执为 nil，与拆分前逐字同义）。
-	s.planes.Providers.SetEffect(s.providerEffect)
-	s.planes.Providers.SetDefaultModel(func(ctx context.Context) (string, bool) {
-		row, ok, err := s.planes.Providers.DefaultModelRow(ctx)
-		if err != nil || !ok {
-			return "", false
-		}
-		return strings.TrimSpace(row.ProviderID), true
-	})
+	if s.facts.Providers != nil {
+		s.facts.Providers.SetEffect(s.providerEffect)
+	}
+	if s.facts.Providers != nil {
+		s.facts.Providers.SetDefaultModel(func(ctx context.Context) (string, bool) {
+			row, ok, err := s.facts.Providers.DefaultModelRow(ctx)
+			if err != nil || !ok {
+				return "", false
+			}
+			return strings.TrimSpace(row.ProviderID), true
+		})
+	}
 
 	// ③ 流式增量合并：flushFn 直连 publishRaw（绕过合并入口，避免自递归）。
 	s.coalescer = session.NewCoalescer(func(typ, sessionID string, payload any) {
@@ -151,11 +159,6 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 // `StartIdleReaper` 已随本刀从 `Orchestrator` 删除）。
 func (s *Service) RuntimePool() session.ConnPool { return s.runtimePool }
 
-// Planes 交出本次装配的**领域平面集合**（同一实例；P5a）。
-//
-// 装配层（app）与网关子进程都用它拿事实：它们要的是平面本身，不是 Service 上的转发。
-func (s *Service) Planes() *registry.Planes { return s.planes }
-
 // SessionPlane 交会话域平面（**依赖事实**）：导出用例的事实来源（`svcsystem.NewSource`）
 // 由 `ctrexport` 用它与 Store/Bus 一起在自己的构造函数里造（P4a 正文第八刀）。
 func (s *Service) SessionPlane() *session.Plane { return s.sessionPlane }
@@ -175,4 +178,30 @@ func (s *Service) attachOrchestrator(o *Orchestrator) {
 			s.runtimePool.SetDropSink(o)
 		}
 	}
+}
+
+// writeProviderSources 三个目录取样端口的一次性接线（阶段 0.2：Providers 面可缺省）。
+func (s *Service) writeProviderSources() {
+	if s.facts.Providers == nil {
+		return
+	}
+	s.facts.Providers.SetLiveConfigOptionsSource(s)
+	s.facts.Providers.SetCatalogSampler(s)
+	s.facts.Providers.SetCatalogConnectionFacts(s)
+}
+
+// modelValueFor 模型行 ↔ 底座运行时值的换算（Providers 面缺省时返回明确错误）。
+func (s *Service) modelValueFor(runtimeID, providerID, model string) (string, error) {
+	if s.facts.Providers == nil {
+		return "", errPlaneFactsMissing
+	}
+	return s.facts.Providers.ModelValueFor(runtimeID, providerID, model)
+}
+
+// mcpGatewayEnabled 进程级网关开关（未装配 → 默认开启，与 `registry.NewPlanes` 的默认一致）。
+func (s *Service) mcpGatewayEnabled() bool {
+	if s.facts.Gateway == nil {
+		return true
+	}
+	return s.facts.Gateway.McpGatewayEnabled()
 }

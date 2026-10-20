@@ -124,17 +124,17 @@ func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
 	ctx := context.Background()
 	svc, st := newSearchRig(t)
 	home := t.TempDir()
-	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
-	svc.planes.Providers.SetProviderDir(filepath.Join(home, "providers"))
+	planesOf(svc).Credentials.SetLayered(newTestCredentials(t, home))
+	planesOf(svc).Providers.SetProviderDir(filepath.Join(home, "providers"))
 
 	key := "zq7-not-a-known-shape-42" // 形状上谁都认不出来
-	if _, err := svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
+	if _, err := planesOf(svc).Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: "dyn", Protocol: "openai", APIKey: &key,
 	}); err != nil {
 		t.Fatalf("写面存密钥: %v", err)
 	}
 	// 写面回执本身不得回显明文（另一条判据，但放在同一现场里更省事）。
-	items, err := svc.planes.Providers.ListProviders(ctx)
+	items, err := planesOf(svc).Providers.ListProviders(ctx)
 	if err != nil || len(items) != 1 || !items[0].HasKey {
 		t.Fatalf("装回读面: n=%d err=%v", len(items), err)
 	}
@@ -189,8 +189,8 @@ func TestMcpSecretValueIsRedactedAfterResolution(t *testing.T) {
 	ctx := context.Background()
 	svc, st := newSearchRig(t)
 	home := t.TempDir()
-	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
-	svc.planes.Providers.SetProviderDir(filepath.Join(home, "providers"))
+	planesOf(svc).Credentials.SetLayered(newTestCredentials(t, home))
+	planesOf(svc).Providers.SetProviderDir(filepath.Join(home, "providers"))
 	enableStore(svc, st)
 
 	const ref = "store:mcp/dyn-token"
@@ -198,7 +198,7 @@ func TestMcpSecretValueIsRedactedAfterResolution(t *testing.T) {
 	if err := st.SetMcpSecret(ctx, ref, val); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{
 		ID: "dyn", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 		SecretEnv: map[string]string{"TOKEN": ref},
 	}); err != nil {

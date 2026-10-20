@@ -80,7 +80,7 @@ func newGenRigOn(t *testing.T, runtimeID string) *genRig {
 // registerMcp 往注册表里放一个 stdio MCP（模拟 `mcp/*.json` 装载/改动）。
 func (r *genRig) registerMcp(t *testing.T, m capability.McpServer) {
 	t.Helper()
-	if err := r.svc.planes.Capabilities.RegisterMcpServer(&m); err != nil {
+	if err := planesOf(r.svc).Capabilities.RegisterMcpServer(&m); err != nil {
 		t.Fatalf("注册 MCP %s: %v", m.ID, err)
 	}
 }
@@ -149,7 +149,7 @@ func (r *genRig) boundary(t *testing.T, convID string) *session.ActiveSession {
 // row 读库里那三个 M3 列里的指纹与选定明细。
 func (r *genRig) row(t *testing.T, convID string) (fingerprint, capJSON string) {
 	t.Helper()
-	row, ok, err := r.svc.planes.Resources.Store().GetSession(context.Background(), convID)
+	row, ok, err := planesOf(r.svc).Resources.Store().GetSession(context.Background(), convID)
 	if err != nil || !ok {
 		t.Fatalf("读库: ok=%v err=%v", ok, err)
 	}

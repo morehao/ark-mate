@@ -145,10 +145,10 @@ func waitQueueDrain(t *testing.T, svc *Service, convID string) {
 // readInputs 直读 inputs 表的状态列（台账断言：作废/已投递的行必须还在）。
 func readInputs(t *testing.T, svc *Service) ([]string, error) {
 	t.Helper()
-	if svc.planes.Resources.Store() == nil {
+	if planesOf(svc).Resources.Store() == nil {
 		t.Fatal("本用例需要 sqlite 库")
 	}
-	rows, err := svc.planes.Resources.Store().DB().Raw("SELECT status FROM inputs ORDER BY created_at, id").Rows()
+	rows, err := planesOf(svc).Resources.Store().DB().Raw("SELECT status FROM inputs ORDER BY created_at, id").Rows()
 	if err != nil {
 		return nil, err
 	}

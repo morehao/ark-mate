@@ -182,7 +182,7 @@ func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string
 	if sid, ok := o.svc.sessionPlane.ByRuntimeSessionID(wrapped); ok {
 		return sid
 	}
-	st := o.svc.planes.Resources.Store()
+	st := o.svc.resourceStore
 	if st == nil {
 		return ""
 	}

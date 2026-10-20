@@ -126,7 +126,7 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 func registerStdioMcps(t *testing.T, svc *Service) {
 	t.Helper()
 	for _, id := range []string{"fs", "git"} {
-		if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{
+		if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{
 			ID: id, Name: id, Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 		}); err != nil {
 			t.Fatal(err)

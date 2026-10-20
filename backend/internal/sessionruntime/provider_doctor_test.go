@@ -228,18 +228,18 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	// 对账借读的判据是构建期底座（v19：没有"哪个 agent 跑在哪个底座"这一维了），
 	// 所以这里把它设成要体检的那个（`newModelRig` 也注册了合成底座 rtx 的声明）。
 	setBuildRuntime(t, runtimetest.ID)
-	state := r.svc.Planes().Resources.RuntimeConfigStates(ctx)[runtimetest.ID]
+	state := planesOf(r.svc).Resources.RuntimeConfigStates(ctx)[runtimetest.ID]
 
 	// ① 平台声明一条、底座却什么都没广告（这里用"有目录条目但零候选"造出 advertised=0 的事实）：
 	//    这正是"写了完全没生效"的形态 → 高危。
 	m := r.createModel(t, "p1", "m-1")
 	// 运行时目录里的取值是**不透明串**，由平台的同一份生成规则折出来（v12 起清单行不再回带它）。
-	value, err := provider.ModelValueFor(r.svc.planes.Registry, runtimetest.ID, m.ProviderID, m.Model)
+	value, err := provider.ModelValueFor(planesOf(r.svc).Registry, runtimetest.ID, m.ProviderID, m.Model)
 	if err != nil {
 		t.Fatal(err)
 	}
 	seedCatalog(r.svc, runtimetest.ID)
-	facts := doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(r.svc.Planes()), dsh.Specs(), runtimetest.ID, state)
+	facts := doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(planesOf(r.svc)), dsh.Specs(), runtimetest.ID, state)
 	if !facts.AdvertisedKnown || facts.AdvertisedCount != 0 {
 		t.Fatalf("应取到「目录为空」这个事实：%+v", facts)
 	}
@@ -252,7 +252,7 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 
 	// ② 底座广告了它 → 不高危、差集为空。
 	seedCatalog(r.svc, runtimetest.ID, acpValue(value))
-	facts = doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(r.svc.Planes()), dsh.Specs(), runtimetest.ID, state)
+	facts = doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(planesOf(r.svc)), dsh.Specs(), runtimetest.ID, state)
 	if !facts.AdvertisedKnown || facts.HighRisk || facts.AdvertisedCount != 1 {
 		t.Fatalf("两侧一致时不该高危：%+v", facts)
 	}
@@ -266,8 +266,8 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	// `ModelCatalog` 去 resume 历史会话——那是一条会**真的拉起底座**的路（测试不得碰用户装的那份）。
 	// 摘掉编排器走的正是 CLI 离线那条路。
 	r.svc.orch = nil
-	r.svc.planes.Providers.ResetConfigCatalog()
-	facts = doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(r.svc.Planes()), dsh.Specs(), runtimetest.ID, state)
+	planesOf(r.svc).Providers.ResetConfigCatalog()
+	facts = doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(planesOf(r.svc)), dsh.Specs(), runtimetest.ID, state)
 	if facts.AdvertisedKnown || facts.HighRisk {
 		t.Fatalf("取不到广告时不许判定：%+v", facts)
 	}
@@ -305,7 +305,7 @@ func TestCollectProviderDoctorFactsNoStoreNoHome(t *testing.T) {
 // 而 `ModelCatalog` 在无活会话时读它（source=cache）。用真会话造这一侧会让单测依赖真底座，
 // 而本用例要钉的是**对账算法**本身。缓存键是 runtime id（v19）。
 func seedCatalog(svc *Service, runtimeID string, values ...acp.ConfigOptionValue) {
-	svc.planes.Providers.PutConfigOptions(runtimeID, []acp.ConfigOption{{
+	planesOf(svc).Providers.PutConfigOptions(runtimeID, []acp.ConfigOption{{
 		ID: "model", Name: "Model", Category: acp.CategoryModel, Type: "select",
 		Values: values,
 	}})

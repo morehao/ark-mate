@@ -35,15 +35,15 @@ func registryApp(t *testing.T) (*sessionruntime.Service, string, string) {
 	st := testutil.OpenStore(t, dbPath)
 	t.Cleanup(func() { _ = st.Close() })
 
-	svc := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New())
-	svc.EnableStore(st, func() { svc.Planes().EnableStore(st) })
+	svc := newSessionService(runtime.NewRegistry(), eventbus.New())
+	svc.EnableStore(st, st, func() { planesOf(svc).EnableStore(st) })
 
 	// 工作空间根放在**私有临时目录**下（本机隔离纪律：绝不碰 ~/.ark-mate）。
 	provision := filepath.Join(t.TempDir(), "workspaces")
-	if err := svc.Planes().Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
+	if err := planesOf(svc).Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	if err := svc.Planes().Workspaces.EnsureDefaultWorkspace(); err != nil {
+	if err := planesOf(svc).Workspaces.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestWorkspaceRegistryHTTPFlow(t *testing.T) {
 	}
 
 	// ⑦ 删除（DELETE）：只删登记，目录仍在（数据保留）。
-	if _, err := svc.Planes().Workspaces.CreateRegisteredWorkspace(dirA, "", false); err != nil {
+	if _, err := planesOf(svc).Workspaces.CreateRegisteredWorkspace(dirA, "", false); err != nil {
 		t.Fatalf("前置登记: %v", err)
 	}
 	_, dataDel := callJSON(t, svc, "DELETE", "/v1/mate/workspaces/"+wsA.ID, "")
@@ -178,28 +178,28 @@ func TestWorkspaceRegistryHTTPFlow(t *testing.T) {
 func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	st := testutil.OpenStore(t, dbPath)
-	svc := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New())
-	svc.EnableStore(st, func() { svc.Planes().EnableStore(st) })
+	svc := newSessionService(runtime.NewRegistry(), eventbus.New())
+	svc.EnableStore(st, st, func() { planesOf(svc).EnableStore(st) })
 	provision := filepath.Join(t.TempDir(), "workspaces")
-	if err := svc.Planes().Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
+	if err := planesOf(svc).Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	if err := svc.Planes().Workspaces.EnsureDefaultWorkspace(); err != nil {
+	if err := planesOf(svc).Workspaces.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 	dir1, dir2 := t.TempDir(), t.TempDir()
-	if _, err := svc.Planes().Workspaces.CreateRegisteredWorkspace(dir1, "第一个", false); err != nil {
+	if _, err := planesOf(svc).Workspaces.CreateRegisteredWorkspace(dir1, "第一个", false); err != nil {
 		t.Fatalf("登记 1: %v", err)
 	}
-	ws2, err := svc.Planes().Workspaces.CreateRegisteredWorkspace(dir2, "第二个", false)
+	ws2, err := planesOf(svc).Workspaces.CreateRegisteredWorkspace(dir2, "第二个", false)
 	if err != nil {
 		t.Fatalf("登记 2: %v", err)
 	}
 	// 把第二个移到最前，落一个**非创建顺序**的顺序进库。
-	if _, err := svc.Planes().Workspaces.MoveRegisteredWorkspace(ws2.ID, ""); err != nil {
+	if _, err := planesOf(svc).Workspaces.MoveRegisteredWorkspace(ws2.ID, ""); err != nil {
 		t.Fatalf("重排: %v", err)
 	}
-	before, err := svc.Planes().Workspaces.WorkspaceRegistry()
+	before, err := planesOf(svc).Workspaces.WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}
@@ -208,16 +208,16 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	// 重新打开同一个库（等价重启）：登记与顺序都必须在。
 	st2 := testutil.OpenStore(t, dbPath)
 	t.Cleanup(func() { _ = st2.Close() })
-	svc2 := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New())
-	svc2.EnableStore(st2, func() { svc2.Planes().EnableStore(st2) })
-	if err := svc2.Planes().Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
+	svc2 := newSessionService(runtime.NewRegistry(), eventbus.New())
+	svc2.EnableStore(st2, st2, func() { planesOf(svc2).EnableStore(st2) })
+	if err := planesOf(svc2).Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy(重启): %v", err)
 	}
 	// 幂等：默认工作空间已存在 → 不重建、不改顺序。
-	if err := svc2.Planes().Workspaces.EnsureDefaultWorkspace(); err != nil {
+	if err := planesOf(svc2).Workspaces.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace(重启): %v", err)
 	}
-	after, err := svc2.Planes().Workspaces.WorkspaceRegistry()
+	after, err := planesOf(svc2).Workspaces.WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry(重启): %v", err)
 	}
@@ -240,7 +240,7 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 
 // TestWorkspaceRegistryMemoryModeIsReadOnlyHTTP memory 持久层：读面空 + 不可写，写面 40501。
 func TestWorkspaceRegistryMemoryModeIsReadOnlyHTTP(t *testing.T) {
-	svc := sessionruntime.NewService(runtime.NewRegistry(), eventbus.New()) // 无库 = memory
+	svc := newSessionService(runtime.NewRegistry(), eventbus.New()) // 无库 = memory
 	env := doRaw(t, svc, "GET", "/v1/mate/workspaces", "")
 	var parsed struct {
 		Code int                            `json:"code"`

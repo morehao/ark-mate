@@ -64,12 +64,12 @@ func newModelRig(t *testing.T) *modelRig {
 	// 原生权限 / 清单交付 / 模型值三面，表现为一堆看起来像"平台侧没实现"的假症状）。
 	builtin := builtinSpec(t, runtime.DefaultBuildRuntime)
 	builtin.Launch.Command = "mate-test-" + builtin.ID + "-stub-not-on-path"
-	r.svc.planes.Registry.Register(builtin)
-	dsh.New().RegisterPorts(r.svc.planes.Registry)
+	planesOf(r.svc).Registry.Register(builtin)
+	dsh.New().RegisterPorts(planesOf(r.svc).Registry)
 	// 合成那一份：同样 Spec 与端口同批登记（`runtimetest.Register` 就是夹具侧的 `RegisterBuiltinPorts`）。
-	runtimetest.Register(r.svc.planes.Registry, runtime.LaunchSpec{Command: "mate-test-" + runtimetest.ID + "-stub-not-on-path"})
+	runtimetest.Register(planesOf(r.svc).Registry, runtime.LaunchSpec{Command: "mate-test-" + runtimetest.ID + "-stub-not-on-path"})
 	// 隔离面由各 spec 自己声明（dsh 的 `DSH_HOME` / 合成底座的 `RTX_HOME`），内核只做机械投影。
-	r.svc.planes.Registry.ApplyIsolationEnv(home)
+	planesOf(r.svc).Registry.ApplyIsolationEnv(home)
 	// v19：对账不再借 agent 读目录（agent 面撤销），夹具只剩"注册表 + 隔离 env"两件事。
 	return &modelRig{genRig: r}
 }
@@ -101,7 +101,7 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 	ctx := context.Background()
 	key := "sk-test"
 	baseURL := "https://api.deepseek.com/v1"
-	if _, err := r.svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
+	if _, err := planesOf(r.svc).Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: providerID, Protocol: "openai", BaseURL: &baseURL, APIKey: &key,
 	}); err != nil && errCode(err) != "provider_exists" {
 		t.Fatalf("CreateProvider(%s): %v", providerID, err)
@@ -122,7 +122,7 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 	if req.Note != nil {
 		note = *req.Note
 	}
-	ok, err := r.svc.planes.Resources.Store().CreateModelDefinition(ctx, model.ModelColumns{
+	ok, err := planesOf(r.svc).Resources.Store().CreateModelDefinition(ctx, model.ModelColumns{
 		ID: id, ProviderID: providerID, Model: modelID, Name: name, Note: note,
 		InputModalities: modalities, MaxInputTokens: req.MaxInputTokens, MaxOutputTokens: req.MaxOutputTokens,
 	}, defn.DefinitionWriteActor)
@@ -130,11 +130,11 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 		t.Fatalf("插模型行: ok=%v err=%v", ok, err)
 	}
 	if req.IsDefault != nil && *req.IsDefault {
-		if err := r.svc.planes.Resources.Store().SetDefaultModelID(ctx, id); err != nil {
+		if err := planesOf(r.svc).Resources.Store().SetDefaultModelID(ctx, id); err != nil {
 			t.Fatalf("置默认: %v", err)
 		}
 	}
-	resp, found, err := r.svc.Planes().Providers.ModelRow(ctx, id)
+	resp, found, err := planesOf(r.svc).Providers.ModelRow(ctx, id)
 	if err != nil || !found {
 		t.Fatalf("读回刚插的行: found=%v err=%v", found, err)
 	}
@@ -189,7 +189,7 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 	// 行里不得出现**生成的值**（平台只存输入：provider_id + model_id）。
 	r := newModelRig(t)
 	resp := r.createModel(t, "p1", "v4-flash")
-	row, found, err := r.svc.planes.Resources.Store().GetModelDefinition(context.Background(), resp.ID)
+	row, found, err := planesOf(r.svc).Resources.Store().GetModelDefinition(context.Background(), resp.ID)
 	if err != nil || !found {
 		t.Fatalf("读行: found=%v err=%v", found, err)
 	}
@@ -208,7 +208,7 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 func TestModelListReadsEmptyWithoutSQLite(t *testing.T) {
 	ctx := context.Background()
 	svc := newServiceForTest(dsh.Registry(), eventbus.New())
-	items, err := svc.planes.Providers.ListModels(ctx)
+	items, err := planesOf(svc).Providers.ListModels(ctx)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("memory 模式的清单读面应回空列表: %+v err=%v", items, err)
 	}
@@ -222,20 +222,20 @@ func TestModelListReadsEmptyWithoutSQLite(t *testing.T) {
 func TestResolveDefaultModelFallbackChain(t *testing.T) {
 	ctx := context.Background()
 	r := newModelRig(t)
-	v, err := r.svc.planes.Providers.DefaultModelValueFor(ctx, runtimetest.ID)
+	v, err := planesOf(r.svc).Providers.DefaultModelValueFor(ctx, runtimetest.ID)
 	if err != nil || v != "" {
 		t.Fatalf("无默认应回空串（不下发）: %q err=%v", v, err)
 	}
 	r.createModel(t, "p1", "m-a", func(req *dtomodel.ModelCreateReq) { req.IsDefault = ptr(true) })
-	v, err = r.svc.planes.Providers.DefaultModelValueFor(ctx, runtimetest.ID)
+	v, err = planesOf(r.svc).Providers.DefaultModelValueFor(ctx, runtimetest.ID)
 	if err != nil || v != "p1/m-a" {
 		t.Fatalf("有默认应回生成的值: %q err=%v", v, err)
 	}
 	// dsh 的形态是 JSON 数组（同一个平台模型 id，两种底座各自的词汇）。
-	if _, err := r.svc.planes.Providers.DefaultModelValueFor(ctx, "dsh"); err != nil {
+	if _, err := planesOf(r.svc).Providers.DefaultModelValueFor(ctx, "dsh"); err != nil {
 		t.Fatalf("dsh 也该能算出它的值: %v", err)
 	}
-	if v, err := r.svc.planes.Providers.DefaultModelValueFor(ctx, "stub"); err != nil || v != "" {
+	if v, err := planesOf(r.svc).Providers.DefaultModelValueFor(ctx, "stub"); err != nil || v != "" {
 		t.Fatalf("未声明模型值形态的 runtime 应回空串: %q err=%v", v, err)
 	}
 }
@@ -245,7 +245,7 @@ func TestModelListProviderDeleteGuard(t *testing.T) {
 	ctx := context.Background()
 	r := newModelRig(t)
 	_ = r.createModel(t, "p1", "m-a")
-	_, err := r.svc.planes.Providers.DeleteProvider(ctx, "p1")
+	_, err := planesOf(r.svc).Providers.DeleteProvider(ctx, "p1")
 	if errCode(err) != "provider_in_use" {
 		t.Fatalf("被模型挂靠的供应商应 provider_in_use，got %q（%v）", errCode(err), err)
 	}

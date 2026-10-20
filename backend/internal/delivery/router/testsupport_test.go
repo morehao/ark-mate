@@ -57,7 +57,7 @@ func testRouterDeps(t *testing.T, o testRouterOpts) router.Deps {
 	}
 	svc := o.service
 	if svc == nil {
-		svc = sessionruntime.NewService(reg, bus)
+		svc = newSessionService(reg, bus)
 	}
 
 	exec := runtimeconn.NewPlaneFor(reg)
@@ -84,7 +84,7 @@ func testRouterDeps(t *testing.T, o testRouterOpts) router.Deps {
 	}
 	services := assembly.Facts{
 		Cfg:        config.Default(),
-		Planes:     svc.Planes(),
+		Planes:     planesOf(svc),
 		Session:    svc,
 		Bus:        bus,
 		Runtime:    reg,

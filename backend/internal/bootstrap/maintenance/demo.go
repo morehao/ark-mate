@@ -45,7 +45,7 @@ func Demo(args []string) {
 	}
 
 	bus := eventbus.New()
-	svc := sessionruntime.NewService(reg, bus)
+	svc, _, _, _ := assembly.NewSessionService(reg, bus)
 	// runtime 配置隔离（M3-3）：demo 也会真的拉起底座子进程，必须与 serve 走同一份隔离表
 	// （否则 demo 读的是用户自己的底座 home 目录，与平台会话行为不一致）。
 	reg.ApplyIsolationEnv(cfg.HomeDir)

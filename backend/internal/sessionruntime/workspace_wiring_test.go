@@ -36,7 +36,7 @@ func newConvRig(t *testing.T) *convRig {
 	t.Cleanup(func() { _ = st.Close() })
 	enableStore(svc, st)
 	mustWorkspacePolicy(t, svc, filepath.Join(t.TempDir(), "workspaces"), nil)
-	if err := svc.Planes().Workspaces.EnsureDefaultWorkspace(); err != nil {
+	if err := planesOf(svc).Workspaces.EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 	return &convRig{svc: svc, orch: orch, st: st}
@@ -50,7 +50,7 @@ func newConvRig(t *testing.T) *convRig {
 //     而读面兜不住"用户取消默认登记"之后的形态。
 func TestCreateSessionUnspecifiedUsesDefaultWorkspace(t *testing.T) {
 	r := newConvRig(t)
-	def, ok, err := r.svc.Planes().Workspaces.DefaultWorkspace()
+	def, ok, err := planesOf(r.svc).Workspaces.DefaultWorkspace()
 	if err != nil || !ok {
 		t.Fatalf("默认工作空间: ok=%v err=%v", ok, err)
 	}
@@ -105,7 +105,7 @@ func TestCreateSessionExplicitCwdKeepsEmptyAssignment(t *testing.T) {
 		t.Fatalf("库里也不该替它登记: %q", row.WorkspaceID)
 	}
 	// 且**没有**因此产生登记行：只有默认工作空间那一条。
-	list, err := r.svc.Planes().Workspaces.WorkspaceRegistry()
+	list, err := planesOf(r.svc).Workspaces.WorkspaceRegistry()
 	if err != nil {
 		t.Fatalf("WorkspaceRegistry: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestCreateSessionExplicitCwdKeepsEmptyAssignment(t *testing.T) {
 func TestCreateSessionByWorkspaceID(t *testing.T) {
 	r := newConvRig(t)
 	dir := t.TempDir()
-	ws, err := r.svc.Planes().Workspaces.CreateRegisteredWorkspace(dir, "我的项目", false)
+	ws, err := planesOf(r.svc).Workspaces.CreateRegisteredWorkspace(dir, "我的项目", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestCreateSessionWorkspaceConflict(t *testing.T) {
 	r := newConvRig(t)
 	dirA := t.TempDir()
 	dirB := t.TempDir()
-	wsA, err := r.svc.Planes().Workspaces.CreateRegisteredWorkspace(dirA, "A", false)
+	wsA, err := planesOf(r.svc).Workspaces.CreateRegisteredWorkspace(dirA, "A", false)
 	if err != nil {
 		t.Fatalf("登记 A: %v", err)
 	}
@@ -192,9 +192,9 @@ func TestCreateSessionWorkspaceConflict(t *testing.T) {
 // 这条是"默认工作空间显示 N 个会话、点进去却是空的"这类不一致的唯一防线。
 func TestListSessionsByWorkspaceFilter(t *testing.T) {
 	r := newConvRig(t)
-	def, _, _ := r.svc.Planes().Workspaces.DefaultWorkspace()
+	def, _, _ := planesOf(r.svc).Workspaces.DefaultWorkspace()
 	dir := t.TempDir()
-	ws, err := r.svc.Planes().Workspaces.CreateRegisteredWorkspace(dir, "项目", false)
+	ws, err := planesOf(r.svc).Workspaces.CreateRegisteredWorkspace(dir, "项目", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -259,10 +259,10 @@ func TestListSessionsByWorkspaceFilter(t *testing.T) {
 // 否则用户会看到"已经是我的工作空间"的条目出现在"未登记"里，而点它的语义（登记）已经无意义。
 func TestRecentWorkspacesExcludesRegistered(t *testing.T) {
 	r := newConvRig(t)
-	def, _, _ := r.svc.Planes().Workspaces.DefaultWorkspace()
+	def, _, _ := planesOf(r.svc).Workspaces.DefaultWorkspace()
 	registeredDir := t.TempDir()
 	looseDir := t.TempDir()
-	ws, err := r.svc.Planes().Workspaces.CreateRegisteredWorkspace(registeredDir, "已登记", false)
+	ws, err := planesOf(r.svc).Workspaces.CreateRegisteredWorkspace(registeredDir, "已登记", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestRecentWorkspacesExcludesRegistered(t *testing.T) {
 	r.svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "c-reg", Cwd: ws.Path, WorkspaceID: ws.ID})
 	r.svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "c-loose", Cwd: mustEval(t, looseDir)})
 
-	recent, err := r.svc.Planes().Workspaces.RecentWorkspaces(10)
+	recent, err := planesOf(r.svc).Workspaces.RecentWorkspaces(10)
 	if err != nil {
 		t.Fatalf("RecentWorkspaces: %v", err)
 	}
@@ -308,9 +308,9 @@ func TestRecentWorkspacesExcludesRegistered(t *testing.T) {
 // 库是对的、界面是空的，而中间没有任何报错，所以必须由测试钉住。
 func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	r := newConvRig(t)
-	def, _, _ := r.svc.Planes().Workspaces.DefaultWorkspace()
+	def, _, _ := planesOf(r.svc).Workspaces.DefaultWorkspace()
 	dir := t.TempDir()
-	ws, err := r.svc.Planes().Workspaces.CreateRegisteredWorkspace(dir, "要被移除的", false)
+	ws, err := planesOf(r.svc).Workspaces.CreateRegisteredWorkspace(dir, "要被移除的", false)
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	}
 
 	// 删登记（模型层 + store 层都要清）。
-	del, err := r.svc.Planes().Workspaces.DeleteRegisteredWorkspace(ws.ID)
+	del, err := planesOf(r.svc).Workspaces.DeleteRegisteredWorkspace(ws.ID)
 	if err != nil {
 		t.Fatalf("DeleteRegisteredWorkspace: %v", err)
 	}

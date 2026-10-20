@@ -48,7 +48,7 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *sessionruntime.Service) {
 	// 否则模型配置落点会因为解析不到隔离根而报错（这是刻意的 fail-closed：绝不回落到用户目录）。
 	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
 	bus := eventbus.New()
-	svc := sessionruntime.NewService(reg, bus)
+	svc := newSessionService(reg, bus)
 	// v20：这条夹具是 **memory 模式**（没有 sqlite 层），所以密钥的落点是托管文档
 	// `<MATE_HOME>/credentials.json`——`POST/PATCH providers` 带 `api_key` 时它就是事实源，
 	// 文档没装配会被**显式拒绝**（`credentials_write_failed`：拒绝一次只在内存里成功的写入）。
@@ -61,8 +61,8 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *sessionruntime.Service) {
 	// 继承环境那一层置空：这条夹具不该被跑测试的机器上恰好存在的同名变量影响
 	// （层序本身由 `pkg/credentials` 的用例与 manager 的用例覆盖）。
 	creds.Env = func(string) string { return "" }
-	svc.Planes().Credentials.SetLayered(creds)
-	svc.Planes().Providers.SetProviderDir(filepath.Join(home, "providers"))
+	planesOf(svc).Credentials.SetLayered(creds)
+	planesOf(svc).Providers.SetProviderDir(filepath.Join(home, "providers"))
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(testRouterDeps(t, testRouterOpts{web: assets, service: svc, registry: reg, bus: bus}))
 	return engine, svc
@@ -375,7 +375,7 @@ func newAuthEngine(t *testing.T, creds *credential.Set) *gin.Engine {
 	// 否则模型配置落点会因为解析不到隔离根而报错（这是刻意的 fail-closed：绝不回落到用户目录）。
 	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
 	bus := eventbus.New()
-	svc := sessionruntime.NewService(reg, bus)
+	svc := newSessionService(reg, bus)
 	engine := router.New(testRouterDeps(t, testRouterOpts{creds: creds, service: svc, registry: reg, bus: bus}))
 	return engine
 }
@@ -592,7 +592,7 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 		}
 	}
 	e, svc := newEngineWithService(t)
-	if err := svc.Planes().Workspaces.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
+	if err := planesOf(svc).Workspaces.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 
@@ -650,10 +650,10 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 		t.Fatalf("写 config.json: %v", err)
 	}
 	e, svc := newEngineWithService(t)
-	if err := svc.Planes().Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
+	if err := planesOf(svc).Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	svc.Planes().Workspaces.SetRootsStore(config.NewSettingsStore(cfgDir, ""))
+	planesOf(svc).Workspaces.SetRootsStore(config.NewSettingsStore(cfgDir, ""))
 
 	// 起步：没有偏好起点（prefer_roots=false），可写，来源 = 默认值。
 	env := get(t, e, "/v1/mate/settings/workspace")
@@ -724,7 +724,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	}
 
 	// 被更高优先级来源锁定 → 拒绝写并自报只读（面板据此转只读，而不是假装保存成功）。
-	svc.Planes().Workspaces.SetRootsStore(config.NewSettingsStore(cfgDir, config.SourceEnv))
+	planesOf(svc).Workspaces.SetRootsStore(config.NewSettingsStore(cfgDir, config.SourceEnv))
 	env = put(t, e, "/v1/mate/settings/workspace", `{"roots":[]}`)
 	if env.Code != 40001 || !strings.Contains(env.Msg, "settings_locked") {
 		t.Fatalf("锁定时应 settings_locked: %+v", env)
@@ -782,7 +782,7 @@ func TestWorkspaceFilesRoute(t *testing.T) {
 	e, svc := newEngineWithService(t)
 
 	// 即便配了"起始点偏好"，看资料也不受它限制（v14.5：名录不是边界）。
-	if err := svc.Planes().Workspaces.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
+	if err := planesOf(svc).Workspaces.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 

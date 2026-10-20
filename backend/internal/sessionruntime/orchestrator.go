@@ -92,8 +92,8 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	//
 	// `planes.Identity` 在 `NewPlanes` 里必造；nil 判据只服务"自造 Planes 的测试夹具"。
 	var identityOf func() pkgidentity.Spec
-	if svc.planes.Identity != nil {
-		identityOf = svc.planes.Identity.Spec
+	if svc.facts.Identity != nil {
+		identityOf = svc.facts.Identity.Spec
 	}
 	// 轮次运行期状态机的四张窄端口：句柄取自本结构体、在途登记沿用同一份 tracker，
 	// 其余三样（诊断 / 模型目录 / 工具记忆 / 交互取消）都是编排侧的事实，用适配器交出。
@@ -103,8 +103,8 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		Registry:         reg,
 		SelectedSpec:     svc.runtimePlane.SelectedSpec,
 		Acquire:          o.acquireClient,
-		ResolveModel:     svc.planes.Providers.ResolveSessionModel,
-		ProviderKeyReady: svc.planes.Providers.ProviderKeyReady,
+		ResolveModel:     svc.facts.Providers.ResolveSessionModel,
+		ProviderKeyReady: svc.facts.Providers.ProviderKeyReady,
 		McpServers:       svc.McpServersFor,
 		Catalog:          runnerCatalog{svc: svc},
 		Diagnostics:      runnerDiagnostics{o: o},

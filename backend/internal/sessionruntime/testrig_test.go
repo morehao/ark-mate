@@ -17,6 +17,7 @@ package sessionruntime
 
 import (
 	"context"
+	"sync"
 
 	defn "github.com/morehao/ark-mate/internal/core/definition"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
@@ -69,8 +71,8 @@ func providerTestSvc(t *testing.T, providerDir string) *Service {
 		// 与装配期同一条路径：先装配凭据分层（镜像落在 provider 目录的父目录下，即"mate home"），
 		// 再装载 `providers.json`（它顺带登记定义目录）。顺序与 `internal/bootstrap/app` 逐条同形——
 		// 反过来，memory 模式下装载时读到的密钥就会按"凭据面未装配"处理。
-		svc.planes.Credentials.SetLayered(newTestCredentials(t, filepath.Dir(providerDir)))
-		svc.planes.Providers.LoadProviderDefinitions(providerDir)
+		planesOf(svc).Credentials.SetLayered(newTestCredentials(t, filepath.Dir(providerDir)))
+		planesOf(svc).Providers.LoadProviderDefinitions(providerDir)
 	}
 	return svc
 }
@@ -315,14 +317,14 @@ func (r *genRig) seedModelRow(t *testing.T, providerID, model string, isDefault 
 	t.Helper()
 	ctx := context.Background()
 	id := objid.New(objid.Model)
-	ok, err := r.svc.planes.Resources.Store().CreateModelDefinition(ctx, dmodel.ModelColumns{
+	ok, err := planesOf(r.svc).Resources.Store().CreateModelDefinition(ctx, dmodel.ModelColumns{
 		ID: id, ProviderID: providerID, Model: model, InputModalities: resource.ModalityText,
 	}, defn.DefinitionWriteActor)
 	if err != nil || !ok {
 		t.Fatalf("插模型行 %s/%s: ok=%v err=%v", providerID, model, ok, err)
 	}
 	if isDefault {
-		if err := r.svc.planes.Resources.Store().SetDefaultModelID(ctx, id); err != nil {
+		if err := planesOf(r.svc).Resources.Store().SetDefaultModelID(ctx, id); err != nil {
 			t.Fatalf("置默认模型 %s: %v", id, err)
 		}
 	}
@@ -362,9 +364,9 @@ func storeAsSourceFacts(st *store.Store) svcsystem.SourceFactsReader {
 // 没有装配根，所以在同一个入口里把两半都做全——只接会话域会让能力/供应商/工作空间用例
 // 静默读到空平面（那正是 `EnableStore` 注释里说的"漏接任一个都是静默的"）。
 func enableStore(svc *Service, st *store.Store) {
-	svc.EnableStore(st, func() {
-		if svc.planes != nil {
-			svc.planes.EnableStore(st)
+	svc.EnableStore(st, st, func() {
+		if p := planesOf(svc); p != nil {
+			p.EnableStore(st)
 		}
 	})
 }
@@ -396,14 +398,55 @@ func poolOf(o *Orchestrator) *runtimeconn.Pool {
 // no-op；但包内绝大多数用例要真拨号/真记账/真诊断，所以统一从这里走，与生产装配根同形
 // （两半 + 五个来源接线）。改名/漏接的失效方式与生产一致：编译错或诊断报未连接。
 func newServiceForTest(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Service {
+	planes := registry.NewPlanes(reg)
 	plane := runtimeconn.NewPlaneFor(reg)
 	pool := runtimeconn.NewPool(plane)
-	opts = append(opts, WithRuntimePlane(plane), WithConnPool(pool))
+	opts = append(opts,
+		WithPlaneFacts(planeFactsOfTest(planes)),
+		WithRuntimePlane(plane), WithConnPool(pool))
 	svc := NewService(reg, bus, opts...)
 	plane.SetCredentialSource(svc)
 	pool.SetProviderEnvSource(svc)
-	pool.SetConfigDigestSource(svc.planes.Resources)
+	pool.SetConfigDigestSource(planes.Resources)
 	pool.SetNativeEnvSource(svc)
 	plane.SetLiveClientSource(pool)
+	testPlanes.Store(svc, planes)
 	return svc
+}
+
+// testPlanes 记录夹具为每个 Service 造的具体平面（仅供测试断言/前置）。
+//
+// 生产代码不再有 `Planes()`：执行面只认 `PlaneFacts`。测试要直接摆弄具体平面（登记工作空间、
+// 写能力定义…），所以夹具在这里留一份旁路表——**只存在于 `_test.go`**，不污染生产类型。
+var testPlanes sync.Map // map[*Service]*registry.Planes
+
+// planesOf 取夹具造的具体平面集合（未登记 → 明确失败，而不是空指针）。
+func planesOf(svc *Service) *registry.Planes {
+	v, ok := testPlanes.Load(svc)
+	if !ok {
+		panic("planesOf: 该 Service 不是 newServiceForTest 造的（没有具体平面记录）")
+	}
+	return v.(*registry.Planes)
+}
+
+// planeFactsOfTest 把具体平面折成按面端口（与 assembly.planeFacts 同形）。
+func planeFactsOfTest(p *registry.Planes) PlaneFacts {
+	return PlaneFacts{
+		Providers:    p.Providers,
+		Capabilities: p.Capabilities,
+		Skills:       p.Skills,
+		McpSecrets:   p.McpSecrets,
+		Workspaces:   p.Workspaces,
+		Credentials:  p.Credentials,
+		Automation:   p.Automation,
+		Identity:     p.Identity,
+		Gateway:      p,
+	}
+}
+
+// rewireFacts 测试里**替换**了具体平面字段（例如换一个能力注册表）之后，把 Service 的
+// 按面端口按当前平面重新折一遍。只改字段不重折的表现是"注册了新 MCP server 但执行面看不见"
+// （端口持有的是旧实例）。
+func rewireFacts(svc *Service) {
+	svc.facts = planeFactsOfTest(planesOf(svc))
 }

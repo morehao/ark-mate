@@ -144,7 +144,7 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 // 与 `app.go` 的 `SessionPlane: a.svc.SessionPlane(), Bus: a.bus` 逐条对应（用例实例在
 // `ctrexport` 里造；测试里由这里造——`internal/service/svcsystem` 不能 import `manager`）。
 func exportSystemSvc(svc *Service) svcsystem.SystemSvc {
-	return svcsystem.New(svcsystem.NewSource(storeAsSourceFacts(svc.planes.Resources.Store()), svc.sessionPlane, svc.bus))
+	return svcsystem.New(svcsystem.NewSource(storeAsSourceFacts(planesOf(svc).Resources.Store()), svc.sessionPlane, svc.bus))
 }
 
 func TestExportSessions(t *testing.T) {

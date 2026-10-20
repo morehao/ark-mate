@@ -44,12 +44,12 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	svc := newServiceForTest(v12ProviderRegistry(), nil)
 	enableStore(svc, st)
-	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
-	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)
+	planesOf(svc).Credentials.SetLayered(newTestCredentials(t, home))
+	planesOf(svc).Providers.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	// ① 写面：带密钥新建 → 落进那一列，回执不回显明文。
 	key := secret
-	resp, err := svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
+	resp, err := planesOf(svc).Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: "write-face", Protocol: "openai", APIKey: &key,
 	})
 	if err != nil {
@@ -67,7 +67,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 
 	// ② 覆盖写：同一列被换成新值，旧值不留在任何地方。
 	key2 := "sk-rotated-value"
-	if _, err := svc.planes.Providers.UpdateProvider(ctx, "write-face", provider.PatchRequest{APIKey: &key2}); err != nil {
+	if _, err := planesOf(svc).Providers.UpdateProvider(ctx, "write-face", provider.PatchRequest{APIKey: &key2}); err != nil {
 		t.Fatal(err)
 	}
 	if hits := secretHitsAnywhere(t, st, secret); len(hits) != 0 {
@@ -93,9 +93,9 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 		t.Fatalf("导入的历史明文应进 key 列: %q", v)
 	}
 	// 装载面如实报"有密钥"。
-	svc.planes.Providers.DeleteForTest("legacy")
-	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)
-	items, _ := svc.planes.Providers.ListProviders(ctx)
+	planesOf(svc).Providers.DeleteForTest("legacy")
+	planesOf(svc).Providers.LoadProviderDefinitionsFromStore(ctx, dir)
+	items, _ := planesOf(svc).Providers.ListProviders(ctx)
 	for _, it := range items {
 		if it.ID == "legacy" && !it.HasKey {
 			t.Fatalf("库里那一列有值 → has_key 应为 true: %+v", it)
@@ -197,12 +197,12 @@ func TestModelListOrderIsProviderThenModelID(t *testing.T) {
 		{ID: "bbb", ProviderID: "p3", Model: "m-z", Name: "Z", InputModalities: "text"},
 	}
 	for _, row := range rows {
-		if ok, err := r.svc.planes.Resources.Store().CreateModelDefinition(ctx, row, "rest"); err != nil || !ok {
+		if ok, err := planesOf(r.svc).Resources.Store().CreateModelDefinition(ctx, row, "rest"); err != nil || !ok {
 			t.Fatalf("插入 %s: ok=%v err=%v", row.ID, ok, err)
 		}
 	}
 
-	got, err := r.svc.planes.Providers.ListModels(ctx)
+	got, err := planesOf(r.svc).Providers.ListModels(ctx)
 	if err != nil {
 		t.Fatalf("ListModels: %v", err)
 	}

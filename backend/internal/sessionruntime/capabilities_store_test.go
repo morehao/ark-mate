@@ -27,27 +27,27 @@ func TestLoadCapabilityDefinitionsFromStore(t *testing.T) {
 	}
 
 	// 坏定义不该让整个能力面起不来（容错口径与 LoadDir 逐字一致）。
-	if n := r.Svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, ""); n != 3 {
+	if n := planesOf(r.Svc).LoadCapabilityDefinitionsFromStore(ctx, ""); n != 3 {
 		t.Fatalf("应装载 3 条（2 skill + 1 mcp，坏定义跳过），got %d", n)
 	}
-	skills := r.Svc.planes.Capabilities.ListSkills()
+	skills := planesOf(r.Svc).Capabilities.ListSkills()
 	if len(skills) != 2 || skills[0].ID != "a-skill" || skills[1].ID != "b-skill" {
 		t.Fatalf("skill 装载不符: %+v", skills)
 	}
 	if skills[0].Name != "A" || len(skills[0].Runtimes) != 1 || skills[0].Runtimes[0] != "rtx" {
 		t.Fatalf("skill 字段未从 body 还原: %+v", skills[0])
 	}
-	mcps := r.Svc.planes.Capabilities.ListMcpServers()
+	mcps := planesOf(r.Svc).Capabilities.ListMcpServers()
 	if len(mcps) != 1 || mcps[0].ID != "m1" || mcps[0].Transport != "sse" {
 		t.Fatalf("mcp 装载不符: %+v", mcps)
 	}
 	// id 以**行主键**为准：body 里写别的 id 不该让这条能力挂到另一个名字下
 	// （行主键是 CAS 与审计的键，body 里的 id 只是历史残留）。
 	mustUpsertSkill(t, r, "c-skill", `{"id":"wrong-id","name":"C"}`)
-	if n := r.Svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, ""); n != 4 {
+	if n := planesOf(r.Svc).LoadCapabilityDefinitionsFromStore(ctx, ""); n != 4 {
 		t.Fatalf("第二次装载应 4 条，got %d", n)
 	}
-	for _, sk := range r.Svc.planes.Capabilities.ListSkills() {
+	for _, sk := range planesOf(r.Svc).Capabilities.ListSkills() {
 		if sk.ID == "wrong-id" {
 			t.Fatalf("body 里的 id 不该覆盖行主键: %+v", sk)
 		}
@@ -57,12 +57,12 @@ func TestLoadCapabilityDefinitionsFromStore(t *testing.T) {
 	if ok, err := r.St.DeleteSkillDefinition(ctx, "a-skill", 1, "test"); err != nil || !ok {
 		t.Fatalf("删除 skill 行: ok=%v err=%v", ok, err)
 	}
-	if n := r.Svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, ""); n != 3 {
+	if n := planesOf(r.Svc).LoadCapabilityDefinitionsFromStore(ctx, ""); n != 3 {
 		t.Fatalf("删除后装载应 3 条，got %d", n)
 	}
-	for _, sk := range r.Svc.planes.Capabilities.ListSkills() {
+	for _, sk := range planesOf(r.Svc).Capabilities.ListSkills() {
 		if sk.ID == "a-skill" {
-			t.Fatalf("库里已删除的 skill 仍在注册表里（幽灵定义）: %+v", r.Svc.planes.Capabilities.ListSkills())
+			t.Fatalf("库里已删除的 skill 仍在注册表里（幽灵定义）: %+v", planesOf(r.Svc).Capabilities.ListSkills())
 		}
 	}
 	// 变空也必须真的变空（只删一条的用例看不出"清场"，全删才看得出）。
@@ -75,13 +75,13 @@ func TestLoadCapabilityDefinitionsFromStore(t *testing.T) {
 	if ok, err := r.St.DeleteMcpServerDefinition(ctx, "m1", 1, "test"); err != nil || !ok {
 		t.Fatalf("删除 m1: ok=%v err=%v", ok, err)
 	}
-	if n := r.Svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, ""); n != 0 {
+	if n := planesOf(r.Svc).LoadCapabilityDefinitionsFromStore(ctx, ""); n != 0 {
 		t.Fatalf("全删后应 0 条，got %d", n)
 	}
-	if got := r.Svc.planes.Capabilities.ListSkills(); len(got) != 0 {
+	if got := planesOf(r.Svc).Capabilities.ListSkills(); len(got) != 0 {
 		t.Fatalf("全删后 skill 面应为空: %+v", got)
 	}
-	if got := r.Svc.planes.Capabilities.ListMcpServers(); len(got) != 0 {
+	if got := planesOf(r.Svc).Capabilities.ListMcpServers(); len(got) != 0 {
 		t.Fatalf("全删后 mcp 面应为空: %+v", got)
 	}
 }
@@ -92,7 +92,7 @@ func TestLoadCapabilityDefinitionsFromStore(t *testing.T) {
 // 日志可见），比崩在启动路径上更符合本仓"装载失败只告警不阻断"的既有口径。
 func TestLoadCapabilityDefinitionsFromStoreRequiresStore(t *testing.T) {
 	r := newRig(t) // 不带库
-	if n := r.Svc.Planes().LoadCapabilityDefinitionsFromStore(context.Background(), ""); n != 0 {
+	if n := planesOf(r.Svc).LoadCapabilityDefinitionsFromStore(context.Background(), ""); n != 0 {
 		t.Fatalf("无库时应 0 条，got %d", n)
 	}
 }

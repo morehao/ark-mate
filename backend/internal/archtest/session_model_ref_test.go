@@ -61,8 +61,8 @@ func TestSessionModelRefIsPlatformID(t *testing.T) {
 	}
 	// 适配器那一段：域只认端口，实现必须直连 `resolveSessionModel`（缺任一段都等于绕过解析）。
 	wiring := readStripped(t, filepath.Join(backendRoot(t), "internal", "sessionruntime", "orchestrator.go"))
-	if !strings.Contains(wiring, "svc.planes.Providers.ResolveSessionModel") {
-		t.Fatal("装配点没有把 `svc.planes.Providers.ResolveSessionModel` 接到 `Lifecycle.ResolveModel` 端口")
+	if !strings.Contains(wiring, "svc.facts.Providers.ResolveSessionModel") {
+		t.Fatal("装配点没有把 `svc.facts.Providers.ResolveSessionModel` 接到 `Lifecycle.ResolveModel` 端口")
 	}
 	if strings.Contains(start, "ModelID: opt.Model.Model,") {
 		t.Fatal("建会话写路径里仍在把 `opt.Model.Model`（请求原值）直接落库——" +
@@ -88,7 +88,7 @@ func TestSessionModelRefIsPlatformID(t *testing.T) {
 	}
 	depsSrc := readStripped(t, uniqueSourceFile(t, internalDir, nil,
 		`(?m)^func \(s \*Service\) ResolveModel\(`, "模型解析端口的实现 `ResolveModel`"))
-	if !strings.Contains(depsSrc, "s.planes.Providers.ResolveSessionModel(ctx, runtimeID, modelID)") {
+	if !strings.Contains(depsSrc, "s.facts.Providers.ResolveSessionModel(ctx, runtimeID, modelID)") {
 		t.Fatal("`ResolveModel` 适配器没有走 `provider.Plane.ResolveSessionModel`：解析链断在适配器上时，" +
 			"表现正是「把底座的不透明串写回库里」——而两端各自看都像在正常工作")
 	}
@@ -234,7 +234,7 @@ func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
 	wiring := readStripped(t, filepath.Join(backendRoot(t), "internal", "sessionruntime", "orchestrator.go"))
 	if !strings.Contains(start, "l.resolveModel(") || !strings.Contains(sess, "ResolveModel(") ||
 		!strings.Contains(depsSrc, "ResolveSessionModel(") ||
-		!strings.Contains(wiring, "svc.planes.Providers.ResolveSessionModel") {
+		!strings.Contains(wiring, "svc.facts.Providers.ResolveSessionModel") {
 		t.Fatal("建会话与 PATCH 两条写面都必须经 `ResolveSessionModel`（PATCH 那一半现在是" +
 			"「用例调端口 `ResolveModel` → 适配器调 `provider.Plane.ResolveSessionModel`」两段，缺任一段都等于绕过解析）")
 	}

@@ -33,7 +33,7 @@ func TestMcpSecretResolution(t *testing.T) {
 	}
 	t.Setenv("FS_AUTH_HEADER", "Bearer from-env")
 
-	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{
 		ID: "fs", Name: "fs", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 		Env:           map[string]string{"FS_ROOT": "/tmp/root"},
 		SecretEnv:     map[string]string{"FS_TOKEN": ref},
@@ -42,7 +42,7 @@ func TestMcpSecretResolution(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{
 		ID: "broken", Name: "broken", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 		SecretEnv: map[string]string{"FS_TOKEN": "store:mcp/not-there"},
 	}); err != nil {
@@ -119,7 +119,7 @@ func dumpMcpServers(t *testing.T, svc *Service) string {
 func TestMcpSecretResolutionFailures(t *testing.T) {
 	// 1) env 引用未设。
 	svc := providerTestSvc(t, filepath.Join(t.TempDir(), "providers"))
-	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{
 		ID: "s1", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 		SecretEnv: map[string]string{"TOKEN": "env:MATE_TEST_UNSET_VAR"},
 	}); err != nil {
@@ -128,25 +128,25 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 	if got := directMcp(svc.McpServersFor("stub", nil)); len(got) != 0 {
 		t.Fatalf("env 未设时不该注入: %+v", got)
 	}
-	if keys := svc.Planes().McpSecrets.UnresolvedKeys(capability.McpServer{SecretEnv: map[string]string{"TOKEN": "env:MATE_TEST_UNSET_VAR"}}); len(keys) != 1 {
+	if keys := planesOf(svc).McpSecrets.UnresolvedKeys(capability.McpServer{SecretEnv: map[string]string{"TOKEN": "env:MATE_TEST_UNSET_VAR"}}); len(keys) != 1 {
 		t.Fatalf("应报 unresolved: %+v", keys)
 	}
 
 	// 2) 没有库（也没有托管文档）：明确指出"库里没有这条密钥"，而不是当成"密钥为空"。
 	noStore := newServiceForTest(runtime.NewRegistry(runtime.Spec{ID: "stub"}), nil)
-	if err := noStore.Planes().Capabilities.RegisterMcpServer(&capability.McpServer{
+	if err := planesOf(noStore).Capabilities.RegisterMcpServer(&capability.McpServer{
 		ID: "s2", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 		SecretEnv: map[string]string{"TOKEN": "store:mcp/x"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, problems := noStore.Planes().McpSecrets.Resolve(capability.McpServer{
+	_, _, problems := planesOf(noStore).McpSecrets.Resolve(capability.McpServer{
 		SecretEnv: map[string]string{"TOKEN": "store:mcp/x"},
 	})
 	if len(problems) != 1 || !strings.Contains(problems[0], "托管文档") {
 		t.Fatalf("应报「找不到这条密钥」并说明落点: %+v", problems)
 	}
-	if len(noStore.Planes().McpSecrets.UnresolvedKeys(capability.McpServer{SecretEnv: map[string]string{"TOKEN": "store:mcp/x"}})) != 1 {
+	if len(planesOf(noStore).McpSecrets.UnresolvedKeys(capability.McpServer{SecretEnv: map[string]string{"TOKEN": "store:mcp/x"}})) != 1 {
 		t.Fatal("没有库与托管文档时该键应报 unresolved")
 	}
 
@@ -161,7 +161,7 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 引用另一条**不存在**的：失败原因只含键名与引用，绝不含任何密钥值。
-	_, _, problems = svc3.Planes().McpSecrets.Resolve(capability.McpServer{
+	_, _, problems = planesOf(svc3).McpSecrets.Resolve(capability.McpServer{
 		SecretEnv: map[string]string{"TOKEN": "store:mcp/wrong"},
 	})
 	if len(problems) != 1 {
@@ -253,7 +253,7 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("LIVE_HDR", "Bearer live")
-	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{
 		ID: "live", Name: "live", Transport: capability.TransportStdio, Command: "/usr/bin/env",
 		Env:           map[string]string{"PLAIN": "p"},
 		SecretEnv:     map[string]string{"TOKEN": ref},
@@ -263,7 +263,7 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 	}
 
 	// 1) 调用面（mcpLiveServer）：明文 + 解析后的密钥一起进 mcp.Server。
-	got, err := svc.Planes().Mcp.LiveServer("live")
+	got, err := planesOf(svc).Mcp.LiveServer("live")
 	if err != nil {
 		t.Fatalf("mcpLiveServer: %v", err)
 	}
@@ -275,20 +275,20 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 	}
 
 	// 2) 解析不了 → 当场报错（不拿空凭证去探），且是 40001（配置问题）而不是 50001。
-	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{
+	if err := planesOf(svc).Capabilities.RegisterMcpServer(&capability.McpServer{
 		ID: "broken", Name: "broken", Transport: capability.TransportStdio, Command: "/usr/bin/env",
 		SecretEnv: map[string]string{"TOKEN": "store:mcp/not-there"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Planes().Mcp.LiveServer("broken"); err == nil {
+	if _, err := planesOf(svc).Mcp.LiveServer("broken"); err == nil {
 		t.Fatal("密钥解析失败时调用面应报错")
 	} else if numericCode(err) != code.InvalidRequest {
 		t.Fatalf("应是 40001（配置问题），got %d（%v）", numericCode(err), err)
 	} else if !strings.Contains(err.Error(), "mcp_secret_unresolved") {
 		t.Fatalf("错误里应有稳定 code，便于排障：%v", err)
 	}
-	if _, err := svc.Planes().Mcp.Probe(context.Background(), "broken"); err == nil {
+	if _, err := planesOf(svc).Mcp.Probe(context.Background(), "broken"); err == nil {
 		t.Fatal("密钥解析失败时探测应报错")
 	} else if numericCode(err) != code.InvalidRequest {
 		t.Fatalf("探测路径同样应是 40001，got %d（%v）", numericCode(err), err)
@@ -319,14 +319,14 @@ func TestMcpSecretStaleMirrorNotAdopted(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	enableStore(svc, st)
-	doc := svc.planes.Credentials.Doc()
+	doc := planesOf(svc).Credentials.Doc()
 	if doc == nil {
 		t.Fatal("夹具应装配出托管文档")
 	}
 	if err := doc.Set("store:mcp/stale", "sk-stale"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Planes().McpSecrets.ResolveRef("store:mcp/stale"); err == nil {
+	if _, err := planesOf(svc).McpSecrets.ResolveRef("store:mcp/stale"); err == nil {
 		t.Fatal("库里没有这条密钥时不许采用镜像里那一份")
 	} else if !strings.Contains(err.Error(), "不采用") {
 		t.Fatalf("失败原因应说清为什么不采用镜像那份: %v", err)
@@ -335,7 +335,7 @@ func TestMcpSecretStaleMirrorNotAdopted(t *testing.T) {
 	if err := st.SetMcpSecret(context.Background(), "store:mcp/stale", "sk-real"); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := svc.Planes().McpSecrets.ResolveRef("store:mcp/stale"); err != nil || v != "sk-real" {
+	if v, err := planesOf(svc).McpSecrets.ResolveRef("store:mcp/stale"); err != nil || v != "sk-real" {
 		t.Fatalf("库里那条才是权威: v=%q err=%v", v, err)
 	}
 }

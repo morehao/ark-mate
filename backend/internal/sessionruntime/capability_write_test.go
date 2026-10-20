@@ -256,7 +256,7 @@ func TestRemoveDefinitionIdempotent(t *testing.T) {
 // TestCapabilityDirUnsetIsActionable 未配置能力目录 → `capability_dir_unset`（40001）且文案给出路。
 func TestCapabilityDirUnsetIsActionable(t *testing.T) {
 	svc := newServiceForTest(runtime.NewRegistry(), nil) // capabilityDir 为空
-	if _, err := svc.Planes().Definitions.CapabilityDirFor(defn.CapSubSkills); err == nil {
+	if _, err := planesOf(svc).Definitions.CapabilityDirFor(defn.CapSubSkills); err == nil {
 		t.Fatal("未配置目录应报错")
 	} else if got := errCode(err); got != "capability_dir_unset" {
 		t.Fatalf("错误码应为 capability_dir_unset，got %q", got)

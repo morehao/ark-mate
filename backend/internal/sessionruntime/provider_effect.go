@@ -38,7 +38,7 @@ func (s *Service) providerEffect(providerID string) *provider.ProviderEffect {
 
 	// 受影响面：v19 起一条供应商"在不在环上"只由它有没有模型条目挂靠决定（agent 面撤销后
 	// 没有"某个 agent 选了它"这回事）；不在环上，下发给底座的声明里就没有它，改了什么都不会发生。
-	if len(s.planes.Providers.ProviderModelRefsReadOnly(context.Background(), providerID)) == 0 {
+	if len(s.facts.Providers.ProviderModelRefsReadOnly(context.Background(), providerID)) == 0 {
 		eff.Note = "当前没有模型条目挂靠在这条供应商上：改动不会下发给底座（先在「设置 · 模型」里让它承载模型条目）"
 		return eff
 	}
