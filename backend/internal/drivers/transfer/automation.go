@@ -17,6 +17,7 @@ import (
 	pkgautomation "github.com/morehao/ark-mate/internal/core/automation"
 	"github.com/morehao/ark-mate/internal/core/capability"
 	domauto "github.com/morehao/ark-mate/internal/domain/automation"
+	arow "github.com/morehao/ark-mate/internal/domain/automation/row"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
@@ -123,7 +124,7 @@ func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRu
 // 运行态键按 `pkg/pkgautomation.Automation` 的 JSON 形态写回，值用**强类型**（`[]pkgautomation.RunRecord`、
 // 字符串时间）——`DefinitionFile.Set` 会把它 marshal 成紧凑 JSON 再统一缩进，所以导出物与老文件
 // 载体的写回形态一致，且两次导出逐字节相同。
-func automationFileBody(row *model.AutomationEntity) (string, error) {
+func automationFileBody(row *arow.Item) (string, error) {
 	df, err := capability.DecodeDefinitionDoc(domauto.Locator(row.ID), []byte(row.Body))
 	if err != nil {
 		return "", err
@@ -143,7 +144,7 @@ func automationFileBody(row *model.AutomationEntity) (string, error) {
 }
 
 // automationRuntimeStateOf 从一行取运行态（recent_runs 的 JSON 坏掉 → 报错，不静默丢运行史）。
-func automationRuntimeStateOf(row *model.AutomationEntity) (model.AutomationRuntimeState, error) {
+func automationRuntimeStateOf(row *arow.Item) (model.AutomationRuntimeState, error) {
 	rt := model.AutomationRuntimeState{
 		LastFiredAt:         row.LastFiredAt,
 		LastStatus:          row.LastStatus,

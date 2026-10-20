@@ -11,6 +11,7 @@ import (
 	"time"
 
 	pkgautomation "github.com/morehao/ark-mate/internal/core/automation"
+	arow "github.com/morehao/ark-mate/internal/domain/automation/row"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
@@ -211,7 +212,7 @@ func TestImportAutomationDirNeverOverwrites(t *testing.T) {
 	if ok, err := st.UpsertAutomationDefinition(ctx, "u1", panelBody, row.Revision, "rest"); err != nil || !ok {
 		t.Fatalf("面板改一版: ok=%v err=%v", ok, err)
 	}
-	if ok, err := st.SaveAutomationRuntime(ctx, "u1", row.LastFiredAt, model.AutomationRuntimeState{LastFiredAt: "2026-10-09T01:00:00Z", LastStatus: pkgautomation.RunCompleted}); err != nil || !ok {
+	if ok, err := st.SaveAutomationRuntime(ctx, "u1", row.LastFiredAt, arow.RuntimeState{LastFiredAt: "2026-10-09T01:00:00Z", LastStatus: pkgautomation.RunCompleted}); err != nil || !ok {
 		t.Fatalf("面板跑一轮: ok=%v err=%v", ok, err)
 	}
 

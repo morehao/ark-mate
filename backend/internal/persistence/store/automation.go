@@ -4,14 +4,15 @@ import (
 	"context"
 	"time"
 
+	arow "github.com/morehao/ark-mate/internal/domain/automation/row"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/dbaccess/gormdao"
 	"gorm.io/gorm"
 )
 
-// v3.1 P4：列形状上移到 `internal/persistence/model`，这里保留别名（调用点不改）。
-type AutomationRuntimeState = model.AutomationRuntimeState
-type AutomationOverlay = model.AutomationOverlay
+// 列形状归领域（`automation/row`），这里保留别名让既有调用点不改写法。
+type AutomationRuntimeState = arow.RuntimeState
+type AutomationOverlay = arow.Overlay
 
 // 本文件是定时任务事实源（M6-7）的门面。与能力/agent 面**共用一个 CAS 实现**
 // （`dao.DefinitionDao`），但多两类方法，因为 automation 的载体里住着两种东西：
@@ -50,7 +51,7 @@ func (s *Store) DeleteAutomationDefinition(ctx context.Context, id string, expec
 }
 
 // GetAutomationDefinition 读一条定义（不存在 → (nil, false, nil)）。
-func (s *Store) GetAutomationDefinition(ctx context.Context, id string) (*model.AutomationEntity, bool, error) {
+func (s *Store) GetAutomationDefinition(ctx context.Context, id string) (*arow.Item, bool, error) {
 	row, err := s.automations.GetByID(ctx, id)
 	if err != nil {
 		return nil, false, err
@@ -58,12 +59,20 @@ func (s *Store) GetAutomationDefinition(ctx context.Context, id string) (*model.
 	if row == nil {
 		return nil, false, nil
 	}
-	return row, true, nil
+	return automationItemOf(row), true, nil
 }
 
 // ListAutomationDefinitions 列出全部定义（id 升序）。
-func (s *Store) ListAutomationDefinitions(ctx context.Context) (model.AutomationEntityList, error) {
-	return s.automations.GetListByCond(ctx, &gormdao.BaseCond{OrderField: definitionListOrder})
+func (s *Store) ListAutomationDefinitions(ctx context.Context) ([]arow.Item, error) {
+	rows, err := s.automations.GetListByCond(ctx, &gormdao.BaseCond{OrderField: definitionListOrder})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]arow.Item, 0, len(rows))
+	for i := range rows {
+		out = append(out, *automationItemOf(&rows[i]))
+	}
+	return out, nil
 }
 
 // CountAutomationDefinitions 返回定义行数。
@@ -126,4 +135,17 @@ func (s *Store) SaveAutomationOverlay(ctx context.Context, id string, ov Automat
 // `SaveAutomationOverlay`，给调用方一个不需要想"要不要带正文"的入口。
 func (s *Store) SaveAutomationRuntime(ctx context.Context, id string, expectedLastFired string, rt AutomationRuntimeState) (bool, error) {
 	return s.SaveAutomationOverlay(ctx, id, AutomationOverlay{ExpectedLastFired: expectedLastFired, Runtime: rt})
+}
+
+// automationItemOf 把一张 `automations` 行翻成领域值（映射只有这一处）。
+func automationItemOf(r *model.AutomationEntity) *arow.Item {
+	if r == nil {
+		return nil
+	}
+	return &arow.Item{
+		ID: r.ID, Body: r.Body, Revision: r.Revision, UpdatedAt: r.UpdatedAt,
+		LastFiredAt: r.LastFiredAt, LastStatus: r.LastStatus, LastReason: r.LastReason,
+		LastSessionID: r.LastSessionID, ConsecutiveFailures: r.ConsecutiveFailures,
+		RecentRuns: r.RecentRuns,
+	}
 }

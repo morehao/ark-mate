@@ -12,8 +12,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/automation"
 	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+	arow "github.com/morehao/ark-mate/internal/domain/automation/row"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
 
@@ -150,8 +151,8 @@ func (pl *Plane) deleteAutomationDefinition(ctx context.Context, id string) (boo
 // ——— 定义 ⇄ 行/文件的形态转换 ———
 
 // automationRuntimeOf 把强类型定义的运行态抽成列结构（**不含** `state`：它属于定义，见 P-10）。
-func automationRuntimeOf(def automation.Automation) model.AutomationRuntimeState {
-	return model.AutomationRuntimeState{
+func automationRuntimeOf(def automation.Automation) arow.RuntimeState {
+	return arow.RuntimeState{
 		LastFiredAt:         LastFiredText(def.LastFiredAt),
 		LastStatus:          def.LastStatus,
 		LastReason:          def.LastReason,
@@ -185,7 +186,7 @@ func RunsJSON(runs []automation.RunRecord) string {
 }
 
 // automationDefFromRow 把一行还原成"完整定义"（body + 运行态列），与文件载体的解析入口同形。
-func automationDefFromRow(row *model.AutomationEntity) (automation.Automation, error) {
+func automationDefFromRow(row *arow.Item) (automation.Automation, error) {
 	var def automation.Automation
 	if err := json.Unmarshal([]byte(row.Body), &def); err != nil {
 		return def, fmt.Errorf("不是合法 JSON：%v", err)
@@ -195,7 +196,7 @@ func automationDefFromRow(row *model.AutomationEntity) (automation.Automation, e
 		def.ID = row.ID
 	}
 	if row.LastFiredAt != "" {
-		t := model.ParseTime(row.LastFiredAt)
+		t := objtime.Parse(row.LastFiredAt)
 		if t.IsZero() {
 			return def, fmt.Errorf("last_fired_at %q 不是 RFC3339 时间", row.LastFiredAt)
 		}
@@ -235,7 +236,7 @@ func buildAutomationRec(def automation.Automation, keyID string, now time.Time) 
 }
 
 // loadAutomationRow 从一行算出记录（JSON 坏 → 带 loadErr 的记录）。
-func loadAutomationRow(row *model.AutomationEntity, now time.Time) *Rec {
+func loadAutomationRow(row *arow.Item, now time.Time) *Rec {
 	def, err := automationDefFromRow(row)
 	if err != nil {
 		return &Rec{Def: automation.Automation{ID: row.ID}, LoadErr: err.Error()}
@@ -301,7 +302,7 @@ func (pl *Plane) SaveOverlay(ctx context.Context, id string, overlay map[string]
 	if !found {
 		return notFoundAutomation(id)
 	}
-	rt := model.AutomationRuntimeState{
+	rt := arow.RuntimeState{
 		LastFiredAt:         stringOf(overlay, "last_fired_at", row.LastFiredAt),
 		LastStatus:          stringOf(overlay, "last_status", row.LastStatus),
 		LastReason:          stringOf(overlay, "last_reason", row.LastReason),
@@ -336,7 +337,7 @@ func (pl *Plane) SaveOverlay(ctx context.Context, id string, overlay map[string]
 			body, rev = string(next), row.Revision
 		}
 	}
-	ok, err := pl.st.SaveAutomationOverlay(ctx, id, model.AutomationOverlay{
+	ok, err := pl.st.SaveAutomationOverlay(ctx, id, arow.Overlay{
 		Body: body, ExpectedRev: rev, ExpectedLastFired: expectedLastFired, Runtime: rt,
 	})
 	if err != nil {
