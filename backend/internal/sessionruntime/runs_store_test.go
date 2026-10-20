@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"regexp"
 	"testing"
 	"time"
@@ -280,7 +281,7 @@ func TestRunUsageExposedInListRuns(t *testing.T) {
 	now := time.Now().UTC()
 	seed := func(status, usageJSON string, firstTokenMS int64, firstSeq int64) {
 		t.Helper()
-		if err := st.CreateRun(ctx, model.RunEntity{
+		if err := st.CreateRun(ctx, run.Item{
 			ID: objid.New(objid.Run), SessionID: "s-usage", Status: status, UsageJSON: usageJSON,
 			FirstTokenMS: firstTokenMS, FirstSeq: firstSeq, LastSeq: firstSeq + 2,
 			StartedAt: now.Add(-time.Minute), EndedAt: now,

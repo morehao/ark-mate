@@ -10,6 +10,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/domain/session/memory"
+	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -123,7 +124,7 @@ func (pl *Plane) OpenRun(sessionID, runID, text string, firstSeq int64) {
 		return
 	}
 	started := evs[0].CreatedAt
-	r := model.RunEntity{
+	r := run.Item{
 		ID: runID, SessionID: sessionID, UserText: text,
 		Status: SessionStatusInProgress,
 		// first_seq 是本轮 `run.started` 的位次（窗口起点从此由行给出，不再由"上一轮的末尾"推导）。

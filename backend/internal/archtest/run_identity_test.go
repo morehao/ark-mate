@@ -2,6 +2,7 @@ package archtest
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -296,7 +297,7 @@ func TestRunReadModelHasNoDanglingRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("写 run.started: %v", err)
 	}
-	if err := st.CreateRun(ctx, model.RunEntity{
+	if err := st.CreateRun(ctx, run.Item{
 		ID: runID, SessionID: sessionID, UserText: "跑一下",
 		Status: session.SessionStatusInProgress, FirstSeq: firstSeq, LastSeq: -1,
 		StartedAt: time.Now().UTC(),

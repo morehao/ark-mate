@@ -6,6 +6,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session/memory"
 	"github.com/morehao/ark-mate/internal/domain/session/queue"
+	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
@@ -34,11 +35,11 @@ type Store interface {
 	AppendEvent(ctx context.Context, id, sessionID, typ string, payload any) (int64, error)
 
 	// ——— 轮次 ———
-	CreateRun(ctx context.Context, r model.RunEntity) error
-	FinishRun(ctx context.Context, id string, p model.RunFinishPatch) error
-	RunByID(ctx context.Context, id string) (model.RunEntity, bool, error)
-	ListRuns(ctx context.Context, sessionID string) ([]model.RunEntity, error)
-	RunningRuns(ctx context.Context, sessionID string) ([]model.RunEntity, error)
+	CreateRun(ctx context.Context, r run.Item) error
+	FinishRun(ctx context.Context, id string, p run.Finish) error
+	RunByID(ctx context.Context, id string) (run.Item, bool, error)
+	ListRuns(ctx context.Context, sessionID string) ([]run.Item, error)
+	RunningRuns(ctx context.Context, sessionID string) ([]run.Item, error)
 
 	// ——— 消息读模型 ———
 	ReplaceSessionMessages(ctx context.Context, sessionID string, msgs []model.MessageEntity) error

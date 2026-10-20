@@ -113,6 +113,7 @@ func TestMechanismMustNotImportUpward(t *testing.T) {
 var domainValueLeafPackages = []string{
 	modulePrefix + "internal/domain/session/queue",
 	modulePrefix + "internal/domain/session/memory",
+	modulePrefix + "internal/domain/session/run",
 }
 
 func isDomainValueLeaf(imp string) bool {

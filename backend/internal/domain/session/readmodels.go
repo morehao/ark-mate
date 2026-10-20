@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
@@ -73,7 +74,7 @@ func (pl *Plane) RebuildSessionReadModels(ctx context.Context, sessionID string)
 //
 // 为什么不用 `ListRuns` 自己的顺序：它按 `started_at` 排（那是给人看的"第几轮"），而窗口夹取
 // 只能按位次来——时钟回拨时 `started_at` 的顺序说了不算，`first_seq` 说了算。
-func (pl *Plane) SessionRuns(ctx context.Context, sessionID string) ([]model.RunEntity, error) {
+func (pl *Plane) SessionRuns(ctx context.Context, sessionID string) ([]run.Item, error) {
 	runs, err := pl.st.ListRuns(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -111,7 +112,7 @@ func (pl *Plane) reconcileRunRows(ctx context.Context, sessionID string, all []m
 			continue
 		}
 		text, _ := m["text"].(string)
-		if err := pl.st.CreateRun(ctx, model.RunEntity{
+		if err := pl.st.CreateRun(ctx, run.Item{
 			ID: runID, SessionID: sessionID, UserText: text,
 			Status: SessionStatusInProgress, FirstSeq: e.Seq, LastSeq: -1, StartedAt: e.CreatedAt,
 		}); err != nil {
@@ -132,7 +133,7 @@ func (pl *Plane) reconcileRunRows(ctx context.Context, sessionID string, all []m
 // "收口事实"有两支（见 `RunClosingStatus`）：终态事件，以及恢复路径的 `run.status(interrupted)`。
 // 后者是崩溃残轮在**事件层**留下的收口；没有它，重建只能靠"会话不在 in_progress"这条更弱的口径
 // （见 `closeDanglingRunsOfInactiveSession`），而那条口径说不出「轮次是重启带走的」。
-func (pl *Plane) closeRunsWithTerminal(sessionID string, all []model.EventEntity, runs []model.RunEntity) bool {
+func (pl *Plane) closeRunsWithTerminal(sessionID string, all []model.EventEntity, runs []run.Item) bool {
 	open := make(map[string]bool, len(runs))
 	for _, r := range runs {
 		if r.LastSeq < 0 {
@@ -173,7 +174,7 @@ func (pl *Plane) closeRunsWithTerminal(sessionID string, all []model.EventEntity
 // 窗口就是"从起点到日志末尾"）。
 //
 // 与 `closeRunsWithTerminal` 的分工：那一支优先（它读得出"重启带走的"），本函数只处理它漏下的。
-func (pl *Plane) closeDanglingRunsOfInactiveSession(ctx context.Context, sessionID string, runs []model.RunEntity, all []model.EventEntity) bool {
+func (pl *Plane) closeDanglingRunsOfInactiveSession(ctx context.Context, sessionID string, runs []run.Item, all []model.EventEntity) bool {
 	if pl.st == nil || len(runs) == 0 || len(all) == 0 {
 		return false
 	}
@@ -187,7 +188,7 @@ func (pl *Plane) closeDanglingRunsOfInactiveSession(ctx context.Context, session
 		if r.LastSeq >= 0 || lastSeq < r.FirstSeq {
 			continue
 		}
-		if err := pl.st.FinishRun(ctx, r.ID, model.RunFinishPatch{
+		if err := pl.st.FinishRun(ctx, r.ID, run.Finish{
 			LastSeq: lastSeq, Status: rec.Status, EndedAt: all[len(all)-1].CreatedAt,
 		}); err != nil {
 			glog.Warnw(ctx, "read models: 收口残留 running 行失败", "session", sessionID, "run", r.ID, "err", err)
@@ -223,7 +224,7 @@ func (pl *Plane) SessionEvents(ctx context.Context, sessionID string) ([]model.E
 //
 // **不唯一就不猜**：同一会话里两条 running 行意味着崩溃残轮，那时把终态记在"最近一条"上会
 // 静默地把一轮的窗口/状态写到另一轮身上（读出来毫无异常，只是数字是别的轮的）。
-func (pl *Plane) runRowFor(ctx context.Context, sessionID, runID string) (model.RunEntity, bool) {
+func (pl *Plane) runRowFor(ctx context.Context, sessionID, runID string) (run.Item, bool) {
 	if runID != "" {
 		if r, ok, err := pl.st.RunByID(ctx, runID); err != nil {
 			glog.Warnw(context.Background(), "store: 读 run 行失败", "session", sessionID, "run", runID, "err", err)
@@ -234,14 +235,14 @@ func (pl *Plane) runRowFor(ctx context.Context, sessionID, runID string) (model.
 	rows, err := pl.st.RunningRuns(ctx, sessionID)
 	if err != nil {
 		glog.Warnw(context.Background(), "store: 读 running run 失败", "session", sessionID, "err", err)
-		return model.RunEntity{}, false
+		return run.Item{}, false
 	}
 	if len(rows) != 1 {
 		if len(rows) > 1 {
 			glog.Warnw(context.Background(), "store: 该会话有多条 running 行，不猜归属",
 				"session", sessionID, "n", len(rows))
 		}
-		return model.RunEntity{}, false
+		return run.Item{}, false
 	}
 	return rows[0], true
 }
@@ -348,7 +349,7 @@ func (pl *Plane) MaterializeRun(sessionID, typ string, payload map[string]any, t
 			}
 		}
 	}
-	if err := pl.st.FinishRun(ctx, runID, model.RunFinishPatch{
+	if err := pl.st.FinishRun(ctx, runID, run.Finish{
 		LastSeq: terminalSeq, Status: status, StopReason: stopReason, ErrorCode: errCode,
 		UsageJSON: usageJSON, FirstTokenMS: firstTokenMS, EndedAt: ended,
 	}); err != nil {

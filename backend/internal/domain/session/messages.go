@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
@@ -91,7 +92,7 @@ func (pl *Plane) RebuildSessionMessages(ctx context.Context, sessionID string) e
 
 // ReplaceSessionMessages 用**已经读好的** events/runs 重铺（重建通道手上有这两份数据，不必再读
 // 一遍；两条路共用同一段构建代码——"运行时"与"重建"分叉过一次，代价是读模型有两套规则）。
-func (pl *Plane) ReplaceSessionMessages(ctx context.Context, sessionID string, all []model.EventEntity, runs []model.RunEntity) error {
+func (pl *Plane) ReplaceSessionMessages(ctx context.Context, sessionID string, all []model.EventEntity, runs []run.Item) error {
 	rows := buildSessionMessageRows(sessionID, all, runs)
 	return pl.st.ReplaceSessionMessages(ctx, sessionID, rows)
 }
@@ -100,7 +101,7 @@ func (pl *Plane) ReplaceSessionMessages(ctx context.Context, sessionID string, a
 //
 // 进行中的轮（`last_seq = -1`）窗口右端夹到下一轮起点之前（没有下一轮 = 会话末尾）：不夹的话，
 // 一次重启后的重建会把"中断那一轮"之后的事件都算进它。
-func buildSessionMessageRows(sessionID string, all []model.EventEntity, runs []model.RunEntity) []model.MessageEntity {
+func buildSessionMessageRows(sessionID string, all []model.EventEntity, runs []run.Item) []model.MessageEntity {
 	var out []model.MessageEntity
 	for i, r := range runs {
 		hi := r.LastSeq

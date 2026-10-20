@@ -2,11 +2,11 @@ package store
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"path/filepath"
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/infra/dbclient"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // openV29ForV30Test 造一个**真实的 v29 库**（完整跑 v1..v29，含各步的 Go 数据迁移）。
@@ -90,7 +90,7 @@ func TestRunningRowsSeesOpenRun(t *testing.T) {
 	s := openTestDB(t)
 	seedSession(t, s, "s1")
 
-	if err := s.CreateRun(ctx, model.RunEntity{
+	if err := s.CreateRun(ctx, run.Item{
 		ID: "r1", SessionID: "s1", Status: "in_progress", FirstSeq: 0, LastSeq: -1,
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
@@ -103,7 +103,7 @@ func TestRunningRowsSeesOpenRun(t *testing.T) {
 		t.Fatalf("进行中的行 = %+v（want 恰好 r1）：查询与写入方同源之后这里必须非空", rows)
 	}
 
-	if err := s.FinishRun(ctx, "r1", model.RunFinishPatch{Status: "completed", LastSeq: 0}); err != nil {
+	if err := s.FinishRun(ctx, "r1", run.Finish{Status: "completed", LastSeq: 0}); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
 	rows, err = s.RunningRuns(ctx, "s1")

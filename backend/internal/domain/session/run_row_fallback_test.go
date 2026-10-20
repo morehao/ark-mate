@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"testing"
 	"time"
 
@@ -38,7 +39,7 @@ func TestRunRowFallbackMaterializesWithoutRunID(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("写 user_message: %v", err)
 	}
-	if err := st.CreateRun(ctx, model.RunEntity{
+	if err := st.CreateRun(ctx, run.Item{
 		ID: runID, SessionID: sessionID, UserText: "跑一下",
 		Status: SessionStatusInProgress, FirstSeq: 0, LastSeq: -1,
 		StartedAt: time.Now().UTC(),
@@ -86,7 +87,7 @@ func TestRunRowFallbackSkipsAmbiguous(t *testing.T) {
 		t.Fatalf("写会话行: %v", err)
 	}
 	for i, id := range []string{objid.New(objid.Run), objid.New(objid.Run)} {
-		if err := st.CreateRun(ctx, model.RunEntity{
+		if err := st.CreateRun(ctx, run.Item{
 			ID: id, SessionID: sessionID, Status: SessionStatusInProgress,
 			FirstSeq: int64(i * 2), LastSeq: -1, StartedAt: time.Now().UTC(),
 		}); err != nil {

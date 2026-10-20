@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,7 +10,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/infra/dbclient"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // openV21ForV22Test 造一个**真实的 v21 库**（完整跑 v1..v21，含 v21 的 Go 数据步骤）。
@@ -346,13 +346,13 @@ func TestMigrateV22UniqueIndexBlocksDuplicateRun(t *testing.T) {
 }
 
 // runFixture 拼一条最小可插入的开轮行；countRuns 数某会话的 run 行数（本文件专用）。
-func runFixture(t *testing.T, id, sessionID string, firstSeq int64) model.RunEntity {
+func runFixture(t *testing.T, id, sessionID string, firstSeq int64) run.Item {
 	t.Helper()
 	at, err := time.Parse(time.RFC3339, "2026-05-06T10:00:00Z")
 	if err != nil {
 		t.Fatalf("解析夹具时刻: %v", err)
 	}
-	return model.RunEntity{
+	return run.Item{
 		ID: id, SessionID: sessionID, UserText: "q", Status: "running",
 		FirstSeq: firstSeq, LastSeq: -1, StartedAt: at,
 	}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"testing"
 	"time"
 
@@ -37,7 +38,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 	if _, err := s.AppendEvent(ctx, objid.New(objid.Event), "c1", "assistant_message", map[string]any{"text": "hi"}); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
-	if err := s.CreateRun(ctx, model.RunEntity{ID: "r1", SessionID: "c1", Status: "running", StartedAt: at}); err != nil {
+	if err := s.CreateRun(ctx, run.Item{ID: "r1", SessionID: "c1", Status: "running", StartedAt: at}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	// 未结束的 run：ended_at 落空串（不是零值时间戳）。

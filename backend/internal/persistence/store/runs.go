@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
+	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/persistence/dao"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/dbaccess/gormdao"
@@ -32,21 +33,22 @@ const (
 //
 // 刻意只做"行级插入"、不在这里塞业务语义：本函数也被测试用来直接种一行终态（那时它就是
 // 一条普通插入）。"开轮该写什么"属于 manager。
-func (s *Store) CreateRun(ctx context.Context, r model.RunEntity) error {
-	r.StartedAt = nonZeroTime(r.StartedAt)
-	return s.runs.DB(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&r).Error
+func (s *Store) CreateRun(ctx context.Context, r run.Item) error {
+	row := runEntityOf(r)
+	row.StartedAt = nonZeroTime(row.StartedAt)
+	return s.runs.DB(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
 }
 
 // RunByID 按 id 取一条 run；不存在 → (零值, false, nil)。
-func (s *Store) RunByID(ctx context.Context, id string) (model.RunEntity, bool, error) {
+func (s *Store) RunByID(ctx context.Context, id string) (run.Item, bool, error) {
 	r, err := s.runs.GetByID(ctx, id)
 	if err != nil {
-		return model.RunEntity{}, false, err
+		return run.Item{}, false, err
 	}
 	if r == nil {
-		return model.RunEntity{}, false, nil
+		return run.Item{}, false, nil
 	}
-	return *r, true, nil
+	return runItemOf(*r), true, nil
 }
 
 // RunningRuns 取某会话进行中的 run 行（first_seq 降序，最多两条；终态物化的兜底路径用）。
@@ -55,12 +57,15 @@ func (s *Store) RunByID(ctx context.Context, id string) (model.RunEntity, bool, 
 //
 // 保留手写查询：`BaseCond` 没有 limit 这个轴；若改用分页方法会为一条"最多两条"的兜底查询
 // 多做一次 COUNT。
-func (s *Store) RunningRuns(ctx context.Context, sessionID string) ([]model.RunEntity, error) {
+func (s *Store) RunningRuns(ctx context.Context, sessionID string) ([]run.Item, error) {
 	var rows model.RunEntityList
 	err := s.runs.DB(ctx).Model(&model.RunEntity{}).
 		Where("session_id = ? AND status = ?", sessionID, "in_progress").
 		Order("first_seq DESC").Limit(2).Find(&rows).Error
-	return rows, err
+	if err != nil {
+		return nil, err
+	}
+	return runItemsOf(rows), nil
 }
 
 // FinishRun 更新 run 收口列（窗口右端 + 终态 + 首令牌耗时）；行不存在返回 ErrRunNotFound。
@@ -69,7 +74,7 @@ func (s *Store) RunningRuns(ctx context.Context, sessionID string) ([]model.RunE
 // 还是 -1"的中间态。
 //
 // 保留手写 UPDATE：`ErrRunNotFound` 要用 RowsAffected 判定，而 `UpdateMap` 不返回它。
-func (s *Store) FinishRun(ctx context.Context, id string, p model.RunFinishPatch) error {
+func (s *Store) FinishRun(ctx context.Context, id string, p run.Finish) error {
 	res := s.runs.DB(ctx).Model(&model.RunEntity{}).Where("id = ?", id).Updates(map[string]any{
 		"last_seq":       p.LastSeq,
 		"status":         p.Status,
@@ -92,11 +97,15 @@ func (s *Store) FinishRun(ctx context.Context, id string, p model.RunFinishPatch
 // ListRuns 列出某会话全部 run（started_at 升序；失败轮重试/统计按此序回溯）。
 //
 // 排序刻意不动：进行中的行（v22 起在库里）`started_at` 就是开轮时刻，天然排在正确位置。
-func (s *Store) ListRuns(ctx context.Context, sessionID string) ([]model.RunEntity, error) {
-	return s.runs.GetListByCond(ctx, &dao.RunCond{
+func (s *Store) ListRuns(ctx context.Context, sessionID string) ([]run.Item, error) {
+	rows, err := s.runs.GetListByCond(ctx, &dao.RunCond{
 		BaseCond:  &gormdao.BaseCond{OrderField: runListOrder},
 		SessionID: sessionID,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return runItemsOf(rows), nil
 }
 
 // ——— 用量聚合的输入读面（runs.usage_json） ———
@@ -150,4 +159,32 @@ func (s *Store) usageRowsForRange(ctx context.Context, from, to time.Time) ([]us
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// ——— 行 ↔ 聚合映射（C1：领域自持 run.Item）———
+
+func runItemOf(r model.RunEntity) run.Item {
+	return run.Item{
+		ID: r.ID, SessionID: r.SessionID, UserText: r.UserText, Status: r.Status,
+		ErrorCode: r.ErrorCode, StopReason: r.StopReason, UsageJSON: r.UsageJSON,
+		FirstSeq: r.FirstSeq, LastSeq: r.LastSeq, FirstTokenMS: r.FirstTokenMS,
+		StartedAt: r.StartedAt, EndedAt: r.EndedAt,
+	}
+}
+
+func runItemsOf(rows []model.RunEntity) []run.Item {
+	out := make([]run.Item, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, runItemOf(r))
+	}
+	return out
+}
+
+func runEntityOf(r run.Item) model.RunEntity {
+	return model.RunEntity{
+		ID: r.ID, SessionID: r.SessionID, UserText: r.UserText, Status: r.Status,
+		ErrorCode: r.ErrorCode, StopReason: r.StopReason, UsageJSON: r.UsageJSON,
+		FirstSeq: r.FirstSeq, LastSeq: r.LastSeq, FirstTokenMS: r.FirstTokenMS,
+		StartedAt: r.StartedAt, EndedAt: r.EndedAt,
+	}
 }

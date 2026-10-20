@@ -1,6 +1,7 @@
 package store
 
 import (
+	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ var seedRunSeq atomic.Int64
 func seedRun(t *testing.T, s *Store, runID, sessionID, status string, started, ended time.Time, usageJSON string) {
 	t.Helper()
 	seedCompletedSession(t, s, sessionID)
-	if err := s.CreateRun(ctxT(), model.RunEntity{
+	if err := s.CreateRun(ctxT(), run.Item{
 		ID: runID, SessionID: sessionID, Status: status, UsageJSON: usageJSON,
 		FirstSeq: seedRunSeq.Add(1), LastSeq: seedRunSeq.Add(1),
 		StartedAt: started, EndedAt: ended,
