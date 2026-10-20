@@ -126,7 +126,8 @@
 
 - 再加 **1 条「已收口领域包协议无关」守卫**（`layer_isolation_test.go` 的
   `TestProtocolFreeDomainPackagesStayClean`，2026-10-20 C2）：`protocolFreeDomainPackages`
-  里登记的领域包（当前 `internal/domain/interaction`）**生产 import 不得出现 `internal/infra/acp`**。
+  里登记的领域包（当前 interaction / automation / workspace / skill / mcp / identity 六个）**生产
+  import 不得出现 `internal/infra/acp`**（只剩 session 与 provider 两块未收口：连接/生命周期与配置项）。
   这是一张**逐步增长的收口表**：C2 每完成一块（事件与轮次 → 错误构造 → 权限/elicitation →
   配置项 → 连接与生命周期）登记一个包，全部登记完才收成"domain 不得 import acp"的全量判据。
   挡的是已完成边界的**静默回退**：翻译层还在，域里再直接写一个 acp 类型照样编译、照样跑，

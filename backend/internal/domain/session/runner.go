@@ -54,7 +54,7 @@ type BusyTracker interface {
 
 // DiagnosticsSink 运行期诊断的写口（错误分类 + stderr 尾巴）。
 type DiagnosticsSink interface {
-	RecordRuntimeError(sessionID string, ae *acp.Error, tail []string)
+	RecordRuntimeError(sessionID string, ae *code.RuntimeError, tail []string)
 	StderrTail(client *acp.Client) []string
 }
 
@@ -479,8 +479,7 @@ func errLooksCancelled(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return true
 	}
-	var ae *acp.Error
-	if errors.As(err, &ae) {
+	if ae, ok := code.RuntimeErrorOf(err); ok {
 		s := strings.ToLower(ae.Code + " " + ae.Details)
 		return strings.Contains(s, "cancel") || strings.Contains(s, "abort")
 	}
@@ -557,8 +556,7 @@ func (r *Runner) disconnectSession(as *ActiveSession, intentional bool) {
 	if intentional {
 		return
 	}
-	// 同 lifecycle.go 的那一处：诊断端口还吃 `*acp.Error`（它还要读 StderrTail）。
-	ae := acp.NewError(acp.ClassConnection, "connection_lost", "runtime 连接断开（会话句柄已作废；下次 prompt 按需重建）", nil)
+	ae := code.NewRuntimeError(code.ClassConnection, "connection_lost", "runtime 连接断开（会话句柄已作废；下次 prompt 按需重建）", nil)
 	if r.diagnostics != nil {
 		tail := r.diagnostics.StderrTail(as.Client())
 		ae.StderrTail = tail

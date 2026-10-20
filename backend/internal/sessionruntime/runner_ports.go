@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/core/code"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/infra/acp"
@@ -16,7 +17,7 @@ import (
 // runnerDiagnostics 运行期诊断的写口（记录失败 + stderr 尾巴）。
 type runnerDiagnostics struct{ o *Orchestrator }
 
-func (d runnerDiagnostics) RecordRuntimeError(sessionID string, ae *acp.Error, tail []string) {
+func (d runnerDiagnostics) RecordRuntimeError(sessionID string, ae *code.RuntimeError, tail []string) {
 	d.o.svc.runtimePlane.RecordRuntimeError(sessionID, ae, tail)
 }
 

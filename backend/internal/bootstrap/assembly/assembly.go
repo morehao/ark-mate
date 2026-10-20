@@ -3,6 +3,7 @@ package assembly
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"net"
 	"net/http"
 	"os"
@@ -498,7 +499,7 @@ func (as *assembly) startIdentity(ctx context.Context) error {
 			ae := acp.NewError(acp.ClassService, "identity_patch_failed",
 				"产品身份的系统提示面未交付（会话仍可用；模型的自述退回首轮块或无身份）："+
 					strings.Join(outcome.Problems, "；"), nil)
-			as.rconn.RecordRuntimeError("", ae, nil)
+			as.rconn.RecordRuntimeError("", code.ClassifyRuntime(ae), nil)
 		}
 		return nil
 	}

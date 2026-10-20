@@ -10,7 +10,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/object/objtime"
 	"github.com/morehao/ark-mate/internal/core/resource"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -136,7 +135,7 @@ func (pl *Plane) ResolveSessionModel(ctx context.Context, runtimeID, modelID str
 		}
 		id, cfg, verr := pl.ModelValueForRow(runtimeID, row.ID, row.ProviderID, row.Model)
 		if verr != nil {
-			if ae, ok := acp.As(verr); ok && ae.Code == "model_value_unsupported" {
+			if ae, ok := code.RuntimeErrorOf(verr); ok && ae.Code == "model_value_unsupported" {
 				// 该底座**不消费**平台模型清单 = 它没有模型语义：这里"不下发"是正确结论而不是失败
 				// （与 v26 之前 `DefaultModelValueFor` 回空串的行为逐字相同——零回归的那一支）。
 				return "", runtime.ModelConfig{}, nil

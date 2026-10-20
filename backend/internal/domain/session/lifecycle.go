@@ -200,7 +200,7 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 		// A3：底座起不来 / 握手失败时记诊断（含该阶段的 stderr 尾巴），供
 		// `GET /runtime/diagnostics` 外露。今天唯一的启动路径就是"建会话把它拉起来"，所以落在这里。
 		if l.diagnostics != nil {
-			if ae := acp.Classify(err); ae != nil {
+			if ae := code.ClassifyRuntime(err); ae != nil {
 				l.diagnostics.RecordRuntimeError(opt.SessionID, ae, ae.StderrTail)
 			}
 		}
@@ -447,7 +447,7 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 			glog.Warnw(ctx, "恢复时按平台模型行重算运行时值失败（跳过重放，继续用运行时当前值）",
 				"session", rec.ID, "runtime", spec.ID, "model", rec.ModelID, "err", rerr)
 		} else if _, err := as.Projection().ApplyModel(ctx, recCfg); err != nil {
-			if ae, ok := acp.As(err); !ok || !strings.HasPrefix(ae.Code, "unsupported_") {
+			if ae, ok := code.RuntimeErrorOf(err); !ok || !strings.HasPrefix(ae.Code, "unsupported_") {
 				l.catalog.MarkRejected(spec.ID, recCfg.Model, l.applyReason(err))
 			}
 			glog.Warnw(ctx, "恢复后重放会话模型失败（忽略，继续用运行时当前值）",
@@ -548,7 +548,7 @@ func (l *Lifecycle) applyModel(ctx context.Context, as *ActiveSession, spec runt
 		}
 		return nil
 	}
-	ae, _ := acp.As(err)
+	ae, _ := code.RuntimeErrorOf(err)
 	if ae != nil && ae.Code == "unsupported_model" {
 		return code.NewError(code.ClassRequest, "model_not_supported", "[model_not_supported] runtime "+spec.ID+" 未提供模型配置项，无法应用所选模型", nil)
 	}
@@ -570,8 +570,6 @@ func (l *Lifecycle) NoteGenerationFallback(sessionID, runtimeID, from, to string
 	if l.diagnostics == nil {
 		return
 	}
-	// 这里是**唯一**仍需具体错误类型的地方：诊断端口 (RecordRuntimeError) 还吃 `*acp.Error`。
-	// 诊断面端口化（C2 剩余）之后，这一行也换成 code.NewError。
-	ae := acp.NewError(acp.ClassConnection, "generation_switch_failed", "迁移到新能力集失败（已回退到旧代际继续会话）："+cause.Error(), nil)
+	ae := code.NewRuntimeError(code.ClassConnection, "generation_switch_failed", "迁移到新能力集失败（已回退到旧代际继续会话）："+cause.Error(), nil)
 	l.diagnostics.RecordRuntimeError(sessionID, ae, nil)
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/object/objdelivery"
 	"github.com/morehao/ark-mate/internal/core/resource"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -392,7 +391,7 @@ func (pl *Plane) ProviderModelRefsReadOnly(ctx context.Context, providerID strin
 // （它同时表达"并发新建抢先"与"有人改过"两件事），而新建路径上后者不可能发生——所以
 // **新建场景下的 CAS 未命中就是 provider_exists**。文件载体没有 CAS，冲突表现为"文件里已经有"。
 func isDuplicateDefinition(err error) bool {
-	ae, ok := acp.As(err)
+	ae, ok := code.RuntimeErrorOf(err)
 	return ok && ae.Code == "definition_changed"
 }
 

@@ -3,6 +3,7 @@ package runtimeconn
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"strings"
 	"time"
 
@@ -43,7 +44,7 @@ type AmbiguityNote struct {
 //
 // 脱敏与行数截断在这里做（不在调用方）：诊断是**对外可见**的面，闸门必须贴着状态本身——
 // 交给调用方记得脱敏，迟早有一处忘。
-func (pl *Plane) RecordRuntimeError(sessionID string, ae *acp.Error, tail []string) {
+func (pl *Plane) RecordRuntimeError(sessionID string, ae *code.RuntimeError, tail []string) {
 	if ae == nil {
 		return
 	}

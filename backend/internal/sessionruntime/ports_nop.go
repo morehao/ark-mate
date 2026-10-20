@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
@@ -30,7 +31,7 @@ var errRuntimeNotWired = errors.New("执行面未装配：连接池/运行时平
 // nopRuntimePlane `session.RuntimePlane` 的安全缺省。
 type nopRuntimePlane struct{}
 
-func (nopRuntimePlane) RecordRuntimeError(string, *acp.Error, []string) {}
+func (nopRuntimePlane) RecordRuntimeError(string, *code.RuntimeError, []string) {}
 
 func (nopRuntimePlane) NoteScopeAmbiguous(string) {}
 

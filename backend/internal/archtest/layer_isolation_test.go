@@ -230,6 +230,11 @@ func TestDomainOwnsItsTypesNotTableRows(t *testing.T) {
 // 这件事悄悄退回起点，而没有任何判据会响。
 var protocolFreeDomainPackages = []string{
 	modulePrefix + "internal/domain/interaction",
+	modulePrefix + "internal/domain/automation",
+	modulePrefix + "internal/domain/workspace",
+	modulePrefix + "internal/domain/skill",
+	modulePrefix + "internal/domain/mcp",
+	modulePrefix + "internal/domain/identity",
 }
 
 // TestProtocolFreeDomainPackagesStayClean 已收口的领域包不得再 import 协议库。

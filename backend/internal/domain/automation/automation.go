@@ -15,7 +15,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/automation"
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
 	"github.com/morehao/golib/glog"
@@ -206,8 +205,8 @@ func errText(err error) string {
 	if err == nil {
 		return ""
 	}
-	var ae *acp.Error
-	if asACPError(err, &ae) {
+	var ae *code.RuntimeError
+	if asRuntimeError(err, &ae) {
 		if ae.Details != "" {
 			return ae.Details
 		}
@@ -236,9 +235,9 @@ func automationDisabled(id string) error {
 }
 
 // asACPError 是 errors.As 的小包装（避免本文件为了一个断言再引 errors 的命名冲突）。
-func asACPError(err error, dst **acp.Error) bool {
+func asRuntimeError(err error, dst **code.RuntimeError) bool {
 	for err != nil {
-		if ae, ok := err.(*acp.Error); ok {
+		if ae, ok := err.(*code.RuntimeError); ok {
 			*dst = ae
 			return true
 		}

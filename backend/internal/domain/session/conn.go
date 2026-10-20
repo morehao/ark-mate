@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/infra/acp"
@@ -117,7 +118,7 @@ type ConnPool interface {
 // （`SetCredentialSource` / `SetLiveClientSource`）属于装配接线，不进端口。
 type RuntimePlane interface {
 	// RecordRuntimeError 记录底座最近一次失败（含 stderr 尾巴）。
-	RecordRuntimeError(sessionID string, ae *acp.Error, tail []string)
+	RecordRuntimeError(sessionID string, ae *code.RuntimeError, tail []string)
 	// NoteScopeAmbiguous 记一条「归属歧义」留痕。
 	NoteScopeAmbiguous(detail string)
 	// SelectedSpec 取构建期选定的底座 spec（未装配 → 明确错误）。

@@ -175,8 +175,8 @@ func itoa(n int) string {
 // 判据取 **Class** 而不是 code 前缀：这一类的 code 长这样——`resume_session_unsupported`、
 // `list_sessions_unsupported`——后缀在尾不在头。
 func samplingUnsupported(err error) bool {
-	ae, ok := acp.As(err)
-	return ok && ae != nil && ae.Class == acp.ClassUnsupported
+	ae, ok := code.RuntimeErrorOf(err)
+	return ok && ae != nil && ae.Class == code.ClassUnsupported
 }
 
 // modelIDByValue 算"该 runtime 的不透明值 → 平台模型行 id"的注解表（v26，定案「辰」）。
@@ -280,7 +280,7 @@ func (pl *Plane) logCatalogFallback(runtimeID string, err error) {
 			"runtime", runtimeID, "err", err)
 		return
 	}
-	if ae, ok := acp.As(err); ok && ae != nil {
+	if ae, ok := code.RuntimeErrorOf(err); ok && ae != nil {
 		glog.Warnw(context.Background(), "模型目录取样失败（所有候选会话都读不通）",
 			"runtime", runtimeID, "code", ae.Code, "class", string(ae.Class), "err", ae.Details)
 		return
