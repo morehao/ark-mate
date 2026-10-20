@@ -7,11 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-
-	"github.com/morehao/ark-mate/internal/capabilityio"
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/transfer"
 )
 
 // automationCmd 分发 `mate automation <动作>`（M6-7：定时任务定义的存量搬家，与 `mate agent` 同形）。
@@ -64,8 +62,8 @@ func automationImport(args []string) {
 	}
 	defer st.Close()
 
-	stats, err := capabilityio.ImportAutomationDir(context.Background(), st, root,
-		definition.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
+	stats, err := transfer.ImportAutomationDir(context.Background(), st, root,
+		transfer.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "automation import: %v（未写入任何内容）\n", err)
 		os.Exit(1)
@@ -104,7 +102,7 @@ func automationExport(args []string) {
 	}
 	defer st.Close()
 
-	stats, err := capabilityio.ExportAutomationDir(context.Background(), st, root, *dryRun, os.Stdout)
+	stats, err := transfer.ExportAutomationDir(context.Background(), st, root, *dryRun, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "automation export: %v\n", err)
 		os.Exit(1)

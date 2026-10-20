@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 
 	"github.com/morehao/ark-mate/internal/capability"
-	"github.com/morehao/ark-mate/internal/capabilityio"
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
@@ -95,11 +94,11 @@ func NewPlanes(reg *runtime.Registry) *Planes {
 	// 定义**文件**载体与库句柄无关：memory 模式走文件，sqlite 模式才用行。
 	// 所以登记在构造处，而不是 `EnableStore`（那一步只在接了库时才跑——挂在它上面，
 	// memory 模式的写面会直接空指针）。
-	p.Automation.SetDefinitionFiles(capabilityio.DefinitionFiles{})
+	p.Automation.SetDefinitionFiles(AutomationDefinitionFiles{})
 	p.Skills = skill.NewPlane(p.Capabilities, skillDefs{p.Definitions})
 	p.McpSecrets = mcp.NewSecrets(p.Credentials)
 	p.Mcp = mcp.NewPlane(p.Capabilities, mcpDefs{p.Definitions}, p.McpSecrets)
-	p.Providers = provider.NewPlane(reg, capabilityio.NewSecrets(p.Credentials))
+	p.Providers = provider.NewPlane(reg, NewProviderSecrets(p.Credentials))
 	p.Resources = NewResources(reg, p.Providers)
 	p.Identity = NewIdentityDelivery(reg)
 	// 默认开启（config 的 auto）：显式置位，避免 atomic.Bool 零值把默认关掉。

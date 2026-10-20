@@ -3,7 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
-	"github.com/morehao/ark-mate/internal/capabilityio"
+
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"os"
@@ -21,6 +21,7 @@ import (
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
+	"github.com/morehao/ark-mate/internal/transfer"
 )
 
 // ——— K2：`mate doctor` 的 provider / 模型清单只读体检 ———
@@ -49,8 +50,8 @@ func (f *providerDoctorFixture) facts(t *testing.T) doctorfacts.ProviderDoctorFa
 	return doctorfacts.CollectProviderDoctorFacts(context.Background(), f.st, doctorfacts.ProviderDoctorOptions{
 		Home: f.home, ProviderDir: f.providerDir, DBPath: filepath.Join(f.home, "mate.db"),
 		ProvidersFileName:   provider.ProvidersFileName,
-		BackupName:          capabilityio.ProvidersBackupName,
-		MismatchExtraMarker: capabilityio.ProviderMismatchExtraMarker,
+		BackupName:          transfer.ProvidersBackupName,
+		MismatchExtraMarker: transfer.ProviderMismatchExtraMarker,
 	}, func(ctx context.Context, st *store.Store, home string) []doctorfacts.ProviderRuntimeFacts {
 		return registry.CollectRuntimeModelFacts(ctx, st, home, dsh.Registry())
 	})

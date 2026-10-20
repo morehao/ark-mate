@@ -17,6 +17,10 @@
 //   - `Sequence`：启动/关闭各一条声明序列。Step 带阶段、critical 与超时；`Start` 在 critical
 //     失败时按逆序回滚**已启动**的步骤，`Stop` 永远按启动的逆序执行。
 //
+// 本包同时是**窄端口适配体**的落点：`workspaceStore` / `skillDefs` / `mcpDefs` /
+// `AutomationDefinitionFiles` / `providerSecrets`。它们只做「把机制的宽面收窄成域声明的端口」，
+// 而这件事只有同时看得见两侧的装配点写得了（机制层禁止 import 域）。
+//
 // 本包**不认识 manager**：manager 反过来 import 它（过渡期），P4b 随 manager 解散后这里就是
 // 装配面的最终落点。依赖方向单一：registry → domain/mechanism/store/pkg，绝不反向。
 package registry

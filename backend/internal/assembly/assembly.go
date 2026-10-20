@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/capabilityio"
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/credential"
 	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
@@ -20,7 +19,6 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/infra/procreg"
 	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/registry"
@@ -30,6 +28,7 @@ import (
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/transfer"
 	"github.com/morehao/golib/glog"
 )
 
@@ -296,8 +295,8 @@ func (as *assembly) startImports(ctx context.Context) error {
 		return nil
 	}
 	cfg := as.cfg
-	if imp, err := definition.ImportCapabilityDir(ctx, as.st, cfg.CapabilityDir,
-		definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
+	if imp, err := transfer.ImportCapabilityDir(ctx, as.st, cfg.CapabilityDir,
+		transfer.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		glog.Warnw(ctx, "serve: 导入存量能力定义失败（能力面可能为空；可跑 `mate capability import` 重试）",
 			"err", err, "dir", cfg.CapabilityDir)
 	} else if !imp.Already && imp.Inserted+imp.Existing+imp.Invalid+imp.Tools > 0 {
@@ -306,8 +305,8 @@ func (as *assembly) startImports(ctx context.Context) error {
 			"inserted", imp.Inserted, "existing", imp.Existing,
 			"invalid", imp.Invalid, "tools_files_skipped", imp.Tools)
 	}
-	if imp, err := capabilityio.ImportAutomationDir(ctx, as.st, cfg.AutomationDir,
-		definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
+	if imp, err := transfer.ImportAutomationDir(ctx, as.st, cfg.AutomationDir,
+		transfer.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		glog.Warnw(ctx, "serve: 导入存量 automation 定义失败（定时任务面可能为空；可跑 `mate automation import` 重试）",
 			"err", err, "dir", cfg.AutomationDir)
 	} else if !imp.Already && imp.Automations+imp.Inserted+imp.Existing+imp.Invalid > 0 {
@@ -317,8 +316,8 @@ func (as *assembly) startImports(ctx context.Context) error {
 	}
 	// provider 档案一次性导入（v11）：幂等依据是**文件内容指纹**；迁移前备份
 	// `providers.json.bak-v11`（全篇唯一不可逆动作——回退窗口在导入完成后关闭）。
-	if imp, err := capabilityio.ImportProviderFile(ctx, as.st, cfg.ProviderDir,
-		definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
+	if imp, err := transfer.ImportProviderFile(ctx, as.st, cfg.ProviderDir,
+		transfer.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		glog.Warnw(ctx, "serve: 导入存量 provider 档案失败（供应商面可能为空；可跑 `mate provider import` 重试）",
 			"err", err, "dir", cfg.ProviderDir)
 	} else if !imp.Already && imp.Providers+imp.Inserted+imp.Existing > 0 {

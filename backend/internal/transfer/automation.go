@@ -1,4 +1,4 @@
-package capabilityio
+package transfer
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	defn "github.com/morehao/ark-mate/internal/definition"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"github.com/morehao/ark-mate/internal/store"
 	"io"
 	"os"
@@ -35,9 +34,9 @@ import (
 // 目录里没有保留文件（不像 `<AgentDir>` 有 `providers.json`/`default.json`），所以每个 `.json`
 // 都是一条定义；点开头的临时文件跳过（C9 的 staging 文件就在同目录）。
 
-// ImportStats 一次 automation 导入的计数 = 域无关计数 + 本域的 Automations 条数。
-type ImportStats struct {
-	definition.DefinitionImportStats
+// AutomationImportStats 一次 automation 导入的计数 = 域无关计数 + 本域的 Automations 条数。
+type AutomationImportStats struct {
+	DefinitionImportStats
 	// Automations 目录里**过了闸门**的条数。
 	Automations int
 }
@@ -49,8 +48,8 @@ type ImportStats struct {
 //
 // **schedule/target 的可执行性不在导入期判定**：那是装载期的事（`buildAutomationRec` 会把
 // `loadErr` 留在列表里让用户看见），而"现在不可执行"不等于"这条定义该丢"——这与文件模式逐字一致。
-func ImportAutomationDir(ctx context.Context, st *store.Store, dir string, opts definition.DefinitionImportOptions, out io.Writer) (ImportStats, error) {
-	var stats ImportStats
+func ImportAutomationDir(ctx context.Context, st *store.Store, dir string, opts DefinitionImportOptions, out io.Writer) (AutomationImportStats, error) {
+	var stats AutomationImportStats
 	if st == nil {
 		return stats, errors.New("manager: 导入 automation 定义需要 sqlite 持久层（MATE_STORE=sqlite）")
 	}
@@ -63,13 +62,13 @@ func ImportAutomationDir(ctx context.Context, st *store.Store, dir string, opts 
 	items, scanStats := scanAutomationDir(dir, out)
 	stats = scanStats
 	if opts.DryRun {
-		return stats, definition.CountDryRun(ctx, st, items, &stats.DefinitionImportStats)
+		return stats, CountDryRun(ctx, st, items, &stats.DefinitionImportStats)
 	}
 	marker := ""
 	if opts.Auto {
 		marker = stats.Marker
 	}
-	if err := definition.ImportDefinitionRows(ctx, st, items, model.MetaKeyImportedAutomations, marker,
+	if err := ImportDefinitionRows(ctx, st, items, model.MetaKeyImportedAutomations, marker,
 		&stats.DefinitionImportStats, "automation", out); err != nil {
 		return stats, err
 	}
@@ -81,8 +80,8 @@ func ImportAutomationDir(ctx context.Context, st *store.Store, dir string, opts 
 // 每条行都经 `automationFileBody` 归一（定义键 + 运行态键合成一个文件），所以"导出两次逐字节
 // 相同"与"导出 → 空库导入 → 再导出逐字节相同"成立；写盘走 `capability.WriteDefinitionFile`
 // （同目录 staging + 原子 rename + 沿用已有文件权限）。
-func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRun bool, out io.Writer) (definition.DefinitionExportStats, error) {
-	stats := definition.DefinitionExportStats{Dir: strings.TrimSpace(dir), DryRun: dryRun}
+func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRun bool, out io.Writer) (DefinitionExportStats, error) {
+	stats := DefinitionExportStats{Dir: strings.TrimSpace(dir), DryRun: dryRun}
 	if st == nil {
 		return stats, errors.New("manager: 导出 automation 定义需要 sqlite 持久层（MATE_STORE=sqlite）")
 	}
@@ -93,7 +92,7 @@ func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRu
 	if err != nil {
 		return stats, err
 	}
-	outRows := make([]definition.ExportRow, 0, len(rows))
+	outRows := make([]ExportRow, 0, len(rows))
 	for i := range rows {
 		rel := rows[i].ID + ".json"
 		if !defn.ValidDefinitionID(rows[i].ID) {
@@ -112,9 +111,9 @@ func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRu
 			}
 			continue
 		}
-		outRows = append(outRows, definition.ExportRow{Label: rel, Path: filepath.Join(stats.Dir, rel), Body: []byte(body)})
+		outRows = append(outRows, ExportRow{Label: rel, Path: filepath.Join(stats.Dir, rel), Body: []byte(body)})
 	}
-	definition.WriteExportRows(outRows, dryRun, &stats, "automation", out)
+	WriteExportRows(outRows, dryRun, &stats, "automation", out)
 	return stats, nil
 }
 
@@ -201,9 +200,9 @@ func applyAutomationRuntime(df *capability.DefinitionFile, rt model.AutomationRu
 }
 
 // scanAutomationDir 扫描 `<AutomationDir>/*.json`：逐条切分定义/运行态并过闸门。
-func scanAutomationDir(dir string, out io.Writer) ([]model.DefinitionImportItem, ImportStats) {
-	stats := ImportStats{DefinitionImportStats: definition.DefinitionImportStats{Dir: dir}}
-	files := definition.GlobSorted(dir)
+func scanAutomationDir(dir string, out io.Writer) ([]model.DefinitionImportItem, AutomationImportStats) {
+	stats := AutomationImportStats{DefinitionImportStats: DefinitionImportStats{Dir: dir}}
+	files := GlobSorted(dir)
 	items := make([]model.DefinitionImportItem, 0, len(files))
 	kept := make([]string, 0, len(files))
 	for _, path := range files {
@@ -214,7 +213,7 @@ func scanAutomationDir(dir string, out io.Writer) ([]model.DefinitionImportItem,
 		body, id, rt, err := readAutomationDefinitionFile(path)
 		if err != nil {
 			stats.Invalid++
-			definition.WarnFile(out, "automation", path, err)
+			WarnFile(out, "automation", path, err)
 			continue
 		}
 		items = append(items, model.DefinitionImportItem{
@@ -222,7 +221,7 @@ func scanAutomationDir(dir string, out io.Writer) ([]model.DefinitionImportItem,
 		})
 		stats.Automations++
 	}
-	stats.Marker = definition.FingerprintPaths(kept)
+	stats.Marker = FingerprintPaths(kept)
 	return items, stats
 }
 

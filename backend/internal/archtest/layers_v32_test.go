@@ -159,9 +159,9 @@ var v32Layers = map[string]v32Layer{
 		"internal/controller", "internal/router", "internal/assembly", "internal/app",
 		"internal/cliops", "internal/cli",
 	}},
-	// 刀 7 引入：定义导入/导出编排（扫目录 / 计数 / 落库 / 导出）。它吃 domain 的纯转换，
-	// 所以域里不再需要认识 mechanism/definition。
-	"internal/capabilityio": {layer: 6, name: "capabilityio", sameLayer: true},
+	// 存量定义的导入/导出编排（扫目录 / 计数 / 落库 / 导出）。它吃 domain 的纯转换 +
+	// store + mechanism 的载体工具，所以域与装配点都不必各自再写一遍。
+	"internal/transfer": {layer: 6, name: "transfer", sameLayer: true},
 	// 刀 10 引入：migrate / doctor / transcripts / mcp reap 的落点。
 	// 运维动作的落点。**与组合根同级**：`mate doctor` 要真的把 app 装起来自检（装配 + 路由 +
 	// 注册表都在它的扫描面上），所以它必须能向下吃 assembly/router，而不是一个小小的 L6 助手。

@@ -1,4 +1,4 @@
-package sessionruntime
+package transfer
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -59,9 +57,9 @@ func TestImportCapabilityDirCountsAndAudit(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	ctx := context.Background()
 
-	stats, err := definition.ImportCapabilityDir(ctx, st, dir, definition.DefinitionImportOptions{}, nil)
+	stats, err := ImportCapabilityDir(ctx, st, dir, DefinitionImportOptions{}, nil)
 	if err != nil {
-		t.Fatalf("definition.ImportCapabilityDir: %v", err)
+		t.Fatalf("ImportCapabilityDir: %v", err)
 	}
 	if stats.Skills != 2 || stats.Mcps != 1 || stats.Invalid != 2 || stats.Tools != 1 {
 		t.Fatalf("扫描计数不符（2 skill / 1 mcp / 2 坏 / 1 tools 文件）: %+v", stats)
@@ -110,7 +108,7 @@ func TestImportCapabilityDirIsIdempotentAndNeverOverwrites(t *testing.T) {
 	ctx := context.Background()
 
 	// 装配期自动导入（看目录指纹）。
-	first, err := definition.ImportCapabilityDir(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
+	first, err := ImportCapabilityDir(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil)
 	if err != nil || first.Inserted != 3 {
 		t.Fatalf("首次自动导入应插 3 行: %+v err=%v", first, err)
 	}
@@ -120,7 +118,7 @@ func TestImportCapabilityDirIsIdempotentAndNeverOverwrites(t *testing.T) {
 	}
 
 	// 第二次自动导入：目录没变 → 整体跳过，一个字节都不写，**面板那一版也不动**。
-	second, err := definition.ImportCapabilityDir(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
+	second, err := ImportCapabilityDir(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil)
 	if err != nil {
 		t.Fatalf("第二次自动导入: %v", err)
 	}
@@ -137,7 +135,7 @@ func TestImportCapabilityDirIsIdempotentAndNeverOverwrites(t *testing.T) {
 		[]byte(`{"id":"gamma","name":"Gamma"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	third, err := definition.ImportCapabilityDir(ctx, st, dir, definition.DefinitionImportOptions{}, nil)
+	third, err := ImportCapabilityDir(ctx, st, dir, DefinitionImportOptions{}, nil)
 	if err != nil {
 		t.Fatalf("显式导入: %v", err)
 	}
@@ -155,7 +153,7 @@ func TestImportExportRoundTripKeepsUnknownKeys(t *testing.T) {
 	ctx := context.Background()
 
 	src := testutil.OpenStore(t, testutil.TempDBPath(t))
-	if _, err := definition.ImportCapabilityDir(ctx, src, srcDir, definition.DefinitionImportOptions{}, nil); err != nil {
+	if _, err := ImportCapabilityDir(ctx, src, srcDir, DefinitionImportOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	beforeSkills, err := src.ListSkillDefinitions(ctx)
@@ -169,9 +167,9 @@ func TestImportExportRoundTripKeepsUnknownKeys(t *testing.T) {
 
 	// 导出到一个**全新目录**（模拟"清库 → 只靠导出物重建"）。
 	exportDir := t.TempDir()
-	stats, err := definition.ExportCapabilityDir(ctx, src, exportDir, false, nil)
+	stats, err := ExportCapabilityDir(ctx, src, exportDir, false, nil)
 	if err != nil {
-		t.Fatalf("definition.ExportCapabilityDir: %v", err)
+		t.Fatalf("ExportCapabilityDir: %v", err)
 	}
 	if stats.Written != 3 || stats.Failed != 0 {
 		t.Fatalf("导出计数不符: %+v", stats)
@@ -183,7 +181,7 @@ func TestImportExportRoundTripKeepsUnknownKeys(t *testing.T) {
 
 	// 用导出物重建一个空库：逐字段（逐字节）一致。
 	dst := testutil.OpenStore(t, testutil.TempDBPath(t))
-	if _, err := definition.ImportCapabilityDir(ctx, dst, exportDir, definition.DefinitionImportOptions{}, nil); err != nil {
+	if _, err := ImportCapabilityDir(ctx, dst, exportDir, DefinitionImportOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	afterSkills, err := dst.ListSkillDefinitions(ctx)
@@ -210,7 +208,7 @@ func TestImportExportRoundTripKeepsUnknownKeys(t *testing.T) {
 	}
 	// 幂等：再导出一次逐字节相同（导出物是确定性的，便于进 git/diff）。
 	secondDir := t.TempDir()
-	if _, err := definition.ExportCapabilityDir(ctx, src, secondDir, false, nil); err != nil {
+	if _, err := ExportCapabilityDir(ctx, src, secondDir, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, rel := range []string{"skills/alpha.json", "skills/beta.json", "mcp/files.json"} {
@@ -235,7 +233,7 @@ func TestExportCapabilityDirDryRunWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	stats, err := definition.ExportCapabilityDir(ctx, st, dir, true, nil)
+	stats, err := ExportCapabilityDir(ctx, st, dir, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,16 +246,26 @@ func TestExportCapabilityDirDryRunWritesNothing(t *testing.T) {
 }
 
 func TestImportExportRequireStore(t *testing.T) {
-	if _, err := definition.ImportCapabilityDir(context.Background(), nil, "/tmp/x", definition.DefinitionImportOptions{}, nil); err == nil {
+	if _, err := ImportCapabilityDir(context.Background(), nil, "/tmp/x", DefinitionImportOptions{}, nil); err == nil {
 		t.Fatal("无持久层应显式失败")
 	}
-	if _, err := definition.ExportCapabilityDir(context.Background(), nil, "/tmp/x", false, nil); err == nil {
+	if _, err := ExportCapabilityDir(context.Background(), nil, "/tmp/x", false, nil); err == nil {
 		t.Fatal("无持久层应显式失败")
 	}
 	// 空目录 = 没有存量要搬，不是错误（sqlite 模式的写面本来就不需要目录）。
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	stats, err := definition.ImportCapabilityDir(context.Background(), st, "", definition.DefinitionImportOptions{}, nil)
+	stats, err := ImportCapabilityDir(context.Background(), st, "", DefinitionImportOptions{}, nil)
 	if err != nil || stats.Dir != "" {
 		t.Fatalf("空目录应静默无事: %+v err=%v", stats, err)
+	}
+}
+
+// writeSkill 写一个定义文件（raw 为准，便于验证未知键保留）。
+//
+// 从 `sessionruntime/skills_test.go` 复制：本文件搬到 transfer 后不再与那个包共享夹具。
+func writeSkill(t *testing.T, dir, id, raw string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "skills", id+".json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

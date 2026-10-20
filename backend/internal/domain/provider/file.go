@@ -10,7 +10,7 @@ import (
 
 // ——— providers.json 的磁盘形状与词法校验（纯规则，v3.2 刀 8）———
 //
-// 导入/导出**编排**在 `internal/capabilityio`（它要碰 store 与 mechanism）；这里只留
+// 导入/导出**编排**在 `internal/transfer`（它要碰 store 与 mechanism）；这里只留
 // "这个文件长什么样、id 合不合法"——那两条是域自己的词汇，编排与用例层都要用。
 
 const ProvidersFileName = "providers.json"

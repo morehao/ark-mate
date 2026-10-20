@@ -3,7 +3,7 @@ package maintenance
 import (
 	"context"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/capabilityio"
+
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +16,7 @@ import (
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/registry"
 	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/transfer"
 )
 
 // 本文件是 `mate doctor` 的 **provider（供应商凭据）与模型清单**那一段（K2）。
@@ -50,8 +51,8 @@ func checkProviderSection(opts doctorOptions) (doctorfacts.ProviderDoctorFacts, 
 		// 三个"两侧约定的字符串"由**组合根**从供应商域交下去（机制层不得 import 领域）：
 		// 档案文件名、迁移备份名、导入对账的那条判据标记。
 		ProvidersFileName:   provider.ProvidersFileName,
-		BackupName:          capabilityio.ProvidersBackupName,
-		MismatchExtraMarker: capabilityio.ProviderMismatchExtraMarker,
+		BackupName:          transfer.ProvidersBackupName,
+		MismatchExtraMarker: transfer.ProviderMismatchExtraMarker,
 		RuntimeSpecs:        assembly.BuiltinSpecs(),
 	}, func(ctx context.Context, st *store.Store, home string) []doctorfacts.ProviderRuntimeFacts {
 		return registry.CollectRuntimeModelFacts(ctx, st, home, assembly.BuiltinRegistry())

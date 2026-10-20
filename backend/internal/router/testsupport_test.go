@@ -2,9 +2,9 @@ package router_test
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/capabilityio"
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/registry"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -105,6 +105,6 @@ func testRouterDeps(t *testing.T, o testRouterOpts) router.Deps {
 // `registry.NewPlanes`，要么在这里把端口接上——不接的话测的是"配置错误"，不是行为。
 func newAutomationPlaneForTest() *automation.Plane {
 	p := automation.NewPlane()
-	p.SetDefinitionFiles(capabilityio.DefinitionFiles{})
+	p.SetDefinitionFiles(registry.AutomationDefinitionFiles{})
 	return p
 }

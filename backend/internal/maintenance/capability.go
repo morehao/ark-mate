@@ -10,11 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-
 	"github.com/morehao/ark-mate/internal/capability"
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/transfer"
 )
 
 // capabilityCmd 分发 `mate capability <动作>`。
@@ -65,8 +64,8 @@ func capabilityImport(args []string) {
 	}
 	defer st.Close()
 
-	stats, err := definition.ImportCapabilityDir(context.Background(), st, root,
-		definition.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
+	stats, err := transfer.ImportCapabilityDir(context.Background(), st, root,
+		transfer.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "capability import: %v（未写入任何内容）\n", err)
 		os.Exit(1)
@@ -109,7 +108,7 @@ func capabilityExport(args []string) {
 	}
 	defer st.Close()
 
-	stats, err := definition.ExportCapabilityDir(context.Background(), st, root, *dryRun, os.Stdout)
+	stats, err := transfer.ExportCapabilityDir(context.Background(), st, root, *dryRun, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "capability export: %v\n", err)
 		os.Exit(1)

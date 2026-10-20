@@ -1,4 +1,4 @@
-package definition
+package transfer
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 
 // ——— 定义形状的历史迁移（旧 sources[] / legacy mcp ref → 新形状）———
 //
-// 放在机制层而不是任何单个域：这两件事都只与**定义文档的形状**有关，与"skill 该怎么投影"
-// "mcp 该怎么注入"无关；而 skill / mcp / provider 的导入路径都要用它。
+// 放在**导入/导出编排**里而不是任何单个域：这两件事都只与**定义文档的形状**有关，与"skill 该怎么投影"
+// "mcp 该怎么注入"无关；而 skill / mcp / provider 的导入路径只有这一个落点。
 
 // TranslateLegacyMcpRefs 把一条 MCP 定义文档里的旧前缀引用**就地**翻成 `store:`，
 // 返回被翻过的条数（0 = 没有旧前缀，调用方不必重新序列化）。

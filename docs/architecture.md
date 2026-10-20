@@ -108,7 +108,7 @@ Electron 主进程（桌面态）
 | **L3** | `dto/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份） |
 | **L4** | `service/svc<领域>` | 用例层：接口 + 实现 + 构造函数；校验、错误码、响应装配 |
 | **L5** | `store` `dao` `infra/{credentials,dbclient,procreg,dsh}` | 持久与基础设施 |
-| **L6** | `gateway` `mechanism` `registry` `runtimeconn` `config` `capabilityio` | 驱动侧：机制、注册表、连接面、定义导入导出编排 |
+| **L6** | `gateway` `mechanism` `registry` `runtimeconn` `config` `transfer` | 驱动侧：机制、注册表、连接面、存量定义导入导出编排 |
 | **L7** | `sessionruntime` | 会话编排（Service / Orchestrator / 权限） |
 | **L8** | `controller/ctr<领域>` `middleware` | 入站适配 |
 | **L9** | `router` `assembly` `app` `cliops` `cli` `maintenance` | 装配与交付 |
@@ -120,8 +120,12 @@ Electron 主进程（桌面态）
 
 - **`domain` 双载体**：`store`（sqlite）与文件/memory 各一份，由窄端口（`WorkspaceStore` / `ProviderStore` /
   `AutomationStore` / `DefinitionFiles` / `Secrets` / `Store`）在装配期接进来；`*store.Store` 结构上满足它们。
-- **`capabilityio`（L6）**：定义导入/导出**编排**（扫目录、计数、落库、导出）。域只留纯转换
-  （文件形状、v11→v12 映射、id 词法），因为编排要认识 `store` 与 `mechanism`，而域不该认识它们。
+  适配体落在装配点 `registry`（与 `workspaceStore` / `skillDefs` / `mcpDefs` 同一处：只有它同时看得见域端口与机制实现）。
+- **`transfer`（L6）**：**存量定义**在文件载体与持久层之间的导入/导出**编排**（扫目录、计数、落库、导出），
+  三个域（capability / automation / provider）共用一套纪律。域只留纯转换（文件形状、v11→v12 映射、
+  id 词法），因为编排要认识 `store` 与 `mechanism`，而域不该认识它们。它也不能并进 `capability`：
+  后者是 L1 值层，而 `domain/*` 已经 import 它——把 `store` 加进去是 L1 向上的边，`capability → domain`
+  还会直接成环。
 - **`maintenance`（L9）**：命令实现（migrate / doctor / transcripts / mcp / config / demo / automation /
   capability / provider）。`cliops` 只剩命令分发与常驻 `serve`。
 

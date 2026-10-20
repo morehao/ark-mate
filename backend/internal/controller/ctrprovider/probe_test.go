@@ -2,8 +2,8 @@ package ctrprovider
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/capabilityio"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/registry"
 	"strings"
 	"testing"
 
@@ -44,7 +44,7 @@ func (f *fakeProviderCatalog) ModelCatalog(context.Context) (*provider.CatalogVi
 //	   文案里带 id。把平面接错（或忘了接）在这里就会现形，而"编译通过 + 档案面照常工作"看不见它。
 func TestNewProviderCtrBuildsBothUseCases(t *testing.T) {
 	reg := dsh.Registry()
-	plane := provider.NewPlane(reg, capabilityio.NewSecrets(credential.New(reg)))
+	plane := provider.NewPlane(reg, registry.NewProviderSecrets(credential.New(reg)))
 	plane.SetProviderDir(t.TempDir())
 	ctr := NewProviderCtr(svcprovider.NewProvider(plane), svcprovider.NewProbe(plane, &fakeProviderCatalog{}))
 

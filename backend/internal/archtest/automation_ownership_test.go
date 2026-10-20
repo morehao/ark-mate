@@ -68,12 +68,12 @@ var automationDomainAnchors = map[string][]string{
 // 出边被钉死的那条纪律就破了。
 //
 // 现在分工是：域只留**纯转换**（`Locator` / `RunsJSON` / `RuntimeStateOf` 这类"行 ↔ 文件片段"），
-// 编排归 `internal/capabilityio`（L6 组合驱动）。导出之后域侧再也不能自己写一套导入语义——
+// 编排归 `internal/transfer`（L6 组合驱动）。导出之后域侧再也不能自己写一套导入语义——
 // 那正是这条守卫要挡的第二个事实源。
 var automationImportAnchors = []string{
 	"func ImportAutomationDir(",
 	"func ExportAutomationDir(",
-	"type ImportStats struct",
+	"type AutomationImportStats struct",
 }
 
 // automationManagerImplMarkers 实现痕迹（这些动作现在只许在域里做）。
@@ -105,17 +105,17 @@ func TestAutomationImplementationLivesInDomain(t *testing.T) {
 	}
 
 	// 导入/导出编排在新家，且域侧不许再有那份实现。
-	ioDir := filepath.Join(root, "internal", "capabilityio")
+	ioDir := filepath.Join(root, "internal", "transfer")
 	ioBody := dirProductionBody(t, ioDir)
 	for _, a := range automationImportAnchors {
 		if !strings.Contains(ioBody, a) {
-			t.Errorf("internal/capabilityio 里找不到 %q：导入/导出编排被改名/搬走了？（判据失锚＝空转）", a)
+			t.Errorf("internal/transfer 里找不到 %q：导入/导出编排被改名/搬走了？（判据失锚＝空转）", a)
 		}
 	}
 
 	if domAll := dirProductionBody(t, domainDir); strings.Contains(domAll, "func ImportAutomationDir(") ||
 		strings.Contains(domAll, "func ExportAutomationDir(") {
-		t.Error("`internal/domain/automation` 里又出现导入/导出入口：编排归 `internal/capabilityio`，" +
+		t.Error("`internal/domain/automation` 里又出现导入/导出入口：编排归 `internal/transfer`，" +
 			"域侧回去就又会把 store 与 mechanism 拉回领域的出边里。")
 	}
 

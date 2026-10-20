@@ -9,11 +9,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-
-	"github.com/morehao/ark-mate/internal/capabilityio"
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/transfer"
 )
 
 // providerCmd 分发 `mate provider <动作>`（v11：供应商档案的存量搬家）。
@@ -70,8 +68,8 @@ func providerImport(args []string) {
 	}
 	defer st.Close()
 
-	stats, err := capabilityio.ImportProviderFile(context.Background(), st, root,
-		definition.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
+	stats, err := transfer.ImportProviderFile(context.Background(), st, root,
+		transfer.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "provider import: %v\n", err)
 		os.Exit(1)
@@ -132,7 +130,7 @@ func providerExport(args []string) {
 	}
 	defer st.Close()
 
-	stats, err := capabilityio.ExportProviderFile(context.Background(), st, root, *dryRun, os.Stdout)
+	stats, err := transfer.ExportProviderFile(context.Background(), st, root, *dryRun, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "provider export: %v\n", err)
 		os.Exit(1)
