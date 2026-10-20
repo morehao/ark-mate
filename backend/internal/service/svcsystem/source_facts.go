@@ -5,6 +5,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
@@ -29,7 +30,7 @@ import (
 // `*store.Store` 结构上满足它；memory 模式传 nil（只能给进程内事实）。
 type SourceFactsReader interface {
 	GetSession(ctx context.Context, id string) (model.SessionEntity, bool, error)
-	EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]model.EventEntity, bool, error)
+	EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]event.Item, bool, error)
 }
 
 // Facts 是 `Source` 的实现：把库或内存镜像读成导出要的形状。

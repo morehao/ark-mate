@@ -14,6 +14,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 )
@@ -59,7 +60,7 @@ func Migrate(args []string) {
 			skipped++
 			continue
 		}
-		events := make([]model.EventEntity, 0, len(data.Lines))
+		events := make([]event.Item, 0, len(data.Lines))
 		for i, l := range data.Lines {
 			// 身份必须随数据来（v17）：**不代铸**——代铸出来的 id 与用户手里那份文件对不上，
 			// 而"同一支 id 指向同一条事件"正是导入判重与诊断引用的前提。
@@ -73,7 +74,7 @@ func Migrate(args []string) {
 			if mErr != nil {
 				continue
 			}
-			events = append(events, model.EventEntity{ID: l.ID, Type: l.Type, PayloadJSON: string(b)})
+			events = append(events, event.Item{ID: l.ID, Type: l.Type, PayloadJSON: string(b)})
 		}
 		lineCount += len(events)
 		items = append(items, store.ImportItem{

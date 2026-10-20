@@ -1,6 +1,7 @@
 package store
 
 import (
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"testing"
 	"time"
@@ -292,7 +293,7 @@ func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	// 事件行带身份（v17 起导入按 id 判重，缺 id 整批回滚）。
 	if _, _, err := s.ImportBatch(ctx, []ImportItem{{
 		Session: model.SessionEntity{ID: "c1", Title: "导入标题", Status: "completed"},
-		Events: []model.EventEntity{
+		Events: []event.Item{
 			{ID: objid.New(objid.Event), Type: "assistant_message", PayloadJSON: `{"text":"x"}`},
 		},
 	}}, "", 0, 0); err != nil {

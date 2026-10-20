@@ -609,7 +609,7 @@ func TestEventIdentityTravelsWithData(t *testing.T) {
 			"④ sqlite 模式恢复：库里的 id 原样注入 bus"},
 		{`ID: e\.ID, Type: e\.Type,`, 2,
 			"⑤ 两条读模型出口都带 id（REST 导出 + 会话历史）"},
-		{`model\.EventEntity\{ID: l\.ID,`, 1,
+		{`event\.Item\{ID: l\.ID,`, 1,
 			"⑥ 导入把 transcript 的 id 交给 store（缺 id 时前面已 fail-loud）"},
 		{`Event\{ID: id,`, 1,
 			"⑦ 帧结构体必须真的把 id 放进去（omitempty 只对「没有身份」的事件生效）"},

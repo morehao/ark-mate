@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/domain/session/memory"
 	"github.com/morehao/ark-mate/internal/domain/session/message"
 	"github.com/morehao/ark-mate/internal/domain/session/queue"
@@ -31,8 +32,8 @@ type Store interface {
 	DefaultWorkspace(ctx context.Context) (model.WorkspaceEntity, bool, error)
 
 	// ——— 事件 ———
-	EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]model.EventEntity, bool, error)
-	EventsAllBySession(ctx context.Context, afterSessionID string, afterSeq, limit int64) ([]model.EventEntity, bool, error)
+	EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]event.Item, bool, error)
+	EventsAllBySession(ctx context.Context, afterSessionID string, afterSeq, limit int64) ([]event.Item, bool, error)
 	AppendEvent(ctx context.Context, id, sessionID, typ string, payload any) (int64, error)
 
 	// ——— 轮次 ———

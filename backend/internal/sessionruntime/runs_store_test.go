@@ -1,6 +1,7 @@
 package sessionruntime
 
 import (
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"context"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"regexp"
@@ -14,7 +15,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
@@ -145,7 +145,7 @@ func TestRunWindowStartsAtRunStarted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var startedEv model.EventEntity
+	var startedEv event.Item
 	found := false
 	for _, e := range evs {
 		if e.Seq == started.Seq {

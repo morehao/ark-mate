@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"path/filepath"
 	"testing"
 	"time"
@@ -292,14 +293,14 @@ func TestImportBatch(t *testing.T) {
 	now := time.Now().UTC()
 	// v17：导入的事件行必须带**身份**（`evt_…`），所以每次造夹具都现铸——
 	// 固定字面量会在"同一支 id 落在两个会话上"那里撞成"分叉"（那正是另一个用例要测的）。
-	newEvents := func() []model.EventEntity {
-		return []model.EventEntity{
+	newEvents := func() []event.Item {
+		return []event.Item{
 			{ID: objid.New(objid.Event), Type: "session.user_message", PayloadJSON: `{"text":"hi"}`},
 			{ID: objid.New(objid.Event), Type: "session.message", PayloadJSON: `{"text":"yo"}`},
 			{ID: objid.New(objid.Event), Type: "run.ended", PayloadJSON: `{"stop_reason":"end_turn"}`},
 		}
 	}
-	mkItem := func(sessionID string, events []model.EventEntity) ImportItem {
+	mkItem := func(sessionID string, events []event.Item) ImportItem {
 		return ImportItem{
 			Session: model.SessionEntity{ID: sessionID, Title: "迁移会话",
 				Status: "completed", CreatedAt: now, UpdatedAt: now},
@@ -353,22 +354,22 @@ func TestImportBatch(t *testing.T) {
 func TestImportBatchEventIdentity(t *testing.T) {
 	s := openTestDB(t)
 	now := time.Now().UTC()
-	mk := func(events []model.EventEntity) ImportItem {
+	mk := func(events []event.Item) ImportItem {
 		return ImportItem{
 			Session: model.SessionEntity{ID: "s-idem", Status: "completed",
 				CreatedAt: now, UpdatedAt: now},
 			Events: events,
 		}
 	}
-	first := model.EventEntity{ID: objid.New(objid.Event), Type: "session.user_message", PayloadJSON: `{"text":"hi"}`}
-	if ev, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]model.EventEntity{first})}, "fp-a", 1, 1); err != nil || ev != 1 {
+	first := event.Item{ID: objid.New(objid.Event), Type: "session.user_message", PayloadJSON: `{"text":"hi"}`}
+	if ev, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]event.Item{first})}, "fp-a", 1, 1); err != nil || ev != 1 {
 		t.Fatalf("首次导入: ev=%d err=%v", ev, err)
 	}
 	countBefore, _ := s.EventCount(ctxT(), "")
 	seqBefore := sessionWatermarks(t, s)
 
 	// ① 同 id 同内容（不同 marker，模拟"清掉 marker 再导一次"）→ 跳过，不新增行，也不报错。
-	ev, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]model.EventEntity{first})}, "fp-b", 1, 1)
+	ev, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]event.Item{first})}, "fp-b", 1, 1)
 	if err != nil {
 		t.Fatalf("同 id 同内容应幂等跳过，实际报错: %v", err)
 	}
@@ -385,7 +386,7 @@ func TestImportBatchEventIdentity(t *testing.T) {
 	// ② 同 id 不同内容 → 报错 + 整批回滚。
 	diverged := first
 	diverged.PayloadJSON = `{"text":"改过了"}`
-	if _, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]model.EventEntity{diverged})}, "fp-c", 1, 1); err == nil {
+	if _, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]event.Item{diverged})}, "fp-c", 1, 1); err == nil {
 		t.Fatal("同 id 不同内容必须报错（分叉），不能静默跳过")
 	}
 	if n, _ := s.EventCount(ctxT(), ""); n != countBefore {
@@ -394,7 +395,7 @@ func TestImportBatchEventIdentity(t *testing.T) {
 
 	// ③ 缺 id / 形状非法 → 报错。
 	for _, bad := range []string{"", "evt_short", "ses_01J9Z6Q0M7X2V8K4B3N5TRW1PD"} {
-		if _, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]model.EventEntity{
+		if _, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]event.Item{
 			{ID: bad, Type: "session.message", PayloadJSON: `{"text":"x"}`},
 		})}, "fp-d-"+bad, 1, 1); err == nil {
 			t.Fatalf("id=%q 应被拒绝", bad)

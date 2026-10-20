@@ -7,8 +7,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
 
@@ -87,7 +87,7 @@ func (pl *Plane) SessionRuns(ctx context.Context, sessionID string) ([]run.Item,
 //
 // 只补：已存在的行（含崩溃留下的 running 行）既不删也不改——它的 status 是事实，投影推不出来。
 // 行身份**取自事件载荷**（`run_id`），绝不在这里铸新号：读模型不能成为第二个身份铸造点。
-func (pl *Plane) reconcileRunRows(ctx context.Context, sessionID string, all []model.EventEntity) (bool, error) {
+func (pl *Plane) reconcileRunRows(ctx context.Context, sessionID string, all []event.Item) (bool, error) {
 	rows, err := pl.st.ListRuns(ctx, sessionID)
 	if err != nil {
 		return false, err
@@ -133,7 +133,7 @@ func (pl *Plane) reconcileRunRows(ctx context.Context, sessionID string, all []m
 // "收口事实"有两支（见 `RunClosingStatus`）：终态事件，以及恢复路径的 `run.status(interrupted)`。
 // 后者是崩溃残轮在**事件层**留下的收口；没有它，重建只能靠"会话不在 in_progress"这条更弱的口径
 // （见 `closeDanglingRunsOfInactiveSession`），而那条口径说不出「轮次是重启带走的」。
-func (pl *Plane) closeRunsWithTerminal(sessionID string, all []model.EventEntity, runs []run.Item) bool {
+func (pl *Plane) closeRunsWithTerminal(sessionID string, all []event.Item, runs []run.Item) bool {
 	open := make(map[string]bool, len(runs))
 	for _, r := range runs {
 		if r.LastSeq < 0 {
@@ -174,7 +174,7 @@ func (pl *Plane) closeRunsWithTerminal(sessionID string, all []model.EventEntity
 // 窗口就是"从起点到日志末尾"）。
 //
 // 与 `closeRunsWithTerminal` 的分工：那一支优先（它读得出"重启带走的"），本函数只处理它漏下的。
-func (pl *Plane) closeDanglingRunsOfInactiveSession(ctx context.Context, sessionID string, runs []run.Item, all []model.EventEntity) bool {
+func (pl *Plane) closeDanglingRunsOfInactiveSession(ctx context.Context, sessionID string, runs []run.Item, all []event.Item) bool {
 	if pl.st == nil || len(runs) == 0 || len(all) == 0 {
 		return false
 	}
@@ -200,8 +200,8 @@ func (pl *Plane) closeDanglingRunsOfInactiveSession(ctx context.Context, session
 }
 
 // SessionEvents 读某会话的全部事件（位次升序；跨页循环，页大小与恢复注入一致）。
-func (pl *Plane) SessionEvents(ctx context.Context, sessionID string) ([]model.EventEntity, error) {
-	var all []model.EventEntity
+func (pl *Plane) SessionEvents(ctx context.Context, sessionID string) ([]event.Item, error) {
+	var all []event.Item
 	after := int64(-1)
 	for {
 		batch, more, err := pl.st.EventsAfter(ctx, sessionID, after, 2000)
@@ -364,8 +364,8 @@ func (pl *Plane) MaterializeRun(sessionID, typ string, payload map[string]any, t
 
 // eventsInWindow 取 `[lo, hi]` 闭区间内的事件（入参已按 seq 升序）。
 // `hi < 0` = 开区间（M2 起进行中的轮次 last_seq 未知）——此时只按 lo 切。
-func eventsInWindow(evs []model.EventEntity, lo, hi int64) []model.EventEntity {
-	out := make([]model.EventEntity, 0, len(evs))
+func eventsInWindow(evs []event.Item, lo, hi int64) []event.Item {
+	out := make([]event.Item, 0, len(evs))
 	for _, e := range evs {
 		if e.Seq < lo {
 			continue

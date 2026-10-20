@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"gorm.io/gorm"
 )
@@ -17,7 +18,7 @@ type ImportItem struct {
 	// `Seq` 仍然忽略——位次由 DB 这个权威按**本会话**重新分配（v21 起是会话内位次 0 起、
 	// 按本切片的行序推进；transcript 里那个 seq 是写入时那一刻的位次，跨版本可能是全局号，
 	// 拿它当权威会把旧口径的洞带进新库）。
-	Events []model.EventEntity
+	Events []event.Item
 }
 
 // ImportBatch 在一个事务内导入一批会话（transcript → DB，P1 迁移关键路径）：
@@ -109,7 +110,7 @@ func (s *Store) ImportBatch(ctx context.Context, items []ImportItem, marker stri
 //
 // 判重只按 `id`（身份），不按内容哈希：内容相同 + 同 id = 同一件事（跳过）；同 id 不同内容 =
 // 分叉（报错）。两条都是**显式**的——把分叉静默写进去，等于让同一支 id 在库里有两份语义。
-func (s *Store) importEventTx(ctx context.Context, tx *gorm.DB, sessionID string, ev model.EventEntity) (int64, error) {
+func (s *Store) importEventTx(ctx context.Context, tx *gorm.DB, sessionID string, ev event.Item) (int64, error) {
 	if err := validateImportEventID(ev.ID); err != nil {
 		return 0, fmt.Errorf("store: import session %s type %s: %w", sessionID, ev.Type, err)
 	}

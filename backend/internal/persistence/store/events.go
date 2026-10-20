@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/persistence/dao"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"gorm.io/gorm"
@@ -84,14 +85,18 @@ const (
 //
 // 游标只认 seq：v21 起 seq 是会话内位次（0 起、稠密），所以 `seq = 0` 是合法位次，
 // 本方法一律按开区间比较（`seq > after`），哨兵语义由调用方给定。
-func (s *Store) EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]model.EventEntity, bool, error) {
+func (s *Store) EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]event.Item, bool, error) {
 	if limit <= 0 {
 		limit = defaultEventPage
 	}
 	list, err := s.scanEvents(ctx, s.events.DB(ctx).
 		Where("session_id = ? AND seq > ?", sessionID, after).
 		Order("seq ASC").Limit(int(limit+1)))
-	return truncateEvents(list, int(limit), err)
+	items, hasMore, err := truncateEvents(list, int(limit), err)
+	if err != nil {
+		return nil, false, err
+	}
+	return eventItemsOf(items), hasMore, nil
 }
 
 // EventCount 统计某会话/全局事件行数（迁移校验用；sessionID 空 = 全库）。
@@ -107,7 +112,7 @@ func (s *Store) EventCount(ctx context.Context, sessionID string) (int64, error)
 // 为什么不是 v17 的那条 `WHERE seq > ?`（全表全局号序游标）：v21 起 `seq` 是会话内量，
 // 它**不再全库唯一**、也**不再跨会话可比**——拿它当全表游标会在第二个会话处回首（"seq > 5"
 // 在每个会话里都成立），回放顺序与取号顺序脱钩。复合游标把排序键写进谓词，顺序由 DB 定。
-func (s *Store) EventsAllBySession(ctx context.Context, afterSessionID string, afterSeq, limit int64) ([]model.EventEntity, bool, error) {
+func (s *Store) EventsAllBySession(ctx context.Context, afterSessionID string, afterSeq, limit int64) ([]event.Item, bool, error) {
 	if limit <= 0 {
 		limit = defaultEventPageAll
 	}
@@ -116,13 +121,17 @@ func (s *Store) EventsAllBySession(ctx context.Context, afterSessionID string, a
 		q = q.Where("session_id > ? OR (session_id = ? AND seq > ?)", afterSessionID, afterSessionID, afterSeq)
 	}
 	list, err := s.scanEvents(ctx, q.Order("session_id ASC, seq ASC").Limit(int(limit+1)))
-	return truncateEvents(list, int(limit), err)
+	items, hasMore, err := truncateEvents(list, int(limit), err)
+	if err != nil {
+		return nil, false, err
+	}
+	return eventItemsOf(items), hasMore, nil
 }
 
 // EventsBefore 反向分页：返回 seq < before 的最近 limit 条事件（结果仍按 seq 升序）。
 // hasMore 表示窗口之外还有更早的事件（即返回的第一条不是该会话最早的一条）。
 // **before < 0 时按「从最新往回」处理**（哨兵）；`before = 0` = "第 0 条之前" → 空页。
-func (s *Store) EventsBefore(ctx context.Context, sessionID string, before, limit int64) ([]model.EventEntity, bool, error) {
+func (s *Store) EventsBefore(ctx context.Context, sessionID string, before, limit int64) ([]event.Item, bool, error) {
 	if limit <= 0 {
 		limit = defaultEventPage
 	}
@@ -143,13 +152,13 @@ func (s *Store) EventsBefore(ctx context.Context, sessionID string, before, limi
 	for i := len(list) - 1; i >= 0; i-- {
 		out = append(out, list[i])
 	}
-	return out, hasMore, nil
+	return eventItemsOf(out), hasMore, nil
 }
 
 // FindEventByIDTx 按行身份取一条事件（导入判重与分叉检测用；找不到返回 ok=false）。
 //
 // 事务内版本：导入判重必须读同一事务的快照。
-func (s *Store) FindEventByIDTx(ctx context.Context, tx *gorm.DB, id string) (*model.EventEntity, bool, error) {
+func (s *Store) FindEventByIDTx(ctx context.Context, tx *gorm.DB, id string) (*event.Item, bool, error) {
 	ev, err := s.events.WithTx(tx).GetByID(ctx, id)
 	if err != nil {
 		return nil, false, err
@@ -157,7 +166,8 @@ func (s *Store) FindEventByIDTx(ctx context.Context, tx *gorm.DB, id string) (*m
 	if ev == nil {
 		return nil, false, nil
 	}
-	return ev, true, nil
+	item := eventItemOf(*ev)
+	return &item, true, nil
 }
 
 // scanEvents 执行查询并扫描事件行。
@@ -178,4 +188,21 @@ func truncateEvents(list model.EventEntityList, limit int, err error) (model.Eve
 		return list[:limit], true, nil
 	}
 	return list, false, nil
+}
+
+// ——— 行 ↔ 聚合映射（C1：领域自持 event.Item）———
+
+func eventItemOf(e model.EventEntity) event.Item {
+	return event.Item{
+		ID: e.ID, Seq: e.Seq, SessionID: e.SessionID, Type: e.Type,
+		PayloadJSON: e.PayloadJSON, CreatedAt: e.CreatedAt,
+	}
+}
+
+func eventItemsOf(rows []model.EventEntity) []event.Item {
+	out := make([]event.Item, 0, len(rows))
+	for _, e := range rows {
+		out = append(out, eventItemOf(e))
+	}
+	return out
 }

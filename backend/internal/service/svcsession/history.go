@@ -7,9 +7,9 @@ import (
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // ——— 会话历史面（P4a 正文第十刀：从 `manager` 上提到用例层）———
@@ -33,8 +33,8 @@ type HistorySvc interface {
 // `*store.Store` 结构上满足它，装配根直接交下来；memory 模式传 nil（走 eventbus 回放）。
 // 只声明这条用例真正用到的方法：多一个方法就等于多一条"这层还能读别的东西"的暗示。
 type EventReader interface {
-	EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]model.EventEntity, bool, error)
-	EventsBefore(ctx context.Context, sessionID string, before, limit int64) ([]model.EventEntity, bool, error)
+	EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]event.Item, bool, error)
+	EventsBefore(ctx context.Context, sessionID string, before, limit int64) ([]event.Item, bool, error)
 }
 
 // History 会话历史用例。依赖事实：事件读端口（sqlite 模式；memory 模式为 nil）、会话域平面、事件总线。
@@ -94,7 +94,7 @@ func (h *History) SessionHistory(ctx context.Context, id string, q dtosession.Hi
 		hasMore bool
 	)
 	if h.st != nil {
-		var batch []model.EventEntity
+		var batch []event.Item
 		var err error
 		if q.Before != nil {
 			batch, hasMore, err = h.st.EventsBefore(ctx, id, before, int64(q.Limit))
