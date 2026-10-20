@@ -359,7 +359,7 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 	// **恢复路径必须用会话钉住的选定**（不是全量）：它从 `sessions.capability_json` 读回。
 	// 漏了这一步的后果是会话重启后注入集悄悄换一套，而且没有任何报错。
 	opts := acp.SessionOptions{Cwd: cwd, McpServers: l.mcpServers(spec.ID, sel)}
-	caps := client.Capabilities()
+	caps := runtime.CapabilityFactsOfACP(client.Capabilities())
 	sameRuntime := spec.ID == rec.RuntimeID && rec.RuntimeID != ""
 	// `nativeID` 是**平台侧的值**（`rt_` 壳）；给底座的必须是**原文**。
 	//
@@ -376,14 +376,14 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 		rawNativeID = raw
 	}
 	resumeOK := sameRuntime && rawNativeID != "" &&
-		(caps.Raw.LoadSession || caps.Raw.SessionCapabilities.Resume != nil)
+		(caps.LoadSession || caps.SessionResume)
 
 	var sess *acp.Session
 	var memo string
 	reason := "restart"
 	switch {
 	case resumeOK:
-		if caps.Raw.LoadSession {
+		if caps.LoadSession {
 			sess, err = client.LoadSession(ctx, rawNativeID, opts)
 		} else {
 			sess, err = client.ResumeSession(ctx, rawNativeID, opts)

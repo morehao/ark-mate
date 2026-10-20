@@ -56,7 +56,7 @@ type Runtime interface {
 	// ManagesOwnContext 后端自管上下文/工具（§6.2 三投影均 true）。
 	ManagesOwnContext() bool
 	// Capabilities 返回底层连接握手到的能力（工具/MCP/权限面）。
-	Capabilities() acp.Capabilities
+	Capabilities() CapabilityFacts
 	// RuntimeSessionID 返回底层 ACP 会话 id（多轮续跑与诊断定位用）。
 	RuntimeSessionID() string
 	// Cancel 取消本会话进行中的 run（会话级执行原语；best-effort，见 acp.Session.Cancel）。

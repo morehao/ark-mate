@@ -34,8 +34,8 @@ func unsupported(code, details string) error {
 
 func (r *sessionRuntime) ID() string              { return r.spec.ID }
 func (r *sessionRuntime) ManagesOwnContext() bool { return r.spec.ManagesOwnContext }
-func (r *sessionRuntime) Capabilities() acp.Capabilities {
-	return r.sess.Client().Capabilities()
+func (r *sessionRuntime) Capabilities() CapabilityFacts {
+	return CapabilityFactsOfACP(r.sess.Client().Capabilities())
 }
 func (r *sessionRuntime) RuntimeSessionID() string { return r.sess.ID() }
 
