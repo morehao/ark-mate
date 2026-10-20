@@ -328,7 +328,7 @@ func TestGenerationMigrationDefersWhileBusy(t *testing.T) {
 	registered := make(chan struct{})
 	go func() {
 		r.orch.elic.RegisterAndWait(regCtx, convID,
-			acp.ElicitationRequest{Mode: "form", Message: "probe"},
+			interaction.ElicitationRequest{Mode: "form", Message: "probe"},
 			func(interaction.ElicitationItem) { close(registered) })
 	}()
 	<-registered

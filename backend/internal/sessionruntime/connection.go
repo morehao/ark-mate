@@ -31,7 +31,8 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 		if o.allowAll {
 			return acp.PermissionDecision{Allowed: true}
 		}
-		return o.requestPermission(ctx, req)
+		// 领域决策 → 回给底座的协议结果（翻译在 `interaction_bridge.go`，调用点不内联）。
+		return permissionDecisionToACP(o.requestPermission(ctx, req))
 	}
 	var cli *acp.Client // Dial 成功后回填；hook 都在连接读循环里被调用，晚于 Dial 返回
 	reqElic := func(ctx context.Context, req acp.ElicitationRequest) acp.ElicitationOutcome {
@@ -50,7 +51,7 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 			return acp.ElicitationOutcome{Action: "cancel"}
 		}
 		req.SessionID, req.ScopeSource = sid, source
-		return o.requestElicitation(ctx, req)
+		return elicitationOutcomeToACP(o.requestElicitation(ctx, req))
 	}
 	// elicitation/complete（URL 模式收尾通知）：agent 告知提问已在 agent 侧完成 → 宿主按 ACP 侧
 	// elicitationId 收敛挂起项。归属用「同连接的唯一在途 run」校验（可判定时）；不可判定时不阻断

@@ -61,17 +61,6 @@ func acpToolCallSignal(d acp.ToolCallInfo) event.ToolCall {
 	}
 }
 
-// acpToolCallOf 把领域工具调用还原成 ACP 形状。
-//
-// 它服务的是**还没端口化的权限面**（`permission_flow.go` 的请求合并）：那一刀（C2 第二块）
-// 会把权限/elicitation 也换掉，届时这个反向翻译随之消失。
-func acpToolCallOf(t event.ToolCall) acp.ToolCallInfo {
-	return acp.ToolCallInfo{
-		ID: t.ID, Title: t.Title, Status: t.Status, Kind: t.Kind,
-		Input: t.Input, Output: t.Output, ContentText: t.ContentText,
-	}
-}
-
 // acpEventSink 造一个**ACP 形状**的事件出口：先按需刷新配置项目录缓存，再交给领域出口。
 //
 // 目录刷新原先在领域的事件出口里做（那时它直接吃 `acp.ConfigOptionsInfo`）。`Options` 换成

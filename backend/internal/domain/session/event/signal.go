@@ -69,20 +69,24 @@ const (
 )
 
 // ToolCall 工具调用信息（等价于 ACP 的 tool_call / tool_call_update 载荷）。
+//
+// **json tag 是 wire**（不是内部约定）：它会被原样嵌进挂起权限请求的对外载荷
+// （`interaction.PermissionItem` 的 `tool_call`），前端按这些键渲染标题/命令行/结果。
+// 改一个 tag 就是改 REST/WS 契约与历史事件的形状。
 type ToolCall struct {
-	ID     string
-	Title  string
-	Status string
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status,omitempty"`
 	// Kind 底座给的工具种类（read/edit/execute/…），可空。
-	Kind  string
-	Input any
+	Kind  string `json:"kind,omitempty"`
+	Input any    `json:"input,omitempty"`
 	// Output 调用结果（仅 tool_call_update 携带时非空）。
-	Output any
-	// ContentText 结果里的**纯文本**拼接。
+	Output any `json:"output,omitempty"`
+	// ContentText 结果里的**纯文本**拼接（**不进 wire**：对外用 output 与归类字段）。
 	//
 	// 为什么必须有它：dsh 从不下发 rawOutput——工具结果正文只在 content 里。缺了它，
 	// 「这条调用为什么没成」就无从判断（被沙箱拒绝的那一帧 status 是 `completed`）。
-	ContentText string
+	ContentText string `json:"-"`
 }
 
 // Permission 一次权限决策留痕（决策后上抛）。

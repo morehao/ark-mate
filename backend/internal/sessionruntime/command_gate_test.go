@@ -24,8 +24,8 @@ func gateRules(t *testing.T) []interaction.PrefixRule {
 	return rules
 }
 
-func gateOptions() []acp.PermissionOption {
-	return []acp.PermissionOption{
+func gateOptions() []interaction.PermissionOption {
+	return []interaction.PermissionOption{
 		{OptionID: "allow-once", Kind: "allow_once"},
 		{OptionID: "allow-always", Kind: "allow_always"},
 		{OptionID: "reject-once", Kind: "reject_once"},
@@ -38,31 +38,31 @@ func TestCommandGateDecision(t *testing.T) {
 	o := &Orchestrator{commandPolicy: gateRules(t)}
 	opts := gateOptions()
 
-	d, rule, decided := o.commandGateDecision(acp.ToolCallInfo{
+	d, rule, decided := o.commandGateDecision(event.ToolCall{
 		ID: "c1", Input: map[string]any{"command": "rm -rf /tmp/x"},
 	}, opts)
 	if !decided || !d.Rejected || d.OptionID != "reject-once" || rule != "deny rm" {
 		t.Fatalf("forbidden: got (%+v, %q, %v)，want rejected + reject-once", d, rule, decided)
 	}
 
-	d, rule, decided = o.commandGateDecision(acp.ToolCallInfo{
+	d, rule, decided = o.commandGateDecision(event.ToolCall{
 		ID: "c2", Input: map[string]any{"command": "git status"},
 	}, opts)
 	if !decided || !d.Allowed || d.OptionID != "allow-once" || rule != "allow git status" {
 		t.Fatalf("allow: got (%+v, %q, %v)，want allowed + allow-once", d, rule, decided)
 	}
 
-	if _, _, decided := o.commandGateDecision(acp.ToolCallInfo{
+	if _, _, decided := o.commandGateDecision(event.ToolCall{
 		ID: "c3", Input: map[string]any{"command": "ls -la"},
 	}, opts); decided {
 		t.Fatal("没命中规则必须交回既有流程（不能自己放行）")
 	}
-	if _, _, decided := o.commandGateDecision(acp.ToolCallInfo{
+	if _, _, decided := o.commandGateDecision(event.ToolCall{
 		ID: "c4", Input: map[string]any{"command": "git status; rm -rf /"},
 	}, opts); decided {
 		t.Fatal("复杂命令必须交回人工审批（不能按空白切分猜）")
 	}
-	if _, _, decided := o.commandGateDecision(acp.ToolCallInfo{
+	if _, _, decided := o.commandGateDecision(event.ToolCall{
 		ID: "c5", Input: map[string]any{"path": "/x"},
 	}, opts); decided {
 		t.Fatal("非 shell 命令不归门禁管")
@@ -70,7 +70,7 @@ func TestCommandGateDecision(t *testing.T) {
 
 	// 没配置规则 = 不参与（行为与改前逐字相同）。
 	plain := &Orchestrator{tools: session.NewToolCallMemory()}
-	if _, _, decided := plain.commandGateDecision(acp.ToolCallInfo{
+	if _, _, decided := plain.commandGateDecision(event.ToolCall{
 		ID: "c6", Input: map[string]any{"command": "rm -rf /"},
 	}, opts); decided {
 		t.Fatal("未配置规则时门禁不得参与")
@@ -86,16 +86,16 @@ func TestCommandGatePrecedesPermissionMemory(t *testing.T) {
 		handles:       session.NewHandles(),
 		tools:         session.NewToolCallMemory(),
 	}
-	tool := acp.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute",
+	tool := event.ToolCall{ID: "c1", Title: "bash", Kind: "execute",
 		Input: map[string]any{"command": "rm -rf /tmp/x"}}
-	o.tools.Remember(acpToolCallSignal(tool))
+	o.tools.Remember(tool)
 	// 记忆里先放一条"这类工具始终允许"。
 	o.perm.Remember("ses_1", tool, "allow", "allow-always")
 
 	req := acp.PermissionRequest{
 		SessionID: "ses_1",
 		ToolCall:  acp.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute"}, // 请求只带 id/标题
-		Options:   gateOptions(),
+		Options:   acpGateOptions(),
 	}
 	d := o.requestPermission(context.Background(), req)
 	if !d.Rejected || d.Allowed {
@@ -162,4 +162,14 @@ func TestToolCallMemoryConcurrent(t *testing.T) {
 	if _, ok := o.tools.Get(""); ok {
 		t.Fatal("空 id 永远不该命中缓存")
 	}
+}
+
+// acpGateOptions 是同一份选项夹具的**协议形状**：`requestPermission` 的入参仍是 ACP 请求
+// （翻译在函数内部做），所以这条用例需要两份同值的选项。
+func acpGateOptions() []acp.PermissionOption {
+	out := make([]acp.PermissionOption, 0, 4)
+	for _, o := range gateOptions() {
+		out = append(out, acp.PermissionOption{OptionID: o.OptionID, Name: o.Name, Kind: o.Kind})
+	}
+	return out
 }

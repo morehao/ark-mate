@@ -9,6 +9,7 @@ import (
 
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 
 	"github.com/morehao/golib/glog"
 
@@ -22,7 +23,7 @@ import (
 //     PermissionsResolve（allow/reject × once/always）；超时或 ctx 取消自动拒绝。
 //
 // 事件发布（publish）注入的给 interaction.PermissionManager，避免 manager 依赖 bus。
-func (o *Orchestrator) requestPermission(ctx context.Context, req acp.PermissionRequest) acp.PermissionDecision {
+func (o *Orchestrator) requestPermission(ctx context.Context, req acp.PermissionRequest) interaction.PermissionDecision {
 	// P3 双 id：权限请求只携带原生 session id → 解析为平台会话 uuid 键控（记忆/挂起/事件
 	// 均以平台会话 id 为键，与 sessions/events/permission_memories 一致）。
 	sid := o.handles.ResolveProvider(req.SessionID)
@@ -34,12 +35,12 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acp.Permission
 	//
 	// 权限请求只带 toolCallId（dsh 的 wire 形状），命令行在同 id 的 tool_call 更新里——按 id 回查
 	// （`tool_calls.go`）。查不到就只用请求自带的字段：门禁取不到 command 时不再参与。
-	tool := req.ToolCall
+	tool := acpToolCallSignal(req.ToolCall)
 	if cached, ok := o.tools.Get(req.ToolCall.ID); ok {
-		// 工具记忆存的是**领域**形状（`event.ToolCall`）；权限面还没端口化，这里还原回 ACP 形状。
-		tool = acpToolCallOf(cached)
+		// 工具记忆存的也是领域形状（`event.ToolCall`）：两者同型，直接用更新的那一份。
+		tool = cached
 	}
-	if d, rule, decided := o.commandGateDecision(tool, req.Options); decided {
+	if d, rule, decided := o.commandGateDecision(tool, permissionOptionsToDomain(req.Options)); decided {
 		if d.Allowed {
 			glog.Infow(ctx, "命令门禁放行了一次工具调用", "session", sid, "call", tool.ID, "rule", rule)
 		} else {
@@ -51,10 +52,11 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acp.Permission
 	// v19 起没有 per-agent 默认权限策略这一层（agent 面删除）：裁决只剩**会话级记忆**
 	// （用户"始终允许"过的）与会话级征询。`session.permission_policy` 事件常量仍冻结在
 	// events.go（对外契约），但已经没有生产者。
-	if d, ok := o.perm.AutoDecision(sid, req); ok {
+	dreq := permissionRequestToDomain(req)
+	if d, ok := o.perm.AutoDecision(sid, dreq); ok {
 		return d
 	}
-	publish := func(callID, title string, tool acp.ToolCallInfo, opts []acp.PermissionOption, timeout time.Time) {
+	publish := func(callID, title string, tool event.ToolCall, opts []interaction.PermissionOption, timeout time.Time) {
 		// 「等用户决策」是**插曲不是终态**（S1）：它让界面说得出「等待你确认授权」，
 		// 而不是拿「进行中」蒙混过去。进入等待前的状态由域里的投影记着，决策后由
 		// `ResumeRunStatus` 送回去（否则头栏会一直停在等待态）。
@@ -72,7 +74,7 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acp.Permission
 			"timeout_at":   timeout.UTC().Format(time.RFC3339), // UI 端超时收敛（无用户决策时自动拒绝）
 		})
 	}
-	return o.perm.RegisterAndWait(ctx, sid, req, publish)
+	return o.perm.RegisterAndWait(ctx, sid, dreq, publish)
 }
 
 // PendingPermissions 列出某会话的挂起权限请求（attach/snapshot 供 UI 重建）。
@@ -91,7 +93,7 @@ func (o *Orchestrator) ResolvePermission(sessionID, callID, optionID string, alw
 	if callID == "" {
 		return PermissionDecisionOutcome{}, false, acp.NewError(acp.ClassRequest, "call_id_required", "call_id 必填", nil)
 	}
-	d := acp.PermissionDecision{Allowed: allowed, Rejected: !allowed, OptionID: optionID, Always: always}
+	d := interaction.PermissionDecision{Allowed: allowed, Rejected: !allowed, OptionID: optionID, Always: always}
 	found, out := o.perm.ResolveDecision(sessionID, callID, d)
 	if !found {
 		return PermissionDecisionOutcome{}, false, nil
@@ -150,18 +152,18 @@ func (o *Orchestrator) resolveElicitationScope(cli *acp.Client, req acp.Elicitat
 	//
 	// 修法只有一条：先按 `runtime_session_id` 反查平台会话，查不到退 `ScopeAmbiguous` + 留痕，
 	// **不猜**（这个函数的既有口径就是"猜错比不投更坏"）。
-	if req.ScopeSource == acp.ScopeWire && req.SessionID != "" {
+	if req.ScopeSource == interaction.ScopeWire && req.SessionID != "" {
 		if sid := o.platformSessionIDForProvider(req.SessionID); sid != "" {
-			return sid, acp.ScopeWire, ""
+			return sid, interaction.ScopeWire, ""
 		}
-		return "", acp.ScopeAmbiguous,
+		return "", interaction.ScopeAmbiguous,
 			"elicitation 的 wire `_meta` 带来了一个底座会话 id，但平台上没有会话登记它" +
 				"（跨会话 / 已删除 / 底座换了 id）：按不可归属处理，不猜测"
 	}
 	if sid := o.busySessionForClient(cli); sid != "" {
-		return sid, acp.ScopeInferred, ""
+		return sid, interaction.ScopeInferred, ""
 	}
-	return "", acp.ScopeAmbiguous,
+	return "", interaction.ScopeAmbiguous,
 		"elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 run）"
 }
 
@@ -204,7 +206,7 @@ func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string
 //     并阻塞等待 ElicitationResolve（accept/decline/cancel）；超时或 ctx 取消自动按取消处理。
 //
 // 事件发布（publish）注入给 interaction.ElicitationManager，避免 manager 依赖 bus。
-func (o *Orchestrator) requestElicitation(ctx context.Context, req acp.ElicitationRequest) acp.ElicitationOutcome {
+func (o *Orchestrator) requestElicitation(ctx context.Context, req acp.ElicitationRequest) interaction.ElicitationOutcome {
 	sid := req.SessionID // 断点恢复别名归一
 	publish := func(it interaction.ElicitationItem) {
 		o.runner.RunStatusFor(sid, session.RunStatusWaitingForUser, session.RunStatusOpts{WaitingFor: "elicitation"})
@@ -223,7 +225,7 @@ func (o *Orchestrator) requestElicitation(ctx context.Context, req acp.Elicitati
 		}
 		o.svc.sessionPlane.Publish(session.BusElicitationRequest, sid, payload)
 	}
-	return o.elic.RegisterAndWait(ctx, sid, req, publish)
+	return o.elic.RegisterAndWait(ctx, sid, elicitationRequestToDomain(req), publish)
 }
 
 // PendingElicitations 列出某会话的挂起结构化提问（attach/snapshot 供 UI 重建）。
@@ -348,24 +350,24 @@ func lateAnswerText(question string, content map[string]any) string {
 //
 // decided=false 表示**交回既有流程**（prompt / 非 shell 命令 / 未配置规则）；true 表示门禁已经
 // 给出终局（allow / forbidden），调用方直接返回它，不再走记忆与人工审批。
-func (o *Orchestrator) commandGateDecision(tool acp.ToolCallInfo, opts []acp.PermissionOption) (acp.PermissionDecision, string, bool) {
+func (o *Orchestrator) commandGateDecision(tool event.ToolCall, opts []interaction.PermissionOption) (interaction.PermissionDecision, string, bool) {
 	d, rule, isShell := interaction.GateCommand(o.commandPolicy, tool.Input)
 	if !isShell {
-		return acp.PermissionDecision{}, "", false
+		return interaction.PermissionDecision{}, "", false
 	}
 	switch d {
 	case interaction.CommandForbidden:
-		return acp.PermissionDecision{Rejected: true, OptionID: permissionOptionID(opts, false)}, rule, true
+		return interaction.PermissionDecision{Rejected: true, OptionID: permissionOptionID(opts, false)}, rule, true
 	case interaction.CommandAllow:
-		return acp.PermissionDecision{Allowed: true, OptionID: permissionOptionID(opts, true)}, rule, true
+		return interaction.PermissionDecision{Allowed: true, OptionID: permissionOptionID(opts, true)}, rule, true
 	default:
-		return acp.PermissionDecision{}, rule, false
+		return interaction.PermissionDecision{}, rule, false
 	}
 }
 
 // permissionOptionID 选一个放行/拒绝选项：优先 `_once`（最小授权），其次同类任一；没有 → 空串
 // （ACP 层按 EffectivePermissionOutcome 兜底：放行选第一个，拒绝落回 cancelled）。
-func permissionOptionID(opts []acp.PermissionOption, allow bool) string {
+func permissionOptionID(opts []interaction.PermissionOption, allow bool) string {
 	prefix, once := "reject", "reject_once"
 	if allow {
 		prefix, once = "allow", "allow_once"

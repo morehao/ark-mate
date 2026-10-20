@@ -217,3 +217,41 @@ func TestDomainOwnsItsTypesNotTableRows(t *testing.T) {
 		t.Fatal("internal/domain 下没有扫到任何包（fail-closed）：领域目录被改名/搬走了？")
 	}
 }
+
+// protocolFreeDomainPackages 已经完成「协议边界」迁移的领域包：它们的生产 import 里不得再出现
+// `infra/acp`（协议类型只出现在连接边界与出站适配器）。
+//
+// 这份清单是**逐步增长的收口表**：C2 每完成一块（事件与轮次 → 错误构造 → 权限/elicitation →
+// 配置项 → 连接与生命周期），就在这里登记一个包。等全部登记完，`internal/domain` 前缀可以整体
+// 收成一条判据（那时才允许写「domain 不得 import acp」的全量守卫）。
+//
+// 为什么现在就登记：已完成的边界最容易**静默回退**——下一个人为了省一次转换，在域里直接写
+// `acp.PermissionRequest` 能编译、能跑，测试也绿（翻译层还在，两条路都通），于是"域不认识协议"
+// 这件事悄悄退回起点，而没有任何判据会响。
+var protocolFreeDomainPackages = []string{
+	modulePrefix + "internal/domain/interaction",
+}
+
+// TestProtocolFreeDomainPackagesStayClean 已收口的领域包不得再 import 协议库。
+//
+// fail-closed：登记了的包必须真实存在（目录改名/搬走后不许静默空转）。
+func TestProtocolFreeDomainPackagesStayClean(t *testing.T) {
+	root := backendRoot(t)
+	acpPkg := modulePrefix + "internal/infra/acp"
+	for _, pkgPath := range protocolFreeDomainPackages {
+		dir := filepath.Join(root, strings.TrimPrefix(pkgPath, modulePrefix))
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("协议无关的领域包 %s 不存在：请同步 protocolFreeDomainPackages（fail-closed）", pkgPath)
+		}
+		pkg, err := build.ImportDir(dir, 0)
+		if err != nil {
+			t.Fatalf("解析包 %s 失败: %v", pkgPath, err)
+		}
+		for _, imp := range pkg.Imports {
+			if imp == acpPkg {
+				t.Errorf("%s 已登记为「协议无关」，却仍 import %s：改用域值类型，翻译放连接边界",
+					pkgPath, imp)
+			}
+		}
+	}
+}

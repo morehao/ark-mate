@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"net/http"
 	"net/http/httptest"
@@ -1378,8 +1379,8 @@ func TestPermissionMemoriesList(t *testing.T) {
 func TestPendingPermissionsList(t *testing.T) {
 	svc := &stubSvc{pendingPerms: []interaction.PermissionItem{{
 		CallID: "tc1", SessionID: "s1", Title: "执行 echo hello",
-		ToolCall:  acp.ToolCallInfo{ID: "tc1", Kind: "execute", Input: json.RawMessage(`{"cmd":"echo hello"}`)},
-		Options:   []acp.PermissionOption{{OptionID: "allow_once", Name: "本次允许", Kind: "allow_once"}},
+		ToolCall:  event.ToolCall{ID: "tc1", Kind: "execute", Input: json.RawMessage(`{"cmd":"echo hello"}`)},
+		Options:   []interaction.PermissionOption{{OptionID: "allow_once", Name: "本次允许", Kind: "allow_once"}},
 		TimeoutAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 	}}}
 	deps := stubDeps(t, svc)
