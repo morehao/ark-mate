@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条；新增的是层表、契约基线、v3.2 层表与 gin 围栏）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 起为 171 条；新增的是层表、契约基线、v3.2 层表、gin 围栏与定义导入/导出归属）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -88,7 +88,9 @@
 `tz_offset?: number` / api 必须 `p.set('tz_offset'` / 页面必须 `tz_offset: -new Date().getTimezoneOffset()`。
 反证（实跑）：存储层改回 `UTC()` 分桶 → 红；抽掉 api 的 `p.set('tz_offset'` → 红。
 
-**共 169 条**——加守卫时记得同步这句话。
+- 再加 **2 条「定义导入/导出归属」守卫**（`transfer_ownership_test.go`，2026-10-20：`internal/capabilityio` 拆成 `internal/transfer` + `registry` 的两个窄端口适配体。拆之前同一个概念分居两包——capability 的导入留在 `mechanism/definition`，automation/provider 的在 `capabilityio`——而包名又和 `internal/capability` 只差后缀，看目录的人无法判断该 import 哪个。两种静默失效各有一条判据：① **第二个家**：六入口（3 域 × import/export）与域无关框架（`ImportDefinitionRows` / `CountDryRun` / `WriteExportRows` / Options / Stats）必须全在 `internal/transfer`，且 `mechanism/definition` 与 `domain/**` 零命中，旧目录 `internal/capabilityio` 不得复活；判据 fail-closed（transfer 目录扫不到 Go 文件即 Fatal）。② **职责回流**：`automation.DefinitionFiles` / `provider.Secrets` 的编译期断言必须留在 `internal/registry`（装配点，同时看得见域端口与机制实现），`internal/transfer` 不得出现这两个端口名。反证（实跑 5 条，均红）：把 `ExportAutomationDir` 改名 → ①红；在 `mechanism/definition` 加 `func ImportProviderFile()` 桩 → ①红；`mkdir internal/capabilityio` → ①红；把 registry 的编译期断言改成 `var _ = ...` → ②红；把 `secrets.go` 复制回 `transfer` → ②红。）
+
+**共 171 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 
