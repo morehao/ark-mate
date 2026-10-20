@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1812,7 +1813,7 @@ func TestExportRoute(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()
 	now := time.Now().UTC()
-	if err := st.UpsertSession(ctx, model.SessionEntity{
+	if err := st.UpsertSession(ctx, sessionrow.Item{
 		ID: "c-1", Cwd: t.TempDir(), Title: "部署", Status: "idle",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

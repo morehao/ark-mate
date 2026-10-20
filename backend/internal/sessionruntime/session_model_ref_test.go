@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"regexp"
 	"testing"
 	"time"
@@ -214,7 +215,7 @@ func TestBackfillSessionModelRefs(t *testing.T) {
 	row2 := createProviderAndModel(t, r.svc, "p2", "m-1")
 
 	seed := func(id, runtimeID, modelID string) {
-		if err := planesOf(r.svc).Resources.Store().UpsertSession(ctx, model.SessionEntity{
+		if err := planesOf(r.svc).Resources.Store().UpsertSession(ctx, sessionrow.Item{
 			ID: id, Cwd: "/tmp/w", WorkspaceTemporary: false,
 			ModelID: modelID, RuntimeID: runtimeID, Status: "completed",
 			CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),

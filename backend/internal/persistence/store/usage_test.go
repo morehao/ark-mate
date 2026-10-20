@@ -2,12 +2,12 @@ package store
 
 import (
 	"github.com/morehao/ark-mate/internal/domain/session/run"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // seedRun 写入一条 run（连带把会话补齐：run 挂在会话上，用量快照也按会话取最后一条）。
@@ -35,7 +35,7 @@ func seedCompletedSession(t *testing.T, s *Store, id string) {
 	if _, ok, err := s.GetSession(ctxT(), id); err == nil && ok {
 		return
 	}
-	sess := model.SessionEntity{ID: id, Status: "completed",
+	sess := sessionrow.Item{ID: id, Status: "completed",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := s.UpsertSession(ctxT(), sess); err != nil {
 		t.Fatalf("UpsertSession: %v", err)

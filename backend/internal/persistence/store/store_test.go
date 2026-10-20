@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/morehao/ark-mate/internal/domain/session/event"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"path/filepath"
 	"testing"
 	"time"
@@ -205,7 +206,7 @@ func TestEventsAfterReplay(t *testing.T) {
 // TestSessionCRUD upsert（last_seq 触顶不清零）、list 排序、meta 子集更新。
 func TestSessionCRUD(t *testing.T) {
 	s := openTestDB(t)
-	base := model.SessionEntity{ID: "s1", Title: "t0",
+	base := sessionrow.Item{ID: "s1", Title: "t0",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := s.UpsertSession(ctxT(), base); err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -302,7 +303,7 @@ func TestImportBatch(t *testing.T) {
 	}
 	mkItem := func(sessionID string, events []event.Item) ImportItem {
 		return ImportItem{
-			Session: model.SessionEntity{ID: sessionID, Title: "迁移会话",
+			Session: sessionrow.Item{ID: sessionID, Title: "迁移会话",
 				Status: "completed", CreatedAt: now, UpdatedAt: now},
 			Events: events,
 		}
@@ -356,7 +357,7 @@ func TestImportBatchEventIdentity(t *testing.T) {
 	now := time.Now().UTC()
 	mk := func(events []event.Item) ImportItem {
 		return ImportItem{
-			Session: model.SessionEntity{ID: "s-idem", Status: "completed",
+			Session: sessionrow.Item{ID: "s-idem", Status: "completed",
 				CreatedAt: now, UpdatedAt: now},
 			Events: events,
 		}
@@ -518,7 +519,7 @@ func TestEventsBefore(t *testing.T) {
 func TestSessionWorkspaceRoundTrip(t *testing.T) {
 	s := openTestDB(t)
 	now := time.Now().UTC()
-	in := model.SessionEntity{
+	in := sessionrow.Item{
 		ID: "ws-1", Cwd: "/work/alpha", WorkspaceTemporary: true,
 		Status: "in_progress", CreatedAt: now, UpdatedAt: now,
 	}

@@ -2,6 +2,7 @@ package maintenance
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/config"
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 
@@ -46,7 +46,7 @@ func newRetiredRig(t *testing.T) *retiredRig {
 	}
 	at := time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
 	r.withStore(t, func(st *store.Store) {
-		if err := st.UpsertSession(context.Background(), model.SessionEntity{
+		if err := st.UpsertSession(context.Background(), sessionrow.Item{
 			ID: "ses_gone", Cwd: r.home, ModelID: "m1",
 			RuntimeID: r.gone, RuntimeSessionID: "rt_native", Title: "t", Status: "idle",
 			Origin: "manual", CreatedAt: at, UpdatedAt: at,
@@ -140,7 +140,7 @@ func TestDoctorRetiredSectionCleanMachineIsOk(t *testing.T) {
 	r.withStore(t, func(st *store.Store) {
 		// 把两条引用都改回"在册"的那个 id（store 门面没有删会话的接口——体检也不该依赖删除）。
 		at := time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
-		if err := st.UpsertSession(context.Background(), model.SessionEntity{
+		if err := st.UpsertSession(context.Background(), sessionrow.Item{
 			ID: "ses_gone", Cwd: r.home, ModelID: "m1",
 			RuntimeID: r.inService, RuntimeSessionID: "rt_native", Title: "t", Status: "idle",
 			Origin: "manual", CreatedAt: at, UpdatedAt: at,

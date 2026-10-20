@@ -8,6 +8,7 @@ import (
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/infra/acp"
@@ -124,5 +125,5 @@ var errPlaneFactsMissing = errors.New("该领域面未装配：装配根应通�
 type ResourceStore interface {
 	GetWorkspace(ctx context.Context, id string) (model.WorkspaceEntity, bool, error)
 	UpdateSessionMeta(ctx context.Context, id string, meta model.SessionMetaPatch) error
-	ListSessions(ctx context.Context, archived *bool) ([]model.SessionEntity, error)
+	ListSessions(ctx context.Context, archived *bool) ([]sessionrow.Item, error)
 }

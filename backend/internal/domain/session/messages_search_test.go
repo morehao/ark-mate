@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"strings"
 	"testing"
 	"time"
@@ -59,7 +60,7 @@ func TestSearchMessagesSQLiteInDomain(t *testing.T) {
 	seed := func(id, title string, pairs ...[2]string) {
 		t.Helper()
 		now := time.Now().UTC()
-		if err := st.UpsertSession(ctx, model.SessionEntity{
+		if err := st.UpsertSession(ctx, sessionrow.Item{
 			ID: id, Title: title, Status: "completed", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatalf("UpsertSession: %v", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"testing"
 	"time"
 
@@ -11,7 +12,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/golib/gerror"
@@ -124,7 +124,7 @@ func TestSessionHistoryStoreBacked(t *testing.T) {
 	st := testutil.OpenStore(t, ":memory:")
 	t.Cleanup(func() { _ = st.Close() })
 	now := time.Now().UTC()
-	if err := st.UpsertSession(context.Background(), model.SessionEntity{
+	if err := st.UpsertSession(context.Background(), sessionrow.Item{
 		ID: "s1", Status: "in_progress", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("UpsertSession: %v", err)

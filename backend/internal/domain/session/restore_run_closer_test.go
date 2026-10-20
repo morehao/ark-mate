@@ -3,12 +3,12 @@ package session
 import (
 	"context"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"testing"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
@@ -31,7 +31,7 @@ func TestRestoreClosesInterruptedRuns(t *testing.T) {
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatalf("跑迁移: %v", err)
 	}
-	if err := st.UpsertSession(ctx, model.SessionEntity{
+	if err := st.UpsertSession(ctx, sessionrow.Item{
 		ID: sessionID, Cwd: t.TempDir(), Status: SessionStatusInProgress,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {

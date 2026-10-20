@@ -3,11 +3,11 @@ package session
 import (
 	"context"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"testing"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
@@ -23,7 +23,7 @@ func TestRunRowFallbackMaterializesWithoutRunID(t *testing.T) {
 	}
 	sessionID := objid.New(objid.Session)
 	runID := objid.New(objid.Run)
-	if err := st.UpsertSession(ctx, model.SessionEntity{
+	if err := st.UpsertSession(ctx, sessionrow.Item{
 		ID: sessionID, Cwd: t.TempDir(), Status: SessionStatusInProgress,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -80,7 +80,7 @@ func TestRunRowFallbackSkipsAmbiguous(t *testing.T) {
 		t.Fatalf("跑迁移: %v", err)
 	}
 	sessionID := objid.New(objid.Session)
-	if err := st.UpsertSession(ctx, model.SessionEntity{
+	if err := st.UpsertSession(ctx, sessionrow.Item{
 		ID: sessionID, Cwd: t.TempDir(), Status: SessionStatusInProgress,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {

@@ -8,7 +8,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // ——— P2b：自动化域的宿主适配器（`automation.Host` 的实现） ———
@@ -105,5 +104,3 @@ func (a automationHostAdapter) SessionRunning(sessionID string) bool {
 func (a automationHostAdapter) EmitRun(ctx context.Context, automationID string, version int64, payload map[string]any) {
 	a.svc.EmitHostRun(ctx, automationID, version, payload)
 }
-
-var _ = model.SessionEntity{}

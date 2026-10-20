@@ -3,6 +3,7 @@ package archtest
 import (
 	"context"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/infra/dbclient"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 
 	// 守卫 10 要开一个临时库跑真实迁移，而 `dbclient.Open` → `glog.NewLogger` 需要 zap driver：
@@ -284,7 +284,7 @@ func TestRunReadModelHasNoDanglingRunning(t *testing.T) {
 
 	sessionID := objid.New(objid.Session)
 	runID := objid.New(objid.Run)
-	if err := st.UpsertSession(ctx, model.SessionEntity{
+	if err := st.UpsertSession(ctx, sessionrow.Item{
 		ID: sessionID, Cwd: t.TempDir(), Status: session.SessionStatusInProgress,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {

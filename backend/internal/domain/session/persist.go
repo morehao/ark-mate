@@ -10,6 +10,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/domain/session/memory"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -23,7 +24,7 @@ func (pl *Plane) persistSession(rec *SessionRec) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	err := pl.st.UpsertSession(ctx, model.SessionEntity{
+	err := pl.st.UpsertSession(ctx, sessionrow.Item{
 		ID:                 rec.ID,
 		Cwd:                rec.Cwd,
 		WorkspaceID:        rec.WorkspaceID,

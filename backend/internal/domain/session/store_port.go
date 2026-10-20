@@ -9,6 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session/message"
 	"github.com/morehao/ark-mate/internal/domain/session/queue"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
@@ -25,10 +26,10 @@ import (
 // 不是（例如某个读模型） → 它属于 `service` 的端口，不该从这里出去。
 type Store interface {
 	// ——— 会话行 ———
-	UpsertSession(ctx context.Context, sess model.SessionEntity) error
+	UpsertSession(ctx context.Context, sess sessionrow.Item) error
 	SetSessionModelID(ctx context.Context, id, modelID string) error
 	UpdateSessionMeta(ctx context.Context, id string, meta model.SessionMetaPatch) error
-	ListSessions(ctx context.Context, archived *bool) ([]model.SessionEntity, error)
+	ListSessions(ctx context.Context, archived *bool) ([]sessionrow.Item, error)
 	DefaultWorkspace(ctx context.Context) (model.WorkspaceEntity, bool, error)
 
 	// ——— 事件 ———

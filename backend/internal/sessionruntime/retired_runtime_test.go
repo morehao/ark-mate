@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // ——— v18 存量体检（「不在册底座」的痕迹） ———
@@ -46,7 +46,7 @@ func newRetiredFixture(t *testing.T) *retiredFixture {
 	// 库里：一条指向不在册底座的会话 + 一条正常的。
 	at := time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
 	for id, rt := range map[string]string{"ses_gone": f.gone, "ses_live": f.inService} {
-		if err := f.st.UpsertSession(context.Background(), model.SessionEntity{
+		if err := f.st.UpsertSession(context.Background(), sessionrow.Item{
 			ID: id, Cwd: f.home, ModelID: "m1",
 			RuntimeID: rt, RuntimeSessionID: "rt_native", Title: "t", Status: "idle",
 			Origin: "manual", CreatedAt: at, UpdatedAt: at,

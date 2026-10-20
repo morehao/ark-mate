@@ -6,7 +6,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/session/event"
-	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 )
 
 // ——— P4a 正文第八刀：事实来源的适配器收进用例层 ———
@@ -29,7 +29,7 @@ import (
 //
 // `*store.Store` 结构上满足它；memory 模式传 nil（只能给进程内事实）。
 type SourceFactsReader interface {
-	GetSession(ctx context.Context, id string) (model.SessionEntity, bool, error)
+	GetSession(ctx context.Context, id string) (sessionrow.Item, bool, error)
 	EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]event.Item, bool, error)
 }
 

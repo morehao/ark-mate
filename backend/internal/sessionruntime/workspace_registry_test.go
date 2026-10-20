@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"os"
 	"path/filepath"
 	"strings"
@@ -343,7 +344,7 @@ func TestWorkspaceRegistryRenameKeepsIdentity(t *testing.T) {
 func seedStoreSession(t *testing.T, st *store.Store, id, cwd, workspaceID string) {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := st.UpsertSession(context.Background(), model.SessionEntity{
+	if err := st.UpsertSession(context.Background(), sessionrow.Item{
 		ID: id, Cwd: cwd, WorkspaceID: workspaceID,
 		Status: session.SessionStatusCompleted, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

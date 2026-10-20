@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +28,7 @@ func seedSearchSession(t *testing.T, svc *Service, st *store.Store, id, title st
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now()
-	if err := st.UpsertSession(ctx, model.SessionEntity{
+	if err := st.UpsertSession(ctx, sessionrow.Item{
 		ID: id, Title: title, Status: "completed", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("UpsertSession: %v", err)

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,7 +124,7 @@ func TestWorkspaceDeleteKeepsSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	if err := s.UpsertSession(ctxT(), model.SessionEntity{
+	if err := s.UpsertSession(ctxT(), sessionrow.Item{
 		ID: "c1", Cwd: dir, WorkspaceID: ws.ID,
 		Status: "in_progress", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -257,7 +258,7 @@ func TestWorkspaceSessionCounts(t *testing.T) {
 	ws, _ := s.CreateWorkspace(ctxT(), t.TempDir(), "p")
 	now := time.Now().UTC()
 	mk := func(id, workspaceID string, updated time.Time) {
-		if err := s.UpsertSession(ctxT(), model.SessionEntity{
+		if err := s.UpsertSession(ctxT(), sessionrow.Item{
 			ID: id, Cwd: "/tmp/x", WorkspaceID: workspaceID,
 			Status: "in_progress", CreatedAt: now, UpdatedAt: updated,
 		}); err != nil {
@@ -299,7 +300,7 @@ func TestMigrateV14LeavesExistingSessionsUnassigned(t *testing.T) {
 	s := openTestDB(t)
 	// 造一条 cwd 很明确、看起来"该被登记"的会话，确认迁移不拿它建登记。
 	dir := t.TempDir()
-	if err := s.UpsertSession(ctxT(), model.SessionEntity{
+	if err := s.UpsertSession(ctxT(), sessionrow.Item{
 		ID: "legacy", Cwd: dir, WorkspaceTemporary: true,
 		Status: "in_progress", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {

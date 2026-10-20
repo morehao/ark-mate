@@ -7,13 +7,14 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/domain/session/event"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"gorm.io/gorm"
 )
 
 // ImportItem 是一次会话导入的输入（transcript 文件内容）：会话元数据 + 事件原语。
 type ImportItem struct {
-	Session model.SessionEntity
+	Session sessionrow.Item
 	// Events PayloadJSON 已序列化；**ID 必须带**（v17：transcript v2 的事件行身份，原样落库），
 	// `Seq` 仍然忽略——位次由 DB 这个权威按**本会话**重新分配（v21 起是会话内位次 0 起、
 	// 按本切片的行序推进；transcript 里那个 seq 是写入时那一刻的位次，跨版本可能是全局号，
@@ -57,7 +58,7 @@ func (s *Store) ImportBatch(ctx context.Context, items []ImportItem, marker stri
 			}
 			// 先建会话（events 表 FK 引用 sessions），再插事件，最后抬会话水位。
 			// 用窄 upsert：不覆盖 provider_id/model_id/runtime_id/runtime_session_id（见 dao 注释）。
-			conv := item.Session
+			conv := sessionEntityOf(item.Session)
 			conv.CreatedAt = nonZeroTime(conv.CreatedAt)
 			conv.UpdatedAt = nonZeroTime(conv.UpdatedAt)
 			if err := s.upsertSessionForImportTx(ctx, tx, &conv); err != nil {

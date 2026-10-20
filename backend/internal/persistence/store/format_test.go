@@ -3,6 +3,7 @@ package store
 import (
 	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 	// 取一个带纳秒的时间：RFC3339Nano 会裁掉末尾多余的 0，必须能原样往返。
 	at := time.Date(2026, 9, 10, 10, 42, 23, 123456789, time.UTC)
 
-	if err := s.UpsertSession(ctx, model.SessionEntity{
+	if err := s.UpsertSession(ctx, sessionrow.Item{
 		ID: "c1", Cwd: "/tmp/x", Status: "in_progress",
 		Pinned: true, Archived: false, WorkspaceTemporary: true,
 		// v7 三列（M3-1）：来源轴 + 钉住的能力明细与指纹。它们是**文本列**（不是布尔/时间），
@@ -281,7 +282,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	s := openTestDB(t)
 	ctx := ctxT()
-	if err := s.UpsertSession(ctx, model.SessionEntity{
+	if err := s.UpsertSession(ctx, sessionrow.Item{
 		ID: "c1", Status: "completed",
 		ModelID: "m1", RuntimeID: "rtx", RuntimeSessionID: "rt_ses_1",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
@@ -292,7 +293,7 @@ func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	// 模拟导入：header 只带标题等字段，模型选择相关字段为空。
 	// 事件行带身份（v17 起导入按 id 判重，缺 id 整批回滚）。
 	if _, _, err := s.ImportBatch(ctx, []ImportItem{{
-		Session: model.SessionEntity{ID: "c1", Title: "导入标题", Status: "completed"},
+		Session: sessionrow.Item{ID: "c1", Title: "导入标题", Status: "completed"},
 		Events: []event.Item{
 			{ID: objid.New(objid.Event), Type: "assistant_message", PayloadJSON: `{"text":"x"}`},
 		},

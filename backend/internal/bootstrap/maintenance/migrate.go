@@ -15,7 +15,7 @@ import (
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/session/event"
-	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 
@@ -78,7 +78,7 @@ func Migrate(args []string) {
 		}
 		lineCount += len(events)
 		items = append(items, store.ImportItem{
-			Session: model.SessionEntity{
+			Session: sessionrow.Item{
 				ID:        data.SessionID,
 				RuntimeID: data.RuntimeID,
 				Title:     data.Title,
