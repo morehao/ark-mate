@@ -146,7 +146,7 @@ func TestRuntimeDiagnosticsShowsScopeAmbiguous(t *testing.T) {
 // 现在不改变任何注入结果——它保留是因为它是对外装配面（`MATE_NATIVE_PERMISSION=off`）与
 // `interaction.nativePermissionEnv` 这条**端口契约**的存在证明：接入方仍可自行调用它。见 service.go 的注释。
 func TestNativePermissionEnabledSwitch(t *testing.T) {
-	svc := NewService(runtime.NewRegistry(), nil)
+	svc := newServiceForTest(runtime.NewRegistry(), nil)
 	if !svc.Planes().NativePermissionEnabled() {
 		t.Fatal("默认应开启")
 	}

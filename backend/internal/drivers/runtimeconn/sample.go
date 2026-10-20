@@ -56,3 +56,9 @@ func SampleConfigOptions(ctx context.Context, rc session.Conn, rawSessionID, cwd
 	}()
 	return sess.ConfigOptions(), nil
 }
+
+// SampleConfigOptions 实现 `session.RuntimePlane`：把取样的机制挂在平面上，
+// 编排侧因此不需要 import 本包（端口在域，实现在执行面）。
+func (pl *Plane) SampleConfigOptions(ctx context.Context, rc session.Conn, rawSessionID, cwd string) ([]acp.ConfigOption, error) {
+	return SampleConfigOptions(ctx, rc, rawSessionID, cwd)
+}

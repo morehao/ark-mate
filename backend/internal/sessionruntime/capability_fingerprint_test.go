@@ -23,7 +23,7 @@ func fpRig(t *testing.T) *Service {
 		CapabilityScope: runtime.CapabilityScopeProcess,
 		Projections:     []runtime.Projection{rtxSkillProjectionForTest()},
 	})
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	svc.planes.Skills.Projections().Set([]skill.Projection{{
 		Runtime: "rtx",
 		Projection: runtime.Projection{
@@ -219,7 +219,7 @@ func TestCapabilityFingerprintRuntimeShape(t *testing.T) {
 // 不因 skill 定义变化而换代际——技能根本没投给它。
 func TestCapabilityFingerprintNoProjectionMeansNoSkillPart(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "remote", Version: "remote acp"})
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	if err := svc.planes.Capabilities.RegisterSkill(&capability.Skill{ID: "alpha", Body: "# a"}); err != nil {
 		t.Fatal(err)
 	}

@@ -60,6 +60,7 @@ type assembly struct {
 	// ——— 只构造、无 IO 的平台事实（Build 的前半段建好）———
 	bus    *eventbus.Bus
 	rconn  *runtimeconn.Plane
+	rpool  *runtimeconn.Pool
 	planes *registry.Planes
 	svc    *sessionruntime.Service
 	orch   *sessionruntime.Orchestrator

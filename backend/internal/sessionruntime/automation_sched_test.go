@@ -78,7 +78,7 @@ func newSchedRig(t *testing.T) *schedRig {
 	spec := silentACPSpec(t)
 	reg := runtime.NewRegistry(spec)
 	bus := eventbus.New()
-	svc := NewService(reg, bus)
+	svc := newServiceForTest(reg, bus)
 	setBuildRuntime(t, "silent") // 夹具注册表只有 silent
 	orch := NewOrchestrator(svc, reg)
 	orch.SetSettleTimeout(50 * time.Millisecond) // 取消用例不按生产 10s 等

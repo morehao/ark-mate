@@ -34,7 +34,7 @@ func automationDBRig(t *testing.T, dir string) (*Service, *store.Store) {
 	t.Helper()
 	spec := silentACPSpec(t)
 	reg := runtime.NewRegistry(spec)
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "silent") // 夹具注册表只有 silent
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)

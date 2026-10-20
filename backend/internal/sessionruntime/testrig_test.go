@@ -3,7 +3,7 @@ package sessionruntime
 // manager 测试夹具的唯一建造点。
 //
 // 此前包内有三个各自拼装的脚手架（newTestRig / testReapHarness / newSearchRig），
-// 外加约二十处测试里手写的 `NewService(...) + NewOrchestrator(...) + t.Cleanup(orch.Close)`
+// 外加约二十处测试里手写的 `newServiceForTest(...) + NewOrchestrator(...) + t.Cleanup(orch.Close)`
 // 组合。它们的差异其实只有四个开关：注册表装哪些 runtime、要不要事件总线、要不要 sqlite
 // 库、预置哪些 agent。散在多处时，"关闭顺序"这类全局约定（编排器必须先于库关闭）就没人
 // 负责，加一个资源也容易只在某一个 rig 里登记清理。
@@ -64,7 +64,7 @@ func providerTestSvc(t *testing.T, providerDir string) *Service {
 		runtimetest.Spec(runtime.LaunchSpec{}),
 		runtime.Spec{ID: "stub", Name: "Stub"},
 	)
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	if providerDir != "" {
 		// 与装配期同一条路径：先装配凭据分层（镜像落在 provider 目录的父目录下，即"mate home"），
 		// 再装载 `providers.json`（它顺带登记定义目录）。顺序与 `internal/bootstrap/app` 逐条同形——
@@ -150,7 +150,7 @@ func newRig(t *testing.T, mutate ...func(*rigConfig)) *rig {
 		bus = eventbus.New()
 	}
 
-	svc := NewService(reg, bus)
+	svc := newServiceForTest(reg, bus)
 
 	var st *store.Store
 	if cfg.store {
@@ -388,4 +388,22 @@ func poolOf(o *Orchestrator) *runtimeconn.Pool {
 		panic("测试夹具的连接池不是 *runtimeconn.Pool：注入路径必须给真实池")
 	}
 	return p
+}
+
+// newServiceForTest 测试夹具的 Service 建造点：**总是注入真实执行面**（平面 + 连接池）。
+//
+// 阶段 0.4b 起 `NewService` 不再自造执行面（L7 不许 import runtimeconn），纯列表用例拿到的是
+// no-op；但包内绝大多数用例要真拨号/真记账/真诊断，所以统一从这里走，与生产装配根同形
+// （两半 + 五个来源接线）。改名/漏接的失效方式与生产一致：编译错或诊断报未连接。
+func newServiceForTest(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Service {
+	plane := runtimeconn.NewPlaneFor(reg)
+	pool := runtimeconn.NewPool(plane)
+	opts = append(opts, WithRuntimePlane(plane), WithConnPool(pool))
+	svc := NewService(reg, bus, opts...)
+	plane.SetCredentialSource(svc)
+	pool.SetProviderEnvSource(svc)
+	pool.SetConfigDigestSource(svc.planes.Resources)
+	pool.SetNativeEnvSource(svc)
+	plane.SetLiveClientSource(pool)
+	return svc
 }

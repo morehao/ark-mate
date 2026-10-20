@@ -207,7 +207,7 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 // 写面（"没有载体就 40501"）随实现在 `internal/service/svcmodel/declared_test.go`。
 func TestModelListReadsEmptyWithoutSQLite(t *testing.T) {
 	ctx := context.Background()
-	svc := NewService(dsh.Registry(), eventbus.New())
+	svc := newServiceForTest(dsh.Registry(), eventbus.New())
 	items, err := svc.planes.Providers.ListModels(ctx)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("memory 模式的清单读面应回空列表: %+v err=%v", items, err)

@@ -133,7 +133,7 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 	}
 
 	// 2) 没有库（也没有托管文档）：明确指出"库里没有这条密钥"，而不是当成"密钥为空"。
-	noStore := NewService(runtime.NewRegistry(runtime.Spec{ID: "stub"}), nil)
+	noStore := newServiceForTest(runtime.NewRegistry(runtime.Spec{ID: "stub"}), nil)
 	if err := noStore.Planes().Capabilities.RegisterMcpServer(&capability.McpServer{
 		ID: "s2", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 		SecretEnv: map[string]string{"TOKEN": "store:mcp/x"},

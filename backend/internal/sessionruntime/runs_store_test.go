@@ -32,7 +32,7 @@ func TestRunMaterializationAtRunEnd(t *testing.T) {
 	reg := testutil.StubRegistry()
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-run"})
 
@@ -95,7 +95,7 @@ func TestRunMaterializationAtRunEnd(t *testing.T) {
 	}
 
 	// 内存模式（无 store）→ 空读模型。
-	memSvc := NewService(reg, nil)
+	memSvc := newServiceForTest(reg, nil)
 	if empty, err := sessionPlaneOf(memSvc).ListRuns(ctx, "s-run"); err != nil || len(empty) != 0 {
 		t.Fatalf("内存模式 ListRuns 应为空: %+v err=%v", empty, err)
 	}
@@ -113,7 +113,7 @@ func TestRunWindowStartsAtRunStarted(t *testing.T) {
 	reg := testutil.StubRegistry()
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-win"})
 
@@ -182,7 +182,7 @@ func TestOpenRunIsIdempotent(t *testing.T) {
 	reg := testutil.StubRegistry()
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-idem"})
 
@@ -230,7 +230,7 @@ func TestRunningRunSurvivesRestart(t *testing.T) {
 	reg := testutil.StubRegistry()
 
 	st1 := testutil.OpenStore(t, dbPath)
-	svc1 := NewService(reg, eventbus.New())
+	svc1 := newServiceForTest(reg, eventbus.New())
 	enableStore(svc1, st1)
 	svc1.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-crash"})
 	runID, started, _ := beginRun(t, svc1, "s-crash", "这一轮会中断")
@@ -252,7 +252,7 @@ func TestRunningRunSurvivesRestart(t *testing.T) {
 		t.Fatalf("开轮行内容不符: %+v", r)
 	}
 	// 读模型可以被后续收口（接管它的那一轮重新开一行，起点不同 → 不冲突）。
-	svc2 := NewService(reg, eventbus.New())
+	svc2 := newServiceForTest(reg, eventbus.New())
 	enableStore(svc2, st2)
 	if _, _, err := svc2.SessionPlane().Restore(ctx); err != nil {
 		t.Fatalf("RestoreFromStore: %v", err)
@@ -273,7 +273,7 @@ func TestRunUsageExposedInListRuns(t *testing.T) {
 	reg := testutil.StubRegistry()
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-usage"})
 
@@ -319,7 +319,7 @@ func TestRunUsageExposedInListRuns(t *testing.T) {
 func TestRunUsageLandsInRunRowThroughTheSessionPlane(t *testing.T) {
 	ctx := context.Background()
 	reg := testutil.StubRegistry()
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
 	enableStore(svc, st)
@@ -362,7 +362,7 @@ func TestRebuildRepairsMissingRunRow(t *testing.T) {
 	reg := testutil.StubRegistry()
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	enableStore(svc, st)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-repair"})
 

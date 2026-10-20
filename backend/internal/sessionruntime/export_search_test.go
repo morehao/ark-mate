@@ -114,7 +114,7 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	// （`TestSearchMessagesTranscriptFallback`）；这一条留在 manager 是因为它走的是
 	// **真 Service 装配链**（`SetTranscriptDir` → 域、`publish` → 域）——验的是"接上了没有"。
 	dir := t.TempDir()
-	svc := NewService(testutil.StubRegistry(), eventbus.New())
+	svc := newServiceForTest(testutil.StubRegistry(), eventbus.New())
 	svc.SessionPlane().SetTranscriptDir(dir)
 	t.Cleanup(svc.SessionPlane().CloseTranscripts)
 

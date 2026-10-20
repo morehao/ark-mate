@@ -79,7 +79,7 @@ sys.exit(1)
 // 这条是上一条的对照：只"取尾部窗口"会退回一串栈帧 + `Node.js v24.18.1`，用户拿不到死因。
 func TestConnectFailurePicksCauseLineOverTail(t *testing.T) {
 	reg := runtime.NewRegistry(nodeStyleBootFailSpec(t))
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
@@ -117,7 +117,7 @@ func TestConnectFailureSurfacesStderrTail(t *testing.T) {
 	// 写 3000 行：信封里只应出现最后 5 行（其中最后一行是带密钥的那行）。
 	spec := bootFailSpec(t, 3000)
 	reg := runtime.NewRegistry(spec)
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)

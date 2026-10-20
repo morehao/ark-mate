@@ -29,7 +29,7 @@ func libraryRig(t *testing.T) *Service {
 		// dsh 没有投影解析（未配 MATE_PROJECTION_DIRS）→ not_configured 分支。
 		runtime.Spec{ID: "dsh", Name: "dsh", McpTransports: []string{"stdio"}},
 	)
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	svc.Planes().LoadCapabilityDefinitions(dir)
 	svc.planes.Skills.Projections().Set([]skill.Projection{{
 		Runtime: "rtx",
@@ -307,7 +307,7 @@ func BenchmarkLibraryList(b *testing.B) {
 	dir := b.TempDir()
 	reg := runtime.NewRegistry(runtime.Spec{ID: "rtx", McpTransports: []string{"stdio"},
 		Projections: []runtime.Projection{rtxSkillProjectionForTest()}})
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	svc.Planes().LoadCapabilityDefinitions(dir)
 	for i := 0; i < 300; i++ {
 		sk := capability.Skill{ID: fmt.Sprintf("skill-%03d", i), Name: "技能", Description: "批量"}

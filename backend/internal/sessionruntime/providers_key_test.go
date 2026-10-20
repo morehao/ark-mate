@@ -191,7 +191,7 @@ func TestProviderStaleMirrorKeyNotAdopted(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 
-	svc := NewService(v12ProviderRegistry(), nil)
+	svc := newServiceForTest(v12ProviderRegistry(), nil)
 	enableStore(svc, st)
 	svc.planes.Providers.SetProviderDir(dir)
 	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
@@ -275,7 +275,7 @@ func TestProviderInvalidIDRejected(t *testing.T) {
 func TestProviderKeyRejectedWithoutCredentialDoc(t *testing.T) {
 	ctx := context.Background()
 	// 未装配凭据面（数据目录没解析出来）→ 没有落点。
-	svc := NewService(v12ProviderRegistry(), nil)
+	svc := newServiceForTest(v12ProviderRegistry(), nil)
 	key := "sk-memory-only"
 	_, err := svc.planes.Providers.CreateProvider(ctx, providerReq("default", &key))
 	if errCode(err) != "credentials_write_failed" {
@@ -298,7 +298,7 @@ func TestProviderKeyRejectedWithoutCredentialDoc(t *testing.T) {
 		t.Fatalf("PATCH 补密钥也应被拒，got %q（%v）", errCode(err), err)
 	}
 	// 重启 = 新 Service → 内存档案不复存在（没有任何落盘）。
-	svc2 := NewService(v12ProviderRegistry(), nil)
+	svc2 := newServiceForTest(v12ProviderRegistry(), nil)
 	if got := svc2.Planes().Providers.ProviderEnvFor(runtimetest.ID, "default"); got != nil {
 		t.Fatalf("没有落点时不该有任何持久化: %v", got)
 	}
@@ -313,7 +313,7 @@ func TestProviderEnvLayerShadowsStore(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 
-	svc := NewService(v12ProviderRegistry(), nil)
+	svc := newServiceForTest(v12ProviderRegistry(), nil)
 	enableStore(svc, st)
 	svc.planes.Providers.SetProviderDir(dir)
 	l := newTestCredentials(t, home)
@@ -321,7 +321,7 @@ func TestProviderEnvLayerShadowsStore(t *testing.T) {
 	// 候选变量名由注册表的 `RefPattern` 派生（不是手抄常量）：夹具跟着它走，
 	// 换模板时这条用例仍然验的是"继承环境遮住密钥面"这件事。
 	envName := ""
-	for _, n := range NewService(v12ProviderRegistry(), nil).Planes().Credentials.ProviderEnvKeyNames("default") {
+	for _, n := range newServiceForTest(v12ProviderRegistry(), nil).Planes().Credentials.ProviderEnvKeyNames("default") {
 		if strings.Contains(n, "DEFAULT") {
 			envName = n
 			break

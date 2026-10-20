@@ -85,7 +85,7 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 		t.Errorf("IsolationEnvFor 应产出 %d 条，实际 %v", len(wantEnv), got)
 	}
 
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	enableStore(svc, st)
 	t.Cleanup(func() { _ = st.Close() })

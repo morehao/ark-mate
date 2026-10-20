@@ -164,14 +164,14 @@ var v32Layers = map[string]v32Layer{
 
 	// ——— L7：执行面 ———
 	//
-	// 阶段 0.6 第一版：`store` / `dao` / `infra/dsh` 三条进 deny——阶段 0.1 已把接库改成
-	// 端口（`sessionruntime/ports.go`），执行面生产代码不再 import 它们；这条 deny 是那次
-	// 改动的机器判据，防止下一个人"顺手"把库句柄或 DSH 适配器再塞回来。
+	// 阶段 0.6：`store` / `dao` / `infra/dsh` / `runtimeconn` 四条进 deny——
+	// 0.1 把接库改成端口、0.4b 把执行面构造与来源接线移到装配根之后，执行面生产代码不再
+	// import 它们；这条 deny 是那两次改动的机器判据，防止下一个人"顺手"把具体适配器塞回来。
 	//
-	// `registry` / `runtimeconn` 尚未进 deny：它们对应阶段 0.2（`PlaneFacts`）与 0.4
-	// （`ConnPool` / `RuntimePlane` 端口），那两步完成后再加（见计划 §0 与 §2）。
+	// `registry` 尚未进 deny：它对应阶段 0.2（`PlaneFacts`），那一步完成后再加。
 	"internal/sessionruntime": {layer: 7, name: "sessionruntime", deny: []string{
 		"internal/persistence/store", "internal/persistence/dao", "internal/infra/dsh",
+		"internal/drivers/runtimeconn",
 		"internal/drivers/gateway", "internal/delivery/controller", "internal/delivery/middleware", "internal/delivery/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},

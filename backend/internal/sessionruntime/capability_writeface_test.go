@@ -394,7 +394,7 @@ func TestWriteFaceRequiresCapabilityDir(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("memory", func(t *testing.T) {
-		svc := NewService(runtime.NewRegistry(), eventbus.New()) // 未 LoadCapabilityDefinitions
+		svc := newServiceForTest(runtime.NewRegistry(), eventbus.New()) // 未 LoadCapabilityDefinitions
 		_, err := svc.Planes().Skills.WriteSkill(ctx, "", writeReq(t, `{"id":"demo"}`), true)
 		if err == nil {
 			t.Fatal("未配置目录应报错")
@@ -408,7 +408,7 @@ func TestWriteFaceRequiresCapabilityDir(t *testing.T) {
 		// 刻意**不走装载**（那就不会设 importDir）：只启用 store，能力目录始终为空。
 		st := testutil.OpenStore(t, testutil.TempDBPath(t))
 		t.Cleanup(func() { _ = st.Close() })
-		svc := NewService(runtime.NewRegistry(), eventbus.New())
+		svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 		enableStore(svc, st)
 		resp, err := svc.Planes().Skills.WriteSkill(ctx, "", writeReq(t, `{"id":"demo","body":"# d"}`), true)
 		if err != nil {

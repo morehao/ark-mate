@@ -39,7 +39,7 @@ func (f *fakeRootsStore) Status() (string, string) { return f.src, f.locked }
 // GET 可读但必须自报"不可写"，PUT 报 settings_readonly——不能假装接受然后什么都不做。
 func TestWorkspaceSettingsWithoutStore(t *testing.T) {
 	root := t.TempDir()
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, "", []string{mustEval(t, root)})
 
 	resp := svc.Planes().Workspaces.Settings()
@@ -66,7 +66,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 			t.Fatalf("mkdir: %v", err)
 		}
 	}
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, provision, nil) // 未配置偏好起点
 	store := &fakeRootsStore{src: "config.json"}
 	svc.Planes().Workspaces.SetRootsStore(store)
@@ -160,7 +160,7 @@ func TestUpdateWorkspaceSettingsValidation(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	store := &fakeRootsStore{}
 	svc.Planes().Workspaces.SetRootsStore(store)
 
@@ -202,7 +202,7 @@ func TestUpdateWorkspaceSettingsValidation(t *testing.T) {
 // 时**拒绝写**：写 config.json 必然被覆盖，报成功等于骗人。
 func TestUpdateWorkspaceSettingsLocked(t *testing.T) {
 	root := t.TempDir()
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	store := &fakeRootsStore{src: "env(process)", locked: "MATE_WORKSPACE_ROOTS"}
 	svc.Planes().Workspaces.SetRootsStore(store)
 
@@ -227,7 +227,7 @@ func TestUpdateWorkspaceSettingsLocked(t *testing.T) {
 // 反过来会留下"面板生效、重启回滚"的假成功，比直接失败更难查。
 func TestUpdateWorkspaceSettingsSaveFailure(t *testing.T) {
 	root := t.TempDir()
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, "", []string{mustEval(t, t.TempDir())})
 	before := svc.Planes().Workspaces.WorkspaceRoots()
 	svc.Planes().Workspaces.SetRootsStore(&fakeRootsStore{saveErr: errors.New("磁盘只读")})

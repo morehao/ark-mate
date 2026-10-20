@@ -63,7 +63,7 @@ func TestLoadCapabilityDefinitionsAndList(t *testing.T) {
 		`{"id":"fs","name":"Files","transport":"stdio","command":"/usr/local/bin/npx","headers":{"Authorization":"Bearer x"}}`)
 	writeCapFile(t, filepath.Join(dir, "tools", "web.json"), `{"name":"web_search","source":"builtin"}`)
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	if n := svc.Planes().LoadCapabilityDefinitions(dir); n != 3 {
 		t.Fatalf("期望加载 3 条，got %d", n)
 	}
@@ -86,7 +86,7 @@ func TestLoadCapabilityDefinitionsAndList(t *testing.T) {
 
 // TestRegisterToolAndSort 代码注入工具 + 列表排序（工具表按 name）。
 func TestRegisterToolAndSort(t *testing.T) {
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	if err := svc.Planes().RegisterTool(capability.Tool{Name: "z_tool", Source: capability.ToolSourceBuiltin}); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestMcpServersFor(t *testing.T) {
 		runtime.Spec{ID: "rtx", McpTransports: []string{"stdio", "sse", "http"}},
 		runtime.Spec{ID: "plain"}, // 未声明 → 保守仅 stdio
 	)
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	must := func(id, transport string) {
 		t.Helper()
 		// stdio server 须绝对 command（ACP 校验；注册表已拦相对路径）。
@@ -218,7 +218,7 @@ func TestProbeMcpServer(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{ID: "h", Name: "H", Transport: capability.TransportHTTP, URL: srv.URL}); err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestCallMcpTool(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{ID: "h", Name: "H", Transport: capability.TransportHTTP, URL: srv.URL}); err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +473,7 @@ func TestCallMcpToolTimeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{ID: "slow", Name: "Slow", Transport: capability.TransportHTTP, URL: srv.URL}); err != nil {
 		t.Fatal(err)
 	}
@@ -523,7 +523,7 @@ func TestMcpResourcesPrompts(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{ID: "h", Name: "H", Transport: capability.TransportHTTP, URL: srv.URL}); err != nil {
 		t.Fatal(err)
 	}
@@ -616,7 +616,7 @@ func TestAutoProbeMcpServers(t *testing.T) {
 	srvA := okServer("a", []map[string]any{{"name": "tool_a"}})
 	srvB := okServer("b", []map[string]any{{"name": "tool_b"}})
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	for _, in := range []struct{ id, url string }{{"a", srvA.URL}, {"b", srvB.URL}, {"down", "http://127.0.0.1:1"}} {
 		if err := svc.planes.Capabilities.RegisterMcpServer(&capability.McpServer{ID: in.id, Name: in.id, Transport: capability.TransportHTTP, URL: in.url}); err != nil {
 			t.Fatal(err)

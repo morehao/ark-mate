@@ -219,7 +219,7 @@ func discardTempWorkspace(t *testing.T, res workspace.WorkspaceResolution) {
 func workspaceTestSvc(t *testing.T) *Service {
 	t.Helper()
 	reg := testutil.StubRegistry()
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
@@ -313,7 +313,7 @@ func TestCreateSessionFailureLeavesNoPerSessionDir(t *testing.T) {
 
 // TestListSessionsWorkspaceFilter 响应回读 cwd/workspace_temporary + `?cwd=` 精确过滤。
 func TestListSessionsWorkspaceFilter(t *testing.T) {
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "c-a", Cwd: "/work/alpha"})
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "c-b", Cwd: "/work/beta", WorkspaceTemporary: true})
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "c-tmp-sub", Cwd: "/work/alpha/sub"})
@@ -352,7 +352,7 @@ func TestListSessionsWorkspaceFilter(t *testing.T) {
 	// 过滤入参归一化：同一目录的不同写法（macOS 的 /tmp vs /private/tmp、尾斜杠、冗余片段）
 	// 必须命中同一批会话——路径字符串不该决定身份。
 	rootDir := t.TempDir()
-	svc2 := NewService(runtime.NewRegistry(), eventbus.New())
+	svc2 := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	svc2.sessionPlane.RegisterSession(&session.SessionRec{ID: "c-real", Cwd: mustEval(t, rootDir)})
 	for _, spelling := range []string{rootDir, rootDir + "/", filepath.Join(rootDir, ".", "..", filepath.Base(rootDir))} {
 		got, err := sessionPlaneOf(svc2).ListSessions(false, spelling, "")
@@ -379,7 +379,7 @@ func TestBrowseWorkspace(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	resp, err := svc.Planes().Workspaces.BrowseWorkspace(root, false)
 	if err != nil {
 		t.Fatalf("BrowseWorkspace: %v", err)
@@ -421,7 +421,7 @@ func TestBrowseWorkspace(t *testing.T) {
 
 // TestRecentWorkspaces 最近工作空间从会话派生：去重计数、按最近使用倒序、排除代建临时空间。
 func TestRecentWorkspaces(t *testing.T) {
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	base := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "r-1", Cwd: "/work/alpha", UpdatedAt: base})
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "r-2", Cwd: "/work/alpha", UpdatedAt: base.Add(time.Hour)})
@@ -576,7 +576,7 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 			t.Fatalf("mkdir: %v", err)
 		}
 	}
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 
 	// 形式错误仍必须挡住：相对路径的根不是边界。
 	if err := svc.Planes().Workspaces.SetWorkspacePolicy("", []string{"relative/root"}); err == nil {
@@ -615,7 +615,7 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	}
 
 	// 代建根已经落在某个配置根内时不再重复追加（避免 roots 里出现冗余项）。
-	nested := NewService(runtime.NewRegistry(), eventbus.New())
+	nested := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, nested, filepath.Join(root, "tmp"), []string{root})
 	if got := nested.Planes().Workspaces.WorkspaceRoots(); len(got) != 1 {
 		t.Fatalf("代建根已在配置根内时不应重复追加: %v", got)
@@ -623,7 +623,7 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 
 	// 未配置白名单 = 不限制：不能因为存在代建根就把"不限制"悄悄缩成"只允许代建目录"
 	// （那会让默认配置的用户突然选不了自己的项目目录）。
-	open := NewService(runtime.NewRegistry(), eventbus.New())
+	open := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, open, provision, nil)
 	if got := open.Planes().Workspaces.WorkspaceRoots(); len(got) != 0 {
 		t.Fatalf("未配置白名单应保持「不限制」: %v", got)
@@ -654,7 +654,7 @@ func TestBrowseWorkspacePreferenceOnly(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, filepath.Join(root, "tmp"), []string{mustEval(t, root)})
 
 	// 空 path → 从偏好起点起步（"从哪儿开始看"）。
@@ -706,7 +706,7 @@ func TestBrowseWorkspaceCrumbs(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	resp, err := svc.Planes().Workspaces.BrowseWorkspace(deep, false)
 	if err != nil {
 		t.Fatalf("BrowseWorkspace: %v", err)
@@ -744,7 +744,7 @@ func TestBrowseWorkspaceMarksHiddenAndTruncates(t *testing.T) {
 		}
 	}
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	// hidden=false：隐藏行不下发（但 visible 行必须带 Hidden=false 这个零值语义）。
 	plain, err := svc.Planes().Workspaces.BrowseWorkspace(root, false)
 	if err != nil {
@@ -799,7 +799,7 @@ func TestCreateWorkspaceDir(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, filepath.Join(root, "tmp"), []string{mustEval(t, root)})
 
 	// 合法：建在根内子目录下，回**规范化后**的绝对路径（前端拿它直接当 cwd）。
@@ -864,7 +864,7 @@ func TestListWorkspaceFiles(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, filepath.Join(root, "tmp"), []string{mustEval(t, root)})
 
 	resp, err := svc.Planes().Workspaces.ListWorkspaceFiles(root, false)
@@ -945,7 +945,7 @@ func TestSessionWorksOutsidePreferenceRoots(t *testing.T) {
 		}
 	}
 
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, filepath.Join(base, "tmp"), []string{mustEval(t, preferred)})
 
 	res, err := workspace.ResolveWorkspace(other, nil)

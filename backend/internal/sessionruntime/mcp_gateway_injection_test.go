@@ -109,7 +109,7 @@ func TestGatewayRemoteMcpEntersFaceWithoutGenerationSwitch(t *testing.T) {
 func TestGatewayEntryCarriesPinnedSelectionOnly(t *testing.T) {
 	reg := stubACPSpec(t)
 	reg.McpTransports = []string{"stdio"}
-	svc := NewService(runtime.NewRegistry(reg), nil)
+	svc := newServiceForTest(runtime.NewRegistry(reg), nil)
 	for _, m := range []capability.McpServer{
 		webServer("web", "https://x.invalid/mcp"),
 		webServer("web2", "https://y.invalid/mcp"),
@@ -165,7 +165,7 @@ func TestGatewayEntryCarriesPinnedSelectionOnly(t *testing.T) {
 func TestGatewayFoldingKeepsSecretValuesOutOfFingerprint(t *testing.T) {
 	reg := stubACPSpec(t)
 	reg.McpTransports = []string{"stdio"}
-	svc := NewService(runtime.NewRegistry(reg), nil)
+	svc := newServiceForTest(runtime.NewRegistry(reg), nil)
 	sel := session.NewCapabilitySelection()
 
 	// 远程密钥引用：值不进指纹（连引用都不进——远程定义完全不在指纹里）。
@@ -228,7 +228,7 @@ func TestGatewayEntryNotInjectedIntoRemoteAcpRuntime(t *testing.T) {
 	spec.Launch.Transport = "ws"
 	spec.Launch.Endpoint = "wss://x.invalid/acp"
 	spec.McpTransports = []string{"stdio", "http"}
-	svc := NewService(runtime.NewRegistry(spec), nil)
+	svc := newServiceForTest(runtime.NewRegistry(spec), nil)
 	for _, m := range []capability.McpServer{
 		{ID: "fs", Name: "fs", Transport: capability.TransportStdio, Command: "/bin/echo"},
 		webServer("web", "https://x.invalid/mcp"),

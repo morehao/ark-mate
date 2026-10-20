@@ -47,7 +47,7 @@ func writeFaceDB(t *testing.T, specs ...runtime.Spec) *writeFace {
 	t.Helper()
 	ctx := context.Background()
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	svc := NewService(runtime.NewRegistry(specs...), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(specs...), eventbus.New())
 	enableStore(svc, st)
 	// 与生产装配同源：装载走 store 分支，导入/导出目录给一个空目录。
 	svc.Planes().LoadCapabilityDefinitionsFromStore(ctx, t.TempDir())
@@ -59,7 +59,7 @@ func writeFaceDB(t *testing.T, specs ...runtime.Spec) *writeFace {
 func writeFaceFile(t *testing.T, specs ...runtime.Spec) *writeFace {
 	t.Helper()
 	dir := t.TempDir()
-	svc := NewService(runtime.NewRegistry(specs...), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(specs...), eventbus.New())
 	svc.Planes().LoadCapabilityDefinitions(dir)
 	return &writeFace{name: "memory", svc: svc, dir: dir}
 }

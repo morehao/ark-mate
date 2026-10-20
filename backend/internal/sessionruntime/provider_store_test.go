@@ -162,7 +162,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	}
 
 	// ⑥ 保存并重开（模拟重启）：装载出来的内存档案与文件时代逐字段一致。
-	svc := NewService(publisherRegistry(), eventbus.New())
+	svc := newServiceForTest(publisherRegistry(), eventbus.New())
 	enableStore(svc, st)
 	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
 	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)
@@ -243,7 +243,7 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	if _, err := transfer.ImportProviderFile(ctx, st, dir, transfer.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		t.Fatalf("provider.ImportProviderFile: %v", err)
 	}
-	svc := NewService(publisherRegistry(), eventbus.New())
+	svc := newServiceForTest(publisherRegistry(), eventbus.New())
 	enableStore(svc, st)
 	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
 	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)
@@ -333,7 +333,7 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	}
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
-	svc := NewService(publisherRegistry(), eventbus.New())
+	svc := newServiceForTest(publisherRegistry(), eventbus.New())
 	enableStore(svc, st)
 	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
 	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)

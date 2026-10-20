@@ -65,7 +65,7 @@ func newGenRigOn(t *testing.T, runtimeID string) *genRig {
 	// 与产品装配同形：桩 Spec 保留自己的 Launch（桩命令），只把执行半场登记进来。
 	dsh.New().RegisterPorts(reg)
 	bus := eventbus.New()
-	svc := NewService(reg, bus)
+	svc := newServiceForTest(reg, bus)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
 	enableStore(svc, st)

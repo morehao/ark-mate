@@ -3,7 +3,7 @@ package sessionruntime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
@@ -24,7 +24,7 @@ func (d runnerDiagnostics) StderrTail(client *acp.Client) []string {
 	if client == nil {
 		return nil
 	}
-	return acp.TailLines(client.StderrTail(), runtimeconn.MaxDiagStderrLines)
+	return acp.TailLines(client.StderrTail(), session.MaxDiagStderrLines)
 }
 
 // runnerCatalog 运行时配置项（模型目录）的缓存写口。

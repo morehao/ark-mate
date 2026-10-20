@@ -40,7 +40,7 @@ func historySvc(svc *Service) svcsession.HistorySvc {
 
 // TestSessionHistoryPaging 验证 history 分页（after/limit、has_more、仅本聚合、未知会话 40401）。
 func TestSessionHistoryPaging(t *testing.T) {
-	svc := NewService(testutil.StubRegistry(), eventbus.New())
+	svc := newServiceForTest(testutil.StubRegistry(), eventbus.New())
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
 
 	// ③ 文本增量合并：不同 msg_id = 不同消息，5 条各自成事件（断言前 flush 落盘）。

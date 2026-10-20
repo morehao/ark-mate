@@ -8,7 +8,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -20,7 +19,7 @@ import (
 // 那三个窄端口，因为"哪条会话值得试、连接从哪来"是编排/执行面的事：
 //
 //	LiveConfigOptions      → 活跃会话的配置项（Runner 的运行期状态）
-//	SampleConfigOptions    → 候选枚举 + 逐条退避（每条由 `runtimeconn.SampleConfigOptions` 执行）
+//	SampleConfigOptions    → 候选枚举 + 逐条退避（每条的取样经 `session.RuntimePlane` 端口交给执行面）
 //	AuthGuidance / 收图能力 → 连接期能力事实（连接池的活客户端）
 //
 // 一条判据不变：**任何一支都不新建会话**（session/new 会落持久记录，而两家 runtime 都没有 delete）。
@@ -110,7 +109,7 @@ func (s *Service) SampleConfigOptions(ctx context.Context) ([]acp.ConfigOption, 
 	// 逐条退避：最近那条读不通就试下一条。**没有候选时**返回 `ErrNoSampleCandidate`
 	// （正常状态：第一条消息发送前就是这样），说明文案据此与"读不通"分开。
 	return sampleCandidates(cands, func(t resumeTarget) ([]acp.ConfigOption, error) {
-		return runtimeconn.SampleConfigOptions(ctx, rc, t.RawID, t.Cwd)
+		return s.runtimePlane.SampleConfigOptions(ctx, rc, t.RawID, t.Cwd)
 	})
 }
 

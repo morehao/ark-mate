@@ -9,7 +9,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
-	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -30,16 +29,13 @@ type Service struct {
 	// runtimePlane 执行面（P3a-2 分批搬入）：本进程认的那个底座的绑定与诊断状态。
 	//
 	// 阶段 0.4：字段是**端口**（`session.RuntimePlane`），具体实现留在 `drivers/runtimeconn`。
-	// 只读编排要用的四件事（诊断留痕 ×2、底座绑定 ×2）；来源登记走 `planeImpl`。
+	// 本层**不自造**执行面：装配根注入；未注入时退到 no-op（见 `ports_nop.go`）。
 	runtimePlane session.RuntimePlane
 	// runtimePool 连接池（P4a 正文第五十四刀搬进执行面）：连接表、代际上限与空闲回收。
 	//
 	// 阶段 0.4：字段是**端口**（`session.ConnPool`）。取连接与生命周期都在端口上；
-	// env / 凭据 / 配置指纹的来源登记是**装配接线**，走 `planeImpl`（本层自造路径）。
+	// env / 凭据 / 配置指纹的来源登记是**装配接线**（`bootstrap/assembly`），不在本层。
 	runtimePool session.ConnPool
-	// planeImpl **只有本层自造执行面时**非 nil：缺省建池与三个来源的登记要用具体
-	// `*runtimeconn.Plane`。装配层注入平面时这里同样被回填（同一实例），保证来源不会漏接。
-	planeImpl *runtimeconn.Plane
 
 	// coalescer ③ 文本增量合并器（NewService 构造时创建；见 chunk_coalescer.go）。
 	coalescer *session.Coalescer
@@ -67,6 +63,13 @@ type Option func(*Service)
 // 连接却活着"这种分叉会立刻发生（`runtimeconn.Plane` 的进程状态是它自己的字段）。
 func WithRuntimePlane(pl session.RuntimePlane) Option {
 	return func(s *Service) { s.runtimePlane = pl }
+}
+
+// WithConnPool 用装配层提供的连接池（与 `WithRuntimePlane` 是**同一份执行面**的两半）。
+//
+// 两半必须一起注：池与平面各自记账会让"诊断说 stopped、连接却活着"立刻发生。
+func WithConnPool(pool session.ConnPool) Option {
+	return func(s *Service) { s.runtimePool = pool }
 }
 
 // WithPlanes 使用装配层已经造好的领域平面（核心与网关共用同一套事实的前提）。
@@ -129,39 +132,14 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 	// **必须紧跟创建点**：会话域持有的是合并器本身，早一行它还是 nil——表现是"文本增量不再
 	// 合并"（每条增量各占一个位次），而编译、vet、构造期都看不出来（§3.1.38 的同一课）。
 	s.sessionPlane.SetCoalescer(s.coalescer)
-	// 绑定构建期选定的那个底座（v19：单实例）。`specOK=false`（未注册）不是这里报错——
-	// 装配期的 `runtime.ProductRegistry` 已经 fail-closed，这里只是把事实记下来供诊断如实外露。
-	spec, specOK := reg.Get(runtime.SelectedRuntime())
-	// 执行面的口子：凭据面（供应商域）与连接池。两半都归装配层持有，这里只保留
-	// **缺省自造**（测试与独立路径）；装配层注入平面时回填 `planeImpl`（同一实例），
-	// 来源登记仍然只走一条路。
+	// 执行面两半：装配根注入（`WithRuntimePlane` / `WithConnPool`）；未注入时退到 no-op ——
+	// 本层**不再自造** `*runtimeconn.Plane/Pool`（那会让 L7 import L6 的具体适配器，
+	// 阶段 0.6 的 deny 不成立）。纯列表/纯状态用例不需要执行面，no-op 让它们照常跑。
 	if s.runtimePlane == nil {
-		s.planeImpl = runtimeconn.NewPlane(reg, spec, specOK)
-		s.runtimePlane = s.planeImpl
+		s.runtimePlane = nopRuntimePlane{}
 	}
 	if s.runtimePool == nil {
-		bind := s.planeImpl
-		if bind == nil {
-			bind, _ = s.runtimePlane.(*runtimeconn.Plane)
-		}
-		if bind != nil {
-			s.planeImpl = bind
-			s.runtimePool = runtimeconn.NewPool(bind)
-		}
-	}
-	if s.planeImpl != nil {
-		s.planeImpl.SetCredentialSource(s)
-		if pool, ok := s.runtimePool.(*runtimeconn.Pool); ok {
-			// env 与配置指纹都是**装配事实**，池只认端口（执行面不认识供应商档案与模型清单）。
-			pool.SetProviderEnvSource(s)
-			// 指纹的来源是 `registry.Resources`：它是同一份 `runtimeCfgDigests`。
-			pool.SetConfigDigestSource(s.planes.Resources)
-			// 原生权限 env 的来源（P1-f 下半）：模式**进基础键**，所以这条端口不是"可选的注入"，
-			// 而是"键的第三维"——不登记它，`DSH_PERMISSION_MODE` 既不会注入、也不会分进程。
-			pool.SetNativeEnvSource(s)
-			// 连接池读面：诊断要问"此刻哪条连接活着"。
-			s.planeImpl.SetLiveClientSource(pool)
-		}
+		s.runtimePool = nopConnPool{}
 	}
 	return s
 }

@@ -21,7 +21,7 @@ func selRig(t *testing.T) *Service {
 		ID: "rtx", McpTransports: []string{"stdio", "http"},
 		Projections: []runtime.Projection{rtxSkillProjectionForTest()},
 	})
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	// 本组钉的是**选择优先级**（会话选定 > 未声明时的全量），与"远程是否折叠成网关条目"
 	// 无关：网关开着时远程会被折叠成一条常量条目，断言里的 id 就看不出来了。故显式关掉网关，
 	// 让这组用例继续逐条断言被选中的定义；折叠语义由 gateway_folding 那组用例负责。

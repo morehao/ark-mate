@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 )
 
 // ——— 执行面端口的实现（P4a 正文第五十四刀） ———
@@ -57,14 +56,12 @@ func (s *Service) NativePermissionEnv(runtimeID, mode string) ([]string, string)
 	return adapter.Env(mode, "", nil)
 }
 
-// 编译期断言：执行面的这两个端口必须由本层实现（改名/签名漂移当场编译失败，而不是等到
-// 装配期拿到一个 nil 端口——那时表现是"少注入密钥"/"代际键少一维"，两者都静默）。
-// ConfigDigest 的断言跟着实现搬去了 `registry`（同一个实例交给池）。
-var (
-	_ runtimeconn.ProviderEnvSource = (*Service)(nil)
-	_ runtimeconn.NativeEnvSource   = (*Service)(nil)
-	_ session.DropSink              = (*Orchestrator)(nil)
-)
+// 编译期断言：拆除的应用面必须由编排侧实现（改名/签名漂移当场编译失败）。
+//
+// 另两个来源端口（`ProviderEnv` / `NativePermissionEnv`）的断言随阶段 0.4b 删掉：
+// 本层不再 import `runtimeconn`，改由装配根的 `SetProviderEnvSource(s)` / `SetNativeEnvSource(s)`
+// 调用做**同一份**编译期检查（装配点漏接会直接编译不过）。
+var _ session.DropSink = (*Orchestrator)(nil)
 
 // ——— 供应商域：只剩**端口适配器**（P4a 正文第四十六刀）———
 //

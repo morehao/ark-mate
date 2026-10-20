@@ -19,7 +19,7 @@ import (
 func automationRig(t *testing.T) (*Service, string) {
 	t.Helper()
 	dir := t.TempDir()
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	if n := svc.Planes().Automation.LoadAutomationDefinitions(dir); n != 0 {
 		t.Fatalf("空目录应装载 0 条，got %d", n)
 	}
@@ -288,7 +288,7 @@ func TestAutomationLoadBadDefinitions(t *testing.T) {
 	  "schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},
 	  "target":{"cwd":"/tmp/ws","prompt":"跑"}
 	}`)
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	if n := svc.Planes().Automation.LoadAutomationDefinitions(dir); n != 2 {
 		t.Fatalf("成功装载应为 2（ok/disabled），got %d", n)
 	}
@@ -362,7 +362,7 @@ func TestAutomationDueSnapshot(t *testing.T) {
 
 // TestAutomationDirUnset 未配置目录 → 显式报错（不静默"内存生效、盘上没留痕"）。
 func TestAutomationDirUnset(t *testing.T) {
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := newServiceForTest(runtime.NewRegistry(), eventbus.New())
 	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "x", dailyPatch("x", "9"), true); errCode(err) != "automation_dir_unset" {
 		t.Fatalf("期望 automation_dir_unset，got %v", err)
 	}

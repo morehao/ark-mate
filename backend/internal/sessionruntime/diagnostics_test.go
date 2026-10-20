@@ -63,7 +63,7 @@ for line in sys.stdin:
 // 底座是被会话拉起来的，那才是它唯一的启动路径。
 func TestRuntimeDiagnosticsStartFailure(t *testing.T) {
 	reg := runtime.NewRegistry(brokenRuntimeSpec())
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "broken") // 夹具注册表只有 broken
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
@@ -96,7 +96,7 @@ func TestRuntimeDiagnosticsStartFailure(t *testing.T) {
 // TestRuntimeDiagnosticsLiveTail 已连接 → 外露实时 stderr 尾巴（A3，真实子进程 + 真实 ACP 握手）。
 func TestRuntimeDiagnosticsLiveTail(t *testing.T) {
 	reg := runtime.NewRegistry(stubRuntimeSpec(t))
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
@@ -140,7 +140,7 @@ func TestRuntimeDiagnosticsLiveTail(t *testing.T) {
 func TestPublishErrorCarriesStderrTail(t *testing.T) {
 	reg := runtime.NewRegistry()
 	bus := eventbus.New()
-	svc := NewService(reg, bus)
+	svc := newServiceForTest(reg, bus)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "c-x"})
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
@@ -180,7 +180,7 @@ func TestRuntimeDiagnosticsRemediation(t *testing.T) {
 		Launch:     runtime.LaunchSpec{Command: "definitely-not-installed-cmd"},
 		SetupSteps: []string{"安装 rtx CLI 并确认它在 PATH 中"},
 	})
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "rtx") // 夹具注册表只有 rtx
 	// 「供应商档案悬空」那一类事实在 v19 的落点是**默认模型所指的供应商**（agent 上的 provider
 	// 字段已随 agent 面撤销）：置一条默认模型、让它指向一个不存在的供应商档案。
@@ -216,7 +216,7 @@ func TestRuntimeDiagnosticsRemediation(t *testing.T) {
 	// 历史：这里种的是"agent 的候选里有未注册的 runtime"。候选面下线后，唯一能让诊断报
 	// 「未装配」的形态是**构建期选定的那个不在注册表里**（注册表是空的）。
 	reg2 := runtime.NewRegistry()
-	svc2 := NewService(reg2, eventbus.New())
+	svc2 := newServiceForTest(reg2, eventbus.New())
 	setBuildRuntime(t, "ghost")
 	diag2, err := svcruntime.New(planeOf(svc2)).RuntimeDiagnostics(ctx)
 	if err != nil {
@@ -231,7 +231,7 @@ func TestRuntimeDiagnosticsRemediation(t *testing.T) {
 	stub := stubRuntimeSpec(t)
 	stub.SetupSteps = []string{"装 stub（仅在有问题时才该出现）"}
 	reg3 := runtime.NewRegistry(stub)
-	svc3 := NewService(reg3, eventbus.New())
+	svc3 := newServiceForTest(reg3, eventbus.New())
 	setBuildRuntime(t, "stub")
 	orch3 := NewOrchestrator(svc3, reg3)
 	t.Cleanup(orch3.Close)

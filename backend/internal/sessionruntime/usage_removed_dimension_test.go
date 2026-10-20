@@ -28,7 +28,7 @@ import (
 // 请求直接构造（这个字段只服务查询串，没有 JSON 标签；控制器从 `c.Query` 填它）。
 func TestUsageSummaryRejectsRemovedAgentDimension(t *testing.T) {
 	ctx := context.Background()
-	svc := NewService(testutil.StubRegistry(), eventbus.New())
+	svc := newServiceForTest(testutil.StubRegistry(), eventbus.New())
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
 	enableStore(svc, st)

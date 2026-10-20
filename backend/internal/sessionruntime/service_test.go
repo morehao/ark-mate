@@ -26,7 +26,7 @@ func rigWithRuntime(t *testing.T, specs ...runtime.Spec) (*Service, *Orchestrato
 	t.Helper()
 	reg := runtime.NewRegistry(specs...)
 	bus := eventbus.New()
-	svc := NewService(reg, bus)
+	svc := newServiceForTest(reg, bus)
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	return svc, orch, bus
@@ -301,7 +301,7 @@ func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
 // 号序与版本在 flush 时才分配（下面单独断言这条语义）。
 func TestPublishVersionAndBusNil(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "x", Name: "X"})
-	svc := NewService(reg, nil) // bus = nil
+	svc := newServiceForTest(reg, nil) // bus = nil
 	e1 := svc.sessionPlane.Publish(session.BusToolCall, "s1", map[string]any{"tool": "a"})
 	e2 := svc.sessionPlane.Publish(session.BusToolCall, "s1", map[string]any{"tool": "b"})
 	_ = svc.sessionPlane.Publish(session.BusToolCall, "s2", map[string]any{"tool": "c"})
@@ -351,7 +351,7 @@ func TestSessionHistoryClamp(t *testing.T) {
 // TestCreateSessionWithoutOrchestrator 未装配编排器 → 50201 业务错误。
 func TestCreateSessionWithoutOrchestrator(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "x", Name: "X"})
-	svc := NewService(reg, eventbus.New()) // 无 orch
+	svc := newServiceForTest(reg, eventbus.New()) // 无 orch
 	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{Prompt: "hi"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 50201 {
@@ -422,7 +422,7 @@ func TestServiceResolveRuntimeUsesBuildRuntime(t *testing.T) {
 	}
 
 	// 未装配：明确报 runtime_not_found（不静默回落到注册表里的别的底座）。
-	empty := NewService(runtime.NewRegistry(), nil)
+	empty := newServiceForTest(runtime.NewRegistry(), nil)
 	setBuildRuntime(t, "stub")
 	_, err := planeOf(empty).Resolve()
 	var ae *acp.Error

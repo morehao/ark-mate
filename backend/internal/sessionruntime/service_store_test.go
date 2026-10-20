@@ -20,7 +20,7 @@ import (
 // 归档过的会话重新出现在默认列表里，用户看到的是"我删掉的又回来了"。
 func TestListSessionsArchivedFilter(t *testing.T) {
 	reg := testutil.StubRegistry()
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	enableStore(svc, testutil.OpenStore(t, testutil.TempDBPath(t)))
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-live", Title: "在用的", RuntimeID: "stub"})
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-archived", Title: "归档的", RuntimeID: "stub", Archived: true})
@@ -70,7 +70,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	// —— 进程一：sqlite 模式活会话 ——
 	st1 := testutil.OpenStore(t, dbPath)
 	bus1 := eventbus.New()
-	svc1 := NewService(reg, bus1)
+	svc1 := newServiceForTest(reg, bus1)
 	enableStore(svc1, st1)
 
 	svc1.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-live"})
@@ -102,7 +102,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	st2 := testutil.OpenStore(t, dbPath)
 	defer st2.Close()
 	bus2 := eventbus.New()
-	svc2 := NewService(reg, bus2)
+	svc2 := newServiceForTest(reg, bus2)
 	enableStore(svc2, st2)
 
 	n, injected, err := svc2.SessionPlane().Restore(ctx)
@@ -144,7 +144,7 @@ func TestSQLiteRestoreAcrossSessions(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
 	st := testutil.OpenStore(t, dbPath)
-	svc := NewService(runtime.NewRegistry(), nil)
+	svc := newServiceForTest(runtime.NewRegistry(), nil)
 	enableStore(svc, st)
 	// 手动制造交错号序：s-a 先事件、s-b 后事件、s-a 再事件（ListSessions 按 updated_at 降序可能先 s-a 后 s-b）。
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-a"})
@@ -158,7 +158,7 @@ func TestSQLiteRestoreAcrossSessions(t *testing.T) {
 	st2 := testutil.OpenStore(t, dbPath)
 	defer st2.Close()
 	bus2 := eventbus.New()
-	svc2 := NewService(runtime.NewRegistry(), bus2)
+	svc2 := newServiceForTest(runtime.NewRegistry(), bus2)
 	enableStore(svc2, st2)
 	if _, _, err := svc2.SessionPlane().Restore(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
@@ -205,7 +205,7 @@ func TestRestoreRebuildsStaleReadModels(t *testing.T) {
 
 	// —— 进程一：跑一轮（用户消息 + 终态），让 runs/messages 由事件物化出来 ——
 	st1 := testutil.OpenStore(t, dbPath)
-	svc1 := NewService(testutil.StubRegistry(), eventbus.New())
+	svc1 := newServiceForTest(testutil.StubRegistry(), eventbus.New())
 	enableStore(svc1, st1)
 	svc1.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-rebuild"})
 	runID, _, _ := beginRun(t, svc1, "s-rebuild", "重建我")
@@ -229,7 +229,7 @@ func TestRestoreRebuildsStaleReadModels(t *testing.T) {
 	// —— 进程二：重启恢复 ——
 	st2 := testutil.OpenStore(t, dbPath)
 	defer st2.Close()
-	svc2 := NewService(testutil.StubRegistry(), eventbus.New())
+	svc2 := newServiceForTest(testutil.StubRegistry(), eventbus.New())
 	enableStore(svc2, st2)
 	if _, _, err := svc2.SessionPlane().Restore(ctx); err != nil {
 		t.Fatalf("RestoreFromStore: %v", err)
@@ -266,7 +266,7 @@ func TestRestoreRebuildsStaleReadModels(t *testing.T) {
 // 而当时全量测试**一条都不红**。判据就钉这两侧（内存镜像 + 库），漏一侧都要红。
 func TestFirstUserMessageDerivesTitleInMemory(t *testing.T) {
 	ctx := context.Background()
-	svc := NewService(testutil.StubRegistry(), eventbus.New())
+	svc := newServiceForTest(testutil.StubRegistry(), eventbus.New())
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
 	enableStore(svc, st)

@@ -24,7 +24,7 @@ func catalogRig(t *testing.T) (*Service, *Orchestrator) {
 	t.Helper()
 	reg := testutil.StubRegistry()
 	bus := eventbus.New()
-	svc := NewService(reg, bus)
+	svc := newServiceForTest(reg, bus)
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
@@ -197,7 +197,7 @@ func TestApplySessionModelSemantics(t *testing.T) {
 // 给出可执行错误，不把底座的 invalidParams 原样甩给用户，也不下发到运行时。
 func TestApplySessionModelFailsFastOnMissingCredential(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "stub", Name: "Stub", ModelCatalogNeedsCredential: true})
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub")
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)

@@ -23,7 +23,7 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 
 	// —— 进程一：sqlite 模式记录双侧记忆 ——
 	st1 := testutil.OpenStore(t, dbPath)
-	svc1 := NewService(reg, nil)
+	svc1 := newServiceForTest(reg, nil)
 	enableStore(svc1, st1)
 	orch1 := NewOrchestrator(svc1, reg)
 	svc1.sessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
@@ -63,7 +63,7 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	// —— 进程二：重启恢复 ——
 	st2 := testutil.OpenStore(t, dbPath)
 	defer st2.Close()
-	svc2 := NewService(reg, nil)
+	svc2 := newServiceForTest(reg, nil)
 	enableStore(svc2, st2)
 	orch2 := NewOrchestrator(svc2, reg)
 	svc2.sessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})

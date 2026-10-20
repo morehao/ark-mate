@@ -23,7 +23,7 @@ func TestUsageSummaryService(t *testing.T) {
 	reg := testutil.StubRegistry()
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	enableStore(svc, st)
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
@@ -125,7 +125,7 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// 内存模式（无 store）→ 明确 unsupported（不返回假零值）。
-	svcMem := NewService(reg, eventbus.New())
+	svcMem := newServiceForTest(reg, eventbus.New())
 	_, err = sessionPlaneOf(svcMem).UsageSummary(ctx, session.UsageQuery{})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40501 || !strings.Contains(ge.Msg, "[usage_stats_unsupported]") {

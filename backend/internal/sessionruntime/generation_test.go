@@ -118,7 +118,7 @@ func TestGenerationKeyFindsAllGenerations(t *testing.T) {
 func acpRig(t *testing.T) *rig {
 	t.Helper()
 	reg := runtime.NewRegistry(stubACPSpec(t))
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)

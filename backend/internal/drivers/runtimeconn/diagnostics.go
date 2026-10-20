@@ -13,8 +13,10 @@ import (
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
-// maxDiagStderrLines 外露的 stderr 诊断行数上限（超出保留最近若干行）。
-const MaxDiagStderrLines = 20
+// MaxDiagStderrLines 外露的 stderr 诊断行数上限（超出保留最近若干行）。
+//
+// 值本身归 `domain/session`（编排侧读同一个数字），这里只保留一个本包可读的别名常量。
+const MaxDiagStderrLines = session.MaxDiagStderrLines
 
 // LastErr 底座最近一次失败（进程起不来/握手失败/轮次失败）的诊断快照。
 //

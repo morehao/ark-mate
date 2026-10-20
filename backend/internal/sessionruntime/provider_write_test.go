@@ -137,7 +137,7 @@ func TestProviderCreateDoesNotWriteKeyWhenRowExists(t *testing.T) {
 	dir := filepath.Join(home, "providers")
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
-	svc := NewService(v12ProviderRegistry(), eventbus.New())
+	svc := newServiceForTest(v12ProviderRegistry(), eventbus.New())
 	enableStore(svc, st)
 	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
 	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)
@@ -179,7 +179,7 @@ func TestProviderUpdateKeepsKeyWhenContentCasFails(t *testing.T) {
 	dir := filepath.Join(home, "providers")
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
-	svc := NewService(v12ProviderRegistry(), eventbus.New())
+	svc := newServiceForTest(v12ProviderRegistry(), eventbus.New())
 	enableStore(svc, st)
 	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
 	svc.planes.Providers.LoadProviderDefinitionsFromStore(ctx, dir)
@@ -294,7 +294,7 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 // TestProviderEffectNilWithoutOrchestrator 没有编排器时**不编数**（回 nil 而不是回 0）。
 func TestProviderEffectNilWithoutOrchestrator(t *testing.T) {
 	ctx := context.Background()
-	svc := NewService(v12ProviderRegistry(), eventbus.New())
+	svc := newServiceForTest(v12ProviderRegistry(), eventbus.New())
 	svc.planes.Providers.SetProviderDir(filepath.Join(t.TempDir(), "providers"))
 	if _, err := svc.planes.Providers.CreateProvider(ctx, providerReq("p1", nil)); err != nil {
 		t.Fatal(err)
@@ -312,7 +312,7 @@ func TestProviderEffectNilWithoutOrchestrator(t *testing.T) {
 func TestProviderProblemsSurfaceBeforeSession(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	svc := NewService(v12ProviderRegistry(), eventbus.New())
+	svc := newServiceForTest(v12ProviderRegistry(), eventbus.New())
 	svc.planes.Providers.SetProviderDir(filepath.Join(home, "providers"))
 	svc.planes.Credentials.SetLayered(newTestCredentials(t, home))
 	if _, err := svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{ID: "no-key", Protocol: "openai"}); err != nil {
@@ -348,7 +348,7 @@ func TestCredentialProblemPointsAtModelSettings(t *testing.T) {
 	home := t.TempDir()
 	st := testutil.OpenStore(t, filepath.Join(home, "mate.db"))
 	defer func() { _ = st.Close() }()
-	svc := NewService(v12ProviderRegistry(), eventbus.New())
+	svc := newServiceForTest(v12ProviderRegistry(), eventbus.New())
 	svc.planes.Providers.SetProviderDir(filepath.Join(home, "providers"))
 	enableStore(svc, st)
 

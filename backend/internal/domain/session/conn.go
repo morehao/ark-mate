@@ -124,4 +124,13 @@ type RuntimePlane interface {
 	SelectedSpec() (runtime.Spec, error)
 	// SetState 更新底座进程状态（建/拆连接时调用）。
 	SetState(state string)
+	// SampleConfigOptions 恢复/装载一条已有会话，读它的配置项，然后关闭（只读取样）。
+	// **不新建会话**：那是执行面的责任，调用方只管候选枚举与退避。
+	SampleConfigOptions(ctx context.Context, conn Conn, rawSessionID, cwd string) ([]acp.ConfigOption, error)
 }
+
+// MaxDiagStderrLines 诊断留痕里 stderr 尾巴的保留行数（执行面与编排侧共用同一份上限）。
+//
+// 放在域而不是执行面：编排侧只拿到 `acp.Client` 与端口，不 import 具体池，
+// 而两边必须用**同一个数字**（两处各写一份的表现是诊断里尾巴长短不一致）。
+const MaxDiagStderrLines = 20

@@ -31,7 +31,7 @@ func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 	spec := stubACPSpec(t)
 	spec.McpTransports = []string{"stdio"}
 	reg := runtime.NewRegistry(spec)
-	svc := NewService(reg, eventbus.New())
+	svc := newServiceForTest(reg, eventbus.New())
 	// 本组用例钉的是**按传输承载能力**拒选（`mcp_gateway=off` 的回退口径）；网关在环时远程
 	// server 对每个已注册 runtime 都可达，故"不承载 http"这条不再成立——那条新语义由
 	// `TestSelectionValidationRemoteReachableViaGateway` 负责。
