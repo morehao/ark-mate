@@ -98,15 +98,18 @@
   **适配器前缀**补上，fail-closed（一个 import 都解析不到即失败）。反证（实跑）：在 `app.go` 加
   `import _ "internal/persistence/store"` → 红。
 
-- 再加 **1 条「领域自持类型」守卫**（`layer_isolation_test.go` 的 `TestDomainOwnsItsTypesNotTableRows`，
-  2026-10-20 C1）：`internal/domain/**` 的**生产 import** 不得出现 `internal/persistence/model`。
+- 再加 **1 条「内圈自持类型」守卫**（`layer_isolation_test.go` 的 `TestInnerLayersUseNoTableRows`，
+  2026-10-20 C1，C2 扩到五层）：`internal/{domain,service,sessionruntime,delivery,bootstrap}/**` 的
+  **生产 import** 不得出现 `internal/persistence/model`。
   层表只判方向——L2 → L0 是"向内"，所以「领域端口签名里全是 `model.*Entity`」在层表里一直**合法**，
   没有任何判据会说那不对（换存储实现要先改一遍域）。C1 把 16 个实体的行形状搬进域内叶子值包
   （`domain/session/{queue,memory,run,message,event,sessionrow,usage}`、`domain/workspace/row`、
   `domain/provider/row`、`domain/automation/row`），行↔值映射只留在 `persistence/store`。
-  **只扫生产 import**：域的包内测试会直插行构造夹具（真 SQLite），那正是映射的验证方式。
-  fail-closed（一个 domain 包都扫不到即失败）。反证（实跑）：在 `domain/workspace/row/item.go`
-  加 `persistence/model` 引用 → 红。
+  扫描根是**五层**而不是只有 domain：只钉 domain 的话，"把行形状挪进 svc / sessionruntime 再传下去"
+  照样绿——那也是内圈。**只扫生产 import**：内圈的包内测试会直插行构造夹具（真 SQLite），
+  那正是映射的验证方式。fail-closed（任一根不存在、或一个包都扫不到即失败）。
+  反证（实跑）：`domain/workspace/row/item.go` 加 `persistence/model` 引用 → 红；
+  `service/svcusage` 加一个 model 空白 import → 红。
 
 - 再加 **1 条「错误分类词对照」守卫**（`error_class_parity_test.go` 的 `TestErrorClassVocabularyMatchesACP`，
   2026-10-20 C2）：`core/code` 的平台错误分类（`code.ClassRequest` 等，7 个）与 `infra/acp` 的分类

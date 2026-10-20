@@ -185,36 +185,52 @@ func TestServicePortsMustNotImportEachOther(t *testing.T) {
 	}
 }
 
-// TestDomainOwnsItsTypesNotTableRows 领域不得引用表行形状（`persistence/model`）。
+// TestInnerLayersUseNoTableRows 内圈（领域 / 用例 / 执行面 / 入站适配 / 装配）不得引用表行形状
+// （`persistence/model`）。
 //
 // 层表只判**方向**：L2 → L0 是"向内"，所以 `domain` import `model` 在层表里一直是**合法**的
 // ——C1 之前域的端口签名里全是 `model.*Entity`，没有任何判据会说那不对；换一份存储实现就要
-// 先改一遍域，而这正是"端口语言来自外圈"的那条裂缝。这条按**角色**补上：领域自持聚合与值
-// 类型（`domain/<agg>/row` 这类叶子值包），行形状（列、gorm tag、迁移词汇）只留在出站适配器。
+// 先改一遍域，而这正是"端口语言来自外圈"的那条裂缝。C1 把 16 个实体的行形状搬进域内叶子值包
+// （`domain/<agg>/row` 这一类），行↔值映射只留在 `persistence/store`。这条按**角色**把结果钉住：
+// **行形状只属于持久层**，内圈任何一层都不许再把它写进签名或字段。
 //
-// 只扫**生产** import（`pkg.Imports`）：域自己的包内测试会直插行来构造夹具（真 SQLite），
-// 那恰好是"行↔值映射在适配器里"的验证方式；把测试也禁掉只会逼夹具绕路，不会让域更干净。
+// 扫描根是**五层**而不是只有 domain：只钉 domain 的话，"把行形状挪进 svc / sessionruntime 再
+// 传下去"照样绿——而那也是内圈。每个根都必须存在（目录改名/搬走即失败）。
 //
-// fail-closed：一个 domain 包都扫不到即失败（目录改名/搬走时不许静默空转）。
-func TestDomainOwnsItsTypesNotTableRows(t *testing.T) {
+// 只扫**生产** import（`pkg.Imports`）：内圈的包内测试会直插行来构造夹具（真 SQLite），
+// 那恰好是"行↔值映射在适配器里"的验证方式；把测试也禁掉只会逼夹具绕路，不会让内圈更干净。
+func TestInnerLayersUseNoTableRows(t *testing.T) {
 	root := backendRoot(t)
 	modelPkg := modulePrefix + "internal/persistence/model"
+	innerRoots := []string{
+		filepath.Join("internal", "domain"),
+		filepath.Join("internal", "service"),
+		filepath.Join("internal", "sessionruntime"),
+		filepath.Join("internal", "delivery"),
+		filepath.Join("internal", "bootstrap"),
+	}
 	scanned := 0
-	for _, dir := range goPackagesUnder(t, filepath.Join(root, "internal", "domain")) {
-		pkg, err := build.ImportDir(dir, 0)
-		if err != nil {
-			t.Fatalf("解析包 %s 失败: %v", rel(root, dir), err)
+	for _, relRoot := range innerRoots {
+		dir := filepath.Join(root, relRoot)
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("内圈扫描根 %s 不存在（fail-closed）：目录被改名/搬走了？", relRoot)
 		}
-		scanned++
-		for _, imp := range pkg.Imports {
-			if imp == modelPkg {
-				t.Errorf("%s 不应 import %s：领域要自持聚合与值类型，行形状只属于出站适配器"+
-					"（把该类型搬进域内叶子值包，让 store 做行↔值映射）", rel(root, dir), imp)
+		for _, pkgDir := range goPackagesUnder(t, dir) {
+			pkg, err := build.ImportDir(pkgDir, 0)
+			if err != nil {
+				t.Fatalf("解析包 %s 失败: %v", rel(root, pkgDir), err)
+			}
+			scanned++
+			for _, imp := range pkg.Imports {
+				if imp == modelPkg {
+					t.Errorf("%s 不应 import %s：内圈要自持聚合与值类型，行形状只属于持久层"+
+						"（把该类型搬进域内叶子值包，让 store 做行↔值映射）", rel(root, pkgDir), imp)
+				}
 			}
 		}
 	}
 	if scanned == 0 {
-		t.Fatal("internal/domain 下没有扫到任何包（fail-closed）：领域目录被改名/搬走了？")
+		t.Fatal("内圈没有扫到任何包（fail-closed）：目录被改名/搬走了？")
 	}
 }
 
