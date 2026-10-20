@@ -22,7 +22,7 @@ import (
 	defn "github.com/morehao/ark-mate/internal/core/definition"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 	dmodel "github.com/morehao/ark-mate/internal/persistence/model"
-	svcsession "github.com/morehao/ark-mate/internal/service/svcsession"
+	"github.com/morehao/ark-mate/internal/service/svcsession"
 	svcsystem "github.com/morehao/ark-mate/internal/service/svcsystem"
 
 	"os"
@@ -160,7 +160,7 @@ func newRig(t *testing.T, mutate ...func(*rigConfig)) *rig {
 		enableStore(svc, st)
 		t.Cleanup(func() { _ = st.Close() })
 	}
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	// 取消后的结算窗口在测试里压到 50ms：生产默认 10s（等 dsh drain），照默认跑会让每个
 	// 「取消 → 等终态」的用例都挂满 10s 并被 feed 的 2s 超时判红。
 	orch.SetSettleTimeout(50 * time.Millisecond)
@@ -449,4 +449,28 @@ func planeFactsOfTest(p *registry.Planes) PlaneFacts {
 // （端口持有的是旧实例）。
 func rewireFacts(svc *Service) {
 	svc.facts = planeFactsOfTest(planesOf(svc))
+}
+
+// sessionOf 造会话写面用例（P5 起在 `svcsession`）。端口全部取自当前夹具：
+// 编排器给三条能力，平面给工作空间事实，库口给归属校验，Service 给投递能力。
+func sessionOf(svc *Service) svcsession.SessionSvc {
+	deps := svcsession.SessionDeps{
+		Workspaces: svc.facts.Workspaces,
+		Store:      svc.resourceStore,
+		Queued:     svc,
+	}
+	if o := svc.orch; o != nil {
+		deps.Starter, deps.Prompt, deps.Canceller = o, o, o
+	}
+	return svcsession.NewSession(deps)
+}
+
+// newOrchestratorForTest 造编排器并**回注自动化宿主需要的会话用例**（P5）。
+//
+// 生产里这一步在装配根的 `startControllers`；测试没有装配根，所以在编排器造好之后立刻接上。
+// 只接 Orchestrator 而不回注的表现是自动化触发带码失败（`orchestrator_unavailable`）。
+func newOrchestratorForTest(svc *Service, reg *runtime.Registry) *Orchestrator {
+	o := NewOrchestrator(svc, reg)
+	svc.SetSessionUseCase(sessionOf(svc))
+	return o
 }

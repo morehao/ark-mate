@@ -8,6 +8,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -24,6 +25,9 @@ type Service struct {
 	reg *runtime.Registry
 	// resourceStore 资源同步面的窄库口（`EnableStore` 注入；nil = 未接库）。
 	resourceStore ResourceStore
+	// sessionUC 自动化宿主需要的两条会话写面能力（P5 起用例在 `svcsession`，
+	// 由装配根在它造好之后注入；nil = 未装配，宿主动作带码失败而不是 panic）。
+	sessionUC sessionUseCase
 
 	// sessionPlane 会话域（自持一把只保护域内字段的锁）。
 	sessionPlane *session.Plane
@@ -65,6 +69,17 @@ type Option func(*Service)
 func WithRuntimePlane(pl session.RuntimePlane) Option {
 	return func(s *Service) { s.runtimePlane = pl }
 }
+
+// sessionUseCase 自动化宿主需要的两条会话写面能力（**只声明用到的那两条**）。
+//
+// 它不叫 `svcsession.SessionSvc`：执行面不该 import 用例层；装配根把用例实例交进来即可。
+type sessionUseCase interface {
+	CreateSession(ctx context.Context, req dtosession.SessionCreateReq) (*dtosession.SessionCreateResp, error)
+	CancelRun(ctx context.Context, id string) error
+}
+
+// SetSessionUseCase 装配根在会话用例造好之后注入（自动化的 `Host` 端口要用）。
+func (s *Service) SetSessionUseCase(u sessionUseCase) { s.sessionUC = u }
 
 // WithConnPool 用装配层提供的连接池（与 `WithRuntimePlane` 是**同一份执行面**的两半）。
 //

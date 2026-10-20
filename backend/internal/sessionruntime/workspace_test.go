@@ -221,7 +221,7 @@ func workspaceTestSvc(t *testing.T) *Service {
 	reg := testutil.StubRegistry()
 	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 	return svc
 }
@@ -232,14 +232,14 @@ func TestCreateSessionWorkspaceRejectedBeforeRuntime(t *testing.T) {
 	svc := workspaceTestSvc(t)
 	mustWorkspacePolicy(t, svc, t.TempDir(), nil)
 
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
+	_, err := sessionOf(svc).CreateSession(context.Background(), dtosession.SessionCreateReq{
 		Cwd: "relative/not-absolute",
 	})
 	if code := gerrCode(t, err); code != 40001 {
 		t.Fatalf("相对路径应 40001（请求拒绝），got %d: %v", code, err)
 	}
 
-	_, err = svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
+	_, err = sessionOf(svc).CreateSession(context.Background(), dtosession.SessionCreateReq{
 		Cwd: filepath.Join(t.TempDir(), "nope"),
 	})
 	if code := gerrCode(t, err); code != 40001 {
@@ -250,7 +250,7 @@ func TestCreateSessionWorkspaceRejectedBeforeRuntime(t *testing.T) {
 	if werr := os.WriteFile(f, []byte("x"), 0o600); werr != nil {
 		t.Fatalf("write: %v", werr)
 	}
-	_, err = svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
+	_, err = sessionOf(svc).CreateSession(context.Background(), dtosession.SessionCreateReq{
 		Cwd: f,
 	})
 	if code := gerrCode(t, err); code != 40001 {
@@ -264,7 +264,7 @@ func TestCreateSessionWorkspaceRequiredWhenDisabled(t *testing.T) {
 	svc := workspaceTestSvc(t)
 	mustWorkspacePolicy(t, svc, "", nil)
 
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{})
+	_, err := sessionOf(svc).CreateSession(context.Background(), dtosession.SessionCreateReq{})
 	if code := gerrCode(t, err); code != 40001 {
 		t.Fatalf("代建关闭应 40001，got %d: %v", code, err)
 	}
@@ -290,7 +290,7 @@ func TestCreateSessionFailureLeavesNoPerSessionDir(t *testing.T) {
 	}
 
 	// echo spec 无启动命令 → acquire 失败。
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{})
+	_, err := sessionOf(svc).CreateSession(context.Background(), dtosession.SessionCreateReq{})
 	if err == nil {
 		t.Fatal("无命令的 runtime 应建会话失败")
 	}

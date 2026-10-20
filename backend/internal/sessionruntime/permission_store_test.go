@@ -25,7 +25,7 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	st1 := testutil.OpenStore(t, dbPath)
 	svc1 := newServiceForTest(reg, nil)
 	enableStore(svc1, st1)
-	orch1 := NewOrchestrator(svc1, reg)
+	orch1 := newOrchestratorForTest(svc1, reg)
 	svc1.sessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
 
 	toolRun := acp.ToolCallInfo{Title: "跑脚本", Kind: "execute"}
@@ -65,7 +65,7 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	defer st2.Close()
 	svc2 := newServiceForTest(reg, nil)
 	enableStore(svc2, st2)
-	orch2 := NewOrchestrator(svc2, reg)
+	orch2 := newOrchestratorForTest(svc2, reg)
 	svc2.sessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
 	svc2.sessionPlane.RegisterSession(&session.SessionRec{ID: "s2"})
 

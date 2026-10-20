@@ -195,7 +195,7 @@ func TestPromptAfterRunQueuesWhenBusy(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
 	startFirstRun(t, orch, g, "第一轮")
 
-	resp, err := svc.PromptSession(context.Background(), "conv-1",
+	resp, err := sessionOf(svc).PromptSession(context.Background(), "conv-1",
 		dtosession.PromptReq{Prompt: "排队的话", Delivery: session.DeliveryAfterRun})
 	if err != nil {
 		t.Fatalf("after_run 入队失败: %v", err)
@@ -236,11 +236,11 @@ func TestPromptAfterRunQueuesWhenBusy(t *testing.T) {
 func TestQueuedInputDeliveredAfterRunEnds(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
 	startFirstRun(t, orch, g, "第一轮")
-	if _, err := svc.PromptSession(context.Background(), "conv-1",
+	if _, err := sessionOf(svc).PromptSession(context.Background(), "conv-1",
 		dtosession.PromptReq{Prompt: "排队一", Delivery: session.DeliveryAfterRun}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.PromptSession(context.Background(), "conv-1",
+	if _, err := sessionOf(svc).PromptSession(context.Background(), "conv-1",
 		dtosession.PromptReq{Prompt: "排队二", Delivery: session.DeliveryAfterRun}); err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestQueuedInputDeliveredAfterRunEnds(t *testing.T) {
 func TestQueuedInputStaledWhenGenerationChanged(t *testing.T) {
 	svc, orch, g, as := newQueueRig(t, newGatedSession(), true)
 	startFirstRun(t, orch, g, "第一轮")
-	if _, err := svc.PromptSession(context.Background(), "conv-1",
+	if _, err := sessionOf(svc).PromptSession(context.Background(), "conv-1",
 		dtosession.PromptReq{Prompt: "为旧上下文排的队", Delivery: session.DeliveryAfterRun}); err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func TestQueuedInputInterruptThenPrompt(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
 	startFirstRun(t, orch, g, "被打断的一轮")
 
-	resp, err := svc.PromptSession(context.Background(), "conv-1",
+	resp, err := sessionOf(svc).PromptSession(context.Background(), "conv-1",
 		dtosession.PromptReq{Prompt: "插话", Delivery: session.DeliveryInterruptThenPrompt})
 	if err != nil {
 		t.Fatalf("interrupt_then_prompt 失败: %v", err)
@@ -355,7 +355,7 @@ func TestQueuedInputInterruptThenPrompt(t *testing.T) {
 func TestDeleteQueuedInput(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
 	startFirstRun(t, orch, g, "第一轮")
-	resp, err := svc.PromptSession(context.Background(), "conv-1",
+	resp, err := sessionOf(svc).PromptSession(context.Background(), "conv-1",
 		dtosession.PromptReq{Prompt: "要撤下的", Delivery: session.DeliveryAfterRun})
 	if err != nil {
 		t.Fatal(err)
@@ -411,7 +411,7 @@ func TestPromptDeliveryValidation(t *testing.T) {
 		t.Fatalf("空值应归一为 reject: %q/%v", got, err)
 	}
 	// 服务出口：信封码是 acp 分类的投影（ClassRequest → 40001，ClassLimit → 40901）。
-	if _, err := svc.PromptSession(context.Background(), "conv-1",
+	if _, err := sessionOf(svc).PromptSession(context.Background(), "conv-1",
 		dtosession.PromptReq{Prompt: "x", Delivery: "whenever"}); err == nil {
 		t.Fatal("非法 delivery 应报错")
 	} else {
@@ -420,7 +420,7 @@ func TestPromptDeliveryValidation(t *testing.T) {
 			t.Fatalf("应报 %d: %v", code.InvalidRequest, err)
 		}
 	}
-	if _, err := svc.PromptSession(context.Background(), "conv-1",
+	if _, err := sessionOf(svc).PromptSession(context.Background(), "conv-1",
 		dtosession.PromptReq{Prompt: "x", Delivery: session.DeliveryReject}); err == nil {
 		t.Fatal("忙 + reject 应报错（历史行为）")
 	} else {
@@ -438,7 +438,7 @@ func TestPromptDeliveryValidation(t *testing.T) {
 // 直接执行，不留队列行（没有「等的那一轮」）。
 func TestPromptAfterRunWhenIdleRunsImmediately(t *testing.T) {
 	svc, _, g, _ := newQueueRig(t, newGatedSession(), true)
-	resp, err := svc.PromptSession(context.Background(), "conv-1",
+	resp, err := sessionOf(svc).PromptSession(context.Background(), "conv-1",
 		dtosession.PromptReq{Prompt: "空闲时提交", Delivery: session.DeliveryAfterRun})
 	if err != nil {
 		t.Fatalf("空闲投递失败: %v", err)
@@ -511,7 +511,7 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 func TestInputQueueMemoryMode(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), false)
 	startFirstRun(t, orch, g, "第一轮")
-	resp, err := svc.PromptSession(context.Background(), "conv-1",
+	resp, err := sessionOf(svc).PromptSession(context.Background(), "conv-1",
 		dtosession.PromptReq{Prompt: "内存里的排队", Delivery: session.DeliveryAfterRun})
 	if err != nil || !resp.Queued {
 		t.Fatalf("内存模式应能入队: %v/%+v", err, resp)

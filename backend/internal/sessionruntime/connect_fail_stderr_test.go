@@ -81,10 +81,10 @@ func TestConnectFailurePicksCauseLineOverTail(t *testing.T) {
 	reg := runtime.NewRegistry(nodeStyleBootFailSpec(t))
 	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 
-	_, err := svc.CreateSession(context.Background(),
+	_, err := sessionOf(svc).CreateSession(context.Background(),
 		dtosession.SessionCreateReq{Cwd: t.TempDir()})
 	if err == nil {
 		t.Fatal("底座起不来时建会话必须失败")
@@ -119,10 +119,10 @@ func TestConnectFailureSurfacesStderrTail(t *testing.T) {
 	reg := runtime.NewRegistry(spec)
 	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 
-	_, err := svc.CreateSession(context.Background(),
+	_, err := sessionOf(svc).CreateSession(context.Background(),
 		dtosession.SessionCreateReq{Cwd: t.TempDir()})
 	if err == nil {
 		t.Fatal("底座起不来时建会话必须失败")

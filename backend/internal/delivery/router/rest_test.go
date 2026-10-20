@@ -508,6 +508,9 @@ func (s *stubSvc) DeliverQueuedNow(_ context.Context, id string) error {
 	return nil
 }
 
+// DeliverQueued 执行面的投递能力（`svcsession.QueuedDelivery`）。
+func (s *stubSvc) DeliverQueued(id string) { s.deliverQueuedID = id }
+
 // ListRuns 桩：默认空 runs（详情/统计路径不依赖其返回）。
 
 // ——— 测试基建 ———

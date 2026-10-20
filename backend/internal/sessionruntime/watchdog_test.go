@@ -76,7 +76,7 @@ func TestRunTimeoutOff(t *testing.T) {
 		t.Fatalf("看门狗关闭时挂起 run 应保持 busy")
 	}
 	// 手动取消仍可用。
-	if err := orch.CancelRun(context.Background(), "s1"); err != nil {
+	if err := sessionOf(orch.svc).CancelRun(context.Background(), "s1"); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
 }

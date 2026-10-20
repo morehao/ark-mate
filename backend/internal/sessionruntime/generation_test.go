@@ -120,7 +120,7 @@ func acpRig(t *testing.T) *rig {
 	reg := runtime.NewRegistry(stubACPSpec(t))
 	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 	return &rig{Svc: svc, Orch: orch}
 }
@@ -133,7 +133,7 @@ func TestWarmProcessSharingWithoutCapabilitySelection(t *testing.T) {
 	cwd := t.TempDir()
 	mk := func() string {
 		t.Helper()
-		resp, err := r.Svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		resp, err := sessionOf(r.Svc).CreateSession(ctx, dtosession.SessionCreateReq{
 			Cwd: cwd,
 		})
 		if err != nil {

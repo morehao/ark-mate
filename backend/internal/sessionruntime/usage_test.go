@@ -25,7 +25,7 @@ func TestUsageSummaryService(t *testing.T) {
 	defer st.Close()
 	svc := newServiceForTest(reg, eventbus.New())
 	enableStore(svc, st)
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 
 	// 两个会话：a1（echo，两轮，用量快照 250/1000）与 a2（echo，一轮无上报）。

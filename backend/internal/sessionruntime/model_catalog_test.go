@@ -26,7 +26,7 @@ func catalogRig(t *testing.T) (*Service, *Orchestrator) {
 	bus := eventbus.New()
 	svc := newServiceForTest(reg, bus)
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 	return svc, orch
 }
@@ -199,7 +199,7 @@ func TestApplySessionModelFailsFastOnMissingCredential(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "stub", Name: "Stub", ModelCatalogNeedsCredential: true})
 	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub")
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 
 	proj := &fakeProjection{}

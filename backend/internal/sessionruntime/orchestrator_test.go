@@ -135,7 +135,7 @@ func TestPromptBusy(t *testing.T) {
 		t.Fatalf("期望 run_in_progress，got %v", err)
 	}
 	// 结束第一个 run（cancel 它）以免泄漏 goroutine
-	_ = orch.CancelRun(context.Background(), "s1")
+	_ = sessionOf(orch.svc).CancelRun(context.Background(), "s1")
 }
 
 // TestCancelRun 取消 → run.cancelled + cancelled 状态。
@@ -148,7 +148,7 @@ func TestCancelRun(t *testing.T) {
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
-	if err := orch.CancelRun(context.Background(), "s1"); err != nil {
+	if err := sessionOf(orch.svc).CancelRun(context.Background(), "s1"); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
 	evts := feed(bus, "s1", 3)
@@ -196,7 +196,7 @@ func TestCancelWaitsForPromptSettlement(t *testing.T) {
 		t.Fatalf("Prompt: %v", err)
 	}
 	<-gate.started
-	if err := orch.CancelRun(context.Background(), "s1"); err != nil {
+	if err := sessionOf(orch.svc).CancelRun(context.Background(), "s1"); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -225,11 +225,11 @@ func TestCancelWaitsForPromptSettlement(t *testing.T) {
 // 的判据：把它错报成 40401 会让用户去查一个并不存在的资源。
 func TestServiceRESTErrors(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{Prompt: "hi"})
+	_, err := sessionOf(svc).CreateSession(context.Background(), dtosession.SessionCreateReq{Prompt: "hi"})
 	if numericCode(err) != 40001 {
 		t.Fatalf("缺工作空间应 40001，got %d（%v）", numericCode(err), err)
 	}
-	if err := svc.CancelRun(context.Background(), "ghost"); err == nil || !strings.Contains(err.Error(), "40401") {
+	if err := sessionOf(svc).CancelRun(context.Background(), "ghost"); err == nil || !strings.Contains(err.Error(), "40401") {
 		t.Fatalf("CancelRun 期望 40401 错误，got %v", err)
 	}
 }
@@ -260,7 +260,7 @@ func TestCancelRunAgentUnresponsive(t *testing.T) {
 		t.Fatalf("Prompt: %v", err)
 	}
 	start := time.Now()
-	if err := orch.CancelRun(context.Background(), "s1"); err != nil {
+	if err := sessionOf(orch.svc).CancelRun(context.Background(), "s1"); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
 	if el := time.Since(start); el > session.AgentCancelSendTimeout+2*time.Second {
@@ -337,7 +337,7 @@ func TestBusyAttributionLifecycle(t *testing.T) {
 	if got := orch.busySessionForClient(c1); got != "s1" {
 		t.Fatalf("run 进行中应归属 s1: %q", got)
 	}
-	if err := orch.CancelRun(context.Background(), "s1"); err != nil {
+	if err := sessionOf(orch.svc).CancelRun(context.Background(), "s1"); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
 	// executeRun 收尾后在途登记应清空（轮询等待，2s 防御）

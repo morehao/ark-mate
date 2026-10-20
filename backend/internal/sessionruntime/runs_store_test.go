@@ -324,7 +324,7 @@ func TestRunUsageLandsInRunRowThroughTheSessionPlane(t *testing.T) {
 	defer st.Close()
 	enableStore(svc, st)
 	// 造编排器 = 走真实接线（`NewOrchestrator` 末尾回挂，端口在那里接上）。
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	defer orch.Close()
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "s-usage-wire"})
 

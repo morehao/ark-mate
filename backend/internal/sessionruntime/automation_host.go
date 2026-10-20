@@ -3,9 +3,11 @@ package sessionruntime
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
@@ -24,7 +26,10 @@ import (
 // 漂移，而 ADR-10 真正要求的是"失败也推进游标"——与校验在哪一层无关。把真实路径带码的错误
 // 原样交回去，用户在面板上看到的正是"为什么没跑成"。
 func (s *Service) CreateHostSession(ctx context.Context, req automation.HostSessionReq) (string, error) {
-	resp, err := s.CreateSession(ctx, dtosession.SessionCreateReq{
+	if s.sessionUC == nil {
+		return "", code.FromError(acp.NewError(acp.ClassService, "orchestrator_unavailable", "服务尚未装配会话用例", nil))
+	}
+	resp, err := s.sessionUC.CreateSession(ctx, dtosession.SessionCreateReq{
 		Prompt: req.Prompt,
 		Cwd:    req.Cwd,
 		Model:  req.Model,
@@ -38,7 +43,10 @@ func (s *Service) CreateHostSession(ctx context.Context, req automation.HostSess
 
 // CancelHostRun 实现 `automation.Host`。
 func (s *Service) CancelHostRun(ctx context.Context, sessionID string) error {
-	return s.CancelRun(ctx, sessionID)
+	if s.sessionUC == nil {
+		return code.FromError(acp.NewError(acp.ClassService, "orchestrator_unavailable", "服务尚未装配会话用例", nil))
+	}
+	return s.sessionUC.CancelRun(ctx, sessionID)
 }
 
 // HostSessionRunning 实现 `automation.Host`（overlap 判据；空 id → false）。

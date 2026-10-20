@@ -65,7 +65,7 @@ func TestRuntimeDiagnosticsStartFailure(t *testing.T) {
 	reg := runtime.NewRegistry(brokenRuntimeSpec())
 	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "broken") // 夹具注册表只有 broken
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 
 	if _, err := orch.startSessionOn(context.Background(), session.StartOptions{Cwd: t.TempDir()}); err == nil {
@@ -98,7 +98,7 @@ func TestRuntimeDiagnosticsLiveTail(t *testing.T) {
 	reg := runtime.NewRegistry(stubRuntimeSpec(t))
 	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 
 	if _, err := orch.startSessionOn(context.Background(), session.StartOptions{Cwd: t.TempDir()}); err != nil {
@@ -142,7 +142,7 @@ func TestPublishErrorCarriesStderrTail(t *testing.T) {
 	bus := eventbus.New()
 	svc := newServiceForTest(reg, bus)
 	svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "c-x"})
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 
 	ae := acp.NewError(acp.ClassConnection, "spawn_failed", "runtime 起不来", nil)
@@ -233,7 +233,7 @@ func TestRuntimeDiagnosticsRemediation(t *testing.T) {
 	reg3 := runtime.NewRegistry(stub)
 	svc3 := newServiceForTest(reg3, eventbus.New())
 	setBuildRuntime(t, "stub")
-	orch3 := NewOrchestrator(svc3, reg3)
+	orch3 := newOrchestratorForTest(svc3, reg3)
 	t.Cleanup(orch3.Close)
 	if _, err := orch3.startSessionOn(ctx, session.StartOptions{Cwd: t.TempDir()}); err != nil {
 		t.Fatalf("建会话: %v", err)

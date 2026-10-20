@@ -61,7 +61,7 @@ func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 			t.Fatal(err)
 		}
 	}
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 	return svc, orch, reg
 }
@@ -193,7 +193,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 
-	_, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+	_, err := sessionOf(svc).CreateSession(ctx, dtosession.SessionCreateReq{
 		Capabilities: &dtosession.CapabilitiesReq{Skills: ptrOf([]string{"ghost"})},
 	})
 	if err == nil {
@@ -223,7 +223,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	}
 
 	// 可达的选定则一切照常。
-	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+	res, err := sessionOf(svc).CreateSession(ctx, dtosession.SessionCreateReq{
 		Capabilities: &dtosession.CapabilitiesReq{Mcps: ptrOf([]string{"fs"})},
 	})
 	if err != nil {
@@ -269,7 +269,7 @@ func TestCreateSessionDefaultPathUnchanged(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	enableStore(svc, st)
-	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{Cwd: t.TempDir()})
+	res, err := sessionOf(svc).CreateSession(ctx, dtosession.SessionCreateReq{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -314,13 +314,13 @@ func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 	svc, orch, _ := validateRig(t)
 	ctx := context.Background()
 
-	declared, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+	declared, err := sessionOf(svc).CreateSession(ctx, dtosession.SessionCreateReq{
 		Cwd: t.TempDir(), Capabilities: &dtosession.CapabilitiesReq{},
 	})
 	if err != nil {
 		t.Fatalf("空选定应能建会话: %v", err)
 	}
-	plain, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{Cwd: t.TempDir()})
+	plain, err := sessionOf(svc).CreateSession(ctx, dtosession.SessionCreateReq{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 	}
 
 	// `{skills:[],mcps:[]}` = 明确一个都不要 → 回显两个空数组，且是**另一个代际**。
-	none, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+	none, err := sessionOf(svc).CreateSession(ctx, dtosession.SessionCreateReq{
 		Cwd:          t.TempDir(),
 		Capabilities: &dtosession.CapabilitiesReq{Skills: ptrOf([]string{}), Mcps: ptrOf([]string{})},
 	})

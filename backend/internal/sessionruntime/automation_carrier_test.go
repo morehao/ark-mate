@@ -36,7 +36,7 @@ func automationDBRig(t *testing.T, dir string) (*Service, *store.Store) {
 	reg := runtime.NewRegistry(spec)
 	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "silent") // 夹具注册表只有 silent
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	enableStore(svc, st)

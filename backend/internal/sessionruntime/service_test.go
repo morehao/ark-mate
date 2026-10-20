@@ -27,7 +27,7 @@ func rigWithRuntime(t *testing.T, specs ...runtime.Spec) (*Service, *Orchestrato
 	reg := runtime.NewRegistry(specs...)
 	bus := eventbus.New()
 	svc := newServiceForTest(reg, bus)
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 	return svc, orch, bus
 }
@@ -352,12 +352,12 @@ func TestSessionHistoryClamp(t *testing.T) {
 func TestCreateSessionWithoutOrchestrator(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "x", Name: "X"})
 	svc := newServiceForTest(reg, eventbus.New()) // 无 orch
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{Prompt: "hi"})
+	_, err := sessionOf(svc).CreateSession(context.Background(), dtosession.SessionCreateReq{Prompt: "hi"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 50201 {
 		t.Fatalf("期望 50201，got %v", err)
 	}
-	if _, err := svc.PromptSession(context.Background(), "s1", dtosession.PromptReq{Prompt: "x"}); err == nil {
+	if _, err := sessionOf(svc).PromptSession(context.Background(), "s1", dtosession.PromptReq{Prompt: "x"}); err == nil {
 		t.Fatal("无 orch 应报错")
 	} else {
 		var ge2 gerror.Error
@@ -370,7 +370,7 @@ func TestCreateSessionWithoutOrchestrator(t *testing.T) {
 // TestPromptSessionUnknown 既有编排器下未知会话 → 40401。
 func TestPromptSessionUnknown(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	_, err := svc.PromptSession(context.Background(), "ghost", dtosession.PromptReq{Prompt: "hi"})
+	_, err := sessionOf(svc).PromptSession(context.Background(), "ghost", dtosession.PromptReq{Prompt: "hi"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40401 {
 		t.Fatalf("期望 40401，got %v", err)
@@ -380,7 +380,7 @@ func TestPromptSessionUnknown(t *testing.T) {
 // TestServiceRESTValidation Prompt 必填校验（service 层，无 orch 前置）。
 func TestServiceRESTValidation(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	if _, err := svc.PromptSession(context.Background(), "", dtosession.PromptReq{}); err == nil {
+	if _, err := sessionOf(svc).PromptSession(context.Background(), "", dtosession.PromptReq{}); err == nil {
 		t.Fatal("空 id/prompt 应报错")
 	}
 }

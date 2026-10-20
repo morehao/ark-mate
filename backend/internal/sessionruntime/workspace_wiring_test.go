@@ -55,7 +55,7 @@ func TestCreateSessionUnspecifiedUsesDefaultWorkspace(t *testing.T) {
 		t.Fatalf("默认工作空间: ok=%v err=%v", ok, err)
 	}
 
-	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{})
+	res, err := sessionOf(r.svc).CreateSession(context.Background(), dtosession.SessionCreateReq{})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestCreateSessionExplicitCwdKeepsEmptyAssignment(t *testing.T) {
 	r := newConvRig(t)
 	dir := t.TempDir()
 
-	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{Cwd: dir})
+	res, err := sessionOf(r.svc).CreateSession(context.Background(), dtosession.SessionCreateReq{Cwd: dir})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestCreateSessionByWorkspaceID(t *testing.T) {
 		t.Fatalf("登记: %v", err)
 	}
 
-	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
+	res, err := sessionOf(r.svc).CreateSession(context.Background(), dtosession.SessionCreateReq{
 		WorkspaceID: ws.ID,
 	})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestCreateSessionByWorkspaceID(t *testing.T) {
 	}
 
 	// 未知 id → 40401（前端据此刷新列表，而不是引导改路径）。
-	if _, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
+	if _, err := sessionOf(r.svc).CreateSession(context.Background(), dtosession.SessionCreateReq{
 		WorkspaceID: "wsp-nope",
 	}); gerrCode(t, err) != code.NotFound {
 		t.Fatalf("未知 workspace_id 应 40401，实际 %d", gerrCode(t, err))
@@ -161,7 +161,7 @@ func TestCreateSessionWorkspaceConflict(t *testing.T) {
 	}
 
 	// 不一致 → workspace_conflict（40001），且**零副作用**（不建会话、不写库）。
-	_, err = r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
+	_, err = sessionOf(r.svc).CreateSession(context.Background(), dtosession.SessionCreateReq{
 		WorkspaceID: wsA.ID, Cwd: dirB,
 	})
 	if err == nil {
@@ -176,7 +176,7 @@ func TestCreateSessionWorkspaceConflict(t *testing.T) {
 	}
 
 	// 一致 → 放行（两条来源指向同一目录时不该被拦）。
-	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
+	res, err := sessionOf(r.svc).CreateSession(context.Background(), dtosession.SessionCreateReq{
 		WorkspaceID: wsA.ID, Cwd: dirA,
 	})
 	if err != nil {
@@ -315,7 +315,7 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 		t.Fatalf("登记: %v", err)
 	}
 
-	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
+	res, err := sessionOf(r.svc).CreateSession(context.Background(), dtosession.SessionCreateReq{
 		WorkspaceID: ws.ID,
 	})
 	if err != nil {

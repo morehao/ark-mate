@@ -104,7 +104,16 @@ func (f Facts) BuildServices() Services {
 	plane := as.Session.SessionPlane()
 	modelFace := sessionruntime.NewModelFace(as.Session, registry.NewModelViews(as.Planes))
 	return Services{
-		Session:            as.Session,
+		// P5：会话写面用例在 `svcsession`，执行面只交能力（Starter/Prompt/Canceller 由编排器实现，
+		// DeliverQueued 由 Service 实现）。漏接任一个的表现都是"用例 503/静默 no-op"。
+		Session: svcsession.NewSession(svcsession.SessionDeps{
+			Workspaces: as.Planes.Workspaces,
+			Store:      workspaceStore(as.Store),
+			Starter:    as.Orchestrator,
+			Prompt:     as.Orchestrator,
+			Canceller:  as.Orchestrator,
+			Queued:     as.Session,
+		}),
 		SessionHistory:     svcsession.NewHistory(eventReader(as.Store), plane, as.Bus),
 		SessionDetail:      svcsession.NewDetail(plane, as.Session),
 		SessionInteraction: svcsession.NewInteraction(plane, as.Session),
@@ -170,6 +179,13 @@ func eventReader(st *store.Store) svcsession.EventReader {
 }
 
 func sourceFactsReader(st *store.Store) svcsystem.SourceFactsReader {
+	if st == nil {
+		return nil
+	}
+	return st
+}
+
+func workspaceStore(st *store.Store) svcsession.WorkspaceStore {
 	if st == nil {
 		return nil
 	}

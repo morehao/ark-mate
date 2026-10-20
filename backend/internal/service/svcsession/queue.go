@@ -35,10 +35,13 @@ type QueueSvc interface {
 
 // QueuedDelivery 「让队首立刻成为一轮」的窄端口（会话轮次投递是那一面的事，本用不拥有它）。
 //
-// 只用于 `SendNow` 的**空闲**分支：忙时什么都不用做——当前轮结束时收尾路径会自然投递队首，
-// 而此刻排队项已经被排到了第一位。这一层刻意不自己去启动一轮：那样"谁来投递"就有两份实现。
+// 只用于 `SendNow` 与 `DeliverQueuedNow` 的**空闲**分支：忙时什么都不用做——当前轮结束时
+// 收尾路径会自然投递队首。这一层刻意不自己去启动一轮：那样"谁来投递"就有两份实现。
+//
+// P5：方法的**用例**（空 id / 无执行面的 no-op 语义）在 `Session.DeliverQueuedNow`，
+// 这里只要"投递这个动作"——执行面按"有活跃句柄才投"实现。
 type QueuedDelivery interface {
-	DeliverQueuedNow(ctx context.Context, sessionID string) error
+	DeliverQueued(sessionID string)
 }
 
 // Queue 排队输入用例。依赖事实：会话域平面（队列状态与事件出口）+ 投递窄端口。
@@ -110,11 +113,8 @@ func (q *Queue) SendNow(ctx context.Context, id, inputID string) error {
 	if err := q.plane.SendNowQueuedInput(ctx, id, inputID); err != nil {
 		return code.FromError(err)
 	}
-	if q.del == nil {
-		return nil
-	}
-	if err := q.del.DeliverQueuedNow(ctx, id); err != nil {
-		return code.FromError(err)
+	if q.del != nil {
+		q.del.DeliverQueued(id)
 	}
 	return nil
 }

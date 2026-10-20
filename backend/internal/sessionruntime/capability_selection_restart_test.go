@@ -35,7 +35,7 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	svc1 := newServiceForTest(reg, eventbus.New())
 	enableStore(svc1, st1)
 	registerStdioMcps(t, svc1)
-	orch1 := NewOrchestrator(svc1, reg)
+	orch1 := newOrchestratorForTest(svc1, reg)
 
 	pinned := &session.CapabilitySelection{Mcps: ptrOf([]string{"git"})}
 	res, err := orch1.startSessionOn(ctx, session.StartOptions{Cwd: cwd, Selection: pinned})

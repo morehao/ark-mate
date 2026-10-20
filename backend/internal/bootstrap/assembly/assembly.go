@@ -561,6 +561,8 @@ func (as *assembly) stopAutomationScheduler(context.Context) error {
 func (as *assembly) startControllers(context.Context) error {
 	as.creds = as.credentials()
 	as.services = as.buildServices()
+	// P5：自动化宿主的会话写面能力（用例实例造好之后回注执行面）。
+	as.svc.SetSessionUseCase(as.services.Session)
 	as.controllers = as.buildControllers()
 	return nil
 }

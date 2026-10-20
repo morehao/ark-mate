@@ -148,7 +148,7 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 	}
 
 	// ⑤ 真子进程：上面这些 env **真的**到了进程里。
-	orch := NewOrchestrator(svc, reg)
+	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 	res, err := orch.startSessionOn(context.Background(), session.StartOptions{Cwd: t.TempDir()})
 	if err != nil {
