@@ -38,15 +38,20 @@ import (
 //  2. **应用契约（`dto`，C3 起落在 `contract/`）从第 6 层挪到第 3 层**（domain 外侧、service 内侧）。它是应用契约：驱动侧
 //     （执行面、mechanism、controller）用它是六边形允许的外→内依赖；领域侧用它才是违规。
 //
-// 三条规则与 v3.1 一致：只能向内（被 import 的层号不得增大）；同带默认不互链，除非该层显式
-// `sameLayer`；每层可带 `deny` 精确排除"方向允许但不该做"的边（如 `cliops ↛ store`）。
+// 三条规则与 v3.1 一致：① 只能向内（被 import 的层号不得增大）；② **同带默认不互链**——跨 key 的
+// 同带边必须逐条登记在 `v32SameBandEdges`（C3 4.6 之前每带一个布尔一次性放行整带，27 条跨 key 边
+// 没有一条被单独审过）；③ 每层可带 `deny` 精确排除"方向允许但不该做"的边（如 `cliops ↛ store`）。
+//
+// 同带、**同一个 key** 的子包互引（`domain/session → domain/session/event`、`platform → platform/code`）
+// 不走登记表：它们本来就解析到同一个层表 key，是一个角色的内部结构。
 //
 // 失效方式与 `TestFrontendUiScanRootsCoverAllUi` 同形：层表搬走/改名后判据会**静默空转**
 // （照样绿，只是不再检查任何东西），所以本文件同时 fail-closed：
 //   - 扫到 0 个包 → 失败；
 //   - 某个包映射不到任何层 → 失败；
 //   - 例外预算被新边吃掉 → 失败；
-//   - 例外降到 0 时条目未删除 → 失败（双向判据，防清单腐烂）。
+//   - 例外降到 0 时条目未删除 → 失败（双向判据，防清单腐烂）；
+//   - 同带边登记降到 0 时条目未删除 → 失败（同上）。
 //
 // 与 v3.1 守卫的关系：两张表**同时生效**。v3.2 的收口过程只会删边、不会新增 v3.1 方向的边，
 // 所以 v3.1 守卫在迁移期间应始终为绿；一旦它转红，说明这一刀把某条边挪到了 v3.1 的更高层。
@@ -57,8 +62,6 @@ const v32LayerGuardBlocking = true
 type v32Layer struct {
 	// layer 层号（0 = 最内层）。
 	layer int
-	// sameLayer 是否允许同层互链（默认只允许 import 严格更内层）。
-	sameLayer bool
 	// deny 显式禁止的 import 前缀（覆盖"更内层即可 import"的默认规则）。
 	deny []string
 	// name 人类可读的层名（错误文案用）。
@@ -77,30 +80,33 @@ var v32Layers = map[string]v32Layer{
 	// C3 4.1：`core/*` 整体搬成 `platform/*`（纯改名，包内逻辑不动）。角色仍在 L1：
 	// 纯值、纯规则、平台内共享内核，不认识框架与适配器。
 	//
-	// 本带允许同层互链：`code` 是错误码与分类的唯一事实源，`runtime` 要用
-	// `identity`/`resource` 的值类型，而 ACP 是各底座**共用的线协议**（不是可替换的外部
-	// 服务，见 plan 的 ADR-1）——把它们拆开只会得到一堆复制粘贴。
+	// L1 内部的跨 key 边逐条登记在 `v32SameBandEdges`：`code` 是错误码与分类的唯一事实源，
+	// `runtime` 要用 `identity`/`resource` 的值类型与 `code` 的错误分类，而 ACP 是各底座
+	// **共用的线协议**（不是可替换的外部服务，见 plan 的 ADR-1）——把它们拆开只会得到一堆
+	// 复制粘贴。`sameLayer` 布尔在 C3 4.6 已删：这一带 11 条同带边里 8 条跨 key，逐条有理由。
 	//
 	// `platform` 是**带级 key**：object / redact / identity / resource / credential / eventbus /
-	// code / automation / definition / capability 十个包同为 L1、都 sameLayer、都没有自己的
-	// deny，收成一个前缀不丢任何判据（按最长前缀解析的结果逐条等价）。
+	// code / automation / definition / capability 十个包同为 L1、都没有自己的 deny，收成一个前缀
+	// 不丢任何判据（按最长前缀解析的结果逐条等价）；它们之间的互引是"同 key 内部结构"，
+	// 不经登记表。
 	// 其中 `definition` 承载能力定义的**值层规则**（id 合法性、patch 键语义、参数类错误出口）：
 	// 从 `adapters/outbound/mechanism/definition` 抽出来，让 `domain/*` 不必反向 import 机制层。
-	"internal/platform": {layer: 1, name: "platform", sameLayer: true},
+	"internal/platform": {layer: 1, name: "platform"},
 	// 底下几个仍是独立 key：`runtime` 有 adapter 禁入；`acp` / `mcp` 虽在 `adapters/outbound/`
 	// 下，性质仍是**协议库（L1）**——内圈（`domain/mcp`、`internal/runtime`）用它们是允许的，
-	// 把它们抬到 L5 会让这两条边变成"向上"。（C3 4.6 按角色重写层表时再单独讨论它们的圈层。）
-	"internal/version":                  {layer: 1, name: "version", sameLayer: true},
-	"internal/runtime":                  {layer: 1, name: "runtime", sameLayer: true, deny: []string{"internal/adapters/outbound/dsh"}},
-	"internal/adapters/outbound/acp":    {layer: 1, name: "outbound/acp", sameLayer: true},
-	"internal/adapters/outbound/mcp":    {layer: 1, name: "outbound/mcp", sameLayer: true},
-	"internal/platform/logging":         {layer: 1, name: "platform/logging", sameLayer: true},
+	// 把它们抬到 L5 会让这两条边变成"向上"。（C3 4.6 的结论：L1 不拆，协议库留在值层；
+	// 它与 `runtime` 之间的那条边登记在 `v32SameBandEdges`。）
+	"internal/version":               {layer: 1, name: "version"},
+	"internal/runtime":               {layer: 1, name: "runtime", deny: []string{"internal/adapters/outbound/dsh"}},
+	"internal/adapters/outbound/acp": {layer: 1, name: "outbound/acp"},
+	"internal/adapters/outbound/mcp": {layer: 1, name: "outbound/mcp"},
+	"internal/platform/logging":      {layer: 1, name: "platform/logging"},
 
 	// ——— L2：领域 ———
 	//
 	// 出边只允许落在 L0/L1。子域之间允许互链：它们不是独立的 bounded context，
 	// 而是同一内核的分区（`session` 用 `identity` 的身份值）。
-	"internal/domain": {layer: 2, name: "domain", sameLayer: true, deny: []string{
+	"internal/domain": {layer: 2, name: "domain", deny: []string{
 		"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/contract", "internal/adapters/outbound/mechanism",
 		"internal/adapters/outbound/credentials", "internal/adapters/outbound/dsh", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces",
 		"internal/app/run", "internal/adapters/outbound/runtimeconn", "internal/adapters/inbound/mcpgateway",
@@ -114,13 +120,13 @@ var v32Layers = map[string]v32Layer{
 	// 的那个词，改名会碰 31 个同时引用同名域包的文件，收益只有美观）。
 	//
 	// 只许向内（L0/L1/L2 都不该被 contract 依赖，实际上它只用标准库 + 少量值类型）。
-	"internal/contract": {layer: 3, name: "contract", sameLayer: true},
+	"internal/contract": {layer: 3, name: "contract"},
 
 	// ——— L4：用例环 ———
 	//
 	// C3 4.2：`service/svc<领域>` 搬成 `app/<领域>`（包名去掉 `svc` 前缀）——用例环就是这一带。
 	//
-	// **永不 sameLayer**：这是"用例包之间零互引"（三条硬规矩第 2 条）的载体。
+	// **永不放开同层**：这是"用例包之间零互引"（三条硬规矩第 2 条）的载体。
 	// deny `internal/app` 同时挡住兄弟用例包与自身（自 import 不会出现在图里）。
 	"internal/app": {layer: 4, name: "app", deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/dsh",
@@ -141,20 +147,20 @@ var v32Layers = map[string]v32Layer{
 	// C3 4.3：`persistence/{model,dao,store}` + `infra/dbclient` 整体搬成
 	// `adapters/outbound/sqlite/{model,dao,store,db}`（表行形状仍是 L0，持久三件套仍是 L5）。
 	// 层号不动、只换路径与层名：这一刀改的是"它属于哪个圈"，不是"它能 import 谁"。
-	"internal/adapters/outbound/sqlite/dao": {layer: 5, name: "sqlite/dao", sameLayer: true, deny: []string{
+	"internal/adapters/outbound/sqlite/dao": {layer: 5, name: "sqlite/dao", deny: []string{
 		"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/mechanism", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn",
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller",
 		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
-	"internal/adapters/outbound/sqlite/store": {layer: 5, name: "sqlite/store", sameLayer: true, deny: []string{
+	"internal/adapters/outbound/sqlite/store": {layer: 5, name: "sqlite/store", deny: []string{
 		"internal/adapters/outbound/mechanism", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn",
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller",
 		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
-	"internal/adapters/outbound/dsh":         {layer: 5, name: "outbound/dsh", sameLayer: true, deny: v32AdapterDeny},
-	"internal/adapters/outbound/sqlite/db":    {layer: 5, name: "sqlite/db", sameLayer: true},
-	"internal/adapters/outbound/credentials": {layer: 5, name: "outbound/credentials", sameLayer: true},
-	"internal/adapters/outbound/procreg":     {layer: 5, name: "outbound/procreg", sameLayer: true},
+	"internal/adapters/outbound/dsh":         {layer: 5, name: "outbound/dsh", deny: v32AdapterDeny},
+	"internal/adapters/outbound/sqlite/db":   {layer: 5, name: "sqlite/db"},
+	"internal/adapters/outbound/credentials": {layer: 5, name: "outbound/credentials"},
+	"internal/adapters/outbound/procreg":     {layer: 5, name: "outbound/procreg"},
 
 	// ——— L6：组合驱动 / 网关与机制 ———
 	//
@@ -163,11 +169,11 @@ var v32Layers = map[string]v32Layer{
 	// 4.5 后半已落：`registry` 解体为 `definitions` / `models` / `workspaces` 三个出站适配器，
 	// 平面容器搬进 `bootstrap/assembly/planes`、启停序列搬进 `bootstrap/assembly`。
 	// 三个新 key 的层号与 deny 逐条继承原 `registry`（只换归属，不放松方向）。
-	"internal/adapters/inbound/mcpgateway": {layer: 6, name: "inbound/mcpgateway", sameLayer: true, deny: []string{
+	"internal/adapters/inbound/mcpgateway": {layer: 6, name: "inbound/mcpgateway", deny: []string{
 		"internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/middleware", "internal/adapters/inbound/http/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
-	"internal/adapters/outbound/mechanism": {layer: 6, name: "outbound/mechanism", sameLayer: true, deny: []string{
+	"internal/adapters/outbound/mechanism": {layer: 6, name: "outbound/mechanism", deny: []string{
 		"internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn", "internal/app/run",
 		"internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/middleware", "internal/adapters/inbound/http/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
@@ -176,46 +182,46 @@ var v32Layers = map[string]v32Layer{
 	// 占用、且它反向被 `mechanism/credential` 依赖 ⇒ 凭据端口适配体并进 `models`，见
 	// `provider_secrets.go` 的包注释）。层号与 deny 原样继承：这一刀改的是"它属于哪个域"，
 	// 不是"它能 import 谁"。
-	"internal/adapters/outbound/definitions": {layer: 6, name: "outbound/definitions", sameLayer: true, deny: []string{
+	"internal/adapters/outbound/definitions": {layer: 6, name: "outbound/definitions", deny: []string{
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller",
 		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
-	"internal/adapters/outbound/models": {layer: 6, name: "outbound/models", sameLayer: true, deny: []string{
+	"internal/adapters/outbound/models": {layer: 6, name: "outbound/models", deny: []string{
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller",
 		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
-	"internal/adapters/outbound/workspaces": {layer: 6, name: "outbound/workspaces", sameLayer: true, deny: []string{
+	"internal/adapters/outbound/workspaces": {layer: 6, name: "outbound/workspaces", deny: []string{
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller",
 		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
-	"internal/adapters/outbound/runtimeconn": {layer: 6, name: "outbound/runtimeconn", sameLayer: true, deny: []string{
+	"internal/adapters/outbound/runtimeconn": {layer: 6, name: "outbound/runtimeconn", deny: []string{
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller",
 		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
-	"internal/config": {layer: 6, name: "config", sameLayer: true, deny: []string{
+	"internal/config": {layer: 6, name: "config", deny: []string{
 		"internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
 		"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	// 存量定义的导入/导出编排（扫目录 / 计数 / 落库 / 导出）。它吃 domain 的纯转换 +
 	// store + mechanism 的载体工具，所以域与装配点都不必各自再写一遍。
-	"internal/adapters/outbound/transfer": {layer: 6, name: "outbound/transfer", sameLayer: true},
+	"internal/adapters/outbound/transfer": {layer: 6, name: "outbound/transfer"},
 	// 刀 10 引入：migrate / doctor / transcripts / mcp reap 的落点。
 	// 运维动作的落点。**与组合根同级**：`mate doctor` 要真的把 app 装起来自检（装配 + 路由 +
 	// 注册表都在它的扫描面上），所以它必须能向下吃 assembly/router，而不是一个小小的 L6 助手。
-	"internal/adapters/inbound/cli/maintenance": {layer: 9, name: "inbound/cli/maintenance", sameLayer: true},
+	"internal/adapters/inbound/cli/maintenance": {layer: 9, name: "inbound/cli/maintenance"},
 
 	// ——— 执行面（C3 4.2 起并进用例环：`sessionruntime` → `app/run`）———
 	//
 	// 它**与兄弟用例包同层（L4）**：编排归用例环，包内逻辑从阶段 0 起就只经端口取连接。
 	// 与原 L7 的两点差别（都在注释里说清楚，别让下一个人以为可以随手放宽）：
 	//
-	//  1. **不 deny `infra/acp`**：拨号的 hooks 载荷仍是协议形状（`acp.ClientOptions`），
+	//  1. **不 deny `adapters/outbound/acp`**：拨号的 hooks 载荷仍是协议形状（`acp.ClientOptions`），
 	//     那一层随 C3 4.5（`adapters/outbound/acp`）一起收。协议无关收口表因此把它登记成
 	//     **刻意豁免**（`layer_isolation_test.go` 的 `protocolFreeExempt`，附理由且双向判）。
 	//  2. deny 里**显式点名**兄弟用例包（`internal/app`）——执行面不构造别的用例实例
 	//     （测试夹具除外；同层互引判据只扫生产 import）。
 	//
-	// 原 L7 的 deny 保持：执行面不认任何具体适配器（store / dao / dsh / registry / runtimeconn）。
+	// 原 L7 的 deny 保持：执行面不认任何具体适配器（store / dao / dsh / definitions / models / workspaces / runtimeconn）。
 	"internal/app/run": {layer: 4, name: "app/run", deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/dsh",
 		"internal/adapters/outbound/runtimeconn", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces",
@@ -245,13 +251,13 @@ var v32Layers = map[string]v32Layer{
 	}},
 
 	// ——— L9：交付 / 装配 ———
-	"internal/adapters/inbound/http/router": {layer: 9, name: "inbound/http/router", sameLayer: true, deny: []string{
+	"internal/adapters/inbound/http/router": {layer: 9, name: "inbound/http/router", deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model",
 		"internal/domain", "internal/contract", "internal/platform/eventbus", "internal/adapters/outbound/mechanism",
 		"internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn", "internal/app/run",
 		"internal/adapters/inbound/mcpgateway", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
-	"internal/bootstrap/assembly": {layer: 9, name: "assembly", sameLayer: true, deny: []string{
+	"internal/bootstrap/assembly": {layer: 9, name: "assembly", deny: []string{
 		"internal/bootstrap/app", "internal/adapters/inbound/cli/cmd",
 	}},
 	// C3 4.5 后半：平面容器单独成子包（`assembly` 的依赖里有用例环，而用例环的**包内测试**
@@ -259,10 +265,10 @@ var v32Layers = map[string]v32Layer{
 	// 层号仍是最外层：它只被装配根与夹具使用，生产侧任何"适配器/用例"都不许 import 它
 	// （`app/run`、`mcpgateway` 等 key 的 deny 里点的是 `internal/bootstrap/assembly` 前缀，
 	// 本 key 是它的子路径，因此同样被挡住）。
-	"internal/bootstrap/assembly/planes": {layer: 9, name: "assembly/planes", sameLayer: true, deny: []string{
+	"internal/bootstrap/assembly/planes": {layer: 9, name: "assembly/planes", deny: []string{
 		"internal/bootstrap/app", "internal/adapters/inbound/cli/cmd",
 	}},
-	"internal/bootstrap/app": {layer: 9, name: "app", sameLayer: true, deny: []string{
+	"internal/bootstrap/app": {layer: 9, name: "app", deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model",
 		"internal/domain", "internal/adapters/outbound/mechanism", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn",
 		"internal/app/run", "internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/router",
@@ -273,17 +279,82 @@ var v32Layers = map[string]v32Layer{
 	//
 	// `ops` 是**第二入站适配器**，不是第二装配根：它只做参数绑定 + 调用例 + 打印。
 	// 持久化与机制一律经 `assembly.BuildResult` 暴露的 `Maintenance` 端口，拿不到具体实现。
-	"internal/adapters/inbound/cli/ops": {layer: 9, name: "inbound/cli/ops", sameLayer: true, deny: []string{
+	"internal/adapters/inbound/cli/ops": {layer: 9, name: "inbound/cli/ops", deny: []string{
 		"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model", "internal/adapters/outbound/mechanism",
 		"internal/domain", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn",
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/outbound",
 	}},
-	"internal/adapters/inbound/cli/cmd": {layer: 9, name: "inbound/cli/cmd", sameLayer: true, deny: []string{
+	"internal/adapters/inbound/cli/cmd": {layer: 9, name: "inbound/cli/cmd", deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model",
 		"internal/domain", "internal/adapters/inbound/http/controller", "internal/adapters/outbound/mechanism",
 		"internal/adapters/outbound/runtimeconn", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/app/run",
 		"internal/adapters/inbound/http/router", "internal/adapters/inbound/mcpgateway",
 	}},
+}
+
+// v32SameBandEdge 一条**跨 key 的同带**边：层号相同（方向允许），但"同层"不等于"随便引"。
+type v32SameBandEdge struct {
+	// from 源包（相对 backend/，精确到包）。
+	from string
+	// to 目标包（相对 backend/，精确到包）。
+	to string
+	// why 这条同带边为什么是结构性的（不是"顺手 import 了一下"）。
+	why string
+}
+
+// v32SameBandEdges 同带跨 key 边的**唯一放行清单**（C3 4.6）。
+//
+// 4.6 之前每个带有一个 `sameLayer: true` 布尔，一次性放行整带互引；43 条同带边里有 27 条跨 key，
+// 没有一条被单独审过。现在布尔已删，跨 key 的边必须在这里逐条登记：
+//   - 新增的同带跨 key 边 → 红（提示来这里登记并写理由）；
+//   - 登记了但实际已不存在的边 → 红（双向判据，防清单腐烂，见 `TestLayerImportsV32`）。
+//
+// 同 key 的子包互引（`domain/session → domain/session/event`、`platform → platform/code`）不走这张表。
+var v32SameBandEdges = []v32SameBandEdge{
+	// ——— L1：值对象 / 协议库 / 运行时契约 ———
+	{"internal/adapters/outbound/acp", "internal/platform/logging", "协议库用平台日志门面，不自己装配 zap/glog"},
+	{"internal/adapters/outbound/acp", "internal/platform/object/objusage", "协议库回传用量时用平台值对象"},
+	{"internal/adapters/outbound/acp", "internal/platform/redact", "协议库在错误与工具载荷上复用平台脱敏"},
+	{"internal/adapters/outbound/mcp", "internal/platform/capability", "MCP 客户端用具名能力声明值类型"},
+	{"internal/runtime", "internal/adapters/outbound/acp", "运行时契约的 hooks 载荷仍是协议形状（ADR-1；与 `protocolFreeExempt` 是同一件事的两面）"},
+	{"internal/runtime", "internal/platform/code", "运行时契约按平台错误码分类，不向外回传裸 error"},
+	{"internal/runtime", "internal/platform/identity", "运行时契约用身份值类型"},
+	{"internal/runtime", "internal/platform/resource", "运行时契约用资源值类型"},
+
+	// ——— L5：持久实现 ———
+	{"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "持久业务面用列词汇（Cond）"},
+	{"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/db", "持久业务面拿连接句柄"},
+
+	// ——— L6：网关 / 机制 / 端口实现 ———
+	{"internal/adapters/inbound/mcpgateway", "internal/adapters/outbound/mechanism/credential", "网关为远端 MCP server 解凭据（机制层四层回落）"},
+	{"internal/adapters/inbound/mcpgateway", "internal/config", "网关读进程配置（超时 / 端点）"},
+	{"internal/adapters/outbound/definitions", "internal/adapters/outbound/mechanism/definition", "定义装载面把机制层的文件存储适配成定义端口"},
+	{"internal/adapters/outbound/models", "internal/adapters/outbound/mechanism/credential", "`providerSecrets` 把凭据机制适配成供应商域窄端口"},
+	{"internal/adapters/outbound/models", "internal/adapters/outbound/mechanism/doctor", "模型事实面复用机制层自检"},
+
+	// ——— L9：交付 / 装配 ———
+	{"internal/adapters/inbound/cli/cmd", "internal/adapters/inbound/cli/maintenance", "命令树分发到运维子命令"},
+	{"internal/adapters/inbound/cli/cmd", "internal/adapters/inbound/cli/ops", "命令树分发到 ops 子命令"},
+	{"internal/adapters/inbound/cli/maintenance", "internal/adapters/inbound/http/router", "doctor 真装路由做自检（资产解析与摘要）"},
+	{"internal/adapters/inbound/cli/maintenance", "internal/bootstrap/assembly", "doctor 用装配根自检"},
+	{"internal/adapters/inbound/cli/maintenance", "internal/bootstrap/assembly/planes", "doctor 用平面容器自检"},
+	{"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/maintenance", "serve 复用运维命令的载荷解析与信号处理"},
+	{"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/http/router", "serve 造路由"},
+	{"internal/adapters/inbound/cli/ops", "internal/bootstrap/app", "serve 跑进程壳"},
+	{"internal/adapters/inbound/cli/ops", "internal/bootstrap/assembly", "serve 用装配根"},
+	{"internal/bootstrap/app", "internal/bootstrap/assembly", "进程壳用装配根"},
+	{"internal/bootstrap/assembly", "internal/adapters/inbound/http/router", "装配根造路由"},
+	{"internal/bootstrap/assembly", "internal/bootstrap/assembly/planes", "装配根造平面容器"},
+}
+
+// v32SameBandRegistered 这条跨 key 的同带边是否已登记。
+func v32SameBandRegistered(from, to string) bool {
+	for _, e := range v32SameBandEdges {
+		if e.from == from && e.to == to {
+			return true
+		}
+	}
+	return false
 }
 
 // v32AdapterDeny adapter（`adapters/outbound/dsh`）不得认识应用内核的任何一层。
@@ -378,10 +449,10 @@ func collectV32Violations(t *testing.T) []v32Violation {
 				})
 				continue
 			}
-			if toLayer.layer == fromLayer.layer && toKey != fromKey && !fromLayer.sameLayer {
+			if toLayer.layer == fromLayer.layer && toKey != fromKey && !v32SameBandRegistered(p.rel, relImp) {
 				out = append(out, v32Violation{
 					from: p.rel, fromLn: fromLayer.layer,
-					to: toKey, toLn: toLayer.layer, kind: "同层",
+					to: relImp, toLn: toLayer.layer, kind: "同层未登记",
 				})
 			}
 		}
@@ -493,6 +564,21 @@ func TestLayerImportsV32(t *testing.T) {
 	for _, e := range v32Exceptions {
 		if used[e.from+"→"+e.to] == 0 {
 			t.Errorf("过期例外：%s → %s 已无命中，请从 v32Exceptions 删除（双向判据；计划 %s 清零）", e.from, e.to, e.slice)
+		}
+	}
+
+	// 双向判据（C3 4.6）：登记的同带边必须仍然存在，否则清单在腐烂。
+	live := map[string]bool{}
+	for _, p := range scanProductionPackages(t) {
+		for _, imp := range p.imports {
+			if relImp := importPathOf(imp); relImp != "" {
+				live[p.rel+"→"+relImp] = true
+			}
+		}
+	}
+	for _, e := range v32SameBandEdges {
+		if !live[e.from+"→"+e.to] {
+			t.Errorf("过期同带边登记：%s → %s 已不存在，请从 v32SameBandEdges 删除（双向判据）", e.from, e.to)
 		}
 	}
 

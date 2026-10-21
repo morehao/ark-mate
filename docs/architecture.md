@@ -96,20 +96,20 @@ Electron 主进程（桌面态）
 ### 4.1 层带（L0–L9，v3.2 终局表）
 
 机器判据是 `backend/internal/archtest/layers_v32_test.go` 的 `v32Layers`：每个包按**最长前缀**归到一层，
-规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，除非该层 `sameLayer: true`
-（`service` **永不** `sameLayer`，它 deny 自己的前缀，逼"svc 包之间零互相 import"）；③ 每层可带 `deny`
-精确排除个别内层包。违规是**硬失败**，例外清单必须为空且双向。
+规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，**跨 key 的同带边必须逐条
+登记在 `v32SameBandEdges`**（当前 27 条、每条带理由；`app` 用 deny 自己前缀的方式逼"用例包之间零互相 import"）；
+③ 每层可带 `deny` 精确排除个别内层包。违规是**硬失败**，例外清单必须为空且双向。
 
 | 层 | 谁 | 一句话 |
 | --- | --- | --- |
 | **L0** | `adapters/outbound/sqlite/model` | 表行形状。零依赖，被所有持久侧与部分领域引用（C3 4.3 起归到出站适配器下） |
-| **L1** | `platform/{object/*,redact,identity,resource,credential,eventbus,code,automation,definition,capability,logging}` `version` `runtime` `adapters/outbound/{acp,mcp}` | 值对象与协议库，**本带允许互链**（ACP 线协议、错误码折算、值类型复用）。`acp`/`mcp` 虽在出站适配器目录下，性质仍是协议库；`logging` 是平台日志门面 |
+| **L1** | `platform/{object/*,redact,identity,resource,credential,eventbus,code,automation,definition,capability,logging}` `version` `runtime` `adapters/outbound/{acp,mcp}` | 值对象与协议库，**本带的跨 key 互链逐条登记**（ACP 线协议、错误码折算、值类型复用）。`acp`/`mcp` 虽在出站适配器目录下，性质仍是协议库；`logging` 是平台日志门面 |
 | **L2** | `domain/*` | 业务规则与状态。**出边为零**：不 import dto、store、mechanism、infra |
 | **L3** | `contract/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份）。C3 4.1 起目录由 `dto/` 搬到 `contract/`，包名保留 `dto<领域>` |
 | **L4** | `app/<领域>`（含执行面 `app/run`） | 用例环（原 `service/svc<领域>`，C3 4.2 起包名去掉 `svc` 前缀）：接口 + 实现 + 构造函数；校验、错误码、响应装配。执行面 `sessionruntime` 同批搬成 `app/run`（编排归用例环，连接归出站适配器） |
 | **L5** | `adapters/outbound/sqlite/{store,dao,db}` `adapters/outbound/{dsh,credentials,procreg}` | 持久与出站适配器（C3 4.3 起持久层与 infra 逐步归到 `adapters/outbound/`） |
 | **L6** | `adapters/inbound/mcpgateway` `adapters/outbound/{definitions,models,workspaces,mechanism,transfer,runtimeconn}` `config` | 网关与机制、定义装载 / 模型同步 / 工作空间三个域的端口实现、连接面、存量定义导入导出编排（C3 4.5 起 `drivers/*` 按方向归到 `adapters/`，`registry` 已按域解体） |
-| **L8** | `delivery/controller/ctr<领域>` `delivery/middleware` | 入站适配 |
+| **L8** | `adapters/inbound/http/{controller/ctr<领域>,middleware}` `adapters/inbound/ws` | 入站适配（gin 只在这一带；C3 4.4 起 `delivery/*` 已归位） |
 | **L9** | `adapters/inbound/{http/router,cli/*}` `bootstrap/{assembly,app}` | 装配与交付（C3 4.4 起入站适配全都归到 `adapters/inbound/`） |
 
 两条容易搞混的：**`domain` 在应用契约（`contract/`）里侧**（域不认识对外契约，视图由用例层投影）；**`maintenance` 与组合根同级**
