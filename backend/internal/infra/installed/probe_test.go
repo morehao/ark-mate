@@ -1,6 +1,8 @@
-package runtime
+package installed
 
 import (
+	"github.com/morehao/ark-mate/internal/runtime"
+
 	"os"
 	"testing"
 )
@@ -11,23 +13,23 @@ import (
 // 修复动作），所以两分支与三种边界都要钉住。
 func TestInstalled(t *testing.T) {
 	exe, _ := os.Executable()
-	if !Installed(Spec{Launch: LaunchSpec{Command: exe}}) {
+	if !Installed(runtime.Spec{Launch: runtime.LaunchSpec{Command: exe}}) {
 		t.Fatal("绝对路径可执行文件应判 installed")
 	}
-	if Installed(Spec{Launch: LaunchSpec{Command: "ghost-cmd-not-exist-zzz-9f3a"}}) {
+	if Installed(runtime.Spec{Launch: runtime.LaunchSpec{Command: "ghost-cmd-not-exist-zzz-9f3a"}}) {
 		t.Fatal("PATH 找不到应判未安装")
 	}
-	if Installed(Spec{}) {
+	if Installed(runtime.Spec{}) {
 		t.Fatal("空命令应判未安装")
 	}
 	// 远程 runtime（A5）：无本地命令，端点非空即视为可用（可达性由拨号判定）。
-	if !Installed(Spec{Launch: LaunchSpec{Transport: "ws", Endpoint: "ws://127.0.0.1:1/acp"}}) {
+	if !Installed(runtime.Spec{Launch: runtime.LaunchSpec{Transport: "ws", Endpoint: "ws://127.0.0.1:1/acp"}}) {
 		t.Fatal("远程 runtime 端点非空应判 installed")
 	}
-	if !Installed(Spec{Launch: LaunchSpec{Transport: "http", Endpoint: "http://127.0.0.1:1/acp"}}) {
+	if !Installed(runtime.Spec{Launch: runtime.LaunchSpec{Transport: "http", Endpoint: "http://127.0.0.1:1/acp"}}) {
 		t.Fatal("远程 http runtime 端点非空应判 installed")
 	}
-	if Installed(Spec{Launch: LaunchSpec{Transport: "ws"}}) {
+	if Installed(runtime.Spec{Launch: runtime.LaunchSpec{Transport: "ws"}}) {
 		t.Fatal("远程 runtime 端点为空应判未安装")
 	}
 }

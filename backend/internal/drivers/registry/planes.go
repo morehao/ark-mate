@@ -14,6 +14,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/drivers/mechanism"
+	"github.com/morehao/ark-mate/internal/infra/host"
 	"github.com/morehao/ark-mate/internal/infra/logging"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -79,13 +80,24 @@ type Planes struct {
 //   - `skill.NewPlane` 与 `mcp.NewPlane` 共用**同一份**能力注册表（两份注册表 = 两个事实源）；
 //   - `mcp.NewSecrets` 与 `provider.NewPlane` 共用**同一份**凭据机制（同一引用解析出两个结果
 //     是 v13–v19 那类分叉的来源）。
+//
+// newPicker 造原生目录选择器并注入宿主能力（`infra/host`）。
+//
+// 为什么注入点在这里而不是域里：判定（该不该抬面板、用哪条命令）是域规则，
+// 执行（spawn osascript/zenity）必须落 `infra`——域不能认识 os/exec。
+func newPicker() *workspace.Picker {
+	p := workspace.NewPicker()
+	p.SetHostRunner(host.NewRunner())
+	return p
+}
+
 func NewPlanes(reg *runtime.Registry) *Planes {
 	p := &Planes{
 		Registry:     reg,
 		Definitions:  mechanism.NewMechanism(),
 		Credentials:  mechanism.NewCredentialStore(reg),
 		Capabilities: capability.NewRegistry(),
-		Picker:       workspace.NewPicker(),
+		Picker:       newPicker(),
 		Workspaces:   workspace.NewPlane(),
 		Automation:   automation.NewPlane(),
 		defWarned:    make(map[string]bool),

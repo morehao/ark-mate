@@ -11,6 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 
+	installedpkg "github.com/morehao/ark-mate/internal/infra/installed"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -190,7 +191,7 @@ func (pl *Plane) RemediationFor(ctx context.Context, spec runtime.Spec, specOK, 
 	if !specOK {
 		add(fmt.Sprintf("runtime %q 未装配：它由**构建期**注入（`-X pkg/runtime.BuildRuntime`），"+
 			"请重新构建该二进制，或在 .ark-mate/config/runtimes.json 里声明同 id 的远程端点", runtime.SelectedRuntime()))
-	} else if !runtime.Installed(spec) {
+	} else if !installedpkg.Installed(spec) {
 		add(fmt.Sprintf("runtime %q 的启动命令 %q 当前不可执行：安装该底座并确保它在 PATH 中（或把配置改成绝对路径）",
 			spec.ID, spec.Launch.Command))
 	}

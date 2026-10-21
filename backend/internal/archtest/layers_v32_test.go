@@ -17,7 +17,7 @@ import (
 //	L3  dto/*                                                     应用契约
 //	L4  service/svc*                                              用例
 //	L5  persistence/store persistence/dao infra/dsh infra/dbclient
-//	    infra/credentials infra/procreg                           基础驱动
+//	    infra/credentials infra/procreg infra/host infra/installed  基础驱动
 //	L6  drivers/gateway drivers/mechanism drivers/registry
 //	    drivers/runtimeconn drivers/transfer config                组合驱动
 //	L7  sessionruntime                                            执行面
@@ -131,6 +131,10 @@ var v32Layers = map[string]v32Layer{
 	"internal/infra/dbclient":    {layer: 5, name: "infra/dbclient", sameLayer: true},
 	"internal/infra/credentials": {layer: 5, name: "infra/credentials", sameLayer: true},
 	"internal/infra/procreg":     {layer: 5, name: "infra/procreg", sameLayer: true},
+	// P4（2026-10-21）：域内的两处 I/O 归位后新增——宿主短命进程（选目录面板）与本机可执行性探测。
+	// 都是"跟本机说话"，与 dbclient/procreg 同带。
+	"internal/infra/host":      {layer: 5, name: "infra/host", sameLayer: true},
+	"internal/infra/installed": {layer: 5, name: "infra/installed", sameLayer: true},
 
 	// ——— L6：组合驱动 ———
 	"internal/drivers/gateway": {layer: 6, name: "gateway", sameLayer: true, deny: []string{

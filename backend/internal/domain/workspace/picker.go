@@ -7,7 +7,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"net"
 	"os"
-	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
@@ -36,6 +35,25 @@ import (
 type Picker struct {
 	mu       sync.Mutex
 	bindAddr string
+	// host 是宿主能力端口（跑面板进程 / 按 PATH 找命令），装配期注入。
+	// 它是**一方法的端口**而不是具体实现：域不认识 os/exec，执行落 `infra/host`。
+	host HostRunner
+}
+
+// HostRunner 是"在宿主上跑一个短命进程"的端口。
+//
+// 签名全是原语（stdout/stderr/退出码/是否超时），所以实现方 `infra/host` **不需要 import 本包**，
+// 域也不需要 import 它——两侧只在装配点相遇。
+type HostRunner interface {
+	Run(ctx context.Context, exe string, args []string, timeout time.Duration) (stdout, stderr string, exitCode int, timedOut bool, err error)
+	LookPath(name string) (string, error)
+}
+
+// SetHostRunner 装配期注入宿主能力（与 SetBindAddr 同批调用）。
+func (p *Picker) SetHostRunner(r HostRunner) {
+	p.mu.Lock()
+	p.host = r
+	p.mu.Unlock()
 }
 
 // NewPicker 造一个选择器（零值即可用：未注入地址时判定保守地落 browse）。
@@ -218,9 +236,25 @@ func (p *Picker) pickEnv() pickEnv {
 		bindAddr: addr,
 		ssh:      sshSession(os.Getenv),
 		display:  firstNonEmpty(os.Getenv("DISPLAY"), os.Getenv("WAYLAND_DISPLAY")),
-		lookPath: exec.LookPath,
+		lookPath: p.lookPath,
 	}
 }
+
+// lookPath 按 PATH 找可执行文件（只用于"这个平台有没有 zenity/kdialog"的存在性判定）。
+//
+// 未注入宿主能力时一律返回"找不到"——那正是"抬不起面板"的语义，前端会回落到应用内浏览。
+func (p *Picker) lookPath(name string) (string, error) {
+	p.mu.Lock()
+	r := p.host
+	p.mu.Unlock()
+	if r == nil {
+		return "", errNoHostRunner
+	}
+	return r.LookPath(name)
+}
+
+// errNoHostRunner 装配期没注入宿主能力（本进程不该抬面板）。
+var errNoHostRunner = errors.New("host runner not wired")
 
 // nativePickTimeout 原生面板的墙钟上限。
 //
@@ -238,7 +272,8 @@ const nativePickTimeout = 5 * time.Minute
 // 这正是 dsh `dsh web` 的行为。
 func (p *Picker) PickDirectoryHost(ctx context.Context) (string, bool, error) {
 	env := p.pickEnv()
-	if nativePickerMode(env) != NativePickerHost {
+	if nativePickerMode(env) != NativePickerHost || p.host == nil {
+		// 没注入宿主能力 = 抬不起面板（与"平台不支持"同一类拒绝，前端回落到应用内浏览）。
 		return "", false, ErrNativePickUnsupported
 	}
 	plan, err := planNativePick(env.platform, env.lookPath)
@@ -246,17 +281,7 @@ func (p *Picker) PickDirectoryHost(ctx context.Context) (string, bool, error) {
 		return "", false, err
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, nativePickTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(runCtx, plan.Exe, plan.Args...)
-	// 面板要出现在用户面前：stdout 收路径，stderr 只用于"取消"判定（不进日志，避免把用户目录名
-	// 播撒到日志里——那是最容易被忽略的一类信息泄漏）。
-	var out, errOut strings.Builder
-	cmd.Stdout = &out
-	cmd.Stderr = &errOut
-	runErr := cmd.Run()
-
-	stdout := strings.TrimRight(out.String(), "\r\n")
+	stdout, stderrOut, exitCode, timedOut, runErr := p.host.Run(ctx, plan.Exe, plan.Args, nativePickTimeout)
 	if runErr == nil {
 		if strings.TrimSpace(stdout) == "" {
 			return "", true, nil // 面板正常结束但没给路径：按取消处理
@@ -264,27 +289,18 @@ func (p *Picker) PickDirectoryHost(ctx context.Context) (string, bool, error) {
 		return stdout, false, nil
 	}
 	// 取消：退出码与 stderr 特征两者都成立（只看退出码会把"脚本语法错"也当成取消）。
-	if exitCode(runErr) == plan.CancelExit && (plan.CancelStderr == "" ||
-		strings.Contains(strings.ToLower(errOut.String()), plan.CancelStderr)) {
+	if exitCode == plan.CancelExit && (plan.CancelStderr == "" ||
+		strings.Contains(strings.ToLower(stderrOut), plan.CancelStderr)) {
 		return "", true, nil
 	}
 	// 超时被收回：面板已经关了，对用户就是"没选"。
-	if runCtx.Err() == context.DeadlineExceeded {
+	if timedOut {
 		return "", true, nil
 	}
 	// 其余失败：报服务侧错误，并把命令名带上——不带上就只剩一句"退出码 1"，
 	// 而这台机器上可能是缺 osascript、权限被拒、或面板被系统策略挡住。
 	return "", false, failure.NewError(failure.ClassService, "native_pick_failed",
 		fmt.Sprintf("原生目录选择器执行失败（%s）: %v", plan.Exe, runErr), runErr)
-}
-
-// exitCode 取进程退出码（拿不到时返回 -1：绝不与任何 CancelExit 相等）。
-func exitCode(err error) int {
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		return ee.ExitCode()
-	}
-	return -1
 }
 
 // firstNonEmpty 返回第一个非空值（显示会话的两个变量选一个）。
