@@ -22,6 +22,29 @@ import (
 // "装配的是哪一个底座"同理：换成 ProductRegistry 之后，漏改某个装配点不会有编译错误。
 func newIsolationRig(t *testing.T) (*App, string) {
 	t.Helper()
+	cfg, home := isolationConfig(t)
+	a := New(cfg, nil)
+	if err := a.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if a.srv != nil {
+			_ = a.srv.Stop(ctx)
+		}
+		a.Close()
+	})
+	return a, home
+}
+
+// isolationConfig 本包测试的**隔离配置**：家目录/资产/投影根/数据库全在临时目录里，调度与空闲
+// 回收关掉，地址由内核分配。
+//
+// 抽出来是因为"装配一台不拨 ACP 的后端"（C2 §3.4 的桩验收，见 `stub_execution_test.go`）
+// 必须用**逐字相同**的配置——两份配置迟早分叉，而分叉的表现是"人肉跑一遍才发现两边行为不同"。
+func isolationConfig(t *testing.T) (config.Config, string) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	home := t.TempDir()
 	web := t.TempDir()
@@ -52,20 +75,7 @@ func newIsolationRig(t *testing.T) (*App, string) {
 	cfg.RemoteRuntimes = []config.RemoteRuntime{
 		{ID: "remote-x", Transport: "ws", Endpoint: "ws://127.0.0.1:1/acp"},
 	}
-
-	a := New(cfg, nil)
-	if err := a.Init(context.Background()); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		if a.srv != nil {
-			_ = a.srv.Stop(ctx)
-		}
-		a.Close()
-	})
-	return a, home
+	return cfg, home
 }
 
 // TestInitPinsBuildRuntime 装配路径真的把**构建期选定的那一个**底座装上（默认 = dsh）。

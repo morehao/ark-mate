@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"flag"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -186,9 +187,15 @@ var contractNoRouteCases = map[string]string{
 // TestControlPlaneContractBaseline 逐条比对控制面契约基线。
 func TestControlPlaneContractBaseline(t *testing.T) {
 	a, _ := newIsolationRig(t)
-	eng := a.Handler()
-	host := a.srv.Addr()
+	assertContractBaseline(t, a.Handler(), a.srv.Addr())
+}
 
+// assertContractBaseline 对**任意一份装配产物**逐条比对控制面契约基线。
+//
+// 抽成函数是为了让 C2 §3.4 的桩验收复用同一份判据（`stub_execution_test.go`：底座换成
+// 不认识协议的纯内存实现，这份基线必须逐字通过）。两处各抄一份采样表，迟早在一边悄悄漂移。
+func assertContractBaseline(t *testing.T, eng http.Handler, host string) {
+	t.Helper()
 	got := make([]contractEntry, 0, len(contractCases()))
 	for _, c := range contractCases() {
 		req := httptest.NewRequest(c.Method, c.Path, strings.NewReader(c.Body))
@@ -261,6 +268,23 @@ func TestControlPlaneContractBaseline(t *testing.T) {
 	}
 }
 
+// contractVolatileDataKeys 采样里**不冻结**的 data 键：它们出现与否取决于宿主事实
+// （这台机器装没装底座、此刻有没有活的底座进程），不是控制面契约。
+//
+// 为什么必须显式列出来（不是"看着不稳就不比"）：
+//   - `/runtime/diagnostics` 的 `pid` 只在**有活连接**时出现，而活连接是真实拨号的副产物
+//     ——`GET /models` 会取样模型目录，取样要一条连接，于是基线跑一遍就真的起了一个底座进程。
+//     把 `pid` 冻进基线，等于把"跑基线那台机器装没装 dsh"写进契约：没装的机器上基线红，
+//     而契约一个字没变。
+//   - `remediation` 同理：未连接/有故障时才出现（底座没装 → 安装说明）。
+//
+// 这两个键的**内容**另有判据（`TestRuntimeDiagnosticsRemediation` 逐条断言"怎么修"），
+// 所以这里不冻结键存在性，不丢覆盖。
+var contractVolatileDataKeys = map[string]string{
+	"pid":         "只在有活连接时出现：取决于宿主是否装了底座、此刻有没有进程",
+	"remediation": "只在未连接或有故障时出现：同样取决于宿主事实（装没装底座）",
+}
+
 // normalizeContractEntry 把一次响应归一化成可比对的结构。
 func normalizeContractEntry(t *testing.T, c contractCase, w *httptest.ResponseRecorder) contractEntry {
 	t.Helper()
@@ -300,6 +324,9 @@ func normalizeContractEntry(t *testing.T, c contractCase, w *httptest.ResponseRe
 	if json.Unmarshal(raw, &obj) == nil {
 		e.DataKind = "object"
 		for k := range obj {
+			if _, volatile := contractVolatileDataKeys[k]; volatile {
+				continue
+			}
 			e.DataKeys = append(e.DataKeys, k)
 		}
 		sort.Strings(e.DataKeys)

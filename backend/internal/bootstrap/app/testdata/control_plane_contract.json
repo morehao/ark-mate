@@ -554,7 +554,6 @@
       "checked_at",
       "command",
       "connected",
-      "pid",
       "runtime",
       "runtime_name",
       "state",

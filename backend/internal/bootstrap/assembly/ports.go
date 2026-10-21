@@ -70,18 +70,39 @@ func PlaneFactsOf(p *registry.Planes) sessionruntime.PlaneFacts {
 // 与 `Build` 的构造段**同一份**：装配顺序（先平面/平面，后来源）漏一个的表现都是静默的
 // （少注入密钥 / 代际键少一维 / 诊断永远报未连接）。`mate demo` 直接复用它。
 func NewSessionService(reg *runtime.Registry, bus *eventbus.Bus) (*sessionruntime.Service, *registry.Planes, *runtimeconn.Plane, *runtimeconn.Pool) {
+	return NewSessionServiceWith(reg, bus, nil)
+}
+
+// NewSessionServiceWith 同 `NewSessionService`，但可以把"取连接"这一半换成**别的实现**
+// （`connPool` 非 nil 时用它，装配根不再往它上面接 ACP 的来源）。
+//
+// 唯一用途是 C2 §3.4 的验收缝：装配一个**不认识协议**的纯内存连接池，控制面契约与会话
+// 事件序列必须逐字不变（那是"换底座不动框架"的机器证明）。生产路径一律传 nil。
+//
+// 传了它，`runtimeconn` 的两半**仍然造出来**：进程注册、身份面、诊断面还挂在它们上面，
+// 换掉的只有"会话从哪条连接来"。
+func NewSessionServiceWith(reg *runtime.Registry, bus *eventbus.Bus,
+	connPool session.ConnPool) (*sessionruntime.Service, *registry.Planes, *runtimeconn.Plane, *runtimeconn.Pool) {
 	planes := registry.NewPlanes(reg)
 	plane := runtimeconn.NewPlaneFor(reg)
 	pool := runtimeconn.NewPool(plane)
+	exec := session.ConnPool(pool)
+	if connPool != nil {
+		exec = connPool
+	}
 	svc := sessionruntime.NewService(reg, bus,
 		sessionruntime.WithPlaneFacts(PlaneFactsOf(planes)),
 		sessionruntime.WithRuntimePlane(plane),
-		sessionruntime.WithConnPool(pool))
+		sessionruntime.WithConnPool(exec))
 	plane.SetCredentialSource(svc)
-	pool.SetProviderEnvSource(svc)
-	pool.SetConfigDigestSource(planes.Resources)
-	pool.SetNativeEnvSource(svc)
-	plane.SetLiveClientSource(pool)
+	// 来源接线是 `runtimeconn.Pool` 的具体面（env / 配置指纹 / 原生权限 env / 活连接读面）：
+	// 换成端口实现时它一个都不需要——那些来源只为"A CP 子进程该拿到什么"服务。
+	if connPool == nil {
+		pool.SetProviderEnvSource(svc)
+		pool.SetConfigDigestSource(planes.Resources)
+		pool.SetNativeEnvSource(svc)
+		plane.SetLiveClientSource(pool)
+	}
 	return svc, planes, plane, pool
 }
 

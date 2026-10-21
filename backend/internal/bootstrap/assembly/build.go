@@ -9,6 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/dto/dtosystem"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -31,6 +32,11 @@ type Options struct {
 	Credentials *credential.Set
 	// Payloads 桌面壳**已解析**的随包载荷清单（M3-4）：核心只把它透出到 `/meta`，不自己探测。
 	Payloads []dtosystem.PayloadInfo
+	// ConnPool 替换"会话从哪条连接来"（`session.ConnPool`；nil = 用 `runtimeconn.Pool`）。
+	//
+	// 生产路径构造 `Options` 时不填它。存在的唯一理由是 C2 §3.4 的验收缝：装配一个
+	// **不认识协议**的纯内存连接池，控制面契约与会话事件序列必须逐字不变。
+	ConnPool session.ConnPool
 }
 
 // Option 装配可选项的函数式写法。
@@ -44,6 +50,14 @@ func WithCredentials(creds *credential.Set) Option {
 // WithPayloads 注入随包载荷清单。
 func WithPayloads(payloads []dtosystem.PayloadInfo) Option {
 	return func(o *Options) { o.Payloads = payloads }
+}
+
+// WithConnPool 用别的连接池顶替 `runtimeconn.Pool`（见 `Options.ConnPool`）。
+//
+// 这是**装配缝**而不是行为开关：装配根交下来的仍是一个端口（`session.ConnPool`），
+// 会话侧一行不变；换掉的只是"连接从哪来"。生产路径不传。
+func WithConnPool(pool session.ConnPool) Option {
+	return func(o *Options) { o.ConnPool = pool }
 }
 
 // Handler HTTP 交付面：处理器 + **已绑定的监听器**。
@@ -146,7 +160,7 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 	}
 	// 执行面 + 领域平面 + 五个来源接线由**同一份**最小装配产出（与 `mate demo` 共用）：
 	// 两半各自记账会让"诊断说 stopped、连接却活着"立刻发生；来源漏接是静默的。
-	as.svc, as.planes, as.rconn, as.rpool = NewSessionService(reg, as.bus)
+	as.svc, as.planes, as.rconn, as.rpool = NewSessionServiceWith(reg, as.bus, o.ConnPool)
 
 	as.creds = o.Credentials
 	as.lifecycle = registry.New(as.steps()...)
