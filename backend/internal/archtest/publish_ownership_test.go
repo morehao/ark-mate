@@ -26,7 +26,7 @@ import (
 //
 //	① 运行时唯一铸号点所在的文件必须在 `internal/domain/session`（迁移里的历史回填除外——
 //	   那是历史数据的搬运，不是第二条运行时铸号路径，G2 的 ⑦′ 已单独钉它的分部）；
-//	② `internal/drivers/mechanism/` 下不得出现 `publish` / `event_sink` 这类包（附录 A 的旧口径若被照做，
+//	② `internal/adapters/outbound/mechanism/` 下不得出现 `publish` / `event_sink` 这类包（附录 A 的旧口径若被照做，
 //	   一定会落在这种目录名上）。
 //
 // 反证（实跑）：把 `publish.go` 从 `domain/session` 挪到 `mechanism/publish/` → 红（两段都红）。
@@ -67,11 +67,11 @@ func TestEventExitStaysInSessionDomain(t *testing.T) {
 	}
 
 	// ② `mechanism/` 下不得出现附录 A 那种包名（照做旧口径一定会落在这两个名字上）。
-	mechDir := filepath.Join(internalDir, "drivers", "mechanism")
+	mechDir := filepath.Join(internalDir, "adapters", "outbound", "mechanism")
 	for _, sub := range subdirs(t, mechDir) {
 		name := filepath.Base(sub)
 		if name == "publish" || name == "event_sink" {
-			t.Errorf("`internal/drivers/mechanism/%s` 存在：事件出口**不在机制层**（P1a-2 定案）。\n"+
+			t.Errorf("`internal/adapters/outbound/mechanism/%s` 存在：事件出口**不在机制层**（P1a-2 定案）。\n"+
 				"它写 `events` 表并读会话记录——那是会话域的不变量，不是\"被 ≥3 个域共享的跨域设施\"。\n"+
 				"请把实现留在 `internal/domain/session`（`publish.go`）。", name)
 		}

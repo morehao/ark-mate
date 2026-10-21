@@ -2,7 +2,7 @@ package registry
 
 import (
 	"github.com/morehao/ark-mate/internal/domain/mcp"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/definition"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/definition"
 )
 
 // mcpDefs 把定义机制收窄成 MCP 域声明的端口（`mcp.Definitions`）。

@@ -17,7 +17,7 @@
 //
 // **C10（stdout 纯度）**：本包只往 `out` 写 JSON-RPC 帧，一切诊断走 Logger（网关的 Logger
 // 由 CLI 固定为 stderr）。一行日志写错地方就会让底座的协议流错位。
-package gateway
+package mcpgateway
 
 import (
 	"context"

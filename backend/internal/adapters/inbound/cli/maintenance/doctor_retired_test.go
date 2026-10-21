@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/config"
-	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
+	doctorfacts "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 

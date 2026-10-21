@@ -10,7 +10,7 @@ import (
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/platform/object/objmeta"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
+	doctorfacts "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 

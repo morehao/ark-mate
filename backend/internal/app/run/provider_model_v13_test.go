@@ -12,7 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
-	"github.com/morehao/ark-mate/internal/drivers/transfer"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/transfer"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/model"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/testutil"

@@ -30,8 +30,8 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/drivers/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"
 
 	"github.com/morehao/ark-mate/internal/platform/eventbus"

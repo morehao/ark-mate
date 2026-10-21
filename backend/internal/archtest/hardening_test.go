@@ -312,9 +312,9 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 	}
 	// P4b：picker 由 `registry.Planes` 拥有（`Picker *workspace.Picker` 字段），
 	// `Service.Picker()` 与 `SetBindAddr` 的过渡口子一起删了。
-	pickerFact := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "planes.go")))
+	pickerFact := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "registry", "planes.go")))
 	if !strings.Contains(pickerFact, "Picker       *workspace.Picker") {
-		t.Error("`internal/drivers/registry/planes.go` 里找不到 `Picker *workspace.Picker` 字段：" +
+		t.Error("`internal/adapters/outbound/registry/planes.go` 里找不到 `Picker *workspace.Picker` 字段：" +
 			"选择器的唯一事实来源必须是装配平面的那一个实例。")
 	}
 	if strings.Contains(pickerFact, "func (s *Service) SetBindAddr(") {

@@ -20,7 +20,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/adapters/inbound/http/router"
-	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
+	doctorfacts "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 	"github.com/morehao/ark-mate/internal/version"
 )

@@ -10,7 +10,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/drivers/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
 	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"

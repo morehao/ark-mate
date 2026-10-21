@@ -10,7 +10,7 @@ import (
 
 // ——— 分层重构（P3d/P2a 起）的层守卫 ———
 //
-// 新结构把解散 `internal/app/run` 的实现按**层**落进 `internal/drivers/mechanism/*`（机制：无业务规则的
+// 新结构把解散 `internal/app/run` 的实现按**层**落进 `internal/adapters/outbound/mechanism/*`（机制：无业务规则的
 // 跨域设施）、`internal/domain/*`（领域：拥有数据与不变量）、`internal/app/*`（用例：API
 // 面实现）。层分开之后最危险的失效方式有两种，**都不会让任何既有测试变红**：
 //
@@ -81,9 +81,9 @@ func TestMechanismMustNotImportUpward(t *testing.T) {
 		modulePrefix + "internal/bootstrap/app",
 		modulePrefix + "internal/adapters/inbound/http/router",
 		modulePrefix + "internal/delivery/controller",
-		modulePrefix + "internal/drivers/gateway",
+		modulePrefix + "internal/adapters/inbound/mcpgateway",
 	}
-	for _, dir := range layerScanPackages(t, root, "internal/drivers/mechanism", "drivers/mechanism") {
+	for _, dir := range layerScanPackages(t, root, "internal/adapters/outbound/mechanism", "adapters/outbound/mechanism") {
 		for _, imp := range importedByPackage(t, dir) {
 			for _, bad := range forbidden {
 				if imp == bad || strings.HasPrefix(imp, bad+"/") {
@@ -147,7 +147,7 @@ func TestDomainPackagesMustNotImportEachOther(t *testing.T) {
 		modulePrefix + "internal/bootstrap/app",
 		modulePrefix + "internal/adapters/inbound/http/router",
 		modulePrefix + "internal/delivery/controller",
-		modulePrefix + "internal/drivers/gateway",
+		modulePrefix + "internal/adapters/inbound/mcpgateway",
 	}
 	for _, dir := range layerScanPackages(t, root, "internal/domain", "domain") {
 		self := packageImportPath(root, dir)
@@ -254,7 +254,7 @@ func TestInnerLayersUseNoTableRows(t *testing.T) {
 //
 // 值层也在表里：它们的错误构造改用 `code` 之后就不该再认识协议。B4 之后 `platform/code` 自己
 // 也不再认识协议——协议错误 → 平台视图的转换点搬到了**适配器出口**（`runtime.FoldError`，
-// 由 `runtime.Connect` 与 `drivers/runtimeconn` 调用），内圈因此对协议零依赖。
+// 由 `runtime.Connect` 与 `adapters/outbound/runtimeconn` 调用），内圈因此对协议零依赖。
 // 第二段的"全量"判据同时覆盖 `internal/domain` / `internal/platform` / `internal/app` 三个前缀：
 // 这些前缀下新出现的包不登记即红。
 var protocolFreePackages = []string{

@@ -5,7 +5,7 @@ import (
 
 	src "github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	mechcred "github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	mechcred "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/credential"
 )
 
 // providerSecrets 把凭据机制适配成供应商域声明的窄端口。

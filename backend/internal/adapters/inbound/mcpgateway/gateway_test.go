@@ -1,4 +1,4 @@
-package gateway
+package mcpgateway
 
 // M7-1 的网关侧用例：MCP 服务端（`pkg/mcp`）已经逐方法验过，这里钉的是**网关这一层**：
 // 空数据面必须响亮而不是静默、真数据面的透传与"未知工具"分线、stdin EOF 即退出。

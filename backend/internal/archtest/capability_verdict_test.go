@@ -360,10 +360,10 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 				"清零（调用点直连 `McpPlane()` / `defs`）。", dead)
 		}
 	}
-	gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "gateway", "source.go")))
+	gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "mcpgateway", "source.go")))
 	for _, want := range []string{"s.planes.Mcp.GatewayFace(", "s.planes.Mcp.ResolveSecrets("} {
 		if !strings.Contains(gwSrc, want) {
-			t.Errorf("`internal/drivers/gateway/source.go` 里找不到 `%s`：网关装配必须直连 MCP 平面。"+
+			t.Errorf("`internal/adapters/inbound/mcpgateway/source.go` 里找不到 `%s`：网关装配必须直连 MCP 平面。"+
 				"漏了会让这一条链悄悄退回某个中间层。", want)
 		}
 	}

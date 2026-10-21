@@ -3,7 +3,7 @@ package assembly
 import (
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/drivers/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/runtime"

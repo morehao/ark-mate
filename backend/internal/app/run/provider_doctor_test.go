@@ -14,11 +14,11 @@ import (
 	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/drivers/registry"
+	doctorfacts "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/doctor"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
 
 	"github.com/morehao/ark-mate/internal/platform/capability"
-	"github.com/morehao/ark-mate/internal/drivers/transfer"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/transfer"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/model"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"

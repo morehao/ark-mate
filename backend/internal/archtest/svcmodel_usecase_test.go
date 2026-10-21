@@ -178,15 +178,15 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 		t.Errorf("`internal/domain/provider/models.go` 里找不到 `func (pl *Plane) ModelRow(`：" +
 			"`model.Host` 的读一条实现必须有真落点")
 	}
-	views := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "models_view.go")))
+	views := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "registry", "models_view.go")))
 	if !strings.Contains(views, "*provider.Plane") {
-		t.Errorf("`internal/drivers/registry/models_view.go` 的 ModelViews 没有嵌入 `*provider.Plane`：" +
+		t.Errorf("`internal/adapters/outbound/registry/models_view.go` 的 ModelViews 没有嵌入 `*provider.Plane`：" +
 			"ModelSvc/Host 的读面就少一份真实现")
 	}
-	regBody := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "resources.go")))
+	regBody := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "registry", "resources.go")))
 	for _, a := range registryModelPortAnchors {
 		if !strings.Contains(regBody, a) {
-			t.Errorf("internal/drivers/registry/resources.go 里找不到 %q：同步面的端口实现被改名/删掉了？", a)
+			t.Errorf("internal/adapters/outbound/registry/resources.go 里找不到 %q：同步面的端口实现被改名/删掉了？", a)
 		}
 	}
 

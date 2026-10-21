@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	defn "github.com/morehao/ark-mate/internal/platform/definition"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/definition"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/definition"
 
 	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/platform/code"

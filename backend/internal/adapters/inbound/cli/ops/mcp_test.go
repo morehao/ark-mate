@@ -1,7 +1,7 @@
 package ops
 
 // `mate mcp bridge` 的**进程级**用例：帧形状与 stdout 纯度已经在包内验过
-// （`pkg/mcp/server_test.go`、`internal/drivers/gateway/gateway_test.go`），这里钉的是**进程入口**：
+// （`pkg/mcp/server_test.go`、`internal/adapters/inbound/mcpgateway/gateway_test.go`），这里钉的是**进程入口**：
 // 子命令分发、参数解析、退出码，以及"诊断绝不写 stdout"这条在真实二进制上是否成立。
 //
 // 为什么真编一个二进制：网关是**底座拉起的子进程**，它的入口形态（argv → 退出码 → 两个流）
@@ -138,7 +138,7 @@ func TestMcpBridgeCLI(t *testing.T) {
 	// 所以 mcp 子命令只能用文件 writer（见 internal/bootstrap/app/command/logging.go）。
 	logs := readCLILogs(t, home)
 	// 空工具面**不再**走"取数失败"那条（v19 起 scope 只有 runtime，数据面就绪即空面）：
-	// 那条失败出口由 `internal/drivers/gateway/gateway_test.go` 的单测负责。
+	// 那条失败出口由 `internal/adapters/inbound/mcpgateway/gateway_test.go` 的单测负责。
 	for _, want := range []string{"mcp bridge", `"runtime":"r1"`, `"pinned":false`, "数据面就绪"} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("网关日志应含 %q：\n%s", want, logs)

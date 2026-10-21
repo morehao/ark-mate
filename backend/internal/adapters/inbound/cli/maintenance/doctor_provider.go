@@ -13,9 +13,9 @@ import (
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/drivers/registry"
-	"github.com/morehao/ark-mate/internal/drivers/transfer"
+	doctorfacts "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/doctor"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/transfer"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 

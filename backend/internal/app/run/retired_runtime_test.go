@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/doctor"
 )
 
 // ——— v18 存量体检（「不在册底座」的痕迹） ———

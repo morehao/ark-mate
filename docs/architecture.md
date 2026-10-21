@@ -107,8 +107,8 @@ Electron 主进程（桌面态）
 | **L2** | `domain/*` | 业务规则与状态。**出边为零**：不 import dto、store、mechanism、infra |
 | **L3** | `contract/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份）。C3 4.1 起目录由 `dto/` 搬到 `contract/`，包名保留 `dto<领域>` |
 | **L4** | `app/<领域>`（含执行面 `app/run`） | 用例环（原 `service/svc<领域>`，C3 4.2 起包名去掉 `svc` 前缀）：接口 + 实现 + 构造函数；校验、错误码、响应装配。执行面 `sessionruntime` 同批搬成 `app/run`（编排归用例环，连接归出站适配器） |
-| **L5** | `adapters/outbound/sqlite/{store,dao,db}` `adapters/outbound/{dsh,credentials,procreg}` `drivers/{mechanism,registry,transfer}` | 持久与出站适配器（C3 4.3 起持久层与 infra 逐步归到 `adapters/outbound/`） |
-| **L6** | `drivers/{gateway,mechanism,registry,transfer}` `adapters/outbound/runtimeconn` `config` | 驱动侧：机制、注册表、连接面（C3 4.2 起搬到 `adapters/outbound/`）、存量定义导入导出编排 |
+| **L5** | `adapters/outbound/sqlite/{store,dao,db}` `adapters/outbound/{dsh,credentials,procreg}` | 持久与出站适配器（C3 4.3 起持久层与 infra 逐步归到 `adapters/outbound/`） |
+| **L6** | `adapters/inbound/mcpgateway` `adapters/outbound/{registry,mechanism,transfer,runtimeconn}` `config` | 网关与机制、注册表、连接面、存量定义导入导出编排（C3 4.5 起 `drivers/*` 按方向归到 `adapters/`） |
 | **L8** | `delivery/controller/ctr<领域>` `delivery/middleware` | 入站适配 |
 | **L9** | `adapters/inbound/{http/router,cli/*}` `bootstrap/{assembly,app}` | 装配与交付（C3 4.4 起入站适配全都归到 `adapters/inbound/`） |
 

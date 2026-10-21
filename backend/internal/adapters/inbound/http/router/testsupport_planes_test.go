@@ -4,7 +4,7 @@ import (
 	"sync"
 
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
-	"github.com/morehao/ark-mate/internal/drivers/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
 	"github.com/morehao/ark-mate/internal/runtime"
 	apprun "github.com/morehao/ark-mate/internal/app/run"
 )

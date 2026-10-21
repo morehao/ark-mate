@@ -15,7 +15,7 @@ import (
 	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	"github.com/morehao/ark-mate/internal/domain/workspace"
-	credmech "github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	credmech "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/credential"
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/config"

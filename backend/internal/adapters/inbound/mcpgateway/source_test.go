@@ -1,4 +1,4 @@
-package gateway
+package mcpgateway
 
 // ——— M7-2 验收：数据面（取数 → 选址 → 解密钥 → 代理 + 连接池）———
 //

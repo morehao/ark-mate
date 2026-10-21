@@ -322,7 +322,7 @@ var layeringWhitelist = []struct {
 	reason string
 }{
 	{
-		// P3d-2 起它落 `internal/drivers/mechanism/credential`，并因为跨包转发的要求而**导出**
+		// P3d-2 起它落 `internal/adapters/outbound/mechanism/credential`，并因为跨包转发的要求而**导出**
 		// （`ResolveProviderKey`）——判据只认符号名，所以这里跟着改名，不钉路径。
 		symbol: "ResolveProviderKey",
 		reason: "**库与镜像的对账，不是第二份层序**：四层顺序仍由 `Layered.Resolve` 一处实现，" +

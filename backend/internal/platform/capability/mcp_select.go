@@ -3,7 +3,7 @@ package capability
 // ——— MCP 定义的选址语义（M7-2：注入面与网关面共用**唯一**实现） ———
 //
 // 这段逻辑原先只活在 manager（`mcpSelectionFor`）。M7 之后多了一个消费者：平台侧 stdio 网关
-// （`internal/drivers/gateway`）必须按**同一套**语义算出"这个 agent×runtime 该看到哪些 server"。
+// （`internal/adapters/inbound/mcpgateway`）必须按**同一套**语义算出"这个 agent×runtime 该看到哪些 server"。
 // 两边各写一遍的后果不是报错，而是**静默不同面**：网关漏了 enabled 判据 → 用户停用的 server
 // 依然能被模型调；网关漏了会话白名单 → 钉过选定的会话看到 agent 的全量。
 //

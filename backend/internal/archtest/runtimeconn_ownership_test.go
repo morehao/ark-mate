@@ -233,7 +233,7 @@ func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
 		switch {
 		case strings.HasPrefix(slash, "internal/adapters/outbound/runtimeconn/"):
 			inRuntimeconn += n
-		case filepath.ToSlash(rel(root, path)) == "internal/drivers/registry/resources.go":
+		case filepath.ToSlash(rel(root, path)) == "internal/adapters/outbound/registry/resources.go":
 			inResourceSync += n
 		case strings.HasPrefix(slash, "internal/app/run/"):
 			inManager += n
@@ -251,7 +251,7 @@ func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
 		t.Errorf("`internal/app/run` 里仍有 %d 处 `runtime_not_found` 铸码。", inManager)
 	}
 	if inResourceSync != 1 {
-		t.Error("`internal/drivers/registry/resources.go` 里那个 `runtime_not_found` 不见了：" +
+		t.Error("`internal/adapters/outbound/registry/resources.go` 里那个 `runtime_not_found` 不见了：" +
 			"它校验的是**用户请求同步的那个 runtime**（另一个输入，故放行）——删掉它 = " +
 			"请求一个不在册的 runtime 会被静默当成「同步全部」。")
 	}

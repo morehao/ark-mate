@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/morehao/ark-mate/internal/domain/automation"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/definition"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/definition"
 )
 
 // AutomationDefinitionFiles 把定义文件机制适配成 `automation` 域声明的窄端口。

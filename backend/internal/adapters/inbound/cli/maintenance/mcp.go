@@ -11,7 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
 	"github.com/morehao/ark-mate/internal/config"
 
-	"github.com/morehao/ark-mate/internal/drivers/gateway"
+	"github.com/morehao/ark-mate/internal/adapters/inbound/mcpgateway"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
 	"github.com/morehao/golib/glog"
 )
@@ -89,7 +89,7 @@ func mcpBridge(args []string) {
 	// 底座那边"这个 MCP server 没起来"（连工具面都看不到），而"起来了但这一轮没有工具"是
 	// 看得见的降级，且日志里有原因。
 	cfg, _ := config.MustLoad()
-	src, sErr := gateway.NewSource(ctx, gateway.SourceOptions{
+	src, sErr := mcpgateway.NewSource(ctx, mcpgateway.SourceOptions{
 		Cfg:        cfg,
 		McpsPinned: scope.McpsPinned,
 		Adapters:   assembly.AllAdapters(),
@@ -104,12 +104,12 @@ func mcpBridge(args []string) {
 		}()
 	}
 
-	var face gateway.Source
+	var face mcpgateway.Source
 	if src != nil {
 		face = src
 	}
-	err = gateway.Run(ctx, os.Stdin, os.Stdout, gateway.Options{
-		Scope:  gateway.Scope{RuntimeID: scope.RuntimeID, McpsPinned: scope.McpsPinned},
+	err = mcpgateway.Run(ctx, os.Stdin, os.Stdout, mcpgateway.Options{
+		Scope:  mcpgateway.Scope{RuntimeID: scope.RuntimeID, McpsPinned: scope.McpsPinned},
 		Source: face,
 	})
 	switch {

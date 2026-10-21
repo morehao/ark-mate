@@ -9,7 +9,7 @@ import (
 
 // transferEntryAnchors 存量定义导入/导出的六个域入口（3 域 × 2 方向）。
 //
-// 它们必须且只能出现在 `internal/drivers/transfer`：2026-10-20 之前同一件事分居两包
+// 它们必须且只能出现在 `internal/adapters/outbound/transfer`：2026-10-20 之前同一件事分居两包
 // （capability 的导入留在 `mechanism/definition`，automation/provider 的在
 // `capabilityio`），改一条纪律要改两处，而两处都编译得过——「幂等 / 绝不覆盖 /
 // 不回写」只要有一份没跟上，就是静默的数据语义分叉。
@@ -35,34 +35,34 @@ var transferFrameworkAnchors = []string{
 
 // TestDefinitionTransferHasOneHome 定义导入/导出只能有一个家。
 //
-// 判据三段：① 六入口与框架原语全在 `internal/drivers/transfer`（改名/搬走即失锚）；
+// 判据三段：① 六入口与框架原语全在 `internal/adapters/outbound/transfer`（改名/搬走即失锚）；
 // ② 旧目录 `internal/capabilityio` 不得复活（它与 `internal/platform/capability` 只差后缀，
 // 正是这次要消灭的歧义）；③ `mechanism/definition` 与 `domain/**` 零命中（第二个家）。
 // fail-closed：transfer 目录扫不到生产 Go 文件时 `dirProductionBody` 直接 Fatal。
 func TestDefinitionTransferHasOneHome(t *testing.T) {
 	root := backendRoot(t)
-	body := dirProductionBody(t, filepath.Join(root, "internal", "drivers", "transfer"))
+	body := dirProductionBody(t, filepath.Join(root, "internal", "adapters", "outbound", "transfer"))
 	for _, a := range append(append([]string{}, transferEntryAnchors...), transferFrameworkAnchors...) {
 		if !strings.Contains(body, a) {
-			t.Errorf("internal/drivers/transfer 里找不到 %q：入口/框架被改名或搬走了？（判据失锚＝空转）", a)
+			t.Errorf("internal/adapters/outbound/transfer 里找不到 %q：入口/框架被改名或搬走了？（判据失锚＝空转）", a)
 		}
 	}
 
 	// 旧名不得复活：`capability` 是能力数据面（L1），存量定义搬运不是它的 I/O。
 	if _, err := os.Stat(filepath.Join(root, "internal", "capabilityio")); err == nil {
 		t.Error("internal/capabilityio 复活了：`capability` 是能力数据面（L1），" +
-			"存量定义搬运不是它的 I/O；落点只许是 internal/drivers/transfer。")
+			"存量定义搬运不是它的 I/O；落点只许是 internal/adapters/outbound/transfer。")
 	}
 
 	// 不得有第二个家：同一条纪律只许在一个包里维护。
 	for _, dir := range []string{
-		filepath.Join(root, "internal", "drivers", "mechanism", "definition"),
+		filepath.Join(root, "internal", "adapters", "outbound", "mechanism", "definition"),
 		filepath.Join(root, "internal", "domain"),
 	} {
 		other := dirProductionBody(t, dir)
 		for _, a := range append(append([]string{}, transferEntryAnchors...), transferFrameworkAnchors...) {
 			if strings.Contains(other, a) {
-				t.Errorf("%s 里又出现 %q：导入/导出编排只能有一个家（internal/drivers/transfer），"+
+				t.Errorf("%s 里又出现 %q：导入/导出编排只能有一个家（internal/adapters/outbound/transfer），"+
 					"第二个家会让「幂等 / 绝不覆盖 / 不回写」静默分叉。", rel(root, dir), a)
 			}
 		}
@@ -76,20 +76,20 @@ func TestDefinitionTransferHasOneHome(t *testing.T) {
 // `capabilityio` 就是这样长成一个杂物间的。
 func TestPortAdaptersStayAtAssemblyPoint(t *testing.T) {
 	root := backendRoot(t)
-	reg := dirProductionBody(t, filepath.Join(root, "internal", "drivers", "registry"))
+	reg := dirProductionBody(t, filepath.Join(root, "internal", "adapters", "outbound", "registry"))
 	for _, a := range []string{
 		"var _ automation.DefinitionFiles = AutomationDefinitionFiles{}",
 		"var _ provider.Secrets = providerSecrets{}",
 	} {
 		if !strings.Contains(reg, a) {
-			t.Errorf("internal/drivers/registry 里找不到 %q：窄端口适配体必须留在装配点"+
+			t.Errorf("internal/adapters/outbound/registry 里找不到 %q：窄端口适配体必须留在装配点"+
 				"（只有它同时看得见域端口与机制实现；机制层禁止 import 域）。", a)
 		}
 	}
-	tr := dirProductionBody(t, filepath.Join(root, "internal", "drivers", "transfer"))
+	tr := dirProductionBody(t, filepath.Join(root, "internal", "adapters", "outbound", "transfer"))
 	for _, a := range []string{"automation.DefinitionFiles", "provider.Secrets"} {
 		if strings.Contains(tr, a) {
-			t.Errorf("internal/drivers/transfer 里出现 %q：适配体又和导入/导出混回一个包了。", a)
+			t.Errorf("internal/adapters/outbound/transfer 里出现 %q：适配体又和导入/导出混回一个包了。", a)
 		}
 	}
 }

@@ -10,7 +10,7 @@ import (
 //
 // 技能域的写面必须落盘/落库，但这些读写**不属于领域知识**：它是定义载体（文件 / SQLite 行）
 // 的机制。按六边形口径，消费方声明自己需要的那几个方法，装配根把机制注进来——
-// 于是 `internal/domain/skill` 不必再 import `internal/drivers/mechanism/definition`（L6 组合驱动），
+// 于是 `internal/domain/skill` 不必再 import `internal/adapters/outbound/mechanism/definition`（L6 组合驱动），
 // 领域层的出边只剩 L0/L1。
 //
 // 端口刻意只列技能域真正用到的六个方法（机制层的 `DefinitionRepo` 是它的超集）：

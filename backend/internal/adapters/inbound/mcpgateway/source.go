@@ -1,4 +1,4 @@
-package gateway
+package mcpgateway
 
 // ——— 数据面：网关自己读平台的库与凭据文档（M7-2）———
 //
@@ -31,11 +31,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/credential"
 
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/platform/capability"
-	"github.com/morehao/ark-mate/internal/drivers/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/runtime"

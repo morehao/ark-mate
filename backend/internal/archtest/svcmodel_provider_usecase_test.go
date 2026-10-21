@@ -203,7 +203,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 	}
 	// P4b：`ProviderPlane()` 删了；事实出口是 `Planes()` + `registry.Planes.Providers`。
 	factsSrc := stripLineComments(readFileOrFatal(t, filepath.Join(mgr, "planes.go")))
-	planesSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "planes.go")))
+	planesSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "registry", "planes.go")))
 	if !strings.Contains(factsSrc, "Providers    ProviderFacts") ||
 		!strings.Contains(planesSrc, "Providers    *provider.Plane") {
 		t.Error("`PlaneFacts.Providers` / `registry.Planes.Providers` 有一处不在：控制器拿不到供应商域平面 ⇒ " +
@@ -241,7 +241,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 			"serve 的装载入口"},
 		{"internal/bootstrap/assembly/assembly.go", "as.planes.Providers.SetProviderDir(",
 			"serve 的目录入口"},
-		{"internal/drivers/gateway/source.go", "s.planes.Providers.ReloadProviderDefinitionsFromStore(",
+		{"internal/adapters/inbound/mcpgateway/source.go", "s.planes.Providers.ReloadProviderDefinitionsFromStore(",
 			"gateway 的换代重载"},
 		// 第五十四刀：建连时的密钥注入经**执行面端口**取（池的 `ProviderEnvSource`），
 		// 适配器在 `runtime_pool.go`。锚跟着对象走，判据不变：调用点必须直连域平面。

@@ -1,4 +1,4 @@
-package gateway
+package mcpgateway
 
 // ——— M7-4/M7-5 验收：命名策略 fail-closed、探测面/真实面对拍、调用留痕、并发语义 ———
 
@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/drivers/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	apprun "github.com/morehao/ark-mate/internal/app/run"

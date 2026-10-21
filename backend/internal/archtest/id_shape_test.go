@@ -23,7 +23,7 @@ import (
 // （设计 §4.5.3 的 4 包装 / 3 解包表 —— 这是"包装点唯一"这条不变式的机器判据）。
 //
 // 锚点是**包含调用点的函数名**，不是文件路径。为什么换锚：这几个点会随"哪个包拥有它"而搬家
-// （v27 起 `internal/app/run` 正被拆成 `internal/domain/*` / `internal/drivers/mechanism/*`），而搬家时
+// （v27 起 `internal/app/run` 正被拆成 `internal/domain/*` / `internal/adapters/outbound/mechanism/*`），而搬家时
 // 变的是**包与接收者类型**，函数名不变。钉路径的守卫在搬家后只有两种结局，都很坏：静默空转
 // （判据指向一个不存在的文件，测试照样绿却什么都没检查）或假红。
 //
@@ -574,7 +574,7 @@ func TestEventSeqStaysTheCursor(t *testing.T) {
 // 判据是**调用点字面量**（正则容空白）：这层的正确性没有运行时信号，只有"这一行还在不在"。
 //
 // v27 起锚点是**符号在全树里的出现次数**，不是文件路径：这些点会随包搬家
-// （`internal/app/run/*` → `internal/domain/*` / `internal/drivers/mechanism/*`），而钉路径的判据
+// （`internal/app/run/*` → `internal/domain/*` / `internal/adapters/outbound/mechanism/*`），而钉路径的判据
 // 一搬就静默空转。次数是**实测精确值**，两侧都拦：多了说明有人又铸了一支 id / 又开了一条出口
 // （正是要拦的），少了说明某个载体丢了身份。
 //

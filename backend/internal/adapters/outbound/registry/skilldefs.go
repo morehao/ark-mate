@@ -2,7 +2,7 @@ package registry
 
 import (
 	"github.com/morehao/ark-mate/internal/domain/skill"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/definition"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/definition"
 )
 
 // skillDefs 把定义机制**收窄**成技能域声明的端口（`skill.Definitions`）。

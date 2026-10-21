@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"

@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/drivers/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 	"github.com/morehao/ark-mate/internal/app/model"
 )

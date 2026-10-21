@@ -62,7 +62,7 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 ### T2 · O3-b：MCP 调用结果进审计表（事件流第二刀）
 
-- **现状**：`backend/internal/drivers/gateway/source.go` 只在 stderr 留一行
+- **现状**：`backend/internal/adapters/inbound/mcpgateway/source.go` 只在 stderr 留一行
   `(server, tool, outcome, latency_ms)`——**事后无法按会话复盘调用了什么**。
 - **做什么**（建议分两刀，别一次做完）：
   1. **第一刀：审计表**。新表（`server_id / tool / outcome / latency_ms / session_id / run_id /

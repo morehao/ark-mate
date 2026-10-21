@@ -18,7 +18,7 @@ import (
 // 判据三段（都 fail-closed：找不到即失败，避免改名/搬迁后守卫静默空转——这正是 P0 里
 // 反复吃过的那类假绿）：
 //  1. `ProviderMirrorRefPrefix` 全树**恰好声明一次**；
-//  2. 那处声明在 `internal/drivers/mechanism/credential/`，取值**逐字**是 `providers/`；
+//  2. 那处声明在 `internal/adapters/outbound/mechanism/credential/`，取值**逐字**是 `providers/`；
 //  3. 全树只有**一个**拼接点（`ProviderMirrorRefPrefix +`），即没有人在别处手拼这个键。
 //
 // 刻意**不**断言 `"providers/"` 这个字面量全仓唯一：`internal/config` 的旧目录告警里有同名串，
@@ -128,8 +128,8 @@ func TestCredentialFaceHasNoTransitionalForwards(t *testing.T) {
 				"漏了会让这一条链悄悄退回某个中间层。", want)
 		}
 	}
-	if gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "gateway", "source.go"))); !strings.Contains(gwSrc, "s.planes.Credentials.SetLayered(") {
-		t.Error("`internal/drivers/gateway/source.go` 里找不到 `s.planes.Credentials.SetLayered(`：" +
+	if gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "mcpgateway", "source.go"))); !strings.Contains(gwSrc, "s.planes.Credentials.SetLayered(") {
+		t.Error("`internal/adapters/inbound/mcpgateway/source.go` 里找不到 `s.planes.Credentials.SetLayered(`：" +
 			"网关装配必须直连事实（P5a 起是 registry.Planes，不再是 manager 转发）。")
 	}
 }
