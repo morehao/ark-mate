@@ -3,7 +3,7 @@ package interaction
 import (
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // TestPermissionPolicyDecide 匹配优先级：工具 title > ACP kind > default；大小写不敏感。

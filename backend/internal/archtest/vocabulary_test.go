@@ -71,9 +71,9 @@ var conversationVocabularyWhitelist = []struct {
 	reason string
 }{
 	{
-		path: "backend/internal/infra/acp/scope.go",
+		path: "backend/internal/infra/protocol/acp/scope.go",
 		reason: "ACP `_meta` 的**第三方键** `conversationId`/`conversation_id`：那是底座发的，" +
-			"改了就丢 scope（README 已登记这条解析口径）。internal/infra/acp 是「可复用的 ACP 客户端」，" +
+			"改了就丢 scope（README 已登记这条解析口径）。internal/infra/protocol/acp 是「可复用的 ACP 客户端」，" +
 			"它不该知道 ark-mate 的词汇表",
 	},
 	{
@@ -118,7 +118,7 @@ var conversationVocabularyWhitelist = []struct {
 //
 // 为什么只豁免这一个原样词组（而不是给 README 开一条文件级白名单）：README 是路由与 JSON 键
 // 的契约文档，给整份文件开豁免等于放弃对它的检查；而这个键序列是**底座发的键**，写文档时
-// 必须原样给出，否则读者不知道要解析什么（README 已把它与 `internal/infra/acp/scope.go` 的处置写在同一句里）。
+// 必须原样给出，否则读者不知道要解析什么（README 已把它与 `internal/infra/protocol/acp/scope.go` 的处置写在同一句里）。
 const readmeThirdPartyMetaKeys = "`sessionId`/`session_id`/`conversationId`/`conversation_id`"
 
 // TestNoConversationVocabulary 词汇收口（T5 / B2 / R-1 的机器判据）。

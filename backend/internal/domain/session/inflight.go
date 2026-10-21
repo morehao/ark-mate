@@ -3,7 +3,7 @@ package session
 import (
 	"sync"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // InFlightTracker 记录每连接（acp.Client）上正在执行 run 的会话（§17 方案 B：连接共享、

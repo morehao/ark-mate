@@ -12,14 +12,14 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/coder/websocket"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // testACPResponder 是 pkg/runtime 测试用的**自建最小 ACP responder**。
 //
 // 为什么需要它：`TestConnectRemoteTransport` 原先拿内置 echo 底座当对端（echo 已于 M0 删除）。
 // 若一并删掉该测试，`runtime.Connect` 的远程分支（ws/http）就失去覆盖，而远程 runtime 是
-// 受支持的产品形态（`runtimes.json` 可声明远端 ACP 端点）。这里照 `internal/infra/acp/remote_test.go`
+// 受支持的产品形态（`runtimes.json` 可声明远端 ACP 端点）。这里照 `internal/infra/protocol/acp/remote_test.go`
 // 的思路重建一份——那份 `remoteAgent` 在 `package acp` 的测试文件里，**跨包不可用**，必须重写。
 //
 // 两端都用真 SDK：agent 侧是 `acpsdk.NewAgentSideConnection`，客户端侧是 `acp.Dial`（内部同样

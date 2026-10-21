@@ -36,7 +36,7 @@
 | `EmbeddedContext` | `false` | 同上，以连接期探测为准 |
 
 `Caps` 的**消费者是零**：唯一旧出口 `/runtimes` 已随决策 v18 删除，「能不能收图」一律走连接期事实
-（`internal/infra/acp` 解析 `initialize` 得到的 `Capabilities.Images`）。由 `TestStaticCapsImagesHasNoConsumer`
+（`internal/infra/protocol/acp` 解析 `initialize` 得到的 `Capabilities.Images`）。由 `TestStaticCapsImagesHasNoConsumer`
 钉住「没有新的读法」。
 
 **不支持的面**：`session/load`、fork/delete、附加目录、终端、客户端 FS、SSE 与传输级 MCP。

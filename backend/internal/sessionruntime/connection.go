@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )

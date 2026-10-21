@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/core/failure"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // sessionRuntime 是 Runtime 接口（§4.2 会话边界版）在「一条活着的 ACP 会话」上的通用实现：

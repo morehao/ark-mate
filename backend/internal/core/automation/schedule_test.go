@@ -498,7 +498,7 @@ func TestAutomationValidate(t *testing.T) {
 
 func ptrTime(t time.Time) *time.Time { return &t }
 
-// acpCode 取出带码错误的码（本包的校验错误一律用 internal/infra/acp 的可操作错误）。
+// acpCode 取出带码错误的码（本包的校验错误一律用 internal/infra/protocol/acp 的可操作错误）。
 func acpCode(err error) string {
 	var ae *failure.Error
 	if errors.As(err, &ae) {

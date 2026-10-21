@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // ——— 权限策略：**类型与词表**（M2 #7 引入；v19 起平台没有策略来源） ———

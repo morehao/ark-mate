@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/infra/mcp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/mcp"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 

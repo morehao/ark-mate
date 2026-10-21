@@ -5,7 +5,7 @@
 // 从错误链里取回它的入口、以及诊断尾巴的统一裁剪（含脱敏闸门）。
 //
 // 它**不负责**：把分类折算成对外业务码（那是 `internal/core/code` 的投影表）、
-// 以及在协议边界上把 SDK 错误识别成本类型（那是 `internal/infra/acp` 的 `Classify`）。
+// 以及在协议边界上把 SDK 错误识别成本类型（那是 `internal/infra/protocol/acp` 的 `Classify`）。
 //
 // 为什么单独成包而不是塞进 `core/code`：后者已有 `func Error(c int, msg string)`，
 // 同一包里再放一个 `type Error` 直接冲突；而把类型改名成 `Failure` 放在 `code` 里，

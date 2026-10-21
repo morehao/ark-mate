@@ -167,7 +167,7 @@ func (pl *Plane) Diagnostics(ctx context.Context) (*dtoruntime.DiagnosticsResp, 
 	// 归属歧义留痕（若有）：诊断里给事实 + 可执行动作，而不是让提问卡无痕消失。
 	if n, ok := pl.ScopeNote(); ok {
 		resp.Remediation = append(resp.Remediation, fmt.Sprintf(
-			"%s（%s）。若该 runtime 会发 elicitation 且存在多会话并发在途：让底座在 elicitation 的 `_meta` 里带 sessionId（宿主零 fork 读取，见 internal/infra/acp/scope.go），或串行等待提问。",
+			"%s（%s）。若该 runtime 会发 elicitation 且存在多会话并发在途：让底座在 elicitation 的 `_meta` 里带 sessionId（宿主零 fork 读取，见 internal/infra/protocol/acp/scope.go），或串行等待提问。",
 			n.Detail, n.At.Format(time.RFC3339)))
 	}
 	return resp, nil

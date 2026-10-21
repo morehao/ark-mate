@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/failure"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // dialTestSession 用自建 responder（acp_testserver_test.go）取一条**活的** acp.Session，

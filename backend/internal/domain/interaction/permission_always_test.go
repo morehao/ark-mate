@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // TestPermissionMemoryBothSides 会话级权限记忆（allow/reject 双侧对称）：

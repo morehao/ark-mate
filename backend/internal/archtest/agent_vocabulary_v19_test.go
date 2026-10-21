@@ -15,7 +15,7 @@ import (
 // 会话身份少一项而投影仍然自洽。逐处 review 挡不住这类漏，机器判据能。
 //
 // 判据**不是**「grep 到英文词 agent 就红」（那是错的）：ACP 自己的词表里 `agent` 指的就是**底座进程**
-// （SDK 的 `Agent` 接口、`AuthMethods` 的 `agent` 变体），`internal/infra/acp` 必须能照原文写；`~/.agents/skills`
+// （SDK 的 `Agent` 接口、`AuthMethods` 的 `agent` 变体），`internal/infra/protocol/acp` 必须能照原文写；`~/.agents/skills`
 // 是平台与底座的**共享投放根**，也与本概念无关。所以禁词表列的是**被撤掉的那批标识符**，
 // 与 v15 的 `conversation`、v16 的 `capability_revision`、v17 的 `provider_session` 同形。
 //
@@ -46,7 +46,7 @@ var legacyAgentVocabulary = []string{
 	// ⑥ 三层包名（dto/controller/service 端口）。
 	"dtoagent", "ctragent", "svcagent",
 	// ⑦ 身份列/字段的两种写法：`agent_id`（列名、json 键、日志键、路径段）与驼峰
-	//    `AgentID`/`agentID`（小写化后同形）。`internal/infra/procreg` 与 `internal/infra/mcp` 的网关 scope 曾用它，
+	//    `AgentID`/`agentID`（小写化后同形）。`internal/infra/procreg` 与 `internal/infra/protocol/mcp` 的网关 scope 曾用它，
 	//    而它们**不会让编译变红**——正是这条守卫存在的理由。
 	"agent_id", "agentid",
 	// ⑧ 路由段。刻意**不**写裸词 `agents`：`~/.agents/skills` 与旧的 `MATE_AGENTS` 都要放行。

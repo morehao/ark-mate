@@ -84,10 +84,10 @@ var domainInfraAllow = []string{"internal/infra/logging"}
 // 这三个域包用的是 ACP 的线协议载荷（权限裁决 / 提问 / 工具事件 / 选项），要等 P3
 // "平台值 + 连接边界翻译" 落地才能清空。
 var domainInfraImports = map[string]string{
-	"internal/domain/interaction": "infra/acp（权限与提问载荷）",
-	"internal/domain/mcp":         "infra/mcp（MCP 客户端：连 server 与探测由域直调，P3′ 待定）",
-	"internal/domain/provider":    "infra/acp（配置选项载荷 ConfigOption）",
-	"internal/domain/session":     "infra/acp（工具事件与权限载荷）",
+	"internal/domain/interaction": "infra/protocol/acp（权限与提问载荷）",
+	"internal/domain/mcp":         "infra/protocol/mcp（MCP 客户端：连 server 与探测由域直调，P3′ 待定）",
+	"internal/domain/provider":    "infra/protocol/acp（配置选项载荷 ConfigOption）",
+	"internal/domain/session":     "infra/protocol/acp（工具事件与权限载荷）",
 }
 
 func TestDomainAvoidsInfraProtocol(t *testing.T) {

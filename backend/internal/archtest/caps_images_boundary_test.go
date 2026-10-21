@@ -44,7 +44,7 @@ const connectionFactImagesConsumers = 1
 // 它今天已无出口（`/runtimes` 与它的 `ListItems` 一起删掉了），但"没有出口"这件事**不会**
 // 被编译期保证——下一个人写 `if spec.Caps.Images { … }` 照样能编译。这条守卫就是那个保证。
 //
-// 同时**正向**断言连接期事实真的被消费了（`internal/infra/acp` 解析 initialize 的 `Capabilities.Images`
+// 同时**正向**断言连接期事实真的被消费了（`internal/infra/protocol/acp` 解析 initialize 的 `Capabilities.Images`
 // 必须在某处被读）：否则"用连接期事实"只是一句没人执行的话，而门禁会悄悄退回静态值。
 func TestStaticCapsImagesHasNoConsumer(t *testing.T) {
 	backend := backendRoot(t)

@@ -8,7 +8,7 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 
 	"github.com/morehao/ark-mate/internal/core/failure"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // newTestRemote 起一个真实 ACP server（自建最小 responder，见 acp_testserver_test.go）挂在

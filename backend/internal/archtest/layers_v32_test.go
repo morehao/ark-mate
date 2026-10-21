@@ -81,11 +81,11 @@ var v32Layers = map[string]v32Layer{
 	// 从 `drivers/mechanism` 抽出来，让 `domain/*` 不必反向 import 机制层。
 	"internal/core": {layer: 1, name: "core", sameLayer: true},
 	// 下面四个仍是独立 key：`runtime` 有 adapter 禁入，`infra/*` 的位置与带语义各自不同。
-	"internal/version":       {layer: 1, name: "version", sameLayer: true},
-	"internal/runtime":       {layer: 1, name: "runtime", sameLayer: true, deny: []string{"internal/infra/dsh"}},
-	"internal/infra/acp":     {layer: 1, name: "infra/acp", sameLayer: true},
-	"internal/infra/mcp":     {layer: 1, name: "infra/mcp", sameLayer: true},
-	"internal/infra/logging": {layer: 1, name: "infra/logging", sameLayer: true},
+	"internal/version":            {layer: 1, name: "version", sameLayer: true},
+	"internal/runtime":            {layer: 1, name: "runtime", sameLayer: true, deny: []string{"internal/infra/dsh"}},
+	"internal/infra/protocol/acp": {layer: 1, name: "protocol/acp", sameLayer: true},
+	"internal/infra/protocol/mcp": {layer: 1, name: "protocol/mcp", sameLayer: true},
+	"internal/infra/logging":      {layer: 1, name: "infra/logging", sameLayer: true},
 
 	// ——— L2：领域 ———
 	//

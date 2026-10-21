@@ -46,7 +46,7 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 ### T1 · O3-a：MCP 全局并发限流/排队
 
-- **现状**：`backend/internal/infra/mcp/pool.go` 按 server 池化、**同会话串行**、有界 + 空闲回收；但
+- **现状**：`backend/internal/infra/protocol/mcp/pool.go` 按 server 池化、**同会话串行**、有界 + 空闲回收；但
   N 条会话可以同时打到**同一个**远端 server——没有 server 维度的总闸。
 - **做什么**：
   1. 在 pool 层加 **per-server 并发上限 + 等待队列**（在途数超过上限时排队，而不是直接拒绝）；

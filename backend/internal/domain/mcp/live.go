@@ -9,7 +9,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 
-	mcpclient "github.com/morehao/ark-mate/internal/infra/mcp"
+	mcpclient "github.com/morehao/ark-mate/internal/infra/protocol/mcp"
 	"github.com/morehao/golib/glog"
 )
 
