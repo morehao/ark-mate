@@ -12,11 +12,11 @@ import (
 
 	"github.com/morehao/ark-mate/internal/platform/object/objid"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/infra/dbclient"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/db"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 
 	// 守卫 10 要开一个临时库跑真实迁移，而 `dbclient.Open` → `glog.NewLogger` 需要 zap driver：
-	// 日志出口归装配根（`cmd/mate` 的匿名引入），test 二进制不含它（同 `internal/persistence/store` 的做法）。
+	// 日志出口归装配根（`cmd/mate` 的匿名引入），test 二进制不含它（同 `internal/adapters/outbound/sqlite/store` 的做法）。
 	_ "github.com/morehao/golib/glog/driver/zap"
 )
 
@@ -51,7 +51,7 @@ func TestRunIdentityIsMintedAndUnique(t *testing.T) {
 	root := backendRoot(t)
 
 	// ① 实体：`RunEntity.ID` 是平台铸造的主键；位置列（FirstSeq/LastSeq）**不得**参与主键。
-	entityPath := filepath.Join(root, "internal", "persistence", "model", "run.go")
+	entityPath := filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "model", "run.go")
 	entity := stripLineComments(readFileOrFatal(t, entityPath))
 	idField := regexp.MustCompile(`(?m)^\s*ID\s+string\s+` + "`" + `gorm:"([^"]*)"` + "`")
 	m := idField.FindStringSubmatch(entity)
@@ -79,7 +79,7 @@ func TestRunIdentityIsMintedAndUnique(t *testing.T) {
 	//    扫**全部** `migrate_v*.go` 而不是钉住某个版本文件：文件会随版本往后长，
 	//    钉死会在下次迁移时解析不到——本守卫依旧 fail-closed（宁可真红，也不静默）。
 	uniqueOnWindow := regexp.MustCompile(`(?is)CREATE\s+UNIQUE\s+INDEX\s+\S+\s+ON\s+runs\s*\(\s*session_id\s*,\s*first_seq\s*\)`)
-	migrateDir := filepath.Join(root, "internal", "persistence", "store")
+	migrateDir := filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "store")
 	paths, err := filepath.Glob(filepath.Join(migrateDir, "migrate_v*.go"))
 	if err != nil || len(paths) == 0 {
 		t.Fatalf("扫不到 %s/migrate_v*.go: %v（fail-closed：迁移源码找不到即失败）", migrateDir, err)

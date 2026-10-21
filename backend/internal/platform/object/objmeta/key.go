@@ -25,7 +25,7 @@ const KeyReadModelsRebuild = "read_models_rebuild"
 //
 // 为什么需要一个标记，而不是"在迁移里就地改写"：v26 起 `sessions.model_id` 装的是**平台模型行
 // id**（`mdl_…`），而存量装的是**底座的不透明值**。两者之间的换算是"平台行 → 运行时值"，要过
-// adapter——而 `internal/persistence/store` **不得 import adapter**，所以迁移只能置标记，真正的
+// adapter——而 `internal/adapters/outbound/sqlite/store` **不得 import adapter**，所以迁移只能置标记，真正的
 // 回填由持注册表的编排层在启动时做。
 //
 // 消费面是**唯一的**（同 KeyReadModelsRebuild 的纪律）：`session.Plane.BackfillSessionModelRefs`。

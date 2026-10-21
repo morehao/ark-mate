@@ -23,7 +23,7 @@ func TestWorkspacePathUpdateKeepsIdentity(t *testing.T) {
 	root := backendRoot(t)
 
 	// ① 写面**只**改 path/updated_at，且函数体里零 `sessions` 写。
-	storeSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "workspace.go")))
+	storeSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "store", "workspace.go")))
 	relocate, ok := goFuncBody(storeSrc, "func (s *Store) RelocateWorkspace(")
 	if !ok {
 		t.Fatalf("`store/workspace.go` 里找不到 `RelocateWorkspace`（改名了？本守卫 fail-closed）")

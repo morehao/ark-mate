@@ -6,7 +6,7 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // ——— `mate doctor` 的 **读模型**体检与重建（v21–v23） ———

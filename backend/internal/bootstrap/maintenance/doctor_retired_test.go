@@ -11,7 +11,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/config"
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // ——— v18：`mate doctor` 的存量体检段（「不在册底座」的痕迹） ———

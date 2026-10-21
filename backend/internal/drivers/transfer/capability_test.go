@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/model"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 

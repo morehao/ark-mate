@@ -21,7 +21,7 @@
 两套编号在旧文档里并行用了很久，这是最容易踩的一处：
 
 - **决策号（v2…v27）**：本文件的条目编号，登记「口径与形态」的变化。
-- **数据模型版本号（v1…v27）**：`backend/internal/persistence/store` 的迁移版本（`migrate_vNN.go`），登记 schema 的变化。
+- **数据模型版本号（v1…v27）**：`backend/internal/adapters/outbound/sqlite/store` 的迁移版本（`migrate_vNN.go`），登记 schema 的变化。
 
 两者**大部分不同步**。已知的对应与空缺照实登记，不做补齐式改写：
 
@@ -258,9 +258,9 @@
 >    **底座透传过来的会话 id 平台侧一律加固定壳 `rt_`**（`rt_ses_…`/`rt_<uuid>`）：平台不改底座、
 >    只加壳，于是"平台 id 与底座 id 形状可分"这条判据**由平台单方面定义**（底座换实现、换前缀、
 >    发裸 uuid 都不影响）。包装 4 处 / 解包 3 处，调用点白名单由守卫②钉住。
-> ③ **表行结构体对齐参照工程**——`internal/persistence/model` 从 583 行的单文件拆成**一表一文件**，
+> ③ **表行结构体对齐参照工程**——`internal/adapters/outbound/sqlite/model` 从 583 行的单文件拆成**一表一文件**，
 >    结构体一律 `<域词>Entity` / `<域词>EntityList`、表名常量 `TableName<域词>` 随实体文件走
->    （不做汇总 `table.go`）；同时删掉 `internal/persistence/store` 的 15 个实体类型别名（一个表行类型只留一个名字）。
+>    （不做汇总 `table.go`）；同时删掉 `internal/adapters/outbound/sqlite/store` 的 15 个实体类型别名（一个表行类型只留一个名字）。
 > ④ **v15 是一次性例外，不构成先例**（用户原话：「v15 重建吧，但只有这一次，而不是一个标准 sop」）——
 >    这次走**破坏性重建**（7 张表 DDL 重建 + 元数据清理，`<db>.bak-v15-<ts>` 是回退窗口），
 >    **不写逐行数据迁移**。四条约束把它钉成例外：**不给内核加能力**（`migration` 结构体字段集合不变、

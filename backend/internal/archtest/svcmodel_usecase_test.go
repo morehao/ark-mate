@@ -109,8 +109,8 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	if !strings.Contains(declaredSrc, "type ModelStore interface {") {
 		t.Error("internal/app/model 里找不到 `type ModelStore interface {`：清单载体的窄端口必须在用例层声明（v3.1 P4）。")
 	}
-	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/persistence/store"`) {
-		t.Error("internal/app/model 又 import 了 `internal/persistence/store`：清单载体走 `ModelStore` 端口，" +
+	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"`) {
+		t.Error("internal/app/model 又 import 了 `internal/adapters/outbound/sqlite/store`：清单载体走 `ModelStore` 端口，" +
 			"`internal/app` 的层表 deny 已把这条边钉死。")
 	}
 

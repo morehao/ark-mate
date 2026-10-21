@@ -87,7 +87,7 @@ func TestEventsHasNoGlobalSequence(t *testing.T) {
 	// ③ 源码：`events_last_seq` 这个全局水位只许出现在 v21 迁移的那一条 DELETE 里。
 	//    其余任何地方（读或写）都是"还在按全局号序思考"。
 	allowed := map[string]bool{
-		filepath.Join("internal", "persistence", "store", "migrate_v21.go"): true,
+		filepath.Join("internal", "adapters", "outbound", "sqlite", "store", "migrate_v21.go"): true,
 	}
 	for _, f := range goFilesUnder(t, filepath.Join(root, "internal")) {
 		if strings.HasSuffix(f, "_test.go") || strings.Contains(f, string(filepath.Separator)+"archtest"+string(filepath.Separator)) {
@@ -107,7 +107,7 @@ func TestEventsHasNoGlobalSequence(t *testing.T) {
 				"写它则是在维护一个没人该读的数", rel)
 		}
 	}
-	v21 := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "migrate_v21.go")))
+	v21 := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "store", "migrate_v21.go")))
 	if !strings.Contains(v21, "DELETE FROM meta WHERE key = 'events_last_seq'") {
 		t.Fatal("`migrate_v21.go` 里找不到 `DELETE FROM meta WHERE key = 'events_last_seq'`：" +
 			"退场的水位必须被**删掉**（留着它，下一个读到的人会以为它还有效；fail-closed）")
@@ -115,15 +115,15 @@ func TestEventsHasNoGlobalSequence(t *testing.T) {
 
 	// ④ 源码：取号只能有一个入口（`dao/event_sequence.go` 的 NextSeq），且不得用跨会话的
 	//    `MAX(seq)+1` 取号——那是全局号序的另一种写法，单会话测试永远测不出来。
-	seqDao := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "dao", "event_sequence.go")))
+	seqDao := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "dao", "event_sequence.go")))
 	if !strings.Contains(seqDao, "ON CONFLICT(session_id) DO UPDATE SET seq = seq + 1") {
-		t.Fatal("`internal/persistence/dao/event_sequence.go` 里找不到 `ON CONFLICT(session_id) DO UPDATE SET seq = seq + 1`：" +
+		t.Fatal("`internal/adapters/outbound/sqlite/dao/event_sequence.go` 里找不到 `ON CONFLICT(session_id) DO UPDATE SET seq = seq + 1`：" +
 			"每会话取号必须是**单条原子的 upsert**（先 SELECT 再 UPDATE 会给并发写留下重号窗口；fail-closed）")
 	}
 	// 判据只在**触到 events 表**的文件上生效：`definition_revisions.seq` 的 `MAX(seq)` 是
 	// 另一张表的合法聚合（v3.3 把读面搬进 store 后它就在这个扫描面里），不能一并误杀。
 	maxSeqSQL := regexp.MustCompile(`(?is)SELECT\s+COALESCE\(\s*MAX\(seq\)`)
-	for _, f := range goFilesUnder(t, filepath.Join(root, "internal", "persistence", "store")) {
+	for _, f := range goFilesUnder(t, filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "store")) {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
 		}

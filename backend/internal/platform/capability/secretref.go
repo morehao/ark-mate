@@ -22,7 +22,7 @@ import (
 //	env:<ENV_NAME>            进程环境变量（容器/CI 注入；盘上什么都没有）
 //
 // 这一层只做**词法**校验（纯字符串，不碰磁盘/不碰密钥材料），解析成明文发生在注入前一刻，
-// 由 internal/manager 查库完成——`pkg/` 不认识 `internal/persistence/store`，"密钥从哪来"这件事
+// 由 internal/manager 查库完成——`pkg/` 不认识 `internal/adapters/outbound/sqlite/store`，"密钥从哪来"这件事
 // 留在应用层，能力数据面只负责"什么算合法的引用"。
 
 // 引用前缀。

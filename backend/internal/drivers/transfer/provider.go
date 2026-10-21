@@ -19,8 +19,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/platform/resource"
-	"github.com/morehao/ark-mate/internal/persistence/model"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/model"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/golib/glog"
 )
 

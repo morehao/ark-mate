@@ -9,7 +9,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // automationCmd 分发 `mate automation <动作>`（M6-7：定时任务定义的存量搬家，与 `mate agent` 同形）。

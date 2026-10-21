@@ -10,10 +10,10 @@
     - `internal/platform/{code,capability,automation,identity,resource,redact,object/*}`：错误码、能力装载、自动化解析、身份常量、跨层值对象等；`internal/config` 仍是独立的进程配置包。
     - 新增/搬迁包时只问一句：**它在层表的哪一层**（见下），不再问"进 pkg 还是 internal"。
   - **依赖方向单一**：
-    - 层带（L0–L9 终局表，见 [`../architecture.md`](../architecture.md) 的 §4.1）：`persistence/model` → 值/协议 → `domain` → 应用契约 → 用例环（`app/*`，含执行面 `app/run`）→ `persistence/{store,dao}` + `infra` → 机制与注册表与出站适配器 → `controller` → 装配与交付。**只能向内 import**；应用契约被 controller / service / CLI / WS 共用（同一份对外契约），`domain` 在它的里侧、不认识它。
+    - 层带（L0–L9 终局表，见 [`../architecture.md`](../architecture.md) 的 §4.1）：`adapters/outbound/sqlite/model` → 值/协议 → `domain` → 应用契约 → 用例环（`app/*`，含执行面 `app/run`）→ `adapters/outbound/sqlite/{store,dao}` + `infra` → 机制与注册表与出站适配器 → `controller` → 装配与交付。**只能向内 import**；应用契约被 controller / service / CLI / WS 共用（同一份对外契约），`domain` 在它的里侧、不认识它。
       C3 4.1 起这带的三处只改了**目录**：`core/*` → `platform/*`（纯值/规则/平台内核，L1 不变）、`dto/*` → `contract/*`（包名仍是 `dto<领域>`：`dto` 是本仓词汇里"应用契约"那个词，改名要动 31 个同时引用同名域包的文件、收益只有美观）。
     - **装配只能自上而下，不许反向**：`assembly` 构造用例与控制器，`router` 只收已构造的控制器（`router.Deps`），`app` 只消费 `assembly.BuildResult`。**`app`/`router`/`cli` 都不得引用用例环（`internal/app/*`）**，控制器也不得 import `domain`/`store`/`model`——判据见 `layers_v32_test.go`。
-    - 持久侧：`dbclient → persistence/dao → persistence/store`，`model` 被三者依赖且自身不依赖任何一层；`dao` 不得 import `store`（会成环），`model` 不得 import `dao`/`store`。
+    - 持久侧：`sqlite/db → sqlite/dao → sqlite/store`（都在 `adapters/outbound/sqlite/` 下），`model` 被三者依赖且自身不依赖任何一层；`dao` 不得 import `store`（会成环），`model` 不得 import `dao`/`store`。
     - **厚域与用例都走窄端口，不 import 门面**（P4）：`domain/session` 声明 `Store` 端口（`store_port.go`），`domain/interaction` 零 `store`；用例环同理声明 `model.ModelStore` / `session.EventReader` / `system.SourceFactsReader`。`*store.Store` 结构上满足它们、由装配根交下来；**交下来时必须现判 nil**——typed-nil 装进接口不是 nil，会让"内存模式 40501 / 只读镜像"那几条判据静默失效（`assembly/services.go` 的 `eventReader`/`sourceFactsReader`/`modelStore` 就是这条规矩的落点）。`model` 仍可被 `domain/session` 引用：它是纯列形状（无行为），把它也搬走只会换来 30 多个镜像结构。
   - **用例环（C3 4.2 起是 `internal/app/<领域>`；此前叫 `service/svc<领域>`）的三条硬规矩**（2026-10-16 定案；违反者由 `internal/archtest` 拦，别靠注释）：
 
@@ -33,7 +33,7 @@
     参数绑定、简单校验、调 service、回响应（**任何业务判断都不许写在 controller**）。
   - **2026-10-20：provider 侧并入 `model`（原 `svcmodel`）/ `ctrmodel` / `dtomodel`**——
     provider 与 model 同属 `domain/provider` 一个域（`models.provider_id` 是外键式的挂靠）。
-    **包名取 `model` 系**（用户面主名词是「设置 · 模型」），域仍是 `domain/provider`；注意 `internal/persistence/model`
+    **包名取 `model` 系**（用户面主名词是「设置 · 模型」），域仍是 `domain/provider`；注意 `internal/adapters/outbound/sqlite/model`
     是数据库实体包，不要和 `dtomodel`/`app/model`/`ctrmodel` 混为一谈。合并的是**目录**，不是接口：
     `ProviderSvc` / `Prober` / `DeclaredSvc` / `ModelSvc` / `Host` / `ModelStore` 仍按**面**切开，
     一个控制器只认自己那片。

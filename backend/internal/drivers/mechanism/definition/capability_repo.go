@@ -8,7 +8,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/platform/code"
 	defval "github.com/morehao/ark-mate/internal/platform/definition"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // ——— 能力定义写面的**载体**（M6-3） ———

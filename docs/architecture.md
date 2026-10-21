@@ -102,12 +102,12 @@ Electron 主进程（桌面态）
 
 | 层 | 谁 | 一句话 |
 | --- | --- | --- |
-| **L0** | `persistence/model` | 表行形状。零依赖，被所有持久侧与部分领域引用 |
+| **L0** | `adapters/outbound/sqlite/model` | 表行形状。零依赖，被所有持久侧与部分领域引用（C3 4.3 起归到出站适配器下） |
 | **L1** | `platform/{object/*,redact,identity,resource,credential,eventbus,code,automation,definition,capability}` `version` `runtime` `infra/{acp,mcp,logging}` | 值对象与协议库，**本带允许互链**（ACP 线协议、错误码折算、值类型复用） |
 | **L2** | `domain/*` | 业务规则与状态。**出边为零**：不 import dto、store、mechanism、infra |
 | **L3** | `contract/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份）。C3 4.1 起目录由 `dto/` 搬到 `contract/`，包名保留 `dto<领域>` |
 | **L4** | `app/<领域>`（含执行面 `app/run`） | 用例环（原 `service/svc<领域>`，C3 4.2 起包名去掉 `svc` 前缀）：接口 + 实现 + 构造函数；校验、错误码、响应装配。执行面 `sessionruntime` 同批搬成 `app/run`（编排归用例环，连接归出站适配器） |
-| **L5** | `persistence/{store,dao}` `infra/{credentials,dbclient,procreg,dsh}` | 持久与基础设施 |
+| **L5** | `adapters/outbound/sqlite/{store,dao,db}` `infra/{credentials,procreg,dsh}` | 持久与基础设施 |
 | **L6** | `drivers/{gateway,mechanism,registry,transfer}` `adapters/outbound/runtimeconn` `config` | 驱动侧：机制、注册表、连接面（C3 4.2 起搬到 `adapters/outbound/`）、存量定义导入导出编排 |
 | **L8** | `delivery/controller/ctr<领域>` `delivery/middleware` | 入站适配 |
 | **L9** | `delivery/router` `bootstrap/{assembly,app,cliops,cli,maintenance}` | 装配与交付 |
@@ -132,9 +132,9 @@ Electron 主进程（桌面态）
 
 ```
 internal/dbclient（句柄装配 + SQLite URL 拼装）
-      →  internal/persistence/dao（列词汇 + gormdao 泛型方法 + 机械原语；不承载业务读面）
-             →  internal/persistence/store（业务面：排序/筛选/聚合/状态迁移 + 跨表事务 + 读模型 API）
-internal/persistence/model（实体定义）被上面三者依赖，自身不依赖任何一层
+      →  internal/adapters/outbound/sqlite/dao（列词汇 + gormdao 泛型方法 + 机械原语；不承载业务读面）
+             →  internal/adapters/outbound/sqlite/store（业务面：排序/筛选/聚合/状态迁移 + 跨表事务 + 读模型 API）
+internal/adapters/outbound/sqlite/model（实体定义）被上面三者依赖，自身不依赖任何一层
 ```
 
 三条方向纪律：`dao` 不得 import `store`（成环）；`model` 不得 import `dao`/`store`；`store` 只做三件事——持有句柄、兜住**单聚合**事务、暴露读模型 API，单表读写一律经 `dao`。
@@ -160,7 +160,7 @@ internal/persistence/model（实体定义）被上面三者依赖，自身不依
 
 ### 5.2 表与实体
 
-17 张表，一表一文件（`internal/persistence/model/<域>.go`），结构体一律 `<域词>Entity` / `<域词>EntityList`，表名常量 `TableName<域词>` 随实体文件走：
+17 张表，一表一文件（`internal/adapters/outbound/sqlite/model/<域>.go`），结构体一律 `<域词>Entity` / `<域词>EntityList`，表名常量 `TableName<域词>` 随实体文件走：
 
 | 分组 | 表 |
 | --- | --- |
@@ -305,10 +305,12 @@ backend/
 │   ├── runtimeconn/          执行面（连接池 / 拨号 / 代际 / 诊断）
 │   ├── manager/              过渡期实现（逐域搬空后整体删除；只剩装配适配与权限/提问回调）
 │   ├── contract/dto<域>/     请求/响应 DTO（应用契约；两侧共用，自身不依赖应用层）
-│   ├── persistence/          持久层（实体 + 访问面 + 业务面，同一只管带）
-│   │   ├── model/            持久层实体（一表一文件 + enum/serializer/time）
-│   │   ├── dao/              列词汇（Cond）+ gormdao 泛型方法 + 机械原语
-│   │   └── store/            持久层业务面（排序/筛选/聚合 + 跨表事务 + 读模型 + 自管迁移）
+│   ├── adapters/outbound/    出站适配器（按外部系统分；C3 起持久层与其他 infra 逐步归到这里）
+│   │   └── sqlite/           持久层（同一只管带）
+│   │       ├── model/        表行形状（一表一文件 + enum/serializer/time）
+│   │       ├── dao/          列词汇（Cond）+ gormdao 泛型方法 + 机械原语
+│   │       ├── store/        持久层业务面（排序/筛选/聚合 + 跨表事务 + 读模型 + 自管迁移）
+│   │       └── db/           连接与方言装配（原 infra/dbclient）
 │   ├── eventbus/             进程内事件总线（每聚合位次 + 历史缓冲 + 回放）
 │   ├── middleware/           凭据与 Host/Origin 矩阵
 │   ├── credential/           凭据 → scope 只读表（rest / stream 两面）

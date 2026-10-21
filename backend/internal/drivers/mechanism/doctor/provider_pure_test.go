@@ -52,7 +52,7 @@ func TestProviderMismatchBenignOnly(t *testing.T) {
 
 // TestLegacySecretAnchor 旧机制遗留物的锚点：**ProviderDir 的父目录**优先（与搬运扫描同源）。
 //
-// 两个文件名不在这里断言（它们由 `internal/persistence/store` 的历史面拥有，见 v20 词规），这里只钉锚点。
+// 两个文件名不在这里断言（它们由 `internal/adapters/outbound/sqlite/store` 的历史面拥有，见 v20 词规），这里只钉锚点。
 func TestLegacySecretAnchor(t *testing.T) {
 	if got := LegacySecretAnchor("/h", "/h/providers"); got != "/h" {
 		t.Fatalf("应取 ProviderDir 的父目录：%q", got)

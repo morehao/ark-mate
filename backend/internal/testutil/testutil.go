@@ -24,7 +24,7 @@ import (
 	// 否则会以 "unknown LoggerType zap" 失败。与 ark-go-starter 的 pkg/testsetup 同一分工。
 	_ "github.com/morehao/golib/glog/driver/zap"
 
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

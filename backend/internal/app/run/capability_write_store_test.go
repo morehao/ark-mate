@@ -14,7 +14,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/platform/code"
 	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
-	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/model"
 	"github.com/morehao/golib/gerror"
 )
 

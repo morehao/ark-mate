@@ -99,7 +99,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	// （读模型 join 的是注册表与投影，`store` 出现在这里意味着有人把"数据面"又接了一遍）。
 	for _, m := range []string{
 		`"github.com/morehao/ark-mate/internal/app/run"`,
-		`"github.com/morehao/ark-mate/internal/persistence/store"`,
+		`"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"`,
 	} {
 		if strings.Contains(src, m) {
 			t.Errorf("internal/app/library 里出现 import %s：这一层的依赖是域/包事实"+

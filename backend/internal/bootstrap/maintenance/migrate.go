@@ -16,7 +16,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // migrate 把 transcript 目录（默认 ~/.ark-mate/transcripts）全量导入 SQLite（P1 迁移关键路径）：

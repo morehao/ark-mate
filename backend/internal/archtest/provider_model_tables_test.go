@@ -38,10 +38,10 @@ var forbiddenProviderModelColumns = []string{
 // 迁移改名、换写法、或把 DDL 挪走，都必须让守卫红，而不是静默变成空转。
 //
 // 判据取**静态源码**而不是"实建临时库读 PRAGMA"：后者要求迁移已能跑通，于是"迁移坏了"
-// 会把这条守卫一起弄红，两件事就分不开了（PRAGMA 那半由 `internal/persistence/store` 的
+// 会把这条守卫一起弄红，两件事就分不开了（PRAGMA 那半由 `internal/adapters/outbound/sqlite/store` 的
 // `TestCapabilityDefinitionColumnsFrozen` 在真库上覆盖）。
 func TestProviderModelTablesAreColumnsNotCarriers(t *testing.T) {
-	path := filepath.Join(backendRoot(t), "internal", "persistence", "store", "migrate.go")
+	path := filepath.Join(backendRoot(t), "internal", "adapters", "outbound", "sqlite", "store", "migrate.go")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（路径改了请同步本守卫）", path, err)
@@ -120,12 +120,12 @@ func createTableColumns(src, table string) ([]string, bool) {
 
 // assertEntityHasNoBodyColumn 断言某个实体结构体的字段里没有 `column:body`（fail-closed：找不到结构体即失败）。
 //
-// v15 起 `internal/persistence/model` 是**一表一文件**（`entity.go` 已拆掉），所以这里必须 glob 整个目录
+// v15 起 `internal/adapters/outbound/sqlite/model` 是**一表一文件**（`entity.go` 已拆掉），所以这里必须 glob 整个目录
 // 而不是钉死一个文件名——钉死会在拆文件后**解析不到即失败**（fail-closed 是好的那一侧），
 // 而"读不到就跳过"那种写法会让守卫静默空转，本函数刻意不给自己留那条路。
 func assertEntityHasNoBodyColumn(t *testing.T, structName string) {
 	t.Helper()
-	dir := filepath.Join(backendRoot(t), "internal", "persistence", "model")
+	dir := filepath.Join(backendRoot(t), "internal", "adapters", "outbound", "sqlite", "model")
 	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil || len(paths) == 0 {
 		t.Fatalf("扫不到 %s/*.go: %v（本守卫是 fail-closed，找不到实体源码即失败）", dir, err)

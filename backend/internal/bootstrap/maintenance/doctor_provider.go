@@ -16,7 +16,7 @@ import (
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // 本文件是 `mate doctor` 的 **provider（供应商凭据）与模型清单**那一段（K2）。

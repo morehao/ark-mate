@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )
 

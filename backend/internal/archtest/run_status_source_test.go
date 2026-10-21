@@ -42,7 +42,7 @@ func TestRunInProgressStatusIsSingleSourced(t *testing.T) {
 	}
 
 	// ② 读面过滤（v3.3 起查询口径在 store；判据跟着实现走）
-	daoRun := stripGoComments(read("internal/persistence/store/runs.go"))
+	daoRun := stripGoComments(read("internal/adapters/outbound/sqlite/store/runs.go"))
 	if !strings.Contains(daoRun, `"in_progress"`) {
 		t.Errorf("store/runs.go 的 RunningRuns 不含 in_progress——它必须与 OpenRun 写入的值同源")
 	}
@@ -51,7 +51,7 @@ func TestRunInProgressStatusIsSingleSourced(t *testing.T) {
 	}
 
 	// ③ 用量计数
-	usage := stripGoComments(read("internal/persistence/store/usage.go"))
+	usage := stripGoComments(read("internal/adapters/outbound/sqlite/store/usage.go"))
 	if !strings.Contains(usage, `case "in_progress":`) {
 		t.Errorf(`store/usage.go 的 Running 计数不再认 in_progress——进行中的轮会被算成"其它"`)
 	}
@@ -60,7 +60,7 @@ func TestRunInProgressStatusIsSingleSourced(t *testing.T) {
 	}
 
 	// ④ 迁移：存在、已登记、方向可读
-	migRaw, err := os.ReadFile(filepath.Join(root, "internal", "persistence", "store", "migrate_v30.go"))
+	migRaw, err := os.ReadFile(filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "store", "migrate_v30.go"))
 	if err != nil {
 		t.Fatalf("读 migrate_v30.go 失败: %v（v30 是历史数据归一的唯一落点）", err)
 	}
@@ -68,7 +68,7 @@ func TestRunInProgressStatusIsSingleSourced(t *testing.T) {
 	if !strings.Contains(mig, "'running'") || !strings.Contains(mig, "'in_progress'") {
 		t.Errorf("migrate_v30.go 的归一句子不可见——历史 running 行不会被迁到 in_progress")
 	}
-	if !strings.Contains(read("internal/persistence/store/migrate.go"), "migrationV30") {
+	if !strings.Contains(read("internal/adapters/outbound/sqlite/store/migrate.go"), "migrationV30") {
 		t.Errorf("migrate.go 没有登记 migrationV30——迁移写了但没人执行")
 	}
 }

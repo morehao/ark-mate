@@ -21,7 +21,7 @@ func TestUsageDayBucketsCarryClientZone(t *testing.T) {
 	frontend := filepath.Join(root, "..", "frontend")
 
 	// ① 存储层：分桶用 q.Location（UTC 固定写死 = 旧行为）。
-	storeSrc := stripGoComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "usage.go")))
+	storeSrc := stripGoComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "store", "usage.go")))
 	if !strings.Contains(storeSrc, "r.startedAt.In(loc)") ||
 		!strings.Contains(storeSrc, `Format("2006-01-02")`) {
 		t.Fatalf("store/usage.go 的 day 分桶没有按 Location 投影：`r.startedAt.In(loc)` + `Format(\"2006-01-02\")` 必须同时出现")

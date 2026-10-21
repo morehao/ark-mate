@@ -107,7 +107,7 @@ func importedByProductionPackage(t *testing.T, dir string) []string {
 }
 
 // TestTransportFreeLayersMustNotImportAppLayers 锁定传输无关的底层包不得反向依赖
-// 应用装配层：事件总线（internal/platform/eventbus）与持久层（internal/persistence/store）都被上层广泛
+// 应用装配层：事件总线（internal/platform/eventbus）与持久层（internal/adapters/outbound/sqlite/store）都被上层广泛
 // 引用，一旦它们 import manager/server 就会形成环，并把"可被任意宿主复用"的能力
 // 绑死在当前装配方式上。
 func TestTransportFreeLayersMustNotImportAppLayers(t *testing.T) {
@@ -117,7 +117,7 @@ func TestTransportFreeLayersMustNotImportAppLayers(t *testing.T) {
 		modulePrefix + "internal/server",
 		modulePrefix + "internal/bootstrap/app",
 	}
-	for _, rel := range []string{"internal/platform/eventbus", "internal/persistence/store"} {
+	for _, rel := range []string{"internal/platform/eventbus", "internal/adapters/outbound/sqlite/store"} {
 		dir := filepath.Join(root, filepath.FromSlash(rel))
 		for _, imp := range importedByPackage(t, dir) {
 			for _, bad := range forbidden {
@@ -203,15 +203,15 @@ func TestControllersMustNotImportImplementations(t *testing.T) {
 //
 // 三层的职责与允许的依赖方向（单向，不得回指）：
 //
-//	internal/infra/dbclient（句柄装配） ← internal/persistence/dao（单表数据访问） ← internal/persistence/store（跨表事务门面）
+//	internal/adapters/outbound/sqlite/db（句柄装配） ← internal/adapters/outbound/sqlite/dao（单表数据访问） ← internal/adapters/outbound/sqlite/store（跨表事务门面）
 //	                 ↑                    ↑
-//	          internal/persistence/model（实体与列约定，谁都依赖它，它不依赖任何一层）
+//	          internal/adapters/outbound/sqlite/model（实体与列约定，谁都依赖它，它不依赖任何一层）
 //
 // 具体边界：
-//   - internal/persistence/model 只描述"库长什么样"，不得 import dao/store/传输层——否则实体定义
+//   - internal/adapters/outbound/sqlite/model 只描述"库长什么样"，不得 import dao/store/传输层——否则实体定义
 //     会被数据访问或业务语义污染，schema 契约也就不再中立；
-//   - internal/persistence/dao 不得 import store（会与 store→dao 形成环）与传输层；
-//   - internal/persistence/store 是门面，可以 import dao/model/dbclient，但不得反向 import manager/app/router。
+//   - internal/adapters/outbound/sqlite/dao 不得 import store（会与 store→dao 形成环）与传输层；
+//   - internal/adapters/outbound/sqlite/store 是门面，可以 import dao/model/dbclient，但不得反向 import manager/app/router。
 func TestPersistenceLayersMustNotImportAppLayers(t *testing.T) {
 	root := backendRoot(t)
 	transport := []string{
@@ -233,19 +233,19 @@ func TestPersistenceLayersMustNotImportAppLayers(t *testing.T) {
 	}{
 		{
 			name:      "model 不得依赖数据访问与业务层",
-			dir:       filepath.Join(root, "internal", "persistence", "model"),
-			forbidden: append(append([]string{modulePrefix + "internal/persistence/store", modulePrefix + "internal/persistence/dao"}, app...), transport...),
+			dir:       filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "model"),
+			forbidden: append(append([]string{modulePrefix + "internal/adapters/outbound/sqlite/store", modulePrefix + "internal/adapters/outbound/sqlite/dao"}, app...), transport...),
 			reason:    "实体只描述库结构，必须保持中立",
 		},
 		{
 			name:      "dao 不得依赖 store 与上层",
-			dir:       filepath.Join(root, "internal", "persistence", "dao"),
-			forbidden: append(append([]string{modulePrefix + "internal/persistence/store"}, app...), transport...),
+			dir:       filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "dao"),
+			forbidden: append(append([]string{modulePrefix + "internal/adapters/outbound/sqlite/store"}, app...), transport...),
 			reason:    "store 已依赖 dao，反向依赖即成环",
 		},
 		{
 			name:      "store 不得依赖传输层与实现层",
-			dir:       filepath.Join(root, "internal", "persistence", "store"),
+			dir:       filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "store"),
 			forbidden: append(append([]string{}, app...), transport...),
 			reason:    "持久层不得感知业务实现与传输形态",
 		},

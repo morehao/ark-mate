@@ -91,7 +91,7 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 ### T4 · L3-3：审计表加哈希链
 
-- **现状**：`backend/internal/persistence/dao/definition_revision.go` 的每条 revision 独立，改过也看不出来。
+- **现状**：`backend/internal/adapters/outbound/sqlite/dao/definition_revision.go` 的每条 revision 独立，改过也看不出来。
 - **做什么**：加 `prev_hash` / `hash` 两列（写这段时最新迁移是 v30，所以下一版是 v31），写入时在
   **同一事务**里取该表最后一条的 `hash` 作为 `prev_hash`；创世条用固定常量。
   提供一个只读校验函数（遍历链，发现断点返回第一条坏行的 id）。

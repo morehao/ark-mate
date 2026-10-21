@@ -54,7 +54,7 @@ func V11FileBaseURL(d *ProviderFile) string {
 	return ""
 }
 
-// v11KnownEndpoints v11 的 `type` → 端点（**冻结副本**：`internal/persistence/store/migrate_v12.go`
+// v11KnownEndpoints v11 的 `type` → 端点（**冻结副本**：`internal/adapters/outbound/sqlite/store/migrate_v12.go`
 // 里有一份同源的，那是迁移用的历史快照，这里是导入（逃生门）用的；两处都描述历史，不复用活代码）。
 var v11KnownEndpoints = map[string]string{
 	"openai":     "https://api.openai.com/v1",

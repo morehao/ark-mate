@@ -41,7 +41,7 @@ import (
 	"github.com/morehao/ark-mate/internal/contract/dtosession"
 	"github.com/morehao/ark-mate/internal/contract/dtousage"
 	"github.com/morehao/ark-mate/internal/contract/dtoworkspace"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
 	appautomation "github.com/morehao/ark-mate/internal/app/automation"
 	appcapability "github.com/morehao/ark-mate/internal/app/capability"

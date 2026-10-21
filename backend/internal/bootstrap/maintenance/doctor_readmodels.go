@@ -10,7 +10,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/object/objmeta"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // 本文件是 `mate doctor` 的 **read-models（读模型）** 那一段（v21–v23）。

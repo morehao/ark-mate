@@ -87,13 +87,13 @@ func TestSqliteDriverStaysPureGo(t *testing.T) {
 		if !strings.Contains(gomod, marker) {
 			t.Fatalf("backend/go.mod 里找不到 %q：本守卫的正向前提没了（依赖被换成了别的\n"+
 				"SQLite 方案？）。换驱动是可评估的事，但必须同时改这条守卫与\n"+
-				"internal/infra/dbclient 的行为守卫，不能让它静默空转。", marker)
+				"internal/adapters/outbound/sqlite/db 的行为守卫，不能让它静默空转。", marker)
 		}
 	}
-	// 驱动确实是从 internal/infra/dbclient 空引入的（守卫的对象没被搬走）。
-	gormSrc := readFileOrFatal(t, filepath.Join(backend, "internal", "infra", "dbclient", "gorm.go"))
+	// 驱动确实是从 internal/adapters/outbound/sqlite/db 空引入的（守卫的对象没被搬走）。
+	gormSrc := readFileOrFatal(t, filepath.Join(backend, "internal", "adapters", "outbound", "sqlite", "db", "gorm.go"))
 	if !strings.Contains(gormSrc, `_ "github.com/morehao/golib/dbaccess/dbgorm/driver/sqlite"`) {
-		t.Fatalf("internal/infra/dbclient/gorm.go 里没有空引入 golib 的 SQLite driver：" +
+		t.Fatalf("internal/adapters/outbound/sqlite/db/gorm.go 里没有空引入 golib 的 SQLite driver：" +
 			"SQLite dialector 的落点变了，本守卫的对象就没了（fail-closed）")
 	}
 

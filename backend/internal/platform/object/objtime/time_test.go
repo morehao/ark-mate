@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/model"
 )
 
 // TestLayoutMatchesSchemaLayout 钉住「平台时间文本」与「列落库布局」是同一个串。

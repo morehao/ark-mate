@@ -12,13 +12,13 @@ import (
 	"time"
 
 	defn "github.com/morehao/ark-mate/internal/platform/definition"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 
 	pkgautomation "github.com/morehao/ark-mate/internal/platform/automation"
 	"github.com/morehao/ark-mate/internal/platform/capability"
 	domauto "github.com/morehao/ark-mate/internal/domain/automation"
 	arow "github.com/morehao/ark-mate/internal/domain/automation/row"
-	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/model"
 )
 
 // ——— 存量定时任务定义的一次性导入与导出（M6-7 下半） ———

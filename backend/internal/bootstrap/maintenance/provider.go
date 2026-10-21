@@ -12,7 +12,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // providerCmd 分发 `mate provider <动作>`（v11：供应商档案的存量搬家）。

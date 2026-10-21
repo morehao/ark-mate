@@ -15,7 +15,7 @@
 // 默认取最保守的 `next_process`；本表只声明**通道**与**默认生效时刻**。
 //
 // 「每个 kind 都必须有声明」由 `internal/archtest/delivery_matrix_test.go` 的
-// `TestDeliveryMatrixCoversKinds` 钉住：它从 `internal/persistence/model/enum.go` 的 `DefinitionKind*`
+// `TestDeliveryMatrixCoversKinds` 钉住：它从 `internal/adapters/outbound/sqlite/model/enum.go` 的 `DefinitionKind*`
 // 常量读出「平台拥有的资源种类」，逐个断言 `For` 查得到声明，并断言未知 kind 必须返回 false。
 // 它挡的是「新增一种资源却漏了交付通道声明」这种静默缺口——那种缺口的表现是界面照常显示
 // 「已保存」，而用户永远等不到它生效，且没有任何一处会报错。
@@ -100,7 +100,7 @@ const (
 
 // 资源 kind（本表覆盖的种类）。
 //
-// 与 `internal/persistence/model/enum.go` 的 `DefinitionKind*` 逐一对应（pkg 层不许 import internal，
+// 与 `internal/adapters/outbound/sqlite/model/enum.go` 的 `DefinitionKind*` 逐一对应（pkg 层不许 import internal，
 // 故这里只能重述取值，由 `TestDeliveryMatrixCoversKinds` 断言两边对齐）；`KindTool` 是
 // **派生**种类（随所属 MCP server 每轮重建，只在内存），不在 `DefinitionKind*` 里。
 const (
@@ -166,7 +166,7 @@ func For(kind string) (Delivery, bool) {
 
 // Kinds 本表声明过的资源种类（升序）。
 //
-// 它**不是**「平台拥有的资源种类」的事实源——那是 `internal/persistence/model/enum.go` 的 `DefinitionKind*`
+// 它**不是**「平台拥有的资源种类」的事实源——那是 `internal/adapters/outbound/sqlite/model/enum.go` 的 `DefinitionKind*`
 // （pkg 层不许 import internal，故不能在这里直接引用）。这里返回的是本表的覆盖面，
 // 由 `TestDeliveryMatrixCoversKinds` 负责断言两者对齐。
 func Kinds() []string {

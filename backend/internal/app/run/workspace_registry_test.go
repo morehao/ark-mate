@@ -15,12 +15,12 @@ import (
 
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/platform/object/objid"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // 本文件是**工作空间登记表**（v14）的领域层测试（manager/workspace_registry.go）。
 //
-// 与 `internal/persistence/store/workspace_test.go` 的分工：那边钉住跨表不变量（唯一索引、顺序对账、
+// 与 `internal/adapters/outbound/sqlite/store/workspace_test.go` 的分工：那边钉住跨表不变量（唯一索引、顺序对账、
 // 删登记不删会话），这边钉住领域语义——**校验与建会话同源**、**默认工作空间是历史会话的落点**、
 // **memory 是明确的不可写而不是内部错误**。后者在 store 层测不了（那里没有持久层模式的差别）。
 

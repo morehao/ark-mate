@@ -1,7 +1,7 @@
 // Package objtime 是平台内部的**时间文本约定**（纯值，零 I/O、零业务依赖）。
 //
 // 为什么需要它：领域读模型要把时间折成对外契约里的 ISO 文本，而库侧的时间布局住在
-// `internal/persistence/model`（L0，领域不得 import）。两处必须**逐字同一个布局**，
+// `internal/adapters/outbound/sqlite/model`（L0，领域不得 import）。两处必须**逐字同一个布局**，
 // 否则「库里存什么」与「接口回什么」会悄悄分叉——`time.RFC3339Nano` 与
 // `time.RFC3339` 在整秒上看起来一样，带小数秒时才不同，那种差异只会在某个客户端里炸。
 //

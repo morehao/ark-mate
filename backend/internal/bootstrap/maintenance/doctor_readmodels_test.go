@@ -11,7 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/object/objmeta"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // ——— `mate doctor` 的 read-models 段（v21–v23 的读模型漂移） ———

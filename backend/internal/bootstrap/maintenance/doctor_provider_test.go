@@ -14,8 +14,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/config"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
-	"github.com/morehao/ark-mate/internal/persistence/model"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/model"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // ——— K2：`mate doctor` 的 provider / 模型清单段（v20 凭据面） ———

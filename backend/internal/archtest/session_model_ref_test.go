@@ -42,7 +42,7 @@ var sessionModelIDForm = regexp.MustCompile(`^mdl_[0-9A-HJKMNP-TV-Z]{26}$`)
 // （0 处 = 判据失去对象；≥2 处 = 第二个真相源）。
 func TestSessionModelRefIsPlatformID(t *testing.T) {
 	internalDir := filepath.Join(backendRoot(t), "internal")
-	entityPath := filepath.Join(backendRoot(t), "internal", "persistence", "model", "session.go")
+	entityPath := filepath.Join(backendRoot(t), "internal", "adapters", "outbound", "sqlite", "model", "session.go")
 	entity := readStripped(t, entityPath)
 	if !strings.Contains(entity, "column:model_id") {
 		t.Fatalf("%s 里找不到 `column:model_id` 标签（fail-closed：实体面是这条守卫的一半）", entityPath)
@@ -111,7 +111,7 @@ func TestSessionModelRefIsPlatformID(t *testing.T) {
 // "没设置"长得一模一样——下一个读它的人会以为"这里存着会话用的是哪个供应商"，于是又把它填起来，
 // 于是同一件事就有了第二份事实源（模型行已经在说它挂在谁下面）。
 //
-// 白名单只放历史：`internal/persistence/store/migrate*.go`（v15 建表与 v16 的 RENAME 必须写当时那一版的名字，
+// 白名单只放历史：`internal/adapters/outbound/sqlite/store/migrate*.go`（v15 建表与 v16 的 RENAME 必须写当时那一版的名字，
 // v26 的 DROP 也必须写它）与停在旧版的测试夹具。
 func TestSessionsHasNoProviderIDColumn(t *testing.T) {
 	db := migratedSchemaDB(t)
@@ -132,8 +132,8 @@ func TestSessionsHasNoProviderIDColumn(t *testing.T) {
 	// 文本面：实体 / 会话写面 / DTO / 前端类型。
 	// v3.3 起会话的列映射在 store（DAO 只剩列词汇）：扫描面跟着实现走。
 	files := []string{
-		filepath.Join(backendRoot(t), "internal", "persistence", "model", "session.go"),
-		filepath.Join(backendRoot(t), "internal", "persistence", "store", "sessions.go"),
+		filepath.Join(backendRoot(t), "internal", "adapters", "outbound", "sqlite", "model", "session.go"),
+		filepath.Join(backendRoot(t), "internal", "adapters", "outbound", "sqlite", "store", "sessions.go"),
 		filepath.Join(backendRoot(t), "internal", "contract", "dtosession", "response.go"),
 		filepath.Join(backendRoot(t), "internal", "contract", "dtosession", "request.go"),
 		filepath.Join(frontendRoot(t), "packages", "types", "src", "session.ts"),

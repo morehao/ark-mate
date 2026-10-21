@@ -15,7 +15,7 @@ package definition
 import (
 	"sync"
 
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // Mechanism 定义机制实例：持有载体所需的库句柄与（memory 模式的）定义目录。

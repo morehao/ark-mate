@@ -76,8 +76,8 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 		t.Error("`internal/app/system` 里出现 `internal/app/run`：用例层通过**端口**取事实（ADR-6），" +
 			"它不认识过渡层。")
 	}
-	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/persistence/store"`) {
-		t.Error("`internal/app/system/export.go` 里出现 `internal/persistence/store`：用例本体只认 `Source` 端口，" +
+	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"`) {
+		t.Error("`internal/app/system/export.go` 里出现 `internal/adapters/outbound/sqlite/store`：用例本体只认 `Source` 端口，" +
 			"读库是适配器（`source_facts.go`）的事。")
 	}
 

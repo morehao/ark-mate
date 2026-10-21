@@ -2,15 +2,15 @@ package archtest
 
 // 本文件是 **DAO 不得承载业务读面 / 不得手工拼标识符** 的守卫（v3.3，2026-10-19）。
 //
-// v3.3 把持久层拆成两半：`internal/persistence/dao` 只留**列词汇**（`XxxCond`，条件用 `clause` 结构化表达）、
+// v3.3 把持久层拆成两半：`internal/adapters/outbound/sqlite/dao` 只留**列词汇**（`XxxCond`，条件用 `clause` 结构化表达）、
 // gormdao 的泛型方法与机械原语（KV / 取号 / CAS / 只追加插入）；**排序、筛选组合、分页、聚合**
-// 这些读面口径一律写在 `internal/persistence/store`（它用 `GetListByCond`/`CountByCond`/`UpdateMap` 拼）。
+// 这些读面口径一律写在 `internal/adapters/outbound/sqlite/store`（它用 `GetListByCond`/`CountByCond`/`UpdateMap` 拼）。
 //
 // 为什么需要机器判据：把 `ListByOrder`/`RunningRuns` 这类方法加回 DAO **不会让任何测试变红**
 // ——store 里通常还留着一条同样能跑的调用路径，两层各有一套顺序时，"用户看到的顺序"取决于
 // 调用方恰好走了哪条；而单表测试只验证"返回了行"，永远看不出两套口径已经分叉。
 //
-// 判据（fail-closed：`internal/persistence/dao` 扫不到 Go 文件即失败）：剥离注释后，DAO 源码不得出现
+// 判据（fail-closed：`internal/adapters/outbound/sqlite/dao` 扫不到 Go 文件即失败）：剥离注释后，DAO 源码不得出现
 // 下列任一项——读面组合/排序/分页/聚合的写法，以及 `tableName+` 的标识符拼接（条件必须交给
 // `clause.Column` 由方言引用，手工拼 `<table>.col = ?` 在保留字/带 schema 的表名上会静默出错）。
 // 唯一例外是 `meta.go` 的 `GetByCond(`：`meta` 是键值表，"按 key 取一行"就是它的原语，
@@ -29,7 +29,7 @@ import (
 // TestDaoKeepsNoBusinessReadFace 见文件头。
 func TestDaoKeepsNoBusinessReadFace(t *testing.T) {
 	root := backendRoot(t)
-	daoDir := filepath.Join(root, "internal", "persistence", "dao")
+	daoDir := filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "dao")
 	if !hasGoFiles(daoDir) {
 		t.Fatalf("%s 下没有 Go 文件：这条守卫失去检查对象（改名/搬迁了？）", daoDir)
 	}
@@ -67,13 +67,13 @@ func TestDaoKeepsNoBusinessReadFace(t *testing.T) {
 		src := stripGoComments(readFileOrFatal(t, path))
 		for _, rule := range rules {
 			if strings.Contains(src, rule.pattern) {
-				t.Errorf("`internal/persistence/dao/%s` 里出现了 %q：%s——DAO 只留列词汇与机械原语，"+
+				t.Errorf("`internal/adapters/outbound/sqlite/dao/%s` 里出现了 %q：%s——DAO 只留列词汇与机械原语，"+
 					"两层各有一套口径时，结果取决于调用方走了哪条路，而单表测试永远看不出来",
 					rel, rule.pattern, rule.reason)
 			}
 		}
 		if strings.Contains(src, "GetByCond(") && !condAllowed[rel] {
-			t.Errorf("`internal/persistence/dao/%s` 里出现了 `GetByCond(`：条件查询组合归 store"+
+			t.Errorf("`internal/adapters/outbound/sqlite/dao/%s` 里出现了 `GetByCond(`：条件查询组合归 store"+
 				"（唯一例外是 meta 的按键取一行）", rel)
 		}
 	}

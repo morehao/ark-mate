@@ -1,7 +1,7 @@
 // Package objusage 承载会话用量的共享值对象。
 //
 // 为什么单独成包：这个形状同时被三层使用——协议层（internal/infra/acp 从 ACP
-// session/usage_update 归一化出来）、持久层（internal/persistence/store 解析 runs.usage_json
+// session/usage_update 归一化出来）、持久层（internal/adapters/outbound/sqlite/store 解析 runs.usage_json
 // 并做聚合）、传输层（internal/contract/dtosession 直接作为响应载荷）。
 // 放在其中任何一层都会让另外两层反向依赖该层；放在 pkg/object 下则三方都只依赖值对象。
 package objusage

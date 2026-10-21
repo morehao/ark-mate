@@ -209,7 +209,7 @@ func TestServicePortsMustNotImportEachOther(t *testing.T) {
 // 那恰好是"行↔值映射在适配器里"的验证方式；把测试也禁掉只会逼夹具绕路，不会让内圈更干净。
 func TestInnerLayersUseNoTableRows(t *testing.T) {
 	root := backendRoot(t)
-	modelPkg := modulePrefix + "internal/persistence/model"
+	modelPkg := modulePrefix + "internal/adapters/outbound/sqlite/model"
 	innerRoots := []string{
 		filepath.Join("internal", "domain"),
 		filepath.Join("internal", "app"),

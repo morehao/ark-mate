@@ -26,7 +26,7 @@ import (
 	"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
 	"github.com/morehao/ark-mate/internal/infra/procreg"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/runtime"
 	apprun "github.com/morehao/ark-mate/internal/app/run"
 	"github.com/morehao/golib/glog"

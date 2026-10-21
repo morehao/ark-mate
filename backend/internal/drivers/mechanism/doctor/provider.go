@@ -13,8 +13,8 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/credential"
 
 	"github.com/morehao/ark-mate/internal/platform/capability"
-	"github.com/morehao/ark-mate/internal/persistence/model"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/model"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -385,7 +385,7 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 }
 
 // LegacySecretAnchor 旧密钥机制的锚点：**ProviderDir 的父目录**优先（与 v13–v19 的取法逐字同源，
-// `internal/persistence/store/legacy_vault.go` 的搬运也用同一个根），ProviderDir 为空时回落到 mate home。
+// `internal/adapters/outbound/sqlite/store/legacy_vault.go` 的搬运也用同一个根），ProviderDir 为空时回落到 mate home。
 //
 // 之所以不复用 `MATE_HOME`：用户把 `MATE_PROVIDERS` 指到别处时，历史实现是按"provider 目录的
 // 父目录"找主密钥的——遗留物与搬运都得跟着它，否则会去报一个当年根本没写过的路径。
@@ -399,7 +399,7 @@ func LegacySecretAnchor(home, providerDir string) string {
 // LegacySecretPaths 旧机制遗留物的两个位置：密文目录与主密钥文件（锚点为空 → 两个空串）。
 //
 // 导出它是为了让**诊断文案与用例构造共享同一份"它们在哪儿"**：医生报出的锚点、用例造出的
-// 遗留物、以及 `internal/persistence/store` 的搬运扫描的必须是同一批磁盘文件。三处各写一遍路径，
+// 遗留物、以及 `internal/adapters/outbound/sqlite/store` 的搬运扫描的必须是同一批磁盘文件。三处各写一遍路径，
 // 迟早会有一处漂移——而漂移的表现是"医生报没有遗留物，而用户明明看得见它们"。
 func LegacySecretPaths(anchor string) (dir, keyFile string) {
 	a := strings.TrimSpace(anchor)
@@ -411,7 +411,7 @@ func LegacySecretPaths(anchor string) (dir, keyFile string) {
 
 // legacySecretLeftovers 旧机制的遗留物事实（目录、主密钥文件、密文条数）。
 //
-// 两个文件名与 `internal/persistence/store/legacy_vault.go` 的常量**逐字一致**：那边的搬运是唯一读它们的地方，
+// 两个文件名与 `internal/adapters/outbound/sqlite/store/legacy_vault.go` 的常量**逐字一致**：那边的搬运是唯一读它们的地方，
 // 这里是唯一"报出来"的地方。两处字面量必须同源——它们指向的是同一批磁盘文件（该文件在 store 侧
 // 是白名单内的历史面，所以那一份定义不动；见 v20 词规）。
 func legacySecretLeftovers(anchor string) (dirExists, keyFileExists bool, count int) {

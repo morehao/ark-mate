@@ -57,7 +57,7 @@ var legacyAgentVocabulary = []string{
 // agentVocabularyWhitelistEntry 一条登记：**目录/文件前缀**或**路径无关锚**恰好一种，外加理由。
 //
 //   - `path`：相对仓库根的前缀（豁免整棵目录时用）。只给**落点稳定**的登记——本次分层重构不动
-//     `internal/persistence/store`、`internal/delivery/router`、`internal/config`、`internal/contract`、`internal/delivery/controller`。
+//     `internal/adapters/outbound/sqlite/store`、`internal/delivery/router`、`internal/config`、`internal/contract`、`internal/delivery/controller`。
 //   - `anchor`：**路径无关锚**——一个只出现在**唯一一个**被扫描文件里的符号；含它的那个文件被豁免。
 //     `manager` 包里这几个落点会搬家（设计 §3.4 文件去向表），所以它们只有锚、没有路径：
 //     符号跟着文件走，登记不会因为一次目录改名而悬空。
@@ -84,7 +84,7 @@ func (w agentVocabularyWhitelistEntry) key() string {
 // 白名单是"这次确实改不了/不该改"的登记簿，不是"懒得改"的垃圾桶。
 var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 	{
-		path: "backend/internal/persistence/store/migrate.go",
+		path: "backend/internal/adapters/outbound/sqlite/store/migrate.go",
 		reason: "迁移内核纪律：**追加迁移 = 在尾部新增，绝不回改历史**。所以这个文件里必然有两类旧词——" +
 			"① v1–v18 的历史 DDL（建 `agents` 表、`sessions.agent_id` 列、`definition_revisions` 的 " +
 			"`kind='agent'` 行）；② v19 自己的收口语句，它必须写**当时那一版**的名字才能撤掉它们：" +
@@ -93,27 +93,27 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 			"`ALTER TABLE sessions DROP COLUMN agent_id`",
 	},
 	{
-		path: "backend/internal/persistence/store/migrate_test.go",
+		path: "backend/internal/adapters/outbound/sqlite/store/migrate_test.go",
 		reason: "「停在 v19 之前」的历史迁移用例要用裸 SQL 造/读当时那一版的表与列" +
 			"（DAO 已不认 `agents` 表与 `agent_id` 列，读不到历史形态），再断言 v19 之后它们**真的没了**" +
 			"——改用新名字写夹具的话，这条用例就只是在验证“新形态能跑”，对迁移本身零覆盖。" +
 			"这是守卫⑤ 那条纪律的测试侧镜像（同 `readLegacyConversation`）",
 	},
 	{
-		path: "backend/internal/persistence/store/migrate_v19_test.go",
+		path: "backend/internal/adapters/outbound/sqlite/store/migrate_v19_test.go",
 		reason: "同上的 v19 专项：夹具必须停在 v18 的形态（`agents` 行 + `sessions.agent_id`），" +
 			"否则测不出 DROP COLUMN 与 DROP TABLE 的效果",
 	},
 	{
-		path:   "backend/internal/persistence/store/migrate_v15_test.go",
+		path:   "backend/internal/adapters/outbound/sqlite/store/migrate_v15_test.go",
 		reason: historicalAgentFixtureReason,
 	},
 	{
-		path:   "backend/internal/persistence/store/migrate_v16_test.go",
+		path:   "backend/internal/adapters/outbound/sqlite/store/migrate_v16_test.go",
 		reason: historicalAgentFixtureReason,
 	},
 	{
-		path:   "backend/internal/persistence/store/migrate_v17_test.go",
+		path:   "backend/internal/adapters/outbound/sqlite/store/migrate_v17_test.go",
 		reason: historicalAgentFixtureReason,
 	},
 	{
@@ -420,20 +420,20 @@ func TestNoAgentVocabulary(t *testing.T) {
 
 // sessionIdentityFiles 是落点**稳定**的那几处会话身份落点（相对 backend 根）。
 //
-// 本次分层重构不动 `internal/persistence/model`、`internal/persistence/dao`、`internal/persistence/store`（设计 §3.4），所以它们按路径
+// 本次分层重构不动 `internal/adapters/outbound/sqlite/model`、`internal/adapters/outbound/sqlite/dao`、`internal/adapters/outbound/sqlite/store`（设计 §3.4），所以它们按路径
 // 登记是安全的；会搬家的那一处（用量聚合）走 sessionIdentityUsageAnchor。
 //
-// 注意 `internal/persistence/store/migrate.go` 是 P0 补进来的：下面 TestSessionIdentityIsRuntimeOnly 里那条
+// 注意 `internal/adapters/outbound/sqlite/store/migrate.go` 是 P0 补进来的：下面 TestSessionIdentityIsRuntimeOnly 里那条
 // "必须真的有一条 `DROP COLUMN agent_id`"的分支此前**从未执行**过（那张表里一直没有它，
 // 分支是死代码——实测把期望值改成不存在的串，测试照样绿），而这条正向断言正是 migrate.go 被
 // 白名单放行之后唯一的补偿。删掉迁移里那行语句不会有任何别的测试变红。
 var sessionIdentityFiles = []string{
-	filepath.Join("internal", "persistence", "model", "session.go"),
+	filepath.Join("internal", "adapters", "outbound", "sqlite", "model", "session.go"),
 	// v3.3 起写面（upsert 的列集合）从 dao 搬到 store：判据必须跟着实现走，否则它会在
 	// 只剩列词汇的 dao/session.go 上静默空转。
-	filepath.Join("internal", "persistence", "store", "sessions.go"),
-	filepath.Join("internal", "persistence", "store", "usage.go"),
-	filepath.Join("internal", "persistence", "store", "migrate.go"),
+	filepath.Join("internal", "adapters", "outbound", "sqlite", "store", "sessions.go"),
+	filepath.Join("internal", "adapters", "outbound", "sqlite", "store", "usage.go"),
+	filepath.Join("internal", "adapters", "outbound", "sqlite", "store", "migrate.go"),
 }
 
 // sessionIdentityUsageAnchor 定位第四处落点「用量聚合」。
@@ -473,9 +473,9 @@ func TestSessionIdentityIsRuntimeOnly(t *testing.T) {
 	for _, rel := range sessionIdentityFiles {
 		kind := ""
 		switch rel {
-		case filepath.Join("internal", "persistence", "model", "session.go"):
+		case filepath.Join("internal", "adapters", "outbound", "sqlite", "model", "session.go"):
 			kind = "entity"
-		case filepath.Join("internal", "persistence", "store", "migrate.go"):
+		case filepath.Join("internal", "adapters", "outbound", "sqlite", "store", "migrate.go"):
 			kind = "migration"
 		}
 		targets = append(targets, identityTarget{rel: rel, path: filepath.Join(backend, rel), kind: kind})

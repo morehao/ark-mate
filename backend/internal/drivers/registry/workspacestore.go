@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/morehao/ark-mate/internal/domain/workspace"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // workspaceStore 把登记表载体适配成工作空间域声明的端口（`workspace.WorkspaceStore`）。

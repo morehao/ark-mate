@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/platform/code"
-	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/model"
 )
 
 // ——— D1 技能包导入的对外契约（两种载体各跑一遍） ———

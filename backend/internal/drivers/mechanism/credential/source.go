@@ -8,7 +8,7 @@ import (
 	credval "github.com/morehao/ark-mate/internal/platform/credential"
 
 	"github.com/morehao/ark-mate/internal/infra/credentials"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/golib/glog"
 )
 

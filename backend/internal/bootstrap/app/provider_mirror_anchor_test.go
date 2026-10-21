@@ -14,7 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/config"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
 
 // TestStartupResolvesStoredProviderKeyAndWritesMirror 装配**顺序**的回归守卫（v20 形态）。
@@ -34,7 +34,7 @@ import (
 //	镜像没写/权限放宽   → 面板保存的密钥在 `<MATE_HOME>/credentials.json` 里没有，或别人可读；
 //	同步报密钥问题      → 模型清单被当成空的下发**撤回**（比界面文案更坏的后果）。
 //
-// 旧密文的一次性搬运（以及"它在 EnableStore 之前"这条顺序）由 `internal/persistence/store` 侧的冻结工件
+// 旧密文的一次性搬运（以及"它在 EnableStore 之前"这条顺序）由 `internal/adapters/outbound/sqlite/store` 侧的冻结工件
 // 用例证明：那里有一份由 v19 实现产出的真实密文，且只有那个包能在白名单里写出旧机制的目录名。
 func TestStartupResolvesStoredProviderKeyAndWritesMirror(t *testing.T) {
 	gin.SetMode(gin.TestMode)

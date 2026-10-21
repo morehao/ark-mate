@@ -2,7 +2,7 @@
 //
 // 装配范式（v3.1 §3.2.1 规则 4）：本包只做**engine + 中间件 + 路由表**。
 //   - 控制器一律由 `internal/bootstrap/assembly` 构造后经 `Deps.Controllers` 交进来；
-//     本包**不构造用例、不 import `internal/app/*`、`internal/persistence/store`、`internal/domain`**；
+//     本包**不构造用例、不 import `internal/app/*`、`internal/adapters/outbound/sqlite/store`、`internal/domain`**；
 //   - 每个领域一个 routes_*.go，只注册自己的路由；
 //   - 鉴权等横切关注点经 internal/delivery/middleware 挂载。
 //

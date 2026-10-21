@@ -130,7 +130,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 		}
 	}
 	// 用例层不得 import 持久层或实现层（那正是两个端口的用途）。
-	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/persistence/store"`, `"github.com/morehao/ark-mate/internal/app/run"`} {
+	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"`, `"github.com/morehao/ark-mate/internal/app/run"`} {
 		if strings.Contains(probSrc+portSrc, banned) {
 			t.Errorf("`internal/app/model` 里出现 %s：用例层通过**端口**取事实（ADR-6），"+
 				"它不 import 持久层、也不 import `manager`。", banned)
@@ -181,7 +181,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 		}
 	}
 	// 档案用例层同样只经域平面取事实：不 import 持久层、也不 import `manager`。
-	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/persistence/store"`, `"github.com/morehao/ark-mate/internal/app/run"`} {
+	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"`, `"github.com/morehao/ark-mate/internal/app/run"`} {
 		if strings.Contains(archSrc, banned) {
 			t.Errorf("`internal/app/model/archive.go` 里出现 %s：档案用例拿的是域平面"+
 				"（`*provider.Plane`，装配点交下来），不 import 持久层、也不 import `manager`。", banned)

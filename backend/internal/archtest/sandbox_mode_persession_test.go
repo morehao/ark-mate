@@ -46,7 +46,7 @@ func TestNativeModeIsDeliveredPerSession(t *testing.T) {
 	}
 
 	// ② 模式必须落库 + 装载复原（"写了但不复原"是这一族最典型的静默失效）。
-	mig := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "migrate_v29.go")))
+	mig := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "sqlite", "store", "migrate_v29.go")))
 	if !strings.Contains(mig, "ADD COLUMN native_mode TEXT NOT NULL DEFAULT ''") {
 		t.Fatalf("v29 没有加 `native_mode` 列（或默认值不是空串）：空串 = 不注入，是刻意的平台缺省")
 	}

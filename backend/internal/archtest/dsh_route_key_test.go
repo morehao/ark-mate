@@ -263,7 +263,7 @@ func TestModelCapacityColumnsAreNullable(t *testing.T) {
 	}
 
 	// 实体 gorm 标签同步：带 `default:` 的标签会让 gorm 在插入时补值（编译期无感，运行期才看得出来）。
-	entity := readStripped(t, filepath.Join(backendRoot(t), "internal", "persistence", "model", "model.go"))
+	entity := readStripped(t, filepath.Join(backendRoot(t), "internal", "adapters", "outbound", "sqlite", "model", "model.go"))
 	for _, col := range []string{"max_input_tokens", "max_output_tokens"} {
 		needle := "column:" + col
 		idx := strings.Index(entity, needle)

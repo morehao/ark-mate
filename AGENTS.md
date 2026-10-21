@@ -30,7 +30,7 @@
 - **本机隔离**：开发、构建、验收、手工探针都不得读写用户自己安装与正在使用的底座（`~/.dsh` 等）；私有 `HOME` + `MATE_HOME`，目录建在工作区 `.dsh/tmp/` 下，收尾杀进程 + 清目录。细节见 [`docs/agents/isolation.md`](docs/agents/isolation.md)。
 - **词汇收口**：平台聚合概念只有一个词 `session`；`conversation` 零命中；底座侧原生会话 id 叫 `RuntimeSessionID`（`rt_` 壳），不得命名为 `session_id`。细节见 [`docs/agents/vocabulary.md`](docs/agents/vocabulary.md)。
 - **错误码三处同步**：`internal/platform/code`（事实源）↔ README「业务错误码」↔ 前端 `packages/types/src/response.ts` 的 `BizCode`；控制器错误出口一律带码（`code.FromError`），不得透传裸 `err`。见 [`docs/agents/error-codes.md`](docs/agents/error-codes.md)。
-- **改路由 / 事件 type / 数据 schema 必须同一次提交同步**：README 路由表（`TestReadmeRoutesMatchRouter` 双向比对）、`internal/domain/session/events.go`、`internal/persistence/model` 实体与 `internal/persistence/store` 迁移（三处手工一致）。
+- **改路由 / 事件 type / 数据 schema 必须同一次提交同步**：README 路由表（`TestReadmeRoutesMatchRouter` 双向比对）、`internal/domain/session/events.go`、`internal/adapters/outbound/sqlite/model` 实体与 `internal/adapters/outbound/sqlite/store` 迁移（三处手工一致）。
 - **交付形态**：桌面是主线（`make desktop/*`），浏览器入口（`make dev`）只是开发形态；底座由构建期固定（默认 `dsh`），用户面**没有**选择入口，被撤掉的选择键在各写面**显式拒绝**而不是静默丢弃。见 [`docs/agents/build-and-runtime.md`](docs/agents/build-and-runtime.md)。
 - **语言**：代码注释与 commit message 用简体中文；commit 用 conventional 前缀（`feat`/`fix`/`refactor` + 中文 scope）。
 

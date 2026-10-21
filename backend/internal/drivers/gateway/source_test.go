@@ -31,7 +31,7 @@ import (
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/platform/resource"
 	"github.com/morehao/ark-mate/internal/infra/mcp"
-	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 )

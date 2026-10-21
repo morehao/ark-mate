@@ -554,7 +554,7 @@ compose 路径把同名变量写进 `.env` 即可（`NODE_IMAGE`/`GO_IMAGE`/`RUN
 #     不是整洁偏好：迁移备份落 `<db 目录>/backups/`（v19 起的布局），它和诊断包一样按密钥面看待。
 # ◯ 必须一起收进备份清单的：库（含 `backups/` 里的迁移前快照）、`~/.ark-mate/credentials.json`
 #   · v20 起这些文件都含**明文密钥**，权限是硬要求：库与备份 0600、`backups/` 0700。
-#     平台在**打开库时**会自动收口到 0600（`internal/infra/dbclient` 的 tightenFilePerms，含首次建库），
+#     平台在**打开库时**会自动收口到 0600（`internal/adapters/outbound/sqlite/db` 的 tightenFilePerms，含首次建库），
 #     收口过会打一条 WARN；`mate doctor` 的敏感文件清单把库与备份一并按密钥面报出（宽权限 = fail）。
 #     拷贝/同步整个数据目录 = 连密钥一起带走，所以权限收口之后还要注意**同步目标**的权限
 #     凭据镜像、`<ProviderDir>/providers.json` 与它的 providers.json.bak-v11（v11 的迁移前快照）、

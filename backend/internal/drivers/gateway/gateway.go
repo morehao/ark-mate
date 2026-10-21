@@ -12,7 +12,7 @@
 //  3. **调用期策略**：每次 `tools/call` 按**当下**定义重查 —— 停用/删除一个 server 或一个
 //     工具后调用立即失败，不等换代际、不等下一轮（"收窄即时生效"，P-4）。
 //
-// 分层：本包落 `internal/`（要读 `internal/persistence/store` 与凭据面），协议面在 `pkg/mcp`
+// 分层：本包落 `internal/`（要读 `internal/adapters/outbound/sqlite/store` 与凭据面），协议面在 `pkg/mcp`
 // 的**服务端方向**（`mcp.Serve`）——C8 的 `pkg/` 不得 import `internal/` 是那条边界的由来。
 //
 // **C10（stdout 纯度）**：本包只往 `out` 写 JSON-RPC 帧，一切诊断走 Logger（网关的 Logger
