@@ -1,4 +1,4 @@
-// Package cliops 承载 `mate` 子命令的**实现**（doctor / migrate / capability / provider /
+// Package ops 承载 `mate` 子命令的**实现**（doctor / migrate / capability / provider /
 // automation / mcp / demo / config / transcripts / serve）。
 //
 // 为什么它不是 `internal/adapters/inbound/cli/cmd`：v3.1 §3.2.1 要求命令树（`cli`）不得 import store/domain/mechanism；

@@ -16,7 +16,7 @@ import (
 // 调用方保证 session 已存在（sessions 表 FK）。
 // payload 序列化为 JSON 文本（map/结构体均可——结构体载荷此前不入 transcript，见设计文档修复清单 #10）。
 //
-// id 是行身份（`evt_…`），**由调用方铸造**（v17：铸号点唯一在 `manager.publishRaw`；迁移回填在
+// id 是行身份（`evt_…`），**由调用方铸造**（v17：铸号点唯一在 `session.Plane.Publish`；迁移回填在
 // store 的 v17 步骤里）。store 不自己铸——否则「DB 行的 id」与「同一事件在 transcript/帧上的 id」
 // 会是两支值，"身份随数据流动"当场失效。
 func (s *Store) AppendEvent(ctx context.Context, id, sessionID, typ string, payload any) (int64, error) {
@@ -44,7 +44,7 @@ func (s *Store) AppendEventJSON(ctx context.Context, id, sessionID, typ, payload
 // appendEventTx 在**已有事务**内追加事件（位次分配 → 落库 → 抬会话水位），
 // 供单条追加与批量导入共用，保证两条路径的事务边界与水位语义完全一致。
 //
-// 注入的 id 原样落库（不校验、不重铸）：live 路径的 id 由 `manager.publishRaw` 铸，
+// 注入的 id 原样落库（不校验、不重铸）：live 路径的 id 由 `session.Plane.Publish` 铸，
 // 导入路径的 id 来自 transcript 行且**已在 ImportBatch 里过形状与判重**。
 //
 // **位次是会话内的**（v21）：取号器是 `event_sequence(session_id, seq)`，所以第一条事件的

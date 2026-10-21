@@ -64,7 +64,7 @@ var migrationV22 = migration{
 		     AND (i2.created_at < inputs.created_at OR (i2.created_at = inputs.created_at AND i2.id <= inputs.id))) - 1`,
 		`CREATE UNIQUE INDEX idx_inputs_session_seq ON inputs(session_id, seq)`,
 
-		// 3. 读模型重建标记（M1 起由 `manager.rebuildStaleReadModels` 消费）。
+		// 3. 读模型重建标记（M1 起由 `session.Plane` 的 `rebuildStaleReadModels` 消费；原 `manager.*`）。
 		//
 		//    M1 只重建 `messages`；本步之后 `runs` 也进了重建面（进行中的轮次在库里**有行**了，
 		//    它同样能从 events 重建），所以标记抬到 22。

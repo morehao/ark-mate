@@ -8,7 +8,7 @@ const (
 	TableNameSession = "sessions"
 )
 
-// SessionEntity 是 sessions 表的一行（DB 权威元数据；字段对齐 manager.SessionRec + transcript header）。
+// SessionEntity 是 sessions 表的一行（DB 权威元数据；字段对齐 `session.SessionRec` + transcript header）。
 type SessionEntity struct {
 	ID string `gorm:"column:id;primaryKey"`
 	// Cwd 会话工作空间（canonical 绝对路径；= 底座 ACP session 的 cwd，

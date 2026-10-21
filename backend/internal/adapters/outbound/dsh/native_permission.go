@@ -69,7 +69,7 @@ func (NativePermission) Env(mode, def string, tools map[string]string) ([]string
 	}
 }
 
-// 策略动作取值（与 `internal/manager.Permission*` 逐字相同；理由同上面的模式常量）。
+// 策略动作取值（与 `interaction.PermissionAsk`/`PermissionDeny` 逐字相同；理由同上面的模式常量）。
 const (
 	permissionAsk  = "ask"
 	permissionDeny = "deny"

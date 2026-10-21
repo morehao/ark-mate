@@ -1,6 +1,6 @@
-// Package cli 承载 `mate` 的**命令树**：子命令名、帮助文本、参数分发与退出码。
+// Package cmd 承载 `mate` 的**命令树**：子命令名、帮助文本、参数分发与退出码。
 //
-// 依赖边界（v3.1 §3.2.1）：本包只 import `app` / `assembly` / `version` / `config` / `cliops`；
+// 依赖边界（v3.1 §3.2.1）：本包只 import `app` / `assembly` / `version` / `config` / `cli/ops`；
 // 不 import store/domain/mechanism/service/controller——命令实现全部下沉到 `internal/adapters/inbound/cli/ops`。
 //
 // `cmd/mate` 只 import 本包（`os.Exit(cli.Run(os.Args[1:]))`）。

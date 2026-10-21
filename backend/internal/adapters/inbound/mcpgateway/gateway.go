@@ -1,4 +1,4 @@
-// Package gateway 是「远程 MCP 收进平台侧 stdio 网关」的**网关侧**实现（计划 M7）。
+// Package mcpgateway 是「远程 MCP 收进平台侧 stdio 网关」的**网关侧**实现（计划 M7）。
 //
 // 形态（计划的 P-1/P-2，先认清否则会照抄错模板）：底座按 ACP 规范在
 // `session/new` 里收到一条 **stdio** MCP 条目，条目指向平台自己的可执行文件

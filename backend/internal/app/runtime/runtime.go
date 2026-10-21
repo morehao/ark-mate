@@ -1,4 +1,4 @@
-// Package svcruntime 定义**底座身份与诊断**面的服务端口（ADR-2：provider/模型目录已拆出）。
+// Package runtime 定义**底座身份与诊断**面的服务端口（ADR-2：provider/模型目录已拆出）。
 //
 // **没有 runtime 概览**：底座由构建期固定（internal/runtime/build.go），用户面不存在
 // "列出有哪些底座"的读面（`GET /runtimes` 已随 agent 候选面一并下线）。

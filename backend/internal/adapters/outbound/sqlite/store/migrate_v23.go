@@ -54,7 +54,7 @@ var migrationV23 = migration{
 		`DROP INDEX idx_messages_session`,
 		`CREATE INDEX idx_messages_session ON messages(session_id, seq_lo)`,
 
-		// 5. 读模型重建标记（M1 起由 `manager.rebuildStaleReadModels` 消费）：整会话重铺 messages
+		// 5. 读模型重建标记（M1 起由 `session.Plane` 的 `rebuildStaleReadModels` 消费；原 `manager.*`）：整会话重铺 messages
 		//    之后 `ordinal` 才真正稠密（本步的回填只对"当时库里那些行"成立）。
 		`UPDATE meta SET value = '23' WHERE key = 'read_models_rebuild'`,
 		`INSERT INTO meta (key, value) SELECT 'read_models_rebuild', '23'

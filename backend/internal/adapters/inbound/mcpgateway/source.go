@@ -142,8 +142,8 @@ func resolveCredCwd(explicit string, getenv func(string) string) (cwd, source st
 
 // MateSource 从平台持久层取数并代理远程 MCP 的 `Source` 实现。
 //
-// **不经过 manager**（P5a）：网关要的是领域平面与库句柄，而不是会话/编排。两边各自
-// `manager.NewService` 一遍时，能力装载与凭据分层会静默分叉（"核心能注入的服务器，
+// **不经过执行面**（P5a）：网关要的是领域平面与库句柄，而不是会话/编排。两边各自
+// 构造一遍服务时，能力装载与凭据分层会静默分叉（"核心能注入的服务器，
 // 网关注入不了"），所以统一从装配根构造的领域平面取同一套装配事实（C3 4.5 后半：容器在
 // `bootstrap/assembly/planes`，网关经 `Planes` 端口注入，不 import 它）。
 type MateSource struct {
@@ -165,7 +165,7 @@ type MateSource struct {
 	mu         sync.Mutex
 	lastReload time.Time
 	// secretWarned 逐 server 只报一次"密钥引用解析不了"：这条信息随每次取数重新计算，
-	// 每次都报会把日志刷成噪声（同 manager.defWarnOnce 的理由）。
+	// 每次都报会把日志刷成噪声（同 `definitions` 面 `warnOnce` 的理由）。
 	secretWarned map[string]bool
 }
 

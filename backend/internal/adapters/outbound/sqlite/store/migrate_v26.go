@@ -15,7 +15,7 @@ package store
 //
 // ②为什么只能在应用层做：回填要把"平台行 → 运行时值"过一遍 adapter，而 `internal/adapters/outbound/sqlite/store`
 // **不得 import adapter**（守卫 `TestInternalDoesNotImportRuntimeAdapters`）——所以迁移只**置标记**，
-// 真正的回填由持注册表的 `manager.backfillSessionModelRefs` 在启动时做（同 `meta.read_models_rebuild`
+// 真正的回填由持注册表的 `session.Plane.BackfillSessionModelRefs` 在启动时做（同 `meta.read_models_rebuild`
 // 的形状：算不出来就不打勾，下次启动再来）。
 //
 // **本步一个字都不改 `sessions.model_id`**：迁移里做不了对账，而"改了但没改对"比"没改"更糟

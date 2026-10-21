@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// SettingsStore 是 manager.WorkspaceRootsStore 的 infra 实现：让面板把工作区根白名单写回
+// SettingsStore 是 `domain/workspace` 的 `WorkspaceRootsStore` 的 infra 实现：让面板把工作区根白名单写回
 // `<配置目录>/config.json`，并把「该键被更高优先级来源锁定」这一事实显式报给上层。
 //
 // 为什么不另开一份 settings.json：白名单只应有一个事实源。真正的风险也不是"写哪个文件"，

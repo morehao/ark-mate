@@ -1,4 +1,4 @@
-// Package svcsystem 定义**系统面**的服务端口（ADR-2：由 svcexport 并入）。
+// Package system 定义**系统面**的服务端口（ADR-2：由 svcexport 并入）。
 //
 // 它的判据是"跨会话的、与某一个会话无关的动作"：导出把多个会话的 transcript 与事件事实源
 // 汇成一份交付件，读的是**全库**而不是某条记录。

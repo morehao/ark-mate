@@ -1,4 +1,4 @@
-// Package svcautomation 定义 automation（定时任务）面的服务端口。
+// Package automation 定义 automation（定时任务）面的服务端口。
 //
 // 实现方是本包的 `Service`（控制器在构造函数里用 `New(plane)` 造）；`manager` 只负责把
 // 域平面接上，不再实现这个端口。

@@ -1,7 +1,8 @@
 // Package dtolibrary 定义能力 Library 的统一读模型（M2-4）。
 //
 // Library **不拥有任何数据**（选型 E1）：它是一次请求内的聚合视图，事实源分别是
-// `internal/platform/capability` 的注册表、`manager.agents` 与（后续）`manager.automation`。
+// `internal/platform/capability` 的注册表、`internal/runtime` 的注册表（底座声明的能力），
+// 以及 `domain/skill` / `domain/mcp` 的投影与密钥面（依赖清单见 `app/library` 的文件头）。
 package dtolibrary
 
 import "github.com/morehao/ark-mate/internal/platform/object/objdelivery"

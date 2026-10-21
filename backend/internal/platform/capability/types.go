@@ -52,7 +52,7 @@ type Skill struct {
 	Scope string `json:"scope,omitempty"`
 	// Enabled 启停开关（§13.4 S4）：nil = 未声明（默认启用）；显式 false = 禁用。
 	// 用指针是为了「未声明」与「显式关掉」在磁盘上可区分——写回文件时只动它一个键，
-	// 其余字段（含未知键）原样保留（见 manager.SetSkillEnabled）。
+	// 其余字段（含未知键）原样保留（见本包 `Registry.SetSkillEnabled`）。
 	Enabled *bool `json:"enabled,omitempty"`
 	// Warnings 装载期正文扫描的非 critical 告警（§13.2 S1；critical 已在 RegisterSkill 拒载）。
 	// 派生字段：不落盘、不从 JSON 读（`json:"-"`）——磁盘上的定义是事实源，扫描结果每次装载重算，

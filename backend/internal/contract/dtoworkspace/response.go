@@ -70,7 +70,7 @@ type WorkspaceRecentResp struct {
 	Sessions int `json:"sessions"`
 }
 
-// WorkspaceFilesResp 目录内容清单（只读的"看资料"面，与浏览面分工见 manager.ListWorkspaceFiles）。
+// WorkspaceFilesResp 目录内容清单（只读的"看资料"面，与浏览面分工见 `domain/workspace` 的 `Plane.ListWorkspaceFiles`）。
 type WorkspaceFilesResp struct {
 	// Path 规范化后的目录绝对路径。
 	Path string `json:"path"`

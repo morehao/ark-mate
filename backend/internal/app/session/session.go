@@ -1,4 +1,4 @@
-// Package svcsession 定义会话面的服务端口：会话元数据、轮次执行、
+// Package session 定义会话面的服务端口：会话元数据、轮次执行、
 // 事件历史、挂起权限与结构化提问（elicitation）的决策入口。
 package session
 

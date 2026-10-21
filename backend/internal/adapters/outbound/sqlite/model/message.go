@@ -12,7 +12,7 @@ const (
 //
 // "白名单"= 只有 `session.user_message` 与 `session.message` 两类事件成行（其余事件留在
 // events 里，由事件读面渲染时间线）；"空正文不产行"。整会话可从 events 重铺
-// （`manager.RebuildSessionReadModels`），`ordinal` 是重铺后的连续序号。
+// （`session.Plane.RebuildSessionReadModels`），`ordinal` 是重铺后的连续序号。
 type MessageEntity struct {
 	ID        string `gorm:"column:id;primaryKey"`
 	SessionID string `gorm:"column:session_id;not null"`

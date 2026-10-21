@@ -46,7 +46,7 @@ var nameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 // 底座之间宽容度不同（历史实测：某底座递归扫 `**/SKILL.md` 且只验 name 的存在性；dsh 不宽容），
 // **取最严者（即交集）**便是这条判据。
 // `nameRE` 仍是 MCP/tool 的规则（那些名字不喂给底座的 skill 校验，且历史上更宽）；
-// 路径安全那道判据在 `manager.validDefinitionID`，与此处正交。
+// 路径安全那道判据在 `platform/definition.ValidDefinitionID`，与此处正交。
 var skillIDRE = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 // NewRegistry 构造空注册表。

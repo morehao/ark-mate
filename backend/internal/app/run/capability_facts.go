@@ -55,11 +55,14 @@ func (s *Service) projectedSkillsForFingerprint(runtimeID string, _ *session.Cap
 	return out
 }
 
-// ——— 过渡期转发/别名（纪律 1：一行 + TODO；P4b 删） ———
+// ——— 读面事实装配（P3c 的收尾形态） ———
 //
-// 选定的值对象（`session.CapabilitySelection`）连同这几个自由函数在 P3c 落 `domain/session`；本包还有
-// ~40 处调用点（建会话的请求归一、代际裁决、读面回显、以及一大批集成用例），所以这一批保留
-// 同名转发，调用点零改动。
+// 这几个函数只做一件事：把注册表 / 定义 / 网关条目折成域侧事实值（`session.InjectedMcp`、
+// `runtime.Spec`）。它们只有"事实怎么取"的知识，没有判决——谁能注入、指纹怎么算都在
+// `domain/session`。
+//
+// 这批函数在 P3c 曾以"过渡期同名转发"的形式留下（原注释写着 P4b 删）。收口后它们已经是
+// **唯一实现**、没有转发目标可删，那段"临时"口径不成立，故改成本段的形态说明。
 
 // regSpec 取已注册 runtime 的 Spec（ok=false = 未注册）。
 //

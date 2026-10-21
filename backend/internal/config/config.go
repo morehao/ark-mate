@@ -94,14 +94,14 @@ type Config struct {
 	AutomationTick time.Duration
 	// WorkspaceDir 代建工作空间的根目录（MATE_WORKSPACE_DIR 覆盖，默认 ~/.ark-mate/workspaces）。
 	// 建会话未指定 cwd 时在 <dir>/<会话id>/ 下建临时工作空间。**空 = 关闭代建**：
-	// 此时未指定 cwd 直接报 workspace_required（绝不回落 serve 进程目录，见 manager.ResolveWorkspace）。
+	// 此时未指定 cwd 直接报 workspace_required（绝不回落 serve 进程目录，见 `workspace.ResolveWorkspace`）。
 	WorkspaceDir string
 	// WorkspaceRoots 允许作为工作空间的根白名单（MATE_WORKSPACE_ROOTS，逗号分隔绝对路径；
 	// 默认空 = 不限制，保持本机单操作员零配置）。非空时**显式 cwd 与目录浏览都收在根内**：
 	// 浏览不能越过根向上。用途：容器化/对外提供服务时，目录浏览不再等价于"暴露整个 rootfs 结构"。
 	//
 	// 这里只存**显式配置**的值：平台代建根（WorkspaceDir）由 manager 在运行期隐式并进生效名单，
-	// 因此"代建根不在白名单里"不再是配置错误（见 manager.SetWorkspacePolicy）。
+	// 因此"代建根不在白名单里"不再是配置错误（见 `workspace.Plane.SetWorkspacePolicy`）。
 	WorkspaceRoots []string
 	// ProjectionDirs 投影根的部署级覆盖（`MATE_PROJECTION_DIRS=runtime:kind=dir[,...]`，
 	// config.json 可写 JSON 数组）。键是 `<runtime>:<kind>`，值是**绝对目录**。
@@ -285,7 +285,7 @@ type RemoteRuntime struct {
 	Headers map[string]string `json:"headers"`
 }
 
-// 默认超时（与 manager.DefaultPermissionTimeout/DefaultElicitationTimeout 对齐）。
+// 默认超时（与 `interaction.DefaultPermissionTimeout`/`DefaultElicitationTimeout` 对齐）。
 const (
 	DefaultPermissionTimeout  = 30 * time.Minute
 	DefaultElicitationTimeout = 30 * time.Minute

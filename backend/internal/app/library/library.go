@@ -1,4 +1,4 @@
-// Package svclibrary 定义能力 Library 的读模型端口（M2-4）。
+// Package library 定义能力 Library 的读模型端口（M2-4）。
 //
 // 独立成包而不是挂进 svccapability：Library 是**跨领域**的聚合视图（skill/mcp/agent/tool），
 // 挂在任何单一领域端口上都说不通。它不拥有数据、也不写任何东西——只有一个查询方法。

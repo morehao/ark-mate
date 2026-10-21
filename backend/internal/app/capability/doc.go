@@ -1,4 +1,4 @@
-// Package svccapability 承载能力数据面的**用例**：Skill / MCP server / Tool 目录的读模型。
+// Package capability 承载能力数据面的**用例**：Skill / MCP server / Tool 目录的读模型。
 //
 // # 为什么这里没有 `CapabilitySvc`
 //

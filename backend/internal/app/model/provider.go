@@ -1,4 +1,4 @@
-// Package svcmodel 承载**供应商域**的用例层：供应商档案、连接自检、平台模型清单写面，
+// Package model 承载**供应商域**的用例层：供应商档案、连接自检、平台模型清单写面，
 // 以及模型读清单 / 运行时目录 / 同步面的过渡端口。
 //
 // 2026-10-20：原 `svcprovider` 并入本包——provider 与 model 同属 `domain/provider` 一个域

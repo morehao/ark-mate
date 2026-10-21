@@ -1,8 +1,8 @@
-// Package svccommandpolicy 是命令门禁（A2）的**用例层**：读规则、校验、落盘、立即生效。
+// Package commandpolicy 是命令门禁（A2）的**用例层**：读规则、校验、落盘、立即生效。
 //
 // 它拥有：参数校验（交给域的 `LoadCommandRules`）、错误码出口、响应装配、原子落盘。
 // 它**不拥有**：裁决本身（域：`interaction.GateCommand`）与"规则怎么被用"（执行面：
-// `manager.Orchestrator`）——后者由装配点交一个 `Apply` 回调，本包不 import manager。
+// `run.Orchestrator`，`app/run`）——后者由装配点交一个 `Apply` 回调，本包不 import 执行面。
 package commandpolicy
 
 import (
