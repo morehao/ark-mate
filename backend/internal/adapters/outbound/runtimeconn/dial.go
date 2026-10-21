@@ -2,12 +2,13 @@ package runtimeconn
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/platform/code"
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
+	"github.com/morehao/ark-mate/internal/domain/interaction"
+	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -75,15 +76,16 @@ func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt session.DialOpt
 		return nil, err
 	}
 
-	// hooks 是域**不透明转发**过来的回调集合；在这里断言成协议形态（唯一一处）。
-	hooks, ok := opt.Hooks.(acp.ClientOptions)
+	// hooks 是域**不透明转发**过来的平台回调集合（具体形态 = `interaction.Callbacks`）：
+	// 在这里断言并翻译成协议回调，全仓唯一一处。
+	callbacks, ok := opt.Hooks.(interaction.Callbacks)
 	if !ok {
 		return nil, code.NewError(code.ClassConnection, "dial_hooks_invalid",
-			"拨号回调集合的类型不符（装配侧交下来的不是执行面的 hooks 形态）", nil)
+			"拨号回调集合的类型不符（装配侧交下来的不是平台交互回调形态）", nil)
 	}
-	// 事件出口在域侧是**平台值**（`session.DialOptions.OnEvent` 收 `event.Signal`），翻译在
-	// 这一层（`events.go`）；三个权限/提问回调仍经 `Hooks` 不透明转发（待下一刀随 `interaction` 收）。
-	// 装配侧没交出口 = 不订阅：保留适配器原有的空实现。
+	hooks := clientOptionsOf(callbacks)
+	// 事件出口在域侧也是**平台值**（`session.DialOptions.OnEvent` 收 `event.Signal`），翻译在
+	// 这一层（`events.go`）。装配侧没交出口 = 不订阅：保留适配器原有的空实现。
 	if opt.OnEvent != nil {
 		hooks.OnEvent = func(ev acp.Event) { opt.OnEvent(acpSignal(ev)) }
 	}

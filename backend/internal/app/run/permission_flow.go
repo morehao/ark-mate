@@ -15,7 +15,6 @@ import (
 	"github.com/morehao/golib/glog"
 
 	"github.com/morehao/ark-mate/internal/platform/object/objid"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 )
 
 // requestPermission 处理一次 ACP 权限请求（在 SDK 派发的 goroutine 中阻塞等待用户决策）：
@@ -24,7 +23,7 @@ import (
 //     PermissionsResolve（allow/reject × once/always）；超时或 ctx 取消自动拒绝。
 //
 // 事件发布（publish）注入的给 interaction.PermissionManager，避免 manager 依赖 bus。
-func (o *Orchestrator) requestPermission(ctx context.Context, req acp.PermissionRequest) interaction.PermissionDecision {
+func (o *Orchestrator) requestPermission(ctx context.Context, req interaction.PermissionRequest) interaction.PermissionDecision {
 	// P3 双 id：权限请求只携带原生 session id → 解析为平台会话 uuid 键控（记忆/挂起/事件
 	// 均以平台会话 id 为键，与 sessions/events/permission_memories 一致）。
 	sid := o.handles.ResolveProvider(req.SessionID)
@@ -36,12 +35,12 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acp.Permission
 	//
 	// 权限请求只带 toolCallId（dsh 的 wire 形状），命令行在同 id 的 tool_call 更新里——按 id 回查
 	// （`tool_calls.go`）。查不到就只用请求自带的字段：门禁取不到 command 时不再参与。
-	tool := toolCallOfACP(req.ToolCall)
+	tool := req.ToolCall
 	if cached, ok := o.tools.Get(req.ToolCall.ID); ok {
 		// 工具记忆存的也是领域形状（`event.ToolCall`）：两者同型，直接用更新的那一份。
 		tool = cached
 	}
-	if d, rule, decided := o.commandGateDecision(tool, permissionOptionsToDomain(req.Options)); decided {
+	if d, rule, decided := o.commandGateDecision(tool, req.Options); decided {
 		if d.Allowed {
 			glog.Infow(ctx, "命令门禁放行了一次工具调用", "session", sid, "call", tool.ID, "rule", rule)
 		} else {
@@ -53,7 +52,7 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acp.Permission
 	// v19 起没有 per-agent 默认权限策略这一层（agent 面删除）：裁决只剩**会话级记忆**
 	// （用户"始终允许"过的）与会话级征询。`session.permission_policy` 事件常量仍冻结在
 	// events.go（对外契约），但已经没有生产者。
-	dreq := permissionRequestToDomain(req)
+	dreq := req
 	if d, ok := o.perm.AutoDecision(sid, dreq); ok {
 		return d
 	}
@@ -146,7 +145,7 @@ func (o *Orchestrator) RevokeMemory(sessionID, title, kind string) (bool, error)
 //   - inferred_inflight：`_meta` 未给，但连接上恰有一个在途 run → 按它归属；
 //   - ambiguous：两者都不成立（空闲 / 会话外 request-scope / 多会话并发）→ 空 id，调用方按取消
 //     回应并留痕，不猜测（猜错会把提问卡投到别的会话上，比不投更坏）。
-func (o *Orchestrator) resolveElicitationScope(conn session.Conn, req acp.ElicitationRequest) (sessionID, scopeSource, ambiguousNote string) {
+func (o *Orchestrator) resolveElicitationScope(conn session.Conn, req interaction.ElicitationRequest) (sessionID, scopeSource, ambiguousNote string) {
 	// D-4（v15 顺手修的既有缺陷）：`req.SessionID` 来自 ACP `_meta`，那是**底座的会话 id**，
 	// 不是平台的会话 id。v15 之前两者同形（有些底座就发 `ses_…`），于是"把提问卡挂到一个
 	// 不存在的会话上"在任何测试与人工核对里都看不出来；加了 `rt_` 壳之后形状不同了，**不查就错**。
@@ -207,7 +206,7 @@ func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string
 //     并阻塞等待 ElicitationResolve（accept/decline/cancel）；超时或 ctx 取消自动按取消处理。
 //
 // 事件发布（publish）注入给 interaction.ElicitationManager，避免 manager 依赖 bus。
-func (o *Orchestrator) requestElicitation(ctx context.Context, req acp.ElicitationRequest) interaction.ElicitationOutcome {
+func (o *Orchestrator) requestElicitation(ctx context.Context, req interaction.ElicitationRequest) interaction.ElicitationOutcome {
 	sid := req.SessionID // 断点恢复别名归一
 	publish := func(it interaction.ElicitationItem) {
 		o.runner.RunStatusFor(sid, session.RunStatusWaitingForUser, session.RunStatusOpts{WaitingFor: "elicitation"})
@@ -226,7 +225,7 @@ func (o *Orchestrator) requestElicitation(ctx context.Context, req acp.Elicitati
 		}
 		o.svc.sessionPlane.Publish(session.BusElicitationRequest, sid, payload)
 	}
-	return o.elic.RegisterAndWait(ctx, sid, elicitationRequestToDomain(req), publish)
+	return o.elic.RegisterAndWait(ctx, sid, req, publish)
 }
 
 // PendingElicitations 列出某会话的挂起结构化提问（attach/snapshot 供 UI 重建）。

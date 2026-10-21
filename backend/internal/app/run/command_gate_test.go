@@ -9,7 +9,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/session/event"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 )
 
 func gateRules(t *testing.T) []interaction.PrefixRule {
@@ -92,10 +91,10 @@ func TestCommandGatePrecedesPermissionMemory(t *testing.T) {
 	// 记忆里先放一条"这类工具始终允许"。
 	o.perm.Remember("ses_1", tool, "allow", "allow-always")
 
-	req := acp.PermissionRequest{
+	req := interaction.PermissionRequest{
 		SessionID: "ses_1",
-		ToolCall:  acp.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute"}, // 请求只带 id/标题
-		Options:   acpGateOptions(),
+		ToolCall:  event.ToolCall{ID: "c1", Title: "bash", Kind: "execute"}, // 请求只带 id/标题
+		Options:   gateOptions(),
 	}
 	d := o.requestPermission(context.Background(), req)
 	if !d.Rejected || d.Allowed {
@@ -108,8 +107,8 @@ func TestToolCallMemoryMergesAndForgets(t *testing.T) {
 	o := &Orchestrator{tools: session.NewToolCallMemory()}
 	o.tools.Remember(event.ToolCall{ID: "c1", Title: "bash", Kind: "execute",
 		Input: map[string]any{"command": "ls"}})
-	// 后续 update 只带 status/正文：不得把 Input 抹掉。
-	o.tools.Remember(event.ToolCall{ID: "c1", Status: acp.ToolStatusInProgress, ContentText: "out"})
+	// 后续 update 只带 status/正文：不得把 Input 抹掉。"in_progress" 不是归一终态，底座原样透传。
+	o.tools.Remember(event.ToolCall{ID: "c1", Status: "in_progress", ContentText: "out"})
 
 	got, ok := o.tools.Get("c1")
 	if !ok || got.Title != "bash" || got.ContentText != "out" {
@@ -162,14 +161,4 @@ func TestToolCallMemoryConcurrent(t *testing.T) {
 	if _, ok := o.tools.Get(""); ok {
 		t.Fatal("空 id 永远不该命中缓存")
 	}
-}
-
-// acpGateOptions 是同一份选项夹具的**协议形状**：`requestPermission` 的入参仍是 ACP 请求
-// （翻译在函数内部做），所以这条用例需要两份同值的选项。
-func acpGateOptions() []acp.PermissionOption {
-	out := make([]acp.PermissionOption, 0, 4)
-	for _, o := range gateOptions() {
-		out = append(out, acp.PermissionOption{OptionID: o.OptionID, Name: o.Name, Kind: o.Kind})
-	}
-	return out
 }

@@ -3,8 +3,8 @@ package run
 import (
 	"context"
 
+	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -25,20 +25,19 @@ import (
 // acquire 取（或拨）一条 runtime 连接：活着复用，断开则作废重拨；并挂断连监听。
 //
 // 取键 / 复用 / 代际准入 / spawn+握手 / 登记已随 P4a 第五十七刀进 `runtimeconn.Pool.Dial`；
-// 本函数只交两样编排侧事实：三个 ACP 回调与凭据检查。
+// 本函数只交两样编排侧事实：交互回调（平台形状）与凭据检查。
 func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (session.Conn, error) {
-	reqPerm := func(ctx context.Context, req acp.PermissionRequest) acp.PermissionDecision {
+	reqPerm := func(ctx context.Context, req interaction.PermissionRequest) interaction.PermissionDecision {
 		if o.allowAll {
-			return acp.PermissionDecision{Allowed: true}
+			return interaction.PermissionDecision{Allowed: true}
 		}
-		// 领域决策 → 回给底座的协议结果（翻译在 `interaction_bridge.go`，调用点不内联）。
-		return permissionDecisionToACP(o.requestPermission(ctx, req))
+		return o.requestPermission(ctx, req)
 	}
 	var conn session.Conn // Dial 成功后回填；hook 都在连接读循环里被调用，晚于 Dial 返回
-	reqElic := func(ctx context.Context, req acp.ElicitationRequest) acp.ElicitationOutcome {
+	reqElic := func(ctx context.Context, req interaction.ElicitationRequest) interaction.ElicitationOutcome {
 		if o.allowAll {
 			// 调试/冒烟（--allow-all）：不征询，直接按空内容接受（agent 自行处理空内容）。
-			return acp.ElicitationOutcome{Action: "accept"}
+			return interaction.ElicitationOutcome{Action: "accept"}
 		}
 		sid, source, note := o.resolveElicitationScope(conn, req)
 		if sid == "" {
@@ -48,10 +47,10 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 			// 让「提问卡为什么没出现」可查，而不是无痕消失。
 			glog.Warnw(ctx, "elicitation: 无法归属会话，按取消处理", "scope_source", source, "note", note)
 			o.svc.runtimePlane.NoteScopeAmbiguous(note)
-			return acp.ElicitationOutcome{Action: "cancel"}
+			return interaction.ElicitationOutcome{Action: "cancel"}
 		}
 		req.SessionID, req.ScopeSource = sid, source
-		return elicitationOutcomeToACP(o.requestElicitation(ctx, req))
+		return o.requestElicitation(ctx, req)
 	}
 	// elicitation/complete（URL 模式收尾通知）：agent 告知提问已在 agent 侧完成 → 宿主按 ACP 侧
 	// elicitationId 收敛挂起项。归属用「同连接的唯一在途 run」校验（可判定时）；不可判定时不阻断
@@ -63,12 +62,12 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 		Fingerprint:      fingerprint,
 		NativeMode:       nativeMode,
 		CheckCredentials: o.svc.CredentialProblem,
-		// 事件出口是平台形状（翻译在适配器）；权限/提问仍是协议回调，经不透明 `Hooks` 转发。
+		// 事件出口与交互回调都是**平台形状**（翻译在适配器）：本层不认识协议类型。
 		OnEvent: o.eventSink(spec.ID),
-		Hooks: acp.ClientOptions{
-			RequestPermission:   reqPerm,
-			CreateElicitation:   reqElic,
-			CompleteElicitation: completeElic,
+		Hooks: interaction.Callbacks{
+			OnPermission:          reqPerm,
+			OnElicitation:         reqElic,
+			OnElicitationComplete: completeElic,
 		},
 	})
 	if err != nil {

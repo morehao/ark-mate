@@ -51,22 +51,21 @@ type DialOptions struct {
 	CheckCredentials func(ctx context.Context) error
 	// OnEvent 运行期事件出口，**平台信号形状**（`event.Signal`）。
 	//
-	// 为什么不放进下面那个不透明 `Hooks`（C2 事件载荷那一刀的落点）：事件翻译（`acp.Event` →
-	// `event.Signal`）是**适配器**的活，它的产物是平台值；把产物类型化成域内值，用例层因此不必
-	// import 协议库就能消费事件。权限/提问两个回调还在 `Hooks` 里（它们的载荷同样含协议形状，
-	// 待下一刀随 `interaction` 值面一起收）。
+	// 为什么不放进下面那个不透明 `Hooks`：事件翻译（`acp.Event` → `event.Signal`）是**适配器**的活，
+	// 它的产物是平台值；把产物类型化成域内值，用例层因此不必 import 协议库就能消费事件。
 	//
 	// nil = 不订阅（测试桩）。
 	OnEvent func(event.Signal)
-	// Hooks 拨号时挂给执行面的回调集合（权限 / 提问 / 提问完成）。
+	// Hooks 拨号时挂给执行面的**交互回调集合**，具体形态 = `interaction.Callbacks`
+	// （权限 / 结构化提问 / 提问完成；三个回调的入参与回执都是领域值）。
 	//
-	// **不透明载荷**：这三个回调的载荷类型属于 `interaction` 值面，而领域之间
-	// 不许互相 import（`TestDomainPackagesMustNotImportEachOther`）。域对它一个字节都不读，
-	// 只负责把装配侧交下来的那份原样转给适配器——适配器按自己的约定断言（类型不符即报
-	// `dial_hooks_invalid`，不静默忽略：静默忽略的表现是"权限永远超时"）。
+	// **为什么这里仍是 `any`**：形态定义在 `domain/interaction`，而领域之间不许互相 import
+	// （`TestDomainPackagesMustNotImportEachOther`）。会话域对它一个字节都不读，只负责把装配侧
+	// 交下来的那份原样转给适配器——适配器按 `interaction.Callbacks` 断言
+	// （类型不符即报 `dial_hooks_invalid`，不静默忽略：静默忽略的表现是"权限永远超时"）。
 	//
-	// 这是 C2 收尾刻意留下的一处 `any`：换成具体类型要么让会话域 import 另一个域的值包，
-	// 要么把值面下沉到共享内核（C3 的 `platform`）——两条都比"一次不透明转发"贵。
+	// 换成具体类型要么让会话域 import 另一个域的值包，要么把值面下沉到共享内核
+	// （C3 的 `platform`）——两条都比"一次不透明转发"贵。
 	Hooks any
 }
 

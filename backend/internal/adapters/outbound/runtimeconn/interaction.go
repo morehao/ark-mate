@@ -1,38 +1,49 @@
-package run
+package runtimeconn
 
 import (
+	"context"
+
 	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
-	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/domain/session/event"
+	"github.com/morehao/ark-mate/internal/domain/interaction"
 )
 
-// toolCallOfACP 把 ACP 的工具调用详情搬成领域值。
-//
-// 为什么这里还有一份：**事件面**那份已随翻译搬进适配器（`runtimeconn/events.go` 的
-// `acpToolCallSignal`），而权限征询里的 `toolCall` 仍是协议形状——本文件整体还在协议边界上
-// （下一刀随 `interaction` 值面收）。两份的字段清单必须一致；收口后这一份删除。
-func toolCallOfACP(d acp.ToolCallInfo) event.ToolCall {
-	return event.ToolCall{
-		ID: d.ID, Title: d.Title, Status: d.Status, Kind: d.Kind,
-		Input: d.Input, Output: d.Output, ContentText: d.ContentText,
-	}
-}
-
-// ——— 权限/结构化提问的**翻译边界**（C2 第四刀）———
+// ——— 权限/结构化提问的翻译（C2 第四刀从 `app/run` 搬来）———
 //
 // `domain/interaction` 只认领域值（`PermissionRequest`/`PermissionDecision`/`ElicitationRequest`/
-// `ElicitationOutcome`）；ACP 的请求与决策在这一侧翻译，与事件出口（`event_bridge.go`）同一条纪律：
+// `ElicitationOutcome`）；ACP 的请求与决策在这一侧翻译，与事件出口（`events.go`）同一条纪律：
 // **逐字段搬运、不改语义**。
 //
 // 决策回执的两半必须分开看：「用户点了什么」是领域值，「回给底座什么」是协议结果
 // （选项可能被兜底成第一个、或整条降级成取消）。两个方向的翻译都在这里，别在调用点内联。
+
+// clientOptionsOf 把装配侧交下来的**平台形状**回调集合折成 ACP 的拨号回调。
+//
+// `hooks.OnEvent` 由调用方单独挂（事件那一刀已收口，走 `DialOptions.OnEvent`）；这里只处理
+// 权限/提问三件。`callbacks` 的零值安全：nil 回调保留 ACP 的零值实现，不 panic。
+func clientOptionsOf(cb interaction.Callbacks) acp.ClientOptions {
+	var out acp.ClientOptions
+	if cb.OnPermission != nil {
+		out.RequestPermission = func(ctx context.Context, req acp.PermissionRequest) acp.PermissionDecision {
+			return permissionDecisionToACP(cb.OnPermission(ctx, permissionRequestToDomain(req)))
+		}
+	}
+	if cb.OnElicitation != nil {
+		out.CreateElicitation = func(ctx context.Context, req acp.ElicitationRequest) acp.ElicitationOutcome {
+			return elicitationOutcomeToACP(cb.OnElicitation(ctx, elicitationRequestToDomain(req)))
+		}
+	}
+	if cb.OnElicitationComplete != nil {
+		out.CompleteElicitation = cb.OnElicitationComplete
+	}
+	return out
+}
 
 // permissionRequestToDomain 把 ACP 的权限征询翻成领域值。
 func permissionRequestToDomain(req acp.PermissionRequest) interaction.PermissionRequest {
 	return interaction.PermissionRequest{
 		SessionID: req.SessionID,
 		RequestID: req.RequestID,
-		ToolCall:  toolCallOfACP(req.ToolCall),
+		ToolCall:  acpToolCallSignal(req.ToolCall),
 		Options:   permissionOptionsToDomain(req.Options),
 	}
 }
