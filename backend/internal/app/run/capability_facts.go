@@ -3,7 +3,6 @@ package run
 import (
 	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -27,7 +26,7 @@ func (s *Service) CapabilityFactsFor(runtimeID string, sel *session.CapabilitySe
 	facts.Direct = injectedMcpsOfServers(plan.Direct)
 	facts.Remote = injectedMcpsOfServers(plan.Remote)
 	if plan.Gateway != nil {
-		gw := injectedMcpOfACP(*plan.Gateway)
+		gw := injectedMcpOfRuntime(*plan.Gateway)
 		facts.Gateway = &gw
 	}
 	return facts
@@ -95,8 +94,10 @@ func injectedMcpOfServer(m capability.McpServer) session.InjectedMcp {
 	}
 }
 
-// injectedMcpOfACP 网关条目（`acp.McpServer`）→ 域侧事实。
-func injectedMcpOfACP(m acp.McpServer) session.InjectedMcp {
+// injectedMcpOfRuntime 网关条目（`runtime.McpServer`）→ 域侧事实。
+//
+// 网关条目天生无密钥（只有 scope），所以没有 `SecretRefs` 那一列——与直连条目同一份事实形状。
+func injectedMcpOfRuntime(m runtime.McpServer) session.InjectedMcp {
 	return session.InjectedMcp{
 		ID: m.Name, Transport: m.Transport,
 		Command: m.Command, Args: append([]string(nil), m.Args...), URL: m.URL,

@@ -302,6 +302,9 @@ var protocolFreePackages = []string{
 	modulePrefix + "internal/app/commandpolicy",
 	modulePrefix + "internal/app/library",
 	modulePrefix + "internal/app/model",
+	// C2 尾巴：执行面的协议形状已全部退到适配器（事件/权限/提问回调收平台值，MCP 网关条目
+	// 直接用 `runtime.McpServer`），`app/run` 对 `acp` 零 import。
+	modulePrefix + "internal/app/run",
 	modulePrefix + "internal/app/runtime",
 	modulePrefix + "internal/app/search",
 	modulePrefix + "internal/app/session",
@@ -313,12 +316,12 @@ var protocolFreePackages = []string{
 
 // protocolFreeExempt 落在"全量收口"前缀之下、但**刻意不在协议无关面内**的包（必须写理由）。
 //
-// 目前只有执行面：`app/run` 拨号时把 `acp.ClientOptions` 作为不透明 hooks 交给适配器，
-// 事件/权限/提问的载荷类型仍是协议形状——那一层随 C3 4.5（`adapters/outbound/acp`）平台化。
-// 双向判：豁免的包**必须仍然 import acp**（收干净了就该从表里删掉），且必须真实存在。
-var protocolFreeExempt = map[string]string{
-	modulePrefix + "internal/app/run": "执行面：拨号 hooks 的载荷类型仍是协议形状，随 C3 4.5 平台化",
-}
+// **当前为空**：C2 尾巴（事件 / 权限提问 / MCP 网关条目三刀）把执行面也收干净了，最后一条豁免
+// 已挪进 `protocolFreePackages`。保留这张表是因为下一条豁免大概率还会出现（比如某个新适配面
+// 需要临时协议值），形式判据仍有效：
+// 双向判——豁免的包**必须仍然 import acp**（收干净了就该从表里删掉），且必须真实存在，
+// 且理由不能为空。
+var protocolFreeExempt = map[string]string{}
 
 // TestProtocolFreePackagesStayClean 已收口的内圈包不得再 import 协议库。
 //

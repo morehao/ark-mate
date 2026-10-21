@@ -30,7 +30,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/platform/capability"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -42,7 +41,7 @@ type mcpInjectionPlan struct {
 	// **远程端点 runtime** 例外——它们没有网关条目，仍按自己声明的传输直连注入（见 planMcpInjection）。
 	Direct []capability.McpServer
 	// Gateway 平台网关条目（nil = 不需要）。远程 server **全部**由它代连，故这里只有一条。
-	Gateway *acp.McpServer
+	Gateway *runtime.McpServer
 	// Remote 交由网关代连的远程定义——**只用于日志/诊断**：它绝不进指纹，也不进条目。
 	// （任何"把远程定义塞进指纹"的改动都会让"加一个远程 server 换代际"回潮，是 M7 的头号禁忌。）
 	Remote []capability.McpServer
@@ -129,17 +128,17 @@ func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySele
 // 它的 cwd 是底座给的（会话工作区），而 `<cwd>/.env` 那一层的语义是"用户启动 `mate serve` 的
 // 目录"——没有这个变量，同一个引用会在两个进程里解析出不同的值。放 `Env` 而不是 `Args`：`Args`
 // 整体进指纹（换个目录启动就换代际），而 `Env` 只把**键名**入指纹（键名恒定、值不入）。
-func (s *Service) gatewayEntry(runtimeID string, sel *session.CapabilitySelection) (acp.McpServer, error) {
+func (s *Service) gatewayEntry(runtimeID string, sel *session.CapabilitySelection) (runtime.McpServer, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return acp.McpServer{}, fmt.Errorf("取自身可执行文件路径失败：%w", err)
+		return runtime.McpServer{}, fmt.Errorf("取自身可执行文件路径失败：%w", err)
 	}
 	scope := mcp.GatewayScope{RuntimeID: runtimeID}
 	if sel != nil {
 		// 三态原样传递：nil = 该会话没钉（网关按全量）；`[]` = 一个远程都不要。
 		scope.McpsPinned = sel.Mcps
 	}
-	entry := acp.McpServer{
+	entry := runtime.McpServer{
 		Name:      mcp.GatewayServerName,
 		Transport: capability.TransportStdio,
 		Command:   exe,

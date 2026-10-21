@@ -35,23 +35,10 @@ type SessionRef struct {
 	UpdatedAt string
 }
 
-// McpServersOfACP 把协议形状的注入列表折成平台值（适配器边界的唯一转换入口）。
-func McpServersOfACP(in []acp.McpServer) []McpServer {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]McpServer, 0, len(in))
-	for _, s := range in {
-		out = append(out, McpServer{
-			Name: s.Name, Transport: s.Transport, Command: s.Command,
-			Args: append([]string(nil), s.Args...), Env: cloneStringMap(s.Env),
-			URL: s.URL, Headers: cloneStringMap(s.Headers),
-		})
-	}
-	return out
-}
-
-// McpServersToACP 是 `McpServersOfACP` 的逆（写面下发用；同样只在适配器里调）。
+// McpServersToACP 把平台值折成协议形状（写面下发用；只在适配器里调）。
+//
+// 反方向（`acp.McpServer` → `McpServer`）**没有对应函数**：注入侧从注册表编制条目时直接产出
+// 平台值（`runtime.McpServer`），协议形状只在适配器里落地，用不着再折回来。
 func McpServersToACP(in []McpServer) []acp.McpServer {
 	if len(in) == 0 {
 		return nil

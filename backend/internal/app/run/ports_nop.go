@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -55,8 +54,6 @@ func (nopConnPool) Dial(context.Context, runtime.Spec, session.DialOptions) (ses
 func (nopConnPool) KeyFor(runtime.Spec, string, string) session.KeyInputs {
 	return session.KeyInputs{}
 }
-
-func (nopConnPool) ConnOfClient(*acp.Client) session.Conn { return nil }
 
 func (nopConnPool) ConnForRuntime(string) session.Conn { return nil }
 

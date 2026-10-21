@@ -83,7 +83,7 @@ func (o *Orchestrator) PendingPermissions(sessionID string) []interaction.Permis
 }
 
 // ResolvePermission 按 call_id 投递决策（allow/reject × once/always），并返回**实际回执**
-// （ACP 形态 selected/cancelled + 有效 option_id；规则见 acp.EffectivePermissionOutcome）。
+// （回执形态 selected/cancelled + 有效 option_id 由适配器按其兜底规则决定：放行落第一个，拒绝落 cancelled）。
 // 拒绝分支不再折叠：optionID（所选 deny 选项）与 always 标记透传给 interaction.PermissionManager，
 // ACP 层对显式拒绝回 Selected{deny 选项}，agent 可区分「拒绝」与「取消/超时」。
 //
@@ -366,7 +366,7 @@ func (o *Orchestrator) commandGateDecision(tool event.ToolCall, opts []interacti
 }
 
 // permissionOptionID 选一个放行/拒绝选项：优先 `_once`（最小授权），其次同类任一；没有 → 空串
-// （ACP 层按 EffectivePermissionOutcome 兜底：放行选第一个，拒绝落回 cancelled）。
+// （适配器按它自己的兜底规则：放行选第一个，拒绝落回 cancelled）。
 func permissionOptionID(opts []interaction.PermissionOption, allow bool) string {
 	prefix, once := "reject", "reject_once"
 	if allow {

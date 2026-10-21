@@ -6,7 +6,7 @@
 //     就够（自检/导出/底座用例的实现已分别在 app/model、app/system、app/runtime）。
 //   - Orchestrator：把「对一次会话的 ACP 编排」（连接获取 → session/new → prompt →
 //     事件流 → cancel/close）跑通，并把归一化事件 Publish 进 eventbus（agg = session id）
-//   - 能力门控：load/resume/list/fork 依 acp.Capabilities 裁剪（各底座声明的能力集不同，
+//   - 能力门控：load/resume/list/fork 依底座声明的能力集（`runtime.Capabilities`）裁剪（各底座不同，
 //     例如 dsh 支持 list/resume/close、不支持 load/fork，见 `internal/runtime` 各 adapter 的 Notes）；
 //     连接断开经 Client.Done() 收敛：进行中会话标记失败，持久会话是否可续依 runtime 能力
 //

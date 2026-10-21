@@ -138,11 +138,16 @@
   平台映射（`codeOf` 分类 → 对外码）。第二段判据从"`internal/domain` 全量"扩到
   `internal/{domain,core,service}` 三个前缀——新增包不登记即红。
   这张表从 C2 开始**逐步增长**（事件与轮次 → 错误构造 → 权限/elicitation → 配置项 →
-  连接与生命周期），现在已覆盖整个领域。挡的是已完成边界的**静默回退**：翻译层还在，
+  连接与生命周期），现在已覆盖整个领域与用例层。挡的是已完成边界的**静默回退**：翻译层还在，
   域里再直接写一个 acp 类型照样编译、照样跑，测试全绿，而"域不认识协议"这件事悄悄退回起点。
   fail-closed（登记的包不存在即红）。
+  **2026-10-21 C2 尾巴收口**：执行面 `internal/app/run` 的最后一条豁免被消掉——事件翻译
+  （`runtimeconn/events.go`）、权限/提问回调（`interaction.Callbacks` + `runtimeconn/interaction.go`）、
+  MCP 网关条目（直接产出 `runtime.McpServer`）三刀之后，它已对 `acp` 零 import，于是从
+  `protocolFreeExempt` 挪进 `protocolFreePackages` 的 `internal/app` 组，**豁免表当前为空**。
   反证（实跑）：在 `domain/interaction`（C2 第四刀）与 `domain/session`（C2 第八刀，全量收口后）
-  各放一个 acp 空白 import → 红。
+  各放一个 acp 空白 import → 红；把 `app/run` 从正式表挪回豁免表 → 红（它已不再 import acp，
+  豁免表双向判据要求"豁免的包必须仍然认得协议"）。
 
 - 再加 **1 条「配置项值类型」对照守卫**（`config_option_parity_test.go` 的
   `TestConfigOptionValueTypesMatchACP`，2026-10-20 C2）：`runtime.ConfigOption` /
@@ -179,7 +184,7 @@ C3 是**纯搬迁**（改目录与包名，不改行为），所以每条守卫�
 | --- | --- | --- |
 | `core/*` → `platform/*`、`dto/*` → `contract/*` | 层表 key/deny、`protocolFreePackages` 全量前缀、`TestPortsAndDTOsMustNotImportTransport` 扫描根、各条硬编码文件锚 | 在 `internal/platform/` 下放一个 import `delivery/router` 的包 → 层表"L1 → L9 向上" + 收口表"新包未登记"（双红） |
 | `service/svc*` → `app/<领域>` | 包集清单、`usecase_layer_consumer`、`TestUseCaseInstancesAreBuiltByAssembly` | 往 `bootstrap/app` 引一个 `internal/app/session` → 三条同时红 |
-| `sessionruntime` → `app/run`、`runtimeconn` → `adapters/outbound/` | 同层互引（改扫生产 import）、内圈自持类型扫描根、`protocolFreeExempt` 豁免表 | 把 `app/run` 从豁免表挪进正式表 → 红（它仍 import acp） |
+| `sessionruntime` → `app/run`、`runtimeconn` → `adapters/outbound/` | 同层互引（改扫生产 import）、内圈自持类型扫描根、`protocolFreeExempt` 豁免表 | 给 `internal/app/run` 加一条 `adapters/outbound/acp` 生产 import → 红（它已在正式表里）；把它挪回豁免表 → 红（不再认得协议） |
 | `persistence/*` → `adapters/outbound/sqlite/*` | 层表 L0/L5 key、`TestInnerLayersUseNoTableRows` 的 `modelPkg` | `domain/workspace/row` 加 `sqlite/model` 引用 → 红 |
 | `infra/*` 按方向拆 | 「底座配置知识只许在 adapter」的跳过目录、`protocolFreePackages` 加 `platform/logging`、cliops 的 deny | `domain/session/events.go` 加 `adapters/outbound/acp` 空白 import → 红 |
 | `delivery/*` / `bootstrap/{cli,cliops,maintenance}` → `adapters/inbound/*` | `ctrws` 帧锚、gin 围栏允许面（补 `inbound/ws`）、层表 L8/L9 | `inbound/http/router` 加 `sqlite/store` 空白 import → 层表红 |

@@ -6,7 +6,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -16,7 +15,7 @@ import (
 // `RegisterTool`）已随 P5a 归平面容器（C3 4.5 后半在 `bootstrap/assembly/planes`，`RegisterTool` 转发到 `adapters/outbound/definitions`）：那三件事只碰注册表、定义机制与库，
 // 没有一样来自会话/编排，而网关子进程也要同一份实现。
 //
-// 留在本文件的是**注入适配**：把注册表里的定义折成 `acp.McpServer`（解析密钥、拼网关条目）。
+// 留在本文件的是**注入适配**：把注册表里的定义折成平台值 `runtime.McpServer`（解析密钥、拼网关条目）。
 // 它要读进程自己的可执行文件路径与凭据 cwd，属于编排侧的事实。
 
 // McpServersFor 选出可注入某 runtime 的 MCP server 子集（P2 §5.2/§5.3）：
@@ -55,8 +54,7 @@ func (s *Service) McpServersFor(runtimeID string, sel *session.CapabilitySelecti
 	}
 	if plan.Gateway != nil {
 		// 网关条目天生无密钥（只有 scope），故直接追加；远程凭据留在网关进程里（§10.6-②）。
-		gw := runtime.McpServersOfACP([]acp.McpServer{*plan.Gateway})
-		out = append(out, gw...)
+		out = append(out, *plan.Gateway)
 		if len(plan.Remote) > 0 {
 			glog.Debugw(context.Background(), "mcp 注入：远程 server 经平台网关代连",
 				"runtime", runtimeID, "remote", len(plan.Remote))
