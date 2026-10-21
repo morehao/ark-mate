@@ -3,11 +3,12 @@ package mechanism
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"os"
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	defval "github.com/morehao/ark-mate/internal/core/definition"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
 	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 
@@ -170,7 +171,7 @@ func (r *storeDefinitionRepo) Open(ctx context.Context, id string, patch map[str
 	locator := r.Locator(id)
 	body, rev, found, err := r.Read(ctx, id)
 	if err != nil {
-		return nil, 0, false, acp.NewError(acp.ClassService, "definition_write_failed",
+		return nil, 0, false, failure.NewError(failure.ClassService, "definition_write_failed",
 			fmt.Sprintf("读取能力定义 %s 失败：%v", locator, err), err)
 	}
 	var doc *capability.DefinitionFile
@@ -181,7 +182,7 @@ func (r *storeDefinitionRepo) Open(ctx context.Context, id string, patch map[str
 		if err != nil {
 			// 内容坏掉 → 与文件载体同一条出路：**先修那一行**（40001），
 			// 而不是"写入失败，重试"（50000）。混成一个码的话真正该做的事就丢了。
-			return nil, 0, false, acp.NewError(acp.ClassRequest, "definition_invalid",
+			return nil, 0, false, failure.NewError(failure.ClassRequest, "definition_invalid",
 				fmt.Sprintf("能力定义 %s 不是合法 JSON 对象，先修好或删掉它再写：%v", locator, err), err)
 		}
 	}
@@ -191,7 +192,7 @@ func (r *storeDefinitionRepo) Open(ctx context.Context, id string, patch map[str
 			continue
 		}
 		if err := doc.Set(k, patch[k]); err != nil {
-			return nil, 0, false, acp.NewError(acp.ClassService, "definition_write_failed",
+			return nil, 0, false, failure.NewError(failure.ClassService, "definition_write_failed",
 				fmt.Sprintf("能力定义 %s 的键 %q 无法序列化：%v", locator, k, err), err)
 		}
 	}
@@ -201,12 +202,12 @@ func (r *storeDefinitionRepo) Open(ctx context.Context, id string, patch map[str
 func (r *storeDefinitionRepo) Commit(ctx context.Context, id string, doc *capability.DefinitionFile, rev int64, _ bool) (bool, bool, error) {
 	body, err := doc.Marshal()
 	if err != nil {
-		return false, false, acp.NewError(acp.ClassService, "definition_write_failed",
+		return false, false, failure.NewError(failure.ClassService, "definition_write_failed",
 			fmt.Sprintf("序列化能力定义 %s 失败：%v", r.Locator(id), err), err)
 	}
 	ok, err := r.Upsert(ctx, id, string(body), rev)
 	if err != nil {
-		return false, false, acp.NewError(acp.ClassService, "definition_write_failed",
+		return false, false, failure.NewError(failure.ClassService, "definition_write_failed",
 			fmt.Sprintf("写入能力定义 %s 失败：%v", r.Locator(id), err), err)
 	}
 	if !ok {
@@ -226,7 +227,7 @@ func (r *storeDefinitionRepo) Upsert(ctx context.Context, id, body string, rev i
 func (r *storeDefinitionRepo) Remove(ctx context.Context, id string) (bool, bool, error) {
 	_, rev, found, err := r.Read(ctx, id)
 	if err != nil {
-		return false, false, acp.NewError(acp.ClassService, "definition_delete_failed",
+		return false, false, failure.NewError(failure.ClassService, "definition_delete_failed",
 			fmt.Sprintf("读取能力定义 %s 失败：%v", r.Locator(id), err), err)
 	}
 	if !found {
@@ -239,7 +240,7 @@ func (r *storeDefinitionRepo) Remove(ctx context.Context, id string) (bool, bool
 		ok, err = r.st.DeleteSkillDefinition(ctx, id, rev, r.actor)
 	}
 	if err != nil {
-		return false, false, acp.NewError(acp.ClassService, "definition_delete_failed",
+		return false, false, failure.NewError(failure.ClassService, "definition_delete_failed",
 			fmt.Sprintf("删除能力定义 %s 失败：%v", r.Locator(id), err), err)
 	}
 	if !ok {

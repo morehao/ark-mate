@@ -15,6 +15,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/infra/mcp"
@@ -454,7 +455,7 @@ func TestGenerationPool(t *testing.T) {
 	if err == nil {
 		t.Fatal("达上限且都有引用时应拒绝新建代际")
 	}
-	ae, ok := acp.As(err)
+	ae, ok := failure.As(err)
 	if !ok || ae.Code != "generation_limit_reached" {
 		t.Fatalf("错误应带码 generation_limit_reached，got %v", err)
 	}

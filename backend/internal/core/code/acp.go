@@ -1,16 +1,16 @@
 package code
 
 import (
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"regexp"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/gerror"
 )
 
 // notFoundCodes 是 acp 层"目标不存在"这一类稳定 code。
 //
-// 它们落在 acp.ClassRequest 里（对上游而言确实是一次被拒的请求），但对调用方
+// 它们落在 failure.ClassRequest 里（对上游而言确实是一次被拒的请求），但对调用方
 // 而言语义是 404：再改参数也不会有结果，得先把资源建好。故单独提档到 NotFound，
 // 让前端能按 40401 直接引导"去注册 agent / 去建 runtime"，而不是当成参数错误。
 var notFoundCodes = map[string]bool{
@@ -63,24 +63,24 @@ var classCodeOverrides = map[string]int{
 // ark-mate 的信封编号；反过来 code 包作为"编号唯一事实源"必须收下这张表，
 // 否则同一个 acp 错误在控制器与领域层会映射成两个不同的码。
 func fromACP(err error) (gerror.Error, bool) {
-	ae, ok := acp.As(err)
+	ae, ok := failure.As(err)
 	if !ok {
 		return gerror.Error{}, false
 	}
 	c := UpstreamFailed
 	switch ae.Class {
-	case acp.ClassRequest:
+	case failure.ClassRequest:
 		c = InvalidRequest
 		if notFoundCodes[ae.Code] {
 			c = NotFound
 		}
-	case acp.ClassLimit:
+	case failure.ClassLimit:
 		c = Conflict
-	case acp.ClassAccess:
+	case failure.ClassAccess:
 		c = Unauthorized
-	case acp.ClassUnsupported:
+	case failure.ClassUnsupported:
 		c = NotSupported
-	case acp.ClassService, acp.ClassConnection:
+	case failure.ClassService, failure.ClassConnection:
 		c = BadGateway
 	}
 	if o, ok := classCodeOverrides[ae.Code]; ok {
@@ -129,7 +129,7 @@ var stderrCauseRe = regexp.MustCompile(`(?i)^\s*(error|fatal|panic|traceback|exc
 // 这个形态；而 Python 把原因打在**最后一行**。所以先找"原因行"并从它开始取，取不满时回退成
 // 尾部窗口，两种形态都能落进窗口。
 //
-// 尾巴在 acp.TailLines 出口已过 pkg/redact 闸门，这里再经 code.Error 过一次，不必自行脱敏。
+// 尾巴在 failure.TailLines 出口已过 pkg/redact 闸门，这里再经 code.Error 过一次，不必自行脱敏。
 func stderrMsgSuffix(tail []string) string {
 	lines := make([]string, 0, len(tail))
 	for _, l := range tail {

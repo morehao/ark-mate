@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"sort"
 	"strings"
 
@@ -10,7 +11,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/object/objdelivery"
 	"github.com/morehao/ark-mate/internal/core/resource"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
@@ -111,7 +112,7 @@ func (pl *Plane) UpdateProvider(ctx context.Context, id string, patch PatchReque
 	}
 	pl.mu.Unlock()
 	if !exists {
-		return nil, acp.NewError(acp.ClassRequest, "provider_not_found",
+		return nil, failure.NewError(failure.ClassRequest, "provider_not_found",
 			fmt.Sprintf("供应商 %q 不存在：PATCH 只更新、不再顺带新建（要新建用 POST /providers）", id), nil)
 	}
 
@@ -190,17 +191,17 @@ func (pl *Plane) writeProviderKey(ctx context.Context, d *Def, key string) error
 		// 文档都没装配（数据目录没解析出来）时必须在这里拒绝：否则这条密钥只活在内存里，
 		// 面板回 `has_key=true`、重启后消失——那是本仓最忌讳的一类静默谎报。
 		if !pl.hasCredentialDoc() {
-			return acp.NewError(acp.ClassRequest, "credentials_write_failed",
+			return failure.NewError(failure.ClassRequest, "credentials_write_failed",
 				"没有可写的凭据落点（托管文档未装配）：memory 模式下 "+credential.CredentialsFileName+
 					"就是密钥的事实源，这里拒绝一次只在内存里成功的写入", nil)
 		}
 		if key == "" {
 			if err := pl.mirrorDelete(d.KeyRef); err != nil {
-				return acp.NewError(acp.ClassRequest, "credentials_write_failed",
+				return failure.NewError(failure.ClassRequest, "credentials_write_failed",
 					"清除密钥失败（托管文档 "+credential.CredentialsFileName+" 写不动）: "+err.Error(), nil)
 			}
 		} else if err := pl.mirrorSet(d.KeyRef, key); err != nil {
-			return acp.NewError(acp.ClassRequest, "credentials_write_failed",
+			return failure.NewError(failure.ClassRequest, "credentials_write_failed",
 				"保存密钥失败（托管文档 "+credential.CredentialsFileName+" 写不动）: "+err.Error(), nil)
 		}
 		d.Key, d.KeySource, d.KeyEnvKey, d.KeyProblems = key, "", "", nil
@@ -208,11 +209,11 @@ func (pl *Plane) writeProviderKey(ctx context.Context, d *Def, key string) error
 	}
 	written, err := pl.st.SetProviderKey(ctx, d.ID, key)
 	if err != nil {
-		return acp.NewError(acp.ClassRequest, "credentials_write_failed",
+		return failure.NewError(failure.ClassRequest, "credentials_write_failed",
 			"密钥写入失败: "+err.Error(), nil)
 	}
 	if !written {
-		return acp.NewError(acp.ClassRequest, "provider_not_found",
+		return failure.NewError(failure.ClassRequest, "provider_not_found",
 			fmt.Sprintf("供应商 %q 不存在（写密钥时行已不在）：刷新后重试", d.ID), nil)
 	}
 	// 密钥写入会 bump 行版本（"生效时刻"要可解释）：把最新版本读回来，别让内存里的 revision 落后。
@@ -262,7 +263,7 @@ func (pl *Plane) DeleteProvider(ctx context.Context, id string) (*ProviderDelete
 	// 两种载体的对外承诺相同：被引用 → `provider_in_use` + 名单，绝不级联清空。
 	if pl.st == nil {
 		if refs := pl.ProviderModelRefsReadOnly(ctx, id); len(refs) > 0 {
-			return nil, acp.NewError(acp.ClassLimit, "provider_in_use",
+			return nil, failure.NewError(failure.ClassLimit, "provider_in_use",
 				providerInUseMsg(id, refs), nil)
 		}
 	}
@@ -301,7 +302,7 @@ func (pl *Plane) DeleteProvider(ctx context.Context, id string) (*ProviderDelete
 			return nil, err
 		}
 		if len(refModels) > 0 {
-			return nil, acp.NewError(acp.ClassLimit, "provider_in_use",
+			return nil, failure.NewError(failure.ClassLimit, "provider_in_use",
 				providerInUseMsg(id, refModels), nil)
 		}
 		if !removed {
@@ -347,7 +348,7 @@ func normalizeProtocol(v string) (string, error) {
 	}
 	p := resource.Protocol(strings.ToLower(strings.TrimSpace(v)))
 	if !resource.ValidProtocols[p] {
-		return "", acp.NewError(acp.ClassUnsupported, "protocol_unsupported",
+		return "", failure.NewError(failure.ClassUnsupported, "protocol_unsupported",
 			fmt.Sprintf("不支持的协议 %q：本期只支持 OpenAI 兼容端点（`openai`）。"+
 				"原生 anthropic / gemini 协议需要各自的 api 映射与鉴权形态，尚未取证", v), nil)
 	}
@@ -362,7 +363,7 @@ func dialEnvChannel() string {
 
 // providerExistsErr 新建撞上已存在的供应商（与 skill_exists/mcp_exists 同形）。
 func providerExistsErr(id string) error {
-	return acp.NewError(acp.ClassLimit, "provider_exists",
+	return failure.NewError(failure.ClassLimit, "provider_exists",
 		fmt.Sprintf("供应商 %q 已存在（要改它用 PATCH /providers/%s）", id, id), nil)
 }
 
@@ -401,7 +402,7 @@ func (pl *Plane) ProviderModelRefsReadOnly(ctx context.Context, providerID strin
 // （它同时表达"并发新建抢先"与"有人改过"两件事），而新建路径上后者不可能发生——所以
 // **新建场景下的 CAS 未命中就是 provider_exists**。文件载体没有 CAS，冲突表现为"文件里已经有"。
 func isDuplicateDefinition(err error) bool {
-	ae, ok := acp.As(err)
+	ae, ok := failure.As(err)
 	return ok && ae.Code == "definition_changed"
 }
 

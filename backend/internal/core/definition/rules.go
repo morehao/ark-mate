@@ -17,12 +17,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // 三类能力定义各自的子目录名（`<CapabilityDir>/<subdir>/<id>.json`）。
@@ -33,7 +33,7 @@ const (
 
 // ErrCapabilityUnavailable 能力数据面未装配（服务端形态问题，不是用户的参数问题）。
 func ErrCapabilityUnavailable() error {
-	return acp.NewError(acp.ClassService, "capability_unavailable", "能力数据面未装配", nil)
+	return failure.NewError(failure.ClassService, "capability_unavailable", "能力数据面未装配", nil)
 }
 
 // ValidDefinitionID 定义 id 可否作为文件名。
@@ -57,7 +57,7 @@ func ValidDefinitionID(id string) bool {
 
 // InvalidDefinitionIDErr 非法 id 的错误（文案不回显原始字符串的长度细节，只说明规则）。
 func InvalidDefinitionIDErr(Kind, id string) error {
-	return acp.NewError(acp.ClassRequest, "invalid_param",
+	return failure.NewError(failure.ClassRequest, "invalid_param",
 		fmt.Sprintf("%s id %q 不能作为文件名（须字母数字开头、≤64 位、不含路径分隔符）", Kind, id), nil)
 }
 
@@ -84,7 +84,7 @@ func SortedPatchKeys(patch map[string]any) []string {
 // 语义与文案都必须与文件载体时代**逐字同义**：这不是"你的参数错了"（40001），而是
 // "刷新后重试，你的改动没写入"（40901）——绝不 last-write-wins。
 func DefinitionChangedErr(locator string) error {
-	return acp.NewError(acp.ClassLimit, "definition_changed",
+	return failure.NewError(failure.ClassLimit, "definition_changed",
 		fmt.Sprintf("能力定义 %s 在本次编辑期间被外部改动，请刷新后重试（你的改动未写入）", locator), nil)
 }
 

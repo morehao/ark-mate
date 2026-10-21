@@ -2,6 +2,7 @@ package skill
 
 import (
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"os"
 	"sort"
 	"strings"
@@ -9,7 +10,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— §13.4 S2：物化体检（审计 / 复现面） ———
@@ -28,11 +28,11 @@ func declaredFormats() string { return strings.Join(capability.VettedFormats(), 
 // （`missing` / `disabled` / `not_applicable` / `user_owned`）。修复不在这里做——重校与启停负责写。
 func (m *Plane) SkillMaterialization(id string) (*MaterializationView, error) {
 	if m.caps == nil {
-		return nil, code.FromError(acp.NewError(acp.ClassService, "capability_unavailable", "能力数据面未装配", nil))
+		return nil, code.FromError(failure.NewError(failure.ClassService, "capability_unavailable", "能力数据面未装配", nil))
 	}
 	sk, ok := m.caps.SkillByID(id)
 	if !ok {
-		return nil, code.FromError(acp.NewError(acp.ClassRequest, "skill_not_found", fmt.Sprintf("未知 skill %q", id), nil))
+		return nil, code.FromError(failure.NewError(failure.ClassRequest, "skill_not_found", fmt.Sprintf("未知 skill %q", id), nil))
 	}
 	resp := &MaterializationView{ID: sk.ID, Enabled: sk.IsEnabled()}
 	projections := m.Snapshot()

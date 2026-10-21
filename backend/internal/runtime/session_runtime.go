@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -29,7 +30,7 @@ var _ Runtime = (*sessionRuntime)(nil)
 
 // unsupported 构造「该投影不支持此操作」的请求类错误（REST 面可据 code 精确映射）。
 func unsupported(code, details string) error {
-	return acp.NewError(acp.ClassRequest, code, details, nil)
+	return failure.NewError(failure.ClassRequest, code, details, nil)
 }
 
 func (r *sessionRuntime) ID() string              { return r.spec.ID }

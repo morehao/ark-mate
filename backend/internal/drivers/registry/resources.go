@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -177,7 +177,7 @@ func (r *Resources) SyncModels(ctx context.Context, runtimeID string) (*dtomodel
 		// 失败面按设计映 50001（见 `pkg/code/acp.go` 的 classCodeOverrides）：
 		// 这是**服务侧**失败，不是 50201"上游连接失败"——后者的排障方向是底座进程/网络，
 		// 而这里真因更可能在平台自己的生成器、校验门或磁盘上。
-		return nil, acp.NewError(acp.ClassService, "resource_sync_failed",
+		return nil, failure.NewError(failure.ClassService, "resource_sync_failed",
 			"同步失败（**资源没有被回滚**，只是没交付到这些会话进程）："+strings.Join(failed, " | ")+
 				"；修掉原因后重试 POST /models/sync", nil)
 	}
@@ -188,7 +188,7 @@ func (r *Resources) SyncModels(ctx context.Context, runtimeID string) (*dtomodel
 func (r *Resources) runtimeIDsForSync(runtimeID string) ([]string, error) {
 	if runtimeID != "" {
 		if _, ok := r.reg.Get(runtimeID); !ok {
-			return nil, acp.NewError(acp.ClassRequest, "runtime_not_found",
+			return nil, failure.NewError(failure.ClassRequest, "runtime_not_found",
 				fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
 		}
 		return []string{runtimeID}, nil

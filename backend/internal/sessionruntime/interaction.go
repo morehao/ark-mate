@@ -28,8 +28,8 @@ package sessionruntime
 //	   （§3.1.58 的结论：编排既不是执行面、也不是「读面」）。
 
 import (
+	"github.com/morehao/ark-mate/internal/core/failure"
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ResolvePermission 投递一次权限决策（`svcsession.InteractionDelivery` 的实现）。
@@ -43,7 +43,7 @@ import (
 // 已过期/不属于该会话）才由用例层翻译成 `permission_not_found`。
 func (s *Service) ResolvePermission(sessionID, callID, optionID string, always, allowed bool) (interaction.DecisionOutcome, bool, error) {
 	if s.orch == nil {
-		return interaction.DecisionOutcome{}, false, acp.NewError(acp.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil)
+		return interaction.DecisionOutcome{}, false, failure.NewError(failure.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil)
 	}
 	out, ok, err := s.orch.ResolvePermission(sessionID, callID, optionID, always, allowed)
 	if err != nil {
@@ -73,7 +73,7 @@ func (s *Service) PendingElicitations(id string) []interaction.ElicitationItem {
 // ResolveElicitation 投递一次结构化提问决策（`svcsession.InteractionDelivery` 的实现）。
 func (s *Service) ResolveElicitation(sessionID, elicitationID, action string, content map[string]any, late bool) (bool, error) {
 	if s.orch == nil {
-		return false, acp.NewError(acp.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil)
+		return false, failure.NewError(failure.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil)
 	}
 	return s.orch.ResolveElicitation(sessionID, elicitationID, action, content, late)
 }
@@ -89,7 +89,7 @@ func (s *Service) PermissionMemories(id string) []interaction.MemoryItem {
 // RevokeMemory 撤销会话级权限记忆（`svcsession.InteractionDelivery` 的实现；title+kind 均空 = 全部）。
 func (s *Service) RevokeMemory(sessionID, title, kind string) (bool, error) {
 	if s.orch == nil {
-		return false, acp.NewError(acp.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil)
+		return false, failure.NewError(failure.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil)
 	}
 	return s.orch.RevokeMemory(sessionID, title, kind)
 }

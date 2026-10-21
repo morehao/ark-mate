@@ -12,6 +12,7 @@ import (
 
 	"github.com/morehao/golib/glog"
 
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
@@ -88,7 +89,7 @@ func (o *Orchestrator) PendingPermissions(sessionID string) []interaction.Permis
 // （ok=false，不投递、不删除挂起项，不泄露他会话挂起项）——与 elicitation 决策同一立场。
 func (o *Orchestrator) ResolvePermission(sessionID, callID, optionID string, always, allowed bool) (PermissionDecisionOutcome, bool, error) {
 	if callID == "" {
-		return PermissionDecisionOutcome{}, false, acp.NewError(acp.ClassRequest, "call_id_required", "call_id 必填", nil)
+		return PermissionDecisionOutcome{}, false, failure.NewError(failure.ClassRequest, "call_id_required", "call_id 必填", nil)
 	}
 	d := acp.PermissionDecision{Allowed: allowed, Rejected: !allowed, OptionID: optionID, Always: always}
 	found, out := o.perm.ResolveDecision(sessionID, callID, d)
@@ -132,7 +133,7 @@ func (o *Orchestrator) RevokeMemory(sessionID, title, kind string) (bool, error)
 		o.perm.ForgetSession(sessionID)
 		return true, nil
 	case title == "" || kind == "":
-		return false, acp.NewError(acp.ClassRequest, "memory_revoke_params", "撤销单条需 title 与 kind 同时提供；两者都空则撤销全部", nil)
+		return false, failure.NewError(failure.ClassRequest, "memory_revoke_params", "撤销单条需 title 与 kind 同时提供；两者都空则撤销全部", nil)
 	}
 	return o.perm.Revoke(sessionID, title, kind), nil
 }
@@ -236,7 +237,7 @@ func (o *Orchestrator) PendingElicitations(sessionID string) []interaction.Elici
 // `cancel` 返回，所以回答**不能**塞回旧轮——它作为**新一轮**的用户消息进去（见 `lateElicitation`）。
 func (o *Orchestrator) ResolveElicitation(sessionID, elicitationID, action string, content map[string]any, late bool) (bool, error) {
 	if elicitationID == "" {
-		return false, acp.NewError(acp.ClassRequest, "elicitation_id_required", "elicitation_id 必填", nil)
+		return false, failure.NewError(failure.ClassRequest, "elicitation_id_required", "elicitation_id 必填", nil)
 	}
 	if late {
 		return o.lateElicitation(sessionID, elicitationID, action, content)
@@ -250,11 +251,11 @@ func (o *Orchestrator) ResolveElicitation(sessionID, elicitationID, action strin
 	case "cancel":
 		found, mismatch = o.elic.ResolveCancel(sessionID, elicitationID)
 	default:
-		return false, acp.NewError(acp.ClassRequest, "elicitation_action", "action 需为 accept/decline/cancel 之一", nil)
+		return false, failure.NewError(failure.ClassRequest, "elicitation_action", "action 需为 accept/decline/cancel 之一", nil)
 	}
 	if mismatch {
 		// 归属不符：对外与「不存在」同表现（不泄露其它会话的挂起项），细节已在 manager 侧告警。
-		return false, acp.NewError(acp.ClassRequest, "elicitation_not_found",
+		return false, failure.NewError(failure.ClassRequest, "elicitation_not_found",
 			fmt.Sprintf("结构化提问 %q 不存在或已过期", elicitationID), nil)
 	}
 	// 等待结束（同权限：等待是插曲，决策后要把进入等待前的阶段送回去）。
@@ -283,13 +284,13 @@ func (o *Orchestrator) CancelElicitations(sessionID string) {
 func (o *Orchestrator) lateElicitation(sessionID, elicitationID, action string, content map[string]any) (bool, error) {
 	message, found, mismatch := o.elic.ResolveLate(sessionID, elicitationID)
 	if mismatch {
-		return false, acp.NewError(acp.ClassRequest, "elicitation_not_found",
+		return false, failure.NewError(failure.ClassRequest, "elicitation_not_found",
 			fmt.Sprintf("结构化提问 %q 不存在或已过期", elicitationID), nil)
 	}
 	if !found {
 		// 不是 pending 态：说明它还在等（走常态）或压根不存在。两种都**不**猜——交给调用方
 		// 按 `late=false` 重试，或者如实回"不存在"（与常态那一支同一条出路）。
-		return false, acp.NewError(acp.ClassRequest, "elicitation_not_found",
+		return false, failure.NewError(failure.ClassRequest, "elicitation_not_found",
 			fmt.Sprintf("结构化提问 %q 不在「超时仍可回答」状态", elicitationID), nil)
 	}
 	// 卡片收敛：`reason:late` 说得出"这是迟到的回答"（与 `user` 分开，界面文案不同）。

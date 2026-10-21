@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	defn "github.com/morehao/ark-mate/internal/core/definition"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
 	"github.com/morehao/golib/glog"
 )
 
@@ -95,7 +96,7 @@ func (p *Plane) WriteServer(ctx context.Context, pathID string, req WriteRequest
 	if err := capability.ValidateMcpServer(&m); err != nil {
 		// 闸门拒绝 → 40001：transport 枚举 / stdio 绝对路径 / 引用词法 / 明文密钥键重复…
 		// 文案直接带闸门原话（它已经说清哪一项不合法），不另造一层解释。
-		return nil, acp.NewError(acp.ClassRequest, "definition_invalid",
+		return nil, failure.NewError(failure.ClassRequest, "definition_invalid",
 			fmt.Sprintf("MCP server %q 的定义被拒绝：%v", id, err), err)
 	}
 	created, conflict, err := repo.Commit(ctx, id, doc, rev, existed)
@@ -180,7 +181,7 @@ func deleteNoop(id, path string) *DeleteResult {
 
 // existsErr 新建时 id 已占用（40901）。
 func existsErr(id string) error {
-	return acp.NewError(acp.ClassLimit, "mcp_exists",
+	return failure.NewError(failure.ClassLimit, "mcp_exists",
 		fmt.Sprintf("MCP server %q 已存在：改它用 PUT /mcps/%s，或换一个 id", id, id), nil)
 }
 
@@ -189,5 +190,5 @@ func existsErr(id string) error {
 // 它是**这个平面唯一的 40401 出口**：写面、删除面、实时面、探测面都经它——四处各写一遍的
 // 后果不是编译错误，而是某一天只改了三处、第四个出口的 code 悄悄变成别的值。
 func notFoundErr(id string) error {
-	return acp.NewError(acp.ClassRequest, "mcp_not_found", fmt.Sprintf("未知 MCP server %q", id), nil)
+	return failure.NewError(failure.ClassRequest, "mcp_not_found", fmt.Sprintf("未知 MCP server %q", id), nil)
 }

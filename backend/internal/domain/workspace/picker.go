@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"net"
 	"os"
 	"os/exec"
@@ -11,8 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // 宿主原生目录选择器（v14.5，对齐 dsh 的 `directory-picker-auto` + `directory-picker-native`）。
@@ -60,7 +59,7 @@ type NativePickPlan struct {
 // 这个错是"能力声明与实际不一致"或直接打接口的兜底）。
 // 消息里带 `[native_pick_unsupported]` 是有意的：acp 的 Details 是唯一能进信封的字段，要让调用方
 // **稳定识别**这一类拒绝（而不是去猜中文文案），就把码放进消息里。
-var ErrNativePickUnsupported = acp.NewError(acp.ClassUnsupported, "native_pick_unsupported",
+var ErrNativePickUnsupported = failure.NewError(failure.ClassUnsupported, "native_pick_unsupported",
 	"[native_pick_unsupported] 宿主上没有可用的原生目录选择器（当前平台不支持，或缺少 zenity/kdialog）：请改用控制面提供的目录浏览", nil)
 
 // nativePickPrompt 面板标题（macOS 的 choose folder 与 zenity/kdialog 共用一句）。
@@ -275,7 +274,7 @@ func (p *Picker) PickDirectoryHost(ctx context.Context) (string, bool, error) {
 	}
 	// 其余失败：报服务侧错误，并把命令名带上——不带上就只剩一句"退出码 1"，
 	// 而这台机器上可能是缺 osascript、权限被拒、或面板被系统策略挡住。
-	return "", false, acp.NewError(acp.ClassService, "native_pick_failed",
+	return "", false, failure.NewError(failure.ClassService, "native_pick_failed",
 		fmt.Sprintf("原生目录选择器执行失败（%s）: %v", plan.Exe, runErr), runErr)
 }
 

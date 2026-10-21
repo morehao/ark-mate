@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -70,7 +71,7 @@ func (pl *Plane) SetCatalogConnectionFacts(f CatalogConnectionFacts) { pl.connFa
 //
 // 它是**正常状态**（第一条消息发送前就是这样），不是故障——说明文案与留痕级别都靠它把
 // "还没有会话可供读取"与"有会话但读不通"分开（2026-10-15 的事故正是把两者讲成同一句话）。
-var ErrNoSampleCandidate = acp.NewError(acp.ClassRequest, "no_resumable_session",
+var ErrNoSampleCandidate = failure.NewError(failure.ClassRequest, "no_resumable_session",
 	"还没有可供取样的会话（发送一条消息后目录会自动补全）", nil)
 
 // ModelCatalog 返回该 runtime 的运行时模型目录。
@@ -86,7 +87,7 @@ var ErrNoSampleCandidate = acp.NewError(acp.ClassRequest, "no_resumable_session"
 func (pl *Plane) ModelCatalog(ctx context.Context) (*CatalogView, error) {
 	spec, ok := pl.reg.Get(runtime.SelectedRuntime())
 	if !ok {
-		return nil, code.FromError(acp.NewError(acp.ClassRequest, "runtime_not_registered",
+		return nil, code.FromError(failure.NewError(failure.ClassRequest, "runtime_not_registered",
 			"[runtime_not_registered] 构建期选定的 runtime 未装配", nil))
 	}
 
@@ -177,8 +178,8 @@ func itoa(n int) string {
 // 判据取 **Class** 而不是 code 前缀：这一类的 code 长这样——`resume_session_unsupported`、
 // `list_sessions_unsupported`——后缀在尾不在头。
 func samplingUnsupported(err error) bool {
-	ae, ok := acp.As(err)
-	return ok && ae != nil && ae.Class == acp.ClassUnsupported
+	ae, ok := failure.As(err)
+	return ok && ae != nil && ae.Class == failure.ClassUnsupported
 }
 
 // modelIDByValue 算"该 runtime 的不透明值 → 平台模型行 id"的注解表（v26，定案「辰」）。
@@ -282,7 +283,7 @@ func (pl *Plane) logCatalogFallback(runtimeID string, err error) {
 			"runtime", runtimeID, "err", err)
 		return
 	}
-	if ae, ok := acp.As(err); ok && ae != nil {
+	if ae, ok := failure.As(err); ok && ae != nil {
 		glog.Warnw(context.Background(), "模型目录取样失败（所有候选会话都读不通）",
 			"runtime", runtimeID, "code", ae.Code, "class", string(ae.Class), "err", ae.Details)
 		return

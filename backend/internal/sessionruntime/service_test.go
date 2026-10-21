@@ -12,6 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -393,7 +394,7 @@ func TestServiceRESTValidation(t *testing.T) {
 func TestStartSessionUnknownRuntime(t *testing.T) {
 	_, orch, _ := newTestRig(t) // 空注册表 → 构建期底座（默认 dsh）必然未装配
 	_, err := orch.StartSession(context.Background(), session.StartOptions{Cwd: "/tmp"})
-	var ae *acp.Error
+	var ae *failure.Error
 	if !errors.As(err, &ae) || ae.Code != "runtime_not_found" {
 		t.Fatalf("期望 runtime_not_found，got %v", err)
 	}
@@ -425,7 +426,7 @@ func TestServiceResolveRuntimeUsesBuildRuntime(t *testing.T) {
 	empty := NewService(runtime.NewRegistry(), nil)
 	setBuildRuntime(t, "stub")
 	_, err := empty.runtimePlane.Resolve()
-	var ae *acp.Error
+	var ae *failure.Error
 	if !errors.As(err, &ae) || ae.Code != "runtime_not_found" {
 		t.Fatalf("空注册表应报 runtime_not_found，got %v", err)
 	}

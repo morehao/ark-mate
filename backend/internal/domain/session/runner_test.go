@@ -2,9 +2,8 @@ package session
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"testing"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // TestErrLooksCancelled 取消类错误归一判定（随 `runner.go` 从 manager 搬入）。
@@ -12,10 +11,10 @@ func TestErrLooksCancelled(t *testing.T) {
 	if !errLooksCancelled(context.Canceled) {
 		t.Fatal("ctx.Canceled 应为取消")
 	}
-	if !errLooksCancelled(acp.NewError(acp.ClassUnknown, "jsonrpc_error", "Request cancelled", nil)) {
+	if !errLooksCancelled(failure.NewError(failure.ClassUnknown, "jsonrpc_error", "Request cancelled", nil)) {
 		t.Fatal("Request cancelled 应为取消")
 	}
-	if errLooksCancelled(acp.NewError(acp.ClassService, "service_error", "boom", nil)) {
+	if errLooksCancelled(failure.NewError(failure.ClassService, "service_error", "boom", nil)) {
 		t.Fatal("普通错误不应判为取消")
 	}
 }
@@ -43,7 +42,7 @@ func TestActiveSessionRunLifecycle(t *testing.T) {
 	// 忙时再开一轮：必须是 run_in_progress（不是静默覆盖在途轮次）。
 	if _, _, err := as.BeginRun(context.Background()); err == nil {
 		t.Fatal("忙时第二轮应返回 run_in_progress")
-	} else if ae, ok := acp.As(err); !ok || ae.Code != "run_in_progress" {
+	} else if ae, ok := failure.As(err); !ok || ae.Code != "run_in_progress" {
 		t.Fatalf("错误码应为 run_in_progress: %v", err)
 	}
 	as.FinishRun()

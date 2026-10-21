@@ -11,6 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -161,7 +162,7 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	}
 
 	// 2) 运行时拒绝：上抛 + 标记不可用（目录里标灰）。
-	proj.err = acp.NewError(acp.ClassRequest, "invalid_params", "unknown model option: nope", nil)
+	proj.err = failure.NewError(failure.ClassRequest, "invalid_params", "unknown model option: nope", nil)
 	if _, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Model: "nope"}); err == nil {
 		t.Fatal("运行时拒绝应上抛")
 	}
@@ -171,11 +172,11 @@ func TestApplySessionModelSemantics(t *testing.T) {
 
 	// 3) 运行时未广告模型项（echo 语义）：显式指定模型 → model_not_supported；
 	//    未指定（空）→ 无操作。
-	unsupported := &fakeProjection{err: acp.NewError(acp.ClassUnsupported, "unsupported_model", "未广告模型配置项", nil)}
+	unsupported := &fakeProjection{err: failure.NewError(failure.ClassUnsupported, "unsupported_model", "未广告模型配置项", nil)}
 	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c2", Runtime: "stub",
 		Session: &stubSession{}, Projection: unsupported}))
 	_, err = orch.ApplySessionModel(context.Background(), "c2", runtime.ModelConfig{Model: "x"})
-	ae, ok := acp.As(err)
+	ae, ok := failure.As(err)
 	if !ok || ae.Code != "model_not_supported" {
 		t.Fatalf("未广告模型项应报 model_not_supported: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestApplySessionModelFailsFastOnMissingCredential(t *testing.T) {
 		Session: &stubSession{}, Projection: proj}))
 
 	_, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Provider: "ghost", Model: "x"})
-	ae, ok := acp.As(err)
+	ae, ok := failure.As(err)
 	if !ok || ae.Code != "model_credential_missing" {
 		t.Fatalf("缺密钥应报 model_credential_missing，got %v", err)
 	}
@@ -369,7 +370,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 
 	// ③ 取样失败：如实说"这次没读到"，并且**不得**冒充"还没有会话可供读取"。
 	failed := r.svc.Planes().Providers.CatalogEmptyNote(ctx, false,
-		acp.NewError(acp.ClassRequest, "invalid_params", `no adapter registered for provider "old"`, nil))
+		failure.NewError(failure.ClassRequest, "invalid_params", `no adapter registered for provider "old"`, nil))
 	if !strings.Contains(failed, "取样失败") {
 		t.Fatalf("取样失败应如实说失败，实际：%s", failed)
 	}
@@ -380,7 +381,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 	// ④ "该底座不支持在不新建会话的前提下读目录"是**能力事实、不是故障**：
 	//    退回"发一条消息就会补全"这条正常出路。
 	unsupported := r.svc.Planes().Providers.CatalogEmptyNote(ctx, false,
-		acp.NewError(acp.ClassUnsupported, "resume_session_unsupported", "不支持 resume", nil))
+		failure.NewError(failure.ClassUnsupported, "resume_session_unsupported", "不支持 resume", nil))
 	if !strings.Contains(unsupported, "发送一条消息") {
 		t.Fatalf("底座不支持读时应给「发消息」这条路，实际：%s", unsupported)
 	}

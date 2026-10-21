@@ -30,15 +30,10 @@ import (
 // ——— G1：core 不得 import infra ———
 
 // coreInfraImports 是**过渡期登记表**：`core` 下仍在 import `infra/*` 的包（键=core 子包相对路径，
-// 值=它 import 的 infra 子包与原因）。清空后才允许删本表，删表即判据转硬。
-//
-// 三个包都只为取**通用错误分类学**（`acp.Error`/`Class*`/`NewError`/`As`）——它与 ACP 无关，
-// 只是恰好住在 `infra/acp/errors.go`；P1 把它迁到 `core/code` 后这三条边一起消失。
-var coreInfraImports = map[string]string{
-	"internal/core/automation": "取 acp.NewError/Class* 做错误分类（P1 迁入 core/code）",
-	"internal/core/code":       "错误码折算表需要 acp.Error/Class（P1 迁入本包）",
-	"internal/core/definition": "取 acp.NewError/Class* 做错误分类（P1 迁入 core/code）",
-}
+// 值=它 import 的 infra 子包与原因）。**P1 已把它清零**：三个包原先只为取通用错误分类学
+// （`Error`/`Class*`/`NewError`/`As`）而 import `infra/acp`，那套词汇现已归 `core/failure`。
+// 表结构保留为空——它现在是**硬判据**：`core` 下任何一个包 import `infra/*` 即红。
+var coreInfraImports = map[string]string{}
 
 func TestCoreStaysFreeOfInfra(t *testing.T) {
 	pkgs := scanProductionPackages(t)
@@ -85,14 +80,14 @@ var domainInfraAllow = []string{"internal/infra/logging"}
 
 // domainInfraImports 过渡期登记表：域包 → 它 import 的 infra 子包（原因见设计文档 §1.4）。
 // P1（错误分类归位）会让多数域包不再认识 `infra/acp`，P3（载荷归位）清空最后一批。
+// P1 之后只剩**载荷类型**这一类越界（错误分类那一半已随 `core/failure` 归位）：
+// 这三个域包用的是 ACP 的线协议载荷（权限裁决 / 提问 / 工具事件 / 选项），要等 P3
+// "平台值 + 连接边界翻译" 落地才能清空。
 var domainInfraImports = map[string]string{
-	"internal/domain/automation":  "infra/acp（错误分类 + 定义载荷）",
 	"internal/domain/interaction": "infra/acp（权限与提问载荷）",
-	"internal/domain/mcp":         "infra/acp、infra/mcp（MCP 客户端与协议载荷）",
-	"internal/domain/provider":    "infra/acp（错误分类）",
+	"internal/domain/mcp":         "infra/mcp（MCP 客户端：连 server 与探测由域直调，P3′ 待定）",
+	"internal/domain/provider":    "infra/acp（配置选项载荷 ConfigOption）",
 	"internal/domain/session":     "infra/acp（工具事件与权限载荷）",
-	"internal/domain/skill":       "infra/acp（错误分类 + 定义载荷）",
-	"internal/domain/workspace":   "infra/acp（错误分类）",
 }
 
 func TestDomainAvoidsInfraProtocol(t *testing.T) {

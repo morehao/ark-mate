@@ -9,11 +9,10 @@
 package automation
 
 import (
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"path/filepath"
 	"sort"
 	"time"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // 调度种类。**只有这三种**（ADR-3）：不引 cron 表达式。
@@ -119,23 +118,23 @@ const MaxRunDurationLimit = 60 * time.Minute
 // 而不是等到触发时每 30s 报一次错（那正是 ADR-10 要避免的刷屏形态）。
 func (a *Automation) Validate() error {
 	if a.ID == "" {
-		return acp.NewError(acp.ClassRequest, "invalid_param", "automation 缺少 id", nil)
+		return failure.NewError(failure.ClassRequest, "invalid_param", "automation 缺少 id", nil)
 	}
 	if err := a.Schedule.Validate(); err != nil {
 		return err
 	}
 	if a.Target.Prompt == "" {
-		return acp.NewError(acp.ClassRequest, "invalid_param", "automation 缺少 target.prompt（触发时没有可执行的内容）", nil)
+		return failure.NewError(failure.ClassRequest, "invalid_param", "automation 缺少 target.prompt（触发时没有可执行的内容）", nil)
 	}
 	// cwd 必须**在创建时就写死**（ADR-6）。留空就等于"每次触发都按当时的活跃工作空间解析"——
 	// 那正是 openwork 吃过的亏（切换活跃工作空间会静默改掉所有 automation 的目标），
 	// 而且自动化往往是"半夜跑、改了不该改的东西"，事后极难归因。
 	if a.Target.Cwd == "" {
-		return acp.NewError(acp.ClassRequest, "invalid_param",
+		return failure.NewError(failure.ClassRequest, "invalid_param",
 			"automation 缺少 target.cwd：工作空间必须在创建时钉死（触发时不再解析活跃工作空间）", nil)
 	}
 	if !filepath.IsAbs(a.Target.Cwd) {
-		return acp.NewError(acp.ClassRequest, "invalid_param",
+		return failure.NewError(failure.ClassRequest, "invalid_param",
 			"automation 的 target.cwd 必须是绝对路径，得到 "+a.Target.Cwd, nil)
 	}
 	if _, err := a.RunDuration(); err != nil {
@@ -151,14 +150,14 @@ func (a *Automation) RunDuration() (time.Duration, error) {
 	}
 	d, err := time.ParseDuration(a.MaxRunDuration)
 	if err != nil {
-		return 0, acp.NewError(acp.ClassRequest, "invalid_param",
+		return 0, failure.NewError(failure.ClassRequest, "invalid_param",
 			"max_run_duration 不是合法的 duration（如 30m）："+a.MaxRunDuration, nil)
 	}
 	if d < 0 {
-		return 0, acp.NewError(acp.ClassRequest, "invalid_param", "max_run_duration 不能为负数", nil)
+		return 0, failure.NewError(failure.ClassRequest, "invalid_param", "max_run_duration 不能为负数", nil)
 	}
 	if d > MaxRunDurationLimit {
-		return 0, acp.NewError(acp.ClassRequest, "invalid_param",
+		return 0, failure.NewError(failure.ClassRequest, "invalid_param",
 			"max_run_duration 上限 "+MaxRunDurationLimit.String()+"（超过就交给 MATE_RUN_TIMEOUT 看门狗）", nil)
 	}
 	return d, nil
@@ -172,7 +171,7 @@ func (s Schedule) Validate() error {
 	switch s.Kind {
 	case KindOnce, KindDaily, KindWeekly:
 	default:
-		return acp.NewError(acp.ClassRequest, "invalid_schedule",
+		return failure.NewError(failure.ClassRequest, "invalid_schedule",
 			"schedule.kind 必须是 once | daily | weekly，得到 "+s.Kind, nil)
 	}
 	if _, err := s.Location(); err != nil {
@@ -181,26 +180,26 @@ func (s Schedule) Validate() error {
 	switch s.Kind {
 	case KindOnce:
 		if s.At == nil || s.At.IsZero() {
-			return acp.NewError(acp.ClassRequest, "invalid_schedule", "once 需要 schedule.at（绝对时刻）", nil)
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "once 需要 schedule.at（绝对时刻）", nil)
 		}
 	case KindDaily, KindWeekly:
 		if s.Hour == nil || s.Minute == nil {
-			return acp.NewError(acp.ClassRequest, "invalid_schedule", s.Kind+" 需要 schedule.hour 与 schedule.minute（本地墙钟）", nil)
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", s.Kind+" 需要 schedule.hour 与 schedule.minute（本地墙钟）", nil)
 		}
 		if *s.Hour < 0 || *s.Hour > 23 {
-			return acp.NewError(acp.ClassRequest, "invalid_schedule", "schedule.hour 需在 0–23", nil)
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "schedule.hour 需在 0–23", nil)
 		}
 		if *s.Minute < 0 || *s.Minute > 59 {
-			return acp.NewError(acp.ClassRequest, "invalid_schedule", "schedule.minute 需在 0–59", nil)
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "schedule.minute 需在 0–59", nil)
 		}
 	}
 	if s.Kind == KindWeekly {
 		if len(s.DaysOfWeek) == 0 {
-			return acp.NewError(acp.ClassRequest, "invalid_schedule", "weekly 需要 schedule.days_of_week（0=周日）", nil)
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "weekly 需要 schedule.days_of_week（0=周日）", nil)
 		}
 		for _, d := range s.DaysOfWeek {
 			if d < 0 || d > 6 {
-				return acp.NewError(acp.ClassRequest, "invalid_schedule", "schedule.days_of_week 取值需在 0–6（0=周日）", nil)
+				return failure.NewError(failure.ClassRequest, "invalid_schedule", "schedule.days_of_week 取值需在 0–6（0=周日）", nil)
 			}
 		}
 	}
@@ -214,12 +213,12 @@ func (s Schedule) Validate() error {
 // 兜底（约 +450KB 二进制），所以这里能拿到完整时区库（见 M4-7）。
 func (s Schedule) Location() (*time.Location, error) {
 	if s.Timezone == "" {
-		return nil, acp.NewError(acp.ClassRequest, "invalid_timezone",
+		return nil, failure.NewError(failure.ClassRequest, "invalid_timezone",
 			"schedule.timezone 必填（IANA 名，如 Asia/Shanghai）：不填会让"+s.Kind+"按 UTC 解释", nil)
 	}
 	loc, err := time.LoadLocation(s.Timezone)
 	if err != nil {
-		return nil, acp.NewError(acp.ClassRequest, "invalid_timezone",
+		return nil, failure.NewError(failure.ClassRequest, "invalid_timezone",
 			"未知时区 "+s.Timezone+"（需 IANA 名，如 Asia/Shanghai / UTC）", nil)
 	}
 	return loc, nil

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
@@ -88,7 +89,7 @@ func (s *Service) SampleConfigOptions(ctx context.Context) ([]acp.ConfigOption, 
 	}
 	spec, ok := s.planes.Registry.Get(runtime.SelectedRuntime())
 	if !ok {
-		return nil, false, acp.NewError(acp.ClassRequest, "runtime_not_registered",
+		return nil, false, failure.NewError(failure.ClassRequest, "runtime_not_registered",
 			"[runtime_not_registered] 构建期选定的 runtime 未装配", nil)
 	}
 	// 目录探测不绑定任何会话，按缺省代际复用连接（不额外起进程）。原生模式同样走缺省（空 =
@@ -99,7 +100,7 @@ func (s *Service) SampleConfigOptions(ctx context.Context) ([]acp.ConfigOption, 
 	}
 	caps := rc.Client.Capabilities()
 	if !caps.SessionResume && !caps.Raw.LoadSession {
-		return nil, false, acp.NewError(acp.ClassUnsupported, "resume_session_unsupported",
+		return nil, false, failure.NewError(failure.ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
 	}
 

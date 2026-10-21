@@ -3,13 +3,14 @@ package runtimeconn
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"strings"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/redact"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -41,7 +42,7 @@ type AmbiguityNote struct {
 //
 // 脱敏与行数截断在这里做（不在调用方）：诊断是**对外可见**的面，闸门必须贴着状态本身——
 // 交给调用方记得脱敏，迟早有一处忘。
-func (pl *Plane) RecordRuntimeError(sessionID string, ae *acp.Error, tail []string) {
+func (pl *Plane) RecordRuntimeError(sessionID string, ae *failure.Error, tail []string) {
 	if ae == nil {
 		return
 	}
@@ -51,7 +52,7 @@ func (pl *Plane) RecordRuntimeError(sessionID string, ae *acp.Error, tail []stri
 		Code:       ae.Code,
 		Class:      string(ae.Class),
 		Details:    redact.String(ae.Details),
-		StderrTail: acp.TailLines(tail, MaxDiagStderrLines),
+		StderrTail: failure.TailLines(tail, MaxDiagStderrLines),
 	})
 }
 
@@ -142,7 +143,7 @@ func (pl *Plane) Diagnostics(ctx context.Context) (*dtoruntime.DiagnosticsResp, 
 		if cli, pid, live := pl.live.LiveClient(runtimeID); live {
 			resp.Connected = true
 			resp.PID = pid
-			if tail := acp.TailLines(cli.StderrTail(), MaxDiagStderrLines); len(tail) > 0 {
+			if tail := failure.TailLines(cli.StderrTail(), MaxDiagStderrLines); len(tail) > 0 {
 				resp.StderrTail = tail
 				resp.StderrSource = "live"
 			}
@@ -195,7 +196,7 @@ func (pl *Plane) RemediationFor(ctx context.Context, spec runtime.Spec, specOK, 
 	}
 	if pl.cred != nil {
 		if err := pl.cred.CredentialProblem(ctx); err != nil {
-			if ae, ok := acp.As(err); ok && ae != nil {
+			if ae, ok := failure.As(err); ok && ae != nil {
 				add(ae.Details)
 			}
 		}

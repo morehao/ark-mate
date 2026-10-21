@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -73,7 +74,7 @@ func TestSessionProjectionCarriesSpecIdentity(t *testing.T) {
 		// 该会话未广告任何配置项 → 一律 unsupported_model（不臆造 env/provider 回落路径）。
 		_, err := rt.ApplyModel(ctx, ModelConfig{Model: "x"})
 		unsupported := false
-		if ae, ok := acp.As(err); ok {
+		if ae, ok := failure.As(err); ok {
 			unsupported = strings.HasPrefix(ae.Code, "unsupported_")
 		}
 		if !unsupported {

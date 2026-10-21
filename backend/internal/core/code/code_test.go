@@ -2,6 +2,7 @@ package code_test
 
 import (
 	"errors"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
 	"github.com/morehao/golib/gerror"
 )
 
@@ -25,18 +26,18 @@ func TestFromErrorMapping(t *testing.T) {
 		in   error
 		want int
 	}{
-		{"agent_not_found", acp.NewError(acp.ClassRequest, "agent_not_found", "x", nil), code.NotFound},
-		{"session_not_found", acp.NewError(acp.ClassRequest, "session_not_found", "x", nil), code.NotFound},
-		{"runtime_not_found", acp.NewError(acp.ClassRequest, "runtime_not_found", "x", nil), code.NotFound},
-		{"mcp_not_found", acp.NewError(acp.ClassRequest, "mcp_not_found", "x", nil), code.NotFound},
-		{"provider_not_found", acp.NewError(acp.ClassRequest, "provider_not_found", "x", nil), code.NotFound},
-		{"request_other", acp.NewError(acp.ClassRequest, "agent_required", "x", nil), code.InvalidRequest},
-		{"limit", acp.NewError(acp.ClassLimit, "run_in_progress", "x", nil), code.Conflict},
-		{"access", acp.NewError(acp.ClassAccess, "auth_required", "x", nil), code.Unauthorized},
-		{"unsupported", acp.NewError(acp.ClassUnsupported, "resume_unsupported", "x", nil), code.NotSupported},
-		{"service", acp.NewError(acp.ClassService, "orchestrator_unavailable", "x", nil), code.BadGateway},
-		{"connection", acp.NewError(acp.ClassConnection, "connection_lost", "x", nil), code.BadGateway},
-		{"unknown_class", acp.NewError(acp.ClassUnknown, "weird", "x", nil), code.UpstreamFailed},
+		{"agent_not_found", failure.NewError(failure.ClassRequest, "agent_not_found", "x", nil), code.NotFound},
+		{"session_not_found", failure.NewError(failure.ClassRequest, "session_not_found", "x", nil), code.NotFound},
+		{"runtime_not_found", failure.NewError(failure.ClassRequest, "runtime_not_found", "x", nil), code.NotFound},
+		{"mcp_not_found", failure.NewError(failure.ClassRequest, "mcp_not_found", "x", nil), code.NotFound},
+		{"provider_not_found", failure.NewError(failure.ClassRequest, "provider_not_found", "x", nil), code.NotFound},
+		{"request_other", failure.NewError(failure.ClassRequest, "agent_required", "x", nil), code.InvalidRequest},
+		{"limit", failure.NewError(failure.ClassLimit, "run_in_progress", "x", nil), code.Conflict},
+		{"access", failure.NewError(failure.ClassAccess, "auth_required", "x", nil), code.Unauthorized},
+		{"unsupported", failure.NewError(failure.ClassUnsupported, "resume_unsupported", "x", nil), code.NotSupported},
+		{"service", failure.NewError(failure.ClassService, "orchestrator_unavailable", "x", nil), code.BadGateway},
+		{"connection", failure.NewError(failure.ClassConnection, "connection_lost", "x", nil), code.BadGateway},
+		{"unknown_class", failure.NewError(failure.ClassUnknown, "weird", "x", nil), code.UpstreamFailed},
 		{"plain_error", errors.New("boom"), code.Internal},
 	}
 	for _, tc := range cases {
@@ -50,7 +51,7 @@ func TestFromErrorMapping(t *testing.T) {
 
 	// details 为空 → msg 回落为 acp 稳定 code。
 	var ge gerror.Error
-	_ = errors.As(code.FromError(acp.NewError(acp.ClassLimit, "busy", "", nil)), &ge)
+	_ = errors.As(code.FromError(failure.NewError(failure.ClassLimit, "busy", "", nil)), &ge)
 	if ge.Msg != "busy" {
 		t.Fatalf("空 details 应回落 code: %+v", ge)
 	}
@@ -64,8 +65,8 @@ func TestFromErrorMapping(t *testing.T) {
 func TestFromErrorNeverLosesCode(t *testing.T) {
 	inputs := []error{
 		errors.New("裸错误"),
-		acp.NewError(acp.ClassRequest, "agent_not_found", "x", nil),
-		acp.NewError(acp.ClassUnknown, "weird", "", nil),
+		failure.NewError(failure.ClassRequest, "agent_not_found", "x", nil),
+		failure.NewError(failure.ClassUnknown, "weird", "", nil),
 		code.Error(code.Conflict, "已带码"),
 		code.Errorf(code.InvalidParam, "带参 %d", 1),
 	}
@@ -278,7 +279,7 @@ func TestErrorRedactsSecrets(t *testing.T) {
 		t.Fatalf("裸错误出口未脱敏: %q", ge.Msg)
 	}
 	// 2) acp 分类错误 → Details 过闸
-	err := code.FromError(acp.NewError(acp.ClassService, "boom", "启动失败 KEY="+secret, nil))
+	err := code.FromError(failure.NewError(failure.ClassService, "boom", "启动失败 KEY="+secret, nil))
 	if !errors.As(err, &ge) {
 		t.Fatal("acp 错误应映射为带码错误")
 	}

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -52,7 +53,7 @@ type BusyTracker interface {
 
 // DiagnosticsSink 运行期诊断的写口（错误分类 + stderr 尾巴）。
 type DiagnosticsSink interface {
-	RecordRuntimeError(sessionID string, ae *acp.Error, tail []string)
+	RecordRuntimeError(sessionID string, ae *failure.Error, tail []string)
 	StderrTail(client *acp.Client) []string
 }
 
@@ -368,7 +369,7 @@ func (r *Runner) DeliverQueued(as *ActiveSession) {
 func (r *Runner) CancelRun(ctx context.Context, sessionID string) error {
 	as := r.handles.Get(sessionID)
 	if as == nil {
-		return acp.NewError(acp.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
+		return failure.NewError(failure.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
 	}
 	t := as.RequestCancel()
 	if t == nil {
@@ -430,7 +431,7 @@ func (r *Runner) awaitSettle(sessionID string, t *Run) {
 func (r *Runner) WaitRun(ctx context.Context, sessionID string) (string, error) {
 	as := r.handles.Get(sessionID)
 	if as == nil {
-		return "", acp.NewError(acp.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
+		return "", failure.NewError(failure.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
 	}
 	t := as.ActiveRun()
 	if t == nil {
@@ -477,7 +478,7 @@ func errLooksCancelled(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return true
 	}
-	var ae *acp.Error
+	var ae *failure.Error
 	if errors.As(err, &ae) {
 		s := strings.ToLower(ae.Code + " " + ae.Details)
 		return strings.Contains(s, "cancel") || strings.Contains(s, "abort")
@@ -555,7 +556,7 @@ func (r *Runner) disconnectSession(as *ActiveSession, intentional bool) {
 	if intentional {
 		return
 	}
-	ae := acp.NewError(acp.ClassConnection, "connection_lost",
+	ae := failure.NewError(failure.ClassConnection, "connection_lost",
 		"runtime 连接断开（会话句柄已作废；下次 prompt 按需重建）", nil)
 	if r.diagnostics != nil {
 		tail := r.diagnostics.StderrTail(as.Client())

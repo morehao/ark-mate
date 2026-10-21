@@ -3,19 +3,19 @@ package mechanism
 import (
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"os"
 	"path/filepath"
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	defval "github.com/morehao/ark-mate/internal/core/definition"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // CapabilityDirUnsetErr 未配置能力目录 → 显式报错而不是"内存生效、盘上没留痕"。
 //
 // 措辞给出路：这是部署配置问题，用户要的是"该设哪个键"，不是一个"写入失败"。
 func CapabilityDirUnsetErr(what string) error {
-	return acp.NewError(acp.ClassRequest, "capability_dir_unset",
+	return failure.NewError(failure.ClassRequest, "capability_dir_unset",
 		fmt.Sprintf("未配置能力目录（MATE_CAPABILITIES），%s只能内存生效、重启即失；设好目录后重试", what), nil)
 }
 
@@ -61,7 +61,7 @@ func OpenDefinition(dir, Kind, id string, patch map[string]any) (*DefinitionDraf
 		return nil, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, acp.NewError(acp.ClassService, "definition_write_failed",
+		return nil, failure.NewError(failure.ClassService, "definition_write_failed",
 			fmt.Sprintf("创建能力目录 %s 失败：%v", dir, err), err)
 	}
 	// 三种"读不了"要分开给路：文件不存在 → 新建；内容不是 JSON 对象 → **用户的文件坏了，
@@ -72,18 +72,18 @@ func OpenDefinition(dir, Kind, id string, patch map[string]any) (*DefinitionDraf
 	switch {
 	case err == nil:
 	case errors.Is(err, capability.ErrNotObject):
-		return nil, acp.NewError(acp.ClassRequest, "definition_invalid",
+		return nil, failure.NewError(failure.ClassRequest, "definition_invalid",
 			fmt.Sprintf("能力定义 %s 不是合法 JSON 对象，先修好或删掉它再写：%v", path, err), err)
 	case os.IsNotExist(err):
 		df, err = capability.NewDefinitionFile(path)
 		if err != nil {
-			return nil, acp.NewError(acp.ClassService, "definition_write_failed",
+			return nil, failure.NewError(failure.ClassService, "definition_write_failed",
 				fmt.Sprintf("准备新建能力定义 %s 失败：%v", path, err), err)
 		}
 		// 新建路径也要防"我以为是新建、其实文件已被别人建出来"：NewDefinitionFile 的
 		// mtime 是零值，Save 的乐观锁一比对就会判冲突（见 capability.NewDefinitionFile）。
 	default:
-		return nil, acp.NewError(acp.ClassService, "definition_write_failed",
+		return nil, failure.NewError(failure.ClassService, "definition_write_failed",
 			fmt.Sprintf("读取能力定义 %s 失败：%v", path, err), err)
 	}
 	for _, k := range defval.SortedPatchKeys(patch) {
@@ -92,7 +92,7 @@ func OpenDefinition(dir, Kind, id string, patch map[string]any) (*DefinitionDraf
 			continue
 		}
 		if err := df.Set(k, patch[k]); err != nil {
-			return nil, acp.NewError(acp.ClassService, "definition_write_failed",
+			return nil, failure.NewError(failure.ClassService, "definition_write_failed",
 				fmt.Sprintf("能力定义 %s 的键 %q 无法序列化：%v", path, k, err), err)
 		}
 	}
@@ -130,7 +130,7 @@ func RemoveDefinitionPermanently(dir, Kind, id string) (bool, error) {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
-		return false, acp.NewError(acp.ClassService, "definition_delete_failed",
+		return false, failure.NewError(failure.ClassService, "definition_delete_failed",
 			fmt.Sprintf("删除能力定义 %s 失败：%v", path, err), err)
 	}
 	return true, nil
@@ -146,9 +146,9 @@ func DefinitionSaveErr(path string, err error) error {
 	if capability.IsConflict(err) {
 		// ClassLimit 是"与当前状态冲突"这一类（→ 40901）。用 ClassRequest 会落成 40001
 		// 「请求非法」，用户看到的是"我的参数错了"，而实际动作是"刷新重试"。
-		return acp.NewError(acp.ClassLimit, "definition_changed",
+		return failure.NewError(failure.ClassLimit, "definition_changed",
 			fmt.Sprintf("能力定义 %s 在本次编辑期间被外部改动，请刷新后重试（你的改动未写入）", path), err)
 	}
-	return acp.NewError(acp.ClassService, "definition_write_failed",
+	return failure.NewError(failure.ClassService, "definition_write_failed",
 		fmt.Sprintf("写入能力定义 %s 失败：%v", path, err), err)
 }

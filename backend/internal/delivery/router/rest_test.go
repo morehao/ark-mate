@@ -21,6 +21,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/delivery/router"
 	"github.com/morehao/ark-mate/internal/domain/automation"
@@ -176,15 +177,15 @@ func (s *stubSvc) RestErr(err error) error {
 	if errors.As(err, &ge) {
 		return err
 	}
-	var ae *acp.Error
+	var ae *failure.Error
 	if errors.As(err, &ae) {
 		code := 40001
 		switch ae.Class {
-		case acp.ClassUnsupported:
+		case failure.ClassUnsupported:
 			code = 40501
-		case acp.ClassLimit:
+		case failure.ClassLimit:
 			code = 40901
-		case acp.ClassService, acp.ClassConnection:
+		case failure.ClassService, failure.ClassConnection:
 			code = 50201
 		}
 		if ae.Code == "agent_not_found" || ae.Code == "session_not_found" || ae.Code == "runtime_not_found" || ae.Code == "mcp_not_found" {
@@ -1679,11 +1680,11 @@ func TestErrorEnvelopeMapping(t *testing.T) {
 		err  error
 		code int
 	}{
-		{"not_found", acp.NewError(acp.ClassRequest, "provider_not_found", "未知供应商", nil), 40401},
-		{"request", acp.NewError(acp.ClassRequest, "invalid_provider_id", "id 非法", nil), 40001},
-		{"conflict", acp.NewError(acp.ClassLimit, "provider_exists", "已存在", nil), 40901},
-		{"unsupported", acp.NewError(acp.ClassUnsupported, "credentials_unsupported", "这套底座不支持托管凭据", nil), 40501},
-		{"upstream", acp.NewError(acp.ClassService, "provider_write_failed", "载体提交失败", nil), 50201},
+		{"not_found", failure.NewError(failure.ClassRequest, "provider_not_found", "未知供应商", nil), 40401},
+		{"request", failure.NewError(failure.ClassRequest, "invalid_provider_id", "id 非法", nil), 40001},
+		{"conflict", failure.NewError(failure.ClassLimit, "provider_exists", "已存在", nil), 40901},
+		{"unsupported", failure.NewError(failure.ClassUnsupported, "credentials_unsupported", "这套底座不支持托管凭据", nil), 40501},
+		{"upstream", failure.NewError(failure.ClassService, "provider_write_failed", "载体提交失败", nil), 50201},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

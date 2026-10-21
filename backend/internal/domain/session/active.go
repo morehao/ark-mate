@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -210,7 +211,7 @@ func (as *ActiveSession) BeginRun(ctx context.Context) (*Run, RunPrefix, error) 
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	if as.busy {
-		return nil, RunPrefix{}, acp.NewError(acp.ClassLimit, "run_in_progress", "该会话正有 run 在执行，请等待结束", nil)
+		return nil, RunPrefix{}, failure.NewError(failure.ClassLimit, "run_in_progress", "该会话正有 run 在执行，请等待结束", nil)
 	}
 	prefix := RunPrefix{Identity: as.identity, Memo: as.memo}
 	as.identity, as.memo = "", ""

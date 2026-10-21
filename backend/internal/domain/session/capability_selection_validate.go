@@ -2,11 +2,11 @@ package session
 
 import (
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"sort"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— M3-3 建会话时的能力选定校验 ———
@@ -75,7 +75,7 @@ func (pl *Plane) ValidateSelection(sel *CapabilitySelection, runtimeID string) e
 	}
 	// 不存在（拼错）排前面：它更可能是用户立刻要改的那个。
 	problems := append(append([]SelectionProblem(nil), unknown...), unreachable...)
-	return acp.NewError(acp.ClassRequest, "capability_not_applicable",
+	return failure.NewError(failure.ClassRequest, "capability_not_applicable",
 		fmt.Sprintf("能力选择对 runtime %q 不可达：%s", runtimeID, problemList(problems)), nil)
 }
 

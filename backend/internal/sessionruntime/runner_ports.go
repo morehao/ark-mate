@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -16,7 +17,7 @@ import (
 // runnerDiagnostics 运行期诊断的写口（记录失败 + stderr 尾巴）。
 type runnerDiagnostics struct{ o *Orchestrator }
 
-func (d runnerDiagnostics) RecordRuntimeError(sessionID string, ae *acp.Error, tail []string) {
+func (d runnerDiagnostics) RecordRuntimeError(sessionID string, ae *failure.Error, tail []string) {
 	d.o.svc.runtimePlane.RecordRuntimeError(sessionID, ae, tail)
 }
 
@@ -24,7 +25,7 @@ func (d runnerDiagnostics) StderrTail(client *acp.Client) []string {
 	if client == nil {
 		return nil
 	}
-	return acp.TailLines(client.StderrTail(), runtimeconn.MaxDiagStderrLines)
+	return failure.TailLines(client.StderrTail(), runtimeconn.MaxDiagStderrLines)
 }
 
 // runnerCatalog 运行时配置项（模型目录）的缓存写口。
@@ -61,7 +62,7 @@ func (o *Orchestrator) acquireClient(ctx context.Context, spec runtime.Spec, fin
 		return nil, err
 	}
 	if rc == nil || rc.Client == nil {
-		return nil, acp.NewError(acp.ClassConnection, "connection_unavailable",
+		return nil, failure.NewError(failure.ClassConnection, "connection_unavailable",
 			"连接已建立但没有可用的 ACP 客户端", nil)
 	}
 	return rc.Client, nil

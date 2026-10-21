@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"encoding/json"
 	"errors"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
 )
@@ -48,7 +49,7 @@ func numericCode(err error) int {
 
 // errCode 取 acp 错误的稳定 code（非 acp 错误 → 空串）。
 func errCode(err error) string {
-	if ae, ok := acp.As(err); ok {
+	if ae, ok := failure.As(err); ok {
 		return ae.Code
 	}
 	return ""

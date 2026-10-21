@@ -7,6 +7,7 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -102,7 +103,7 @@ func TestConnectUnsupportedTransport(t *testing.T) {
 	if err == nil {
 		t.Fatal("应报错")
 	}
-	if cls := acp.Classify(err).Class; cls != acp.ClassUnsupported {
+	if cls := acp.Classify(err).Class; cls != failure.ClassUnsupported {
 		t.Fatalf("应归类 unsupported，得到 %v (%v)", cls, err)
 	}
 }

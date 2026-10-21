@@ -2,11 +2,10 @@ package automation
 
 import (
 	"errors"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // 期望值来源：`python3 -c "zoneinfo"` 与 `TZ=... date`（系统 tzdata）手算对照，
@@ -501,7 +500,7 @@ func ptrTime(t time.Time) *time.Time { return &t }
 
 // acpCode 取出带码错误的码（本包的校验错误一律用 internal/infra/acp 的可操作错误）。
 func acpCode(err error) string {
-	var ae *acp.Error
+	var ae *failure.Error
 	if errors.As(err, &ae) {
 		return ae.Code
 	}

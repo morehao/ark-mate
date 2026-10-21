@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -56,7 +57,7 @@ func Connect(ctx context.Context, spec Spec, args []string, env []string, opts a
 		}
 		t = rt
 	default:
-		return nil, acp.NewError(acp.ClassUnsupported, "unsupported_transport",
+		return nil, failure.NewError(failure.ClassUnsupported, "unsupported_transport",
 			"runtime "+spec.ID+" 声明了不支持的传输 "+spec.Launch.Transport, nil)
 	}
 
