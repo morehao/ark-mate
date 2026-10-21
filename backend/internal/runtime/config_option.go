@@ -6,7 +6,7 @@ import "github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 //
 // 这些形状此前直接是 `acp.ConfigOption`：内核的 `Runtime` 接口、模型目录缓存、会话状态机都拿它
 // 当语言，于是"换一个非 ACP 底座"要先改内核。现在它们是**平台值**，ACP 侧的对应结构只在两个
-// 边界上出现：`configOptionsFromACP`（本文件，协议 → 平台）与 `infra/dsh`（写面下发）。
+// 边界上出现：`configOptionsFromACP`（本文件，协议 → 平台）与 `adapters/outbound/dsh`（写面下发）。
 //
 // **json tag 与协议逐字相同**：`session.config_options` 事件与 `/models` 目录会把它们直接序列化
 // 给前端（既有契约）；tag 分叉等于改 wire。由 archtest 的

@@ -9,23 +9,27 @@ import (
 
 // ——— 后端六边形架构 v3.2 的层表守卫 ———
 //
-// 口径见 `.dsh/docs/plans/2026-10-19-hexagonal-alignment-plan.md`（终局版）。
+// 口径见 `docs/architecture.md` §4.1（终局层表）；下面的 `v32Layers` 是唯一机器事实源，
+// 本注释只是它的摘要——改表时同步这里（`TestLayerTablePathsResolve` 只钉 key/deny 指向的目录
+// 真实存在，钉不住注释，别让它成为第二份"看起来对"的表）。
 //
 //	L0  adapters/outbound/sqlite/model                            表行形状（零内部依赖）
-//	L1  platform/* version runtime adapters/outbound/{acp,mcp} platform/logging 值对象 / 协议库
+//	L1  platform/* version runtime adapters/outbound/{acp,mcp}    值对象 / 协议库
 //	L2  domain/*                                                  领域
 //	L3  contract/dto*                                             应用契约
-//	L4  app/*                                                     用例环
-//	L5  adapters/outbound/sqlite/{store,dao,db} infra/dsh
+//	L4  app/*（含执行面 app/run）                                  用例环
+//	L5  adapters/outbound/sqlite/{store,dao,db}
 //	    adapters/outbound/{dsh,credentials,procreg}                基础驱动 / 出站适配器
-//	L6  adapters/{inbound/mcpgateway,outbound/{registry,mechanism,transfer,runtimeconn}} config
-//	                                                               组合驱动 / 网关与机制
-//	L7  run                                            执行面
-//	L8  adapters/inbound/{http,ws}                                入站适配
-//	L9  adapters/inbound/http/router adapters/inbound/cli/* bootstrap/assembly bootstrap/app
-//	    adapters/inbound/cli/{ops,cmd,maintenance}       交付 / 装配
+//	L6  adapters/inbound/mcpgateway config
+//	    adapters/outbound/{mechanism,definitions,models,workspaces,transfer,runtimeconn}
+//	                                                               网关、机制与按域解体的端口实现
+//	L8  adapters/inbound/{http/{controller,middleware},ws}        入站适配
+//	L9  adapters/inbound/{http/router,cli/{ops,cmd,maintenance}}
+//	    bootstrap/{assembly,assembly/planes,app}                   交付 / 装配
 //
-// 相对 v3.1 表（`layers_v31_test.go`）只改了两件事：
+// L7 已无包（执行面 C3 4.2 并进用例环），故不列。
+//
+// 相对 v3.1 表（已删除，见 git 历史）只改了两件事：
 //
 //  1. **方向反过来**。v3.1 把 `domain` 放在第 9 层、`store` 第 7 层、`dto`/`dao` 第 6 层、
 //     `model` 第 1 层，规则是"高层可以 import 低层"——于是 `domain → store/dto/mechanism`
@@ -282,7 +286,7 @@ var v32Layers = map[string]v32Layer{
 	}},
 }
 
-// v32AdapterDeny adapter（`infra/dsh`）不得认识应用内核的任何一层。
+// v32AdapterDeny adapter（`adapters/outbound/dsh`）不得认识应用内核的任何一层。
 var v32AdapterDeny = []string{
 	"internal/adapters/outbound/sqlite/model", "internal/platform/eventbus", "internal/platform/capability", "internal/platform/credential",
 	"internal/platform/code", "internal/platform/automation", "internal/config", "internal/contract",

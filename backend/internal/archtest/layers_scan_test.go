@@ -111,7 +111,7 @@ func TestOnlyAssemblyImportsRuntimeAdapters(t *testing.T) {
 	}
 	for _, h := range hits {
 		if true {
-			t.Errorf("adapter 装配边：只有 internal/bootstrap/assembly 可以 import infra/dsh；违规 %s", h)
+			t.Errorf("adapter 装配边：只有 internal/bootstrap/assembly 可以 import internal/adapters/outbound/dsh；违规 %s", h)
 		} else {
 			t.Logf("P0 报告（adapter 装配边）：%s", h)
 		}

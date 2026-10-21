@@ -12,7 +12,7 @@ import (
 //
 // 背景（C2）：内核契约（`runtime.Runtime.ConfigOptions/ApplyModel`）、模型目录缓存、会话状态机
 // 原先直接拿 `acp.ConfigOption` 当语言；现在它们是平台值（`runtime.ConfigOption`），协议类型只在
-// 两个边界出现：`runtime.ConfigOptionsOfACP`（读）与 `infra/dsh`（写面下发）。
+// 两个边界出现：`runtime.ConfigOptionsOfACP`（读）与 `adapters/outbound/dsh`（写面下发）。
 //
 // 为什么必须钉住：这两份结构会被**直接序列化**给前端（`session.config_options` 事件与 `/models`
 // 目录的 `options`），所以 json tag 就是 wire 契约；而字段集不同会让某条取值在转换时被静默丢掉
