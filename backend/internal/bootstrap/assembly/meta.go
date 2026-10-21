@@ -8,7 +8,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/service/svcsystem"
+	"github.com/morehao/ark-mate/internal/app/system"
 	"github.com/morehao/ark-mate/internal/version"
 	"github.com/morehao/golib/glog"
 )
@@ -18,22 +18,22 @@ import (
 // 资产相关字段由装配根按**已解析的资产**补（M2-4 的 build id 现场读——它是闸门用来发现
 // "资产被换过"的字段，缓存住就失去意义）；载荷清单（M3-4）来自壳经 `--payloads` 交来的
 // 已解析结果，核心不自己解析载荷（只有壳做了显式配置 → 随包 → PATH 的三级解析）。
-func (as *assembly) metaSource() svcsystem.MetaSource {
+func (as *assembly) metaSource() system.MetaSource {
 	payloads := as.opts.Payloads
 	if payloads == nil {
 		// 非桌面态：恒为空数组而不是 nil，让 `/meta` 的客户端只写一种分支。
 		payloads = []dtosystem.PayloadInfo{}
 	}
-	src := svcsystem.MetaSource{
+	src := system.MetaSource{
 		CoreVersion: version.Version,
 		APIContract: version.APIContract,
 		Home:        as.cfg.HomeDir,
 		Payloads:    payloads,
 		// 产品面事实（产品名/版本/身份版本/定位）：**不读** runtime 段——「关于」面板只消费它。
-		Product: svcsystem.ProductInfoOf(version.Version),
+		Product: system.ProductInfoOf(version.Version),
 	}
 	if as.assets.Has() {
-		src.Assets = svcsystem.MetaAssets{
+		src.Assets = system.MetaAssets{
 			Path:    as.assets.Path,
 			Digest:  as.assets.Digest,
 			BuildID: as.assets.CurrentBuildID(),

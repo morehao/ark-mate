@@ -11,12 +11,12 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/contract/dtomodel"
-	"github.com/morehao/ark-mate/internal/service/svcmodel"
+	"github.com/morehao/ark-mate/internal/app/model"
 )
 
 // ——— 自检用例的**接线判据**（实例由装配根造，控制器只收接口） ———
 //
-// 用例本身的判据在 `internal/service/svcmodel/probe_test.go`（零出网 / 上游四结论 / 目录
+// 用例本身的判据在 `internal/app/model/probe_test.go`（零出网 / 上游四结论 / 目录
 // 未知档 / redact 闸门），那里拿的是两个窄端口。本文件验的是**控制器有没有把它们接上**：
 //
 //	① `NewProviderCtr` 必须把**两个**用例都接上（`actions == nil` 的表现是 `/providers` 四条
@@ -27,7 +27,7 @@ import (
 // 容易出的错不是编译失败（少一个入参就会），而是**接错事实**（把别的平面接进来、或两个都传
 // nil：前者读的是另一份状态，后者静默变成"自检永远说不知道"）。
 
-// fakeProviderCatalog 模型目录读面替身（`svcmodel.Catalog`）。
+// fakeProviderCatalog 模型目录读面替身（`model.Catalog`）。
 type fakeProviderCatalog struct{ called bool }
 
 func (f *fakeProviderCatalog) ModelCatalog(context.Context) (*provider.CatalogView, error) {
@@ -46,7 +46,7 @@ func TestNewProviderCtrKeepsBothUseCases(t *testing.T) {
 	reg := dsh.Registry()
 	plane := provider.NewPlane(reg, registry.NewProviderSecrets(credential.New(reg)))
 	plane.SetProviderDir(t.TempDir())
-	ctr := NewProviderCtr(svcmodel.NewProvider(plane), svcmodel.NewProbe(plane, &fakeProviderCatalog{}))
+	ctr := NewProviderCtr(model.NewProvider(plane), model.NewProbe(plane, &fakeProviderCatalog{}))
 
 	pc, ok := ctr.(*providerCtr)
 	if !ok {

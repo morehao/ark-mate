@@ -167,15 +167,15 @@ func TestAutomationWiringIsAttached(t *testing.T) {
 // `domain/automation/plane.go` 的文件头早就写着本域"不负责对外 DTO 与错误码出口
 // （`service/svc*` 与 `dto/*`）"——但 `rest.go` 当初整文件跟着 P2b 搬进了域里，
 // 于是那条口径在代码上不成立。这一刀把那一面（请求形态校验 / 错误码出口 / DTO 折叠 / 排序）
-// 上提到 `internal/service/svcautomation`，域只留领域动作。
+// 上提到 `internal/app/automation`，域只留领域动作。
 //
 // 三种失效都不会让既有测试变红：
 //
 //	① **回流**：谁在域里又写一遍 `automation_not_found` 或 `InvalidParamErr(`——两份出口立刻分叉
 //	   （例如一边 40401、另一边 40001），而"哪边生效"取决于调用路径，两边各自都有测试；
-//	② **装配回潮**：`Ports` 那一格写回 svc 类型（`svcautomation.AutomationSvc`）——装配点为了声明
+//	② **装配回潮**：`Ports` 那一格写回 svc 类型（`automation.AutomationSvc`）——装配点为了声明
 //	   一格字段而 import 用例包，`router`/`app` 不得引用 `service/svc*` 这条口径当场破掉；
-//	③ **用例没人造**：控制器不再调 `svcautomation.New(`（拿到的 `plane` 直接当用例用，
+//	③ **用例没人造**：控制器不再调 `automation.New(`（拿到的 `plane` 直接当用例用，
 //	   或者干脆绕开用例层）——于是 `AutomationSvc` 的实现只剩测试里的替身。
 //
 // 判据四段，都 fail-closed（锚找不到即失败：改名/搬迁会让守卫静默空转）。
@@ -223,17 +223,17 @@ var automationRunFaceCodes = []string{`"automation_not_found"`, `"definition_inv
 // TestAutomationApiFaceLivesInAutomationSvc 见上方注释。
 func TestAutomationApiFaceLivesInAutomationSvc(t *testing.T) {
 	root := backendRoot(t)
-	svcDir := filepath.Join(root, "internal", "service", "svcautomation")
+	svcDir := filepath.Join(root, "internal", "app", "automation")
 	svcBody := dirProductionBody(t, svcDir)
 	for _, a := range automationUseCaseAnchors {
 		if !strings.Contains(svcBody, a) {
-			t.Errorf("`internal/service/svcautomation` 里找不到 %q：应用例面被改名/搬走了"+
+			t.Errorf("`internal/app/automation` 里找不到 %q：应用例面被改名/搬走了"+
 				"（这条守卫的判据挂在它身上，失锚等于空转）。", a)
 		}
 	}
 	if !strings.Contains(svcBody, `"github.com/morehao/ark-mate/internal/domain/automation"`) &&
 		!strings.Contains(svcBody, `domauto "github.com/morehao/ark-mate/internal/domain/automation"`) {
-		t.Error("`internal/service/svcautomation` 没有 import `internal/domain/automation`：" +
+		t.Error("`internal/app/automation` 没有 import `internal/domain/automation`：" +
 			"用例层必须调用**领域动作**（WriteAutomation / AutomationByID / Recs / RunNow），" +
 			"而不是自己再实现一遍装载与排期。")
 	}
@@ -244,7 +244,7 @@ func TestAutomationApiFaceLivesInAutomationSvc(t *testing.T) {
 	for _, m := range automationApiFaceMarkers {
 		if strings.Contains(domBody, m) {
 			t.Errorf("`internal/domain/automation` 里出现对外面的痕迹 %q：对外 DTO 与错误码出口归 "+
-				"`service/svcautomation`（域的文件头写着这条口径）。两边各写一份的表现是"+
+				"`app/automation`（域的文件头写着这条口径）。两边各写一份的表现是"+
 				"错误码或折叠口径静默分叉。", m)
 		}
 	}
@@ -265,20 +265,20 @@ func TestAutomationApiFaceLivesInAutomationSvc(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(domDir, "rest.go")); err == nil {
 		t.Error("`internal/domain/automation/rest.go` 又存在了：对外面的实现只有一份，" +
-			"在 `internal/service/svcautomation`（P4a 正文第九刀）。")
+			"在 `internal/app/automation`（P4a 正文第九刀）。")
 	}
 
 	// ② 用例实例只在装配根造（v3.1 §3.4）；控制器只收接口。
 	asmSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
-	if !strings.Contains(asmSrc, "svcautomation.New(") {
-		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcautomation.New(`：" +
+	if !strings.Contains(asmSrc, "automation.New(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `automation.New(`：" +
 			"用例实例必须在唯一装配根里造。")
 	}
 
 	// ③ 控制器不得再造用例（交给它的是**用例接口**，不是域平面）。
 	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrautomation", "automation.go")))
-	if strings.Contains(ctrSrc, "svcautomation.New(") {
-		t.Error("`ctrautomation` 里又出现 `svcautomation.New(`：用例实例只在 `internal/bootstrap/assembly` 造，" +
+	if strings.Contains(ctrSrc, "automation.New(") {
+		t.Error("`ctrautomation` 里又出现 `automation.New(`：用例实例只在 `internal/bootstrap/assembly` 造，" +
 			"控制器拿到的必须是已构造的接口。")
 	}
 }

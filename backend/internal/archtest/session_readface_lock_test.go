@@ -3,7 +3,7 @@ package archtest
 // 本文件钉住**会话读面自己取锁**（2026-10-17，修 `SessionResp` 的裸读 map）。
 //
 // 已发生的竞态：`domain/session/readface.go` 的 `SessionResp` 注释写着「须持锁调用」，但它是
-// **导出**方法、锁在包里——`service/svcsession` 的两个调用点（`detail.go` / `meta.go`）都不可能
+// **导出**方法、锁在包里——`app/session` 的两个调用点（`detail.go` / `meta.go`）都不可能
 // 持锁，于是并发 `RegisterSession` 时对 `pl.sessions` 的裸读是真实的数据竞争（`-race` 可复现）。
 //
 // 修法不是"给调用方也加一把锁"（那把锁在包里、跨包本来就不该拿），而是把**调用方持锁**这个
@@ -14,7 +14,7 @@ package archtest
 //
 //	① `readface.go` 不得再出现导出的 `func (pl *Plane) SessionResp(`；
 //	② `SessionSnapshot` 必须存在，且函数体里有 `pl.mu.Lock()`；
-//	③ `service/svcsession` 的生产文件里 `SessionSnapshot(` 至少一处；
+//	③ `app/session` 的生产文件里 `SessionSnapshot(` 至少一处；
 //	④ 同一扫描面 `.SessionResp(` 零命中。
 //
 // 反证（实跑）：把 `SessionResp` 加回导出（能编译）→ ① 红；`detail.go` 改回
@@ -53,7 +53,7 @@ func TestSessionReadFaceTakesOwnLock(t *testing.T) {
 
 	// ③④ 消费面：用例层只许调自取锁的入口。
 	snapHits, exportedHits, files := 0, 0, 0
-	for _, p := range goFilesUnder(t, filepath.Join(root, "internal", "service", "svcsession")) {
+	for _, p := range goFilesUnder(t, filepath.Join(root, "internal", "app", "session")) {
 		if strings.HasSuffix(p, "_test.go") {
 			continue
 		}

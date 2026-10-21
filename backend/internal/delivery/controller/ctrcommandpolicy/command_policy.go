@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/contract/dtocommandpolicy"
-	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
+	"github.com/morehao/ark-mate/internal/app/commandpolicy"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -19,10 +19,10 @@ type CommandPolicyCtr interface {
 
 var _ CommandPolicyCtr = (*commandPolicyCtr)(nil)
 
-type commandPolicyCtr struct{ svc svccommandpolicy.PolicySvc }
+type commandPolicyCtr struct{ svc commandpolicy.PolicySvc }
 
 // NewCommandPolicyCtr 构造控制器（只收**已构造的用例**；规则文件路径与立即生效回调在装配根交给用例）。
-func NewCommandPolicyCtr(svc svccommandpolicy.PolicySvc) CommandPolicyCtr {
+func NewCommandPolicyCtr(svc commandpolicy.PolicySvc) CommandPolicyCtr {
 	return &commandPolicyCtr{svc: svc}
 }
 

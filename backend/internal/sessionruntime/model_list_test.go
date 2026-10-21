@@ -92,7 +92,7 @@ func builtinSpec(t *testing.T, id string) runtime.Spec {
 //
 // 写面（`CreateModel`/`UpdateModel`/`DeleteModel`）已搬进 `service/svcmodel`（P4a 正文第五刀）：
 // 这些用例要的是"清单里有一条"这个**前提**，不是写面的行为——写面的判据跟着实现走，
-// 在 `internal/service/svcmodel/declared_test.go`。
+// 在 `internal/app/model/declared_test.go`。
 //
 // 仍借 `provrow.ModelColumns` 落库而不是手写 SQL：前提必须与产品落库的形态同源
 // （列化之后"清单里有一条"这句话的含义就是这些列）。
@@ -204,7 +204,7 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 
 // TestModelListReadsEmptyWithoutSQLite memory 模式（无清单载体）：读面回空列表。
 //
-// 写面（"没有载体就 40501"）随实现在 `internal/service/svcmodel/declared_test.go`。
+// 写面（"没有载体就 40501"）随实现在 `internal/app/model/declared_test.go`。
 func TestModelListReadsEmptyWithoutSQLite(t *testing.T) {
 	ctx := context.Background()
 	svc := newServiceForTest(dsh.Registry(), eventbus.New())

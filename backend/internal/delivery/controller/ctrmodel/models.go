@@ -4,7 +4,7 @@
 // 与 model 同属一个域（`domain/provider`），但两个控制器接口仍分开：`ProviderCtr`（档案 / 自检）
 // 与 `ModelCtr`（目录 / 清单）。
 //
-// 控制器只依赖 internal/service/svc* 的窄端口与**依赖事实**（清单载体、供应商域平面），不感知领域实现；
+// 控制器只依赖 internal/app/* 的窄端口与**依赖事实**（清单载体、供应商域平面），不感知领域实现；
 // 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
 package ctrmodel
 
@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/contract/dtomodel"
-	"github.com/morehao/ark-mate/internal/service/svcmodel"
+	"github.com/morehao/ark-mate/internal/app/model"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -32,19 +32,19 @@ var _ ModelCtr = (*modelCtr)(nil)
 //
 // 两个字段都是装配根构造、由构造函数注入的用例：
 //
-//	declared —— 平台清单的**写面**（`svcmodel.NewDeclared`，P4a 第五刀）
+//	declared —— 平台清单的**写面**（`model.NewDeclared`，P4a 第五刀）
 //	svc      —— 读清单 / 运行时目录 / 同步（装配点交出）
 //
 // 底座由构建期固定（v19），"问哪个底座"不是一个参数。
 type modelCtr struct {
-	svc      svcmodel.ModelSvc
-	declared svcmodel.DeclaredSvc
+	svc      model.ModelSvc
+	declared model.DeclaredSvc
 }
 
 // NewModelCtr 构造 ModelCtr（只收**已构造的两个用例**：写面与读/目录/同步面）。
 //
 // 除控制器之外的层不许引用 `service/svc*`（`internal/archtest/svc_layer_consumer_test.go`）。
-func NewModelCtr(svc svcmodel.ModelSvc, declared svcmodel.DeclaredSvc) ModelCtr {
+func NewModelCtr(svc model.ModelSvc, declared model.DeclaredSvc) ModelCtr {
 	return &modelCtr{svc: svc, declared: declared}
 }
 

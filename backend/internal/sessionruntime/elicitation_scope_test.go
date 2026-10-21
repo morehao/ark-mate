@@ -16,7 +16,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/service/svcruntime"
+	appruntime "github.com/morehao/ark-mate/internal/app/runtime"
 )
 
 // 本文件是从 `elicitation_test.go` 拆出来的：那三个用例测的是 **Orchestrator / Service 侧**
@@ -127,7 +127,7 @@ func TestRuntimeDiagnosticsShowsScopeAmbiguous(t *testing.T) {
 	svc, _ := newSearchRig(t)
 	planeOf(svc).NoteScopeAmbiguous("elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 run）")
 
-	resp, err := svcruntime.New(planeOf(svc)).RuntimeDiagnostics(context.Background())
+	resp, err := appruntime.New(planeOf(svc)).RuntimeDiagnostics(context.Background())
 	if err != nil {
 		t.Fatalf("RuntimeDiagnostics: %v", err)
 	}

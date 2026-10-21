@@ -1,6 +1,6 @@
 // Package ctrexport 承载会话导出控制器。
 //
-// 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
+// 控制器只依赖 internal/app/* 的窄端口，不感知领域实现；
 // 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
 package ctrexport
 
@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/contract/dtoexport"
-	"github.com/morehao/ark-mate/internal/service/svcsystem"
+	"github.com/morehao/ark-mate/internal/app/system"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -21,11 +21,11 @@ var _ ExportCtr = (*exportCtr)(nil)
 
 // ExportHandler 处理会话批量导出（M3 ②：JSON / 纯文本 / Markdown）。
 type exportCtr struct {
-	svc svcsystem.SystemSvc
+	svc system.SystemSvc
 }
 
 // NewExportCtr 构造 ExportCtr（只收**已构造的用例**；事实来源在装配根建）。
-func NewExportCtr(svc svcsystem.SystemSvc) ExportCtr {
+func NewExportCtr(svc system.SystemSvc) ExportCtr {
 	return &exportCtr{svc: svc}
 }
 

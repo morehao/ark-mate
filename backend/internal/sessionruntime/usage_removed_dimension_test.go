@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/contract/dtousage"
-	"github.com/morehao/ark-mate/internal/service/svcusage"
+	"github.com/morehao/ark-mate/internal/app/usage"
 
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -34,7 +34,7 @@ func TestUsageSummaryRejectsRemovedAgentDimension(t *testing.T) {
 	enableStore(svc, st)
 
 	// 拒绝面在**用例层**（v3.2 刀 9）：已下线的键是"请求形状"的事，领域只收它要用的维度。
-	usageSvc := svcusage.New(sessionPlaneOf(svc))
+	usageSvc := usage.New(sessionPlaneOf(svc))
 	_, err := usageSvc.Summary(ctx, dtousage.UsageQueryReq{AgentID: "stub"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40001 || !strings.Contains(ge.Msg, "[agent_selection_removed]") {

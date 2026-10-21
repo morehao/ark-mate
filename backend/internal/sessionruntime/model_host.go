@@ -6,16 +6,16 @@ import (
 	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 )
 
-// ——— `svcmodel.Host` 的过渡端口实现（P4a 正文第五十九刀）———
+// ——— `model.Host` 的过渡端口实现（P4a 正文第五十九刀）———
 //
 // 行投影已随模型读面进 `domain/provider`（`ModelRow` 只留一行转发）；`ModelEffect` 仍在这里：
 // "哪些会话会顺延"要问代际裁决（与连接/会话编排绑在一起），随 `Orchestrator` 在 P5 dissolve。
 
 // ModelEffect 计算模型清单改动的生效面回执（只读、无副作用；判据与代际裁决同源）。
 //
-// 导出是**过渡期的端口实现**（`svcmodel.Host`，P4a 正文第五刀）：清单写面已搬进
+// 导出是**过渡期的端口实现**（`model.Host`，P4a 正文第五刀）：清单写面已搬进
 // `service/svcmodel`，而"哪些会话会顺延"要问代际裁决（与连接/会话编排绑在一起，P5 才 dissolve）。
-// 搬过去的那一天，这个方法连同 `svcmodel.Host` 一起消失。
+// 搬过去的那一天，这个方法连同 `model.Host` 一起消失。
 func (s *Service) ModelEffect(defaultTouched bool) *dtomodel.ModelEffect {
 	eff := &dtomodel.ModelEffect{Effect: "next_session"}
 	o := s.orch
@@ -47,7 +47,7 @@ func (s *Service) ModelEffect(defaultTouched bool) *dtomodel.ModelEffect {
 // ——— 派生只读：`GET /agents` 的 `default_model` ———
 
 // ModelFace 把「模型读面（`ModelViews` 端口：清单/目录/同步）」与「生效面回执
-// （本层 ModelEffect）」拼成 `svcmodel.ModelSvc` / `Host` 需要的形状。
+// （本层 ModelEffect）」拼成 `model.ModelSvc` / `Host` 需要的形状。
 //
 // 这是装配点的**组合**，不是转发层：读面与同步各自来自一份真实现，生效面回执要问代际裁决
 // （随 Orchestrator 留在这里）。两份事实拼成一个接口实现——这就是它的全部职责。
@@ -84,7 +84,7 @@ func (f ModelFace) TrySyncModels(ctx context.Context) string {
 //
 // 领域（`provider.Plane`）返回无 tag 视图；`svcmodel` 的接口面向控制器，要的是 DTO。
 // 这里显式遮蔽（shadow）嵌入值提升上来的同名方法，把投影钉在一个地方——否则
-// `ModelFace` 会因为嵌入值返回领域类型而不再满足 `svcmodel.ModelSvc`。
+// `ModelFace` 会因为嵌入值返回领域类型而不再满足 `model.ModelSvc`。
 func (f ModelFace) ModelCatalog(ctx context.Context) (*dtomodel.ModelCatalogResp, error) {
 	if f.facts.Providers == nil {
 		return nil, errPlaneFactsMissing

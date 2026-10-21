@@ -19,7 +19,7 @@ import (
 // 供应商档案同属一个域（`models.provider_id` 是外键式的挂靠），所以落在这里而不是用例层：
 //
 //   - 用例层（`service/svcmodel`）只做请求校验、错误码出口与响应装配；
-//   - 解析链（`ResolveSessionModel`）同时被会话用例（`svcsession.MetaDeps.ResolveModel`）、
+//   - 解析链（`ResolveSessionModel`）同时被会话用例（`session.MetaDeps.ResolveModel`）、
 //     模型目录（`model_catalog.go`）与体检（`provider_model_facts.go`）消费——**只有一份实现**，
 //     放在域里才不会出现"某一条路径自己解释那个串"。
 //

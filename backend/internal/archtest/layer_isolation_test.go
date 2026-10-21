@@ -11,7 +11,7 @@ import (
 // ——— 分层重构（P3d/P2a 起）的层守卫 ———
 //
 // 新结构把解散 `internal/sessionruntime` 的实现按**层**落进 `internal/drivers/mechanism/*`（机制：无业务规则的
-// 跨域设施）、`internal/domain/*`（领域：拥有数据与不变量）、`internal/service/svc*`（用例：API
+// 跨域设施）、`internal/domain/*`（领域：拥有数据与不变量）、`internal/app/*`（用例：API
 // 面实现）。层分开之后最危险的失效方式有两种，**都不会让任何既有测试变红**：
 //
 //	① **反向依赖**：机制/领域层 import 上层（manager / service / controller / app）——一旦发生，
@@ -62,7 +62,7 @@ func layerScanPackages(t *testing.T, root, layer string, roots ...string) []stri
 //
 //	mechanism/* → pkg/* · internal/{store,model} · 同层机制
 //
-// **不得** import 任何 `internal/domain/*`（领域）或 `internal/service/*`（用例口）、
+// **不得** import 任何 `internal/domain/*`（领域）或 `internal/app/*`（用例口）、
 // 以及 `manager`/`app`/`router`/`controller`/`gateway` 这些上层实现与装配面。
 //
 // 为什么这条最要紧：机制层是被 ≥3 个域共享的那一层（`mechanism/definition` 被五类定义共用）。
@@ -76,7 +76,7 @@ func TestMechanismMustNotImportUpward(t *testing.T) {
 	root := backendRoot(t)
 	forbidden := []string{
 		modulePrefix + "internal/domain",
-		modulePrefix + "internal/service",
+		modulePrefix + "internal/app",
 		modulePrefix + "internal/sessionruntime",
 		modulePrefix + "internal/bootstrap/app",
 		modulePrefix + "internal/delivery/router",
@@ -142,7 +142,7 @@ func TestDomainPackagesMustNotImportEachOther(t *testing.T) {
 		}
 	}
 	upward := []string{
-		modulePrefix + "internal/service",
+		modulePrefix + "internal/app",
 		modulePrefix + "internal/sessionruntime",
 		modulePrefix + "internal/bootstrap/app",
 		modulePrefix + "internal/delivery/router",
@@ -169,15 +169,15 @@ func TestDomainPackagesMustNotImportEachOther(t *testing.T) {
 // TestServicePortsMustNotImportEachOther 锁定用例层的同层纪律：`service/svc*` 之间零互相 import。
 //
 // 用例层的分界是两条：① "谁调谁"（`svcsession` 与 `svccapability` 不该互相调：那是编排，归
-// registry 或各自的下游领域）② "谁拥有端口类型"（`svclibrary.Query` 的类型该下沉到 `domain/skill`，
+// registry 或各自的下游领域）② "谁拥有端口类型"（`library.Query` 的类型该下沉到 `domain/skill`，
 // 见 P4a）。一个 `svc` import 另一个 `svc` 会让这两条同时失效；而端口层互相 import 通常还伴随
 // import 环——只是 Go 要等到某个具体调用点才报出来。
 func TestServicePortsMustNotImportEachOther(t *testing.T) {
 	root := backendRoot(t)
-	for _, dir := range layerScanPackages(t, root, "internal/service", "service") {
+	for _, dir := range layerScanPackages(t, root, "internal/app", "app") {
 		self := packageImportPath(root, dir)
 		for _, imp := range importedByPackage(t, dir) {
-			if strings.HasPrefix(imp, modulePrefix+"internal/service/") && imp != self {
+			if strings.HasPrefix(imp, modulePrefix+"internal/app/") && imp != self {
 				t.Errorf("同层互相依赖：%s 不应 import %s（用例层按 API 领域分包，互不 import）",
 					rel(root, dir), imp)
 			}
@@ -204,7 +204,7 @@ func TestInnerLayersUseNoTableRows(t *testing.T) {
 	modelPkg := modulePrefix + "internal/persistence/model"
 	innerRoots := []string{
 		filepath.Join("internal", "domain"),
-		filepath.Join("internal", "service"),
+		filepath.Join("internal", "app"),
 		filepath.Join("internal", "sessionruntime"),
 		filepath.Join("internal", "delivery"),
 		filepath.Join("internal", "bootstrap"),
@@ -248,7 +248,7 @@ func TestInnerLayersUseNoTableRows(t *testing.T) {
 // 值层也在表里：它们的错误构造改用 `code` 之后就不该再认识协议。B4 之后 `platform/code` 自己
 // 也不再认识协议——协议错误 → 平台视图的转换点搬到了**适配器出口**（`runtime.FoldError`，
 // 由 `runtime.Connect` 与 `drivers/runtimeconn` 调用），内圈因此对协议零依赖。
-// 第二段的"全量"判据同时覆盖 `internal/domain` / `internal/platform` / `internal/service` 三个前缀：
+// 第二段的"全量"判据同时覆盖 `internal/domain` / `internal/platform` / `internal/app` 三个前缀：
 // 这些前缀下新出现的包不登记即红。
 var protocolFreePackages = []string{
 	// —— 领域：已**全量**收口（每个包都在表里，新增域包不登记即红）——
@@ -289,18 +289,18 @@ var protocolFreePackages = []string{
 	modulePrefix + "internal/platform/resource",
 
 	// —— 用例层：业务错误的分类与 code 都走 `platform/code`，用例不写协议分类 ——
-	modulePrefix + "internal/service/svcautomation",
-	modulePrefix + "internal/service/svccapability",
-	modulePrefix + "internal/service/svccommandpolicy",
-	modulePrefix + "internal/service/svclibrary",
-	modulePrefix + "internal/service/svcmodel",
-	modulePrefix + "internal/service/svcruntime",
-	modulePrefix + "internal/service/svcsearch",
-	modulePrefix + "internal/service/svcsession",
-	modulePrefix + "internal/service/svcstream",
-	modulePrefix + "internal/service/svcsystem",
-	modulePrefix + "internal/service/svcusage",
-	modulePrefix + "internal/service/svcworkspace",
+	modulePrefix + "internal/app/automation",
+	modulePrefix + "internal/app/capability",
+	modulePrefix + "internal/app/commandpolicy",
+	modulePrefix + "internal/app/library",
+	modulePrefix + "internal/app/model",
+	modulePrefix + "internal/app/runtime",
+	modulePrefix + "internal/app/search",
+	modulePrefix + "internal/app/session",
+	modulePrefix + "internal/app/stream",
+	modulePrefix + "internal/app/system",
+	modulePrefix + "internal/app/usage",
+	modulePrefix + "internal/app/workspace",
 }
 
 // TestProtocolFreePackagesStayClean 已收口的内圈包不得再 import 协议库。
@@ -336,7 +336,7 @@ func TestProtocolFreePackagesStayClean(t *testing.T) {
 	for _, p := range protocolFreePackages {
 		registered[p] = true
 	}
-	for _, prefix := range []string{"domain", "platform", "service"} {
+	for _, prefix := range []string{"domain", "platform", "app"} {
 		for _, dir := range goPackagesUnder(t, filepath.Join(root, "internal", prefix)) {
 			self := packageImportPath(root, dir)
 			if !registered[self] {

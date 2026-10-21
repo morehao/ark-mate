@@ -7,7 +7,7 @@ package ctrlibrary
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/platform/code"
-	"github.com/morehao/ark-mate/internal/service/svclibrary"
+	"github.com/morehao/ark-mate/internal/app/library"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -19,11 +19,11 @@ type LibraryCtr interface {
 var _ LibraryCtr = (*libraryCtr)(nil)
 
 type libraryCtr struct {
-	svc svclibrary.LibrarySvc
+	svc library.LibrarySvc
 }
 
 // NewLibraryCtr 构造 LibraryCtr（只收**已构造的用例**）。
-func NewLibraryCtr(svc svclibrary.LibrarySvc) LibraryCtr {
+func NewLibraryCtr(svc library.LibrarySvc) LibraryCtr {
 	return &libraryCtr{svc: svc}
 }
 
@@ -31,7 +31,7 @@ func NewLibraryCtr(svc svclibrary.LibrarySvc) LibraryCtr {
 // `?q=`（id/name/description 大小写不敏感子串）。逐条回带**逐 runtime 的可达性**与人话原因，
 // 刻意不给"整体可用吗"的合并结论。
 func (h *libraryCtr) ListLibrary(c *gin.Context) {
-	items, err := h.svc.ListLibrary(svclibrary.Query{Kind: c.Query("kind"), Q: c.Query("q")})
+	items, err := h.svc.ListLibrary(library.Query{Kind: c.Query("kind"), Q: c.Query("q")})
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

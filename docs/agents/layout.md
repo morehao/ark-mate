@@ -12,29 +12,29 @@
   - **依赖方向单一**：
     - 层带（L0–L9 终局表，见 [`../architecture.md`](../architecture.md) 的 §4.1）：`persistence/model` → 值/协议 → `domain` → 应用契约 → `service` → `persistence/{store,dao}` + `infra` → 机制与注册表 → `sessionruntime` → `controller` → 装配与交付。**只能向内 import**；应用契约被 controller / service / CLI / WS 共用（同一份对外契约），`domain` 在它的里侧、不认识它。
       C3 4.1 起这带的三处只改了**目录**：`core/*` → `platform/*`（纯值/规则/平台内核，L1 不变）、`dto/*` → `contract/*`（包名仍是 `dto<领域>`：`dto` 是本仓词汇里"应用契约"那个词，改名要动 31 个同时引用同名域包的文件、收益只有美观）。
-    - **装配只能自上而下，不许反向**：`assembly` 构造用例与控制器，`router` 只收已构造的控制器（`router.Deps`），`app` 只消费 `assembly.BuildResult`。**`app`/`router`/`cli` 都不得引用 `service/svc*`**，控制器也不得 import `domain`/`store`/`model`——判据见 `layers_v32_test.go`。
+    - **装配只能自上而下，不许反向**：`assembly` 构造用例与控制器，`router` 只收已构造的控制器（`router.Deps`），`app` 只消费 `assembly.BuildResult`。**`app`/`router`/`cli` 都不得引用用例环（`internal/app/*`）**，控制器也不得 import `domain`/`store`/`model`——判据见 `layers_v32_test.go`。
     - 持久侧：`dbclient → persistence/dao → persistence/store`，`model` 被三者依赖且自身不依赖任何一层；`dao` 不得 import `store`（会成环），`model` 不得 import `dao`/`store`。
-    - **厚域与用例都走窄端口，不 import 门面**（P4）：`domain/session` 声明 `Store` 端口（`store_port.go`），`domain/interaction` 零 `store`；用例层同理声明 `svcmodel.ModelStore` / `svcsession.EventReader` / `svcsystem.SourceFactsReader`。`*store.Store` 结构上满足它们、由装配根交下来；**交下来时必须现判 nil**——typed-nil 装进接口不是 nil，会让"内存模式 40501 / 只读镜像"那几条判据静默失效（`assembly/services.go` 的 `eventReader`/`sourceFactsReader`/`modelStore` 就是这条规矩的落点）。`model` 仍可被 `domain/session` 引用：它是纯列形状（无行为），把它也搬走只会换来 30 多个镜像结构。
-  - **用例层（`service/svc<领域>`）的三条硬规矩**（2026-10-16 定案；违反者由 `internal/archtest` 拦，别靠注释）：
+    - **厚域与用例都走窄端口，不 import 门面**（P4）：`domain/session` 声明 `Store` 端口（`store_port.go`），`domain/interaction` 零 `store`；用例环同理声明 `model.ModelStore` / `session.EventReader` / `system.SourceFactsReader`。`*store.Store` 结构上满足它们、由装配根交下来；**交下来时必须现判 nil**——typed-nil 装进接口不是 nil，会让"内存模式 40501 / 只读镜像"那几条判据静默失效（`assembly/services.go` 的 `eventReader`/`sourceFactsReader`/`modelStore` 就是这条规矩的落点）。`model` 仍可被 `domain/session` 引用：它是纯列形状（无行为），把它也搬走只会换来 30 多个镜像结构。
+  - **用例环（C3 4.2 起是 `internal/app/<领域>`；此前叫 `service/svc<领域>`）的三条硬规矩**（2026-10-16 定案；违反者由 `internal/archtest` 拦，别靠注释）：
 
-    1. **只有 `internal/delivery/controller/ctr<领域>` 可以引用 `internal/service/svc<领域>`**——「引用」包括调用、构造与**写类型名**。
-       `app` / `router` / `sessionruntime` / `domain` / `mechanism` / `dao` / `store` / `pkg` 一律不许出现 `svc*` 类型。
+    1. **只有 `internal/delivery/controller/ctr<领域>` 与装配根可以引用 `internal/app/<领域>`**——「引用」包括调用、构造与**写类型名**。
+       `bootstrap/app` / `router` / `cliops` / `sessionruntime`（C3 后是 `app/run`）/ `domain` / `mechanism` / `dao` / `store` 一律不许出现用例包。
        连带的装配口径：**`app` 不引用 controller**（`cmd → app → router → controller` 是有向的），
        `router` 拿到的只是依赖事实；**用例实例只在装配根（`internal/bootstrap/assembly`）造**，controller 只收接口。
-    2. **`service/svc*` 之间零互相 import、零互调用**（同层的另外半边由既有守卫钉）。需要别的域的事实时，
+    2. **`app/<领域>` 之间零互相 import、零互调用**（同层的另外半边由既有守卫钉）。需要别的域的事实时，
        在自己包里声明一个**窄接口**（如 `automation.Host`），由接线点（controller / router）把实现接上；
        需要共享的纯值或判决下沉到 `domain/*` / `internal/platform/object/*`。
-    3. **不许别名与转发骚操作**：不写 `type XxxSvc = svcxxx.XxxSvc` 这类「端口别名」，
+    3. **不许别名与转发骚操作**：不写 `type XxxSvc = otherpkg.XxxSvc` 这类「端口别名」，
        也不要「只做一行转发」的适配器层。controller 直接持有 **service 包内声明的接口**，一个类型只有一处定义。
         （2026-10-16 的 P4a 一批曾用别名把 8 个端口挂在 `router.Ports` 上，事后被判定为骚操作，已删。）
 
-  - **`service/svc<领域>` 的形状**（新写一个域时照抄）：接口（`XxxSvc`，消费方只认它）+ 实现（导出结构体或私有结构体）
+  - **用例包（`app/<领域>`）的形状**（新写一个域时照抄）：接口（`XxxSvc`，消费方只认它）+ 实现（导出结构体或私有结构体）
     + 构造函数 `NewXxx(deps...) XxxSvc`；校验、错误码、响应装配、渲染都在这一层；controller 里只做
     参数绑定、简单校验、调 service、回响应（**任何业务判断都不许写在 controller**）。
-  - **2026-10-20：provider 侧并入 `svcmodel` / `ctrmodel` / `dtomodel`**——
+  - **2026-10-20：provider 侧并入 `model`（原 `svcmodel`）/ `ctrmodel` / `dtomodel`**——
     provider 与 model 同属 `domain/provider` 一个域（`models.provider_id` 是外键式的挂靠）。
     **包名取 `model` 系**（用户面主名词是「设置 · 模型」），域仍是 `domain/provider`；注意 `internal/persistence/model`
-    是数据库实体包，不要和 `dtomodel`/`svcmodel`/`ctrmodel` 混为一谈。合并的是**目录**，不是接口：
+    是数据库实体包，不要和 `dtomodel`/`app/model`/`ctrmodel` 混为一谈。合并的是**目录**，不是接口：
     `ProviderSvc` / `Prober` / `DeclaredSvc` / `ModelSvc` / `Host` / `ModelStore` 仍按**面**切开，
     一个控制器只认自己那片。
 

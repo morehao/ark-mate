@@ -797,13 +797,13 @@ backend/                单 Go module（github.com/morehao/ark-mate）
     router              唯一路由装配点（按领域分 routes_*.go；只收已构造的控制器）
     controller/ctr*     传输层控制器（只收 service 接口 + DTO + gin）
     middleware          HTTP 中间件（单操作员 token 鉴权）
-    dto/dto*            请求/响应 DTO（按领域分包，双方共用）
-    service/svc*        用例层（控制器依赖的窄接口 + 实现，装配根构造）
+    contract/dto*       请求/响应 DTO（应用契约，按领域分包，双方共用）
+    app/<域>            用例环（控制器依赖的窄接口 + 实现，装配根构造）
     model               持久层实体 + 列与取值约定（gorm 映射；时间 TEXT/布尔 INTEGER 由 serializer 保证）
     dao                 列词汇（各领域 Cond）+ gormdao 泛型方法 + 机械原语（不承载业务读面）
     store               持久层业务面（排序/筛选/聚合/状态迁移 + 跨表事务与读模型 API）
     eventbus            进程内事件总线（WS 订阅源）
-    archtest            架构守卫（机器判据的唯一集中地，169 条，含 1 条文档引用守卫）
+    archtest            架构守卫（机器判据的唯一集中地，179 条，含 1 条文档引用守卫）
 frontend/               pnpm workspace（apps/* + packages/*）
   apps/web/             入口 + 组装（main.tsx 挂载 + vite 构建配置）；产物 dist 是唯一一份 UI
   apps/desktop/         桌面产品（Electron 壳：src/ 主进程与 preload、renderer/ 壳静态页、scripts/ 装配与打包）

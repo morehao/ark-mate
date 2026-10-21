@@ -14,7 +14,7 @@ import (
 // ——— 动态密钥登记的生产装配判据（P4a：自检用例搬走之后**留下**的那一半） ———
 //
 // 自检的判据（默认零出网、上游四种结论、目录未知档、redact 闸门）在用例层
-// （`internal/service/svcmodel/probe_test.go`），自检用例的**装配**判据在
+// （`internal/app/model/probe_test.go`），自检用例的**装配**判据在
 // `internal/delivery/controller/ctrmodel/probe_test.go`，两条合起来才完整。
 //
 // 本文件验的是用例级夹具验不了的那一段：**真的建档 → 密钥真值落进域平面 → `providerEnvFor`

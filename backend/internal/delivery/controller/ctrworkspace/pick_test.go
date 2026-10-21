@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/platform/code"
-	"github.com/morehao/ark-mate/internal/service/svcworkspace"
+	"github.com/morehao/ark-mate/internal/app/workspace"
 )
 
 // pickStub 宿主选择器替身：三个结局里"选定 / 取消"要真的 spawn 宿主命令（osascript/zenity），
@@ -50,7 +50,7 @@ func TestWorkspacePickDirectoryThreeOutcomes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// svc 传 nil：这条路由只经 picker 端口，正是"控制器只做绑定与回响应"的形状。
 			r := gin.New()
-			r.POST("/pick", NewWorkspaceCtr(svcworkspace.New(nil, tc.stub)).PickDirectory)
+			r.POST("/pick", NewWorkspaceCtr(workspace.New(nil, tc.stub)).PickDirectory)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/pick", nil))
 			var env envelope

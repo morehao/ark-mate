@@ -21,7 +21,7 @@ import (
 //	   `-1`），而两边各自都有测试；
 //	② **接口回潮**：`SessionHistory` 声明回 `SessionSvc`——控制器于是有两条路拿到它
 //	   （`svc.SessionHistory` / `hist.SessionHistory`），"面"又没了；
-//	③ **装配漏接**：`NewSessionCtr` 不再造 `svcsession.NewHistory(...)`（同一个包里的中间函数
+//	③ **装配漏接**：`NewSessionCtr` 不再造 `session.NewHistory(...)`（同一个包里的中间函数
 //	   也能把整文件的字面量判据喂绿）——于是历史那半只剩测试里的替身。
 //
 // 判据四段，都 fail-closed。
@@ -40,16 +40,16 @@ var sessionHistoryAnchors = []string{
 // TestSessionHistoryUseCaseLivesInSessionSvc 见上方注释。
 func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	root := backendRoot(t)
-	svcDir := filepath.Join(root, "internal", "service", "svcsession")
+	svcDir := filepath.Join(root, "internal", "app", "session")
 	svcBody := dirProductionBody(t, svcDir)
 	for _, a := range sessionHistoryAnchors {
 		if !strings.Contains(svcBody, a) {
-			t.Errorf("`internal/service/svcsession` 里找不到 %q：用例面被改名/搬走了"+
+			t.Errorf("`internal/app/session` 里找不到 %q：用例面被改名/搬走了"+
 				"（判据挂在它身上，失锚等于空转）。", a)
 		}
 	}
 	if !strings.Contains(svcBody, `"github.com/morehao/ark-mate/internal/domain/session"`) {
-		t.Error("`internal/service/svcsession` 没有 import `internal/domain/session`：" +
+		t.Error("`internal/app/session` 没有 import `internal/domain/session`：" +
 			"历史读面要用域平面的会话存在性，不能自己再实现一遍。")
 	}
 
@@ -70,7 +70,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	mgrBody := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
 	if strings.Contains(mgrBody, "func (s *Service) SessionHistory(") {
 		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) SessionHistory(`：历史读面的实现" +
-			"只有一份，在 `internal/service/svcsession`（P4a 正文第十刀）。")
+			"只有一份，在 `internal/app/session`（P4a 正文第十刀）。")
 	}
 	if strings.Contains(mgrBody, `"history_read_failed"`) {
 		t.Error("`internal/sessionruntime` 里又出现 `history_read_failed`：错误码出口跟实现走，" +
@@ -79,21 +79,21 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 
 	// ③ 用例实例必须在**控制器的构造函数里**造（判据钉在函数体上，不是整文件）。
 	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsession", "session.go")))
-	if !regexp.MustCompile(`func NewSessionCtr\(svc svcsession\.SessionSvc, hist svcsession\.HistorySvc`).MatchString(ctrSrc) {
+	if !regexp.MustCompile(`func NewSessionCtr\(svc session\.SessionSvc, hist session\.HistorySvc`).MatchString(ctrSrc) {
 		t.Error("`ctrsession.NewSessionCtr` 的签名变了：v3.1 起它只收**已构造的用例接口**。")
 	}
 	body := funcBodyOf(t, ctrSrc, "func NewSessionCtr(")
 	asmServices := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
-	if !strings.Contains(asmServices, "svcsession.NewHistory(") {
-		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewHistory(`：" +
+	if !strings.Contains(asmServices, "session.NewHistory(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `session.NewHistory(`：" +
 			"用例实例必须在唯一装配根造。")
 	}
 	asmCtrls := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "controllers.go")))
 	if !strings.Contains(asmCtrls, "ctrsession.NewSessionCtr(s.Session, s.SessionHistory") {
 		t.Error("`internal/bootstrap/assembly/controllers.go` 没有把已构造的会话面用例交给 `NewSessionCtr`。")
 	}
-	if strings.Contains(body, "svcsession.New") {
-		t.Error("`NewSessionCtr` 的函数体里又出现 `svcsession.New`：控制器只收接口，不再造用例。")
+	if strings.Contains(body, "session.New") {
+		t.Error("`NewSessionCtr` 的函数体里又出现 `session.New`：控制器只收接口，不再造用例。")
 	}
 
 	// ——— P4a 正文第四十刀：会话**详情读面**（详情 + 三份交互快照）也在这个包里 ———
@@ -124,7 +124,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	}
 	for _, a := range detailAnchors {
 		if !strings.Contains(svcBody, a) {
-			t.Errorf("`internal/service/svcsession` 里找不到 %q：详情读面被改名/搬走了"+
+			t.Errorf("`internal/app/session` 里找不到 %q：详情读面被改名/搬走了"+
 				"（判据挂在它身上，失锚等于空转）。", a)
 		}
 	}
@@ -142,12 +142,12 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		"func toPermissionResp(", "func toElicitationResp("} {
 		if strings.Contains(mgrBody, dead) {
 			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：详情读面的实现与投影只有一份，"+
-				"在 `internal/service/svcsession`（P4a 正文第四十刀）。", dead)
+				"在 `internal/app/session`（P4a 正文第四十刀）。", dead)
 		}
 	}
 	// ③′ 用例实例同样必须在控制器构造函数里造，且装配点必须交出**事实来源**。
-	if !strings.Contains(asmServices, "svcsession.NewDetail(") {
-		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewDetail(`：" +
+	if !strings.Contains(asmServices, "session.NewDetail(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `session.NewDetail(`：" +
 			"详情读面用例必须在唯一装配根造。")
 	}
 
@@ -175,7 +175,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	}
 	for _, a := range interactionAnchors {
 		if !strings.Contains(svcBody, a) {
-			t.Errorf("`internal/service/svcsession` 里找不到 %q：交互动作面被改名/搬走了"+
+			t.Errorf("`internal/app/session` 里找不到 %q：交互动作面被改名/搬走了"+
 				"（判据挂在它身上，失锚等于空转）。", a)
 		}
 	}
@@ -209,13 +209,13 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	// 另一份回显请求参数，而「界面说已允许、底座收到取消」就是这么来的。
 	for _, dead := range []string{"dtosession.PermissionDecisionResp{", "dtosession.ElicitationResp{"} {
 		if strings.Contains(mgrBody, dead) {
-			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：这两个 DTO 的装配已归 `service/svcsession`"+
+			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：这两个 DTO 的装配已归 `app/session`"+
 				"（`Interaction`），manager 侧只交**域值对象**。", dead)
 		}
 	}
 	// ③″ 用例实例同样在控制器构造函数里造，且装配点必须交出投递口。
-	if !strings.Contains(asmServices, "svcsession.NewInteraction(") {
-		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewInteraction(`：" +
+	if !strings.Contains(asmServices, "session.NewInteraction(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `session.NewInteraction(`：" +
 			"动作面用例必须在唯一装配根造。")
 	}
 	// ——— P4a 正文第四十二刀：排队输入的**撤下**也在这一面 ———
@@ -238,7 +238,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	}
 	for _, a := range queueAnchors {
 		if !strings.Contains(svcBody, a) {
-			t.Errorf("`internal/service/svcsession` 里找不到 %q：排队输入用例被改名/搬走了"+
+			t.Errorf("`internal/app/session` 里找不到 %q：排队输入用例被改名/搬走了"+
 				"（判据挂在它身上，失锚等于空转）。", a)
 		}
 	}
@@ -250,8 +250,8 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) DeleteQueuedInput(`：那一层转发已随" +
 			"P4a 正文第四十二刀删除（私有 `deleteQueuedInput` 仍留着——`run.go` 的回滚路径用它，且那条路径**刻意不发事件**）。")
 	}
-	if !strings.Contains(asmServices, "svcsession.NewQueue(") {
-		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewQueue(`：排队输入用例必须在唯一装配根造。")
+	if !strings.Contains(asmServices, "session.NewQueue(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `session.NewQueue(`：排队输入用例必须在唯一装配根造。")
 	}
 	if b := funcBodyOf(t, ctrSrc, "func (h *sessionCtr) DeleteQueuedInput("); !strings.Contains(b, "h.queue.DeleteQueuedInput(") {
 		t.Errorf("`DeleteQueuedInput` handler 的函数体里没有 `h.queue.DeleteQueuedInput(`："+
@@ -279,7 +279,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	}
 	for _, a := range metaAnchors {
 		if !strings.Contains(svcBody, a) {
-			t.Errorf("`internal/service/svcsession` 里找不到 %q：元数据写面被改名/搬走了"+
+			t.Errorf("`internal/app/session` 里找不到 %q：元数据写面被改名/搬走了"+
 				"（判据挂在它身上，失锚等于空转）。", a)
 		}
 	}
@@ -291,8 +291,8 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) UpdateSession(`：那一层实现已随" +
 			"P4a 正文第四十四刀删除（`manager` 侧只剩 `ResolveModel` / `ApplyModel` / `UpdateMeta` 三个适配器）。")
 	}
-	if !strings.Contains(asmServices, "svcsession.NewMeta(") {
-		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewMeta(`：" +
+	if !strings.Contains(asmServices, "session.NewMeta(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `session.NewMeta(`：" +
 			"元数据写面用例必须在唯一装配根造。")
 	}
 	if b := funcBodyOf(t, ctrSrc, "func (h *sessionCtr) Update("); !strings.Contains(b, "h.meta.UpdateSession(") {

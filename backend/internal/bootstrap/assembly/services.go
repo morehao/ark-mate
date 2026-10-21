@@ -8,18 +8,18 @@ import (
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/service/svcautomation"
-	"github.com/morehao/ark-mate/internal/service/svccapability"
-	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
-	"github.com/morehao/ark-mate/internal/service/svclibrary"
-	"github.com/morehao/ark-mate/internal/service/svcmodel"
-	"github.com/morehao/ark-mate/internal/service/svcruntime"
-	"github.com/morehao/ark-mate/internal/service/svcsearch"
-	"github.com/morehao/ark-mate/internal/service/svcsession"
-	"github.com/morehao/ark-mate/internal/service/svcstream"
-	"github.com/morehao/ark-mate/internal/service/svcsystem"
-	"github.com/morehao/ark-mate/internal/service/svcusage"
-	"github.com/morehao/ark-mate/internal/service/svcworkspace"
+	"github.com/morehao/ark-mate/internal/app/automation"
+	"github.com/morehao/ark-mate/internal/app/capability"
+	"github.com/morehao/ark-mate/internal/app/commandpolicy"
+	"github.com/morehao/ark-mate/internal/app/library"
+	"github.com/morehao/ark-mate/internal/app/model"
+	appruntime "github.com/morehao/ark-mate/internal/app/runtime"
+	"github.com/morehao/ark-mate/internal/app/search"
+	"github.com/morehao/ark-mate/internal/app/session"
+	"github.com/morehao/ark-mate/internal/app/stream"
+	"github.com/morehao/ark-mate/internal/app/system"
+	"github.com/morehao/ark-mate/internal/app/usage"
+	"github.com/morehao/ark-mate/internal/app/workspace"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 )
 
@@ -30,37 +30,37 @@ import (
 // 只该有一份状态，否则"两处各自记账"会让诊断与真实行为分叉。
 type Services struct {
 	// ——— 会话面 ———
-	Session            svcsession.SessionSvc
-	SessionHistory     svcsession.HistorySvc
-	SessionDetail      svcsession.DetailSvc
-	SessionInteraction svcsession.InteractionSvc
-	SessionQueue       svcsession.QueueSvc
-	SessionMeta        svcsession.MetaSvc
-	SessionRead        svcsession.ReadSvc
-	Search             svcsearch.SearchSvc
-	Usage              svcusage.UsageSvc
-	Export             svcsystem.SystemSvc
+	Session            session.SessionSvc
+	SessionHistory     session.HistorySvc
+	SessionDetail      session.DetailSvc
+	SessionInteraction session.InteractionSvc
+	SessionQueue       session.QueueSvc
+	SessionMeta        session.MetaSvc
+	SessionRead        session.ReadSvc
+	Search             search.SearchSvc
+	Usage              usage.UsageSvc
+	Export             system.SystemSvc
 
 	// ——— 交付与设置 ———
-	Workspace     svcworkspace.WorkspaceSvc
-	CommandPolicy svccommandpolicy.PolicySvc
+	Workspace     workspace.WorkspaceSvc
+	CommandPolicy commandpolicy.PolicySvc
 
 	// ——— 底座 / 模型 / 供应商 ———
-	Runtime       svcruntime.RuntimeSvc
-	Model         svcmodel.ModelSvc
-	ModelDeclared svcmodel.DeclaredSvc
-	Provider      svcmodel.ProviderSvc
-	ProviderProbe svcmodel.Prober
+	Runtime       appruntime.RuntimeSvc
+	Model         model.ModelSvc
+	ModelDeclared model.DeclaredSvc
+	Provider      model.ProviderSvc
+	ProviderProbe model.Prober
 
 	// ——— 能力 / 自动化 / Library ———
-	Capability svccapability.CapabilitySvc
-	Automation svcautomation.AutomationSvc
-	Library    svclibrary.LibrarySvc
+	Capability capability.CapabilitySvc
+	Automation automation.AutomationSvc
+	Library    library.LibrarySvc
 
 	// ——— 系统面与事件流 ———
-	Meta         svcsystem.MetaSvc
-	Capabilities svcsystem.CapabilitySvc
-	Stream       svcstream.Stream
+	Meta         system.MetaSvc
+	Capabilities system.CapabilitySvc
+	Stream       stream.Stream
 }
 
 // Facts 构造用例所需的事实集合（装配根在启动序列里填好；测试也可以直接给一份）。
@@ -77,7 +77,7 @@ type Facts struct {
 	Runtime      *runtime.Registry
 	Execution    *runtimeconn.Plane
 	// MetaSource 诊断面的值来源（nil = 空来源，测试与 CLI 最小装配用）。
-	MetaSource func() svcsystem.MetaSource
+	MetaSource func() system.MetaSource
 }
 
 // facts 把装配根的可变状态折成构造用例所需的事实。
@@ -106,7 +106,7 @@ func (f Facts) BuildServices() Services {
 	return Services{
 		// P5：会话写面用例在 `svcsession`，执行面只交能力（Starter/Prompt/Canceller 由编排器实现，
 		// DeliverQueued 由 Service 实现）。漏接任一个的表现都是"用例 503/静默 no-op"。
-		Session: svcsession.NewSession(svcsession.SessionDeps{
+		Session: session.NewSession(session.SessionDeps{
 			Workspaces: as.Planes.Workspaces,
 			Store:      workspaceStore(as.Store),
 			Starter:    as.Orchestrator,
@@ -114,37 +114,37 @@ func (f Facts) BuildServices() Services {
 			Canceller:  as.Orchestrator,
 			Queued:     as.Session,
 		}),
-		SessionHistory:     svcsession.NewHistory(eventReader(as.Store), plane, as.Bus),
-		SessionDetail:      svcsession.NewDetail(plane, as.Session),
-		SessionInteraction: svcsession.NewInteraction(plane, as.Session),
-		SessionQueue:       svcsession.NewQueue(plane, as.Session),
-		SessionMeta:        svcsession.NewMeta(plane, as.Session),
-		SessionRead:        svcsession.NewRead(plane),
-		Search:             svcsearch.New(plane),
-		Usage:              svcusage.New(plane),
-		Export:             svcsystem.New(svcsystem.NewSource(sourceFactsReader(as.Store), plane, as.Bus)),
+		SessionHistory:     session.NewHistory(eventReader(as.Store), plane, as.Bus),
+		SessionDetail:      session.NewDetail(plane, as.Session),
+		SessionInteraction: session.NewInteraction(plane, as.Session),
+		SessionQueue:       session.NewQueue(plane, as.Session),
+		SessionMeta:        session.NewMeta(plane, as.Session),
+		SessionRead:        session.NewRead(plane),
+		Search:             search.New(plane),
+		Usage:              usage.New(plane),
+		Export:             system.New(system.NewSource(sourceFactsReader(as.Store), plane, as.Bus)),
 
-		Workspace:     svcworkspace.New(as.Planes.Workspaces, as.Planes.Picker),
-		CommandPolicy: svccommandpolicy.New(as.Cfg.CommandPolicyPath, f.orchestratorApply()),
+		Workspace:     workspace.New(as.Planes.Workspaces, as.Planes.Picker),
+		CommandPolicy: commandpolicy.New(as.Cfg.CommandPolicyPath, f.orchestratorApply()),
 
-		Runtime:       svcruntime.New(as.Execution),
+		Runtime:       appruntime.New(as.Execution),
 		Model:         modelFace,
-		ModelDeclared: svcmodel.NewDeclared(modelStore(as.Store), as.Planes.Providers, modelFace),
-		Provider:      svcmodel.NewProvider(as.Planes.Providers),
-		ProviderProbe: svcmodel.NewProbe(as.Planes.Providers, as.Planes.Providers),
+		ModelDeclared: model.NewDeclared(modelStore(as.Store), as.Planes.Providers, modelFace),
+		Provider:      model.NewProvider(as.Planes.Providers),
+		ProviderProbe: model.NewProbe(as.Planes.Providers, as.Planes.Providers),
 
-		Capability: svccapability.NewCapability(
+		Capability: capability.NewCapability(
 			as.Planes.Skills, as.Planes.Mcp,
-			svccapability.NewTools(as.Planes.Capabilities),
-			svccapability.NewServers(as.Planes.Capabilities, as.Planes.Mcp, as.Planes.McpSecrets),
+			capability.NewTools(as.Planes.Capabilities),
+			capability.NewServers(as.Planes.Capabilities, as.Planes.Mcp, as.Planes.McpSecrets),
 		),
-		Automation: svcautomation.New(as.Planes.Automation),
-		Library: svclibrary.NewLibrary(as.Planes.Capabilities, as.Planes.Skills, as.Runtime,
+		Automation: automation.New(as.Planes.Automation),
+		Library: library.NewLibrary(as.Planes.Capabilities, as.Planes.Skills, as.Runtime,
 			as.Planes.McpSecrets, as.Planes.McpGatewayEnabled),
 
-		Meta:         svcsystem.NewMeta(f.metaSource),
-		Capabilities: svcsystem.NewCapabilities(),
-		Stream:       svcstream.New(as.Bus),
+		Meta:         system.NewMeta(f.metaSource),
+		Capabilities: system.NewCapabilities(),
+		Stream:       stream.New(as.Bus),
 	}
 }
 
@@ -160,9 +160,9 @@ func (f Facts) orchestratorApply() func([]interaction.PrefixRule) {
 }
 
 // metaSource 诊断面的值来源（未注入时给一份空来源，而不是 nil 函数）。
-func (f Facts) metaSource() svcsystem.MetaSource {
+func (f Facts) metaSource() system.MetaSource {
 	if f.MetaSource == nil {
-		return svcsystem.MetaSource{}
+		return system.MetaSource{}
 	}
 	return f.MetaSource()
 }
@@ -171,28 +171,28 @@ func (f Facts) metaSource() svcsystem.MetaSource {
 //
 // 必须现判 nil：typed-nil（`var st *store.Store = nil` 装进接口）在接口里**不是 nil**，
 // 用例里那句 `if m.st == nil { 返回 40501 }` 会失效——memory 模式下会变成一次对 nil 的方法调用。
-func eventReader(st *store.Store) svcsession.EventReader {
+func eventReader(st *store.Store) session.EventReader {
 	if st == nil {
 		return nil
 	}
 	return st
 }
 
-func sourceFactsReader(st *store.Store) svcsystem.SourceFactsReader {
+func sourceFactsReader(st *store.Store) system.SourceFactsReader {
 	if st == nil {
 		return nil
 	}
 	return st
 }
 
-func workspaceStore(st *store.Store) svcsession.WorkspaceStore {
+func workspaceStore(st *store.Store) session.WorkspaceStore {
 	if st == nil {
 		return nil
 	}
 	return st
 }
 
-func modelStore(st *store.Store) svcmodel.ModelStore {
+func modelStore(st *store.Store) model.ModelStore {
 	if st == nil {
 		return nil
 	}

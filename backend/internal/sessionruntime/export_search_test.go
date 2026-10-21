@@ -18,7 +18,7 @@ import (
 	"github.com/morehao/ark-mate/internal/contract/dtoexport"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
-	"github.com/morehao/ark-mate/internal/service/svcsystem"
+	"github.com/morehao/ark-mate/internal/app/system"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/golib/gerror"
 )
@@ -143,9 +143,9 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 // exportSystemSvc 按**装配点的形状**造导出用例：三份依赖事实 → `NewSource` → `New`。
 //
 // 与 `app.go` 的 `SessionPlane: a.svc.SessionPlane(), Bus: a.bus` 逐条对应（用例实例在
-// `ctrexport` 里造；测试里由这里造——`internal/service/svcsystem` 不能 import `manager`）。
-func exportSystemSvc(svc *Service) svcsystem.SystemSvc {
-	return svcsystem.New(svcsystem.NewSource(storeAsSourceFacts(planesOf(svc).Resources.Store()), svc.sessionPlane, svc.bus))
+// `ctrexport` 里造；测试里由这里造——`internal/app/system` 不能 import `manager`）。
+func exportSystemSvc(svc *Service) system.SystemSvc {
+	return system.New(system.NewSource(storeAsSourceFacts(planesOf(svc).Resources.Store()), svc.sessionPlane, svc.bus))
 }
 
 func TestExportSessions(t *testing.T) {
@@ -215,7 +215,7 @@ func TestExportSessions(t *testing.T) {
 	if _, err := exportSystemSvc(svc).ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{}}); err == nil {
 		t.Fatal("空 ids 应报错")
 	}
-	ids := make([]string, svcsystem.MaxExportIDs+1)
+	ids := make([]string, system.MaxExportIDs+1)
 	for i := range ids {
 		ids[i] = fmt.Sprintf("x-%d", i) // 互不相同：去重后仍超上限
 	}

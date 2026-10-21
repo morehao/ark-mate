@@ -1,7 +1,7 @@
 // Package ctrmodel 承载供应商域控制器：模型目录 / 平台清单写面（`ModelCtr`）与供应商档案 /
 // 连接自检（`ProviderCtr`，2026-10-20 从 `ctrprovider` 并入）。
 //
-// 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
+// 控制器只依赖 internal/app/* 的窄端口，不感知领域实现；
 // 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
 package ctrmodel
 
@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/contract/dtomodel"
-	"github.com/morehao/ark-mate/internal/service/svcmodel"
+	"github.com/morehao/ark-mate/internal/app/model"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -28,18 +28,18 @@ var _ ProviderCtr = (*providerCtr)(nil)
 //
 // 两个字段都是装配根构造、由构造函数注入的用例，两个都是 `service/svcmodel` 包内声明的接口：
 //
-//	actions —— 档案面四动作（`svcmodel.NewProvider(plane)`）；
-//	probe   —— 自检（`svcmodel.NewProbe(ports, catalog)`）。
+//	actions —— 档案面四动作（`model.NewProvider(plane)`）；
+//	probe   —— 自检（`model.NewProbe(ports, catalog)`）。
 //
 // 控制器只收已构造的接口；除控制器外的层不许引用 `service/svc*`
 // （`internal/archtest/svc_layer_consumer_test.go`）。
 type providerCtr struct {
-	actions svcmodel.ProviderSvc
-	probe   svcmodel.Prober
+	actions model.ProviderSvc
+	probe   model.Prober
 }
 
 // NewProviderCtr 构造 ProviderCtr（只收**已构造的两个用例**：档案动作与自检）。
-func NewProviderCtr(actions svcmodel.ProviderSvc, probe svcmodel.Prober) ProviderCtr {
+func NewProviderCtr(actions model.ProviderSvc, probe model.Prober) ProviderCtr {
 	return &providerCtr{actions: actions, probe: probe}
 }
 

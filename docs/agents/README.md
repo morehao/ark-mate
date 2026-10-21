@@ -4,7 +4,7 @@
 
 | 文件 | 讲什么 |
 | --- | --- |
-| [`layout.md`](layout.md) | 目录边界、`pkg/` 与 `internal/` 分界、依赖方向、`service/svc<领域>` 的三条硬规矩与形状 |
+| [`layout.md`](layout.md) | 目录边界、`pkg/` 与 `internal/` 分界、依赖方向、用例环（`app/<领域>`）的三条硬规矩与形状 |
 | [`guards.md`](guards.md) | `internal/archtest` 当前判据清单与测试约定（守卫计数的唯一维护处） |
 | [`guards-history.md`](guards-history.md) | 守卫沿革：每条新增挡的静默失效与实跑反证 |
 | [`commands.md`](commands.md) | 常用命令、`RUNTIME_BIN`、界面验收 |

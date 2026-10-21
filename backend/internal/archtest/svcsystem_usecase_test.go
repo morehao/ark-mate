@@ -10,11 +10,11 @@ import (
 // ——— P4a 正文第一刀「导出用例归属」守卫 ———
 //
 // `ExportSessions` 是 P4a 正文里**第一个真正"收实现"**的动作：它从 `manager/export.go`
-// （295 行，`*Service` 的方法）搬进 `internal/service/svcsystem`（P4a 新建的用例层包），
+// （295 行，`*Service` 的方法）搬进 `internal/app/system`（P4a 新建的用例层包），
 // 形状也换了——不再是一个大结构体的方法，而是
 //
-//	`svcsystem.Exporter`（用例：校验 / 错误码出口 / 响应装配 / 渲染）
-//	  ← `svcsystem.Source` 端口（两个方法：会话元数据、事件序列）
+//	`system.Exporter`（用例：校验 / 错误码出口 / 响应装配 / 渲染）
+//	  ← `system.Source` 端口（两个方法：会话元数据、事件序列）
 //	      ← `manager` 的适配器（`export_source.go`：sqlite 走库、memory 走会话域镜像 + 事件总线回放）
 //
 // 这是 P4a 之后所有"收实现"的**模板**，所以它的两种失效都要钉住：
@@ -22,7 +22,7 @@ import (
 //	① **实现回流**：谁在 `manager` 里再写一遍校验或渲染（"顺手"最可能发生的地方就是它原来的文件），
 //	   于是两份实现静默分叉——渲染口径（哪种事件渲染成什么标题）与上限口径各说各话，
 //	   而两边都编译得过；
-//	② **装配漏接**：`app.go` 忘了 `svcsystem.New(a.svc)`（或交的是 `a.svc`）——那会**编译不过**
+//	② **装配漏接**：`app.go` 忘了 `system.New(a.svc)`（或交的是 `a.svc`）——那会**编译不过**
 //	   （`*Service` 不再实现 `SystemSvc`），所以这一条是"响亮"的；但**端口漏接**是静默的：
 //	   `Source` 为 nil 时 `ExportSessions` 会在第一次取数时 nil panic，而单测若只测校验分支就看不见。
 //
@@ -50,20 +50,20 @@ var exportImplementationMarkers = []string{
 // TestExportUseCaseLivesInSystemSvc 见文件头。
 func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 	root := backendRoot(t)
-	impl := filepath.Join(root, "internal", "service", "svcsystem", "export.go")
+	impl := filepath.Join(root, "internal", "app", "system", "export.go")
 	src := stripLineComments(readFileOrFatal(t, impl))
 	for _, a := range exportUseCaseAnchors {
 		if !strings.Contains(src, a) {
-			t.Errorf("internal/service/svcsystem/export.go 里找不到 %q：导出用例的实现被改名/搬走了？"+
+			t.Errorf("internal/app/system/export.go 里找不到 %q：导出用例的实现被改名/搬走了？"+
 				"（这条守卫的判据就挂在它身上，失锚等于空转）", a)
 		}
 	}
 
 	// 端口必须真的在（`Source` 是这一刀的关键：用例层不认识 store/domain）。
-	sourceSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsystem", "source.go")))
+	sourceSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "system", "source.go")))
 	for _, a := range []string{"type Source interface {", "SessionMeta(ctx context.Context, id string) (SessionMeta, bool)", "SessionEvents(ctx context.Context, id string, limit int) (events []eventbus.Event, truncated bool)"} {
 		if !strings.Contains(sourceSrc, a) {
-			t.Errorf("internal/service/svcsystem/source.go 里找不到 %q：端口被改名/搬走了？", a)
+			t.Errorf("internal/app/system/source.go 里找不到 %q：端口被改名/搬走了？", a)
 		}
 	}
 	// 用例**本体**不得 import 持久层（那正是端口的用途）。
@@ -73,11 +73,11 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 	// （那正是"实现与它的名字分家"的老毛病）。禁止项拆成两半：整包禁 `manager`（用例层
 	// 不认识过渡层），`export.go` 另禁 `store`。
 	if strings.Contains(src+sourceSrc, `"github.com/morehao/ark-mate/internal/sessionruntime"`) {
-		t.Error("`internal/service/svcsystem` 里出现 `internal/sessionruntime`：用例层通过**端口**取事实（ADR-6），" +
+		t.Error("`internal/app/system` 里出现 `internal/sessionruntime`：用例层通过**端口**取事实（ADR-6），" +
 			"它不认识过渡层。")
 	}
 	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/persistence/store"`) {
-		t.Error("`internal/service/svcsystem/export.go` 里出现 `internal/persistence/store`：用例本体只认 `Source` 端口，" +
+		t.Error("`internal/app/system/export.go` 里出现 `internal/persistence/store`：用例本体只认 `Source` 端口，" +
 			"读库是适配器（`source_facts.go`）的事。")
 	}
 
@@ -92,7 +92,7 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 		for _, m := range exportImplementationMarkers {
 			if strings.Contains(body, m) {
 				t.Errorf("internal/sessionruntime/%s 里出现导出用例的实现痕迹 %q：它**只有一份实现**，"+
-					"在 `internal/service/svcsystem`（P4a 正文第一刀）。\n"+
+					"在 `internal/app/system`（P4a 正文第一刀）。\n"+
 					"manager 只留适配器（`export_source.go`：把库/内存镜像/事件总线读成 `Source` 要的形状）。\n"+
 					"在这里再写一遍的后果是渲染口径与上限口径静默分叉，而两边都编译得过。",
 					filepath.Base(path), m)
@@ -102,18 +102,21 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 
 	// 装配：用例实例只在 `internal/bootstrap/assembly` 造；控制器只收接口（v3.1 §3.4）。
 	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
-	if !strings.Contains(asm, "Export:             svcsystem.New(") &&
-		!strings.Contains(asm, "svcsystem.New(") {
-		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsystem.New(`：" +
+	if !strings.Contains(asm, "Export:             system.New(") &&
+		!strings.Contains(asm, "system.New(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `system.New(`：" +
 			"导出的事实来源与用例实例必须在唯一装配根造。")
 	}
 	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrexport", "export.go")))
-	if strings.Contains(ctr, "svcsystem.New") {
-		t.Error("`ctrexport` 里又出现 `svcsystem.New`：控制器只收接口，不再造用例。")
+	if strings.Contains(ctr, "system.New") {
+		t.Error("`ctrexport` 里又出现 `system.New`：控制器只收接口，不再造用例。")
 	}
-	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "app", "app.go")))
-	if strings.Contains(app, "svcsystem.") {
-		t.Error("`internal/bootstrap/app/app.go` 里出现 `svcsystem.`：应用壳只消费 `assembly.BuildResult`。")
+	// 按 **import 路径**判（C3 4.2 起用例包不再叫 `svcsystem`，`system.` 这种限定符文本
+	// 在应用壳里已经指不到用例层了——按文本判会变成空转）。
+	for _, imp := range importedByProductionPackage(t, filepath.Join(root, "internal", "bootstrap", "app")) {
+		if strings.HasPrefix(imp, modulePrefix+"internal/app/") {
+			t.Errorf("`internal/bootstrap/app` import 了用例层 %s：应用壳只消费 `assembly.BuildResult`。", imp)
+		}
 	}
 }
 
@@ -124,7 +127,7 @@ func TestManagerExportFileIsGone(t *testing.T) {
 	root := backendRoot(t)
 	old := filepath.Join(root, "internal", "sessionruntime", "export.go")
 	if _, err := os.Stat(old); err == nil {
-		t.Error("`internal/sessionruntime/export.go` 又存在了：导出的实现归 `internal/service/svcsystem`" +
+		t.Error("`internal/sessionruntime/export.go` 又存在了：导出的实现归 `internal/app/system`" +
 			"（P4a）。\n两边并存的表现是**渲染口径与上限口径分叉**——例如一边按 4 MiB 截断、" +
 			"另一边没有，而两条路径都编译得过。")
 	}
@@ -148,12 +151,12 @@ var systemSourceAdapterAnchors = []string{
 //
 //	① 适配器回流 `manager`（`func (s *Service) SessionEvents(` 回来）：两份取数的产物口径会分叉，
 //	   而两边都编译得过、都有一套自己的测试；
-//	② `Ports` 那一格写回 svc 类型（`svcsystem.Source`）：装配点为了声明一格而 import 用例包，
+//	② `Ports` 那一格写回 svc 类型（`system.Source`）：装配点为了声明一格而 import 用例包，
 //	   "只说依赖事实"这条口径当场破掉；
 //	③ 用例层丢了适配器锚（改名/搬走）：判据失锚，守卫会静默空转。
 func TestSystemSourceAdapterLivesInSystemSvc(t *testing.T) {
 	root := backendRoot(t)
-	dir := filepath.Join(root, "internal", "service", "svcsystem")
+	dir := filepath.Join(root, "internal", "app", "system")
 	files := goFilesUnder(t, dir)
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有 .go 文件：守卫失去检查对象", dir)
@@ -168,7 +171,7 @@ func TestSystemSourceAdapterLivesInSystemSvc(t *testing.T) {
 	src := body.String()
 	for _, a := range systemSourceAdapterAnchors {
 		if !strings.Contains(src, a) {
-			t.Errorf("`internal/service/svcsystem` 里找不到 %q：事实来源的适配器被改名/搬走了"+
+			t.Errorf("`internal/app/system` 里找不到 %q：事实来源的适配器被改名/搬走了"+
 				"（它是这一刀的判据本身，失锚等于空转）。", a)
 		}
 	}
@@ -184,7 +187,7 @@ func TestSystemSourceAdapterLivesInSystemSvc(t *testing.T) {
 		for _, m := range []string{"func (s *Service) SessionMeta(", "func (s *Service) SessionEvents("} {
 			if strings.Contains(mgrBody, m) {
 				t.Errorf("internal/sessionruntime/%s 里出现 %q：事实来源的适配器只有一份，在 "+
-					"`internal/service/svcsystem`（P4a 正文第八刀）。", filepath.Base(path), m)
+					"`internal/app/system`（P4a 正文第八刀）。", filepath.Base(path), m)
 			}
 		}
 	}

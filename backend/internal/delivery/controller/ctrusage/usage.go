@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/contract/dtousage"
-	"github.com/morehao/ark-mate/internal/service/svcusage"
+	"github.com/morehao/ark-mate/internal/app/usage"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -23,11 +23,11 @@ var _ UsageCtr = (*usageCtr)(nil)
 
 // UsageHandler 用量统计 REST（M3 首项：GET /usage/summary）。
 type usageCtr struct {
-	svc svcusage.UsageSvc
+	svc usage.UsageSvc
 }
 
 // NewUsageCtr 构造 UsageCtr（只收**已构造的用例**；v3.1 §3.2.1：控制器不 import domain）。
-func NewUsageCtr(svc svcusage.UsageSvc) UsageCtr {
+func NewUsageCtr(svc usage.UsageSvc) UsageCtr {
 	return &usageCtr{svc: svc}
 }
 

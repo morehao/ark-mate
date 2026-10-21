@@ -1,6 +1,6 @@
 // Package ctrsession 承载会话面控制器（列表/详情/新建/提问/取消/历史/权限/提问决策）。
 //
-// 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
+// 控制器只依赖 internal/app/* 的窄端口，不感知领域实现；
 // 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
 package ctrsession
 
@@ -13,7 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/contract/dtosession"
-	"github.com/morehao/ark-mate/internal/service/svcsession"
+	"github.com/morehao/ark-mate/internal/app/session"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -46,40 +46,40 @@ var _ SessionCtr = (*sessionCtr)(nil)
 
 // SessionHandler 处理会话相关 REST 请求（列表 + search + create/prompt/cancel/history + 元数据 + 权限）。
 type sessionCtr struct {
-	svc svcsession.SessionSvc
+	svc session.SessionSvc
 	// hist 会话历史**读面**（P4a 正文第十刀起在用例层，与 `svc` 分开按面持有）。
-	hist svcsession.HistorySvc
+	hist session.HistorySvc
 	// detail 会话详情**读面**（P4a 正文第四十刀起在用例层）：单会话详情 + 三份交互快照。
 	//
 	// 与读模型（`plane` 那一族）的分界是"有没有请求校验与错误码出口"：这一面要回
 	// `session_not_found`，而四条出口共用同一份投影（详情里的 pending/memories 就是那两条列表的
 	// 结果），所以它们一起搬、一起持有。
-	detail svcsession.DetailSvc
+	detail session.DetailSvc
 	// interaction 会话交互的**动作面**（P4a 正文第四十一刀起在用例层）：权限/提问决策 + 记忆撤销。
 	//
 	// 与 detail（只读）分开持有：这一族有副作用（把决定投给底座），两族吃的窄端口也因此不同
 	// （`InteractionSource` 纯读 vs `InteractionDelivery` 投递）。
-	interaction svcsession.InteractionSvc
+	interaction session.InteractionSvc
 	// queue 排队输入的**撤下**用例（P4a 正文第四十二刀起在用例层）：请求形状校验 + 幂等口径 +
 	// 「真撤下必须发一条 `session.input_cancelled`」三条语义都在它里面。
-	queue svcsession.QueueSvc
+	queue session.QueueSvc
 	// meta 会话**元数据写面**用例（P4a 正文第四十四刀起在用例层）：子集更新 + 会话内改模型。
 	//
 	// 它吃两个依赖：域平面（就地改 + 回读投影）与一个三方法窄端口（模型解析 / 投递 / 落库）。
-	meta svcsession.MetaSvc
+	meta session.MetaSvc
 	// read 会话**只读列表面**用例（v3.1 §3.2.1：控制器不 import domain）。
 	//
 	// 列表 / 检索 / 待投递 / 轮次是纯读模型，域里已折好 DTO；用例层只复述窄接口。
-	read svcsession.ReadSvc
+	read session.ReadSvc
 }
 
 // NewSessionCtr 构造 SessionCtr。
 //
 // 拿到的是**依赖事实**（会话面过渡期端口 + 库句柄 + 会话域平面 + 事件总线 + 交互事实来源）：
 // 历史读面（第十刀）与详情读面（第四十刀）两个用例在这里造，其余方法的实现仍在 `manager`（逐刀搬）。
-func NewSessionCtr(svc svcsession.SessionSvc, hist svcsession.HistorySvc, detail svcsession.DetailSvc,
-	interaction svcsession.InteractionSvc, queue svcsession.QueueSvc, meta svcsession.MetaSvc,
-	read svcsession.ReadSvc) SessionCtr {
+func NewSessionCtr(svc session.SessionSvc, hist session.HistorySvc, detail session.DetailSvc,
+	interaction session.InteractionSvc, queue session.QueueSvc, meta session.MetaSvc,
+	read session.ReadSvc) SessionCtr {
 	return &sessionCtr{
 		svc: svc, hist: hist, detail: detail, interaction: interaction,
 		queue: queue, meta: meta, read: read,

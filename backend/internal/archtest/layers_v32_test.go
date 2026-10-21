@@ -15,7 +15,7 @@ import (
 //	L1  platform/* version runtime infra/acp infra/mcp infra/logging 值对象 / 协议库
 //	L2  domain/*                                                  领域
 //	L3  contract/dto*                                             应用契约
-//	L4  service/svc*                                              用例
+//	L4  app/*                                                     用例环
 //	L5  persistence/store persistence/dao infra/dsh infra/dbclient
 //	    infra/credentials infra/procreg                           基础驱动
 //	L6  drivers/gateway drivers/mechanism drivers/registry
@@ -110,12 +110,14 @@ var v32Layers = map[string]v32Layer{
 	// 只许向内（L0/L1/L2 都不该被 contract 依赖，实际上它只用标准库 + 少量值类型）。
 	"internal/contract": {layer: 3, name: "contract", sameLayer: true},
 
-	// ——— L4：用例 ———
+	// ——— L4：用例环 ———
 	//
-	// **永不 sameLayer**：这是"svc 包之间零互引"（三条硬规矩第 2 条）的载体。
-	// deny `internal/service` 同时挡住兄弟 svc 与自身（自 import 不会出现在图里）。
-	"internal/service": {layer: 4, name: "service", deny: []string{
-		"internal/service", "internal/persistence/store", "internal/persistence/dao", "internal/infra/dsh",
+	// C3 4.2：`service/svc<领域>` 搬成 `app/<领域>`（包名去掉 `svc` 前缀）——用例环就是这一带。
+	//
+	// **永不 sameLayer**：这是"用例包之间零互引"（三条硬规矩第 2 条）的载体。
+	// deny `internal/app` 同时挡住兄弟用例包与自身（自 import 不会出现在图里）。
+	"internal/app": {layer: 4, name: "app", deny: []string{
+		"internal/app", "internal/persistence/store", "internal/persistence/dao", "internal/infra/dsh",
 		// C2 第二刀：用例层不写协议分类。业务错误的构造面在 `platform/code`
 		// （RequestError/ServiceError/…），分类 → 对外码的投影也住那里。
 		"internal/infra/acp",
@@ -198,7 +200,7 @@ var v32Layers = map[string]v32Layer{
 
 	// ——— L9：交付 / 装配 ———
 	"internal/delivery/router": {layer: 9, name: "router", sameLayer: true, deny: []string{
-		"internal/service", "internal/persistence/store", "internal/persistence/dao", "internal/persistence/model",
+		"internal/app", "internal/persistence/store", "internal/persistence/dao", "internal/persistence/model",
 		"internal/domain", "internal/contract", "internal/platform/eventbus", "internal/drivers/mechanism",
 		"internal/drivers/registry", "internal/drivers/runtimeconn", "internal/sessionruntime",
 		"internal/drivers/gateway", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
@@ -207,7 +209,7 @@ var v32Layers = map[string]v32Layer{
 		"internal/bootstrap/app", "internal/bootstrap/cli",
 	}},
 	"internal/bootstrap/app": {layer: 9, name: "app", sameLayer: true, deny: []string{
-		"internal/service", "internal/persistence/store", "internal/persistence/dao", "internal/persistence/model",
+		"internal/app", "internal/persistence/store", "internal/persistence/dao", "internal/persistence/model",
 		"internal/domain", "internal/drivers/mechanism", "internal/drivers/registry", "internal/drivers/runtimeconn",
 		"internal/sessionruntime", "internal/delivery/controller", "internal/delivery/router",
 		"internal/bootstrap/cliops", "internal/bootstrap/cli", "internal/drivers/gateway",
@@ -220,7 +222,7 @@ var v32Layers = map[string]v32Layer{
 		"internal/sessionruntime", "internal/drivers/gateway", "internal/infra",
 	}},
 	"internal/bootstrap/cli": {layer: 9, name: "cli", sameLayer: true, deny: []string{
-		"internal/service", "internal/persistence/store", "internal/persistence/dao", "internal/persistence/model",
+		"internal/app", "internal/persistence/store", "internal/persistence/dao", "internal/persistence/model",
 		"internal/domain", "internal/delivery/controller", "internal/drivers/mechanism",
 		"internal/drivers/runtimeconn", "internal/drivers/registry", "internal/sessionruntime",
 		"internal/delivery/router", "internal/drivers/gateway",
@@ -232,7 +234,7 @@ var v32AdapterDeny = []string{
 	"internal/persistence/model", "internal/platform/eventbus", "internal/platform/capability", "internal/platform/credential",
 	"internal/platform/code", "internal/platform/automation", "internal/config", "internal/contract",
 	"internal/persistence/dao", "internal/persistence/store", "internal/drivers/mechanism", "internal/domain",
-	"internal/drivers/runtimeconn", "internal/drivers/registry", "internal/service",
+	"internal/drivers/runtimeconn", "internal/drivers/registry", "internal/app",
 	"internal/sessionruntime", "internal/delivery/middleware", "internal/drivers/gateway",
 	"internal/delivery/controller", "internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
 	"internal/bootstrap/cliops", "internal/bootstrap/cli",

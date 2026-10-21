@@ -10,7 +10,7 @@ import (
 // ——— P4a 正文第六刀「能力 Library 读模型归属」守卫 ———
 //
 // `ListLibrary`（跨四个平面的聚合读模型）从 `manager/library.go`（`*Service` 的方法）搬进
-// `internal/service/svclibrary`。这一刀与上一刀（模型写面，现并入 `svcmodel`）有一处**结构上的不同**，
+// `internal/app/library`。这一刀与上一刀（模型写面，现并入 `svcmodel`）有一处**结构上的不同**，
 // 值得钉住：它**不需要过渡端口**——依赖全是事实：
 //
 //	*capability.Registry  三张能力表（skill/mcp/tool）
@@ -32,7 +32,7 @@ import (
 //	   后者是**静默空转**（nil 能力面 → 恒空清单，而路由照常 200）。
 //
 // 反证（实跑）：把 `func (s *Service) ListLibrary(` 加回 `manager`（真实现的形态，能编译）→ 红；
-// 抽掉 `ctrlibrary` 的 `svclibrary.NewLibrary(` → 红；把 `McpSecrets` 从 `router.Ports` 拿掉 → 红；
+// 抽掉 `ctrlibrary` 的 `library.NewLibrary(` → 红；把 `McpSecrets` 从 `router.Ports` 拿掉 → 红；
 // 把 `Capabilities: a.svc.Planes().Capabilities` 从 `app.go` 抽掉 → 红；把 `manager` 里
 // `s.reg.McpTransportsFor(` 换回本地的 `len(spec.McpTransports) == 0` → 红。
 
@@ -75,7 +75,7 @@ var libraryRelocationMarkers = []string{
 
 func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	root := backendRoot(t)
-	dir := filepath.Join(root, "internal", "service", "svclibrary")
+	dir := filepath.Join(root, "internal", "app", "library")
 
 	files := goFilesUnder(t, dir)
 	if len(files) == 0 {
@@ -91,7 +91,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	src := body.String()
 	for _, a := range append(append([]string{}, libraryUseCaseAnchors...), libraryVerdictAnchors...) {
 		if !strings.Contains(src, a) {
-			t.Errorf("internal/service/svclibrary 里找不到 %q：读模型的实现被改名/搬走了？"+
+			t.Errorf("internal/app/library 里找不到 %q：读模型的实现被改名/搬走了？"+
 				"（判据挂在它身上，失锚等于空转）", a)
 		}
 	}
@@ -102,7 +102,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 		`"github.com/morehao/ark-mate/internal/persistence/store"`,
 	} {
 		if strings.Contains(src, m) {
-			t.Errorf("internal/service/svclibrary 里出现 import %s：这一层的依赖是域/包事实"+
+			t.Errorf("internal/app/library 里出现 import %s：这一层的依赖是域/包事实"+
 				"（能力注册表 / 技能平面 / 底座注册表 / 密钥面），读模型自己不读库。", m)
 		}
 	}
@@ -116,14 +116,14 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	for _, path := range mgrFiles {
 		base := filepath.Base(path)
 		if base == "library.go" || base == "library_read.go" {
-			t.Errorf("internal/sessionruntime/%s 复活了：读模型**只有一份实现**，在 `internal/service/svclibrary`"+
+			t.Errorf("internal/sessionruntime/%s 复活了：读模型**只有一份实现**，在 `internal/app/library`"+
 				"（P4a 正文第六刀）。两份并存的后果是同一个资源在两个入口显示不同的可达性。", base)
 		}
 		mgrBody := stripLineComments(readFileOrFatal(t, path))
 		for _, m := range libraryRelocationMarkers {
 			if strings.Contains(mgrBody, m) {
 				t.Errorf("internal/sessionruntime/%s 里出现读模型的实现痕迹 %q：它只有一份实现，在 "+
-					"`internal/service/svclibrary`。在这里再写一遍的后果是聚合口径与可达性判决静默分叉。",
+					"`internal/app/library`。在这里再写一遍的后果是聚合口径与可达性判决静默分叉。",
 					base, m)
 			}
 		}
@@ -136,7 +136,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	// 平面"，而是像本文件钉的 Library 读模型一样**收进 svc**。
 	//
 	// 失效方式与 ① 同形（实现回流 / 就地投影），只在能力面上：
-	capsSvc := filepath.Join(root, "internal", "service", "svccapability")
+	capsSvc := filepath.Join(root, "internal", "app", "capability")
 	var capsBody strings.Builder
 	for _, path := range goFilesUnder(t, capsSvc) {
 		if strings.HasSuffix(path, "_test.go") {
@@ -153,7 +153,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 		"t.caps.ListTools()",
 	} {
 		if !strings.Contains(capsSrc, anc) {
-			t.Errorf("internal/service/svccapability 里找不到 %q：工具目录读模型的实现被改名/搬走了？"+
+			t.Errorf("internal/app/capability 里找不到 %q：工具目录读模型的实现被改名/搬走了？"+
 				"（判据挂在它身上，失锚等于空转）", anc)
 		}
 	}
@@ -161,14 +161,14 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 		base := filepath.Base(path)
 		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "func (s *Service) ListTools(") {
 			t.Errorf("internal/sessionruntime/%s 里又出现 `func (s *Service) ListTools(`：工具目录的实现只有一份，"+
-				"在 `internal/service/svccapability`（P4a 正文第十二刀）。两份并存的后果是同一个工具"+
+				"在 `internal/app/capability`（P4a 正文第十二刀）。两份并存的后果是同一个工具"+
 				"在 `/tools` 与别处的可见范围静默分叉。", base)
 		}
 	}
 	// 取用路径：控制器**函数体**里必须经用例（同包中间函数喂不绿它）。
 	capCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrcapability", "capability.go")))
-	if !regexp.MustCompile(`svc\s+svccapability\.CapabilitySvc`).MatchString(capCtr) {
-		t.Error("`ctrcapability` 里找不到 `svc svccapability.CapabilitySvc` 字段：控制器只认用例接口。")
+	if !regexp.MustCompile(`svc\s+capability\.CapabilitySvc`).MatchString(capCtr) {
+		t.Error("`ctrcapability` 里找不到 `svc capability.CapabilitySvc` 字段：控制器只认用例接口。")
 	}
 	if !strings.Contains(funcBodyOf(t, capCtr, "func (h *capabilityCtr) ListTools("), "h.svc.ListTools(") {
 		t.Error("`capabilityCtr.ListTools` 的函数体里找不到 `h.svc.ListTools(`：工具目录必须走用例接口。")
@@ -188,7 +188,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	// 守卫随之钉两件事：域的签名是**领域视图**（不是 DTO），用例层确实调用投影函数
 	// （否则"搬运"会退化成一行透传，那正是第十一刀判定为骚操作的形状）。
 	if !strings.Contains(capsSrc, "ListSkills()") {
-		t.Error("`internal/service/svccapability` 里找不到 `ListSkills()`：v3.1 起控制器不 import domain，" +
+		t.Error("`internal/app/capability` 里找不到 `ListSkills()`：v3.1 起控制器不 import domain，" +
 			"技能目录必须经用例接口。")
 	}
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "skill", "plane.go"))),
@@ -197,7 +197,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 			"投影的本体只有一份且在域里，且域只产**领域视图**、不产对外 DTO（判据失锚＝空转）。")
 	}
 	if !strings.Contains(funcBodyOf(t,
-		readFileOrFatal(t, filepath.Join(root, "internal", "service", "svccapability", "capability.go")),
+		readFileOrFatal(t, filepath.Join(root, "internal", "app", "capability", "capability.go")),
 		"func (s *capabilitySvc) ListSkills("), "skillResps(") {
 		t.Error("`capabilitySvc.ListSkills` 的函数体里找不到 `skillResps(`：领域视图必须经投影函数" +
 			"转成对外 DTO，不能退化成一行透传。")
@@ -226,7 +226,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 		"s.secrets.UnresolvedKeys(m)",
 	} {
 		if !strings.Contains(capsSrc, anc) {
-			t.Errorf("internal/service/svccapability 里找不到 %q：MCP 注册表读模型的实现被改名/搬走了？"+
+			t.Errorf("internal/app/capability 里找不到 %q：MCP 注册表读模型的实现被改名/搬走了？"+
 				"（判据挂在它身上，失锚等于空转）", anc)
 		}
 	}
@@ -235,7 +235,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 		for _, dead := range []string{"func (s *Service) ListMcpServers(", "func (s *Service) mcpToolCounts(", "func (s *Service) mcpProbeSnapshot("} {
 			if strings.Contains(body, dead) {
 				t.Errorf("internal/sessionruntime/%s 里又出现 `%s`：MCP 注册表读模型只有一份实现，在 "+
-					"`internal/service/svccapability`（P4a 正文第十四刀）；那两条私有转发已随调用点消失。",
+					"`internal/app/capability`（P4a 正文第十四刀）；那两条私有转发已随调用点消失。",
 					filepath.Base(path), dead)
 			}
 		}
@@ -261,11 +261,11 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 
 	// ④ 装配：用例实例只在 `internal/bootstrap/assembly` 造；控制器只收接口。
 	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
-	if !strings.Contains(asm, "svclibrary.NewLibrary(") {
-		t.Error("`internal/bootstrap/assembly/services.go` 里没有 `svclibrary.NewLibrary(`：用例必须在唯一装配根造出来。")
+	if !strings.Contains(asm, "library.NewLibrary(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里没有 `library.NewLibrary(`：用例必须在唯一装配根造出来。")
 	}
 	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrlibrary", "library.go")))
-	if strings.Contains(ctr, "svclibrary.NewLibrary(") {
-		t.Error("`ctrlibrary` 里又出现 `svclibrary.NewLibrary(`：用例实例只在装配根造，控制器只收接口。")
+	if strings.Contains(ctr, "library.NewLibrary(") {
+		t.Error("`ctrlibrary` 里又出现 `library.NewLibrary(`：用例实例只在装配根造，控制器只收接口。")
 	}
 }

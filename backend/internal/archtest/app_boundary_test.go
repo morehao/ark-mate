@@ -29,7 +29,7 @@ func TestProcessShellDoesNotImportAdapters(t *testing.T) {
 		"internal/infra",
 		"internal/drivers",
 		"internal/sessionruntime",
-		"internal/service",
+		"internal/app",
 		"internal/domain",
 		"internal/delivery",
 	}

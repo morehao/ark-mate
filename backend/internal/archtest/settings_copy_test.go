@@ -369,7 +369,7 @@ func assertNoBannedWord(t *testing.T, where, text string) {
 // P0：原先钉着一个精确文件路径（`provider_probe.go`）。该文件随供应商域搬进 `domain/provider`
 // （设计 §3.4），钉路径在搬家后只会"读不到文件"（假红）。判据改锚在**符号**上：`probeLocal`
 // （自检检查表的构造入口，这些 `detail`/`remedy` 文案就产在它和它的同族函数里）。刻意**不锚
-// 导出的 `ProbeProvider`**——它在 `service/svcmodel` 很可能只剩一行转发，锚到它会让判据
+// 导出的 `ProbeProvider`**——它在 `app/model` 很可能只剩一行转发，锚到它会让判据
 // 盯错文件。锚点由 `uniqueSourceFile` 保证全仓恰好一处（0 处 = 判据失去对象，≥2 处 = 自检实现
 // 有了第二份），下面的 `scanned >= 40` 是第二道 fail-closed 兜底。
 func TestProviderProbeProseAvoidsRuntimeVocabulary(t *testing.T) {

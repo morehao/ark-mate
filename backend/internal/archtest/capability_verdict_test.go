@@ -107,9 +107,9 @@ func TestCapabilityVerdictConsumersDelegateToDomain(t *testing.T) {
 		// P4a 正文第六刀起：读面孔径随实现搬进了用例层（`svclibrary`），判据跟着它走——
 		// 留一个指向 `manager/library.go` 的锚会在文件搬走之后变成 `readFileOrFatal` 的 Fatal
 		// （**这一次是实测出来的**：那正是"判据失锚不静默"该有的样子）。
-		{"internal/service/svclibrary/list.go", "session.SkillVerdict(",
+		{"internal/app/library/list.go", "session.SkillVerdict(",
 			"Library 读面（skill 那条）"},
-		{"internal/service/svclibrary/list.go", "session.McpVerdict(",
+		{"internal/app/library/list.go", "session.McpVerdict(",
 			"Library 读面（MCP 那条）"},
 		{"internal/domain/session/capability_selection_validate.go", "SkillVerdict(",
 			"建会话的选定校验（skill 那条）"},
@@ -127,10 +127,10 @@ func TestCapabilityVerdictConsumersDelegateToDomain(t *testing.T) {
 	// 消费面不许把判决抄回来：`svclibrary` 里出现判据文案锚即意味着有人手写了一遍
 	// （它只该搬运 `session.SkillVerdict`/`McpVerdict` 的返回值）。
 	libSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root,
-		filepath.FromSlash("internal/service/svclibrary/list.go"))))
+		filepath.FromSlash("internal/app/library/list.go"))))
 	for _, p := range capabilityVerdictMarkers {
 		if strings.Contains(libSrc, p) {
-			t.Errorf("internal/service/svclibrary/list.go 里出现判决文案锚 %q：文案随判决一起归 %s，"+
+			t.Errorf("internal/app/library/list.go 里出现判决文案锚 %q：文案随判决一起归 %s，"+
 				"消费层只搬运结论（`session.SkillVerdict`/`McpVerdict` 的返回值）。", p, capabilityVerdictOwner)
 		}
 	}
@@ -164,9 +164,9 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	// 删掉了，钉路径的判据会当场变成 `readFileOrFatal` 的 Fatal；而"文件被删"本身又不能作为判据
 	// ——把接口换个文件名重新添回来就绕过去了。按目录扫同时解决这两件事，并且顺带把下面三批
 	// "接口里不许有声明"的判据收紧成"包里任何地方都不许有"。
-	capFiles := productionGoFiles(t, filepath.Join(root, "internal", "service", "svccapability"))
+	capFiles := productionGoFiles(t, filepath.Join(root, "internal", "app", "capability"))
 	if len(capFiles) == 0 {
-		t.Fatal("`internal/service/svccapability` 下扫不到任何生产文件：判据失锚（目录被搬走/改名？），不许静默通过")
+		t.Fatal("`internal/app/capability` 下扫不到任何生产文件：判据失锚（目录被搬走/改名？），不许静默通过")
 	}
 	var capBuf strings.Builder
 	for _, f := range capFiles {
@@ -180,7 +180,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	// `SetSkillEnabled` 与 `SkillMaterialization` 的投影（两个 DTO）与错误码（`skill_not_found` 等）
 	// 都在 `domain/skill` 的平面里，用例层再留一份声明就只是给"一行转发"留位置。判据取"那两行
 	// 在用例层不存在"：一个方法声明在任何地方都能满足，删掉转发之后声明会**静默地**无事可做。
-	// v3.1 §3.2.1：控制器不得 import domain，故 `svccapability.CapabilitySvc` **必须**声明这两条
+	// v3.1 §3.2.1：控制器不得 import domain，故 `capability.CapabilitySvc` **必须**声明这两条
 	// （窄接口是控制器唯一入口）；下面只钉"实现仍在域平面"。
 	for _, must := range []string{"func (m *Plane) SetSkillEnabled(", "func (m *Plane) SkillMaterialization("} {
 		dom := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "skill", "plane.go")))
@@ -206,7 +206,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	// 本体（`WriteSkill`/`DeleteSkill`/`WriteServer`/`DeleteServer`）必须在（失锚＝空转）。
 	// v3.1：接口必须声明写面（控制器不 import domain），但**实现**仍只在域平面。
 	if !strings.Contains(capSrc, "WriteSkill(") || !strings.Contains(capSrc, "WriteServer(") {
-		t.Error("`svccapability.CapabilitySvc` 缺写面方法：v3.1 起控制器只认这个接口。")
+		t.Error("`capability.CapabilitySvc` 缺写面方法：v3.1 起控制器只认这个接口。")
 	}
 	// 扫描面是**整个 manager 生产目录**（P4a 正文第五十二刀删掉了 `skills_write.go` / `mcps_write.go`
 	// 两个只剩说明头的文件；写死文件名会 Fatal，而写成整目录**同时变强**：那六行转发放回任何
@@ -269,8 +269,8 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 		}
 	}
 	capCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrcapability", "capability.go")))
-	if !regexp.MustCompile(`svc\s+svccapability\.CapabilitySvc`).MatchString(capCtr) {
-		t.Error("`ctrcapability` 里找不到 `svc svccapability.CapabilitySvc` 字段：控制器只认用例接口（v3.1 §3.2.1）。")
+	if !regexp.MustCompile(`svc\s+capability\.CapabilitySvc`).MatchString(capCtr) {
+		t.Error("`ctrcapability` 里找不到 `svc capability.CapabilitySvc` 字段：控制器只认用例接口（v3.1 §3.2.1）。")
 	}
 	if body := funcBodyOf(t, capCtr, "func (h *capabilityCtr) ProbeMcpServer("); !strings.Contains(body, "h.svc.Probe(") {
 		t.Error("`ProbeMcpServer` handler 的函数体里没有 `h.svc.Probe(`：探测面已归域平面，" +
@@ -293,7 +293,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	//	   少这一条，"端口没了但装配点还留着"会看起来一样（而端口类型已经不存在，那一格
 	//	   只能靠再引入一个别名/接口来填，正是第三条硬规矩禁的形状）。
 	if !strings.Contains(capSrc, "type CapabilitySvc interface {") {
-		t.Error("`internal/service/svccapability` 里没有 `CapabilitySvc`：v3.1 起控制器只认这个接口。")
+		t.Error("`internal/app/capability` 里没有 `CapabilitySvc`：v3.1 起控制器只认这个接口。")
 	}
 	// 扫描面是**整个生产目录**（原 `mcp_live.go` 已删；实现痕迹换个文件放回来也要红）。
 	liveFace := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
@@ -326,7 +326,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 		}
 	}
 	if !strings.Contains(capCtr, "h.svc.") {
-		t.Error("`ctrcapability` 里找不到 `h.svc.`：v3.1 起控制器只持 `svccapability.CapabilitySvc` 接口。")
+		t.Error("`ctrcapability` 里找不到 `h.svc.`：v3.1 起控制器只持 `capability.CapabilitySvc` 接口。")
 	}
 	for _, banned := range []string{"*skill.Plane", "*mcp.Plane", "*capability.Registry"} {
 		if strings.Contains(capCtr, banned) {
@@ -335,11 +335,11 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	}
 	// v3.1：用例实例只在装配根造；控制器只收接口。
 	asmSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
-	if !strings.Contains(asmSrc, "svccapability.NewCapability(") {
-		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svccapability.NewCapability(`：能力面用例必须在装配根造。")
+	if !strings.Contains(asmSrc, "capability.NewCapability(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `capability.NewCapability(`：能力面用例必须在装配根造。")
 	}
-	if strings.Contains(capCtr, "svccapability.NewCapability(") {
-		t.Error("`ctrcapability` 里又出现 `svccapability.NewCapability(`：用例实例只在装配根造。")
+	if strings.Contains(capCtr, "capability.NewCapability(") {
+		t.Error("`ctrcapability` 里又出现 `capability.NewCapability(`：用例实例只在装配根造。")
 	}
 
 	// 第四十九刀：能力/定义面的**四条一行转发**清零（`gateway_face.go` 与 `definition_forward.go`

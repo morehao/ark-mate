@@ -78,7 +78,7 @@ func TestSessionModelRefIsPlatformID(t *testing.T) {
 
 	sess := readStripped(t, uniqueSourceFile(t, internalDir, nil,
 		declREFor("UpdateSession").String(), "PATCH 写面 `UpdateSession`"))
-	// P4a 正文第四十四刀把 PATCH 写面搬进了 `service/svcsession`（`Meta.UpdateSession`），模型解析
+	// P4a 正文第四十四刀把 PATCH 写面搬进了 `app/session`（`Meta.UpdateSession`），模型解析
 	// 改经 `MetaDeps.ResolveModel` 端口——**判据一字不改，锚跟着对象走**：链路变成两段，判据也分两段。
 	// 缺任一段都有一种静默失效：只钉用例侧，适配器忘了转发就没人拦；只钉适配器侧，用例自己
 	// 把请求原值落库也看不出来。

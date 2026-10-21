@@ -9,13 +9,13 @@ import (
 // ——— P4a 正文第五刀「平台模型清单写面归属」守卫 ———
 //
 // 平台模型清单的**写面**（`CreateModel`/`UpdateModel`/`DeleteModel`）从 `manager/model_list.go`
-// （`*Service` 的方法）搬进 `internal/service/svcmodel`，形状是同一个模板：
+// （`*Service` 的方法）搬进 `internal/app/model`，形状是同一个模板：
 //
-//	`svcmodel.Declared`（用例：校验 / 错误码出口 / 单一默认 / 行 CAS / 响应装配）
+//	`model.Declared`（用例：校验 / 错误码出口 / 单一默认 / 行 CAS / 响应装配）
 //	  ← 两个**依赖事实**（`*store.Store` 清单载体、`*provider.Plane` 挂靠校验）
-//	  + 一个**过渡端口** `svcmodel.Host`（读一条的投影 / 生效面回执 / 同步触发——这三条还在
+//	  + 一个**过渡端口** `model.Host`（读一条的投影 / 生效面回执 / 同步触发——这三条还在
 //	    `manager`，随读面与同步面在 P4b 第二刀 / P5 搬进来）
-//	      ← 装配根（`internal/bootstrap/assembly`）把三者接上并**造出**用例（`svcmodel.NewDeclared(...)`），
+//	      ← 装配根（`internal/bootstrap/assembly`）把三者接上并**造出**用例（`model.NewDeclared(...)`），
 //	        控制器只收接口（v3.1 起实例只在装配根造）
 //
 // 为什么是"一个端口"而不是把写面也留给 `manager`：写面的判据（(provider_id, model_id) 唯一、
@@ -30,13 +30,13 @@ import (
 //	   而两边都编译得过、都"看起来在工作"；
 //	② **接口面不清**：写面搬走了而 `ModelSvc` 上还留着那三条，于是端口与实际实现各说一份，
 //	   "这一段还剩什么"再也看不出来；
-//	③ **装配漏接**：装配根忘了 `svcmodel.NewDeclared(...)`（写面 nil ⇒ 一提交就 panic）
+//	③ **装配漏接**：装配根忘了 `model.NewDeclared(...)`（写面 nil ⇒ 一提交就 panic）
 //	   或 `app.go` 没交 `Store`（⇒ memory 模式的 40501 变成"所有模式都 40501"，而读面照常绿）。
 //
 // 反证（实跑）：把 `func (s *Service) CreateModel(` 加回 `manager`（真实现的形态，能编译）→ 红；
-// 抽掉装配根的 `svcmodel.NewDeclared(` → 红；把 `CreateModel` 加回 `ModelSvc` 接口 → 红；
+// 抽掉装配根的 `model.NewDeclared(` → 红；把 `CreateModel` 加回 `ModelSvc` 接口 → 红；
 // 把 `app.go` 的 `Store: st` 抽掉 → 红；把 `router.Ports` 的 `ModelHost` 字段换回
-// `svcmodel.DeclaredSvc` → 红。
+// `model.DeclaredSvc` → 红。
 
 // declaredUseCaseAnchors 写面用例层的实现锚（**实现**，不是转发）。
 var declaredUseCaseAnchors = []string{
@@ -74,7 +74,7 @@ var declaredRelocationMarkers = []string{
 }
 
 // managerModelPortAnchors 还留在 `manager` 的那半边：过渡端口的三条实现必须真的在
-// （它们不在 = `svcmodel.Host` 没人满足，而"改名 + 顺手改 app"能编译过）。
+// （它们不在 = `model.Host` 没人满足，而"改名 + 顺手改 app"能编译过）。
 //
 // P4b 第二刀（读面 + 同步面进 `svcmodel`）会把这三条逐条删掉，**判据跟着少**——
 // 这正是"过渡期债务单调收缩"应有的形状。
@@ -90,28 +90,28 @@ var registryModelPortAnchors = []string{
 // TestModelWriteUseCaseLivesInModelSvc 见文件头。
 func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	root := backendRoot(t)
-	dir := filepath.Join(root, "internal", "service", "svcmodel")
+	dir := filepath.Join(root, "internal", "app", "model")
 
 	declaredSrc := stripLineComments(readFileOrFatal(t, filepath.Join(dir, "declared.go")))
 	for _, a := range append(append([]string{}, declaredUseCaseAnchors...), declaredPortAnchors...) {
 		if !strings.Contains(declaredSrc, a) {
-			t.Errorf("internal/service/svcmodel/declared.go 里找不到 %q：写面用例的实现被改名/搬走了？"+
+			t.Errorf("internal/app/model/declared.go 里找不到 %q：写面用例的实现被改名/搬走了？"+
 				"（这条守卫的判据就挂在它身上，失锚等于空转）", a)
 		}
 	}
 	// 清单载体是**依赖事实**（写面要落库），而实现层不许认识：`manager` 是过渡期的邻居，
 	// 用例层通过端口取它的东西，绝不 import 它（否则"谁拥有这段逻辑"就没有答案了）。
 	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/sessionruntime"`) {
-		t.Error("internal/service/svcmodel 里出现 `internal/sessionruntime` 的 import：写面通过 `Host` 端口取那半边，不 import 实现层。")
+		t.Error("internal/app/model 里出现 `internal/sessionruntime` 的 import：写面通过 `Host` 端口取那半边，不 import 实现层。")
 	}
 	// v3.1 P4：用例层**不再 import store**，改吃装配根交下来的窄端口（`ModelStore`）。
 	// 判据双向：接口必须在本包（否则端口又跑到实现层去了）；store 不得再被 import。
 	if !strings.Contains(declaredSrc, "type ModelStore interface {") {
-		t.Error("internal/service/svcmodel 里找不到 `type ModelStore interface {`：清单载体的窄端口必须在用例层声明（v3.1 P4）。")
+		t.Error("internal/app/model 里找不到 `type ModelStore interface {`：清单载体的窄端口必须在用例层声明（v3.1 P4）。")
 	}
 	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/persistence/store"`) {
-		t.Error("internal/service/svcmodel 又 import 了 `internal/persistence/store`：清单载体走 `ModelStore` 端口，" +
-			"`internal/service` 的层表 deny 已把这条边钉死。")
+		t.Error("internal/app/model 又 import 了 `internal/persistence/store`：清单载体走 `ModelStore` 端口，" +
+			"`internal/app` 的层表 deny 已把这条边钉死。")
 	}
 
 	// ② 接口面切分：写面在 `DeclaredSvc` 上，读/目录/同步在 `ModelSvc` 上，两边不许互相夹带。
@@ -136,7 +136,7 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	}
 	for _, m := range []string{"CreateModel(", "UpdateModel(", "DeleteModel("} {
 		if strings.Contains(modelIf, m) {
-			t.Errorf("`ModelSvc` 接口里仍声明 %q：写面已搬进 `svcmodel.Declared`（P4a 正文第五刀），"+
+			t.Errorf("`ModelSvc` 接口里仍声明 %q：写面已搬进 `model.Declared`（P4a 正文第五刀），"+
 				"接口上留着它等于让端口与实际实现各说一份，「这一段还剩什么」就看不出来了。", m)
 		}
 	}
@@ -158,7 +158,7 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 		for _, m := range declaredRelocationMarkers {
 			if strings.Contains(body, m) {
 				t.Errorf("internal/sessionruntime/%s 里出现模型写面的实现痕迹 %q：它**只有一份实现**，"+
-					"在 `internal/service/svcmodel`（P4a 正文第五刀）。\n"+
+					"在 `internal/app/model`（P4a 正文第五刀）。\n"+
 					"manager 交出的是清单载体与供应商域平面（依赖事实）+ 过渡端口的三条实现。\n"+
 					"在这里再写一遍的后果是校验与错误码静默分叉（一处允许多个默认、另一处只留一个），"+
 					"而两边都编译得过。", filepath.Base(path), m)
@@ -167,16 +167,16 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	}
 	for _, a := range managerModelPortAnchors {
 		if !strings.Contains(mgrBody.String(), a) {
-			t.Errorf("internal/sessionruntime 的生产文件里找不到 %q：`svcmodel.Host` 的这条实现被改名/删掉了？"+
+			t.Errorf("internal/sessionruntime 的生产文件里找不到 %q：`model.Host` 的这条实现被改名/删掉了？"+
 				"（改名后 `app.go` 一起改就能编译过，而端口的那件事没人做）", a)
 		}
 	}
 	// ModelRow 随模型读面进了 `domain/provider`；`registry.ModelViews` 嵌入该平面后一并满足
-	// `svcmodel.Host`。判据落在**真实现**上（不是转发）。
+	// `model.Host`。判据落在**真实现**上（不是转发）。
 	providerModels := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "provider", "models.go")))
 	if !strings.Contains(providerModels, "func (pl *Plane) ModelRow(") {
 		t.Errorf("`internal/domain/provider/models.go` 里找不到 `func (pl *Plane) ModelRow(`：" +
-			"`svcmodel.Host` 的读一条实现必须有真落点")
+			"`model.Host` 的读一条实现必须有真落点")
 	}
 	views := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "models_view.go")))
 	if !strings.Contains(views, "*provider.Plane") {
@@ -206,14 +206,14 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 
 	// v3.1：装配根造用例；控制器只收接口。
 	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
-	for _, want := range []string{"svcmodel.NewDeclared(", "Model:         modelFace"} {
+	for _, want := range []string{"model.NewDeclared(", "Model:         modelFace"} {
 		if !strings.Contains(asm, want) {
 			t.Errorf("`internal/bootstrap/assembly/services.go` 里找不到 %q：模型写面的依赖事实与用例实例都在装配根交出。", want)
 		}
 	}
 	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrmodel", "models.go")))
-	if strings.Contains(ctrSrc, "svcmodel.NewDeclared(") {
-		t.Error("`ctrmodel` 里又出现 `svcmodel.NewDeclared(`：用例实例只在装配根造，控制器只收接口。")
+	if strings.Contains(ctrSrc, "model.NewDeclared(") {
+		t.Error("`ctrmodel` 里又出现 `model.NewDeclared(`：用例实例只在装配根造，控制器只收接口。")
 	}
 }
 

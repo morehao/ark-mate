@@ -18,7 +18,7 @@ import (
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/service/svcsystem"
+	"github.com/morehao/ark-mate/internal/app/system"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
 	"github.com/morehao/ark-mate/internal/version"
 )
@@ -30,7 +30,7 @@ type testRouterOpts struct {
 	origin     *middleware.OriginPolicy
 	creds      *credential.Set
 	// metaSource 覆盖诊断面的值来源；nil 时用"资产已接上"的默认值。
-	metaSource func() svcsystem.MetaSource
+	metaSource func() system.MetaSource
 	// 复用一个已装配好的会话面（调用方要先设策略/凭据时传它）。
 	service  *sessionruntime.Service
 	registry *goruntime.Registry
@@ -64,17 +64,17 @@ func testRouterDeps(t *testing.T, o testRouterOpts) router.Deps {
 	meta := o.metaSource
 	if meta == nil {
 		assets := o.web
-		meta = func() svcsystem.MetaSource {
+		meta = func() system.MetaSource {
 			// 与生产装配同形：版本/契约/产品面由装配根填，资产按已解析的那份填，
 			// 底座身份取执行面此刻的事实。
-			src := svcsystem.MetaSource{
+			src := system.MetaSource{
 				CoreVersion: version.Version,
 				APIContract: version.APIContract,
 				Payloads:    []dtosystem.PayloadInfo{},
-				Product:     svcsystem.ProductInfoOf(version.Version),
+				Product:     system.ProductInfoOf(version.Version),
 			}
 			if assets.Has() {
-				src.Assets = svcsystem.MetaAssets{Path: assets.Path, Digest: assets.Digest, BuildID: assets.CurrentBuildID()}
+				src.Assets = system.MetaAssets{Path: assets.Path, Digest: assets.Digest, BuildID: assets.CurrentBuildID()}
 			}
 			if ri := exec.Identity(context.Background()); ri.ID != "" {
 				src.Runtime = dtosystem.RuntimeInfo{ID: ri.ID, Name: ri.Name, Version: ri.Version}

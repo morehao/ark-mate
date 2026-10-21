@@ -59,7 +59,7 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 	// transcript 目录绑死、用量的校验与分组口径全在 `domain/session`），声明与转发随之删除。
 	// 它们的控制器**不在** `ctrsession` 里，所以下面的"控制器取用路径"要扫三个文件。
 	// v3.1 §3.2.1：控制器不得 import `internal/domain`，所以读模型有了**窄用例接口**
-	// `svcsession.ReadSvc`（会话列表/检索/轮次/待投递）+ `svcsearch` / `svcusage`。
+	// `session.ReadSvc`（会话列表/检索/轮次/待投递）+ `svcsearch` / `svcusage`。
 	// 本体仍在域平面；这里两侧一起钉：域里有实体、用例接口有声明、控制器只走接口。
 	readModels := []struct {
 		plane, iface, call string
@@ -75,9 +75,9 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsearch", "search.go"))) +
 		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrusage", "usage.go")))
 	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
-	readIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsession", "read.go")))
-	searchIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsearch", "search.go")))
-	usageIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcusage", "usage.go")))
+	readIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "session", "read.go")))
+	searchIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "search", "search.go")))
+	usageIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "usage", "usage.go")))
 	for _, m := range readModels {
 		if !strings.Contains(domBody, "func (pl *Plane) "+m.plane+"(") {
 			t.Errorf("域平面里找不到 `func (pl *Plane) %s(`：读模型本体必须只有一份且在域里。", m.plane)
@@ -94,7 +94,7 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 	}
 
 	// ① `SessionSvc` 不得收读模型（它们进的是 `ReadSvc`）。
-	iface := interfaceBodyOf(t, readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsession", "session.go")), "type SessionSvc interface {")
+	iface := interfaceBodyOf(t, readFileOrFatal(t, filepath.Join(root, "internal", "app", "session", "session.go")), "type SessionSvc interface {")
 	for _, m := range []string{"ListSessions(", "SearchSessions(", "ListRuns(", "ListQueuedInputs("} {
 		if strings.Contains(iface, m) {
 			t.Errorf("`SessionSvc` 里又声明了 `%s`：读模型归 `ReadSvc`，两个接口各说各话。", m)
@@ -115,8 +115,8 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 	if strings.Contains(ctrSrc, "*session.Plane") {
 		t.Error("`ctrsession` 里又出现 `*session.Plane`：控制器不 import domain（v3.1 §3.2.1 规则 1）。")
 	}
-	if !regexp.MustCompile(`read\s+svcsession\.ReadSvc`).MatchString(ctrSrc) {
-		t.Error("`ctrsession` 里找不到 `read svcsession.ReadSvc` 字段（容空白匹配）。")
+	if !regexp.MustCompile(`read\s+session\.ReadSvc`).MatchString(ctrSrc) {
+		t.Error("`ctrsession` 里找不到 `read session.ReadSvc` 字段（容空白匹配）。")
 	}
 	body := funcBodyOf(t, ctrSrc, "func (h *sessionCtr) List(")
 	if !strings.Contains(body, "h.read.List(") {

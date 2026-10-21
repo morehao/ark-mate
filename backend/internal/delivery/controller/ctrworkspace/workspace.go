@@ -1,6 +1,6 @@
 // Package ctrworkspace 承载工作空间面控制器（目录枚举/建目录/最近使用/起始点偏好设置）。
 //
-// 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
+// 控制器只依赖 internal/app/* 的窄端口，不感知领域实现；
 // 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
 package ctrworkspace
 
@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/contract/dtoworkspace"
-	"github.com/morehao/ark-mate/internal/service/svcworkspace"
+	"github.com/morehao/ark-mate/internal/app/workspace"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -41,11 +41,11 @@ var _ WorkspaceCtr = (*workspaceCtr)(nil)
 // （见 workspace.ValidateWorkspace 的三条件）。
 type workspaceCtr struct {
 	// svc 工作空间面用例（登记表 / 派生视图 / 设置面 / 宿主目录选择器）。
-	svc svcworkspace.WorkspaceSvc
+	svc workspace.WorkspaceSvc
 }
 
 // NewWorkspaceCtr 构造 WorkspaceCtr（只收**已构造的用例**）。
-func NewWorkspaceCtr(svc svcworkspace.WorkspaceSvc) WorkspaceCtr {
+func NewWorkspaceCtr(svc workspace.WorkspaceSvc) WorkspaceCtr {
 	return &workspaceCtr{svc: svc}
 }
 

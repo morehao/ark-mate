@@ -8,7 +8,7 @@
 
 | 分册 | 讲什么 | 什么时候必须读 |
 | --- | --- | --- |
-| [`docs/agents/layout.md`](docs/agents/layout.md) | 目录边界、层表、依赖方向、`service/svc<领域>` 的三条硬规矩与形状 | 新增/搬迁包、改装配或分层 |
+| [`docs/agents/layout.md`](docs/agents/layout.md) | 目录边界、层表、依赖方向、用例环（`app/<领域>`）的三条硬规矩与形状 | 新增/搬迁包、改装配或分层 |
 | [`docs/agents/guards.md`](docs/agents/guards.md) | `internal/archtest` 当前判据清单与测试约定（**守卫计数只在这里维护**） | 改任何被守卫钉住的代码、加/改守卫 |
 | [`docs/agents/guards-history.md`](docs/agents/guards-history.md) | 守卫沿革：每条新增挡的静默失效与实跑反证 | 想知道某条守卫为什么存在、怎么反证 |
 | [`docs/agents/commands.md`](docs/agents/commands.md) | 常用命令（dev / desktop / 验收 / 容器）、`RUNTIME_BIN`、界面验收 | 跑构建、开发循环或验收 |

@@ -11,7 +11,7 @@ import (
 // 依赖链是 `cmd → cli → app → assembly → controller → service(接口)`。这条链里
 // `service/svc*` 只该被两类包认识：
 //
-//	① `internal/bootstrap/assembly` —— 唯一装配根，**造**用例实例（`svcsystem.New(...)`）；
+//	① `internal/bootstrap/assembly` —— 唯一装配根，**造**用例实例（`system.New(...)`）；
 //	② `internal/delivery/controller/ctr<领域>` —— 消费用例，但只写**接口类型名**，不再构造。
 //
 // `app`/`router`/`domain`/`mechanism`/`store`/`pkg` 都不该 import 它。
@@ -27,11 +27,14 @@ import (
 // **判据只扫生产文件**（跳过 `_test.go`）：端到端用例要真跑用例实现，那正是它们该做的事；
 // 把它们算进来只会逼守卫加一张越来越长的白名单。
 //
-// 反证（实跑）：往 `internal/bootstrap/app/app.go` 加一行 `import ".../internal/service/svcsystem"`
+// 反证（实跑）：往 `internal/bootstrap/app/app.go` 加一行 `import ".../internal/app/system"`
 // （并用一下那个符号）→ 红；把扫描根指到不存在的目录 → Fatal。
 
-// svcImportPrefix 用例层包的 import 路径前缀（`internal/service/svc*`）。
-const svcImportPrefix = modulePrefix + "internal/service/svc"
+// svcImportPrefix 用例层包的 import 路径前缀（`internal/app/*`）。
+//
+// C3 4.2 起用例环就是 `internal/app/<领域>`（原 `service/svc<领域>`）：前缀少了 `svc`，
+// 判据不变——"只有装配根与控制器可以引用用例层"。
+const svcImportPrefix = modulePrefix + "internal/app/"
 
 // TestOnlyAssemblyAndControllersImportServicePackages 见文件头。
 func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
@@ -53,7 +56,7 @@ func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 			case strings.Contains(slashed, "/internal/bootstrap/assembly/"):
 				fromAllowed++
 				continue
-			case strings.Contains(slashed, "/internal/service/"):
+			case strings.Contains(slashed, "/internal/app/"):
 				// 用例层自己（`svc*` 之间零互相 import 由 layer_isolation_test.go 单独钉）。
 				continue
 			case strings.Contains(slashed, "/internal/archtest/"):
@@ -85,22 +88,22 @@ func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 // TestUseCaseInstancesAreBuiltByAssembly 钉住"用例实例由谁造"。
 //
 // v3.1 §3.4：用例实例**只在装配根**造（`internal/bootstrap/assembly/services.go`），控制器只收接口。
-// 这条改动的失效方式是静默的——把 `svcsystem.New(...)` 挪回控制器照样能编译、行为也一样，
+// 这条改动的失效方式是静默的——把 `system.New(...)` 挪回控制器照样能编译、行为也一样，
 // 只是"依赖方向可验证"这条目标又失效了。
 //
 // 判据两侧一起钉（都 fail-closed：文件读不到直接 Fatal）：
 //
-//	① 装配根必须有建造点（`svcsystem.New(` / `svcruntime.New(` / `svcmodel.New(`）；
+//	① 装配根必须有建造点（`system.New(` / `runtime.New(` / `model.New(`）；
 //	② `internal/bootstrap/app` 与 `internal/delivery/router` 侧不得出现用例层包名。
 func TestUseCaseInstancesAreBuiltByAssembly(t *testing.T) {
 	root := backendRoot(t)
 	builders := []struct {
 		name, file, anchor string
 	}{
-		{"导出用例", filepath.Join("internal", "bootstrap", "assembly", "services.go"), "svcsystem.New("},
-		{"底座用例", filepath.Join("internal", "bootstrap", "assembly", "services.go"), "svcruntime.New("},
-		{"供应商自检用例", filepath.Join("internal", "bootstrap", "assembly", "services.go"), "svcmodel.NewProbe("},
-		{"会话读面用例", filepath.Join("internal", "bootstrap", "assembly", "services.go"), "svcsession.NewRead("},
+		{"导出用例", filepath.Join("internal", "bootstrap", "assembly", "services.go"), "system.New("},
+		{"底座用例", filepath.Join("internal", "bootstrap", "assembly", "services.go"), "runtime.New("},
+		{"供应商自检用例", filepath.Join("internal", "bootstrap", "assembly", "services.go"), "model.NewProbe("},
+		{"会话读面用例", filepath.Join("internal", "bootstrap", "assembly", "services.go"), "session.NewRead("},
 	}
 	for _, b := range builders {
 		src := stripLineComments(readFileOrFatal(t, filepath.Join(root, b.file)))
@@ -111,15 +114,24 @@ func TestUseCaseInstancesAreBuiltByAssembly(t *testing.T) {
 		}
 	}
 
-	for _, f := range []string{
-		filepath.Join("internal", "bootstrap", "app", "app.go"),
-		filepath.Join("internal", "delivery", "router", "router.go"),
+	// ② 进程壳与路由不得 import 用例层。
+	//
+	// 判据按 **import 路径**而不是限定符文本：用例包名去掉 `svc` 前缀之后（C3 4.2），
+	// `runtime.` / `session.` / `model.` 在装配面本来就是别的包（`internal/runtime`、
+	// `domain/session`、`persistence/model`）的限定符——按文本扫会既误伤又漏判。
+	for _, dir := range []string{
+		filepath.Join(root, "internal", "bootstrap", "app"),
+		filepath.Join(root, "internal", "delivery", "router"),
 	} {
-		src := stripLineComments(readFileOrFatal(t, filepath.Join(root, f)))
-		for _, banned := range []string{"svcsystem.", "svcruntime.", "svcmodel.", "svcsession.", "service/svc"} {
-			if strings.Contains(src, banned) {
-				t.Errorf("%s 里出现 %q：装配面不认识用例层。\n"+
-					"它该交出/消费的是**已构造的接口**（`assembly.BuildResult.Services` 与控制器接口）。", f, banned)
+		imports := importedByProductionPackage(t, dir)
+		if len(imports) == 0 {
+			t.Fatalf("%s 未解析到任何 import：判据失去对象", dir)
+		}
+		for _, imp := range imports {
+			if strings.HasPrefix(imp, svcImportPrefix) {
+				t.Errorf("%s import 了用例层 %s：装配面不认识用例层。\n"+
+					"它该交出/消费的是**已构造的接口**（`assembly.BuildResult.Services` 与控制器接口）。",
+					rel(root, dir), imp)
 			}
 		}
 	}

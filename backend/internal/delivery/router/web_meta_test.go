@@ -16,7 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/delivery/router"
-	"github.com/morehao/ark-mate/internal/service/svcsystem"
+	"github.com/morehao/ark-mate/internal/app/system"
 )
 
 // recomputeDigest 是 `webDigest` 的**独立第二实现**（照 meta.go/web.go 注释里的算法重写一遍）：
@@ -109,8 +109,8 @@ func TestMetaHomeAndContract(t *testing.T) {
 	}
 	eng := router.New(testRouterDeps(t, testRouterOpts{
 		web: assets,
-		metaSource: func() svcsystem.MetaSource {
-			return svcsystem.MetaSource{CoreVersion: "9.9.9", APIContract: "v1", Home: "/tmp/mate-home"}
+		metaSource: func() system.MetaSource {
+			return system.MetaSource{CoreVersion: "9.9.9", APIContract: "v1", Home: "/tmp/mate-home"}
 		},
 	}))
 	w := httptest.NewRecorder()

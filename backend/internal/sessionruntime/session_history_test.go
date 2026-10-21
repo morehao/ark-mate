@@ -12,7 +12,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/contract/dtosession"
-	"github.com/morehao/ark-mate/internal/service/svcsession"
+	appsession "github.com/morehao/ark-mate/internal/app/session"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/golib/gerror"
 )
@@ -26,8 +26,8 @@ func sessionPlaneOf(svc *Service) *session.Plane { return svc.sessionPlane }
 // historySvc 取会话历史读面的**用例层**（P4a 正文第十刀起它不在 manager 上）。
 //
 // 夹具链不变：库句柄、会话域平面、事件总线都还是同一个，用例只是换了个所有者。
-func historySvc(svc *Service) svcsession.HistorySvc {
-	return svcsession.NewHistory(storeAsEventReader(planesOf(svc).Resources.Store()), svc.sessionPlane, svc.bus)
+func historySvc(svc *Service) appsession.HistorySvc {
+	return appsession.NewHistory(storeAsEventReader(planesOf(svc).Resources.Store()), svc.sessionPlane, svc.bus)
 }
 
 // 本文件是**会话历史读面的装配级用例**（此前与 transcript 落盘用例同处

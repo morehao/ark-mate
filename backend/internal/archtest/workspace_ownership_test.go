@@ -246,18 +246,18 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	//
 	// P4a 曾把 `svcworkspace` 删除（实现全在 `domain/workspace`，控制器直接持平面）；v3.1 §3.2.1
 	// 规则 1 要求控制器不得 import `internal/domain`，因此这一层以**窄接口**的形式回来：
-	// 控制器只认 `svcworkspace.WorkspaceSvc`，平面仍归领域。
-	svcDir := filepath.Join(root, "internal", "service", "svcworkspace")
+	// 控制器只认 `workspace.WorkspaceSvc`，平面仍归领域。
+	svcDir := filepath.Join(root, "internal", "app", "workspace")
 	if _, err := os.Stat(svcDir); err != nil {
-		t.Error("`internal/service/svcworkspace` 不存在了：用例层是控制器与领域之间的唯一连接（v3.1 §3.2.1）。")
+		t.Error("`internal/app/workspace` 不存在了：用例层是控制器与领域之间的唯一连接（v3.1 §3.2.1）。")
 	}
 	ctrWs := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrworkspace", "workspace.go")))
 	if strings.Contains(ctrWs, "internal/domain/workspace") {
 		t.Error("`ctrworkspace` 又 import 了 `internal/domain/workspace`：控制器只认用例接口。")
 	}
 	asmWs := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
-	if !strings.Contains(asmWs, "svcworkspace.New(") {
-		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcworkspace.New(`。")
+	if !strings.Contains(asmWs, "workspace.New(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `workspace.New(`。")
 	}
 	asmGo := dirProductionBody(t, filepath.Join(root, "internal", "bootstrap", "assembly"))
 	if !strings.Contains(asmGo, "as.planes.Workspaces.SetRootsStore(") {

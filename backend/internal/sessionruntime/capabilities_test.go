@@ -22,14 +22,14 @@ import (
 	"github.com/morehao/ark-mate/internal/contract/dtocapability"
 	"github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/service/svccapability"
+	appcapability "github.com/morehao/ark-mate/internal/app/capability"
 	"github.com/morehao/golib/gerror"
 )
 
 // mcpCatalog 取 MCP 注册表读模型的**用例层**（P4a 正文第十四刀：读模型从 manager 收进
 // `svccapability`，夹具链不变——注册表/平面/密钥面本来就是真的）。
-func mcpCatalog(svc *Service) svccapability.McpCatalog {
-	return svccapability.NewServers(planesOf(svc).Capabilities, planesOf(svc).Mcp, planesOf(svc).McpSecrets)
+func mcpCatalog(svc *Service) appcapability.McpCatalog {
+	return appcapability.NewServers(planesOf(svc).Capabilities, planesOf(svc).Mcp, planesOf(svc).McpSecrets)
 }
 
 // skillPlaneOf 取技能域平面：技能目录的投影在域里（`skill.Plane.ListSkills`），
@@ -37,8 +37,8 @@ func mcpCatalog(svc *Service) svccapability.McpCatalog {
 func skillPlaneOf(svc *Service) *skill.Plane { return planesOf(svc).Skills }
 
 // toolCatalog 取工具目录的**用例层**（P4a 正文第十二刀：读模型从 manager 收进 svccapability）。
-func toolCatalog(svc *Service) svccapability.ToolCatalog {
-	return svccapability.NewTools(planesOf(svc).Capabilities)
+func toolCatalog(svc *Service) appcapability.ToolCatalog {
+	return appcapability.NewTools(planesOf(svc).Capabilities)
 }
 
 func writeCapFile(t *testing.T, path, content string) {

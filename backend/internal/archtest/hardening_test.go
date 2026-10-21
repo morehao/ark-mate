@@ -340,7 +340,7 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 		t.Error("`ctrworkspace` 的 PickDirectory 里找不到 `h.svc.PickDirectory(...)`：" +
 			"宿主选择器必须经用例接口（v3.1 §3.2.1：控制器不 import domain）。")
 	}
-	svcWs := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcworkspace", "workspace.go")))
+	svcWs := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "workspace", "workspace.go")))
 	if !strings.Contains(svcWs, "type HostPicker interface {") {
 		t.Error("`svcworkspace` 里找不到 `type HostPicker interface {`：窄端口是替身缝，" +
 			"删了它三个结局的契约就只能靠真 spawn 宿主命令来验。")

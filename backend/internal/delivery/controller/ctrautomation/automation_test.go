@@ -19,7 +19,7 @@ import (
 // P4a 正文第九刀把 automation 那一格换成**真平面**之后，路由器侧再也造不出这两条——
 // 它们验的本来也不是领域行为，而是**本控制器**的出口：`gincontext.Fail(c, code.FromError(err))`。
 // 所以搬到这里，并**直接构造控制器**（同包测试可以直接填 `svc` 字段），
-// 用一个实现 `svcautomation.AutomationSvc` 的替身注入任意错误。
+// 用一个实现 `automation.AutomationSvc` 的替身注入任意错误。
 //
 // 为什么不能少：`code.FromError` 会把"带码错误"透成它的码，把"裸错误"兜成 50000。
 // 少了兜底那半，一个没包 error 的第三方库错误会以 `code:-1` 出去（客户端拿到的是

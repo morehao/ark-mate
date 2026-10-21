@@ -106,7 +106,7 @@ Electron 主进程（桌面态）
 | **L1** | `platform/{object/*,redact,identity,resource,credential,eventbus,code,automation,definition,capability}` `version` `runtime` `infra/{acp,mcp,logging}` | 值对象与协议库，**本带允许互链**（ACP 线协议、错误码折算、值类型复用） |
 | **L2** | `domain/*` | 业务规则与状态。**出边为零**：不 import dto、store、mechanism、infra |
 | **L3** | `contract/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份）。C3 4.1 起目录由 `dto/` 搬到 `contract/`，包名保留 `dto<领域>` |
-| **L4** | `service/svc<领域>` | 用例层：接口 + 实现 + 构造函数；校验、错误码、响应装配 |
+| **L4** | `app/<领域>` | 用例环（原 `service/svc<领域>`，C3 4.2 起包名去掉 `svc` 前缀）：接口 + 实现 + 构造函数；校验、错误码、响应装配 |
 | **L5** | `persistence/{store,dao}` `infra/{credentials,dbclient,procreg,dsh}` | 持久与基础设施 |
 | **L6** | `drivers/{gateway,mechanism,registry,runtimeconn,transfer}` `config` | 驱动侧：机制、注册表、连接面、存量定义导入导出编排 |
 | **L7** | `sessionruntime` | 会话编排（Service / Orchestrator / 权限） |
@@ -300,7 +300,7 @@ backend/
 │   │   └── command/          子命令参数解析与命令行输出（serve/demo/doctor/migrate/…）
 │   ├── router/               唯一传输层装配点；按领域分 routes_*.go；资产管理（web.go）
 │   ├── controller/ctr<域>/   传输层控制器（一域一包）
-│   ├── service/svc<域>/      业务逻辑层（接口 + 实现；控制器内构造）
+│   ├── app/<域>/             用例环（接口 + 实现；装配根构造，控制器只收接口）
 │   ├── domain/<域>/          领域平面（会话 / 工作空间 / 供应商 / 技能 / MCP / 自动化 / 交互）
 │   ├── mechanism/            机制层（定义装载 / 凭据 / doctor）
 │   ├── runtimeconn/          执行面（连接池 / 拨号 / 代际 / 诊断）

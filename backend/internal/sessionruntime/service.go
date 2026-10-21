@@ -56,14 +56,14 @@ type Service struct {
 //
 // **为什么是"可选"而不是必填参数**：`NewService` 有 130+ 处调用点（几乎全在 manager 自己的
 // 测试里，它们只需要"一个能跑的 Service"），而**装配层需要的是"同一个执行面实例"**
-// （它要把这个实例也交给 API 面：P4a 起 `svcruntime.New` 由 `ctrruntime` 在构造函数里调，
+// （它要把这个实例也交给 API 面：P4a 起 `runtime.New` 由 `ctrruntime` 在构造函数里调，
 // 用的就是这一份执行面）。必填参数会让 130+ 处跟着改，
 // 换来的信息量与这里一样。P5a 的 `registry` 装配表会取代这个缝。
 type Option func(*Service)
 
 // WithRuntimePlane 用装配层提供的执行面（而不是本函数自己造一个）。
 //
-// **必须与 `svcruntime.New` 拿到同一个实例**（P4a 起那个调用在 `ctrruntime` 里）：
+// **必须与 `runtime.New` 拿到同一个实例**（P4a 起那个调用在 `ctrruntime` 里）：
 // 两个平面各自记账时，"诊断说 stopped、
 // 连接却活着"这种分叉会立刻发生（`runtimeconn.Plane` 的进程状态是它自己的字段）。
 func WithRuntimePlane(pl session.RuntimePlane) Option {
@@ -72,7 +72,7 @@ func WithRuntimePlane(pl session.RuntimePlane) Option {
 
 // sessionUseCase 自动化宿主需要的两条会话写面能力（**只声明用到的那两条**）。
 //
-// 它不叫 `svcsession.SessionSvc`：执行面不该 import 用例层；装配根把用例实例交进来即可。
+// 它不叫 `session.SessionSvc`：执行面不该 import 用例层；装配根把用例实例交进来即可。
 type sessionUseCase interface {
 	CreateSession(ctx context.Context, req dtosession.SessionCreateReq) (*dtosession.SessionCreateResp, error)
 	CancelRun(ctx context.Context, id string) error
@@ -174,7 +174,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 // `StartIdleReaper` 已随本刀从 `Orchestrator` 删除）。
 func (s *Service) RuntimePool() session.ConnPool { return s.runtimePool }
 
-// SessionPlane 交会话域平面（**依赖事实**）：导出用例的事实来源（`svcsystem.NewSource`）
+// SessionPlane 交会话域平面（**依赖事实**）：导出用例的事实来源（`system.NewSource`）
 // 由 `ctrexport` 用它与 Store/Bus 一起在自己的构造函数里造（P4a 正文第八刀）。
 func (s *Service) SessionPlane() *session.Plane { return s.sessionPlane }
 

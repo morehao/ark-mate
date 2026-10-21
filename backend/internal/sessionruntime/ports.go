@@ -36,7 +36,7 @@ type PlaneStore func()
 // 改造前 `ModelFace` 直接内嵌 `*registry.ModelViews`：执行面因此认识 registry 的组合实现，
 // 而 `ModelFace` 的方法集由"嵌了谁"决定——换一份读面实现就得改这里。
 //
-// 现在它只认识三条方法（`svcmodel.ModelSvc` / `Host` 真正消费的那几条）：读面、同步、同步触发。
+// 现在它只认识三条方法（`model.ModelSvc` / `Host` 真正消费的那几条）：读面、同步、同步触发。
 // 装配层把 `registry.NewModelViews(planes)` 注进来（见 `bootstrap/assembly/services.go`）。
 type ModelViews interface {
 	// ModelsView 组装 `GET /models` 读面（平台清单 + 聚合生效结论 + 逐 runtime 明细）。

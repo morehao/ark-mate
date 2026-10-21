@@ -133,7 +133,7 @@ func TestPendingElicitationIsStaleOnRestore(t *testing.T) {
 	}
 
 	// ③ 归档那条路也必须在，且走的是**同一个**收口铸造点（不是另写一份"删掉表项"）。
-	meta := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsession", "meta.go")))
+	meta := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "session", "meta.go")))
 	if !strings.Contains(meta, "m.deps.CancelElicitations(id)") {
 		t.Fatalf("会话归档时没有作废挂起提问（`m.deps.CancelElicitations(id)`）：归档之后会话不该再接受\n" +
 			"回答，而挂起项还在的话**那张卡片既点得动又没人收**")

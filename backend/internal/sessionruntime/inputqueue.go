@@ -24,7 +24,7 @@ func (s *Service) DeliverQueued(sessionID string) {
 
 // CancelElicitations 归档时作废该会话的挂起提问（`reason:archive`，ADR-11）。
 //
-// 它实现 `svcsession.MetaDeps` 的端口：走 `CancelSessionReason` 而不是直接删表项——那一支会把
+// 它实现 `session.MetaDeps` 的端口：走 `CancelSessionReason` 而不是直接删表项——那一支会把
 // `cancel` 投给正在等的那一轮、再由终局回调发 `elicitation_resolved{action:cancel,reason:archive}`。
 func (s *Service) CancelElicitations(sessionID string) {
 	if s.orch == nil || sessionID == "" {

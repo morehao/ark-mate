@@ -1,6 +1,6 @@
 // Package ctrcapability 承载能力数据面控制器（Skill / MCP server / Tool 目录与 MCP live 交互）。
 //
-// 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
+// 控制器只依赖 internal/app/* 的窄端口，不感知领域实现；
 // 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
 package ctrcapability
 
@@ -14,7 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/contract/dtocapability"
-	"github.com/morehao/ark-mate/internal/service/svccapability"
+	"github.com/morehao/ark-mate/internal/app/capability"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -44,18 +44,18 @@ var _ CapabilityCtr = (*capabilityCtr)(nil)
 
 // CapabilityHandler 处理能力数据面 REST（P1：Skill/MCP/Tool 目录列出；注入属 P2）。
 //
-// P4a 正文第三十九刀之后这里**没有** `svc svccapability.CapabilitySvc` 字段：那个接口已经空了
+// P4a 正文第三十九刀之后这里**没有** `svc capability.CapabilitySvc` 字段：那个接口已经空了
 // （写面 / 探测面 / live 五条都归了域平面），空接口留在控制器上只会让人以为"还有一格端口"。
 // 现在持有的全是**依赖事实**（能力注册表 / 技能平面 / MCP 平面 / 密钥面）与本包内构造的两个
 // 读模型用例。
 type capabilityCtr struct {
 	// svc 能力数据面用例（v3.1 §3.2.1：控制器不得 import `internal/domain`；
 	// 域平面、探测态与两个读模型的折叠全在 `svccapability` 里）。
-	svc svccapability.CapabilitySvc
+	svc capability.CapabilitySvc
 }
 
 // NewCapabilityCtr 构造 CapabilityCtr：只收**已构造的用例**（装配根建一次）。
-func NewCapabilityCtr(svc svccapability.CapabilitySvc) CapabilityCtr {
+func NewCapabilityCtr(svc capability.CapabilitySvc) CapabilityCtr {
 	return &capabilityCtr{svc: svc}
 }
 
@@ -112,7 +112,7 @@ func (h *capabilityCtr) DeleteSkill(c *gin.Context) {
 }
 
 // maxSkillImportBody multipart 信封的上限：20 MiB 包 + 1 MiB 头部/边界余量。
-const maxSkillImportBody = svccapability.MaxSkillPackageBytes + (1 << 20)
+const maxSkillImportBody = capability.MaxSkillPackageBytes + (1 << 20)
 
 // ImportSkill 导入一个技能包（`POST /skills/import`，multipart/form-data，字段 `file`）。
 //
@@ -134,7 +134,7 @@ func (h *capabilityCtr) ImportSkill(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "只接受 .zip 技能包："+header.Filename))
 		return
 	}
-	if header.Size > svccapability.MaxSkillPackageBytes {
+	if header.Size > capability.MaxSkillPackageBytes {
 		gincontext.Fail(c, code.Error(code.InvalidParam,
 			"技能包超过 20 MiB 上限："+header.Filename))
 		return
@@ -146,12 +146,12 @@ func (h *capabilityCtr) ImportSkill(c *gin.Context) {
 	}
 	defer f.Close()
 	// 再按字节数兜一层：`header.Size` 来自 multipart 头，不能当成唯一判据。
-	data, err := io.ReadAll(io.LimitReader(f, svccapability.MaxSkillPackageBytes+1))
+	data, err := io.ReadAll(io.LimitReader(f, capability.MaxSkillPackageBytes+1))
 	if err != nil {
 		gincontext.Fail(c, code.Error(code.Internal, "读取上传文件失败："+err.Error()))
 		return
 	}
-	if len(data) > svccapability.MaxSkillPackageBytes {
+	if len(data) > capability.MaxSkillPackageBytes {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "技能包超过 20 MiB 上限"))
 		return
 	}

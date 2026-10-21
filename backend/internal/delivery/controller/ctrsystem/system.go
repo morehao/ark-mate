@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/service/svcsystem"
+	"github.com/morehao/ark-mate/internal/app/system"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -38,14 +38,14 @@ type SystemCtr interface {
 var _ SystemCtr = (*systemCtr)(nil)
 
 type systemCtr struct {
-	meta svcsystem.MetaSvc
-	caps svcsystem.CapabilitySvc
+	meta system.MetaSvc
+	caps system.CapabilitySvc
 	// hostFacts 报告"宿主能不能抬起系统目录面板"；nil = 未知（当 false，能力声明退化）。
 	hostFacts func() bool
 }
 
 // NewSystemCtr 构造系统面控制器：只收**已构造的用例**与一份宿主事实查询。
-func NewSystemCtr(meta svcsystem.MetaSvc, caps svcsystem.CapabilitySvc, hostFacts func() bool) SystemCtr {
+func NewSystemCtr(meta system.MetaSvc, caps system.CapabilitySvc, hostFacts func() bool) SystemCtr {
 	return &systemCtr{meta: meta, caps: caps, hostFacts: hostFacts}
 }
 
@@ -60,7 +60,7 @@ func (h *systemCtr) GetMeta(c *gin.Context) {
 // 因为那个对话框是核心进程抬的——本机浏览器也能用，远程/SSH 才不行。
 func (h *systemCtr) GetCapabilities(c *gin.Context) {
 	desktop := strings.EqualFold(strings.TrimSpace(c.GetHeader(CarrierHeader)), CarrierDesktop)
-	facts := svcsystem.CapabilityFacts{Desktop: desktop}
+	facts := system.CapabilityFacts{Desktop: desktop}
 	if h.hostFacts != nil {
 		facts.NativeDialog = h.hostFacts()
 	}

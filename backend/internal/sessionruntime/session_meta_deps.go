@@ -10,7 +10,7 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// ——— 会话**元数据写面**的三份依赖（`svcsession.MetaDeps` 的实现，P4a 正文第四十四刀）———
+// ——— 会话**元数据写面**的三份依赖（`session.MetaDeps` 的实现，P4a 正文第四十四刀）———
 //
 // 适配器留在 `manager` 的理由与交互动作面同形：端口的三个签名只吃**域/pkg 类型**
 // （`runtime.ModelConfig` / `sessionrow.MetaPatch`），所以它能在不认识用例层的地方实现

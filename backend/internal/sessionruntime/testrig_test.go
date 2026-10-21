@@ -21,8 +21,8 @@ import (
 
 	defn "github.com/morehao/ark-mate/internal/platform/definition"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
-	"github.com/morehao/ark-mate/internal/service/svcsession"
-	svcsystem "github.com/morehao/ark-mate/internal/service/svcsystem"
+	appsession "github.com/morehao/ark-mate/internal/app/session"
+	"github.com/morehao/ark-mate/internal/app/system"
 
 	"os"
 	"path/filepath"
@@ -312,7 +312,7 @@ func transcriptPlane(svc *Service) *session.Plane { return svc.sessionPlane }
 //
 // 写面（`CreateModel`/`UpdateModel`/`DeleteModel`）已搬进 `service/svcmodel`（P4a 正文第五刀）：
 // 还留在 manager 的用例要的是"清单里有一条（甚至是默认那条）"这个**前提**，不是写面的行为
-// ——写面自己的判据跟着实现走（`internal/service/svcmodel/declared_test.go`）。
+// ——写面自己的判据跟着实现走（`internal/app/model/declared_test.go`）。
 func (r *genRig) seedModelRow(t *testing.T, providerID, model string, isDefault bool) string {
 	t.Helper()
 	ctx := context.Background()
@@ -344,14 +344,14 @@ func setBusy(as *session.ActiveSession, busy bool) {
 }
 
 // 端口转换（v3.1 P4）：typed-nil 装进接口**不是 nil**。装配根与测试用同一条规矩。
-func storeAsEventReader(st *store.Store) svcsession.EventReader {
+func storeAsEventReader(st *store.Store) appsession.EventReader {
 	if st == nil {
 		return nil
 	}
 	return st
 }
 
-func storeAsSourceFacts(st *store.Store) svcsystem.SourceFactsReader {
+func storeAsSourceFacts(st *store.Store) system.SourceFactsReader {
 	if st == nil {
 		return nil
 	}
@@ -453,8 +453,8 @@ func rewireFacts(svc *Service) {
 
 // sessionOf 造会话写面用例（P5 起在 `svcsession`）。端口全部取自当前夹具：
 // 编排器给三条能力，平面给工作空间事实，库口给归属校验，Service 给投递能力。
-func sessionOf(svc *Service) svcsession.SessionSvc {
-	deps := svcsession.SessionDeps{
+func sessionOf(svc *Service) appsession.SessionSvc {
+	deps := appsession.SessionDeps{
 		Workspaces: svc.facts.Workspaces,
 		Store:      svc.resourceStore,
 		Queued:     svc,
@@ -462,7 +462,7 @@ func sessionOf(svc *Service) svcsession.SessionSvc {
 	if o := svc.orch; o != nil {
 		deps.Starter, deps.Prompt, deps.Canceller = o, o, o
 	}
-	return svcsession.NewSession(deps)
+	return appsession.NewSession(deps)
 }
 
 // newOrchestratorForTest 造编排器并**回注自动化宿主需要的会话用例**（P5）。

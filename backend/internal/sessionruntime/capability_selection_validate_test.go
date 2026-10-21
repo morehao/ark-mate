@@ -16,7 +16,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/contract/dtosession"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/service/svclibrary"
+	"github.com/morehao/ark-mate/internal/app/library"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
@@ -489,4 +489,4 @@ func TestSelectionProblemsAreNotCodeWrapped(t *testing.T) {
 }
 
 // libQueryAll 全量 Library 查询（校验与 Library 同源的对照用）。
-func libQueryAll() svclibrary.Query { return svclibrary.Query{} }
+func libQueryAll() library.Query { return library.Query{} }

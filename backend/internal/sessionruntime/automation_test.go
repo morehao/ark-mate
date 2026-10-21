@@ -12,7 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/contract/dtoautomation"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/service/svcautomation"
+	appautomation "github.com/morehao/ark-mate/internal/app/automation"
 )
 
 // automationRig 一个装了自动化目录的 Service（M4-3 的写面 + 注册表都在它上面测）。
@@ -40,8 +40,8 @@ func writeAutomationFile(t *testing.T, path, body string) {
 //
 // 测试经它与"真 Service + 真域平面"驱动——这层的实现搬走了，但夹具链一个字不用改：
 // 平面还是那个平面，用例只是换了个所有者。
-func autoSvc(svc *Service) svcautomation.AutomationSvc {
-	return svcautomation.New(planesOf(svc).Automation)
+func autoSvc(svc *Service) appautomation.AutomationSvc {
+	return appautomation.New(planesOf(svc).Automation)
 }
 
 // mustListAutomations 列出注册表（端口签名带 error，测试里不关心 err）。

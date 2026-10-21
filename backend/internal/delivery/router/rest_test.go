@@ -43,18 +43,18 @@ import (
 	"github.com/morehao/ark-mate/internal/contract/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/service/svcautomation"
-	"github.com/morehao/ark-mate/internal/service/svccapability"
-	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
-	"github.com/morehao/ark-mate/internal/service/svclibrary"
-	"github.com/morehao/ark-mate/internal/service/svcmodel"
-	"github.com/morehao/ark-mate/internal/service/svcruntime"
-	"github.com/morehao/ark-mate/internal/service/svcsearch"
-	"github.com/morehao/ark-mate/internal/service/svcsession"
-	"github.com/morehao/ark-mate/internal/service/svcstream"
-	"github.com/morehao/ark-mate/internal/service/svcsystem"
-	"github.com/morehao/ark-mate/internal/service/svcusage"
-	"github.com/morehao/ark-mate/internal/service/svcworkspace"
+	appautomation "github.com/morehao/ark-mate/internal/app/automation"
+	appcapability "github.com/morehao/ark-mate/internal/app/capability"
+	"github.com/morehao/ark-mate/internal/app/commandpolicy"
+	"github.com/morehao/ark-mate/internal/app/library"
+	"github.com/morehao/ark-mate/internal/app/model"
+	"github.com/morehao/ark-mate/internal/app/runtime"
+	"github.com/morehao/ark-mate/internal/app/search"
+	appsession "github.com/morehao/ark-mate/internal/app/session"
+	"github.com/morehao/ark-mate/internal/app/stream"
+	"github.com/morehao/ark-mate/internal/app/system"
+	"github.com/morehao/ark-mate/internal/app/usage"
+	appworkspace "github.com/morehao/ark-mate/internal/app/workspace"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/golib/gerror"
 )
@@ -210,10 +210,10 @@ func (s *stubSvc) ModelsView(_ context.Context, runtimeID string, refresh bool) 
 	return &dtomodel.ModelsResp{}, nil
 }
 
-// stubCatalog 把 `stubSvc` 的 DTO 目录面收窄成 `svcmodel.Catalog` 要的领域形状。
+// stubCatalog 把 `stubSvc` 的 DTO 目录面收窄成 `model.Catalog` 要的领域形状。
 //
 // 同一个 stub 不能同时满足两个接口的同名方法（返回类型不同），而 `stubSvc` 还要供
-// `svcmodel.ModelSvc` 用——所以这里显式包一层，而不是把两个接口的签名再拉平一次。
+// `model.ModelSvc` 用——所以这里显式包一层，而不是把两个接口的签名再拉平一次。
 type stubCatalog struct{ s *stubSvc }
 
 func (c stubCatalog) ModelCatalog(ctx context.Context) (*provider.CatalogView, error) {
@@ -486,7 +486,7 @@ func (s *stubSvc) DeliverQueuedNow(_ context.Context, id string) error {
 	return nil
 }
 
-// DeliverQueued 执行面的投递能力（`svcsession.QueuedDelivery`）。
+// DeliverQueued 执行面的投递能力（`appsession.QueuedDelivery`）。
 func (s *stubSvc) DeliverQueued(id string) { s.deliverQueuedID = id }
 
 // ListRuns 桩：默认空 runs（详情/统计路径不依赖其返回）。
@@ -562,33 +562,33 @@ func (f restFixture) services() assembly.Services {
 	}
 	return assembly.Services{
 		Session:            f.svc,
-		SessionHistory:     svcsession.NewHistory(nilSafeEventReader(f.store), f.plane, bus),
-		SessionDetail:      svcsession.NewDetail(f.plane, f.svc),
-		SessionInteraction: svcsession.NewInteraction(f.plane, f.svc),
-		SessionQueue:       svcsession.NewQueue(f.plane, f.svc),
-		SessionMeta:        svcsession.NewMeta(f.plane, f.svc),
-		SessionRead:        svcsession.NewRead(f.plane),
-		Search:             svcsearch.New(f.plane),
-		Usage:              svcusage.New(f.plane),
-		Export:             svcsystem.New(svcsystem.NewSource(nilSafeSourceFacts(f.store), f.plane, bus)),
+		SessionHistory:     appsession.NewHistory(nilSafeEventReader(f.store), f.plane, bus),
+		SessionDetail:      appsession.NewDetail(f.plane, f.svc),
+		SessionInteraction: appsession.NewInteraction(f.plane, f.svc),
+		SessionQueue:       appsession.NewQueue(f.plane, f.svc),
+		SessionMeta:        appsession.NewMeta(f.plane, f.svc),
+		SessionRead:        appsession.NewRead(f.plane),
+		Search:             search.New(f.plane),
+		Usage:              usage.New(f.plane),
+		Export:             system.New(system.NewSource(nilSafeSourceFacts(f.store), f.plane, bus)),
 
-		Workspace:     svcworkspace.New(f.wsPlane, workspace.NewPicker()),
-		CommandPolicy: svccommandpolicy.New("", func([]interaction.PrefixRule) {}),
+		Workspace:     appworkspace.New(f.wsPlane, workspace.NewPicker()),
+		CommandPolicy: commandpolicy.New("", func([]interaction.PrefixRule) {}),
 
-		Runtime:       svcruntime.New(f.execution),
+		Runtime:       runtime.New(f.execution),
 		Model:         f.svc,
-		ModelDeclared: svcmodel.NewDeclared(nilSafeModelStore(f.store), f.providerPlane, nil),
-		Provider:      svcmodel.NewProvider(f.providerPlane),
-		ProviderProbe: svcmodel.NewProbe(f.providerPlane, stubCatalog{f.svc}),
+		ModelDeclared: model.NewDeclared(nilSafeModelStore(f.store), f.providerPlane, nil),
+		Provider:      model.NewProvider(f.providerPlane),
+		ProviderProbe: model.NewProbe(f.providerPlane, stubCatalog{f.svc}),
 
-		Capability: svccapability.NewCapability(f.skills, f.mcpPlane,
-			svccapability.NewTools(f.caps), svccapability.NewServers(f.caps, f.mcpPlane, f.mcpSecrets)),
-		Automation: svcautomation.New(f.automationPlane),
-		Library:    svclibrary.NewLibrary(f.caps, f.skills, f.registry, f.mcpSecrets, func() bool { return true }),
+		Capability: appcapability.NewCapability(f.skills, f.mcpPlane,
+			appcapability.NewTools(f.caps), appcapability.NewServers(f.caps, f.mcpPlane, f.mcpSecrets)),
+		Automation: appautomation.New(f.automationPlane),
+		Library:    library.NewLibrary(f.caps, f.skills, f.registry, f.mcpSecrets, func() bool { return true }),
 
-		Meta:         svcsystem.NewMeta(func() svcsystem.MetaSource { return svcsystem.MetaSource{} }),
-		Capabilities: svcsystem.NewCapabilities(),
-		Stream:       svcstream.New(bus),
+		Meta:         system.NewMeta(func() system.MetaSource { return system.MetaSource{} }),
+		Capabilities: system.NewCapabilities(),
+		Stream:       stream.New(bus),
 	}
 }
 
@@ -1198,7 +1198,7 @@ func TestPromptAndCancel(t *testing.T) {
 
 // TestHistoryParamParsing 历史读面的**窗口语义**（端点 → 控制器参数 → 用例 → 会话域/总线）。
 //
-// P4a 正文第十刀把这面从 `manager` 上提到 `svcsession.History`，router 侧因此失去"替身转告参数"
+// P4a 正文第十刀把这面从 `manager` 上提到 `appsession.History`，router 侧因此失去"替身转告参数"
 // 这种证据——`svc.historyAfter` 那类标志位断言撤掉之后，**参数被忽略**与"参数生效但恰好没差别"
 // 会变得无法区分（默认 after=-1 与显式 after=0 只差一条事件，而下限钳制、方向互斥都在这一面里）。
 // 所以改成**真平面 + 真事件**：播 3 条（seq 0/1/2）再看**回来的窗口本身**。
@@ -1318,7 +1318,7 @@ func histPageOf(t *testing.T, r *gin.Engine, url string) histPage {
 
 // TestPermissionMemoriesList GET /sessions/:id/permissions/memories 返回会话级权限记忆（含 decision 侧）。
 //
-// P4a 正文第四十刀：这一面归 `svcsession.DetailSvc`（用例层）之后，路由测试的替身只提供**域值对象**
+// P4a 正文第四十刀：这一面归 `appsession.DetailSvc`（用例层）之后，路由测试的替身只提供**域值对象**
 // （`interaction.MemoryItem`），`since` 的 RFC3339 折叠与"空集回 []"都由用例层做——判据因此从
 // "替身收到了 id"变成"投影真的发生了"。同时补上"未知会话 → 40401"：替身时代那条校验根本不存在，
 // 而它是这一面的主要职责（存在性判据）。
@@ -2105,7 +2105,7 @@ func TestResolvePermissionReceiptShape(t *testing.T) {
 // TestLibraryRouteShape GET /library：真实用例跑起来（空注册表 → 空数组）+ 领域校验落成 40000。
 //
 // 替身撤掉之后这条用例验的是**装配**：控制器拿到的是域/包事实、用例在控制器里造、错误经信封映射。
-// 读模型的过滤与逐 runtime 可达性在 `internal/service/svclibrary` 的测试里（那里有真注册表与投影）。
+// 读模型的过滤与逐 runtime 可达性在 `internal/app/library` 的测试里（那里有真注册表与投影）。
 func TestLibraryRouteShape(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(t, svc))
@@ -2132,21 +2132,21 @@ func TestLibraryRouteShape(t *testing.T) {
 
 // 端口转换（v3.1 P4）：typed-nil 装进接口**不是 nil**，用例里 `st == nil` 的判据会失效。
 // 测试装配与 `internal/bootstrap/assembly` 用同一条规矩：先判 nil，再交接口。
-func nilSafeEventReader(st *store.Store) svcsession.EventReader {
+func nilSafeEventReader(st *store.Store) appsession.EventReader {
 	if st == nil {
 		return nil
 	}
 	return st
 }
 
-func nilSafeSourceFacts(st *store.Store) svcsystem.SourceFactsReader {
+func nilSafeSourceFacts(st *store.Store) system.SourceFactsReader {
 	if st == nil {
 		return nil
 	}
 	return st
 }
 
-func nilSafeModelStore(st *store.Store) svcmodel.ModelStore {
+func nilSafeModelStore(st *store.Store) model.ModelStore {
 	if st == nil {
 		return nil
 	}

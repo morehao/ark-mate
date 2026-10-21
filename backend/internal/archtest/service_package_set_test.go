@@ -38,16 +38,19 @@ import (
 //	② `svcruntime` 又长回 provider/model 的方法（拆开的意义当场消失，而调用方一个都不用改）；
 //	③ 目标包被改名/删除（判据失锚，守卫静默空转）。
 //
-// 反证（实跑）：重建一个 `internal/service/svcsearch` → 红；把 `CreateProvider` 声明回
+// 反证（实跑）：重建一个 `internal/app/search` → 红；把 `CreateProvider` 声明回
 // `svcruntime` → 红。
 
 // servicePackageSet ADR-2 定下的用例层包集（**恰好**这些）。
 // v3.1 §3.2.1 起控制器不得 import `internal/domain`，于是"纯读模型"也必须有一层窄端口：
-// `svcsearch` / `svcusage` 从会话域取出，`svcworkspace` 从工作空间域取出，`svcstream` 包住事件总线。
+// `search` / `usage` 从会话域取出，`workspace` 从工作空间域取出，`stream` 包住事件总线。
+//
+// C3 4.2：目录从 `service/svc<领域>` 搬成 `app/<领域>`，**包名去掉 `svc` 前缀**（角色不再叫
+// "service 层"，它就是用例环）。判据本身不变：包集恰好这些、多一个少一个都红。
 var servicePackageSet = []string{
-	"svcautomation", "svccapability", "svccommandpolicy", "svclibrary",
-	"svcmodel", "svcruntime", "svcsearch", "svcsession", "svcstream", "svcsystem",
-	"svcusage", "svcworkspace",
+	"automation", "capability", "commandpolicy", "library",
+	"model", "runtime", "search", "session", "stream", "system",
+	"usage", "workspace",
 }
 
 // serviceRuntimeMethods `svcruntime` 的 **API 端口**（`RuntimeSvc`）允许声明的方法（多一个都红）。
@@ -63,7 +66,7 @@ var serviceRuntimePlaneMethods = []string{"Identity", "Diagnostics"}
 
 // TestServicePackageSetFollowsADR2 见文件头。
 func TestServicePackageSetFollowsADR2(t *testing.T) {
-	dir := filepath.Join(backendRoot(t), "internal", "service")
+	dir := filepath.Join(backendRoot(t), "internal", "app")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("读 %s 失败：%v（这条守卫失去了检查对象）", dir, err)
@@ -81,7 +84,7 @@ func TestServicePackageSetFollowsADR2(t *testing.T) {
 	want := append([]string(nil), servicePackageSet...)
 	sort.Strings(want)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("`internal/service` 的包集与 ADR-2 不一致：\n  实际 %v\n  期望 %v\n"+
+		t.Errorf("`internal/app` 的包集与 ADR-2 不一致：\n  实际 %v\n  期望 %v\n"+
 			"包集是 v3.1 的用例层清单（控制器只认它；新增/删除包时必须同步本表与 `assembly/services.go`）。\n"+
 			"旧名回潮的后果是**两个包表达同一件事**，装配点给哪个都能编译过——"+
 			"而\"收实现\"就没法判断该落到哪一边。", got, want)
@@ -91,7 +94,7 @@ func TestServicePackageSetFollowsADR2(t *testing.T) {
 // TestServiceRuntimeStaysIdentityAndDiagnostics `svcruntime` 只许装底座身份与诊断。
 func TestServiceRuntimeStaysIdentityAndDiagnostics(t *testing.T) {
 	root := backendRoot(t)
-	dir := filepath.Join(root, "internal", "service", "svcruntime")
+	dir := filepath.Join(root, "internal", "app", "runtime")
 	files := productionGoFiles(t, dir)
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：判据失锚", dir)
@@ -125,14 +128,14 @@ func TestServiceRuntimeStaysIdentityAndDiagnostics(t *testing.T) {
 			found++
 			allowed, known := allowedByIface[iface]
 			if !known {
-				t.Errorf("`internal/service/svcruntime` 声明了接口 `%s`：这个包只许两个接口——"+
+				t.Errorf("`internal/app/runtime` 声明了接口 `%s`：这个包只许两个接口——"+
 					"API 端口 `RuntimeSvc`（`RuntimeIdentity`/`RuntimeDiagnostics`）与执行面适配端口 "+
 					"`Plane`（`Identity`/`Diagnostics`）。\n"+
 					"多一个接口 = 又一个「顺手把别的东西塞进来」的入口，而那正是这一刀要消灭的形态。", iface)
 				continue
 			}
 			if !allowed[name] {
-				t.Errorf("`internal/service/svcruntime` 声明了 %q：这个包只装**底座身份与诊断**"+
+				t.Errorf("`internal/app/runtime` 声明了 %q：这个包只装**底座身份与诊断**"+
 					"（ADR-2，P4a）。\n"+
 					"供应商档案与模型清单/目录都属 `svcmodel`（2026-10-20 两包合并）——"+
 					"三件事共用一个接口时，每个控制器都抱着一份大半用不上的大接口"+

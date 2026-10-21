@@ -20,8 +20,8 @@ import (
 // 目录取样的执行细节（活会话 / resume）经域的三个窄端口交下去；本类型只做**组合**与聚合，
 // 不碰连接、不碰 ACP。
 
-// ModelViews 模型读面的组合实现：`svcmodel.ModelSvc` 的 ModelsView/SyncModels/ModelCatalog，
-// 以及 `svcmodel.Host` 的 ModelRow/TrySyncModels 都由它（的两份真实现）提供。
+// ModelViews 模型读面的组合实现：`model.ModelSvc` 的 ModelsView/SyncModels/ModelCatalog，
+// 以及 `model.Host` 的 ModelRow/TrySyncModels 都由它（的两份真实现）提供。
 type ModelViews struct {
 	*provider.Plane
 	*Resources

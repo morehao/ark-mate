@@ -51,13 +51,13 @@ var transcriptOwnerLiterals = []string{
 // transcriptNonOwnerRoots 是"**绝不能**认识 transcript 内部形状"的包（生产文件；测试文件
 // 需要按文件名造夹具，`_test.go` 一律跳过）。
 //
-// 为什么点这两个：`internal/sessionruntime` 是拆分中的实现层、`internal/service/svc*` 是用例端口层
+// 为什么点这两个：`internal/sessionruntime` 是拆分中的实现层、`internal/app/*` 是用例端口层
 // ——两处都只该经会话域的动作面碰 transcript。CLI（`internal/bootstrap/app/command`）与装配根
 // （`internal/bootstrap/app`）**刻意不在名单里**：它们的职责就是"按目录扫文件"（`mate migrate` /
 // `transcripts prune` / `doctor` / serve 的空库提示），ban 了它们等于让守卫与产品行为对打。
 var transcriptNonOwnerRoots = []string{
 	filepath.Join("internal", "sessionruntime"),
-	filepath.Join("internal", "service"),
+	filepath.Join("internal", "app"),
 }
 
 // TestTranscriptStateLivesInSessionPlane transcript 的 recorder 类型与 wire schema 字面量

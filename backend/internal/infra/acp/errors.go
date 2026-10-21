@@ -20,7 +20,7 @@ const (
 	ClassAccess      Class = "access"           // 鉴权/权限不足（登录）
 	ClassLimit       Class = "limit"            // 配额/并发限制
 	ClassRequest     Class = "request_rejected" // 请求被拒（参数/语义错误）
-	ClassService     Class = "service"          // runtime 侧内部错误
+	ClassService     Class = "service"      // runtime 侧内部错误
 	ClassUnsupported Class = "unsupported"      // 该 runtime 能力不支持
 	ClassUnknown     Class = "unknown"
 )
