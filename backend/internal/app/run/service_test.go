@@ -34,24 +34,26 @@ func rigWithRuntime(t *testing.T, specs ...runtime.Spec) (*Service, *Orchestrato
 	return svc, orch, bus
 }
 
-// TestEventSinkMapping acp 归一事件 → 域事件 type/payload（agg=平台会话 uuid；
+// TestEventSinkMapping 域信号 → 域事件 type/payload（agg=平台会话 uuid；
 // P3 双 id：原生 session id 经 byProvider 解析后发布）。
+//
+// ACP → 域信号的翻译在适配器（`runtimeconn/events_test.go` 单独钉），这里只喂平台信号。
 func TestEventSinkMapping(t *testing.T) {
 	_, orch, bus := newTestRig(t)
 	orch.handles.BindProvider("s1", "conv-1") // 原生底座 session id → 平台会话 uuid
-	sink := orch.acpEventSink("rtx")
+	sink := orch.eventSink("rtx")
 
-	sink(acp.Event{SessionID: "s1", Kind: acp.KindMessage, Payload: acp.MessageDelta{Text: "hi"}})
-	sink(acp.Event{SessionID: "s1", Kind: acp.KindThought, Payload: acp.ThoughtDelta{Text: "think"}})
+	sink(event.Signal{SessionID: "s1", Kind: event.KindMessage, Payload: event.MessageDelta{Text: "hi"}})
+	sink(event.Signal{SessionID: "s1", Kind: event.KindThought, Payload: event.ThoughtDelta{Text: "think"}})
 	// agent 回传的 user_message 是会话镜像（宿主已在 Prompt 提交时发布 session.BusUserMessage）→ eventSink 丢弃。
-	sink(acp.Event{SessionID: "s1", Kind: acp.KindUserMessage, Payload: acp.MessageDelta{Text: "me"}})
-	sink(acp.Event{SessionID: "s1", Kind: acp.KindToolCall, Payload: acp.ToolCallInfo{ID: "c1", Title: "edit", Status: "pending"}})
-	sink(acp.Event{SessionID: "s1", Kind: acp.KindToolUpdate, Payload: acp.ToolCallInfo{ID: "c1", Status: "completed"}})
-	sink(acp.Event{SessionID: "s1", Kind: acp.KindUsage, Payload: nil})
-	sink(acp.Event{SessionID: "s1", Kind: acp.KindPermission, Payload: acp.PermissionInfo{Title: "t", Allowed: false}})
+	sink(event.Signal{SessionID: "s1", Kind: event.KindUserMessage, Payload: event.MessageDelta{Text: "me"}})
+	sink(event.Signal{SessionID: "s1", Kind: event.KindToolCall, Payload: event.ToolCall{ID: "c1", Title: "edit", Status: "pending"}})
+	sink(event.Signal{SessionID: "s1", Kind: event.KindToolUpdate, Payload: event.ToolCall{ID: "c1", Status: "completed"}})
+	sink(event.Signal{SessionID: "s1", Kind: event.KindUsage, Payload: nil})
+	sink(event.Signal{SessionID: "s1", Kind: event.KindPermission, Payload: event.Permission{Title: "t", Allowed: false}})
 	// 空 session id / 未知 kind → 丢弃。
-	sink(acp.Event{SessionID: "", Kind: acp.KindMessage, Payload: acp.MessageDelta{Text: "x"}})
-	sink(acp.Event{SessionID: "s1", Kind: "bogus_kind", Payload: "whatever"})
+	sink(event.Signal{SessionID: "", Kind: event.KindMessage, Payload: event.MessageDelta{Text: "x"}})
+	sink(event.Signal{SessionID: "s1", Kind: "bogus_kind", Payload: "whatever"})
 
 	sub := bus.SubscribeAfter(nil)
 	defer bus.Unsubscribe(sub)
@@ -103,26 +105,26 @@ func TestEventSinkMapping(t *testing.T) {
 // TestEventSinkWrongPayloadType 载荷类型不匹配 → 事件被跳过（不 panic、不发布）。
 func TestEventSinkWrongPayloadType(t *testing.T) {
 	_, orch, bus := newTestRig(t)
-	sink := orch.acpEventSink("rtx")
-	sink(acp.Event{SessionID: "s1", Kind: acp.KindMessage, Payload: "not a delta"})
-	sink(acp.Event{SessionID: "s1", Kind: acp.KindToolCall, Payload: nil})
+	sink := orch.eventSink("rtx")
+	sink(event.Signal{SessionID: "s1", Kind: event.KindMessage, Payload: "not a delta"})
+	sink(event.Signal{SessionID: "s1", Kind: event.KindToolCall, Payload: nil})
 	if bus.Published() != 0 {
 		t.Fatalf("类型不匹配不应发布: published=%d", bus.Published())
 	}
 }
 
-// TestEventSinkCommands 命令发现面（ADR-17）：acp 的 available_commands_update →
+// TestEventSinkCommands 命令发现面（ADR-17）：`commands` 域信号 →
 // `session.commands` 域事件，agg = 平台会话 uuid，载荷带全量命令且**保序**（平台不重排）。
 // 另钉住两条容易做错的语义：空列表**照样发布**（"通告了当前没有命令"要让前端清空候选），
 // 载荷类型不匹配则被跳过。
 func TestEventSinkCommands(t *testing.T) {
 	_, orch, bus := newTestRig(t)
 	orch.handles.BindProvider("s1", "conv-1")
-	sink := orch.acpEventSink("rtx")
+	sink := orch.eventSink("rtx")
 	sub := bus.SubscribeAfter(nil)
 	defer bus.Unsubscribe(sub)
 
-	sink(acp.Event{SessionID: "s1", Kind: acp.KindCommands, Payload: acp.CommandsInfo{
+	sink(event.Signal{SessionID: "s1", Kind: event.KindCommands, Payload: event.Commands{
 		SessionID: "s1",
 		Commands: []acp.CommandInfo{
 			{Name: "review", Description: "审查改动", Hint: "文件路径"},
@@ -155,7 +157,7 @@ func TestEventSinkCommands(t *testing.T) {
 	}
 
 	// 空列表也要发布：它不是"没发生"，而是"底座通告了当前没有命令"。
-	sink(acp.Event{SessionID: "s1", Kind: acp.KindCommands, Payload: acp.CommandsInfo{
+	sink(event.Signal{SessionID: "s1", Kind: event.KindCommands, Payload: event.Commands{
 		SessionID: "s1", Commands: []acp.CommandInfo{},
 	}})
 	select {
@@ -170,7 +172,7 @@ func TestEventSinkCommands(t *testing.T) {
 
 	// 载荷类型不匹配：跳过而不是发布一个半成品。
 	before := bus.Published()
-	sink(acp.Event{SessionID: "s1", Kind: acp.KindCommands, Payload: "not commands"})
+	sink(event.Signal{SessionID: "s1", Kind: event.KindCommands, Payload: "not commands"})
 	if bus.Published() != before {
 		t.Fatalf("类型不匹配不应发布: published=%d", bus.Published())
 	}

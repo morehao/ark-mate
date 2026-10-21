@@ -36,7 +36,7 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acp.Permission
 	//
 	// 权限请求只带 toolCallId（dsh 的 wire 形状），命令行在同 id 的 tool_call 更新里——按 id 回查
 	// （`tool_calls.go`）。查不到就只用请求自带的字段：门禁取不到 command 时不再参与。
-	tool := acpToolCallSignal(req.ToolCall)
+	tool := toolCallOfACP(req.ToolCall)
 	if cached, ok := o.tools.Get(req.ToolCall.ID); ok {
 		// 工具记忆存的也是领域形状（`event.ToolCall`）：两者同型，直接用更新的那一份。
 		tool = cached

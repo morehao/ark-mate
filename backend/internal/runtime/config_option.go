@@ -106,6 +106,21 @@ func ConfigOptionsOfACP(in []acp.ConfigOption) []ConfigOption {
 	return out
 }
 
+// ConfigOptionsOfPayload 把**事件载荷里**的配置项（不透明 `any`）折成平台值。
+//
+// 为什么需要它：配置项目录刷新的调用点在用例层（`app/run` 的事件出口），而载荷的具体类型
+// （`[]acp.ConfigOption`）是协议形状。用例层不 import 协议库，所以断言留在这里——runtime 是
+// 协议形状的合法落点（ADR-1），app 只认平台值。
+//
+// 返回 ok=false 表示"载荷不是配置项"（未知形状）：调用方跳过即可，不猜。
+func ConfigOptionsOfPayload(v any) ([]ConfigOption, bool) {
+	in, ok := v.([]acp.ConfigOption)
+	if !ok {
+		return nil, false
+	}
+	return ConfigOptionsOfACP(in), true
+}
+
 // configOptionOfACP 单条转换。
 func configOptionOfACP(o acp.ConfigOption) ConfigOption {
 	out := ConfigOption{

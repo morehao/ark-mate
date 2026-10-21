@@ -63,8 +63,9 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 		Fingerprint:      fingerprint,
 		NativeMode:       nativeMode,
 		CheckCredentials: o.svc.CredentialProblem,
+		// 事件出口是平台形状（翻译在适配器）；权限/提问仍是协议回调，经不透明 `Hooks` 转发。
+		OnEvent: o.eventSink(spec.ID),
 		Hooks: acp.ClientOptions{
-			OnEvent:             o.acpEventSink(spec.ID),
 			RequestPermission:   reqPerm,
 			CreateElicitation:   reqElic,
 			CompleteElicitation: completeElic,

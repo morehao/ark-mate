@@ -1,9 +1,22 @@
 package run
 
 import (
-	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
+	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
+	"github.com/morehao/ark-mate/internal/domain/session/event"
 )
+
+// toolCallOfACP 把 ACP 的工具调用详情搬成领域值。
+//
+// 为什么这里还有一份：**事件面**那份已随翻译搬进适配器（`runtimeconn/events.go` 的
+// `acpToolCallSignal`），而权限征询里的 `toolCall` 仍是协议形状——本文件整体还在协议边界上
+// （下一刀随 `interaction` 值面收）。两份的字段清单必须一致；收口后这一份删除。
+func toolCallOfACP(d acp.ToolCallInfo) event.ToolCall {
+	return event.ToolCall{
+		ID: d.ID, Title: d.Title, Status: d.Status, Kind: d.Kind,
+		Input: d.Input, Output: d.Output, ContentText: d.ContentText,
+	}
+}
 
 // ——— 权限/结构化提问的**翻译边界**（C2 第四刀）———
 //
@@ -19,7 +32,7 @@ func permissionRequestToDomain(req acp.PermissionRequest) interaction.Permission
 	return interaction.PermissionRequest{
 		SessionID: req.SessionID,
 		RequestID: req.RequestID,
-		ToolCall:  acpToolCallSignal(req.ToolCall),
+		ToolCall:  toolCallOfACP(req.ToolCall),
 		Options:   permissionOptionsToDomain(req.Options),
 	}
 }

@@ -94,9 +94,10 @@ func TestSessionStateLivesInSessionDomain(t *testing.T) {
 			"o.handles",
 		},
 		filepath.Join("internal", "app", "run", "connection.go"): {
-			// C2 第一刀起，连接层接的是**适配器侧的出口**（ACP 事件先翻译成域信号）；
+			// C2 第一刀起，连接层接的是**适配器侧的出口**；事件载荷那一刀之后，翻译在适配器
+			// （`runtimeconn/events.go`），装配侧只交平台形状的 `OnEvent`。
 			// 它必须真的把事件交给领域出口，所以下面再对 event_bridge.go 加一条正判据。
-			"o.acpEventSink(",
+			"o.eventSink(",
 			"o.pool.Dial(",
 			"o.runner.DropConn(",
 			"o.runner.InUse(",

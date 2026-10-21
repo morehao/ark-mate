@@ -81,6 +81,12 @@ func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt session.DialOpt
 		return nil, code.NewError(code.ClassConnection, "dial_hooks_invalid",
 			"拨号回调集合的类型不符（装配侧交下来的不是执行面的 hooks 形态）", nil)
 	}
+	// 事件出口在域侧是**平台值**（`session.DialOptions.OnEvent` 收 `event.Signal`），翻译在
+	// 这一层（`events.go`）；三个权限/提问回调仍经 `Hooks` 不透明转发（待下一刀随 `interaction` 收）。
+	// 装配侧没交出口 = 不订阅：保留适配器原有的空实现。
+	if opt.OnEvent != nil {
+		hooks.OnEvent = func(ev acp.Event) { opt.OnEvent(acpSignal(ev)) }
+	}
 	args := resolveArgs(spec.Launch.Args, "")
 	// spawn + 握手由 runtime.Connect 承载（可执行投影的拨号底座）。
 	client, err := runtime.Connect(context.WithoutCancel(ctx), spec, args, keys.Env, hooks)
