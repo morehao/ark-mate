@@ -102,7 +102,7 @@ func TestStartupResolvesStoredProviderKeyAndWritesMirror(t *testing.T) {
 	})
 
 	// ③ 用户可见的结论：这条档案"有密钥"，且没有任何待处理项。
-	items, err := a.Result().Probe.Planes.Providers.ListProviders(ctx)
+	items, err := a.Result().Probe.Planes.ListProviders(ctx)
 	if err != nil {
 		t.Fatalf("ListProviders: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestStartupResolvesStoredProviderKeyAndWritesMirror(t *testing.T) {
 	assertCredentialsMirror(t, home, "providers/yygu", secret)
 
 	// ⑥ 同步面也不能把"密钥不可解"写进去——那会让模型清单被当成空的**撤回**。
-	states := a.Result().Probe.Planes.Resources.RuntimeConfigStates(ctx)
+	states := a.Result().Probe.Planes.RuntimeConfigStates(ctx)
 	st, ok := states["dsh"]
 	if !ok {
 		t.Fatalf("装配期同步应有 dsh 的结论，得到 %v", states)

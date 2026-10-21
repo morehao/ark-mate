@@ -10,7 +10,6 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/bootstrap/assembly/planes"
 	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -88,9 +87,9 @@ type Probe struct {
 	AutoProbeMCP func(ctx context.Context) error
 	// Runtime 构建期选定的底座注册表（只读；诊断与桌面隔离测试用）。
 	Runtime *runtime.Registry
-	// Planes 只读的领域平面集合（doctor / 装配断言用）。
+	// Planes 只读的领域平面诊断面（doctor / 装配断言用；C3 §3g 第 3 条收窄成 4 方法接口）。
 	// **生产行为路径不得从这里取事实**：行为面只认用例接口与端口。
-	Planes *planes.Planes
+	Planes DiagnosticPlanes
 }
 
 // BuildResult 一次装配的产物：**只暴露端口**（阶段 0.5）。

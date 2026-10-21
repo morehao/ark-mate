@@ -26,6 +26,7 @@ import (
 	"github.com/morehao/ark-mate/internal/adapters/outbound/models"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/workspaces"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
@@ -177,3 +178,23 @@ func (p *Planes) ProviderPlane() *provider.Plane { return p.Providers }
 
 // McpPlane MCP 平面（网关要取网关面与解析密钥）。
 func (p *Planes) McpPlane() *mcp.Plane { return p.Mcp }
+
+// ——— 诊断读面（`assembly.DiagnosticPlanes` 的实现） ———
+//
+// 装配根不再把整个容器交给 `Probe`（C3 §3g 第 3 条）：公开面只有这 4 条只读方法，
+// 新增一条要读的东西必须显式加在这里，而不是靠 `Probe.Planes.Xxx.Something()` 顺手取。
+// 委托而不是复制：消费方拿到的是**同一个实例**，两份平面 = 两个事实源（见包注释）。
+
+func (p *Planes) ListSkills() ([]skill.SkillView, error) { return p.Skills.ListSkills() }
+
+func (p *Planes) AutomationByID(id string) (automation.AutomationView, bool) {
+	return p.Automation.AutomationByID(id)
+}
+
+func (p *Planes) ListProviders(ctx context.Context) ([]provider.ProviderItem, error) {
+	return p.Providers.ListProviders(ctx)
+}
+
+func (p *Planes) RuntimeConfigStates(ctx context.Context) map[string]dtomodel.RuntimeSyncResp {
+	return p.Resources.RuntimeConfigStates(ctx)
+}
