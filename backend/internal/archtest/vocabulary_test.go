@@ -236,7 +236,7 @@ var legacyCapabilityVocabulary = []string{"capability_revision", "capability_id"
 //
 // v16 把「定义变更审计」的表名与列名从 `capability_revisions` / `capability_id` 改成了
 // `definition_revisions` / `definition_id`，理由是**`capability` 在本仓是重载词**：它既指
-// 运行期声明的能力集（`capability_json`、`CapabilityScope`、`internal/core/capability` = skill + mcp），
+// 运行期声明的能力集（`capability_json`、`CapabilityScope`、`internal/platform/capability` = skill + mcp），
 // 又指这张审计表覆盖的**六种定义**（skill / mcp / agent / automation / provider / model，
 // 后四者与"运行期能力"无关）。判据与 v15 的 conversation 同形：**零命中**是可以机器判据的。
 //
@@ -540,7 +540,7 @@ func TestModelEntitiesFollowNamingConvention(t *testing.T) {
 // 四面 + 一反向，全部 fail-closed（解析不到即失败，避免改名/搬迁后守卫静默空转）：
 //
 //	① **真 schema**：跑完整迁移的库里 `models` 有 `model`、没有 `model_id`；
-//	② **DTO**：`internal/dto/dtomodel/model_*.go` 剥注释后零 `model_id`（线上键名唯一事实源）；
+//	② **DTO**：`internal/contract/dtomodel/model_*.go` 剥注释后零 `model_id`（线上键名唯一事实源）；
 //	③ **前端类型**：`packages/types/src/model.ts` 剥注释后零 `model_id`；
 //	④ **实体 gorm 标签**：`internal/persistence/model/model.go` 必须是 `column:model`——标签写错**编译期无感**，
 //	   只有运行时那条 SQL 才报 `no such column`（v16 的 A1 守卫注释里写着同一件事）；
@@ -588,7 +588,7 @@ func TestModelsVocabularyIsModelNotModelID(t *testing.T) {
 	// （`ConfigOptionValueResp.ModelID` 是"这个候选对应平台哪一行"的**注解**，wire 键就叫
 	// `model_id`，v26 加的）——那是第三个含义、也是**正确**的那个名字（它真的指向 `models.id`）。
 	// 判据按**面**限定：这里问的是"平台清单行里那个'发给上游的模型名'键叫什么"。
-	listPath := filepath.Join(backendRoot(t), "internal", "dto", "dtomodel", "model_list.go")
+	listPath := filepath.Join(backendRoot(t), "internal", "contract", "dtomodel", "model_list.go")
 	raw, err := os.ReadFile(listPath)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（fail-closed：平台清单的线上键名是这条守卫的一半）", listPath, err)
@@ -598,7 +598,7 @@ func TestModelsVocabularyIsModelNotModelID(t *testing.T) {
 	}
 	// 反向：目录面的注解必须还在（它消失时"候选 → 平台行"这条链就断了，而前端会静默地
 	// 让所有候选都变成"平台未声明"）。
-	catPath := filepath.Join(backendRoot(t), "internal", "dto", "dtomodel", "model_catalog.go")
+	catPath := filepath.Join(backendRoot(t), "internal", "contract", "dtomodel", "model_catalog.go")
 	raw, err = os.ReadFile(catPath)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（fail-closed）", catPath, err)

@@ -1,6 +1,6 @@
 package dsh
 
-import "github.com/morehao/ark-mate/internal/core/resource"
+import "github.com/morehao/ark-mate/internal/platform/resource"
 
 // ——— 路由键与展示名：平台身份 → 底座命名空间的**唯一**派生点 ———
 //

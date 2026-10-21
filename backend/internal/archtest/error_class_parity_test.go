@@ -3,13 +3,13 @@ package archtest
 import (
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // TestErrorClassVocabularyMatchesACP 平台分类词与协议分类词必须逐条同值。
 //
-// 背景（C2）：`domain` / `service` 不再 import 协议库，错误分类改由 `core/code` 声明
+// 背景（C2）：`domain` / `service` 不再 import 协议库，错误分类改由 `platform/code` 声明
 // （`code.ClassRequest` 等），由 `code.NewError` 在**唯一一处**翻成协议载体。
 //
 // 失效方式：两份词汇分叉不会让任何东西变红——错误照常构造、`acp.As` 也照常命中，只是

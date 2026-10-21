@@ -38,7 +38,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 )
 
 // syncCredentials 把 `Set.Providers` 的密钥写进原生凭据文档（读-改-写），并回带凭据面的结论。

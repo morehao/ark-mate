@@ -2,22 +2,22 @@ package sessionruntime
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/core/object/objmeta"
+	"github.com/morehao/ark-mate/internal/platform/object/objmeta"
 	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"regexp"
 	"testing"
 	"time"
 
-	defn "github.com/morehao/ark-mate/internal/core/definition"
+	defn "github.com/morehao/ark-mate/internal/platform/definition"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/object/objid"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/contract/dtosession"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 

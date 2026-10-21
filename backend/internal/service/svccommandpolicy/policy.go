@@ -12,9 +12,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/dto/dtocommandpolicy"
+	"github.com/morehao/ark-mate/internal/contract/dtocommandpolicy"
 )
 
 // PolicySvc 命令门禁读写面（实现 `CommandPolicySvc`）。

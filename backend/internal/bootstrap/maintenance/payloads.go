@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/dto/dtosystem"
+	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 )
 
 // 本文件是 `serve --payloads` 的**解析层**（M3-4 的 Go 侧一半）。

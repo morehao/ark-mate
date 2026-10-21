@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
@@ -34,7 +34,7 @@ func TestSyncerContractEmptySet(t *testing.T) {
 	}
 	if stub.calls == 0 {
 		t.Fatal("Set 为空时编排层**必须**调用 SyncModels：跳过它等于退回 v11 的\"空清单什么都不做\"" +
-			"（上一份配置会原样留在生效状态），而外观上一切正常——见 internal/core/resource 的契约③")
+			"（上一份配置会原样留在生效状态），而外观上一切正常——见 internal/platform/resource 的契约③")
 	}
 	if stub.calls != 1 {
 		t.Fatalf("同一次同步只该调一次端口，实际 %d 次", stub.calls)

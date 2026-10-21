@@ -3,7 +3,7 @@ package transfer
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/platform/capability"
 )
 
 // ——— 定义形状的历史迁移（旧 sources[] / legacy mcp ref → 新形状）———

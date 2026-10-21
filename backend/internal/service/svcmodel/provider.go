@@ -16,7 +16,7 @@ package svcmodel
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 )
 
 // ProviderSvc 供应商**档案面**的服务接口（增删改查四条）。

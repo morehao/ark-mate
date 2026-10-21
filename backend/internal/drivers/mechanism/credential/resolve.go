@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	credval "github.com/morehao/ark-mate/internal/core/credential"
+	credval "github.com/morehao/ark-mate/internal/platform/credential"
 )
 
 // 凭据的**取值与对账**面。搬到机制层后仍需要库句柄（`st`），所以 `Store` 多持一个

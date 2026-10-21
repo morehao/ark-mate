@@ -2,7 +2,7 @@ package session
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/runtime"

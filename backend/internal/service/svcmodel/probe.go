@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 
-	"github.com/morehao/ark-mate/internal/core/redact"
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/redact"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 )
 
 // ——— P4a：供应商连接自检（M4）的**用例层实现** ———

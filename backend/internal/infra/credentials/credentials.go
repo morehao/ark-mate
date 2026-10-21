@@ -37,7 +37,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 )
 
 // Request 描述"要解析哪个凭据"。

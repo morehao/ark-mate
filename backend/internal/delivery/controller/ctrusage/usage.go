@@ -8,8 +8,8 @@ package ctrusage
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/dto/dtousage"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	"github.com/morehao/ark-mate/internal/contract/dtousage"
 	"github.com/morehao/ark-mate/internal/service/svcusage"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )

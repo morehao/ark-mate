@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/dto/dtocommandpolicy"
+	"github.com/morehao/ark-mate/internal/contract/dtocommandpolicy"
 )
 
 func TestPolicyGetDisabled(t *testing.T) {

@@ -7,7 +7,7 @@ package svcruntime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
+	"github.com/morehao/ark-mate/internal/contract/dtoruntime"
 )
 
 // Plane 执行面（`internal/drivers/runtimeconn`）——**这两个方法名是执行面的口语，不是 API 的口语**：

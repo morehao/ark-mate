@@ -8,7 +8,7 @@ import (
 	mateRuntime "runtime"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/runtime"
 )

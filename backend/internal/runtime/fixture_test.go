@@ -3,7 +3,7 @@ package runtime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 )
 
 // ——— 测试夹具：与内置 adapter 同形的声明 ———

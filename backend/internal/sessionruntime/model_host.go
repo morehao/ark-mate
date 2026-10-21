@@ -3,7 +3,7 @@ package sessionruntime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 )
 
 // ——— `svcmodel.Host` 的过渡端口实现（P4a 正文第五十九刀）———

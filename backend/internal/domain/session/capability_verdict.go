@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/object/objdelivery"
+	"github.com/morehao/ark-mate/internal/platform/object/objdelivery"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

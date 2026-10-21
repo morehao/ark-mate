@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 )
 
 // TestProviderWriteFaceREST A1：四条 provider 端点走**真实装配路径**

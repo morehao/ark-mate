@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/contract/dtocapability"
 )
 
 // ——— MCP 域视图 → 对外 DTO 的投影（v3.2 刀 5）———

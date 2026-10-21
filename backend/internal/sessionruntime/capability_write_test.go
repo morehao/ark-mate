@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	defn "github.com/morehao/ark-mate/internal/core/definition"
+	defn "github.com/morehao/ark-mate/internal/platform/definition"
 	"github.com/morehao/ark-mate/internal/drivers/mechanism/definition"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/capability"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
 )

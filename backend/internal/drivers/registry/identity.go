@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
-	"github.com/morehao/ark-mate/internal/core/resource"
+	pkgidentity "github.com/morehao/ark-mate/internal/platform/identity"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

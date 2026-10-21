@@ -21,7 +21,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 )
 
 // 三类能力定义各自的子目录名（`<CapabilityDir>/<subdir>/<id>.json`）。

@@ -7,17 +7,17 @@ import (
 	"strings"
 	"testing"
 
-	defn "github.com/morehao/ark-mate/internal/core/definition"
+	defn "github.com/morehao/ark-mate/internal/platform/definition"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
 
-	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/core/eventbus"
-	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	"github.com/morehao/ark-mate/internal/platform/eventbus"
+	"github.com/morehao/ark-mate/internal/platform/object/objid"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/object/objusage"
+	"github.com/morehao/ark-mate/internal/platform/object/objusage"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/persistence/dao"
 	"github.com/morehao/ark-mate/internal/persistence/model"

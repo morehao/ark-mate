@@ -6,7 +6,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/dto/dtosearch"
+	"github.com/morehao/ark-mate/internal/contract/dtosearch"
 )
 
 // SearchSvc 跨会话消息检索用例端口。

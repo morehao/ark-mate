@@ -3,9 +3,9 @@ package svccapability
 import (
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/contract/dtocapability"
 )
 
 // McpCatalog MCP 注册表读面（能力数据面的**读模型**）。
@@ -21,7 +21,7 @@ type McpCatalog interface {
 //
 // 为什么在用例层而不是"调用方直接用平面"：`capability.McpServer` → `dtocapability.McpServerResp`
 // 是**响应装配**，且它的三个输入来自三个不同的源（注册表 / 平面 / 密钥面），
-// `pkg/` 又不能 import `internal/dto`——与 `Tools`（第十二刀）同一条分界线。
+// `pkg/` 又不能 import `internal/contract`——与 `Tools`（第十二刀）同一条分界线。
 type Servers struct {
 	caps    *capability.Registry
 	plane   *mcp.Plane

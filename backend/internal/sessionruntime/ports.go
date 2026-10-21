@@ -3,7 +3,7 @@ package sessionruntime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 )
 
 // ——— 执行面的**接库端口**（阶段 0.1）———

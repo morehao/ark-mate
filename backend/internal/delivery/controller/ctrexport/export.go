@@ -6,8 +6,8 @@ package ctrexport
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/dto/dtoexport"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	"github.com/morehao/ark-mate/internal/contract/dtoexport"
 	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )

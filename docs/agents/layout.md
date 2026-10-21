@@ -7,10 +7,11 @@
   - **`backend/pkg` 已全量并入 `internal/`**（v3.1 §3.1.12，P2）：仓库只有一个代码层，不再有"可复用基础设施 vs 应用专属"的目录分界。原先在 `pkg/` 的包按职责落到 `internal/` 下：
     - `internal/infra/{acp,mcp,dsh,logging,credentials,dbclient,procreg}`：协议客户端与运行期基础设施。`infra/dsh` 是**唯一 adapter**（实现 `runtime.Adapter`：`Spec()` + `RegisterPorts()`，五张端口表：syncer / 原生权限 / 模型值 / 工具失败归类 / 产品身份）。
     - `internal/runtime`：注册表 + `Spec` 契约 + `Adapter` 接口 + 隔离投影。**不得 import 任何 adapter**（`TestRuntimeDoesNotImportRuntimeAdapters`）。
-    - `internal/core/{code,capability,automation,identity,resource,redact,object/*}`：错误码、能力装载、自动化解析、身份常量、跨层值对象等；`internal/config` 仍是独立的进程配置包。
+    - `internal/platform/{code,capability,automation,identity,resource,redact,object/*}`：错误码、能力装载、自动化解析、身份常量、跨层值对象等；`internal/config` 仍是独立的进程配置包。
     - 新增/搬迁包时只问一句：**它在层表的哪一层**（见下），不再问"进 pkg 还是 internal"。
   - **依赖方向单一**：
-    - 层带（L0–L9 终局表，见 [`../architecture.md`](../architecture.md) 的 §4.1）：`persistence/model` → 值/协议 → `domain` → `dto` → `service` → `persistence/{store,dao}` + `infra` → 机制与注册表 → `sessionruntime` → `controller` → 装配与交付。**只能向内 import**；`dto` 被 controller / service / CLI / WS 共用（同一份对外契约），`domain` 在它的里侧、不认识它。
+    - 层带（L0–L9 终局表，见 [`../architecture.md`](../architecture.md) 的 §4.1）：`persistence/model` → 值/协议 → `domain` → 应用契约 → `service` → `persistence/{store,dao}` + `infra` → 机制与注册表 → `sessionruntime` → `controller` → 装配与交付。**只能向内 import**；应用契约被 controller / service / CLI / WS 共用（同一份对外契约），`domain` 在它的里侧、不认识它。
+      C3 4.1 起这带的三处只改了**目录**：`core/*` → `platform/*`（纯值/规则/平台内核，L1 不变）、`dto/*` → `contract/*`（包名仍是 `dto<领域>`：`dto` 是本仓词汇里"应用契约"那个词，改名要动 31 个同时引用同名域包的文件、收益只有美观）。
     - **装配只能自上而下，不许反向**：`assembly` 构造用例与控制器，`router` 只收已构造的控制器（`router.Deps`），`app` 只消费 `assembly.BuildResult`。**`app`/`router`/`cli` 都不得引用 `service/svc*`**，控制器也不得 import `domain`/`store`/`model`——判据见 `layers_v32_test.go`。
     - 持久侧：`dbclient → persistence/dao → persistence/store`，`model` 被三者依赖且自身不依赖任何一层；`dao` 不得 import `store`（会成环），`model` 不得 import `dao`/`store`。
     - **厚域与用例都走窄端口，不 import 门面**（P4）：`domain/session` 声明 `Store` 端口（`store_port.go`），`domain/interaction` 零 `store`；用例层同理声明 `svcmodel.ModelStore` / `svcsession.EventReader` / `svcsystem.SourceFactsReader`。`*store.Store` 结构上满足它们、由装配根交下来；**交下来时必须现判 nil**——typed-nil 装进接口不是 nil，会让"内存模式 40501 / 只读镜像"那几条判据静默失效（`assembly/services.go` 的 `eventReader`/`sourceFactsReader`/`modelStore` 就是这条规矩的落点）。`model` 仍可被 `domain/session` 引用：它是纯列形状（无行为），把它也搬走只会换来 30 多个镜像结构。
@@ -22,7 +23,7 @@
        `router` 拿到的只是依赖事实；**用例实例只在装配根（`internal/bootstrap/assembly`）造**，controller 只收接口。
     2. **`service/svc*` 之间零互相 import、零互调用**（同层的另外半边由既有守卫钉）。需要别的域的事实时，
        在自己包里声明一个**窄接口**（如 `automation.Host`），由接线点（controller / router）把实现接上；
-       需要共享的纯值或判决下沉到 `domain/*` / `internal/core/object/*`。
+       需要共享的纯值或判决下沉到 `domain/*` / `internal/platform/object/*`。
     3. **不许别名与转发骚操作**：不写 `type XxxSvc = svcxxx.XxxSvc` 这类「端口别名」，
        也不要「只做一行转发」的适配器层。controller 直接持有 **service 包内声明的接口**，一个类型只有一处定义。
         （2026-10-16 的 P4a 一批曾用别名把 8 个端口挂在 `router.Ports` 上，事后被判定为骚操作，已删。）

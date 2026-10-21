@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/capability"
+	"github.com/morehao/ark-mate/internal/platform/code"
 )
 
 // ——— §13.4 S2：物化体检（审计 / 复现面） ———

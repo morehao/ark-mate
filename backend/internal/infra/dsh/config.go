@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 )
 
 const (

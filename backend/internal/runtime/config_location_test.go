@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 )
 
 // TestResolveConfigLocationUsesIsolationEnv 落点解析必须**先看该 runtime 的隔离 env**。

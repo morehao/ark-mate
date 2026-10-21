@@ -6,7 +6,7 @@ package ctrruntime
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )

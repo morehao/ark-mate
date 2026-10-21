@@ -3,13 +3,13 @@ package runtimeconn
 import (
 	"context"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/redact"
+	"github.com/morehao/ark-mate/internal/platform/redact"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
+	"github.com/morehao/ark-mate/internal/contract/dtoruntime"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/core/code"
-	defval "github.com/morehao/ark-mate/internal/core/definition"
+	"github.com/morehao/ark-mate/internal/platform/capability"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	defval "github.com/morehao/ark-mate/internal/platform/definition"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 

@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 
-	src "github.com/morehao/ark-mate/internal/core/credential"
+	src "github.com/morehao/ark-mate/internal/platform/credential"
 )
 
 // Secrets 供应商密钥面（v3.2 刀 8 收尾）。

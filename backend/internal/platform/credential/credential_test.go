@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 )
 
 // TestSetEmptyIsNotPermissive 空表**不放行**：不鉴权的判定属于调用方（Required()），

@@ -18,11 +18,11 @@
 
 ## 当前判据清单
 
-- **层表守卫（v3.2）**：`layers_v32_test.go` 用一张**层号表**（`v32Layers`：L0 persistence/model → L1 值层（core/object·redact·identity·resource·credential·eventbus·code·automation·definition·capability + version·runtime·infra/acp·mcp·logging）→ L2 domain → L3 dto → L4 service → L5 persistence/store·persistence/dao·infra → L6 drivers/{gateway,mechanism,registry,runtimeconn,transfer}·config → L7 sessionruntime → L8 delivery/controller·delivery/middleware → L9 delivery/router·bootstrap/{assembly,app,cliops,cli,maintenance}）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，除非该层显式 `sameLayer: true`（`service` **永不** `sameLayer`，它 `deny` 自己的前缀，逼"svc 包之间零互相 import"）；③ 每层可带 `deny` 精确排除个别内层包（如 `cliops ↛ store`）。违规是**硬失败**，例外清单 `v32Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。
+- **层表守卫（v3.2）**：`layers_v32_test.go` 用一张**层号表**（`v32Layers`：L0 persistence/model → L1 值层（platform/object·redact·identity·resource·credential·eventbus·code·automation·definition·capability + version·runtime·infra/acp·mcp·logging）→ L2 domain → L3 contract/dto → L4 service → L5 persistence/store·persistence/dao·infra → L6 drivers/{gateway,mechanism,registry,runtimeconn,transfer}·config → L7 sessionruntime → L8 delivery/controller·delivery/middleware → L9 delivery/router·bootstrap/{assembly,app,cliops,cli,maintenance}）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，除非该层显式 `sameLayer: true`（`service` **永不** `sameLayer`，它 `deny` 自己的前缀，逼"svc 包之间零互相 import"）；③ 每层可带 `deny` 精确排除个别内层包（如 `cliops ↛ store`）。违规是**硬失败**，例外清单 `v32Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。
   `layers_scan_test.go` 留着扫描器与三条专项判据：`runtime` 不得 import adapter、只有 `assembly`（生产代码）可以 import `internal/infra/dsh`、adapter 不得 import 应用内核。
   同目录 `layers_paths_test.go` 的 `TestLayerTablePathsResolve`：`v32Layers` 的 key、每个 key 的 `deny`、`v32AdapterDeny` 必须指向真实存在的目录；挡的是“搬迁时 deny 漏改、守卫静默放行”的失效。
 
-- **层表守卫（v3.2 六边形，`layers_v32_test.go`）**：与 v3.1 表**同时生效**，两者方向相反。v3.1 把 `domain` 放第 9 层、`store` 第 7 层、`dto`/`dao` 第 6 层、`model` 第 1 层（规则是"高层可以 import 低层"），于是 `domain → store/dto/mechanism` 被那张表定义成**合法**；v3.2 把 `domain` 压到 L2、持久化与机制压到 L5/L6、`dto` 挪到 L3，`domain` 的出边只剩 L0（`model` 纯列形状）与 L1（值对象/协议库）。判据三条同构（只能向内、同带默认不互链、`deny` 精确排除策略边），另有两条只属于 v3.2：`service` **永不** `sameLayer` 且 `deny internal/service`（同时挡兄弟 svc 与自身，是"svc 零互引"的载体），C2 起还 `deny internal/infra/acp`（用例层只写业务错误的语义，分类 → 对外码的投影与构造都在 `core/code`）、`cliops` 是**第二入站适配器而不是第二装配根**（`deny` `store`/`dao`/`model`/`mechanism`/`domain`/`registry`/`sessionruntime`/`gateway`/`infra`）。迁移期 26 条例外（36 处命中）登记在 `v32Exceptions`，**双向**判据（新增边红、降到 0 不删也红），`TestV32ReportOnly` 是随时可跑的收口进度表。同文件另有 **gin 围栏**（`TestGinConfinedToInboundAdaptersV32`）：gin 只许落在 `router`/`controller`/`middleware`，`assembly`/`app` 的临时白名单在刀 2 清空。
+- **层表守卫（v3.2 六边形，`layers_v32_test.go`）**：与 v3.1 表**同时生效**，两者方向相反。v3.1 把 `domain` 放第 9 层、`store` 第 7 层、`dto`/`dao` 第 6 层、`model` 第 1 层（规则是"高层可以 import 低层"），于是 `domain → store/dto/mechanism` 被那张表定义成**合法**；v3.2 把 `domain` 压到 L2、持久化与机制压到 L5/L6、`contract/dto` 挪到 L3，`domain` 的出边只剩 L0（`model` 纯列形状）与 L1（值对象/协议库）。判据三条同构（只能向内、同带默认不互链、`deny` 精确排除策略边），另有两条只属于 v3.2：`service` **永不** `sameLayer` 且 `deny internal/service`（同时挡兄弟 svc 与自身，是"svc 零互引"的载体），C2 起还 `deny internal/infra/acp`（用例层只写业务错误的语义，分类 → 对外码的投影与构造都在 `platform/code`）、`cliops` 是**第二入站适配器而不是第二装配根**（`deny` `store`/`dao`/`model`/`mechanism`/`domain`/`registry`/`sessionruntime`/`gateway`/`infra`）。迁移期 26 条例外（36 处命中）登记在 `v32Exceptions`，**双向**判据（新增边红、降到 0 不删也红），`TestV32ReportOnly` 是随时可跑的收口进度表。同文件另有 **gin 围栏**（`TestGinConfinedToInboundAdaptersV32`）：gin 只许落在 `router`/`controller`/`middleware`，`assembly`/`app` 的临时白名单在刀 2 清空。
 
 - 再加 **1 条持久层边界守卫（v3.3）**：`dao_boundary_test.go` 的 `TestDaoKeepsNoBusinessReadFace`。v3.3 把 `internal/persistence/dao` 收成「列词汇（`XxxCond`）+ gormdao 泛型方法 + 机械原语（KV / 取号 / CAS / 只追加插入）」，**排序、筛选组合、分页、聚合**一律归 `internal/persistence/store`。守卫扫 `internal/persistence/dao`（剥注释）禁止 `OrderField:`/`.Order(`/`.Limit(`/`.Offset(`/`.Join(`/`.Group(`/`.Select(`/`GetListByCond(`/`GetPageListByCond(`/`CountByCond(`，以及 `tableName+` 的标识符拼接（Cond 里的表名/列名必须交给 `clause.Column` 由方言引用）；条件查询组合也只许留在 store，唯一例外是 `meta.go` 的 `GetByCond(`（键值表按 key 取一行的原语）。挡的是「把 `ListByOrder`/`RunningRuns` 这类读面方法加回 DAO」——两层各有一套顺序时，用户看到的顺序取决于调用方走了哪条路，而单表测试永远看不出来。反证（实跑）：把 `ListByOrder` 的 `OrderField` 搬回 `dao/workspace.go`、把 `RunningRuns` 的 `.Order(`/`.Limit(` 搬回 `dao/run.go`、把 `MetaCond` 的 `clause.Eq` 改回 `tableName+".key = ?"`，三者皆红。
 
@@ -38,7 +38,7 @@
 
 - 再加 **1 条桌面运行期宿主绑定守卫**（`desktop_host_path_test.go`：**进包并在运行期生效**的代码——`apps/desktop/src/**` 整棵 + `gen-runtime-bin.mjs`——剥注释后**不得**出现宿主工具绑定：`/opt/homebrew/`、`/usr/local/bin/`、`/usr/bin/<工具>`、`.nvm/.volta/.asdf/.fnm`、`#!/usr/bin/env node`、`env [-i KEY=VALUE] node` 形态；**脚本自身首行**的 `#!/usr/bin/env node` 例外——它不进包，进包的是模板串里生成的那份启动器，照扫不误；**构建期脚本刻意不扫**（它们跑在开发者机器上，依赖宿主 node 是正常的，扫了只会变噪声，理由写在该文件注释里）；判据是"今天零命中"，与动态那半（`desktop-no-host-acceptance.mjs` 的诱饵 + 最小 `PATH` + 真会话）配对——一个管"有没有这条路"，一个管"这条路今天没被走到"）
 
-- 再加 **1 条交付矩阵完整性守卫**（`delivery_matrix_test.go`：`internal/core/object/objdelivery` 的静态交付表必须覆盖 `internal/persistence/model/enum.go` 的全部 `DefinitionKind*`，且未知 kind 必须查到 `false`——它挡的是「新增一种资源却漏了交付通道声明」这种静默缺口：写面照常成功、界面显示「已保存」，而用户永远等不到它生效；故意删掉表里一条声明 → 红）
+- 再加 **1 条交付矩阵完整性守卫**（`delivery_matrix_test.go`：`internal/platform/object/objdelivery` 的静态交付表必须覆盖 `internal/persistence/model/enum.go` 的全部 `DefinitionKind*`，且未知 kind 必须查到 `false`——它挡的是「新增一种资源却漏了交付通道声明」这种静默缺口：写面照常成功、界面显示「已保存」，而用户永远等不到它生效；故意删掉表里一条声明 → 红）
 
 - 再加 **1 条设置 · 模型的文案守卫**（`settings_copy_test.go` 的 `TestSettingsModelCopyAvoidsProvider`：设置「模型」那一节的**标题**里不得出现 `provider`/`mcp`/`skill`/`token` 这类代码词——那一节的用户词是「供应商」「模型」，代码词只许出现在指向具体资源/接口的地方（表格列、错误出路）；它读 `packages/console/src` 下的 `console/settingsView.tsx` 与 `components/settings/ModelSettingsPanel.tsx`，**解析不到就失败**（fail-closed，避免改名后守卫静默失效），并断言「供应商」「模型」两块都在；故意把节标题改回 `provider 档案` → 红；同文件还有 `TestProviderProbeProseAvoidsRuntimeVocabulary`——A13 的**后端那一半**：那一屏除了界面自己的字，还会渲染核心给的自检文案（`GET /providers/:id/check` 的 `detail`/`remedy`，`ModelSettingsPanel.tsx` 里两个 `<span className="fg-probe-…">`），只扫前端就会漏掉「前端一个字不改、后端塞一句『不会被下发给底座』」这条——2026-10-14 的动态验收 `面板正文零底座词汇` 命中的正是它，而且它只在"某条档案没被挂靠"这一种状态下才渲染（同文件里另有两处同形的潜伏字：`承载 …（runtime …）` 与 `见 GET /runtime/diagnostics`，一并清了）。判据只看**含中文的字面量**（ASCII 字面量是协议键与依赖路径，用户读不到，判进来只会逼着守卫加白名单）；fail-closed：中文串 < 40 条即失败；反证：往一条 remedy 里注入「底座」→ 红）
 
@@ -89,7 +89,7 @@
 `tz_offset?: number` / api 必须 `p.set('tz_offset'` / 页面必须 `tz_offset: -new Date().getTimezoneOffset()`。
 反证（实跑）：存储层改回 `UTC()` 分桶 → 红；抽掉 api 的 `p.set('tz_offset'` → 红。
 
-- 再加 **2 条「定义导入/导出归属」守卫**（`transfer_ownership_test.go`，2026-10-20：`internal/capabilityio` 拆成 `internal/drivers/transfer` + `registry` 的两个窄端口适配体。拆之前同一个概念分居两包——capability 的导入留在 `mechanism/definition`，automation/provider 的在 `capabilityio`——而包名又和 `internal/core/capability` 只差后缀，看目录的人无法判断该 import 哪个。两种静默失效各有一条判据：① **第二个家**：六入口（3 域 × import/export）与域无关框架（`ImportDefinitionRows` / `CountDryRun` / `WriteExportRows` / Options / Stats）必须全在 `internal/drivers/transfer`，且 `mechanism/definition` 与 `domain/**` 零命中，旧目录 `internal/capabilityio` 不得复活；判据 fail-closed（transfer 目录扫不到 Go 文件即 Fatal）。② **职责回流**：`automation.DefinitionFiles` / `provider.Secrets` 的编译期断言必须留在 `internal/drivers/registry`（装配点，同时看得见域端口与机制实现），`internal/drivers/transfer` 不得出现这两个端口名。反证（实跑 5 条，均红）：把 `ExportAutomationDir` 改名 → ①红；在 `mechanism/definition` 加 `func ImportProviderFile()` 桩 → ①红；`mkdir internal/capabilityio` → ①红；把 registry 的编译期断言改成 `var _ = ...` → ②红；把 `secrets.go` 复制回 `transfer` → ②红。）
+- 再加 **2 条「定义导入/导出归属」守卫**（`transfer_ownership_test.go`，2026-10-20：`internal/capabilityio` 拆成 `internal/drivers/transfer` + `registry` 的两个窄端口适配体。拆之前同一个概念分居两包——capability 的导入留在 `mechanism/definition`，automation/provider 的在 `capabilityio`——而包名又和 `internal/platform/capability` 只差后缀，看目录的人无法判断该 import 哪个。两种静默失效各有一条判据：① **第二个家**：六入口（3 域 × import/export）与域无关框架（`ImportDefinitionRows` / `CountDryRun` / `WriteExportRows` / Options / Stats）必须全在 `internal/drivers/transfer`，且 `mechanism/definition` 与 `domain/**` 零命中，旧目录 `internal/capabilityio` 不得复活；判据 fail-closed（transfer 目录扫不到 Go 文件即 Fatal）。② **职责回流**：`automation.DefinitionFiles` / `provider.Secrets` 的编译期断言必须留在 `internal/drivers/registry`（装配点，同时看得见域端口与机制实现），`internal/drivers/transfer` 不得出现这两个端口名。反证（实跑 5 条，均红）：把 `ExportAutomationDir` 改名 → ①红；在 `mechanism/definition` 加 `func ImportProviderFile()` 桩 → ①红；`mkdir internal/capabilityio` → ①红；把 registry 的编译期断言改成 `var _ = ...` → ②红；把 `secrets.go` 复制回 `transfer` → ②红。）
 
 - 再加 **1 条「进程壳端口边界」守卫**（`app_boundary_test.go`，2026-10-20 阶段 0.6）：`bootstrap/app`
   只认 `assembly.BuildResult` 的端口字段（Handler / Maintenance / Probe / Close），不得直接 import
@@ -112,7 +112,7 @@
   `service/svcusage` 加一个 model 空白 import → 红。
 
 - 再加 **1 条「错误分类词对照」守卫**（`error_class_parity_test.go` 的 `TestErrorClassVocabularyMatchesACP`，
-  2026-10-20 C2）：`core/code` 的平台错误分类（`code.ClassRequest` 等，7 个）与 `infra/acp` 的分类
+  2026-10-20 C2）：`platform/code` 的平台错误分类（`code.ClassRequest` 等，7 个）与 `infra/acp` 的分类
   **逐条同值**，且协议侧每个分类在平台词汇里都有对应项；同时断言 `code.NewError` 真的把分类与 code
   带到**平台载体**（`*code.Coded` → `code.RuntimeErrorOf`）上——B4 起内圈不再产出协议错误，
   分类的双语对照只剩"同值"这一条必须守的事实。挡的是两份词汇悄悄分叉——错误照常构造、`acp.As` 照常命中，只是前端按 `class`
@@ -130,10 +130,10 @@
 
 - 再加 **1 条「已收口包协议无关」守卫**（`layer_isolation_test.go` 的
   `TestProtocolFreePackagesStayClean`，2026-10-20 C2）：`protocolFreePackages` 里登记的内圈包
-  （**`internal/domain` 已全量收口**：18 个包逐个登记 + `core/definition` / `core/automation`
+  （**`internal/domain` 已全量收口**：18 个包逐个登记 + `platform/definition` / `platform/automation`
   两个值包）**生产 import 不得出现 `internal/infra/acp`**。第二段判据是**全量覆盖**：
   `internal/domain` 下新出现的包不登记即红（否则"新包又 import 协议库"这条回退路径没有判据）。
-  **B4 之后 `core/code` 也进了表**：协议错误 → 平台视图的折叠点搬到**适配器出口**
+  **B4 之后 `platform/code` 也进了表**：协议错误 → 平台视图的折叠点搬到**适配器出口**
   （`runtime.FoldError`，由 `runtime.Connect` 与 `drivers/runtimeconn` 调用），错误码包只留
   平台映射（`codeOf` 分类 → 对外码）。第二段判据从"`internal/domain` 全量"扩到
   `internal/{domain,core,service}` 三个前缀——新增包不登记即红。

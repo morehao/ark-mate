@@ -6,7 +6,7 @@ import (
 
 	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
 	domskill "github.com/morehao/ark-mate/internal/domain/skill"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/contract/dtocapability"
 )
 
 // CapabilitySvc 能力数据面用例端口（Skill / MCP server / Tool 目录与 MCP live 交互）。

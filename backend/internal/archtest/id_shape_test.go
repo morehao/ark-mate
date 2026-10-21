@@ -74,8 +74,8 @@ var runtimeShellCallSites = []runtimeShellCallSite{
 // runtimeShellImplPaths 是「壳包装/解包的**实现本身**与它的单测」——两处都住在 `pkg/`，
 // **不参与**本次 `internal/` 的重划，所以这里继续钉精确路径：它们本来就只该各有一份。
 var runtimeShellImplPaths = []string{
-	"backend/internal/core/object/objid/objid.go",
-	"backend/internal/core/object/objid/objid_test.go",
+	"backend/internal/platform/object/objid/objid.go",
+	"backend/internal/platform/object/objid/objid_test.go",
 }
 
 // TestRuntimeSessionNeverOnWireAsPlatformID 守卫②：两个 id 词汇不得互串。
@@ -114,9 +114,9 @@ func TestRuntimeSessionNeverOnWireAsPlatformID(t *testing.T) {
 	}
 
 	// ② DTO：`json:"id"` 不得绑 `Runtime*` 字段。
-	dtoFiles, err := filepath.Glob(filepath.Join(root, "internal", "dto", "*", "*.go"))
+	dtoFiles, err := filepath.Glob(filepath.Join(root, "internal", "contract", "*", "*.go"))
 	if err != nil || len(dtoFiles) == 0 {
-		t.Fatalf("扫不到 internal/dto/*/*.go: %v（fail-closed）", err)
+		t.Fatalf("扫不到 internal/contract/*/*.go: %v（fail-closed）", err)
 	}
 	fieldRe := regexp.MustCompile("(?m)^\\s*(\\w+)\\s+([\\w\\[\\]\\*]+)\\s+`[^`]*json:\"([^\",]+)")
 	for _, path := range dtoFiles {
@@ -132,8 +132,8 @@ func TestRuntimeSessionNeverOnWireAsPlatformID(t *testing.T) {
 
 	// ③ `SessionResp` 的两个字段都还在、都是 string。
 	respSrc := stripLineComments(readFileOrFatal(t,
-		filepath.Join(root, "internal", "dto", "dtosession", "response.go")))
-	respBody := structBody(t, respSrc, "SessionResp", "internal/dto/dtosession/response.go")
+		filepath.Join(root, "internal", "contract", "dtosession", "response.go")))
+	respBody := structBody(t, respSrc, "SessionResp", "internal/contract/dtosession/response.go")
 	for _, want := range []struct{ field, tag string }{
 		{"ID", "id"},
 		{"RuntimeSessionID", "runtime_session_id"},
@@ -401,7 +401,7 @@ func TestPrimaryKeyShapesStayDeclared(t *testing.T) {
 
 	// ③ `objid` 的前缀登记表 == 8 个平台铸造前缀，**不含**任何定义类。
 	objidSrc := stripLineComments(readFileOrFatal(t,
-		filepath.Join(backendRoot(t), "internal", "core", "object", "objid", "objid.go")))
+		filepath.Join(backendRoot(t), "internal", "platform", "object", "objid", "objid.go")))
 	prefixRe := regexp.MustCompile(`(?m)^\s*([A-Z]\w+)\s*=\s*"([a-z]{2,3}_)\s*"`)
 	type kv struct{ name, value string }
 	var got []kv

@@ -1,6 +1,6 @@
 package dtosession
 
-import "github.com/morehao/ark-mate/internal/core/eventbus"
+import "github.com/morehao/ark-mate/internal/platform/eventbus"
 
 // SessionResp 会话的对外表示（含 runtime 身份）。
 type SessionResp struct {

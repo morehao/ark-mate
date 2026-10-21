@@ -1,6 +1,6 @@
 package runtime
 
-import "github.com/morehao/ark-mate/internal/core/resource"
+import "github.com/morehao/ark-mate/internal/platform/resource"
 
 // Capabilities 是 runtime 的能力基线声明（静态）。
 // 真实运行时能力以 ACP initialize 探测结果为准（acp.Capabilities）。

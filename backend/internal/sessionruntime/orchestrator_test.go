@@ -2,7 +2,7 @@ package sessionruntime
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"strings"
 	"testing"
@@ -11,8 +11,8 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 
-	"github.com/morehao/ark-mate/internal/core/eventbus"
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/platform/eventbus"
+	"github.com/morehao/ark-mate/internal/contract/dtosession"
 )
 
 // stubSession 代替 acp.Session（Prompt/Cancel 可按脚本返回）。

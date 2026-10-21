@@ -2,7 +2,7 @@ package registry
 
 import (
 	domprovider "github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 )
 
 // ——— 领域模型视图 → 对外 DTO 的投影（v3.2 刀 8）———

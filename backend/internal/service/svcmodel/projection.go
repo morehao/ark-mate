@@ -1,9 +1,9 @@
 package svcmodel
 
 import (
-	"github.com/morehao/ark-mate/internal/core/object/objdelivery"
+	"github.com/morehao/ark-mate/internal/platform/object/objdelivery"
 	domprovider "github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 )
 
 // ——— 供应商域视图 → 对外 DTO 的投影（v3.2 刀 8）———

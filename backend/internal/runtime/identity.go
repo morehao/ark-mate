@@ -3,8 +3,8 @@ package runtime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/core/identity"
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/identity"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 )
 
 // IdentityAdapter 第五张可执行端口表：**产品身份的交付实现**（见 registry.go 的 `identities`）。

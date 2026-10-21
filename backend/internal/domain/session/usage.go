@@ -8,7 +8,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session/usage"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 )
 
 // ——— M3 首项：用量统计（GET /usage/summary） ———

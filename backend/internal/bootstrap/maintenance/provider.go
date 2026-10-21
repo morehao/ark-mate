@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 	mechcred "github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
 
 	"github.com/morehao/ark-mate/internal/config"

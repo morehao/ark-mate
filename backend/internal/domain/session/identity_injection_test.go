@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/platform/eventbus"
 )
 
 // ——— 首轮身份注入（P2 的确定性判据） ———

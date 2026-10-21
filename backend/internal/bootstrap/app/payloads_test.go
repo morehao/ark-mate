@@ -12,7 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/dto/dtosystem"
+	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 )
 
 // payloadTestConfig 造一份"能起得来"的最小配置（照 isolation_test 的口径）：

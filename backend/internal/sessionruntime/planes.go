@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
-	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
+	"github.com/morehao/ark-mate/internal/platform/capability"
+	pkgidentity "github.com/morehao/ark-mate/internal/platform/identity"
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"

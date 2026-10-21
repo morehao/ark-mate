@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 )
 
 // 工作空间**起始点偏好**的设置面：把"目录浏览从哪儿起步"从"只能改环境变量"变成"面板也能改"。

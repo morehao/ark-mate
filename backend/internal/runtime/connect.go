@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 

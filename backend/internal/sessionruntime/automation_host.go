@@ -3,10 +3,10 @@ package sessionruntime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/contract/dtosession"
 )
 
 // ——— P2b：自动化域的宿主适配器（`automation.Host` 的实现） ———

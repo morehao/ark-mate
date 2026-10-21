@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 )
 
 // ——— P4a 正文第四刀：供应商**档案面**用例层实现 ———

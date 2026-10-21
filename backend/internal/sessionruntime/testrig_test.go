@@ -19,7 +19,7 @@ import (
 	"context"
 	"sync"
 
-	defn "github.com/morehao/ark-mate/internal/core/definition"
+	defn "github.com/morehao/ark-mate/internal/platform/definition"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
 	svcsystem "github.com/morehao/ark-mate/internal/service/svcsystem"
@@ -34,9 +34,9 @@ import (
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 
-	"github.com/morehao/ark-mate/internal/core/eventbus"
-	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/eventbus"
+	"github.com/morehao/ark-mate/internal/platform/object/objid"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/infra/credentials"
 	"github.com/morehao/ark-mate/internal/persistence/store"

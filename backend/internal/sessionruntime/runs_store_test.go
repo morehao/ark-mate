@@ -12,9 +12,9 @@ import (
 
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/eventbus"
-	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/core/object/objusage"
+	"github.com/morehao/ark-mate/internal/platform/eventbus"
+	"github.com/morehao/ark-mate/internal/platform/object/objid"
+	"github.com/morehao/ark-mate/internal/platform/object/objusage"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/platform/object/objid"
 	"github.com/morehao/ark-mate/internal/domain/session/event"
 	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"
 	"github.com/morehao/ark-mate/internal/persistence/model"

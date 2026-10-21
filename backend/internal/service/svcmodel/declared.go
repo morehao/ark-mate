@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/code"
-	defn "github.com/morehao/ark-mate/internal/core/definition"
-	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	defn "github.com/morehao/ark-mate/internal/platform/definition"
+	"github.com/morehao/ark-mate/internal/platform/object/objid"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 )
 
 // ——— P4a 正文第五刀：平台模型清单的**写面**用例 ———

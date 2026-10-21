@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtosystem"
+	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 )
 
 // TestParsePayloadsValid 合法清单被原样解析成结构化值：字段一一对应、顺序保持、entry 被忽略。

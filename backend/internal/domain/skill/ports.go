@@ -3,7 +3,7 @@ package skill
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/platform/capability"
 )
 
 // ——— 定义载体的窄端口（v3.2 刀 4）———

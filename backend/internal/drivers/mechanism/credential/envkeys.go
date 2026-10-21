@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 )
 
 // 候选环境变量名的推导。放在凭据机制里，因为它是**四层回落**的一部分：继承环境与两份

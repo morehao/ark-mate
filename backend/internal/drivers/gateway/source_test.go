@@ -29,7 +29,7 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 
 	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 	"github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"

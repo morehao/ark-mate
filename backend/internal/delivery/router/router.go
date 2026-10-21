@@ -16,7 +16,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/ark-mate/internal/delivery/controller/ctrautomation"
 	"github.com/morehao/ark-mate/internal/delivery/controller/ctrcapability"
 	"github.com/morehao/ark-mate/internal/delivery/controller/ctrcommandpolicy"
@@ -61,7 +61,7 @@ type Controllers struct {
 type Deps struct {
 	Controllers Controllers
 
-	// Credentials 凭据表（见 internal/core/credential）。
+	// Credentials 凭据表（见 internal/platform/credential）。
 	//
 	// 空表 = 不鉴权（默认，仅绑定回环地址时的历史行为）。非空时：
 	//   - 除 /health 外的 REST 路由要求具备 **rest 面**的凭据（`Authorization: Bearer <token>`，

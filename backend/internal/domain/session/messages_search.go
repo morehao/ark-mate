@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 )
 
 // ——— 跨会话消息级检索（M3 ②：全局消息搜索 + 锚点跳转） ———

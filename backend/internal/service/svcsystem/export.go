@@ -9,9 +9,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/core/eventbus"
-	"github.com/morehao/ark-mate/internal/dto/dtoexport"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	"github.com/morehao/ark-mate/internal/platform/eventbus"
+	"github.com/morehao/ark-mate/internal/contract/dtoexport"
 )
 
 // ——— P4a：导出的**用例层实现** ———

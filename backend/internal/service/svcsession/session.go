@@ -5,7 +5,7 @@ package svcsession
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/contract/dtosession"
 )
 
 // SessionSvc 会话面（过渡期端口：实现仍在 `manager`，逐刀并入本包）。

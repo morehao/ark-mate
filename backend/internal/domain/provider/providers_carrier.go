@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/credential"
-	defn "github.com/morehao/ark-mate/internal/core/definition"
+	"github.com/morehao/ark-mate/internal/platform/credential"
+	defn "github.com/morehao/ark-mate/internal/platform/definition"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 
 	"github.com/morehao/ark-mate/internal/infra/logging"

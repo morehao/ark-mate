@@ -9,7 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
+	pkgidentity "github.com/morehao/ark-mate/internal/platform/identity"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )

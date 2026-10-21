@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 )
 
 // TestErrLooksCancelled 取消类错误归一判定（随 `runner.go` 从 manager 搬入）。

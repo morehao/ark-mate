@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/code"
-	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
-	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	pkgidentity "github.com/morehao/ark-mate/internal/platform/identity"
+	"github.com/morehao/ark-mate/internal/platform/object/objid"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )

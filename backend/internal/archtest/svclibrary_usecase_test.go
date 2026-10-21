@@ -131,7 +131,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 
 	// ④ 工具目录是**同一族读模型**（P4a 正文第十二刀）：`ListTools` 从 `manager` 收进
 	// `svccapability`。它没有请求校验、没有错误码出口，但**有响应装配**——`capability.Tool`
-	// → `dtocapability.ToolResp` 这个投影只能落在用例层：`pkg/` 不能 import `internal/dto`
+	// → `dtocapability.ToolResp` 这个投影只能落在用例层：`pkg/` 不能 import `internal/contract`
 	// （分层方向），控制器又只做参数绑定与回响应。所以它不像会话那几个读模型那样"调用方直接用
 	// 平面"，而是像本文件钉的 Library 读模型一样**收进 svc**。
 	//
@@ -182,7 +182,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	//     （含 warnings 与 scope 判定）——这是投影的**本体**，只有一份；
 	//   - `svccapability` 只做领域视图 → `dtocapability.SkillResp` 的**逐字段搬运**（`skillResps`），
 	//     不重新判定、不增删语义。
-	// 而工具目录的投影在 `pkg/` 之上（`pkg/` 不能 import `internal/dto`），只能整份落用例层。
+	// 而工具目录的投影在 `pkg/` 之上（`pkg/` 不能 import `internal/contract`），只能整份落用例层。
 	// 同一个域里的两面因此落点不同，这不是不一致。
 	//
 	// 守卫随之钉两件事：域的签名是**领域视图**（不是 DTO），用例层确实调用投影函数

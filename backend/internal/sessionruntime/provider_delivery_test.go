@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/core/object/objdelivery"
+	"github.com/morehao/ark-mate/internal/platform/object/objdelivery"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 )

@@ -6,7 +6,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 

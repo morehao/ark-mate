@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/core/credential"
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	"github.com/morehao/ark-mate/internal/platform/credential"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -174,7 +174,7 @@ func (r *Resources) SyncModels(ctx context.Context, runtimeID string) (*dtomodel
 		}
 	}
 	if len(failed) > 0 {
-		// 失败面按设计映 50001（见 `internal/core/code/business.go` 的 classCodeOverrides）：
+		// 失败面按设计映 50001（见 `internal/platform/code/business.go` 的 classCodeOverrides）：
 		// 这是**服务侧**失败，不是 50201"上游连接失败"——后者的排障方向是底座进程/网络，
 		// 而这里真因更可能在平台自己的生成器、校验门或磁盘上。
 		return nil, code.NewError(code.ClassService, "resource_sync_failed",

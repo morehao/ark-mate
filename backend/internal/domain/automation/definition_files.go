@@ -1,6 +1,6 @@
 package automation
 
-import "github.com/morehao/ark-mate/internal/core/capability"
+import "github.com/morehao/ark-mate/internal/platform/capability"
 
 // ——— 定义文件载体的窄端口（v3.2 刀 7 收尾）———
 //

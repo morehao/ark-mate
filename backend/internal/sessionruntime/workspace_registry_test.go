@@ -13,8 +13,8 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	wkrow "github.com/morehao/ark-mate/internal/domain/workspace/row"
 
-	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	"github.com/morehao/ark-mate/internal/platform/object/objid"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 

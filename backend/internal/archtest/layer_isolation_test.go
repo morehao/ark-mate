@@ -245,10 +245,10 @@ func TestInnerLayersUseNoTableRows(t *testing.T) {
 // `acp.PermissionRequest` 能编译、能跑，测试也绿（翻译层还在，两条路都通），于是"域不认识协议"
 // 这件事悄悄退回起点，而没有任何判据会响。
 //
-// 值层也在表里：它们的错误构造改用 `code` 之后就不该再认识协议。B4 之后 `core/code` 自己
+// 值层也在表里：它们的错误构造改用 `code` 之后就不该再认识协议。B4 之后 `platform/code` 自己
 // 也不再认识协议——协议错误 → 平台视图的转换点搬到了**适配器出口**（`runtime.FoldError`，
 // 由 `runtime.Connect` 与 `drivers/runtimeconn` 调用），内圈因此对协议零依赖。
-// 第二段的"全量"判据同时覆盖 `internal/domain` / `internal/core` / `internal/service` 三个前缀：
+// 第二段的"全量"判据同时覆盖 `internal/domain` / `internal/platform` / `internal/service` 三个前缀：
 // 这些前缀下新出现的包不登记即红。
 var protocolFreePackages = []string{
 	// —— 领域：已**全量**收口（每个包都在表里，新增域包不登记即红）——
@@ -271,24 +271,24 @@ var protocolFreePackages = []string{
 	modulePrefix + "internal/domain/workspace",
 	modulePrefix + "internal/domain/workspace/row",
 
-	// —— 值层：错误构造改走 `core/code` 之后不该再认识协议 ——
-	modulePrefix + "internal/core/automation",
-	modulePrefix + "internal/core/capability",
+	// —— 值层：错误构造改走 `platform/code` 之后不该再认识协议 ——
+	modulePrefix + "internal/platform/automation",
+	modulePrefix + "internal/platform/capability",
 	// B4：错误码包只留平台映射（分类 → 对外码），协议错误在适配器出口就折成平台视图。
-	modulePrefix + "internal/core/code",
-	modulePrefix + "internal/core/credential",
-	modulePrefix + "internal/core/definition",
-	modulePrefix + "internal/core/eventbus",
-	modulePrefix + "internal/core/identity",
-	modulePrefix + "internal/core/object/objdelivery",
-	modulePrefix + "internal/core/object/objid",
-	modulePrefix + "internal/core/object/objmeta",
-	modulePrefix + "internal/core/object/objtime",
-	modulePrefix + "internal/core/object/objusage",
-	modulePrefix + "internal/core/redact",
-	modulePrefix + "internal/core/resource",
+	modulePrefix + "internal/platform/code",
+	modulePrefix + "internal/platform/credential",
+	modulePrefix + "internal/platform/definition",
+	modulePrefix + "internal/platform/eventbus",
+	modulePrefix + "internal/platform/identity",
+	modulePrefix + "internal/platform/object/objdelivery",
+	modulePrefix + "internal/platform/object/objid",
+	modulePrefix + "internal/platform/object/objmeta",
+	modulePrefix + "internal/platform/object/objtime",
+	modulePrefix + "internal/platform/object/objusage",
+	modulePrefix + "internal/platform/redact",
+	modulePrefix + "internal/platform/resource",
 
-	// —— 用例层：业务错误的分类与 code 都走 `core/code`，用例不写协议分类 ——
+	// —— 用例层：业务错误的分类与 code 都走 `platform/code`，用例不写协议分类 ——
 	modulePrefix + "internal/service/svcautomation",
 	modulePrefix + "internal/service/svccapability",
 	modulePrefix + "internal/service/svccommandpolicy",
@@ -336,7 +336,7 @@ func TestProtocolFreePackagesStayClean(t *testing.T) {
 	for _, p := range protocolFreePackages {
 		registered[p] = true
 	}
-	for _, prefix := range []string{"domain", "core", "service"} {
+	for _, prefix := range []string{"domain", "platform", "service"} {
 		for _, dir := range goPackagesUnder(t, filepath.Join(root, "internal", prefix)) {
 			self := packageImportPath(root, dir)
 			if !registered[self] {

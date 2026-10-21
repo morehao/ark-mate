@@ -1,7 +1,7 @@
 // Package objdelivery 承载「应用层资源 → 底座生效方式」的共享值对象与**静态交付矩阵**（M6）。
 //
-// 为什么单独成包：这套形状同时被三层使用——传输层（`internal/dto/dtomodel` 把它直接作为
-// 响应载荷、`internal/dto/dtolibrary` 的能力条目复用它）、实现层（`internal/manager` 逐 kind
+// 为什么单独成包：这套形状同时被三层使用——传输层（`internal/contract/dtomodel` 把它直接作为
+// 响应载荷、`internal/contract/dtolibrary` 的能力条目复用它）、实现层（`internal/manager` 逐 kind
 // 组装 delivery/applicability），以及模型面（M5 的清单回执）。放在其中任何一层都会让另外两层
 // 反向依赖该层；而 `pkg/` 不得 import `internal/`（`internal/archtest` 守卫），所以它只能待在
 // `pkg/object` 下，三方都只依赖值对象。
@@ -47,7 +47,7 @@ type Delivery struct {
 //	not_applicable 底座不支持或未注册（换 runtime，或注册它）
 //	disabled       被显式关掉（改回 enabled:true）
 //
-// 类型定义于 M6 从 `internal/dto/dtolibrary` **原样迁入**：JSON 形状逐字不变（前端零改），
+// 类型定义于 M6 从 `internal/contract/dtolibrary` **原样迁入**：JSON 形状逐字不变（前端零改），
 // `dtolibrary` 侧留类型别名，既有调用点零改。
 type Applicability struct {
 	Runtime string `json:"runtime"`

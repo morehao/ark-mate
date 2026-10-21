@@ -1,8 +1,8 @@
 package svccapability
 
 import (
-	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/platform/capability"
+	"github.com/morehao/ark-mate/internal/contract/dtocapability"
 )
 
 // ToolCatalog 工具目录（能力数据面的**读模型**）：平台 builtin / 观察兜底 / MCP live 的并集。
@@ -16,7 +16,7 @@ type ToolCatalog interface {
 // Tools 工具目录用例：只依赖**能力注册表**这一个事实（`pkg/capability`）。
 //
 // 为什么在这里而不是在控制器：`capability.Tool` → `dtocapability.ToolResp` 是**响应装配**，
-// 而控制器只做参数绑定与回响应；`pkg/` 又不能 import `internal/dto`（分层方向），
+// 而控制器只做参数绑定与回响应；`pkg/` 又不能 import `internal/contract`（分层方向），
 // 所以投影只能发生在用例层——这正是 `svclibrary`（第六刀）定下的落点。
 type Tools struct {
 	caps *capability.Registry

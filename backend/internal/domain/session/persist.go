@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/core/object/objmeta"
-	"github.com/morehao/ark-mate/internal/core/object/objusage"
+	"github.com/morehao/ark-mate/internal/platform/object/objid"
+	"github.com/morehao/ark-mate/internal/platform/object/objmeta"
+	"github.com/morehao/ark-mate/internal/platform/object/objusage"
 	"github.com/morehao/ark-mate/internal/domain/session/memory"
 	"github.com/morehao/ark-mate/internal/domain/session/run"
 	"github.com/morehao/ark-mate/internal/domain/session/sessionrow"

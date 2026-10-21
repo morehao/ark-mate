@@ -71,7 +71,7 @@ var (
 //
 // `path` 一律是**绝对路径**：会话记录那一处按**符号**定位（`uniqueSourceFile`，见下面
 // `TestNoAgentRuntimeSelectionSurface` 的注释），另两处是仍然稳定的精确路径（`dto` 与
-// `internal/core/automation` 不在本次「manager 解散」的重划范围内）。
+// `internal/platform/automation` 不在本次「manager 解散」的重划范围内）。
 type selectionSurfaceTarget struct {
 	path     string
 	patterns []*regexp.Regexp
@@ -97,9 +97,9 @@ func TestNoAgentRuntimeSelectionSurface(t *testing.T) {
 		{path: uniqueSourceFile(t, internalDir, nil,
 			`(?m)^type\s+SessionRec\s+struct`, "会话记录 `SessionRec` 的类型声明"),
 			patterns: []*regexp.Regexp{reRuntimesList, reRoutingPolicy}},
-		{path: filepath.Join(root, "internal", "dto", "dtosession", "request.go"),
+		{path: filepath.Join(root, "internal", "contract", "dtosession", "request.go"),
 			patterns: []*regexp.Regexp{reRuntimeHintStr}},
-		{path: filepath.Join(root, "internal", "core", "automation", "types.go"),
+		{path: filepath.Join(root, "internal", "platform", "automation", "types.go"),
 			patterns: []*regexp.Regexp{reRuntimeHintStr}},
 	}
 	for _, tgt := range targets {
@@ -163,7 +163,7 @@ func TestRuntimeSelectionRejectionsExist(t *testing.T) {
 	internalDir := filepath.Join(root, "internal")
 
 	// ① DTO 必须保留**只为拒绝**的原始 JSON 字段（类型是 json.RawMessage）。
-	dto := filepath.Join(root, "internal", "dto", "dtosession", "request.go")
+	dto := filepath.Join(root, "internal", "contract", "dtosession", "request.go")
 	src, err := os.ReadFile(dto)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v", dto, err)

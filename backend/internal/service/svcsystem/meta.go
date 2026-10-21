@@ -2,7 +2,7 @@ package svcsystem
 
 import (
 	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
-	"github.com/morehao/ark-mate/internal/dto/dtosystem"
+	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 )
 
 // `/meta` 的内容定义（M2-3）：**谁填什么**在这里一次说清，装配点只负责把值凑齐。

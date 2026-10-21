@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	credval "github.com/morehao/ark-mate/internal/core/credential"
+	credval "github.com/morehao/ark-mate/internal/platform/credential"
 
-	src "github.com/morehao/ark-mate/internal/core/credential"
+	src "github.com/morehao/ark-mate/internal/platform/credential"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )
 

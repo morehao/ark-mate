@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 
 	"github.com/morehao/ark-mate/internal/config"
 )

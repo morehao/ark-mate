@@ -1,6 +1,6 @@
 package provider
 
-import "github.com/morehao/ark-mate/internal/core/object/objdelivery"
+import "github.com/morehao/ark-mate/internal/platform/object/objdelivery"
 
 // ——— 供应商域的对外响应形状（v3.2 刀 8）———
 //

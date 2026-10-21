@@ -9,7 +9,7 @@
 package automation
 
 import (
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"path/filepath"
 	"sort"
 	"time"

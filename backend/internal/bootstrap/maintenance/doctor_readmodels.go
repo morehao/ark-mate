@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/core/object/objmeta"
+	"github.com/morehao/ark-mate/internal/platform/object/objmeta"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/persistence/store"

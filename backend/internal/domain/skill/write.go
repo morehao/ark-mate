@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/core/code"
-	defn "github.com/morehao/ark-mate/internal/core/definition"
+	"github.com/morehao/ark-mate/internal/platform/capability"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	defn "github.com/morehao/ark-mate/internal/platform/definition"
 	"github.com/morehao/golib/glog"
 )
 

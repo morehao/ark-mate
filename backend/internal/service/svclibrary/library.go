@@ -8,7 +8,7 @@ package svclibrary
 
 import (
 	"github.com/morehao/ark-mate/internal/domain/skill"
-	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
+	"github.com/morehao/ark-mate/internal/contract/dtolibrary"
 )
 
 // Query 一次 Library 查询。

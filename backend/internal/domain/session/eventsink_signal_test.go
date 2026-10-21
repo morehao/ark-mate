@@ -3,8 +3,8 @@ package session
 import (
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/core/eventbus"
-	"github.com/morehao/ark-mate/internal/core/object/objusage"
+	"github.com/morehao/ark-mate/internal/platform/eventbus"
+	"github.com/morehao/ark-mate/internal/platform/object/objusage"
 	"github.com/morehao/ark-mate/internal/domain/session/event"
 )
 

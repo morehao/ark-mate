@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
 

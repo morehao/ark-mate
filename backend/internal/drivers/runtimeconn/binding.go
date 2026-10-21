@@ -4,9 +4,9 @@ import (
 	"context"
 	"sync"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
+	"github.com/morehao/ark-mate/internal/contract/dtoruntime"
 	"github.com/morehao/ark-mate/internal/infra/procreg"
 	"github.com/morehao/ark-mate/internal/runtime"
 )

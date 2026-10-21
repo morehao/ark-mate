@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/config"

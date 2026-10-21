@@ -9,7 +9,7 @@ import "encoding/json"
 //
 // 字段名与对外 DTO 一一对应（投影是纯搬运，不重命名）。
 
-// WriteRequest 定义写面的**原文对象**：键的语义（`null` = 删键）由 `internal/core/definition.RawPatch` 解释。
+// WriteRequest 定义写面的**原文对象**：键的语义（`null` = 删键）由 `internal/platform/definition.RawPatch` 解释。
 type WriteRequest map[string]json.RawMessage
 
 // ToolCallRequest 工具调用请求。

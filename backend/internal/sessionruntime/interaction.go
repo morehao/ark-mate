@@ -28,7 +28,7 @@ package sessionruntime
 //	   （§3.1.58 的结论：编排既不是执行面、也不是「读面」）。
 
 import (
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 )
 

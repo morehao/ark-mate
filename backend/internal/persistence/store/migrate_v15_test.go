@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/platform/object/objid"
 	"github.com/morehao/ark-mate/internal/infra/dbclient"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )

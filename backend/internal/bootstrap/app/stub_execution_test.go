@@ -12,7 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/delivery/middleware"
 	"github.com/morehao/ark-mate/internal/runtime"

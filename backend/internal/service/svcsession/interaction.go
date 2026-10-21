@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/contract/dtosession"
 )
 
 // InteractionSvc 会话交互的**动作面**三条：权限决策 / 结构化提问决策 / 权限记忆撤销。

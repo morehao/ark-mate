@@ -57,7 +57,7 @@ var legacyAgentVocabulary = []string{
 // agentVocabularyWhitelistEntry 一条登记：**目录/文件前缀**或**路径无关锚**恰好一种，外加理由。
 //
 //   - `path`：相对仓库根的前缀（豁免整棵目录时用）。只给**落点稳定**的登记——本次分层重构不动
-//     `internal/persistence/store`、`internal/delivery/router`、`internal/config`、`internal/dto`、`internal/delivery/controller`。
+//     `internal/persistence/store`、`internal/delivery/router`、`internal/config`、`internal/contract`、`internal/delivery/controller`。
 //   - `anchor`：**路径无关锚**——一个只出现在**唯一一个**被扫描文件里的符号；含它的那个文件被豁免。
 //     `manager` 包里这几个落点会搬家（设计 §3.4 文件去向表），所以它们只有锚、没有路径：
 //     符号跟着文件走，登记不会因为一次目录改名而悬空。
@@ -128,7 +128,7 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 			"新代码路径一律只认 `ProviderDir`/`MATE_PROVIDERS`",
 	},
 	{
-		path: "backend/internal/dto/dtosession/request.go",
+		path: "backend/internal/contract/dtosession/request.go",
 		reason: removedKeyRefusalReason + "**接住**一个被撤掉的键只有一个办法：给它一个同名 raw 字段" +
 			"（JSON 绑定默认丢弃未知键，删掉这个字段就等于把「用户以为指定了 agent」变成静默 no-op）",
 	},
@@ -159,7 +159,7 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 			"只写「已下线的键已清除」，用户翻自己的自动化定义时对不上是哪一行",
 	},
 	{
-		path: "backend/internal/dto/dtousage/request.go",
+		path: "backend/internal/contract/dtousage/request.go",
 		reason: removedKeyRefusalReason + "用量面的 `?agent_id=` 是**读**面的被撤键（v19 撤掉 agent 维度后，" +
 			"「按底座筛用量」不再有意义）：它没有 JSON 绑定那一层，控制器读不到就等于**静默忽略**——" +
 			"用户以为在看某个底座的用量，拿到的却是全量。接住它同样要一个同名 raw 字段",

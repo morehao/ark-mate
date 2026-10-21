@@ -21,8 +21,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
 	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/core/credential"
-	"github.com/morehao/ark-mate/internal/dto/dtosystem"
+	"github.com/morehao/ark-mate/internal/platform/credential"
+	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 	"github.com/morehao/golib/glog"
 )
 

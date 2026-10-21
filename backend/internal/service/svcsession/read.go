@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/contract/dtosession"
 )
 
 // ReadSvc 会话**只读列表面**（v3.1 §3.2.1：控制器不得 import `internal/domain`）。

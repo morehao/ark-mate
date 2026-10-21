@@ -2,7 +2,7 @@ package svcsession
 
 import (
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/contract/dtosession"
 )
 
 // ——— 会话域视图 → 对外 DTO（v3.2 刀 9）———

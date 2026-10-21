@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	"github.com/morehao/ark-mate/internal/platform/object/objid"
 	"github.com/morehao/ark-mate/internal/domain/workspace/row"
 	"github.com/morehao/golib/glog"
 )

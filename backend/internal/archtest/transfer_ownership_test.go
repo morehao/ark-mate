@@ -36,7 +36,7 @@ var transferFrameworkAnchors = []string{
 // TestDefinitionTransferHasOneHome 定义导入/导出只能有一个家。
 //
 // 判据三段：① 六入口与框架原语全在 `internal/drivers/transfer`（改名/搬走即失锚）；
-// ② 旧目录 `internal/capabilityio` 不得复活（它与 `internal/core/capability` 只差后缀，
+// ② 旧目录 `internal/capabilityio` 不得复活（它与 `internal/platform/capability` 只差后缀，
 // 正是这次要消灭的歧义）；③ `mechanism/definition` 与 `domain/**` 零命中（第二个家）。
 // fail-closed：transfer 目录扫不到生产 Go 文件时 `dirProductionBody` 直接 Fatal。
 func TestDefinitionTransferHasOneHome(t *testing.T) {

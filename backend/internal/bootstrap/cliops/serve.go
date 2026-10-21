@@ -17,7 +17,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/bootstrap/app"
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
-	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/ark-mate/internal/delivery/router"
 	"github.com/morehao/golib/glog"
 )

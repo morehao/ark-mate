@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/core/code"
-	defval "github.com/morehao/ark-mate/internal/core/definition"
+	"github.com/morehao/ark-mate/internal/platform/capability"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	defval "github.com/morehao/ark-mate/internal/platform/definition"
 )
 
 // CapabilityDirUnsetErr 未配置能力目录 → 显式报错而不是"内存生效、盘上没留痕"。

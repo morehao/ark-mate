@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	"github.com/morehao/ark-mate/internal/contract/dtocapability"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )

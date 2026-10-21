@@ -3,7 +3,7 @@ package registry
 import (
 	"context"
 
-	src "github.com/morehao/ark-mate/internal/core/credential"
+	src "github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	mechcred "github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
 )

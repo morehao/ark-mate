@@ -2,7 +2,7 @@ package svcsearch
 
 import (
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/dto/dtosearch"
+	"github.com/morehao/ark-mate/internal/contract/dtosearch"
 )
 
 // ——— 会话域搜索视图 → 对外 DTO（v3.2 刀 9）———

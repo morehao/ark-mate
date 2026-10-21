@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/identity"
+	"github.com/morehao/ark-mate/internal/platform/identity"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

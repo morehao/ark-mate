@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtousage"
+	"github.com/morehao/ark-mate/internal/contract/dtousage"
 	"github.com/morehao/ark-mate/internal/service/svcusage"
 
-	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/golib/gerror"
 )

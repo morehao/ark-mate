@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 )
 
 // 工作空间的**只读辅助面**（浏览 + 最近使用）。

@@ -10,8 +10,8 @@ package ctrautomation
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	"github.com/morehao/ark-mate/internal/contract/dtoautomation"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )

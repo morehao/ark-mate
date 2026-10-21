@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/domain/workspace"
-	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
+	"github.com/morehao/ark-mate/internal/contract/dtoworkspace"
 )
 
 // WorkspaceSvc 工作空间面用例端口：登记表、派生视图（浏览/文件/最近）与设置面。

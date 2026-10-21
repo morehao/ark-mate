@@ -9,16 +9,16 @@ import (
 	"sort"
 	"strings"
 
-	credval "github.com/morehao/ark-mate/internal/core/credential"
+	credval "github.com/morehao/ark-mate/internal/platform/credential"
 
-	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/core/object/objdelivery"
-	"github.com/morehao/ark-mate/internal/core/object/objtime"
-	"github.com/morehao/ark-mate/internal/core/redact"
-	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/platform/capability"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	"github.com/morehao/ark-mate/internal/platform/object/objdelivery"
+	"github.com/morehao/ark-mate/internal/platform/object/objtime"
+	"github.com/morehao/ark-mate/internal/platform/redact"
+	"github.com/morehao/ark-mate/internal/platform/resource"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )

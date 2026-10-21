@@ -3,7 +3,7 @@ package mcp
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/platform/capability"
 )
 
 // ——— MCP 域的窄端口（v3.2 刀 5）———

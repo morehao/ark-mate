@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 )
 
 // 期望值来源：`python3 -c "zoneinfo"` 与 `TZ=... date`（系统 tzdata）手算对照，

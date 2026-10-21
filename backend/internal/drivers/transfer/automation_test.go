@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	pkgautomation "github.com/morehao/ark-mate/internal/core/automation"
+	pkgautomation "github.com/morehao/ark-mate/internal/platform/automation"
 	arow "github.com/morehao/ark-mate/internal/domain/automation/row"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/testutil"

@@ -1,6 +1,6 @@
 package svcsystem
 
-import "github.com/morehao/ark-mate/internal/dto/dtosystem"
+import "github.com/morehao/ark-mate/internal/contract/dtosystem"
 
 // 能力声明面（`/capabilities`）的用例实现。
 //

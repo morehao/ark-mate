@@ -2,10 +2,10 @@ package svcusage
 
 import (
 	"encoding/json"
-	"github.com/morehao/ark-mate/internal/dto/dtousage"
+	"github.com/morehao/ark-mate/internal/contract/dtousage"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

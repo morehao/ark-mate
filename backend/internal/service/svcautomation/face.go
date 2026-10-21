@@ -7,11 +7,11 @@ import (
 	"sort"
 	"time"
 
-	pkgauto "github.com/morehao/ark-mate/internal/core/automation"
-	"github.com/morehao/ark-mate/internal/core/code"
-	defn "github.com/morehao/ark-mate/internal/core/definition"
+	pkgauto "github.com/morehao/ark-mate/internal/platform/automation"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	defn "github.com/morehao/ark-mate/internal/platform/definition"
 	domauto "github.com/morehao/ark-mate/internal/domain/automation"
-	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
+	"github.com/morehao/ark-mate/internal/contract/dtoautomation"
 )
 
 // ——— automation 的**对外面**（P4a 正文第九刀：从 `domain/automation` 上提到这里）———

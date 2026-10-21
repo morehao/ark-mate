@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
+	"github.com/morehao/ark-mate/internal/contract/dtoautomation"
 )
 
 // ——— M4-5：端口形态（DTO ↔ 领域）的回归 ———

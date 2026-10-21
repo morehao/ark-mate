@@ -5,8 +5,8 @@ package ctrcommandpolicy
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/dto/dtocommandpolicy"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	"github.com/morehao/ark-mate/internal/contract/dtocommandpolicy"
 	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )

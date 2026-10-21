@@ -12,9 +12,9 @@ import (
 // 口径见 `.dsh/docs/plans/2026-10-19-hexagonal-alignment-plan.md`（终局版）。
 //
 //	L0  persistence/model                                         表行形状（零内部依赖）
-//	L1  core/* version runtime infra/acp infra/mcp infra/logging  值对象 / 协议库
+//	L1  platform/* version runtime infra/acp infra/mcp infra/logging 值对象 / 协议库
 //	L2  domain/*                                                  领域
-//	L3  dto/*                                                     应用契约
+//	L3  contract/dto*                                             应用契约
 //	L4  service/svc*                                              用例
 //	L5  persistence/store persistence/dao infra/dsh infra/dbclient
 //	    infra/credentials infra/procreg                           基础驱动
@@ -31,7 +31,7 @@ import (
 //     `model` 第 1 层，规则是"高层可以 import 低层"——于是 `domain → store/dto/mechanism`
 //     全都被这张表定义成**合法**。v3.2 把 `domain` 压到第 2 层，把持久化与机制压到 5/6 层，
 //     `domain` 的出边只剩 L0/L1。这不是代码写歪了，是 v3.1 的层号本来就把方向定反了。
-//  2. **`dto` 从第 6 层挪到第 3 层**（domain 外侧、service 内侧）。它是应用契约：驱动侧
+//  2. **应用契约（`dto`，C3 起落在 `contract/`）从第 6 层挪到第 3 层**（domain 外侧、service 内侧）。它是应用契约：驱动侧
 //     （执行面、mechanism、controller）用它是六边形允许的外→内依赖；领域侧用它才是违规。
 //
 // 三条规则与 v3.1 一致：只能向内（被 import 的层号不得增大）；同带默认不互链，除非该层显式
@@ -70,16 +70,19 @@ var v32Layers = map[string]v32Layer{
 
 	// ——— L1：值对象 / 协议库 ———
 	//
-	// 本带允许同层互链：`code` 要把 ACP 协议错误折成本仓错误码，`runtime` 要用
+	// C3 4.1：`core/*` 整体搬成 `platform/*`（纯改名，包内逻辑不动）。角色仍在 L1：
+	// 纯值、纯规则、平台内共享内核，不认识框架与适配器。
+	//
+	// 本带允许同层互链：`code` 是错误码与分类的唯一事实源，`runtime` 要用
 	// `identity`/`resource` 的值类型，而 ACP 是各底座**共用的线协议**（不是可替换的外部
 	// 服务，见 plan 的 ADR-1）——把它们拆开只会得到一堆复制粘贴。
 	//
-	// `core` 是**带级 key**：object / redact / identity / resource / credential / eventbus /
+	// `platform` 是**带级 key**：object / redact / identity / resource / credential / eventbus /
 	// code / automation / definition / capability 十个包同为 L1、都 sameLayer、都没有自己的
 	// deny，收成一个前缀不丢任何判据（按最长前缀解析的结果逐条等价）。
 	// 其中 `definition` 承载能力定义的**值层规则**（id 合法性、patch 键语义、参数类错误出口）：
 	// 从 `drivers/mechanism/definition` 抽出来，让 `domain/*` 不必反向 import 机制层。
-	"internal/core": {layer: 1, name: "core", sameLayer: true},
+	"internal/platform": {layer: 1, name: "platform", sameLayer: true},
 	// 下面四个仍是独立 key：`runtime` 有 adapter 禁入，`infra/*` 的位置与带语义各自不同。
 	"internal/version":       {layer: 1, name: "version", sameLayer: true},
 	"internal/runtime":       {layer: 1, name: "runtime", sameLayer: true, deny: []string{"internal/infra/dsh"}},
@@ -92,17 +95,20 @@ var v32Layers = map[string]v32Layer{
 	// 出边只允许落在 L0/L1。子域之间允许互链：它们不是独立的 bounded context，
 	// 而是同一内核的分区（`session` 用 `identity` 的身份值）。
 	"internal/domain": {layer: 2, name: "domain", sameLayer: true, deny: []string{
-		"internal/persistence/store", "internal/persistence/dao", "internal/dto", "internal/drivers/mechanism",
+		"internal/persistence/store", "internal/persistence/dao", "internal/contract", "internal/drivers/mechanism",
 		"internal/infra/credentials", "internal/infra/dsh", "internal/drivers/registry",
 		"internal/sessionruntime", "internal/drivers/runtimeconn", "internal/drivers/gateway",
 		"internal/delivery/controller", "internal/delivery/middleware", "internal/delivery/router", "internal/bootstrap/assembly",
 		"internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
 
-	// ——— L3：应用契约（dto）———
+	// ——— L3：应用契约（`contract/dto*`）———
 	//
-	// 只许向内（L0/L1/L2 都不该被 dto 依赖，实际上它只用标准库 + 少量值类型）。
-	"internal/dto": {layer: 3, name: "dto", sameLayer: true},
+	// C3 4.1：`dto/*` 整体搬成 `contract/*`（包名保留 `dto<领域>`：它是本仓词汇里"应用契约"
+	// 的那个词，改名会碰 31 个同时引用同名域包的文件，收益只有美观）。
+	//
+	// 只许向内（L0/L1/L2 都不该被 contract 依赖，实际上它只用标准库 + 少量值类型）。
+	"internal/contract": {layer: 3, name: "contract", sameLayer: true},
 
 	// ——— L4：用例 ———
 	//
@@ -110,7 +116,7 @@ var v32Layers = map[string]v32Layer{
 	// deny `internal/service` 同时挡住兄弟 svc 与自身（自 import 不会出现在图里）。
 	"internal/service": {layer: 4, name: "service", deny: []string{
 		"internal/service", "internal/persistence/store", "internal/persistence/dao", "internal/infra/dsh",
-		// C2 第二刀：用例层不写协议分类。业务错误的构造面在 `core/code`
+		// C2 第二刀：用例层不写协议分类。业务错误的构造面在 `platform/code`
 		// （RequestError/ServiceError/…），分类 → 对外码的投影也住那里。
 		"internal/infra/acp",
 		"internal/drivers/mechanism", "internal/drivers/registry", "internal/drivers/runtimeconn",
@@ -193,7 +199,7 @@ var v32Layers = map[string]v32Layer{
 	// ——— L9：交付 / 装配 ———
 	"internal/delivery/router": {layer: 9, name: "router", sameLayer: true, deny: []string{
 		"internal/service", "internal/persistence/store", "internal/persistence/dao", "internal/persistence/model",
-		"internal/domain", "internal/dto", "internal/core/eventbus", "internal/drivers/mechanism",
+		"internal/domain", "internal/contract", "internal/platform/eventbus", "internal/drivers/mechanism",
 		"internal/drivers/registry", "internal/drivers/runtimeconn", "internal/sessionruntime",
 		"internal/drivers/gateway", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
@@ -223,8 +229,8 @@ var v32Layers = map[string]v32Layer{
 
 // v32AdapterDeny adapter（`infra/dsh`）不得认识应用内核的任何一层。
 var v32AdapterDeny = []string{
-	"internal/persistence/model", "internal/core/eventbus", "internal/core/capability", "internal/core/credential",
-	"internal/core/code", "internal/core/automation", "internal/config", "internal/dto",
+	"internal/persistence/model", "internal/platform/eventbus", "internal/platform/capability", "internal/platform/credential",
+	"internal/platform/code", "internal/platform/automation", "internal/config", "internal/contract",
 	"internal/persistence/dao", "internal/persistence/store", "internal/drivers/mechanism", "internal/domain",
 	"internal/drivers/runtimeconn", "internal/drivers/registry", "internal/service",
 	"internal/sessionruntime", "internal/delivery/middleware", "internal/drivers/gateway",

@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	defn "github.com/morehao/ark-mate/internal/core/definition"
+	defn "github.com/morehao/ark-mate/internal/platform/definition"
 
 	domainautomation "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/core/automation"
-	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/platform/automation"
+	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"

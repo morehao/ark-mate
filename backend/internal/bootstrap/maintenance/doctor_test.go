@@ -11,7 +11,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/delivery/router"
-	"github.com/morehao/ark-mate/internal/dto/dtosystem"
+	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 )
 
 // writeFiles 在 root 下写一组文件（rel → 内容），自动建父目录。

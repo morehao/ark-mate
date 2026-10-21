@@ -2,7 +2,7 @@ package svcusage
 
 import (
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/dto/dtousage"
+	"github.com/morehao/ark-mate/internal/contract/dtousage"
 )
 
 // ——— 会话域用量视图 → 对外 DTO（v3.2 刀 9）———

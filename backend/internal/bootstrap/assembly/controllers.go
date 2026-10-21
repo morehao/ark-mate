@@ -1,7 +1,7 @@
 package assembly
 
 import (
-	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/ark-mate/internal/delivery/controller/ctrautomation"
 	"github.com/morehao/ark-mate/internal/delivery/controller/ctrcapability"
 	"github.com/morehao/ark-mate/internal/delivery/controller/ctrcommandpolicy"

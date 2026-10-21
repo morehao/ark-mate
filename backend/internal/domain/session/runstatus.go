@@ -3,7 +3,7 @@ package session
 import (
 	"time"
 
-	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/platform/eventbus"
 )
 
 // 一轮问答的**过程状态**（ADR-6 / ADR-7）。

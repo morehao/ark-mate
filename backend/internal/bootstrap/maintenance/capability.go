@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 )

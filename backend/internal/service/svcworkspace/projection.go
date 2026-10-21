@@ -2,7 +2,7 @@ package svcworkspace
 
 import (
 	"github.com/morehao/ark-mate/internal/domain/workspace"
-	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
+	"github.com/morehao/ark-mate/internal/contract/dtoworkspace"
 )
 
 // ——— 工作空间域视图 → 对外 DTO 的投影（v3.2 刀 6）———

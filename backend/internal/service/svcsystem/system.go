@@ -7,7 +7,7 @@ package svcsystem
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoexport"
+	"github.com/morehao/ark-mate/internal/contract/dtoexport"
 )
 
 // SystemSvc 系统面的服务端口。

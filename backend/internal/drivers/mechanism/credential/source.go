@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	credval "github.com/morehao/ark-mate/internal/core/credential"
+	credval "github.com/morehao/ark-mate/internal/platform/credential"
 
 	"github.com/morehao/ark-mate/internal/infra/credentials"
 	"github.com/morehao/ark-mate/internal/persistence/store"

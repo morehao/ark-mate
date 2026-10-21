@@ -1,14 +1,14 @@
 package runtime
 
 import (
-	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— 协议错误 → 平台视图的唯一折叠点（B4）———
 //
 // 口径：**分类（可操作语义）在所有层都是平台词汇（`code.Class`）**，协议词汇（`acp.Class`）
-// 只活在协议库与适配器内部。`core/code` 因此对协议零依赖；把协议错误折成平台视图这一步，
+// 只活在协议库与适配器内部。`platform/code` 因此对协议零依赖；把协议错误折成平台视图这一步，
 // 由"把错误交给上层"的那一层负责——今天这条出口只有本包的拨号底座与
 // `drivers/runtimeconn`（会话/轮次调用），两者都在这里取值。
 //

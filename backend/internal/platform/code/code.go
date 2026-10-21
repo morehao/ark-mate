@@ -17,7 +17,7 @@ import (
 
 	"github.com/morehao/golib/gerror"
 
-	"github.com/morehao/ark-mate/internal/core/redact"
+	"github.com/morehao/ark-mate/internal/platform/redact"
 )
 
 // 成功码。gincontext 的成功分支同样落 0。

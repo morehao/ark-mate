@@ -5,8 +5,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/credential"
-	credval "github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
+	credval "github.com/morehao/ark-mate/internal/platform/credential"
 
 	"github.com/morehao/ark-mate/internal/infra/credentials"
 )

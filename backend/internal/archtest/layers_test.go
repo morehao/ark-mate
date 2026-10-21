@@ -107,7 +107,7 @@ func importedByProductionPackage(t *testing.T, dir string) []string {
 }
 
 // TestTransportFreeLayersMustNotImportAppLayers 锁定传输无关的底层包不得反向依赖
-// 应用装配层：事件总线（internal/core/eventbus）与持久层（internal/persistence/store）都被上层广泛
+// 应用装配层：事件总线（internal/platform/eventbus）与持久层（internal/persistence/store）都被上层广泛
 // 引用，一旦它们 import manager/server 就会形成环，并把"可被任意宿主复用"的能力
 // 绑死在当前装配方式上。
 func TestTransportFreeLayersMustNotImportAppLayers(t *testing.T) {
@@ -117,7 +117,7 @@ func TestTransportFreeLayersMustNotImportAppLayers(t *testing.T) {
 		modulePrefix + "internal/server",
 		modulePrefix + "internal/bootstrap/app",
 	}
-	for _, rel := range []string{"internal/core/eventbus", "internal/persistence/store"} {
+	for _, rel := range []string{"internal/platform/eventbus", "internal/persistence/store"} {
 		dir := filepath.Join(root, filepath.FromSlash(rel))
 		for _, imp := range importedByPackage(t, dir) {
 			for _, bad := range forbidden {
@@ -136,7 +136,7 @@ func TestTransportFreeLayersMustNotImportAppLayers(t *testing.T) {
 // 后果是领域层每加一个字段都要改传输层文件，且依赖方向与调用方向相反。
 //
 // 现在的边界：
-//   - internal/dto/dto*  → 纯数据，谁都能依赖它，它不依赖任何应用层
+//   - internal/contract/dto*  → 纯数据，谁都能依赖它，它不依赖任何应用层
 //   - internal/service/svc* → 只依赖 dto，是控制器与实现之间的端口
 //   - 传输层（server/handler）依赖端口；实现层（manager）实现端口
 func TestPortsAndDTOsMustNotImportTransport(t *testing.T) {
@@ -163,7 +163,7 @@ func TestPortsAndDTOsMustNotImportTransport(t *testing.T) {
 			walk(sub)
 		}
 	}
-	for _, top := range []string{"dto", "service"} {
+	for _, top := range []string{"contract", "service"} {
 		for _, dir := range subdirs(t, filepath.Join(root, "internal", top)) {
 			walk(dir)
 		}
@@ -171,7 +171,7 @@ func TestPortsAndDTOsMustNotImportTransport(t *testing.T) {
 }
 
 // TestControllersMustNotImportImplementations 锁定控制器的依赖面：
-// 控制器只允许依赖 internal/service/svc*（端口）与 internal/dto/dto*（数据），
+// 控制器只允许依赖 internal/service/svc*（端口）与 internal/contract/dto*（数据），
 // 不得 import internal/sessionruntime（实现）或 internal/delivery/router（自己所属的装配层）。
 //
 // 这条边界是 P2/P3 重构的核心收益：控制器与实现两边的任一侧改动，
@@ -217,7 +217,7 @@ func TestPersistenceLayersMustNotImportAppLayers(t *testing.T) {
 	transport := []string{
 		modulePrefix + "internal/delivery/controller",
 		modulePrefix + "internal/delivery/router",
-		modulePrefix + "internal/dto",
+		modulePrefix + "internal/contract",
 		modulePrefix + "internal/service",
 	}
 	app := []string{

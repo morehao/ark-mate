@@ -705,7 +705,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 
 > 最后一条要特别说明：若不认领旧名字，归属集合里那条旧名字会永远留着，于是"集合空了才删目录"
 > 永不成立——**禁用/删除技能时副本删不掉，底座照旧读到已禁用的技能**。这是本次归一里唯一一处
-> 会静默出错的地方，护栏见 `internal/core/capability` 的 `TestOwnerAliasClaimsLegacyMarker`（回退那行即变红）。
+> 会静默出错的地方，护栏见 `internal/platform/capability` 的 `TestOwnerAliasClaimsLegacyMarker`（回退那行即变红）。
 
 **别名什么时候可以删**：当 `mate doctor` 能报告"本机没有任何老数据引用它"之后，
 `internal/runtime/legacy.go` 的 `LegacyDeepseekharnessID` / `NormalizeID` / `LegacyAliasesOf` 与它们的
@@ -723,7 +723,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 > `MATE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已被 `MATE_PROJECTION_DIRS` 取代（旧键现在会让启动
 > 失败并给出等价写法），单 root 的"兼容路径"也已不存在——物化落点只由各 runtime 的投影声明
 > 决定，配置只能覆盖根。当时记录里"归属标记 / 共享 root 只摘自己 / 空归属即残留清理"这些**不变式**
-> 仍成立，由 `internal/core/capability/skill_materialize_test.go` 与 `internal/sessionruntime/skills_test.go` 覆盖。
+> 仍成立，由 `internal/platform/capability/skill_materialize_test.go` 与 `internal/sessionruntime/skills_test.go` 覆盖。
 >
 > **底座面也已变（2026-10 后阅读）**：本节 C4/C6/C7 与容器那几条里出现的 `opencode`，指的是
 > **当时在册的第二个一等适配**——它已下线（决策 v18），随包载荷、`Dockerfile` 的 `WITH_OPENCODE`

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/morehao/ark-mate/internal/core/object/objusage"
+	"github.com/morehao/ark-mate/internal/platform/object/objusage"
 	"github.com/morehao/ark-mate/internal/infra/logging"
 )
 

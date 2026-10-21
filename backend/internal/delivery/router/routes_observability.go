@@ -2,7 +2,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/ark-mate/internal/delivery/controller/ctrusage"
 	"github.com/morehao/ark-mate/internal/delivery/controller/ctrws"
 	"github.com/morehao/ark-mate/internal/delivery/middleware"

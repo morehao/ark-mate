@@ -6,7 +6,7 @@
 // 第十二刀 ~ 第三十九刀），判据只有一条：**投影在哪一边**。
 //
 //   - 投影在 `pkg/` 之上（`capability.Tool`/`capability.McpServer` → `dtocapability.*`）⇒ 只能落
-//     用例层，因为 `pkg/` 不能 import `internal/dto`：这就是本包的 `Tools`（第十二刀）与
+//     用例层，因为 `pkg/` 不能 import `internal/contract`：这就是本包的 `Tools`（第十二刀）与
 //     `Servers`（第十四刀）——两个真用例，各自声明自己的窄接口。
 //   - 投影与错误码**本来就在域平面里**（`skill.Plane.ListSkills` 已经把 `capability.Skill`
 //     折成 DTO）⇒ 用例层再包一层只会得到一行转发，那正是 `docs/agents/layout.md` 第三条硬规矩禁的形状：

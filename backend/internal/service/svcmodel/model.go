@@ -17,7 +17,7 @@ package svcmodel
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 )
 
 // DeclaredSvc 平台模型清单的**写面**（三条），实现是本包的 `Declared`（`declared.go`）。

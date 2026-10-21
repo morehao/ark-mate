@@ -125,7 +125,7 @@ func TestSettingsModelCopyAvoidsProvider(t *testing.T) {
 // （写面少了两条入口，"只有一个默认"就落不了地）。
 func assertModelsResponseHasNoPerRuntimeDefault(t *testing.T) {
 	t.Helper()
-	path := filepath.Join(backendRoot(t), "internal", "dto", "dtomodel", "model_list.go")
+	path := filepath.Join(backendRoot(t), "internal", "contract", "dtomodel", "model_list.go")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（这块契约的落点改了？请同步 A14 的断言）", path, err)

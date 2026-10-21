@@ -5,9 +5,9 @@ import (
 
 	"context"
 
-	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/core/code"
-	defn "github.com/morehao/ark-mate/internal/core/definition"
+	"github.com/morehao/ark-mate/internal/platform/capability"
+	"github.com/morehao/ark-mate/internal/platform/code"
+	defn "github.com/morehao/ark-mate/internal/platform/definition"
 )
 
 // Plane 技能平面的**有状态主体**：持有能力注册表（技能定义都在这里）与投影登记处。

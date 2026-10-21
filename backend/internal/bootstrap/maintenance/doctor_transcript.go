@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/platform/object/objid"
 )
 
 // checkTranscriptShape 是 `mate doctor` 的 R3 检查：transcript 目录里有没有**旧形状**的会话 id。
