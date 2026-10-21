@@ -78,6 +78,12 @@ type IsolationVar struct {
 // Spec 是注册表里一个 runtime 的投影描述（§6.1 ProjectionSpec 的声明式半场：
 // 启动形态 + 传输能力 + **纯数据**的落点/凭据/隔离声明；可执行半场 = acp 连接 + 该 adapter 的
 // `resource.Syncer`，后者按 ADR-2 挂在 `Registry` 的第一张可执行端口表上，不进 Spec）。
+//
+// **字段的值类型放在哪**（C3 4.6 之后的口径，2026-10-21 定）：跟着**消费它的逻辑与方法**走，
+// 不按"纯数据 / 行为"分类。`IsolationVar`（`value(home)`）、`Projection`（`UnverifiedReason`）、
+// `ModelConfigLocation`（`Declared`）都带方法、方法依赖运行时上下文，所以与 `Spec` 同住本包；
+// 只有"第二个层也要认识这个值、且那层不该认识 adapter 契约"时才下沉 `platform/*`——今天唯一的
+// 例子是 `Credential resource.CredentialSpec`（`domain/provider` 消费它，见 `platform/resource`）。
 type Spec struct {
 	ID      string // 注册表键（= 该 adapter 的 id，如 "dsh"）
 	Name    string // 展示名
