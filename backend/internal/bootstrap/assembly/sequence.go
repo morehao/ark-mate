@@ -1,4 +1,4 @@
-package registry
+package assembly
 
 import (
 	"context"
@@ -56,8 +56,8 @@ type Sequence struct {
 	started []int
 }
 
-// New 按声明顺序构造序列。
-func New(steps ...Step) *Sequence { return &Sequence{steps: steps} }
+// NewSequence 按声明顺序构造序列。
+func NewSequence(steps ...Step) *Sequence { return &Sequence{steps: steps} }
 
 // Steps 返回声明本身（对照表与测试用；返回副本，调用方改不到内部状态）。
 func (s *Sequence) Steps() []Step {

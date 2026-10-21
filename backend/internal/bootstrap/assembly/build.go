@@ -20,7 +20,7 @@ import (
 //
 // `Build` 做两件事，且**只有它**做：
 //  1. 构造对象图（事件总线 / 执行面 / 领域平面 / 会话编排 / 用例 / 控制器 / 路由）；
-//  2. 按 `registry.Sequence` 的声明顺序执行启动动作（导入、恢复、定义装载、监听绑定…），
+//  2. 按 `NewSequence` 的声明顺序执行启动动作（导入、恢复、定义装载、监听绑定…），
 //     失败时按逆序回滚已启动的步骤。
 //
 // 它**不启动 HTTP、不读 os.Args、不处理信号**：那些是 `internal/bootstrap/app`（应用壳）的事。
@@ -163,7 +163,7 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 	as.svc, as.planes, as.rconn, as.rpool = NewSessionServiceWith(reg, as.bus, o.ConnPool)
 
 	as.creds = o.Credentials
-	as.lifecycle = registry.New(as.steps()...)
+	as.lifecycle = NewSequence(as.steps()...)
 	if err := as.lifecycle.Start(ctx); err != nil {
 		return nil, err
 	}

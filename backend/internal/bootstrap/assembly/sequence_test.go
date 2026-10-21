@@ -1,4 +1,4 @@
-package registry
+package assembly
 
 import (
 	"context"
@@ -28,7 +28,7 @@ func TestSequenceStartStopSymmetric(t *testing.T) {
 			},
 		}
 	}
-	seq := New(step("a"), step("b"), step("c"))
+	seq := NewSequence(step("a"), step("b"), step("c"))
 	if err := seq.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestSequenceStartStopSymmetric(t *testing.T) {
 func TestSequenceCriticalFailureRollsBack(t *testing.T) {
 	var order []string
 	boom := errors.New("坏了")
-	seq := New(
+	seq := NewSequence(
 		Step{Name: "opened", Start: func(context.Context) error {
 			order = append(order, "start:opened")
 			return nil
@@ -88,7 +88,7 @@ func TestSequenceCriticalFailureRollsBack(t *testing.T) {
 // 这一条与 critical 那条是一对——只钉一侧，判据就只剩"总是回滚"或"从不回滚"两种错法之一。
 func TestSequenceNonCriticalContinues(t *testing.T) {
 	var order []string
-	seq := New(
+	seq := NewSequence(
 		Step{Name: "warn", Start: func(context.Context) error {
 			order = append(order, "start:warn")
 			return errors.New("可选目录缺失")
@@ -109,7 +109,7 @@ func TestSequenceNonCriticalContinues(t *testing.T) {
 // TestSequenceTimeoutIsReported 步骤自己不观察 ctx 时（例如 `store.Open`），超时无法中断它，
 // 但必须在返回后如实报出来——"超了还当成功继续"是这一层最坏的假绿。
 func TestSequenceTimeoutIsReported(t *testing.T) {
-	seq := New(Step{
+	seq := NewSequence(Step{
 		Name: "slow", Critical: true, Timeout: 5 * time.Millisecond,
 		Start: func(context.Context) error {
 			time.Sleep(20 * time.Millisecond)

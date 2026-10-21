@@ -41,7 +41,7 @@ import (
 //	② 关闭顺序与启动不对称 ⇒ 退出时偶发丢数据（transcript 尾部、在途轮次）；
 //	③ 把只该 WARN 的步骤写成 critical ⇒ 某个可选目录缺失就起不来。
 //
-// 现在每一行是一个 `registry.Step`：名字、阶段、critical、启动/关闭超时、Start/Stop 都是
+// 现在每一行是一个 `Step`：名字、阶段、critical、启动/关闭超时、Start/Stop 都是
 // 显式的。逐条对照表见 `.dsh/docs/plans/2026-10-17-p5a-registry-assembly-table.md`。
 //
 // **装配事实与装配动作分开**：`registry.Planes` 拥有领域平面（只构造、不读盘），本文件只按
@@ -66,7 +66,7 @@ type assembly struct {
 	orch   *apprun.Orchestrator
 	reg    *runtime.Registry
 	// lifecycle 本次启停的声明序列（Build 的 Start / Close 的逆序 Stop）。
-	lifecycle *registry.Sequence
+	lifecycle *Sequence
 
 	// ——— 步骤之间传递的产物 ———
 	st          *store.Store
@@ -85,48 +85,48 @@ type assembly struct {
 }
 
 // steps 声明启动序列（顺序即语义；关闭按它的逆序执行）。
-func (as *assembly) steps() []registry.Step {
-	return []registry.Step{
-		{Name: "命令门禁", Phase: registry.PhasePlatform, Critical: true, Start: as.startCommandPolicy},
-		{Name: "旧定义目录导入", Phase: registry.PhasePlatform, Timeout: 10 * time.Second, Start: as.startLegacyProviderImport},
-		{Name: "凭据面", Phase: registry.PhasePlatform, Timeout: 10 * time.Second, Start: as.startCredentials},
+func (as *assembly) steps() []Step {
+	return []Step{
+		{Name: "命令门禁", Phase: PhasePlatform, Critical: true, Start: as.startCommandPolicy},
+		{Name: "旧定义目录导入", Phase: PhasePlatform, Timeout: 10 * time.Second, Start: as.startLegacyProviderImport},
+		{Name: "凭据面", Phase: PhasePlatform, Timeout: 10 * time.Second, Start: as.startCredentials},
 		// 产品身份（部署级常量）：必须在**任何连接被拉起之前**把系统提示面装进启动参数。
 		// 非 critical：交付失败只让模型的自述退回首轮块（`auto`），不该拒绝启动。
-		{Name: "产品身份", Phase: registry.PhasePlatform, Timeout: 10 * time.Second, Start: as.startIdentity},
+		{Name: "产品身份", Phase: PhasePlatform, Timeout: 10 * time.Second, Start: as.startIdentity},
 		{
-			Name: "持久层打开", Phase: registry.PhasePersistence, Critical: true,
+			Name: "持久层打开", Phase: PhasePersistence, Critical: true,
 			Timeout: 30 * time.Second, Start: as.startStore, Stop: as.stopStore, StopTimeout: 10 * time.Second,
 		},
-		{Name: "旧密钥搬运", Phase: registry.PhasePersistence, Timeout: time.Minute, Start: as.startLegacySecretMigration},
-		{Name: "持久层接线", Phase: registry.PhasePersistence, Timeout: 2 * time.Minute, Start: as.startStoreWiring},
-		{Name: "启动导入", Phase: registry.PhasePersistence, Timeout: 2 * time.Minute, Start: as.startImports},
-		{Name: "会话恢复", Phase: registry.PhasePersistence, Timeout: 2 * time.Minute, Start: as.startRestore},
-		{Name: "工作空间策略", Phase: registry.PhaseDomain, Critical: true, Start: as.startWorkspacePolicy},
-		{Name: "默认工作空间", Phase: registry.PhaseDomain, Critical: true, Start: as.startDefaultWorkspace},
-		{Name: "工作空间白名单端口", Phase: registry.PhaseDomain, Start: as.startWorkspaceRootsStore},
+		{Name: "旧密钥搬运", Phase: PhasePersistence, Timeout: time.Minute, Start: as.startLegacySecretMigration},
+		{Name: "持久层接线", Phase: PhasePersistence, Timeout: 2 * time.Minute, Start: as.startStoreWiring},
+		{Name: "启动导入", Phase: PhasePersistence, Timeout: 2 * time.Minute, Start: as.startImports},
+		{Name: "会话恢复", Phase: PhasePersistence, Timeout: 2 * time.Minute, Start: as.startRestore},
+		{Name: "工作空间策略", Phase: PhaseDomain, Critical: true, Start: as.startWorkspacePolicy},
+		{Name: "默认工作空间", Phase: PhaseDomain, Critical: true, Start: as.startDefaultWorkspace},
+		{Name: "工作空间白名单端口", Phase: PhaseDomain, Start: as.startWorkspaceRootsStore},
 		{
-			Name: "编排器", Phase: registry.PhaseDomain, Critical: true,
+			Name: "编排器", Phase: PhaseDomain, Critical: true,
 			Start: as.startOrchestrator, Stop: as.stopOrchestrator, StopTimeout: 30 * time.Second,
 		},
-		{Name: "子进程注册表", Phase: registry.PhaseDomain, Timeout: as.reapTimeout(), Start: as.startProcRegistry},
-		{Name: "定义装载", Phase: registry.PhaseDomain, Critical: true, Timeout: 2 * time.Minute, Start: as.startDefinitions},
-		{Name: "权限记忆恢复", Phase: registry.PhaseDomain, Timeout: 30 * time.Second, Start: as.startPermissionMemories},
-		{Name: "编排参数", Phase: registry.PhaseSettings, Start: as.startRuntimeSettings},
-		{Name: "MCP 网关开关", Phase: registry.PhaseSettings, Start: as.startMcpGateway},
-		{Name: "原生权限开关", Phase: registry.PhaseSettings, Start: as.startNativePermission},
-		{Name: "空闲回收", Phase: registry.PhaseBackground, Start: as.startIdleReaper},
+		{Name: "子进程注册表", Phase: PhaseDomain, Timeout: as.reapTimeout(), Start: as.startProcRegistry},
+		{Name: "定义装载", Phase: PhaseDomain, Critical: true, Timeout: 2 * time.Minute, Start: as.startDefinitions},
+		{Name: "权限记忆恢复", Phase: PhaseDomain, Timeout: 30 * time.Second, Start: as.startPermissionMemories},
+		{Name: "编排参数", Phase: PhaseSettings, Start: as.startRuntimeSettings},
+		{Name: "MCP 网关开关", Phase: PhaseSettings, Start: as.startMcpGateway},
+		{Name: "原生权限开关", Phase: PhaseSettings, Start: as.startNativePermission},
+		{Name: "空闲回收", Phase: PhaseBackground, Start: as.startIdleReaper},
 		{
-			Name: "自动化调度", Phase: registry.PhaseBackground,
+			Name: "自动化调度", Phase: PhaseBackground,
 			Start: as.startAutomationScheduler, Stop: as.stopAutomationScheduler,
 		},
-		{Name: "用例与控制器", Phase: registry.PhaseDelivery, Critical: true, Start: as.startControllers},
-		{Name: "前端资产", Phase: registry.PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startAssets},
+		{Name: "用例与控制器", Phase: PhaseDelivery, Critical: true, Start: as.startControllers},
+		{Name: "前端资产", Phase: PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startAssets},
 		{
-			Name: "资产重建通知", Phase: registry.PhaseDelivery,
+			Name: "资产重建通知", Phase: PhaseDelivery,
 			Start: as.startAssetWatch, Stop: as.stopAssetWatch, StopTimeout: 5 * time.Second,
 		},
-		{Name: "监听绑定", Phase: registry.PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startListener},
-		{Name: "路由", Phase: registry.PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startRouter},
+		{Name: "监听绑定", Phase: PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startListener},
+		{Name: "路由", Phase: PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startRouter},
 	}
 }
 
