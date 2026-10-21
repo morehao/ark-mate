@@ -427,6 +427,24 @@ const GatewayServerName = "mate-gateway"
 // 自己的 home"，而这是我们自己的装配值，随条目一对一携带（也因此不依赖进程环境继承是否完整）。
 const GatewayCredCwdEnv = "MATE_MCP_CRED_CWD"
 
+// GatewaySessionEnv 核心经网关条目的 `env` 下发的**平台会话 id**（审计归属，不是密钥）。
+//
+// 语义：网关写下的每一行 `mcp_call_audits` 都属于这个会话。网关进程**只带 scope**（P-2），
+// 它自己无从知道"我是被哪个会话拉起来的"——底座 spawn 它时不传平台 id，所以这个归属只能由
+// 核心显式交下去。
+//
+// 为什么走 `env` 而不是命令行参数（与 `GatewayCredCwdEnv` 同一条理由，但这里的代价更大）：
+// `Args` 逐字进能力指纹，会话 id 进 `Args` 就等于**每个会话一个指纹、每个会话一个底座进程**
+// ——暖进程复用与代际台账一起报废，而这件事在功能上完全看不出来（只是"启动变慢、进程变多"）。
+// `Env` 只把**键名**入指纹，键名恒定、取值不入，正好是"每会话换值、不换代际"。
+//
+// 与 `GatewayCredCwdEnv` 的一处**刻意不同**：那个只在实际有值时才带键（不臆造核心的答案），
+// 这个**无条件带键**（值可能是空串）。理由是键名进指纹：指纹那侧（`CapabilityFactsFor`）
+// 在算指纹时还不知道会话 id（`session/new` 之前），若按"有值才带键"，指纹会说条目只有
+// `MATE_MCP_CRED_CWD` 一个键、而实际注入的条目有两个 —— 那正是"指纹说含 X、实际没注入 X"
+// 的静默分叉。空值在网关侧等同"没有归属"（审计行照写，`session_id` 留空）。
+const GatewaySessionEnv = "MATE_MCP_SESSION"
+
 // GatewayScope 网关条目的 scope：注入端拼参数、网关端解参数，**两侧共用这一个类型**。
 type GatewayScope struct {
 	RuntimeID string

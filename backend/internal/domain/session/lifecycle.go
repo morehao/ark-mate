@@ -100,7 +100,11 @@ type LifecycleDeps struct {
 	// 只对声明了 ModelCatalogNeedsCredential 的 runtime 生效（见 applyModel）。
 	ProviderKeyReady func(ctx context.Context, providerID string) (bool, string)
 	// McpServers 该会话该下发的 MCP 条目（注册表 + 传输能力 + 选定过滤后的结果）。
-	McpServers func(runtimeID string, sel *CapabilitySelection) []runtime.McpServer
+	//
+	// `sessionID` 由域交下去（它就是这次会话的 id），用途只有一个：网关写审计行时要知道
+	// "我是被哪个会话拉起来的"。它落在网关条目的 `env` 里、**不进 `Args`**，所以不改变能力
+	// 指纹——本域不需要知道这件事的细节，只负责把 id 递过去。
+	McpServers func(runtimeID, sessionID string, sel *CapabilitySelection) []runtime.McpServer
 	// Catalog 模型目录缓存。
 	Catalog ConfigCatalog
 	// Diagnostics 运行期诊断（起不来 / 恢复失败 / 模型被拒的留痕）。
@@ -129,7 +133,7 @@ type Lifecycle struct {
 	acquire          func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (Conn, error)
 	resolveModel     func(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)
 	providerKeyReady func(ctx context.Context, providerID string) (bool, string)
-	mcpServers       func(runtimeID string, sel *CapabilitySelection) []runtime.McpServer
+	mcpServers       func(runtimeID, sessionID string, sel *CapabilitySelection) []runtime.McpServer
 	catalog          ConfigCatalog
 	diagnostics      DiagnosticsSink
 	setState         func(state string)
@@ -222,7 +226,7 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 	agent := conn.Agent()
 	sess, err := agent.NewSession(ctx, SessionOptions{
 		Cwd:        cwd,
-		McpServers: l.mcpServers(spec.ID, opt.Selection),
+		McpServers: l.mcpServers(spec.ID, convID, opt.Selection),
 	})
 	if err != nil {
 		return nil, err
@@ -359,7 +363,7 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 	agent := conn.Agent()
 	// **恢复路径必须用会话钉住的选定**（不是全量）：它从 `sessions.capability_json` 读回。
 	// 漏了这一步的后果是会话重启后注入集悄悄换一套，而且没有任何报错。
-	opts := SessionOptions{Cwd: cwd, McpServers: l.mcpServers(spec.ID, sel)}
+	opts := SessionOptions{Cwd: cwd, McpServers: l.mcpServers(spec.ID, rec.ID, sel)}
 	caps := agent.Capabilities()
 	sameRuntime := spec.ID == rec.RuntimeID && rec.RuntimeID != ""
 	// `nativeID` 是**平台侧的值**（`rt_` 壳）；给底座的必须是**原文**。

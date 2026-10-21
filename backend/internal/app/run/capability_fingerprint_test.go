@@ -99,7 +99,7 @@ func TestCapabilityFingerprintMCPSecretValueNotInFingerprint(t *testing.T) {
 		t.Fatal("应有非空指纹")
 	}
 	// 记录一下：解析出来的明文确实存在且会进注入值（对照面）。
-	got := directMcp(svc.McpServersFor("stub", nil)) // 网关条目另计（它不含密钥）
+	got := directMcp(svc.McpServersFor("stub", "", nil)) // 网关条目另计（它不含密钥）
 	if len(got) != 1 || got[0].Env["FS_TOKEN"] != "secret-one" {
 		t.Fatalf("注入侧应解析出明文: %+v", got)
 	}

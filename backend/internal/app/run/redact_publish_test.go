@@ -204,7 +204,7 @@ func TestMcpSecretValueIsRedactedAfterResolution(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got := directMcp(svc.McpServersFor("stub", nil))
+	got := directMcp(svc.McpServersFor("stub", "", nil))
 	if len(got) != 1 || got[0].Env["TOKEN"] != val {
 		t.Fatalf("注入侧应解析出明文: %+v", got)
 	}

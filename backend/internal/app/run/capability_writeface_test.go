@@ -369,13 +369,13 @@ func TestMcpServerDisabledNotInjected(t *testing.T) {
 				`{"id":"fs","transport":"stdio","command":"/usr/local/bin/npx"}`), true); err != nil {
 				t.Fatal(err)
 			}
-			if got := directMcp(wf.svc.McpServersFor("rtx", nil)); len(got) != 1 {
+			if got := directMcp(wf.svc.McpServersFor("rtx", "", nil)); len(got) != 1 {
 				t.Fatalf("默认应注入，got %+v", got)
 			}
 			if _, err := planesOf(wf.svc).Mcp.WriteServer(ctx, "fs", writeMcpReq(t, `{"enabled":false}`), false); err != nil {
 				t.Fatal(err)
 			}
-			if got := directMcp(wf.svc.McpServersFor("rtx", nil)); len(got) != 0 {
+			if got := directMcp(wf.svc.McpServersFor("rtx", "", nil)); len(got) != 0 {
 				t.Fatalf("禁用后不该注入，got %+v", got)
 			}
 			if _, ok := planesOf(wf.svc).Capabilities.GetMcpServer("fs"); !ok {

@@ -1,8 +1,8 @@
 package run
 
 import (
-	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -16,13 +16,18 @@ import (
 // 已有实现里，域只是消费方）。
 
 // CapabilityFactsFor 实现 `session.CapabilityFactsProvider`。
+//
+// 算指纹时**刻意不传会话 id**（`planMcpInjection(runtimeID, "", sel)`）：会话 id 只落在网关
+// 条目的 `env` **取值**里，而指纹只认 `env` 的**键名**（`EnvKeys`）——值根本不参与，传了也只是
+// 噪音。更硬的一条：`session/new` 之前那个 id 还不一定存在（`StartSession` 先算指纹、后铸 id），
+// 于是"指纹那一路能不能看见它"会变成随调用顺序而变的事。
 func (s *Service) CapabilityFactsFor(runtimeID string, sel *session.CapabilitySelection) session.CapabilityFacts {
 	facts := session.CapabilityFacts{}
 	if spec, ok := s.regSpec(runtimeID); ok {
 		facts.Spec, facts.SpecOK = spec, true
 	}
 	facts.Skills = s.projectedSkillsForFingerprint(runtimeID, sel)
-	plan := s.planMcpInjection(runtimeID, sel)
+	plan := s.planMcpInjection(runtimeID, "", sel)
 	facts.Direct = injectedMcpsOfServers(plan.Direct)
 	facts.Remote = injectedMcpsOfServers(plan.Remote)
 	if plan.Gateway != nil {

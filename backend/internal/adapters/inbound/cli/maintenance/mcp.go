@@ -42,6 +42,8 @@ const mcpUsage = `mcp 用法：
       协议流走 stdout，**一切诊断走 stderr**（stdout 混进一行日志就会毁掉整条会话）
       凭据 cwd（<cwd>/.env 那一层）由核心经 env MATE_MCP_CRED_CWD 传入；没有它时用网关
       自己的 cwd 并 WARN（网关的 cwd 是底座给的，可能与核心不同）
+      调用审计的会话归属由核心经 env MATE_MCP_SESSION 传入（网关只带 scope，自己不知道
+      谁拉起了它）；没有它时审计行照写、session_id 留空并 WARN（sqlite 模式才有审计表）
 `
 
 // mcpBridge `mate mcp bridge`：平台侧 MCP stdio 网关的进程入口。

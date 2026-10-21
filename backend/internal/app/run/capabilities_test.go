@@ -149,39 +149,39 @@ func TestMcpServersFor(t *testing.T) {
 
 	// 网关开（默认）：stdio 直连 1 条 + 网关 1 条。注意 stub **只声明 stdio**，而远程 server
 	// 照样经网关可达——这正是 §10.6-① 的收益。
-	got := svc.McpServersFor("stub", noBind)
+	got := svc.McpServersFor("stub", "", noBind)
 	if len(got) != 2 || got[0].Name != "fs_stdio" || got[0].Transport != capability.TransportStdio {
 		t.Fatalf("仅 stdio 的 runtime 应取「stdio 直连 + 网关」2 条，got %+v", got)
 	}
 	assertGatewayEntry(got)
-	if got := svc.McpServersFor("rtx", noBind); len(got) != 2 {
+	if got := svc.McpServersFor("rtx", "", noBind); len(got) != 2 {
 		t.Fatalf("rtx 未声明白名单应取「stdio 直连 + 网关」2 条（不再逐条直连远程），got %+v", got)
 	}
 	// 白名单只钉 stdio server：直连 1 条 + **网关条目照样在**（条目恒定，不跟定义集走）；
 	// 它的远程面会是空的（网关按同一份白名单取数），所以"钉了 stdio 就没网关条目"不是判据。
-	if got := svc.McpServersFor("rtx", onlyFS); len(got) != 2 || got[0].Name != "fs_stdio" || got[1].Name != mcp.GatewayServerName {
+	if got := svc.McpServersFor("rtx", "", onlyFS); len(got) != 2 || got[0].Name != "fs_stdio" || got[1].Name != mcp.GatewayServerName {
 		t.Fatalf("白名单 fs_stdio 应取「直连 1 条 + 恒定网关条目」，got %+v", got)
 	}
-	if got := svc.McpServersFor("rtx", denyAll); len(got) != 0 {
+	if got := svc.McpServersFor("rtx", "", denyAll); len(got) != 0 {
 		t.Fatalf("空白名单应禁用注入，got %+v", got)
 	}
-	if got := svc.McpServersFor("ghost", noBind); len(got) != 0 {
+	if got := svc.McpServersFor("ghost", "", noBind); len(got) != 0 {
 		t.Fatalf("未知 runtime 应不下发，got %+v", got)
 	}
 	// Spec.McpTransports 为空 → 该 runtime 的直连只承载 stdio（ACP 全 agent 必须支持）。
-	if got := svc.McpServersFor("plain", noBind); len(got) != 2 || got[0].Name != "fs_stdio" {
+	if got := svc.McpServersFor("plain", "", noBind); len(got) != 2 || got[0].Name != "fs_stdio" {
 		t.Fatalf("未声明传输的 runtime 应取「stdio 直连 + 网关」，got %+v", got)
 	}
 
 	// 回退开关：off → 老口径逐条直连（远程按该 runtime 的声明过滤）。
 	planesOf(svc).SetMcpGatewayEnabled(false)
-	if got := svc.McpServersFor("stub", noBind); len(got) != 1 || got[0].Name != "fs_stdio" {
+	if got := svc.McpServersFor("stub", "", noBind); len(got) != 1 || got[0].Name != "fs_stdio" {
 		t.Fatalf("网关关时应回到「仅承载得起的直连」，got %+v", got)
 	}
-	if got := svc.McpServersFor("rtx", noBind); len(got) != 3 {
+	if got := svc.McpServersFor("rtx", "", noBind); len(got) != 3 {
 		t.Fatalf("网关关时 rtx 应逐条直连 3 台，got %+v", got)
 	}
-	if got := svc.McpServersFor("plain", noBind); len(got) != 1 {
+	if got := svc.McpServersFor("plain", "", noBind); len(got) != 1 {
 		t.Fatalf("网关关时未声明传输的 runtime 应保守仅 stdio，got %+v", got)
 	}
 }

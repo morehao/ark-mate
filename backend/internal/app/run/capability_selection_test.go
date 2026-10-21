@@ -65,23 +65,23 @@ func TestCapabilitySelectionMcpPrecedence(t *testing.T) {
 	svc := selRig(t)
 
 	// 未声明 → 全量（该 runtime 承载得起的全部）。
-	if got := names(svc.McpServersFor("rtx", nil)); len(got) != 2 {
+	if got := names(svc.McpServersFor("rtx", "", nil)); len(got) != 2 {
 		t.Fatalf("未声明会话选定应取全量，got %v", got)
 	}
 	// 声明了空数组 → 一个都不要（**不是**回落全量）。
-	if got := svc.McpServersFor("rtx", &session.CapabilitySelection{Mcps: ptrOf([]string{})}); len(got) != 0 {
+	if got := svc.McpServersFor("rtx", "", &session.CapabilitySelection{Mcps: ptrOf([]string{})}); len(got) != 0 {
 		t.Fatalf("会话选定空数组应禁用注入，got %v", names(got))
 	}
 	// 声明了 web → 只要 web（求交/并集都说不清意图，命中制只有这一种读法）。
-	if got := names(svc.McpServersFor("rtx", &session.CapabilitySelection{Mcps: ptrOf([]string{"web"})})); len(got) != 1 || got[0] != "web" {
+	if got := names(svc.McpServersFor("rtx", "", &session.CapabilitySelection{Mcps: ptrOf([]string{"web"})})); len(got) != 1 || got[0] != "web" {
 		t.Fatalf("会话选定应逐条命中，got %v", got)
 	}
 	// 只声明 skill 侧 → MCP 仍是全量（两个 kind 互相独立）。
-	if got := names(svc.McpServersFor("rtx", &session.CapabilitySelection{Skills: ptrOf([]string{"alpha"})})); len(got) != 2 {
+	if got := names(svc.McpServersFor("rtx", "", &session.CapabilitySelection{Skills: ptrOf([]string{"alpha"})})); len(got) != 2 {
 		t.Fatalf("只声明 skill 时 MCP 应保持全量，got %v", got)
 	}
 	// 空选定对象（`capabilities: {}`）→ 与未声明同义：全量。
-	if got := names(svc.McpServersFor("rtx", session.NewCapabilitySelection())); len(got) != 2 {
+	if got := names(svc.McpServersFor("rtx", "", session.NewCapabilitySelection())); len(got) != 2 {
 		t.Fatalf("空选定对象应取全量，got %v", got)
 	}
 }
@@ -181,7 +181,7 @@ func TestMcpInjectionRestorePathMatchesPinnedSelection(t *testing.T) {
 	injectedFor := func(rec *session.SessionRec) []string {
 		t.Helper()
 		sel := session.ParseCapabilitySelection(rec.CapabilityJSON)
-		return names(svc.McpServersFor("rtx", sel))
+		return names(svc.McpServersFor("rtx", "", sel))
 	}
 
 	// 恢复路径的注入集与会话钉住的选定一致。

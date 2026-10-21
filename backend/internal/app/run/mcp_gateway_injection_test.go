@@ -7,8 +7,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
+	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -121,7 +121,7 @@ func TestGatewayEntryCarriesPinnedSelectionOnly(t *testing.T) {
 	}
 	entryFor := func(sel *session.CapabilitySelection) string {
 		t.Helper()
-		entries := svc.McpServersFor("stub", sel)
+		entries := svc.McpServersFor("stub", "", sel)
 		var gw *runtime.McpServer
 		for i := range entries {
 			if entries[i].Name == mcp.GatewayServerName {
@@ -237,7 +237,7 @@ func TestGatewayEntryNotInjectedIntoRemoteAcpRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := svc.McpServersFor("remote", nil)
+	got := svc.McpServersFor("remote", "", nil)
 	if gw := gatewayMcp(got); gw != nil {
 		t.Fatalf("远程端点不该拿到网关条目（本机路径对它无意义）：%+v", gw)
 	}
@@ -280,7 +280,7 @@ func TestGatewayEntryCarriesCredentialCwd(t *testing.T) {
 
 	// ① 登记过（= 用户在某个目录下启动了 mate serve）→ 条目把这个值交下去。
 	planesOf(svc).Credentials.SetCwd("/tmp/serve-cwd")
-	entry, err := svc.gatewayEntry("stub", nil)
+	entry, err := svc.gatewayEntry("stub", "", nil)
 	if err != nil {
 		t.Fatalf("合成网关条目: %v", err)
 	}
@@ -293,12 +293,127 @@ func TestGatewayEntryCarriesCredentialCwd(t *testing.T) {
 	//    而不是收到一个被 `os.Getwd()` 冒充成"核心的答案"的值。
 	for _, v := range []string{"", "   "} {
 		planesOf(svc).Credentials.SetCwd(v)
-		entry, err := svc.gatewayEntry("stub", nil)
+		entry, err := svc.gatewayEntry("stub", "", nil)
 		if err != nil {
 			t.Fatalf("合成网关条目: %v", err)
 		}
 		if _, ok := entry.Env[mcp.GatewayCredCwdEnv]; ok {
 			t.Fatalf("未登记 cwd（%q）时不得带 %s：%v", v, mcp.GatewayCredCwdEnv, entry.Env)
+		}
+	}
+}
+
+// ——— T2 第一刀：网关条目的**会话归属**（审计用） ———
+
+// TestGatewayEntryCarriesSessionID 条目把会话 id 交给网关（它自己不知道谁拉起了它）。
+//
+// 与凭据 cwd 的一处**刻意不同**：这个键**无条件**出现（空值也带）。理由是键名进指纹，而指纹
+// 那一路（`CapabilityFactsFor`）在 `session/new` 之前拿不到会话 id——按"有值才带键"拼条目，
+// 指纹与真实注入的键集合就会分叉（"指纹说含 X、实际多一个键"）。
+func TestGatewayEntryCarriesSessionID(t *testing.T) {
+	svc, _ := newSearchRig(t)
+
+	entry, err := svc.gatewayEntry("stub", "ses_audit001", nil)
+	if err != nil {
+		t.Fatalf("合成网关条目: %v", err)
+	}
+	if got := entry.Env[mcp.GatewaySessionEnv]; got != "ses_audit001" {
+		t.Fatalf("条目应把会话 id 交给网关（key=%s），got %q（env=%v）", mcp.GatewaySessionEnv, got, entry.Env)
+	}
+	// 会话 id **不得**进 Args：`Args` 逐字进能力指纹，进去就变成"每会话一个代际"。
+	for _, a := range entry.Args {
+		if strings.Contains(a, "ses_audit001") {
+			t.Fatalf("会话 id 不得出现在 Args（Args 进指纹）：%v", entry.Args)
+		}
+	}
+
+	// 空会话 id → 键仍然在（值空）：两者的**键集合**必须相同，否则指纹会分叉。
+	empty, err := svc.gatewayEntry("stub", "", nil)
+	if err != nil {
+		t.Fatalf("合成网关条目: %v", err)
+	}
+	if _, ok := empty.Env[mcp.GatewaySessionEnv]; !ok {
+		t.Fatalf("会话 id 为空时该键仍须存在（键名进指纹，键集合必须恒定）：%v", empty.Env)
+	}
+
+	// **两个不同的会话 id，条目的"指纹面"必须逐字相同**：`Command` / `Args` 逐字进能力指纹，
+	// `Env` 只有键名进。会话 id 一旦漏进 `Args`，两种失败都是静默的——① 指纹按 A 算、注入却是 B
+	// （会话 id 在指纹那一侧拿不到），于是「指纹说含 X、实际注入 X'」；② 或者每会话一个代际、
+	// 每个会话各起一个底座进程（功能上看不出来，只是变慢变多）。这条断言就是那个判据。
+	other, err := svc.gatewayEntry("stub", "ses_audit002", nil)
+	if err != nil {
+		t.Fatalf("合成网关条目: %v", err)
+	}
+	if other.Command != entry.Command {
+		t.Fatalf("Command 不该随会话变：%q vs %q", entry.Command, other.Command)
+	}
+	if strings.Join(entry.Args, " ") != strings.Join(other.Args, " ") {
+		t.Fatalf("Args 逐字进指纹 ⇒ 不得随会话变：%v vs %v", entry.Args, other.Args)
+	}
+	if got, want := strings.Join(capability.KeysOf(other.Env), ","), strings.Join(capability.KeysOf(entry.Env), ","); got != want {
+		t.Fatalf("Env **键名**进指纹 ⇒ 键集合不得随会话变：%q vs %q", got, want)
+	}
+	if entry.Env[mcp.GatewaySessionEnv] == other.Env[mcp.GatewaySessionEnv] {
+		t.Fatalf("两条例目的会话 id 取值必须不同（否则上面「键集合相同」是被空值蒙过去的）")
+	}
+}
+
+// TestGatewaySessionIDDoesNotChangeFingerprint 会话 id 是**值**：两条不同的会话拿同一套能力，
+// 必须落在同一个代际（同一个底座进程）上。
+//
+// 反面同样钉住：条目里**确实**各自带着自己的会话 id——否则"不换代际"会被"它根本没进条目"蒙过去。
+func TestGatewaySessionIDDoesNotChangeFingerprint(t *testing.T) {
+	r := newGenRig(t)
+	log := sessionNewLog(t)
+	sel := session.NewCapabilitySelection()
+
+	convA, asA := r.start(t, sel)
+	convB, asB := r.start(t, sel)
+	if asA.Fingerprint == "" {
+		t.Fatal("这条用例需要真实指纹（否则证明不了「值不入指纹」）")
+	}
+	if convA == convB {
+		t.Fatalf("两条会话应是不同 id：%q", convA)
+	}
+	if asA.Fingerprint != asB.Fingerprint {
+		t.Fatalf("会话 id 不得影响指纹（它是值，不是注入面）：%s vs %s", asA.Fingerprint, asB.Fingerprint)
+	}
+
+	// 两次 session/new 的网关条目：各自带自己的会话 id（归属正确），其余逐字相同。
+	news := log()
+	if len(news) < 2 {
+		t.Fatalf("应有两次 session/new 记录，got %d", len(news))
+	}
+	sessionIDs := make([]string, 0, 2)
+	for _, rec := range news[len(news)-2:] {
+		servers := mcpServersOf(t, rec)
+		if len(servers) == 0 {
+			t.Fatalf("应有网关条目：%v", rec)
+		}
+		// 底座可见面（ACP）上 env 是 `[{name,value}]` 数组，不是 map。
+		var entry struct {
+			Env []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"env"`
+		}
+		if err := json.Unmarshal(servers[0], &entry); err != nil {
+			t.Fatalf("解析网关条目: %v（%s）", err, servers[0])
+		}
+		got := ""
+		for _, kv := range entry.Env {
+			if kv.Name == mcp.GatewaySessionEnv {
+				got = kv.Value
+			}
+		}
+		if got == "" {
+			t.Fatalf("条目在底座可见面上应带 %s：%s", mcp.GatewaySessionEnv, servers[0])
+		}
+		sessionIDs = append(sessionIDs, got)
+	}
+	for _, want := range []string{convA, convB} {
+		if !strings.Contains(strings.Join(sessionIDs, ","), want) {
+			t.Fatalf("每次 session/new 的条目都应带**本次**会话 id（%s），got %v", want, sessionIDs)
 		}
 	}
 }

@@ -62,7 +62,13 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 ### T2 · O3-b：MCP 调用结果进审计表（事件流第二刀）
 
-- **现状**：`backend/internal/adapters/inbound/mcpgateway/source.go` 只在 stderr 留一行
+> **第一刀已落地（2026-10-21，schema v31）**：`mcp_call_audits` 表 + 迁移 + 网关写点（成功 / 上游失败 /
+> 被拒三态，**写失败只 WARN 不阻断调用**）+ 保留期 30 天 / 上限 20000（网关按小时节流裁剪，启动先裁一次）。
+> 会话归属由核心经网关条目的 `env` 下发（`MATE_MCP_SESSION`，走 `env` 而不是 `Args`——后者逐字进指纹，
+> 进去就变成"每会话一个代际"）。口径写在 [`architecture.md`](./architecture.md) §5.2 与 §7.3。
+> **本节只剩第二刀（事件流，可选）**：加事件前先答"前端是否真的消费"，不消费就只留审计表。
+
+- **现状（第一刀之前）**：`backend/internal/adapters/inbound/mcpgateway/source.go` 只在 stderr 留一行
   `(server, tool, outcome, latency_ms)`——**事后无法按会话复盘调用了什么**。
 - **做什么**（建议分两刀，别一次做完）：
   1. **第一刀：审计表**。新表（`server_id / tool / outcome / latency_ms / session_id / run_id /
@@ -92,7 +98,7 @@ cd frontend && pnpm run typecheck && pnpm run build
 ### T4 · L3-3：审计表加哈希链
 
 - **现状**：`backend/internal/adapters/outbound/sqlite/dao/definition_revision.go` 的每条 revision 独立，改过也看不出来。
-- **做什么**：加 `prev_hash` / `hash` 两列（写这段时最新迁移是 v30，所以下一版是 v31），写入时在
+- **做什么**：加 `prev_hash` / `hash` 两列（写这段时最新迁移是 v31，所以下一版是 v32），写入时在
   **同一事务**里取该表最后一条的 `hash` 作为 `prev_hash`；创世条用固定常量。
   提供一个只读校验函数（遍历链，发现断点返回第一条坏行的 id）。
 - **验收**：

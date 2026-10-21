@@ -19,12 +19,22 @@ package mcpgateway
 //   - **绝不把密钥写进日志**：只记 server id、键名、引用名与失败原因（与 `resolveMcpSecrets`
 //     同一纪律）。
 //
+// **调用审计（v31 / T2 第一刀）**：每一次 `tools/call` 除日志之外还落一行 `mcp_call_audits`
+// （会话归属、server、工具、三态结果、耗时）。日志回答"刚才发生了什么"，审计表回答"**这个会话**
+// 调了什么"——后者按会话聚合，日志做不到（按日期轮转、进程一退就散）。三条取舍：
+//   - **写失败只 WARN、不阻断调用**（与事件持久化 C32 同一取舍）：结果已经拿回来了，因为审计
+//     没落地把它变成失败，比少一行审计更糟；
+//   - **不记工具入参**（入参里常带路径与令牌）；
+//   - **会话归属靠核心下发**（`mcp.GatewaySessionEnv`）：网关只带 scope，自己不知道谁拉起了它。
+//     memory 模式没有持久层 ⇒ 没有审计面，启动时 INFO 一次（不静默，也不假装写过）。
+//
 // `Source` 的**会话归属**：本文件不关心"网关进程被谁拉起"，只认 scope 的 runtime + 会话钉住的
 // 白名单；stdio server 不在面里（底座直连，见 `capability.RemoteMcpTransports` 的注释）。
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -33,12 +43,12 @@ import (
 
 	"github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/credential"
 
-	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/platform/capability"
-	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
-	domprovider "github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
+	"github.com/morehao/ark-mate/internal/config"
+	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
+	domprovider "github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -104,6 +114,26 @@ type SourceOptions struct {
 	// `resolveCredCwd` 的优先级：显式入参 > 环境变量 > 网关自己的 cwd）。留出这个字段是为了让
 	// 调用方与测试能**显式**给一个值，而不必去摆布进程环境。
 	CredCwd string
+
+	// SessionID 本网关进程服务的**平台会话 id**（审计归属）。
+	//
+	// 常规路径下留空——核心会把它经 `mcp.GatewaySessionEnv` 放在网关条目的 `env` 里（见
+	// `resolveSessionID` 的优先级：显式入参 > 环境变量 > 空）。与 `CredCwd` 同理，留出这个
+	// 字段是让调用方与测试不必摆布进程环境。
+	SessionID string
+	// Audit 审计落点（测试用；nil → 用注入/自建的持久层，memory 模式下没有落点）。
+	//
+	// 为什么留一个注入点：本包要验的两条判据（"一次调用恰好一行"、"写失败不阻断调用"）里，
+	// 后者的**唯一**观测方式就是让写必然失败——用一个失败的 sink 比"关掉库句柄"干净得多
+	// （关库会让定义重读先失败，于是根本不是审计那条路在出错）。
+	Audit AuditSink
+}
+
+// AuditSink 审计落点：把一次网关工具调用写成一行审计。
+//
+// `*store.Store` 结构上满足它（方法名与参数类型相同），装配根与 CLI 不需要适配体。
+type AuditSink interface {
+	AppendMcpCallAudit(ctx context.Context, rec store.McpCallRecord) error
 }
 
 // 凭据 cwd 的来源（日志与测试共用同一组取值；`source` 进日志，判据落在"回落到自己那份"）。
@@ -140,6 +170,21 @@ func resolveCredCwd(explicit string, getenv func(string) string) (cwd, source st
 	return own, credCwdSourceOwnGetwd
 }
 
+// resolveSessionID 决定审计归属：**显式入参 > 环境变量 > 空**。
+//
+// 与 `resolveCredCwd` 同一个形状（纯函数 + getenv 注入，判据可测），但**没有回落兜底**：
+// cwd 至少还有个"自己的"可回落，而"哪个会话拉起了我"只存在于核心的记忆里——猜不出来，
+// 也不该猜（猜错的审计行比空 session_id 更糟：它会把一次调用记到别的会话上）。
+func resolveSessionID(explicit string, getenv func(string) string) string {
+	if v := strings.TrimSpace(explicit); v != "" {
+		return v
+	}
+	if getenv != nil {
+		return strings.TrimSpace(getenv(mcp.GatewaySessionEnv))
+	}
+	return ""
+}
+
 // MateSource 从平台持久层取数并代理远程 MCP 的 `Source` 实现。
 //
 // **不经过执行面**（P5a）：网关要的是领域平面与库句柄，而不是会话/编排。两边各自
@@ -161,6 +206,12 @@ type MateSource struct {
 	// 留在结构体上是为了让日志与测试看的是**同一个已决定的值**，不是各算一遍）。
 	credCwd       string
 	credCwdSource string
+	// sessionID 本次装配认下的平台会话 id（审计归属；空 = 没拿到，审计行照写但 session_id 留空）。
+	sessionID string
+	// audit 审计落点（nil = memory 模式没有持久层，不写审计表）。
+	audit AuditSink
+	// auditPrunedAt 上次裁剪审计表的时刻（按 `auditPruneInterval` 节流；启动时先裁一次）。
+	auditPrunedAt time.Time
 
 	mu         sync.Mutex
 	lastReload time.Time
@@ -253,6 +304,36 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 		s.planes.ProviderPlane().LoadProviderDefinitions(opts.Cfg.ProviderDir)
 		s.planes.LoadCapabilityDefinitions(opts.Cfg.CapabilityDir)
 	}
+	// 调用审计（v31）：sqlite 模式写 `mcp_call_audits`；memory 模式没有持久层，没有审计面。
+	//
+	// 归属由**核心**经条目 env 下发（`mcp.GatewaySessionEnv`）：网关只带 scope，自己无从知道
+	// "我被哪个会话拉起来了"。判据落在这里的三个分支上——三种形态都必须**说出来**，
+	// 因为"审计静默不写"与"审计写了但归属为空"在复盘时看起来一样（都是查不到）。
+	s.sessionID = resolveSessionID(opts.SessionID, os.Getenv)
+	if opts.Audit != nil {
+		s.audit = opts.Audit // 注入的落点优先（测试形态；它在 memory 模式下也成立）
+	} else if s.st != nil {
+		s.audit = AuditSink(s.st)
+	}
+	if s.st != nil {
+		// 启动时先裁一次：节流只按进程内的时钟走，长命网关进程之间不会互相"记账"。
+		s.auditPrunedAt = s.now()
+		if removed, pErr := s.st.PruneMcpCallAudits(ctx, s.now()); pErr != nil {
+			glog.Warnw(ctx, "mcp 网关: 启动时裁剪审计表失败（不影响调用）", "err", pErr)
+		} else if removed > 0 {
+			glog.Infow(ctx, "mcp 网关: 启动时裁剪审计表", "deleted", removed)
+		}
+	}
+	switch {
+	case s.audit == nil:
+		glog.Infow(ctx, "mcp 网关: 没有审计落点（memory 模式没有持久层），本次不写调用审计")
+	case s.sessionID == "":
+		// 审计行照写，但 session_id 留空："不知道属于谁"也是事实，比装作没有这次调用好。
+		glog.Warnw(ctx, "mcp 网关: 没有拿到会话归属，审计行将无法按会话复盘", "env", mcp.GatewaySessionEnv)
+	default:
+		glog.Infow(ctx, "mcp 网关: 调用审计就绪", "session", s.sessionID)
+	}
+
 	s.lastReload = s.now()
 	glog.Infow(ctx, "mcp 网关数据面就绪",
 		"store", opts.Cfg.ResolvedStoreMode(), "db", opts.Cfg.DBPath,
@@ -361,7 +442,10 @@ func (s *MateSource) Call(ctx context.Context, name string, args json.RawMessage
 		// 否决同样留痕：模型调一个已被收窄掉的工具时，日志里必须能看出"平台拒绝了它"，
 		// 而不是"远端没回话"——同样的 (tool, allow/deny) 证据面。
 		glog.Infow(ctx, "mcp 网关: 工具调用被拒（不在当下工具面）",
-			"tool", name, "outcome", "deny", "candidates", strings.Join(ids, ","))
+			"tool", name, "outcome", store.McpCallOutcomeDeny, "candidates", strings.Join(ids, ","))
+		// 否决也要落审计：复盘时"模型要调一个已被收窄掉的工具"与"远端没回话"是两件事，
+		// 而两者在结果里都只是"工具调用失败"。
+		s.auditCall(ctx, store.McpCallRecord{Tool: name, Outcome: store.McpCallOutcomeDeny})
 		return mcp.CallResult{}, mcp.ErrToolNotFound
 	}
 	var target *gatewayServer
@@ -372,24 +456,128 @@ func (s *MateSource) Call(ctx context.Context, name string, args json.RawMessage
 		}
 	}
 	if target == nil {
+		// 选中的 server 在这一轮里消失了（定义刚被改）：同样是 deny，但知道它本该是谁。
+		s.auditCall(ctx, store.McpCallRecord{ServerID: defID, Tool: tool, Outcome: store.McpCallOutcomeDeny})
 		return mcp.CallResult{}, mcp.ErrToolNotFound
 	}
 	cctx, cancel := context.WithTimeout(ctx, s.perServer)
 	defer cancel()
 	// 每次调用**记一条**(server, tool, 结果, 耗时)：这是"底座何时重列工具面 / 收窄是否即时
-	// 生效"（设计 §10.6-⑤ 的 E4/E6）唯一的一手证据，不落库（v1 网关无状态）。
+	// 生效"（设计 §10.6-⑤ 的 E4/E6）唯一的一手证据。当日志之外还要落一行审计（v31）：
+	// 日志只回答"刚才发生了什么"，按会话复盘要靠 `mcp_call_audits`。
 	start := s.now()
 	res, err := s.pool.CallTool(cctx, target.client, tool, args)
+	latency := s.now().Sub(start).Milliseconds()
 	if err != nil {
 		glog.Infow(ctx, "mcp 网关: 工具调用失败",
-			"server", defID, "tool", tool, "outcome", "error",
-			"err", err, "latency_ms", s.now().Sub(start).Milliseconds())
+			"server", defID, "tool", tool, "outcome", store.McpCallOutcomeError,
+			"err", err, "latency_ms", latency)
+		s.auditCall(ctx, store.McpCallRecord{
+			ServerID: defID, Tool: tool, Outcome: store.McpCallOutcomeError,
+			ErrorKind: classifyCallError(err), LatencyMS: latency,
+		})
 		return res, err
 	}
 	glog.Infow(ctx, "mcp 网关: 工具调用完成",
-		"server", defID, "tool", tool, "outcome", "ok",
-		"latency_ms", s.now().Sub(start).Milliseconds())
+		"server", defID, "tool", tool, "outcome", store.McpCallOutcomeOK,
+		"latency_ms", latency)
+	s.auditCall(ctx, store.McpCallRecord{
+		ServerID: defID, Tool: tool, Outcome: store.McpCallOutcomeOK, LatencyMS: latency,
+	})
 	return res, nil
+}
+
+// ——— 调用审计的写入面（v31 / T2 第一刀）———
+
+// auditPruneInterval 两次裁剪之间的最小间隔。
+//
+// 裁剪要全扫一遍 `created_at`（`julianday()` 用不上索引，见 `store.PruneMcpCallAudits` 的理由），
+// 所以不能每次调用都裁。一小时一次：表最多两万行，扫它一次是毫秒级，而"晚一小时才删掉过期行"
+// 对审计表没有任何影响。
+const auditPruneInterval = time.Hour
+
+// auditCall 写一行审计。**永不返回错误、永不改变调用结果**（C32 同一取舍）：
+//
+// 写失败只 WARN。这是刻意的——结果已经拿回来了，因为"审计行没落地"把一次成功的调用变成失败，
+// 比少一行审计糟得多。反过来说，这条 WARN 也**必须**在测试里被钉住（把这里改成 return err，
+// 那条"上游成功但审计失败"的用例必须红）。
+func (s *MateSource) auditCall(ctx context.Context, rec store.McpCallRecord) {
+	if s.audit == nil {
+		return // memory 模式：没有持久层，也没有审计面（NewSource 已 INFO 过一次）
+	}
+	rec.SessionID = s.sessionID
+	if rec.RunID == "" {
+		rec.RunID = s.openRunID(ctx)
+	}
+	rec.At = s.now()
+	if err := s.audit.AppendMcpCallAudit(ctx, rec); err != nil {
+		glog.Warnw(ctx, "mcp 网关: 审计行写入失败（调用不受影响）",
+			"server", rec.ServerID, "tool", rec.Tool, "outcome", rec.Outcome, "err", err)
+		return
+	}
+	s.pruneAuditIfDue(ctx)
+}
+
+// openRunID 调用发生时该会话**正在进行**的那一轮；空 = 不在轮内/查不到/不唯一。
+//
+// 为什么不缓存：一轮的长短从几秒到几十分钟，缓存只会让"归属"过期；而这条查询走
+// `runs(session_id, …)` 的索引前缀（最多两条行），比一次远端工具调用便宜几个数量级。
+// 多条开轮行 = 崩溃残轮，这时"最近一条"只是猜测，宁可留空（同 `store.RunningRuns` 的口径）。
+func (s *MateSource) openRunID(ctx context.Context) string {
+	if s.st == nil || s.sessionID == "" {
+		return ""
+	}
+	runs, err := s.st.RunningRuns(ctx, s.sessionID)
+	if err != nil {
+		glog.Debugw(ctx, "mcp 网关: 读进行中的轮失败（审计行的 run_id 留空）", "err", err)
+		return ""
+	}
+	if len(runs) != 1 {
+		return ""
+	}
+	return runs[0].ID
+}
+
+// pruneAuditIfDue 按 `auditPruneInterval` 节流裁剪；失败只 WARN（裁剪失败不影响审计继续写）。
+func (s *MateSource) pruneAuditIfDue(ctx context.Context) {
+	if s.st == nil {
+		return // 注入的审计落点没有裁剪面（测试形态）
+	}
+	now := s.now()
+	s.mu.Lock()
+	due := now.Sub(s.auditPrunedAt) >= auditPruneInterval
+	if due {
+		s.auditPrunedAt = now
+	}
+	s.mu.Unlock()
+	if !due {
+		return
+	}
+	removed, err := s.st.PruneMcpCallAudits(ctx, now)
+	if err != nil {
+		glog.Warnw(ctx, "mcp 网关: 裁剪审计表失败", "err", err)
+		return
+	}
+	if removed > 0 {
+		glog.Infow(ctx, "mcp 网关: 审计表已裁剪", "deleted", removed)
+	}
+}
+
+// classifyCallError 把一次调用的错误折成 `error_kind` 的三个取值之一。
+//
+// 只做"是哪一类"的粗分类：细信息（原始错误串）留在日志里，不进库——它可能带 URL 与
+// 上游客体（T2 的风险段：审计表只记元数据）。
+func classifyCallError(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "upstream"
+	}
 }
 
 // gatewayServer 一台远程 server 的"定义 + 注入形态"。

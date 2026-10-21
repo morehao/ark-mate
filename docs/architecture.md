@@ -188,15 +188,17 @@ internal/adapters/outbound/sqlite/model（实体定义）被上面三者依赖�
 
 ### 5.2 表与实体
 
-17 张表，一表一文件（`internal/adapters/outbound/sqlite/model/<域>.go`），结构体一律 `<域词>Entity` / `<域词>EntityList`，表名常量 `TableName<域词>` 随实体文件走：
+18 张表，一表一文件（`internal/adapters/outbound/sqlite/model/<域>.go`），结构体一律 `<域词>Entity` / `<域词>EntityList`，表名常量 `TableName<域词>` 随实体文件走：
 
 | 分组 | 表 |
 | --- | --- |
-| 会话与执行 | `sessions` · `runs` · `messages` · `events` · `event_sequence` · `inputs` |
+| 会话与执行 | `sessions` · `runs` · `messages` · `events` · `event_sequence` · `inputs` · `mcp_call_audits` |
 | 交互与记忆 | `permission_memories` |
 | 能力定义 | `skills` · `mcp_servers` · `mcp_secrets` · `automations` |
 | 资源与凭据 | `providers` · `models` |
 | 空间与系统 | `workspaces` · `definition_revisions` · `meta` · `schema_migrations` |
+
+`mcp_call_audits`（v31）是**审计面**，与上面那些表不是一类东西，别按读模型的规矩改它：一次经平台 MCP 网关的 `tools/call` 一行（会话 / 轮次 / server / 工具 / `ok|error|deny` / 耗时），**只追加、不重建**（它不参与 `mate doctor --rebuild-read-models`，因为来源不是 `events`），**不记工具入参正文**（入参会带路径与令牌），并且**没有 REST 读面、不进事件总线**——要按会话复盘就直查这张表。写入点在网关进程（`internal/adapters/inbound/mcpgateway`），**写失败只 WARN、不阻断调用**（与 C32 同一取舍）。保留期 30 天 + 行数上限 20000（`store.McpCallAuditRetention` / `store.McpCallAuditMaxRows`，改它等于改"还能回溯多久"）；网关按小时节流裁剪，启动时先裁一次。
 
 ### 5.3 身份与位次（两件不同的事）
 
@@ -275,6 +277,8 @@ internal/adapters/outbound/sqlite/model（实体定义）被上面三者依赖�
 - **明文与密钥分开**：`env` / `headers` 是明文（可读回键名、可 diff），`secret_env` / `secret_headers` 的值**只能是引用**。读模型只回键名，连引用都不回；「绑了但解析不了」作为半配置摆到列表上，绝不静默塞空凭证。
 - **远程 MCP 经平台侧网关代连**（`mate mcp bridge --runtime <id>`）：底座侧只注入**一条恒定**的 stdio 条目，网关进程自己读库、解引用、连远端、把工具面拼给底座。收益是结构性的——底座的配置面不再随「有几台远程 server / URL 改没改 / 密钥换没换」变化，于是**增删改远程 MCP 不再换代际**，密钥本体也不进入底座可见面。
 - 工具命名是 `<serverID>__<toolName>`；跨 server 撞名时**fail-closed 整组丢弃**（保留「第一个」会让调用静默落到另一台 server 上）。
+- 网关条目只带 scope（`--runtime` + 会话钉住的 `--mcps`），外加 `env` 里两项**平台装配值**（都不是密钥）：**凭据 cwd**（`MATE_MCP_CRED_CWD`，「用户启动 `mate serve` 的目录」）与**会话 id**（`MATE_MCP_SESSION`，审计归属）。两者都走 `env` 而不是 `Args`：`Args` 逐字进能力指纹，会话 id 进去就变成「每会话一个代际」（暖进程复用与代际台账一起报废，功能上却看不出来）；`env` 只把**键名**入指纹，键名恒定、取值不入。会话 id 那个键**无条件存在**（值可能是空串）——指纹那一路在 `session/new` 之前还不知道会话 id，按「有值才带键」拼条目会让指纹与实际注入的键集合分叉。
+- 每一次 `tools/call` 除日志外还落一行审计（`mcp_call_audits`，见 §5.2）：日志回答「刚才发生了什么」，审计表回答「**这个会话**调了什么」。
 - 缺省路径（未声明能力集）的指纹恒为空、不迁移，所以恒定注入是「从零到一加一台远程 server」能被看见的唯一方式。
 
 ### 7.4 能力指纹与代际

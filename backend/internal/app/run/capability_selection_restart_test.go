@@ -52,7 +52,7 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	if fp0 := svc1.sessionPlane.CapabilityFingerprint("stub", nil); fp0 != "" {
 		t.Fatalf("未声明应为空指纹，got %q", fp0)
 	}
-	defInject := names(directMcp(svc1.McpServersFor("stub", nil)))
+	defInject := names(directMcp(svc1.McpServersFor("stub", "", nil)))
 	if len(defInject) != 2 {
 		t.Fatalf("对照组（未声明）应注入 2 条直连，got %v", defInject)
 	}
@@ -104,7 +104,7 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 		t.Fatalf("重启后代际键漂移:\n%s\n%s", genKey1, genKey2)
 	}
 	// ③ 恢复路径算出的注入集 = 会话钉住的那一份（不是"现在的默认"）。
-	restored := names(directMcp(svc2.McpServersFor("stub", session.ParseCapabilitySelection(rec2.CapabilityJSON))))
+	restored := names(directMcp(svc2.McpServersFor("stub", "", session.ParseCapabilitySelection(rec2.CapabilityJSON))))
 	if !sameSet(restored, []string{"git"}) {
 		t.Fatalf("重启后注入集应等于钉住的选定，got %v", restored)
 	}
@@ -113,8 +113,8 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	}
 	// 恒定的网关条目在重启前后**逐字**相同（args 里的 scope 与会话钉住的白名单都来自会话记录，
 	// 与进程无关）——它一旦漂移，重启就会换代际。
-	gw1 := gatewayMcp(svc1.McpServersFor("stub", session.ParseCapabilitySelection(rec1.CapabilityJSON)))
-	gw2 := gatewayMcp(svc2.McpServersFor("stub", session.ParseCapabilitySelection(rec2.CapabilityJSON)))
+	gw1 := gatewayMcp(svc1.McpServersFor("stub", "", session.ParseCapabilitySelection(rec1.CapabilityJSON)))
+	gw2 := gatewayMcp(svc2.McpServersFor("stub", "", session.ParseCapabilitySelection(rec2.CapabilityJSON)))
 	if gw1 == nil || gw2 == nil {
 		t.Fatal("两侧都应有恒定的网关条目")
 	}

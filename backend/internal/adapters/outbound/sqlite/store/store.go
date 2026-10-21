@@ -82,6 +82,10 @@ type Store struct {
 
 	// 工作空间登记（v14）：用户的工作目录这条线的持久身份。
 	workspaces *dao.WorkspaceDao
+
+	// MCP 网关调用审计（v31）：一次 `tools/call` 一行。它不是聚合，只做追加/复盘读/裁剪
+	// （见 store/mcp_audit.go 的文件头）。
+	mcpCallAudits *dao.McpCallAuditDao
 }
 
 // Open 打开（必要时创建）SQLite 库并自动迁移到最新 schema。
@@ -127,7 +131,8 @@ func New(db *gorm.DB) *Store {
 		models:     dao.NewModelDao(getDB),
 		mcpSecrets: dao.NewMcpSecretDao(getDB),
 
-		workspaces: dao.NewWorkspaceDao(getDB),
+		workspaces:    dao.NewWorkspaceDao(getDB),
+		mcpCallAudits: dao.NewMcpCallAuditDao(getDB),
 	}
 }
 

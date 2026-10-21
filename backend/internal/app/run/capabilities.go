@@ -30,8 +30,11 @@ import (
 // 会话重启后注入集悄悄变回全量默认（用户看不到任何提示）。
 //
 // v19 起没有"agent 白名单"这一层：会话没钉就是全量（按 runtime transport 过滤）。
-func (s *Service) McpServersFor(runtimeID string, sel *session.CapabilitySelection) []runtime.McpServer {
-	plan := s.planMcpInjection(runtimeID, sel)
+//
+// `sessionID` 的唯一用途是让网关写审计行时知道"我是被哪个会话拉起来的"（T2 第一刀）：
+// 它落在网关条目的 `env` 里，**不进 `Args`**（进了就每会话一个代际，见 `mcp.GatewaySessionEnv`）。
+func (s *Service) McpServersFor(runtimeID, sessionID string, sel *session.CapabilitySelection) []runtime.McpServer {
+	plan := s.planMcpInjection(runtimeID, sessionID, sel)
 	out := make([]runtime.McpServer, 0, len(plan.Direct)+1)
 	for _, m := range plan.Direct {
 		name := m.Name

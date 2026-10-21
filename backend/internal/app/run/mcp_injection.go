@@ -29,8 +29,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
+	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -54,10 +54,14 @@ func (p mcpInjectionPlan) empty() bool {
 
 // planMcpInjection 算出该 runtime 的 MCP 注入计划（唯一实现：注入面与指纹共用）。
 //
+// `sessionID` 只进网关条目的 `env`（审计归属，见 `mcp.GatewaySessionEnv`），**不进 `Args`**：
+// `Args` 逐字进能力指纹，会话 id 进去就等于每个会话一个代际。指纹那一路（`CapabilityFactsFor`）
+// 还不知道会话 id，所以传空串——键名恒定、取值不入，两条路径算出的指纹逐字相同。
+//
 // 与 `mcpSelectionFor`（白名单优先级那一段）的关系：选择语义在 `internal/platform/capability.SelectMcpServers`，
 // 这里负责**按传输分派**——直连那一支只收 stdio，远程那一支收远程三种。开关关掉（`mcp_gateway=off`）
 // 时回到老路：远程 server 按该 runtime 声明的承载能力直连注入（能承载才注入，承载不了就跳过）。
-func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySelection) mcpInjectionPlan {
+func (s *Service) planMcpInjection(runtimeID, sessionID string, sel *session.CapabilitySelection) mcpInjectionPlan {
 	var plan mcpInjectionPlan
 	if s.facts.Capabilities == nil {
 		return plan
@@ -105,7 +109,7 @@ func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySele
 		// 关掉了。此时连网关条目都不该出现——它的存在本身就是"这个面还在"，与声明相悖。
 		return plan
 	}
-	entry, err := s.gatewayEntry(runtimeID, sel)
+	entry, err := s.gatewayEntry(runtimeID, sessionID, sel)
 	if err != nil {
 		// 拼不出网关条目（取不到自身可执行文件路径）→ 远程 server 这轮**没有出路**。
 		// 响亮降级：宁可少工具，也不要注入一条指向不存在命令的 stdio 条目（底座会反复拉起失败）。
@@ -128,7 +132,7 @@ func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySele
 // 它的 cwd 是底座给的（会话工作区），而 `<cwd>/.env` 那一层的语义是"用户启动 `mate serve` 的
 // 目录"——没有这个变量，同一个引用会在两个进程里解析出不同的值。放 `Env` 而不是 `Args`：`Args`
 // 整体进指纹（换个目录启动就换代际），而 `Env` 只把**键名**入指纹（键名恒定、值不入）。
-func (s *Service) gatewayEntry(runtimeID string, sel *session.CapabilitySelection) (runtime.McpServer, error) {
+func (s *Service) gatewayEntry(runtimeID, sessionID string, sel *session.CapabilitySelection) (runtime.McpServer, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return runtime.McpServer{}, fmt.Errorf("取自身可执行文件路径失败：%w", err)
@@ -144,10 +148,14 @@ func (s *Service) gatewayEntry(runtimeID string, sel *session.CapabilitySelectio
 		Command:   exe,
 		Args:      mcp.GatewayBridgeArgs(scope),
 	}
+	// 审计归属**无条件带键**（值可能是空串）：键名进指纹，而指纹那一路还不知道会话 id——
+	// 按"有值才带键"会让两条路径的键集合不同，正是"指纹说含 X、实际多一个键"的静默分叉。
+	// 空串在网关侧等同"没有归属"（审计行照写，`session_id` 留空）。
+	entry.Env = map[string]string{mcp.GatewaySessionEnv: sessionID}
 	// 空 = 装配期没登记（测试、`mate demo` 这类不经装配的入口）：**不带这个键**，让网关侧
 	// 明确知道"核心没交 cwd"，回落并 WARN——不臆造一个 `os.Getwd()` 冒充核心的答案。
 	if cwd := s.facts.Credentials.Cwd(); cwd != "" {
-		entry.Env = map[string]string{mcp.GatewayCredCwdEnv: cwd}
+		entry.Env[mcp.GatewayCredCwdEnv] = cwd
 	}
 	return entry, nil
 }
