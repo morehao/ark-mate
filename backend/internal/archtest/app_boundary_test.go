@@ -25,13 +25,13 @@ func TestProcessShellDoesNotImportAdapters(t *testing.T) {
 		t.Fatalf("`internal/bootstrap/app` 未解析到任何 import：扫描面失效，判据形同虚设")
 	}
 	forbidden := []string{
-		"internal/persistence",
-		"internal/infra",
-		"internal/drivers",
+		"internal/adapters/outbound/sqlite",
+		"internal/adapters/outbound",
+		"internal/adapters",
 		"internal/app/run",
 		"internal/app",
 		"internal/domain",
-		"internal/delivery",
+		"internal/adapters/inbound",
 	}
 	for _, imp := range imports {
 		if !strings.HasPrefix(imp, modulePrefix) {

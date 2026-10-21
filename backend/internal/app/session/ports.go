@@ -11,7 +11,7 @@ import (
 // ——— 会话用例的**依赖端口**（P5：写面从 sessionruntime 搬进本包）———
 //
 // 搬过来的四条用例（CreateSession / PromptSession / CancelRun / DeliverQueuedNow）此前长在
-// `sessionruntime.Service` 上，于是"会话用例"有两个中心：读面在本包、写面在执行面。
+// `run.Service` 上，于是"会话用例"有两个中心：读面在本包、写面在执行面。
 // 端口把两边的**语言**对齐：用例层只声明"我要什么能力"，执行面（`Orchestrator`）实现它。
 //
 // 每个端口都窄到"这一条用例真正用到的那几样"，不把整个执行面交进来。

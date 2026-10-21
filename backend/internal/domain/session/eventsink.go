@@ -11,7 +11,7 @@ import (
 
 // ——— 运行期信号的**出口**（P4a 正文第五十五刀：从 `internal/manager` 搬入）———
 //
-// 底座回传的归一化信号（`event.Signal`，由 ACP 适配器翻译，见 `sessionruntime/event_bridge.go`）
+// 底座回传的归一化信号（`event.Signal`，由 ACP 适配器翻译，见 `app/run/event_bridge.go`）
 // 在这里翻译成平台事件（`Bus*`）并发布：
 //
 //	① 双 id 解析：底层事件只带原生 session id，先经 `Handles.ResolveProvider` 换成平台 uuid；

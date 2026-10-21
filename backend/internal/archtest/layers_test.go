@@ -215,7 +215,7 @@ func TestControllersMustNotImportImplementations(t *testing.T) {
 func TestPersistenceLayersMustNotImportAppLayers(t *testing.T) {
 	root := backendRoot(t)
 	transport := []string{
-		modulePrefix + "internal/delivery/controller",
+		modulePrefix + "internal/adapters/inbound/http/controller",
 		modulePrefix + "internal/adapters/inbound/http/router",
 		modulePrefix + "internal/contract",
 		modulePrefix + "internal/app",

@@ -242,7 +242,7 @@ func TestStubExecutionSessionEventSnapshot(t *testing.T) {
 	//
 	// **刻意没有** `session.message` / `session.thought` / `session.tool_call`：它们是适配器
 	// 事件流（增量）的产物，而桩只回一句话、不发增量——那两个事件的判据在 C2 第一刀
-	// （`sessionruntime/eventsink_signal_test.go` 的域信号桩）与 ACP 桩用例里。
+	// （`app/run/eventsink_signal_test.go` 的域信号桩）与 ACP 桩用例里。
 	want := []string{
 		"run.started",
 		"run.status",

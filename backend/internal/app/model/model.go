@@ -36,7 +36,7 @@ type DeclaredSvc interface {
 
 // ModelSvc 模型面的**过渡期复合接口**：声明清单的读面 + 运行时目录 + 同步。
 //
-// 今天由装配根交下来的组合实现满足（`sessionruntime.ModelFace`：`registry.ModelViews` 的读面/同步
+// 今天由装配根交下来的组合实现满足（`app/run.ModelFace`：`registry.ModelViews` 的读面/同步
 // + `ModelEffect` 的生效面回执）。它只声明**controller 真正调用**的三个方法——不要为了"看起来完整"
 // 把 `ListModels` 再放回来：那个方法没有接口消费方，放进来只会让"这一段还剩什么"变得不可见。
 //

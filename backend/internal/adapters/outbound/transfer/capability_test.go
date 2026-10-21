@@ -262,7 +262,7 @@ func TestImportExportRequireStore(t *testing.T) {
 
 // writeSkill 写一个定义文件（raw 为准，便于验证未知键保留）。
 //
-// 从 `sessionruntime/skills_test.go` 复制：本文件搬到 transfer 后不再与那个包共享夹具。
+// 从 `app/run/skills_test.go` 复制：本文件搬到 transfer 后不再与那个包共享夹具。
 func writeSkill(t *testing.T, dir, id, raw string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, "skills", id+".json"), []byte(raw), 0o644); err != nil {

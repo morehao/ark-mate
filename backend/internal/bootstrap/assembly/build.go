@@ -95,7 +95,7 @@ type Probe struct {
 
 // BuildResult 一次装配的产物：**只暴露端口**（阶段 0.5）。
 //
-// 不再出现 `*registry.Planes` / `*sessionruntime.Service` / `*runtimeconn.Plane` 等具体类型：
+// 不再出现 `*registry.Planes` / `*run.Service` / `*runtimeconn.Plane` 等具体类型：
 // 应用壳只经 `Handler` 起 HTTP、经 `Probe` 读诊断、经 `Close` 收尾。
 type BuildResult struct {
 	Handler     Handler

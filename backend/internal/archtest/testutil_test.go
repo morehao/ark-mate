@@ -31,7 +31,7 @@ func TestTestutilMustNotImportImplementations(t *testing.T) {
 	}
 	forbidden := []string{
 		modulePrefix + "internal/app/run",
-		modulePrefix + "internal/delivery/controller",
+		modulePrefix + "internal/adapters/inbound/http/controller",
 		modulePrefix + "internal/adapters/inbound/http/router",
 		modulePrefix + "internal/bootstrap/app",
 	}

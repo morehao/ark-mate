@@ -14,7 +14,7 @@ import (
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
-// ——— 会话写面用例（P5：从 `sessionruntime.Service` 搬入）———
+// ——— 会话写面用例（P5：从 `run.Service` 搬入）———
 //
 // 为什么它们属于这里：`CreateSession` 的三条判据（`agent_id` 显式拒绝、工作空间解析与
 // `workspace_id/cwd` 一致性、能力选定/原生模式的默认值合并）都是**用例语义**，与"谁拨号、

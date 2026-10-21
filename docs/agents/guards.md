@@ -10,9 +10,9 @@
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
-| **结构/边界类** | 依赖方向、包归属、装配边 | `layers_v32_test.go`、`layers_scan_test.go`、`svc_layer_consumer_test.go`、`automation_ownership_test.go` | 名字扫描（"某包不得 import 某包"）收敛为**一张层表**；其余改写扫描根，判据不变 |
+| **结构/边界类** | 依赖方向、包归属、装配边 | `layers_v32_test.go`、`layers_scan_test.go`、`usecase_layer_consumer_test.go`、`automation_ownership_test.go` | 名字扫描（"某包不得 import 某包"）收敛为**一张层表**；其余改写扫描根，判据不变 |
 | **语义/产品契约类** | 词汇、错误码、事件 type、契约快照、交付矩阵 | `agent_vocabulary_v19_test.go`、`event_type_contract`、`delivery_matrix_test.go`、`internal/bootstrap/app/contract_baseline_test.go` | **不删，只改扫描根**（语义守卫是产品事实，与目录结构无关） |
-| **路径耦合类** | 判据锚在具体文件/构造签名上 | `svcmodel_usecase_test.go`、`isolation_parity_test.go`、`runtime_pin_test.go` | 锚点随实现搬家同步；新增 `TestLayerTableCoversAllPackagesV31` 让"没登记的包"当场红 |
+| **路径耦合类** | 判据锚在具体文件/构造签名上 | `model_usecase_test.go`、`isolation_parity_test.go`、`runtime_pin_test.go` | 锚点随实现搬家同步；新增 `TestLayerTableCoversAllPackagesV31` 让"没登记的包"当场红 |
 
 判据纪律：**fail-closed**（扫不到对象就失败，不许静默空转）、**双向**（例外清零要删登记）、**反证**（新增守卫必须实跑一次反例）。
 
@@ -162,6 +162,34 @@
   `internal/adapters/outbound/acp` 即红。反证（实跑）：加一个 acp 空白 import → 红；把桩文件移走 → 红。
 
 **共 179 条**——加守卫时记得同步这句话。
+
+## C3 目录重组：判据怎么跟着搬（2026-10-21）
+
+C3 是**纯搬迁**（改目录与包名，不改行为），所以每条守卫的处理只有两种，没有第三种：
+
+1. **换锚**：判据指向的文件/目录/前缀跟着改，判据本身的语义一字不动；
+2. **换判据口径**（只在"锚的语义变了"时）：例如用例包名去掉 `svc` 前缀之后，
+   `app`/`router` 里 `system.` / `runtime.` 这类**限定符文本**已经指不到用例层（它们本来就是
+   `internal/runtime`、`domain/session` 这些包的限定符），于是那两条判据从"扫文本"改成
+   **扫 import 路径**（`usecase_layer_consumer_test.go` / `system_usecase_test.go`）。
+
+每一条都实跑反证（改动即红、恢复即绿），覆盖的动作与反证：
+
+| 动作 | 换锚的守卫 | 反证（实跑） |
+| --- | --- | --- |
+| `core/*` → `platform/*`、`dto/*` → `contract/*` | 层表 key/deny、`protocolFreePackages` 全量前缀、`TestPortsAndDTOsMustNotImportTransport` 扫描根、各条硬编码文件锚 | 在 `internal/platform/` 下放一个 import `delivery/router` 的包 → 层表"L1 → L9 向上" + 收口表"新包未登记"（双红） |
+| `service/svc*` → `app/<领域>` | 包集清单、`usecase_layer_consumer`、`TestUseCaseInstancesAreBuiltByAssembly` | 往 `bootstrap/app` 引一个 `internal/app/session` → 三条同时红 |
+| `sessionruntime` → `app/run`、`runtimeconn` → `adapters/outbound/` | 同层互引（改扫生产 import）、内圈自持类型扫描根、`protocolFreeExempt` 豁免表 | 把 `app/run` 从豁免表挪进正式表 → 红（它仍 import acp） |
+| `persistence/*` → `adapters/outbound/sqlite/*` | 层表 L0/L5 key、`TestInnerLayersUseNoTableRows` 的 `modelPkg` | `domain/workspace/row` 加 `sqlite/model` 引用 → 红 |
+| `infra/*` 按方向拆 | 「底座配置知识只许在 adapter」的跳过目录、`protocolFreePackages` 加 `platform/logging`、cliops 的 deny | `domain/session/events.go` 加 `adapters/outbound/acp` 空白 import → 红 |
+| `delivery/*` / `bootstrap/{cli,cliops,maintenance}` → `adapters/inbound/*` | `ctrws` 帧锚、gin 围栏允许面（补 `inbound/ws`）、层表 L8/L9 | `inbound/http/router` 加 `sqlite/store` 空白 import → 层表红 |
+| `drivers/*` → `adapters/{inbound/mcpgateway,outbound/*}` | 机制层 upward 扫描根、事件出口归属扫描根、层表 L6 | `domain/skill` 加 `adapters/outbound/transfer` 空白 import → "L2 → L6 向上" |
+
+**"过期路径"也算失锚**：搬迁之后守卫的 `deny` / `forbidden` 列表里若还留着旧前缀，它不会再拦
+任何东西（新路径不在列表里），表现为"判据还在、已经不生效"。这一批里清掉的有
+`layer_isolation_test.go` / `layers_test.go` / `testutil_test.go` / `app_boundary_test.go` /
+`layers_scan_test.go` 五处（`internal/delivery`、`internal/drivers`、`internal/infra`、
+`internal/persistence` 四组前缀）。
 
 ## 测试约定
 

@@ -57,7 +57,7 @@ var legacyAgentVocabulary = []string{
 // agentVocabularyWhitelistEntry 一条登记：**目录/文件前缀**或**路径无关锚**恰好一种，外加理由。
 //
 //   - `path`：相对仓库根的前缀（豁免整棵目录时用）。只给**落点稳定**的登记——本次分层重构不动
-//     `internal/adapters/outbound/sqlite/store`、`internal/adapters/inbound/http/router`、`internal/config`、`internal/contract`、`internal/delivery/controller`。
+//     `internal/adapters/outbound/sqlite/store`、`internal/adapters/inbound/http/router`、`internal/config`、`internal/contract`、`internal/adapters/inbound/http/controller`。
 //   - `anchor`：**路径无关锚**——一个只出现在**唯一一个**被扫描文件里的符号；含它的那个文件被豁免。
 //     `manager` 包里这几个落点会搬家（设计 §3.4 文件去向表），所以它们只有锚、没有路径：
 //     符号跟着文件走，登记不会因为一次目录改名而悬空。

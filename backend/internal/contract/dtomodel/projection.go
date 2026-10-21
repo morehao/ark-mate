@@ -7,7 +7,7 @@ import (
 // ——— 领域模型视图 → 对外 DTO 的投影（v3.2 刀 8；阶段 0.2 从 registry 移入）———
 //
 // 投影是"域 → DTO"的纯函数，既不属于执行面也不属于装配面。放在 dto 包里，registry 与
-// `sessionruntime.ModelFace` 才能共用同一份（否则就是两处各写一遍的静默分叉）。
+// `app/run.ModelFace` 才能共用同一份（否则就是两处各写一遍的静默分叉）。
 func ModelResps(vs []domprovider.ModelItem) []ModelResp {
 	out := make([]ModelResp, 0, len(vs))
 	for _, v := range vs {
@@ -21,7 +21,7 @@ func ModelResps(vs []domprovider.ModelItem) []ModelResp {
 	return out
 }
 
-// CatalogResp 把领域目录快照投影成对外形态（供 `sessionruntime.ModelFace` 用）。
+// CatalogResp 把领域目录快照投影成对外形态（供 `app/run.ModelFace` 用）。
 func CatalogRespOf(v *domprovider.CatalogView) *ModelCatalogResp {
 	if v == nil {
 		return nil
