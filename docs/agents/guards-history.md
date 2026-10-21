@@ -4,6 +4,14 @@
 > 原文是一整段连续沿革；拆分时只按条目断开、去掉条目外层括号，文字未改。
 > 顺序沿用原文；不同批次的计数是**当时**的实际值，今天的计数以 guards.md 的「共 N 条」为准。
 
+## 2026-10-21
+
+顶层目录角色 4 条（172 → **176**，`layer_roles_test.go`）：`core`/`domain` 不得 import `infra` 的协议实现、第三方 SDK 只许在 `infra`（及登记的入口/持久化面）、每个顶层目录必须登记角色与层带。
+
+挡的是一类**层表看不见的失效**：层表只判方向（目标层号 ≤ 源层号），于是 `core → infra/acp`、`domain → infra/acp` 这两条边在 v3.2 表里**完全合法**——它们都是 L1 侧的边。可实际上 `core` 与 `domain` 一旦认识外部协议，"换底座只动 adapter"这个承诺就是假的：实测 `domain` 有 7 个包 / 36 个文件 import `internal/infra/acp`，`core` 有 3 个包为取通用错误分类学而越界。四条判据统计到的现状写成了双向登记表，因此它不会静默空转（新增一条即红，改完不删登记也红）。
+
+反证（实跑 4 条，均红后复原）：`core/capability` 加 `infra/acp` import、`domain/identity` 加 `infra/mcp`、`service/svcusage` 加 `gin`、新建 `internal/foo` 不登记。
+
 ## 2026-10-20
 
 2026-10-20 层表路径存在性加 1 条 → **172**：`TestLayerTablePathsResolve`（新文件 `layers_paths_test.go`）。**为什么必须有一条守卫**：`v32Layers` 的 key 与 `deny`、以及 `v32AdapterDeny`，都是**精确字符串**；`backend/internal` 做目录搬迁时把 key 改对、把某条 `deny` 漏改，判据不会红——那条原本非法的边会**静默变合法**，而层表自带的兜底（扫到 0 个包、某包映射不到层）照旧全部正常。判据：`v32Layers` 的每个 key、每个 key 的每条 `deny`、`v32AdapterDeny` 的每一项都必须指向 `backendRoot(t)` 下**真实存在的目录**；只查"目录存在"、不查"有 Go 文件"（`internal/infra` 这类带目录本身没有 Go 文件，但合法），`v32Exceptions` 当前为空、暂不纳入。反证（实跑）：`perl -pi -e 's#"internal/model": \{layer: 0#"internal/__missing__": {layer: 0#' internal/archtest/layers_v32_test.go` 后运行 → `层表路径不存在: internal/__missing__（来自 v32Layers key）` 并 FAIL；还原备份后 PASS。同批修了 `Makefile` 的 `-X` 注入路径：`pkg/runtime.BuildRuntime` → `internal/runtime.BuildRuntime`（`backend/pkg/` 早已不存在，`-X` 对不存在的符号是**静默无操作**，桌面/容器包里的 `BuildRuntime` 从来没被注入过）。

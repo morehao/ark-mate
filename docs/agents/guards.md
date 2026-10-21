@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属与层表路径存在性）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，2026-10-21 顶层角色 4 条为 176 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属与层表路径存在性）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -91,7 +91,14 @@
 
 - 再加 **2 条「定义导入/导出归属」守卫**（`transfer_ownership_test.go`，2026-10-20：`internal/capabilityio` 拆成 `internal/drivers/transfer` + `registry` 的两个窄端口适配体。拆之前同一个概念分居两包——capability 的导入留在 `mechanism`，automation/provider 的在 `capabilityio`——而包名又和 `internal/core/capability` 只差后缀，看目录的人无法判断该 import 哪个。两种静默失效各有一条判据：① **第二个家**：六入口（3 域 × import/export）与域无关框架（`ImportDefinitionRows` / `CountDryRun` / `WriteExportRows` / Options / Stats）必须全在 `internal/drivers/transfer`，且 `mechanism` 与 `domain/**` 零命中，旧目录 `internal/capabilityio` 不得复活；判据 fail-closed（transfer 目录扫不到 Go 文件即 Fatal）。② **职责回流**：`automation.DefinitionFiles` / `provider.Secrets` 的编译期断言必须留在 `internal/drivers/registry`（装配点，同时看得见域端口与机制实现），`internal/drivers/transfer` 不得出现这两个端口名。反证（实跑 5 条，均红）：把 `ExportAutomationDir` 改名 → ①红；在 `mechanism` 加 `func ImportProviderFile()` 桩 → ①红；`mkdir internal/capabilityio` → ①红；把 registry 的编译期断言改成 `var _ = ...` → ②红；把 `secrets.go` 复制回 `transfer` → ②红。）
 
-**共 172 条**——加守卫时记得同步这句话。
+- 再加 **4 条「顶层目录角色」守卫**（P0，2026-10-21，`layer_roles_test.go`；口径见 `.dsh/docs/specs/2026-10-21-backend-layer-roles-design.md` §2.2）。层表管**方向**，这四条管**角色**：同样落在合法方向上的边也可能不该存在——`core → infra` 就是典型（L1 同带允许，但"最内层的纯词汇"认识"外部协议"是角色错误）：
+  ① `TestCoreStaysFreeOfInfra`：`core` 不得 import `internal/infra/*`。现状 3 个包（`automation`/`code`/`definition`）只为取**通用错误分类学**（`acp.Error`/`Class*`/`NewError`/`As`，与 ACP 无关，只是住在 `infra/acp/errors.go`）而越界，先逐条登记在 `coreInfraImports`，**双向**（新增一条红、改完不删登记也红），P1 把它迁进 `core/code` 后清空转硬。
+  ② `TestDomainAvoidsInfraProtocol`：`domain` 不得 import `infra` 的协议/进程/句柄子包，白名单只有 `infra/logging`（日志是横切关注点）。现状 7 个域包越界（`domain` 36 个文件 import `infra/acp`），同样双向登记，P1 砍掉错误分类那一半、P3 清空载荷那一半。
+  ③ `TestForeignSDKStaysInInfra`：第三方协议与驱动 SDK（`coder/acp-go-sdk`、`coder/websocket`、`gin`、`gorm.io/gorm`、`database/sql`）只许出现在登记的顶层目录（`infra` / `delivery` / `persistence`）。**今天零越界**，是硬判据；每个 SDK 必须全仓找得到至少一处，找不到即 Fatal（换库时不同步这张表就会空转）。
+  ④ `TestTopLevelDirsHaveRoles`：`internal/` 下每个顶层目录必须在 `topLevelRoles` 里登记**角色 + 允许的层带**，且双向（登记了却不存在也红）；每个生产包必须落在该目录声明的带内。`infra` 今天登记为 `{L1, L5}`——它是唯一跨带的目录，也正是"目录名推不出层号"的根源；P2/P3 收敛后应改为 `{5}`。
+  反证（实跑四条，均红后复原）：往 `core/capability` 加 `infra/acp` import → ①红；往 `domain/identity` 加 `infra/mcp` → ②红；在 `service/svcusage` import `gin` → ③红；新建未登记的 `internal/foo` → ④红。
+
+**共 176 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 
