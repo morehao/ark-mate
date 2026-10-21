@@ -295,37 +295,42 @@ CSP 是**双源逐字一致**的（前端契约 ↔ 核心路由层），`webPre
 backend/
 ├── cmd/mate/                 进程入口（只做参数分发与返回码）
 ├── internal/
-│   ├── app/                  装配 + 启停生命周期（装配顺序有语义，不要随意调换）
-│   │   └── command/          子命令参数解析与命令行输出（serve/demo/doctor/migrate/…）
-│   ├── router/               唯一传输层装配点；按领域分 routes_*.go；资产管理（web.go）
-│   ├── controller/ctr<域>/   传输层控制器（一域一包）
-│   ├── app/<域>/             用例环（接口 + 实现；装配根构造，控制器只收接口）
-│   ├── domain/<域>/          领域平面（会话 / 工作空间 / 供应商 / 技能 / MCP / 自动化 / 交互）
-│   ├── mechanism/            机制层（定义装载 / 凭据 / doctor）
-│   ├── runtimeconn/          执行面（连接池 / 拨号 / 代际 / 诊断）
-│   ├── manager/              过渡期实现（逐域搬空后整体删除；只剩装配适配与权限/提问回调）
-│   ├── contract/dto<域>/     请求/响应 DTO（应用契约；两侧共用，自身不依赖应用层）
-│   ├── adapters/outbound/    出站适配器（按外部系统分；C3 起持久层与其他 infra 逐步归到这里）
-│   │   └── sqlite/           持久层（同一只管带）
-│   │       ├── model/        表行形状（一表一文件 + enum/serializer/time）
-│   │       ├── dao/          列词汇（Cond）+ gormdao 泛型方法 + 机械原语
-│   │       ├── store/        持久层业务面（排序/筛选/聚合 + 跨表事务 + 读模型 + 自管迁移）
-│   │       └── db/           连接与方言装配（原 infra/dbclient）
-│   ├── eventbus/             进程内事件总线（每聚合位次 + 历史缓冲 + 回放）
-│   ├── middleware/           凭据与 Host/Origin 矩阵
-│   ├── credential/           凭据 → scope 只读表（rest / stream 两面）
-│   ├── gateway/              远程 MCP 的平台侧 stdio 网关
+│   ├── domain/<域>/          领域：聚合 + 不变量 + 端口（session / interaction / provider /
+│   │                         skill / mcp / workspace / automation / identity；域内值包如
+│   │                         session/{event,run,queue,memory,message,sessionrow,usage}）
+│   ├── app/<域>/             用例环（session / run / model / capability / automation / search /
+│   │                         usage / workspace / system / runtime / library / export /
+│   │                         commandpolicy / stream）；`app/run` 是执行面（连接/轮次/事件桥）
+│   ├── contract/dto<域>/     应用契约（请求/响应 DTO；两侧共用，自身不依赖应用层）
+│   ├── platform/             共享内核：纯值 / 规则 / 平台服务，无框架
+│   │   ├── code/             业务错误码（唯一事实源）+ 平台错误类型
+│   │   ├── capability/ automation/ definition/ credential/ identity/ resource/ redact/
+│   │   ├── eventbus/         进程内事件总线（每聚合位次 + 历史缓冲 + 回放）
+│   │   ├── logging/          日志门面（domain/app 经它；适配器可直接用 glog）
+│   │   └── object/{objid,objtime,objmeta,objusage,objdelivery}
+│   ├── adapters/
+│   │   ├── inbound/
+│   │   │   ├── http/{router,controller/ctr<域>,middleware}   REST 入站（gin 只在这里）
+│   │   │   ├── ws/           WS 事件流（订阅语义 → 帧）
+│   │   │   ├── cli/{cmd,ops,maintenance}                    命令树 / 命令实现 / 运维命令
+│   │   │   └── mcpgateway/   被底座反向调用的 MCP 服务端半场
+│   │   └── outbound/
+│   │       ├── sqlite/{model,dao,store,db}                  持久层（行形状 / 列词汇 / 业务面 / 连接）
+│   │       ├── acp/ mcp/    协议客户端（性质仍是协议库，层表 L1）
+│   │       ├── dsh/         唯一 runtime adapter（Spec + 五张端口表）
+│   │       ├── credentials/ procreg/                        凭据与进程注册表
+│   │       ├── registry/    领域端口实现集合 + 平面容器（按域再拆见进度笔记 4.5 后半）
+│   │       ├── mechanism/{definition,credential,doctor}/    机制层
+│   │       ├── transfer/    存量定义的导入/导出编排
+│   │       └── runtimeconn/ 连接池 / 拨号 / 代际 / 诊断
+│   ├── runtime/              adapter 注册表 + `Spec` 契约 + 隔离投影（不得 import 任何 adapter）
+│   ├── config/               进程配置（唯一入口）
+│   ├── bootstrap/            装配根与进程壳
+│   │   ├── assembly/         对象图 + 启停序列（唯一装配根）
+│   │   └── app/              HTTP 生命周期、就绪行、信号与优雅关闭
 │   ├── archtest/             架构守卫（**唯一的机器判据集中地**，见第 10 节）
-│   └── testutil/             跨包复用的测试夹具（含合成 adapter；不得 import manager）
-└── pkg/                      可复用基础设施（不得 import internal/）
-    ├── acl/                  ACP 客户端与两套远程传输；服务端半场
-    ├── runtime/              adapter 注册表（Spec + 三张可执行端口表）+ build 期固定 + 隔离投影
-    │   └── dsh/              内置底座 adapter（Spec 汇入点、凭据文档、清单 overlay、模型值投影）
-    ├── capability/           Skill / MCP / Tool 数据面 + 物化
-    ├── mcp/                  最小 MCP 客户端（stdio / http / sse）
-    ├── code/                 对外错误码唯一事实源
-    ├── config/ · dbclient/ · logging/ · procreg/ · redact/ · credentials/ · resource/ · automation/
-    └── object/               objid（id 铸造 + rt_ 壳）· objusage · objdelivery（静态交付表）
+│   ├── testutil/             跨包复用的测试夹具（含合成 adapter）
+│   └── version/
 ```
 
 ### 9.2 `frontend/`（pnpm workspace）
