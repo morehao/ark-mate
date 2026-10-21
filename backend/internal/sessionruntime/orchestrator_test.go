@@ -2,7 +2,7 @@ package sessionruntime
 
 import (
 	"context"
-	"errors"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"strings"
 	"testing"
@@ -13,7 +13,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // stubSession 代替 acp.Session（Prompt/Cancel 可按脚本返回）。
@@ -137,8 +136,7 @@ func TestPromptBusy(t *testing.T) {
 		t.Fatalf("Prompt: %v", err)
 	}
 	_, err := orch.Prompt(context.Background(), "s1", "second")
-	var ae *acp.Error
-	if !errors.As(err, &ae) || ae.Code != "run_in_progress" {
+	if re, ok := code.RuntimeErrorOf(err); !ok || re.Code != "run_in_progress" {
 		t.Fatalf("期望 run_in_progress，got %v", err)
 	}
 	// 结束第一个 run（cancel 它）以免泄漏 goroutine
@@ -379,18 +377,18 @@ func TestEnsureSessionResumeGating(t *testing.T) {
 
 	if _, err := orch.Prompt(ctx, "c-stub", "hi"); err == nil {
 		t.Fatal("可续聊但构建期底座未装配应 runtime_not_found")
-	} else if ae, ok := acp.As(err); !ok || ae.Code != "runtime_not_found" {
+	} else if re, ok := code.RuntimeErrorOf(err); !ok || re.Code != "runtime_not_found" {
 		t.Fatalf("期望 runtime_not_found，got %v", err)
 	}
 	// 终态会话（completed）不再按未找到处理：进入 runtime 解析 → 未注册 → runtime_not_found。
 	if _, err := orch.Prompt(ctx, "c-term", "hi"); err == nil {
 		t.Fatal("终态会话也应可续聊（应进到 runtime 解析）")
-	} else if ae, ok := acp.As(err); !ok || ae.Code != "runtime_not_found" {
+	} else if re, ok := code.RuntimeErrorOf(err); !ok || re.Code != "runtime_not_found" {
 		t.Fatalf("期望 runtime_not_found（终态不再拦截），got %v", err)
 	}
 	if _, err := orch.Prompt(ctx, "no-such", "hi"); err == nil {
 		t.Fatal("未知会话应 session_not_found")
-	} else if ae, ok := acp.As(err); !ok || ae.Code != "session_not_found" {
+	} else if re, ok := code.RuntimeErrorOf(err); !ok || re.Code != "session_not_found" {
 		t.Fatalf("期望 session_not_found，got %v", err)
 	}
 }

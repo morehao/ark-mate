@@ -3,7 +3,7 @@ package runtime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/core/code"
 )
 
 // sessionRuntime 是 Runtime 接口（§4.2 会话边界版）在「一条活着的 ACP 会话」上的通用实现：
@@ -42,8 +42,11 @@ func newSessionRuntime(spec Spec, sess AgentSessionView) *sessionRuntime {
 var _ Runtime = (*sessionRuntime)(nil)
 
 // unsupported 构造「该投影不支持此操作」的请求类错误（REST 面可据 code 精确映射）。
-func unsupported(code, details string) error {
-	return acp.NewError(acp.ClassRequest, code, details, nil)
+//
+// 用平台词汇构造（`code.ClassRequest`）：这条错误会一路冒到 `code.FromError` 与
+// `code.RuntimeErrorOf`，分类必须自始至终是平台口径。
+func unsupported(name, details string) error {
+	return code.NewError(code.ClassRequest, name, details, nil)
 }
 
 func (r *sessionRuntime) ID() string              { return r.spec.ID }

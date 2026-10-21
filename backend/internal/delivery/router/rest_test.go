@@ -41,7 +41,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
@@ -168,33 +167,11 @@ type stubSvc struct {
 	metaPatch            sessionrow.MetaPatch
 }
 
-// RestErr 桩：与 manager 一致——已映射错误透传，acp 错误按分类映射（测试只关心 acp→信封码）。
-func (s *stubSvc) RestErr(err error) error {
-	if err == nil {
-		return nil
-	}
-	var ge gerror.Error
-	if errors.As(err, &ge) {
-		return err
-	}
-	var ae *acp.Error
-	if errors.As(err, &ae) {
-		code := 40001
-		switch ae.Class {
-		case acp.ClassUnsupported:
-			code = 40501
-		case acp.ClassLimit:
-			code = 40901
-		case acp.ClassService, acp.ClassConnection:
-			code = 50201
-		}
-		if ae.Code == "agent_not_found" || ae.Code == "session_not_found" || ae.Code == "runtime_not_found" || ae.Code == "mcp_not_found" {
-			code = 40401
-		}
-		return gerror.Error{Code: code, Msg: ae.Details}
-	}
-	return gerror.Error{Code: 50000, Msg: err.Error()}
-}
+// RestErr 桩：与生产出口同款——控制器那道门就是 `code.FromError`（分类 → 对外码的唯一投影）。
+//
+// 此前这里自己抄了一份 class → 码的表；B4 起平台错误自带分类与稳定 code，再抄一份等于把
+// 被测的投影换成测试自己写的那份（改错了也绿）。
+func (s *stubSvc) RestErr(err error) error { return code.FromError(err) }
 
 func (s *stubSvc) ListModels(_ context.Context) ([]dtomodel.ModelResp, error) {
 	if s.modelErr != nil {
@@ -1668,11 +1645,11 @@ func TestProbeMcpServerRoute(t *testing.T) {
 	}
 }
 
-// TestErrorEnvelopeMapping 端点错误必须经信封映射（修复：此前裸 acp 错误漏成 code=-1，
+// TestErrorEnvelopeMapping 端点错误必须经信封映射（修复：此前裸错误漏成 code=-1，
 // 与 README「非 0 为业务错误（40001/40401/…）」契约不符）。
 //
 // v19：这些用例原挂在 agent 端点上（已随 agent 面删除）；映射表本身与端点无关，
-// 只要求"某个端点把一支 acp 错误原样交给信封映射"。
+// 只要求"某个端点把一支带分类的错误原样交给信封映射"。
 //
 // 承载端点换过三次（供应商面 → 会话列表 → 用量），每次都是因为那一面**归了真域平面/真用例**、
 // 替身注入不进去了；P4a 正文第四十三刀用量面也归域平面后，改挂**会话写面**（`createErr`）。
@@ -1683,11 +1660,11 @@ func TestErrorEnvelopeMapping(t *testing.T) {
 		err  error
 		code int
 	}{
-		{"not_found", acp.NewError(acp.ClassRequest, "provider_not_found", "未知供应商", nil), 40401},
-		{"request", acp.NewError(acp.ClassRequest, "invalid_provider_id", "id 非法", nil), 40001},
-		{"conflict", acp.NewError(acp.ClassLimit, "provider_exists", "已存在", nil), 40901},
-		{"unsupported", acp.NewError(acp.ClassUnsupported, "credentials_unsupported", "这套底座不支持托管凭据", nil), 40501},
-		{"upstream", acp.NewError(acp.ClassService, "provider_write_failed", "载体提交失败", nil), 50201},
+		{"not_found", code.NewError(code.ClassRequest, "provider_not_found", "未知供应商", nil), 40401},
+		{"request", code.NewError(code.ClassRequest, "invalid_provider_id", "id 非法", nil), 40001},
+		{"conflict", code.NewError(code.ClassLimit, "provider_exists", "已存在", nil), 40901},
+		{"unsupported", code.NewError(code.ClassUnsupported, "credentials_unsupported", "这套底座不支持托管凭据", nil), 40501},
+		{"upstream", code.NewError(code.ClassService, "provider_write_failed", "载体提交失败", nil), 50201},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

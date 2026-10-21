@@ -3,17 +3,18 @@ package code
 import (
 	"strings"
 	"testing"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // TestFromACPCarriesStderrTail 底座起不来时，信封文案要带 stderr 尾巴（诊断可用性）。
+//
+// 载体在 B4 换成平台视图（`*RuntimeError`）：适配器把协议错误折成它时把尾巴一起带上来，
+// 投影端负责把尾巴并进对外文案。
 func TestFromACPCarriesStderrTail(t *testing.T) {
-	ae := acp.NewError(acp.ClassConnection, "process_exited", "agent 进程异常退出", nil)
-	ae.StderrTail = []string{"dsh: .env sets DSH_VERSION", "  exit 3  "}
-	got, ok := fromACP(ae)
+	re := NewRuntimeError(ClassConnection, "process_exited", "agent 进程异常退出", nil)
+	re.StderrTail = []string{"dsh: .env sets DSH_VERSION", "  exit 3  "}
+	got, ok := fromView(re)
 	if !ok {
-		t.Fatal("fromACP 应命中 acp.Error")
+		t.Fatal("fromView 应命中平台错误视图")
 	}
 	if got.Code != BadGateway {
 		t.Fatalf("ClassConnection 应映射为 %d，got %d", BadGateway, got.Code)
@@ -23,8 +24,8 @@ func TestFromACPCarriesStderrTail(t *testing.T) {
 		t.Fatalf("文案不符:\n got %q\nwant %q", got.Msg, want)
 	}
 	// 没有尾巴时不得凭空多出一段（既有文案保持逐字不变）。
-	plain := acp.NewError(acp.ClassRequest, "invalid_params", "参数不对", nil)
-	if p, _ := fromACP(plain); p.Msg != "参数不对" {
+	plain := NewError(ClassRequest, "invalid_params", "参数不对", nil)
+	if p, _ := fromView(mustView(t, plain)); p.Msg != "参数不对" {
 		t.Fatalf("无尾巴时文案应原样: %q", p.Msg)
 	}
 }
@@ -66,22 +67,22 @@ func TestStderrMsgSuffix(t *testing.T) {
 func TestFromACPProviderModelCodesFrozen(t *testing.T) {
 	cases := []struct {
 		name  string
-		class acp.Class
+		class Class
 		want  int
 	}{
-		{"provider_exists", acp.ClassLimit, Conflict},
-		{"provider_in_use", acp.ClassLimit, Conflict},
-		{"model_exists", acp.ClassLimit, Conflict},
-		{"model_not_found", acp.ClassRequest, NotFound},
-		{"provider_not_found", acp.ClassRequest, NotFound},
-		{"invalid_provider_id", acp.ClassRequest, InvalidRequest},
-		{"definition_changed", acp.ClassLimit, Conflict},
-		{"resource_sync_failed", acp.ClassService, UpstreamFailed},
+		{"provider_exists", ClassLimit, Conflict},
+		{"provider_in_use", ClassLimit, Conflict},
+		{"model_exists", ClassLimit, Conflict},
+		{"model_not_found", ClassRequest, NotFound},
+		{"provider_not_found", ClassRequest, NotFound},
+		{"invalid_provider_id", ClassRequest, InvalidRequest},
+		{"definition_changed", ClassLimit, Conflict},
+		{"resource_sync_failed", ClassService, UpstreamFailed},
 	}
 	for _, tc := range cases {
-		got, ok := fromACP(acp.NewError(tc.class, tc.name, "细节", nil))
+		got, ok := fromView(mustView(t, NewError(tc.class, tc.name, "细节", nil)))
 		if !ok {
-			t.Fatalf("%s: fromACP 应命中", tc.name)
+			t.Fatalf("%s: fromView 应命中", tc.name)
 		}
 		if got.Code != tc.want {
 			t.Errorf("%s（Class=%s）应映射为 %d，got %d", tc.name, tc.class, tc.want, got.Code)
@@ -92,7 +93,17 @@ func TestFromACPProviderModelCodesFrozen(t *testing.T) {
 		t.Fatalf("例外表新增了条目（%v）：每一条都要有"+"这里写的那个量级"+"的理由", classCodeOverrides)
 	}
 	// 未登记的名字仍按 Class 兜底（resource_sync_failed 之外的服务侧错误仍是 50201）。
-	if got, _ := fromACP(acp.NewError(acp.ClassService, "backend_boom", "x", nil)); got.Code != BadGateway {
+	if got, _ := fromView(mustView(t, NewError(ClassService, "backend_boom", "x", nil))); got.Code != BadGateway {
 		t.Fatalf("ClassService 的默认映射应仍是 %d，got %d", BadGateway, got.Code)
 	}
+}
+
+// mustView 取平台错误视图（测试夹具：拿不到就当场失败，避免"nil 比 nil"的假绿）。
+func mustView(t *testing.T, err error) *RuntimeError {
+	t.Helper()
+	re, ok := RuntimeErrorOf(err)
+	if !ok {
+		t.Fatalf("应能从 %v 取到平台错误视图", err)
+	}
+	return re
 }

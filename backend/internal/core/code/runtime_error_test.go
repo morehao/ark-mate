@@ -4,17 +4,17 @@ import (
 	"errors"
 	"io"
 	"testing"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
-// TestClassifyRuntimeKeepsDiagnostics 协议错误折成平台视图时，诊断面要用的四样一个都不能丢：
+// TestClassifyRuntimeKeepsDiagnostics 平台错误视图里，诊断面要用的四样一个都不能丢：
 // 分类、稳定 code、文案、stderr 尾巴；原始错误还要能 `errors.Is` 穿透（判连接类故障用）。
+//
+// 视图由适配器出口折成（`runtime.FoldError`，B4），本包只负责把它投影成信封错误。
 //
 // 失效方式：丢一样不会让任何调用点报错——诊断页少一句原因、`run.error` 缺 class、
 // 或者连接类判据认不出 `exec.ExitError`（"进程起不来"被当成普通失败，用户看到的出路是错的）。
 func TestClassifyRuntimeKeepsDiagnostics(t *testing.T) {
-	ae := acp.NewError(acp.ClassConnection, "process_exited", "agent 进程异常退出", io.ErrUnexpectedEOF)
+	ae := NewRuntimeError(ClassConnection, "process_exited", "agent 进程异常退出", io.ErrUnexpectedEOF)
 	ae.StderrTail = []string{"boot line 1", "boot line 2"}
 
 	re := ClassifyRuntime(ae)
@@ -44,9 +44,14 @@ func TestClassifyRuntimeKeepsDiagnostics(t *testing.T) {
 		t.Fatalf("普通错误应折成 unknown + 原文，实际 %+v", got)
 	}
 
-	// RuntimeErrorOf 两种输入都要认（判"是不是某类故障"的调用点面对的是两边来的错误）。
-	if _, ok := RuntimeErrorOf(ae); !ok {
-		t.Fatal("RuntimeErrorOf 应认出协议错误")
+	// RuntimeErrorOf 两种输入都要认（判"是不是某类故障"的调用点面对的是两边来的错误）：
+	// 上游错误视图，与内圈自己用 `NewError` 造的带码错误。
+	coded := NewError(ClassUnsupported, "unsupported_model", "这个运行时没有模型配置项", nil)
+	if _, ok := RuntimeErrorOf(coded); !ok {
+		t.Fatal("RuntimeErrorOf 应认出平台带码错误（否则 unsupported_* 之类的分支会静默失配）")
+	}
+	if v, _ := RuntimeErrorOf(coded); v.Code != "unsupported_model" || v.Class != ClassUnsupported {
+		t.Fatalf("带码错误折成视图时丢了分类/code: %+v", v)
 	}
 	if _, ok := RuntimeErrorOf(re); !ok {
 		t.Fatal("RuntimeErrorOf 应认出平台视图")

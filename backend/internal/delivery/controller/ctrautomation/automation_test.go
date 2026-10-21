@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— 控制器的**错误出口**：领域错误原样落码，裸错误兜底 50000 ———
@@ -76,7 +76,7 @@ func TestAutomationErrorExitsCarryDomainCodes(t *testing.T) {
 		want int
 	}{
 		{"载体 CAS 冲突（带码错误原样出）",
-			acp.NewError(acp.ClassLimit, "definition_changed", "定义已被别处改过，请刷新重试", nil), 40901},
+			code.NewError(code.ClassLimit, "definition_changed", "定义已被别处改过，请刷新重试", nil), 40901},
 		{"裸错误兜底 50000", errors.New("boom"), 50000},
 	}
 	for _, c := range cases {

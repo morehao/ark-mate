@@ -114,7 +114,8 @@
 - 再加 **1 条「错误分类词对照」守卫**（`error_class_parity_test.go` 的 `TestErrorClassVocabularyMatchesACP`，
   2026-10-20 C2）：`core/code` 的平台错误分类（`code.ClassRequest` 等，7 个）与 `infra/acp` 的分类
   **逐条同值**，且协议侧每个分类在平台词汇里都有对应项；同时断言 `code.NewError` 真的把分类与 code
-  带到协议载体上。挡的是两份词汇悄悄分叉——错误照常构造、`acp.As` 照常命中，只是前端按 `class`
+  带到**平台载体**（`*code.Coded` → `code.RuntimeErrorOf`）上——B4 起内圈不再产出协议错误，
+  分类的双语对照只剩"同值"这一条必须守的事实。挡的是两份词汇悄悄分叉——错误照常构造、`acp.As` 照常命中，只是前端按 `class`
   渲染的动作（重试 / 去登录 / 改参数）与控制器出口的码映射给出不同答案，而两边各自的测试都绿；
   更隐蔽的是「新增一个 acp 分类而平台没跟」，内圈从此拿不到它、只能回去 import 协议库。
   反向覆盖是 fail-closed 的：分类数量不等即失败（新增分类必须登记进对照表）。
@@ -132,7 +133,10 @@
   （**`internal/domain` 已全量收口**：18 个包逐个登记 + `core/definition` / `core/automation`
   两个值包）**生产 import 不得出现 `internal/infra/acp`**。第二段判据是**全量覆盖**：
   `internal/domain` 下新出现的包不登记即红（否则"新包又 import 协议库"这条回退路径没有判据）。
-  只剩 `core/code` 仍 import acp：协议错误 → 平台视图的唯一转换点，按 B4 随连接边界搬走。
+  **B4 之后 `core/code` 也进了表**：协议错误 → 平台视图的折叠点搬到**适配器出口**
+  （`runtime.FoldError`，由 `runtime.Connect` 与 `drivers/runtimeconn` 调用），错误码包只留
+  平台映射（`codeOf` 分类 → 对外码）。第二段判据从"`internal/domain` 全量"扩到
+  `internal/{domain,core,service}` 三个前缀——新增包不登记即红。
   这张表从 C2 开始**逐步增长**（事件与轮次 → 错误构造 → 权限/elicitation → 配置项 →
   连接与生命周期），现在已覆盖整个领域。挡的是已完成边界的**静默回退**：翻译层还在，
   域里再直接写一个 acp 类型照样编译、照样跑，测试全绿，而"域不认识协议"这件事悄悄退回起点。

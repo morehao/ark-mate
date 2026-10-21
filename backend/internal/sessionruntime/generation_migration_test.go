@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
@@ -16,7 +17,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -454,8 +454,7 @@ func TestGenerationPool(t *testing.T) {
 	if err == nil {
 		t.Fatal("达上限且都有引用时应拒绝新建代际")
 	}
-	ae, ok := acp.As(err)
-	if !ok || ae.Code != "generation_limit_reached" {
+	if re, ok := code.RuntimeErrorOf(err); !ok || re.Code != "generation_limit_reached" {
 		t.Fatalf("错误应带码 generation_limit_reached，got %v", err)
 	}
 	// 拒绝文案必须给出路（用户看得懂"我该怎么办"）。

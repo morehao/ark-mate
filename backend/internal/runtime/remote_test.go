@@ -7,6 +7,7 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -102,7 +103,9 @@ func TestConnectUnsupportedTransport(t *testing.T) {
 	if err == nil {
 		t.Fatal("应报错")
 	}
-	if cls := acp.Classify(err).Class; cls != acp.ClassUnsupported {
-		t.Fatalf("应归类 unsupported，得到 %v (%v)", cls, err)
+	// 出口错误是**平台视图**（Connect 在把错误交给上层前折叠），分类按平台词汇判。
+	re, ok := code.RuntimeErrorOf(err)
+	if !ok || re.Class != code.ClassUnsupported {
+		t.Fatalf("应归类 unsupported，得到 %+v (%v)", re, err)
 	}
 }

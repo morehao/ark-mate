@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -144,7 +144,8 @@ func TestPublishErrorCarriesStderrTail(t *testing.T) {
 	orch := newOrchestratorForTest(svc, reg)
 	t.Cleanup(orch.Close)
 
-	ae := acp.NewError(acp.ClassConnection, "spawn_failed", "runtime 起不来", nil)
+	// 这条错误是**适配器出口的形态**（拨号失败 → 平台视图，带 stderr 尾巴）。
+	ae := code.NewRuntimeError(code.ClassConnection, "spawn_failed", "runtime 起不来", nil)
 	ae.StderrTail = []string{"line-1", "line-2"}
 	orch.runner.PublishError("c-x", "run_test0000000000000000000001", ae, nil)
 

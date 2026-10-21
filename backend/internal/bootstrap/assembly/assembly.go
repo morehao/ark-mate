@@ -3,7 +3,6 @@ package assembly
 import (
 	"context"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/core/code"
 	"net"
 	"net/http"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
@@ -25,7 +25,6 @@ import (
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/infra/procreg"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -496,7 +495,7 @@ func (as *assembly) startIdentity(ctx context.Context) error {
 		glog.Warnw(ctx, "serve: 产品身份的系统提示面未交付（模型的自述会退回首轮块或无名）",
 			"mode", string(mode), "status", outcome.Status, "problems", strings.Join(outcome.Problems, "；"), "err", cause)
 		if as.rconn != nil {
-			ae := acp.NewError(acp.ClassService, "identity_patch_failed",
+			ae := code.NewError(code.ClassService, "identity_patch_failed",
 				"产品身份的系统提示面未交付（会话仍可用；模型的自述退回首轮块或无身份）："+
 					strings.Join(outcome.Problems, "；"), nil)
 			as.rconn.RecordRuntimeError("", code.ClassifyRuntime(ae), nil)

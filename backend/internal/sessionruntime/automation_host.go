@@ -7,7 +7,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— P2b：自动化域的宿主适配器（`automation.Host` 的实现） ———
@@ -26,7 +25,7 @@ import (
 // 原样交回去，用户在面板上看到的正是"为什么没跑成"。
 func (s *Service) CreateHostSession(ctx context.Context, req automation.HostSessionReq) (string, error) {
 	if s.sessionUC == nil {
-		return "", code.FromError(acp.NewError(acp.ClassService, "orchestrator_unavailable", "服务尚未装配会话用例", nil))
+		return "", code.FromError(code.NewError(code.ClassService, "orchestrator_unavailable", "服务尚未装配会话用例", nil))
 	}
 	resp, err := s.sessionUC.CreateSession(ctx, dtosession.SessionCreateReq{
 		Prompt: req.Prompt,
@@ -43,7 +42,7 @@ func (s *Service) CreateHostSession(ctx context.Context, req automation.HostSess
 // CancelHostRun 实现 `automation.Host`。
 func (s *Service) CancelHostRun(ctx context.Context, sessionID string) error {
 	if s.sessionUC == nil {
-		return code.FromError(acp.NewError(acp.ClassService, "orchestrator_unavailable", "服务尚未装配会话用例", nil))
+		return code.FromError(code.NewError(code.ClassService, "orchestrator_unavailable", "服务尚未装配会话用例", nil))
 	}
 	return s.sessionUC.CancelRun(ctx, sessionID)
 }

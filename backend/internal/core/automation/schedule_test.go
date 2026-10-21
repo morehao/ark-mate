@@ -1,12 +1,11 @@
 package automation
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/core/code"
 )
 
 // 期望值来源：`python3 -c "zoneinfo"` 与 `TZ=... date`（系统 tzdata）手算对照，
@@ -80,7 +79,7 @@ func TestScheduleValidate(t *testing.T) {
 			if err == nil {
 				t.Fatal("期望报错，got nil")
 			}
-			if got := acpCode(err); got != c.wantErr {
+			if got := errCode(err); got != c.wantErr {
 				t.Fatalf("期望码 %s，got %s（%v）", c.wantErr, got, err)
 			}
 		})
@@ -499,11 +498,10 @@ func TestAutomationValidate(t *testing.T) {
 
 func ptrTime(t time.Time) *time.Time { return &t }
 
-// acpCode 取出带码错误的码（本包的校验错误一律用 internal/infra/acp 的可操作错误）。
-func acpCode(err error) string {
-	var ae *acp.Error
-	if errors.As(err, &ae) {
-		return ae.Code
+// errCode 取出带码错误的稳定 code（本包的校验错误一律是平台带码错误，B4 起不碰协议库）。
+func errCode(err error) string {
+	if re, ok := code.RuntimeErrorOf(err); ok {
+		return re.Code
 	}
 	return ""
 }

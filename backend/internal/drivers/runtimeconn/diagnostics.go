@@ -198,8 +198,10 @@ func (pl *Plane) RemediationFor(ctx context.Context, spec runtime.Spec, specOK, 
 	}
 	if pl.cred != nil {
 		if err := pl.cred.CredentialProblem(ctx); err != nil {
-			if ae, ok := acp.As(err); ok && ae != nil {
-				add(ae.Details)
+			// 凭据面给的是**平台带码错误**（B4 起内圈不再产出协议错误）；
+			// 诊断只要那句已写好的出路文案，取视图的 Details。
+			if re, ok := code.RuntimeErrorOf(err); ok && re.Details != "" {
+				add(re.Details)
 			}
 		}
 	}

@@ -10,11 +10,10 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/gerror"
 )
 
-// TestFromErrorMapping 领域错误（acp 分类）→ 对外业务码映射矩阵。
+// TestFromErrorMapping 平台错误（分类 + 稳定 code）→ 对外业务码映射矩阵。
 //
 // 这条矩阵原先在 internal/manager 里测（当时映射表是 Service.restErr 的私有实现）。
 // 映射表收归 pkg/code 后随之搬来：它测的是"码怎么定"，与 manager 的装配无关，
@@ -25,18 +24,20 @@ func TestFromErrorMapping(t *testing.T) {
 		in   error
 		want int
 	}{
-		{"agent_not_found", acp.NewError(acp.ClassRequest, "agent_not_found", "x", nil), code.NotFound},
-		{"session_not_found", acp.NewError(acp.ClassRequest, "session_not_found", "x", nil), code.NotFound},
-		{"runtime_not_found", acp.NewError(acp.ClassRequest, "runtime_not_found", "x", nil), code.NotFound},
-		{"mcp_not_found", acp.NewError(acp.ClassRequest, "mcp_not_found", "x", nil), code.NotFound},
-		{"provider_not_found", acp.NewError(acp.ClassRequest, "provider_not_found", "x", nil), code.NotFound},
-		{"request_other", acp.NewError(acp.ClassRequest, "agent_required", "x", nil), code.InvalidRequest},
-		{"limit", acp.NewError(acp.ClassLimit, "run_in_progress", "x", nil), code.Conflict},
-		{"access", acp.NewError(acp.ClassAccess, "auth_required", "x", nil), code.Unauthorized},
-		{"unsupported", acp.NewError(acp.ClassUnsupported, "resume_unsupported", "x", nil), code.NotSupported},
-		{"service", acp.NewError(acp.ClassService, "orchestrator_unavailable", "x", nil), code.BadGateway},
-		{"connection", acp.NewError(acp.ClassConnection, "connection_lost", "x", nil), code.BadGateway},
-		{"unknown_class", acp.NewError(acp.ClassUnknown, "weird", "x", nil), code.UpstreamFailed},
+		{"agent_not_found", code.NewError(code.ClassRequest, "agent_not_found", "x", nil), code.NotFound},
+		{"session_not_found", code.NewError(code.ClassRequest, "session_not_found", "x", nil), code.NotFound},
+		{"runtime_not_found", code.NewError(code.ClassRequest, "runtime_not_found", "x", nil), code.NotFound},
+		{"mcp_not_found", code.NewError(code.ClassRequest, "mcp_not_found", "x", nil), code.NotFound},
+		{"provider_not_found", code.NewError(code.ClassRequest, "provider_not_found", "x", nil), code.NotFound},
+		{"request_other", code.NewError(code.ClassRequest, "agent_required", "x", nil), code.InvalidRequest},
+		{"limit", code.NewError(code.ClassLimit, "run_in_progress", "x", nil), code.Conflict},
+		{"access", code.NewError(code.ClassAccess, "auth_required", "x", nil), code.Unauthorized},
+		{"unsupported", code.NewError(code.ClassUnsupported, "resume_unsupported", "x", nil), code.NotSupported},
+		{"service", code.NewError(code.ClassService, "orchestrator_unavailable", "x", nil), code.BadGateway},
+		{"connection", code.NewError(code.ClassConnection, "connection_lost", "x", nil), code.BadGateway},
+		{"unknown_class", code.NewError(code.ClassUnknown, "weird", "x", nil), code.UpstreamFailed},
+		// 上游错误视图同一条投影（适配器折叠后的形态，带 stderr 尾巴）。
+		{"upstream_view", &code.RuntimeError{Class: code.ClassConnection, Code: "process_exited", Details: "agent 进程异常退出"}, code.BadGateway},
 		{"plain_error", errors.New("boom"), code.Internal},
 	}
 	for _, tc := range cases {
@@ -48,9 +49,9 @@ func TestFromErrorMapping(t *testing.T) {
 		})
 	}
 
-	// details 为空 → msg 回落为 acp 稳定 code。
+	// details 为空 → msg 回落为稳定 code。
 	var ge gerror.Error
-	_ = errors.As(code.FromError(acp.NewError(acp.ClassLimit, "busy", "", nil)), &ge)
+	_ = errors.As(code.FromError(code.NewError(code.ClassLimit, "busy", "", nil)), &ge)
 	if ge.Msg != "busy" {
 		t.Fatalf("空 details 应回落 code: %+v", ge)
 	}
@@ -64,8 +65,8 @@ func TestFromErrorMapping(t *testing.T) {
 func TestFromErrorNeverLosesCode(t *testing.T) {
 	inputs := []error{
 		errors.New("裸错误"),
-		acp.NewError(acp.ClassRequest, "agent_not_found", "x", nil),
-		acp.NewError(acp.ClassUnknown, "weird", "", nil),
+		code.NewError(code.ClassRequest, "agent_not_found", "x", nil),
+		code.NewError(code.ClassUnknown, "weird", "", nil),
 		code.Error(code.Conflict, "已带码"),
 		code.Errorf(code.InvalidParam, "带参 %d", 1),
 	}
@@ -267,7 +268,7 @@ func repoRoot(t *testing.T) string {
 }
 
 // TestErrorRedactsSecrets 对外错误文案的唯一构造入口即脱敏闸门：
-// 上游原文里的凭证形状串（含 acp Details 一路）不得出现在信封 msg 里。
+// 上游原文里的凭证形状串（含上游 Details 一路）不得出现在信封 msg 里。
 func TestErrorRedactsSecrets(t *testing.T) {
 	const secret = "sk-abcdefghijklmnop1234"
 	// 1) 裸错误 → Internal + err.Error()，必须过闸
@@ -277,13 +278,13 @@ func TestErrorRedactsSecrets(t *testing.T) {
 	} else if strings.Contains(ge.Msg, secret) {
 		t.Fatalf("裸错误出口未脱敏: %q", ge.Msg)
 	}
-	// 2) acp 分类错误 → Details 过闸
-	err := code.FromError(acp.NewError(acp.ClassService, "boom", "启动失败 KEY="+secret, nil))
+	// 2) 平台带码错误 → Details 过闸
+	err := code.FromError(code.NewError(code.ClassService, "boom", "启动失败 KEY="+secret, nil))
 	if !errors.As(err, &ge) {
-		t.Fatal("acp 错误应映射为带码错误")
+		t.Fatal("平台带码错误应映射为带码错误")
 	}
 	if strings.Contains(ge.Msg, secret) {
-		t.Fatalf("acp 错误出口未脱敏: %q", ge.Msg)
+		t.Fatalf("平台错误出口未脱敏: %q", ge.Msg)
 	}
 	// 3) 直接构造
 	if ge := code.Error(code.InvalidRequest, "token "+secret); strings.Contains(ge.Msg, secret) {

@@ -2,10 +2,10 @@ package runtimeconn
 
 import (
 	"context"
-	"github.com/morehao/ark-mate/internal/runtime"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
 
@@ -31,13 +31,13 @@ import (
 // 事实，不是故障——调用方据此把说明文案与留痕级别分开。
 func SampleConfigOptions(ctx context.Context, rc session.Conn, rawSessionID, cwd string) ([]runtime.ConfigOption, error) {
 	if rc == nil || rc.Agent() == nil {
-		return nil, acp.NewError(acp.ClassConnection, "runtime_not_connected",
+		return nil, code.NewError(code.ClassConnection, "runtime_not_connected",
 			"执行面没有可用的客户端连接，无法取样模型目录", nil)
 	}
 	agent := rc.Agent()
 	caps := agent.Capabilities()
 	if !caps.SessionResume && !caps.LoadSession {
-		return nil, acp.NewError(acp.ClassUnsupported, "resume_session_unsupported",
+		return nil, code.NewError(code.ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
 	}
 	var sess session.AgentSession

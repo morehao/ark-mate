@@ -33,7 +33,7 @@ func TestPickDirectoryHostUnsupportedWhenNotHost(t *testing.T) {
 	if err == nil || !errors.Is(err, workspace.ErrNativePickUnsupported) {
 		t.Fatalf("非 native 形态应 native_pick_unsupported: %v", err)
 	}
-	if code := acpCode(t, err); code != "native_pick_unsupported" {
+	if code := viewCode(t, err); code != "native_pick_unsupported" {
 		t.Fatalf("错误码应为 native_pick_unsupported: %s", code)
 	}
 }
@@ -143,7 +143,7 @@ func TestPickDirectoryHostSpawnsAndParsesHostPicker(t *testing.T) {
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho 'boom' >&2\nexit 3\n"), 0o755); err != nil {
 		t.Fatalf("改写假 osascript: %v", err)
 	}
-	if _, _, err := planesOf(svc).Picker.PickDirectoryHost(context.Background()); err == nil || acpCode(t, err) != "native_pick_failed" {
+	if _, _, err := planesOf(svc).Picker.PickDirectoryHost(context.Background()); err == nil || viewCode(t, err) != "native_pick_failed" {
 		t.Fatalf("非取消失败应 native_pick_failed: %v", err)
 	}
 }

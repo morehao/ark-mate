@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
@@ -56,14 +57,16 @@ func Connect(ctx context.Context, spec Spec, args []string, env []string, opts a
 		}
 		t = rt
 	default:
-		return nil, acp.NewError(acp.ClassUnsupported, "unsupported_transport",
+		return nil, code.NewError(code.ClassUnsupported, "unsupported_transport",
 			"runtime "+spec.ID+" 声明了不支持的传输 "+spec.Launch.Transport, nil)
 	}
 
 	client, err := acp.Dial(context.WithoutCancel(ctx), t, opts)
 	if err != nil {
 		_ = t.Close()
-		return nil, err
+		// 握手/拉起失败是本包交给上层的错误出口：协议错误在这里折成平台视图
+		// （分类、稳定 code、stderr 诊断尾巴一并带走，见 FoldError）。
+		return nil, FoldError(err)
 	}
 	return client, nil
 }

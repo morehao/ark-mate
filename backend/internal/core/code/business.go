@@ -1,16 +1,30 @@
 package code
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/gerror"
 )
 
-// notFoundCodes 是 acp 层"目标不存在"这一类稳定 code。
+// ——— 平台业务错误的**载体**与**投影** ———
 //
-// 它们落在 acp.ClassRequest 里（对上游而言确实是一次被拒的请求），但对调用方
+// 为什么内圈需要自己的载体：`acp.NewError` 的四个参数里，第一个是 **错误分类**（可操作语义：
+// 重试、登录、换参数、降级），后三个才是文案与 cause。用例层与领域层为了借这套语义曾被迫
+// import 协议库，于是"内圈认识外圈协议"这条裂缝从错误出口重新长回来。
+//
+// B4 之后协议库在**适配器出口**就把协议错误折成平台视图（`RuntimeError`，见 runtime_error.go），
+// 本包因此对 `internal/infra/acp` 零依赖：
+//
+//	构造：内圈写 `code.NewError(code.ClassRequest, "session_not_found", …)` → `*Coded`；
+//	投影：`FromError` 把平台视图/平台带码错误按分类映射成对外业务码（下面是唯一投影点）。
+//
+// 两份词汇（平台 Class ↔ 协议 Class）同样值，由 `TestErrorClassVocabularyMatchesACP` 逐条钉住。
+
+// notFoundCodes 是"目标不存在"这一类稳定 code。
+//
+// 它们落在 ClassRequest 里（对上游而言确实是一次被拒的请求），但对调用方
 // 而言语义是 404：再改参数也不会有结果，得先把资源建好。故单独提档到 NotFound，
 // 让前端能按 40401 直接引导"去注册 agent / 去建 runtime"，而不是当成参数错误。
 var notFoundCodes = map[string]bool{
@@ -44,7 +58,7 @@ var notFoundCodes = map[string]bool{
 
 // classCodeOverrides 是"分类对、但对外码要换一个"的例外表（按稳定 code 名）。
 //
-// 为什么需要它：acp 的 Class 表达的是**可操作语义**（重试/登录/换参数/降级），而对外码表达的是
+// 为什么需要它：Class 表达的是**可操作语义**（重试/登录/换参数/降级），而对外码表达的是
 // **用户该做什么**。绝大多数时候两者同向，但有一类故障它们的指向不同——
 //
 //	resource_sync_failed：平台把应用层清单交付给某个底座失败（v12 的同步链路；v11 叫
@@ -56,43 +70,94 @@ var classCodeOverrides = map[string]int{
 	"resource_sync_failed": UpstreamFailed,
 }
 
-// fromACP 把 acp 层错误按其 Class 映射为业务码。
+// Coded 是平台自己的**带码错误**：分类（可操作语义）+ 稳定 code + 文案 + 可选诊断尾巴 + cause。
 //
-// 这张表是 acp 分类（可操作语义：重试/登录/换参数/降级）到对外码的单向投影，
-// 因此**放在 code 包**而不是 acp 包：acp 是可复用的 ACP 客户端，不该知道
-// ark-mate 的信封编号；反过来 code 包作为"编号唯一事实源"必须收下这张表，
-// 否则同一个 acp 错误在控制器与领域层会映射成两个不同的码。
-func fromACP(err error) (gerror.Error, bool) {
-	ae, ok := acp.As(err)
-	if !ok {
-		return gerror.Error{}, false
+// 它是内圈表达"这是哪一种错"的唯一构造产物。`RuntimeError`（runtime_error.go）是同形的**上游
+// 执行错误视图**；两者都由下面的 `codeOf` 投影成对外码，因此新增/改名一个 code 只需要动一处。
+type Coded struct {
+	// Class 可操作分类（重试 / 登录 / 改参数 / 降级）。
+	Class Class
+	// Code 稳定 code 名（进信封与诊断面；前端据此给动作）。
+	Code string
+	// Details 人话描述（出口统一过脱敏闸门；可直接展示）。
+	Details string
+	// StderrTail 需要外露的诊断尾巴（业务错误通常为空；空 = 未采集）。
+	StderrTail []string
+	// Err 原始错误（供日志与更深层判定；不进对外载荷）。
+	Err error
+}
+
+// Error 实现 error（日志与 `%v` 用）。
+func (e *Coded) Error() string {
+	if e.Err == nil {
+		return "code error: class=" + string(e.Class) + " code=" + e.Code + " " + e.Details
 	}
+	return "code error: class=" + string(e.Class) + " code=" + e.Code + " " + e.Details + ": " + e.Err.Error()
+}
+
+// Unwrap 让 `errors.As/Is` 能穿透到原始错误。
+func (e *Coded) Unwrap() error { return e.Err }
+
+// CodedOf 从错误链里取**平台带码错误**。
+//
+// 取外层而不是最内层：包装它的那一层才是"这是什么错"的答案（`errors.As` 深度优先命中第一个）。
+func CodedOf(err error) (*Coded, bool) {
+	if err == nil {
+		return nil, false
+	}
+	var ce *Coded
+	if errors.As(err, &ce) {
+		return ce, true
+	}
+	return nil, false
+}
+
+// codeOf 把**平台错误**投影成对外业务码（唯一投影点）。
+//
+// 这张表是分类（可操作语义：重试/登录/换参数/降级）到对外码的单向投影，因此放在本包而不是
+// 协议库：协议是可复用的客户端，不该知道 ark-mate 的信封编号；反过来本包作为"编号唯一事实源"
+// 必须收下这张表，否则同一个分类在控制器与领域层会映射成两个不同的码。
+func codeOf(class Class, name string) int {
 	c := UpstreamFailed
-	switch ae.Class {
-	case acp.ClassRequest:
+	switch class {
+	case ClassRequest:
 		c = InvalidRequest
-		if notFoundCodes[ae.Code] {
+		if notFoundCodes[name] {
 			c = NotFound
 		}
-	case acp.ClassLimit:
+	case ClassLimit:
 		c = Conflict
-	case acp.ClassAccess:
+	case ClassAccess:
 		c = Unauthorized
-	case acp.ClassUnsupported:
+	case ClassUnsupported:
 		c = NotSupported
-	case acp.ClassService, acp.ClassConnection:
+	case ClassService, ClassConnection:
 		c = BadGateway
 	}
-	if o, ok := classCodeOverrides[ae.Code]; ok {
+	if o, ok := classCodeOverrides[name]; ok {
 		c = o
 	}
-	// acp 的 Details 是脱敏后给用户看的一句话；缺省回落到稳定 code，
-	// 保证 msg 永不为空（空 msg 在前端会渲染成一个没有内容的错误气泡）。
-	msg := ae.Details
-	if msg == "" {
-		msg = ae.Code
+	return c
+}
+
+// fromView 把平台错误视图投影成对外信封错误（视图为 nil 时 ok=false）。
+func fromView(re *RuntimeError) (gerror.Error, bool) {
+	if re == nil {
+		return gerror.Error{}, false
 	}
-	if s := stderrMsgSuffix(ae.StderrTail); s != "" {
+	return Error(codeOf(re.Class, re.Code), messageOf(re)), true
+}
+
+// messageOf 取平台错误视图的对外文案。
+//
+// Details 是脱敏后给用户看的一句话；缺省回落到稳定 code，保证 msg 永不为空（空 msg 在前端会
+// 渲染成一个没有内容的错误气泡）。有 stderr 尾巴时并进文案（见 stderrMsgSuffix）。
+func messageOf(re *RuntimeError) string {
+	msg := re.Details
+	if msg == "" {
+		msg = re.Code
+	}
+	if s := stderrMsgSuffix(re.StderrTail); s != "" {
 		// SDK 把"底座进程没了"裹成 JSON-RPC -32603 的通用文案（字面量 `Internal error`，
 		// 见 acp-go-sdk errors.go）。这句话单独摆给用户没有信息量，而尾巴里有——换掉它。
 		// 若将来 SDK 换了文案，这里只是不再替换（退回它自己的话），不会出错。
@@ -101,11 +166,11 @@ func fromACP(err error) (gerror.Error, bool) {
 		}
 		msg += "；" + s
 	}
-	return Error(c, msg), true
+	return msg
 }
 
-// 信封文案里底座 stderr 的量纲（**与 acp 侧的尾巴上限不是一回事**）：
-// acp 保留 200 行是给事件/诊断面板那种结构化字段用的；而 msg 会进前端错误气泡、访问日志
+// 信封文案里底座 stderr 的量纲（**与协议侧的尾巴上限不是一回事**）：
+// 协议侧保留 200 行是给事件/诊断面板那种结构化字段用的；而 msg 会进前端错误气泡、访问日志
 // 与用户截图，两者差一个数量级，所以这里另设一个更小的上限。
 const (
 	stderrMsgLines = 5   // 最多带几行
@@ -117,9 +182,9 @@ const (
 // 以及通用的 `fatal:` / 日志里的 `ERROR:`。
 var stderrCauseRe = regexp.MustCompile(`(?i)^\s*(error|fatal|panic|traceback|exception)\b|\b(error|exception)s?\s*:`)
 
-// stderrMsgSuffix 把 acp 采集到的底座 stderr 尾巴并进对外文案。
+// stderrMsgSuffix 把底座 stderr 尾巴并进对外文案。
 //
-// 为什么必须并：底座起不来时，ACP SDK 只回一句通用的 `Internal error`
+// 为什么必须并：底座起不来时，协议 SDK 只回一句通用的 `Internal error`
 // （JSON-RPC -32603 的固定文案，见 acp-go-sdk errors.go），真因在子进程 stderr 里
 // （典型如 dsh 的 `.env` 保留键报错）。不并的话用户只看到 `50001 Internal error`，
 // 完整原因却躺在核心日志里——排障得先知道去翻日志。
@@ -129,7 +194,7 @@ var stderrCauseRe = regexp.MustCompile(`(?i)^\s*(error|fatal|panic|traceback|exc
 // 这个形态；而 Python 把原因打在**最后一行**。所以先找"原因行"并从它开始取，取不满时回退成
 // 尾部窗口，两种形态都能落进窗口。
 //
-// 尾巴在 acp.TailLines 出口已过 pkg/redact 闸门，这里再经 code.Error 过一次，不必自行脱敏。
+// 尾巴在协议侧 TailLines 出口已过 redact 闸门，这里再经 code.Error 过一次，不必自行脱敏。
 func stderrMsgSuffix(tail []string) string {
 	lines := make([]string, 0, len(tail))
 	for _, l := range tail {
@@ -190,20 +255,12 @@ func truncateRunes(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-// ——— 业务错误的**构造面**：调用方只写"这是什么错"，不写协议怎么描述它 ———
-//
-// 为什么有这一组：`acp.NewError` 的四个参数里，第一个是 **错误分类**（可操作语义：重试、
-// 登录、换参数、降级），后三个才是文案与 cause。用例层与领域层为了借这套语义被迫 import
-// 协议库，于是"内圈认识外圈协议"这条裂缝从错误出口重新长回来。
-//
-// 分类 → 对外码的投影本来就住在**本包**（`fromACP`），构造与投影住在同一处才谈得上收口。
-// 返回值仍是 `*acp.Error`（class 语义是所有分类消费方的共同货币，ACP 只是它今天的载体），
-// 所以既有分类路径（`acp.Classify` / `acp.As` / 控制器出口）行为逐字不变。
+// ——— 构造面：调用方只写"这是什么错"，不写协议怎么描述它 ———
 
 // Class 是平台自己的**可操作错误分类**（重试 / 登录 / 改参数 / 降级）。
 //
-// 它**不是** `acp.Class` 的别名：内圈写 `code.ClassRequest`，适配器边界做同值转换
-// （`NewError` 里那一处 `acp.Class(class)`）。取值与 `acp.Class` 一一对应，由
+// 它**不是**协议分类的别名：内圈写 `code.ClassRequest`，适配器边界做同值转换（协议侧的
+// `acp.Class` 与本词汇逐个同值）。取值与协议词汇一一对应，由
 // `TestErrorClassVocabularyMatchesACP` 逐条钉住——两份词汇分叉的表现是"这个错该重试还是该登录"
 // 在控制器与领域两侧给出不同答案，而两边各自的测试都绿。
 type Class string
@@ -221,15 +278,16 @@ const (
 	ClassService Class = "service"
 	// ClassUnsupported 该形态不支持 → 40501。
 	ClassUnsupported Class = "unsupported"
-	// ClassUnknown 未归类（保留与 acp 词汇同宽）。
+	// ClassUnknown 未归类（保留与协议词汇同宽）。
 	ClassUnknown Class = "unknown"
 )
 
 // NewError 按平台分类造一个带业务语义的错误（cause 可为 nil）。
 //
-// 这是**唯一**把平台分类翻成协议载体的地方：其余构造入口（RequestError 等）都走它。
+// 这是**唯一**把平台分类变成错误的构造入口：其余构造入口（RequestError 等）都走它。
+// 返回值是平台载体 `*Coded`——协议错误类型不再出现在内圈（B4）。
 func NewError(class Class, name, msg string, cause error) error {
-	return acp.NewError(acp.Class(class), name, msg, cause)
+	return &Coded{Class: class, Code: name, Details: msg, Err: cause}
 }
 
 // RequestError 请求侧错误：调用方改参数/换资源后可以重试（Class=request）。
@@ -252,7 +310,7 @@ func UnsupportedError(name, msg string) error {
 	return NewError(ClassUnsupported, name, msg, nil)
 }
 
-// ServiceError 平台自身失败（Class=service → 50001/50201，按 fromACP 的例外表）。
+// ServiceError 平台自身失败（Class=service → 50001/50201，按 codeOf 的例外表）。
 func ServiceError(name, msg string) error {
 	return NewError(ClassService, name, msg, nil)
 }
@@ -269,3 +327,9 @@ func ConnectionError(name, msg string) error {
 func WrapServiceError(name, msg string, cause error) error {
 	return NewError(ClassService, name, msg, cause)
 }
+
+// 编译期断言：平台带码错误与上游错误视图都是 error（共用同一套投影）。
+var (
+	_ error = (*Coded)(nil)
+	_ error = (*RuntimeError)(nil)
+)

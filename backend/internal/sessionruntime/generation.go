@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -205,7 +205,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *session.A
 			// 缩权面变化 + 建不起新代际 → **不回退**（旧进程 = 已被收回的权限面）。
 			glog.Warnw(ctx, "权限/能力面已收窄但新代际建不起来：本轮不发（不使用被收回的权限面继续跑）",
 				"session", as.ID, "runtime", as.Runtime, "from", plan.From, "to", plan.To, "err", err)
-			return nil, acp.NewError(acp.ClassLimit, "generation_switch_required",
+			return nil, code.NewError(code.ClassLimit, "generation_switch_required",
 				fmt.Sprintf("会话的权限或能力面已变更（%s），但新代际此刻无法建立：本轮未发出——不会用已经收回的权限面继续跑。请稍后重试（%s）",
 					plan.Reason, err.Error()), nil)
 		}

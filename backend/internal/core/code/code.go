@@ -90,7 +90,7 @@ func Error(c int, msg string) gerror.Error {
 		msg = Message(c)
 	}
 	// 脱敏闸门：对外文案可能夹带上游原文（如 runtime 报错里回显的 key）。
-	// 这是控制面所有对外错误的唯一构造入口（FromError 与 fromACP 都汇到这里）。
+	// 这是控制面所有对外错误的唯一构造入口（FromError 的每条投影分支都汇到这里）。
 	return gerror.Error{Code: c, Msg: redact.String(msg)}
 }
 
@@ -106,7 +106,7 @@ func Errorf(c int, format string, args ...any) gerror.Error {
 //
 // 映射顺序：
 //  1. 已经是带码的 gerror.Error → 原样透传（避免二次映射把 40401 压成 50000）；
-//  2. 是 acp 分类错误 → 按 Class 映射（见 acpClassCode）；
+//  2. 是平台错误（带码错误 / 上游错误视图）→ 按 Class 与稳定 code 映射（见 codeOf）；
 //  3. 其余 → Internal，msg 取 err.Error()。
 //
 // nil 原样返回 nil，便于 `return code.FromError(err)` 的直写。
@@ -118,8 +118,8 @@ func FromError(err error) error {
 	if errors.As(err, &coded) {
 		return err
 	}
-	if c, ok := fromACP(err); ok {
-		return c
+	if re, ok := RuntimeErrorOf(err); ok {
+		return Error(codeOf(re.Class, re.Code), messageOf(re))
 	}
 	return Error(Internal, err.Error())
 }

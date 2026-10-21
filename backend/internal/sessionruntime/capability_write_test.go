@@ -13,7 +13,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
 )
@@ -46,10 +45,10 @@ func numericCode(err error) int {
 	return gerr.Code
 }
 
-// errCode 取 acp 错误的稳定 code（非 acp 错误 → 空串）。
+// errCode 取平台错误的稳定 code（非平台错误 → 空串）。
 func errCode(err error) string {
-	if ae, ok := acp.As(err); ok {
-		return ae.Code
+	if re, ok := code.RuntimeErrorOf(err); ok {
+		return re.Code
 	}
 	return ""
 }

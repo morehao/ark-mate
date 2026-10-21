@@ -4,9 +4,9 @@ import (
 	"context"
 	"sync"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/infra/procreg"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
@@ -158,8 +158,8 @@ func (pl *Plane) Info() (id, name, version string) {
 }
 
 // unregisteredErr 构建期选定的 runtime 没在注册表里（单底座下只可能是装配/配置问题）。
-func unregisteredErr(id string) *acp.Error {
-	return acp.NewError(acp.ClassRequest, "runtime_not_found",
+func unregisteredErr(id string) error {
+	return code.NewError(code.ClassRequest, "runtime_not_found",
 		"构建期选定的 runtime "+id+" 未注册（检查 -ldflags 注入的 pkg/runtime.BuildRuntime "+
 			"与 .ark-mate/config/runtimes.json）", nil)
 }

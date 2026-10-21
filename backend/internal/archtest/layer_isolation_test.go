@@ -245,8 +245,11 @@ func TestInnerLayersUseNoTableRows(t *testing.T) {
 // `acp.PermissionRequest` 能编译、能跑，测试也绿（翻译层还在，两条路都通），于是"域不认识协议"
 // 这件事悄悄退回起点，而没有任何判据会响。
 //
-// 值层的两个包（`core/definition` / `core/automation`）也在表里：它们的错误构造改用 `code` 之后
-// 就不该再认识协议——`core/code` 是唯一例外（协议错误 → 平台视图的转换点，按 B4 随连接边界搬走）。
+// 值层也在表里：它们的错误构造改用 `code` 之后就不该再认识协议。B4 之后 `core/code` 自己
+// 也不再认识协议——协议错误 → 平台视图的转换点搬到了**适配器出口**（`runtime.FoldError`，
+// 由 `runtime.Connect` 与 `drivers/runtimeconn` 调用），内圈因此对协议零依赖。
+// 第二段的"全量"判据同时覆盖 `internal/domain` / `internal/core` / `internal/service` 三个前缀：
+// 这些前缀下新出现的包不登记即红。
 var protocolFreePackages = []string{
 	// —— 领域：已**全量**收口（每个包都在表里，新增域包不登记即红）——
 	modulePrefix + "internal/domain/automation",
@@ -269,17 +272,43 @@ var protocolFreePackages = []string{
 	modulePrefix + "internal/domain/workspace/row",
 
 	// —— 值层：错误构造改走 `core/code` 之后不该再认识协议 ——
-	// `core/code` 是唯一例外（协议错误 → 平台视图的转换点，按 B4 随连接边界搬走）。
-	modulePrefix + "internal/core/definition",
 	modulePrefix + "internal/core/automation",
+	modulePrefix + "internal/core/capability",
+	// B4：错误码包只留平台映射（分类 → 对外码），协议错误在适配器出口就折成平台视图。
+	modulePrefix + "internal/core/code",
+	modulePrefix + "internal/core/credential",
+	modulePrefix + "internal/core/definition",
+	modulePrefix + "internal/core/eventbus",
+	modulePrefix + "internal/core/identity",
+	modulePrefix + "internal/core/object/objdelivery",
+	modulePrefix + "internal/core/object/objid",
+	modulePrefix + "internal/core/object/objmeta",
+	modulePrefix + "internal/core/object/objtime",
+	modulePrefix + "internal/core/object/objusage",
+	modulePrefix + "internal/core/redact",
+	modulePrefix + "internal/core/resource",
+
+	// —— 用例层：业务错误的分类与 code 都走 `core/code`，用例不写协议分类 ——
+	modulePrefix + "internal/service/svcautomation",
+	modulePrefix + "internal/service/svccapability",
+	modulePrefix + "internal/service/svccommandpolicy",
+	modulePrefix + "internal/service/svclibrary",
+	modulePrefix + "internal/service/svcmodel",
+	modulePrefix + "internal/service/svcruntime",
+	modulePrefix + "internal/service/svcsearch",
+	modulePrefix + "internal/service/svcsession",
+	modulePrefix + "internal/service/svcstream",
+	modulePrefix + "internal/service/svcsystem",
+	modulePrefix + "internal/service/svcusage",
+	modulePrefix + "internal/service/svcworkspace",
 }
 
 // TestProtocolFreePackagesStayClean 已收口的内圈包不得再 import 协议库。
 //
 // 两段判据：
 //   - **已登记的包必须干净**（逐个包扫生产 import）；
-//   - **`internal/domain` 已全量收口**：该前缀下每个包都必须在表里——新增一个域包而不登记
-//     即红（否则"新包又 import acp"这条最自然的回退路径没有判据）。
+//   - **`internal/{domain,core,service}` 已全量收口**：这些前缀下每个包都必须在表里——
+//     新增一个包而不登记即红（否则"新包又 import acp"这条最自然的回退路径没有判据）。
 //
 // fail-closed：登记了的包必须真实存在（目录改名/搬走后不许静默空转）。
 func TestProtocolFreePackagesStayClean(t *testing.T) {
@@ -302,16 +331,18 @@ func TestProtocolFreePackagesStayClean(t *testing.T) {
 		}
 	}
 
-	// 领域全量收口：`internal/domain` 下的每个包都必须在表里（新增包不登记即红）。
+	// 全量收口：`internal/{domain,core,service}` 下的每个包都必须在表里（新增包不登记即红）。
 	registered := make(map[string]bool, len(protocolFreePackages))
 	for _, p := range protocolFreePackages {
 		registered[p] = true
 	}
-	for _, dir := range goPackagesUnder(t, filepath.Join(root, "internal", "domain")) {
-		self := packageImportPath(root, dir)
-		if !registered[self] {
-			t.Errorf("%s 没有登记进 protocolFreePackages：领域已全量收口，新增域包必须显式表态"+
-				"（否则「新包又 import 协议库」这条回退路径没有任何判据）", rel(root, dir))
+	for _, prefix := range []string{"domain", "core", "service"} {
+		for _, dir := range goPackagesUnder(t, filepath.Join(root, "internal", prefix)) {
+			self := packageImportPath(root, dir)
+			if !registered[self] {
+				t.Errorf("%s 没有登记进 protocolFreePackages：%s 已全量收口，新增包必须显式表态"+
+					"（否则「新包又 import 协议库」这条回退路径没有任何判据）", rel(root, dir), prefix)
+			}
 		}
 	}
 }

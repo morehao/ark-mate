@@ -62,10 +62,14 @@ func TestErrorClassVocabularyMatchesACP(t *testing.T) {
 		}
 	}
 
-	// 构造面真的把平台分类翻成了协议分类（不是丢字段）。
+	// 构造面真的带上了平台分类与 code（不是丢字段）：B4 起 `code.NewError` 造的是**平台载体**
+	// （`*code.Coded`），协议错误只在适配器出口被折成平台视图，内圈不再产出协议错误。
 	err := code.NewError(code.ClassRequest, "invalid_param", "参数不对", nil)
-	ae, ok := acp.As(err)
-	if !ok || ae.Class != acp.ClassRequest || ae.Code != "invalid_param" {
-		t.Fatalf("code.NewError 未把分类/code 带到协议载体：%+v (ok=%v)", ae, ok)
+	re, ok := code.RuntimeErrorOf(err)
+	if !ok || re.Class != code.ClassRequest || re.Code != "invalid_param" {
+		t.Fatalf("code.NewError 未把分类/code 带到平台错误视图：%+v (ok=%v)", re, ok)
+	}
+	if ce, ok := code.CodedOf(err); !ok || ce.Class != code.ClassRequest {
+		t.Fatalf("code.NewError 的载体应是 *code.Coded：%+v (ok=%v)", ce, ok)
 	}
 }
