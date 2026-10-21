@@ -9,7 +9,7 @@ import (
 // 本文件钉住**会话运行期状态归会话域**（P4a 正文第五十五刀）。
 //
 // 这一刀把 `ActiveSession` / `Run` / 句柄表与三个半块（事件出口、排队投递、轮次收口）从
-// `internal/sessionruntime` 搬进 `internal/domain/session`。失效方式全是**静默**的：
+// `internal/app/run` 搬进 `internal/domain/session`。失效方式全是**静默**的：
 //
 //	① **状态搬一半**：句柄表留在 manager、`Runner` 在域里各存一份 ⇒ 两份在途 / 两份队列，
 //	   并发下表现为重复投递或丢投递，而编译、日志、单会话串行用例全部正常；
@@ -57,9 +57,9 @@ func TestSessionStateLivesInSessionDomain(t *testing.T) {
 	}
 
 	// ② manager 生产代码零命中旧状态：句柄表、双索引、私有字段都不许长回来。
-	files := productionGoFiles(t, filepath.Join(root, "internal", "sessionruntime"))
+	files := productionGoFiles(t, filepath.Join(root, "internal", "app", "run"))
 	if len(files) == 0 {
-		t.Fatal("`internal/sessionruntime` 下扫不到任何生产文件——判据失锚（目录改名/搬走了？）")
+		t.Fatal("`internal/app/run` 下扫不到任何生产文件——判据失锚（目录改名/搬走了？）")
 	}
 	forbidden := []string{
 		"type ActiveSession struct",
@@ -84,7 +84,7 @@ func TestSessionStateLivesInSessionDomain(t *testing.T) {
 
 	// ③ 接线正判据：只删旧字段不够——`Runner` 造出来却没接上时，事件出口恒空/队列恒不投。
 	wiring := map[string][]string{
-		filepath.Join("internal", "sessionruntime", "orchestrator.go"): {
+		filepath.Join("internal", "app", "run", "orchestrator.go"): {
 			"session.NewHandles(",
 			"session.NewRunner(",
 			"session.NewLifecycle(",
@@ -93,7 +93,7 @@ func TestSessionStateLivesInSessionDomain(t *testing.T) {
 			"Busy:         o.inflight,",
 			"o.handles",
 		},
-		filepath.Join("internal", "sessionruntime", "connection.go"): {
+		filepath.Join("internal", "app", "run", "connection.go"): {
 			// C2 第一刀起，连接层接的是**适配器侧的出口**（ACP 事件先翻译成域信号）；
 			// 它必须真的把事件交给领域出口，所以下面再对 event_bridge.go 加一条正判据。
 			"o.acpEventSink(",
@@ -112,10 +112,10 @@ func TestSessionStateLivesInSessionDomain(t *testing.T) {
 			"func (l *Lifecycle) Attach(",
 			"l.handles.Put(",
 		},
-		filepath.Join("internal", "sessionruntime", "event_bridge.go"): {
+		filepath.Join("internal", "app", "run", "event_bridge.go"): {
 			"o.runner.EventSink(",
 		},
-		filepath.Join("internal", "sessionruntime", "run.go"): {
+		filepath.Join("internal", "app", "run", "run.go"): {
 			"o.runner.Prompt(",
 			"o.runner.CancelRun(",
 		},

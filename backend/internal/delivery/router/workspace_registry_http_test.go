@@ -11,7 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/delivery/router"
 	"github.com/morehao/ark-mate/internal/contract/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/sessionruntime"
+	apprun "github.com/morehao/ark-mate/internal/app/run"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
@@ -29,7 +29,7 @@ import (
 // registryApp 装配真路由 + 真 manager + 独立 sqlite 库（工作区白名单：不受限）。
 //
 // 返回 service 是为了让用例能直接调领域方法做前置（例如建出默认工作空间）。
-func registryApp(t *testing.T) (*sessionruntime.Service, string, string) {
+func registryApp(t *testing.T) (*apprun.Service, string, string) {
 	t.Helper()
 	dbPath := testutil.TempDBPath(t)
 	st := testutil.OpenStore(t, dbPath)
@@ -50,7 +50,7 @@ func registryApp(t *testing.T) (*sessionruntime.Service, string, string) {
 	return svc, dbPath, provision
 }
 
-func callJSON(t *testing.T, svc *sessionruntime.Service, method, path, body string) (int, json.RawMessage) {
+func callJSON(t *testing.T, svc *apprun.Service, method, path, body string) (int, json.RawMessage) {
 	t.Helper()
 	env := doRaw(t, svc, method, path, body)
 	var parsed struct {
@@ -271,7 +271,7 @@ func TestWorkspaceRegistryMemoryModeIsReadOnlyHTTP(t *testing.T) {
 }
 
 // doRaw 走真实路由表发一次请求，返回原始信封字节。
-func doRaw(t *testing.T, svc *sessionruntime.Service, method, path, body string) []byte {
+func doRaw(t *testing.T, svc *apprun.Service, method, path, body string) []byte {
 	t.Helper()
 	engine := router.New(testRouterDeps(t, testRouterOpts{service: svc, bus: eventbus.New()}))
 	var rd *strings.Reader

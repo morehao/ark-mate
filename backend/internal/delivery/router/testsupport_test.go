@@ -15,11 +15,11 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/delivery/middleware"
 	"github.com/morehao/ark-mate/internal/delivery/router"
-	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"
 	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/app/system"
-	"github.com/morehao/ark-mate/internal/sessionruntime"
+	apprun "github.com/morehao/ark-mate/internal/app/run"
 	"github.com/morehao/ark-mate/internal/version"
 )
 
@@ -32,7 +32,7 @@ type testRouterOpts struct {
 	// metaSource 覆盖诊断面的值来源；nil 时用"资产已接上"的默认值。
 	metaSource func() system.MetaSource
 	// 复用一个已装配好的会话面（调用方要先设策略/凭据时传它）。
-	service  *sessionruntime.Service
+	service  *apprun.Service
 	registry *goruntime.Registry
 	bus      *eventbus.Bus
 }

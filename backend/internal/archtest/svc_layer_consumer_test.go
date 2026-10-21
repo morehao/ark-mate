@@ -56,6 +56,12 @@ func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 			case strings.Contains(slashed, "/internal/bootstrap/assembly/"):
 				fromAllowed++
 				continue
+			case strings.Contains(slashed, "/internal/bootstrap/maintenance/"):
+				// `mate demo` / `mate doctor` 是**运维与验证命令**，与 cliops 同性质的入站面：
+				// demo 刻意只要"最小执行面"（不起 HTTP、不建路由），所以它直接构造编排器。
+				// 它们不参与产品装配，也不持有路由，放行不改变"用例实例由装配根造"这条。
+				fromAllowed++
+				continue
 			case strings.Contains(slashed, "/internal/app/"):
 				// 用例层自己（`svc*` 之间零互相 import 由 layer_isolation_test.go 单独钉）。
 				continue

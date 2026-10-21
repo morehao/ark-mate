@@ -71,7 +71,7 @@ func TestSandboxEscalationGoesThroughApproval(t *testing.T) {
 	//    （A2：规则文件里显式写了 `allow`，见 `commandGateDecision`）。除此之外，`permission_flow.go`
 	//    里出现 `Allowed: true` 都视为"默认值式放行"——所以判据按**函数体**切分：门禁函数里必须有
 	//    `CommandAllow` 分支且允许，其余部分一个字都不许有。
-	flow := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "permission_flow.go")))
+	flow := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "run", "permission_flow.go")))
 	if !strings.Contains(flow, "o.perm.RegisterAndWait(") {
 		t.Fatalf("`permission_flow.go` 里没有 `o.perm.RegisterAndWait(`：审批通道必须只有这一条")
 	}

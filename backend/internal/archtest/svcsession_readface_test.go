@@ -74,7 +74,7 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 	ctrSrcAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsession", "session.go"))) +
 		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsearch", "search.go"))) +
 		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrusage", "usage.go")))
-	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
+	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "app", "run"))
 	readIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "session", "read.go")))
 	searchIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "search", "search.go")))
 	usageIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "usage", "usage.go")))
@@ -86,7 +86,7 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 			t.Errorf("用例层找不到 `%s`：控制器只能经用例接口取，而该接口必须声明这个方法。", m.iface)
 		}
 		if strings.Contains(mgrAll, "func (s *Service) "+m.plane+"(") {
-			t.Errorf("`internal/sessionruntime` 里又出现 `func (s *Service) %s(`：那一行转发已按 P4b 口径删除。", m.plane)
+			t.Errorf("`internal/app/run` 里又出现 `func (s *Service) %s(`：那一行转发已按 P4b 口径删除。", m.plane)
 		}
 		if !strings.Contains(ctrSrcAll, m.call) {
 			t.Errorf("控制器里没有 `%s` 调用点：读模型要经用例接口取（v3.1 §3.2.1）。", m.call)
@@ -106,7 +106,7 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 
 	// ② manager 侧不得再有这份实现。
 	if strings.Contains(mgrAll, "func (s *Service) ListSessions(") {
-		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) ListSessions(`：它是一行转发，" +
+		t.Error("`internal/app/run` 里又出现 `func (s *Service) ListSessions(`：它是一行转发，" +
 			"读模型的实现只有一份且在域里（P4a 正文第十一刀）。")
 	}
 

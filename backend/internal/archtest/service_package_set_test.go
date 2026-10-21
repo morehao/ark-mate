@@ -46,10 +46,11 @@ import (
 // `search` / `usage` 从会话域取出，`workspace` 从工作空间域取出，`stream` 包住事件总线。
 //
 // C3 4.2：目录从 `service/svc<领域>` 搬成 `app/<领域>`，**包名去掉 `svc` 前缀**（角色不再叫
-// "service 层"，它就是用例环）。判据本身不变：包集恰好这些、多一个少一个都红。
+// "service 层"，它就是用例环）；同一步把执行面 `sessionruntime` 也搬成 `app/run`。
+// 判据本身不变：包集恰好这些、多一个少一个都红。
 var servicePackageSet = []string{
 	"automation", "capability", "commandpolicy", "library",
-	"model", "runtime", "search", "session", "stream", "system",
+	"model", "run", "runtime", "search", "session", "stream", "system",
 	"usage", "workspace",
 }
 
@@ -58,7 +59,7 @@ var serviceRuntimeMethods = []string{"RuntimeIdentity", "RuntimeDiagnostics"}
 
 // serviceRuntimePlaneMethods `svcruntime` 的**执行面端口**（`Plane`）允许声明的方法。
 //
-// 它们是执行面的口语（`internal/drivers/runtimeconn` 的方法名）：用例层在这里只做**命名适配**
+// 它们是执行面的口语（`internal/adapters/outbound/runtimeconn` 的方法名）：用例层在这里只做**命名适配**
 // （`Identity` → `RuntimeIdentity`，路径 `/runtime/...` 是对外契约的口语）。
 // 这条判据与上一条配对：API 端口只许那 2 个、适配端口也只许那 2 个——两边同时被钉住，
 // 才挡得住"把 provider/model 又塞回这个大包"这条回头路。

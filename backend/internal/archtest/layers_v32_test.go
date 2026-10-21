@@ -20,7 +20,7 @@ import (
 //	    infra/credentials infra/procreg                           基础驱动
 //	L6  drivers/gateway drivers/mechanism drivers/registry
 //	    drivers/runtimeconn drivers/transfer config                组合驱动
-//	L7  sessionruntime                                            执行面
+//	L7  run                                            执行面
 //	L8  delivery/controller delivery/middleware                   入站适配
 //	L9  delivery/router bootstrap/assembly bootstrap/app
 //	    bootstrap/cliops bootstrap/cli bootstrap/maintenance       交付 / 装配
@@ -97,7 +97,7 @@ var v32Layers = map[string]v32Layer{
 	"internal/domain": {layer: 2, name: "domain", sameLayer: true, deny: []string{
 		"internal/persistence/store", "internal/persistence/dao", "internal/contract", "internal/drivers/mechanism",
 		"internal/infra/credentials", "internal/infra/dsh", "internal/drivers/registry",
-		"internal/sessionruntime", "internal/drivers/runtimeconn", "internal/drivers/gateway",
+		"internal/app/run", "internal/adapters/outbound/runtimeconn", "internal/drivers/gateway",
 		"internal/delivery/controller", "internal/delivery/middleware", "internal/delivery/router", "internal/bootstrap/assembly",
 		"internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
@@ -121,21 +121,21 @@ var v32Layers = map[string]v32Layer{
 		// C2 第二刀：用例层不写协议分类。业务错误的构造面在 `platform/code`
 		// （RequestError/ServiceError/…），分类 → 对外码的投影也住那里。
 		"internal/infra/acp",
-		"internal/drivers/mechanism", "internal/drivers/registry", "internal/drivers/runtimeconn",
-		"internal/sessionruntime", "internal/drivers/gateway", "internal/delivery/controller",
+		"internal/drivers/mechanism", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
+		"internal/app/run", "internal/drivers/gateway", "internal/delivery/controller",
 		"internal/delivery/middleware", "internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
 		"internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
 
 	// ——— L5：基础驱动 ———
 	"internal/persistence/dao": {layer: 5, name: "dao", sameLayer: true, deny: []string{
-		"internal/persistence/store", "internal/drivers/mechanism", "internal/drivers/registry", "internal/drivers/runtimeconn",
-		"internal/sessionruntime", "internal/drivers/gateway", "internal/delivery/controller",
+		"internal/persistence/store", "internal/drivers/mechanism", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
+		"internal/app/run", "internal/drivers/gateway", "internal/delivery/controller",
 		"internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
 	"internal/persistence/store": {layer: 5, name: "store", sameLayer: true, deny: []string{
-		"internal/drivers/mechanism", "internal/drivers/registry", "internal/drivers/runtimeconn",
-		"internal/sessionruntime", "internal/drivers/gateway", "internal/delivery/controller",
+		"internal/drivers/mechanism", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
+		"internal/app/run", "internal/drivers/gateway", "internal/delivery/controller",
 		"internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
 	"internal/infra/dsh":         {layer: 5, name: "infra/dsh", sameLayer: true, deny: v32AdapterDeny},
@@ -149,16 +149,16 @@ var v32Layers = map[string]v32Layer{
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
 	"internal/drivers/mechanism": {layer: 6, name: "mechanism", sameLayer: true, deny: []string{
-		"internal/drivers/registry", "internal/drivers/runtimeconn", "internal/sessionruntime",
+		"internal/drivers/registry", "internal/adapters/outbound/runtimeconn", "internal/app/run",
 		"internal/drivers/gateway", "internal/delivery/controller", "internal/delivery/middleware", "internal/delivery/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
 	"internal/drivers/registry": {layer: 6, name: "registry", sameLayer: true, deny: []string{
-		"internal/sessionruntime", "internal/drivers/gateway", "internal/delivery/controller",
+		"internal/app/run", "internal/drivers/gateway", "internal/delivery/controller",
 		"internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
-	"internal/drivers/runtimeconn": {layer: 6, name: "runtimeconn", sameLayer: true, deny: []string{
-		"internal/sessionruntime", "internal/drivers/gateway", "internal/delivery/controller",
+	"internal/adapters/outbound/runtimeconn": {layer: 6, name: "runtimeconn", sameLayer: true, deny: []string{
+		"internal/app/run", "internal/drivers/gateway", "internal/delivery/controller",
 		"internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
 	"internal/config": {layer: 6, name: "config", sameLayer: true, deny: []string{
@@ -173,15 +173,21 @@ var v32Layers = map[string]v32Layer{
 	// 注册表都在它的扫描面上），所以它必须能向下吃 assembly/router，而不是一个小小的 L6 助手。
 	"internal/bootstrap/maintenance": {layer: 9, name: "maintenance", sameLayer: true},
 
-	// ——— L7：执行面 ———
+	// ——— 执行面（C3 4.2 起并进用例环：`sessionruntime` → `app/run`）———
 	//
-	// 阶段 0（A）完成后的 deny：执行面不认任何具体适配器。
-	//   0.1 接库 → 端口；0.2 `PlaneFacts` → 不再 import `drivers/registry`；
-	//   0.4b 执行面构造与来源接线移到装配根 → 不再 import `drivers/runtimeconn`。
-	// 这条 deny 是那几步的机器判据，防止下一个人"顺手"把具体适配器塞回来。
-	"internal/sessionruntime": {layer: 7, name: "sessionruntime", deny: []string{
-		"internal/persistence/store", "internal/persistence/dao", "internal/infra/dsh",
-		"internal/drivers/runtimeconn", "internal/drivers/registry",
+	// 它**与兄弟用例包同层（L4）**：编排归用例环，包内逻辑从阶段 0 起就只经端口取连接。
+	// 与原 L7 的两点差别（都在注释里说清楚，别让下一个人以为可以随手放宽）：
+	//
+	//  1. **不 deny `infra/acp`**：拨号的 hooks 载荷仍是协议形状（`acp.ClientOptions`），
+	//     那一层随 C3 4.5（`adapters/outbound/acp`）一起收。协议无关收口表因此把它登记成
+	//     **刻意豁免**（`layer_isolation_test.go` 的 `protocolFreeExempt`，附理由且双向判）。
+	//  2. deny 里**显式点名**兄弟用例包（`internal/app`）——执行面不构造别的用例实例
+	//     （测试夹具除外；同层互引判据只扫生产 import）。
+	//
+	// 原 L7 的 deny 保持：执行面不认任何具体适配器（store / dao / dsh / registry / runtimeconn）。
+	"internal/app/run": {layer: 4, name: "app/run", deny: []string{
+		"internal/app", "internal/persistence/store", "internal/persistence/dao", "internal/infra/dsh",
+		"internal/adapters/outbound/runtimeconn", "internal/drivers/registry",
 		"internal/drivers/gateway", "internal/delivery/controller", "internal/delivery/middleware", "internal/delivery/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
@@ -189,8 +195,8 @@ var v32Layers = map[string]v32Layer{
 	// ——— L8：入站适配 ———
 	"internal/delivery/controller": {layer: 8, name: "controller", deny: []string{
 		"internal/persistence/model", "internal/domain", "internal/persistence/store", "internal/persistence/dao",
-		"internal/drivers/mechanism", "internal/drivers/registry", "internal/drivers/runtimeconn",
-		"internal/sessionruntime", "internal/drivers/gateway", "internal/delivery/router",
+		"internal/drivers/mechanism", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
+		"internal/app/run", "internal/drivers/gateway", "internal/delivery/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
 	"internal/delivery/middleware": {layer: 8, name: "middleware", deny: []string{
@@ -202,7 +208,7 @@ var v32Layers = map[string]v32Layer{
 	"internal/delivery/router": {layer: 9, name: "router", sameLayer: true, deny: []string{
 		"internal/app", "internal/persistence/store", "internal/persistence/dao", "internal/persistence/model",
 		"internal/domain", "internal/contract", "internal/platform/eventbus", "internal/drivers/mechanism",
-		"internal/drivers/registry", "internal/drivers/runtimeconn", "internal/sessionruntime",
+		"internal/drivers/registry", "internal/adapters/outbound/runtimeconn", "internal/app/run",
 		"internal/drivers/gateway", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
 	"internal/bootstrap/assembly": {layer: 9, name: "assembly", sameLayer: true, deny: []string{
@@ -210,21 +216,21 @@ var v32Layers = map[string]v32Layer{
 	}},
 	"internal/bootstrap/app": {layer: 9, name: "app", sameLayer: true, deny: []string{
 		"internal/app", "internal/persistence/store", "internal/persistence/dao", "internal/persistence/model",
-		"internal/domain", "internal/drivers/mechanism", "internal/drivers/registry", "internal/drivers/runtimeconn",
-		"internal/sessionruntime", "internal/delivery/controller", "internal/delivery/router",
+		"internal/domain", "internal/drivers/mechanism", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
+		"internal/app/run", "internal/delivery/controller", "internal/delivery/router",
 		"internal/bootstrap/cliops", "internal/bootstrap/cli", "internal/drivers/gateway",
 	}},
 	// cliops 是**第二入站适配器**，不是第二装配根：它只做参数绑定 + 调用例 + 打印。
 	// 持久化与机制一律经 `assembly.BuildResult` 暴露的 `Maintenance` 端口，拿不到具体实现。
 	"internal/bootstrap/cliops": {layer: 9, name: "cliops", sameLayer: true, deny: []string{
 		"internal/persistence/store", "internal/persistence/dao", "internal/persistence/model", "internal/drivers/mechanism",
-		"internal/domain", "internal/drivers/registry", "internal/drivers/runtimeconn",
-		"internal/sessionruntime", "internal/drivers/gateway", "internal/infra",
+		"internal/domain", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
+		"internal/app/run", "internal/drivers/gateway", "internal/infra",
 	}},
 	"internal/bootstrap/cli": {layer: 9, name: "cli", sameLayer: true, deny: []string{
 		"internal/app", "internal/persistence/store", "internal/persistence/dao", "internal/persistence/model",
 		"internal/domain", "internal/delivery/controller", "internal/drivers/mechanism",
-		"internal/drivers/runtimeconn", "internal/drivers/registry", "internal/sessionruntime",
+		"internal/adapters/outbound/runtimeconn", "internal/drivers/registry", "internal/app/run",
 		"internal/delivery/router", "internal/drivers/gateway",
 	}},
 }
@@ -234,8 +240,8 @@ var v32AdapterDeny = []string{
 	"internal/persistence/model", "internal/platform/eventbus", "internal/platform/capability", "internal/platform/credential",
 	"internal/platform/code", "internal/platform/automation", "internal/config", "internal/contract",
 	"internal/persistence/dao", "internal/persistence/store", "internal/drivers/mechanism", "internal/domain",
-	"internal/drivers/runtimeconn", "internal/drivers/registry", "internal/app",
-	"internal/sessionruntime", "internal/delivery/middleware", "internal/drivers/gateway",
+	"internal/adapters/outbound/runtimeconn", "internal/drivers/registry", "internal/app",
+	"internal/app/run", "internal/delivery/middleware", "internal/drivers/gateway",
 	"internal/delivery/controller", "internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
 	"internal/bootstrap/cliops", "internal/bootstrap/cli",
 }

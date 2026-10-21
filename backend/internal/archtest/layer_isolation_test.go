@@ -10,7 +10,7 @@ import (
 
 // ——— 分层重构（P3d/P2a 起）的层守卫 ———
 //
-// 新结构把解散 `internal/sessionruntime` 的实现按**层**落进 `internal/drivers/mechanism/*`（机制：无业务规则的
+// 新结构把解散 `internal/app/run` 的实现按**层**落进 `internal/drivers/mechanism/*`（机制：无业务规则的
 // 跨域设施）、`internal/domain/*`（领域：拥有数据与不变量）、`internal/app/*`（用例：API
 // 面实现）。层分开之后最危险的失效方式有两种，**都不会让任何既有测试变红**：
 //
@@ -77,7 +77,7 @@ func TestMechanismMustNotImportUpward(t *testing.T) {
 	forbidden := []string{
 		modulePrefix + "internal/domain",
 		modulePrefix + "internal/app",
-		modulePrefix + "internal/sessionruntime",
+		modulePrefix + "internal/app/run",
 		modulePrefix + "internal/bootstrap/app",
 		modulePrefix + "internal/delivery/router",
 		modulePrefix + "internal/delivery/controller",
@@ -143,7 +143,7 @@ func TestDomainPackagesMustNotImportEachOther(t *testing.T) {
 	}
 	upward := []string{
 		modulePrefix + "internal/app",
-		modulePrefix + "internal/sessionruntime",
+		modulePrefix + "internal/app/run",
 		modulePrefix + "internal/bootstrap/app",
 		modulePrefix + "internal/delivery/router",
 		modulePrefix + "internal/delivery/controller",
@@ -172,16 +172,24 @@ func TestDomainPackagesMustNotImportEachOther(t *testing.T) {
 // registry 或各自的下游领域）② "谁拥有端口类型"（`library.Query` 的类型该下沉到 `domain/skill`，
 // 见 P4a）。一个 `svc` import 另一个 `svc` 会让这两条同时失效；而端口层互相 import 通常还伴随
 // import 环——只是 Go 要等到某个具体调用点才报出来。
+// 只扫**生产** import：用例包的包内测试要装真用例做端到端夹具（`app/run` 的 rig 会构造
+// `app/session`/`app/system` 的实例），那不是"用例之间互相调用"，而是测试装配；把它算进来
+// 只会逼夹具绕路，判据反而变弱（同 `TestInnerLayersUseNoTableRows` 的口径）。
 func TestServicePortsMustNotImportEachOther(t *testing.T) {
 	root := backendRoot(t)
+	scanned := 0
 	for _, dir := range layerScanPackages(t, root, "internal/app", "app") {
+		scanned++
 		self := packageImportPath(root, dir)
-		for _, imp := range importedByPackage(t, dir) {
+		for _, imp := range importedByProductionPackage(t, dir) {
 			if strings.HasPrefix(imp, modulePrefix+"internal/app/") && imp != self {
-				t.Errorf("同层互相依赖：%s 不应 import %s（用例层按 API 领域分包，互不 import）",
+				t.Errorf("同层互相依赖：%s 不应 import %s（用例包按领域分包，生产代码互不 import）",
 					rel(root, dir), imp)
 			}
 		}
+	}
+	if scanned == 0 {
+		t.Fatal("扫描面一个包都没扫到：判据失锚")
 	}
 }
 
@@ -194,7 +202,7 @@ func TestServicePortsMustNotImportEachOther(t *testing.T) {
 // （`domain/<agg>/row` 这一类），行↔值映射只留在 `persistence/store`。这条按**角色**把结果钉住：
 // **行形状只属于持久层**，内圈任何一层都不许再把它写进签名或字段。
 //
-// 扫描根是**五层**而不是只有 domain：只钉 domain 的话，"把行形状挪进 svc / sessionruntime 再
+// 扫描根是**五层**而不是只有 domain：只钉 domain 的话，"把行形状挪进 svc / run 再
 // 传下去"照样绿——而那也是内圈。每个根都必须存在（目录改名/搬走即失败）。
 //
 // 只扫**生产** import（`pkg.Imports`）：内圈的包内测试会直插行来构造夹具（真 SQLite），
@@ -205,7 +213,6 @@ func TestInnerLayersUseNoTableRows(t *testing.T) {
 	innerRoots := []string{
 		filepath.Join("internal", "domain"),
 		filepath.Join("internal", "app"),
-		filepath.Join("internal", "sessionruntime"),
 		filepath.Join("internal", "delivery"),
 		filepath.Join("internal", "bootstrap"),
 	}
@@ -303,6 +310,15 @@ var protocolFreePackages = []string{
 	modulePrefix + "internal/app/workspace",
 }
 
+// protocolFreeExempt 落在"全量收口"前缀之下、但**刻意不在协议无关面内**的包（必须写理由）。
+//
+// 目前只有执行面：`app/run` 拨号时把 `acp.ClientOptions` 作为不透明 hooks 交给适配器，
+// 事件/权限/提问的载荷类型仍是协议形状——那一层随 C3 4.5（`adapters/outbound/acp`）平台化。
+// 双向判：豁免的包**必须仍然 import acp**（收干净了就该从表里删掉），且必须真实存在。
+var protocolFreeExempt = map[string]string{
+	modulePrefix + "internal/app/run": "执行面：拨号 hooks 的载荷类型仍是协议形状，随 C3 4.5 平台化",
+}
+
 // TestProtocolFreePackagesStayClean 已收口的内圈包不得再 import 协议库。
 //
 // 两段判据：
@@ -339,10 +355,39 @@ func TestProtocolFreePackagesStayClean(t *testing.T) {
 	for _, prefix := range []string{"domain", "platform", "app"} {
 		for _, dir := range goPackagesUnder(t, filepath.Join(root, "internal", prefix)) {
 			self := packageImportPath(root, dir)
+			if _, exempt := protocolFreeExempt[self]; exempt {
+				continue
+			}
 			if !registered[self] {
 				t.Errorf("%s 没有登记进 protocolFreePackages：%s 已全量收口，新增包必须显式表态"+
 					"（否则「新包又 import 协议库」这条回退路径没有任何判据）", rel(root, dir), prefix)
 			}
+		}
+	}
+
+	// 豁免表双向：豁免包必须**仍然**认得协议（收干净了就该删掉这条），且必须真实存在。
+	for pkgPath, why := range protocolFreeExempt {
+		dir := filepath.Join(root, strings.TrimPrefix(pkgPath, modulePrefix))
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("豁免的包 %s 不存在（fail-closed）：请同步 protocolFreeExempt", pkgPath)
+			continue
+		}
+		if why == "" {
+			t.Errorf("豁免 %s 没写理由：空理由的豁免等于没登记判据", pkgPath)
+		}
+		pkg, err := build.ImportDir(dir, 0)
+		if err != nil {
+			t.Fatalf("解析包 %s 失败: %v", pkgPath, err)
+		}
+		still := false
+		for _, imp := range pkg.Imports {
+			if imp == acpPkg {
+				still = true
+			}
+		}
+		if !still {
+			t.Errorf("%s 已经不再 import 协议库：请把它从 protocolFreeExempt 挪进 protocolFreePackages"+
+				"（豁免留着的表现是「这条边界已收口，却仍被当例外」）", pkgPath)
 		}
 	}
 }

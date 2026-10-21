@@ -60,7 +60,7 @@ func TestSessionModelRefIsPlatformID(t *testing.T) {
 			"「平台行 + 运行时值」，否则库里又会存底座的不透明串")
 	}
 	// 适配器那一段：域只认端口，实现必须直连 `resolveSessionModel`（缺任一段都等于绕过解析）。
-	wiring := readStripped(t, filepath.Join(backendRoot(t), "internal", "sessionruntime", "orchestrator.go"))
+	wiring := readStripped(t, filepath.Join(backendRoot(t), "internal", "app", "run", "orchestrator.go"))
 	if !strings.Contains(wiring, "svc.facts.Providers.ResolveSessionModel") {
 		t.Fatal("装配点没有把 `svc.facts.Providers.ResolveSessionModel` 接到 `Lifecycle.ResolveModel` 端口")
 	}
@@ -231,7 +231,7 @@ func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
 	// P4a 正文第四十四/五十六刀之后两条写面的链路都分两段（用例/域 → 端口 → 适配器），判据随之分两段。
 	depsSrc := readStripped(t, uniqueSourceFile(t, internalDir, nil,
 		`(?m)^func \(s \*Service\) ResolveModel\(`, "模型解析端口的实现 `ResolveModel`"))
-	wiring := readStripped(t, filepath.Join(backendRoot(t), "internal", "sessionruntime", "orchestrator.go"))
+	wiring := readStripped(t, filepath.Join(backendRoot(t), "internal", "app", "run", "orchestrator.go"))
 	if !strings.Contains(start, "l.resolveModel(") || !strings.Contains(sess, "ResolveModel(") ||
 		!strings.Contains(depsSrc, "ResolveSessionModel(") ||
 		!strings.Contains(wiring, "svc.facts.Providers.ResolveSessionModel") {

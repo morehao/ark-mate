@@ -25,10 +25,10 @@ import (
 	"github.com/morehao/ark-mate/internal/delivery/router"
 	"github.com/morehao/ark-mate/internal/contract/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/sessionruntime"
+	apprun "github.com/morehao/ark-mate/internal/app/run"
 )
 
-// newEngine 走真实装配路径：sessionruntime.Service + router.New（含 /v1/mate 分组与默认中间件）。
+// newEngine 走真实装配路径：apprun.Service + router.New（含 /v1/mate 分组与默认中间件）。
 func newEngine(t *testing.T) *gin.Engine {
 	t.Helper()
 	e, _ := newEngineWithService(t)
@@ -40,7 +40,7 @@ func newEngine(t *testing.T) *gin.Engine {
 // 资产按**生产同一条路径**解析（M2-1）：release 构建内嵌 → 有资产（非 API 未知路径回落 SPA）；
 // 默认构建 → 没有（回落信封 404）。忽略解析错误是刻意的——"没有资产"对只测 API 的用例是合法状态，
 // 而生产入口（serve）走的是 app.Init，那里会按退出码 3 拒绝启动。
-func newEngineWithService(t *testing.T) (*gin.Engine, *sessionruntime.Service) {
+func newEngineWithService(t *testing.T) (*gin.Engine, *apprun.Service) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	reg := dsh.Registry()
@@ -530,7 +530,7 @@ func TestAuthTokenDisabled(t *testing.T) {
 	}
 }
 
-// TestWorkspaceRoutes 走真实装配（sessionruntime.Service）验证工作空间只读面：
+// TestWorkspaceRoutes 走真实装配（apprun.Service）验证工作空间只读面：
 // browse 只列目录且路径与 cwd 同形态；recent 从会话派生（新库为空）。
 func TestWorkspaceRoutes(t *testing.T) {
 	dir := t.TempDir()

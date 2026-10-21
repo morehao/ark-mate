@@ -18,7 +18,7 @@
 
 ## 当前判据清单
 
-- **层表守卫（v3.2）**：`layers_v32_test.go` 用一张**层号表**（`v32Layers`：L0 persistence/model → L1 值层（platform/object·redact·identity·resource·credential·eventbus·code·automation·definition·capability + version·runtime·infra/acp·mcp·logging）→ L2 domain → L3 contract/dto → L4 service → L5 persistence/store·persistence/dao·infra → L6 drivers/{gateway,mechanism,registry,runtimeconn,transfer}·config → L7 sessionruntime → L8 delivery/controller·delivery/middleware → L9 delivery/router·bootstrap/{assembly,app,cliops,cli,maintenance}）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，除非该层显式 `sameLayer: true`（`app`（原 `service`）**永不** `sameLayer`，它 `deny` 自己的前缀，逼"用例包之间零互相 import"）；③ 每层可带 `deny` 精确排除个别内层包（如 `cliops ↛ store`）。违规是**硬失败**，例外清单 `v32Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。
+- **层表守卫（v3.2）**：`layers_v32_test.go` 用一张**层号表**（`v32Layers`：L0 persistence/model → L1 值层（platform/object·redact·identity·resource·credential·eventbus·code·automation·definition·capability + version·runtime·infra/acp·mcp·logging）→ L2 domain → L3 contract/dto → L4 app（含 `app/run` 执行面）→ L5 persistence/store·persistence/dao·infra → L6 drivers/{gateway,mechanism,registry,transfer}·config·adapters/outbound/runtimeconn → L8 delivery/controller·delivery/middleware → L9 delivery/router·bootstrap/{assembly,app,cliops,cli,maintenance}）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，除非该层显式 `sameLayer: true`（`app`（原 `service`）**永不** `sameLayer`，它 `deny` 自己的前缀，逼"用例包之间零互相 import"）；③ 每层可带 `deny` 精确排除个别内层包（如 `cliops ↛ store`）。违规是**硬失败**，例外清单 `v32Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。
   `layers_scan_test.go` 留着扫描器与三条专项判据：`runtime` 不得 import adapter、只有 `assembly`（生产代码）可以 import `internal/infra/dsh`、adapter 不得 import 应用内核。
   同目录 `layers_paths_test.go` 的 `TestLayerTablePathsResolve`：`v32Layers` 的 key、每个 key 的 `deny`、`v32AdapterDeny` 必须指向真实存在的目录；挡的是“搬迁时 deny 漏改、守卫静默放行”的失效。
 
@@ -93,19 +93,19 @@
 
 - 再加 **1 条「进程壳端口边界」守卫**（`app_boundary_test.go`，2026-10-20 阶段 0.6）：`bootstrap/app`
   只认 `assembly.BuildResult` 的端口字段（Handler / Maintenance / Probe / Close），不得直接 import
-  `persistence/*`、`infra/*`、`drivers/*`、`sessionruntime`、`service`、`domain`、`delivery/*`。
+  `persistence/*`、`infra/*`、`drivers/*`、`adapters/*`、`app`、`domain`、`delivery/*`。
   层表按层号判方向，`app`（L9）向 L5/L6 import 是"向内"、拦不住"进程壳直接摸适配器"；这条按
   **适配器前缀**补上，fail-closed（一个 import 都解析不到即失败）。反证（实跑）：在 `app.go` 加
   `import _ "internal/persistence/store"` → 红。
 
 - 再加 **1 条「内圈自持类型」守卫**（`layer_isolation_test.go` 的 `TestInnerLayersUseNoTableRows`，
-  2026-10-20 C1，C2 扩到五层）：`internal/{domain,service,sessionruntime,delivery,bootstrap}/**` 的
+  2026-10-20 C1，C2 扩到五层）：`internal/{domain,app,delivery,bootstrap}/**` 的
   **生产 import** 不得出现 `internal/persistence/model`。
   层表只判方向——L2 → L0 是"向内"，所以「领域端口签名里全是 `model.*Entity`」在层表里一直**合法**，
   没有任何判据会说那不对（换存储实现要先改一遍域）。C1 把 16 个实体的行形状搬进域内叶子值包
   （`domain/session/{queue,memory,run,message,event,sessionrow,usage}`、`domain/workspace/row`、
   `domain/provider/row`、`domain/automation/row`），行↔值映射只留在 `persistence/store`。
-  扫描根是**五层**而不是只有 domain：只钉 domain 的话，"把行形状挪进 svc / sessionruntime 再传下去"
+  扫描根是**五层**而不是只有 domain：只钉 domain 的话，"把行形状挪进用例包 / 执行面再传下去"
   照样绿——那也是内圈。**只扫生产 import**：内圈的包内测试会直插行构造夹具（真 SQLite），
   那正是映射的验证方式。fail-closed（任一根不存在、或一个包都扫不到即失败）。
   反证（实跑）：`domain/workspace/row/item.go` 加 `persistence/model` 引用 → 红；
@@ -134,7 +134,7 @@
   两个值包）**生产 import 不得出现 `internal/infra/acp`**。第二段判据是**全量覆盖**：
   `internal/domain` 下新出现的包不登记即红（否则"新包又 import 协议库"这条回退路径没有判据）。
   **B4 之后 `platform/code` 也进了表**：协议错误 → 平台视图的折叠点搬到**适配器出口**
-  （`runtime.FoldError`，由 `runtime.Connect` 与 `drivers/runtimeconn` 调用），错误码包只留
+  （`runtime.FoldError`，由 `runtime.Connect` 与 `adapters/outbound/runtimeconn` 调用），错误码包只留
   平台映射（`codeOf` 分类 → 对外码）。第二段判据从"`internal/domain` 全量"扩到
   `internal/{domain,core,service}` 三个前缀——新增包不登记即红。
   这张表从 C2 开始**逐步增长**（事件与轮次 → 错误构造 → 权限/elicitation → 配置项 →
@@ -167,6 +167,6 @@
 
 - `TestReadmeRoutesMatchRouter`（`internal/delivery/router/router_test.go`）把 README 反引号内的 `/v1/mate` 路径与真实注册路由做**双向**比对：README 引用的路径必须注册（抓改名/删除），每条注册路由也必须在 README 出现（抓新增）。所以**改路由与改文档必须同一次提交**——新增端点不写文档同样红。因此没有豁免名单：**兼容别名也是端点，也要成行写进路由表**（`/permissions/always` 两个别名就是这么被补进文档的）。README 里也不得再出现历史名 `/conversations`。
 - 域事件 type 权威定义在 `backend/internal/domain/session/events.go`。
-- **连接拆除语义（`sessionruntime`，改动前先读 `disconnectSession` 注释）**：连接断开只是连接事实，绝不等于轮次失败。主动拆除（`Close` 停机 / `stopAgent` / 空闲回收）在途轮次归 `interrupted`（可续聊重发）、空闲会话状态**原样保留**；只有对端或子进程意外断开才可能把在途轮次收成失败，空闲会话同样不被改写（只落连接诊断 `connection_lost`）。拆除原因由 `runtimeConn.intentional` 承载（`watchConn` 观察到对端结束 = 意外），断连时句柄摘除但会话记录不动——下次 prompt 经 `ensureSession` 按 native resume / handoff memo 重建（执行可丢弃、会话平台拥有），**可续聊性只看会话是否存在**，上一轮的终态不是作废判据。
+- **连接拆除语义（`app/run`，改动前先读 `disconnectSession` 注释）**：连接断开只是连接事实，绝不等于轮次失败。主动拆除（`Close` 停机 / `stopAgent` / 空闲回收）在途轮次归 `interrupted`（可续聊重发）、空闲会话状态**原样保留**；只有对端或子进程意外断开才可能把在途轮次收成失败，空闲会话同样不被改写（只落连接诊断 `connection_lost`）。拆除原因由 `runtimeConn.intentional` 承载（`watchConn` 观察到对端结束 = 意外），断连时句柄摘除但会话记录不动——下次 prompt 经 `ensureSession` 按 native resume / handoff memo 重建（执行可丢弃、会话平台拥有），**可续聊性只看会话是否存在**，上一轮的终态不是作废判据。
 - WS / REST 契约改动优先看 `internal/delivery/router/routes_*.go` 与 `internal/delivery/controller/ctr*`，测试多为走真实装配路径
-  （`sessionruntime.NewService` + `router.New`）的进程内测试；`TestReadmeRoutesMatchRouter` 走的就是真实引擎。
+  （`run.NewService` + `router.New`）的进程内测试；`TestReadmeRoutesMatchRouter` 走的就是真实引擎。

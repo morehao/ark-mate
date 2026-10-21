@@ -52,7 +52,7 @@ memory 模式写入断言 ×1）、解包 3 处（原生恢复 ×2、探测 resu
 |---|---|---|---|
 | `models.model`（v24 从 `model_id` 改名） | **发给上游的模型名**（外部世界的名字；不是任何一行的 id） | `models.model` 列、wire `model`、`resource.Model.Model`、`ModelValueAdapter.Value(providerID, model)` | `TestModelsVocabularyIsModelNotModelID`：真 schema 有 `model` 无 `model_id` + DTO（`dtomodel/model_list.go`）+ 前端类型（`ModelRow`/`ModelCreateReq`）+ 实体 gorm 标签四面，**反向**断言 `sessions.model_id` 仍在 |
 | `sessions.model_id`（v26 改名保留、**语义改**） | **平台模型行 id**（`mdl_…`；指向 `models.id`）。运行时的不透明值**不落库、不过 wire**，由 adapter 现算 | `sessions.model_id` 列、wire `model`（`dtosession` 三处）、`SessionRec.ModelID` | `TestSessionModelRefIsPlatformID`（写入点必须先经 `resolveSessionModel`）+ `TestModelSelectionIsLimitedToPlatformList`（对不上平台清单必须**显式拒**，复用 `40401 model_not_found`） |
-| `ConfigOptionValueResp.model_id`（v26 加） | **注解**：这条运行时候选对应平台清单里的哪一行（空 = 平台未声明 ⇒ 客户端选不了） | `GET /models/catalog` 的 `values[].model_id`、`domain/provider/catalog_read.go` 的 `ModelIDByValue`（唯一产出点，多命中 fail-closed） | 同守卫⑧ + `internal/sessionruntime/session_model_ref_test.go` 的三条链一致性判据 |
+| `ConfigOptionValueResp.model_id`（v26 加） | **注解**：这条运行时候选对应平台清单里的哪一行（空 = 平台未声明 ⇒ 客户端选不了） | `GET /models/catalog` 的 `values[].model_id`、`domain/provider/catalog_read.go` 的 `ModelIDByValue`（唯一产出点，多命中 fail-closed） | 同守卫⑧ + `internal/app/run/session_model_ref_test.go` 的三条链一致性判据 |
 
 **消歧规则**（这是本节唯一要记的）：`_id` 一律指"指向某表 `id`"（`models.provider_id` → `providers.id`、`sessions.model_id` → `models.id`），而 `model` 是"发给上游的那个名字"。所以判据**按表/按面**限定，不是全局 grep：`sessions` 侧与目录注解的 `model_id` 是**正确**的名字，历史迁移里的 `model_id` 是**当时那一版**的名字。
 

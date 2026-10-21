@@ -130,7 +130,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 		}
 	}
 	// 用例层不得 import 持久层或实现层（那正是两个端口的用途）。
-	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/persistence/store"`, `"github.com/morehao/ark-mate/internal/sessionruntime"`} {
+	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/persistence/store"`, `"github.com/morehao/ark-mate/internal/app/run"`} {
 		if strings.Contains(probSrc+portSrc, banned) {
 			t.Errorf("`internal/app/model` 里出现 %s：用例层通过**端口**取事实（ADR-6），"+
 				"它不 import 持久层、也不 import `manager`。", banned)
@@ -138,7 +138,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 	}
 
 	// manager 侧：不得再有实现痕迹。
-	mgr := filepath.Join(root, "internal", "sessionruntime")
+	mgr := filepath.Join(root, "internal", "app", "run")
 	files := productionGoFiles(t, mgr)
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：守卫失去检查对象", mgr)
@@ -147,7 +147,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 		body := stripLineComments(readFileOrFatal(t, path))
 		for _, m := range probeImplementationMarkers {
 			if strings.Contains(body, m) {
-				t.Errorf("internal/sessionruntime/%s 里出现自检用例的实现痕迹 %q：它**只有一份实现**，"+
+				t.Errorf("internal/app/run/%s 里出现自检用例的实现痕迹 %q：它**只有一份实现**，"+
 					"在 `internal/app/model`（P4a 正文第三刀）。\n"+
 					"manager 交出的是域平面（`ProviderPlane()`），适配在 `ctrmodel`。\n"+
 					"在这里再写一遍的后果是上游段计数口径/超时口径静默分叉，而两边都编译得过。",
@@ -156,7 +156,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 		}
 		for _, m := range archiveForwardMarkers {
 			if strings.Contains(body, m) {
-				t.Errorf("internal/sessionruntime/%s 里又长出了档案面转发 %q：档案用例的出口是 "+
+				t.Errorf("internal/app/run/%s 里又长出了档案面转发 %q：档案用例的出口是 "+
 					"`internal/app/model.Provider`（P4a 正文第四刀，控制器自己造）。\n"+
 					"转发复活的后果是控制器多一条绕过用例层的路——两条都能编译、都能跑，"+
 					"只是其中一条没有生效面回执，也不在未来任何迁移名单里。",
@@ -168,7 +168,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 	// 旧实现文件不得复活（比"文件里的痕迹"更硬：两份实现并存的起点）。
 	old := filepath.Join(mgr, "provider_probe.go")
 	if _, err := os.Stat(old); err == nil {
-		t.Error("`internal/sessionruntime/provider_probe.go` 又存在了：供应商自检的实现归 " +
+		t.Error("`internal/app/run/provider_probe.go` 又存在了：供应商自检的实现归 " +
 			"`internal/app/model`（P4a 正文第三刀）；适配在 `ctrmodel`。")
 	}
 
@@ -181,7 +181,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 		}
 	}
 	// 档案用例层同样只经域平面取事实：不 import 持久层、也不 import `manager`。
-	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/persistence/store"`, `"github.com/morehao/ark-mate/internal/sessionruntime"`} {
+	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/persistence/store"`, `"github.com/morehao/ark-mate/internal/app/run"`} {
 		if strings.Contains(archSrc, banned) {
 			t.Errorf("`internal/app/model/archive.go` 里出现 %s：档案用例拿的是域平面"+
 				"（`*provider.Plane`，装配点交下来），不 import 持久层、也不 import `manager`。", banned)
@@ -229,7 +229,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 		"func (s *Service) providerModelRefsReadOnly(",
 	} {
 		if strings.Contains(mgrAll, dead) {
-			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：供应商域的过渡转发已随 P4a 正文第四十六刀清零"+
+			t.Errorf("`internal/app/run` 里又出现 `%s`：供应商域的过渡转发已随 P4a 正文第四十六刀清零"+
 				"（调用点直连 `provider.Plane`）。转发层的存在没有判据价值——一行转发的正确性等价于"+
 				"被转发的那一行，而它让「实现在哪一层」重新不可见。", dead)
 		}
@@ -245,9 +245,9 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 			"gateway 的换代重载"},
 		// 第五十四刀：建连时的密钥注入经**执行面端口**取（池的 `ProviderEnvSource`），
 		// 适配器在 `runtime_pool.go`。锚跟着对象走，判据不变：调用点必须直连域平面。
-		{"internal/sessionruntime/runtime_pool.go", "s.facts.Providers.ProviderEnvFor(",
+		{"internal/app/run/runtime_pool.go", "s.facts.Providers.ProviderEnvFor(",
 			"建连时的密钥注入"},
-		{"internal/sessionruntime/provider_effect.go", "s.facts.Providers.ProviderModelRefsReadOnly(",
+		{"internal/app/run/provider_effect.go", "s.facts.Providers.ProviderModelRefsReadOnly(",
 			"写面回执的引用统计"},
 	} {
 		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, c.file))), c.want) {
@@ -258,7 +258,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 	// 顺带把**日志转发**那一条钉住（同批清零的另一个文件）：`logAt` 是 `internal/infra/logging.At` 的一行转发，
 	// manager 的 `logging.go` 已随本刀删除。
 	if strings.Contains(mgrAll, "func logAt(") {
-		t.Error("`internal/sessionruntime` 里又出现 `func logAt(`：日志出口的唯一实现是 `internal/infra/logging.At`" +
+		t.Error("`internal/app/run` 里又出现 `func logAt(`：日志出口的唯一实现是 `internal/infra/logging.At`" +
 			"（P4a 正文第四十六刀删掉了 manager 的一行转发）。多出来的这一层会让「日志走哪个出口」" +
 			"重新有两处答案，而 `TestOnlyLoggingPackageImportsSlog` 只看 slog 那一头，看不见它。")
 	}

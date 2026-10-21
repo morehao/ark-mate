@@ -13,7 +13,7 @@ import (
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 
-	"github.com/morehao/ark-mate/internal/sessionruntime"
+	apprun "github.com/morehao/ark-mate/internal/app/run"
 )
 
 // TestToolsCollisionIsFailClosed 跨 server 的重名**整组丢弃**，不保留任何一个。
@@ -78,7 +78,7 @@ func TestProbeAndGatewayFacesMatch(t *testing.T) {
 	// 探测面：管理器装载同一份定义后探测（真实入口，走真远端）。
 	reg := dsh.Registry()
 	planes := registry.NewPlanes(reg)
-	svc := sessionruntime.NewService(reg, nil, sessionruntime.WithPlaneFacts(planeFactsForTest(planes)))
+	svc := apprun.NewService(reg, nil, apprun.WithPlaneFacts(planeFactsForTest(planes)))
 	svc.EnableStore(r.st, r.st, func() { planes.EnableStore(r.st) })
 	if n := planes.LoadCapabilityDefinitionsFromStore(ctx, ""); n == 0 {
 		t.Fatal("装载能力定义：应读到 1 条")
@@ -223,8 +223,8 @@ func TestCallsSerializePerServerAndParallelizeAcrossServers(t *testing.T) {
 }
 
 // planeFactsForTest 把具体平面折成按面端口（与 assembly.PlaneFactsOf 同形）。
-func planeFactsForTest(p *registry.Planes) sessionruntime.PlaneFacts {
-	return sessionruntime.PlaneFacts{
+func planeFactsForTest(p *registry.Planes) apprun.PlaneFacts {
+	return apprun.PlaneFacts{
 		Providers: p.Providers, Capabilities: p.Capabilities, Skills: p.Skills,
 		McpSecrets: p.McpSecrets, Workspaces: p.Workspaces, Credentials: p.Credentials,
 		Automation: p.Automation, Identity: p.Identity, Gateway: p,

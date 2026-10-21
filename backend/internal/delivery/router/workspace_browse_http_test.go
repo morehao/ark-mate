@@ -10,7 +10,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/contract/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/sessionruntime"
+	apprun "github.com/morehao/ark-mate/internal/app/run"
 )
 
 // 本文件是 v14.3 目录浏览对话框的**进程内集成判据**（真路由 + 真 manager + 真文件系统）。
@@ -25,7 +25,7 @@ import (
 // （新增固定字面量路径最典型的坏法就是被 `/workspaces/:id` 抢走，那种坏法只有走真路由才看得见）。
 
 // browseApp 装配真路由 + 真 manager，白名单可指定（nil = 不限制）。
-func browseApp(t *testing.T, roots []string) *sessionruntime.Service {
+func browseApp(t *testing.T, roots []string) *apprun.Service {
 	t.Helper()
 	svc := newSessionService(runtime.NewRegistry(), eventbus.New())
 	provision := filepath.Join(t.TempDir(), "workspaces")
@@ -36,7 +36,7 @@ func browseApp(t *testing.T, roots []string) *sessionruntime.Service {
 }
 
 // doRawEnvelope 与 doRaw 同一套装配，但**不**把非零 code 当失败：拒绝路径本身就是要验的东西。
-func doRawEnvelope(t *testing.T, svc *sessionruntime.Service, method, path, body string) envelope {
+func doRawEnvelope(t *testing.T, svc *apprun.Service, method, path, body string) envelope {
 	t.Helper()
 	var env envelope
 	if err := json.Unmarshal(doRaw(t, svc, method, path, body), &env); err != nil {

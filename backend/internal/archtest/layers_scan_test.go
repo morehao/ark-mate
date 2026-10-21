@@ -127,9 +127,9 @@ func TestAdapterStaysOutsideAppCore(t *testing.T) {
 	}
 	forbidden := []string{
 		"internal/bootstrap/app", "internal/bootstrap/cli", "internal/bootstrap/assembly", "internal/delivery/router", "internal/delivery/controller",
-		"internal/app", "internal/sessionruntime", "internal/drivers/registry", "internal/persistence/store",
+		"internal/app", "internal/app/run", "internal/drivers/registry", "internal/persistence/store",
 		"internal/persistence/dao", "internal/persistence/model", "internal/domain", "internal/drivers/mechanism", "internal/drivers/gateway",
-		"internal/drivers/runtimeconn",
+		"internal/adapters/outbound/runtimeconn",
 	}
 	for _, imp := range importedByPackage(t, dir) {
 		relImp := importPathOf(imp)

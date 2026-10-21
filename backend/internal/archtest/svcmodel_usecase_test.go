@@ -101,8 +101,8 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	}
 	// 清单载体是**依赖事实**（写面要落库），而实现层不许认识：`manager` 是过渡期的邻居，
 	// 用例层通过端口取它的东西，绝不 import 它（否则"谁拥有这段逻辑"就没有答案了）。
-	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/sessionruntime"`) {
-		t.Error("internal/app/model 里出现 `internal/sessionruntime` 的 import：写面通过 `Host` 端口取那半边，不 import 实现层。")
+	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/app/run"`) {
+		t.Error("internal/app/model 里出现 `internal/app/run` 的 import：写面通过 `Host` 端口取那半边，不 import 实现层。")
 	}
 	// v3.1 P4：用例层**不再 import store**，改吃装配根交下来的窄端口（`ModelStore`）。
 	// 判据双向：接口必须在本包（否则端口又跑到实现层去了）；store 不得再被 import。
@@ -146,7 +146,7 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	}
 
 	// ① manager 侧：不得再有实现痕迹；③ 还留在那里的端口实现必须真的在。
-	mgr := filepath.Join(root, "internal", "sessionruntime")
+	mgr := filepath.Join(root, "internal", "app", "run")
 	files := productionGoFiles(t, mgr)
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：守卫失去检查对象", mgr)
@@ -157,7 +157,7 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 		mgrBody.WriteString(body)
 		for _, m := range declaredRelocationMarkers {
 			if strings.Contains(body, m) {
-				t.Errorf("internal/sessionruntime/%s 里出现模型写面的实现痕迹 %q：它**只有一份实现**，"+
+				t.Errorf("internal/app/run/%s 里出现模型写面的实现痕迹 %q：它**只有一份实现**，"+
 					"在 `internal/app/model`（P4a 正文第五刀）。\n"+
 					"manager 交出的是清单载体与供应商域平面（依赖事实）+ 过渡端口的三条实现。\n"+
 					"在这里再写一遍的后果是校验与错误码静默分叉（一处允许多个默认、另一处只留一个），"+
@@ -167,7 +167,7 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	}
 	for _, a := range managerModelPortAnchors {
 		if !strings.Contains(mgrBody.String(), a) {
-			t.Errorf("internal/sessionruntime 的生产文件里找不到 %q：`model.Host` 的这条实现被改名/删掉了？"+
+			t.Errorf("internal/app/run 的生产文件里找不到 %q：`model.Host` 的这条实现被改名/删掉了？"+
 				"（改名后 `app.go` 一起改就能编译过，而端口的那件事没人做）", a)
 		}
 	}

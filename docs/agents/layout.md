@@ -10,7 +10,7 @@
     - `internal/platform/{code,capability,automation,identity,resource,redact,object/*}`：错误码、能力装载、自动化解析、身份常量、跨层值对象等；`internal/config` 仍是独立的进程配置包。
     - 新增/搬迁包时只问一句：**它在层表的哪一层**（见下），不再问"进 pkg 还是 internal"。
   - **依赖方向单一**：
-    - 层带（L0–L9 终局表，见 [`../architecture.md`](../architecture.md) 的 §4.1）：`persistence/model` → 值/协议 → `domain` → 应用契约 → `service` → `persistence/{store,dao}` + `infra` → 机制与注册表 → `sessionruntime` → `controller` → 装配与交付。**只能向内 import**；应用契约被 controller / service / CLI / WS 共用（同一份对外契约），`domain` 在它的里侧、不认识它。
+    - 层带（L0–L9 终局表，见 [`../architecture.md`](../architecture.md) 的 §4.1）：`persistence/model` → 值/协议 → `domain` → 应用契约 → 用例环（`app/*`，含执行面 `app/run`）→ `persistence/{store,dao}` + `infra` → 机制与注册表与出站适配器 → `controller` → 装配与交付。**只能向内 import**；应用契约被 controller / service / CLI / WS 共用（同一份对外契约），`domain` 在它的里侧、不认识它。
       C3 4.1 起这带的三处只改了**目录**：`core/*` → `platform/*`（纯值/规则/平台内核，L1 不变）、`dto/*` → `contract/*`（包名仍是 `dto<领域>`：`dto` 是本仓词汇里"应用契约"那个词，改名要动 31 个同时引用同名域包的文件、收益只有美观）。
     - **装配只能自上而下，不许反向**：`assembly` 构造用例与控制器，`router` 只收已构造的控制器（`router.Deps`），`app` 只消费 `assembly.BuildResult`。**`app`/`router`/`cli` 都不得引用用例环（`internal/app/*`）**，控制器也不得 import `domain`/`store`/`model`——判据见 `layers_v32_test.go`。
     - 持久侧：`dbclient → persistence/dao → persistence/store`，`model` 被三者依赖且自身不依赖任何一层；`dao` 不得 import `store`（会成环），`model` 不得 import `dao`/`store`。

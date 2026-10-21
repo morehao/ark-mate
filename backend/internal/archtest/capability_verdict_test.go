@@ -148,11 +148,11 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	root := backendRoot(t)
 	// manager 生产目录的全文：本条用例里多处判据都钉"某条转发不得回潮"，
 	// 统一按**整个目录**扫（写死单个文件名会让文件一搬/一删就让判据 Fatal——本批踩过三次）。
-	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
-	src := readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "service.go"))
+	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "app", "run"))
+	src := readFileOrFatal(t, filepath.Join(root, "internal", "app", "run", "service.go"))
 	for _, call := range []string{"SetCapabilityFacts(s)", "SetCapabilityLookup(s)"} {
 		if !strings.Contains(src, call) {
-			t.Errorf("internal/sessionruntime/service.go 的 `NewService` 里找不到 `sessionPlane.%s`："+
+			t.Errorf("internal/app/run/service.go 的 `NewService` 里找不到 `sessionPlane.%s`："+
 				"能力事实/查表没有登记到会话域上。\n"+
 				"漏登记的后果是**静默**的（指纹恒空 ⇒ 改了定义不换代际；或校验恒过 ⇒ 选了没生效），"+
 				"而构建、启动、既有测试全都正常。", call)
@@ -193,7 +193,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	// 写死文件名会让这条判据直接 Fatal；改成整目录之后它同时变强：那两行转发无论放回哪个文件都红）。
 	if strings.Contains(mgrAll, "func (s *Service) SetSkillEnabled(") ||
 		strings.Contains(mgrAll, "func (s *Service) SkillMaterialization(") {
-		t.Error("`internal/sessionruntime` 里又出现技能启停/物化的转发：那两行已删（P4a 正文第三十六刀），" +
+		t.Error("`internal/app/run` 里又出现技能启停/物化的转发：那两行已删（P4a 正文第三十六刀），" +
 			"投影与错误码都在 `domain/skill`，控制器直接 `h.svc.*`。")
 	}
 	// ——— 定义**写面**六条（skill 三条 / mcp 三条）归域平面（P4a 正文第三十七刀）———
@@ -215,7 +215,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	for _, dead := range []string{"func (s *Service) CreateSkill(", "func (s *Service) UpdateSkill(", "func (s *Service) DeleteSkill(",
 		"func (s *Service) CreateMcpServer(", "func (s *Service) UpdateMcpServer(", "func (s *Service) DeleteMcpServer("} {
 		if strings.Contains(writeFaces, dead) {
-			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：技能/MCP 写面的一行转发已删"+
+			t.Errorf("`internal/app/run` 里又出现 `%s`：技能/MCP 写面的一行转发已删"+
 				"（实现全在 `domain/skill` / `domain/mcp` 的写面，控制器直接 `h.svc.*` / `h.mcps.*`）。", dead)
 		}
 	}
@@ -259,7 +259,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	for _, dead := range []string{"func (s *Service) ProbeMcpServer(", "func (s *Service) AutoProbeMcpServers(",
 		"func (s *Service) SetMcpProbeTimeout("} {
 		if strings.Contains(probeFace, dead) {
-			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：那三条已随 P4a 正文第三十八刀删除"+
+			t.Errorf("`internal/app/run` 里又出现 `%s`：那三条已随 P4a 正文第三十八刀删除"+
 				"（探测面走 `a.svc.Planes().Mcp` / `h.svc.Probe`）。", dead)
 		}
 	}
@@ -296,12 +296,12 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 		t.Error("`internal/app/capability` 里没有 `CapabilitySvc`：v3.1 起控制器只认这个接口。")
 	}
 	// 扫描面是**整个生产目录**（原 `mcp_live.go` 已删；实现痕迹换个文件放回来也要红）。
-	liveFace := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
+	liveFace := dirProductionBody(t, filepath.Join(root, "internal", "app", "run"))
 	for _, dead := range []string{"func (s *Service) CallMcpTool(", "func (s *Service) ListMcpResources(",
 		"func (s *Service) ReadMcpResource(", "func (s *Service) ListMcpPrompts(",
 		"func (s *Service) GetMcpPrompt(", "func (s *Service) mcpLiveServer("} {
 		if strings.Contains(liveFace, dead) {
-			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：那六条已随 P4a 正文第三十九刀删除"+
+			t.Errorf("`internal/app/run` 里又出现 `%s`：那六条已随 P4a 正文第三十九刀删除"+
 				"（live 面走 `h.svc.*`，跨面集成测试走 `svc.Planes().Mcp.LiveServer`）。", dead)
 		}
 	}
@@ -356,7 +356,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 		"func (s *Service) capabilityDirFor(",
 	} {
 		if strings.Contains(mgrAll, dead) {
-			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：能力/定义面的过渡转发已随 P4a 正文第四十九刀"+
+			t.Errorf("`internal/app/run` 里又出现 `%s`：能力/定义面的过渡转发已随 P4a 正文第四十九刀"+
 				"清零（调用点直连 `McpPlane()` / `defs`）。", dead)
 		}
 	}
@@ -380,7 +380,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 		"func (s *Service) capabilityDirSnapshot(",
 	} {
 		if strings.Contains(mgrAll, dead) {
-			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：技能投影面的过渡转发已随 P4a 正文第五十刀"+
+			t.Errorf("`internal/app/run` 里又出现 `%s`：技能投影面的过渡转发已随 P4a 正文第五十刀"+
 				"清零（调用点直连 `SkillPlane()` / `defs`）。", dead)
 		}
 	}

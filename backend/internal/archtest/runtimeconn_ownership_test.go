@@ -17,7 +17,7 @@ var bindingFieldRe = regexp.MustCompile(`binding\s+\*runtimeBinding`)
 
 // ——— P3a-2「执行面归属」守卫（第一刀：底座绑定） ———
 //
-// 执行面（连接池 / 代际 / 子进程回收 / 会话挂载 / 运行期诊断）落 `internal/drivers/runtimeconn`。
+// 执行面（连接池 / 代际 / 子进程回收 / 会话挂载 / 运行期诊断）落 `internal/adapters/outbound/runtimeconn`。
 // 第一刀只搬"本进程认的那个底座"的绑定与诊断**状态**。
 //
 // 两种静默失效：
@@ -66,21 +66,21 @@ var runtimeconnAnchors = []string{
 	"type ConfigDigestSource interface {",
 }
 
-// TestRuntimeBindingLivesInRuntimeconn 绑定与诊断状态必须在 `internal/drivers/runtimeconn`，
+// TestRuntimeBindingLivesInRuntimeconn 绑定与诊断状态必须在 `internal/adapters/outbound/runtimeconn`，
 // 且 manager 的转发文件里不得再出现状态或判定。
 func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 	root := backendRoot(t)
-	domainDir := filepath.Join(root, "internal", "drivers", "runtimeconn")
+	domainDir := filepath.Join(root, "internal", "adapters", "outbound", "runtimeconn")
 	// 扫**整个目录**而不是一份写死的文件清单：第四十八刀加 `procreg.go` 时，写死的清单让新文件的
 	// 锚**从来没被查过**（判据当场红，但根因是扫描面没跟上）。这一条与 `uiSrcRoots()` 那条教训同源：
 	// 扫描面写死一处，新增的文件就静默不设防。
 	joined := dirProductionBody(t, domainDir)
 	if len(joined) < 500 {
-		t.Fatalf("`internal/drivers/runtimeconn` 只扫到 %d 字节——扫描面解析错了？（fail-closed）", len(joined))
+		t.Fatalf("`internal/adapters/outbound/runtimeconn` 只扫到 %d 字节——扫描面解析错了？（fail-closed）", len(joined))
 	}
 	for _, a := range runtimeconnAnchors {
 		if !strings.Contains(joined, a) {
-			t.Errorf("internal/drivers/runtimeconn 里找不到 %q：执行面的绑定/诊断入口被改名/搬走了？"+
+			t.Errorf("internal/adapters/outbound/runtimeconn 里找不到 %q：执行面的绑定/诊断入口被改名/搬走了？"+
 				"（这条守卫的判据就挂在它身上，失锚等于空转）", a)
 		}
 	}
@@ -98,7 +98,7 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 	//
 	// 这一族与供应商那七条（第四十六刀）同形：一行转发的正确性完全等价于被转发的那一行，
 	// 所以它写错与否都不会让任何测试变红，而它让「这段实现在哪一层」重新不可见。
-	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
+	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "app", "run"))
 	// 第五十四刀：**连接表与连接对象**也不许回到 manager。
 	//
 	// 三种失效都不让别的测试变红：
@@ -107,7 +107,7 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 	//   - `o.conns` 的任意读写 ⇒ 有人绕过池锁与键派生（"同一份配置共享暖进程"当场失效）。
 	for _, dead := range []string{"conns map[string]*runtimeConn", "type runtimeConn struct", "o.conns"} {
 		if strings.Contains(mgrAll, dead) {
-			t.Errorf("`internal/sessionruntime` 里出现 %q：连接池与连接对象**只有一份**，在 `internal/drivers/runtimeconn`"+
+			t.Errorf("`internal/app/run` 里出现 %q：连接池与连接对象**只有一份**，在 `internal/adapters/outbound/runtimeconn`"+
 				"（P4a 正文第五十四刀）。两份的表现不是报错：迁移判据读一张表、acquire 写另一张，"+
 				"「同配置共享暖进程」静默失效。", dead)
 		}
@@ -122,9 +122,9 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 		{"internal/bootstrap/assembly/ports.go", "SetProviderEnvSource(", "子进程 env 的来源（同时是基础键的输入）"},
 		{"internal/bootstrap/assembly/ports.go", "SetConfigDigestSource(", "模型清单指纹的来源（进代际键）"},
 		{"internal/bootstrap/assembly/ports.go", "SetLiveClientSource(", "诊断的连接池读面"},
-		{"internal/sessionruntime/service.go", "SetDropSink(o)", "拆除的应用面（会话收尾）"},
-		{"internal/sessionruntime/connection.go", "func (o *Orchestrator) OnConnDropped(", "拆除的应用实现"},
-		{"internal/sessionruntime/connection.go", "func (o *Orchestrator) InUseOn(", "回收判据的应用实现"},
+		{"internal/app/run/service.go", "SetDropSink(o)", "拆除的应用面（会话收尾）"},
+		{"internal/app/run/connection.go", "func (o *Orchestrator) OnConnDropped(", "拆除的应用实现"},
+		{"internal/app/run/connection.go", "func (o *Orchestrator) InUseOn(", "回收判据的应用实现"},
 	} {
 		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, c.file))), c.want) {
 			t.Errorf("`%s` 里找不到 `%s`（%s）：这是执行面端口的接线点，漏了不会有编译错——"+
@@ -138,7 +138,7 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 		"func (s *Service) selectedSpec(",
 	} {
 		if strings.Contains(mgrAll, dead) {
-			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：执行面自身的转发已随 P4a 正文第四十九刀清零"+
+			t.Errorf("`internal/app/run` 里又出现 `%s`：执行面自身的转发已随 P4a 正文第四十九刀清零"+
 				"（调用点直连 `runtimePlane`）。", dead)
 		}
 	}
@@ -147,9 +147,9 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 	// 的**唯一写入方**就是池（`Add` → running、`Drop` 摘到当前连接 → stopped）。判据本身不变，
 	// 仍是"这两个状态转移必须在执行面、且调用点直连"；留在 manager 的话它就只能是转发。
 	for _, c := range []struct{ file, want, why string }{
-		{"internal/drivers/runtimeconn/pool.go", "SetState(session.AgentStateRunning)", "建连时的进程状态"},
-		{"internal/drivers/runtimeconn/pool.go", "SetState(session.AgentStateStopped)", "拆连时的状态回落"},
-		{"internal/sessionruntime/orchestrator.go", "svc.runtimePlane.SelectedSpec", "建会话时的 spec 解析（装配点直连执行面）"},
+		{"internal/adapters/outbound/runtimeconn/pool.go", "SetState(session.AgentStateRunning)", "建连时的进程状态"},
+		{"internal/adapters/outbound/runtimeconn/pool.go", "SetState(session.AgentStateStopped)", "拆连时的状态回落"},
+		{"internal/app/run/orchestrator.go", "svc.runtimePlane.SelectedSpec", "建会话时的 spec 解析（装配点直连执行面）"},
 		{"internal/domain/session/lifecycle.go", "spec, err := l.selectedSpec()", "建会话/恢复时的 spec 解析（域经端口调用）"},
 	} {
 		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, c.file))), c.want) {
@@ -165,10 +165,10 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 // "谁在建/拆连接时改状态"与"读面读到哪一份"变成两件事——而表现是诊断报 stopped 而连接活着。
 func TestRuntimeBindingIsNotDuplicatedOnService(t *testing.T) {
 	root := backendRoot(t)
-	service := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "service.go")))
+	service := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "run", "service.go")))
 	if bindingFieldRe.MatchString(service) {
-		t.Error("`internal/sessionruntime/service.go` 上出现了 `binding *runtimeBinding` 字段：" +
-			"绑定的状态归 `internal/drivers/runtimeconn`（`Service` 只持平面引用）。\n" +
+		t.Error("`internal/app/run/service.go` 上出现了 `binding *runtimeBinding` 字段：" +
+			"绑定的状态归 `internal/adapters/outbound/runtimeconn`（`Service` 只持平面引用）。\n" +
 			"两份状态的表现是 `/runtime/diagnostics` 的 State 与真实连接状态分叉——" +
 			"一边说 stopped、另一边连接活着，而两边都编译得过。")
 	}
@@ -210,8 +210,8 @@ func TestRuntimeBindingIsNotDuplicatedOnService(t *testing.T) {
 //
 // 判据两段，fail-closed：
 //
-//	① `runtime_not_found` 的 `code.NewError` 铸码点在 `internal/sessionruntime` 里**为零**、
-//	   在 `internal/drivers/runtimeconn` 里**恰好一处**；
+//	① `runtime_not_found` 的 `code.NewError` 铸码点在 `internal/app/run` 里**为零**、
+//	   在 `internal/adapters/outbound/runtimeconn` 里**恰好一处**；
 //	② `resource_sync.go` 里那个 `runtime_not_found`（校验**用户请求同步的那个 runtime**）
 //	   是**另一个输入**，刻意放行——但它必须仍在（否则说明有人把请求参数校验也删了）。
 func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
@@ -231,24 +231,24 @@ func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
 		}
 		slash := filepath.ToSlash(rel(root, path))
 		switch {
-		case strings.HasPrefix(slash, "internal/drivers/runtimeconn/"):
+		case strings.HasPrefix(slash, "internal/adapters/outbound/runtimeconn/"):
 			inRuntimeconn += n
 		case filepath.ToSlash(rel(root, path)) == "internal/drivers/registry/resources.go":
 			inResourceSync += n
-		case strings.HasPrefix(slash, "internal/sessionruntime/"):
+		case strings.HasPrefix(slash, "internal/app/run/"):
 			inManager += n
-			t.Errorf("internal/sessionruntime/%s 里铸了 `runtime_not_found`：这条判据的铸码点在执行面"+
+			t.Errorf("internal/app/run/%s 里铸了 `runtime_not_found`：这条判据的铸码点在执行面"+
 				"（`runtimeconn.SelectedSpec`）。\n"+
 				"同一条判据的第二、第三份文本迟早只改一处——用户看到的「为什么没装配」就会分成两套说法。",
 				filepath.Base(path))
 		}
 	}
 	if inRuntimeconn != 1 {
-		t.Errorf("`internal/drivers/runtimeconn` 里 `runtime_not_found` 的铸码点是 %d 处（期望恰好 1）："+
+		t.Errorf("`internal/adapters/outbound/runtimeconn` 里 `runtime_not_found` 的铸码点是 %d 处（期望恰好 1）："+
 			"这条判据失锚或被人复制了。", inRuntimeconn)
 	}
 	if inManager != 0 {
-		t.Errorf("`internal/sessionruntime` 里仍有 %d 处 `runtime_not_found` 铸码。", inManager)
+		t.Errorf("`internal/app/run` 里仍有 %d 处 `runtime_not_found` 铸码。", inManager)
 	}
 	if inResourceSync != 1 {
 		t.Error("`internal/drivers/registry/resources.go` 里那个 `runtime_not_found` 不见了：" +

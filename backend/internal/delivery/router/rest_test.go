@@ -34,7 +34,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"
 	"github.com/morehao/ark-mate/internal/contract/dtocapability"
 	"github.com/morehao/ark-mate/internal/contract/dtomodel"
 	"github.com/morehao/ark-mate/internal/contract/dtosearch"
@@ -1838,7 +1838,7 @@ func TestExportRoute(t *testing.T) {
 //
 // 替身撤掉之后这条用例验的是**装配与读面**：`Ports.Runtime` 交的是执行面本身，用例在
 // `ctrruntime` 里造，诊断读的是此刻的进程态（没有活连接 → `stopped` + `stderr_source: none`）。
-// 形状里的"stderr 尾巴 + 最近失败"两段由执行面自己的用例覆盖（`internal/drivers/runtimeconn`）。
+// 形状里的"stderr 尾巴 + 最近失败"两段由执行面自己的用例覆盖（`internal/adapters/outbound/runtimeconn`）。
 func TestRuntimeDiagnosticsRoute(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(t, svc))

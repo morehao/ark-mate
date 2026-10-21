@@ -72,7 +72,7 @@ func TestProviderMirrorRefFormatIsPinned(t *testing.T) {
 
 // TestCredentialFaceHasNoTransitionalForwards 凭据面的**八条一行转发**不许回潮（P4a 正文第五十一刀）。
 //
-// `internal/sessionruntime/credentials.go` 整个删除（77 行）：`SetCredentials` / `SetCredentialCwd` /
+// `internal/app/run/credentials.go` 整个删除（77 行）：`SetCredentials` / `SetCredentialCwd` /
 // `credentialCwd` / `credentialDoc` / `SyncCredentialMirror` / `providerEnvKeyNames` /
 // `mirrorSet` / `mirrorDelete` 全部改成调用点直连——装配期（`app.go` / `gateway/source.go`）走
 // **事实出口** `CredentialStore()`，包内两处走 `s.creds` / `s.providerPlane`。
@@ -88,9 +88,9 @@ func TestProviderMirrorRefFormatIsPinned(t *testing.T) {
 //	② 装配点必须走事实出口（`a.svc.Planes().Credentials`），否则"实现搬到哪一层"重新不可见。
 func TestCredentialFaceHasNoTransitionalForwards(t *testing.T) {
 	root := backendRoot(t)
-	mgr := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
+	mgr := dirProductionBody(t, filepath.Join(root, "internal", "app", "run"))
 	if len(mgr) < 1000 {
-		t.Fatalf("`internal/sessionruntime` 只扫到 %d 字节——扫描面解析错了？（fail-closed）", len(mgr))
+		t.Fatalf("`internal/app/run` 只扫到 %d 字节——扫描面解析错了？（fail-closed）", len(mgr))
 	}
 	for _, dead := range []string{
 		"func (s *Service) SetCredentials(",
@@ -104,16 +104,16 @@ func TestCredentialFaceHasNoTransitionalForwards(t *testing.T) {
 		"func (s *Service) resolveProviderKey(",
 	} {
 		if strings.Contains(mgr, dead) {
-			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：凭据面的过渡转发已随 P4a 正文第五十一刀清零"+
+			t.Errorf("`internal/app/run` 里又出现 `%s`：凭据面的过渡转发已随 P4a 正文第五十一刀清零"+
 				"（装配走 `CredentialStore()`，包内走 `s.creds` / `s.providerPlane.KeyFor`）。", dead)
 		}
 	}
 	// 事实出口必须在（少了它，装配点只能再造一份转发）。
-	svcSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "service.go")))
+	svcSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "run", "service.go")))
 	// P4b：`CredentialStore()` 删了；阶段 0.2 起连 `Planes()` 也删了——事实出口收敛成
 	// `facts PlaneFacts`（按面端口，一份实例折出来）。
 	if !strings.Contains(svcSrc, "facts PlaneFacts") || !strings.Contains(svcSrc, "func WithPlaneFacts(") {
-		t.Error("`internal/sessionruntime/service.go` 里找不到 `facts PlaneFacts` / `WithPlaneFacts`：装配期没有它" +
+		t.Error("`internal/app/run/service.go` 里找不到 `facts PlaneFacts` / `WithPlaneFacts`：装配期没有它" +
 			"就只能再写一层转发，而那正是本刀删掉的东西。")
 	}
 	// P5a 起凭据面由 `registry.Planes.Credentials` 拥有，装配动作在 app/assembly.go。

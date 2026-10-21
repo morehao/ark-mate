@@ -14,7 +14,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/sessionruntime"
+	apprun "github.com/morehao/ark-mate/internal/app/run"
 )
 
 // demo 在**构建期选定的** runtime 上跑一次真实会话（M0 DoD 的可执行验证路径）。
@@ -50,7 +50,7 @@ func Demo(args []string) {
 	// （否则 demo 读的是用户自己的底座 home 目录，与平台会话行为不一致）。
 	reg.ApplyIsolationEnv(cfg.HomeDir)
 	svc.SessionPlane().SetTranscriptDir(cfg.TranscriptDir) // demo 会话也落 transcript（wire 事实源）
-	orch := sessionruntime.NewOrchestrator(svc, reg)
+	orch := apprun.NewOrchestrator(svc, reg)
 	orch.SetAllowAll(*allowAll)
 	orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	orch.SetElicitationTimeout(cfg.ElicitationTimeout)
@@ -78,7 +78,7 @@ func Demo(args []string) {
 	}()
 
 	fmt.Printf("▶ demo runtime=%s prompt=%q\n", runtime.SelectedRuntime(), *prompt)
-	res, err := orch.RunOnce(ctx, sessionruntime.RunOptions{
+	res, err := orch.RunOnce(ctx, apprun.RunOptions{
 		Prompt:     *prompt,
 		Cwd:        *cwd,
 		ConfigPath: *configPath,

@@ -37,7 +37,7 @@ func TestCommandGateIsWiredToPermissionDecision(t *testing.T) {
 	}
 
 	// ①② 裁决点顺序 + 回查
-	flow := stripGoComments(read("internal/sessionruntime/permission_flow.go"))
+	flow := stripGoComments(read("internal/app/run/permission_flow.go"))
 	// 必须落在 requestPermission 的**函数体**里：本文件末尾也有 commandGateDecision 的
 	// 定义，按整文件找会被定义那一行喂饱（本仓已经踩过"判据被定义喂饱"的坑）。
 	body, ok := goFuncBody(flow, "func (o *Orchestrator) requestPermission(")

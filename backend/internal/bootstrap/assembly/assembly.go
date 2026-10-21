@@ -23,12 +23,12 @@ import (
 	credmech "github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
-	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
 	"github.com/morehao/ark-mate/internal/infra/procreg"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
-	"github.com/morehao/ark-mate/internal/sessionruntime"
+	apprun "github.com/morehao/ark-mate/internal/app/run"
 	"github.com/morehao/golib/glog"
 )
 
@@ -62,8 +62,8 @@ type assembly struct {
 	rconn  *runtimeconn.Plane
 	rpool  *runtimeconn.Pool
 	planes *registry.Planes
-	svc    *sessionruntime.Service
-	orch   *sessionruntime.Orchestrator
+	svc    *apprun.Service
+	orch   *apprun.Orchestrator
 	reg    *runtime.Registry
 	// lifecycle 本次启停的声明序列（Build 的 Start / Close 的逆序 Stop）。
 	lifecycle *registry.Sequence
@@ -270,7 +270,7 @@ func (as *assembly) startLegacySecretMigration(ctx context.Context) error {
 
 // startStoreWiring 把库句柄接到所有持有它的部件，并做装配期同步。
 //
-// 实现只有 `sessionruntime.EnableStore` 一份（两半端口见 `ports.go`）：会话域与领域平面
+// 实现只有 `apprun.EnableStore` 一份（两半端口见 `ports.go`）：会话域与领域平面
 // **同一次**接线——**漏接任一个**的表现都是静默的（该走库的走了文件、或反过来——定义只写进
 // 内存、凭据读不到库）。
 func (as *assembly) startStoreWiring(ctx context.Context) error {
@@ -389,7 +389,7 @@ func (as *assembly) startWorkspaceRootsStore(ctx context.Context) error {
 
 // startOrchestrator 构造编排器并回挂到 Service。
 func (as *assembly) startOrchestrator(ctx context.Context) error {
-	as.orch = sessionruntime.NewOrchestrator(as.svc, as.reg)
+	as.orch = apprun.NewOrchestrator(as.svc, as.reg)
 	// 命令门禁规则在**加载期**就读完了（坏文件拒绝启动），这里交给裁决点。
 	// 改造前 `Service.SetCommandPolicy` 在编排器还不存在时静默丢掉这批规则——那是"门禁
 	// 有实现、没接线"的另一种形态；现在交接点只有一个。

@@ -61,10 +61,10 @@ func TestRuntimeIdentityUseCaseLivesInRuntimeSvc(t *testing.T) {
 				"（判据挂在它身上，失锚等于空转）", a)
 		}
 	}
-	// 用例层只认那个两方法端口：它不该认识执行面的实现（`internal/drivers/runtimeconn`）——
+	// 用例层只认那个两方法端口：它不该认识执行面的实现（`internal/adapters/outbound/runtimeconn`）——
 	// 认识之后"可替换 occupant"就没得换了（测试也没法塞一份假执行面）。
-	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/drivers/runtimeconn"`) {
-		t.Error("internal/app/runtime 里出现 `internal/drivers/runtimeconn` 的 import：" +
+	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"`) {
+		t.Error("internal/app/runtime 里出现 `internal/adapters/outbound/runtimeconn` 的 import：" +
 			"用例层只认 `Plane` 端口，执行面的形态由装配点交下来。")
 	}
 
@@ -80,7 +80,7 @@ func TestRuntimeIdentityUseCaseLivesInRuntimeSvc(t *testing.T) {
 	}
 
 	// ③ manager 侧不得长回那两条转发。
-	mgr := filepath.Join(root, "internal", "sessionruntime")
+	mgr := filepath.Join(root, "internal", "app", "run")
 	mgrFiles := productionGoFiles(t, mgr)
 	if len(mgrFiles) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：守卫失去检查对象", mgr)
@@ -89,7 +89,7 @@ func TestRuntimeIdentityUseCaseLivesInRuntimeSvc(t *testing.T) {
 		mgrBody := stripLineComments(readFileOrFatal(t, path))
 		for _, m := range []string{"func (s *Service) RuntimeIdentity(", "func (s *Service) RuntimeDiagnostics("} {
 			if strings.Contains(mgrBody, m) {
-				t.Errorf("internal/sessionruntime/%s 里出现 %q：底座面的用例只有一份实现，在 "+
+				t.Errorf("internal/app/run/%s 里出现 %q：底座面的用例只有一份实现，在 "+
 					"`internal/app/runtime`（P4a 正文第七刀）。", filepath.Base(path), m)
 			}
 		}

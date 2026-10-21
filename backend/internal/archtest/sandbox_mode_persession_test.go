@@ -27,7 +27,7 @@ func TestNativeModeIsDeliveredPerSession(t *testing.T) {
 	root := backendRoot(t)
 
 	// ① 模式必须是**基础键**的一维（与 provider env 同一层），且注入的 env 与算键的 env 同源。
-	pool := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "runtimeconn", "pool.go")))
+	pool := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "runtimeconn", "pool.go")))
 	keyFor, ok := goFuncBody(pool, "func (pl *Pool) KeyFor(")
 	if !ok {
 		t.Fatalf("`runtimeconn/pool.go` 里找不到 `KeyFor(`")
@@ -65,7 +65,7 @@ func TestNativeModeIsDeliveredPerSession(t *testing.T) {
 	}
 
 	// ④ adapter 的 `Env()` 必须有**生产调用点**（本轮之前它是死代码）。
-	poolPort := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "runtime_pool.go")))
+	poolPort := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "run", "runtime_pool.go")))
 	if !strings.Contains(poolPort, "adapter.Env(mode, \"\", nil)") {
 		t.Fatalf("`runtime_pool.go` 里没有 `adapter.Env(`：原生权限投影会退回死代码——" +
 			"映射写得再完整，没人喊它就不生效")
