@@ -4,7 +4,7 @@ import "github.com/morehao/ark-mate/internal/platform/object/objdelivery"
 
 // ——— 供应商域的对外响应形状（v3.2 刀 8）———
 //
-// 只有字段、没有 json tag：对外形态（`dtomodel.*`）由用例层 `service/svcmodel` 投影。
+// 只有字段、没有 json tag：对外形态（`dtomodel.*`）由用例层 `app/model` 投影。
 // 字段名与 DTO 一一对应（投影是纯搬运，不重命名）。
 type ProviderItem struct {
 	ID            string

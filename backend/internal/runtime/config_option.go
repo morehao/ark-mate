@@ -93,7 +93,7 @@ func HasConfigValue(opts []ConfigOption, category, value string) bool {
 
 // ConfigOptionsOfACP 把协议选项折成平台值（**适配器边界的唯一转换入口**）。
 //
-// 公开而不是只在包内用：`drivers/runtimeconn` 取样时手里只有 `*acp.Session`，它必须借这一处
+// 公开而不是只在包内用：`adapters/outbound/runtimeconn` 取样时手里只有 `*acp.Session`，它必须借这一处
 // 转换——转换逻辑抄第二遍就会在两处各漏一个字段。
 func ConfigOptionsOfACP(in []acp.ConfigOption) []ConfigOption {
 	if len(in) == 0 {

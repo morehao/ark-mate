@@ -2,21 +2,21 @@ package run
 
 // ——— 会话交互面的**剩余形状**（P4a 正文第四十一刀之后）———
 //
-// 这一族共七条，都已归 `service/svcsession`，本文件只剩两样**适配器**：
+// 这一族共七条，都已归 `app/session`，本文件只剩两样**适配器**：
 //
 //	① 三个事实出口（`PendingPermissions` / `PermissionMemories` / `PendingElicitations`）：
 //	   `session.InteractionSource` 的实现（那两份状态归执行面持有，用例层只认这三条只读事实）；
 //	② 三个投递口（`ResolvePermission` / `ResolveElicitation` / `RevokeMemory`）：
 //	   `session.InteractionDelivery` 的实现（把决定投给底座 = 投递面，第四十一刀）。
 //
-// 两者的签名只吃**域值对象**与基础类型，所以适配器能留在这里——本包不许 import `service/svc*`
-// （层守卫 `TestOnlyControllersImportServicePackages` 钉着），端口一旦用 svc 层自己的值类型，
+// 两者的签名只吃**域值对象**与基础类型，所以适配器能留在这里——本包不许 import 兄弟用例包
+// （`app/<域>`；层守卫 `TestOnlyAssemblyAndControllersImportServicePackages` 钉着），端口一旦用 svc 层自己的值类型，
 // 适配器就没有落点了。旧的那批 DTO 版方法（`GetSession` 等四条 + 这三条）已随第四十/四十一刀删除。
 
 // ——— 会话交互面的**剩余形状**（P4a 正文第四十刀之后）———
 //
 // 只读四条（`GetSession` / `ListPendingPermissions` / `ListPermissionMemories` /
-// `ListPendingElicitations`）已收进 `service/svcsession`（`DetailSvc` + `InteractionSource`），
+// `ListPendingElicitations`）已收进 `app/session`（`DetailSvc` + `InteractionSource`），
 // 连同两个投影 `toPermissionResp` / `toElicitationResp` 一起搬走——投影只该有一份。
 //
 // 本文件此后只剩两样：

@@ -233,7 +233,7 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 		t.Fatalf("CreateProvider: %v", err)
 	}
 	// 注入哪条档案由**默认模型**那条清单决定（v19：agent 上的 provider 字段已撤销）。
-	// 夹具直接插行：写面已搬进 `service/svcmodel`（见 `seedModelRow`）。
+	// 夹具直接插行：写面已搬进 `app/model`（见 `seedModelRow`）。
 	r.seedModelRow(t, "p1", "m-1", true)
 
 	idleID, idle := r.start(t, nil)

@@ -90,7 +90,7 @@ func builtinSpec(t *testing.T, id string) runtime.Spec {
 
 // createModel 直接往库里插一条模型行（**绕开写面**）。
 //
-// 写面（`CreateModel`/`UpdateModel`/`DeleteModel`）已搬进 `service/svcmodel`（P4a 正文第五刀）：
+// 写面（`CreateModel`/`UpdateModel`/`DeleteModel`）已搬进 `app/model`（P4a 正文第五刀）：
 // 这些用例要的是"清单里有一条"这个**前提**，不是写面的行为——写面的判据跟着实现走，
 // 在 `internal/app/model/declared_test.go`。
 //

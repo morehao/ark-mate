@@ -3,7 +3,7 @@ package workspace
 // ——— 工作空间域的**对外响应**形状（v3.2 刀 6）———
 //
 // 只放领域自己产出的数据形状：没有 json tag，也不认识 omitempty。对外形态
-// （`dtoworkspace.Workspace*`）由用例层 `service/svcworkspace` 投影——改一个 JSON 字段名
+// （`dtoworkspace.Workspace*`）由用例层 `app/workspace` 投影——改一个 JSON 字段名
 // 不该动领域代码，领域测试也不该断言线上格式。字段名与 DTO 一一对应（投影是纯搬运）。
 //
 // 与 `view.go` 的分工：那个文件里的 `WorkspaceView` 是**登记项在域内的视图**（含目录可读性

@@ -12,8 +12,8 @@ import "time"
 // 等域测试改走内存 store（计划 §2.2 的"内存 store 跑通领域测试"）后，这个包可以并回 `session`。
 //
 // 改造前 `inputs` 行的形状（`model.InputEntity`）直接出现在域的 `Store` 端口签名里：领域因此
-// import `persistence/model`，换一份存储实现就要改域。现在领域自持 `QueueItem`，行结构只出现在
-// `persistence/store` 的行↔聚合映射里。
+// import `adapters/outbound/sqlite/model`，换一份存储实现就要改域。现在领域自持 `QueueItem`，行结构只出现在
+// `adapters/outbound/sqlite/store` 的行↔聚合映射里。
 //
 // 字段与列一一对应（含台账列 `Status` / `Seq` / `ClaimedAt`）：`QueuedInput` 是对外投影
 // （REST/事件形状），`QueueItem` 是**完整聚合**——两者刻意分开，投影加字段不该逼聚合改形状。

@@ -3,7 +3,7 @@ package run
 // ——— 排队输入的**执行面能力**（P5）———
 //
 // `delivery` 三值（reject / after_run / interrupt_then_prompt）的用例语义在
-// `service/svcsession`（`PromptSession` 校验 + `DeliverQueuedNow` 的 no-op 三种情况）；
+// `app/session`（`PromptSession` 校验 + `DeliverQueuedNow` 的 no-op 三种情况）；
 // 本层只剩"投递这个动作"——它要与在途状态、收尾路径共用同一份事实（`Runner.DeliverQueued`），
 // 所以实现必须留在执行面。
 //

@@ -29,7 +29,7 @@ type runtimeCtr struct {
 // NewRuntimeCtr 构造 RuntimeCtr：交出底座**执行面**，在这里造出用例。
 //
 // `plane` 由装配侧交出（`*runtimeconn.Plane`）——`app` 交的是执行面而不是用例，因为
-// `app` 与 `router` 都不该 import `service/svc*`（`internal/archtest/svc_layer_consumer_test.go`）。
+// `app` 与 `router` 都不该 import 用例层（`app/<域>`；`internal/archtest/usecase_layer_consumer_test.go`）。
 func NewRuntimeCtr(svc runtime.RuntimeSvc) RuntimeCtr {
 	return &runtimeCtr{svc: svc}
 }

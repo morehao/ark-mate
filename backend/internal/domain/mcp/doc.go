@@ -4,9 +4,9 @@
 // 它**负责**：密钥引用（`store:` / `env:`）到明文的解析与"当前是否解析得出来"的体检、
 // 密钥解析的失败原因文案（只含键名与引用，**绝不含值**）、以及把解析结果合成最终注入值。
 //
-// 它**不负责**：凭据的来源与分层顺序（那是 `mechanism/credential` 与 `pkg/credentials`——
+// 它**不负责**：凭据的来源与分层顺序（那是 `mechanism/credential` 与 `adapters/outbound/credentials`——
 // 本包只调它的 `ResolveStoreSecret`）、会话的注入选址（那要读会话钉住的白名单，属会话平面）、
-// 定义载体的读写（`mechanism/definition`）、对外 DTO 与错误码（`service/svc*` 与 `dto/*`）。
+// 定义载体的读写（`mechanism/definition`）、对外 DTO 与错误码（用例层 `app/*` 与 `contract/dto*`）。
 //
 // 为什么与 `domain/skill` 分开而不合成一个 `capability` 包：**密钥**这条不变量只对 MCP 成立
 // ——技能是提示词平面（无凭据、会话无关），连接器是工具访问平面（有凭据、要授权与审计）。

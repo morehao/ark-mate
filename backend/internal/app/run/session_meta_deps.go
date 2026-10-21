@@ -14,7 +14,7 @@ import (
 //
 // 适配器留在 `manager` 的理由与交互动作面同形：端口的三个签名只吃**域/pkg 类型**
 // （`runtime.ModelConfig` / `sessionrow.MetaPatch`），所以它能在不认识用例层的地方实现
-// （层守卫不许 manager import `service/svc*`）。
+// （层守卫不许 manager import 用例层（`app/<域>`））。
 
 // ResolveModel 把请求里的模型引用解析成 (平台行 id, 运行时值)。
 //

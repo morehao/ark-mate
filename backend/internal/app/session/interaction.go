@@ -36,7 +36,7 @@ type InteractionSvc interface {
 // `Secrets`（纯解析）和实时面分开是同一条理由。
 //
 // 三个签名只吃**域值对象**（`interaction.DecisionOutcome`）与基础类型，这是刻意的：
-// 适配器因此能落在 `manager`（它不许 import `service/svc*`，层守卫钉着）——端口一旦用
+// 适配器因此能落在 `manager`（它不许 import 兄弟用例包 `app/<域>`，层守卫钉着）——端口一旦用
 // svc 层自己声明的值类型，适配器就只能塞进"某个同时认识两边的层"，而那一层不存在。
 type InteractionDelivery interface {
 	// ResolvePermission 投递权限决策；ok=false = 挂起项不存在/已过期/不属于该会话。

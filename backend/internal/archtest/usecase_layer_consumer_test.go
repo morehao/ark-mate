@@ -8,13 +8,13 @@ import (
 
 // ——— v3.1：「只有装配根与控制器引用用例层」守卫 ———
 //
-// 依赖链是 `cmd → cli → app → assembly → controller → service(接口)`。这条链里
-// `service/svc*` 只该被两类包认识：
+// 依赖链是 `cmd → cli → app → assembly → controller → 用例接口`。这条链里
+// 用例层（`app/<领域>`）只该被两类包认识：
 //
 //	① `internal/bootstrap/assembly` —— 唯一装配根，**造**用例实例（`system.New(...)`）；
 //	② `internal/adapters/inbound/http/controller/ctr<领域>` —— 消费用例，但只写**接口类型名**，不再构造。
 //
-// `app`/`router`/`domain`/`mechanism`/`store`/`pkg` 都不该 import 它。
+// `bootstrap`/`router`/`domain`/`mechanism`/`sqlite/*` 都不该 import 它。
 //
 // 这条边为什么必须有机器判据——它的失效**完全静默**：
 //
@@ -82,7 +82,7 @@ func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 		t.Fatalf("扫描面一个生产 .go 文件都没扫到（扫描根被搬走/改名了？）：判据失锚，守卫不许静默通过")
 	}
 	if fromAllowed == 0 {
-		t.Fatal("没有任何包 import 用例层：要么 `service/svc*` 被改名，要么装配根已改依赖具体类型——" +
+		t.Fatal("没有任何包 import 用例层：要么用例层（`app/<域>`）被改名，要么装配根已改依赖具体类型——" +
 			"两种都会让这条判据变成空转（它只证明「没人违规」，而违规门槛已经不对应现实）")
 	}
 	if violations > 0 {
@@ -115,7 +115,7 @@ func TestUseCaseInstancesAreBuiltByAssembly(t *testing.T) {
 		src := stripLineComments(readFileOrFatal(t, filepath.Join(root, b.file)))
 		if !strings.Contains(src, b.anchor) {
 			t.Errorf("%s 的建造点不在装配根里：%s 找不到 %q。\n"+
-				"用例实例必须由 `internal/bootstrap/assembly` 造——`app`/`router` 不认识 `service/svc*`。",
+				"用例实例必须由 `internal/bootstrap/assembly` 造——`app`/`router` 不认识用例层（`app/<域>`）。",
 				b.name, b.file, b.anchor)
 		}
 	}
@@ -124,7 +124,7 @@ func TestUseCaseInstancesAreBuiltByAssembly(t *testing.T) {
 	//
 	// 判据按 **import 路径**而不是限定符文本：用例包名去掉 `svc` 前缀之后（C3 4.2），
 	// `runtime.` / `session.` / `model.` 在装配面本来就是别的包（`internal/runtime`、
-	// `domain/session`、`persistence/model`）的限定符——按文本扫会既误伤又漏判。
+	// `domain/session`、`adapters/outbound/sqlite/model`）的限定符——按文本扫会既误伤又漏判。
 	for _, dir := range []string{
 		filepath.Join(root, "internal", "bootstrap", "app"),
 		filepath.Join(root, "internal", "adapters", "inbound", "http", "router"),

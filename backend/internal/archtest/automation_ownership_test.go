@@ -175,7 +175,7 @@ func TestAutomationWiringIsAttached(t *testing.T) {
 //	① **回流**：谁在域里又写一遍 `automation_not_found` 或 `InvalidParamErr(`——两份出口立刻分叉
 //	   （例如一边 40401、另一边 40001），而"哪边生效"取决于调用路径，两边各自都有测试；
 //	② **装配回潮**：`Ports` 那一格写回 svc 类型（`automation.AutomationSvc`）——装配点为了声明
-//	   一格字段而 import 用例包，`router`/`app` 不得引用 `service/svc*` 这条口径当场破掉；
+//	   一格字段而 import 用例包，`router`/`app` 不得引用用例层（`app/<域>`）这条口径当场破掉；
 //	③ **用例没人造**：控制器不再调 `automation.New(`（拿到的 `plane` 直接当用例用，
 //	   或者干脆绕开用例层）——于是 `AutomationSvc` 的实现只剩测试里的替身。
 //

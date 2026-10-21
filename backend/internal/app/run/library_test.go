@@ -44,7 +44,7 @@ func libCtx() library.Query { return library.Query{} }
 
 // listLibrary 在测试里按**装配点的形状**造一次 Library 用例。
 //
-// Library 的实现已搬进 `service/svclibrary`（P4a 正文第六刀），而 manager 的历史用例要拿真
+// Library 的实现已搬进 `app/library`（P4a 正文第六刀），而 manager 的历史用例要拿真
 // Service 的能力面当夹具（装载、写面、投影都在 manager 上）——这正是"用例实例由装配点造"这条
 // 规矩在测试里的样子：签名由编译期钉住，装配点漂了这里先红。
 func listLibrary(tb testing.TB, svc *Service) library.LibrarySvc {

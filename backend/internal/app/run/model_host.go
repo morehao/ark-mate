@@ -14,7 +14,7 @@ import (
 // ModelEffect 计算模型清单改动的生效面回执（只读、无副作用；判据与代际裁决同源）。
 //
 // 导出是**过渡期的端口实现**（`model.Host`，P4a 正文第五刀）：清单写面已搬进
-// `service/svcmodel`，而"哪些会话会顺延"要问代际裁决（与连接/会话编排绑在一起，P5 才 dissolve）。
+// `app/model`，而"哪些会话会顺延"要问代际裁决（与连接/会话编排绑在一起，P5 才 dissolve）。
 // 搬过去的那一天，这个方法连同 `model.Host` 一起消失。
 func (s *Service) ModelEffect(defaultTouched bool) *dtomodel.ModelEffect {
 	eff := &dtomodel.ModelEffect{Effect: "next_session"}

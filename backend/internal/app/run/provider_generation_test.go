@@ -26,7 +26,7 @@ func TestProviderKeyChangeSwitchesGenerationNextRun(t *testing.T) {
 		t.Fatalf("建档案: %v", err)
 	}
 	// v19：注入哪条档案由**默认模型**那条清单决定（agent 上的 provider 字段已随 agent 面撤销）。
-	// 夹具直接插行：写面已搬进 `service/svcmodel`（见 `seedModelRow`）。
+	// 夹具直接插行：写面已搬进 `app/model`（见 `seedModelRow`）。
 	r.seedModelRow(t, "p1", "m-1", true)
 
 	convID, as1 := r.start(t, nil)

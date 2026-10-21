@@ -6,7 +6,7 @@
 // 文件名安全边界、以及定义形状的历史迁移（旧 `sources[]` / legacy mcp ref → 新形状）。
 //
 // 它**不负责**：某一种定义**该怎么生效**（那是各领域的事：skill 的投影与启停、mcp 的注入条目、
-// automation 的调度、provider 的密钥）、对外 DTO 与错误码（`service/svc*` 与 `dto/*`）。
+// automation 的调度、provider 的密钥）、对外 DTO 与错误码（用例层 `app/*` 与 `contract/dto*`）。
 //
 // 为什么它单独成包：五类定义共用同一套双载体 + CAS + 审计，本来就只有一份实现；它被 ≥3 个域
 // 依赖，而按设计它**不依赖任何域**（`mechanism/*` 不得向上 import）。

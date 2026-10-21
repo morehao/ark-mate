@@ -5,7 +5,7 @@
 //
 // 它**不负责**：会话的创建与取消（那是 `domain/session`——本域经 `Host` 端口请求）、
 // 事件的身份与落库（本域只发一条**只走实时通道**的 `automation.run`，身份与落库都属会话域）、
-// 以及对外 DTO 与错误码出口（`service/svc*` 与 `dto/*`）。
+// 以及对外 DTO 与错误码出口（用例层 `app/*` 与 `contract/dto*`）。
 //
 // **它自持一把锁**：`recs`（内存注册表）、`dir`、`autoVer`、调度 goroutine 的句柄此前挂在
 // `manager.Service` 上、与 `sessions` 共用 `Service.mu`；而"自动化注册表"与"会话表"本来没有

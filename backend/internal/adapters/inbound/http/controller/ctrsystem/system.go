@@ -7,8 +7,8 @@
 //
 // 能力**执行面**不在这里：那是 `__MATE_DESKTOP__`（壳的 preload）。声明与执行分工见设计 §7.3。
 //
-// v3.1 起本包只做两件事：读请求头（入口标识）、调 `svcsystem` 用例、回信封。
-// 契约类型在 `dto/dtosystem`，投影在 `service/svcsystem`（`app`/`cli` 因此不必 import 本包）。
+// v3.1 起本包只做两件事：读请求头（入口标识）、调 `app/system` 用例、回信封。
+// 契约类型在 `contract/dtosystem`，投影在 `app/system`（`app`/`cli` 因此不必 import 本包）。
 package ctrsystem
 
 import (

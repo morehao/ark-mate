@@ -18,7 +18,7 @@ import (
 // 这一族回答「平台声明了哪些模型、某条会话该用哪一行、这一行折成该底座认的什么值」。它与
 // 供应商档案同属一个域（`models.provider_id` 是外键式的挂靠），所以落在这里而不是用例层：
 //
-//   - 用例层（`service/svcmodel`）只做请求校验、错误码出口与响应装配；
+//   - 用例层（`app/model`）只做请求校验、错误码出口与响应装配；
 //   - 解析链（`ResolveSessionModel`）同时被会话用例（`session.MetaDeps.ResolveModel`）、
 //     模型目录（`model_catalog.go`）与体检（`provider_model_facts.go`）消费——**只有一份实现**，
 //     放在域里才不会出现"某一条路径自己解释那个串"。
@@ -27,7 +27,7 @@ import (
 
 // ListModels 列出全部平台清单（**不分页**：清单上限 200 条，全量返回）。
 func (pl *Plane) ListModels(ctx context.Context) ([]ModelItem, error) {
-	// memory 模式没有清单载体：读面回空列表（写面在 `service/svcmodel`，那里报 40501）。
+	// memory 模式没有清单载体：读面回空列表（写面在 `app/model`，那里报 40501）。
 	if pl.st == nil {
 		return []ModelItem{}, nil
 	}
@@ -47,7 +47,7 @@ func (pl *Plane) ListModels(ctx context.Context) ([]ModelItem, error) {
 // ModelRow 读一条并投影（`found=false` = 不在册；错误只有载体读失败）。
 //
 // 形状是"查得到/查不到"而不是"查不到就报错"：错误码与文案属于**用例**（写面提交后读不回来
-// 是 40401），留在 `service/svcmodel` 一处，不让同一个码在两层各铸一遍。
+// 是 40401），留在 `app/model` 一处，不让同一个码在两层各铸一遍。
 func (pl *Plane) ModelRow(ctx context.Context, id string) (*ModelItem, bool, error) {
 	if pl.st == nil {
 		return nil, false, nil

@@ -59,7 +59,7 @@ type AuthGuidance struct {
 
 // CapabilityFactsOfACP 把协议能力事实折成平台值（**适配器边界的唯一转换入口**）。
 //
-// 公开给适配器：`drivers/runtimeconn` 拨号后手里只有 `*acp.Client`，它必须借这一处转换。
+// 公开给适配器：`adapters/outbound/runtimeconn` 拨号后手里只有 `*acp.Client`，它必须借这一处转换。
 func CapabilityFactsOfACP(c acp.Capabilities) CapabilityFacts {
 	out := CapabilityFacts{
 		SessionsPersistent:     c.SessionsPersistent,

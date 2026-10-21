@@ -5,7 +5,7 @@ import "encoding/json"
 // ——— 技能域的读/写视图（v3.2 刀 4）———
 //
 // 领域**不产出对外 JSON 形态**：这些结构只有字段、没有 tag，也不认识 omitempty。
-// 对外形态（`dtocapability.Skill*`）由用例层 `service/svccapability` 投影——它才是
+// 对外形态（`dtocapability.Skill*`）由用例层 `app/capability` 投影——它才是
 // "HTTP 契约长什么样"的负责人。这样改一个 JSON 字段名不必动领域代码，领域测试也不必断言线上格式。
 //
 // 字段名与对外 DTO 一一对应是**刻意的**：投影是纯搬运（逐字段赋值），不做重命名，

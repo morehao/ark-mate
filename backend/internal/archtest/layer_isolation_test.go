@@ -166,10 +166,10 @@ func TestDomainPackagesMustNotImportEachOther(t *testing.T) {
 	}
 }
 
-// TestServicePortsMustNotImportEachOther 锁定用例层的同层纪律：`service/svc*` 之间零互相 import。
+// TestServicePortsMustNotImportEachOther 锁定用例层的同层纪律：用例层（`app/<领域>`）之间零互相 import。
 //
-// 用例层的分界是两条：① "谁调谁"（`svcsession` 与 `svccapability` 不该互相调：那是编排，归
-// registry 或各自的下游领域）② "谁拥有端口类型"（`library.Query` 的类型该下沉到 `domain/skill`，
+// 用例层的分界是两条：① "谁调谁"（`session` 与 `capability` 不该互相调：那是编排，归执行面
+// 或各自的下游领域）② "谁拥有端口类型"（`library.Query` 的类型该下沉到 `domain/skill`，
 // 见 P4a）。一个 `svc` import 另一个 `svc` 会让这两条同时失效；而端口层互相 import 通常还伴随
 // import 环——只是 Go 要等到某个具体调用点才报出来。
 // 只扫**生产** import：用例包的包内测试要装真用例做端到端夹具（`app/run` 的 rig 会构造
@@ -194,12 +194,12 @@ func TestServicePortsMustNotImportEachOther(t *testing.T) {
 }
 
 // TestInnerLayersUseNoTableRows 内圈（领域 / 用例 / 执行面 / 入站适配 / 装配）不得引用表行形状
-// （`persistence/model`）。
+// （`adapters/outbound/sqlite/model`）。
 //
 // 层表只判**方向**：L2 → L0 是"向内"，所以 `domain` import `model` 在层表里一直是**合法**的
 // ——C1 之前域的端口签名里全是 `model.*Entity`，没有任何判据会说那不对；换一份存储实现就要
 // 先改一遍域，而这正是"端口语言来自外圈"的那条裂缝。C1 把 16 个实体的行形状搬进域内叶子值包
-// （`domain/<agg>/row` 这一类），行↔值映射只留在 `persistence/store`。这条按**角色**把结果钉住：
+// （`domain/<agg>/row` 这一类），行↔值映射只留在 `adapters/outbound/sqlite/store`。这条按**角色**把结果钉住：
 // **行形状只属于持久层**，内圈任何一层都不许再把它写进签名或字段。
 //
 // 扫描根是**五层**而不是只有 domain：只钉 domain 的话，"把行形状挪进 svc / run 再
@@ -242,7 +242,7 @@ func TestInnerLayersUseNoTableRows(t *testing.T) {
 }
 
 // protocolFreePackages 已经完成「协议边界」迁移的**内圈包**：它们的生产 import 里不得再出现
-// `infra/acp`（协议类型只出现在连接边界与出站适配器）。
+// `adapters/outbound/acp`（协议类型只出现在连接边界与出站适配器）。
 //
 // 这份清单是**逐步增长的收口表**：C2 每完成一块（事件与轮次 → 错误构造 → 权限/elicitation →
 // 配置项 → 连接与生命周期），就在这里登记相关包。等全部登记完，`internal/domain` 前缀可以整体

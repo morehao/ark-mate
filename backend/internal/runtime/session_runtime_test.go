@@ -108,7 +108,7 @@ func TestNewProjectionNeedsNoDispatch(t *testing.T) {
 
 // testSessionView 把真实的 ACP 会话包成投影所需的平台视图。
 //
-// 生产路径上的这一层在 `drivers/runtimeconn`（`agentSession`）；本包测试只用真实会话验投影
+// 生产路径上的这一层在 `adapters/outbound/runtimeconn`（`agentSession`）；本包测试只用真实会话验投影
 // 自身的行为，所以就地包一层——刻意不 import runtimeconn（那会成环）。
 type testSessionView struct{ sess *acp.Session }
 

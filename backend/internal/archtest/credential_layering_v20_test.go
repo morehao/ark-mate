@@ -96,7 +96,7 @@ func TestCredentialLayeringOrderIsSingleSource(t *testing.T) {
 		rel := relOf[path]
 		// 词表的**声明点**不参与扫描（v3.2 刀 7 起在凭据值层 `internal/platform/credential`）：
 		// 它天生会同时"点名"四个常量（那是声明，不是在判顺序）。除它之外任何地方出现同名同值
-		// 的声明都算复述——所以 `infra/credentials` 现在**要**被扫。
+		// 的声明都算复述——所以 `adapters/outbound/credentials` 现在**要**被扫。
 		if strings.HasPrefix(rel, "backend/internal/archtest/") ||
 			strings.HasPrefix(rel, "backend/internal/platform/credential/") {
 			continue
@@ -109,7 +109,7 @@ func TestCredentialLayeringOrderIsSingleSource(t *testing.T) {
 	// 「这份配置从哪来」，其中 `SourceEnv` 与凭据词表**同名不同值**），按名字扫会误伤，
 	// 按"同名 + 同值"扫才只认这一份词表。
 	pairRe := regexp.MustCompile(`(Source\w+)\s+Source\s*=\s*"([^"]*)"`)
-	// v3.2 刀 7 起词表在**凭据值层**（`internal/platform/credential`）：`infra/credentials` 只做分层解析。
+	// v3.2 刀 7 起词表在**凭据值层**（`internal/platform/credential`）：`adapters/outbound/credentials` 只做分层解析。
 	// 判据不变（自取词表 → 全仓找"同名同值"的复述），只是取词表的地方跟着搬。
 	vocabSrc := dirProductionBody(t, filepath.Join(root, "internal", "platform", "credential"))
 	credsPairs := map[string]string{}
@@ -153,7 +153,7 @@ func TestCredentialLayeringOrderIsSingleSource(t *testing.T) {
 			t.Fatalf("读不到 %s: %v", rel, err)
 		}
 		clean := stripLineComments(string(raw))
-		// 分层**实现**（`infra/credentials`）本来就要读 `.env`、本来就要同时点名四层——
+		// 分层**实现**（`adapters/outbound/credentials`）本来就要读 `.env`、本来就要同时点名四层——
 		// 那两条启发式查的是"别人在复刻层序"，不是查它自己。但它仍要参与 `decls` 扫描：
 		// 词表已在 `internal/platform/credential`，它若再声明一份必须当场红。
 		isLayeringImpl := strings.HasPrefix(rel, "backend/internal/adapters/outbound/credentials/")

@@ -190,7 +190,7 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 		}
 	}
 
-	// ③ 装配：用例在**装配根**造（`app` 与 `router` 都不许引用 `service/svc*`）。
+	// ③ 装配：用例在**装配根**造（`app` 与 `router` 都不许引用用例层 `app/<域>`）。
 	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "http", "controller", "ctrmodel", "models.go")))
 	for _, m := range []string{"h.declared.CreateModel(", "h.declared.UpdateModel(", "h.declared.DeleteModel("} {
 		if !strings.Contains(ctr, m) {

@@ -10,12 +10,12 @@ import (
 
 // ——— 执行面的连接端口（阶段 0.4）———
 //
-// 连接池与运行时平面的**实现**在 `drivers/runtimeconn`（出站适配器），但端口由域声明：
+// 连接池与运行时平面的**实现**在 `adapters/outbound/runtimeconn`（出站适配器），但端口由域声明：
 // 会话与编排只认"一条连接能给我什么"（句柄、键、配置指纹），不认池的具体类型。
 //
 // 为什么端口落在 `domain/session` 而不是执行面 `app/run`：`runtimeconn`（L6）必须**实现**
-// 这些端口，而它只能向下 import（L6 → L2 合法，L6 → L7 是"向上"）。端口放执行面会让适配器
-// 无法落地——那正是层表在提醒的边界方向。
+// 这些端口，而适配器只向下 import 端口与值类型（L6 → L2 合法）；端口放用例层会让适配器
+// import 用例层，与"适配器只认识端口"的口径相冲。
 //
 // 与 `Runner` / `Lifecycle` 的既有窄端口同一口径：这里的方法**只交事实**（键、指纹、句柄），
 // 不做判断；"要不要迁代际 / 要不要回收"都在编排侧。
@@ -94,7 +94,7 @@ type DropSink interface {
 	InUseOn(conn Conn) bool
 }
 
-// ConnPool 连接池端口（`drivers/runtimeconn.Pool` 实现）。
+// ConnPool 连接池端口（`adapters/outbound/runtimeconn.Pool` 实现）。
 //
 // 方法分两类：取连接（Dial / KeyFor / ConnOfClient / ConnForRuntime）与生命周期
 // （ReclaimGeneration / CloseAll / SetDropSink / SetGenerationLimit / StartIdleReaper）。
@@ -119,7 +119,7 @@ type ConnPool interface {
 	StartIdleReaper(interval, idle time.Duration)
 }
 
-// RuntimePlane 运行时平面端口（`drivers/runtimeconn.Plane` 实现）。
+// RuntimePlane 运行时平面端口（`adapters/outbound/runtimeconn.Plane` 实现）。
 //
 // 只交出编排真正要用的四件事：诊断留痕两条、底座绑定两条。凭据面与连接池的登记
 // （`SetCredentialSource` / `SetLiveClientSource`）属于装配接线，不进端口。

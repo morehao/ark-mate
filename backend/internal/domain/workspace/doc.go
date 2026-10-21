@@ -9,9 +9,9 @@
 // 以及工作空间路径的三条件校验与解析（`ValidateWorkspace` / `ResolveWorkspace` /
 // `DiscardWorkspace`）——它们此前是 `manager` 的包级函数，与选择器同域（同一个"工作空间"概念）。
 //
-// 它**不负责**：工作空间登记表的持久化（仍在 manager，随 P2b 的下一刀搬）、会话与
+// 它**不负责**：工作空间登记表的持久化（已在 `adapters/outbound/workspaces`）、会话与
 // 工作空间的归属（那要读会话读面，属 `domain/session`）、对外 DTO 与错误码出口
-// （`service/svc*` 与 `dto/*`）。
+// （用例层 `app/*` 与 `contract/dto*`）。
 //
 // 为什么这一半能先搬：它对 `*Service` 的依赖只有"本进程实际监听的地址"一个字段（装配期注入、
 // 之后只读），**零会话依赖、零库依赖**——与 `domain/interaction` 同形的自足孤岛。剩下那一半

@@ -310,7 +310,7 @@ func transcriptPlane(svc *Service) *session.Plane { return svc.sessionPlane }
 
 // seedModelRow 直接往库里插一条模型行（**绕开写面**），返回行 id。
 //
-// 写面（`CreateModel`/`UpdateModel`/`DeleteModel`）已搬进 `service/svcmodel`（P4a 正文第五刀）：
+// 写面（`CreateModel`/`UpdateModel`/`DeleteModel`）已搬进 `app/model`（P4a 正文第五刀）：
 // 还留在 manager 的用例要的是"清单里有一条（甚至是默认那条）"这个**前提**，不是写面的行为
 // ——写面自己的判据跟着实现走（`internal/app/model/declared_test.go`）。
 func (r *genRig) seedModelRow(t *testing.T, providerID, model string, isDefault bool) string {

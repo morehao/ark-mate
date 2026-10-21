@@ -13,7 +13,7 @@ import (
 // `NewSession` 就认识协议库，换一个非 ACP 底座要先改领域。
 //
 // 现在的语言是**平台值**（`SessionOptions` / `runtime.McpServer` / `runtime.CapabilityFacts`）
-// 与两个小接口；协议形状只在适配器（`drivers/runtimeconn`）内部出现，转换只在那里做一次。
+// 与两个小接口；协议形状只在适配器（`adapters/outbound/runtimeconn`）内部出现，转换只在那里做一次。
 //
 // 与 `Conn` 的分工：`Conn` 是"一条连接的事实"（键、指纹、身份），`AgentConn` 是"它上面能做
 // 什么"。分开是因为拆连与取连接只认键，不需要任何协议能力。

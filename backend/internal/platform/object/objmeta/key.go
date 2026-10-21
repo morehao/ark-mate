@@ -1,11 +1,11 @@
 // Package objmeta 承载 `meta` 表里**跨层共用**的键名（纯值，零 I/O）。
 //
 // 为什么单独成包：这些键同时被内圈（`domain/session` 在启动钩子里置标记/清标记）与外圈
-// （`bootstrap/maintenance` 的 doctor 读同一个标记）使用。放在 `persistence/model/enum.go`
+// （`internal/adapters/inbound/cli/maintenance` 的 doctor 读同一个标记）使用。放在 `adapters/outbound/sqlite/model/enum.go`
 // 会让领域 import 表形状包（C1 要消掉的那条边）；复制成两份字面量则会出现"域写了 A、doctor
 // 读 B"的静默分叉——标记永远读不到，而两边各自的测试都绿。
 //
-// **不属于这里的东西**：迁移内核自己用的键（`MetaKeyImportMarker` 等）留在 `persistence/model`，
+// **不属于这里的东西**：迁移内核自己用的键（`MetaKeyImportMarker` 等）留在 `adapters/outbound/sqlite/model`，
 // 因为它们的消费面就是迁移（同层，无跨层共用问题）。
 package objmeta
 

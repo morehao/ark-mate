@@ -33,7 +33,7 @@ type Service struct {
 	sessionPlane *session.Plane
 	// runtimePlane 执行面（P3a-2 分批搬入）：本进程认的那个底座的绑定与诊断状态。
 	//
-	// 阶段 0.4：字段是**端口**（`session.RuntimePlane`），具体实现留在 `drivers/runtimeconn`。
+	// 阶段 0.4：字段是**端口**（`session.RuntimePlane`），具体实现留在 `adapters/outbound/runtimeconn`。
 	// 本层**不自造**执行面：装配根注入；未注入时退到 no-op（见 `ports_nop.go`）。
 	runtimePlane session.RuntimePlane
 	// runtimePool 连接池（P4a 正文第五十四刀搬进执行面）：连接表、代际上限与空闲回收。

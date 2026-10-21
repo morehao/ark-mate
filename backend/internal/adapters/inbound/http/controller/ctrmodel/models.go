@@ -43,7 +43,7 @@ type modelCtr struct {
 
 // NewModelCtr 构造 ModelCtr（只收**已构造的两个用例**：写面与读/目录/同步面）。
 //
-// 除控制器之外的层不许引用 `service/svc*`（`internal/archtest/svc_layer_consumer_test.go`）。
+// 除控制器之外的层不许引用用例层（`app/<域>`；`internal/archtest/usecase_layer_consumer_test.go`）。
 func NewModelCtr(svc model.ModelSvc, declared model.DeclaredSvc) ModelCtr {
 	return &modelCtr{svc: svc, declared: declared}
 }

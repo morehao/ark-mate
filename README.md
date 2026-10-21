@@ -777,33 +777,44 @@ sqlite 模式下自动跑一次 `import`，幂等靠指纹 `meta.imported_automa
 backend/                单 Go module（github.com/morehao/ark-mate）
   cmd/mate             进程入口：只做子命令分发（→ internal/adapters/inbound/cli/cmd）
   internal/             单 module 的全部代码（v3.1 起 `backend/pkg` 已全量并入，不再有第二层）
-    adapters/outbound/acp    ACP 客户端（stdio 传输、能力探测、权限、elicitation（unstable）、错误分类）
-    adapters/outbound/mcp   自研最小 MCP 客户端（stdio / http / streamable_http / sse）
-    adapters/outbound/dsh   dsh adapter（`runtime.Adapter`：Spec + 五张端口表；新增底座 = 新目录 + Adapter）
-    platform/logging    zap/glog 装配（平台日志门面）
-    infra/credentials   凭据分层解析（env → 平台文档 → provider 档案 → 原生文档）
-    infra/dbclient      gorm 句柄装配 + golib SQLite dialector（纯 Go，`CGO_ENABLED=0`）
-    infra/procreg       进程注册表（孤儿 runtime 子进程回收）
+    domain/<域>/        领域：聚合 + 不变量 + 端口（域内值包：session/{event,run,queue,memory,message,sessionrow,usage}）
+    app/<域>/           用例环（控制器依赖的窄接口 + 实现，装配根构造；`app/run` 是执行面）
+    contract/dto<域>/   请求/响应 DTO（应用契约，按领域分包，两侧共用）
+    platform/           共享内核：纯值 / 规则 / 平台服务，无框架
+      code/             业务错误码（唯一事实源）+ 平台错误类型
+      capability/ automation/ definition/ credential/ identity/ resource/ redact/
+      eventbus/         进程内事件总线（WS 订阅源）
+      logging/          日志门面（zap/glog 装配）
+      object/{objid,objtime,objmeta,objusage,objdelivery}   跨层共享值对象
     runtime             运行时注册表 + `Spec` 契约 + `Adapter` 接口 + 隔离投影
-    capability          Skill/MCP/Tool 能力定义装载 + skill 物化（投影落点由 runtime 声明）
     config              进程配置（flag + MATE_* 环境变量 + .ark-mate/config 目录化）
-    code                业务错误码（唯一事实源）
-    object/objusage     跨层共享值对象（会话用量快照）
-    object/objid        主键壳体（`rt_` 等）
-    assembly            唯一装配根：构造 store/平面/执行面/用例/控制器/路由 + 启停序列
-    app                 应用壳：HTTP 启停、ready、信号与优雅关闭
-    cli                 命令树：子命令名、帮助、参数分发与退出码
-    inbound/cli/{cmd,ops,maintenance}  命令树 / 命令实现（serve / demo / migrate / doctor / …）/ 运维命令
-    router              唯一路由装配点（按领域分 routes_*.go；只收已构造的控制器）
-    controller/ctr*     传输层控制器（只收 service 接口 + DTO + gin）
-    middleware          HTTP 中间件（单操作员 token 鉴权）
-    contract/dto*       请求/响应 DTO（应用契约，按领域分包，双方共用）
-    app/<域>            用例环（控制器依赖的窄接口 + 实现，装配根构造）
-    model               持久层实体 + 列与取值约定（gorm 映射；时间 TEXT/布尔 INTEGER 由 serializer 保证）
-    dao                 列词汇（各领域 Cond）+ gormdao 泛型方法 + 机械原语（不承载业务读面）
-    store               持久层业务面（排序/筛选/聚合/状态迁移 + 跨表事务与读模型 API）
-    eventbus            进程内事件总线（WS 订阅源）
+    adapters/inbound/
+      http/router       唯一路由装配点（按领域分 routes_*.go；只收已构造的控制器）
+      http/controller/ctr*   传输层控制器（只收用例接口 + DTO + gin）
+      http/middleware   HTTP 中间件（单操作员 token 鉴权）
+      ws                WS 事件流（订阅语义 → 帧）
+      cli/{cmd,ops,maintenance}  命令树 / 命令实现（serve / demo / migrate / doctor / …）/ 运维命令
+      mcpgateway        被底座反向调用的 MCP 服务端半场
+    adapters/outbound/
+      sqlite/{model,dao,store,db}  持久层：行形状 / 列词汇 / 业务面 / 连接（gorm + golib SQLite，纯 Go）
+      acp                 ACP 客户端（stdio 传输、能力探测、权限、elicitation（unstable）、错误分类）
+      mcp                 自研最小 MCP 客户端（stdio / http / streamable_http / sse）
+      dsh                 dsh adapter（`runtime.Adapter`：Spec + 五张端口表；新增底座 = 新目录 + Adapter）
+      credentials         凭据分层解析（env → 平台文档 → provider 档案 → 原生文档）
+      procreg             进程注册表（孤儿 runtime 子进程回收）
+      definitions         能力定义装载面 + 定义类窄端口适配体（skill / mcp / automation）
+      models              资源同步面 + 模型读面 + 模型事实 + 身份交付 + 供应商密钥端口
+      workspaces          工作空间登记表端口适配体
+      mechanism/*         机制层（definition / credential / doctor）
+      transfer            存量定义的导入/导出编排
+      runtimeconn         连接池 / 拨号 / 代际 / 诊断
+    bootstrap/
+      assembly            唯一装配根：构造 store/平面/执行面/用例/控制器/路由 + 启停序列
+      assembly/planes     领域平面容器（唯一构造点；装配根与用例夹具共用）
+      app                 应用壳：HTTP 启停、ready、信号与优雅关闭
     archtest            架构守卫（机器判据的唯一集中地，179 条，含 1 条文档引用守卫）
+    testutil/           跨包复用的测试夹具（含合成 adapter）
+    version/
 frontend/               pnpm workspace（apps/* + packages/*）
   apps/web/             入口 + 组装（main.tsx 挂载 + vite 构建配置）；产物 dist 是唯一一份 UI
   apps/desktop/         桌面产品（Electron 壳：src/ 主进程与 preload、renderer/ 壳静态页、scripts/ 装配与打包）

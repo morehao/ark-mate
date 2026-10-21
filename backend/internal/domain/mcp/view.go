@@ -5,7 +5,7 @@ import "encoding/json"
 // ——— MCP 域的读/写视图（v3.2 刀 5）———
 //
 // 由域返回的数据形状：只有字段、没有 json tag。对外形态（`dtocapability.Mcp*`）由用例层
-// `service/svccapability` 投影——改一个 JSON 字段名不该动领域代码，领域测试也不该断言线上格式。
+// `app/capability` 投影——改一个 JSON 字段名不该动领域代码，领域测试也不该断言线上格式。
 //
 // 字段名与对外 DTO 一一对应（投影是纯搬运，不重命名）。
 

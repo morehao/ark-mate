@@ -26,13 +26,13 @@ var _ ProviderCtr = (*providerCtr)(nil)
 
 // providerCtr 处理 Provider 档案 REST（P2 注入面：密钥只写不读回）。
 //
-// 两个字段都是装配根构造、由构造函数注入的用例，两个都是 `service/svcmodel` 包内声明的接口：
+// 两个字段都是装配根构造、由构造函数注入的用例，两个都是 `app/model` 包内声明的接口：
 //
 //	actions —— 档案面四动作（`model.NewProvider(plane)`）；
 //	probe   —— 自检（`model.NewProbe(ports, catalog)`）。
 //
-// 控制器只收已构造的接口；除控制器外的层不许引用 `service/svc*`
-// （`internal/archtest/svc_layer_consumer_test.go`）。
+// 控制器只收已构造的接口；除控制器外的层不许引用用例层（`app/<域>`）
+// （`internal/archtest/usecase_layer_consumer_test.go`）。
 type providerCtr struct {
 	actions model.ProviderSvc
 	probe   model.Prober
