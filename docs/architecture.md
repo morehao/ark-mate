@@ -131,6 +131,31 @@ Electron 主进程（桌面态）
 - **`maintenance`（L9）**：命令实现（migrate / doctor / transcripts / mcp / config / demo / automation /
   capability / provider）。`adapters/inbound/cli/{cmd,ops}` 只剩命令分发与常驻 `serve`。
 
+### 4.1.2 协议边界：内圈不认识 `acp`
+
+`acp` 是 L1 的协议库，但**不是谁都能拿**：`internal/{domain,app,platform}` 的生产代码对它零 import
+（`TestProtocolFreePackagesStayClean`：逐包登记、新包不登记即红、豁免表当前为空——最后一条豁免
+`app/run` 于 2026-10-21 收口）。这条判据问的不是"分层好不好看"，而是**换一个底座要改哪几行**：
+协议类型一旦漏进用例层，换 ABI 就得动业务代码，而编译器不会提醒你"这里拿的是协议"。
+
+三个**载荷面**各有一个平台落点，翻译一律在出站适配器 `adapters/outbound/runtimeconn`：
+
+| 面 | 平台值 | 翻译点 |
+| --- | --- | --- |
+| 事件流 | `session/event.Signal`（交给 `DialOptions.OnEvent`） | `runtimeconn/events.go` |
+| 权限 / 结构化提问回调 | `interaction.Callbacks`（装在 `DialOptions.Hooks` 里当**不透明 `any`**：会话域不能 import 交互域） | `runtimeconn/interaction.go` |
+| 注入的 MCP 条目 | `runtime.McpServer`（网关条目同样，平台自己造的条目没有"先协议再折回"的中间态） | 只有写面下发才反向折（`McpServersToACP`） |
+
+于是执行面（`app/run`）里没有任何 `acp` 类型：它只决定**发不发事件、这次权限怎么裁决、要不要注入
+网关条目**，不碰线协议。这不是一开始就成立的——事件、权限/提问、MCP 三处都曾在用例层翻译，
+2026-10-21 分三刀搬走。
+
+一点容易看错的地方：`Hooks` 那个 `any` 仍然在（会话域不能 import 交互域，
+`TestDomainPackagesMustNotImportEachOther`），
+变的是**里面装什么**——从 `acp.ClientOptions` 换成领域值的 `interaction.Callbacks`。同样是 `any`，
+前者是"把协议形状藏进不透明载荷"，后者是"平台值的一次不透明转发"；判据在适配器那一侧的
+类型断言上，它失败会报 `dial_hooks_invalid`，而不是静默降级。
+
 ### 4.2 持久侧
 
 ```
@@ -303,7 +328,8 @@ backend/
 │   │                         session/{event,run,queue,memory,message,sessionrow,usage}）
 │   ├── app/<域>/             用例环（session / run / model / capability / automation / search /
 │   │                         usage / workspace / system / runtime / library / export /
-│   │                         commandpolicy / stream）；`app/run` 是执行面（连接/轮次/事件桥）
+│   │                         commandpolicy / stream）；`app/run` 是执行面（连接/轮次/事件桥）——
+│   │                         只碰平台值，协议翻译在 `runtimeconn`（见 §4.1.2）
 │   ├── contract/dto<域>/     应用契约（请求/响应 DTO；两侧共用，自身不依赖应用层）
 │   ├── platform/             共享内核：纯值 / 规则 / 平台服务，无框架
 │   │   ├── code/             业务错误码（唯一事实源）+ 平台错误类型
@@ -327,7 +353,7 @@ backend/
 │   │       ├── workspaces/   工作空间登记表端口适配体
 │   │       ├── mechanism/{definition,credential,doctor}/    机制层
 │   │       ├── transfer/    存量定义的导入/导出编排
-│   │       └── runtimeconn/ 连接池 / 拨号 / 代际 / 诊断
+│   │       └── runtimeconn/ 连接池 / 拨号 / 代际 / 诊断 + 协议翻译（事件 / 权限提问 / MCP 条目）
 │   ├── runtime/              adapter 注册表 + `Spec` 契约 + 隔离投影（不得 import 任何 adapter）
 │   ├── config/               进程配置（唯一入口）
 │   ├── bootstrap/            装配根与进程壳
@@ -370,7 +396,7 @@ Node 版本看 `frontend/.nvmrc`，pnpm 版本看 `frontend/package.json` 的 `p
 cd backend && go test ./internal/archtest/
 ```
 
-守卫覆盖的面向包括：分层与依赖方向（层表单向依赖、`internal` 不得 import adapter（除装配根）、DAO/Store 方向、内核不得按底座 id 特判）、词汇收口（一个东西一个词，被撤掉的标识符零命中）、契约冻结（事件 type 快照、错误码三处同步、README 路由与码表）、前端边界（包纪律、共享 UI 够不到 Electron/Node、界面源码根覆盖）、交付与加固（CSP 双源逐字一致、资产 Content-Type、桌面载荷不得探测本机安装、隔离表三份同源、交付矩阵完整性）、数据模型形态（表/列/索引命名、事件身份与位次分离、读模型可重建、消息白名单投影、纯 Go SQLite 驱动）、以及一批**「静默失效」专案**（构建期底座固定、模型下拉只出现声明过的模型、设置文案不得出现代码词、全局浮层层号、目录选择器形态）。
+守卫覆盖的面向包括：分层与依赖方向（层表单向依赖、`internal` 不得 import adapter（除装配根）、内圈与用例层不得 import 协议库（§4.1.2）、DAO/Store 方向、内核不得按底座 id 特判）、词汇收口（一个东西一个词，被撤掉的标识符零命中）、契约冻结（事件 type 快照、错误码三处同步、README 路由与码表）、前端边界（包纪律、共享 UI 够不到 Electron/Node、界面源码根覆盖）、交付与加固（CSP 双源逐字一致、资产 Content-Type、桌面载荷不得探测本机安装、隔离表三份同源、交付矩阵完整性）、数据模型形态（表/列/索引命名、事件身份与位次分离、读模型可重建、消息白名单投影、纯 Go SQLite 驱动）、以及一批**「静默失效」专案**（构建期底座固定、模型下拉只出现声明过的模型、设置文案不得出现代码词、全局浮层层号、目录选择器形态）。
 
 这些字面判据逐条列在 **`docs/agents/guards.md`**，连同：
 
