@@ -26,6 +26,8 @@
 
 - 再加 **1 条持久层边界守卫（v3.3）**：`dao_boundary_test.go` 的 `TestDaoKeepsNoBusinessReadFace`。v3.3 把 `internal/adapters/outbound/sqlite/dao` 收成「列词汇（`XxxCond`）+ gormdao 泛型方法 + 机械原语（KV / 取号 / CAS / 只追加插入）」，**排序、筛选组合、分页、聚合**一律归 `internal/adapters/outbound/sqlite/store`。守卫扫 `internal/adapters/outbound/sqlite/dao`（剥注释）禁止 `OrderField:`/`.Order(`/`.Limit(`/`.Offset(`/`.Join(`/`.Group(`/`.Select(`/`GetListByCond(`/`GetPageListByCond(`/`CountByCond(`，以及 `tableName+` 的标识符拼接（Cond 里的表名/列名必须交给 `clause.Column` 由方言引用）；条件查询组合也只许留在 store，唯一例外是 `meta.go` 的 `GetByCond(`（键值表按 key 取一行的原语）。挡的是「把 `ListByOrder`/`RunningRuns` 这类读面方法加回 DAO」——两层各有一套顺序时，用户看到的顺序取决于调用方走了哪条路，而单表测试永远看不出来。反证（实跑）：把 `ListByOrder` 的 `OrderField` 搬回 `dao/workspace.go`、把 `RunningRuns` 的 `.Order(`/`.Limit(` 搬回 `dao/run.go`、把 `MetaCond` 的 `clause.Eq` 改回 `tableName+".key = ?"`，三者皆红。
 
+- 再加 **1 条审计写入路径守卫**（`definition_revision_chain_test.go`，v32 / T4）：`definition_revisions` 追加**只许**经 `store.appendDefinitionRevision`（同一事务里取链尾、算哈希、插行）。判据两条，均 fail-closed（扫不到文件/找不到那句调用即失败）：① 生产代码里 `definitionRevision.WithTx(tx).Append(` 只许出现在 `definition_revision_chain.go`；② `internal/**` 生产代码（`migrate*.go` 除外）不得出现这张表的裸 `INSERT`。挡的是"另起一条插入路径"：它不会让任何测试变红——链上只是多一条 `hash=''` 的行，而 `hash=''` 在 v32 之前的历史行里**本来就合法**（它们是链的前缀），于是"新行绕过链"与"这是历史行"在库里长得一模一样。反证（实跑 2 条，均红）：把 `commitDefinitionChange` 改回直调 DAO 的 `Append`；在 `store/capability.go` 里加一句 `INSERT INTO definition_revisions`。
+
 - [`layout.md`](layout.md) 里的六条边界都由 `internal/archtest` 的守卫测试强制（`go test ./internal/archtest/`）；同目录还另有**四条**契约/出口守卫：事件 type 冻结快照（`TestEventTypeContractFrozen`）、前端事件同步边（`TestFrontendEventTypesMatchRegistry`）、控制器错误出口带码（`TestControllerErrorExitsCarryCode`）、**能力绑定粒度不得超出已实测范围**（`TestCapabilityScopeDeclaration`：读**策略接口** `Spec.Capability.BindScope()`——未 `Tested` 的 runtime 不得声明比 `process` 更细的绑定粒度，否则平台可能把 A 会话的能力投给 B 会话；C3 4.7 起判据读接口而不是读裸字段，所以换成"现场探测"实现的 adapter 同样被盯着）
 
 - 再加 **4 条前端侧边界守卫**（`frontend_boundary_test.go`，Go 读 TS 源码、不引前端测试框架）：`apps/web` 的产物包纪律（`dependencies` 空 / `exports` 只开产物 / `files` 排 map / 非 private）、`apps/desktop` 只消费 `apps/web` 的 dist 产物（不引其源码）、共享 UI 够不到 Electron 与 Node API（不引 `electron`/`node:*`/`@ark-mate/desktop`、不嗅探 `window.electron`）、`packages/*` 不反向相对引入 `apps/*`（界面搬进 `packages/console` 后，这条就是"搬迁方向"的守卫）；扫描根由 `uiSrcRoots()` 单点给出（`apps/web/src` + `packages/console/src` + `packages/ui/src`）——搬迁前六个守卫各自写死 `apps/web/src`，搬完会**静默空转**（目录还在、只剩入口，"目录不存在即 fatal"不触发）
@@ -183,7 +185,7 @@
   与实际 `cmd`/`ops`/`mcpgateway` 不符）。fail-closed：一条 `// Package …` 都没扫到即 `Fatal`。
   反证（实跑）：把 `app/library` 的包注释改回 `Package svclibrary` → 红；复原即绿。
 
-**共 181 条**——加守卫时记得同步这句话。
+**共 182 条**——加守卫时记得同步这句话。
 
 ## C3 目录重组：判据怎么跟着搬（2026-10-21）
 

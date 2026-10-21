@@ -39,8 +39,10 @@ func TestMigrationV31AddsAuditTableWithoutTouchingExistingData(t *testing.T) {
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("Migrate(v31): %v", err)
 	}
-	if v, err := s.SchemaVersion(ctx); err != nil || v != 31 {
-		t.Fatalf("schema 版本应 = 31，got %d (err=%v)", v, err)
+	// 版本号钉成"≥ 31 且等于本二进制支持的最新版"：以后每加一步迁移都不用回来改这条
+	// （它要验的是"审计表在这一步之后存在"，不是"schema 永远停在 31"）。
+	if v, err := s.SchemaVersion(ctx); err != nil || v != latestSchemaVersion() {
+		t.Fatalf("schema 版本应 = %d，got %d (err=%v)", latestSchemaVersion(), v, err)
 	}
 	// 表与两张索引都在（索引名带表名段是守卫 A2 的要求，这里顺带验它真的建出来了）。
 	for _, name := range []string{

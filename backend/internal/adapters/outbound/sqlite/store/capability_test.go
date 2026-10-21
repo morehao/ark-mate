@@ -176,9 +176,11 @@ func digestOf(body string) string {
 func TestCapabilityDefinitionColumnsFrozen(t *testing.T) {
 	s := openTestDB(t)
 	want := map[string][]string{
-		model.TableNameSkill:              {"id", "body", "revision", "updated_at"},
-		model.TableNameMcpServer:          {"id", "body", "revision", "updated_at"},
-		model.TableNameDefinitionRevision: {"seq", "kind", "definition_id", "action", "actor", "at", "digest"},
+		model.TableNameSkill:     {"id", "body", "revision", "updated_at"},
+		model.TableNameMcpServer: {"id", "body", "revision", "updated_at"},
+		// v32 追加 `prev_hash` / `hash`（哈希链，T4）：它们**不是**定义内容，而是"这行有没有被
+		// 改过"的判据载体——所以冻结判据放行这两列，同时仍然禁止"顺手再给定义体加一列"。
+		model.TableNameDefinitionRevision: {"seq", "kind", "definition_id", "action", "actor", "at", "digest", "prev_hash", "hash"},
 		// v13：providers/models 不再是「定义载体」而是「资源表」——平台字段全部成列、
 		// 无 body（ADR-1/ADR-2）。它们的列集合由 `archtest` 的
 		// `TestProviderModelTablesAreColumnsNotCarriers` 按**白名单**钉住（这里只冻住
@@ -271,5 +273,17 @@ func TestDefinitionRevisionConcurrentAppend(t *testing.T) {
 	}
 	if max, _ := s.MaxDefinitionRevisionSeq(ctx); max != n {
 		t.Fatalf("MaxDefinitionRevisionSeq 应为 %d，got %d", n, max)
+	}
+	// v32：并发提交同样不得把链写分叉（两条行挂在同一个前驱上）。
+	// 单写者的来由见本用例文件头：连接池 MaxOpenConns=1，事务在连接上天然串行。
+	checked, brk, err := s.VerifyDefinitionRevisionChain(ctx)
+	if err != nil {
+		t.Fatalf("VerifyDefinitionRevisionChain: %v", err)
+	}
+	if brk != nil {
+		t.Fatalf("并发提交把链写断了（seq=%d reason=%s want=%s got=%s）", brk.Seq, brk.Reason, brk.Want, brk.Got)
+	}
+	if checked != n {
+		t.Fatalf("应校验 n=%d 条带链的行，got %d", n, checked)
 	}
 }

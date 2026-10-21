@@ -262,7 +262,7 @@ internal/adapters/outbound/sqlite/model（实体定义）被上面三者依赖�
 
 ### 7.1 三表与「平台只做数据管理」
 
-平台侧的 Skill / MCP / Tool 是**数据面**：定义、注册、启停、审计、投放声明都在平台；**执行一律归底座**。定义的载体按持久层模式分叉（见 §5.1），每次变更在同一张审计表（`definition_revisions`）追一条，覆盖 skill / mcp / automation / provider / model 五种定义。
+平台侧的 Skill / MCP / Tool 是**数据面**：定义、注册、启停、审计、投放声明都在平台；**执行一律归底座**。定义的载体按持久层模式分叉（见 §5.1），每次变更在同一张审计表（`definition_revisions`）追一条，覆盖 skill / mcp / automation / provider / model 五种定义。v32 起这张表是**哈希链**：每行带 `prev_hash` / `hash`，写入时在同一事务里取链尾作为前驱，`store.VerifyDefinitionRevisionChain` 逐行复核并指出第一条坏行（`link` 删插换行 / `content` 改字段 / `gap` 清空哈希），消费面是 `mate doctor` 的 `audit-chain` 一段。两处如实记账：**v32 之前的行不补算**（它们是链的前缀，不参与校验），**单写者前提**（连接池 `MaxOpenConns=1`；多实例须先把写锁挪到进程外，见 C26）。
 
 **Skill 正文在入表前过威胁扫描**（11 条模式：9 条 critical 直接拒载、2 条 warning 放行但记在条目上并对外暴露）。规则是**字面匹配**——语序改写/中文改写可绕过，这条边界写在测试里，不要当成语义检测。
 

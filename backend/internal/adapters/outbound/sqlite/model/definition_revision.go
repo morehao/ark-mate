@@ -51,6 +51,17 @@ type DefinitionRevisionEntity struct {
 	// Digest 提交后 body 的摘要（sha256 hex）：审计要能回答"那一版到底是什么"，
 	// 而不是只留一个自增号。
 	Digest string `gorm:"column:digest;not null"`
+	// PrevHash 链上**前一条**的 `Hash`；创世条写 `store.DefinitionRevisionGenesisHash`。
+	//
+	// v32 起（T4）：每行挂在前一行的哈希上，于是"改过"从"看不出来"变成"链断在哪儿"。
+	// **空串 = v32 之前的行**（那时没有链）：它们构成链的前缀、不参与校验，也不假装被保护过
+	// ——把历史行就地补算成链，等于把"当时没人校验"这件事写成"当时就被校验过"。
+	PrevHash string `gorm:"column:prev_hash;not null;default:''"`
+	// Hash 本行的链哈希（对"归一化后的内容 + PrevHash"取 sha256 hex）。
+	//
+	// 归一化规则与算法只有一份实现（`store/definition_revision_chain.go`）：它一旦改了，
+	// 既有库的链会**当场断**——这是刻意的（"验证算法"和"写入算法"必须是同一段代码）。
+	Hash string `gorm:"column:hash;not null;default:''"`
 }
 
 // TableName 实现 gormdao.Entity。

@@ -128,7 +128,7 @@ func (s *Store) DeleteProviderDefinitionIfUnreferenced(
 			return err
 		}
 		deleted = true
-		return s.definitionRevision.WithTx(tx).Append(ctx, &model.DefinitionRevisionEntity{
+		return s.appendDefinitionRevision(ctx, tx, model.DefinitionRevisionEntity{
 			Kind:         model.DefinitionKindProvider,
 			DefinitionID: id,
 			Action:       model.DefinitionActionDelete,

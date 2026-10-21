@@ -130,7 +130,7 @@ func (s *Store) DeleteModelDefinitionAndClearDefault(
 			}
 			cleared = true
 		}
-		return s.definitionRevision.WithTx(tx).Append(ctx, &model.DefinitionRevisionEntity{
+		return s.appendDefinitionRevision(ctx, tx, model.DefinitionRevisionEntity{
 			Kind:         model.DefinitionKindModel,
 			DefinitionID: id,
 			Action:       model.DefinitionActionDelete,

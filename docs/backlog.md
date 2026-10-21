@@ -66,7 +66,12 @@ cd frontend && pnpm run typecheck && pnpm run build
 > 被拒三态，**写失败只 WARN 不阻断调用**）+ 保留期 30 天 / 上限 20000（网关按小时节流裁剪，启动先裁一次）。
 > 会话归属由核心经网关条目的 `env` 下发（`MATE_MCP_SESSION`，走 `env` 而不是 `Args`——后者逐字进指纹，
 > 进去就变成"每会话一个代际"）。口径写在 [`architecture.md`](./architecture.md) §5.2 与 §7.3。
-> **本节只剩第二刀（事件流，可选）**：加事件前先答"前端是否真的消费"，不消费就只留审计表。
+> **第二刀（事件流）判定不做**（2026-10-21 勘察）：工具调用本来就以 `session.tool_call` /
+> `session.tool_update` 到达前端（`domain/session/eventsink.go` 从 ACP 面翻译，工具名带
+> `serverID__` 前缀 ⇒ 来源 server 已在流里），`console/src/store.ts` 与 `runSummary` 真在消费
+> ——再加一条 MCP 专用事件是重复的通道。审计表独有的那两样（平台侧 `outcome`、`latency_ms`）
+> 目前**没有界面消费者**；等出现"要在界面上区分『平台拒绝』与『远端失败』"的真实需求，再回来
+> 加事件（那时三处同步：事件常量、`TestEventTypeContractFrozen` 快照、前端 `events.ts`）。
 
 - **现状（第一刀之前）**：`backend/internal/adapters/inbound/mcpgateway/source.go` 只在 stderr 留一行
   `(server, tool, outcome, latency_ms)`——**事后无法按会话复盘调用了什么**。
@@ -97,8 +102,15 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 ### T4 · L3-3：审计表加哈希链
 
+> **已落地（2026-10-21，schema v32）**：`prev_hash` / `hash` 两列 + `store.appendDefinitionRevision`（四个
+> 写点全部改走它：`commitDefinitionChange`、模型删除、provider 删除、导入）+ 只读校验
+> `store.VerifyDefinitionRevisionChain`（返回第一条坏行的 seq 与断法 `link`/`content`/`gap`）。
+> 归一化 = 长度前缀拼接 + 时间取**落库文本**（RFC3339Nano(UTC)），写入与校验共用同一个哈希函数。
+> 两处口径写死：**v32 之前的行不补算**（链的前缀、不参与校验）、**单写者前提**（`MaxOpenConns=1`；
+> 多实例要先有跨实例锁，见 C26）。反证：前驱写死成哨兵 / 去掉按内容重算，各自变红的用例逐条实跑过。
+
 - **现状**：`backend/internal/adapters/outbound/sqlite/dao/definition_revision.go` 的每条 revision 独立，改过也看不出来。
-- **做什么**：加 `prev_hash` / `hash` 两列（写这段时最新迁移是 v31，所以下一版是 v32），写入时在
+- **做什么**：加 `prev_hash` / `hash` 两列（v32 已是这一步），写入时在
   **同一事务**里取该表最后一条的 `hash` 作为 `prev_hash`；创世条用固定常量。
   提供一个只读校验函数（遍历链，发现断点返回第一条坏行的 id）。
 - **验收**：

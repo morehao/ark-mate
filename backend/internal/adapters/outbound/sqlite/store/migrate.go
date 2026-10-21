@@ -770,6 +770,10 @@ var schemaMigrations = []migration{
 	// v31 的版本步本体在 `migrate_v31.go`（MCP 网关调用审计表：一次 `tools/call` 一行，
 	// **不记入参正文**、也**不是事件流**——理由写在该文件头）。
 	migrationV31,
+
+	// v32 的版本步本体在 `migrate_v32.go`（定义变更审计的哈希链：`prev_hash` / `hash` 两列；
+	// v32 之前的行留空当"链的前缀"。算法与校验在 `definition_revision_chain.go`）。
+	migrationV32,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

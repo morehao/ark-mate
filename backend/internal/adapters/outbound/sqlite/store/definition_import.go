@@ -66,7 +66,7 @@ func (s *Store) ImportDefinitionRows(ctx context.Context, items []DefinitionImpo
 				// provider 是资源表：审计摘要取**列行的规范 JSON**（ADR-10），不是已消失的 body。
 				digest = providerColumnsDigest(providerColumnsOfImport(*it.Provider))
 			}
-			if err := s.definitionRevision.WithTx(tx).Append(ctx, &model.DefinitionRevisionEntity{
+			if err := s.appendDefinitionRevision(ctx, tx, model.DefinitionRevisionEntity{
 				Kind:         it.Kind,
 				DefinitionID: it.ID,
 				Action:       model.DefinitionActionImport,

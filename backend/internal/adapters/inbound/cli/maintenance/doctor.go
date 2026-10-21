@@ -18,9 +18,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/adapters/inbound/http/router"
 	doctorfacts "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/doctor"
+	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 	"github.com/morehao/ark-mate/internal/version"
 )
@@ -341,6 +341,10 @@ func runDoctor(opts doctorOptions) doctorReport {
 	// 读模型漂移（v21–v23）：`messages`/`runs` 是 `events` 的投影（J7），投影错了不会报错——
 	// 所以它需要一条**可判定**的体检项，而不是"看起来对不对"。默认路径仍然只读。
 	checks = append(checks, checkReadModels(opts)...)
+
+	// 审计链（T4 / v32）：定义变更审计的每行挂在前一行的哈希上——"有人改过历史"从此是可判定的，
+	// 而判据的唯一常规消费者就是这里（一条没人调用的校验函数等于没有校验）。
+	checks = append(checks, checkDefinitionRevisionChain(opts)...)
 
 	// transcript 目录的**形状体检**（R3）：v15 起平台会话 id 形如 `ses_<26 位 ULID>`，而目录里
 	// 旧形状的文件（裸 uuid）在装载期会被**跳过 + WARN**——那件事发生在启动日志里，而 doctor

@@ -187,7 +187,7 @@ func (s *Store) commitDefinitionChange(
 			return err
 		}
 		applied = true
-		return s.definitionRevision.WithTx(tx).Append(ctx, &model.DefinitionRevisionEntity{
+		return s.appendDefinitionRevision(ctx, tx, model.DefinitionRevisionEntity{
 			Kind:         kind,
 			DefinitionID: id,
 			Action:       action,
