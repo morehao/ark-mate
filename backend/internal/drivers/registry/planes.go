@@ -13,8 +13,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
-	credmech "github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/definition"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 	"github.com/morehao/ark-mate/internal/infra/logging"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -35,8 +34,8 @@ import (
 type Planes struct {
 	Registry *runtime.Registry
 
-	Definitions  *definition.Mechanism
-	Credentials  *credmech.Store
+	Definitions  *mechanism.Mechanism
+	Credentials  *mechanism.Store
 	Capabilities *capability.Registry
 	Skills       *skill.Plane
 	McpSecrets   *mcp.Secrets
@@ -83,8 +82,8 @@ type Planes struct {
 func NewPlanes(reg *runtime.Registry) *Planes {
 	p := &Planes{
 		Registry:     reg,
-		Definitions:  definition.New(),
-		Credentials:  credmech.New(reg),
+		Definitions:  mechanism.NewMechanism(),
+		Credentials:  mechanism.NewCredentialStore(reg),
 		Capabilities: capability.NewRegistry(),
 		Picker:       workspace.NewPicker(),
 		Workspaces:   workspace.NewPlane(),

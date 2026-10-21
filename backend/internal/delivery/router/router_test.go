@@ -15,7 +15,7 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 
 	"github.com/morehao/ark-mate/internal/domain/workspace"
-	credmech "github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/config"
@@ -54,7 +54,7 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *sessionruntime.Service) {
 	// 文档没装配会被**显式拒绝**（`credentials_write_failed`：拒绝一次只在内存里成功的写入）。
 	// home 与 providerDir 都在 `t.TempDir()` 下，绝不碰用户环境（`~/.ark-mate`）。
 	home := t.TempDir()
-	creds, _, err := credmech.OpenCredentialSource(home, home)
+	creds, _, err := mechanism.OpenCredentialSource(home, home)
 	if err != nil {
 		t.Fatalf("装配凭据分层: %v", err)
 	}

@@ -4,10 +4,10 @@
 // 为什么单独成包（六边形对齐，v3.2 L1）：
 //
 //	这些规则被 ≥3 个领域（skill / mcp / automation）与用例层共用，但它们**只讲定义载体本身**
-//	——不含任何存储、协议或装配知识。留在 `internal/drivers/mechanism/definition`（L6 组合驱动）里，
+//	——不含任何存储、协议或装配知识。留在 `internal/drivers/mechanism`（L6 组合驱动）里，
 //	领域层就得反向 import 机制层，`domain` 的出边被钉死的那条纪律就破了。
 //
-// 与 `internal/drivers/mechanism/definition` 的分工：本包只放**纯规则**（无 I/O、无 store、无 acp 客户端），
+// 与 `internal/drivers/mechanism` 的分工：本包只放**纯规则**（无 I/O、无 store、无 acp 客户端），
 // 机制层负责读写载体（repo / import / export），并**调用**本包而不是各写一份——两份原文处理会让
 // 同一个请求在不同域上有不同的键语义（最典型的是 `null`：一处当"删键"，一处当"写一个 null 值"），
 // 而这两种解释装载后看起来一样，只在手读文件时才显形。

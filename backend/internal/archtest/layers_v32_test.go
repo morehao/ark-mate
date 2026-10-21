@@ -78,7 +78,7 @@ var v32Layers = map[string]v32Layer{
 	// code / automation / definition / capability 十个包同为 L1、都 sameLayer、都没有自己的
 	// deny，收成一个前缀不丢任何判据（按最长前缀解析的结果逐条等价）。
 	// 其中 `definition` 承载能力定义的**值层规则**（id 合法性、patch 键语义、参数类错误出口）：
-	// 从 `drivers/mechanism/definition` 抽出来，让 `domain/*` 不必反向 import 机制层。
+	// 从 `drivers/mechanism` 抽出来，让 `domain/*` 不必反向 import 机制层。
 	"internal/core": {layer: 1, name: "core", sameLayer: true},
 	// 下面四个仍是独立 key：`runtime` 有 adapter 禁入，`infra/*` 的位置与带语义各自不同。
 	"internal/version":       {layer: 1, name: "version", sameLayer: true},

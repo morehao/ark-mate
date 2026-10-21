@@ -133,7 +133,7 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 			"（JSON 绑定默认丢弃未知键，删掉这个字段就等于把「用户以为指定了 agent」变成静默 no-op）",
 	},
 	{
-		// 锚 = 拒绝函数的定义。它随 `reject_removed_keys.go` 一起搬进 `mechanism/definition`（P1b），
+		// 锚 = 拒绝函数的定义。它随 `reject_removed_keys.go` 一起搬进 `mechanism`（P1b），
 		// 所以这里不写路径：写路径的话，搬完就得回来改，而"回来改"正是 P0 要消灭的东西。
 		anchor: "func rejectRemovedAgentSelection(",
 		reason: removedKeyRefusalReason + "**拒绝**必须点名它拒的是哪个键，否则用户拿到的" +
@@ -179,7 +179,7 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 	},
 	{
 		// 锚 = 造那份夹具的助手（v19 之前的自动化定义就是它写出来的）。它随
-		// `automation_import_test.go` 搬进 `mechanism/definition`（P1b）。
+		// `automation_import_test.go` 搬进 `mechanism`（P1b）。
 		anchor: "automationSeedDir",
 		reason: "**停在 v19 之前的自动化定义夹具**：`target.agent_id` 是当年用户写在文件里的键，" +
 			"这条用例测的正是「导入旧定义时把已下线的键清掉并 WARN」——它必须写出旧键，否则测不到清除",

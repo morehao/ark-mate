@@ -63,12 +63,12 @@ func layerScanPackages(t *testing.T, root, layer string, roots ...string) []stri
 // **不得** import 任何 `internal/domain/*`（领域）或 `internal/service/*`（用例口）、
 // 以及 `manager`/`app`/`router`/`controller`/`gateway` 这些上层实现与装配面。
 //
-// 为什么这条最要紧：机制层是被 ≥3 个域共享的那一层（`mechanism/definition` 被五类定义共用）。
+// 为什么这条最要紧：机制层是被 ≥3 个域共享的那一层（`mechanism` 被五类定义共用）。
 // 它一旦认识某个领域类型，"共享"就没了——它会变成那个领域的附属品，而其余域只能反向 import
-// 它（正是拆分前 `*Service` 的样子）。`mechanism/credential` 的 `ResolveProviderKey` 收窄成
+// 它（正是拆分前 `*Service` 的样子）。`mechanism` 的 `ResolveProviderKey` 收窄成
 // `(id, keyRef)` 两个入参（P3d-2h）就是照这条做的：机制层不认识 `providerDef`。
 //
-// 反证（实跑）：往 `mechanism/definition` 里加一行 import `internal/domain/session` → 红；
+// 反证（实跑）：往 `mechanism` 里加一行 import `internal/domain/session` → 红；
 // 把扫描根指到不存在的目录 → Fatal。
 func TestMechanismMustNotImportUpward(t *testing.T) {
 	root := backendRoot(t)

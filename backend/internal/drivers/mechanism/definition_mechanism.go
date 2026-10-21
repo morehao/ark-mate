@@ -10,7 +10,7 @@
 //
 // 为什么它单独成包：五类定义共用同一套双载体 + CAS + 审计，本来就只有一份实现；它被 ≥3 个域
 // 依赖，而按设计它**不依赖任何域**（`mechanism/*` 不得向上 import）。
-package definition
+package mechanism
 
 import (
 	"sync"
@@ -29,8 +29,8 @@ type Mechanism struct {
 	capabilityDir string
 }
 
-// New 造一个未装配的定义机制（库句柄与目录随后由装配期登记）。
-func New() *Mechanism { return &Mechanism{} }
+// NewMechanism 造一个未装配的定义机制（库句柄与目录随后由装配期登记）。
+func NewMechanism() *Mechanism { return &Mechanism{} }
 
 // SetStore 装配期登记库句柄（与 `Service.EnableStore` 同步调用）。
 func (m *Mechanism) SetStore(st *store.Store) { m.st = st }

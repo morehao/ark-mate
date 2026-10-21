@@ -18,7 +18,7 @@ import (
 // 判据三段（都 fail-closed：找不到即失败，避免改名/搬迁后守卫静默空转——这正是 P0 里
 // 反复吃过的那类假绿）：
 //  1. `ProviderMirrorRefPrefix` 全树**恰好声明一次**；
-//  2. 那处声明在 `internal/drivers/mechanism/credential/`，取值**逐字**是 `providers/`；
+//  2. 那处声明在 `internal/drivers/mechanism/`，取值**逐字**是 `providers/`；
 //  3. 全树只有**一个**拼接点（`ProviderMirrorRefPrefix +`），即没有人在别处手拼这个键。
 //
 // 刻意**不**断言 `"providers/"` 这个字面量全仓唯一：`internal/config` 的旧目录告警里有同名串，

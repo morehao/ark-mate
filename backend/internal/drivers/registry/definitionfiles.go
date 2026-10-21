@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/morehao/ark-mate/internal/domain/automation"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/definition"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 )
 
 // AutomationDefinitionFiles 把定义文件机制适配成 `automation` 域声明的窄端口。
@@ -21,7 +21,7 @@ var _ automation.DefinitionFiles = AutomationDefinitionFiles{}
 
 // Open 打开定义草稿（不存在 → 可写的空文档；不落盘）。
 func (AutomationDefinitionFiles) Open(dir, kind, id string, patch map[string]any) (automation.DefinitionDraft, error) {
-	d, err := definition.OpenDefinition(dir, kind, id, patch)
+	d, err := mechanism.OpenDefinition(dir, kind, id, patch)
 	if err != nil {
 		return nil, err
 	}
@@ -30,19 +30,19 @@ func (AutomationDefinitionFiles) Open(dir, kind, id string, patch map[string]any
 
 // Save 提交草稿（文件载体的 mtime 乐观锁在机制内部）。
 func (AutomationDefinitionFiles) Save(d automation.DefinitionDraft) error {
-	dd, ok := d.(*definition.DefinitionDraft)
+	dd, ok := d.(*mechanism.DefinitionDraft)
 	if !ok {
 		return fmt.Errorf("registry: 无法保存 %T 定义草稿（草稿只能由本适配体的 Open 产出）", d)
 	}
-	return definition.SaveDefinition(dd)
+	return mechanism.SaveDefinition(dd)
 }
 
 // Write 只改几个键的一次性写（覆盖层）。
 func (AutomationDefinitionFiles) Write(dir, kind, id string, patch map[string]any) error {
-	return definition.WriteDefinition(dir, kind, id, patch)
+	return mechanism.WriteDefinition(dir, kind, id, patch)
 }
 
 // Remove 删除定义文件（返回是否真的删掉了）。
 func (AutomationDefinitionFiles) Remove(dir, kind, id string) (bool, error) {
-	return definition.RemoveDefinitionPermanently(dir, kind, id)
+	return mechanism.RemoveDefinitionPermanently(dir, kind, id)
 }

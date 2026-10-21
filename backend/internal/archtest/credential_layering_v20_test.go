@@ -19,7 +19,7 @@ import (
 //
 // **判据按符号定位，不钉文件路径**（P0）：这条不变量只该落在两处——层序的**唯一实现**
 // （`internal/infra/credentials` 的 `Layered.Resolve`）与那个合法地"同时点名两层"的**对账消费者**
-// （迁移后落 `mechanism/credential`，由符号 `ResolveProviderKey` 认领）。两处都按符号断言，
+// （迁移后落 `mechanism`，由符号 `ResolveProviderKey` 认领）。两处都按符号断言，
 // 所以文件搬进哪个包都不影响判据；反过来，"在第二个地方又实现了一遍层序"会因为**符号声明数
 // 变成 2** 而红。
 //
@@ -313,7 +313,7 @@ func uniqueSourceFile(t *testing.T, dir string, skipDirs map[string]bool, patter
 
 // layeringWhitelist 允许同时点名两层 `Source*` 的**符号**（不是文件路径）。
 //
-// 登记的是"唯一那一处对账消费者"的符号：凭据机制包从 `manager` 搬到 `mechanism/credential`
+// 登记的是"唯一那一处对账消费者"的符号：凭据机制包从 `manager` 搬到 `mechanism`
 // 之后这条登记仍然成立（符号跟着走），而"再抄一份对账"会因为该符号的声明数变成 2 而红。
 // 目前只有一条：正确的用法是拿 `Resolve` 返回的 `Resolution.Source` 去比较**一个**值
 // （例如 `SourceManaged` 才允许面板编辑），而不是在别处重新点名两层。
@@ -322,7 +322,7 @@ var layeringWhitelist = []struct {
 	reason string
 }{
 	{
-		// P3d-2 起它落 `internal/drivers/mechanism/credential`，并因为跨包转发的要求而**导出**
+		// P3d-2 起它落 `internal/drivers/mechanism`，并因为跨包转发的要求而**导出**
 		// （`ResolveProviderKey`）——判据只认符号名，所以这里跟着改名，不钉路径。
 		symbol: "ResolveProviderKey",
 		reason: "**库与镜像的对账，不是第二份层序**：四层顺序仍由 `Layered.Resolve` 一处实现，" +

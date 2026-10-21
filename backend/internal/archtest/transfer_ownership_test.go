@@ -10,7 +10,7 @@ import (
 // transferEntryAnchors 存量定义导入/导出的六个域入口（3 域 × 2 方向）。
 //
 // 它们必须且只能出现在 `internal/drivers/transfer`：2026-10-20 之前同一件事分居两包
-// （capability 的导入留在 `mechanism/definition`，automation/provider 的在
+// （capability 的导入留在 `mechanism`，automation/provider 的在
 // `capabilityio`），改一条纪律要改两处，而两处都编译得过——「幂等 / 绝不覆盖 /
 // 不回写」只要有一份没跟上，就是静默的数据语义分叉。
 var transferEntryAnchors = []string{
@@ -37,7 +37,10 @@ var transferFrameworkAnchors = []string{
 //
 // 判据三段：① 六入口与框架原语全在 `internal/drivers/transfer`（改名/搬走即失锚）；
 // ② 旧目录 `internal/capabilityio` 不得复活（它与 `internal/core/capability` 只差后缀，
-// 正是这次要消灭的歧义）；③ `mechanism/definition` 与 `domain/**` 零命中（第二个家）。
+// 正是这次要消灭的歧义）；③ `internal/drivers/mechanism` 与 `domain/**` 零命中（第二个家）。
+// 2026-10-21 起 mechanism 的定义/凭据两个子包合并为 `mechanism` 本包，扫描根随之从
+// `mechanism` 改为 `mechanism`——判据方向不变，扫描面反而更严（覆盖了原先
+// 只扫 `definition` 子目录时漏掉的同包其余文件）。
 // fail-closed：transfer 目录扫不到生产 Go 文件时 `dirProductionBody` 直接 Fatal。
 func TestDefinitionTransferHasOneHome(t *testing.T) {
 	root := backendRoot(t)
@@ -56,7 +59,7 @@ func TestDefinitionTransferHasOneHome(t *testing.T) {
 
 	// 不得有第二个家：同一条纪律只许在一个包里维护。
 	for _, dir := range []string{
-		filepath.Join(root, "internal", "drivers", "mechanism", "definition"),
+		filepath.Join(root, "internal", "drivers", "mechanism"),
 		filepath.Join(root, "internal", "domain"),
 	} {
 		other := dirProductionBody(t, dir)

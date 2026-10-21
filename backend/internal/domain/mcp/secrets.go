@@ -15,7 +15,7 @@ import (
 // 它是全仓**唯一**把 MCP 密钥引用变成明文的地方（`ResolveRef` 一处开关），所以脱敏登记
 // （`redact.RegisterDynamicSecret`）也挂在这里：凡是被解析过的值，离开进程前必被替换。
 //
-// 依赖只有一个：`mechanism/credential`（"`store:` 引用指向哪一行"的知识在库里/托管文档里，
+// 依赖只有一个：`mechanism`（"`store:` 引用指向哪一行"的知识在库里/托管文档里，
 // 那不属于本平面）。**没有库句柄、没有注册表**——所以它搬进域里不需要任何新端口。
 type Secrets struct {
 	creds SecretResolver

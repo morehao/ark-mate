@@ -31,7 +31,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/core/capability"
@@ -190,7 +190,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	} else {
 		glog.Infow(ctx, "mcp 网关: 凭据 cwd 已确定", "cwd", credCwd, "source", credCwdSource)
 	}
-	if layered, _, cErr := credential.OpenCredentialSource(opts.Cfg.HomeDir, credCwd); cErr != nil {
+	if layered, _, cErr := mechanism.OpenCredentialSource(opts.Cfg.HomeDir, credCwd); cErr != nil {
 		glog.Warnw(ctx, "mcp 网关: 凭据分层未装配（只有库里的那一份可用）", "err", cErr)
 	} else {
 		s.planes.Credentials.SetLayered(layered)

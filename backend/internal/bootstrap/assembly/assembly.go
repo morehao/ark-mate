@@ -19,7 +19,7 @@ import (
 	"github.com/morehao/ark-mate/internal/delivery/router"
 	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	credmech "github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
@@ -182,7 +182,7 @@ func (as *assembly) startCredentials(ctx context.Context) error {
 	// 凭据 cwd **显式登记**（不是让用到的每一处各自 `os.Getwd()`）：它要随网关条目交给网关
 	// **子进程**，而网关的 cwd 是底座给的（会话工作区）——见 `mcp.GatewayCredCwdEnv`。
 	as.planes.Credentials.SetCwd(cwd)
-	layered, mirrorPath, err := credmech.OpenCredentialSource(cfg.HomeDir, cwd)
+	layered, mirrorPath, err := mechanism.OpenCredentialSource(cfg.HomeDir, cwd)
 	if err != nil {
 		glog.Warnw(ctx, "serve: 凭据分层未装配（只有库里的那一份可用）", "err", err,
 			"home", config.DisplayHome(cfg.HomeDir))

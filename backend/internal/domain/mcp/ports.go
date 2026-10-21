@@ -41,7 +41,7 @@ type Definitions interface {
 
 // SecretResolver 把 `store:` 引用解析成明文（"引用指向哪一行"的知识在凭据机制里）。
 //
-// `*mechanism/credential.Store` 的方法集是它的超集且签名相同，所以装配期**直接注入即可**，
+// `*mechanism.Store` 的方法集是它的超集且签名相同，所以装配期**直接注入即可**，
 // 不需要适配层。
 type SecretResolver interface {
 	ResolveStoreSecret(ctx context.Context, ref string) (string, error)

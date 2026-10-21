@@ -1,4 +1,4 @@
-package credential
+package mechanism
 
 import (
 	"strings"
@@ -22,7 +22,7 @@ type Store struct {
 
 // New 造一个凭据 Store。runtime 注册表由构造期给出（清单面，装配期即固定）；
 // 四层凭据面与库句柄随后由 `SetLayered` / `SetStore` 登记。
-func New(reg *runtime.Registry) *Store { return &Store{reg: reg} }
+func NewCredentialStore(reg *runtime.Registry) *Store { return &Store{reg: reg} }
 
 // SetLayered 登记四层凭据面（**装配期写一次、之后只读**）。
 func (m *Store) SetLayered(l *credentials.Layered) { m.layered = l }

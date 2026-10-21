@@ -1,5 +1,5 @@
 // 本文件是 provider 拨号密钥的解析入口（provider 面唯一入口）。
-package credential
+package mechanism
 
 import (
 	"context"

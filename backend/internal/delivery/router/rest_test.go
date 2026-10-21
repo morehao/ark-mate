@@ -31,7 +31,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
@@ -556,7 +556,7 @@ func stubDeps(t *testing.T, svc *stubSvc) restFixture {
 	reg := dsh.Registry()
 	caps := capability.NewRegistry()
 	skills := skill.NewPlane(caps, nil)
-	mcpSecrets := mcp.NewSecrets(credential.New(reg))
+	mcpSecrets := mcp.NewSecrets(mechanism.NewCredentialStore(reg))
 	return restFixture{
 		svc:             svc,
 		plane:           sessionPlaneForRouter(),
@@ -1534,7 +1534,7 @@ func TestProviderRoutes(t *testing.T) {
 func testProviderPlane(t *testing.T) *provider.Plane {
 	t.Helper()
 	reg := dsh.Registry()
-	plane := provider.NewPlane(reg, registry.NewProviderSecrets(credential.New(reg)))
+	plane := provider.NewPlane(reg, registry.NewProviderSecrets(mechanism.NewCredentialStore(reg)))
 	plane.SetProviderDir(t.TempDir())
 	return plane
 }

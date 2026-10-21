@@ -18,7 +18,7 @@ import (
 //
 //	① **先校验**（`capability.ValidateSkill` 是唯一闸门：正文扫描、scope 枚举、id 规则、
 //	   runtimes 重复），且校验必须看到**合并后**的完整定义；
-//	② 通过后才提交给载体（C9 的文件纪律 / DB 的 revision CAS，见 `mechanism/definition`）；
+//	② 通过后才提交给载体（C9 的文件纪律 / DB 的 revision CAS，见 `mechanism`）；
 //	③ 提交成功后才更新内存——顺序倒过来就会留下"内存里有、载体上没有"的幻影
 //	   （本进程可用、重启即消失，是最难查的一类不一致）。
 //

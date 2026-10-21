@@ -5,7 +5,7 @@ import "github.com/morehao/ark-mate/internal/core/capability"
 // ——— 定义文件载体的窄端口（v3.2 刀 7 收尾）———
 //
 // 自动化域有**两个载体**：sqlite 行（`AutomationStore`）与定义文件（内存/开发态）。
-// 文件侧原先直接调 `mechanism/definition` 的包级函数，于是领域层认识了机制层。
+// 文件侧原先直接调 `mechanism` 的包级函数，于是领域层认识了机制层。
 //
 // 这里把文件载体收成四个动作 + 一个草稿接口：
 //
