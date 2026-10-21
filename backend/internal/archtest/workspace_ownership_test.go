@@ -119,12 +119,13 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	}
 	// 判据不许失锚：域里那份本体必须在。
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "registry.go"))),
-		"func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error)") {
+		"func (pl *Plane) WorkspaceRegistry() (*WorkspaceList, error)") {
 		t.Error("`internal/domain/workspace/registry.go` 里找不到登记表读模型本体：判据失锚＝空转。")
 	}
 	// 只读辅助四条（P4a 正文第三十二刀）：浏览 / 建目录 / 列内容 / 最近使用——接口声明与 manager
-	// 转发一起删，控制器直接 `h.plane.*`。它们虽然**带错误出口**，但码与 DTO 都在域里铸（`workspace_invalid`
-	// / `workspace_exists` / `workspace_not_found`），所以用例层再包一层仍然只是一行转发。
+	// 转发一起删，控制器直接 `h.plane.*`。它们虽然**带错误出口**，但码在域里铸（`workspace_invalid`
+	// / `workspace_exists` / `workspace_not_found`）；v3.2 刀 6 起域返回的是**无 tag 视图**，
+	// 对外 DTO 由 `svcworkspace` 投影——判据因此钉"域侧本体在"，不再钉 DTO 类型名。
 	if vm := mgrAll; strings.Contains(vm, "func (s *Service) BrowseWorkspace(") ||
 		strings.Contains(vm, "func (s *Service) CreateWorkspaceDir(") || strings.Contains(vm, "func (s *Service) ListWorkspaceFiles(") ||
 		strings.Contains(vm, "func (s *Service) RecentWorkspaces(") {
@@ -144,12 +145,12 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		t.Error("`internal/sessionruntime` 里又出现 `UpdateWorkspaceSettings(` 转发：那一行已删（扫描面是整目录）。")
 	}
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "settings.go"))),
-		"func (pl *Plane) UpdateSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error)") {
+		"func (pl *Plane) UpdateSettings(roots []string) (*SettingsView, error)") {
 		t.Error("`internal/domain/workspace/settings.go` 里找不到 `func (pl *Plane) UpdateSettings(...)`：判据失锚＝空转。")
 	}
 
-	// 设置面快照（P4a 正文第十九刀）：域里 `Plane.Settings()` 同样已经折好 DTO（含
-	// configured / prefer_roots / source / locked_by），用例层再包一层就只是一行转发。
+	// 设置面快照（P4a 正文第十九刀）：域里 `Plane.Settings()` 折出**设置视图**（含
+	// configured / prefer_roots / source / locked_by）；v3.2 刀 6 起投影归 `svcworkspace`。
 	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "sessionruntime")) {
 		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "func (s *Service) WorkspaceSettings(") {
 			t.Errorf("internal/sessionruntime/%s 里又出现 `func (s *Service) WorkspaceSettings(`："+
@@ -157,7 +158,7 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		}
 	}
 	settingsFam := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "settings.go")))
-	if !strings.Contains(settingsFam, "func (pl *Plane) Settings() *dtoworkspace.WorkspaceSettingsResp {") {
+	if !strings.Contains(settingsFam, "func (pl *Plane) Settings() *SettingsView {") {
 		t.Error("`internal/domain/workspace/settings.go` 里找不到 `func (pl *Plane) Settings()`：" +
 			"判据失锚＝空转。")
 	}
@@ -241,20 +242,26 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 			"判据失锚＝空转。")
 	}
 
-	// ——— 端口包已删除（P4a 正文第三十四刀）———
+	// ——— v3.1：工作空间面有**用例包**，控制器不 import 领域 ———
 	//
-	// 工作空间域的实现全部归 `domain/workspace` 的平面，控制器直接持 `WorkspacePlane()`；端口包
-	// `internal/service/svcworkspace` 连同它在 `router.Ports` 上的那一格一起删除。**判据是"目录
-	// 不存在"而不是"目录里没有方法"**：一个空接口在任何地方都能满足，留着它编译器不会提醒任何人，
-	// 而它随时可以再长出方法（那时"用例层已被清空"这句话就不再成立）。
-	if _, err := os.Stat(filepath.Join(root, "internal", "service", "svcworkspace")); err == nil {
-		t.Error("`internal/service/svcworkspace` 又出现了：本域实现全在 `domain/workspace`，" +
-			"端口包删掉之后不该回来（P4a 正文第三十四刀）。")
+	// P4a 曾把 `svcworkspace` 删除（实现全在 `domain/workspace`，控制器直接持平面）；v3.1 §3.2.1
+	// 规则 1 要求控制器不得 import `internal/domain`，因此这一层以**窄接口**的形式回来：
+	// 控制器只认 `svcworkspace.WorkspaceSvc`，平面仍归领域。
+	svcDir := filepath.Join(root, "internal", "service", "svcworkspace")
+	if _, err := os.Stat(svcDir); err != nil {
+		t.Error("`internal/service/svcworkspace` 不存在了：用例层是控制器与领域之间的唯一连接（v3.1 §3.2.1）。")
 	}
-
-	appGo := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
-	if !strings.Contains(appGo, "a.planes.Workspaces.SetRootsStore(") {
-		t.Error("`internal/app/assembly.go` 里找不到 `a.planes.Workspaces.SetRootsStore(`：" +
+	ctrWs := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrworkspace", "workspace.go")))
+	if strings.Contains(ctrWs, "internal/domain/workspace") {
+		t.Error("`ctrworkspace` 又 import 了 `internal/domain/workspace`：控制器只认用例接口。")
+	}
+	asmWs := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
+	if !strings.Contains(asmWs, "svcworkspace.New(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcworkspace.New(`。")
+	}
+	asmGo := dirProductionBody(t, filepath.Join(root, "internal", "bootstrap", "assembly"))
+	if !strings.Contains(asmGo, "as.planes.Workspaces.SetRootsStore(") {
+		t.Error("`internal/bootstrap/assembly` 里找不到 `as.planes.Workspaces.SetRootsStore(`：" +
 			"落盘端口必须接到**装配好的那个平面**上（接错一个平面时两边都编译过，表现是设置改了不落盘）。")
 	}
 
@@ -314,14 +321,12 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		}
 	}
 
-	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "workspace.go")))
-	if !strings.Contains(ctrWork, "h.plane.Settings()") {
-		t.Error("`ctrworkspace` 里找不到 `h.plane.Settings()`：设置面快照要么走域平面、要么走一层转发。")
+	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrworkspace", "workspace.go")))
+	if !strings.Contains(ctrWork, "h.svc.Settings()") {
+		t.Error("`ctrworkspace` 里找不到 `h.svc.Settings()`：设置面快照必须经用例接口（v3.1 §3.2.1）。")
 	}
-
-	if !strings.Contains(ctrWork, "h.plane.WorkspaceRegistry()") {
-		t.Error("`ctrworkspace` 里找不到 `h.plane.WorkspaceRegistry()`：登记表要么走域平面、" +
-			"要么走一层转发，没有第三条路。")
+	if !strings.Contains(ctrWork, "h.svc.Registry()") {
+		t.Error("`ctrworkspace` 里找不到 `h.svc.Registry()`：登记表必须经用例接口。")
 	}
 
 }
@@ -332,9 +337,12 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 // `RecentWorkspaces` 会安静地把默认工作空间与已登记项当成"未登记"推回来，或者干脆恒空。
 func TestWorkspaceWiringIsAttached(t *testing.T) {
 	root := backendRoot(t)
-	persist := readFileOrFatal(t, filepath.Join(root, "internal", "registry", "planes.go"))
-	if !strings.Contains(persist, "p.Workspaces.SetStore(st)") {
-		t.Error("`internal/registry/planes.go` 的 `EnableStore` 里找不到 `p.Workspaces.SetStore(st)`：" +
+	persist := readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "planes.go"))
+	// v3.2 刀 6 起交下去的是**适配体**（`workspaceStore{st}`）：十三读写法由内嵌的
+	// `*store.Store` 提升，另加三条 `Is*` 把载体哨兵错误翻成领域判决。判据改钉"确实交下去
+	// 了、且确实包着 st"——只钉 `SetStore(st)` 会在适配体出现后失锚。
+	if !strings.Contains(persist, "p.Workspaces.SetStore(workspaceStore{st})") {
+		t.Error("`internal/drivers/registry/planes.go` 的 `EnableStore` 里找不到 `p.Workspaces.SetStore(workspaceStore{st})`：" +
 			"工作空间域没拿到库句柄。\n" +
 			"表现**只在 sqlite 模式**现形——`RecentWorkspaces` 会把默认工作空间与已登记项当成" +
 			"「未登记」推回来（memory 模式的登记表在域自己的字段里，开发态多半看不见）。")
@@ -421,7 +429,7 @@ func TestWorkspaceCreateModesAreExplicit(t *testing.T) {
 	// 判据只看 **`Create` 这个 handler 的函数体**：同文件里的 `CreateDir` 处理的是**另一种请求**
 	// （`WorkspaceDirCreateReq` 的 `name` 是"在已存在目录下建一层"，不是"新建工作空间"），
 	// 按文件扫会把那一处正常的字段读取当成回流（本守卫第一版就是这么假红的）。
-	ctrDir := filepath.Join(root, "internal", "controller", "ctrworkspace")
+	ctrDir := filepath.Join(root, "internal", "delivery", "controller", "ctrworkspace")
 	foundCreate := false
 	for _, p := range goFilesUnder(t, ctrDir) {
 		if strings.HasSuffix(p, "_test.go") {
@@ -438,8 +446,8 @@ func TestWorkspaceCreateModesAreExplicit(t *testing.T) {
 				"**业务判决**，归域里的 `Plane.CreateWorkspace`。放在控制器里会让「两模式」出现在一个"+
 				"不懂工作空间语义的地方，而且第二次加模式时必然再写一遍同一段分派", filepath.Base(p))
 		}
-		if !strings.Contains(body, "plane.CreateWorkspace(req)") {
-			t.Errorf("%s 的 `Create` handler 里没有 `plane.CreateWorkspace(req)`：创建入口必须是那一个", filepath.Base(p))
+		if !strings.Contains(body, "h.svc.Create(req)") {
+			t.Errorf("%s 的 `Create` handler 里没有 `h.svc.Create(req)`：创建入口必须经用例接口", filepath.Base(p))
 		}
 	}
 	if !foundCreate {

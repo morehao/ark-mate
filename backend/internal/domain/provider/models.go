@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/ark-mate/pkg/resource"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 平台模型清单的**读面与解析链**（P4a 正文第五十九刀：从 `internal/manager/model_list.go` 搬入）———
@@ -26,10 +25,10 @@ import (
 // 清单需要 sqlite 持久层：memory 模式没有 `models` 表，读面回空列表、写面在用例层报 40501。
 
 // ListModels 列出全部平台清单（**不分页**：清单上限 200 条，全量返回）。
-func (pl *Plane) ListModels(ctx context.Context) ([]dtomodel.ModelResp, error) {
+func (pl *Plane) ListModels(ctx context.Context) ([]ModelItem, error) {
 	// memory 模式没有清单载体：读面回空列表（写面在 `service/svcmodel`，那里报 40501）。
 	if pl.st == nil {
-		return []dtomodel.ModelResp{}, nil
+		return []ModelItem{}, nil
 	}
 	rows, err := pl.st.ListModelDefinitions(ctx)
 	if err != nil {
@@ -37,7 +36,7 @@ func (pl *Plane) ListModels(ctx context.Context) ([]dtomodel.ModelResp, error) {
 	}
 	// **不再在 Go 侧排序**：顺序由 SQL 的 `ORDER BY provider_id, model_id` 给出（ADR-6）。
 	// 这里再排一次会让"库里的顺序"与"对外顺序"变成两份可能分叉的事实。
-	out := make([]dtomodel.ModelResp, 0, len(rows))
+	out := make([]ModelItem, 0, len(rows))
 	for i := range rows {
 		out = append(out, modelRespFromRow(&rows[i]))
 	}
@@ -48,7 +47,7 @@ func (pl *Plane) ListModels(ctx context.Context) ([]dtomodel.ModelResp, error) {
 //
 // 形状是"查得到/查不到"而不是"查不到就报错"：错误码与文案属于**用例**（写面提交后读不回来
 // 是 40401），留在 `service/svcmodel` 一处，不让同一个码在两层各铸一遍。
-func (pl *Plane) ModelRow(ctx context.Context, id string) (*dtomodel.ModelResp, bool, error) {
+func (pl *Plane) ModelRow(ctx context.Context, id string) (*ModelItem, bool, error) {
 	if pl.st == nil {
 		return nil, false, nil
 	}
@@ -87,7 +86,7 @@ func (pl *Plane) DefaultModelRow(ctx context.Context) (*model.ModelEntity, bool,
 func ModelValueFor(reg *runtime.Registry, runtimeID, providerID, model string) (string, error) {
 	a, ok := reg.ModelValue(runtimeID)
 	if !ok {
-		return "", acl.NewError(acl.ClassUnsupported, "model_value_unsupported",
+		return "", acp.NewError(acp.ClassUnsupported, "model_value_unsupported",
 			fmt.Sprintf("runtime %q 的模型值形态未声明：平台不为未知底座猜模型值的形状", runtimeID), nil)
 	}
 	return a.Value(providerID, model)
@@ -136,7 +135,7 @@ func (pl *Plane) ResolveSessionModel(ctx context.Context, runtimeID, modelID str
 		}
 		id, cfg, verr := pl.ModelValueForRow(runtimeID, row.ID, row.ProviderID, row.Model)
 		if verr != nil {
-			if ae, ok := acl.As(verr); ok && ae.Code == "model_value_unsupported" {
+			if ae, ok := acp.As(verr); ok && ae.Code == "model_value_unsupported" {
 				// 该底座**不消费**平台模型清单 = 它没有模型语义：这里"不下发"是正确结论而不是失败
 				// （与 v26 之前 `DefaultModelValueFor` 回空串的行为逐字相同——零回归的那一支）。
 				return "", runtime.ModelConfig{}, nil
@@ -183,7 +182,7 @@ func (pl *Plane) DefaultModelValueFor(ctx context.Context, runtimeID string) (st
 // 这里的处境是"这条会话声明的模型已不在清单里"，出路是**重新选一个**（或先把模型声明回来），
 // 而不是"你打错了 id"。码相同是刻意的（E9）。
 func SessionModelNotFoundErr(modelID string) error {
-	return acl.NewError(acl.ClassRequest, "model_not_found",
+	return acp.NewError(acp.ClassRequest, "model_not_found",
 		fmt.Sprintf("会话声明的模型 %q 不在平台清单里（或它还不是平台模型 id）："+
 			"请到「设置 · 模型」重新选一个——平台只接受自己声明过的模型", modelID), nil)
 }
@@ -191,8 +190,8 @@ func SessionModelNotFoundErr(modelID string) error {
 // modelRespFromRow 把一行模型条目投影成对外表示（**不含任何 runtime 维度**）。
 //
 // v13 起是**纯列投影，不可能失败**：没有 JSON 可比坏，于是"一行坏 body 打不开整页"在结构上消失了。
-func modelRespFromRow(row *model.ModelEntity) dtomodel.ModelResp {
-	out := dtomodel.ModelResp{
+func modelRespFromRow(row *model.ModelEntity) ModelItem {
+	out := ModelItem{
 		ID: row.ID, ProviderID: row.ProviderID, Model: row.Model,
 		Name: row.Name, Note: row.Note,
 		InputModalities: resource.ModalitiesFromColumn(row.InputModalities),

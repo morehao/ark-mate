@@ -67,30 +67,30 @@ func TestWorkspaceDefaultsAreResolvedOnce(t *testing.T) {
 func TestWorkspaceDefaultsDoNotRewriteSessions(t *testing.T) {
 	root := backendRoot(t)
 
-	// ① 写面（dao + store）的语句集合里不得出现 `sessions`。
-	for _, rel := range []string{
-		filepath.Join("internal", "dao", "workspace.go"),
-		filepath.Join("internal", "store", "workspace.go"),
-	} {
+	// ① 写面（store）的语句集合里不得出现 `sessions`。
+	//
+	// v3.3 起 `SetDefaults` 的写面在 store（DAO 只剩列词汇与泛型方法）——判据必须跟着实现走。
+	// 找不到函数即失败：写面再搬一次时，`continue` 会让这条守卫对着一个空文件静默空转。
+	{
+		rel := filepath.Join("internal", "persistence", "store", "workspace.go")
 		src := stripLineComments(readFileOrFatal(t, filepath.Join(root, rel)))
-		for _, fn := range []string{"func (d *WorkspaceDao) SetDefaults(", "func (s *Store) SetWorkspaceDefaults("} {
-			body, ok := goFuncBody(src, fn)
-			if !ok {
-				continue
-			}
-			// 只扫**写语句**：`sessions` 出现在注释里（解释为什么不动它）是正常的。
-			for _, bad := range []string{"sessions\"", "TableNameSession", "UPDATE sessions"} {
-				if strings.Contains(body, bad) {
-					t.Errorf("%s 的 `%s` 里出现了 %q：改工作空间默认值**不许**连带改会话——\n"+
-						"既有会话的能力集与权限模式是**快照**，改写它们等于把历史里的行为改掉，"+
-						"而用户看到的是「我调了个默认值，昨天那个会话的行为变了」", rel, fn, bad)
-				}
+		const fn = "func (s *Store) SetWorkspaceDefaults("
+		body, ok := goFuncBody(src, fn)
+		if !ok {
+			t.Fatalf("%s 里找不到 `%s`：写面搬走后这条守卫会静默空转", rel, fn)
+		}
+		// 只扫**写语句**：`sessions` 出现在注释里（解释为什么不动它）是正常的。
+		for _, bad := range []string{"sessions\"", "TableNameSession", "UPDATE sessions"} {
+			if strings.Contains(body, bad) {
+				t.Errorf("%s 的 `%s` 里出现了 %q：改工作空间默认值**不许**连带改会话——\n"+
+					"既有会话的能力集与权限模式是**快照**，改写它们等于把历史里的行为改掉，"+
+					"而用户看到的是「我调了个默认值，昨天那个会话的行为变了」", rel, fn, bad)
 			}
 		}
 	}
 
 	// ② 迁移**也不许**碰 `sessions`（v27 只加两列）。
-	mig := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "store", "migrate_v27.go")))
+	mig := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "migrate_v27.go")))
 	if strings.Contains(mig, "sessions") {
 		t.Fatalf("`migrate_v27.go` 里出现了 `sessions`：v27 只给 `workspaces` 加两列——" +
 			"一次全表写就多一次中断面，而「把存量会话的默认值也刷一遍」正是本批刻意不做的事")

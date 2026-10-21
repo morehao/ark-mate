@@ -2,7 +2,6 @@ package archtest
 
 import (
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -62,42 +61,22 @@ func TestRuntimeIdentityUseCaseLivesInRuntimeSvc(t *testing.T) {
 				"（判据挂在它身上，失锚等于空转）", a)
 		}
 	}
-	// 用例层只认那个两方法端口：它不该认识执行面的实现（`internal/runtimeconn`）——
+	// 用例层只认那个两方法端口：它不该认识执行面的实现（`internal/drivers/runtimeconn`）——
 	// 认识之后"可替换 occupant"就没得换了（测试也没法塞一份假执行面）。
-	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/runtimeconn"`) {
-		t.Error("internal/service/svcruntime 里出现 `internal/runtimeconn` 的 import：" +
+	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/drivers/runtimeconn"`) {
+		t.Error("internal/service/svcruntime 里出现 `internal/drivers/runtimeconn` 的 import：" +
 			"用例层只认 `Plane` 端口，执行面的形态由装配点交下来。")
 	}
 
-	// ① 装配面：`Ports` 那一格是依赖事实，不许写回 svc 接口类型。
-	ports := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))
-	if !regexp.MustCompile(`Runtime\s+\*runtimeconn\.Plane`).MatchString(ports) {
-		t.Error("internal/router/router.go 的 `Ports` 里找不到 `Runtime *runtimeconn.Plane`：" +
-			"装配点交的是**执行面本身**（依赖事实），用例实例由 `ctrruntime` 造。")
+	// ① 装配根：用例实例由 `assembly/services.go` 造，控制器只收接口。
+	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
+	if !strings.Contains(asm, "Runtime:       svcruntime.New(") &&
+		!strings.Contains(asm, "svcruntime.New(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcruntime.New(`：底座面用例必须在装配根造。")
 	}
-	if strings.Contains(ports, "svcruntime") {
-		t.Error("internal/router/router.go 里出现 `svcruntime`：`Ports` 只放依赖事实，" +
-			"svc 接口类型不外溢到装配点（P4a 那批端口别名已判定为骚操作，别再开这条路）。")
-	}
-	routerFiles := goFilesUnder(t, filepath.Join(root, "internal", "router"))
-	if len(routerFiles) == 0 {
-		t.Fatal("internal/router 下没有 .go 文件：守卫失去检查对象")
-	}
-	for _, path := range routerFiles {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "svcruntime") {
-			t.Errorf("internal/router/%s 里出现 `svcruntime`：这一格交的是执行面，不是用例接口。",
-				filepath.Base(path))
-		}
-	}
-
-	// ② 用例必须在控制器里造出来。
-	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrruntime", "runtime.go")))
-	if !strings.Contains(ctr, "svcruntime.New(") {
-		t.Error("internal/controller/ctrruntime/runtime.go 里没有 `svcruntime.New(`：用例必须在控制器里造出来" +
-			"（那一层是 API 口语与执行面口语之间的命名适配，跳过它两个名字就静默分叉）。")
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrruntime", "runtime.go")))
+	if strings.Contains(ctr, "svcruntime.New(") {
+		t.Error("`ctrruntime` 里又出现 `svcruntime.New(`：用例实例只在 `internal/bootstrap/assembly` 造，控制器只收接口。")
 	}
 
 	// ③ manager 侧不得长回那两条转发。

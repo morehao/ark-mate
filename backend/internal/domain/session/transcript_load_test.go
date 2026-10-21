@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/pkg/object/objid"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
 )
 
 // P3b-2b：本文件是 `manager/transcript_load_test.go` 的**装载面那一半**，随装载代码搬进本域。

@@ -15,7 +15,7 @@ import (
 // 会话身份少一项而投影仍然自洽。逐处 review 挡不住这类漏，机器判据能。
 //
 // 判据**不是**「grep 到英文词 agent 就红」（那是错的）：ACP 自己的词表里 `agent` 指的就是**底座进程**
-// （SDK 的 `Agent` 接口、`AuthMethods` 的 `agent` 变体），`pkg/acl` 必须能照原文写；`~/.agents/skills`
+// （SDK 的 `Agent` 接口、`AuthMethods` 的 `agent` 变体），`internal/infra/acp` 必须能照原文写；`~/.agents/skills`
 // 是平台与底座的**共享投放根**，也与本概念无关。所以禁词表列的是**被撤掉的那批标识符**，
 // 与 v15 的 `conversation`、v16 的 `capability_revision`、v17 的 `provider_session` 同形。
 //
@@ -46,7 +46,7 @@ var legacyAgentVocabulary = []string{
 	// ⑥ 三层包名（dto/controller/service 端口）。
 	"dtoagent", "ctragent", "svcagent",
 	// ⑦ 身份列/字段的两种写法：`agent_id`（列名、json 键、日志键、路径段）与驼峰
-	//    `AgentID`/`agentID`（小写化后同形）。`pkg/procreg` 与 `pkg/mcp` 的网关 scope 曾用它，
+	//    `AgentID`/`agentID`（小写化后同形）。`internal/infra/procreg` 与 `internal/infra/mcp` 的网关 scope 曾用它，
 	//    而它们**不会让编译变红**——正是这条守卫存在的理由。
 	"agent_id", "agentid",
 	// ⑧ 路由段。刻意**不**写裸词 `agents`：`~/.agents/skills` 与旧的 `MATE_AGENTS` 都要放行。
@@ -57,7 +57,7 @@ var legacyAgentVocabulary = []string{
 // agentVocabularyWhitelistEntry 一条登记：**目录/文件前缀**或**路径无关锚**恰好一种，外加理由。
 //
 //   - `path`：相对仓库根的前缀（豁免整棵目录时用）。只给**落点稳定**的登记——本次分层重构不动
-//     `internal/store`、`internal/router`、`pkg/config`、`internal/dto`、`internal/controller`。
+//     `internal/persistence/store`、`internal/delivery/router`、`internal/config`、`internal/dto`、`internal/delivery/controller`。
 //   - `anchor`：**路径无关锚**——一个只出现在**唯一一个**被扫描文件里的符号；含它的那个文件被豁免。
 //     `manager` 包里这几个落点会搬家（设计 §3.4 文件去向表），所以它们只有锚、没有路径：
 //     符号跟着文件走，登记不会因为一次目录改名而悬空。
@@ -84,7 +84,7 @@ func (w agentVocabularyWhitelistEntry) key() string {
 // 白名单是"这次确实改不了/不该改"的登记簿，不是"懒得改"的垃圾桶。
 var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 	{
-		path: "backend/internal/store/migrate.go",
+		path: "backend/internal/persistence/store/migrate.go",
 		reason: "迁移内核纪律：**追加迁移 = 在尾部新增，绝不回改历史**。所以这个文件里必然有两类旧词——" +
 			"① v1–v18 的历史 DDL（建 `agents` 表、`sessions.agent_id` 列、`definition_revisions` 的 " +
 			"`kind='agent'` 行）；② v19 自己的收口语句，它必须写**当时那一版**的名字才能撤掉它们：" +
@@ -93,36 +93,36 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 			"`ALTER TABLE sessions DROP COLUMN agent_id`",
 	},
 	{
-		path: "backend/internal/store/migrate_test.go",
+		path: "backend/internal/persistence/store/migrate_test.go",
 		reason: "「停在 v19 之前」的历史迁移用例要用裸 SQL 造/读当时那一版的表与列" +
 			"（DAO 已不认 `agents` 表与 `agent_id` 列，读不到历史形态），再断言 v19 之后它们**真的没了**" +
 			"——改用新名字写夹具的话，这条用例就只是在验证“新形态能跑”，对迁移本身零覆盖。" +
 			"这是守卫⑤ 那条纪律的测试侧镜像（同 `readLegacyConversation`）",
 	},
 	{
-		path: "backend/internal/store/migrate_v19_test.go",
+		path: "backend/internal/persistence/store/migrate_v19_test.go",
 		reason: "同上的 v19 专项：夹具必须停在 v18 的形态（`agents` 行 + `sessions.agent_id`），" +
 			"否则测不出 DROP COLUMN 与 DROP TABLE 的效果",
 	},
 	{
-		path:   "backend/internal/store/migrate_v15_test.go",
+		path:   "backend/internal/persistence/store/migrate_v15_test.go",
 		reason: historicalAgentFixtureReason,
 	},
 	{
-		path:   "backend/internal/store/migrate_v16_test.go",
+		path:   "backend/internal/persistence/store/migrate_v16_test.go",
 		reason: historicalAgentFixtureReason,
 	},
 	{
-		path:   "backend/internal/store/migrate_v17_test.go",
+		path:   "backend/internal/persistence/store/migrate_v17_test.go",
 		reason: historicalAgentFixtureReason,
 	},
 	{
-		path: "backend/internal/router/router_test.go",
+		path: "backend/internal/delivery/router/router_test.go",
 		reason: "反向断言「README 不得出现历史名 `/agents…`」的**判据字面量**本身——" +
 			"这种守卫必须写出它禁的那个词，扫自己必然自证其罪（与 conversation 白名单里同一条理由同形）",
 	},
 	{
-		path: "backend/pkg/config/config.go",
+		path: "backend/internal/config/config.go",
 		reason: "一次性导入必须**指出旧目录名**：装配期要把 `<MATE_HOME>/agents/providers.json` 搬到新的 " +
 			"`providers/` 目录（v19 的目录改名），所以这里必然出现旧路径字面量。这是“指出历史”而不是“用旧词”：" +
 			"新代码路径一律只认 `ProviderDir`/`MATE_PROVIDERS`",
@@ -165,7 +165,7 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 			"用户以为在看某个底座的用量，拿到的却是全量。接住它同样要一个同名 raw 字段",
 	},
 	{
-		path: "backend/internal/controller/ctrusage/usage.go",
+		path: "backend/internal/delivery/controller/ctrusage/usage.go",
 		reason: removedKeyRefusalReason + "控制器要**点名**它拒的是哪个查询参数（与同文件里 " +
 			"`group_by` 只认 `day` 的那条校验口径一致），否则用户只拿到一句「参数不对」，改不动",
 	},
@@ -191,7 +191,7 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 			"`agent_selection_removed`」，构造请求就必须写出那个键",
 	},
 	{
-		path: "backend/internal/router/rest_removed_agent_key_test.go",
+		path: "backend/internal/delivery/router/rest_removed_agent_key_test.go",
 		reason: negativeAssertionReason + "传输层这一半钉的是相反的义务：「已下线的键**原样透传**给 " +
 			"service，不由控制器自作聪明地丢掉」（丢弃会让用户以为筛选生效了）——判据里必然出现键名",
 	},
@@ -214,7 +214,7 @@ const negativeAssertionReason = "**反向断言的判据字面量**："
 // 写面带这个键的请求照旧 200，键被 JSON 绑定悄悄丢掉，用户以为"我给这个会话指定了 agent"。
 // 所以本仓刻意留了一条显式拒绝（40001 `agent_selection_removed`），而它要成立就必须：
 // ① 有一个同名的 raw 字段接住它；② 拒绝文案点它的名；③ 调用点把值交过去；④ 清历史键时说得清
-// 清掉了什么。四处都是"指出历史"而不是"使用旧词"，与 `pkg/config` 的改名提示同形。
+// 清掉了什么。四处都是"指出历史"而不是"使用旧词"，与 `internal/config` 的改名提示同形。
 const removedKeyRefusalReason = "**显式拒绝面**："
 
 // historicalAgentFixtureReason 是"停在 v19 之前"那批历史迁移夹具的共用理由（v15/v16/v17 各一份）。
@@ -420,18 +420,20 @@ func TestNoAgentVocabulary(t *testing.T) {
 
 // sessionIdentityFiles 是落点**稳定**的那几处会话身份落点（相对 backend 根）。
 //
-// 本次分层重构不动 `internal/model`、`internal/dao`、`internal/store`（设计 §3.4），所以它们按路径
+// 本次分层重构不动 `internal/persistence/model`、`internal/persistence/dao`、`internal/persistence/store`（设计 §3.4），所以它们按路径
 // 登记是安全的；会搬家的那一处（用量聚合）走 sessionIdentityUsageAnchor。
 //
-// 注意 `internal/store/migrate.go` 是 P0 补进来的：下面 TestSessionIdentityIsRuntimeOnly 里那条
+// 注意 `internal/persistence/store/migrate.go` 是 P0 补进来的：下面 TestSessionIdentityIsRuntimeOnly 里那条
 // "必须真的有一条 `DROP COLUMN agent_id`"的分支此前**从未执行**过（那张表里一直没有它，
 // 分支是死代码——实测把期望值改成不存在的串，测试照样绿），而这条正向断言正是 migrate.go 被
 // 白名单放行之后唯一的补偿。删掉迁移里那行语句不会有任何别的测试变红。
 var sessionIdentityFiles = []string{
-	filepath.Join("internal", "model", "session.go"),
-	filepath.Join("internal", "dao", "session.go"),
-	filepath.Join("internal", "store", "usage.go"),
-	filepath.Join("internal", "store", "migrate.go"),
+	filepath.Join("internal", "persistence", "model", "session.go"),
+	// v3.3 起写面（upsert 的列集合）从 dao 搬到 store：判据必须跟着实现走，否则它会在
+	// 只剩列词汇的 dao/session.go 上静默空转。
+	filepath.Join("internal", "persistence", "store", "sessions.go"),
+	filepath.Join("internal", "persistence", "store", "usage.go"),
+	filepath.Join("internal", "persistence", "store", "migrate.go"),
 }
 
 // sessionIdentityUsageAnchor 定位第四处落点「用量聚合」。
@@ -471,9 +473,9 @@ func TestSessionIdentityIsRuntimeOnly(t *testing.T) {
 	for _, rel := range sessionIdentityFiles {
 		kind := ""
 		switch rel {
-		case filepath.Join("internal", "model", "session.go"):
+		case filepath.Join("internal", "persistence", "model", "session.go"):
 			kind = "entity"
-		case filepath.Join("internal", "store", "migrate.go"):
+		case filepath.Join("internal", "persistence", "store", "migrate.go"):
 			kind = "migration"
 		}
 		targets = append(targets, identityTarget{rel: rel, path: filepath.Join(backend, rel), kind: kind})

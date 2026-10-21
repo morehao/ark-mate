@@ -137,7 +137,7 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
   `MATE_WORKSPACE_ROOTS` 设在**进程环境变量**里仍会让面板变只读（`mate config` 会打印
   `面板设置 只读（由该来源锁定）`），但那只锁住"改偏好"，不锁可访问的目录范围。
 
-### 2.3 环境变量（全部来自 `backend/pkg/config/config.go`）
+### 2.3 环境变量（全部来自 `backend/internal/config/config.go`）
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
@@ -416,7 +416,7 @@ make image/run IMAGE_TAG=runtimes                      # 起容器
   交给核心启动时的 `runtime.ProductRegistry` 判定（远程 runtime 的 id 由 `runtimes.json` 声明，
   构建期写不出起始位置偏好）。
 - 版本可用 `--build-arg DSH_VERSION=…` 钉住，默认 `0.2.1-rc.2`（与随包载荷 pin 同源）。**dsh 需含 acp profile
-  模板**（`>= 0.1.2-rc.1`，见 `pkg/runtime/adapters.go` 的能力说明），默认值满足。
+  模板**（`>= 0.1.2-rc.1`，见 `internal/runtime/adapters.go` 的能力说明），默认值满足。
 - 镜像只装 mate 与所选底座；agent 真要用的工具（git / ripgrep / 语言 SDK 等）请在派生镜像里补：
   `FROM ark-mate:runtimes` + `USER root` + `apt-get install -y …`。
 - **容器里给底座模型凭据**（不内置、也不该内置）：容器以 `uid=10001(mate)`、`HOME=/data` 运行，
@@ -554,7 +554,7 @@ compose 路径把同名变量写进 `.env` 即可（`NODE_IMAGE`/`GO_IMAGE`/`RUN
 #     不是整洁偏好：迁移备份落 `<db 目录>/backups/`（v19 起的布局），它和诊断包一样按密钥面看待。
 # ◯ 必须一起收进备份清单的：库（含 `backups/` 里的迁移前快照）、`~/.ark-mate/credentials.json`
 #   · v20 起这些文件都含**明文密钥**，权限是硬要求：库与备份 0600、`backups/` 0700。
-#     平台在**打开库时**会自动收口到 0600（`pkg/dbclient` 的 tightenFilePerms，含首次建库），
+#     平台在**打开库时**会自动收口到 0600（`internal/infra/dbclient` 的 tightenFilePerms，含首次建库），
 #     收口过会打一条 WARN；`mate doctor` 的敏感文件清单把库与备份一并按密钥面报出（宽权限 = fail）。
 #     拷贝/同步整个数据目录 = 连密钥一起带走，所以权限收口之后还要注意**同步目标**的权限
 #     凭据镜像、`<ProviderDir>/providers.json` 与它的 providers.json.bak-v11（v11 的迁移前快照）、
@@ -688,7 +688,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 
 ### 6.2 runtime 标识归一（`deepseekharness` → `dsh`）：老数据自动继续生效
 
-2026-10-11 起注册表键统一为 **`dsh`**（Go 包 `pkg/runtime/dsh`、展示名 `dsh`）——它本来就是同一个
+2026-10-11 起注册表键统一为 **`dsh`**（Go 包 `internal/infra/dsh`、展示名 `dsh`）——它本来就是同一个
 东西在其余六个面上的名字：二进制 `dsh`、隔离根 `<MATE_HOME>/runtime/dsh`、随包载荷 `payloads/dsh/`、
 桌面启动器分支 `runtimeId === 'dsh'`、环境变量前缀 `DSH_`、构建期固定的 runtime id `dsh`。构建参数随之变成
 `RUNTIME=dsh` / `--build-arg MATE_RUNTIME=dsh`（不指定时的默认值）。
@@ -705,10 +705,10 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 
 > 最后一条要特别说明：若不认领旧名字，归属集合里那条旧名字会永远留着，于是"集合空了才删目录"
 > 永不成立——**禁用/删除技能时副本删不掉，底座照旧读到已禁用的技能**。这是本次归一里唯一一处
-> 会静默出错的地方，护栏见 `pkg/capability` 的 `TestOwnerAliasClaimsLegacyMarker`（回退那行即变红）。
+> 会静默出错的地方，护栏见 `internal/core/capability` 的 `TestOwnerAliasClaimsLegacyMarker`（回退那行即变红）。
 
 **别名什么时候可以删**：当 `mate doctor` 能报告"本机没有任何老数据引用它"之后，
-`pkg/runtime/legacy.go` 的 `LegacyDeepseekharnessID` / `NormalizeID` / `LegacyAliasesOf` 与它们的
+`internal/runtime/legacy.go` 的 `LegacyDeepseekharnessID` / `NormalizeID` / `LegacyAliasesOf` 与它们的
 用例可一并删除。在此之前请把别名当成**数据兼容面**对待：它只出现在读路径上，新写入的任何地方都不会再有旧值。
 
 ## 8. 验证记录（本机实跑）
@@ -723,7 +723,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 > `MATE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已被 `MATE_PROJECTION_DIRS` 取代（旧键现在会让启动
 > 失败并给出等价写法），单 root 的"兼容路径"也已不存在——物化落点只由各 runtime 的投影声明
 > 决定，配置只能覆盖根。当时记录里"归属标记 / 共享 root 只摘自己 / 空归属即残留清理"这些**不变式**
-> 仍成立，由 `pkg/capability/skill_materialize_test.go` 与 `internal/sessionruntime/skills_test.go` 覆盖。
+> 仍成立，由 `internal/core/capability/skill_materialize_test.go` 与 `internal/sessionruntime/skills_test.go` 覆盖。
 >
 > **底座面也已变（2026-10 后阅读）**：本节 C4/C6/C7 与容器那几条里出现的 `opencode`，指的是
 > **当时在册的第二个一等适配**——它已下线（决策 v18），随包载荷、`Dockerfile` 的 `WITH_OPENCODE`

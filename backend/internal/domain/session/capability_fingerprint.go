@@ -1,8 +1,8 @@
 package session
 
 import (
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 能力集 → 指纹输入（§13.4 代际；`pkg/runtime.Fingerprint` 的唯一装配点） ———

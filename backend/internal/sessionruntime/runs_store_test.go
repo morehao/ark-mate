@@ -10,11 +10,11 @@ import (
 
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/ark-mate/pkg/object/objusage"
 )
 
 // runIDShape 轮次身份的形状：`run_` + 26 位 Crockford Base32（v22 起重铸，不再是由

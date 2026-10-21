@@ -3,12 +3,12 @@ package sessionruntime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 )
 
 // ——— 执行面端口的实现（P4a 正文第五十四刀） ———
 //
-// 连接池搬进 `internal/runtimeconn` 之后，它需要三样**本层的事实**；本文件是那三个端口的
+// 连接池搬进 `internal/drivers/runtimeconn` 之后，它需要三样**本层的事实**；本文件是那三个端口的
 // 实现，**只有实现，没有逻辑**：
 //
 //	ProviderEnv(runtimeID)      —— 子进程 env（供应商域；同时是基础连接键的输入）
@@ -17,7 +17,7 @@ import (
 //	  是同一件事，分开就是"同步写了一半"；装配点在 NewService 里直接交给池。）
 //	（DropSink 的两个方法在 `connection.go`：它们要读写会话状态，属编排面）
 //
-// 为什么适配器落在 manager 而不是 `internal/app`：端口的签名只吃 `pkg`/域类型，而事实住在
+// 为什么适配器落在 manager 而不是 `internal/bootstrap/app`：端口的签名只吃 `pkg`/域类型，而事实住在
 // `Service`（`providerPlane`）。装配层交的是**同一个实例**（见 `Service.RuntimePool`），
 // 不重造池——两份池 = 两个事实源。
 
@@ -70,7 +70,7 @@ var (
 // 载体/写面/读面（约 1128 行）已落 `domain/provider`（P3a-1b），域自持一把只保护域内字段的锁
 // （并发审查见计划 §3.1.35：29 处临界区零跨域），并持 `st`/`reg`/`creds` 三个注入件与两个端口。
 //
-// P4a 正文第四刀删掉**档案面四条**（用例出口换成 `service/svcprovider`），本刀再把**剩下七条**
+// P4a 正文第四刀删掉**档案面四条**（用例出口换成 `service/svcmodel`），本刀再把**剩下七条**
 // 转发清掉：四条装配入口（`SetProviderDir` / `LoadProviderDefinitions` /
 // `LoadProviderDefinitionsFromStore` / `ReloadProviderDefinitionsFromStore`）改由调用点**直连域平面**
 // （`app.go` 与 `gateway/source.go`），三条包内转发（`providerEnvFor` / `injectedProviderID` /

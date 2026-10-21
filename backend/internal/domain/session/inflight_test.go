@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // TestInFlightTracker 语义（§17 E1 显式化簿记，语义同 §1.5 修订）：
@@ -19,8 +19,8 @@ func TestInFlightTracker(t *testing.T) {
 		t.Fatal("nil client 应空结果")
 	}
 
-	// 造两把"伪连接"：tracker 只按指针身份记账，无需真实 acl 连接。
-	var c1, c2 acl.Client
+	// 造两把"伪连接"：tracker 只按指针身份记账，无需真实 acp 连接。
+	var c1, c2 acp.Client
 	if s := tr.SoleOwner(&c1); s != "" {
 		t.Fatal("无在途应返回空串")
 	}
@@ -74,7 +74,7 @@ func TestInFlightTracker(t *testing.T) {
 // 计数最终归零且不 panic（race 检测覆盖）。
 func TestInFlightTrackerConcurrent(t *testing.T) {
 	tr := NewInFlightTracker()
-	var c acl.Client
+	var c acp.Client
 	const (
 		workers = 8
 		each    = 200

@@ -12,13 +12,13 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/dto/dtoexport"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/service/svcsystem"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -144,7 +144,7 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 // 与 `app.go` 的 `SessionPlane: a.svc.SessionPlane(), Bus: a.bus` 逐条对应（用例实例在
 // `ctrexport` 里造；测试里由这里造——`internal/service/svcsystem` 不能 import `manager`）。
 func exportSystemSvc(svc *Service) svcsystem.SystemSvc {
-	return svcsystem.New(svcsystem.NewSource(svc.planes.Resources.Store(), svc.sessionPlane, svc.bus))
+	return svcsystem.New(svcsystem.NewSource(storeAsSourceFacts(svc.planes.Resources.Store()), svc.sessionPlane, svc.bus))
 }
 
 func TestExportSessions(t *testing.T) {

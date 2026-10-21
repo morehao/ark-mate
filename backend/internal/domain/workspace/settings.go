@@ -6,8 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // 工作空间**起始点偏好**的设置面：把"目录浏览从哪儿起步"从"只能改环境变量"变成"面板也能改"。
@@ -62,10 +61,10 @@ const SourceUnavailable = "unavailable"
 //
 // Configured 与 Roots 必须分开给：面板编辑的是 Configured，而"代建根"是平台派生的、
 // 用户删不掉的那一条；只给生效名单，面板就永远无法表达"删掉这一条"。
-func (pl *Plane) Settings() *dtoworkspace.WorkspaceSettingsResp {
+func (pl *Plane) Settings() *SettingsView {
 	effective, configured, provisionDir, createRoot := pl.PolicySnapshot()
 	store := pl.rootsStoreRef()
-	resp := &dtoworkspace.WorkspaceSettingsResp{
+	resp := &SettingsView{
 		Configured:        append([]string{}, configured...),
 		Roots:             effective,
 		PreferRoots:       len(configured) > 0,
@@ -90,14 +89,14 @@ func (pl *Plane) Settings() *dtoworkspace.WorkspaceSettingsResp {
 // 与配置文件入口的严格度差异：这里要求每个根**存在且是目录**（配置文件只校验绝对路径）。
 // 理由是交互式设置的反馈必须在当下给（否则面板保存成功、下次进来看到的是错误页），
 // 而声明式配置允许"挂载还没到"这种编排顺序——两处的取舍不同是有意的。
-func (pl *Plane) UpdateSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error) {
+func (pl *Plane) UpdateSettings(roots []string) (*SettingsView, error) {
 	store := pl.rootsStoreRef()
 	if store == nil {
-		return nil, acl.NewError(acl.ClassRequest, "settings_readonly",
+		return nil, acp.NewError(acp.ClassRequest, "settings_readonly",
 			"当前进程未启用设置持久化（无配置目录）：工作区根白名单只能由 MATE_WORKSPACE_ROOTS 或配置文件设置", nil)
 	}
 	if _, lockedBy := store.Status(); lockedBy != "" {
-		return nil, acl.NewError(acl.ClassRequest, "settings_locked",
+		return nil, acp.NewError(acp.ClassRequest, "settings_locked",
 			fmt.Sprintf("[settings_locked] 工作区根白名单由 %s 锁定（优先级高于配置文件）：请改该来源，或在此只读查看",
 				lockedBy), nil)
 	}
@@ -106,11 +105,11 @@ func (pl *Plane) UpdateSettings(roots []string) (*dtoworkspace.WorkspaceSettings
 		return nil, err
 	}
 	if err := store.SaveWorkspaceRoots(normalized); err != nil {
-		return nil, acl.NewError(acl.ClassService, "settings_save_failed",
+		return nil, acp.NewError(acp.ClassService, "settings_save_failed",
 			"保存工作区根白名单失败: "+err.Error(), err)
 	}
 	if err := pl.SetWorkspaceRoots(normalized); err != nil {
-		return nil, acl.NewError(acl.ClassService, "settings_save_failed",
+		return nil, acp.NewError(acp.ClassService, "settings_save_failed",
 			"已写入配置文件但热更新失败（重启后生效）: "+err.Error(), err)
 	}
 	return pl.Settings(), nil
@@ -131,16 +130,16 @@ func NormalizeSettingsRoots(roots []string) ([]string, error) {
 			continue
 		}
 		if !filepath.IsAbs(p) {
-			return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+			return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
 				fmt.Sprintf("工作区根需为绝对路径，得到 %q", p), nil)
 		}
 		st, err := os.Stat(p)
 		if err != nil {
-			return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+			return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
 				fmt.Sprintf("工作区根不存在或不可访问: %s", p), nil)
 		}
 		if !st.IsDir() {
-			return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+			return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
 				fmt.Sprintf("工作区根需为目录: %s", p), nil)
 		}
 		real := ResolveRealPath(p)

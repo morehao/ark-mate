@@ -6,15 +6,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/infra/dsh"
+
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
 
+	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/object/objid"
 )
 
 // 本文件是从 `elicitation_test.go` 拆出来的：那三个用例测的是 **Orchestrator / Service 侧**
@@ -37,26 +39,26 @@ func TestResolveElicitationScope(t *testing.T) {
 		RuntimeSessionID: objid.RuntimeShell + "wire-sess",
 	})
 
-	if sid, src, note := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
-		SessionID: "wire-sess", ScopeSource: acl.ScopeWire,
-	}); sid != "ses_platform" || src != acl.ScopeWire || note != "" {
+	if sid, src, note := orch.resolveElicitationScope(nil, acp.ElicitationRequest{
+		SessionID: "wire-sess", ScopeSource: acp.ScopeWire,
+	}); sid != "ses_platform" || src != acp.ScopeWire || note != "" {
 		t.Fatalf("wire 归属应按 runtime_session_id 反查成平台会话: sid=%q src=%q note=%q", sid, src, note)
 	}
 	// **查不到**的 wire id（底座发了个我们不认识的会话）→ ambiguous + 留痕，**不猜**。
-	if sid, src, note := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
-		SessionID: "wire-unknown", ScopeSource: acl.ScopeWire,
-	}); sid != "" || src != acl.ScopeAmbiguous || note == "" {
+	if sid, src, note := orch.resolveElicitationScope(nil, acp.ElicitationRequest{
+		SessionID: "wire-unknown", ScopeSource: acp.ScopeWire,
+	}); sid != "" || src != acp.ScopeAmbiguous || note == "" {
 		t.Fatalf("查不到的 wire 归属应落 ambiguous 且留痕: sid=%q src=%q note=%q", sid, src, note)
 	}
 	// ScopeSource=wire 但 SessionID 为空（脏数据）→ 不认，退到推断/歧义。
-	if sid, src, _ := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
-		ScopeSource: acl.ScopeWire,
-	}); sid != "" || src != acl.ScopeAmbiguous {
+	if sid, src, _ := orch.resolveElicitationScope(nil, acp.ElicitationRequest{
+		ScopeSource: acp.ScopeWire,
+	}); sid != "" || src != acp.ScopeAmbiguous {
 		t.Fatalf("空 wire 归属应落 ambiguous: sid=%q src=%q", sid, src)
 	}
-	if sid, src, _ := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
+	if sid, src, _ := orch.resolveElicitationScope(nil, acp.ElicitationRequest{
 		Mode: "form", Message: "q",
-	}); sid != "" || src != acl.ScopeAmbiguous {
+	}); sid != "" || src != acp.ScopeAmbiguous {
 		t.Fatalf("无 wire 且无在途 run 应落 ambiguous: sid=%q src=%q", sid, src)
 	}
 }
@@ -73,9 +75,9 @@ func TestServiceResolveElicitationScope(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		orch.elic.RegisterAndWait(context.Background(), "owner", acl.ElicitationRequest{
+		orch.elic.RegisterAndWait(context.Background(), "owner", acp.ElicitationRequest{
 			SessionID: "owner", Mode: "form", Message: "q",
-			Schema: &acl.ElicitationSchema{Properties: map[string]any{}},
+			Schema: &acp.ElicitationSchema{Properties: map[string]any{}},
 		}, func(it interaction.ElicitationItem) { published <- it })
 	}()
 	it := <-published
@@ -172,7 +174,7 @@ func TestConnKeyIsolatesNativePermission(t *testing.T) {
 	// 正是这条用例要钉的"两侧同源"。
 	pol := &interaction.PermissionPolicy{Default: "deny"}
 	envOf := func() []string {
-		e, _ := interaction.NativePermissionEnv(runtime.AllBuiltinRegistry(), "dsh", pol)
+		e, _ := interaction.NativePermissionEnv(dsh.Registry(), "dsh", pol)
 		return e
 	}
 	if runtimeconn.ConnKey("dsh", envOf()) != runtimeconn.ConnKey("dsh", envOf()) {

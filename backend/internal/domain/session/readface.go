@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
 )
 
 // ListSessions 返回会话概要；archived=false 仅未归档（默认），true 仅归档。
@@ -23,7 +21,7 @@ import (
 // 归属过滤会同时把"历史会话（workspace_id=”）"算进默认工作空间那一组：那些行在**读面**
 // 归默认工作空间（设计 ADR-6），所以按 default id 过滤时它们必须出现——否则界面上默认工作
 // 空间显示 N 个会话、点进去却是空的。
-func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]dtosession.SessionResp, error) {
+func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]SessionItem, error) {
 	cwd = NormalizeWorkspaceFilter(cwd)
 	workspaceID = strings.TrimSpace(workspaceID)
 	// 归属过滤要先把"默认工作空间 id"和"目标 id 是否就是默认"问出来（读面语义的一部分）。
@@ -34,7 +32,7 @@ func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]dtosess
 		}
 	}
 	pl.mu.Lock()
-	out := make([]dtosession.SessionResp, 0, len(pl.sessions))
+	out := make([]SessionItem, 0, len(pl.sessions))
 	for _, r := range pl.sessions {
 		if r.Archived != archived {
 			continue
@@ -72,14 +70,14 @@ func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]dtosess
 //
 // 必须在**释放锁之后**调：`RunSnapshot` 自己取锁，而 `recordRunStatus` 与 `ListSessions`
 // 的读循环是两条会互相等待的边（持锁读域状态 → 详情写点取锁 = 经典的锁序反转）。
-func (pl *Plane) fillRunPhase(items []dtosession.SessionResp) {
+func (pl *Plane) fillRunPhase(items []SessionItem) {
 	for i := range items {
 		items[i].Run = pl.RunPhaseOf(items[i].ID)
 	}
 }
 
 // fillWorkspaceDisplay 给一批响填补归属展示字段（v14；读面解析，见设计 §4.3）。
-func (pl *Plane) fillWorkspaceDisplay(items []dtosession.SessionResp) {
+func (pl *Plane) fillWorkspaceDisplay(items []SessionItem) {
 	for i := range items {
 		id, title := pl.workspaceDisplayOf(items[i].WorkspaceID)
 		items[i].WorkspaceID = id
@@ -92,7 +90,7 @@ func (pl *Plane) fillWorkspaceDisplay(items []dtosession.SessionResp) {
 // 刻意不导出：锁在包里、调用方拿不到，"须持锁调用"这种约定只对包内有效。跨包读面走
 // `SessionSnapshot`——它自己取锁。这条是 2026-10-17 修的：此前它叫 `SessionResp` 且导出，
 // 而 `svcsession` 的两个调用点都不持锁（对 map 的裸读，`-race` 可复现）。
-func (pl *Plane) sessionRespLocked(id string) dtosession.SessionResp {
+func (pl *Plane) sessionRespLocked(id string) SessionItem {
 	r := pl.sessions[id]
 	return pl.ToSessionRespOf(r)
 }
@@ -104,15 +102,15 @@ func (pl *Plane) sessionRespLocked(id string) dtosession.SessionResp {
 // 是同一行字。列表路径仍走 `fillRunPhase`（锁外逐条补，见那里的注释）。
 //
 // 返回的 `RunPhase` 为 nil = 没有投影（历史会话 / 本轮还没开始），与 `RunPhaseOf` 同一口径。
-func (pl *Plane) SessionSnapshot(id string) (dtosession.SessionResp, *dtosession.RunPhaseResp, bool) {
+func (pl *Plane) SessionSnapshot(id string) (SessionItem, *RunPhase, bool) {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 	r, ok := pl.sessions[id]
 	if !ok {
-		return dtosession.SessionResp{}, nil, false
+		return SessionItem{}, nil, false
 	}
 	resp := pl.ToSessionRespOf(r)
-	var run *dtosession.RunPhaseResp
+	var run *RunPhase
 	if snap, ok := pl.runStatusLatest[id]; ok {
 		run = runPhaseOfSnapshot(snap)
 	}
@@ -130,13 +128,13 @@ func workspaceMatches(recWorkspaceID, wantID, defaultID string) bool {
 	return recWorkspaceID == wantID
 }
 
-// toSessionResp 把 SessionRec 折叠为 dtosession.SessionResp。
+// toSessionResp 把 SessionRec 折叠为 SessionItem。
 //
 // **不含归属展示字段**（workspace_id / workspace_title）：那两个要读库，而本函数在持 pl.mu 的
 // 调用点里跑。需要它们的调用点用 `fillWorkspaceDisplay` 在释放锁之后补——这条分界必须显式，
 // 否则下一个人会顺手在这里加一次查库，而症状是偶发死锁。
-func (pl *Plane) ToSessionRespOf(r *SessionRec) dtosession.SessionResp {
-	return dtosession.SessionResp{
+func (pl *Plane) ToSessionRespOf(r *SessionRec) SessionItem {
+	return SessionItem{
 		Capabilities:       pl.SessionCapabilitiesRespOf(r),
 		ID:                 r.ID,
 		RuntimeSessionID:   r.RuntimeSessionID,

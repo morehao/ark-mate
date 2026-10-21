@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // 本文件的三个用例验的是**空闲回收的判据**：它随 P4a 正文第五十四刀进了执行面

@@ -2,7 +2,6 @@ package archtest
 
 import (
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -16,12 +15,13 @@ import (
 //	  ← 两个**依赖事实**（`*store.Store` 清单载体、`*provider.Plane` 挂靠校验）
 //	  + 一个**过渡端口** `svcmodel.Host`（读一条的投影 / 生效面回执 / 同步触发——这三条还在
 //	    `manager`，随读面与同步面在 P4b 第二刀 / P5 搬进来）
-//	      ← `ctrmodel` 把三者接上并**造出**用例（`NewModelCtr` 里 `svcmodel.NewDeclared(...)`）
+//	      ← 装配根（`internal/bootstrap/assembly`）把三者接上并**造出**用例（`svcmodel.NewDeclared(...)`），
+//	        控制器只收接口（v3.1 起实例只在装配根造）
 //
 // 为什么是"一个端口"而不是把写面也留给 `manager`：写面的判据（(provider_id, model_id) 唯一、
 // 默认是单一值、删默认要如实回带 default_cleared、memory 模式 40501）是**用例**的判据，
 // 而读面那半边要**执行面**（活连接的 session 投影、spawn 采样），它随 `Orchestrator` 在 P5
-// 一起 dissolve——于是这一刀按**面**切，不按领域切（与 `svcprovider` 的档案面/自检面同一条口径）。
+// 一起 dissolve——于是这一刀按**面**切，不按领域切（与同包的档案面/自检面同一条口径）。
 //
 // 三种失效各有一条判据：
 //
@@ -30,11 +30,11 @@ import (
 //	   而两边都编译得过、都"看起来在工作"；
 //	② **接口面不清**：写面搬走了而 `ModelSvc` 上还留着那三条，于是端口与实际实现各说一份，
 //	   "这一段还剩什么"再也看不出来；
-//	③ **装配漏接**：`ctrmodel` 忘了 `svcmodel.NewDeclared(...)`（写面 nil ⇒ 一提交就 panic）
+//	③ **装配漏接**：装配根忘了 `svcmodel.NewDeclared(...)`（写面 nil ⇒ 一提交就 panic）
 //	   或 `app.go` 没交 `Store`（⇒ memory 模式的 40501 变成"所有模式都 40501"，而读面照常绿）。
 //
 // 反证（实跑）：把 `func (s *Service) CreateModel(` 加回 `manager`（真实现的形态，能编译）→ 红；
-// 抽掉 `ctrmodel` 的 `svcmodel.NewDeclared(` → 红；把 `CreateModel` 加回 `ModelSvc` 接口 → 红；
+// 抽掉装配根的 `svcmodel.NewDeclared(` → 红；把 `CreateModel` 加回 `ModelSvc` 接口 → 红；
 // 把 `app.go` 的 `Store: st` 抽掉 → 红；把 `router.Ports` 的 `ModelHost` 字段换回
 // `svcmodel.DeclaredSvc` → 红。
 
@@ -104,9 +104,14 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/sessionruntime"`) {
 		t.Error("internal/service/svcmodel 里出现 `internal/sessionruntime` 的 import：写面通过 `Host` 端口取那半边，不 import 实现层。")
 	}
-	if !strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/store"`) {
-		t.Error("internal/service/svcmodel 里没有 `internal/store` 的 import：清单载体是这一层的**依赖事实**（P4a 起装配点交出 store），" +
-			"它被拿走意味着写面又回到了「只认 Service」的老形状。")
+	// v3.1 P4：用例层**不再 import store**，改吃装配根交下来的窄端口（`ModelStore`）。
+	// 判据双向：接口必须在本包（否则端口又跑到实现层去了）；store 不得再被 import。
+	if !strings.Contains(declaredSrc, "type ModelStore interface {") {
+		t.Error("internal/service/svcmodel 里找不到 `type ModelStore interface {`：清单载体的窄端口必须在用例层声明（v3.1 P4）。")
+	}
+	if strings.Contains(declaredSrc, `"github.com/morehao/ark-mate/internal/persistence/store"`) {
+		t.Error("internal/service/svcmodel 又 import 了 `internal/persistence/store`：清单载体走 `ModelStore` 端口，" +
+			"`internal/service` 的层表 deny 已把这条边钉死。")
 	}
 
 	// ② 接口面切分：写面在 `DeclaredSvc` 上，读/目录/同步在 `ModelSvc` 上，两边不许互相夹带。
@@ -173,59 +178,42 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 		t.Errorf("`internal/domain/provider/models.go` 里找不到 `func (pl *Plane) ModelRow(`：" +
 			"`svcmodel.Host` 的读一条实现必须有真落点")
 	}
-	views := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "registry", "models_view.go")))
+	views := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "models_view.go")))
 	if !strings.Contains(views, "*provider.Plane") {
-		t.Errorf("`internal/registry/models_view.go` 的 ModelViews 没有嵌入 `*provider.Plane`：" +
+		t.Errorf("`internal/drivers/registry/models_view.go` 的 ModelViews 没有嵌入 `*provider.Plane`：" +
 			"ModelSvc/Host 的读面就少一份真实现")
 	}
-	regBody := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "registry", "resources.go")))
+	regBody := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "resources.go")))
 	for _, a := range registryModelPortAnchors {
 		if !strings.Contains(regBody, a) {
-			t.Errorf("internal/registry/resources.go 里找不到 %q：同步面的端口实现被改名/删掉了？", a)
+			t.Errorf("internal/drivers/registry/resources.go 里找不到 %q：同步面的端口实现被改名/删掉了？", a)
 		}
 	}
 
-	// ③ 装配：用例在**控制器**里造（`app` 与 `router` 都不许引用 `service/svc*`）。
-	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrmodel", "models.go")))
-	if !strings.Contains(ctr, "svcmodel.NewDeclared(") {
-		t.Error("internal/controller/ctrmodel/models.go 里没有 `svcmodel.NewDeclared(`：写面用例必须在控制器里造出来" +
-			"（装配只能自上而下；`app`/`router` 不许引用 `service/svc*`）。")
-	}
+	// ③ 装配：用例在**装配根**造（`app` 与 `router` 都不许引用 `service/svc*`）。
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrmodel", "models.go")))
 	for _, m := range []string{"h.declared.CreateModel(", "h.declared.UpdateModel(", "h.declared.DeleteModel("} {
 		if !strings.Contains(ctr, m) {
-			t.Errorf("internal/controller/ctrmodel/models.go 里找不到 %q：三个写动作必须走用例出口。", m)
+			t.Errorf("internal/delivery/controller/ctrmodel/models.go 里找不到 %q：三个写动作必须走用例出口。", m)
 		}
 	}
 	for _, m := range []string{"h.svc.CreateModel(", "h.svc.UpdateModel(", "h.svc.DeleteModel("} {
 		if strings.Contains(ctr, m) {
-			t.Errorf("internal/controller/ctrmodel/models.go 里仍出现 %q：写面已不在 `ModelSvc` 上——"+
+			t.Errorf("internal/delivery/controller/ctrmodel/models.go 里仍出现 %q：写面已不在 `ModelSvc` 上——"+
 				"这两条路都能编译的那一天，就是「实现收了但出口没换」的那一天。", m)
 		}
 	}
 
-	ports := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))
-	// 字段判据必须是**容空白**的正则：gofmt 会把字段对齐成多空格，定长空格的判据会在
-	// 格式化之后静默变绿（§3.1.53 与 P3a-2 第一刀各踩过一次）。
-	for _, want := range []*regexp.Regexp{
-		regexp.MustCompile(`Store\s+\*store\.Store`),
-		regexp.MustCompile(`ModelHost\s+svcmodel\.Host`),
-	} {
-		if !want.MatchString(ports) {
-			t.Errorf("internal/router/router.go 的 `Ports` 里找不到 %s：装配点交出的是**依赖事实**"+
-				"（store）与**过渡端口**（Host），用例实例由控制器自己造。", want)
+	// v3.1：装配根造用例；控制器只收接口。
+	asm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
+	for _, want := range []string{"svcmodel.NewDeclared(", "Model:         modelFace"} {
+		if !strings.Contains(asm, want) {
+			t.Errorf("`internal/bootstrap/assembly/services.go` 里找不到 %q：模型写面的依赖事实与用例实例都在装配根交出。", want)
 		}
 	}
-	if regexp.MustCompile(`DeclaredSvc`).MatchString(ports) {
-		t.Error("internal/router/router.go 里出现 `DeclaredSvc`：`Ports` 只放依赖事实与窄端口，" +
-			"用例接口不外溢到装配点（P4a 那批端口别名已判定为骚操作，别再开这条路）。")
-	}
-
-	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
-	for _, want := range []string{"ModelHost: sessionruntime.NewModelFace(as.a.svc)", "Store: as.st"} {
-		if !strings.Contains(app, want) {
-			t.Errorf("internal/app/assembly.go 里找不到 %q：模型写面的依赖事实与过渡端口都在装配点交出"+
-				"（漏了 Store ⇒ 所有模式都报「清单不可用」；漏了 ModelHost ⇒ 端口没人满足，编译期就该拦）。", want)
-		}
+	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrmodel", "models.go")))
+	if strings.Contains(ctrSrc, "svcmodel.NewDeclared(") {
+		t.Error("`ctrmodel` 里又出现 `svcmodel.NewDeclared(`：用例实例只在装配根造，控制器只收接口。")
 	}
 }
 

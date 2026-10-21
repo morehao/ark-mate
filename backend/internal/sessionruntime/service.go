@@ -7,10 +7,10 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/registry"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/drivers/registry"
+	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // Service 实现 handler.Service（替换 mock），为控制面提供「真实」数据与动作：
@@ -19,7 +19,7 @@ import (
 type Service struct {
 	bus  *eventbus.Bus
 	orch *Orchestrator
-	// planes 本次进程的领域平面集合（P5a：**装配层 `internal/registry` 拥有**）。
+	// planes 本次进程的领域平面集合（P5a：**装配层 `internal/drivers/registry` 拥有**）。
 	//
 	// 本层**不再复刻**一份平面字段：所有读法都直接走 `s.planes.X`（一份实例、一条路径）。
 	// P4b 之前它们是同名过渡视角，清理掉之后"这段实现在哪一层"重新可判定。
@@ -144,7 +144,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 // RuntimePool 连接池的事实出口（P4a 正文第五十四刀）。
 //
 // 装配期（`app` 的 serve）要用它设代际上限与空闲回收；这两个动作的实现只有
-// `internal/runtimeconn` 那一份，manager 侧不再有一行转发（`SetGenerationLimit` /
+// `internal/drivers/runtimeconn` 那一份，manager 侧不再有一行转发（`SetGenerationLimit` /
 // `StartIdleReaper` 已随本刀从 `Orchestrator` 删除）。
 func (s *Service) RuntimePool() *runtimeconn.Pool { return s.runtimePool }
 

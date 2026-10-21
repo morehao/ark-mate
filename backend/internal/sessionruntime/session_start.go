@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 会话的启动 / 恢复 / 换句柄：编排侧入口（P4a 正文第五十六刀）———
@@ -50,6 +50,6 @@ func (o *Orchestrator) attachSession(as *session.ActiveSession, reason string) {
 }
 
 // liveConfigOptions 返回任一活跃会话的配置项（模型目录的**首选来源**：运行时此刻的真实状态）。
-func (o *Orchestrator) liveConfigOptions() ([]acl.ConfigOption, bool) {
+func (o *Orchestrator) liveConfigOptions() ([]acp.ConfigOption, bool) {
 	return o.runner.LiveConfigOptions()
 }

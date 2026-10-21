@@ -116,7 +116,7 @@ func TestSettingsModelCopyAvoidsProvider(t *testing.T) {
 	assertPanelHasSingleDefaultSurface(t, src)
 }
 
-// assertModelsResponseHasNoPerRuntimeDefault A14 的后端半场：读 `dtomodel/list.go` 源码，
+// assertModelsResponseHasNoPerRuntimeDefault A14 的后端半场：读 `dtomodel/model_list.go` 源码，
 // 断言 `GET /models` 的**用户面字段**里没有逐 runtime 的默认映射（只有单一 `default_model`）。
 //
 // 关键区分（不许"顺手"把写面也 ban 掉）：`ModelCreateReq` / `ModelPatchReq` 里的
@@ -125,7 +125,7 @@ func TestSettingsModelCopyAvoidsProvider(t *testing.T) {
 // （写面少了两条入口，"只有一个默认"就落不了地）。
 func assertModelsResponseHasNoPerRuntimeDefault(t *testing.T) {
 	t.Helper()
-	path := filepath.Join(backendRoot(t), "internal", "dto", "dtomodel", "list.go")
+	path := filepath.Join(backendRoot(t), "internal", "dto", "dtomodel", "model_list.go")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（这块契约的落点改了？请同步 A14 的断言）", path, err)
@@ -362,14 +362,14 @@ func assertNoBannedWord(t *testing.T, where, text string) {
 // 命中的就是这一条，当时它只在"某条档案没被挂靠"这一种状态下才渲染出来）。
 //
 // 判据只看**含中文的字面量**：这一屏的用户文案在本仓一律是中文，而 ASCII 字面量是协议键与
-// 依赖路径（`"github.com/…/pkg/runtime"`、`"max_tokens"`、`"data:image/png;base64,…"`）——
+// 依赖路径（`"github.com/…/internal/runtime"`、`"max_tokens"`、`"data:image/png;base64,…"`）——
 // 用户读不到它们，判进来只会逼着守卫加白名单，而白名单是这套守卫最常见的死法。
 // fail-closed：文件读不到、或中文串少到说明提取器/文件已经失效，都当场失败（守卫不许空转）。
 //
 // P0：原先钉着一个精确文件路径（`provider_probe.go`）。该文件随供应商域搬进 `domain/provider`
 // （设计 §3.4），钉路径在搬家后只会"读不到文件"（假红）。判据改锚在**符号**上：`probeLocal`
 // （自检检查表的构造入口，这些 `detail`/`remedy` 文案就产在它和它的同族函数里）。刻意**不锚
-// 导出的 `ProbeProvider`**——它在 `service/svcprovider` 很可能只剩一行转发，锚到它会让判据
+// 导出的 `ProbeProvider`**——它在 `service/svcmodel` 很可能只剩一行转发，锚到它会让判据
 // 盯错文件。锚点由 `uniqueSourceFile` 保证全仓恰好一处（0 处 = 判据失去对象，≥2 处 = 自检实现
 // 有了第二份），下面的 `scanned >= 40` 是第二道 fail-closed 兜底。
 func TestProviderProbeProseAvoidsRuntimeVocabulary(t *testing.T) {

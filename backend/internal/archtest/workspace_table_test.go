@@ -42,10 +42,10 @@ var forbiddenWorkspaceColumns = []string{
 // ——迁移改名、换写法、或把 DDL 挪走，都必须让守卫红，而不是静默变成空转。
 //
 // 判据取**静态源码**而不是"实建临时库读 PRAGMA"：后者要求迁移已能跑通，于是"迁移坏了"
-// 会把这条守卫一起弄红，两件事就分不开（PRAGMA 那半由 `internal/store` 的
+// 会把这条守卫一起弄红，两件事就分不开（PRAGMA 那半由 `internal/persistence/store` 的
 // `TestWorkspaceUniqueIndexEnforced` 在真库上覆盖）。
 func TestWorkspaceTableIsRegistrationNotCarrier(t *testing.T) {
-	path := filepath.Join(backendRoot(t), "internal", "store", "migrate.go")
+	path := filepath.Join(backendRoot(t), "internal", "persistence", "store", "migrate.go")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（路径改了请同步本守卫）", path, err)
@@ -91,7 +91,7 @@ func TestWorkspaceTableIsRegistrationNotCarrier(t *testing.T) {
 //   - 更要紧的是**语义错了**：删登记**不该**连带删会话（设计 ADR-6），级联恰恰是错的方向；
 //     而 RESTRICT 又会让"移除登记"在会话还挂着时直接失败——那是把数据保留做成了一次报错。
 func TestSessionWorkspaceColumnIsPlain(t *testing.T) {
-	path := filepath.Join(backendRoot(t), "internal", "store", "migrate.go")
+	path := filepath.Join(backendRoot(t), "internal", "persistence", "store", "migrate.go")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v", path, err)

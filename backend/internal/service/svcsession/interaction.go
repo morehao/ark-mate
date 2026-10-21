@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // InteractionSvc 会话交互的**动作面**三条：权限决策 / 结构化提问决策 / 权限记忆撤销。
@@ -67,7 +67,7 @@ var _ InteractionSvc = (*Interaction)(nil)
 //
 // 回执里两组字段的来源不同，别混：
 //   - `allowed` / `rejected` / `always` / `option_id` 是**请求参数的回带**（域构造 `d` 时用的就是
-//     这几个入参，见 `acl.PermissionDecision`），前端拿它核对"我发的是什么"；
+//     这几个入参，见 `acp.PermissionDecision`），前端拿它核对"我发的是什么"；
 //   - `outcome` / `selected_option_id` 才来自**域的实际回执**：`option_id` 可能被兜底成第一个选项、
 //     或整条降级成 `cancelled`，所以这两个绝不许回显请求（回显会让界面说"已允许"而底座收到取消）。
 //
@@ -82,7 +82,7 @@ func (h *Interaction) ResolvePermission(_ context.Context, id, callID, optionID 
 		return nil, code.FromError(err)
 	}
 	if !ok {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "permission_not_found",
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "permission_not_found",
 			fmt.Sprintf("权限请求 %q 不存在或已过期", callID), nil))
 	}
 	return &dtosession.PermissionDecisionResp{
@@ -107,7 +107,7 @@ func (h *Interaction) ResolveElicitation(_ context.Context, id, elicitationID, a
 		return code.FromError(err)
 	}
 	if !ok {
-		return code.FromError(acl.NewError(acl.ClassRequest, "elicitation_not_found",
+		return code.FromError(acp.NewError(acp.ClassRequest, "elicitation_not_found",
 			fmt.Sprintf("结构化提问 %q 不存在或已过期", elicitationID), nil))
 	}
 	return nil

@@ -9,16 +9,16 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/skill"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // validateRig 一套带 skill 投影、两个可注入 MCP、一个 agent 的架子（M3-3 校验用）。
@@ -397,7 +397,7 @@ func TestValidateSelectionUnknownRuntimeNoPanic(t *testing.T) {
 	if err == nil {
 		t.Fatal("未注册 runtime 应不可达")
 	}
-	if ae, ok := acl.As(err); !ok || ae.Code != "capability_not_applicable" {
+	if ae, ok := acp.As(err); !ok || ae.Code != "capability_not_applicable" {
 		t.Fatalf("应是 capability_not_applicable，got %v", err)
 	}
 	// 一个只含空白的 id 会被规范化丢掉 → 不构成问题（与"未声明"同义）。
@@ -465,9 +465,9 @@ func TestSelectionValidationRemoteReachableViaGateway(t *testing.T) {
 	}
 }
 
-// TestSelectionProblemsAreNotCodeWrapped 校验错误必须以**已分类的 acl 错误**上抛（不被提前归一），
+// TestSelectionProblemsAreNotCodeWrapped 校验错误必须以**已分类的 acp 错误**上抛（不被提前归一），
 // 由控制器出口做 `code.FromError` 归一。在 manager 里提前归一（`code.FromError`）会把
-// acl 的稳定 code 名压成 `{code,msg}`，`notFoundCodes` 这类按名字判定的提档就全失效。
+// acp 的稳定 code 名压成 `{code,msg}`，`notFoundCodes` 这类按名字判定的提档就全失效。
 func TestSelectionProblemsAreNotCodeWrapped(t *testing.T) {
 	svc, _, _ := validateRig(t)
 	for _, sel := range []*session.CapabilitySelection{
@@ -476,11 +476,11 @@ func TestSelectionProblemsAreNotCodeWrapped(t *testing.T) {
 		{Mcps: ptrOf([]string{"web"})},
 	} {
 		err := svc.sessionPlane.ValidateSelection(sel, "stub")
-		ae, ok := acl.As(err)
+		ae, ok := acp.As(err)
 		if !ok {
-			t.Fatalf("应是 acl 错误（未被提前归一）: %v", err)
+			t.Fatalf("应是 acp 错误（未被提前归一）: %v", err)
 		}
-		if ae.Class != acl.ClassRequest {
+		if ae.Class != acp.ClassRequest {
 			t.Fatalf("类应为 request，got %v", ae.Class)
 		}
 		if code.FromError(err) == nil {

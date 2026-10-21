@@ -24,7 +24,7 @@ func TestPermissionMemoryCarriesGrantShape(t *testing.T) {
 	root := backendRoot(t)
 
 	// ① 迁移只**增列**，且唯一键保持三元组。
-	mig := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "store", "migrate_v28.go")))
+	mig := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "migrate_v28.go")))
 	if !strings.Contains(mig, "ADD COLUMN scope TEXT NOT NULL DEFAULT 'session'") {
 		t.Fatalf("v28 没有加 `scope` 列（或默认值不是 'session'）：授权形态必须有一个**可写**的落点")
 	}
@@ -36,11 +36,13 @@ func TestPermissionMemoryCarriesGrantShape(t *testing.T) {
 			"「这类工具始终允许」就退化成「这一个参数组合始终允许」，那是把一条便利功能拆掉")
 	}
 
-	// ② 两列**不进** `Upsert` 的冲突列（冲突列 = 唯一键）。
-	dao := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "dao", "memory.go")))
-	upsert, ok := goFuncBody(dao, "func (d *PermissionMemoryDao) Upsert(")
+	// ② 两列**不进**写面的冲突列（冲突列 = 唯一键）。
+	//
+	// 判据作用在 `internal/persistence/store/memories.go`：v3.3 起 upsert 的列集合归 store（DAO 只剩列词汇）。
+	memSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "memories.go")))
+	upsert, ok := goFuncBody(memSrc, "func (s *Store) AddMemory(")
 	if !ok {
-		t.Fatalf("`dao/memory.go` 里找不到 `Upsert(`")
+		t.Fatalf("`store/memories.go` 里找不到 `AddMemory(`")
 	}
 	conflict := upsert
 	if i := strings.Index(upsert, "DoUpdates:"); i > 0 {

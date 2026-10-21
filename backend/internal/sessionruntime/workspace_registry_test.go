@@ -11,16 +11,15 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/object/objid"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 
 // 本文件是**工作空间登记表**（v14）的领域层测试（manager/workspace_registry.go）。
 //
-// 与 `internal/store/workspace_test.go` 的分工：那边钉住跨表不变量（唯一索引、顺序对账、
+// 与 `internal/persistence/store/workspace_test.go` 的分工：那边钉住跨表不变量（唯一索引、顺序对账、
 // 删登记不删会话），这边钉住领域语义——**校验与建会话同源**、**默认工作空间是历史会话的落点**、
 // **memory 是明确的不可写而不是内部错误**。后者在 store 层测不了（那里没有持久层模式的差别）。
 
@@ -54,8 +53,8 @@ func TestWorkspaceRegistryDefaultIsProvisioned(t *testing.T) {
 	if !def.IsDefault {
 		t.Fatal("装配期建立的那条必须带 is_default")
 	}
-	if def.Title != store.DefaultWorkspaceTitle {
-		t.Fatalf("标题应为语言中立的 %q，实际 %q", store.DefaultWorkspaceTitle, def.Title)
+	if def.Title != model.DefaultWorkspaceTitle {
+		t.Fatalf("标题应为语言中立的 %q，实际 %q", model.DefaultWorkspaceTitle, def.Title)
 	}
 	if _, serr := os.Stat(def.Path); serr != nil {
 		t.Fatalf("目录应被建立: %v", serr)
@@ -389,7 +388,7 @@ func TestWorkspaceRegistryDefaultIsProvisionedInMemory(t *testing.T) {
 	if def.Path != want {
 		t.Fatalf("默认工作空间路径 = %q，期望 %q", def.Path, want)
 	}
-	if !def.IsDefault || def.Title != store.DefaultWorkspaceTitle {
+	if !def.IsDefault || def.Title != model.DefaultWorkspaceTitle {
 		t.Fatalf("memory 模式的默认项形状应与 sqlite 侧逐字一致: %+v", def)
 	}
 	if !strings.HasPrefix(def.ID, objid.Workspace) || !objid.IsPlatformID(def.ID) {
@@ -520,7 +519,7 @@ func TestCreateNamedWorkspace(t *testing.T) {
 		t.Fatalf("写哨兵文件: %v", err)
 	}
 	// 判据用**对外码**（40901）而不是 code 名：域名下两条创建路径的错误载体历史上不统一
-	// （一条铸 gerror、一条铸 acl.Error），而对外码是同一支——判据要钉的是用户看到的那个数。
+	// （一条铸 gerror、一条铸 acp.Error），而对外码是同一支——判据要钉的是用户看到的那个数。
 	if _, err := plane.CreateNamedWorkspace("pay-refactor", ""); numericCode(err) != 40901 {
 		t.Fatalf("同名应 40901（workspace_exists）: %v", err)
 	}
@@ -551,10 +550,10 @@ func TestCreateNamedWorkspace(t *testing.T) {
 	}
 
 	// ⑤ 两条路互斥（域里判决，控制器不猜）。
-	if _, err := plane.CreateWorkspace(dtoworkspace.WorkspaceCreateReq{Path: ws.Path, Name: "x"}); numericCode(err) != 40001 {
+	if _, err := plane.CreateWorkspace(workspace.CreateRequest{Path: ws.Path, Name: "x"}); numericCode(err) != 40001 {
 		t.Fatalf("同时给 path 与 name 应被拒（40001）: %v", err)
 	}
-	if _, err := plane.CreateWorkspace(dtoworkspace.WorkspaceCreateReq{}); numericCode(err) != 40001 {
+	if _, err := plane.CreateWorkspace(workspace.CreateRequest{}); numericCode(err) != 40001 {
 		t.Fatalf("两者都不给应被拒（40001）: %v", err)
 	}
 }

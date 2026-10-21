@@ -7,16 +7,17 @@ import (
 	"testing"
 	"time"
 
+	defn "github.com/morehao/ark-mate/internal/core/definition"
+
 	domainautomation "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/core/automation"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/automation"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— M6-7：automation 定义的 DB 载体（定义列 + 运行态列） ———
@@ -176,7 +177,7 @@ func TestAutomationDefinitionsStoreRoundTrip(t *testing.T) {
 	}
 	// 被拒的写与重复新建/覆盖不存在的尝试都不得留下审计。
 	for _, r := range revs {
-		if r.Actor != definition.DefinitionWriteActor {
+		if r.Actor != defn.DefinitionWriteActor {
 			t.Fatalf("审计 actor 不符: %+v", r)
 		}
 	}

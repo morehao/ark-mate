@@ -18,7 +18,7 @@
 package identity
 
 import (
-	pkgidentity "github.com/morehao/ark-mate/pkg/identity"
+	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 )
 
 const (

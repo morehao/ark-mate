@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	defn "github.com/morehao/ark-mate/internal/core/definition"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -31,44 +30,44 @@ import (
 // 同一份输入刚验过就必然能再入表，所以提交成功后那次 `RegisterSkill` 是**必然成功**的。
 
 // WriteSkill 写面主体（create / update 共用的全部顺序与失败处理）。
-func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability.SkillWriteReq, create bool) (*dtocapability.SkillWriteResp, error) {
+func (m *Plane) WriteSkill(ctx context.Context, pathID string, req WriteRequest, create bool) (*WriteResult, error) {
 	if m.caps == nil {
-		return nil, definition.ErrCapabilityUnavailable()
+		return nil, defn.ErrCapabilityUnavailable()
 	}
-	repo, err := m.defs.DefinitionRepoFor(definition.CapSubSkills)
+	repo, err := m.defs.RepoFor(defn.CapSubSkills)
 	if err != nil {
 		return nil, err
 	}
-	patch := definition.RawPatch(req)
+	patch := defn.RawPatch(req)
 
 	id := pathID
-	bodyID, hasBodyID, err := definition.RawString(req, "id")
+	bodyID, hasBodyID, err := defn.RawString(req, "id")
 	if err != nil {
 		return nil, err
 	}
 	if create {
 		if !hasBodyID || strings.TrimSpace(bodyID) == "" {
-			return nil, definition.InvalidParamErr("新建 skill 必须带 id")
+			return nil, defn.InvalidParamErr("新建 skill 必须带 id")
 		}
 		id = bodyID
 	} else {
 		if hasBodyID && bodyID != pathID {
-			return nil, definition.InvalidParamErr(fmt.Sprintf(
+			return nil, defn.InvalidParamErr(fmt.Sprintf(
 				"路径 id %q 与 body id %q 不一致（id 不可改：要换 id 就删掉重建）", pathID, bodyID))
 		}
 		// 定义必须自带 id：手写文件漏了 id 时顺手补上（否则装载时该文件只能被跳过）。
 		patch["id"] = pathID
 	}
 
-	if !definition.ValidDefinitionID(id) {
+	if !defn.ValidDefinitionID(id) {
 		if create {
-			return nil, definition.InvalidDefinitionIDErr("skill", id)
+			return nil, defn.InvalidDefinitionIDErr("skill", id)
 		}
 		// update 的幂等友好处理：id 非法时它**不可能**存在，404 比 400 更准确。
 		if _, in := m.caps.SkillByID(id); !in {
 			return nil, notFoundErr(id)
 		}
-		return nil, definition.InvalidDefinitionIDErr("skill", id)
+		return nil, defn.InvalidDefinitionIDErr("skill", id)
 	}
 
 	_, inReg := m.caps.SkillByID(id)
@@ -102,7 +101,7 @@ func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability
 	}
 	var sk capability.Skill
 	if err := json.Unmarshal(merged, &sk); err != nil {
-		return nil, definition.InvalidParamErr(fmt.Sprintf("skill 定义无法解析：%v", err))
+		return nil, defn.InvalidParamErr(fmt.Sprintf("skill 定义无法解析：%v", err))
 	}
 	if sk.ID == "" {
 		sk.ID = id
@@ -112,7 +111,7 @@ func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability
 	if err := capability.ValidateSkill(&sk); err != nil {
 		// 闸门拒绝（critical 正文 / id 非法 / scope 非法 / runtimes 重复）→ 40001。
 		// **零字节写入**：patch 只在草稿里，草稿从未提交。
-		return nil, acl.NewError(acl.ClassRequest, "definition_invalid",
+		return nil, acp.NewError(acp.ClassRequest, "definition_invalid",
 			fmt.Sprintf("skill %q 的定义被拒绝：%v", id, err), err)
 	}
 	created, conflict, err := repo.Commit(ctx, id, doc, rev, existed)
@@ -122,7 +121,7 @@ func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability
 	if conflict {
 		// 载体的乐观锁没中：文件被手改 / 行 revision 变了（含"我以为新建、别人抢先建出来"）。
 		// 语义与 40901 的老文案一致——刷新重试，绝不 last-write-wins。
-		return nil, definition.DefinitionChangedErr(repo.Locator(id))
+		return nil, defn.DefinitionChangedErr(repo.Locator(id))
 	}
 	// 提交成功后才入表：同一份定义刚过闸门（纯函数），这一次必然成功；真出错也只可能来自
 	// "注册表被并发改坏"，那种情况下**不能**谎报写失败（载体上已经写成功了），记 WARN 更诚实。
@@ -131,7 +130,7 @@ func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability
 		glog.Warnw(ctx, "capability: skill 定义已提交但入表失败（内存视图可能落后）", "id", id, "err", err)
 	}
 
-	resp := &dtocapability.SkillWriteResp{
+	resp := &WriteResult{
 		ID: sk.ID, Path: repo.Locator(id), Created: create || created,
 		Warnings: Warnings(sk),
 	}
@@ -151,19 +150,19 @@ func (m *Plane) WriteSkill(ctx context.Context, pathID string, req dtocapability
 // DeleteSkill 删除一个 skill 定义（DELETE /skills/:id）：删定义 + 撤回物化副本 + 摘内存条目。
 //
 // 幂等：定义本来就不存在 → `deleted:false` 且无错（"让它不在"不要求"它曾在"）。
-func (m *Plane) DeleteSkill(ctx context.Context, id string) (*dtocapability.SkillDeleteResp, error) {
+func (m *Plane) DeleteSkill(ctx context.Context, id string) (*DeleteResult, error) {
 	if m.caps == nil {
-		return nil, definition.ErrCapabilityUnavailable()
+		return nil, defn.ErrCapabilityUnavailable()
 	}
-	repo, err := m.defs.DefinitionRepoFor(definition.CapSubSkills)
+	repo, err := m.defs.RepoFor(defn.CapSubSkills)
 	if err != nil {
 		return nil, err
 	}
-	if !definition.ValidDefinitionID(id) {
+	if !defn.ValidDefinitionID(id) {
 		if _, in := m.caps.SkillByID(id); !in {
 			return deleteNoop(id, ""), nil // 非法 id 不可能存在 → 幂等无操作
 		}
-		return nil, definition.InvalidDefinitionIDErr("skill", id)
+		return nil, defn.InvalidDefinitionIDErr("skill", id)
 	}
 	_, inReg := m.caps.SkillByID(id)
 	stored, err := repo.Exists(ctx, id)
@@ -180,10 +179,10 @@ func (m *Plane) DeleteSkill(ctx context.Context, id string) (*dtocapability.Skil
 		return nil, err
 	}
 	if conflict {
-		return nil, definition.DefinitionChangedErr(locator)
+		return nil, defn.DefinitionChangedErr(locator)
 	}
 	m.caps.RemoveSkill(id)
-	resp := &dtocapability.SkillDeleteResp{ID: id, Deleted: deleted, Path: locator}
+	resp := &DeleteResult{ID: id, Deleted: deleted, Path: locator}
 	// 删定义必须一起撤回已物化副本：否则底座目录里还留着它，agent 照旧看得见。
 	t := m.ReconcileAll()
 	resp.Removed, resp.MaterializeErrors = t.Removed, t.Errors
@@ -192,18 +191,18 @@ func (m *Plane) DeleteSkill(ctx context.Context, id string) (*dtocapability.Skil
 }
 
 // deleteNoop 幂等删除的空结果。
-func deleteNoop(id, path string) *dtocapability.SkillDeleteResp {
-	return &dtocapability.SkillDeleteResp{ID: id, Deleted: false, Path: path,
+func deleteNoop(id, path string) *DeleteResult {
+	return &DeleteResult{ID: id, Deleted: false, Path: path,
 		NextAction: "该 skill 本来就不存在，无需删除"}
 }
 
 // existsErr 新建时 id 已占用（40901：与当前状态冲突——参数没问题，是时机/状态问题）。
 func existsErr(id string) error {
-	return acl.NewError(acl.ClassLimit, "skill_exists",
+	return acp.NewError(acp.ClassLimit, "skill_exists",
 		fmt.Sprintf("skill %q 已存在：改它用 PUT /skills/%s，或换一个 id", id, id), nil)
 }
 
 // notFoundErr 目标 skill 不存在（40401，由 pkg/code 的 notFoundCodes 提档）。
 func notFoundErr(id string) error {
-	return acl.NewError(acl.ClassRequest, "skill_not_found", fmt.Sprintf("未知 skill %q", id), nil)
+	return acp.NewError(acp.ClassRequest, "skill_not_found", fmt.Sprintf("未知 skill %q", id), nil)
 }

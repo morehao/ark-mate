@@ -7,10 +7,10 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/code"
 )
 
 // 本文件钉住 M3 的接线（设计 ADR-2/ADR-4/ADR-6/ADR-9）：会话到底跑在哪个目录、归属写没写进库、

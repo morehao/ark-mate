@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/session"
+
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/dto/dtoexport"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— P4a：导出的**用例层实现** ———
@@ -48,7 +49,7 @@ func (e *Exporter) ExportSessions(ctx context.Context, req dtoexport.ExportReq) 
 	switch format {
 	case "markdown", "text", "json":
 	default:
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_export_format",
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "invalid_export_format",
 			fmt.Sprintf("不支持的导出格式 %q（markdown|text|json）[invalid_export_format]", req.Format), nil))
 	}
 	ids := make([]string, 0, len(req.IDs))
@@ -62,10 +63,10 @@ func (e *Exporter) ExportSessions(ctx context.Context, req dtoexport.ExportReq) 
 		ids = append(ids, id)
 	}
 	if len(ids) == 0 {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_export_ids", "ids 不能为空 [invalid_export_ids]", nil))
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "invalid_export_ids", "ids 不能为空 [invalid_export_ids]", nil))
 	}
 	if len(ids) > MaxExportIDs {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "export_too_many_ids",
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "export_too_many_ids",
 			fmt.Sprintf("一次最多导出 %d 个会话（收到 %d）[export_too_many_ids]", MaxExportIDs, len(ids)), nil))
 	}
 

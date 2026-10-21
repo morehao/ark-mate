@@ -6,17 +6,16 @@ import (
 	"testing"
 	"time"
 
+	defn "github.com/morehao/ark-mate/internal/core/definition"
+
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/ark-mate/pkg/resource"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // ——— v26：会话模型引用 = **平台模型行 id**（定案「辰」）———
@@ -57,19 +56,19 @@ func (byModelNameOnly) Value(_, model string) (string, error) { return "m:" + mo
 //
 // 模型行**直接插库**（写面已搬进 `service/svcmodel`：这些用例测的是会话侧怎么解析模型，
 // 不是写面，见 `seedModelRow`）。
-func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName string) *dtomodel.ModelResp {
+func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName string) *provider.ModelItem {
 	t.Helper()
 	ctx := context.Background()
 	key, baseURL := "sk-test", "https://api.example.com/v1"
-	if _, err := svc.planes.Providers.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	if _, err := svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: providerID, Protocol: "openai", BaseURL: &baseURL, APIKey: &key,
 	}); err != nil && errCode(err) != "provider_exists" {
 		t.Fatalf("CreateProvider(%s): %v", providerID, err)
 	}
 	id := objid.New(objid.Model)
-	ok, err := svc.planes.Resources.Store().CreateModelDefinition(ctx, store.ModelColumns{
+	ok, err := svc.planes.Resources.Store().CreateModelDefinition(ctx, model.ModelColumns{
 		ID: id, ProviderID: providerID, Model: modelName, InputModalities: resource.ModalityText,
-	}, definition.DefinitionWriteActor)
+	}, defn.DefinitionWriteActor)
 	if err != nil || !ok {
 		t.Fatalf("插模型行(%s/%s): ok=%v err=%v", providerID, modelName, ok, err)
 	}
@@ -283,10 +282,10 @@ func TestCatalogAnnotatesCandidatesWithPlatformRowID(t *testing.T) {
 	row := createProviderAndModel(t, r.svc, "p1", "m-1")
 
 	// 目录里有两条候选：一条对得上平台行（`p1/m-1`），一条底座广告了但平台没声明。
-	opts := []acl.ConfigOption{{
-		ID: "model", Name: "Model", Category: acl.CategoryModel, Type: acl.OptionTypeSelect,
+	opts := []acp.ConfigOption{{
+		ID: "model", Name: "Model", Category: acp.CategoryModel, Type: acp.OptionTypeSelect,
 		CurrentValue: "p1/m-1",
-		Values: []acl.ConfigOptionValue{
+		Values: []acp.ConfigOptionValue{
 			{Value: "p1/m-1", Name: "已声明"},
 			{Value: "p2/ghost", Name: "未声明"},
 		},

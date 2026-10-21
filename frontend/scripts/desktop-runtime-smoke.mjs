@@ -90,7 +90,7 @@
  *
  * **不进 CI**：要真 Electron + 真核心 + 随包载荷（`make desktop/payloads`）。
  * 零新依赖：ACP 客户端就是 NDJSON over stdio（协议帧形状对齐
- * `backend/pkg/runtime/acp_testserver_test.go` 与 `acpsdk` 的 line-delimited JSON 约定）。
+ * `backend/internal/runtime/acp_testserver_test.go` 与 `acpsdk` 的 line-delimited JSON 约定）。
  */
 import { createHash } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
@@ -160,9 +160,9 @@ const PROC_RES = PACKAGED_APP ? packagedProcessRes(PACKAGED_APP) : { shell: SHEL
 const ELIDE_FROM = PACKAGED_APP ?? DESKTOP
 
 /**
- * 随包载荷。runtime id 与 `backend/pkg/runtime/dsh` 的 ID 一致。
+ * 随包载荷。runtime id 与 `backend/internal/infra/dsh` 的 ID 一致。
  *
- * **新增一个随包底座 = 在这张表里加一条**（外加 `backend/pkg/runtime/<id>/` 的 adapter、
+ * **新增一个随包底座 = 在这张表里加一条**（外加 `backend/internal/infra/<id>/` 的 adapter、
  * `apps/desktop/runtime/<id>/` 的装配脚本、`prepare-runtime.mjs` 的 PAYLOADS 与
  * `gen-runtime-bin.mjs` 的 LAUNCHERS 各一条）。下面所有场景都**遍历这张表**，不写死 id 清单——
  * 否则新底座接进来时，探针会静默地不测它（"验收覆盖不到新底座"正是本仓最贵的那种假绿）。
@@ -170,7 +170,7 @@ const ELIDE_FROM = PACKAGED_APP ?? DESKTOP
 const RUNTIMES = {
   dsh: {
     label: 'dsh（dsh）',
-    // 形态来自 backend/pkg/runtime/dsh：Command="dsh"，Args=["--profile","acp"]。
+    // 形态来自 backend/internal/infra/dsh：Command="dsh"，Args=["--profile","acp"]。
     args: ['--profile', 'acp'],
   },
 }
@@ -372,7 +372,7 @@ function startAcpServer({ command, args, env, cwd }) {
   }
 }
 
-/** ACP initialize 参数：与 `pkg/acl` 的握手一致（protocolVersion=1 + 客户端能力/身份）。 */
+/** ACP initialize 参数：与 `internal/infra/acp` 的握手一致（protocolVersion=1 + 客户端能力/身份）。 */
 const INITIALIZE_PARAMS = {
   protocolVersion: 1,
   clientCapabilities: {
@@ -390,7 +390,7 @@ const INITIALIZE_PARAMS = {
  *     否则机器上恰好装过的同名命令会顶掉随包那份；
  *  2. **载荷入口来自核心环境**（`MATE_DSH_ENTRY` / `MATE_NODE_EXECUTABLE` / `MATE_HOME`）
  *     ——本脚本不自己拼这几条路径，拼了就等于在验"我记住的那个常量"；
- *  3. **配置隔离按 runtime 叠加**（`backend/pkg/runtime/isolation.go` 的 `IsolationEnv` 逐条对齐）。
+ *  3. **配置隔离按 runtime 叠加**（`backend/internal/runtime/isolation.go` 的 `IsolationEnv` 逐条对齐）。
  *     为什么要在这里补：核心进程自己的环境里**没有**这些变量——它们是核心在 `Connect` 时按
  *     runtime 注入子进程的。不补的话底座会去写用户的 `~/.dsh` 这类真实目录。
  */

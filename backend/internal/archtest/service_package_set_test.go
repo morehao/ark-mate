@@ -14,7 +14,7 @@ import (
 // "把实现上提到 `svc<领域>`"必须有一个正确的落点，落点错了搬进去的东西也要重搬：
 //
 //	`svcruntime` 一度同时装**三件不同的事**（供应商档案 / 模型清单与目录 / 底座身份与诊断），
-//	于是 `ctrprovider` 只用到它的 5 个方法、`ctrmodel` 只用到 6 个、`ctrsystem` 只用到 1 个——
+//	于是 `ctrmodel` 只用到它的 5 个方法、`ctrmodel` 只用到 6 个、`ctrsystem` 只用到 1 个——
 //	三个控制器各自抱着一个"大半用不上的大接口"。
 //
 // 现状（P4a 第一批收口后）：
@@ -25,8 +25,7 @@ import (
 // 持 `WorkspacePlane()`）——这正是这条守卫要防的第 ③ 种失效的**正当版本**：包集变了，守卫同步改，
 // 而不是让守卫静默空转。
 //	svcruntime    底座身份与诊断（**只剩 2 个方法**）
-//	svcprovider   供应商档案（从 svcruntime 拆出）
-//	svcmodel      模型清单与目录（从 svcruntime 拆出）
+//	svcmodel   供应商域：档案 / 自检 / 模型清单（2026-10-20 合并 provider 侧；接口仍按面切）
 //	svccapability 能力定义
 //	svcautomation 自动化
 //	svclibrary    库读面
@@ -43,9 +42,12 @@ import (
 // `svcruntime` → 红。
 
 // servicePackageSet ADR-2 定下的用例层包集（**恰好**这些）。
+// v3.1 §3.2.1 起控制器不得 import `internal/domain`，于是"纯读模型"也必须有一层窄端口：
+// `svcsearch` / `svcusage` 从会话域取出，`svcworkspace` 从工作空间域取出，`svcstream` 包住事件总线。
 var servicePackageSet = []string{
-	"svcautomation", "svccapability", "svccommandpolicy", "svclibrary", "svcmodel",
-	"svcprovider", "svcruntime", "svcsession", "svcsystem",
+	"svcautomation", "svccapability", "svccommandpolicy", "svclibrary",
+	"svcmodel", "svcruntime", "svcsearch", "svcsession", "svcstream", "svcsystem",
+	"svcusage", "svcworkspace",
 }
 
 // serviceRuntimeMethods `svcruntime` 的 **API 端口**（`RuntimeSvc`）允许声明的方法（多一个都红）。
@@ -53,7 +55,7 @@ var serviceRuntimeMethods = []string{"RuntimeIdentity", "RuntimeDiagnostics"}
 
 // serviceRuntimePlaneMethods `svcruntime` 的**执行面端口**（`Plane`）允许声明的方法。
 //
-// 它们是执行面的口语（`internal/runtimeconn` 的方法名）：用例层在这里只做**命名适配**
+// 它们是执行面的口语（`internal/drivers/runtimeconn` 的方法名）：用例层在这里只做**命名适配**
 // （`Identity` → `RuntimeIdentity`，路径 `/runtime/...` 是对外契约的口语）。
 // 这条判据与上一条配对：API 端口只许那 2 个、适配端口也只许那 2 个——两边同时被钉住，
 // 才挡得住"把 provider/model 又塞回这个大包"这条回头路。
@@ -80,8 +82,7 @@ func TestServicePackageSetFollowsADR2(t *testing.T) {
 	sort.Strings(want)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("`internal/service` 的包集与 ADR-2 不一致：\n  实际 %v\n  期望 %v\n"+
-			"三个单方法面（`svcsearch`/`svcusage`/`svcexport`）已并入 `svcsession`/`svcsystem`；"+
-			"`svcprovider`/`svcmodel` 已从 `svcruntime` 拆出。\n"+
+			"包集是 v3.1 的用例层清单（控制器只认它；新增/删除包时必须同步本表与 `assembly/services.go`）。\n"+
 			"旧名回潮的后果是**两个包表达同一件事**，装配点给哪个都能编译过——"+
 			"而\"收实现\"就没法判断该落到哪一边。", got, want)
 	}
@@ -133,9 +134,9 @@ func TestServiceRuntimeStaysIdentityAndDiagnostics(t *testing.T) {
 			if !allowed[name] {
 				t.Errorf("`internal/service/svcruntime` 声明了 %q：这个包只装**底座身份与诊断**"+
 					"（ADR-2，P4a）。\n"+
-					"供应商档案属 `svcprovider`、模型清单与目录属 `svcmodel`——"+
+					"供应商档案与模型清单/目录都属 `svcmodel`（2026-10-20 两包合并）——"+
 					"三件事共用一个接口时，每个控制器都抱着一份大半用不上的大接口"+
-					"（拆之前 `ctrprovider` 只用 5/14、`ctrmodel` 只用 6/14、`ctrsystem` 只用 1/14）。", name)
+					"（拆之前 `ctrmodel` 只用 5/14、`ctrmodel` 只用 6/14、`ctrsystem` 只用 1/14）。", name)
 			}
 		}
 	}

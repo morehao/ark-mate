@@ -60,7 +60,7 @@ const LAUNCHERS = [
     // `config.agentsHome ?? $DSH_AGENTS_HOME ?? ~/.agents` 解析该根。这里一兜底，桌面态 dsh 的读根
     // 就与平台写根分叉、skill **静默不投放**（2026-10-09 桌面态验收实测：平台物化的 `probe-desktop`
     // 不在 dsh 会话的 `<available_skills>` 里，而子进程环境里正是这个变量）。Go 侧
-    // `pkg/runtime/isolation.go` 曾犯同一个错、同批修掉；两侧由 archtest 的
+    // `internal/runtime/isolation.go` 曾犯同一个错、同批修掉；两侧由 archtest 的
     // `TestDesktopLauncherIsolationMatchesCore` 钉住"启动器隔离表 ⊆ 核心隔离表"，且**核心新增的变量
     // 必须二选一**：在这里兜底，或在那个守卫的 `launcherCoreOnly` 里登记"启动器刻意不兜底 + 理由"。
     isolation: { DSH_HOME: 'runtime/dsh' },

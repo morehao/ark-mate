@@ -13,8 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— 技能包导入（D1：POST /skills/import 的解析与校验） ———
@@ -176,12 +175,12 @@ func ParsePackage(r io.ReaderAt, size int64) (*Package, error) {
 //
 // 写面不新开一条路：解析结果被折成与 `POST /skills` 相同的 `SkillWriteReq` 后调用 `WriteSkill`，
 // 这样"上传"与"手填"经过的闸门逐条相同。
-func (m *Plane) ImportPackage(ctx context.Context, r io.ReaderAt, size int64) (*dtocapability.SkillWriteResp, error) {
+func (m *Plane) ImportPackage(ctx context.Context, r io.ReaderAt, size int64) (*WriteResult, error) {
 	pkg, err := ParsePackage(r, size)
 	if err != nil {
-		return nil, acl.NewError(acl.ClassRequest, "definition_invalid", "技能包被拒绝："+err.Error(), err)
+		return nil, acp.NewError(acp.ClassRequest, "definition_invalid", "技能包被拒绝："+err.Error(), err)
 	}
-	req := dtocapability.SkillWriteReq{
+	req := WriteRequest{
 		"id":          rawJSONValue(pkg.ID),
 		"name":        rawJSONValue(pkg.Name),
 		"description": rawJSONValue(pkg.Description),

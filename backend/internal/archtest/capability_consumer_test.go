@@ -47,7 +47,7 @@ func TestDeclaredCapabilitiesHaveConsumers(t *testing.T) {
 	root := frontendRoot(t)
 	repoRoot := filepath.Dir(root)
 
-	declSrc, err := os.ReadFile(filepath.Join(repoRoot, "backend", "internal", "controller", "ctrsystem", "system.go"))
+	declSrc, err := os.ReadFile(filepath.Join(repoRoot, "backend", "internal", "service", "svcsystem", "capability.go"))
 	if err != nil {
 		t.Fatalf("读 capabilityDecls 失败: %v——守卫没有可检查的对象，不允许静默通过", err)
 	}

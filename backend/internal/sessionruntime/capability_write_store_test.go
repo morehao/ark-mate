@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	defn "github.com/morehao/ark-mate/internal/core/definition"
 	"github.com/morehao/ark-mate/internal/domain/skill"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
+	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -50,7 +50,7 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 	id := "db-skill"
 
 	// —— 新建：落行 + 入表 + 审计 + 物化 ——
-	resp, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t,
+	resp, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", skill.WriteRequest(rawObj(t,
 		"id", `"db-skill"`, "name", `"DB Skill"`, "body", `"# DB"`, "runtimes", `["rtx"]`,
 		"my_note", `"手写字段"`)), true)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 	}
 
 	// —— 覆盖写：只改出现的键，未知键与其余键保留；revision 递增；审计追加 ——
-	resp, err = r.Svc.Planes().Skills.WriteSkill(ctx, id, dtocapability.SkillWriteReq(rawObj(t, "name", `"改名了"`)), false)
+	resp, err = r.Svc.Planes().Skills.WriteSkill(ctx, id, skill.WriteRequest(rawObj(t, "name", `"改名了"`)), false)
 	if err != nil {
 		t.Fatalf("UpdateSkill: %v", err)
 	}
@@ -152,10 +152,10 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 	r, _ := storeCapRig(t)
 	ctx := context.Background()
 
-	if _, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t, "id", `"cas-skill"`, "name", `"orig"`)), true); err != nil {
+	if _, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", skill.WriteRequest(rawObj(t, "id", `"cas-skill"`, "name", `"orig"`)), true); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	repo, err := r.Svc.Planes().Definitions.DefinitionRepoFor(definition.CapSubSkills)
+	repo, err := r.Svc.Planes().Definitions.DefinitionRepoFor(defn.CapSubSkills)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,14 +201,14 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 	}
 
 	// 冲突到对外信封的映射（与文件载体时代同码同义）：40901 + definition_changed。
-	// 写面里 `conflict → definition.DefinitionChangedErr` 是一行直连，所以这里钉住那一行的产物即可。
-	rawErr := definition.DefinitionChangedErr(repo.Locator("cas-skill"))
+	// 写面里 `conflict → defn.DefinitionChangedErr` 是一行直连，所以这里钉住那一行的产物即可。
+	rawErr := defn.DefinitionChangedErr(repo.Locator("cas-skill"))
 	if !strings.Contains(rawErr.Error(), "definition_changed") ||
 		!strings.Contains(rawErr.Error(), "db:skill/cas-skill") {
 		t.Fatalf("冲突错误应带稳定码与定位串: %v", rawErr)
 	}
-	// 注意 `code.FromError` 的文案是**码的默认文案**（acl 细节不进信封），所以稳定码只在
-	// acl 错误自身上可见——面板按 40901 分流，用户看默认文案。
+	// 注意 `code.FromError` 的文案是**码的默认文案**（acp 细节不进信封），所以稳定码只在
+	// acp 错误自身上可见——面板按 40901 分流，用户看默认文案。
 	if ge, ok := code.FromError(rawErr).(gerror.Error); !ok || ge.Code != code.Conflict {
 		t.Fatalf("CAS 冲突应落 40901，got %v", code.FromError(rawErr))
 	}
@@ -223,7 +223,7 @@ func TestStoreWriteFaceGateRejectsWithoutWrite(t *testing.T) {
 	ctx := context.Background()
 
 	// skill：非法 scope。
-	_, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t, "id", `"bad-scope"`, "scope", `"bogus"`)), true)
+	_, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", skill.WriteRequest(rawObj(t, "id", `"bad-scope"`, "scope", `"bogus"`)), true)
 	if err == nil || !strings.Contains(err.Error(), "scope") || !strings.Contains(err.Error(), "definition_invalid") {
 		t.Fatalf("非法 scope 应被闸门以 definition_invalid 拒绝: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestStoreWriteFaceGateRejectsWithoutWrite(t *testing.T) {
 	}
 
 	// mcp：stdio 命令不是绝对路径（同一道闸门，MCP 侧最常踩的一条）。
-	_, err = r.Svc.Planes().Mcp.WriteServer(ctx, "", dtocapability.McpWriteReq(rawObj(t,
+	_, err = r.Svc.Planes().Mcp.WriteServer(ctx, "", dommcp.WriteRequest(rawObj(t,
 		"id", `"bad-mcp"`, "transport", `"stdio"`, "command", `"npx"`)), true)
 	if err == nil || !strings.Contains(err.Error(), "绝对路径") {
 		t.Fatalf("相对命令应被闸门拒绝: %v", err)
@@ -259,7 +259,7 @@ func TestStoreSkillEnabledTogglesOnlyOneKey(t *testing.T) {
 	r, root := storeCapRig(t)
 	ctx := context.Background()
 
-	if _, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t,
+	if _, err := r.Svc.Planes().Skills.WriteSkill(ctx, "", skill.WriteRequest(rawObj(t,
 		"id", `"toggle"`, "name", `"T"`, "body", `"# T"`, "my_note", `"留着"`)), true); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestStoreMcpWriteFaceRoundTrip(t *testing.T) {
 	r, _ := storeCapRig(t)
 	ctx := context.Background()
 
-	resp, err := r.Svc.Planes().Mcp.WriteServer(ctx, "", dtocapability.McpWriteReq(rawObj(t,
+	resp, err := r.Svc.Planes().Mcp.WriteServer(ctx, "", dommcp.WriteRequest(rawObj(t,
 		"id", `"fs"`, "transport", `"stdio"`, "command", `"/usr/bin/env"`, "args", `["node"]`,
 		"secret_env", `{"TOKEN":"store:fs/token"}`)), true)
 	if err != nil {
@@ -385,7 +385,7 @@ func TestStoreWriteFaceRequiresNoCapabilityDir(t *testing.T) {
 	if dir := r.Svc.Planes().Definitions.Dir(); dir != "" {
 		t.Fatalf("本夹具刻意不配能力目录，got %q", dir)
 	}
-	if _, err := r.Svc.Planes().Skills.WriteSkill(context.Background(), "", dtocapability.SkillWriteReq(rawObj(t, "id", `"no-dir"`)), true); err != nil {
+	if _, err := r.Svc.Planes().Skills.WriteSkill(context.Background(), "", skill.WriteRequest(rawObj(t, "id", `"no-dir"`)), true); err != nil {
 		t.Fatalf("DB 模式没配目录也该能写: %v", err)
 	}
 }

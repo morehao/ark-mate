@@ -38,7 +38,7 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 	// ③′ 读模型本体必须还在域里（判据失锚的最坏表现是"守卫照样绿、什么都不检查"）。
 	domBody := dirProductionBody(t, filepath.Join(root, "internal", "domain", "session"))
 	for _, a := range []string{
-		"func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]dtosession.SessionResp, error)",
+		"func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]SessionItem, error)",
 		// 归属过滤的两条语义（ADR-6）与"持锁折叠、释放锁后补展示字段"的分界。
 		"func workspaceMatches(recWorkspaceID, wantID, defaultID string) bool",
 		"pl.fillWorkspaceDisplay(out)",
@@ -58,56 +58,68 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 	// 第四十三刀 +2：`SearchMessages` / `UsageSummary`——两条都是纯转发到域平面（检索的实现与
 	// transcript 目录绑死、用量的校验与分组口径全在 `domain/session`），声明与转发随之删除。
 	// 它们的控制器**不在** `ctrsession` 里，所以下面的"控制器取用路径"要扫三个文件。
-	readModels := []string{"ListSessions", "SearchSessions", "ListRuns", "ListQueuedInputs",
-		"SearchMessages", "UsageSummary"}
-	ctrSrcAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go"))) +
-		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsearch", "search.go"))) +
-		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrusage", "usage.go")))
+	// v3.1 §3.2.1：控制器不得 import `internal/domain`，所以读模型有了**窄用例接口**
+	// `svcsession.ReadSvc`（会话列表/检索/轮次/待投递）+ `svcsearch` / `svcusage`。
+	// 本体仍在域平面；这里两侧一起钉：域里有实体、用例接口有声明、控制器只走接口。
+	readModels := []struct {
+		plane, iface, call string
+	}{
+		{"ListSessions", "List(", "h.read.List("},
+		{"SearchSessions", "Search(", "h.read.Search("},
+		{"ListRuns", "Runs(", "h.read.Runs("},
+		{"ListQueuedInputs", "QueuedInputs(", "h.read.QueuedInputs("},
+		{"SearchMessages", "Messages(", "h.svc.Messages("},
+		{"UsageSummary", "Summary(", "h.svc.Summary("},
+	}
+	ctrSrcAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsession", "session.go"))) +
+		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsearch", "search.go"))) +
+		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrusage", "usage.go")))
 	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
-	ifaceAll := interfaceBodyOf(t, readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsession", "session.go")), "type SessionSvc interface {")
+	readIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsession", "read.go")))
+	searchIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsearch", "search.go")))
+	usageIface := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcusage", "usage.go")))
 	for _, m := range readModels {
-		if !strings.Contains(domBody, "func (pl *Plane) "+m+"(") {
-			t.Errorf("域平面里找不到 `func (pl *Plane) %s(`：读模型本体必须只有一份且在域里。", m)
+		if !strings.Contains(domBody, "func (pl *Plane) "+m.plane+"(") {
+			t.Errorf("域平面里找不到 `func (pl *Plane) %s(`：读模型本体必须只有一份且在域里。", m.plane)
 		}
-		if strings.Contains(ifaceAll, m+"(") {
-			t.Errorf("`SessionSvc` 里又声明了读模型 `%s(`：进用例层只能是一行转发（被判定为骚操作的形状）。", m)
+		if !strings.Contains(readIface+searchIface+usageIface, m.iface) {
+			t.Errorf("用例层找不到 `%s`：控制器只能经用例接口取，而该接口必须声明这个方法。", m.iface)
 		}
-		if strings.Contains(mgrAll, "func (s *Service) "+m+"(") {
-			t.Errorf("`internal/sessionruntime` 里又出现 `func (s *Service) %s(`：那一行转发已按 P4b 口径删除。", m)
+		if strings.Contains(mgrAll, "func (s *Service) "+m.plane+"(") {
+			t.Errorf("`internal/sessionruntime` 里又出现 `func (s *Service) %s(`：那一行转发已按 P4b 口径删除。", m.plane)
 		}
-		if !strings.Contains(ctrSrcAll, "h.plane."+m+"(") {
-			t.Errorf("`ctrsession`/`ctrsearch`/`ctrusage` 三个控制器里都没有 `h.plane.%s(` 调用点："+
-				"读模型要从域平面取，不能走转发。", m)
+		if !strings.Contains(ctrSrcAll, m.call) {
+			t.Errorf("控制器里没有 `%s` 调用点：读模型要经用例接口取（v3.1 §3.2.1）。", m.call)
 		}
 	}
 
-	// ① 用例层不得把读模型收成转发。
+	// ① `SessionSvc` 不得收读模型（它们进的是 `ReadSvc`）。
 	iface := interfaceBodyOf(t, readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsession", "session.go")), "type SessionSvc interface {")
-	if strings.Contains(iface, "ListSessions(") {
-		t.Error("`SessionSvc` 里又声明了 `ListSessions(`：它是**读模型**（无校验、无错误码、无装配，" +
-			"实现与域锁绑死），进用例层只能是一行转发——那正是被判定为骚操作的形状。" +
-			"控制器直接经域平面取（`ctrsession.plane`）。")
+	for _, m := range []string{"ListSessions(", "SearchSessions(", "ListRuns(", "ListQueuedInputs("} {
+		if strings.Contains(iface, m) {
+			t.Errorf("`SessionSvc` 里又声明了 `%s`：读模型归 `ReadSvc`，两个接口各说各话。", m)
+		}
 	}
 	if !strings.Contains(iface, "CreateSession(") {
 		t.Errorf("`SessionSvc` 的接口体里找不到 `CreateSession(`：判据失锚（接口被改名/搬走了？）。实际体：\n%s", iface)
 	}
 
-	// ② manager 侧不得再有这份实现（TODO(P4b) 的转发已删）。
-	mgrBody := dirProductionBody(t, filepath.Join(root, "internal", "sessionruntime"))
-	if strings.Contains(mgrBody, "func (s *Service) ListSessions(") {
+	// ② manager 侧不得再有这份实现。
+	if strings.Contains(mgrAll, "func (s *Service) ListSessions(") {
 		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) ListSessions(`：它是一行转发，" +
 			"读模型的实现只有一份且在域里（P4a 正文第十一刀）。")
 	}
 
-	// ③ 控制器的取用路径：判据钉在 `List` 的**函数体**上（同包中间函数喂不绿它）。
-	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go")))
-	if !regexp.MustCompile(`plane\s+\*session\.Plane`).MatchString(ctrSrc) {
-		t.Error("`ctrsession` 里找不到 `plane *session.Plane` 字段：读模型必须由域平面提供" +
-			"（容空白匹配——gofmt 会把字段对齐成多空格，定长写法会假绿）。")
+	// ③ 控制器只持用例接口。
+	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsession", "session.go")))
+	if strings.Contains(ctrSrc, "*session.Plane") {
+		t.Error("`ctrsession` 里又出现 `*session.Plane`：控制器不 import domain（v3.1 §3.2.1 规则 1）。")
+	}
+	if !regexp.MustCompile(`read\s+svcsession\.ReadSvc`).MatchString(ctrSrc) {
+		t.Error("`ctrsession` 里找不到 `read svcsession.ReadSvc` 字段（容空白匹配）。")
 	}
 	body := funcBodyOf(t, ctrSrc, "func (h *sessionCtr) List(")
-	if !strings.Contains(body, "h.plane.ListSessions(") {
-		t.Errorf("`sessionCtr.List` 的函数体里找不到 `h.plane.ListSessions(`："+
-			"读模型要么走域平面、要么走一层转发，没有第三条路。实际体：\n%s", body)
+	if !strings.Contains(body, "h.read.List(") {
+		t.Errorf("`sessionCtr.List` 的函数体里找不到 `h.read.List(`。实际体：\n%s", body)
 	}
 }

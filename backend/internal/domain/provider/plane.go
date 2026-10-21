@@ -7,11 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/credentials"
-	goruntime "github.com/morehao/ark-mate/pkg/runtime"
+	credval "github.com/morehao/ark-mate/internal/core/credential"
+
+	src "github.com/morehao/ark-mate/internal/core/credential"
+	goruntime "github.com/morehao/ark-mate/internal/runtime"
 )
 
 // Plane 供应商域的**有状态主体**：持有内存档案表、档案目录、库句柄、注册表与凭据机制。
@@ -23,9 +22,9 @@ type Plane struct {
 	mu          sync.Mutex
 	providers   map[string]*Def
 	providerDir string
-	st          *store.Store
+	st          ProviderStore
 	reg         *goruntime.Registry
-	creds       *credential.Store
+	secrets     Secrets
 
 	// effect 写面回执（读会话与代际裁决，属编排侧）。nil = 没有编排器（demo/migrate/纯列表）。
 	effect EffectFn
@@ -47,7 +46,7 @@ type Plane struct {
 // 为什么是端口：它要 `sessions` 与 `generation` 的裁决（编排侧的东西），而写面只是把结论塞进
 // 响应。`nil` 是**合法取值**（没有编排器时"哪些会话会顺延"这个问题本身不成立），
 // 与 `providerEffect` 今天的返回 nil 逐字同义。
-type EffectFn func(providerID string) *dtoprovider.ProviderEffect
+type EffectFn func(providerID string) *ProviderEffect
 
 // DefaultModelProvider 平台默认模型落在哪条供应商上（`ok=false` = 没有默认模型）。
 //
@@ -57,18 +56,18 @@ type DefaultModelProvider func(ctx context.Context) (providerID string, ok bool)
 
 // NewPlane 造一个供应商域。`reg` 与 `creds` 必须由装配期注入**同一个实例**（两份 = 两个事实源：
 // 注册表决定"这条档案能不能被交付"，凭据机制决定"密钥从哪一层来"）。
-func NewPlane(reg *goruntime.Registry, creds *credential.Store) *Plane {
+func NewPlane(reg *goruntime.Registry, secrets Secrets) *Plane {
 	return &Plane{
 		providers: make(map[string]*Def),
 		reg:       reg,
-		creds:     creds,
+		secrets:   secrets,
 		catalog:   newConfigCatalog(),
 	}
 }
 
 // SetStore 装配期登记库句柄（**必须在装配期调用**：构造时按值传一个当时的 `st` 会永远停在
 // nil，而表现是"该走库的走了文件"——静默）。
-func (pl *Plane) SetStore(st *store.Store) { pl.st = st }
+func (pl *Plane) SetStore(st ProviderStore) { pl.st = st }
 
 // SetEffect 装配期登记写面回执（没有编排器时不登记 → 回执为 nil，与今天同义）。
 func (pl *Plane) SetEffect(fn EffectFn) { pl.effect = fn }
@@ -98,9 +97,6 @@ func (pl *Plane) Snapshot(id string) (*Def, bool) {
 	return &c, true
 }
 
-// CredentialDoc 托管凭据文档（测试与诊断面读它的现状；**只读**，写入一律走本域的方法）。
-func (pl *Plane) CredentialDoc() *credentials.Doc { return pl.credentialDoc() }
-
 // DeleteForTest 从内存表里摘掉一条档案（**只给测试**：模拟"库里删了、内存还没同步"这类竞态）。
 //
 // 为什么不给生产用：档案的删除有完整路径（`DeleteProvider`：写库 + 摘表 + 撤镜像），
@@ -117,11 +113,11 @@ func (pl *Plane) DeleteForTest(id string) {
 //
 // 那一行的 `nil` 守卫是**类型擦除的产物、不是第二份逻辑**：调用方可能拿到 nil 档案
 // （map 查找的结果），而机制层不认识本域的 `Def`，守卫只能留在这里。
-func (pl *Plane) KeyFor(ctx context.Context, d *Def) credential.ProviderKey {
+func (pl *Plane) KeyFor(ctx context.Context, d *Def) src.ProviderKey {
 	if d == nil {
-		return credential.ProviderKey{}
+		return src.ProviderKey{}
 	}
-	return pl.creds.ResolveProviderKey(ctx, d.ID, d.KeyRef)
+	return pl.secrets.Resolve(ctx, d.ID, d.KeyRef)
 }
 
 // ProviderKeyReady 该供应商当前是否有可用密钥；false 时 reason 是可执行的原因。
@@ -147,15 +143,11 @@ func (pl *Plane) ProviderKeyReady(ctx context.Context, providerID string) (bool,
 	return false, "尚未设置密钥"
 }
 
-func (pl *Plane) mirrorSet(ref, value string) error {
-	return credential.MirrorSet(pl.creds.Doc(), ref, value)
-}
+func (pl *Plane) mirrorSet(ref, value string) error { return pl.secrets.MirrorSet(ref, value) }
 
-func (pl *Plane) mirrorDelete(ref string) error {
-	return credential.MirrorDelete(pl.creds.Doc(), ref)
-}
+func (pl *Plane) mirrorDelete(ref string) error { return pl.secrets.MirrorDelete(ref) }
 
-func (pl *Plane) credentialDoc() *credentials.Doc { return pl.creds.Doc() }
+func (pl *Plane) hasCredentialDoc() bool { return pl.secrets.HasDoc() }
 
 // registeredRuntimeIDs 已注册 runtime id（升序，保证响应稳定）。
 //
@@ -173,7 +165,7 @@ func (pl *Plane) registeredRuntimeIDs() []string {
 // Def provider 档案的内存形态。
 //
 // 字段的语义与 v11–v20 的历史见 `providerFile`（磁盘形状）与 `Def.KeyRef` 的注释；
-// 导出是因为 `resource_sync.go`（运行期同步面）与 `service/svcprovider`（自检；P4a 起从
+// 导出是因为 `resource_sync.go`（运行期同步面）与 `service/svcmodel`（自检；P4a 起从
 // 执行面的旧实现搬进用例层）都要构造/拷贝它。
 type Def struct {
 	ID       string `json:"id"`
@@ -190,7 +182,7 @@ type Def struct {
 	//
 	// 它必须摆到读面上：`继承的进程环境 > 托管` 这个顺序意味着**进程环境里的同名变量会遮住
 	// 面板里保存的那一条**——用户轮换了密钥却毫无变化，且没有任何报错（2026-10-10 实测）。
-	KeySource credentials.Source `json:"-"`
+	KeySource credval.Source `json:"-"`
 	// KeyEnvKey 生效值来自哪个环境变量名（仅 `KeySource == env` 时有值；诊断面展示用）。
 	KeyEnvKey string `json:"-"`
 	// KeyRef 托管文档里的键（**派生量**，= `providers/<id>`）。

@@ -9,14 +9,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/infra/dsh"
+
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // TestSyntheticAdapterIsFirstClass 「adapter 层还在」这句话的**可执行证据**。
@@ -36,10 +38,10 @@ import (
 // 于是那句口径从**声明**变成**被执行过的事实**。
 func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 	t.Helper()
-	if len(runtime.AllBuiltinSpecs()) == 0 {
+	if len(dsh.Specs()) == 0 {
 		t.Fatal("内置清单为空：本条判据的对照面没了")
 	}
-	for _, s := range runtime.AllBuiltinSpecs() {
+	for _, s := range dsh.Specs() {
 		if s.ID == runtimetest.ID {
 			t.Fatalf("合成底座 %s 不该出现在内置清单里——一旦出现，它就变成「第二个内置底座」，"+
 				"「框架没见过它」这个唯一的证明力就没了", runtimetest.ID)
@@ -54,7 +56,7 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 	t.Setenv("STUB_ACP_ENV_LOG", envLog)
 	reg, syncer := runtimetest.NewRegistry(stubACPSpec(t).Launch)
 
-	// ① 隔离：装机期投影（生产里这一步在 `internal/app` 的装配最前面）。
+	// ① 隔离：装机期投影（生产里这一步在 `internal/bootstrap/app` 的装配最前面）。
 	home := t.TempDir()
 	applied := reg.ApplyIsolationEnv(home)
 	if !reflect.DeepEqual(applied, []string{runtimetest.ID}) {
@@ -140,7 +142,7 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 	}
 	// 反向：dsh 的形态（JSON 数组）**不在**这份注册表里——它由 dsh 自己登记。
 	// v25：第一段是**派生路由键**（`mate-` + 平台供应商 id），不再是平台 id 本身。
-	if v, err := provider.ModelValueFor(runtime.AllBuiltinRegistry(), runtime.DefaultBuildRuntime, "p", "m"); err != nil ||
+	if v, err := provider.ModelValueFor(dsh.Registry(), runtime.DefaultBuildRuntime, "p", "m"); err != nil ||
 		v != `["mate-p","m"]` {
 		t.Fatalf("内置底座的形态应由它的 adapter 声明，实际 %q err=%v", v, err)
 	}

@@ -9,15 +9,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/infra/dsh"
+
 	"github.com/morehao/ark-mate/internal/domain/session"
 
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/mcp"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/mcp"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— M3-6/M3-7：轮次边界的代际迁移、缩权与代际池 ———
@@ -61,7 +63,7 @@ func newGenRigOn(t *testing.T, runtimeID string) *genRig {
 	spec.McpTransports = []string{"stdio"} // 桩只承载 stdio（保守形态）
 	reg := runtime.NewRegistry(spec)
 	// 与产品装配同形：桩 Spec 保留自己的 Launch（桩命令），只把执行半场登记进来。
-	runtime.RegisterBuiltinPorts(reg)
+	dsh.New().RegisterPorts(reg)
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
@@ -326,7 +328,7 @@ func TestGenerationMigrationDefersWhileBusy(t *testing.T) {
 	registered := make(chan struct{})
 	go func() {
 		r.orch.elic.RegisterAndWait(regCtx, convID,
-			acl.ElicitationRequest{Mode: "form", Message: "probe"},
+			acp.ElicitationRequest{Mode: "form", Message: "probe"},
 			func(interaction.ElicitationItem) { close(registered) })
 	}()
 	<-registered
@@ -452,7 +454,7 @@ func TestGenerationPool(t *testing.T) {
 	if err == nil {
 		t.Fatal("达上限且都有引用时应拒绝新建代际")
 	}
-	ae, ok := acl.As(err)
+	ae, ok := acp.As(err)
 	if !ok || ae.Code != "generation_limit_reached" {
 		t.Fatalf("错误应带码 generation_limit_reached，got %v", err)
 	}

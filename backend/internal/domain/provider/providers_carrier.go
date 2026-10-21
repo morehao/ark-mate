@@ -6,11 +6,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/logging"
+	"github.com/morehao/ark-mate/internal/core/credential"
+	defn "github.com/morehao/ark-mate/internal/core/definition"
+
+	"github.com/morehao/ark-mate/internal/infra/logging"
 	"github.com/morehao/golib/glog"
 )
 
@@ -167,8 +168,8 @@ func (pl *Plane) loadProvidersFromStore(ctx context.Context, dir string) {
 }
 
 // providerColumnsOf 把内存档案投影成 store 的列载荷（sqlite 载体的提交物）。
-func providerColumnsOf(d *Def) store.ProviderColumns {
-	return store.ProviderColumns{
+func providerColumnsOf(d *Def) model.ProviderColumns {
+	return model.ProviderColumns{
 		ID: d.ID, Name: d.Name, Protocol: d.Protocol, BaseURL: d.BaseURL, Note: d.Note,
 	}
 }
@@ -183,12 +184,12 @@ func (pl *Plane) persistProviderDefinition(ctx context.Context, d *Def) error {
 		return pl.persistProvidersFileWith(d)
 	}
 	expected := d.Revision
-	ok, err := pl.st.UpsertProviderDefinition(ctx, providerColumnsOf(d), expected, definition.DefinitionWriteActor)
+	ok, err := pl.st.UpsertProviderDefinition(ctx, providerColumnsOf(d), expected, defn.DefinitionWriteActor)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return definition.DefinitionChangedErr(pl.ProviderLocator(d.ID))
+		return defn.DefinitionChangedErr(pl.ProviderLocator(d.ID))
 	}
 	d.Revision = expected + 1
 	d.UpdatedAt = time.Now().UTC()
@@ -207,7 +208,7 @@ func (pl *Plane) removeProviderDefinition(ctx context.Context, id string, expect
 	if pl.st == nil {
 		return true, nil, pl.persistProvidersFile()
 	}
-	return pl.st.DeleteProviderDefinitionIfUnreferenced(ctx, id, expectedRev, definition.DefinitionWriteActor)
+	return pl.st.DeleteProviderDefinitionIfUnreferenced(ctx, id, expectedRev, defn.DefinitionWriteActor)
 }
 
 // providerFileExists `<ProviderDir>/providers.json` 是否存在（doctor 与迁移提示用）。

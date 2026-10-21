@@ -23,7 +23,7 @@ func TestWorkspacePathUpdateKeepsIdentity(t *testing.T) {
 	root := backendRoot(t)
 
 	// ① 写面**只**改 path/updated_at，且函数体里零 `sessions` 写。
-	storeSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "store", "workspace.go")))
+	storeSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "persistence", "store", "workspace.go")))
 	relocate, ok := goFuncBody(storeSrc, "func (s *Store) RelocateWorkspace(")
 	if !ok {
 		t.Fatalf("`store/workspace.go` 里找不到 `RelocateWorkspace`（改名了？本守卫 fail-closed）")
@@ -41,18 +41,14 @@ func TestWorkspacePathUpdateKeepsIdentity(t *testing.T) {
 			"吞掉它 = get-or-create，而「改路径成功」与「那个目录已经是别人的」是两件必须能分辨的事")
 	}
 
-	dao := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "dao", "workspace.go")))
-	setPath, ok := goFuncBody(dao, "func (d *WorkspaceDao) SetPath(")
-	if !ok {
-		t.Fatalf("`dao/workspace.go` 里找不到 `SetPath`")
-	}
-	// 只写两列：id 是身份，改它等于让该工作空间下的会话归属悬空。
-	if !strings.Contains(setPath, `"path": path`) {
-		t.Fatalf("`SetPath` 没有写 `path`：它到底改了什么？")
+	// 写面那一句（v3.3 起在 store 里：DAO 只剩列词汇，`RelocateWorkspace` 用 UpdateMap 写两列）。
+	// 只写 `path` 与 `updated_at`：id 是身份，改它等于让该工作空间下的会话归属悬空。
+	if !strings.Contains(relocate, `"path":`) || !strings.Contains(relocate, "canonicalPath") {
+		t.Fatalf("`RelocateWorkspace` 没有写 `path`: 它到底改了什么？")
 	}
 	for _, bad := range []string{`"id":`, `"is_default":`, `"default_capability_json":`} {
-		if strings.Contains(setPath, bad) {
-			t.Errorf("`SetPath` 里出现了 %s：改路径只该动 `path` 与 `updated_at`——\n"+
+		if strings.Contains(relocate, bad) {
+			t.Errorf("`RelocateWorkspace` 的写面出现了 %s：改路径只该动 `path` 与 `updated_at`——\n"+
 				"顺带改 id 会让该工作空间下的会话归属悬空（界面上表现为「会话跑到别的分组去了」），"+
 				"改 is_default 会破坏「有且只有一个默认」的不变量", bad)
 		}
@@ -67,8 +63,10 @@ func TestWorkspacePathUpdateKeepsIdentity(t *testing.T) {
 	if !strings.Contains(patch, "RelocateWorkspace(") {
 		t.Fatalf("`PatchWorkspace` 没有走 `RelocateWorkspace(`：改路径的语义只能有一处实现")
 	}
-	if !strings.Contains(patch, "store.ErrWorkspacePathTaken") {
-		t.Fatalf("`PatchWorkspace` 没有处理 `store.ErrWorkspacePathTaken`：冲突会被当成成功")
+	// v3.2 刀 6 起错误分类走端口（`IsPathTaken`），领域层不再认识 `store.Err*`：
+	// 判据钉"冲突被显式分类"，而不是钉某个具体拼写。
+	if !strings.Contains(patch, "IsPathTaken(") && !strings.Contains(patch, "store.ErrWorkspacePathTaken") {
+		t.Fatalf("`PatchWorkspace` 没有处理路径占用冲突（`IsPathTaken(`）：冲突会被当成成功")
 	}
 	if strings.Contains(patch, "workspace_path_immutable") {
 		t.Fatalf("`PatchWorkspace` 仍然无条件拒绝改路径（`workspace_path_immutable`）：" +

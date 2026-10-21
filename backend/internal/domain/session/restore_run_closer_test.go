@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/object/objid"
 )
 
 // 恢复路径的收口（v27 + S7 / ADR-8 的后半）：崩溃残轮在 `runs` 表里不再永久停在 `running`。

@@ -10,12 +10,10 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
-	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/drivers/transfer"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
@@ -51,7 +49,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 
 	// ① 写面：带密钥新建 → 落进那一列，回执不回显明文。
 	key := secret
-	resp, err := svc.planes.Providers.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	resp, err := svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: "write-face", Protocol: "openai", APIKey: &key,
 	})
 	if err != nil {
@@ -69,7 +67,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 
 	// ② 覆盖写：同一列被换成新值，旧值不留在任何地方。
 	key2 := "sk-rotated-value"
-	if _, err := svc.planes.Providers.UpdateProvider(ctx, "write-face", dtoprovider.ProviderPatchReq{APIKey: &key2}); err != nil {
+	if _, err := svc.planes.Providers.UpdateProvider(ctx, "write-face", provider.PatchRequest{APIKey: &key2}); err != nil {
 		t.Fatal(err)
 	}
 	if hits := secretHitsAnywhere(t, st, secret); len(hits) != 0 {
@@ -81,7 +79,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, provider.ProvidersFileName), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
+	if _, err := transfer.ImportProviderFile(ctx, st, dir, transfer.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		t.Fatalf("provider.ImportProviderFile: %v", err)
 	}
 	row, found, _ := st.GetProviderDefinition(ctx, "legacy")
@@ -191,7 +189,7 @@ func TestModelListOrderIsProviderThenModelID(t *testing.T) {
 	r := newModelRig(t)
 
 	// 三个供应商（id 升序 p1 < p2 < p3），每个下面按**平台 id 逆序**插入若干条。
-	rows := []store.ModelColumns{
+	rows := []model.ModelColumns{
 		{ID: "zzz", ProviderID: "p1", Model: "m-a", Name: "A", InputModalities: "text"},
 		{ID: "mmm", ProviderID: "p1", Model: "m-b", Name: "B", InputModalities: "text"},
 		{ID: "aaa", ProviderID: "p1", Model: "m-c", Name: "C", InputModalities: "text"},
@@ -232,7 +230,7 @@ func TestModelListOrderIsProviderThenModelID(t *testing.T) {
 }
 
 // modelPairs 把清单折成 `provider/model` 串（断言失败时的可读输出）。
-func modelPairs(list []dtomodel.ModelResp) []string {
+func modelPairs(list []provider.ModelItem) []string {
 	out := make([]string, 0, len(list))
 	for i := range list {
 		out = append(out, list[i].ProviderID+"/"+list[i].Model)

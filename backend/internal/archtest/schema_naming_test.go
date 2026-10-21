@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/dbclient"
+	"github.com/morehao/ark-mate/internal/infra/dbclient"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 	"gorm.io/gorm"
 
 	// 本守卫要开一个临时库跑真实迁移，而 `dbclient.Open` → `glog.NewLogger` 需要 zap driver：
-	// 日志出口归装配根（`cmd/mate` 的匿名引入），test 二进制不含它（同 `internal/store` 的做法）。
+	// 日志出口归装配根（`cmd/mate` 的匿名引入），test 二进制不含它（同 `internal/persistence/store` 的做法）。
 	_ "github.com/morehao/golib/glog/driver/zap"
 )
 
@@ -71,7 +71,7 @@ func migratedSchemaDB(t *testing.T) *gorm.DB {
 
 // migrateToLatestSchema 造一个临时库、跑完整迁移，返回其中的全部具名对象。
 //
-// 用**真实迁移**而不是建表 SQL：迁移内核是 schema 的唯一事实源（`internal/store/migrate.go`
+// 用**真实迁移**而不是建表 SQL：迁移内核是 schema 的唯一事实源（`internal/persistence/store/migrate.go`
 // 的 `schemaMigrations`），A1/A2 要判的就是它跑完之后的样子。
 func migrateToLatestSchema(t *testing.T) []schemaIdentifier {
 	t.Helper()
@@ -133,11 +133,11 @@ func migrateToLatestSchema(t *testing.T) []schemaIdentifier {
 	return out
 }
 
-// TestIdentifiersFollowLexicalForm 守卫 A1（设计 D1）：真实 schema 的每个标识符 + `internal/model`
+// TestIdentifiersFollowLexicalForm 守卫 A1（设计 D1）：真实 schema 的每个标识符 + `internal/persistence/model`
 // 里每个 gorm `column:` 标签都必须匹配 `^[a-z][a-z0-9_]*$`。
 //
 // 两侧都要查，是因为它们是**两份手工同步的约定**（AGENTS.md「改事件 type / 数据 schema 须同步
-// `internal/model` 实体与 `internal/store` 迁移内核」）：DDL 那侧由真实 schema 兜住，
+// `internal/persistence/model` 实体与 `internal/persistence/store` 迁移内核」）：DDL 那侧由真实 schema 兜住，
 // gorm 标签那侧只能扫源码。只查一侧的后果是另一半静默漂移——`column:TargetRunID` 这种标签
 // 编译期无感，`ORDER BY`/`SELECT` 拼出来才报错，而报错的位置离写它的地方很远。
 //
@@ -156,8 +156,8 @@ func TestIdentifiersFollowLexicalForm(t *testing.T) {
 		}
 	}
 
-	// gorm 标签一侧：`internal/model/*.go` 的 `column:<名字>`。
-	dir := filepath.Join(backendRoot(t), "internal", "model")
+	// gorm 标签一侧：`internal/persistence/model/*.go` 的 `column:<名字>`。
+	dir := filepath.Join(backendRoot(t), "internal", "persistence", "model")
 	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil || len(paths) == 0 {
 		t.Fatalf("扫不到 %s/*.go: %v（fail-closed）", dir, err)

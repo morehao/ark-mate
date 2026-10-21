@@ -28,7 +28,7 @@ import (
 
 // sessionHistoryAnchors 用例层必须有的实现锚。
 var sessionHistoryAnchors = []string{
-	"func NewHistory(st *store.Store, plane *session.Plane, bus *eventbus.Bus) HistorySvc",
+	"func NewHistory(st EventReader, plane *session.Plane, bus *eventbus.Bus) HistorySvc",
 	"var _ HistorySvc = (*History)(nil)",
 	"func (h *History) SessionHistory(ctx context.Context, id string, q dtosession.HistoryQuery) (*dtosession.SessionHistoryResp, error)",
 	// 位次哨兵：缺省 after = `-1`（早于一切事件），而 `0` 是合法位次——
@@ -78,20 +78,22 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	}
 
 	// ③ 用例实例必须在**控制器的构造函数里**造（判据钉在函数体上，不是整文件）。
-	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go")))
-	if !regexp.MustCompile(`func NewSessionCtr\(svc svcsession\.SessionSvc,[\s\S]*?src svcsession\.InteractionSource,[\s\S]*?deliver svcsession\.InteractionDelivery,[\s\S]*?metaDeps svcsession\.MetaDeps\) SessionCtr`).MatchString(ctrSrc) {
-		t.Error("`ctrsession.NewSessionCtr` 的签名变了：它必须拿到**依赖事实**（会话面过渡端口 + 库句柄 + " +
-			"会话域平面 + 事件总线 + 交互事实来源 + 投递口 + 元数据三份依赖），四个用例都在函数体里造。")
+	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsession", "session.go")))
+	if !regexp.MustCompile(`func NewSessionCtr\(svc svcsession\.SessionSvc, hist svcsession\.HistorySvc`).MatchString(ctrSrc) {
+		t.Error("`ctrsession.NewSessionCtr` 的签名变了：v3.1 起它只收**已构造的用例接口**。")
 	}
 	body := funcBodyOf(t, ctrSrc, "func NewSessionCtr(")
-	if !strings.Contains(body, "svcsession.NewHistory(") {
-		t.Errorf("`NewSessionCtr` 的函数体里找不到 `svcsession.NewHistory(`：用例实例必须在控制器里造"+
-			"（交给 `sessionCtr` 的必须是**用例**，不是域平面与总线的散装组合）。实际体：\n%s", body)
+	asmServices := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
+	if !strings.Contains(asmServices, "svcsession.NewHistory(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewHistory(`：" +
+			"用例实例必须在唯一装配根造。")
 	}
-	routesSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "routes_session.go")))
-	if !strings.Contains(routesSrc, "ports.Store, ports.SessionPlane, ports.Bus") {
-		t.Error("`internal/router/routes_session.go` 没有把三个依赖事实交给 `NewSessionCtr`：" +
-			"漏交会让历史读面的库句柄/平面/总线为 nil，取数时 nil panic。")
+	asmCtrls := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "controllers.go")))
+	if !strings.Contains(asmCtrls, "ctrsession.NewSessionCtr(s.Session, s.SessionHistory") {
+		t.Error("`internal/bootstrap/assembly/controllers.go` 没有把已构造的会话面用例交给 `NewSessionCtr`。")
+	}
+	if strings.Contains(body, "svcsession.New") {
+		t.Error("`NewSessionCtr` 的函数体里又出现 `svcsession.New`：控制器只收接口，不再造用例。")
 	}
 
 	// ——— P4a 正文第四十刀：会话**详情读面**（详情 + 三份交互快照）也在这个包里 ———
@@ -144,18 +146,9 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		}
 	}
 	// ③′ 用例实例同样必须在控制器构造函数里造，且装配点必须交出**事实来源**。
-	if !strings.Contains(body, "svcsession.NewDetail(") {
-		t.Errorf("`NewSessionCtr` 的函数体里找不到 `svcsession.NewDetail(`：详情读面用例必须在控制器里造"+
-			"（它要吃域平面 + 交互事实来源两个依赖事实）。实际体：\n%s", body)
-	}
-	if !strings.Contains(routesSrc, "ports.InteractionSource") {
-		t.Error("`internal/router/routes_session.go` 没有把 `ports.InteractionSource` 交给 `NewSessionCtr`：" +
-			"漏交会让交互事实来源为 nil，三份快照取数时 nil 接口调方法直接 panic。")
-	}
-	if !regexp.MustCompile(`InteractionSource\s+svcsession\.InteractionSource`).MatchString(
-		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))) {
-		t.Error("`router.Ports` 里找不到 `InteractionSource svcsession.InteractionSource`（容空白）：" +
-			"装配点交的该是这三条窄端口事实，而不是执行面本身（`Orchestrator` 的私有状态）。")
+	if !strings.Contains(asmServices, "svcsession.NewDetail(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewDetail(`：" +
+			"详情读面用例必须在唯一装配根造。")
 	}
 
 	// ——— P4a 正文第四十一刀：交互**动作面**三条（权限决策 / 提问决策 / 记忆撤销）也在这个包里 ———
@@ -221,17 +214,9 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		}
 	}
 	// ③″ 用例实例同样在控制器构造函数里造，且装配点必须交出投递口。
-	if !strings.Contains(body, "svcsession.NewInteraction(") {
-		t.Errorf("`NewSessionCtr` 的函数体里找不到 `svcsession.NewInteraction(`：动作面用例必须在控制器里造。实际体：\n%s", body)
-	}
-	if !strings.Contains(routesSrc, "ports.InteractionDelivery") {
-		t.Error("`internal/router/routes_session.go` 没有把 `ports.InteractionDelivery` 交给 `NewSessionCtr`：" +
-			"漏交会让投递口为 nil，决策时 nil 接口调方法直接 panic。")
-	}
-	if !regexp.MustCompile(`InteractionDelivery\s+svcsession\.InteractionDelivery`).MatchString(
-		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))) {
-		t.Error("`router.Ports` 里找不到 `InteractionDelivery svcsession.InteractionDelivery`（容空白）：" +
-			"投递口必须是装配点交下来的事实。")
+	if !strings.Contains(asmServices, "svcsession.NewInteraction(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewInteraction(`：" +
+			"动作面用例必须在唯一装配根造。")
 	}
 	// ——— P4a 正文第四十二刀：排队输入的**撤下**也在这一面 ———
 	//
@@ -265,8 +250,8 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) DeleteQueuedInput(`：那一层转发已随" +
 			"P4a 正文第四十二刀删除（私有 `deleteQueuedInput` 仍留着——`run.go` 的回滚路径用它，且那条路径**刻意不发事件**）。")
 	}
-	if !strings.Contains(body, "svcsession.NewQueue(") {
-		t.Errorf("`NewSessionCtr` 的函数体里找不到 `svcsession.NewQueue(`：排队输入用例必须在控制器里造。实际体：\n%s", body)
+	if !strings.Contains(asmServices, "svcsession.NewQueue(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewQueue(`：排队输入用例必须在唯一装配根造。")
 	}
 	if b := funcBodyOf(t, ctrSrc, "func (h *sessionCtr) DeleteQueuedInput("); !strings.Contains(b, "h.queue.DeleteQueuedInput(") {
 		t.Errorf("`DeleteQueuedInput` handler 的函数体里没有 `h.queue.DeleteQueuedInput(`："+
@@ -306,17 +291,9 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) UpdateSession(`：那一层实现已随" +
 			"P4a 正文第四十四刀删除（`manager` 侧只剩 `ResolveModel` / `ApplyModel` / `UpdateMeta` 三个适配器）。")
 	}
-	if !strings.Contains(body, "svcsession.NewMeta(") {
-		t.Errorf("`NewSessionCtr` 的函数体里找不到 `svcsession.NewMeta(`：元数据写面用例必须在控制器里造。实际体：\n%s", body)
-	}
-	if !strings.Contains(routesSrc, "ports.SessionMetaDeps") {
-		t.Error("`internal/router/routes_session.go` 没有把 `ports.SessionMetaDeps` 交给 `NewSessionCtr`：" +
-			"漏交会让那三份依赖为 nil，改模型时 nil 接口调方法直接 panic。")
-	}
-	if !regexp.MustCompile(`SessionMetaDeps\s+svcsession\.MetaDeps`).MatchString(
-		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))) {
-		t.Error("`router.Ports` 里找不到 `SessionMetaDeps svcsession.MetaDeps`（容空白）：" +
-			"那三份依赖必须是装配点交下来的事实。")
+	if !strings.Contains(asmServices, "svcsession.NewMeta(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsession.NewMeta(`：" +
+			"元数据写面用例必须在唯一装配根造。")
 	}
 	if b := funcBodyOf(t, ctrSrc, "func (h *sessionCtr) Update("); !strings.Contains(b, "h.meta.UpdateSession(") {
 		t.Errorf("`Update` handler 的函数体里没有 `h.meta.UpdateSession(`："+

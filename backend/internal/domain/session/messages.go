@@ -3,10 +3,11 @@ package session
 import (
 	"context"
 	"encoding/json"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/golib/glog"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— messages 物化（**白名单投影**，整会话重建） ———

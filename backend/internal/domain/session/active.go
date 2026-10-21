@@ -4,9 +4,9 @@ import (
 	"context"
 	"sync"
 
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 会话的**运行期句柄**（P4a 正文第五十五刀：从 `internal/manager` 搬入）———
@@ -21,12 +21,12 @@ import (
 // 同属一个聚合；把它们留在编排层会让「会话状态」有两个持有者。执行面（`runtimeconn`）只持有
 // **连接**，它不拥有会话——拆连时它回调编排侧（`DropSink`），由这边把句柄作废。
 
-// ACP 是 acl.Session 的最小接口（测试可注入桩；真实实现为 *acl.Session）。
+// ACP 是 acp.Session 的最小接口（测试可注入桩；真实实现为 *acp.Session）。
 type ACP interface {
 	Prompt(ctx context.Context, text string) (string, error)
 	Cancel(ctx context.Context) error
 	// ConfigOptions 会话配置项（模型目录等，唯一来源：运行时自报）。
-	ConfigOptions() []acl.ConfigOption
+	ConfigOptions() []acp.ConfigOption
 }
 
 // ActiveSession 是持久会话句柄：绑定一条 ACP 会话与其所属连接，
@@ -42,7 +42,7 @@ type ActiveSession struct {
 	// 下发，所以两个模式不同的会话不能共用一个暖进程（见 `runtimeconn.Pool.KeyFor`）。
 	NativeMode string
 
-	client *acl.Client
+	client *acp.Client
 	sess   ACP
 	// providerID 底座侧的原生会话 id（`sess.ID()`）。存一份是因为换句柄（代际迁移）时要拿旧值
 	// 摘 `byProvider` 映射与关掉旧会话，而 `sess` 是接口（`ACP` 上没有 ID()）。
@@ -79,7 +79,7 @@ type HandleParams struct {
 	// 它随**句柄**交付（而不是随会话记录）：每建一次执行上下文（新建、原生恢复、handoff、
 	// 代际迁移）都重新声明一次身份——那是刻意的"重新锚定"，代价是每个上下文多 ~100 tokens。
 	Identity   string
-	Client     *acl.Client
+	Client     *acp.Client
 	Session    ACP
 	Projection runtime.Runtime
 }
@@ -95,7 +95,7 @@ func NewActiveSession(p HandleParams) *ActiveSession {
 }
 
 // Client 所属连接（nil = 未拨号/测试桩）。
-func (as *ActiveSession) Client() *acl.Client { return as.client }
+func (as *ActiveSession) Client() *acp.Client { return as.client }
 
 // Native 原生 ACP 会话（nil = 尚未建立）。
 func (as *ActiveSession) Native() ACP { return as.sess }
@@ -210,7 +210,7 @@ func (as *ActiveSession) BeginRun(ctx context.Context) (*Run, RunPrefix, error) 
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	if as.busy {
-		return nil, RunPrefix{}, acl.NewError(acl.ClassLimit, "run_in_progress", "该会话正有 run 在执行，请等待结束", nil)
+		return nil, RunPrefix{}, acp.NewError(acp.ClassLimit, "run_in_progress", "该会话正有 run 在执行，请等待结束", nil)
 	}
 	prefix := RunPrefix{Identity: as.identity, Memo: as.memo}
 	as.identity, as.memo = "", ""
@@ -222,7 +222,7 @@ func (as *ActiveSession) BeginRun(ctx context.Context) (*Run, RunPrefix, error) 
 }
 
 // FinishRun 收尾一轮：清 busy/run 并把所属连接一并交回（取消在途登记要用它）。
-func (as *ActiveSession) FinishRun() (*Run, *acl.Client) {
+func (as *ActiveSession) FinishRun() (*Run, *acp.Client) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	t := as.run
@@ -384,7 +384,7 @@ func (h *Handles) ForgetSession(sessionID string) {
 }
 
 // ForClient 该连接上挂着哪些句柄（含已完成态）。
-func (h *Handles) ForClient(client *acl.Client) []*ActiveSession {
+func (h *Handles) ForClient(client *acp.Client) []*ActiveSession {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out := make([]*ActiveSession, 0, 1)

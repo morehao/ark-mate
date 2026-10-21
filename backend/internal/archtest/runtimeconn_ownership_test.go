@@ -17,7 +17,7 @@ var bindingFieldRe = regexp.MustCompile(`binding\s+\*runtimeBinding`)
 
 // ——— P3a-2「执行面归属」守卫（第一刀：底座绑定） ———
 //
-// 执行面（连接池 / 代际 / 子进程回收 / 会话挂载 / 运行期诊断）落 `internal/runtimeconn`。
+// 执行面（连接池 / 代际 / 子进程回收 / 会话挂载 / 运行期诊断）落 `internal/drivers/runtimeconn`。
 // 第一刀只搬"本进程认的那个底座"的绑定与诊断**状态**。
 //
 // 两种静默失效：
@@ -65,21 +65,21 @@ var runtimeconnAnchors = []string{
 	"type DropSink interface {",
 }
 
-// TestRuntimeBindingLivesInRuntimeconn 绑定与诊断状态必须在 `internal/runtimeconn`，
+// TestRuntimeBindingLivesInRuntimeconn 绑定与诊断状态必须在 `internal/drivers/runtimeconn`，
 // 且 manager 的转发文件里不得再出现状态或判定。
 func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 	root := backendRoot(t)
-	domainDir := filepath.Join(root, "internal", "runtimeconn")
+	domainDir := filepath.Join(root, "internal", "drivers", "runtimeconn")
 	// 扫**整个目录**而不是一份写死的文件清单：第四十八刀加 `procreg.go` 时，写死的清单让新文件的
 	// 锚**从来没被查过**（判据当场红，但根因是扫描面没跟上）。这一条与 `uiSrcRoots()` 那条教训同源：
 	// 扫描面写死一处，新增的文件就静默不设防。
 	joined := dirProductionBody(t, domainDir)
 	if len(joined) < 500 {
-		t.Fatalf("`internal/runtimeconn` 只扫到 %d 字节——扫描面解析错了？（fail-closed）", len(joined))
+		t.Fatalf("`internal/drivers/runtimeconn` 只扫到 %d 字节——扫描面解析错了？（fail-closed）", len(joined))
 	}
 	for _, a := range runtimeconnAnchors {
 		if !strings.Contains(joined, a) {
-			t.Errorf("internal/runtimeconn 里找不到 %q：执行面的绑定/诊断入口被改名/搬走了？"+
+			t.Errorf("internal/drivers/runtimeconn 里找不到 %q：执行面的绑定/诊断入口被改名/搬走了？"+
 				"（这条守卫的判据就挂在它身上，失锚等于空转）", a)
 		}
 	}
@@ -97,7 +97,7 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 	//   - `o.conns` 的任意读写 ⇒ 有人绕过池锁与键派生（"同一份配置共享暖进程"当场失效）。
 	for _, dead := range []string{"conns map[string]*runtimeConn", "type runtimeConn struct", "o.conns"} {
 		if strings.Contains(mgrAll, dead) {
-			t.Errorf("`internal/sessionruntime` 里出现 %q：连接池与连接对象**只有一份**，在 `internal/runtimeconn`"+
+			t.Errorf("`internal/sessionruntime` 里出现 %q：连接池与连接对象**只有一份**，在 `internal/drivers/runtimeconn`"+
 				"（P4a 正文第五十四刀）。两份的表现不是报错：迁移判据读一张表、acquire 写另一张，"+
 				"「同配置共享暖进程」静默失效。", dead)
 		}
@@ -134,8 +134,8 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 	// 的**唯一写入方**就是池（`Add` → running、`Drop` 摘到当前连接 → stopped）。判据本身不变，
 	// 仍是"这两个状态转移必须在执行面、且调用点直连"；留在 manager 的话它就只能是转发。
 	for _, c := range []struct{ file, want, why string }{
-		{"internal/runtimeconn/pool.go", "SetState(session.AgentStateRunning)", "建连时的进程状态"},
-		{"internal/runtimeconn/pool.go", "SetState(session.AgentStateStopped)", "拆连时的状态回落"},
+		{"internal/drivers/runtimeconn/pool.go", "SetState(session.AgentStateRunning)", "建连时的进程状态"},
+		{"internal/drivers/runtimeconn/pool.go", "SetState(session.AgentStateStopped)", "拆连时的状态回落"},
 		{"internal/sessionruntime/orchestrator.go", "svc.runtimePlane.SelectedSpec", "建会话时的 spec 解析（装配点直连执行面）"},
 		{"internal/domain/session/lifecycle.go", "spec, err := l.selectedSpec()", "建会话/恢复时的 spec 解析（域经端口调用）"},
 	} {
@@ -155,7 +155,7 @@ func TestRuntimeBindingIsNotDuplicatedOnService(t *testing.T) {
 	service := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "sessionruntime", "service.go")))
 	if bindingFieldRe.MatchString(service) {
 		t.Error("`internal/sessionruntime/service.go` 上出现了 `binding *runtimeBinding` 字段：" +
-			"绑定的状态归 `internal/runtimeconn`（`Service` 只持平面引用）。\n" +
+			"绑定的状态归 `internal/drivers/runtimeconn`（`Service` 只持平面引用）。\n" +
 			"两份状态的表现是 `/runtime/diagnostics` 的 State 与真实连接状态分叉——" +
 			"一边说 stopped、另一边连接活着，而两边都编译得过。")
 	}
@@ -198,15 +198,15 @@ func TestRuntimeBindingIsNotDuplicatedOnService(t *testing.T) {
 //	manager/session_start.go       ✗ 已删（恢复路径，同上）
 //
 // 同一批还发现**同因异码**（**尚未定案，刻意没动**）：manager/model_catalog.go 的 `ModelCatalog`
-// 对**同一个条件**铸的是 `runtime_not_registered`——而那个码**不在** `pkg/code/acl.go` 的映射表里
+// 对**同一个条件**铸的是 `runtime_not_registered`——而那个码**不在** `internal/core/code/acp.go` 的映射表里
 // （只有 `runtime_not_found` 在），于是它落到 ClassRequest 的兜底码 40001，而 runtimeconn 那条是
-// 40401。**改它是对外契约变更**（要走 `pkg/code` + README + 前端 `BizCode` 三处同步），
+// 40401。**改它是对外契约变更**（要走 `internal/core/code` + README + 前端 `BizCode` 三处同步），
 // 所以登记在 §3.1.61 而不是顺手改；本条守卫只钉**已收敛的那一处**。
 //
 // 判据两段，fail-closed：
 //
-//	① `runtime_not_found` 的 `acl.NewError` 铸码点在 `internal/sessionruntime` 里**为零**、
-//	   在 `internal/runtimeconn` 里**恰好一处**；
+//	① `runtime_not_found` 的 `acp.NewError` 铸码点在 `internal/sessionruntime` 里**为零**、
+//	   在 `internal/drivers/runtimeconn` 里**恰好一处**；
 //	② `resource_sync.go` 里那个 `runtime_not_found`（校验**用户请求同步的那个 runtime**）
 //	   是**另一个输入**，刻意放行——但它必须仍在（否则说明有人把请求参数校验也删了）。
 func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
@@ -216,7 +216,7 @@ func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：判据失去检查对象", internalDir)
 	}
-	mint := `acl.NewError(acl.ClassRequest, "runtime_not_found"`
+	mint := `acp.NewError(acp.ClassRequest, "runtime_not_found"`
 	inRuntimeconn, inManager, inResourceSync := 0, 0, 0
 	for _, path := range files {
 		body := readFileOrFatal(t, path)
@@ -226,9 +226,9 @@ func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
 		}
 		slash := filepath.ToSlash(rel(root, path))
 		switch {
-		case strings.HasPrefix(slash, "internal/runtimeconn/"):
+		case strings.HasPrefix(slash, "internal/drivers/runtimeconn/"):
 			inRuntimeconn += n
-		case filepath.ToSlash(rel(root, path)) == "internal/registry/resources.go":
+		case filepath.ToSlash(rel(root, path)) == "internal/drivers/registry/resources.go":
 			inResourceSync += n
 		case strings.HasPrefix(slash, "internal/sessionruntime/"):
 			inManager += n
@@ -239,14 +239,14 @@ func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
 		}
 	}
 	if inRuntimeconn != 1 {
-		t.Errorf("`internal/runtimeconn` 里 `runtime_not_found` 的铸码点是 %d 处（期望恰好 1）："+
+		t.Errorf("`internal/drivers/runtimeconn` 里 `runtime_not_found` 的铸码点是 %d 处（期望恰好 1）："+
 			"这条判据失锚或被人复制了。", inRuntimeconn)
 	}
 	if inManager != 0 {
 		t.Errorf("`internal/sessionruntime` 里仍有 %d 处 `runtime_not_found` 铸码。", inManager)
 	}
 	if inResourceSync != 1 {
-		t.Error("`internal/registry/resources.go` 里那个 `runtime_not_found` 不见了：" +
+		t.Error("`internal/drivers/registry/resources.go` 里那个 `runtime_not_found` 不见了：" +
 			"它校验的是**用户请求同步的那个 runtime**（另一个输入，故放行）——删掉它 = " +
 			"请求一个不在册的 runtime 会被静默当成「同步全部」。")
 	}

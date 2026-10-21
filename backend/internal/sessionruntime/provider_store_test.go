@@ -9,17 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/drivers/transfer"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— v11 provider 载体（B1/B4）与存量导入（B2，**闸门 3 / H2**） ———
@@ -70,7 +68,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 
-	stats, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
+	stats, err := transfer.ImportProviderFile(ctx, st, dir, transfer.DefinitionImportOptions{Auto: true}, nil)
 	if err != nil {
 		t.Fatalf("provider.ImportProviderFile: %v", err)
 	}
@@ -85,7 +83,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	}
 
 	// ① 备份存在，且内容是**迁移前**那份（含明文）。
-	backupPath := filepath.Join(dir, provider.ProvidersBackupName)
+	backupPath := filepath.Join(dir, transfer.ProvidersBackupName)
 	bb, err := os.ReadFile(backupPath)
 	if err != nil {
 		t.Fatalf("迁移前备份未写出: %v", err)
@@ -158,7 +156,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	}
 
 	// ⑤ 幂等：内容没变 → 整体跳过（一个字节都不写）。
-	again, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
+	again, err := transfer.ImportProviderFile(ctx, st, dir, transfer.DefinitionImportOptions{Auto: true}, nil)
 	if err != nil || !again.Already || again.Inserted != 0 {
 		t.Fatalf("重复导入应整体跳过: %+v err=%v", again, err)
 	}
@@ -172,7 +170,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("装载后档案数不符: %+v", items)
 	}
-	byID := map[string]dtoprovider.ProviderResp{}
+	byID := map[string]provider.ProviderItem{}
 	for _, it := range items {
 		byID[it.ID] = it
 	}
@@ -191,7 +189,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	// v19：注入的档案由**默认模型**那条清单决定（agent 上的 provider 字段已随 agent 面撤销）。
 	// v20：挂到**有密钥**的那条上（`legacy-openai`）——只有引用、没有值的那条会把
 	// `credential_missing` 如实报出来（那是正确行为，见下面的反证）。
-	created, err := st.CreateModelDefinition(ctx, store.ModelColumns{
+	created, err := st.CreateModelDefinition(ctx, model.ModelColumns{
 		ID: "mdl_a2probe", ProviderID: "legacy-openai", Model: "m-a2probe", InputModalities: "text",
 	}, "t")
 	if err != nil || !created {
@@ -205,7 +203,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	}
 	// 反证：挂到"只有引用、库里没有值"的那条上必须报出来——否则"引用即有效"这个错觉会在
 	// v20 里复活（文件里的 `key_ref` 不携带任何东西）。
-	created, err = st.CreateModelDefinition(ctx, store.ModelColumns{
+	created, err = st.CreateModelDefinition(ctx, model.ModelColumns{
 		ID: "mdl_nokey", ProviderID: "deepseek-main", Model: "m-nokey", InputModalities: "text",
 	}, "t")
 	if err != nil || !created {
@@ -242,7 +240,7 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	// 先走一次导入，让"文件里的 existing"成为 DB 行的起点（真实升级后的形态）。
-	if _, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
+	if _, err := transfer.ImportProviderFile(ctx, st, dir, transfer.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		t.Fatalf("provider.ImportProviderFile: %v", err)
 	}
 	svc := NewService(publisherRegistry(), eventbus.New())
@@ -254,7 +252,7 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	if _, err := svc.planes.Providers.CreateProvider(ctx, providerReq("brand-new", ptr("sk-new-secret"))); err != nil {
 		t.Fatalf("CreateProvider(新建): %v", err)
 	}
-	if _, err := svc.planes.Providers.UpdateProvider(ctx, "existing", dtoprovider.ProviderPatchReq{Note: ptr("改了备注")}); err != nil {
+	if _, err := svc.planes.Providers.UpdateProvider(ctx, "existing", provider.PatchRequest{Note: ptr("改了备注")}); err != nil {
 		t.Fatalf("UpdateProvider(覆盖): %v", err)
 	}
 	// 行确实写进了 DB。
@@ -346,7 +344,7 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	}
 	// DryRun 不写盘。
 	dry := filepath.Join(home, "dry")
-	stats, err := provider.ExportProviderFile(ctx, st, dry, true, nil)
+	stats, err := transfer.ExportProviderFile(ctx, st, dry, true, nil)
 	if err != nil || stats.Written != 2 {
 		t.Fatalf("dry-run 导出计数不符: %+v err=%v", stats, err)
 	}
@@ -354,12 +352,12 @@ func TestProviderExportRoundTrip(t *testing.T) {
 		t.Fatal("--dry-run 不应写盘")
 	}
 	// 真导出两次：逐字节相同（确定性）。
-	if _, err := provider.ExportProviderFile(ctx, st, dir, false, nil); err != nil {
+	if _, err := transfer.ExportProviderFile(ctx, st, dir, false, nil); err != nil {
 		t.Fatalf("导出: %v", err)
 	}
 	first := readProvidersFile(t, dir)
 	time.Sleep(10 * time.Millisecond)
-	if _, err := provider.ExportProviderFile(ctx, st, dir, false, nil); err != nil {
+	if _, err := transfer.ExportProviderFile(ctx, st, dir, false, nil); err != nil {
 		t.Fatalf("二次导出: %v", err)
 	}
 	if second := readProvidersFile(t, dir); second != first {

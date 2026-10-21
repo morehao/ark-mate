@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 )
 
 // 本文件是会话域**transcript 测试夹具的公共底座**：形状常量（会话 id / 事件 id）与落盘助手。

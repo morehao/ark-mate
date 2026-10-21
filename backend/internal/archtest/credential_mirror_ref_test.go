@@ -13,20 +13,20 @@ import (
 // 为什么值得一条守卫：`providers/<id>` 不是一个内部常量，是**持久化格式**——它写进
 // `<MATE_HOME>/credentials.json` 的键，也回写进 `providers.json` 的 `key_ref`。把它改掉
 // （或换个地方再拼一次）的后果是**静默**的：已有引用全部指向不存在的键，取值落空，
-// 表现为"密钥没配"；而 `pkg/credentials` 的分层顺序、provider 域的档案校验**都不会红**。
+// 表现为"密钥没配"；而 `internal/infra/credentials` 的分层顺序、provider 域的档案校验**都不会红**。
 //
 // 判据三段（都 fail-closed：找不到即失败，避免改名/搬迁后守卫静默空转——这正是 P0 里
 // 反复吃过的那类假绿）：
 //  1. `ProviderMirrorRefPrefix` 全树**恰好声明一次**；
-//  2. 那处声明在 `internal/mechanism/credential/`，取值**逐字**是 `providers/`；
+//  2. 那处声明在 `internal/drivers/mechanism/credential/`，取值**逐字**是 `providers/`；
 //  3. 全树只有**一个**拼接点（`ProviderMirrorRefPrefix +`），即没有人在别处手拼这个键。
 //
-// 刻意**不**断言 `"providers/"` 这个字面量全仓唯一：`pkg/config` 的旧目录告警里有同名串，
+// 刻意**不**断言 `"providers/"` 这个字面量全仓唯一：`internal/config` 的旧目录告警里有同名串，
 // 那是指目录不是指键，判进来只会逼着后续加白名单。
 func TestProviderMirrorRefFormatIsPinned(t *testing.T) {
 	const decl = "ProviderMirrorRefPrefix"
 	root := backendRoot(t)
-	roots := []string{"internal", "pkg", "cmd"}
+	roots := []string{"internal", "cmd"}
 
 	var declFiles []string
 	concatSites := 0
@@ -51,8 +51,15 @@ func TestProviderMirrorRefFormatIsPinned(t *testing.T) {
 			decl, len(declFiles), declFiles)
 	}
 	got := declFiles[0]
-	if !strings.Contains(filepath.ToSlash(got), "internal/mechanism/credential/") {
-		t.Fatalf("镜像键格式必须由凭据机制拥有，实际声明在 %s（provider 域拥有它会让「改镜像键」看起来像改 provider）", got)
+	// 归属：**凭据词汇层**（`internal/core/credential`）——v3.2 刀 8 把纯值（键前缀 / `ProviderRef` /
+	// 文件名 / 解析结果）从机制层搬下来，领域与机制共享同一份词汇。
+	//
+	// 判据要挡的仍然是"provider 域拥有它"（那会让"改镜像键"看起来像"改 provider"），
+	// 所以这里只认凭据词汇层这一个家，`internal/domain/provider/` 出现即红。
+	slashed := filepath.ToSlash(got)
+	if !strings.Contains(slashed, "internal/core/credential/") || strings.Contains(slashed, "internal/domain/provider/") {
+		t.Fatalf("镜像键格式必须由凭据词汇层（internal/core/credential）拥有，实际声明在 %s"+
+			"（provider 域拥有它会让「改镜像键」看起来像改 provider）", got)
 	}
 	src, _ := os.ReadFile(got)
 	if !strings.Contains(stripLineComments(string(src)), decl+` = "providers/"`) {
@@ -109,19 +116,19 @@ func TestCredentialFaceHasNoTransitionalForwards(t *testing.T) {
 			"再写一层转发，而那正是本刀删掉的东西。")
 	}
 	// P5a 起凭据面由 `registry.Planes.Credentials` 拥有，装配动作在 app/assembly.go。
-	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "assembly.go")))
+	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "assembly.go")))
 	for _, want := range []string{
-		"a.planes.Credentials.SetCwd(",
-		"a.planes.Credentials.SetLayered(",
-		"a.planes.Credentials.SyncCredentialMirror(",
+		"as.planes.Credentials.SetCwd(",
+		"as.planes.Credentials.SetLayered(",
+		"as.planes.Credentials.SyncCredentialMirror(",
 	} {
 		if !strings.Contains(appSrc, want) {
-			t.Errorf("`internal/app/assembly.go` 里找不到 `%s`：装配期的凭据登记必须直连事实出口。"+
+			t.Errorf("`internal/bootstrap/assembly/assembly.go` 里找不到 `%s`：装配期的凭据登记必须直连事实出口。"+
 				"漏了会让这一条链悄悄退回某个中间层。", want)
 		}
 	}
-	if gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "gateway", "source.go"))); !strings.Contains(gwSrc, "s.planes.Credentials.SetLayered(") {
-		t.Error("`internal/gateway/source.go` 里找不到 `s.planes.Credentials.SetLayered(`：" +
+	if gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "gateway", "source.go"))); !strings.Contains(gwSrc, "s.planes.Credentials.SetLayered(") {
+		t.Error("`internal/drivers/gateway/source.go` 里找不到 `s.planes.Credentials.SetLayered(`：" +
 			"网关装配必须直连事实（P5a 起是 registry.Planes，不再是 manager 转发）。")
 	}
 }

@@ -3,7 +3,6 @@ package archtest
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -59,15 +58,22 @@ var automationDomainAnchors = map[string][]string{
 	// 知识**，而机制层不许 import 域（`TestMechanismMustNotImportUpward`），所以它的家是
 	// `domain/automation`，与 `carrier.go`（双载体 + 覆盖层）并排。
 	//
-	// 最后两条锚钉的是"**导入框架只有一份实现**"：选项与统计都取自 `mechanism/definition`，
-	// 域里只做"切成两半"的绑定。在域里另写一套导入语义 = 第二个事实源。
-	"import.go": {
-		"func ImportAutomationDir(",
-		"func ExportAutomationDir(",
-		"type ImportStats struct",
-		"definition.DefinitionImportOptions",
-		"definition.DefinitionImportStats",
-	},
+}
+
+// automationImportAnchors 导入/导出编排的**新家**（v3.2 刀 7）。
+//
+// 这两个入口原先在 `domain/automation/import.go`：它们按 `automation.ReservedKeys` 把一份文件
+// 切成"定义 + 运行态"两半，看起来是域的知识。但它们同时是**导入框架的编排**——扫目录、计数、
+// 调 `mechanism/definition` 落库、导出写文件——域为了它要认识 `store` 与 18 个机制符号，
+// 出边被钉死的那条纪律就破了。
+//
+// 现在分工是：域只留**纯转换**（`Locator` / `RunsJSON` / `RuntimeStateOf` 这类"行 ↔ 文件片段"），
+// 编排归 `internal/drivers/transfer`（L6 组合驱动）。导出之后域侧再也不能自己写一套导入语义——
+// 那正是这条守卫要挡的第二个事实源。
+var automationImportAnchors = []string{
+	"func ImportAutomationDir(",
+	"func ExportAutomationDir(",
+	"type AutomationImportStats struct",
 }
 
 // automationManagerImplMarkers 实现痕迹（这些动作现在只许在域里做）。
@@ -96,6 +102,21 @@ func TestAutomationImplementationLivesInDomain(t *testing.T) {
 	}
 	if resolved == 0 {
 		t.Fatal("自动化域一个入口文件都没解析到（判据失效）")
+	}
+
+	// 导入/导出编排在新家，且域侧不许再有那份实现。
+	ioDir := filepath.Join(root, "internal", "drivers", "transfer")
+	ioBody := dirProductionBody(t, ioDir)
+	for _, a := range automationImportAnchors {
+		if !strings.Contains(ioBody, a) {
+			t.Errorf("internal/drivers/transfer 里找不到 %q：导入/导出编排被改名/搬走了？（判据失锚＝空转）", a)
+		}
+	}
+
+	if domAll := dirProductionBody(t, domainDir); strings.Contains(domAll, "func ImportAutomationDir(") ||
+		strings.Contains(domAll, "func ExportAutomationDir(") {
+		t.Error("`internal/domain/automation` 里又出现导入/导出入口：编排归 `internal/drivers/transfer`，" +
+			"域侧回去就又会把 store 与 mechanism 拉回领域的出边里。")
 	}
 
 	managerDir := filepath.Join(root, "internal", "sessionruntime")
@@ -127,9 +148,9 @@ func TestAutomationImplementationLivesInDomain(t *testing.T) {
 func TestAutomationWiringIsAttached(t *testing.T) {
 	root := backendRoot(t)
 	// P5a 起库句柄的接线统一在 `registry.Planes.EnableStore`（漏一处 = 静默）。
-	persist := readFileOrFatal(t, filepath.Join(root, "internal", "registry", "planes.go"))
+	persist := readFileOrFatal(t, filepath.Join(root, "internal", "drivers", "registry", "planes.go"))
 	if !strings.Contains(persist, "p.Automation.SetStore(st)") {
-		t.Error("`internal/registry/planes.go` 的 `EnableStore` 里找不到 `p.Automation.SetStore(st)`：" +
+		t.Error("`internal/drivers/registry/planes.go` 的 `EnableStore` 里找不到 `p.Automation.SetStore(st)`：" +
 			"自动化域没拿到库句柄。\n" +
 			"表现**只在 sqlite 模式**现形——定义行读不到，面板空、触发不跑（memory 模式的注册表在域自己的字段里）。")
 	}
@@ -164,8 +185,8 @@ var automationUseCaseAnchors = []string{
 	"func New(plane *domauto.Plane) AutomationSvc",
 	"var _ AutomationSvc = (*Service)(nil)",
 	"func (s *Service) ListAutomations() ([]dtoautomation.AutomationResp, error)",
-	`definition.RawString(req, "id")`,
-	"definition.RawPatch(req)",
+	`defn.RawString(req, "id")`,
+	"defn.RawPatch(req)",
 	"func (s *Service) PreviewAutomation(",
 	"s.plane.RunNow(ctx, id)",
 	`"automation_not_found"`,
@@ -180,9 +201,13 @@ var automationUseCaseAnchors = []string{
 // **刻意不列 `"automation_not_found"`**：域里的**运行面**（`RunNow` / 调度 tick）自己也要拒绝
 // 未知 id / 坏定义 / 已停用，那三条码是领域的判决，用例层只是**透传**——把它列成"不许出现"
 // 会逼着域去 import 用例层（反向依赖）。真正要守的是"两侧同码"，见下面的 parity 判据。
+// 注意：定义值层规则已从 `mechanism/definition` 抽到 `internal/core/definition`（别名 defn），
+// 所以每条痕迹都要把**两种拼写**都列出来——只留旧拼写会让守卫在改名后静默失锚。
 var automationApiFaceMarkers = []string{
 	"definition.InvalidParamErr(",
+	"defn.InvalidParamErr(",
 	"definition.RawPatch(req)",
+	"defn.RawPatch(req)",
 	"dtoautomation.AutomationWriteReq",
 }
 
@@ -243,28 +268,18 @@ func TestAutomationApiFaceLivesInAutomationSvc(t *testing.T) {
 			"在 `internal/service/svcautomation`（P4a 正文第九刀）。")
 	}
 
-	// ② 装配点只放依赖事实。
-	portsSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))
-	if !regexp.MustCompile(`AutomationPlane\s+\*automation\.Plane`).MatchString(portsSrc) {
-		t.Error("`internal/router/router.go` 的 `Ports` 里找不到 `AutomationPlane *automation.Plane`：" +
-			"自动化那一格必须是**依赖事实**，用例在控制器里造。")
-	}
-	if strings.Contains(portsSrc, "svcautomation") {
-		t.Error("`internal/router/router.go` 里出现 `svcautomation`：装配点不认识用例层（P4a 正文第九刀）。")
-	}
-	routesSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "routes_automation.go")))
-	if !strings.Contains(routesSrc, "ctrautomation.NewAutomationCtr(ports.AutomationPlane)") {
-		t.Error("`internal/router/routes_automation.go` 必须把 `ports.AutomationPlane` 交给控制器：" +
-			"交别的（或漏交）会让平面为 nil，第一次取数就是 nil panic。")
+	// ② 用例实例只在装配根造（v3.1 §3.4）；控制器只收接口。
+	asmSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "services.go")))
+	if !strings.Contains(asmSrc, "svcautomation.New(") {
+		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcautomation.New(`：" +
+			"用例实例必须在唯一装配根里造。")
 	}
 
-	// ③ 用例实例必须在**控制器的构造函数里**造（判据钉在函数体上，不是整文件：
-	//    同包一个中间函数就能把整文件的字面量判据喂绿——svcsystem 那一刀实测过）。
-	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrautomation", "automation.go")))
-	body := funcBodyOf(t, ctrSrc, "func NewAutomationCtr(")
-	if !strings.Contains(body, "svcautomation.New(") {
-		t.Errorf("`ctrautomation.NewAutomationCtr` 的函数体里找不到 `svcautomation.New(`："+
-			"用例实例必须在控制器里造（交给 `automationCtr` 的必须是**用例**，不是域平面）。实际体：\n%s", body)
+	// ③ 控制器不得再造用例（交给它的是**用例接口**，不是域平面）。
+	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrautomation", "automation.go")))
+	if strings.Contains(ctrSrc, "svcautomation.New(") {
+		t.Error("`ctrautomation` 里又出现 `svcautomation.New(`：用例实例只在 `internal/bootstrap/assembly` 造，" +
+			"控制器拿到的必须是已构造的接口。")
 	}
 }
 

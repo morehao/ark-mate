@@ -8,7 +8,7 @@ import (
 
 // ——— 分层重构（P3d/P2a 起）的层守卫 ———
 //
-// 新结构把解散 `internal/sessionruntime` 的实现按**层**落进 `internal/mechanism/*`（机制：无业务规则的
+// 新结构把解散 `internal/sessionruntime` 的实现按**层**落进 `internal/drivers/mechanism/*`（机制：无业务规则的
 // 跨域设施）、`internal/domain/*`（领域：拥有数据与不变量）、`internal/service/svc*`（用例：API
 // 面实现）。层分开之后最危险的失效方式有两种，**都不会让任何既有测试变红**：
 //
@@ -76,12 +76,12 @@ func TestMechanismMustNotImportUpward(t *testing.T) {
 		modulePrefix + "internal/domain",
 		modulePrefix + "internal/service",
 		modulePrefix + "internal/sessionruntime",
-		modulePrefix + "internal/app",
-		modulePrefix + "internal/router",
-		modulePrefix + "internal/controller",
-		modulePrefix + "internal/gateway",
+		modulePrefix + "internal/bootstrap/app",
+		modulePrefix + "internal/delivery/router",
+		modulePrefix + "internal/delivery/controller",
+		modulePrefix + "internal/drivers/gateway",
 	}
-	for _, dir := range layerScanPackages(t, root, "internal/mechanism", "mechanism") {
+	for _, dir := range layerScanPackages(t, root, "internal/drivers/mechanism", "drivers/mechanism") {
 		for _, imp := range importedByPackage(t, dir) {
 			for _, bad := range forbidden {
 				if imp == bad || strings.HasPrefix(imp, bad+"/") {
@@ -99,7 +99,7 @@ func TestMechanismMustNotImportUpward(t *testing.T) {
 //	② 不得向上 import（`service/*` 的端口、`manager` 的实现、装配与传输面）。
 //
 // 领域层**允许**依赖 `pkg/*`、`internal/{mechanism,store,model,dto}`——机制层是它向下的支撑，
-// DTO 是它对外形态的载体（`Plane.ListSkills` 返回 `[]dtocapability.SkillResp` 是本仓的既有形态）。
+// DTO 是它对外形态的载体（v3.2 起域返回无 tag 的 `[]SkillView`，DTO 由 `svccapability` 投影）。
 //
 // 反证（实跑见计划 §4.1 的 N6/N7）：往 `domain/interaction` 里 import `domain/skill` → 红；
 // 把 `internal/domain` 指到一个不存在的目录 → Fatal（不许静默空转）。
@@ -108,10 +108,10 @@ func TestDomainPackagesMustNotImportEachOther(t *testing.T) {
 	upward := []string{
 		modulePrefix + "internal/service",
 		modulePrefix + "internal/sessionruntime",
-		modulePrefix + "internal/app",
-		modulePrefix + "internal/router",
-		modulePrefix + "internal/controller",
-		modulePrefix + "internal/gateway",
+		modulePrefix + "internal/bootstrap/app",
+		modulePrefix + "internal/delivery/router",
+		modulePrefix + "internal/delivery/controller",
+		modulePrefix + "internal/drivers/gateway",
 	}
 	for _, dir := range layerScanPackages(t, root, "internal/domain", "domain") {
 		self := packageImportPath(root, dir)

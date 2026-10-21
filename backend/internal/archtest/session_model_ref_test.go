@@ -42,7 +42,7 @@ var sessionModelIDForm = regexp.MustCompile(`^mdl_[0-9A-HJKMNP-TV-Z]{26}$`)
 // （0 处 = 判据失去对象；≥2 处 = 第二个真相源）。
 func TestSessionModelRefIsPlatformID(t *testing.T) {
 	internalDir := filepath.Join(backendRoot(t), "internal")
-	entityPath := filepath.Join(backendRoot(t), "internal", "model", "session.go")
+	entityPath := filepath.Join(backendRoot(t), "internal", "persistence", "model", "session.go")
 	entity := readStripped(t, entityPath)
 	if !strings.Contains(entity, "column:model_id") {
 		t.Fatalf("%s 里找不到 `column:model_id` 标签（fail-closed：实体面是这条守卫的一半）", entityPath)
@@ -111,7 +111,7 @@ func TestSessionModelRefIsPlatformID(t *testing.T) {
 // "没设置"长得一模一样——下一个读它的人会以为"这里存着会话用的是哪个供应商"，于是又把它填起来，
 // 于是同一件事就有了第二份事实源（模型行已经在说它挂在谁下面）。
 //
-// 白名单只放历史：`internal/store/migrate*.go`（v15 建表与 v16 的 RENAME 必须写当时那一版的名字，
+// 白名单只放历史：`internal/persistence/store/migrate*.go`（v15 建表与 v16 的 RENAME 必须写当时那一版的名字，
 // v26 的 DROP 也必须写它）与停在旧版的测试夹具。
 func TestSessionsHasNoProviderIDColumn(t *testing.T) {
 	db := migratedSchemaDB(t)
@@ -129,10 +129,11 @@ func TestSessionsHasNoProviderIDColumn(t *testing.T) {
 		t.Fatalf("`sessions.model_id` 必须仍在（它指的是 `models.id`）: n=%d err=%v", n, err)
 	}
 
-	// 文本面：实体 / DAO / DTO / 前端类型。
+	// 文本面：实体 / 会话写面 / DTO / 前端类型。
+	// v3.3 起会话的列映射在 store（DAO 只剩列词汇）：扫描面跟着实现走。
 	files := []string{
-		filepath.Join(backendRoot(t), "internal", "model", "session.go"),
-		filepath.Join(backendRoot(t), "internal", "dao", "session.go"),
+		filepath.Join(backendRoot(t), "internal", "persistence", "model", "session.go"),
+		filepath.Join(backendRoot(t), "internal", "persistence", "store", "sessions.go"),
 		filepath.Join(backendRoot(t), "internal", "dto", "dtosession", "response.go"),
 		filepath.Join(backendRoot(t), "internal", "dto", "dtosession", "request.go"),
 		filepath.Join(frontendRoot(t), "packages", "types", "src", "session.ts"),
@@ -238,9 +239,9 @@ func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
 			"「用例调端口 `ResolveModel` → 适配器调 `provider.Plane.ResolveSessionModel`」两段，缺任一段都等于绕过解析）")
 	}
 	// ③ 复用既有错误码（E9）：`model_not_found` 仍映射到 40401。
-	aclCode := readStripped(t, filepath.Join(backendRoot(t), "pkg", "code", "acl.go"))
-	if !strings.Contains(aclCode, `"model_not_found":`) {
-		t.Fatal("`pkg/code/acl.go` 的 notFoundCodes 里没有 model_not_found：它必须仍提档到 40401" +
+	acpCode := readStripped(t, filepath.Join(backendRoot(t), "internal", "core", "code", "acp.go"))
+	if !strings.Contains(acpCode, `"model_not_found":`) {
+		t.Fatal("`internal/core/code/acp.go` 的 notFoundCodes 里没有 model_not_found：它必须仍提档到 40401" +
 			"（会话引用了一个查不到的模型行 = 同一个码、同一份引导：刷新列表）")
 	}
 	// ④ 目录注解的产出点**只有一处**（`modelIDByValue`）：第二个产出点迟早与它分叉。

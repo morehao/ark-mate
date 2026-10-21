@@ -5,10 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/infra/dsh"
+
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/runtimeconn"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // connCount 读连接池条数（**持锁**读）。
@@ -203,7 +205,7 @@ func TestGenerationPerFingerprint(t *testing.T) {
 // TestAdaptersDeclareProcessScope M1-2 的验收面落在 archtest（第 10 条守卫），这里补一条
 // 就近断言：两个内置 adapter 都声明 process 且未实测（P-2 未出结论前不放宽）。
 func TestAdaptersDeclareProcessScope(t *testing.T) {
-	for _, sp := range runtime.AllBuiltinRegistry().List() {
+	for _, sp := range dsh.Registry().List() {
 		if sp.CapabilityScope != runtime.CapabilityScopeProcess {
 			t.Fatalf("%s 应声明 process：%q", sp.ID, sp.CapabilityScope)
 		}

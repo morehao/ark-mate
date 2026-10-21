@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // TestPermissionMemoryBothSides 会话级权限记忆（allow/reject 双侧对称）：
@@ -15,9 +15,9 @@ import (
 func TestPermissionMemoryBothSides(t *testing.T) {
 	pm := NewPermissionManager(DefaultPermissionTimeout)
 
-	cmd := acl.ToolCallInfo{Title: "运行演示命令 echo hello", Kind: "execute"}
-	other := acl.ToolCallInfo{Title: "写入文件", Kind: "write"}
-	req := func(t acl.ToolCallInfo) acl.PermissionRequest { return acl.PermissionRequest{ToolCall: t} }
+	cmd := acp.ToolCallInfo{Title: "运行演示命令 echo hello", Kind: "execute"}
+	other := acp.ToolCallInfo{Title: "写入文件", Kind: "write"}
+	req := func(t acp.ToolCallInfo) acp.PermissionRequest { return acp.PermissionRequest{ToolCall: t} }
 
 	// 未记录前不命中。
 	if d, ok := pm.AutoDecision("s1", req(cmd)); ok {
@@ -89,10 +89,10 @@ func TestPermissionMemoryBothSides(t *testing.T) {
 // TestRegisterAndWaitRemembersAlways allow_always 决策 → RegisterAndWait 内部记录 allow 侧会话级记忆。
 func TestRegisterAndWaitRemembersAlways(t *testing.T) {
 	pm := NewPermissionManager(DefaultPermissionTimeout)
-	done := make(chan acl.PermissionDecision, 1)
+	done := make(chan acp.PermissionDecision, 1)
 	go func() {
-		d := pm.RegisterAndWait(context.Background(), "s1", acl.PermissionRequest{
-			ToolCall: acl.ToolCallInfo{Title: "执行脚本", Kind: "execute"},
+		d := pm.RegisterAndWait(context.Background(), "s1", acp.PermissionRequest{
+			ToolCall: acp.ToolCallInfo{Title: "执行脚本", Kind: "execute"},
 		}, nil)
 		done <- d
 	}()
@@ -125,10 +125,10 @@ func TestRegisterAndWaitRemembersAlways(t *testing.T) {
 // 二次请求经 AutoDecision 直接拒绝（带当初所选 deny 选项）。
 func TestRegisterAndWaitRemembersReject(t *testing.T) {
 	pm := NewPermissionManager(DefaultPermissionTimeout)
-	tool := acl.ToolCallInfo{Title: "删除文件", Kind: "execute"}
-	done := make(chan acl.PermissionDecision, 1)
+	tool := acp.ToolCallInfo{Title: "删除文件", Kind: "execute"}
+	done := make(chan acp.PermissionDecision, 1)
 	go func() {
-		d := pm.RegisterAndWait(context.Background(), "s1", acl.PermissionRequest{ToolCall: tool}, nil)
+		d := pm.RegisterAndWait(context.Background(), "s1", acp.PermissionRequest{ToolCall: tool}, nil)
 		done <- d
 	}()
 	deadline := time.Now().Add(2 * time.Second)
@@ -155,7 +155,7 @@ func TestRegisterAndWaitRemembersReject(t *testing.T) {
 		t.Fatalf("应记录始终拒绝记忆: %+v", list)
 	}
 	// 二次请求命中始终拒绝记忆 → 直接拒绝。
-	if d, ok := pm.AutoDecision("s1", acl.PermissionRequest{ToolCall: tool}); !ok || !d.Rejected || d.OptionID != "reject-all" {
+	if d, ok := pm.AutoDecision("s1", acp.PermissionRequest{ToolCall: tool}); !ok || !d.Rejected || d.OptionID != "reject-all" {
 		t.Fatalf("始终拒绝记忆未命中: ok=%v d=%+v", ok, d)
 	}
 }
@@ -163,10 +163,10 @@ func TestRegisterAndWaitRemembersReject(t *testing.T) {
 // TestResolveRejectOnce 拒绝一次不落记忆：显式拒绝（带 deny 选项）后 AutoDecision 仍不命中。
 func TestResolveRejectOnce(t *testing.T) {
 	pm := NewPermissionManager(DefaultPermissionTimeout)
-	tool := acl.ToolCallInfo{Title: "清理缓存", Kind: "execute"}
-	done := make(chan acl.PermissionDecision, 1)
+	tool := acp.ToolCallInfo{Title: "清理缓存", Kind: "execute"}
+	done := make(chan acp.PermissionDecision, 1)
 	go func() {
-		d := pm.RegisterAndWait(context.Background(), "s1", acl.PermissionRequest{ToolCall: tool}, nil)
+		d := pm.RegisterAndWait(context.Background(), "s1", acp.PermissionRequest{ToolCall: tool}, nil)
 		done <- d
 	}()
 	deadline := time.Now().Add(2 * time.Second)
@@ -191,7 +191,7 @@ func TestResolveRejectOnce(t *testing.T) {
 	if got := len(pm.List("s1")); got != 0 {
 		t.Fatalf("拒绝一次不应落记忆，got %d", got)
 	}
-	if _, ok := pm.AutoDecision("s1", acl.PermissionRequest{ToolCall: tool}); ok {
+	if _, ok := pm.AutoDecision("s1", acp.PermissionRequest{ToolCall: tool}); ok {
 		t.Fatal("拒绝一次后不应命中记忆")
 	}
 }
@@ -229,14 +229,14 @@ func TestPermissionMemoryListOrderIsDeterministic(t *testing.T) {
 // 反过来的方向是可恢复的：给了 `always` 档却仍走审批，只是多问一次。
 func TestAutoDecisionSkipsOnceOnlyRequests(t *testing.T) {
 	pm := NewPermissionManager(time.Minute)
-	cmd := acl.ToolCallInfo{ID: "tc1", Title: "bash: rm -rf build", Kind: "execute"}
+	cmd := acp.ToolCallInfo{ID: "tc1", Title: "bash: rm -rf build", Kind: "execute"}
 
 	// 先记一条"始终允许"。
 	pm.Remember("s1", cmd, memDecisionAllow, "allow-always")
 	// 常态请求（选项里有 always 档）→ 记忆命中。
-	withAlways := acl.PermissionRequest{
+	withAlways := acp.PermissionRequest{
 		SessionID: "s1", ToolCall: cmd,
-		Options: []acl.PermissionOption{
+		Options: []acp.PermissionOption{
 			{OptionID: "a1", Kind: "allow_once"}, {OptionID: "a2", Kind: "allow_always"},
 		},
 	}
@@ -245,7 +245,7 @@ func TestAutoDecisionSkipsOnceOnlyRequests(t *testing.T) {
 	}
 	// 升权请求（**只有 once 档**）→ 不自动裁决，走人工审批。
 	onceOnly := withAlways
-	onceOnly.Options = []acl.PermissionOption{
+	onceOnly.Options = []acp.PermissionOption{
 		{OptionID: "a1", Kind: "allow_once"}, {OptionID: "r1", Kind: "reject_once"},
 	}
 	if d, ok := pm.AutoDecision("s1", onceOnly); ok {
@@ -264,7 +264,7 @@ func TestRememberCarriesGrantShape(t *testing.T) {
 	pm.SetMemoryHooks(func(it MemoryItem) { got = append(got, it) },
 		func(_, _, _ string) {}, func(_ string) {})
 
-	first := acl.ToolCallInfo{ID: "tc1", Title: "bash", Kind: "execute",
+	first := acp.ToolCallInfo{ID: "tc1", Title: "bash", Kind: "execute",
 		Input: map[string]any{"command": "rm -rf build"}}
 	pm.Remember("s1", first, memDecisionAllow, "allow-always")
 	if len(got) != 1 {
@@ -295,7 +295,7 @@ func TestRememberCarriesGrantShape(t *testing.T) {
 		t.Fatalf("同键覆盖不该改 title/kind，got %q/%q", got[1].Title, got[1].Kind)
 	}
 	// 空入参 → 空摘要（不是"空对象的摘要"）。
-	pm.Remember("s1", acl.ToolCallInfo{Title: "write", Kind: "edit"}, memDecisionReject, "reject-always")
+	pm.Remember("s1", acp.ToolCallInfo{Title: "write", Kind: "edit"}, memDecisionReject, "reject-always")
 	if last := got[len(got)-1]; last.GrantInputDigest != "" {
 		t.Fatalf("空入参的摘要应为空串，got %q", last.GrantInputDigest)
 	}

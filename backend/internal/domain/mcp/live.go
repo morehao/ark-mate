@@ -6,10 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/code"
-	mcpclient "github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	mcpclient "github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -28,7 +27,7 @@ const (
 //     JSON-RPC 错误返回）。
 //   - **工具级失败**（服务端 result.isError=true）不是平台错误：原样透传 is_error + content，
 //     信封 code=0（调用方据 is_error 判断）；只有传输/协议/超时才映射为信封错误码。
-func (p *Plane) CallTool(ctx context.Context, id, tool string, req dtocapability.McpToolCallReq) (*dtocapability.McpToolCallResp, error) {
+func (p *Plane) CallTool(ctx context.Context, id, tool string, req ToolCallRequest) (*ToolCallResult, error) {
 	server, err := p.LiveServer(id)
 	if err != nil {
 		return nil, err
@@ -47,12 +46,12 @@ func (p *Plane) CallTool(ctx context.Context, id, tool string, req dtocapability
 	res, err := mcpclient.CallTool(cctx, server, tool, req.Arguments)
 	if err != nil {
 		// 稳定 code 进信封 msg（同探测）：信封 code 只有分类粒度，排障需要精确原因。
-		return nil, code.FromError(acl.NewError(callClass(err), mcpclient.CodeOf(err),
+		return nil, code.FromError(acp.NewError(callClass(err), mcpclient.CodeOf(err),
 			fmt.Sprintf("[%s] %s", mcpclient.CodeOf(err), err.Error()), nil))
 	}
 	glog.Infow(ctx, "mcp 工具调用完成", "server", id, "tool", tool,
 		"is_error", res.IsError, "blocks", len(res.Content), "ms", time.Since(start).Milliseconds())
-	return &dtocapability.McpToolCallResp{
+	return &ToolCallResult{
 		ServerID: id, Tool: tool, IsError: res.IsError,
 		Content: res.Content, Text: res.TextOf(), StructuredContent: res.StructuredContent,
 		ServerName: res.ServerName, ServerVersion: res.ServerVersion,
@@ -61,17 +60,17 @@ func (p *Plane) CallTool(ctx context.Context, id, tool string, req dtocapability
 }
 
 // callClass 工具调用错误的 REST 分类（与探测同构：传输不支持→Unsupported，参数/超时→Request/Service）。
-func callClass(err error) acl.Class {
+func callClass(err error) acp.Class {
 	switch mcpclient.CodeOf(err) {
 	case "mcp_transport_unsupported":
-		return acl.ClassUnsupported
+		return acp.ClassUnsupported
 	case "mcp_command_invalid", "mcp_url_invalid", "mcp_tool_name_required", "mcp_tool_args_invalid",
 		"mcp_resource_uri_required", "mcp_prompt_name_required":
-		return acl.ClassRequest
+		return acp.ClassRequest
 	case "mcp_timeout":
-		return acl.ClassLimit
+		return acp.ClassLimit
 	default:
-		return acl.ClassService
+		return acp.ClassService
 	}
 }
 
@@ -89,7 +88,7 @@ func (p *Plane) LiveServer(id string) (mcpclient.Server, error) {
 	}
 	env, headers, problems := p.secrets.Resolve(server)
 	if len(problems) > 0 {
-		return mcpclient.Server{}, code.FromError(acl.NewError(acl.ClassRequest, "mcp_secret_unresolved",
+		return mcpclient.Server{}, code.FromError(acp.NewError(acp.ClassRequest, "mcp_secret_unresolved",
 			fmt.Sprintf("[mcp_secret_unresolved] 密钥引用解析失败（%s）", strings.Join(problems, "；")), nil))
 	}
 	return mcpclient.Server{
@@ -99,7 +98,7 @@ func (p *Plane) LiveServer(id string) (mcpclient.Server, error) {
 }
 
 // ListResources 拉取某 MCP server 的资源列表（resources/list + resources/templates/list）。
-func (p *Plane) ListResources(ctx context.Context, id string) (*dtocapability.McpResourcesResp, error) {
+func (p *Plane) ListResources(ctx context.Context, id string) (*ResourcesResult, error) {
 	server, err := p.LiveServer(id)
 	if err != nil {
 		return nil, err
@@ -110,19 +109,19 @@ func (p *Plane) ListResources(ctx context.Context, id string) (*dtocapability.Mc
 	if err != nil {
 		return nil, p.liveErr(err, "mcp_resources_list_failed")
 	}
-	out := &dtocapability.McpResourcesResp{
+	out := &ResourcesResult{
 		ServerID: id, ServerName: res.ServerName, ServerVersion: res.ServerVersion,
 		TemplatesError: res.TemplatesError,
-		Resources:      make([]dtocapability.McpResourceResp, 0, len(res.Resources)),
+		Resources:      make([]ResourceItem, 0, len(res.Resources)),
 	}
 	for _, r := range res.Resources {
-		out.Resources = append(out.Resources, dtocapability.McpResourceResp{
+		out.Resources = append(out.Resources, ResourceItem{
 			URI: r.URI, Name: r.Name, Title: r.Title, Description: r.Description,
 			MimeType: r.MimeType, Size: r.Size,
 		})
 	}
 	for _, t := range res.Templates {
-		out.Templates = append(out.Templates, dtocapability.McpResourceTemplateResp{
+		out.Templates = append(out.Templates, ResourceTemplate{
 			URITemplate: t.URITemplate, Name: t.Name, Title: t.Title,
 			Description: t.Description, MimeType: t.MimeType,
 		})
@@ -131,7 +130,7 @@ func (p *Plane) ListResources(ctx context.Context, id string) (*dtocapability.Mc
 }
 
 // ReadResource 读取一个资源（resources/read）。
-func (p *Plane) ReadResource(ctx context.Context, id, uri string) (*dtocapability.McpResourceReadResp, error) {
+func (p *Plane) ReadResource(ctx context.Context, id, uri string) (*ResourceReadResult, error) {
 	server, err := p.LiveServer(id)
 	if err != nil {
 		return nil, err
@@ -142,15 +141,15 @@ func (p *Plane) ReadResource(ctx context.Context, id, uri string) (*dtocapabilit
 	if err != nil {
 		return nil, p.liveErr(err, "mcp_resource_read_failed")
 	}
-	out := &dtocapability.McpResourceReadResp{ServerID: id, URI: uri, Contents: make([]dtocapability.McpResourceContent, 0, len(res.Contents))}
+	out := &ResourceReadResult{ServerID: id, URI: uri, Contents: make([]ResourceContent, 0, len(res.Contents))}
 	for _, c := range res.Contents {
-		out.Contents = append(out.Contents, dtocapability.McpResourceContent{URI: c.URI, MimeType: c.MimeType, Text: c.Text, Blob: c.Blob})
+		out.Contents = append(out.Contents, ResourceContent{URI: c.URI, MimeType: c.MimeType, Text: c.Text, Blob: c.Blob})
 	}
 	return out, nil
 }
 
 // ListPrompts 拉取某 MCP server 的提示词模板（prompts/list）。
-func (p *Plane) ListPrompts(ctx context.Context, id string) (*dtocapability.McpPromptsResp, error) {
+func (p *Plane) ListPrompts(ctx context.Context, id string) (*PromptsResult, error) {
 	server, err := p.LiveServer(id)
 	if err != nil {
 		return nil, err
@@ -161,11 +160,11 @@ func (p *Plane) ListPrompts(ctx context.Context, id string) (*dtocapability.McpP
 	if err != nil {
 		return nil, p.liveErr(err, "mcp_prompts_list_failed")
 	}
-	out := &dtocapability.McpPromptsResp{ServerID: id, Prompts: make([]dtocapability.McpPromptResp, 0, len(prompts))}
+	out := &PromptsResult{ServerID: id, Prompts: make([]PromptItem, 0, len(prompts))}
 	for _, p := range prompts {
-		item := dtocapability.McpPromptResp{Name: p.Name, Title: p.Title, Description: p.Description}
+		item := PromptItem{Name: p.Name, Title: p.Title, Description: p.Description}
 		for _, a := range p.Arguments {
-			item.Arguments = append(item.Arguments, dtocapability.McpPromptArgumentResp{
+			item.Arguments = append(item.Arguments, PromptArgument{
 				Name: a.Name, Title: a.Title, Description: a.Description, Required: a.Required,
 			})
 		}
@@ -175,7 +174,7 @@ func (p *Plane) ListPrompts(ctx context.Context, id string) (*dtocapability.McpP
 }
 
 // GetPrompt 取用一条提示词模板（prompts/get）。
-func (p *Plane) GetPrompt(ctx context.Context, id, name string, req dtocapability.McpPromptGetReq) (*dtocapability.McpPromptGetResp, error) {
+func (p *Plane) GetPrompt(ctx context.Context, id, name string, req PromptGetRequest) (*PromptGetResult, error) {
 	server, err := p.LiveServer(id)
 	if err != nil {
 		return nil, err
@@ -186,10 +185,10 @@ func (p *Plane) GetPrompt(ctx context.Context, id, name string, req dtocapabilit
 	if err != nil {
 		return nil, p.liveErr(err, "mcp_prompt_get_failed")
 	}
-	out := &dtocapability.McpPromptGetResp{ServerID: id, Name: name, Description: res.Description,
-		Messages: make([]dtocapability.McpPromptMessage, 0, len(res.Messages))}
+	out := &PromptGetResult{ServerID: id, Name: name, Description: res.Description,
+		Messages: make([]PromptMessage, 0, len(res.Messages))}
 	for _, m := range res.Messages {
-		out.Messages = append(out.Messages, dtocapability.McpPromptMessage{Role: m.Role, Content: m.Content})
+		out.Messages = append(out.Messages, PromptMessage{Role: m.Role, Content: m.Content})
 	}
 	return out, nil
 }
@@ -200,5 +199,5 @@ func (p *Plane) liveErr(err error, fallbackCode string) error {
 	if c == "" {
 		c = fallbackCode
 	}
-	return code.FromError(acl.NewError(callClass(err), c, fmt.Sprintf("[%s] %s", c, err.Error()), nil))
+	return code.FromError(acp.NewError(callClass(err), c, fmt.Sprintf("[%s] %s", c, err.Error()), nil))
 }

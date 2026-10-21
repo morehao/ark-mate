@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/ark-mate/pkg/redact"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/redact"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
 
@@ -41,7 +41,7 @@ func (pl *Plane) FlushChunks() {
 
 // publishRaw 把域事件发布进 eventbus（agg = sessionID；每 agg 版本递增），
 // 并旁路追加到该会话的 wire transcript（未启用/非 map 载荷时跳过）。
-// sqlite 模式下（st != nil）：事件先经 store.AppendEvent 在事务内取**会话内位次**，
+// sqlite 模式下（st != nil）：事件先经 model.AppendEvent 在事务内取**会话内位次**，
 // bus 以 PublishAt 镜像同一号序（跨重启连续）；DB 写失败时退化进程内取号并告警（不阻断会话）。
 // 未注入 bus 时静默丢弃（仅出现在纯列表/单测场景）。
 func (pl *Plane) PublishRaw(typ, sessionID string, payload any) eventbus.Event {

@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // TestMcpSecretResolution §13.3 M1/M6：定义文件里只有引用，注入时才解析成明文；
@@ -319,7 +319,7 @@ func TestMcpSecretStaleMirrorNotAdopted(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	svc.EnableStore(st)
-	doc := svc.planes.Providers.CredentialDoc()
+	doc := svc.planes.Credentials.Doc()
 	if doc == nil {
 		t.Fatal("夹具应装配出托管文档")
 	}

@@ -3,8 +3,8 @@ package svcsystem
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/eventbus"
 )
 
 // ——— P4a：系统面**消费方**声明的窄端口 ———

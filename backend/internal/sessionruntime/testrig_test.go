@@ -18,23 +18,28 @@ package sessionruntime
 import (
 	"context"
 
+	defn "github.com/morehao/ark-mate/internal/core/definition"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
+	dmodel "github.com/morehao/ark-mate/internal/persistence/model"
+	svcsession "github.com/morehao/ark-mate/internal/service/svcsession"
+	svcsystem "github.com/morehao/ark-mate/internal/service/svcsystem"
+
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/resource"
+	"github.com/morehao/ark-mate/internal/infra/credentials"
+	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
-	"github.com/morehao/ark-mate/pkg/credentials"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/ark-mate/pkg/resource"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // providerTestSvc 建一个三 spec 的注册表（dsh + 合成的 rtx + 无凭据声明的 stub），并把
@@ -48,7 +53,7 @@ import (
 // v19 起它只做"注册表 + provider 目录"两件事：agent 定义面撤销后，没有定义要播种了。
 func providerTestSvc(t *testing.T, providerDir string) *Service {
 	t.Helper()
-	real := runtime.AllBuiltinRegistry()
+	real := dsh.Registry()
 	dshSpec, ok := real.Get("dsh")
 	if !ok {
 		t.Fatal("默认注册表里应有 dsh")
@@ -61,7 +66,7 @@ func providerTestSvc(t *testing.T, providerDir string) *Service {
 	svc := NewService(reg, eventbus.New())
 	if providerDir != "" {
 		// 与装配期同一条路径：先装配凭据分层（镜像落在 provider 目录的父目录下，即"mate home"），
-		// 再装载 `providers.json`（它顺带登记定义目录）。顺序与 `internal/app` 逐条同形——
+		// 再装载 `providers.json`（它顺带登记定义目录）。顺序与 `internal/bootstrap/app` 逐条同形——
 		// 反过来，memory 模式下装载时读到的密钥就会按"凭据面未装配"处理。
 		svc.planes.Credentials.SetLayered(newTestCredentials(t, filepath.Dir(providerDir)))
 		svc.planes.Providers.LoadProviderDefinitions(providerDir)
@@ -309,9 +314,9 @@ func (r *genRig) seedModelRow(t *testing.T, providerID, model string, isDefault 
 	t.Helper()
 	ctx := context.Background()
 	id := objid.New(objid.Model)
-	ok, err := r.svc.planes.Resources.Store().CreateModelDefinition(ctx, store.ModelColumns{
+	ok, err := r.svc.planes.Resources.Store().CreateModelDefinition(ctx, dmodel.ModelColumns{
 		ID: id, ProviderID: providerID, Model: model, InputModalities: resource.ModalityText,
-	}, definition.DefinitionWriteActor)
+	}, defn.DefinitionWriteActor)
 	if err != nil || !ok {
 		t.Fatalf("插模型行 %s/%s: ok=%v err=%v", providerID, model, ok, err)
 	}
@@ -333,4 +338,19 @@ func setBusy(as *session.ActiveSession, busy bool) {
 		return
 	}
 	as.FinishRun()
+}
+
+// 端口转换（v3.1 P4）：typed-nil 装进接口**不是 nil**。装配根与测试用同一条规矩。
+func storeAsEventReader(st *store.Store) svcsession.EventReader {
+	if st == nil {
+		return nil
+	}
+	return st
+}
+
+func storeAsSourceFacts(st *store.Store) svcsystem.SourceFactsReader {
+	if st == nil {
+		return nil
+	}
+	return st
 }

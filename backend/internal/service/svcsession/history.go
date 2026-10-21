@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
 // ——— 会话历史面（P4a 正文第十刀：从 `manager` 上提到用例层）———
@@ -29,15 +28,24 @@ type HistorySvc interface {
 	SessionHistory(ctx context.Context, id string, q dtosession.HistoryQuery) (*dtosession.SessionHistoryResp, error)
 }
 
-// History 会话历史用例。依赖事实：库句柄（sqlite 模式；memory 模式为 nil）、会话域平面、事件总线。
+// EventReader 事件历史的**窄读端口**（v3.1 P4：用例层不 import store）。
+//
+// `*store.Store` 结构上满足它，装配根直接交下来；memory 模式传 nil（走 eventbus 回放）。
+// 只声明这条用例真正用到的方法：多一个方法就等于多一条"这层还能读别的东西"的暗示。
+type EventReader interface {
+	EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]model.EventEntity, bool, error)
+	EventsBefore(ctx context.Context, sessionID string, before, limit int64) ([]model.EventEntity, bool, error)
+}
+
+// History 会话历史用例。依赖事实：事件读端口（sqlite 模式；memory 模式为 nil）、会话域平面、事件总线。
 type History struct {
-	st    *store.Store
+	st    EventReader
 	plane *session.Plane
 	bus   *eventbus.Bus
 }
 
 // NewHistory 造会话历史用例。
-func NewHistory(st *store.Store, plane *session.Plane, bus *eventbus.Bus) HistorySvc {
+func NewHistory(st EventReader, plane *session.Plane, bus *eventbus.Bus) HistorySvc {
 	return &History{st: st, plane: plane, bus: bus}
 }
 
@@ -55,10 +63,10 @@ var _ HistorySvc = (*History)(nil)
 // 空页的 FirstSeq/LastSeq 回 **-1**（此前是 0，而 0 现在是一个真实位次，"空"与"第 0 条"必须可分）。
 func (h *History) SessionHistory(ctx context.Context, id string, q dtosession.HistoryQuery) (*dtosession.SessionHistoryResp, error) {
 	if !h.plane.HasSession(id) {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	if q.After != nil && q.Before != nil {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "history_cursor_conflict",
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "history_cursor_conflict",
 			"after 与 before 互斥（一个向后、一个向前）", nil))
 	}
 	// 缺席的游标 = -1（v21 哨兵："没有游标"）。两个方向都**不夹到 0**：0 是会话第一条事件的
@@ -94,7 +102,7 @@ func (h *History) SessionHistory(ctx context.Context, id string, q dtosession.Hi
 			batch, hasMore, err = h.st.EventsAfter(ctx, id, after, int64(q.Limit))
 		}
 		if err != nil {
-			return nil, code.FromError(acl.NewError(acl.ClassService, "history_read_failed",
+			return nil, code.FromError(acp.NewError(acp.ClassService, "history_read_failed",
 				fmt.Sprintf("读取会话历史失败：%v", err), nil))
 		}
 		events = make([]eventbus.Event, 0, len(batch))

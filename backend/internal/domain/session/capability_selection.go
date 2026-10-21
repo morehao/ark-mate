@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/golib/glog"
 )
 
@@ -156,7 +155,7 @@ func DerefList(in *[]string) []string {
 //
 // P3c：随选定值对象进域——它读的是本域的记录字段，此前靠 `capabilityViewOf` 端口在
 // manager 侧实现（那个端口因此删掉）。
-func (pl *Plane) SessionCapabilitiesRespOf(rec *SessionRec) *dtosession.SessionCapabilitiesResp {
+func (pl *Plane) SessionCapabilitiesRespOf(rec *SessionRec) *SessionCapabilities {
 	if rec == nil || strings.TrimSpace(rec.CapabilityJSON) == "" {
 		return nil
 	}
@@ -176,5 +175,5 @@ func (pl *Plane) SessionCapabilitiesRespOf(rec *SessionRec) *dtosession.SessionC
 		v := DerefList(sel.Mcps)
 		mcps = &v
 	}
-	return &dtosession.SessionCapabilitiesResp{Skills: skills, Mcps: mcps, Fingerprint: rec.Fingerprint}
+	return &SessionCapabilities{Skills: skills, Mcps: mcps, Fingerprint: rec.Fingerprint}
 }

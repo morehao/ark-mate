@@ -1,6 +1,6 @@
 package dtosession
 
-import "github.com/morehao/ark-mate/internal/eventbus"
+import "github.com/morehao/ark-mate/internal/core/eventbus"
 
 // SessionResp 会话的对外表示（含 runtime 身份）。
 type SessionResp struct {
@@ -266,7 +266,7 @@ type ElicitationResp struct {
 	// 词），改名后收敛成一个键——两个词各写一遍只会在读的一侧留下一个永远取不到的字段。
 	SessionID string `json:"session_id"`
 	// ScopeSource 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 run 推断）
-	// | ambiguous（两者都无，不归属；见 pkg/acl/scope.go 与 manager/diagnostics.go 的留痕）。
+	// | ambiguous（两者都无，不归属；见 internal/infra/acp/scope.go 与 manager/diagnostics.go 的留痕）。
 	ScopeSource string         `json:"scope_source"`
 	Mode        string         `json:"mode"`
 	Message     string         `json:"message"`

@@ -3,8 +3,8 @@ package mcp
 import (
 	"fmt"
 
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // ——— 平台侧 MCP 网关复用的窄出口（M7-2）———

@@ -11,14 +11,14 @@
 - **不许碰的目录**：`~/.dsh`、`~/.config/opencode`、`~/.local/share/opencode`、`~/.local/state/opencode`、
   `~/.opencode`（下面这些目录里的已下线底座**照样不许碰**：磁盘上还有它的安装与状态，而"它已不在册"不是碰它的理由）。`~/.agents/skills` 是**平台与底座的共享投放面**：可以读，写只由平台的物化负责
   （探针别往那儿写，也别去"顺便修一下"）。
-- **平台拉起底座一律经隔离表**（`backend/pkg/runtime/isolation.go` → `<MATE_HOME>/runtime/<id>/…`）。
+- **平台拉起底座一律经隔离表**（`backend/internal/runtime/isolation.go` → `<MATE_HOME>/runtime/<id>/…`）。
   **换底座版本时必须重查它新引入的 home/状态变量**：v2 就新增了 `XDG_STATE_HOME`
   （`<XDG_STATE_HOME ?? ~/.local/state>/<id>/service.json` 的服务登记面）——不注它，平台拉起的
   底座会读用户自己的 `service.json`：同版本同 url 直接复用用户的服务，版本不符还会 SIGTERM
   旧进程再顶掉登记文件。
-- **同一张隔离表在仓库里有三份**（Go 核心 `backend/pkg/runtime/isolation.go`——表内容现已由各 adapter 的 `Spec.Isolation` 声明、父包只做机械投影；桌面私有启动器
+- **同一张隔离表在仓库里有三份**（Go 核心 `backend/internal/runtime/isolation.go`——表内容现已由各 adapter 的 `Spec.Isolation` 声明、父包只做机械投影；桌面私有启动器
   `apps/desktop/scripts/gen-runtime-bin.mjs`、V9 探针 `frontend/scripts/desktop-runtime-smoke.mjs`）：
-  **改一处就得改三处**。护栏三条：`pkg/runtime/isolation_test.go`（逐变量逐取值钉住核心表）、
+  **改一处就得改三处**。护栏三条：`internal/runtime/isolation_test.go`（逐变量逐取值钉住核心表）、
   `TestDesktopLauncherIsolationMatchesCore`（启动器 ⊆ 核心，且核心新增而启动器没兜底的必须登记进
   `launcherCoreOnly`）、`TestDesktopSmokeIsolationMatchesCore`（探针与核心**逐条对齐**）。
   新增一条 home 变量时，三侧都要过一遍守卫——别只修核心那侧。

@@ -3,8 +3,8 @@ package skill
 import (
 	"sync"
 
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // Projection 一个 runtime 上**已解析**的技能投影。

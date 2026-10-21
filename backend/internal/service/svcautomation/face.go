@@ -7,12 +7,12 @@ import (
 	"sort"
 	"time"
 
+	pkgauto "github.com/morehao/ark-mate/internal/core/automation"
+	"github.com/morehao/ark-mate/internal/core/code"
+	defn "github.com/morehao/ark-mate/internal/core/definition"
 	domauto "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/pkg/acl"
-	pkgauto "github.com/morehao/ark-mate/pkg/automation"
-	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— automation 的**对外面**（P4a 正文第九刀：从 `domain/automation` 上提到这里）———
@@ -48,10 +48,11 @@ var _ AutomationSvc = (*Service)(nil)
 // 排序在这一层：域给的是**注册表快照**（`Recs()`），"按 id 排"是对外读面的口径。
 func (s *Service) ListAutomations() ([]dtoautomation.AutomationResp, error) {
 	recs := s.plane.Recs()
-	out := make([]dtoautomation.AutomationResp, 0, len(recs))
+	views := make([]domauto.AutomationView, 0, len(recs))
 	for _, rec := range recs {
-		out = append(out, rec.View())
+		views = append(views, rec.View())
 	}
+	out := automationResps(views)
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
@@ -62,35 +63,38 @@ func (s *Service) GetAutomation(id string) (*dtoautomation.AutomationResp, error
 	if !ok {
 		return nil, notFoundAutomation(id)
 	}
-	return &v, nil
+	out := automationResp(v)
+	return &out, nil
 }
 
 // CreateAutomation 新建定义。`id` 必填（写面 DTO 的原文对象里取，非法类型 → 40000）。
 func (s *Service) CreateAutomation(ctx context.Context, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
-	id, ok, err := definition.RawString(req, "id")
+	id, ok, err := defn.RawString(req, "id")
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, definition.InvalidParamErr("缺少 id（automation 的 id 是文件名，必填且不可改）")
+		return nil, defn.InvalidParamErr("缺少 id（automation 的 id 是文件名，必填且不可改）")
 	}
 	if id == "" {
-		return nil, definition.InvalidParamErr(`字段 "id" 须为非空字符串`)
+		return nil, defn.InvalidParamErr(`字段 "id" 须为非空字符串`)
 	}
-	v, err := s.plane.WriteAutomation(ctx, id, definition.RawPatch(req), true)
+	v, err := s.plane.WriteAutomation(ctx, id, defn.RawPatch(req), true)
 	if err != nil {
 		return nil, err
 	}
-	return &v, nil
+	out := automationResp(v)
+	return &out, nil
 }
 
 // UpdateAutomation 覆盖写：只改请求体里出现的键（未出现的保留原值；`null` 删键）。
 func (s *Service) UpdateAutomation(ctx context.Context, id string, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
-	v, err := s.plane.WriteAutomation(ctx, id, definition.RawPatch(req), false)
+	v, err := s.plane.WriteAutomation(ctx, id, defn.RawPatch(req), false)
 	if err != nil {
 		return nil, err
 	}
-	return &v, nil
+	out := automationResp(v)
+	return &out, nil
 }
 
 // DeleteAutomation 删除定义（幂等）。
@@ -176,12 +180,12 @@ func (s *Service) RunAutomationNow(ctx context.Context, id string) (*dtoautomati
 // 两份必然并存——域不能 import 用例层，而错误码出口归用例层（本文件的头注）。
 // 码是同一个 40401，文案也用同一句，避免用户在两处看到不同的说法。
 func notFoundAutomation(id string) error {
-	return acl.NewError(acl.ClassRequest, "automation_not_found",
+	return acp.NewError(acp.ClassRequest, "automation_not_found",
 		fmt.Sprintf("未知 automation %q（列表刷新一下）", id), nil)
 }
 
 // invalidAutomationByID 定义装载失败 → 40001（只要有 id 与原因）。
 func invalidAutomationByID(id, reason string) error {
-	return acl.NewError(acl.ClassRequest, "definition_invalid",
+	return acp.NewError(acp.ClassRequest, "definition_invalid",
 		fmt.Sprintf("automation %s 的定义不可执行：%s", id, reason), nil)
 }

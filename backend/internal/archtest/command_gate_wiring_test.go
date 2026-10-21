@@ -60,7 +60,7 @@ func TestCommandGateIsWiredToPermissionDecision(t *testing.T) {
 	}
 
 	// ③ 装配：加载 + 交给 service（P5a 起这条动作在 app/assembly.go 的声明表里）
-	app := stripGoComments(read("internal/app/assembly.go"))
+	app := stripGoComments(read("internal/bootstrap/assembly/assembly.go"))
 	if !strings.Contains(app, "LoadCommandPolicyFile(") {
 		t.Errorf("assembly.go 没有 LoadCommandPolicyFile(——规则文件写了但没人读")
 	}
@@ -78,7 +78,7 @@ func TestCommandGateIsWiredToPermissionDecision(t *testing.T) {
 	}
 
 	// 配置键：MATE_COMMAND_POLICY 是唯一入口。
-	cfg := read("pkg/config/config.go")
+	cfg := read("internal/config/config.go")
 	if !strings.Contains(cfg, "MATE_COMMAND_POLICY") || !strings.Contains(cfg, "CommandPolicyPath") {
 		t.Errorf("config 没有 MATE_COMMAND_POLICY / CommandPolicyPath——规则文件没有配置入口")
 	}

@@ -9,8 +9,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
 )
 
 // ——— 会话检索（标题 / runtime / 会话 id / 用户消息正文） ———
@@ -23,7 +21,7 @@ import (
 // 元数据命中计 1 次；正文命中逐条累计（片段取首条命中用户消息）。
 // 排序：updated_at 降序，截断 limit（调用方已校验 >0）。
 // 复杂度说明：本地工具态直接扫 transcript 文件（文件小、量级低）；不引入索引/DB（决策范围外）。
-func (pl *Plane) SearchSessions(_ context.Context, q string, limit int) ([]dtosession.SessionSearchHit, error) {
+func (pl *Plane) SearchSessions(_ context.Context, q string, limit int) ([]SessionSearchHitItem, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return nil, nil
@@ -86,11 +84,11 @@ func (pl *Plane) SearchSessions(_ context.Context, q string, limit int) ([]dtose
 		out = out[:limit]
 	}
 
-	hits := make([]dtosession.SessionSearchHit, 0, len(out))
+	hits := make([]SessionSearchHitItem, 0, len(out))
 	for _, c := range out {
 		r := c.rec
-		hits = append(hits, dtosession.SessionSearchHit{
-			SessionResp: dtosession.SessionResp{
+		hits = append(hits, SessionSearchHitItem{
+			SessionItem: SessionItem{
 				ID:        r.ID,
 				RuntimeID: r.RuntimeID,
 				Status:    r.Status,

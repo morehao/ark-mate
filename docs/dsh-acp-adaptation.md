@@ -3,15 +3,15 @@
 > **这份文档是什么**：平台与内置底座 `dsh` 之间的**接入事实**——启动形态、能力基线、配置隔离、
 > 原生凭据、模型清单交付、权限投影、已知边界。
 >
-> **事实源是代码，不是本文**：声明汇入点是 `backend/pkg/runtime/adapters.go` 的 `dshSpec()`，
-> 实现住在 `backend/pkg/runtime/dsh/`（`dsh.go` 形态与能力、`config.go` 模型清单交付、
+> **事实源是代码，不是本文**：声明汇入点是 `backend/internal/runtime/adapters.go` 的 `dshSpec()`，
+> 实现住在 `backend/internal/infra/dsh/`（`dsh.go` 形态与能力、`config.go` 模型清单交付、
 > `credentials.go` 原生凭据、`route_key.go` 路由键、`model_value.go` 模型取值、`native_permission.go`
 > 权限投影）。**本文与代码冲突时以代码为准**——它是地图，不是契约。
 >
 > **沿革**：本文件取代了旧文档 `deepseekharness-acp-adaptation.md`（2026-08/09 对 dsh **v0.1.x**
 > 快照的源码核实记录）。那份记录里的若干结论（独立 `dsh-acp-demo` bin、`--config <cordis.yml>` 形态、
 > 只支持 fresh session）**早已不成立**，把它当现状读会做错决定；它的历史价值留在 git 提交里。
-> README 与 `pkg/runtime/dsh/dsh.go` 此前指向的路径一直写成本文件名，本次让磁盘追上引用。
+> README 与 `internal/infra/dsh/dsh.go` 此前指向的路径一直写成本文件名，本次让磁盘追上引用。
 
 ## 1. 启动形态
 
@@ -36,7 +36,7 @@
 | `EmbeddedContext` | `false` | 同上，以连接期探测为准 |
 
 `Caps` 的**消费者是零**：唯一旧出口 `/runtimes` 已随决策 v18 删除，「能不能收图」一律走连接期事实
-（`pkg/acl` 解析 `initialize` 得到的 `Capabilities.Images`）。由 `TestStaticCapsImagesHasNoConsumer`
+（`internal/infra/acp` 解析 `initialize` 得到的 `Capabilities.Images`）。由 `TestStaticCapsImagesHasNoConsumer`
 钉住「没有新的读法」。
 
 **不支持的面**：`session/load`、fork/delete、附加目录、终端、客户端 FS、SSE 与传输级 MCP。
@@ -110,7 +110,7 @@
 **模型取值**走 ACP 会话配置项（`session/set_config_option`，会话级、可共享连接）：目录与取值全部由
 dsh 自报（option id `model`，值是 `JSON.stringify([provider, model])`），平台只按 `category` 消费、
 **不解析也不拼接**。交给 dsh 的每个**路由键**带平台保留前缀 `mate-`，派生点唯一
-（`pkg/runtime/dsh/route_key.go`，`config.go` 两处 + `model_value.go` 一处必须同源）——不带前缀时
+（`internal/infra/dsh/route_key.go`，`config.go` 两处 + `model_value.go` 一处必须同源）——不带前缀时
 `providers` 的 dict 键会命中 dsh 内置目录，那一家的端点/协议/展示名会变成这条路由的逐字段默认值，
 「平台配了 A、实际按 A 的目录解析出 B」会**静默发生**。
 

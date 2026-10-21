@@ -8,13 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
+	"github.com/morehao/ark-mate/internal/domain/skill"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // 本文件是写面（Create/Update/Delete skill 与 mcp）的对外契约套件。M6 起它**逐条跑在两种载体上**
@@ -22,9 +23,9 @@ import (
 // 语义"，而这句话只有同一批输入分别走两种载体都被检查过才算被验证。
 
 // writeReq 把 JSON 文本解成写面请求体（测试里直接写 JSON，测的就是"键的出现与否"）。
-func writeReq(t *testing.T, body string) dtocapability.SkillWriteReq {
+func writeReq(t *testing.T, body string) skill.WriteRequest {
 	t.Helper()
-	var req dtocapability.SkillWriteReq
+	var req skill.WriteRequest
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		t.Fatalf("测试请求体不是合法 JSON 对象: %v（%s）", err, body)
 	}
@@ -32,9 +33,9 @@ func writeReq(t *testing.T, body string) dtocapability.SkillWriteReq {
 }
 
 // writeMcpReq 同上（MCP 侧）。
-func writeMcpReq(t *testing.T, body string) dtocapability.McpWriteReq {
+func writeMcpReq(t *testing.T, body string) dommcp.WriteRequest {
 	t.Helper()
-	var req dtocapability.McpWriteReq
+	var req dommcp.WriteRequest
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		t.Fatalf("测试请求体不是合法 JSON 对象: %v（%s）", err, body)
 	}

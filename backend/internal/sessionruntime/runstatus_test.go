@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // 本文件钉 **S1 `run.status` 的发射面**（P0-2）。
@@ -92,11 +92,11 @@ func TestRunStatusFromEventSink(t *testing.T) {
 	sink := orch.runner.EventSink("rtx")
 
 	// 两条文本增量：只应产生**一帧** `model_streaming`（同状态去重）。
-	sink(acl.Event{SessionID: "native-1", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "a"}})
-	sink(acl.Event{SessionID: "native-1", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "b"}})
+	sink(acp.Event{SessionID: "native-1", Kind: acp.KindMessage, Payload: acp.MessageDelta{Text: "a"}})
+	sink(acp.Event{SessionID: "native-1", Kind: acp.KindMessage, Payload: acp.MessageDelta{Text: "b"}})
 	// 一次工具调用：`tool_executing` 带 name/id，且在工具事件**之前**。
-	sink(acl.Event{SessionID: "native-1", Kind: acl.KindToolCall,
-		Payload: acl.ToolCallInfo{ID: "call-1", Title: "Bash", Status: "pending"}})
+	sink(acp.Event{SessionID: "native-1", Kind: acp.KindToolCall,
+		Payload: acp.ToolCallInfo{ID: "call-1", Title: "Bash", Status: "pending"}})
 
 	evts := feedAll(bus, "s1", 4) // run.status(model_streaming) + 合并后的 message + run.status(tool_executing) + tool_call
 	var statuses []map[string]any

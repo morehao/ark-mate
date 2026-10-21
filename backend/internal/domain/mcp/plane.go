@@ -4,8 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/internal/core/capability"
 )
 
 // defaultProbeTimeout 单次探测预算（覆盖 spawn + initialize + tools/list 翻页）。
@@ -27,7 +26,7 @@ type ProbeStatus struct {
 // ——所以这里**不取** `Service.mu`，也不存在"读会话 + 写探测状态必须原子"的要求。
 type Plane struct {
 	caps    *capability.Registry
-	defs    *definition.Mechanism
+	defs    Definitions
 	secrets *Secrets
 
 	mu     sync.Mutex
@@ -38,7 +37,7 @@ type Plane struct {
 // NewPlane 造一个连接器平面。三个依赖都必须由装配期注入**同一个实例**：
 // `caps` 是 skill 与 mcp 共用的注册表（两份 = 两个事实源）、`defs` 是定义机制
 // （写面经它读写载体）、`secrets` 是密钥解析面（两份 = 同一份引用解析出两个结果）。
-func NewPlane(caps *capability.Registry, defs *definition.Mechanism, secrets *Secrets) *Plane {
+func NewPlane(caps *capability.Registry, defs Definitions, secrets *Secrets) *Plane {
 	return &Plane{caps: caps, defs: defs, secrets: secrets, probes: make(map[string]ProbeStatus)}
 }
 

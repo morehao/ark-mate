@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/object/objid"
 )
 
 // 这两条钉的是 `runRowFor` 的**兜底路径**——终态事件载荷没有 `run_id` 时，按"该会话唯一的

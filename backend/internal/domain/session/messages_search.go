@@ -11,9 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtosearch"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— 跨会话消息级检索（M3 ②：全局消息搜索 + 锚点跳转） ———
@@ -23,10 +22,10 @@ import (
 // agent 消息（逐行解析事件，取 seq 作锚点）。两者都返回 seq，前端可据锚点滚动定位。
 
 // SearchMessages 跨会话消息级检索。
-func (pl *Plane) SearchMessages(_ context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error) {
+func (pl *Plane) SearchMessages(_ context.Context, q string, limit int) (*MessageSearchResult, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_search_query", "搜索关键词 q 不能为空 [invalid_search_query]", nil))
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "invalid_search_query", "搜索关键词 q 不能为空 [invalid_search_query]", nil))
 	}
 	if limit <= 0 {
 		limit = 30
@@ -34,13 +33,13 @@ func (pl *Plane) SearchMessages(_ context.Context, q string, limit int) (*dtosea
 	if limit > 200 {
 		limit = 200
 	}
-	resp := &dtosearch.MessageSearchResp{Query: q, Hits: []dtosearch.MessageSearchHit{}}
+	resp := &MessageSearchResult{Query: q, Hits: []MessageSearchHit{}}
 
 	if pl.st != nil {
 		resp.Source = "sqlite"
 		hits, err := pl.st.SearchMessages(context.Background(), q, limit+1)
 		if err != nil {
-			return nil, code.FromError(acl.NewError(acl.ClassService, "message_search_failed",
+			return nil, code.FromError(acp.NewError(acp.ClassService, "message_search_failed",
 				fmt.Sprintf("消息检索失败: %v [message_search_failed]", err), err))
 		}
 		if len(hits) > limit {
@@ -48,7 +47,7 @@ func (pl *Plane) SearchMessages(_ context.Context, q string, limit int) (*dtosea
 			hits = hits[:limit]
 		}
 		for _, h := range hits {
-			resp.Hits = append(resp.Hits, dtosearch.MessageSearchHit{
+			resp.Hits = append(resp.Hits, MessageSearchHit{
 				SessionID: h.SessionID,
 				Title:     h.SessionTitle,
 				Role:      h.Role,
@@ -79,13 +78,13 @@ func (pl *Plane) SearchMessages(_ context.Context, q string, limit int) (*dtosea
 
 	type hit struct {
 		at  time.Time
-		out dtosearch.MessageSearchHit
+		out MessageSearchHit
 	}
 	var all []hit
 	qLower := strings.ToLower(q)
 	for _, r := range recs {
 		for _, th := range scanTranscriptMessages(dir, r.ID, qLower) {
-			all = append(all, hit{at: r.UpdatedAt, out: dtosearch.MessageSearchHit{
+			all = append(all, hit{at: r.UpdatedAt, out: MessageSearchHit{
 				SessionID: r.ID,
 				Title:     r.Title,
 				RuntimeID: r.RuntimeID,

@@ -4,9 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/object/objusage"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 )
 
 // Plane 会话域的**有状态主体**（P3b-1a：先只持库句柄与一个用量端口；会话记录、输入队列
@@ -17,7 +16,7 @@ import (
 // 都不取锁（读模型是纯 `st` 操作），所以 `mu` 暂时只占位（下一批的会话表要用）。
 type Plane struct {
 	mu sync.Mutex
-	st *store.Store
+	st Store
 	// bus 事件总线（恢复时按 DB 位次把已落库事件注回去；与库共用同一套会话内位次）。
 	bus *eventbus.Bus
 
@@ -89,7 +88,7 @@ func (pl *Plane) SetWorkspaceDisplay(fn func(workspaceID string) (string, string
 
 // SetStore 装配期登记库句柄。**必须在装配期调用**：构造时按值传一个当时的 `st` 会永远停在
 // nil，而表现是"该走库的走了内存"——静默（见 `Service.attachStore` 的注释）。
-func (pl *Plane) SetStore(st *store.Store) { pl.st = st }
+func (pl *Plane) SetStore(st Store) { pl.st = st }
 
 // SetUsageSource 装配期登记用量快照来源（执行面）。
 func (pl *Plane) SetUsageSource(fn func(sessionID string) (objusage.UsageInfo, bool)) {

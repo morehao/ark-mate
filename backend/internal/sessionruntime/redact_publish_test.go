@@ -10,10 +10,10 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/redact"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/redact"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 )
 
 // TestPublishRedactsSecretsAtSingleGate ② 脱敏闸门：publish 是事件唯一出口，
@@ -94,7 +94,7 @@ func TestPublishRedactsDynamicProviderKey(t *testing.T) {
 	}
 }
 
-// TestRunErrorPayloadRedactsStderrTail run.error 的 stderr_tail 走 acl.TailLines 出口，
+// TestRunErrorPayloadRedactsStderrTail run.error 的 stderr_tail 走 acp.TailLines 出口，
 // 已在那一步过闸（此处验证装配后的效果：事件里看不到密钥）。
 func TestRunErrorPayloadRedactsStderrTail(t *testing.T) {
 	svc, _ := newSearchRig(t)
@@ -128,7 +128,7 @@ func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
 	svc.planes.Providers.SetProviderDir(filepath.Join(home, "providers"))
 
 	key := "zq7-not-a-known-shape-42" // 形状上谁都认不出来
-	if _, err := svc.planes.Providers.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	if _, err := svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: "dyn", Protocol: "openai", APIKey: &key,
 	}); err != nil {
 		t.Fatalf("写面存密钥: %v", err)

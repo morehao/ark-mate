@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/object/objid"
 )
 
 // P3b-2b：本文件是 `manager/messages_search_test.go` 的域内那一半。

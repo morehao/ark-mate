@@ -8,12 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
+	defn "github.com/morehao/ark-mate/internal/core/definition"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism/definition"
 
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -45,9 +46,9 @@ func numericCode(err error) int {
 	return gerr.Code
 }
 
-// errCode 取 acl 错误的稳定 code（非 acl 错误 → 空串）。
+// errCode 取 acp 错误的稳定 code（非 acp 错误 → 空串）。
 func errCode(err error) string {
-	if ae, ok := acl.As(err); ok {
+	if ae, ok := acp.As(err); ok {
 		return ae.Code
 	}
 	return ""
@@ -255,7 +256,7 @@ func TestRemoveDefinitionIdempotent(t *testing.T) {
 // TestCapabilityDirUnsetIsActionable 未配置能力目录 → `capability_dir_unset`（40001）且文案给出路。
 func TestCapabilityDirUnsetIsActionable(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), nil) // capabilityDir 为空
-	if _, err := svc.Planes().Definitions.CapabilityDirFor(definition.CapSubSkills); err == nil {
+	if _, err := svc.Planes().Definitions.CapabilityDirFor(defn.CapSubSkills); err == nil {
 		t.Fatal("未配置目录应报错")
 	} else if got := errCode(err); got != "capability_dir_unset" {
 		t.Fatalf("错误码应为 capability_dir_unset，got %q", got)

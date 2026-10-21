@@ -3,23 +3,26 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
+
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/registry"
+	"github.com/morehao/ark-mate/internal/core/credential"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/domain/provider"
+	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
+	"github.com/morehao/ark-mate/internal/drivers/registry"
+
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/drivers/transfer"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— K2：`mate doctor` 的 provider / 模型清单只读体检 ———
@@ -48,9 +51,11 @@ func (f *providerDoctorFixture) facts(t *testing.T) doctorfacts.ProviderDoctorFa
 	return doctorfacts.CollectProviderDoctorFacts(context.Background(), f.st, doctorfacts.ProviderDoctorOptions{
 		Home: f.home, ProviderDir: f.providerDir, DBPath: filepath.Join(f.home, "mate.db"),
 		ProvidersFileName:   provider.ProvidersFileName,
-		BackupName:          provider.ProvidersBackupName,
-		MismatchExtraMarker: provider.ProviderMismatchExtraMarker,
-	}, registry.CollectRuntimeModelFacts)
+		BackupName:          transfer.ProvidersBackupName,
+		MismatchExtraMarker: transfer.ProviderMismatchExtraMarker,
+	}, func(ctx context.Context, st *store.Store, home string) []doctorfacts.ProviderRuntimeFacts {
+		return registry.CollectRuntimeModelFacts(ctx, st, home, dsh.Registry())
+	})
 }
 
 // TestCollectProviderDoctorFactsReadsEverything 一次把五件事都放上：没有密钥的档案、
@@ -162,7 +167,7 @@ func TestCollectProviderDoctorFactsReadsEverything(t *testing.T) {
 	// 模型清单段：**每个内置 runtime** 各一条物化状态（按 `AllBuiltinSpecs()` 现算，而不是写死
 	// 一个数字——写死 2 的那一版在第二个内置底座下线后就变成了"数量恰好对上"的空断言），
 	// 且**离线**（无编排器）→ advertised 必须记 unknown。
-	wantRuntimes := len(runtime.AllBuiltinSpecs())
+	wantRuntimes := len(dsh.Specs())
 	if len(got.Runtimes) != wantRuntimes {
 		t.Fatalf("应对每个内置 runtime 各报一条物化状态（%d 条）：%+v", wantRuntimes, got.Runtimes)
 	}
@@ -192,7 +197,9 @@ func TestCollectProviderDoctorFactsMemoryMode(t *testing.T) {
 	}
 	got := doctorfacts.CollectProviderDoctorFacts(context.Background(), nil, doctorfacts.ProviderDoctorOptions{
 		Home: home, ProviderDir: providerDir, ProvidersFileName: provider.ProvidersFileName,
-	}, registry.CollectRuntimeModelFacts)
+	}, func(ctx context.Context, st *store.Store, home string) []doctorfacts.ProviderRuntimeFacts {
+		return registry.CollectRuntimeModelFacts(ctx, st, home, dsh.Registry())
+	})
 	if got.Carrier != "unknown" || got.CarrierNote == "" {
 		t.Fatalf("没有持久层时载体应记 unknown 并给出原因：%+v", got)
 	}
@@ -232,7 +239,7 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedCatalog(r.svc, runtimetest.ID)
-	facts := doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(r.svc.Planes()), runtimetest.ID, state)
+	facts := doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(r.svc.Planes()), dsh.Specs(), runtimetest.ID, state)
 	if !facts.AdvertisedKnown || facts.AdvertisedCount != 0 {
 		t.Fatalf("应取到「目录为空」这个事实：%+v", facts)
 	}
@@ -244,8 +251,8 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	}
 
 	// ② 底座广告了它 → 不高危、差集为空。
-	seedCatalog(r.svc, runtimetest.ID, aclValue(value))
-	facts = doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(r.svc.Planes()), runtimetest.ID, state)
+	seedCatalog(r.svc, runtimetest.ID, acpValue(value))
+	facts = doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(r.svc.Planes()), dsh.Specs(), runtimetest.ID, state)
 	if !facts.AdvertisedKnown || facts.HighRisk || facts.AdvertisedCount != 1 {
 		t.Fatalf("两侧一致时不该高危：%+v", facts)
 	}
@@ -260,7 +267,7 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	// 摘掉编排器走的正是 CLI 离线那条路。
 	r.svc.orch = nil
 	r.svc.planes.Providers.ResetConfigCatalog()
-	facts = doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(r.svc.Planes()), runtimetest.ID, state)
+	facts = doctorfacts.RuntimeModelFacts(ctx, registry.NewModelFacts(r.svc.Planes()), dsh.Specs(), runtimetest.ID, state)
 	if facts.AdvertisedKnown || facts.HighRisk {
 		t.Fatalf("取不到广告时不许判定：%+v", facts)
 	}
@@ -269,14 +276,17 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	}
 }
 
-// aclValue 造一个 `category=model` 的目录取值。
-func aclValue(value string) acl.ConfigOptionValue {
-	return acl.ConfigOptionValue{Value: value}
+// acpValue 造一个 `category=model` 的目录取值。
+func acpValue(value string) acp.ConfigOptionValue {
+	return acp.ConfigOptionValue{Value: value}
 }
 
 // TestCollectProviderDoctorFactsNoStoreNoHome 极端输入：什么都没有时不许 panic。
 func TestCollectProviderDoctorFactsNoStoreNoHome(t *testing.T) {
-	got := doctorfacts.CollectProviderDoctorFacts(context.Background(), nil, doctorfacts.ProviderDoctorOptions{}, registry.CollectRuntimeModelFacts)
+	got := doctorfacts.CollectProviderDoctorFacts(context.Background(), nil, doctorfacts.ProviderDoctorOptions{},
+		func(ctx context.Context, st *store.Store, home string) []doctorfacts.ProviderRuntimeFacts {
+			return registry.CollectRuntimeModelFacts(ctx, st, home, dsh.Registry())
+		})
 	if got.Carrier != "unknown" || got.LegacySecretAnchor != "" {
 		t.Fatalf("空输入应老实报 unknown 且不给假锚点：%+v", got)
 	}
@@ -294,9 +304,9 @@ func TestCollectProviderDoctorFactsNoStoreNoHome(t *testing.T) {
 // 这是把"运行时广告了什么"变成可构造输入的唯一干净办法：目录缓存本来就是内存态，
 // 而 `ModelCatalog` 在无活会话时读它（source=cache）。用真会话造这一侧会让单测依赖真底座，
 // 而本用例要钉的是**对账算法**本身。缓存键是 runtime id（v19）。
-func seedCatalog(svc *Service, runtimeID string, values ...acl.ConfigOptionValue) {
-	svc.planes.Providers.PutConfigOptions(runtimeID, []acl.ConfigOption{{
-		ID: "model", Name: "Model", Category: acl.CategoryModel, Type: "select",
+func seedCatalog(svc *Service, runtimeID string, values ...acp.ConfigOptionValue) {
+	svc.planes.Providers.PutConfigOptions(runtimeID, []acp.ConfigOption{{
+		ID: "model", Name: "Model", Category: acp.CategoryModel, Type: "select",
 		Values: values,
 	}})
 }

@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
 
@@ -124,5 +124,6 @@ func (m *Meta) UpdateSession(ctx context.Context, id string, patch dtosession.Se
 		// 出口与其余读面同一个码（不静默回空壳）。
 		return nil, sessionNotFoundErr(id)
 	}
-	return &resp, nil
+	out := sessionRespDTO(resp)
+	return &out, nil
 }

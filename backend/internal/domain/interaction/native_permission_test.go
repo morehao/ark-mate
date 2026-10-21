@@ -1,11 +1,12 @@
 package interaction
 
 import (
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // portRegistry 一张**带可执行半场**的注册表（含各内置 adapter 的端口）。
@@ -13,7 +14,7 @@ import (
 // 为什么不用 `runtime.NewRegistry()`（空表）：原生权限的实现挂在注册表的第三张表上
 // （ADR-2：`Spec` 只装纯数据、行为进执行表），空表上"没有端口"与"这个底座没有原生机制"
 // 是同一种表现——用它当夹具会把"内核只做转发"这件事掩盖掉。
-func portRegistry() *runtime.Registry { return runtime.AllBuiltinRegistry() }
+func portRegistry() *runtime.Registry { return dsh.Registry() }
 
 // TestNativePermissionDispatch 内核只做三件事：nil 短路、`off` 短路、按 runtime 取端口转发。
 // 具体映射的词表与算法在 adapter 侧（每个 adapter 自己的包与它的测试）。

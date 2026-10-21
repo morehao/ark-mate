@@ -38,7 +38,7 @@ func CaptureLogs(t *testing.T) func() string {
 	install()
 	t.Cleanup(func() {
 		// 收尾必须**重装一个可用出口**，不能只 Close：Close 之后底层 writer 被置空，
-		// 同包后续用例（哪怕不抓日志）再写一行就会 panic（实测：internal/gateway 的
+		// 同包后续用例（哪怕不抓日志）再写一行就会 panic（实测：internal/drivers/gateway 的
 		// TestRunExitsOnStdinEOF 就是这么炸的）。这里装一个 Error 档的 console 出口：
 		// 既不会因为缓冲写进已删除的临时目录，也几乎不会往 stdout 说话。
 		_ = glog.Close()

@@ -6,12 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/object/objid"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
 
@@ -19,15 +17,15 @@ const (
 	// DeliveryReject 忙时直接报错（缺省；不排队）。
 	DeliveryReject = "reject"
 	// DeliveryAfterRun 排队，等当前轮结束再投递。
-	DeliveryAfterRun = store.InputDeliveryAfterRun
+	DeliveryAfterRun = model.InputDeliveryAfterRun
 	// DeliveryInterruptThenPrompt 取消当前轮，随后投递。
-	DeliveryInterruptThenPrompt = store.InputDeliveryInterruptThenPrompt
+	DeliveryInterruptThenPrompt = model.InputDeliveryInterruptThenPrompt
 )
 
 // ValidDeliveries 合法投递模式（报错提示与校验共用，顺序即文档顺序）。
 var ValidDeliveries = []string{DeliveryReject, DeliveryAfterRun, DeliveryInterruptThenPrompt}
 
-// 队列项终态（事件收敛用；与 store.InputStatus* 同值）。
+// 队列项终态（事件收敛用；与 model.InputStatus* 同值）。
 const (
 	ReasonRunFinished = "run_finished"   // 队列项因上一轮结束而投递
 	ReasonUserCancel  = "user_cancel"    // 用户显式撤下
@@ -57,7 +55,7 @@ func NormalizeDelivery(v string) (string, error) {
 	case DeliveryInterruptThenPrompt:
 		return DeliveryInterruptThenPrompt, nil
 	default:
-		return "", acl.NewError(acl.ClassRequest, "invalid_delivery",
+		return "", acp.NewError(acp.ClassRequest, "invalid_delivery",
 			fmt.Sprintf("delivery 需为 %s 之一，得到 %q", strings.Join(ValidDeliveries, "|"), v), nil)
 	}
 }
@@ -90,7 +88,7 @@ func (pl *Plane) EnqueueInput(ctx context.Context, convID, text, delivery, targe
 		row := model.InputEntity{
 			ID: in.ID, SessionID: convID, Text: text, Delivery: delivery,
 			TargetRunID: targetRun, Generation: generation,
-			Status: store.InputStatusQueued, CreatedAt: in.CreatedAt,
+			Status: model.InputStatusQueued, CreatedAt: in.CreatedAt,
 		}
 		if err := pl.st.CreateInput(ctx, row); err != nil {
 			return QueuedInput{}, err
@@ -126,14 +124,14 @@ func (pl *Plane) ListQueuedInputsOf(ctx context.Context, convID string) []Queued
 //
 // 与事件的分工：事件负责「过程」（何时入队/投递/撤下），本读模型负责「当前态」——
 // 前端冷挂载时 WS 只给 snapshot 不回放历史，没有这个入口队列就会在刷新后凭空消失。
-func (pl *Plane) ListQueuedInputs(ctx context.Context, id string) ([]dtosession.QueuedInputResp, error) {
+func (pl *Plane) ListQueuedInputs(ctx context.Context, id string) ([]QueuedInputItem, error) {
 	if !pl.HasSession(id) {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return nil, code.FromError(acp.NewError(acp.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	queue := pl.ListQueuedInputsOf(ctx, id)
-	out := make([]dtosession.QueuedInputResp, 0, len(queue))
+	out := make([]QueuedInputItem, 0, len(queue))
 	for _, q := range queue {
-		out = append(out, dtosession.QueuedInputResp{
+		out = append(out, QueuedInputItem{
 			ID: q.ID, Text: q.Text, Delivery: q.Delivery,
 			TargetRunID: q.TargetRunID, Generation: q.Generation,
 			CreatedAt: q.CreatedAt.UTC().Format(time.RFC3339Nano),
@@ -245,7 +243,7 @@ func (pl *Plane) MoveQueuedInput(ctx context.Context, convID, inputID, beforeID 
 			}
 		}
 		if at < 0 {
-			return code.FromError(acl.NewError(acl.ClassRequest, "queued_input_anchor_not_found",
+			return code.FromError(acp.NewError(acp.ClassRequest, "queued_input_anchor_not_found",
 				fmt.Sprintf("锚点队项 %q 不在该会话的待投递列表里", beforeID), nil))
 		}
 		order = append(order[:at:at], append([]string{inputID}, order[at:]...)...)
@@ -330,7 +328,7 @@ func (pl *Plane) reorderQueued(ctx context.Context, convID string, order []strin
 
 // queuedInputNotFoundErr 队项不在该会话的待投递集里（唯一出口：40401）。
 func queuedInputNotFoundErr(inputID string) error {
-	return acl.NewError(acl.ClassRequest, "queued_input_not_found",
+	return acp.NewError(acp.ClassRequest, "queued_input_not_found",
 		fmt.Sprintf("待投递输入 %q 不存在或已不在队列里", inputID), nil)
 }
 

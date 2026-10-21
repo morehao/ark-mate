@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
 )
 
 // ——— v18「知识归属」三条判据（第二个适配下线 + adapter 层收口）———
@@ -21,18 +21,18 @@ import (
 // 为什么要升级到依赖：字面量判据的扫描对象会随底座被删除而**一起消失**，
 // 于是判据"零命中 → 绿"，而它实际已经空转；依赖判据不会，因为它的对象是"内核 → adapter"这条边本身。
 
-// adapterImportRE 在剥注释后的 Go 源码里找 `pkg/runtime/<adapter>` 的 import 路径。
+// adapterImportRE 在剥注释后的 Go 源码里找 `internal/runtime/<adapter>` 的 import 路径。
 //
-// 采集根是 `pkg/runtime/` 下的**子包**：`pkg/runtime` 根包正是"父包汇入"发生的地方
+// 采集根是 `internal/runtime/` 下的**子包**：`internal/runtime` 根包正是"父包汇入"发生的地方
 // （它必须 import 各 adapter 才能构造 Spec 与执行表），而子包（= adapter 本体）被 import 到哪里
 // 才是知识归属的判据。
-var adapterImportRE = regexp.MustCompile(`"github\.com/morehao/ark-mate/pkg/runtime/([a-z0-9_]+)"`)
+var adapterImportRE = regexp.MustCompile(`"github\.com/morehao/ark-mate/internal/runtime/([a-z0-9_]+)"`)
 
 // TestInternalDoesNotImportRuntimeAdapters 内核（`internal/**`）不得 import 任何 runtime adapter 子包。
 //
 // 为什么这条是"adapter 层"的机器判据：内核要用的只是**端口**（`runtime.Registry` 的 Spec /
-// Syncer / NativePermission），而端口类型住在父包 `pkg/runtime`。一旦内核 import 了
-// `pkg/runtime/dsh`，它多半是在按 id 分派具体底座的知识（本次收口前内核的
+// Syncer / NativePermission），而端口类型住在父包 `internal/runtime`。一旦内核 import 了
+// `internal/infra/dsh`，它多半是在按 id 分派具体底座的知识（本次收口前内核的
 // `native_permission.go` 就是那个样子：`switch runtimeID` + `opencodeActionAliases` +
 // `opencodePermissionConfig`）——症状不是报错，而是
 // **下一个底座接进来时必须回内核改代码**。
@@ -76,7 +76,7 @@ func TestInternalDoesNotImportRuntimeAdapters(t *testing.T) {
 		checked++
 		for _, m := range adapterImportRE.FindAllStringSubmatch(src, -1) {
 			rel, _ := filepath.Rel(backendRoot(t), f)
-			t.Errorf("%s import 了 runtime adapter 子包 %q——内核只许依赖父包 `pkg/runtime` 的**端口**，"+
+			t.Errorf("%s import 了 runtime adapter 子包 %q——内核只许依赖父包 `internal/runtime` 的**端口**，"+
 				"不得依赖任何具体底座的实现。按 id 分派底座知识的后果不是报错，而是"+
 				"「下一个 runtime 接进来时要回内核改 switch」。把那段知识搬进该 adapter 自己的包，"+
 				"经父包的执行表（Syncer / NativePermission）暴露", rel, m[1])
@@ -101,7 +101,7 @@ var nativeModeConstRE = regexp.MustCompile(`(?m)^\s*NativeMode[A-Za-z]*\s*=\s*"(
 func nativeModeWireFileIn(t *testing.T, backendRootDir string) string {
 	t.Helper()
 	return uniqueSourceFile(t, filepath.Join(backendRootDir, "internal"),
-		map[string]bool{"archtest": true}, `(?m)^\s*NativeMode[A-Za-z]*\s*=\s*"`,
+		map[string]bool{"archtest": true, "dsh": true}, `(?m)^\s*NativeMode[A-Za-z]*\s*=\s*"`,
 		"内核侧 `NativeMode*` wire 常量的声明处")
 }
 
@@ -143,7 +143,7 @@ func TestNativePermissionModeLiteralsMatchWire(t *testing.T) {
 	wire := nativeModeValuesOf(t, nativeModeWireFileIn(t, root))
 	// 目前的内置适配里只有 dsh 声明了"模式"这一维（原生面是逐动作表的底座不认 mode，
 	// 那种形态的实现按端口契约自己处理——内核不参与）。
-	adapter := nativeModeValuesOf(t, filepath.Join(root, "pkg", "runtime", "dsh", "native_permission.go"))
+	adapter := nativeModeValuesOf(t, filepath.Join(root, "internal", "infra", "dsh", "native_permission.go"))
 
 	if strings.Join(wire, "\x00") != strings.Join(adapter, "\x00") {
 		t.Errorf("原生权限模式字面量已分叉：\n内核(wire) %v\nadapter    %v\n"+
@@ -188,7 +188,7 @@ var runtimeIDCaseRE = regexp.MustCompile(`(?:case\s+|==\s*|!=\s*)"([a-z0-9][a-z0
 //
 // # 判据
 //
-// 对每个内置 spec 的 id（`runtime.AllBuiltinSpecs()`——**不是**写死的清单，所以加底座时本守卫
+// 对每个内置 spec 的 id（`dsh.Specs()`——**不是**写死的清单，所以加底座时本守卫
 // 自动覆盖它），扫 `internal/**` 的非测试 Go 源码（剥注释），命中 `case "<id>"` / `== "<id>"` /
 // `!= "<id>"` 即失败。
 //
@@ -196,13 +196,13 @@ var runtimeIDCaseRE = regexp.MustCompile(`(?:case\s+|==\s*|!=\s*)"([a-z0-9][a-z0
 //
 //   - **只扫非 `_test.go`**：测试里按 id 命名运行时是**故意的**（夹具要造"某个具体底座的声明"
 //     才能验分发），而那些字符串一个都不进产品代码路径。
-//   - **只扫 `internal/**`**：`pkg/runtime` 根包与各 adapter 子包正是**允许**认识 id 的地方
+//   - **只扫 `internal/**`**：`internal/runtime` 根包与各 adapter 子包正是**允许**认识 id 的地方
 //     （父包负责汇入 Spec 与登记执行表，adapter 就是那个底座本身）。
 //   - **豁免 `internal/archtest` 自身**：它的任务就是逐条比对 id 与声明（同上一条判据的自豁免）。
 //
 // fail-closed：任一扫描面为空即失败——判据自身失效时不许静默变绿。
 func TestInternalHasNoRuntimeIDSpecialCase(t *testing.T) {
-	specs := runtime.AllBuiltinSpecs()
+	specs := dsh.Specs()
 	if len(specs) == 0 {
 		t.Fatal("AllBuiltinSpecs() 返回空：本判据没有可比的 id（fail-closed），先修内置清单")
 	}

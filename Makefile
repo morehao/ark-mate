@@ -45,7 +45,7 @@ DESKTOP_VERSION := $(shell sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]
 # 开发态（core/desktop）不注入 → 核心报 `dev`（internal/version 的口径）；只有 desktop/dist 注入。
 CORE_VERSION ?=
 
-# —— 底座构建期固定（产品约束：用户不能选 runtime，见 backend/pkg/runtime/build.go）——
+# —— 底座构建期固定（产品约束：用户不能选 runtime，见 backend/internal/runtime/build.go）——
 # 不指定 = dsh（dsh）。它是**编译期**的 `-X` 注入，不是运行时配置、也不是环境变量：
 # 换底座要重新构建（桌面/容器本来就要重打包）。
 # 取值只做**词法**校验（存在性交给核心启动时的 ProductRegistry fail-closed）：远程 runtime 的 id
@@ -54,7 +54,7 @@ RUNTIME ?= dsh
 ifneq ($(shell echo '$(RUNTIME)' | grep -Eq '^[a-z0-9][a-z0-9_-]*$$' && echo ok),ok)
 $(error RUNTIME 取值非法：$(RUNTIME)（须是 [a-z0-9][a-z0-9_-]*；不指定则默认 dsh）)
 endif
-CORE_LDFLAG_ARGS = $(strip $(if $(CORE_VERSION),-X github.com/morehao/ark-mate/internal/version.Version=$(CORE_VERSION),) -X github.com/morehao/ark-mate/pkg/runtime.BuildRuntime=$(RUNTIME))
+CORE_LDFLAG_ARGS = $(strip $(if $(CORE_VERSION),-X github.com/morehao/ark-mate/internal/version.Version=$(CORE_VERSION),) -X github.com/morehao/ark-mate/internal/runtime.BuildRuntime=$(RUNTIME))
 # ldflags 的**内层**单独留一个变量：`dev` 把它作为单个 argv 交给 `scripts/dev-loop.mjs`（那里要
 # "一个元素一个空格"地把 -X 递给 `go run`，所以不能把 `-ldflags "..."` 这层壳一起传过去）。
 CORE_LDFLAGS  = -ldflags "$(CORE_LDFLAG_ARGS)"
@@ -93,7 +93,7 @@ MATE_STORE ?= sqlite
 # 机制本身没动：跨源开发 / 自建反代仍用 `MATE_ALLOWED_ORIGINS` 显式登记（README「运行配置要点」）。
 
 # —— 开发态底座用哪一份可执行文件（可选；`make dev` / `make server` 认它）——
-# 为什么需要这个入口：核心拉哪个底座是**写死的名字**（`pkg/runtime/<id>` 里的 `Command`，默认
+# 为什么需要这个入口：核心拉哪个底座是**写死的名字**（`internal/infra/<id>` 里的 `Command`，默认
 # `dsh`），由 exec 走 PATH 解析。桌面态由壳把随包载荷注入私有 bin，而
 # `make dev` / `make server` 这两条"核心自己从 PATH 找"的形态只会命中**本机装的那份**。
 # 于是本机装的那份与仓库的声明/取证不是同一代时，这个人就成了"只有他的开发循环跑在另一代底座上"。
@@ -126,7 +126,7 @@ MATE_STORE ?= sqlite
 # node/npx/dsh 三个启动器，整段前置会让 vite/pnpm 调到的 `node` 因 MATE_NODE_EXECUTABLE
 # 未设置直接以 127 失败。前端进程不拿这个 PATH。
 # 有值但不可执行 → 当场失败：静默忽略的症状是"以为换成了 v2、其实还在跑 v1"，那正是这里要消灭的。
-# 隔离不受影响：核心拉底座时按 pkg/runtime/isolation.go 注入**该 adapter 自己声明**的隔离变量，
+# 隔离不受影响：核心拉底座时按 internal/runtime/isolation.go 注入**该 adapter 自己声明**的隔离变量，
 # 它的 home 落在 MATE_HOME 下，不碰用户自己的安装。也因此这里**不替用户探测版本**——
 # 有的底座连 `--version` 都会写自己的 home（2026-10-10 dsh 实测），探一下就是动本机。
 #

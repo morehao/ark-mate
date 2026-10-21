@@ -11,11 +11,10 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/skill"
 
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -163,7 +162,7 @@ func TestSetSkillEnabledErrors(t *testing.T) {
 	if err := svc.planes.Capabilities.RegisterSkill(&capability.Skill{ID: "in-memory", Body: "# x"}); err != nil {
 		t.Fatal(err)
 	}
-	// acl 的稳定码不进 gerror 文案（msg = Details），故断言人话 + 信封码两条。
+	// acp 的稳定码不进 gerror 文案（msg = Details），故断言人话 + 信封码两条。
 	_, err := svc.Planes().Skills.SetSkillEnabled(context.Background(), "in-memory", false)
 	if err == nil || !strings.Contains(err.Error(), "没有定义文件") {
 		t.Fatalf("无定义文件应显式失败: %v", err)
@@ -238,7 +237,7 @@ func envelopeCode(t *testing.T, err error) int {
 func boolPtr(v bool) *bool { return &v }
 
 // matStatus 取某 root 的体检状态（测试断言用）。
-func matStatus(t *testing.T, svc *Service, id, root string) dtocapability.SkillMaterializationState {
+func matStatus(t *testing.T, svc *Service, id, root string) skill.MaterializationStateView {
 	t.Helper()
 	resp, err := svc.Planes().Skills.SkillMaterialization(id)
 	if err != nil {
@@ -250,7 +249,7 @@ func matStatus(t *testing.T, svc *Service, id, root string) dtocapability.SkillM
 		}
 	}
 	t.Fatalf("体检结果里没有 root=%s: %+v", root, resp.States)
-	return dtocapability.SkillMaterializationState{}
+	return skill.MaterializationStateView{}
 }
 
 // TestSkillMaterializationStatuses §13.4 S2 审计面：每个 status 都可判定、都对应一个真实情况。

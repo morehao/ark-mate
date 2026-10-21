@@ -17,11 +17,11 @@ ark-mate 自上而下分两层，两层职责并列成立：
 边界的四条硬口径（不是取向，是已登记的产品约束）：
 
 - **单机单操作员**。不做多用户、团队共享、登录/RBAC；控制面默认只绑回环（`127.0.0.1`），凭据体系只解决「REST 面与事件流面分权」（见 §6）。
-- **底座由构建期固定，用户不能选 runtime**。选中的 id 由 `-X` 在编译期注入 `pkg/runtime.BuildRuntime`，不注入即 `dsh`；用户面没有任何 runtime 选择或读取入口（`GET /runtimes` 不存在）。带被撤掉的**选择键**的写请求一律显式拒绝（`40001`），不静默丢弃。
+- **底座由构建期固定，用户不能选 runtime**。选中的 id 由 `-X` 在编译期注入 `internal/runtime.BuildRuntime`，不注入即 `dsh`；用户面没有任何 runtime 选择或读取入口（`GET /runtimes` 不存在）。带被撤掉的**选择键**的写请求一律显式拒绝（`40001`），不静默丢弃。
 - **能力不重造**。skill 执行、MCP 工具调用、推理循环一律复用底座原生实现；平台只做这些能力对应的**数据与配置管理**。
 - **无跨 agent 协作**。一次会话/一次运行只绑定一个 runtime，不存在委托、子 agent、并行协作。
 
-**接边有界**：内置适配只有 `dsh` 一个。但 adapter 层是完整的——接一个新底座 = 新建 `backend/pkg/runtime/<id>/` + 一个 `<id>Spec()` + 挂三张**端口表**实现（`resource.Syncer` / `runtime.NativePermissionAdapter` / `runtime.ModelValueAdapter`），**不需要改框架内核**。内核里不得出现任何内置适配 id 的特判（守卫钉住）。
+**接边有界**：内置适配只有 `dsh` 一个。但 adapter 层是完整的——接一个新底座 = 新建 `backend/internal/infra/<id>/`（实现 `runtime.Adapter`）+ 装配根加一行 + 挂三张**端口表**实现（`resource.Syncer` / `runtime.NativePermissionAdapter` / `runtime.ModelValueAdapter`），**不需要改框架内核**。内核里不得出现任何内置适配 id 的特判（守卫钉住）。
 
 ## 2. 交付形态三态
 
@@ -67,13 +67,13 @@ Electron 主进程（桌面态）
 
 | 环节 | 事实 |
 | --- | --- |
-| 选中 id | `pkg/runtime.SelectedRuntime()`（构建期注入值，空则 `dsh`） |
+| 选中 id | `internal/runtime.SelectedRuntime()`（构建期注入值，空则 `dsh`） |
 | 产品装配 | `runtime.ProductRegistry(remotes)`：**只注册选中的那一个**，未注册即**启动失败**——不给「能启动但没底座」的进程 |
 | 全量适配面 | `AllBuiltinSpecs()` / `AllBuiltinRegistry()` 只服务测试与诊断；医生与能力矩阵守卫必须看到**全部**适配面，否则未被选中的适配守卫会静默空转 |
 
 ### 3.3 进程生命周期
 
-- **进程注册表**（`pkg/procreg`）：daemon 把拉起的子进程（pid / pgid / 命令 / runtime / 启动时刻 / daemon 实例 id）登记为 JSON；正常停止或断连时摘除。
+- **进程注册表**（`internal/infra/procreg`）：daemon 把拉起的子进程（pid / pgid / 命令 / runtime / 启动时刻 / daemon 实例 id）登记为 JSON；正常停止或断连时摘除。
 - **孤儿回收**：启动时只回收**非本实例**登记的条目，SIGTERM → 宽限期 → SIGKILL **整个进程组**；以「pgid 与登记值一致」防 PID 复用误杀（不一致只清账并留日志）。取向是**宁可漏杀，不可误杀**。
 - **按需拉起 + 空闲回收**：编排器自己按下需拉起暖进程，`reapLoop` 扫「无在途 run、无会话引用、闲置超时」的暖进程并回收；之后会话与诊断面自动按需重拨。
 
@@ -83,7 +83,7 @@ Electron 主进程（桌面态）
 
 - adapter 在自己的 `Spec.Isolation` 里声明变量名与落点（`IsolationPath` 投影到 `<MATE_HOME>/runtime/<id>/…`、`IsolationLiteral` 字面量、`IsolationEmpty` 清空），父包只做**机械投影**（`IsolationEnvFor`），不认识任何具体底座；
 - 公共 npm 面（`npm_config_cache` / `npm_config_prefix`）对所有本地子进程统一给——MCP server 常经 `npx` 拉起；
-- **同一张隔离表在仓库里有三份**：核心（`pkg/runtime/isolation.go`）、桌面私有启动器（`apps/desktop/scripts/gen-runtime-bin.mjs`）、V9 探针（`frontend/scripts/desktop-runtime-smoke.mjs`）。**改一处就得改三处**，三条 guard 分别钉住「逐变量逐取值」「启动器 ⊆ 核心」「探针与核心逐条对齐」。
+- **同一张隔离表在仓库里有三份**：核心（`internal/runtime/isolation.go`）、桌面私有启动器（`apps/desktop/scripts/gen-runtime-bin.mjs`）、V9 探针（`frontend/scripts/desktop-runtime-smoke.mjs`）。**改一处就得改三处**，三条 guard 分别钉住「逐变量逐取值」「启动器 ⊆ 核心」「探针与核心逐条对齐」。
 
 配套的读数口径：**不注入底座的 skill 家目录变量**——底座的 skill 读根必须与平台的投放写根同源，注了就会让读根与写根悄悄分叉、skill 静默不生效。
 
@@ -93,45 +93,61 @@ Electron 主进程（桌面态）
 
 ## 4. 后端分层与依赖方向
 
-### 4.1 应用侧
+### 4.1 层带（L0–L9，v3.2 终局表）
 
-```
-cmd/mate  →  internal/app（装配 + 启停生命周期）
-                →  internal/router（唯一传输层装配点，按领域分 routes_*.go）
-                      →  internal/controller/ctr<领域>
-                            →  internal/service/svc<领域>（**业务逻辑层**：接口 + 实现）
-                                  →  internal/domain/* · dao · store
-                internal/registry（**装配层**：Planes + 启停表 + 资源同步）
-                internal/sessionruntime（**会话编排层**：Service / Orchestrator / 权限）
-```
+机器判据是 `backend/internal/archtest/layers_v32_test.go` 的 `v32Layers`：每个包按**最长前缀**归到一层，
+规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，除非该层 `sameLayer: true`
+（`service` **永不** `sameLayer`，它 deny 自己的前缀，逼"svc 包之间零互相 import"）；③ 每层可带 `deny`
+精确排除个别内层包。违规是**硬失败**，例外清单必须为空且双向。
 
-- `internal/router` 声明自己需要哪些端口（`router.Ports`），由 `internal/app` 注入实现；每个领域一个 `routes_*.go`，各自构造控制器并注册自己的路由。
-- `internal/service/svc<领域>` 是**业务逻辑层**：包内声明接口 + 实现 + 构造函数，控制器在自己的构造函数里造实例；`internal/sessionruntime` 是**会话编排层**（P4b 起取代 `internal/manager`：Service / Orchestrator / 权限，执行面在 `runtimeconn`、领域状态在 `domain/*`），`internal/registry` 是**装配层**（平面集合 + 启停表 + 资源同步）。
-- `internal/dto/dto<领域>` 被控制器、用例层与过渡期实现共用，自身不依赖任何应用层。
+| 层 | 谁 | 一句话 |
+| --- | --- | --- |
+| **L0** | `persistence/model` | 表行形状。零依赖，被所有持久侧与部分领域引用 |
+| **L1** | `core/{object/*,redact,identity,resource,credential,eventbus,code,automation,definition,capability}` `version` `runtime` `infra/{acp,mcp,logging}` | 值对象与协议库，**本带允许互链**（ACP 线协议、错误码折算、值类型复用） |
+| **L2** | `domain/*` | 业务规则与状态。**出边为零**：不 import dto、store、mechanism、infra |
+| **L3** | `dto/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份） |
+| **L4** | `service/svc<领域>` | 用例层：接口 + 实现 + 构造函数；校验、错误码、响应装配 |
+| **L5** | `persistence/{store,dao}` `infra/{credentials,dbclient,procreg,dsh}` | 持久与基础设施 |
+| **L6** | `drivers/{gateway,mechanism,registry,runtimeconn,transfer}` `config` | 驱动侧：机制、注册表、连接面、存量定义导入导出编排 |
+| **L7** | `sessionruntime` | 会话编排（Service / Orchestrator / 权限） |
+| **L8** | `delivery/controller/ctr<领域>` `delivery/middleware` | 入站适配 |
+| **L9** | `delivery/router` `bootstrap/{assembly,app,cliops,cli,maintenance}` | 装配与交付 |
+
+两条容易搞混的：**`domain` 在 `dto` 里侧**（域不认识对外契约，视图由用例层投影）；**`maintenance` 与组合根同级**
+（`mate doctor` 要真的把 app 装起来自检，它向下吃 `assembly`/`router`）。
+
+### 4.1.1 三个"第二形态"
+
+- **`domain` 双载体**：`store`（sqlite）与文件/memory 各一份，由窄端口（`WorkspaceStore` / `ProviderStore` /
+  `AutomationStore` / `DefinitionFiles` / `Secrets` / `Store`）在装配期接进来；`*store.Store` 结构上满足它们。
+  适配体落在装配点 `registry`（与 `workspaceStore` / `skillDefs` / `mcpDefs` 同一处：只有它同时看得见域端口与机制实现）。
+- **`transfer`（L6）**：**存量定义**在文件载体与持久层之间的导入/导出**编排**（扫目录、计数、落库、导出），
+  三个域（capability / automation / provider）共用一套纪律。域只留纯转换（文件形状、v11→v12 映射、
+  id 词法），因为编排要认识 `store` 与 `mechanism`，而域不该认识它们。它也不能并进 `capability`：
+  后者是 L1 值层，而 `domain/*` 已经 import 它——把 `store` 加进去是 L1 向上的边，`capability → domain`
+  还会直接成环。
+- **`maintenance`（L9）**：命令实现（migrate / doctor / transcripts / mcp / config / demo / automation /
+  capability / provider）。`cliops` 只剩命令分发与常驻 `serve`。
 
 ### 4.2 持久侧
 
 ```
 internal/dbclient（句柄装配 + SQLite URL 拼装）
-      →  internal/dao（单表数据访问，基于 golib gormdao）
-             →  internal/store（门面：句柄 + 跨表事务 + 读模型 API）
-internal/model（实体定义）被上面三者依赖，自身不依赖任何一层
+      →  internal/persistence/dao（列词汇 + gormdao 泛型方法 + 机械原语；不承载业务读面）
+             →  internal/persistence/store（业务面：排序/筛选/聚合/状态迁移 + 跨表事务 + 读模型 API）
+internal/persistence/model（实体定义）被上面三者依赖，自身不依赖任何一层
 ```
 
-三条方向纪律：`dao` 不得 import `store`（成环）；`model` 不得 import `dao`/`store`；`store` 只做三件事——持有句柄、兜住跨表事务、暴露读模型 API，单表读写一律经 `dao`。
+三条方向纪律：`dao` 不得 import `store`（成环）；`model` 不得 import `dao`/`store`；`store` 只做三件事——持有句柄、兜住**单聚合**事务、暴露读模型 API，单表读写一律经 `dao`。
 
-### 4.3 `pkg/` 与 `internal/` 的分界
+跨聚合的事务（如"删工作空间 + 释放会话归属"）**不在仓储里**：策略属于领域，所以领域通过
+`Atomically` 在自己的规则里编排，仓储只提供事务开合与三个窄操作（`store/workspace_tx.go`）。
 
-| 目录 | 准入标准 | 内容 |
-| --- | --- | --- |
-| `pkg/` | 抽出去别的应用也能用 | `acl`（ACP 客户端与传输）、`runtime`（adapter 注册表 + 三张端口表）、`capability`、`mcp`、`code`（错误码）、`config`、`credentials`、`dbclient`、`logging`、`procreg`、`redact`、`resource`、`automation`、`object/{objid,objusage,objdelivery}` |
-| `internal/` | 本控制面的应用逻辑与策略 | `app`、`router`、`controller`、`service`、`manager`、`dto`、`dao`、`model`、`store`、`eventbus`、`middleware`、`credential`、`gateway`、`archtest`、`testutil`、`version` |
+### 4.3 只有一个代码层
 
-**`pkg/` 内部不得 import `internal/`**（守卫）。这条是本仓多条「接口放哪」的根源：底座 adapter 要实现的 `resource.Syncer` 之所以定义在 `pkg/resource` 而不是 `pkg/runtime`，是因为 `pkg/runtime` 已经 import 各 adapter 子包——定义在父包会形成父子 import 环。
-
-### 4.4 一条容易踩的形状约定
-
-**adapter 子包只提供纯数据与端口实现，父包汇入统一 `Spec`**。落点里的 `${VAR}` 占位符只能靠该 runtime 自己的隔离 env 解出来，而 adapter 拿不到注册表——所以解析必须发生在父包，adapter 永远不自己拼 `HOME`。
+`backend/pkg` 已全量并入 `internal/`（v3.1 §3.1.12）：不再有"可复用基础设施 vs 应用专属"的目录分界，
+新增包时只问一句——**它落在层表的哪一层**。原先 `pkg/` 下的包现在归在 L1（协议与值对象）或 L5
+（基础设施），层号就是它们的准入标准。
 
 ## 5. 数据模型
 
@@ -145,7 +161,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 
 ### 5.2 表与实体
 
-17 张表，一表一文件（`internal/model/<域>.go`），结构体一律 `<域词>Entity` / `<域词>EntityList`，表名常量 `TableName<域词>` 随实体文件走：
+17 张表，一表一文件（`internal/persistence/model/<域>.go`），结构体一律 `<域词>Entity` / `<域词>EntityList`，表名常量 `TableName<域词>` 随实体文件走：
 
 | 分组 | 表 |
 | --- | --- |
@@ -157,7 +173,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 
 ### 5.3 身份与位次（两件不同的事）
 
-**身份**由 `pkg/object/objid` 单点铸造：`3 位小写字母 + _` + 26 位 Crockford Base32 ULID（进程内单调，字典序 = 铸造序）。
+**身份**由 `internal/core/object/objid` 单点铸造：`3 位小写字母 + _` + 26 位 Crockford Base32 ULID（进程内单调，字典序 = 铸造序）。
 
 | 前缀 | 实体 | 前缀 | 实体 |
 | --- | --- | --- | --- |
@@ -177,7 +193,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 - `models`：`id` 是 `mdl_…`（平台行 id）；`model` 是**发给上游的模型名**（外部世界的字符串）；`provider_id` 指向供应商；容量列（`max_input_tokens` / `max_output_tokens`）**可空、无 DEFAULT**——空 = 不下发该字段，「0」当不了「未声明」的哨兵。
 - **会话引用平台 id**：`sessions.model_id` 指向 `models.id`。底座的**不透明取值**不落库、不过 wire，由 adapter 每次现算（唯一解析点）。对不上平台清单的提交**显式拒**（`40401`），不静默回落默认模型。
 - **凭据只有一个事实源：库**。`providers.key` 列 + `mcp_secrets(ref, value, revision, updated_at)` 表；`<MATE_HOME>/credentials.json`（严格 `ref → value` 映射、0600、原子写）是**可重建的双写镜像**——删掉它不丢任何东西。
-- **读值走四层回落**，唯一实现在 `pkg/credentials`：**继承环境（只读，最高）> 托管文档 > `<cwd>/.env` > `<MATE_HOME>/.env`**。继承环境最高是因为「这次运行的显式意图」不该被静默遮蔽。
+- **读值走四层回落**，唯一实现在 `internal/infra/credentials`：**继承环境（只读，最高）> 托管文档 > `<cwd>/.env` > `<MATE_HOME>/.env`**。继承环境最高是因为「这次运行的显式意图」不该被静默遮蔽。
 - MCP 的引用词法是 `store:<ns>/<name>`（库里的一行）或 `env:<ENV_NAME>`（进程环境变量）；**明文密钥一律拒收**，引用只在注入前一刻解析成明文。
 - **代价如实写在决策登记里**：库与其备份现在含明文密钥，因此 `backups/` 0700 与备份文件 0600 是硬要求，共享机器不再安全。
 
@@ -185,7 +201,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 
 ### 6.1 REST
 
-前缀 `/v1/mate`（gin 版本分组 `/{version}/{appName}`，`appName = mate`）。路由由 `internal/router/routes_*.go` 按领域装配，**对外的路径集合以本包注册的为准**，README 的「控制面接口摘要」由守卫逐条比对（新增/改名路由必须同步）。
+前缀 `/v1/mate`（gin 版本分组 `/{version}/{appName}`，`appName = mate`）。路由由 `internal/delivery/router/routes_*.go` 按领域装配，**对外的路径集合以本包注册的为准**，README 的「控制面接口摘要」由守卫逐条比对（新增/改名路由必须同步）。
 
 面的一览（代表路径，完整清单见 README）：
 
@@ -209,7 +225,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 
 ### 6.3 错误码与凭据
 
-- **错误码的唯一事实源是 `pkg/code`**：常量 + 默认文案 + 注册表 + `FromError` 归一。信封里的 `code` 是对外契约，三处必须同步——`pkg/code`（事实源）、README 的表、前端 `packages/types/src/response.ts`。**控制器错误出口一律带码**，不得透传裸 error。
+- **错误码的唯一事实源是 `internal/core/code`**：常量 + 默认文案 + 注册表 + `FromError` 归一。信封里的 `code` 是对外契约，三处必须同步——`internal/core/code`（事实源）、README 的表、前端 `packages/types/src/response.ts`。**控制器错误出口一律带码**，不得透传裸 error。
 - **凭据分两个面**：REST 面（`Authorization: Bearer`，改数据的能力都在这里）与 stream 面（只读的事件流首帧）。桌面态两枚令牌互斥、经 **stdin** 交给核心（不进 argv / env / 文件 / URL）；独立态是同一条令牌同时具备两个面。空表 = 不鉴权，只允许出现在绑定回环的场景。
 - **Host 白名单 + Origin 矩阵只挂 `v1` 整组**（回环监听面），静态资产与 SPA 回落不在其内——真正的攻击面是 API。WS 的来源判定在控制器里做（Accept 之前），与 REST 共用**同一个** policy 对象。
 
@@ -239,7 +255,7 @@ internal/model（实体定义）被上面三者依赖，自身不依赖任何一
 能力集是**进程级**的（ACP 没有「给活会话换能力」的通道），所以每套能力各自一个底座子进程，**同指纹共享**：
 
 - **连接键** = runtime id + 影响线程行为的 env 组签名；**代际键** = 连接键 + 能力指纹 + 平台生成的模型配置指纹。三者必须都在键里——缺一项就会出现「暖进程继续用旧清单，而界面显示已保存」。
-- **指纹输入只有一个决定点**（`internal/domain/session/capability_fingerprint.go`），算法在 `pkg/runtime`。三条边界：密钥值绝不进指纹（只用键名与引用名）；正文摘要复用物化 sidecar 的同一算法；**只纳入真正会生效的东西**（禁用的 skill、不投给该 runtime 的 skill、该底座不支持的传输的 MCP 都不进）。
+- **指纹输入只有一个决定点**（`internal/domain/session/capability_fingerprint.go`），算法在 `internal/runtime`。三条边界：密钥值绝不进指纹（只用键名与引用名）；正文摘要复用物化 sidecar 的同一算法；**只纳入真正会生效的东西**（禁用的 skill、不投给该 runtime 的 skill、该底座不支持的传输的 MCP 都不进）。
 - **生效边界只有一条规则：下一个轮次**，但四个方向处置不同——扩权/改内容下一轮迁移过去；**缩权立刻生效且失败不回退**（宁可带码拒发这一轮，也不用已被收回的权限面继续跑）；忙则顺延；纯内容变化迁移失败可回退旧代际继续跑。
 - 同一配置下代际有上限，达限时先淘汰「无会话引用且空闲」的代际，仍超限则要求复用现有能力集——**绝不静默复用错误的能力集**（猜细了是安全 bug）。
 - 会话可钉住能力**子集**（`capabilities` 逐 kind 三态：键缺失 = 未声明、`[]` = 一个都不要、非空 = 白名单且**覆盖**而非求交）。
@@ -290,9 +306,10 @@ backend/
 │   ├── runtimeconn/          执行面（连接池 / 拨号 / 代际 / 诊断）
 │   ├── manager/              过渡期实现（逐域搬空后整体删除；只剩装配适配与权限/提问回调）
 │   ├── dto/dto<域>/          请求/响应 DTO（两侧共用，自身不依赖应用层）
-│   ├── model/                持久层实体（一表一文件 + enum/serializer/time）
-│   ├── dao/                  单表数据访问（gormdao）
-│   ├── store/                持久层门面（句柄 + 跨表事务 + 读模型 + 自管迁移）
+│   ├── persistence/          持久层（实体 + 访问面 + 业务面，同一只管带）
+│   │   ├── model/            持久层实体（一表一文件 + enum/serializer/time）
+│   │   ├── dao/              列词汇（Cond）+ gormdao 泛型方法 + 机械原语
+│   │   └── store/            持久层业务面（排序/筛选/聚合 + 跨表事务 + 读模型 + 自管迁移）
 │   ├── eventbus/             进程内事件总线（每聚合位次 + 历史缓冲 + 回放）
 │   ├── middleware/           凭据与 Host/Origin 矩阵
 │   ├── credential/           凭据 → scope 只读表（rest / stream 两面）

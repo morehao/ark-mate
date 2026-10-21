@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— 首轮身份注入（P2 的确定性判据） ———
@@ -38,7 +38,7 @@ func (c *captureACP) Prompt(_ context.Context, text string) (string, error) {
 }
 
 func (c *captureACP) Cancel(context.Context) error      { return nil }
-func (c *captureACP) ConfigOptions() []acl.ConfigOption { return nil }
+func (c *captureACP) ConfigOptions() []acp.ConfigOption { return nil }
 
 func (c *captureACP) PromptAt(i int) string {
 	c.mu.Lock()
@@ -93,20 +93,20 @@ func newIdentityRunner(t *testing.T, as *ActiveSession) (*Runner, *eventbus.Bus)
 
 // TestFirstPromptStartsWithIdentity 首轮顺序与事件原文（①②）。
 func TestFirstPromptStartsWithIdentity(t *testing.T) {
-	acp := newCaptureACP()
+	agent := newCaptureACP()
 	as := NewActiveSession(HandleParams{
 		ID: "s1", Runtime: "r", Identity: "<product_identity>身份</product_identity>",
-		Memo: "摘要", Session: acp,
+		Memo: "摘要", Session: agent,
 	})
 	r, bus := newIdentityRunner(t, as)
 
 	if _, err := r.Prompt(context.Background(), "s1", "你是谁"); err != nil {
 		t.Fatalf("发首轮: %v", err)
 	}
-	waitPrompt(t, acp, 1)
+	waitPrompt(t, agent, 1)
 
 	want := "<product_identity>身份</product_identity>\n\n摘要\n\n你是谁"
-	if got := acp.PromptAt(0); got != want {
+	if got := agent.PromptAt(0); got != want {
 		t.Fatalf("首轮 prompt 顺序应为 identity → memo → 用户原文：\n got=%q\nwant=%q", got, want)
 	}
 	// 事件仍是用户原文：前缀是**平台注入**，不是用户说的话。
@@ -128,39 +128,39 @@ func TestFirstPromptStartsWithIdentity(t *testing.T) {
 
 // TestIdentityInjectedOnlyOnce 第三条：每个执行上下文一次，不是每轮一次。
 func TestIdentityInjectedOnlyOnce(t *testing.T) {
-	acp := newCaptureACP()
+	agent := newCaptureACP()
 	as := NewActiveSession(HandleParams{
-		ID: "s1", Runtime: "r", Identity: "<product_identity>身份</product_identity>", Session: acp,
+		ID: "s1", Runtime: "r", Identity: "<product_identity>身份</product_identity>", Session: agent,
 	})
 	r, _ := newIdentityRunner(t, as)
 
 	if _, err := r.Prompt(context.Background(), "s1", "第一句"); err != nil {
 		t.Fatalf("首轮: %v", err)
 	}
-	waitPrompt(t, acp, 1)
+	waitPrompt(t, agent, 1)
 	waitIdle(t, as)
 
 	if _, err := r.Prompt(context.Background(), "s1", "第二句"); err != nil {
 		t.Fatalf("第二轮: %v", err)
 	}
-	waitPrompt(t, acp, 2)
+	waitPrompt(t, agent, 2)
 
-	if got := acp.PromptAt(1); got != "第二句" {
+	if got := agent.PromptAt(1); got != "第二句" {
 		t.Fatalf("身份块只应注入首个执行上下文，第二轮应逐字等于用户原文，得到 %q", got)
 	}
 }
 
 // TestNoIdentityChangesNothing 第四条：`off` 模式（身份为空）下 prompt 逐字等于原文。
 func TestNoIdentityChangesNothing(t *testing.T) {
-	acp := newCaptureACP()
-	as := NewActiveSession(HandleParams{ID: "s1", Runtime: "r", Session: acp})
+	agent := newCaptureACP()
+	as := NewActiveSession(HandleParams{ID: "s1", Runtime: "r", Session: agent})
 	r, _ := newIdentityRunner(t, as)
 
 	if _, err := r.Prompt(context.Background(), "s1", "你好"); err != nil {
 		t.Fatalf("发首轮: %v", err)
 	}
-	waitPrompt(t, acp, 1)
-	if got := acp.PromptAt(0); got != "你好" {
+	waitPrompt(t, agent, 1)
+	if got := agent.PromptAt(0); got != "你好" {
 		t.Fatalf("没有身份时不应改变 prompt 字节，得到 %q", got)
 	}
 }

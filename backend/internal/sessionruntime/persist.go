@@ -1,7 +1,8 @@
 package sessionruntime
 
 import (
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/domain/session"
+	"github.com/morehao/ark-mate/internal/persistence/store"
 )
 
 // EnableStore 启用 SQLite 持久层（P1 live 接线）。启用后：
@@ -14,7 +15,7 @@ import (
 // 库句柄的接线分两半，**都从这里进**：
 //
 //   - 会话域（本层拥有）：`sessionPlane.SetStore`；
-//   - 领域平面与资源同步面（P5a 起归 `internal/registry`）：`planes.EnableStore` 一次接全
+//   - 领域平面与资源同步面（P5a 起归 `internal/drivers/registry`）：`planes.EnableStore` 一次接全
 //     （定义机制 / 凭据机制 / 技能平面 / 供应商域 / 工作空间域 / 自动化域 + 同步指纹装载 +
 //     装配期同步）。
 //
@@ -23,6 +24,16 @@ import (
 // 读不到库）。装配路径与 `mate doctor --rebuild-read-models` 那条逃生口都必须经它，
 // **不要各自赋值**。
 func (s *Service) EnableStore(st *store.Store) {
-	s.sessionPlane.SetStore(st)
+	s.sessionPlane.SetStore(sessionStore(st))
 	s.planes.EnableStore(st)
+}
+
+// sessionStore 把库句柄当**窄端口**交给会话域（v3.1 P4）。
+//
+// 必须现判 nil：typed-nil 装进接口不是 nil，会话域里那句 `if pl.st == nil` 会失效。
+func sessionStore(st *store.Store) session.Store {
+	if st == nil {
+		return nil
+	}
+	return st
 }

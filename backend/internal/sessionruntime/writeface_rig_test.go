@@ -7,13 +7,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
+	defn "github.com/morehao/ark-mate/internal/core/definition"
 
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— 写面夹具（M6-5：一套断言跑在**两种载体**上） ———
@@ -67,9 +67,9 @@ func writeFaceFile(t *testing.T, specs ...runtime.Spec) *writeFace {
 // sub 把能力种类映射成目录名（文件载体的目录名 = DB 载体的写面分区名）。
 func subOf(kind string) string {
 	if kind == model.DefinitionKindMcp {
-		return definition.CapSubMcps
+		return defn.CapSubMcps
 	}
-	return definition.CapSubSkills
+	return defn.CapSubSkills
 }
 
 // expectPath 载体无关地给出写面响应里 `path` 的期望值（人类可读的定位串）。
@@ -216,7 +216,7 @@ func (w *writeFace) failWrites(t *testing.T) {
 		}
 		return
 	}
-	skillsDir := filepath.Join(w.dir, definition.CapSubSkills)
+	skillsDir := filepath.Join(w.dir, defn.CapSubSkills)
 	_ = os.RemoveAll(skillsDir)
 	if err := os.WriteFile(skillsDir, []byte("not a dir"), 0o644); err != nil {
 		t.Fatal(err)

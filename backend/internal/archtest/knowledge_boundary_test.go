@@ -20,7 +20,7 @@ import (
 
 // runtimeConfigLiterals 底座的配置格式与机制字面量（T1：`internal/` 下零命中）。
 //
-// 每一个都是**底座私有知识**：它属于 `pkg/runtime/<adapter>`，不属于平台内核。
+// 每一个都是**底座私有知识**：它属于 `internal/runtime/<adapter>`，不属于平台内核。
 //
 // **已下线底座的字面量刻意留在表里**（`opencode.json` / `OPENCODE_CONFIG_CONTENT` /
 // `opencode_json`）：它们的语义是"这类字面量出现在内核就是知识回流"，而不是"这个底座还在仓库里"。
@@ -63,8 +63,14 @@ func TestInternalHasNoRuntimeConfigLiterals(t *testing.T) {
 		t.Fatalf("internal/ 不存在：%v", err)
 	}
 	hits := 0
-	for _, path := range goFilesUnder(t, internalDir) {
+	for _, path := range productionGoFiles(t, internalDir) {
 		if strings.HasPrefix(filepath.ToSlash(path), filepath.ToSlash(filepath.Join(internalDir, "archtest"))+"/") {
+			continue
+		}
+		// v3.1 §3.2.1 规则 5：内核扫描**跳过 adapter**（`internal/infra/dsh/**` 就是底座私有知识
+		// 的合法落点）。跳过它是这次合并的直接结果：adapter 从 `pkg/` 搬进 `internal/` 之后，
+		// 若不跳过，这条守卫会把它自己的归属地判成违规。
+		if strings.HasPrefix(filepath.ToSlash(path), filepath.ToSlash(filepath.Join(internalDir, "infra", "dsh"))+"/") {
 			continue
 		}
 		hits += scanForLiterals(t, path, runtimeConfigLiterals, "internal/")
@@ -85,32 +91,32 @@ var storeLiterals = []string{
 	"DELETE FROM",
 	"gorm",
 	"dao.",
-	modulePrefix + "internal/store",
-	modulePrefix + "internal/dao",
-	modulePrefix + "internal/model",
+	modulePrefix + "internal/persistence/store",
+	modulePrefix + "internal/persistence/dao",
+	modulePrefix + "internal/persistence/model",
 }
 
-// TestAdapterHasNoStoreLiterals A9：`pkg/runtime/<adapter>/**` 剥注释后不得出现持久层代码。
+// TestAdapterHasNoStoreLiterals A9：`internal/runtime/<adapter>/**` 剥注释后不得出现持久层代码。
 //
 // 判据是"结构上够不到"：adapter 只认端口传进来的 `Set`，它没有、也不该有读库的能力
 // （H5 的机器判据）。一旦有，等价性 golden 就再也证明不了什么——同样的输入可能有不同的输出。
 //
-// fail-closed：`pkg/runtime/<adapter>` 一个都没有 → 失败（目录改名/搬迁也会让它静默空转）。
+// fail-closed：`internal/runtime/<adapter>` 一个都没有 → 失败（目录改名/搬迁也会让它静默空转）。
 func TestAdapterHasNoStoreLiterals(t *testing.T) {
 	root := backendRoot(t)
-	runtimeDir := filepath.Join(root, "pkg", "runtime")
-	adapters := 0
-	for _, dir := range subdirs(t, runtimeDir) {
-		if !hasGoFiles(dir) {
-			continue
-		}
-		adapters++
-		for _, path := range goFilesUnder(t, dir) {
-			scanForLiterals(t, path, storeLiterals, "pkg/runtime/<adapter>/")
-		}
+	adapterDir := filepath.Join(root, "internal", "infra", "dsh")
+	if !hasGoFiles(adapterDir) {
+		t.Fatalf("%s 下没有 Go 文件：这条守卫失去了检查对象（改名/搬迁了？）", adapterDir)
 	}
-	if adapters == 0 {
-		t.Fatalf("%s 下没有带 Go 文件的 adapter 子包：这条守卫失去了检查对象（改名/搬迁了？）", runtimeDir)
+	for _, path := range goFilesUnder(t, adapterDir) {
+		scanForLiterals(t, path, storeLiterals, "internal/infra/dsh/")
+	}
+	// 反向：`internal/runtime` 只留契约与注册表，不得再长出 adapter 子包。
+	for _, dir := range subdirs(t, filepath.Join(root, "internal", "runtime")) {
+		if hasGoFiles(dir) {
+			t.Errorf("internal/runtime 下又出现 adapter 子包 %s：adapter 只能住在 internal/infra/dsh（v3.1 §3.2.1 规则 5）。",
+				filepath.ToSlash(rel(root, dir)))
+		}
 	}
 }
 
@@ -162,7 +168,7 @@ func scanForLiterals(t *testing.T, path string, literals []string, where string)
 			if strings.Contains(line, lit) {
 				hits++
 				t.Errorf("%s 里 %s:%d 出现底座/持久层字面量 %q：\n\t%s\n"+
-					"底座配置格式的知识属于 pkg/runtime/<adapter>，不属于平台内核（T1/T2）；"+
+					"底座配置格式的知识属于 internal/runtime/<adapter>，不属于平台内核（T1/T2）；"+
 					"adapter 也不得依赖 internal/{store,dao,model}（H5）",
 					where, rel, i+1, lit, strings.TrimSpace(line))
 			}

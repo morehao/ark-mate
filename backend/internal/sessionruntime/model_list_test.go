@@ -7,19 +7,20 @@ import (
 	"strings"
 	"testing"
 
+	defn "github.com/morehao/ark-mate/internal/core/definition"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+
 	"github.com/morehao/ark-mate/internal/domain/provider"
 
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
-	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/ark-mate/pkg/resource"
-	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -61,10 +62,10 @@ func newModelRig(t *testing.T) *modelRig {
 	home := t.TempDir()
 	// 内置那一份：Spec + `RegisterBuiltinPorts` 的三张执行表（缺了后者，这些底座会**静默**少掉
 	// 原生权限 / 清单交付 / 模型值三面，表现为一堆看起来像"平台侧没实现"的假症状）。
-	dsh := builtinSpec(t, runtime.DefaultBuildRuntime)
-	dsh.Launch.Command = "mate-test-" + dsh.ID + "-stub-not-on-path"
-	r.svc.planes.Registry.Register(dsh)
-	runtime.RegisterBuiltinPorts(r.svc.planes.Registry)
+	builtin := builtinSpec(t, runtime.DefaultBuildRuntime)
+	builtin.Launch.Command = "mate-test-" + builtin.ID + "-stub-not-on-path"
+	r.svc.planes.Registry.Register(builtin)
+	dsh.New().RegisterPorts(r.svc.planes.Registry)
 	// 合成那一份：同样 Spec 与端口同批登记（`runtimetest.Register` 就是夹具侧的 `RegisterBuiltinPorts`）。
 	runtimetest.Register(r.svc.planes.Registry, runtime.LaunchSpec{Command: "mate-test-" + runtimetest.ID + "-stub-not-on-path"})
 	// 隔离面由各 spec 自己声明（dsh 的 `DSH_HOME` / 合成底座的 `RTX_HOME`），内核只做机械投影。
@@ -80,7 +81,7 @@ func newModelRig(t *testing.T) *modelRig {
 // 形态（runtimetest 的声明是合成的，所以它随适配面增减不会静默改变这些用例的覆盖面）。
 func builtinSpec(t *testing.T, id string) runtime.Spec {
 	t.Helper()
-	sp, ok := runtime.AllBuiltinRegistry().Get(id)
+	sp, ok := dsh.Registry().Get(id)
 	if !ok {
 		t.Fatalf("内置注册表里应有 %s", id)
 	}
@@ -93,14 +94,14 @@ func builtinSpec(t *testing.T, id string) runtime.Spec {
 // 这些用例要的是"清单里有一条"这个**前提**，不是写面的行为——写面的判据跟着实现走，
 // 在 `internal/service/svcmodel/declared_test.go`。
 //
-// 仍借 `store.ModelColumns` 落库而不是手写 SQL：前提必须与产品落库的形态同源
+// 仍借 `model.ModelColumns` 落库而不是手写 SQL：前提必须与产品落库的形态同源
 // （列化之后"清单里有一条"这句话的含义就是这些列）。
-func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate ...func(*dtomodel.ModelCreateReq)) *dtomodel.ModelResp {
+func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate ...func(*dtomodel.ModelCreateReq)) *provider.ModelItem {
 	t.Helper()
 	ctx := context.Background()
 	key := "sk-test"
 	baseURL := "https://api.deepseek.com/v1"
-	if _, err := r.svc.planes.Providers.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	if _, err := r.svc.planes.Providers.CreateProvider(ctx, provider.CreateRequest{
 		ID: providerID, Protocol: "openai", BaseURL: &baseURL, APIKey: &key,
 	}); err != nil && errCode(err) != "provider_exists" {
 		t.Fatalf("CreateProvider(%s): %v", providerID, err)
@@ -121,10 +122,10 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 	if req.Note != nil {
 		note = *req.Note
 	}
-	ok, err := r.svc.planes.Resources.Store().CreateModelDefinition(ctx, store.ModelColumns{
+	ok, err := r.svc.planes.Resources.Store().CreateModelDefinition(ctx, model.ModelColumns{
 		ID: id, ProviderID: providerID, Model: modelID, Name: name, Note: note,
 		InputModalities: modalities, MaxInputTokens: req.MaxInputTokens, MaxOutputTokens: req.MaxOutputTokens,
-	}, definition.DefinitionWriteActor)
+	}, defn.DefinitionWriteActor)
 	if err != nil || !ok {
 		t.Fatalf("插模型行: ok=%v err=%v", ok, err)
 	}
@@ -154,7 +155,7 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 // 让另一条断言红。清单里**不存** value：它只存生成 value 的输入（这正是本方案最容易写错的一处：
 // 把运行时给的 value 存回清单就是把"事实"当"意图"）。
 func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
-	builtin := runtime.AllBuiltinRegistry()
+	builtin := dsh.Registry()
 	v, err := provider.ModelValueFor(builtin, runtime.DefaultBuildRuntime, "deepseek-main", "deepseek-v4-flash")
 	if err != nil {
 		t.Fatal(err)
@@ -206,7 +207,7 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 // 写面（"没有载体就 40501"）随实现在 `internal/service/svcmodel/declared_test.go`。
 func TestModelListReadsEmptyWithoutSQLite(t *testing.T) {
 	ctx := context.Background()
-	svc := NewService(runtime.AllBuiltinRegistry(), eventbus.New())
+	svc := NewService(dsh.Registry(), eventbus.New())
 	items, err := svc.planes.Providers.ListModels(ctx)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("memory 模式的清单读面应回空列表: %+v err=%v", items, err)
@@ -266,7 +267,7 @@ func TestDefaultModelReasoningEffortNotSent(t *testing.T) {
 	}
 	// dsh 必须**声明凭据交付面**（原 v11 断言的是"已声明模型配置落点"，v12 的那个概念换成
 	// 落点 + 凭据两条声明；这里断言后者，因为它是新链路的关键）。
-	reg := runtime.AllBuiltinRegistry()
+	reg := dsh.Registry()
 	sp, ok := reg.Get(runtime.DefaultBuildRuntime)
 	if !ok {
 		t.Fatal("dsh 应已注册")

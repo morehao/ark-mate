@@ -1,4 +1,8 @@
-// Package svcmodel 承载**模型清单与目录**面的用例层（ADR-2：从 svcruntime 拆出）。
+// ——— 模型清单与目录面（本包内按**面**切开的第二组接口）———
+//
+// provider 与 model 同属 `domain/provider` 一个域（`models.provider_id` 是外键式的挂靠），
+// 域包早已同时拥有两者；2026-10-20 合并进同一个 `svcmodel` 包后，仍按**面**声明接口：
+// `DeclaredSvc`（写面）与 `ModelSvc`（读清单 / 运行时目录 / 同步）。
 //
 // **两个事实源分得清**：平台的 `models` 表是**声明**（写面在这），运行时派生的目录是**事实**
 // （ACP session 投影，只读）。混成一个读数就会让"平台声明了什么"与"底座广告了什么"变成同一句话。
@@ -19,7 +23,7 @@ import (
 // DeclaredSvc 平台模型清单的**写面**（三条），实现是本包的 `Declared`（`declared.go`）。
 //
 // 读面（`ListModels`）刻意**不在**这个接口上：它在实现搬过来之前，写面不该被迫连带引用一份
-// 还没搬的读数（`svcprovider` 那一刀的同一条口径：接口按**面**切，不按领域切）。
+// 还没搬的读数（`svcmodel` 那一刀的同一条口径：接口按**面**切，不按领域切）。
 type DeclaredSvc interface {
 	// CreateModel 新建一条模型条目（`(provider_id, model_id)` 唯一 → 40901；
 	// provider 不存在 → 40401；请求体带 `runtime` → 40001）。
@@ -32,9 +36,9 @@ type DeclaredSvc interface {
 
 // ModelSvc 模型面的**过渡期复合接口**：声明清单的读面 + 运行时目录 + 同步。
 //
-// 今天由 `*manager.Service` 满足（装配点交出，控制器收下）。它只声明**controller 真正调用**的
-// 三个方法——不要为了"看起来完整"把 `ListModels` 再放回来：那个方法没有接口消费方，
-// 放进来只会让"这一段还剩什么"变得不可见。
+// 今天由装配根交下来的组合实现满足（`sessionruntime.ModelFace`：`registry.ModelViews` 的读面/同步
+// + `ModelEffect` 的生效面回执）。它只声明**controller 真正调用**的三个方法——不要为了"看起来完整"
+// 把 `ListModels` 再放回来：那个方法没有接口消费方，放进来只会让"这一段还剩什么"变得不可见。
 //
 // 这一片的归宿是 P4b 第二刀（读面 + 同步面进 `svcmodel`）与 P5（目录面的采样换成执行面的窄端口）。
 type ModelSvc interface {

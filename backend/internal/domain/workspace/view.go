@@ -9,8 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // 工作空间的**只读辅助面**（浏览 + 最近使用）。
@@ -41,7 +40,7 @@ const BrowseEntryLimit = 1000
 //   - Crumbs 给**完整祖先链**（从文件系统根到当前目录），不再按名录裁剪。
 //
 // `Roots` 仍然下发，但语义变了：它是面板用来把偏好起点列成快捷入口的，不是"允许范围"。
-func (pl *Plane) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace.WorkspaceBrowseResp, error) {
+func (pl *Plane) BrowseWorkspace(path string, includeHidden bool) (*BrowseView, error) {
 	roots := pl.WorkspaceRoots()
 	home := ""
 	if h, err := os.UserHomeDir(); err == nil {
@@ -58,7 +57,7 @@ func (pl *Plane) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace
 		} else if home != "" {
 			path = home
 		} else {
-			return nil, acl.NewError(acl.ClassService, "workspace_unavailable",
+			return nil, acp.NewError(acp.ClassService, "workspace_unavailable",
 				"未指定 path 且无法定位服务进程家目录", nil)
 		}
 	}
@@ -70,10 +69,10 @@ func (pl *Plane) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+		return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
 			"目录不可读: "+dir, err)
 	}
-	out := make([]dtoworkspace.WorkspaceEntryResp, 0, len(entries))
+	out := make([]BrowseEntry, 0, len(entries))
 	truncated := false
 	for _, e := range entries {
 		// 只列目录（含符号链接指向的目录：DirEntry.IsDir 为 false 时再 Stat 一次消歧）。
@@ -89,11 +88,11 @@ func (pl *Plane) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace
 			truncated = true
 			break
 		}
-		out = append(out, dtoworkspace.WorkspaceEntryResp{Name: e.Name(), Path: child, Hidden: hidden})
+		out = append(out, BrowseEntry{Name: e.Name(), Path: child, Hidden: hidden})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 
-	resp := &dtoworkspace.WorkspaceBrowseResp{
+	resp := &BrowseView{
 		Path:      dir,
 		Entries:   out,
 		Roots:     roots,
@@ -127,7 +126,7 @@ func (pl *Plane) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace
 //
 // **v14.5：原来的第 4 条（建完再判真身是否在根内，越界则回滚）已删** —— 白名单不再是边界，
 // 建目录的落点由用户自己选（与 dsh 的原生选择器同口径）。
-func (pl *Plane) CreateWorkspaceDir(parent, name string) (*dtoworkspace.WorkspaceDirCreateResp, error) {
+func (pl *Plane) CreateWorkspaceDir(parent, name string) (*WorkspaceDirCreate, error) {
 	dir, err := ValidateWorkspace(parent)
 	if err != nil {
 		return nil, err
@@ -146,13 +145,13 @@ func (pl *Plane) CreateWorkspaceDir(parent, name string) (*dtoworkspace.Workspac
 	target := filepath.Join(dir, name)
 	if err := os.Mkdir(target, 0o755); err != nil {
 		if os.IsExist(err) {
-			return nil, acl.NewError(acl.ClassLimit, "workspace_exists",
+			return nil, acp.NewError(acp.ClassLimit, "workspace_exists",
 				fmt.Sprintf("目录已存在: %s", target), nil)
 		}
-		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+		return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
 			fmt.Sprintf("创建目录失败: %s", target), err)
 	}
-	return &dtoworkspace.WorkspaceDirCreateResp{Path: ResolveRealPath(target)}, nil
+	return &WorkspaceDirCreate{Path: ResolveRealPath(target)}, nil
 }
 
 // ancestryCrumbs 从**文件系统根**到 target（含自身）的祖先链，逐级可跳。
@@ -162,15 +161,15 @@ func (pl *Plane) CreateWorkspaceDir(parent, name string) (*dtoworkspace.Workspac
 //
 // 输入应当是已规范化的绝对路径（BrowseWorkspace 传的就是 ValidateWorkspace 的结果），
 // 所以这里不再做符号链接解析——面包屑要与"当前目录"逐字一致，而不是另一个真身写法。
-func ancestryCrumbs(target string) []dtoworkspace.WorkspaceCrumbResp {
-	crumbs := make([]dtoworkspace.WorkspaceCrumbResp, 0, 8)
+func ancestryCrumbs(target string) []BrowseCrumb {
+	crumbs := make([]BrowseCrumb, 0, 8)
 	for cur := target; ; {
 		parent := filepath.Dir(cur)
 		name := filepath.Base(cur)
 		if parent == cur {
 			name = cur // 根：basename 为空（POSIX "/" 的 Base 是 "/"，Windows "C:\" 的 Base 是 "\."），用路径当名字
 		}
-		crumbs = append(crumbs, dtoworkspace.WorkspaceCrumbResp{Name: name, Path: cur})
+		crumbs = append(crumbs, BrowseCrumb{Name: name, Path: cur})
 		if parent == cur {
 			break
 		}
@@ -192,10 +191,10 @@ func ancestryCrumbs(target string) []dtoworkspace.WorkspaceCrumbResp {
 // 把两者合成一个接口会破坏上面那条"entries[].path 可直接提交"的契约，所以宁可多一个只读接口。
 //
 // 边界与浏览面完全一致（只要"绝对 / 存在 / 是目录"）：**v14.5 起不再按名录过滤**——要看内容就能看。
-func (pl *Plane) ListWorkspaceFiles(path string, includeHidden bool) (*dtoworkspace.WorkspaceFilesResp, error) {
+func (pl *Plane) ListWorkspaceFiles(path string, includeHidden bool) (*FilesView, error) {
 	roots := pl.WorkspaceRoots()
 	if strings.TrimSpace(path) == "" {
-		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+		return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
 			"未指定 path：列目录内容必须给出要看的目录", nil)
 	}
 	dir, err := ValidateWorkspace(path)
@@ -204,9 +203,9 @@ func (pl *Plane) ListWorkspaceFiles(path string, includeHidden bool) (*dtoworksp
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid", "目录不可读: "+dir, err)
+		return nil, acp.NewError(acp.ClassRequest, "workspace_invalid", "目录不可读: "+dir, err)
 	}
-	out := make([]dtoworkspace.WorkspaceFileEntryResp, 0, len(entries))
+	out := make([]FileEntry, 0, len(entries))
 	for _, e := range entries {
 		if !includeHidden && strings.HasPrefix(e.Name(), ".") {
 			continue
@@ -222,7 +221,7 @@ func (pl *Plane) ListWorkspaceFiles(path string, includeHidden bool) (*dtoworksp
 		if !isDir && !st.Mode().IsRegular() {
 			continue
 		}
-		out = append(out, dtoworkspace.WorkspaceFileEntryResp{
+		out = append(out, FileEntry{
 			Name:       e.Name(),
 			Path:       child,
 			IsDir:      isDir,
@@ -237,7 +236,7 @@ func (pl *Plane) ListWorkspaceFiles(path string, includeHidden bool) (*dtoworksp
 		}
 		return out[i].Name < out[j].Name
 	})
-	return &dtoworkspace.WorkspaceFilesResp{Path: dir, Roots: roots, Entries: out}, nil
+	return &FilesView{Path: dir, Roots: roots, Entries: out}, nil
 }
 
 // isDirEntry 判断目录项是否为目录（符号链接再 Stat 一次消歧）。
@@ -298,7 +297,7 @@ func (pl *Plane) workspaceUsage() map[string]*wsUsage {
 //   - 任何**已登记**的路径（一次查登记表，而不是逐条比对）。
 //
 // v14.3 起面板已无消费者（选择面只剩登记项 + 「添加工作空间…」）；端点保留为可用的只读派生视图。
-func (pl *Plane) RecentWorkspaces(limit int) ([]dtoworkspace.WorkspaceRecentResp, error) {
+func (pl *Plane) RecentWorkspaces(limit int) ([]RecentWorkspace, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -319,12 +318,12 @@ func (pl *Plane) RecentWorkspaces(limit int) ([]dtoworkspace.WorkspaceRecentResp
 		}
 	}
 
-	out := make([]dtoworkspace.WorkspaceRecentResp, 0, len(byPath))
+	out := make([]RecentWorkspace, 0, len(byPath))
 	for path, a := range byPath {
 		if registered[path] {
 			continue
 		}
-		out = append(out, dtoworkspace.WorkspaceRecentResp{
+		out = append(out, RecentWorkspace{
 			Path:       path,
 			Name:       filepath.Base(path),
 			LastUsedAt: a.latest,

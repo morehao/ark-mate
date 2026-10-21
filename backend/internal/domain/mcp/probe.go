@@ -6,24 +6,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/code"
-	mcpclient "github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/infra/acp"
+	mcpclient "github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/golib/glog"
 )
 
-// probeClass 探测错误 → acl 分类（决定 REST 信封码，见 restErr）。
-func probeClass(err error) acl.Class {
+// probeClass 探测错误 → acp 分类（决定 REST 信封码，见 restErr）。
+func probeClass(err error) acp.Class {
 	switch mcpclient.CodeOf(err) {
 	case "mcp_transport_unsupported":
-		return acl.ClassUnsupported
+		return acp.ClassUnsupported
 	case "mcp_command_invalid", "mcp_url_invalid", "mcp_secret_unresolved":
 		// 密钥引用解析不了是**配置问题**（改引用或补齐库/环境），不是服务端故障 ⇒ 40001。
-		return acl.ClassRequest
+		return acp.ClassRequest
 	default:
-		return acl.ClassService
+		return acp.ClassService
 	}
 }
 
@@ -31,7 +30,7 @@ func probeClass(err error) acl.Class {
 // 建连（stdio/http/streamable_http；sse 明确不支持）→ initialize 握手 → tools/list（翻页）
 // → **整体替换**该 server 归属的 Tool 目录条目（tools/list 是权威快照）。
 // 成功/失败都会记录探测状态（GET /mcps 可读回 last_probe_*）。未知 server → 40401。
-func (p *Plane) Probe(ctx context.Context, id string) (*dtocapability.McpProbeResp, error) {
+func (p *Plane) Probe(ctx context.Context, id string) (*ProbeResult, error) {
 	server, ok := p.caps.GetMcpServer(id)
 	if !ok {
 		return nil, code.FromError(notFoundErr(id))
@@ -47,7 +46,7 @@ func (p *Plane) Probe(ctx context.Context, id string) (*dtocapability.McpProbeRe
 		// 解析失败就**不拿空凭证去探**（同注入面纪律）：否则用户看到的是一个远处的 401，
 		// 而"哪条引用解析不了"是当下就能说清的事实。文案只含键名与引用，绝不含值。
 		// msg 里带 [:code] 是同一条排障约定（信封 code 只有分类粒度）。
-		err := acl.NewError(acl.ClassRequest, "mcp_secret_unresolved",
+		err := acp.NewError(acp.ClassRequest, "mcp_secret_unresolved",
 			fmt.Sprintf("[mcp_secret_unresolved] 密钥引用解析失败（%s）", strings.Join(problems, "；")), nil)
 		p.recordProbe(id, err)
 		return nil, code.FromError(err)
@@ -61,7 +60,7 @@ func (p *Plane) Probe(ctx context.Context, id string) (*dtocapability.McpProbeRe
 		p.recordProbe(id, err)
 		// 信封 msg 带稳定 code（[mcp_timeout]/[mcp_spawn_failed]…）：信封 code 只有分类粒度，
 		// 排障需要精确原因（同 last_probe_error 可经 GET /mcps 读回）。
-		return nil, code.FromError(acl.NewError(probeClass(err), mcpclient.CodeOf(err),
+		return nil, code.FromError(acp.NewError(probeClass(err), mcpclient.CodeOf(err),
 			fmt.Sprintf("[%s] %s", mcpclient.CodeOf(err), err.Error()), nil))
 	}
 
@@ -90,7 +89,7 @@ func (p *Plane) Probe(ctx context.Context, id string) (*dtocapability.McpProbeRe
 	added, removed, skipped := p.caps.ReplaceToolsForMcpServer(id, tools)
 	p.recordProbe(id, nil)
 
-	out := &dtocapability.McpProbeResp{
+	out := &ProbeResult{
 		ID: id, Transport: server.Transport,
 		ServerName: res.ServerName, ServerVersion: res.ServerVersion,
 		ProbedAt: time.Now().UTC().Format(time.RFC3339),
@@ -98,7 +97,7 @@ func (p *Plane) Probe(ctx context.Context, id string) (*dtocapability.McpProbeRe
 	}
 	for _, t := range p.caps.ListTools() {
 		if t.McpServer == id {
-			out.Tools = append(out.Tools, dtocapability.ToolResp{
+			out.Tools = append(out.Tools, ToolEntry{
 				Name: t.Name, Description: t.Description, Source: t.Source,
 				McpServer: t.McpServer, Schema: t.Schema,
 			})
