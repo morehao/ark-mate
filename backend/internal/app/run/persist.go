@@ -16,7 +16,7 @@ import "github.com/morehao/ark-mate/internal/domain/session"
 //   - 领域平面（装配层拥有）：`planes` 这个动作把它那份库接全（定义机制 / 凭据机制 / 技能平面 /
 //     供应商域 / 工作空间域 / 自动化域 + 同步指纹装载 + 装配期同步）。
 //
-// 两个参数都是端口（阶段 0.1）：本层不认 `*store.Store`，也不认 `*registry.Planes`。
+// 两个参数都是端口（阶段 0.1）：本层不认 `*store.Store`，也不认具体平面容器。
 // 为什么必须是一个入口：这几处曾经都直接读 `s.resourceStore`，"设一次就够了"；拆层
 // 之后它们各持一个引用，**漏掉任一个的表现都是静默的**（该走库的走了文件、或反过来——定义只写
 // 进内存、凭据读不到库）。装配路径与 `mate doctor --rebuild-read-models` 那条逃生口都必须经它，

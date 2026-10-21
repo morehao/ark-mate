@@ -9,7 +9,9 @@ import (
 	"syscall"
 
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
+	"github.com/morehao/ark-mate/internal/bootstrap/assembly/planes"
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/runtime"
 
 	"github.com/morehao/ark-mate/internal/adapters/inbound/mcpgateway"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
@@ -93,6 +95,9 @@ func mcpBridge(args []string) {
 		Cfg:        cfg,
 		McpsPinned: scope.McpsPinned,
 		Adapters:   assembly.AllAdapters(),
+		// 领域平面由**装配根**构造（网关进程不自己拼一套：那正是"核心能注入的服务器，
+		// 网关注入不了"的来源）。
+		NewPlanes: func(reg *runtime.Registry) mcpgateway.Planes { return planes.New(reg) },
 	})
 	if sErr != nil {
 		glog.Errorw(context.Background(), "mcp bridge: 数据面装配失败（本轮工具面为空）", "err", sErr)

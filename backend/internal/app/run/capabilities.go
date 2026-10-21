@@ -13,7 +13,7 @@ import (
 // ——— 能力面的**注入适配**（P5a 之后本文件只剩这一半）———
 //
 // 能力定义的装配与装载（`LoadCapabilityDefinitions*` / `ReloadCapabilityDefinitions` /
-// `RegisterTool`）已随 P5a 归 `internal/adapters/outbound/registry.Planes`：那三件事只碰注册表、定义机制与库，
+// `RegisterTool`）已随 P5a 归平面容器（C3 4.5 后半在 `bootstrap/assembly/planes`，`RegisterTool` 转发到 `adapters/outbound/definitions`）：那三件事只碰注册表、定义机制与库，
 // 没有一样来自会话/编排，而网关子进程也要同一份实现。
 //
 // 留在本文件的是**注入适配**：把注册表里的定义折成 `acp.McpServer`（解析密钥、拼网关条目）。

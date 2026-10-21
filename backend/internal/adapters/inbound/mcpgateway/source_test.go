@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
+	"github.com/morehao/ark-mate/internal/bootstrap/assembly/planes"
 
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/platform/resource"
@@ -183,6 +184,11 @@ type sourceRig struct {
 	logs func() string
 }
 
+// testPlanes 网关数据面的平面工厂（与 `mate mcp bridge` 的进程入口同一份：装配根注入）。
+func testPlanes() func(reg *runtime.Registry) Planes {
+	return func(reg *runtime.Registry) Planes { return planes.New(reg) }
+}
+
 func newSourceRig(t *testing.T) *sourceRig {
 	t.Helper()
 	dir := t.TempDir()
@@ -213,7 +219,7 @@ func (r *sourceRig) seedMcp(id, body string, expectedRev int64) {
 // v19：网关的 scope 只有"哪个底座 + 会话钉住的 MCP 白名单"两项（agent 面已撤销）。
 func (r *sourceRig) source(pinned *[]string) *MateSource {
 	r.t.Helper()
-	src, err := NewSource(context.Background(), SourceOptions{Adapters: []runtime.Adapter{dsh.New()},
+	src, err := NewSource(context.Background(), SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, NewPlanes: testPlanes(),
 		Cfg: r.cfg, McpsPinned: pinned, Store: r.st,
 	})
 	if err != nil {
@@ -327,7 +333,7 @@ func TestSourceUsesCoreCredCwd(t *testing.T) {
 	}
 	hasKey := func(credCwd string) bool {
 		t.Helper()
-		src, err := NewSource(ctx, SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, Cfg: cfg, Store: st, CredCwd: credCwd})
+		src, err := NewSource(ctx, SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, NewPlanes: testPlanes(), Cfg: cfg, Store: st, CredCwd: credCwd})
 		if err != nil {
 			t.Fatalf("装配数据面: %v", err)
 		}
@@ -335,7 +341,7 @@ func TestSourceUsesCoreCredCwd(t *testing.T) {
 		if src.credCwd != credCwd {
 			t.Fatalf("凭据 cwd 未按显式入参生效：%q（want %q）", src.credCwd, credCwd)
 		}
-		items, err := src.planes.Providers.ListProviders(ctx)
+		items, err := src.planes.ProviderPlane().ListProviders(ctx)
 		if err != nil {
 			t.Fatalf("读 provider 面: %v", err)
 		}
@@ -355,12 +361,12 @@ func TestSourceUsesCoreCredCwd(t *testing.T) {
 		t.Fatal("换一个没有 .env 的 cwd ⇒ 不得再解析出密钥（否则说明用的不是交下来的那个目录）")
 	}
 	// 密钥值**不得**出现在任何对外表示里（回归面）。
-	src, err := NewSource(ctx, SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, Cfg: cfg, Store: st, CredCwd: cwdWithEnv})
+	src, err := NewSource(ctx, SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, NewPlanes: testPlanes(), Cfg: cfg, Store: st, CredCwd: cwdWithEnv})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = src.Close() })
-	items, err := src.planes.Providers.ListProviders(ctx)
+	items, err := src.planes.ProviderPlane().ListProviders(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +402,7 @@ func TestSourceSharesDBWithCore(t *testing.T) {
 	seedVia("web", httpDef("web", remote.srv.URL, "MCP_SHARED_DB_TOKEN"))
 
 	logs := testutil.CaptureLogs(t)
-	src, err := NewSource(context.Background(), SourceOptions{Adapters: []runtime.Adapter{dsh.New()},
+	src, err := NewSource(context.Background(), SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, NewPlanes: testPlanes(),
 		Cfg: cfg,
 	})
 	if err != nil {
@@ -630,7 +636,7 @@ func TestSourceServerTimeoutIsBounded(t *testing.T) {
 	r.seedMcp("hang", httpDef("hang", hang.URL, "MCP_TOKEN_GH"), 0)
 	r.seedMcp("ok", httpDef("ok", ok.srv.URL, "MCP_TOKEN_GH"), 0)
 
-	src, err := NewSource(ctx, SourceOptions{Adapters: []runtime.Adapter{dsh.New()},
+	src, err := NewSource(ctx, SourceOptions{Adapters: []runtime.Adapter{dsh.New()}, NewPlanes: testPlanes(),
 		Cfg: r.cfg, Store: r.st, PerServerTimeout: 300 * time.Millisecond,
 	})
 	if err != nil {

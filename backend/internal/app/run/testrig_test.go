@@ -31,7 +31,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
+	"github.com/morehao/ark-mate/internal/bootstrap/assembly/planes"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"
 
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
@@ -398,7 +398,7 @@ func poolOf(o *Orchestrator) *runtimeconn.Pool {
 // no-op；但包内绝大多数用例要真拨号/真记账/真诊断，所以统一从这里走，与生产装配根同形
 // （两半 + 五个来源接线）。改名/漏接的失效方式与生产一致：编译错或诊断报未连接。
 func newServiceForTest(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Service {
-	planes := registry.NewPlanes(reg)
+	planes := planes.New(reg)
 	plane := runtimeconn.NewPlaneFor(reg)
 	pool := runtimeconn.NewPool(plane)
 	opts = append(opts,
@@ -418,19 +418,19 @@ func newServiceForTest(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option)
 //
 // 生产代码不再有 `Planes()`：执行面只认 `PlaneFacts`。测试要直接摆弄具体平面（登记工作空间、
 // 写能力定义…），所以夹具在这里留一份旁路表——**只存在于 `_test.go`**，不污染生产类型。
-var testPlanes sync.Map // map[*Service]*registry.Planes
+var testPlanes sync.Map // map[*Service]*planes.Planes
 
 // planesOf 取夹具造的具体平面集合（未登记 → 明确失败，而不是空指针）。
-func planesOf(svc *Service) *registry.Planes {
+func planesOf(svc *Service) *planes.Planes {
 	v, ok := testPlanes.Load(svc)
 	if !ok {
 		panic("planesOf: 该 Service 不是 newServiceForTest 造的（没有具体平面记录）")
 	}
-	return v.(*registry.Planes)
+	return v.(*planes.Planes)
 }
 
 // planeFactsOfTest 把具体平面折成按面端口（与 assembly.planeFacts 同形）。
-func planeFactsOfTest(p *registry.Planes) PlaneFacts {
+func planeFactsOfTest(p *planes.Planes) PlaneFacts {
 	return PlaneFacts{
 		Providers:    p.Providers,
 		Capabilities: p.Capabilities,

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/models"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	"github.com/gin-gonic/gin"
@@ -1515,7 +1515,7 @@ func TestProviderRoutes(t *testing.T) {
 func testProviderPlane(t *testing.T) *provider.Plane {
 	t.Helper()
 	reg := dsh.Registry()
-	plane := provider.NewPlane(reg, registry.NewProviderSecrets(credential.New(reg)))
+	plane := provider.NewPlane(reg, models.NewProviderSecrets(credential.New(reg)))
 	plane.SetProviderDir(t.TempDir())
 	return plane
 }

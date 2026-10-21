@@ -69,27 +69,57 @@ func TestDefinitionTransferHasOneHome(t *testing.T) {
 	}
 }
 
-// TestPortAdaptersStayAtAssemblyPoint 窄端口适配体（DefinitionFiles / Secrets）只许在装配点。
+// TestPortAdaptersStayWithTheirDomain 窄端口适配体只能待在**它实现的那个端口的域**旁边。
 //
 // 它们不是「定义搬运」的一部分：一个是 automation 的文件载体端口，一个是 provider 的密钥面端口。
 // 放在一起的后果不是编译错误，而是「读目录的人以为这两件事有关」——2026-10-20 之前的
 // `capabilityio` 就是这样长成一个杂物间的。
-func TestPortAdaptersStayAtAssemblyPoint(t *testing.T) {
+//
+// C3 4.5 后半的判据变化（唯一一处，写清楚免得下一个人以为可以随手放宽）：
+//
+//	原判据把两个适配体都钉在 `internal/adapters/outbound/registry`，理由是"只有装配点同时看得见
+//	域端口与机制实现"。那个包解体之后，落点按**端口声明的域**走：`automation.DefinitionFiles`
+//	→ `adapters/outbound/definitions`（它与 skill/mcp 的定义端口围着同一个机制转），
+//	`provider.Secrets` → `adapters/outbound/models`（供应商域 = 模型面；`credentials` 那一格
+//	被 L5 的凭据来源占着，而它反向被 `mechanism/credential` 依赖，端口适配体放进去会成环）。
+//
+// 不变量不变：**每个端口恰好一个家**，且不在 `transfer`（导入导出编排）里。
+func TestPortAdaptersStayWithTheirDomain(t *testing.T) {
 	root := backendRoot(t)
-	reg := dirProductionBody(t, filepath.Join(root, "internal", "adapters", "outbound", "registry"))
-	for _, a := range []string{
-		"var _ automation.DefinitionFiles = AutomationDefinitionFiles{}",
-		"var _ provider.Secrets = providerSecrets{}",
+	for _, c := range []struct {
+		dir  string
+		want []string
+	}{
+		{filepath.Join(root, "internal", "adapters", "outbound", "definitions"), []string{
+			"var _ automation.DefinitionFiles = AutomationDefinitionFiles{}",
+		}},
+		{filepath.Join(root, "internal", "adapters", "outbound", "models"), []string{
+			"var _ provider.Secrets = providerSecrets{}",
+		}},
 	} {
-		if !strings.Contains(reg, a) {
-			t.Errorf("internal/adapters/outbound/registry 里找不到 %q：窄端口适配体必须留在装配点"+
-				"（只有它同时看得见域端口与机制实现；机制层禁止 import 域）。", a)
+		body := dirProductionBody(t, c.dir)
+		for _, a := range c.want {
+			if !strings.Contains(body, a) {
+				t.Errorf("%s 里找不到 %q：窄端口适配体必须留在**声明该端口的域**的出站适配器包里"+
+					"（只有它同时看得见域端口与机制实现；机制层禁止 import 域）。", rel(root, c.dir), a)
+			}
 		}
 	}
 	tr := dirProductionBody(t, filepath.Join(root, "internal", "adapters", "outbound", "transfer"))
 	for _, a := range []string{"automation.DefinitionFiles", "provider.Secrets"} {
 		if strings.Contains(tr, a) {
 			t.Errorf("internal/adapters/outbound/transfer 里出现 %q：适配体又和导入/导出混回一个包了。", a)
+		}
+	}
+	// 第二个家也不许出现：`models` 不得声明 DefinitionFiles、`definitions` 不得声明 Secrets。
+	cross := []struct{ dir, banned string }{
+		{filepath.Join(root, "internal", "adapters", "outbound", "definitions"), "provider.Secrets"},
+		{filepath.Join(root, "internal", "adapters", "outbound", "models"), "automation.DefinitionFiles"},
+	}
+	for _, c := range cross {
+		if body := dirProductionBody(t, c.dir); strings.Contains(body, c.banned) {
+			t.Errorf("%s 里出现 %q：一个端口只能有一个家（它们围着不同的机制转，"+
+				"并进同一个包会让「读目录的人以为这两件事有关」）。", rel(root, c.dir), c.banned)
 		}
 	}
 }

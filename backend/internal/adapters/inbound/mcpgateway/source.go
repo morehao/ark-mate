@@ -35,12 +35,39 @@ import (
 
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/platform/capability"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
+	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
+	domprovider "github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
+
+// Planes 网关进程需要的**那几个装配面**（由装配根注入，网关不构造领域平面）。
+//
+// 为什么是接口而不是 `*planes.Planes`：网关是 L6 入站适配，而平面容器住在装配根之下
+// （`bootstrap/assembly/planes`，L9）——反过来 import 就是把"适配器认识装配根"钉进依赖图，
+// 而这条边正是 C3 要拆的那条。这里只声明它真正用的七个动作，装配根传容器进来即可
+// （结构上直接满足，无需适配体）。
+//
+// 边界的判据是"谁构造"：容器的唯一构造点仍是装配根（核心、网关子进程、doctor 三处各自
+// 进程内各造一次，但用的是**同一份** `New`），网关只消费。
+type Planes interface {
+	// EnableStore 把库句柄接到全部平面（与核心进程同一个入口）。
+	EnableStore(st *store.Store)
+	// CredentialStore 凭据机制（网关要接分层凭据源）。
+	CredentialStore() *credential.Store
+	// ProviderPlane 供应商平面（装载 / 重装供应商定义）。
+	ProviderPlane() *domprovider.Plane
+	// McpPlane MCP 平面（网关面与密钥解析）。
+	McpPlane() *dommcp.Plane
+	// LoadCapabilityDefinitions 装载定义目录（memory 模式的事实源）。
+	LoadCapabilityDefinitions(dir string) int
+	// LoadCapabilityDefinitionsFromStore 从库装载定义（sqlite 模式的事实源）。
+	LoadCapabilityDefinitionsFromStore(ctx context.Context, importDir string) int
+	// ReloadCapabilityDefinitions 每次取数前重装（M7-2）。
+	ReloadCapabilityDefinitions(ctx context.Context) (int, error)
+}
 
 // SourceOptions 数据面参数。
 type SourceOptions struct {
@@ -50,6 +77,11 @@ type SourceOptions struct {
 	Adapters []runtime.Adapter
 	// McpsPinned 会话钉住的 MCP 白名单（nil = 未钉 → 全量）。
 	McpsPinned *[]string
+	// NewPlanes 领域平面工厂（**装配根注入**，nil → 装配失败）。
+	//
+	// 传工厂而不是实例：网关要先用 `opts.Adapters` 造注册表（"只注册构建期选中的那一个底座"），
+	// 平面必须建在同一份注册表上；否则"平台说 A、网关按 B 过滤"会静默分叉。
+	NewPlanes func(reg *runtime.Registry) Planes
 
 	// Store 注入已打开的持久层（测试用；nil → 按 Cfg 打开）。非 nil 时由调用方负责关闭。
 	Store *store.Store
@@ -112,9 +144,10 @@ func resolveCredCwd(explicit string, getenv func(string) string) (cwd, source st
 //
 // **不经过 manager**（P5a）：网关要的是领域平面与库句柄，而不是会话/编排。两边各自
 // `manager.NewService` 一遍时，能力装载与凭据分层会静默分叉（"核心能注入的服务器，
-// 网关注入不了"），所以统一从 `registry.Planes` 取同一套装配事实。
+// 网关注入不了"），所以统一从装配根构造的领域平面取同一套装配事实（C3 4.5 后半：容器在
+// `bootstrap/assembly/planes`，网关经 `Planes` 端口注入，不 import 它）。
 type MateSource struct {
-	planes      *registry.Planes
+	planes      Planes
 	pool        *mcp.Pool
 	ownPool     bool
 	st          *store.Store
@@ -145,6 +178,10 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
+	if opts.NewPlanes == nil {
+		// 静默兜底成"没有平面"会让工具面恒空而日志干净——那是最难查的一类。
+		return nil, fmt.Errorf("网关装配底座: 装配根未注入领域平面工厂（NewPlanes）")
+	}
 	s := &MateSource{
 		providerDir:  opts.Cfg.ProviderDir,
 		pinned:       opts.McpsPinned,
@@ -163,7 +200,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	if err != nil {
 		return nil, fmt.Errorf("网关装配底座: %w", err)
 	}
-	s.planes = registry.NewPlanes(reg)
+	s.planes = opts.NewPlanes(reg)
 
 	if opts.Pool != nil {
 		s.pool = opts.Pool
@@ -193,7 +230,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	if layered, _, cErr := credential.OpenCredentialSource(opts.Cfg.HomeDir, credCwd); cErr != nil {
 		glog.Warnw(ctx, "mcp 网关: 凭据分层未装配（只有库里的那一份可用）", "err", cErr)
 	} else {
-		s.planes.Credentials.SetLayered(layered)
+		s.planes.CredentialStore().SetLayered(layered)
 	}
 
 	// 持久层：sqlite 走 DB（事实源），memory 走文件目录——两侧都必须拿到 `ProviderDir`
@@ -209,11 +246,11 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	}
 	if s.st != nil {
 		s.planes.EnableStore(s.st)
-		s.planes.Providers.LoadProviderDefinitionsFromStore(ctx, opts.Cfg.ProviderDir)
+		s.planes.ProviderPlane().LoadProviderDefinitionsFromStore(ctx, opts.Cfg.ProviderDir)
 		s.planes.LoadCapabilityDefinitionsFromStore(ctx, opts.Cfg.CapabilityDir)
 	} else {
 		// memory 模式没有持久层：文件是唯一事实源（与核心进程逐条一致）。
-		s.planes.Providers.LoadProviderDefinitions(opts.Cfg.ProviderDir)
+		s.planes.ProviderPlane().LoadProviderDefinitions(opts.Cfg.ProviderDir)
 		s.planes.LoadCapabilityDefinitions(opts.Cfg.CapabilityDir)
 	}
 	s.lastReload = s.now()
@@ -370,14 +407,14 @@ func (s *MateSource) servers(ctx context.Context) ([]gatewayServer, error) {
 	if err := s.reload(ctx); err != nil {
 		return nil, err
 	}
-	defs, err := s.planes.Mcp.GatewayFace(runtime.SelectedRuntime(), s.pinned)
+	defs, err := s.planes.McpPlane().GatewayFace(runtime.SelectedRuntime(), s.pinned)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]gatewayServer, 0, len(defs))
 	for _, def := range defs {
 		// 远程传输只用得到 header（env 是 stdio 子进程的注入面，而 stdio 不进网关）。
-		_, headers, problems := s.planes.Mcp.ResolveSecrets(def)
+		_, headers, problems := s.planes.McpPlane().ResolveSecrets(def)
 		if len(problems) > 0 {
 			if !s.warnOnce("secret:" + def.ID) {
 				glog.Warnw(ctx, "mcp 网关: 密钥引用解析失败，跳过该 server", "server", def.ID, "problems", problems)
@@ -420,7 +457,7 @@ func (s *MateSource) reload(ctx context.Context) error {
 	// provider 面也要重读：密钥引用解析与"这条档案还在不在"都在它上面。
 	// `providerDir` 必须原样传回：`providers.json` 在文件侧（locator 的取值来源），传空会静默
 	// 把密钥解析面砍掉（症状是"所有引用都解析不了"，而不是报错）。
-	s.planes.Providers.ReloadProviderDefinitionsFromStore(ctx, s.providerDir)
+	s.planes.ProviderPlane().ReloadProviderDefinitionsFromStore(ctx, s.providerDir)
 	return nil
 }
 

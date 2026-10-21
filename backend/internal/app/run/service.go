@@ -18,7 +18,7 @@ import (
 type Service struct {
 	bus  *eventbus.Bus
 	orch *Orchestrator
-	// facts 本次装配的领域平面**按面端口**（阶段 0.2）：本层不再认识 `*registry.Planes`。
+	// facts 本次装配的领域平面**按面端口**（阶段 0.2）：本层不再认识平面容器（`bootstrap/assembly/planes.Planes`）。
 	// 装配根从具体平面上折出来交进（`WithPlaneFacts`），测试夹具构造同一套。
 	facts PlaneFacts
 	// reg 构建期选定的底座注册表（L1 值对象）：`Get` / `NativePermission` / `McpTransportsFor`。
@@ -46,7 +46,7 @@ type Service struct {
 	coalescer *session.Coalescer
 
 	// mcpGatewayWarned 网关条目组装失败"逐 key 只 WARN 一次"的记账（纯日志节流，
-	// 不是网关开关本身——开关在 `registry.Planes`，那是进程级配置事实）。
+	// 不是网关开关本身——开关在平面容器（`bootstrap/assembly/planes.Planes`），那是进程级配置事实）。
 	mcpGatewayWarnMu sync.Mutex
 	mcpGatewayWarned map[string]bool
 }
@@ -213,7 +213,7 @@ func (s *Service) modelValueFor(runtimeID, providerID, model string) (string, er
 	return s.facts.Providers.ModelValueFor(runtimeID, providerID, model)
 }
 
-// mcpGatewayEnabled 进程级网关开关（未装配 → 默认开启，与 `registry.NewPlanes` 的默认一致）。
+// mcpGatewayEnabled 进程级网关开关（未装配 → 默认开启，与 `planes.New` 的默认一致）。
 func (s *Service) mcpGatewayEnabled() bool {
 	if s.facts.Gateway == nil {
 		return true

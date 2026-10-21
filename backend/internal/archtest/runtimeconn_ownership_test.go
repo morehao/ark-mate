@@ -212,7 +212,8 @@ func TestRuntimeBindingIsNotDuplicatedOnService(t *testing.T) {
 //
 //	① `runtime_not_found` 的 `code.NewError` 铸码点在 `internal/app/run` 里**为零**、
 //	   在 `internal/adapters/outbound/runtimeconn` 里**恰好一处**；
-//	② `resource_sync.go` 里那个 `runtime_not_found`（校验**用户请求同步的那个 runtime**）
+//	② 同步面（P4a 时叫 `resource_sync.go`，C3 4.5 后半是 `adapters/outbound/models/resources.go`）
+//	   里那个 `runtime_not_found`（校验**用户请求同步的那个 runtime**）
 //	   是**另一个输入**，刻意放行——但它必须仍在（否则说明有人把请求参数校验也删了）。
 func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
 	root := backendRoot(t)
@@ -233,7 +234,7 @@ func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
 		switch {
 		case strings.HasPrefix(slash, "internal/adapters/outbound/runtimeconn/"):
 			inRuntimeconn += n
-		case filepath.ToSlash(rel(root, path)) == "internal/adapters/outbound/registry/resources.go":
+		case filepath.ToSlash(rel(root, path)) == "internal/adapters/outbound/models/resources.go":
 			inResourceSync += n
 		case strings.HasPrefix(slash, "internal/app/run/"):
 			inManager += n
@@ -251,7 +252,7 @@ func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
 		t.Errorf("`internal/app/run` 里仍有 %d 处 `runtime_not_found` 铸码。", inManager)
 	}
 	if inResourceSync != 1 {
-		t.Error("`internal/adapters/outbound/registry/resources.go` 里那个 `runtime_not_found` 不见了：" +
+		t.Error("`internal/adapters/outbound/models/resources.go` 里那个 `runtime_not_found` 不见了：" +
 			"它校验的是**用户请求同步的那个 runtime**（另一个输入，故放行）——删掉它 = " +
 			"请求一个不在册的 runtime 会被静默当成「同步全部」。")
 	}

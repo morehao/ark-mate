@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/domain/automation"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/definitions"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
@@ -44,7 +44,7 @@ func autoPlane(t *testing.T) *automation.Plane {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
 	plane := automation.NewPlane()
-	plane.SetDefinitionFiles(registry.AutomationDefinitionFiles{})
+	plane.SetDefinitionFiles(definitions.AutomationDefinitionFiles{})
 	plane.SetStore(st)
 	plane.SetHost(autoHostDouble{})
 	return plane
@@ -167,7 +167,7 @@ func TestAutomationPreviewIsNotAnID(t *testing.T) {
 func TestAutomationRoutesErrorCodes(t *testing.T) {
 	// 未配置载体：既没有库句柄、也没有定义目录 ⇒ 写面拒绝（同一个真平面的一套最小装配）。
 	barePlane := automation.NewPlane()
-	barePlane.SetDefinitionFiles(registry.AutomationDefinitionFiles{})
+	barePlane.SetDefinitionFiles(definitions.AutomationDefinitionFiles{})
 
 	cases := []struct {
 		name   string

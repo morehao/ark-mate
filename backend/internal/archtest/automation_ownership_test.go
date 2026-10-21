@@ -147,10 +147,11 @@ func TestAutomationImplementationLivesInDomain(t *testing.T) {
 //   - 漏 `SetHost`：**任何模式**下都不报错，只是自动化永远不建会话。
 func TestAutomationWiringIsAttached(t *testing.T) {
 	root := backendRoot(t)
-	// P5a 起库句柄的接线统一在 `registry.Planes.EnableStore`（漏一处 = 静默）。
-	persist := readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "registry", "planes.go"))
+	// P5a 起库句柄的接线统一在平面容器的 `EnableStore`（漏一处 = 静默）；
+	// C3 4.5 后半容器搬到 `bootstrap/assembly/planes`。
+	persist := readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "planes", "planes.go"))
 	if !strings.Contains(persist, "p.Automation.SetStore(st)") {
-		t.Error("`internal/adapters/outbound/registry/planes.go` 的 `EnableStore` 里找不到 `p.Automation.SetStore(st)`：" +
+		t.Error("`internal/bootstrap/assembly/planes/planes.go` 的 `EnableStore` 里找不到 `p.Automation.SetStore(st)`：" +
 			"自动化域没拿到库句柄。\n" +
 			"表现**只在 sqlite 模式**现形——定义行读不到，面板空、触发不跑（memory 模式的注册表在域自己的字段里）。")
 	}

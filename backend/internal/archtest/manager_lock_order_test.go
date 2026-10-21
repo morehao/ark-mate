@@ -134,11 +134,12 @@ func funcNameOf(decl string) string {
 // 去调**任一域平面**（会话域 / 供应商域 / 自动化域 / 工作空间域 / 执行面）。
 func TestManagerDoesNotHoldMutexWhileCallingDomainPlane(t *testing.T) {
 	root := backendRoot(t)
-	// P5a 起同步面搬进 registry，最后一个 `s.mu` 随之消失；判据的检查对象改为
-	// **manager + registry** 两个装配/同步面（任一处在锁内调域平面都算红色）。
+	// P5a 起同步面搬出 manager，最后一个 `s.mu` 随之消失；判据的检查对象是**两个装配/同步面**
+	// （任一处在锁内调域平面都算红色）：执行面 `app/run` 与资源同步面 `adapters/outbound/models`
+	// （C3 4.5 后半：原 `registry.Resources` 按域拆到 models）。
 	dirs := []string{
 		filepath.Join(root, "internal", "app", "run"),
-		filepath.Join(root, "internal", "adapters", "outbound", "registry"),
+		filepath.Join(root, "internal", "adapters", "outbound", "models"),
 	}
 	var files []string
 	for _, dir := range dirs {
@@ -165,10 +166,10 @@ func TestManagerDoesNotHoldMutexWhileCallingDomainPlane(t *testing.T) {
 				filepath.Base(path), fn)
 		}
 	}
-	// 判据本身不许空转：两个装配/同步面里必须还有人在用本结构的锁（registry.Resources
+	// 判据本身不许空转：两个装配/同步面里必须还有人在用本结构的锁（`models.Resources`
 	// 保着同步状态）。一处都没有 = 锁被搬走/改名了，判据失锚。
 	if locked == 0 {
-		t.Fatal("internal/{manager,registry} 里没有任何 `s.mu.Lock()` / `r.mu.Lock()`：锁本身被搬走/改名了？" +
+		t.Fatal("internal/{app/run, adapters/outbound/models} 里没有任何 `s.mu.Lock()` / `r.mu.Lock()`：锁本身被搬走/改名了？" +
 			"这条守卫的判据挂在它身上，失锚等于空转。")
 	}
 }

@@ -13,7 +13,7 @@ import (
 //
 //	ProviderEnv(runtimeID)      —— 子进程 env（供应商域；同时是基础连接键的输入）
 //	NativePermissionEnv(...)     —— 原生权限模式的子进程 env（进基础键）
-//	（ConfigDigest 的实现已随同步面在 P5a 搬进 `registry.Resources`——那份状态与同步编排
+//	（ConfigDigest 的实现已随同步面在 P5a 搬出编排层（C3 4.5 后半落 `adapters/outbound/models.Resources`）——那份状态与同步编排
 //	  是同一件事，分开就是"同步写了一半"；装配点在 NewService 里直接交给池。）
 //	（DropSink 的两个方法在 `connection.go`：它们要读写会话状态，属编排面）
 //

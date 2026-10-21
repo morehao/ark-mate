@@ -82,8 +82,8 @@ var managerModelPortAnchors = []string{
 	"func (s *Service) ModelEffect(",
 }
 
-// registryModelPortAnchors P5a 起同步面在 `registry.Resources`（P4b/取样面搬完后与读面合流）。
-var registryModelPortAnchors = []string{
+// modelPortAnchors 同步面在 `adapters/outbound/models.Resources`（C3 4.5 后半：原 registry 按域拆开）。
+var modelPortAnchors = []string{
 	"func (r *Resources) TrySyncModels(",
 }
 
@@ -171,22 +171,22 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 				"（改名后 `app.go` 一起改就能编译过，而端口的那件事没人做）", a)
 		}
 	}
-	// ModelRow 随模型读面进了 `domain/provider`；`registry.ModelViews` 嵌入该平面后一并满足
+	// ModelRow 随模型读面进了 `domain/provider`；`models.ModelViews` 嵌入该平面后一并满足
 	// `model.Host`。判据落在**真实现**上（不是转发）。
 	providerModels := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "provider", "models.go")))
 	if !strings.Contains(providerModels, "func (pl *Plane) ModelRow(") {
 		t.Errorf("`internal/domain/provider/models.go` 里找不到 `func (pl *Plane) ModelRow(`：" +
 			"`model.Host` 的读一条实现必须有真落点")
 	}
-	views := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "registry", "models_view.go")))
+	views := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "models", "models_view.go")))
 	if !strings.Contains(views, "*provider.Plane") {
-		t.Errorf("`internal/adapters/outbound/registry/models_view.go` 的 ModelViews 没有嵌入 `*provider.Plane`：" +
+		t.Errorf("`internal/adapters/outbound/models/models_view.go` 的 ModelViews 没有嵌入 `*provider.Plane`：" +
 			"ModelSvc/Host 的读面就少一份真实现")
 	}
-	regBody := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "registry", "resources.go")))
-	for _, a := range registryModelPortAnchors {
+	regBody := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "models", "resources.go")))
+	for _, a := range modelPortAnchors {
 		if !strings.Contains(regBody, a) {
-			t.Errorf("internal/adapters/outbound/registry/resources.go 里找不到 %q：同步面的端口实现被改名/删掉了？", a)
+			t.Errorf("internal/adapters/outbound/models/resources.go 里找不到 %q：同步面的端口实现被改名/删掉了？", a)
 		}
 	}
 

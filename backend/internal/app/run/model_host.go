@@ -60,7 +60,7 @@ type ModelFace struct {
 }
 
 // NewModelFace 造一个模型面组合（装配点与测试共用）。views 由装配层用
-// `registry.NewModelViews(planes)` 造好交进来。
+// `models.NewModelViews(...)` 造好交进来。
 func NewModelFace(s *Service, views ModelViews) ModelFace {
 	return ModelFace{views: views, Service: s}
 }

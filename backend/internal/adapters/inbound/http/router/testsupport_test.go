@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/domain/automation"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/definitions"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	"github.com/gin-gonic/gin"
@@ -103,9 +103,9 @@ func testRouterDeps(t *testing.T, o testRouterOpts) router.Deps {
 // newAutomationPlaneForTest 造一个**已接线**的自动化平面（文件载体登记好）。
 //
 // 领域平面本身不带默认实现（nil = 未接线，用文件载体时当场空指针），所以测试要么走
-// `registry.NewPlanes`，要么在这里把端口接上——不接的话测的是"配置错误"，不是行为。
+// `planes.New`，要么在这里把端口接上——不接的话测的是"配置错误"，不是行为。
 func newAutomationPlaneForTest() *automation.Plane {
 	p := automation.NewPlane()
-	p.SetDefinitionFiles(registry.AutomationDefinitionFiles{})
+	p.SetDefinitionFiles(definitions.AutomationDefinitionFiles{})
 	return p
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
+	"github.com/morehao/ark-mate/internal/bootstrap/assembly/planes"
 	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -90,12 +90,12 @@ type Probe struct {
 	Runtime *runtime.Registry
 	// Planes 只读的领域平面集合（doctor / 装配断言用）。
 	// **生产行为路径不得从这里取事实**：行为面只认用例接口与端口。
-	Planes *registry.Planes
+	Planes *planes.Planes
 }
 
 // BuildResult 一次装配的产物：**只暴露端口**（阶段 0.5）。
 //
-// 不再出现 `*registry.Planes` / `*run.Service` / `*runtimeconn.Plane` 等具体类型：
+// 不再出现 `*planes.Planes` / `*run.Service` / `*runtimeconn.Plane` 等具体类型：
 // 应用壳只经 `Handler` 起 HTTP、经 `Probe` 读诊断、经 `Close` 收尾。
 type BuildResult struct {
 	Handler     Handler

@@ -201,12 +201,13 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 			t.Errorf("`ctrmodel` 里又出现 %q：用例实例只在装配根造，控制器只收接口。", a)
 		}
 	}
-	// P4b：`ProviderPlane()` 删了；事实出口是 `Planes()` + `registry.Planes.Providers`。
+	// P4b：`ProviderPlane()` 删了；事实出口是 `PlaneFacts.Providers` + 平面容器的 `Providers` 字段
+	// （C3 4.5 后半容器搬到 `internal/bootstrap/assembly/planes`）。
 	factsSrc := stripLineComments(readFileOrFatal(t, filepath.Join(mgr, "planes.go")))
-	planesSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "outbound", "registry", "planes.go")))
+	planesSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "planes", "planes.go")))
 	if !strings.Contains(factsSrc, "Providers    ProviderFacts") ||
 		!strings.Contains(planesSrc, "Providers    *provider.Plane") {
-		t.Error("`PlaneFacts.Providers` / `registry.Planes.Providers` 有一处不在：控制器拿不到供应商域平面 ⇒ " +
+		t.Error("`PlaneFacts.Providers` / 平面容器的 `Providers` 有一处不在：控制器拿不到供应商域平面 ⇒ " +
 			"自检的域读面恒空，表现是**永远**报「档案不在册」（只在用户点\"测试连接\"时才现形）。")
 	}
 
@@ -241,7 +242,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 			"serve 的装载入口"},
 		{"internal/bootstrap/assembly/assembly.go", "as.planes.Providers.SetProviderDir(",
 			"serve 的目录入口"},
-		{"internal/adapters/inbound/mcpgateway/source.go", "s.planes.Providers.ReloadProviderDefinitionsFromStore(",
+		{"internal/adapters/inbound/mcpgateway/source.go", "s.planes.ProviderPlane().ReloadProviderDefinitionsFromStore(",
 			"gateway 的换代重载"},
 		// 第五十四刀：建连时的密钥注入经**执行面端口**取（池的 `ProviderEnvSource`），
 		// 适配器在 `runtime_pool.go`。锚跟着对象走，判据不变：调用点必须直连域平面。

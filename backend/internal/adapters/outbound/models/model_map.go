@@ -1,4 +1,4 @@
-package registry
+package models
 
 import (
 	domprovider "github.com/morehao/ark-mate/internal/domain/provider"

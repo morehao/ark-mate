@@ -14,7 +14,7 @@ import (
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	doctorfacts "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
+	"github.com/morehao/ark-mate/internal/bootstrap/assembly/planes"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/transfer"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 )
@@ -55,7 +55,7 @@ func checkProviderSection(opts doctorOptions) (doctorfacts.ProviderDoctorFacts, 
 		MismatchExtraMarker: transfer.ProviderMismatchExtraMarker,
 		RuntimeSpecs:        assembly.BuiltinSpecs(),
 	}, func(ctx context.Context, st *store.Store, home string) []doctorfacts.ProviderRuntimeFacts {
-		return registry.CollectRuntimeModelFacts(ctx, st, home, assembly.BuiltinRegistry())
+		return planes.CollectRuntimeModelFacts(ctx, st, home, assembly.BuiltinRegistry())
 	})
 	if st != nil {
 		defer func() { _ = st.Close() }()

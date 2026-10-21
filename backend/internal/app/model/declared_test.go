@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/models"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	"github.com/morehao/ark-mate/internal/platform/code"
@@ -98,7 +98,7 @@ func newDeclaredRig(t *testing.T) *declaredRig {
 	// 注册表与凭据机制必须与生产同源（`provider.NewPlane` 的注释：两份 = 两个事实源）。
 	// 刻意不给密钥：带密钥的写面会落托管文档（那是供应商面的事），写面用例只需要"这条档案在"。
 	reg := dsh.Registry()
-	plane := provider.NewPlane(reg, registry.NewProviderSecrets(credential.New(reg)))
+	plane := provider.NewPlane(reg, models.NewProviderSecrets(credential.New(reg)))
 	plane.SetProviderDir(t.TempDir())
 	host := &stubHost{st: st}
 	return &declaredRig{st: st, plane: plane, host: host, svc: NewDeclared(st, plane, host)}

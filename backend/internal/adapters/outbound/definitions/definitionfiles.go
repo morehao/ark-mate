@@ -1,4 +1,4 @@
-package registry
+package definitions
 
 import (
 	"fmt"
@@ -9,9 +9,10 @@ import (
 
 // AutomationDefinitionFiles 把定义文件机制适配成 `automation` 域声明的窄端口。
 //
-// 为什么落在 registry（装配点）而不是一个「适配器包」：它只做"把机制的宽面收窄成域端口"
-// 这一件事，而这件事只有同时看得见域端口与机制实现的地方写得了（机制层禁止 import 域）。
-// 同包已有 workspaceStore / skillDefs / mcpDefs 三个同形适配体。
+// 为什么落在 definitions（能力定义装载面）而不是放到「automation 域旁边」：它只做"把机制的
+// 宽面收窄成域端口"这一件事，而这件事只有同时看得见域端口与机制实现的地方写得了
+// （机制层禁止 import 域）。同包已有 skillDefs / mcpDefs 两个同形适配体——三者的共同点是
+// **都围着 `mechanism/definition` 转**，这正是本包的边界。
 //
 // 那次断言不是"猜"：草稿只由本适配体的 `Open` 产出，类型就那一个。断言失败说明有人把别处
 // 造的草稿喂进来——那本来就该是错的。
@@ -32,7 +33,7 @@ func (AutomationDefinitionFiles) Open(dir, kind, id string, patch map[string]any
 func (AutomationDefinitionFiles) Save(d automation.DefinitionDraft) error {
 	dd, ok := d.(*definition.DefinitionDraft)
 	if !ok {
-		return fmt.Errorf("registry: 无法保存 %T 定义草稿（草稿只能由本适配体的 Open 产出）", d)
+		return fmt.Errorf("definitions: 无法保存 %T 定义草稿（草稿只能由本适配体的 Open 产出）", d)
 	}
 	return definition.SaveDefinition(dd)
 }

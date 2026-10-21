@@ -22,7 +22,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	credmech "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/credential"
 	doctorfacts "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
+	"github.com/morehao/ark-mate/internal/bootstrap/assembly/planes"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/transfer"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/procreg"
@@ -44,7 +44,7 @@ import (
 // 现在每一行是一个 `Step`：名字、阶段、critical、启动/关闭超时、Start/Stop 都是
 // 显式的。逐条对照表见 `.dsh/docs/plans/2026-10-17-p5a-registry-assembly-table.md`。
 //
-// **装配事实与装配动作分开**：`registry.Planes` 拥有领域平面（只构造、不读盘），本文件只按
+// **装配事实与装配动作分开**：`planes.Planes` 拥有领域平面（只构造、不读盘），本文件只按
 // 顺序把配置与库句柄交给它们。这样核心、网关子进程与 doctor 才能共用同一套平面。
 
 // assembly 一次 Build 的可变状态（各步骤之间传递的产物）。
@@ -61,7 +61,7 @@ type assembly struct {
 	bus    *eventbus.Bus
 	rconn  *runtimeconn.Plane
 	rpool  *runtimeconn.Pool
-	planes *registry.Planes
+	planes *planes.Planes
 	svc    *apprun.Service
 	orch   *apprun.Orchestrator
 	reg    *runtime.Registry

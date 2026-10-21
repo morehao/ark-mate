@@ -1,4 +1,4 @@
-package registry
+package models
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 // 它把两份事实拼在一起：**平台声明 + 运行时目录/同步结论**。两份事实各有主人：
 //
 //	provider.Plane    清单、目录取样、缓存与拒绝值（域）
-//	Resources         同步结论与配置指纹（装配层）
+//	Resources         同步结论与配置指纹（本包：资源同步面）
 //
 // 目录取样的执行细节（活会话 / resume）经域的三个窄端口交下去；本类型只做**组合**与聚合，
 // 不碰连接、不碰 ACP。
@@ -27,9 +27,9 @@ type ModelViews struct {
 	*Resources
 }
 
-// NewModelViews 用装配好的平面造模型读面。
-func NewModelViews(p *Planes) *ModelViews {
-	return &ModelViews{Plane: p.Providers, Resources: p.Resources}
+// NewModelViews 用装配好的两份面造模型读面（厂商平面 + 资源同步面）。
+func NewModelViews(res *Resources, providers *provider.Plane) *ModelViews {
+	return &ModelViews{Plane: providers, Resources: res}
 }
 
 // ModelsView 组装 `GET /models` 读面：**平台清单 + 聚合生效结论 + 逐 runtime 机器面明细**。

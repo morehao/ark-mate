@@ -98,7 +98,7 @@ var v32Layers = map[string]v32Layer{
 	// 而是同一内核的分区（`session` 用 `identity` 的身份值）。
 	"internal/domain": {layer: 2, name: "domain", sameLayer: true, deny: []string{
 		"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/contract", "internal/adapters/outbound/mechanism",
-		"internal/adapters/outbound/credentials", "internal/adapters/outbound/dsh", "internal/adapters/outbound/registry",
+		"internal/adapters/outbound/credentials", "internal/adapters/outbound/dsh", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces",
 		"internal/app/run", "internal/adapters/outbound/runtimeconn", "internal/adapters/inbound/mcpgateway",
 		"internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/middleware", "internal/adapters/inbound/http/router", "internal/bootstrap/assembly",
 		"internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
@@ -123,7 +123,7 @@ var v32Layers = map[string]v32Layer{
 		// C2 第二刀：用例层不写协议分类。业务错误的构造面在 `platform/code`
 		// （RequestError/ServiceError/…），分类 → 对外码的投影也住那里。
 		"internal/adapters/outbound/acp",
-		"internal/adapters/outbound/mechanism", "internal/adapters/outbound/registry", "internal/adapters/outbound/runtimeconn",
+		"internal/adapters/outbound/mechanism", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn",
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller",
 		"internal/adapters/inbound/http/middleware", "internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
 		"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
@@ -138,12 +138,12 @@ var v32Layers = map[string]v32Layer{
 	// `adapters/outbound/sqlite/{model,dao,store,db}`（表行形状仍是 L0，持久三件套仍是 L5）。
 	// 层号不动、只换路径与层名：这一刀改的是"它属于哪个圈"，不是"它能 import 谁"。
 	"internal/adapters/outbound/sqlite/dao": {layer: 5, name: "sqlite/dao", sameLayer: true, deny: []string{
-		"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/mechanism", "internal/adapters/outbound/registry", "internal/adapters/outbound/runtimeconn",
+		"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/mechanism", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn",
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller",
 		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	"internal/adapters/outbound/sqlite/store": {layer: 5, name: "sqlite/store", sameLayer: true, deny: []string{
-		"internal/adapters/outbound/mechanism", "internal/adapters/outbound/registry", "internal/adapters/outbound/runtimeconn",
+		"internal/adapters/outbound/mechanism", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn",
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller",
 		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
@@ -156,19 +156,31 @@ var v32Layers = map[string]v32Layer{
 	//
 	// C3 4.5：`drivers/{gateway,registry,mechanism,transfer}` 按**方向**归位——
 	// `gateway` 是被底座反向调用的**入站**面（`adapters/inbound/mcpgateway`），其余三个是出站。
-	// **`registry` 仍是一个包**：按域再拆成 `definitions` / `models` / `workspaces` /
-	// `credentials` 四个、并把 `planes` 容器与启停序列搬进 `assembly` 是 4.5 的后半段
-	// （见进度笔记 §3f），它要动 1860 行与十几处编译期断言，单独一刀做。
+	// 4.5 后半已落：`registry` 解体为 `definitions` / `models` / `workspaces` 三个出站适配器，
+	// 平面容器搬进 `bootstrap/assembly/planes`、启停序列搬进 `bootstrap/assembly`。
+	// 三个新 key 的层号与 deny 逐条继承原 `registry`（只换归属，不放松方向）。
 	"internal/adapters/inbound/mcpgateway": {layer: 6, name: "inbound/mcpgateway", sameLayer: true, deny: []string{
 		"internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/middleware", "internal/adapters/inbound/http/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	"internal/adapters/outbound/mechanism": {layer: 6, name: "outbound/mechanism", sameLayer: true, deny: []string{
-		"internal/adapters/outbound/registry", "internal/adapters/outbound/runtimeconn", "internal/app/run",
+		"internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn", "internal/app/run",
 		"internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/middleware", "internal/adapters/inbound/http/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
-	"internal/adapters/outbound/registry": {layer: 6, name: "outbound/registry", sameLayer: true, deny: []string{
+	// C3 4.5 后半：`outbound/registry` 按域拆成三个包（`credentials` 那一格被 L5 的凭据来源
+	// 占用、且它反向被 `mechanism/credential` 依赖 ⇒ 凭据端口适配体并进 `models`，见
+	// `provider_secrets.go` 的包注释）。层号与 deny 原样继承：这一刀改的是"它属于哪个域"，
+	// 不是"它能 import 谁"。
+	"internal/adapters/outbound/definitions": {layer: 6, name: "outbound/definitions", sameLayer: true, deny: []string{
+		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller",
+		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
+	}},
+	"internal/adapters/outbound/models": {layer: 6, name: "outbound/models", sameLayer: true, deny: []string{
+		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller",
+		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
+	}},
+	"internal/adapters/outbound/workspaces": {layer: 6, name: "outbound/workspaces", sameLayer: true, deny: []string{
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller",
 		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
@@ -202,7 +214,7 @@ var v32Layers = map[string]v32Layer{
 	// 原 L7 的 deny 保持：执行面不认任何具体适配器（store / dao / dsh / registry / runtimeconn）。
 	"internal/app/run": {layer: 4, name: "app/run", deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/dsh",
-		"internal/adapters/outbound/runtimeconn", "internal/adapters/outbound/registry",
+		"internal/adapters/outbound/runtimeconn", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces",
 		"internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/middleware", "internal/adapters/inbound/http/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
@@ -212,14 +224,14 @@ var v32Layers = map[string]v32Layer{
 	// 它只把订阅语义翻成帧，与 REST 控制器同级同层。
 	"internal/adapters/inbound/ws": {layer: 8, name: "inbound/ws", deny: []string{
 		"internal/adapters/outbound/sqlite/model", "internal/domain", "internal/adapters/outbound/sqlite/store",
-		"internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/mechanism", "internal/adapters/outbound/registry",
+		"internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/mechanism", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces",
 		"internal/adapters/outbound/runtimeconn", "internal/app/run", "internal/adapters/inbound/mcpgateway",
 		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
 		"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	"internal/adapters/inbound/http/controller": {layer: 8, name: "inbound/http/controller", deny: []string{
 		"internal/adapters/outbound/sqlite/model", "internal/domain", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao",
-		"internal/adapters/outbound/mechanism", "internal/adapters/outbound/registry", "internal/adapters/outbound/runtimeconn",
+		"internal/adapters/outbound/mechanism", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn",
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/inbound/http/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
@@ -232,15 +244,23 @@ var v32Layers = map[string]v32Layer{
 	"internal/adapters/inbound/http/router": {layer: 9, name: "inbound/http/router", sameLayer: true, deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model",
 		"internal/domain", "internal/contract", "internal/platform/eventbus", "internal/adapters/outbound/mechanism",
-		"internal/adapters/outbound/registry", "internal/adapters/outbound/runtimeconn", "internal/app/run",
+		"internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn", "internal/app/run",
 		"internal/adapters/inbound/mcpgateway", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	"internal/bootstrap/assembly": {layer: 9, name: "assembly", sameLayer: true, deny: []string{
 		"internal/bootstrap/app", "internal/adapters/inbound/cli/cmd",
 	}},
+	// C3 4.5 后半：平面容器单独成子包（`assembly` 的依赖里有用例环，而用例环的**包内测试**
+	// 要用这套平面做夹具——夹具 import 装配根会得到 `import cycle not allowed in test`）。
+	// 层号仍是最外层：它只被装配根与夹具使用，生产侧任何"适配器/用例"都不许 import 它
+	// （`app/run`、`mcpgateway` 等 key 的 deny 里点的是 `internal/bootstrap/assembly` 前缀，
+	// 本 key 是它的子路径，因此同样被挡住）。
+	"internal/bootstrap/assembly/planes": {layer: 9, name: "assembly/planes", sameLayer: true, deny: []string{
+		"internal/bootstrap/app", "internal/adapters/inbound/cli/cmd",
+	}},
 	"internal/bootstrap/app": {layer: 9, name: "app", sameLayer: true, deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model",
-		"internal/domain", "internal/adapters/outbound/mechanism", "internal/adapters/outbound/registry", "internal/adapters/outbound/runtimeconn",
+		"internal/domain", "internal/adapters/outbound/mechanism", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn",
 		"internal/app/run", "internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/router",
 		"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd", "internal/adapters/inbound/mcpgateway",
 	}},
@@ -251,13 +271,13 @@ var v32Layers = map[string]v32Layer{
 	// 持久化与机制一律经 `assembly.BuildResult` 暴露的 `Maintenance` 端口，拿不到具体实现。
 	"internal/adapters/inbound/cli/ops": {layer: 9, name: "inbound/cli/ops", sameLayer: true, deny: []string{
 		"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model", "internal/adapters/outbound/mechanism",
-		"internal/domain", "internal/adapters/outbound/registry", "internal/adapters/outbound/runtimeconn",
+		"internal/domain", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/adapters/outbound/runtimeconn",
 		"internal/app/run", "internal/adapters/inbound/mcpgateway", "internal/adapters/outbound",
 	}},
 	"internal/adapters/inbound/cli/cmd": {layer: 9, name: "inbound/cli/cmd", sameLayer: true, deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model",
 		"internal/domain", "internal/adapters/inbound/http/controller", "internal/adapters/outbound/mechanism",
-		"internal/adapters/outbound/runtimeconn", "internal/adapters/outbound/registry", "internal/app/run",
+		"internal/adapters/outbound/runtimeconn", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/app/run",
 		"internal/adapters/inbound/http/router", "internal/adapters/inbound/mcpgateway",
 	}},
 }
@@ -267,7 +287,7 @@ var v32AdapterDeny = []string{
 	"internal/adapters/outbound/sqlite/model", "internal/platform/eventbus", "internal/platform/capability", "internal/platform/credential",
 	"internal/platform/code", "internal/platform/automation", "internal/config", "internal/contract",
 	"internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/mechanism", "internal/domain",
-	"internal/adapters/outbound/runtimeconn", "internal/adapters/outbound/registry", "internal/app",
+	"internal/adapters/outbound/runtimeconn", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models", "internal/adapters/outbound/workspaces", "internal/app",
 	"internal/app/run", "internal/adapters/inbound/http/middleware", "internal/adapters/inbound/mcpgateway",
 	"internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
 	"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",

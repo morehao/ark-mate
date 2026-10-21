@@ -1,4 +1,4 @@
-package registry
+package workspaces
 
 import (
 	"context"
@@ -14,10 +14,14 @@ import (
 // 这里只补三条 `Is*`——它们不是转发，是把载体的哨兵错误翻译成领域判决：
 // 领域层因此不必认识 `store.ErrWorkspace*`（那三个错误的身份只属于持久层）。
 //
-// 为什么翻译放装配点而不是让 store 直接返回领域错误：`store` 不认识 `internal/domain`
+// 为什么翻译放在适配体里而不是让 store 直接返回领域错误：`store` 不认识 `internal/domain`
 // （v3.1 层表把这条边钉成非法），而让领域认识 `store` 同样不行——两边各退一步，
 // 翻译就只能落在同时看得见两侧的地方。
 type workspaceStore struct{ *store.Store }
+
+// NewStore 把登记表载体收窄成工作空间域声明的端口（装配点注入用；未接库时调用方传 nil，
+// 本函数不替它判——typed-nil 的判定只落在装配根一处）。
+func NewStore(st *store.Store) workspace.WorkspaceStore { return workspaceStore{Store: st} }
 
 // IsPathTaken 目标路径已被别的登记项占用。
 func (w workspaceStore) IsPathTaken(err error) bool {

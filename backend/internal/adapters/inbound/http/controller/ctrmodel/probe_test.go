@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/models"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
@@ -44,7 +44,7 @@ func (f *fakeProviderCatalog) ModelCatalog(context.Context) (*provider.CatalogVi
 //	   文案里带 id。把平面接错（或忘了接）在这里就会现形，而"编译通过 + 档案面照常工作"看不见它。
 func TestNewProviderCtrKeepsBothUseCases(t *testing.T) {
 	reg := dsh.Registry()
-	plane := provider.NewPlane(reg, registry.NewProviderSecrets(credential.New(reg)))
+	plane := provider.NewPlane(reg, models.NewProviderSecrets(credential.New(reg)))
 	plane.SetProviderDir(t.TempDir())
 	ctr := NewProviderCtr(model.NewProvider(plane), model.NewProbe(plane, &fakeProviderCatalog{}))
 

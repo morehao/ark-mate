@@ -361,10 +361,12 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 		}
 	}
 	gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "mcpgateway", "source.go")))
-	for _, want := range []string{"s.planes.Mcp.GatewayFace(", "s.planes.Mcp.ResolveSecrets("} {
+	for _, want := range []string{"s.planes.McpPlane().GatewayFace(", "s.planes.McpPlane().ResolveSecrets("} {
 		if !strings.Contains(gwSrc, want) {
 			t.Errorf("`internal/adapters/inbound/mcpgateway/source.go` 里找不到 `%s`：网关装配必须直连 MCP 平面。"+
-				"漏了会让这一条链悄悄退回某个中间层。", want)
+				"漏了会让这一条链悄悄退回某个中间层。"+
+				"（C3 4.5 后半：网关经 **端口接口** `Planes` 取面，故写成 `McpPlane()` 访问器——"+
+				"容器在装配根之下、网关是 L6 入站适配，直接认容器会把「适配器认识装配根」钉回来。）", want)
 		}
 	}
 

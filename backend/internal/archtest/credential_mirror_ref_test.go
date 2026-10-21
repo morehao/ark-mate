@@ -116,7 +116,8 @@ func TestCredentialFaceHasNoTransitionalForwards(t *testing.T) {
 		t.Error("`internal/app/run/service.go` 里找不到 `facts PlaneFacts` / `WithPlaneFacts`：装配期没有它" +
 			"就只能再写一层转发，而那正是本刀删掉的东西。")
 	}
-	// P5a 起凭据面由 `registry.Planes.Credentials` 拥有，装配动作在 app/assembly.go。
+	// P5a 起凭据面由平面容器的 `Credentials` 拥有（C3 4.5 后半容器在
+	// `bootstrap/assembly/planes`），装配动作在 assembly.go。
 	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "bootstrap", "assembly", "assembly.go")))
 	for _, want := range []string{
 		"as.planes.Credentials.SetCwd(",
@@ -128,8 +129,10 @@ func TestCredentialFaceHasNoTransitionalForwards(t *testing.T) {
 				"漏了会让这一条链悄悄退回某个中间层。", want)
 		}
 	}
-	if gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "mcpgateway", "source.go"))); !strings.Contains(gwSrc, "s.planes.Credentials.SetLayered(") {
-		t.Error("`internal/adapters/inbound/mcpgateway/source.go` 里找不到 `s.planes.Credentials.SetLayered(`：" +
-			"网关装配必须直连事实（P5a 起是 registry.Planes，不再是 manager 转发）。")
+	// C3 4.5 后半：网关不再 `import` 平面容器，而是由装配根注入端口（`Planes` 接口），
+	// 取面写成访问器 `CredentialStore()`——判据随之钉在"仍然直连同一份凭据机制"上。
+	if gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "mcpgateway", "source.go"))); !strings.Contains(gwSrc, "s.planes.CredentialStore().SetLayered(") {
+		t.Error("`internal/adapters/inbound/mcpgateway/source.go` 里找不到 `s.planes.CredentialStore().SetLayered(`：" +
+			"网关装配必须直连事实（P5a 起是平面容器的凭据机制，不再是 manager 转发）。")
 	}
 }

@@ -127,7 +127,8 @@ func TestAdapterStaysOutsideAppCore(t *testing.T) {
 	}
 	forbidden := []string{
 		"internal/bootstrap/app", "internal/adapters/inbound/cli/cmd", "internal/bootstrap/assembly", "internal/adapters/inbound/http/router", "internal/adapters/inbound/http/controller",
-		"internal/app", "internal/app/run", "internal/adapters/outbound/registry", "internal/adapters/outbound/sqlite/store",
+		"internal/app", "internal/app/run", "internal/adapters/outbound/definitions", "internal/adapters/outbound/models",
+		"internal/adapters/outbound/workspaces", "internal/adapters/outbound/sqlite/store",
 		"internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model", "internal/domain", "internal/adapters/outbound/mechanism", "internal/adapters/inbound/mcpgateway",
 		"internal/adapters/outbound/runtimeconn",
 	}

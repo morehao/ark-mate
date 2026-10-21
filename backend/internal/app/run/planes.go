@@ -18,14 +18,14 @@ import (
 
 // ——— 领域平面的**按面端口**（阶段 0.2）———
 //
-// 改造前 `Service` 直接持 `*registry.Planes`（L6 组合驱动），于是执行面既认识具体平面集合，
+// 改造前 `Service` 直接持具体平面集合（当时的 L6 `registry.Planes`），于是执行面既认识具体平面集合，
 // 也在 `Planes()` 上把整包具体类型漏给装配与测试。现在按**面**拆开：
 //
 //	Providers / Capabilities / Skills / McpSecrets / Workspaces / Credentials / Automation / Identity / Gateway
 //
 // 每个接口只声明本层真正调用的方法（签名里的类型全是域/值层：`provider.*`、`capability.*`…）。
-// 装配根用 `WithPlaneFacts` 把它们从 `*registry.Planes` 上折出来；测试夹具用
-// `newServiceForTest` 构造同一套。**执行面因此不再 import `drivers/registry`。**
+// 装配根用 `WithPlaneFacts` 把它们从平面容器（`bootstrap/assembly/planes.Planes`）上折出来；测试夹具用
+// `newServiceForTest` 构造同一套。**执行面因此不 import 任何具体平面容器或适配器。**
 //
 // 为什么不是"一个大接口"：按面拆之后，某一块将来换实现（例如 MCP 秘密面换成外部 vault）
 // 只需要满足它自己那几张方法，不会被迫实现另外八个面。

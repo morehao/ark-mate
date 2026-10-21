@@ -4,7 +4,8 @@ import (
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/registry"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/models"
+	"github.com/morehao/ark-mate/internal/bootstrap/assembly/planes"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -70,7 +71,7 @@ type Services struct {
 type Facts struct {
 	Cfg          config.Config
 	Store        *store.Store
-	Planes       *registry.Planes
+	Planes       *planes.Planes
 	Session      *apprun.Service
 	Orchestrator *apprun.Orchestrator
 	Bus          *eventbus.Bus
@@ -102,7 +103,7 @@ func (as *assembly) buildServices() Services { return as.facts().BuildServices()
 func (f Facts) BuildServices() Services {
 	as := f
 	plane := as.Session.SessionPlane()
-	modelFace := apprun.NewModelFace(as.Session, registry.NewModelViews(as.Planes))
+	modelFace := apprun.NewModelFace(as.Session, models.NewModelViews(as.Planes.Resources, as.Planes.Providers))
 	return Services{
 		// P5：会话写面用例在 `svcsession`，执行面只交能力（Starter/Prompt/Canceller 由编排器实现，
 		// DeliverQueued 由 Service 实现）。漏接任一个的表现都是"用例 503/静默 no-op"。

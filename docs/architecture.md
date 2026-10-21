@@ -108,7 +108,7 @@ Electron 主进程（桌面态）
 | **L3** | `contract/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份）。C3 4.1 起目录由 `dto/` 搬到 `contract/`，包名保留 `dto<领域>` |
 | **L4** | `app/<领域>`（含执行面 `app/run`） | 用例环（原 `service/svc<领域>`，C3 4.2 起包名去掉 `svc` 前缀）：接口 + 实现 + 构造函数；校验、错误码、响应装配。执行面 `sessionruntime` 同批搬成 `app/run`（编排归用例环，连接归出站适配器） |
 | **L5** | `adapters/outbound/sqlite/{store,dao,db}` `adapters/outbound/{dsh,credentials,procreg}` | 持久与出站适配器（C3 4.3 起持久层与 infra 逐步归到 `adapters/outbound/`） |
-| **L6** | `adapters/inbound/mcpgateway` `adapters/outbound/{registry,mechanism,transfer,runtimeconn}` `config` | 网关与机制、注册表、连接面、存量定义导入导出编排（C3 4.5 起 `drivers/*` 按方向归到 `adapters/`） |
+| **L6** | `adapters/inbound/mcpgateway` `adapters/outbound/{definitions,models,workspaces,mechanism,transfer,runtimeconn}` `config` | 网关与机制、定义装载 / 模型同步 / 工作空间三个域的端口实现、连接面、存量定义导入导出编排（C3 4.5 起 `drivers/*` 按方向归到 `adapters/`，`registry` 已按域解体） |
 | **L8** | `delivery/controller/ctr<领域>` `delivery/middleware` | 入站适配 |
 | **L9** | `adapters/inbound/{http/router,cli/*}` `bootstrap/{assembly,app}` | 装配与交付（C3 4.4 起入站适配全都归到 `adapters/inbound/`） |
 
@@ -119,7 +119,10 @@ Electron 主进程（桌面态）
 
 - **`domain` 双载体**：`store`（sqlite）与文件/memory 各一份，由窄端口（`WorkspaceStore` / `ProviderStore` /
   `AutomationStore` / `DefinitionFiles` / `Secrets` / `Store`）在装配期接进来；`*store.Store` 结构上满足它们。
-  适配体落在装配点 `registry`（与 `workspaceStore` / `skillDefs` / `mcpDefs` 同一处：只有它同时看得见域端口与机制实现）。
+  适配体按**端口声明的域**落位（C3 4.5 后半）：`DefinitionFiles` / `skillDefs` / `mcpDefs` 在
+  `adapters/outbound/definitions`，`Secrets` 在 `adapters/outbound/models`（`credentials` 那一格被 L5 的
+  凭据来源占着，且它反向被机制层依赖），`WorkspaceStore` 在 `adapters/outbound/workspaces`；
+  平面容器在 `bootstrap/assembly/planes`，三条新 key 的层号与 deny 逐条继承原 `registry`。
 - **`transfer`（L6）**：**存量定义**在文件载体与持久层之间的导入/导出**编排**（扫目录、计数、落库、导出），
   三个域（capability / automation / provider）共用一套纪律。域只留纯转换（文件形状、v11→v12 映射、
   id 词法），因为编排要认识 `store` 与 `mechanism`，而域不该认识它们。它也不能并进 `capability`：
@@ -318,8 +321,10 @@ backend/
 │   │       ├── sqlite/{model,dao,store,db}                  持久层（行形状 / 列词汇 / 业务面 / 连接）
 │   │       ├── acp/ mcp/    协议客户端（性质仍是协议库，层表 L1）
 │   │       ├── dsh/         唯一 runtime adapter（Spec + 五张端口表）
-│   │       ├── credentials/ procreg/                        凭据与进程注册表
-│   │       ├── registry/    领域端口实现集合 + 平面容器（按域再拆见进度笔记 4.5 后半）
+│   │       ├── credentials/ procreg/                        凭据来源与进程注册表
+│   │       ├── definitions/  能力定义装载面 + 定义类窄端口适配体（skill/mcp/automation）
+│   │       ├── models/       资源同步面 + 模型读面 + 模型事实 + 身份交付 + 供应商密钥端口
+│   │       ├── workspaces/   工作空间登记表端口适配体
 │   │       ├── mechanism/{definition,credential,doctor}/    机制层
 │   │       ├── transfer/    存量定义的导入/导出编排
 │   │       └── runtimeconn/ 连接池 / 拨号 / 代际 / 诊断
@@ -327,6 +332,7 @@ backend/
 │   ├── config/               进程配置（唯一入口）
 │   ├── bootstrap/            装配根与进程壳
 │   │   ├── assembly/         对象图 + 启停序列（唯一装配根）
+│   │   ├── assembly/planes/  领域平面容器（唯一构造点；装配根与用例夹具共用）
 │   │   └── app/              HTTP 生命周期、就绪行、信号与优雅关闭
 │   ├── archtest/             架构守卫（**唯一的机器判据集中地**，见第 10 节）
 │   ├── testutil/             跨包复用的测试夹具（含合成 adapter）

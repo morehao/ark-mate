@@ -7,7 +7,7 @@
 //   - 只允许「某个域的 Import* / Export* 对」与域无关的导入/导出原语；
 //   - 单条定义的读写（draft / CAS / mtime 锁）在 `internal/adapters/outbound/mechanism/definition`；
 //   - 能力/定义的值层在 `internal/platform/capability` 与 `internal/platform/definition`；
-//   - 域声明的窄端口（DefinitionFiles / Secrets）的适配体在 `internal/adapters/outbound/registry`（装配点）。
+//   - 域声明的窄端口（DefinitionFiles / Secrets）的适配体在**声明该端口的域**旁边（`adapters/outbound/definitions` / `adapters/outbound/models`），不在这里。
 //
 // 名字刻意不用「某个域 + io」的形状：那会让人分不清它和那个域的包到底该 import 哪一个。
 // 本包与任何一个域都不是从属关系：它面对的是「旧载体 → 新载体」这件事本身。
