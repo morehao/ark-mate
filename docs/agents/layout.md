@@ -17,8 +17,8 @@
     - **厚域与用例都走窄端口，不 import 门面**（P4）：`domain/session` 声明 `Store` 端口（`store_port.go`），`domain/interaction` 零 `store`；用例环同理声明 `model.ModelStore` / `session.EventReader` / `system.SourceFactsReader`。`*store.Store` 结构上满足它们、由装配根交下来；**交下来时必须现判 nil**——typed-nil 装进接口不是 nil，会让"内存模式 40501 / 只读镜像"那几条判据静默失效（`assembly/services.go` 的 `eventReader`/`sourceFactsReader`/`modelStore` 就是这条规矩的落点）。`model` 仍可被 `domain/session` 引用：它是纯列形状（无行为），把它也搬走只会换来 30 多个镜像结构。
   - **用例环（C3 4.2 起是 `internal/app/<领域>`；此前叫 `service/svc<领域>`）的三条硬规矩**（2026-10-16 定案；违反者由 `internal/archtest` 拦，别靠注释）：
 
-    1. **只有 `internal/delivery/controller/ctr<领域>` 与装配根可以引用 `internal/app/<领域>`**——「引用」包括调用、构造与**写类型名**。
-       `bootstrap/app` / `router` / `cliops` / `sessionruntime`（C3 后是 `app/run`）/ `domain` / `mechanism` / `dao` / `store` 一律不许出现用例包。
+    1. **只有 `internal/adapters/inbound/http/controller/ctr<领域>` 与装配根可以引用 `internal/app/<领域>`**——「引用」包括调用、构造与**写类型名**。
+       `bootstrap/app` / 路由与 WS（`adapters/inbound/*`）/ 命令面（`adapters/inbound/cli/*`）/ 执行面 `app/run` / `domain` / `mechanism` / `dao` / `store` 一律不许出现用例包。
        连带的装配口径：**`app` 不引用 controller**（`cmd → app → router → controller` 是有向的），
        `router` 拿到的只是依赖事实；**用例实例只在装配根（`internal/bootstrap/assembly`）造**，controller 只收接口。
     2. **`app/<领域>` 之间零互相 import、零互调用**（同层的另外半边由既有守卫钉）。需要别的域的事实时，
@@ -39,5 +39,5 @@
     一个控制器只认自己那片。
 
 - `frontend/`：pnpm workspace（`apps/web` = **入口 + 组装**（`main.tsx` 挂载 + vite 构建配置）；`packages/{console,ui,types,api,desktop-contract,tsconfig}`——**界面本身在 `packages/console`**，2026-10-11 P5 从 `apps/web/src` 搬过来，行为零变化：搬迁保留原目录结构，所以 `internal/archtest` 里禁 `packages/*` 反向引 `apps/*` 的那条从"挡路的墙"变成了"搬迁方向的保证"）。Node 看 `frontend/.nvmrc`（24.x，团队用 fnm）、pnpm 看 `frontend/package.json` 的 `packageManager`；`engines` + Makefile 守卫 node 主版本不符即失败。
-- `docs/` 是**当前有效的对外/产品面文档**（2026-10-16 重建：`positioning` / `decisions` / `architecture` / `roadmap` / `unimplemented` / `acceptance-matrix` / `dsh-acp-adaptation` / `deployment`；2026-10-18 起另有 `agents/`——仓库根 `AGENTS.md` 的分册，见 [`docs/agents/README.md`](README.md)）。旧设计文档中仍有效的内容已抽出，历史整体留在 git 里；**外部产品的对照与逆向分析不进 `docs/`**，一律落 `.dsh/docs/`。`docs/**` 的相互引用由 `TestDocsReferencesResolve` 守卫（指向不存在的文件即红）。对外契约以 README「控制面接口摘要」与 `backend/internal/delivery/router/router.go` 为准。
+- `docs/` 是**当前有效的对外/产品面文档**（2026-10-16 重建：`positioning` / `decisions` / `architecture` / `roadmap` / `unimplemented` / `acceptance-matrix` / `dsh-acp-adaptation` / `deployment`；2026-10-18 起另有 `agents/`——仓库根 `AGENTS.md` 的分册，见 [`docs/agents/README.md`](README.md)）。旧设计文档中仍有效的内容已抽出，历史整体留在 git 里；**外部产品的对照与逆向分析不进 `docs/`**，一律落 `.dsh/docs/`。`docs/**` 的相互引用由 `TestDocsReferencesResolve` 守卫（指向不存在的文件即红）。对外契约以 README「控制面接口摘要」与 `backend/internal/adapters/inbound/http/router/router.go` 为准。
 - `docs/assets/`：文档的**静态资源唯一收口**（图片/矢量图/后续其他静态文件），不散落在 `docs/` 根下；文档内用相对路径引用（`![alt](assets/xxx.svg)`）。

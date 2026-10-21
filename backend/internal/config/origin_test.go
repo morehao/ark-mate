@@ -9,7 +9,7 @@ import (
 
 // 本文件是 `allowed_origins`（M3-5）的解析与校验判据。
 //
-// 与 internal/delivery/middleware/origin_test.go 的分工：这里钉**配置侧**（取值形状、归一结果、非法即报错），
+// 与 internal/adapters/inbound/http/middleware/origin_test.go 的分工：这里钉**配置侧**（取值形状、归一结果、非法即报错），
 // 那边钉**判定侧**（大小写/尾斜杠变体能不能命中这里归一出来的那张表）。两侧合起来
 // 才是"配置值 ↔ 请求头比较键同一条规则"的完整证据。
 

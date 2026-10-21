@@ -110,7 +110,7 @@ Electron 主进程（桌面态）
 | **L5** | `adapters/outbound/sqlite/{store,dao,db}` `adapters/outbound/{dsh,credentials,procreg}` `drivers/{mechanism,registry,transfer}` | 持久与出站适配器（C3 4.3 起持久层与 infra 逐步归到 `adapters/outbound/`） |
 | **L6** | `drivers/{gateway,mechanism,registry,transfer}` `adapters/outbound/runtimeconn` `config` | 驱动侧：机制、注册表、连接面（C3 4.2 起搬到 `adapters/outbound/`）、存量定义导入导出编排 |
 | **L8** | `delivery/controller/ctr<领域>` `delivery/middleware` | 入站适配 |
-| **L9** | `delivery/router` `bootstrap/{assembly,app,cliops,cli,maintenance}` | 装配与交付 |
+| **L9** | `adapters/inbound/{http/router,cli/*}` `bootstrap/{assembly,app}` | 装配与交付（C3 4.4 起入站适配全都归到 `adapters/inbound/`） |
 
 两条容易搞混的：**`domain` 在应用契约（`contract/`）里侧**（域不认识对外契约，视图由用例层投影）；**`maintenance` 与组合根同级**
 （`mate doctor` 要真的把 app 装起来自检，它向下吃 `assembly`/`router`）。
@@ -126,7 +126,7 @@ Electron 主进程（桌面态）
   后者是 L1 值层，而 `domain/*` 已经 import 它——把 `store` 加进去是 L1 向上的边，`capability → domain`
   还会直接成环。
 - **`maintenance`（L9）**：命令实现（migrate / doctor / transcripts / mcp / config / demo / automation /
-  capability / provider）。`cliops` 只剩命令分发与常驻 `serve`。
+  capability / provider）。`adapters/inbound/cli/{cmd,ops}` 只剩命令分发与常驻 `serve`。
 
 ### 4.2 持久侧
 
@@ -200,7 +200,7 @@ internal/adapters/outbound/sqlite/model（实体定义）被上面三者依赖�
 
 ### 6.1 REST
 
-前缀 `/v1/mate`（gin 版本分组 `/{version}/{appName}`，`appName = mate`）。路由由 `internal/delivery/router/routes_*.go` 按领域装配，**对外的路径集合以本包注册的为准**，README 的「控制面接口摘要」由守卫逐条比对（新增/改名路由必须同步）。
+前缀 `/v1/mate`（gin 版本分组 `/{version}/{appName}`，`appName = mate`）。路由由 `internal/adapters/inbound/http/router/routes_*.go` 按领域装配，**对外的路径集合以本包注册的为准**，README 的「控制面接口摘要」由守卫逐条比对（新增/改名路由必须同步）。
 
 面的一览（代表路径，完整清单见 README）：
 

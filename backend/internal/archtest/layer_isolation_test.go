@@ -79,7 +79,7 @@ func TestMechanismMustNotImportUpward(t *testing.T) {
 		modulePrefix + "internal/app",
 		modulePrefix + "internal/app/run",
 		modulePrefix + "internal/bootstrap/app",
-		modulePrefix + "internal/delivery/router",
+		modulePrefix + "internal/adapters/inbound/http/router",
 		modulePrefix + "internal/delivery/controller",
 		modulePrefix + "internal/drivers/gateway",
 	}
@@ -145,7 +145,7 @@ func TestDomainPackagesMustNotImportEachOther(t *testing.T) {
 		modulePrefix + "internal/app",
 		modulePrefix + "internal/app/run",
 		modulePrefix + "internal/bootstrap/app",
-		modulePrefix + "internal/delivery/router",
+		modulePrefix + "internal/adapters/inbound/http/router",
 		modulePrefix + "internal/delivery/controller",
 		modulePrefix + "internal/drivers/gateway",
 	}
@@ -213,7 +213,7 @@ func TestInnerLayersUseNoTableRows(t *testing.T) {
 	innerRoots := []string{
 		filepath.Join("internal", "domain"),
 		filepath.Join("internal", "app"),
-		filepath.Join("internal", "delivery"),
+		filepath.Join("internal", "adapters", "inbound"),
 		filepath.Join("internal", "bootstrap"),
 	}
 	scanned := 0

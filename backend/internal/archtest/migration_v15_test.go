@@ -282,10 +282,10 @@ func TestDestructiveRebuildIsOneShot(t *testing.T) {
 
 	// ⑥ `mate migrate` 不得出现 `--rebuild` 之类的入口（C1）。
 	//
-	// 扫描面跟着实现走：v3.2 刀 10 把命令体搬进了 `internal/bootstrap/maintenance`（命令层只剩分发）。
+	// 扫描面跟着实现走：v3.2 刀 10 把命令体搬进了 `internal/adapters/inbound/cli/maintenance`（命令层只剩分发）。
 	// 判据仍然是"flag 集合恰好是 db,transcripts"——换位置不改判据。
 	cmdSrc := stripLineComments(readFileOrFatal(t,
-		filepath.Join(backendRoot(t), "internal", "bootstrap", "maintenance", "migrate.go")))
+		filepath.Join(backendRoot(t), "internal", "adapters", "inbound", "cli", "maintenance", "migrate.go")))
 	flagRe := regexp.MustCompile(`fs\.(?:String|Bool|Int)\(\s*"([^"]+)"`)
 	var flags []string
 	for _, m := range flagRe.FindAllStringSubmatch(cmdSrc, -1) {

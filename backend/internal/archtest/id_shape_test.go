@@ -81,7 +81,7 @@ var runtimeShellImplPaths = []string{
 // TestRuntimeSessionNeverOnWireAsPlatformID 守卫②：两个 id 词汇不得互串。
 //
 // 四段判据：
-//  1. `internal/delivery/router/routes_*.go` 的路径字面量不得含 `runtime_session`——底座 id 永不允许
+//  1. `internal/adapters/inbound/http/router/routes_*.go` 的路径字面量不得含 `runtime_session`——底座 id 永不允许
 //     出现在 URL 路径段（它一旦成了路径参数，就会有人拿它当"会话 id"用）；
 //  2. DTO 结构体里 `json:"id"` 不得绑到 `Runtime*` 字段（对外 `id` 只能是平台 id）；
 //  3. `SessionResp` 必须**同时**声明 `id` 与 `runtime_session_id` 两个 string 字段
@@ -98,9 +98,9 @@ func TestRuntimeSessionNeverOnWireAsPlatformID(t *testing.T) {
 	root := backendRoot(t)
 
 	// ① 路由路径字面量。
-	routes, err := filepath.Glob(filepath.Join(root, "internal", "delivery", "router", "routes_*.go"))
+	routes, err := filepath.Glob(filepath.Join(root, "internal", "adapters", "inbound", "http", "router", "routes_*.go"))
 	if err != nil || len(routes) == 0 {
-		t.Fatalf("扫不到 internal/delivery/router/routes_*.go: %v（fail-closed）", err)
+		t.Fatalf("扫不到 internal/adapters/inbound/http/router/routes_*.go: %v（fail-closed）", err)
 	}
 	pathLiteral := regexp.MustCompile(`"([^"]*)"`)
 	for _, path := range routes {

@@ -166,7 +166,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 		}
 	}
 	// 取用路径：控制器**函数体**里必须经用例（同包中间函数喂不绿它）。
-	capCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrcapability", "capability.go")))
+	capCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "http", "controller", "ctrcapability", "capability.go")))
 	if !regexp.MustCompile(`svc\s+capability\.CapabilitySvc`).MatchString(capCtr) {
 		t.Error("`ctrcapability` 里找不到 `svc capability.CapabilitySvc` 字段：控制器只认用例接口。")
 	}
@@ -264,7 +264,7 @@ func TestLibraryReadModelLivesInLibrarySvc(t *testing.T) {
 	if !strings.Contains(asm, "library.NewLibrary(") {
 		t.Error("`internal/bootstrap/assembly/services.go` 里没有 `library.NewLibrary(`：用例必须在唯一装配根造出来。")
 	}
-	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrlibrary", "library.go")))
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "http", "controller", "ctrlibrary", "library.go")))
 	if strings.Contains(ctr, "library.NewLibrary(") {
 		t.Error("`ctrlibrary` 里又出现 `library.NewLibrary(`：用例实例只在装配根造，控制器只收接口。")
 	}

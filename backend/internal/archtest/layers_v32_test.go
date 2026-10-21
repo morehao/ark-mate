@@ -21,9 +21,9 @@ import (
 //	L6  drivers/gateway drivers/mechanism drivers/registry
 //	    drivers/runtimeconn drivers/transfer config                组合驱动
 //	L7  run                                            执行面
-//	L8  delivery/controller delivery/middleware                   入站适配
-//	L9  delivery/router bootstrap/assembly bootstrap/app
-//	    bootstrap/cliops bootstrap/cli bootstrap/maintenance       交付 / 装配
+//	L8  adapters/inbound/{http,ws}                                入站适配
+//	L9  adapters/inbound/http/router adapters/inbound/cli/* bootstrap/assembly bootstrap/app
+//	    adapters/inbound/cli/{ops,cmd,maintenance}       交付 / 装配
 //
 // 相对 v3.1 表（`layers_v31_test.go`）只改了两件事：
 //
@@ -100,8 +100,8 @@ var v32Layers = map[string]v32Layer{
 		"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/contract", "internal/drivers/mechanism",
 		"internal/adapters/outbound/credentials", "internal/adapters/outbound/dsh", "internal/drivers/registry",
 		"internal/app/run", "internal/adapters/outbound/runtimeconn", "internal/drivers/gateway",
-		"internal/delivery/controller", "internal/delivery/middleware", "internal/delivery/router", "internal/bootstrap/assembly",
-		"internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
+		"internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/middleware", "internal/adapters/inbound/http/router", "internal/bootstrap/assembly",
+		"internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 
 	// ——— L3：应用契约（`contract/dto*`）———
@@ -124,9 +124,9 @@ var v32Layers = map[string]v32Layer{
 		// （RequestError/ServiceError/…），分类 → 对外码的投影也住那里。
 		"internal/adapters/outbound/acp",
 		"internal/drivers/mechanism", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
-		"internal/app/run", "internal/drivers/gateway", "internal/delivery/controller",
-		"internal/delivery/middleware", "internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
-		"internal/bootstrap/cliops", "internal/bootstrap/cli",
+		"internal/app/run", "internal/drivers/gateway", "internal/adapters/inbound/http/controller",
+		"internal/adapters/inbound/http/middleware", "internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
+		"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 
 	// ——— L5：基础驱动 / 出站适配器 ———
@@ -139,13 +139,13 @@ var v32Layers = map[string]v32Layer{
 	// 层号不动、只换路径与层名：这一刀改的是"它属于哪个圈"，不是"它能 import 谁"。
 	"internal/adapters/outbound/sqlite/dao": {layer: 5, name: "sqlite/dao", sameLayer: true, deny: []string{
 		"internal/adapters/outbound/sqlite/store", "internal/drivers/mechanism", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
-		"internal/app/run", "internal/drivers/gateway", "internal/delivery/controller",
-		"internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
+		"internal/app/run", "internal/drivers/gateway", "internal/adapters/inbound/http/controller",
+		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	"internal/adapters/outbound/sqlite/store": {layer: 5, name: "sqlite/store", sameLayer: true, deny: []string{
 		"internal/drivers/mechanism", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
-		"internal/app/run", "internal/drivers/gateway", "internal/delivery/controller",
-		"internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
+		"internal/app/run", "internal/drivers/gateway", "internal/adapters/inbound/http/controller",
+		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	"internal/adapters/outbound/dsh":         {layer: 5, name: "outbound/dsh", sameLayer: true, deny: v32AdapterDeny},
 	"internal/adapters/outbound/sqlite/db":    {layer: 5, name: "sqlite/db", sameLayer: true},
@@ -154,25 +154,25 @@ var v32Layers = map[string]v32Layer{
 
 	// ——— L6：组合驱动 ———
 	"internal/drivers/gateway": {layer: 6, name: "gateway", sameLayer: true, deny: []string{
-		"internal/delivery/controller", "internal/delivery/middleware", "internal/delivery/router",
-		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
+		"internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/middleware", "internal/adapters/inbound/http/router",
+		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	"internal/drivers/mechanism": {layer: 6, name: "mechanism", sameLayer: true, deny: []string{
 		"internal/drivers/registry", "internal/adapters/outbound/runtimeconn", "internal/app/run",
-		"internal/drivers/gateway", "internal/delivery/controller", "internal/delivery/middleware", "internal/delivery/router",
-		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
+		"internal/drivers/gateway", "internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/middleware", "internal/adapters/inbound/http/router",
+		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	"internal/drivers/registry": {layer: 6, name: "registry", sameLayer: true, deny: []string{
-		"internal/app/run", "internal/drivers/gateway", "internal/delivery/controller",
-		"internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
+		"internal/app/run", "internal/drivers/gateway", "internal/adapters/inbound/http/controller",
+		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	"internal/adapters/outbound/runtimeconn": {layer: 6, name: "runtimeconn", sameLayer: true, deny: []string{
-		"internal/app/run", "internal/drivers/gateway", "internal/delivery/controller",
-		"internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
+		"internal/app/run", "internal/drivers/gateway", "internal/adapters/inbound/http/controller",
+		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	"internal/config": {layer: 6, name: "config", sameLayer: true, deny: []string{
-		"internal/delivery/controller", "internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
-		"internal/bootstrap/cliops", "internal/bootstrap/cli",
+		"internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
+		"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	// 存量定义的导入/导出编排（扫目录 / 计数 / 落库 / 导出）。它吃 domain 的纯转换 +
 	// store + mechanism 的载体工具，所以域与装配点都不必各自再写一遍。
@@ -180,7 +180,7 @@ var v32Layers = map[string]v32Layer{
 	// 刀 10 引入：migrate / doctor / transcripts / mcp reap 的落点。
 	// 运维动作的落点。**与组合根同级**：`mate doctor` 要真的把 app 装起来自检（装配 + 路由 +
 	// 注册表都在它的扫描面上），所以它必须能向下吃 assembly/router，而不是一个小小的 L6 助手。
-	"internal/bootstrap/maintenance": {layer: 9, name: "maintenance", sameLayer: true},
+	"internal/adapters/inbound/cli/maintenance": {layer: 9, name: "inbound/cli/maintenance", sameLayer: true},
 
 	// ——— 执行面（C3 4.2 起并进用例环：`sessionruntime` → `app/run`）———
 	//
@@ -197,50 +197,62 @@ var v32Layers = map[string]v32Layer{
 	"internal/app/run": {layer: 4, name: "app/run", deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/dsh",
 		"internal/adapters/outbound/runtimeconn", "internal/drivers/registry",
-		"internal/drivers/gateway", "internal/delivery/controller", "internal/delivery/middleware", "internal/delivery/router",
-		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
+		"internal/drivers/gateway", "internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/middleware", "internal/adapters/inbound/http/router",
+		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 
 	// ——— L8：入站适配 ———
-	"internal/delivery/controller": {layer: 8, name: "controller", deny: []string{
+	// WS 事件流是**入站适配**的另一半（C3 4.4：`ctrws` 从 HTTP 控制器目录里搬出来）：
+	// 它只把订阅语义翻成帧，与 REST 控制器同级同层。
+	"internal/adapters/inbound/ws": {layer: 8, name: "inbound/ws", deny: []string{
+		"internal/adapters/outbound/sqlite/model", "internal/domain", "internal/adapters/outbound/sqlite/store",
+		"internal/adapters/outbound/sqlite/dao", "internal/drivers/mechanism", "internal/drivers/registry",
+		"internal/adapters/outbound/runtimeconn", "internal/app/run", "internal/drivers/gateway",
+		"internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
+		"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
+	}},
+	"internal/adapters/inbound/http/controller": {layer: 8, name: "inbound/http/controller", deny: []string{
 		"internal/adapters/outbound/sqlite/model", "internal/domain", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao",
 		"internal/drivers/mechanism", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
-		"internal/app/run", "internal/drivers/gateway", "internal/delivery/router",
-		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
+		"internal/app/run", "internal/drivers/gateway", "internal/adapters/inbound/http/router",
+		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
-	"internal/delivery/middleware": {layer: 8, name: "middleware", deny: []string{
-		"internal/delivery/controller", "internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
-		"internal/bootstrap/cliops", "internal/bootstrap/cli",
+	"internal/adapters/inbound/http/middleware": {layer: 8, name: "inbound/http/middleware", deny: []string{
+		"internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
+		"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 
 	// ——— L9：交付 / 装配 ———
-	"internal/delivery/router": {layer: 9, name: "router", sameLayer: true, deny: []string{
+	"internal/adapters/inbound/http/router": {layer: 9, name: "inbound/http/router", sameLayer: true, deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model",
 		"internal/domain", "internal/contract", "internal/platform/eventbus", "internal/drivers/mechanism",
 		"internal/drivers/registry", "internal/adapters/outbound/runtimeconn", "internal/app/run",
-		"internal/drivers/gateway", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
+		"internal/drivers/gateway", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 	}},
 	"internal/bootstrap/assembly": {layer: 9, name: "assembly", sameLayer: true, deny: []string{
-		"internal/bootstrap/app", "internal/bootstrap/cli",
+		"internal/bootstrap/app", "internal/adapters/inbound/cli/cmd",
 	}},
 	"internal/bootstrap/app": {layer: 9, name: "app", sameLayer: true, deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model",
 		"internal/domain", "internal/drivers/mechanism", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
-		"internal/app/run", "internal/delivery/controller", "internal/delivery/router",
-		"internal/bootstrap/cliops", "internal/bootstrap/cli", "internal/drivers/gateway",
+		"internal/app/run", "internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/router",
+		"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd", "internal/drivers/gateway",
 	}},
-	// cliops 是**第二入站适配器**，不是第二装配根：它只做参数绑定 + 调用例 + 打印。
+	// C3 4.4：`bootstrap/{cli,cliops,maintenance}` 搬成 `adapters/inbound/cli/{cmd,ops,maintenance}`
+	// （包名 `cli`→`cmd`、`cliops`→`ops`）——命令树、命令实现、运维命令都是**入站适配器**。
+	//
+	// `ops` 是**第二入站适配器**，不是第二装配根：它只做参数绑定 + 调用例 + 打印。
 	// 持久化与机制一律经 `assembly.BuildResult` 暴露的 `Maintenance` 端口，拿不到具体实现。
-	"internal/bootstrap/cliops": {layer: 9, name: "cliops", sameLayer: true, deny: []string{
+	"internal/adapters/inbound/cli/ops": {layer: 9, name: "inbound/cli/ops", sameLayer: true, deny: []string{
 		"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model", "internal/drivers/mechanism",
 		"internal/domain", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
-		"internal/app/run", "internal/drivers/gateway", "internal/adapters",
+		"internal/app/run", "internal/drivers/gateway", "internal/adapters/outbound",
 	}},
-	"internal/bootstrap/cli": {layer: 9, name: "cli", sameLayer: true, deny: []string{
+	"internal/adapters/inbound/cli/cmd": {layer: 9, name: "inbound/cli/cmd", sameLayer: true, deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model",
-		"internal/domain", "internal/delivery/controller", "internal/drivers/mechanism",
+		"internal/domain", "internal/adapters/inbound/http/controller", "internal/drivers/mechanism",
 		"internal/adapters/outbound/runtimeconn", "internal/drivers/registry", "internal/app/run",
-		"internal/delivery/router", "internal/drivers/gateway",
+		"internal/adapters/inbound/http/router", "internal/drivers/gateway",
 	}},
 }
 
@@ -250,15 +262,15 @@ var v32AdapterDeny = []string{
 	"internal/platform/code", "internal/platform/automation", "internal/config", "internal/contract",
 	"internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/store", "internal/drivers/mechanism", "internal/domain",
 	"internal/adapters/outbound/runtimeconn", "internal/drivers/registry", "internal/app",
-	"internal/app/run", "internal/delivery/middleware", "internal/drivers/gateway",
-	"internal/delivery/controller", "internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
-	"internal/bootstrap/cliops", "internal/bootstrap/cli",
+	"internal/app/run", "internal/adapters/inbound/http/middleware", "internal/drivers/gateway",
+	"internal/adapters/inbound/http/controller", "internal/adapters/inbound/http/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
+	"internal/adapters/inbound/cli/ops", "internal/adapters/inbound/cli/cmd",
 }
 
 // v32Resolve 把相对路径归一成层表 key（最长前缀优先）。
 //
 // 表是 map，遍历顺序不定，所以必须显式取最长前缀，而不是"先命中先返回"
-// （`internal/bootstrap/cliops` 必须命中 cliops 层，不能被 `internal/bootstrap/cli` 抢走）。
+// （`internal/adapters/inbound/cli/ops` 必须命中 cliops 层，不能被 `internal/adapters/inbound/cli/cmd` 抢走）。
 func v32Resolve(rel string) (string, v32Layer, bool) {
 	bestKey, bestLayer, bestLen := "", v32Layer{}, -1
 	for key, layer := range v32Layers {
@@ -471,9 +483,11 @@ func TestLayerImportsV32(t *testing.T) {
 func TestGinConfinedToInboundAdaptersV32(t *testing.T) {
 	// 入站适配层：gin 的合法落点是这三个带。
 	allowed := map[string]bool{
-		"internal/delivery/router":     true,
-		"internal/delivery/controller": true,
-		"internal/delivery/middleware": true,
+		"internal/adapters/inbound/http/router":     true,
+		"internal/adapters/inbound/http/controller": true,
+		"internal/adapters/inbound/http/middleware": true,
+		// WS 事件流也是 gin 路由（升级握手挂在同一个引擎上）。
+		"internal/adapters/inbound/ws": true,
 	}
 	budget := map[string]int{}
 	for _, e := range v32GinAllowlist {

@@ -74,7 +74,7 @@ func TestRuntimeIdentityUseCaseLivesInRuntimeSvc(t *testing.T) {
 		!strings.Contains(asm, "runtime.New(") {
 		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `runtime.New(`：底座面用例必须在装配根造。")
 	}
-	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrruntime", "runtime.go")))
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "http", "controller", "ctrruntime", "runtime.go")))
 	if strings.Contains(ctr, "runtime.New(") {
 		t.Error("`ctrruntime` 里又出现 `runtime.New(`：用例实例只在 `internal/bootstrap/assembly` 造，控制器只收接口。")
 	}

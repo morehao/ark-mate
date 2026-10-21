@@ -14,7 +14,7 @@ import (
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/delivery/middleware"
+	"github.com/morehao/ark-mate/internal/adapters/inbound/http/middleware"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

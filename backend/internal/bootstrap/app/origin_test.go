@@ -15,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/platform/code"
-	"github.com/morehao/ark-mate/internal/delivery/middleware"
+	"github.com/morehao/ark-mate/internal/adapters/inbound/http/middleware"
 )
 
 // 本文件是 M3-5 的**进程内集成**判据：走真实 Init（真起服务、真建 engine、真监听端口），

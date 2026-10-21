@@ -163,7 +163,7 @@ type Config struct {
 	//
 	// **这是给跨源开发/自建反代用的显式登记口，不是默认放开**：内置矩阵只放行「无 Origin」的壳内反代
 	// /同源导航、`mate-app://app`（桌面直连）与核心**自身监听端口**上的 http 同源（见
-	// internal/delivery/middleware/origin.go，设计 §7.2 的 Origin 矩阵行）。`make dev`（vite :5173 → 代理到核心）
+	// internal/adapters/inbound/http/middleware/origin.go，设计 §7.2 的 Origin 矩阵行）。`make dev`（vite :5173 → 代理到核心）
 	// 与自建反代（页面 origin ≠ 核心监听 origin）都落在矩阵之外，必须在这里指名登记。
 	//
 	// 取值必须是**纯 origin**（`scheme://host[:port]`，无路径/查询/片段，可带一个尾斜杠）；

@@ -12,7 +12,7 @@ import (
 // `service/svc*` 只该被两类包认识：
 //
 //	① `internal/bootstrap/assembly` —— 唯一装配根，**造**用例实例（`system.New(...)`）；
-//	② `internal/delivery/controller/ctr<领域>` —— 消费用例，但只写**接口类型名**，不再构造。
+//	② `internal/adapters/inbound/http/controller/ctr<领域>` —— 消费用例，但只写**接口类型名**，不再构造。
 //
 // `app`/`router`/`domain`/`mechanism`/`store`/`pkg` 都不该 import 它。
 //
@@ -50,13 +50,13 @@ func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 			}
 			slashed := "/" + filepath.ToSlash(rel(root, path))
 			switch {
-			case strings.Contains(slashed, "/internal/delivery/controller/"):
+			case strings.Contains(slashed, "/internal/adapters/inbound/http/controller/"):
 				fromAllowed++
 				continue
 			case strings.Contains(slashed, "/internal/bootstrap/assembly/"):
 				fromAllowed++
 				continue
-			case strings.Contains(slashed, "/internal/bootstrap/maintenance/"):
+			case strings.Contains(slashed, "/internal/adapters/inbound/cli/maintenance/"):
 				// `mate demo` / `mate doctor` 是**运维与验证命令**，与 cliops 同性质的入站面：
 				// demo 刻意只要"最小执行面"（不起 HTTP、不建路由），所以它直接构造编排器。
 				// 它们不参与产品装配，也不持有路由，放行不改变"用例实例由装配根造"这条。
@@ -100,7 +100,7 @@ func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 // 判据两侧一起钉（都 fail-closed：文件读不到直接 Fatal）：
 //
 //	① 装配根必须有建造点（`system.New(` / `runtime.New(` / `model.New(`）；
-//	② `internal/bootstrap/app` 与 `internal/delivery/router` 侧不得出现用例层包名。
+//	② `internal/bootstrap/app` 与 `internal/adapters/inbound/http/router` 侧不得出现用例层包名。
 func TestUseCaseInstancesAreBuiltByAssembly(t *testing.T) {
 	root := backendRoot(t)
 	builders := []struct {
@@ -127,7 +127,7 @@ func TestUseCaseInstancesAreBuiltByAssembly(t *testing.T) {
 	// `domain/session`、`persistence/model`）的限定符——按文本扫会既误伤又漏判。
 	for _, dir := range []string{
 		filepath.Join(root, "internal", "bootstrap", "app"),
-		filepath.Join(root, "internal", "delivery", "router"),
+		filepath.Join(root, "internal", "adapters", "inbound", "http", "router"),
 	} {
 		imports := importedByProductionPackage(t, dir)
 		if len(imports) == 0 {

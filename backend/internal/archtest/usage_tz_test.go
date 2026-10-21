@@ -41,7 +41,7 @@ func TestUsageDayBucketsCarryClientZone(t *testing.T) {
 	}
 
 	// ③ 控制器：读 `tz_offset` 查询键（gin 对不认识的键一个字都不说）。
-	ctrSrc := stripGoComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrusage", "usage.go")))
+	ctrSrc := stripGoComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "http", "controller", "ctrusage", "usage.go")))
 	if !strings.Contains(ctrSrc, `c.Query("tz_offset")`) {
 		t.Fatalf("ctrusage 没有读 `tz_offset`：前端传了也会被丢掉，后端静默按 UTC 分桶")
 	}

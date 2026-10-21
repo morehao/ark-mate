@@ -172,7 +172,7 @@ func TestPortsAndDTOsMustNotImportTransport(t *testing.T) {
 
 // TestControllersMustNotImportImplementations 锁定控制器的依赖面：
 // 控制器只允许依赖 internal/app/*（端口）与 internal/contract/dto*（数据），
-// 不得 import internal/app/run（执行面）或 internal/delivery/router（自己所属的装配层）。
+// 不得 import internal/app/run（执行面）或 internal/adapters/inbound/http/router（自己所属的装配层）。
 //
 // 这条边界是 P2/P3 重构的核心收益：控制器与实现两边的任一侧改动，
 // 只要端口不变就不会互相牵连，也让控制器可以脱离 manager 单测。
@@ -180,11 +180,11 @@ func TestControllersMustNotImportImplementations(t *testing.T) {
 	root := backendRoot(t)
 	forbidden := []string{
 		modulePrefix + "internal/app/run",
-		modulePrefix + "internal/delivery/router",
+		modulePrefix + "internal/adapters/inbound/http/router",
 		modulePrefix + "internal/server",
 		modulePrefix + "internal/bootstrap/app",
 	}
-	for _, dir := range subdirs(t, filepath.Join(root, "internal", "delivery", "controller")) {
+	for _, dir := range subdirs(t, filepath.Join(root, "internal", "adapters", "inbound", "http", "controller")) {
 		if !hasGoFiles(dir) {
 			continue
 		}
@@ -216,7 +216,7 @@ func TestPersistenceLayersMustNotImportAppLayers(t *testing.T) {
 	root := backendRoot(t)
 	transport := []string{
 		modulePrefix + "internal/delivery/controller",
-		modulePrefix + "internal/delivery/router",
+		modulePrefix + "internal/adapters/inbound/http/router",
 		modulePrefix + "internal/contract",
 		modulePrefix + "internal/app",
 	}

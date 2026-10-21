@@ -4,7 +4,7 @@
 // 它**负责**：不在册底座的存量事实（隔离目录 / 投影引用 / 存量会话）、平台与底座清单的对账
 // 判据所需的只读事实、读模型的重建循环。
 //
-// 它**不负责**：任何渲染与文案（那在 `internal/bootstrap/cliops`）、任何写库（重建是显式开关下
+// 它**不负责**：任何渲染与文案（那在 `internal/adapters/inbound/cli/ops`）、任何写库（重建是显式开关下
 // 由 `RebuildAllReadModels` 触发的唯一例外）、任何会话生命周期。
 //
 // 为什么单独成包：这些逻辑曾经长在 `internal/manager` 这个 god struct 上，而它们其实是

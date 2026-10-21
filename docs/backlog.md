@@ -132,7 +132,7 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 ### T7 · O4：鉴权 / 多租户（云端 B 段）
 
-- **现状**：`backend/internal/delivery/middleware/credential.go` 只认一个静态 `MATE_TOKEN`（默认空 = 不鉴权，
+- **现状**：`backend/internal/adapters/inbound/http/middleware/credential.go` 只认一个静态 `MATE_TOKEN`（默认空 = 不鉴权，
   仅回环），无用户/角色/审计/限速/轮换；静态资源不鉴权。
 - **前提**：B1 身份映射先落地；**不得推翻决策 v3③「单机单操作员」红线**（它是本地形态的前提，
   云端是新增形态，不是替换）。

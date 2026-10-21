@@ -775,7 +775,7 @@ sqlite 模式下自动跑一次 `import`，幂等靠指纹 `meta.imported_automa
 
 ```
 backend/                单 Go module（github.com/morehao/ark-mate）
-  cmd/mate             进程入口：只做子命令分发（→ internal/bootstrap/cli）
+  cmd/mate             进程入口：只做子命令分发（→ internal/adapters/inbound/cli/cmd）
   internal/             单 module 的全部代码（v3.1 起 `backend/pkg` 已全量并入，不再有第二层）
     adapters/outbound/acp    ACP 客户端（stdio 传输、能力探测、权限、elicitation（unstable）、错误分类）
     adapters/outbound/mcp   自研最小 MCP 客户端（stdio / http / streamable_http / sse）
@@ -793,7 +793,7 @@ backend/                单 Go module（github.com/morehao/ark-mate）
     assembly            唯一装配根：构造 store/平面/执行面/用例/控制器/路由 + 启停序列
     app                 应用壳：HTTP 启停、ready、信号与优雅关闭
     cli                 命令树：子命令名、帮助、参数分发与退出码
-    cliops              命令实现（serve / demo / migrate / doctor / capability / provider / mcp / transcripts / config）
+    inbound/cli/{cmd,ops,maintenance}  命令树 / 命令实现（serve / demo / migrate / doctor / …）/ 运维命令
     router              唯一路由装配点（按领域分 routes_*.go；只收已构造的控制器）
     controller/ctr*     传输层控制器（只收 service 接口 + DTO + gin）
     middleware          HTTP 中间件（单操作员 token 鉴权）
@@ -826,7 +826,7 @@ docs/                   对外/产品面文档（口径、结构、排期、边�
 
 > `docs/` 下的文档是**当前有效的对外/产品面口径**（2026-10-16 重建：旧设计文档中仍有效的内容已抽出，
 > 历史整体留在 git 里）。**外部产品的对照与逆向分析不进 `docs/`**——那类材料一律在 `.dsh/docs/`。
-> 对外契约以本 README 的「控制面接口摘要」与实际路由（`backend/internal/delivery/router/routes_*.go`）为准，
+> 对外契约以本 README 的「控制面接口摘要」与实际路由（`backend/internal/adapters/inbound/http/router/routes_*.go`）为准，
 > 二者由 `TestReadmeRoutesMatchRouter` 自动守卫；`docs/**` 的相互引用由 `TestDocsReferencesResolve`
 > 守卫（指向不存在的文件即红）。
 

@@ -184,9 +184,9 @@ func collectRebuildGuard(t *testing.T, root string) rebuildGuard {
 
 	// ② doctor 侧：开关 + 条件分支。
 	//
-	// 扫描面跟着实现走：v3.2 刀 10 把 doctor 命令体从 `cliops` 搬进 `internal/bootstrap/maintenance`
+	// 扫描面跟着实现走：v3.2 刀 10 把 doctor 命令体从 `cliops` 搬进 `internal/adapters/inbound/cli/maintenance`
 	// （命令层只剩分发）。判据仍然是"有开关 + 有早退拒绝 + 调唯一的重建循环"。
-	cmdDir := filepath.Join(root, "internal", "bootstrap", "maintenance")
+	cmdDir := filepath.Join(root, "internal", "adapters", "inbound", "cli", "maintenance")
 	doctorFile := parseGuardFile(t, fset, filepath.Join(cmdDir, "doctor.go"), root)
 	rebuildFile := parseGuardFile(t, fset, filepath.Join(cmdDir, "doctor_readmodels.go"), root)
 

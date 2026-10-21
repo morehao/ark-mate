@@ -30,7 +30,7 @@ func TestReplayFramesBracketHistory(t *testing.T) {
 	feRoot := filepath.Join(root, "..", "frontend")
 
 	// ① + ② Go 侧：`attach` 里 begin 在回放循环前、end 在其后。
-	wsPath := filepath.Join(root, "internal", "delivery", "controller", "ctrws", "ws.go")
+	wsPath := filepath.Join(root, "internal", "adapters", "inbound", "ws", "ws.go")
 	ws := stripLineComments(readFileOrFatal(t, wsPath))
 	beginAt := strings.Index(ws, `Type: "replay_begin"`)
 	endAt := strings.Index(ws, `Type: "replay_end"`)

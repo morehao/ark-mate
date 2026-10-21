@@ -22,11 +22,11 @@ var errExitCall = regexp.MustCompile(`gincontext\.(?:Fail|Abort)\(c,\s*([^)]*)\)
 // code.Error(code.X, msg) / code.Errorf(...)（控制器自己判定的入参错误）。
 // 直接透传裸 err 会在本测试红。
 //
-// 允许的例外：本测试只看 internal/delivery/controller/ 下**非测试**文件的 gincontext 出口。
+// 允许的例外：本测试只看 internal/adapters/inbound/http/controller/ 下**非测试**文件的 gincontext 出口。
 // 其它层的裸 error 仍可由上层归一（FromError 对已带码错误原样透传，不会二次包装）。
 func TestControllerErrorExitsCarryCode(t *testing.T) {
 	root := backendRoot(t)
-	dir := filepath.Join(root, "internal", "delivery", "controller")
+	dir := filepath.Join(root, "internal", "adapters", "inbound", "http", "controller")
 	allowed := []string{"code.FromError(", "code.Error(", "code.Errorf("}
 
 	var checked int

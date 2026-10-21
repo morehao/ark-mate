@@ -11,7 +11,7 @@ import (
 
 // ——— `mate doctor` 的 **读模型**体检与重建（v21–v23） ———
 //
-// 分工：本文件是**事实的构造函数**（只读）与**唯一的重建循环**，`internal/bootstrap/cliops/
+// 分工：本文件是**事实的构造函数**（只读）与**唯一的重建循环**，`internal/adapters/inbound/cli/ops/
 // doctor_readmodels.go` 只负责排版与三档结论。
 //
 // 本文件尾部另有**一个写路径**（`RebuildAllReadModels`）——它不是体检的一部分，而是体检给出的

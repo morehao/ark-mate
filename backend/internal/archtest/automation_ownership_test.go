@@ -276,7 +276,7 @@ func TestAutomationApiFaceLivesInAutomationSvc(t *testing.T) {
 	}
 
 	// ③ 控制器不得再造用例（交给它的是**用例接口**，不是域平面）。
-	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrautomation", "automation.go")))
+	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "http", "controller", "ctrautomation", "automation.go")))
 	if strings.Contains(ctrSrc, "automation.New(") {
 		t.Error("`ctrautomation` 里又出现 `automation.New(`：用例实例只在 `internal/bootstrap/assembly` 造，" +
 			"控制器拿到的必须是已构造的接口。")

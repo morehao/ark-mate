@@ -195,7 +195,7 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 				"（漏了它 ⇒ 自检端点直接 500 / 档案面 nil panic，而只测另一条的用例看不见）。", a)
 		}
 	}
-	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrmodel", "provider.go")))
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "http", "controller", "ctrmodel", "provider.go")))
 	for _, a := range []string{"model.NewProbe(", "model.NewProvider("} {
 		if strings.Contains(ctr, a) {
 			t.Errorf("`ctrmodel` 里又出现 %q：用例实例只在装配根造，控制器只收接口。", a)

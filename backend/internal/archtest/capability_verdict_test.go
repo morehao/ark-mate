@@ -268,7 +268,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 			t.Errorf("`domain/mcp/probe.go` 里找不到 %q：判据失锚＝空转（方法被改名/搬走时这条判据不会红）。", must)
 		}
 	}
-	capCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrcapability", "capability.go")))
+	capCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "adapters", "inbound", "http", "controller", "ctrcapability", "capability.go")))
 	if !regexp.MustCompile(`svc\s+capability\.CapabilitySvc`).MatchString(capCtr) {
 		t.Error("`ctrcapability` 里找不到 `svc capability.CapabilitySvc` 字段：控制器只认用例接口（v3.1 §3.2.1）。")
 	}
