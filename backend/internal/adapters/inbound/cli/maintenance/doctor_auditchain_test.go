@@ -2,6 +2,7 @@ package maintenance
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -128,11 +129,12 @@ func TestDoctorAuditChainTiers(t *testing.T) {
 		r := newAuditChainRig(t)
 		// 把库退回"没有链列"的形态：删两列（SQLite 3.35+ 支持 DROP COLUMN；驱动是 wasm 的新版本）。
 		r.seed(t, func(st *store.Store) {
+			// 版本号只能**删掉** v32 及其之后的记录（改成 31 会与既有的 v31 行撞主键）。
+			// 用常量而不是字面量：以后再加迁移步，这条夹具不该需要回来改。
 			for _, sqlText := range []string{
 				`ALTER TABLE definition_revisions DROP COLUMN prev_hash`,
 				`ALTER TABLE definition_revisions DROP COLUMN hash`,
-				// 版本号只能**删掉** v32 那条记录（改成 31 会与既有的 v31 行撞主键）。
-				`DELETE FROM schema_migrations WHERE version = 32`,
+				fmt.Sprintf(`DELETE FROM schema_migrations WHERE version >= %d`, store.DefinitionRevisionChainSchemaVersion),
 			} {
 				if err := st.DB().Exec(sqlText).Error; err != nil {
 					t.Fatalf("回退 schema 形态（%s）: %v", sqlText, err)
@@ -143,8 +145,9 @@ func TestDoctorAuditChainTiers(t *testing.T) {
 		if c.Status != doctorWarn {
 			t.Fatalf("库还没升级到 v32 时应 warn（不是 fail）：%+v", c)
 		}
-		if !strings.Contains(c.Detail, "v31") {
-			t.Fatalf("人话应报出实际 schema 版本：%s", c.Detail)
+		want := fmt.Sprintf("v%d", store.DefinitionRevisionChainSchemaVersion-1)
+		if !strings.Contains(c.Detail, want) {
+			t.Fatalf("人话应报出实际 schema 版本（%s）：%s", want, c.Detail)
 		}
 	})
 }

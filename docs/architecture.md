@@ -190,13 +190,14 @@ internal/adapters/outbound/sqlite/model（实体定义）被上面三者依赖�
 
 ### 5.2 表与实体
 
-18 张表，一表一文件（`internal/adapters/outbound/sqlite/model/<域>.go`），结构体一律 `<域词>Entity` / `<域词>EntityList`，表名常量 `TableName<域词>` 随实体文件走：
+19 张表，一表一文件（`internal/adapters/outbound/sqlite/model/<域>.go`），结构体一律 `<域词>Entity` / `<域词>EntityList`，表名常量 `TableName<域词>` 随实体文件走：
 
 | 分组 | 表 |
 | --- | --- |
 | 会话与执行 | `sessions` · `runs` · `messages` · `events` · `event_sequence` · `inputs` · `mcp_call_audits` |
 | 交互与记忆 | `permission_memories` |
 | 能力定义 | `skills` · `mcp_servers` · `mcp_secrets` · `automations` |
+| 投递队列 | `automation_outbox`（v33：自动化的"结果送达"，见 §7.5） |
 | 资源与凭据 | `providers` · `models` |
 | 空间与系统 | `workspaces` · `definition_revisions` · `meta` · `schema_migrations` |
 
@@ -282,6 +283,25 @@ internal/adapters/outbound/sqlite/model（实体定义）被上面三者依赖�
 - 网关条目只带 scope（`--runtime` + 会话钉住的 `--mcps`），外加 `env` 里两项**平台装配值**（都不是密钥）：**凭据 cwd**（`MATE_MCP_CRED_CWD`，「用户启动 `mate serve` 的目录」）与**会话 id**（`MATE_MCP_SESSION`，审计归属）。两者都走 `env` 而不是 `Args`：`Args` 逐字进能力指纹，会话 id 进去就变成「每会话一个代际」（暖进程复用与代际台账一起报废，功能上却看不出来）；`env` 只把**键名**入指纹，键名恒定、取值不入。会话 id 那个键**无条件存在**（值可能是空串）——指纹那一路在 `session/new` 之前还不知道会话 id，按「有值才带键」拼条目会让指纹与实际注入的键集合分叉。
 - 每一次 `tools/call` 除日志外还落一行审计（`mcp_call_audits`，见 §5.2）：日志回答「刚才发生了什么」，审计表回答「**这个会话**调了什么」。
 - 缺省路径（未声明能力集）的指纹恒为空、不迁移，所以恒定注入是「从零到一加一台远程 server」能被看见的唯一方式。
+
+### 7.4.1 自动化的投递 outbox（v33）
+
+**触发**与**送达**是两件事，v33 起分开：`RunOnce` 认领 occurrence 之后先往 `automation_outbox`
+写一行 pending（**幂等键** = `automation_id|occurrence|trigger`，库级唯一），再顺手投一次；
+投不出去就留着，由投递 worker 按退避重试（30s 起、翻倍、上限 30min，最多 6 次）、投成即 `sent`。
+
+- **通道故障不再吃掉一次守护**：底座重启/端口占用是常态，而原先 `host.CreateSession` 一失败，
+  那一轮就只剩一句 `reason` 落在 `recent_runs` 里——**没有可重试的落点**。现在执行侧的事实
+  （"这个 occurrence 已认领"）与投递是否送达分开记账，失败不再被改写成"这一轮失败"（也不会推高
+  `consecutive_failures` 把定义推进 `needs_attention`）。
+- **只投一次**：第一道闸是库级唯一索引（重复入队不增行），第二道是投递前后的状态 CAS
+  （`WHERE status = pending`）。去重放在**发送端**（消费端没有可用的幂等键：会话是平台自己建的）。
+- **认领游标照旧"失败也推进"**（否则同一个错过每 30s 重报一次）——认领一次、投递可重试，
+  两者不打架。
+- **只对 DB 载体生效**：文件载体与 memory 模式没有库，投递仍是同步的（失败即 `Failure`）；
+  手动触发也不进队列（用户在等回答，`POST /automations/:id/run` 必须当场把真实错误交回去）。
+- **放弃要响**：次数用尽落 `failed` + 一条 ERROR（"默默重试"与"已经放弃"在面板上看起来一样，
+  是最难查的一类）。worker 由装配根与调度循环一起起，同一节拍。
 
 ### 7.4 能力指纹与代际
 

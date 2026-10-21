@@ -158,7 +158,8 @@ func (as *assembly) steps() []Step {
 			Name: "自动化调度", Phase: PhaseBackground, Timeout: 10 * time.Second,
 			Start: as.startAutomationScheduler, Stop: as.stopAutomationScheduler,
 			DependsOn: []string{"编排器"},
-			Degrade:   "定时自动化这一轮不触发（历史运行记录不受影响；存下来的 occurrence 下次启动会认领）",
+			Degrade: "定时自动化这一轮不触发、投递队列也不再补投（历史运行记录不受影响；" +
+				"存下来的 occurrence 与 pending 投递下次启动都会被接着处理）",
 		},
 		{Name: "用例与控制器", Phase: PhaseDelivery, Critical: true, Timeout: 30 * time.Second,
 			Start: as.startControllers, DependsOn: []string{"定义装载", "编排器"}},
@@ -610,8 +611,13 @@ func (as *assembly) startIdleReaper(ctx context.Context) error {
 
 // startAutomationScheduler M4-4 调度循环：`MATE_AUTOMATION_TICK=0` 关闭（装配期同步跑一次
 // 启动恢复 pass）。**必须在定义装载之后**——pass 扫的是内存注册表。
+//
+// v33 起这一步同时起**投递 worker**（T5）：调度只判断"该不该触发"，投递由 worker 按自己的
+// 节拍推进（退避重试、幂等）。两者的失败语义不同，混在一条 goroutine 里会让退避把调度也拖慢。
+// 没有库的载体（memory 模式）worker 自己不起（`StartAutomationOutboxWorker` 内部判 st）。
 func (as *assembly) startAutomationScheduler(ctx context.Context) error {
 	as.planes.Automation.StartAutomationScheduler(as.cfg.AutomationTick)
+	as.planes.Automation.StartAutomationOutboxWorker(ctx, as.cfg.AutomationTick)
 	return nil
 }
 

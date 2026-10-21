@@ -243,18 +243,9 @@ func (pl *Plane) RunOnce(ctx context.Context, rec Rec, ScheduledFor time.Time, t
 	// 那份校验必然与真实创建路径漂移，而 ADR-10 真正要求的是"失败也推进游标"——那与校验
 	// 在哪一层无关。所以直接调真实路径，把它带码的错误落成 needs_attention 的**原因**，
 	// 用户在面板上看到的正是"为什么没跑成"。
-	host := pl.hostOf()
-	if host == nil {
-		return pl.FinishAutomationRun(ctx, rec, RunOutcome{ScheduledFor: ScheduledFor, Status: automation.RunSkipped,
-			Trigger: trigger, Advance: true, Failure: true, Claimed: out.Claimed,
-			Reason: "宿主端口未接线（装配期漏了 SetHost）：本次跳过"})
-	}
-	respID, err := host.CreateSession(ctx, HostSessionReq{
-		Prompt: rec.Def.Target.Prompt,
-		Cwd:    rec.Def.Target.Cwd,
-		Model:  rec.Def.Target.Model,
-		Origin: Origin(rec.Def.ID),
-	})
+	// 投递（v33 / T5）：有库载体时**先入队再投**——通道一时不可用不该把这一轮写成失败，
+	// 它只该让"这一次送达"欠着（worker 退避重试，见 outbox.go 的文件头）。
+	respID, pending, err := pl.Deliver(ctx, rec, trigger, ScheduledFor)
 	if err != nil {
 		out := RunOutcome{
 			ScheduledFor: ScheduledFor, Status: automation.RunSkipped, Trigger: trigger, Advance: true,
@@ -262,6 +253,19 @@ func (pl *Plane) RunOnce(ctx context.Context, rec Rec, ScheduledFor time.Time, t
 			Reason: "触发失败（已跳过本次，等修好后的下一个 occurrence）：" + errText(err),
 		}
 		glog.Warnw(ctx, "automation 触发失败", "automation", rec.Def.ID, "err", err)
+		return pl.FinishAutomationRun(ctx, rec, out)
+	}
+	if pending {
+		// 入队成功、这一次没投出去：**执行侧的事实已经成立**（occurrence 已认领），
+		// 所以这里既不是 Failure（那会把"通道抖了一下"写成"这一轮失败"并推高
+		// consecutive_failures），也不动认领游标之外的东西。留痕用既有词 `skipped` + 明确
+		// 的 reason（新增一个 `pending` 状态词会动 recent_runs 的对外词汇，属另一件事）。
+		out := RunOutcome{
+			ScheduledFor: ScheduledFor, Status: automation.RunSkipped, Trigger: trigger, Advance: true,
+			Claimed: out.Claimed,
+			Reason:  "投递未送达，已进投递队列（退避重试中；底座恢复后自动补投，不需要重跑这一轮）",
+		}
+		glog.Warnw(ctx, "automation 投递未送达，已入队重试", "automation", rec.Def.ID, "occurrence", ScheduledFor)
 		return pl.FinishAutomationRun(ctx, rec, out)
 	}
 	out = RunOutcome{

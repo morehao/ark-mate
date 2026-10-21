@@ -33,6 +33,8 @@ type Plane struct {
 	stop context.CancelFunc
 	// done 调度 goroutine 的退出信号（Stop 等它关闭再返回：停机后不该再有新触发起步）。
 	done chan struct{}
+	// outboxOnce 投递 worker 的幂等启动闸（StartAutomationOutboxWorker 可能被调用多次）。
+	outboxOnce sync.Once
 	// runMu 把「认领判定 → 建会话 → 写回游标」串成临界区。
 	//
 	// 认领判定（`automation.Decide`）是纯函数，纯函数**不提供互斥**：tick 与

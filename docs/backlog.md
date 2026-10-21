@@ -136,6 +136,16 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 ### T5 · L3-4：投递与执行解耦（事务性 outbox）
 
+> **已落地（2026-10-21，schema v33）**：`automation_outbox`（`automation_id / occurrence / trigger /
+> payload / idempotency_key（唯一）/ status / attempts / next_attempt_at / last_error`）+ 投递 worker
+> （30s 起退避、翻倍、上限 30min、最多 6 次）+ 发送端幂等（唯一索引 + `WHERE status = pending` 的状态
+> CAS）。`RunOnce` 认领后先入队、再顺手投一次：投不出去就留 pending，**不把这一轮写成失败**
+> （也不推高 `consecutive_failures`）。只对 DB 载体生效（文件载体/memory 仍同步投递），手动触发不进队列。
+> 重投成功会补挂 `max_run_duration` 看门狗（否则重试那一轮会绕过用户声明的上限）。
+> 反证：把"投递未送达"写成 `Failure` → `TestDeliveryFailureDoesNotFailTheRun` 当场红。
+> **欠账（不在本刀）**：`failed` 的行目前只有 ERROR 日志，没有界面入口；真要做要等"面板上看得见
+> 投递失败"这条需求（那会同时动 events/前端）。
+
 - **现状**：automation 的「跑完」与「结果送达」是同一条路（`backend/internal/domain/automation/carrier.go`）；
   通道投递失败是常态，但失败后没有可重试的持久化队列。
 - **做什么**：outbox 表（`id / 目标 / 载荷 / 幂等键 / 尝试次数 / next_attempt_at / 状态`）+
