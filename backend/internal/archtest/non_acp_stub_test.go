@@ -40,8 +40,8 @@ func TestNonACPBottomStubStaysProtocolFree(t *testing.T) {
 	}
 	for _, imp := range file.Imports {
 		p := strings.Trim(imp.Path.Value, `"`)
-		if p == modulePrefix+"internal/infra/acp" {
-			t.Errorf("%s import 了协议库 `internal/infra/acp`：它必须是**非 ACP** 的桩，"+
+		if p == modulePrefix+"internal/adapters/outbound/acp" {
+			t.Errorf("%s import 了协议库 `internal/adapters/outbound/acp`：它必须是**非 ACP** 的桩，"+
 				"否则「换底座不动框架」这条证明退化成「用另一份协议实现跑通」", rel)
 		}
 	}

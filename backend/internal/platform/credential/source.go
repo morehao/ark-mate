@@ -3,7 +3,7 @@ package credential
 // Source 是"这把钥匙从哪一层来的"——它要出现在面板与 `mate doctor` 上，所以取值是**对外词表**，
 // 不能随手改（改了等于让前端与文档同时漂移）。刻意用下划线形态：它进 JSON 字段，不进 Go 标识符。
 //
-// 为什么归在这一层（L1 值层）而不是 `internal/infra/credentials`：它是**凭据的词汇**，不是
+// 为什么归在这一层（L1 值层）而不是 `internal/adapters/outbound/credentials`：它是**凭据的词汇**，不是
 // 某一套解析实现的细节——领域层的快照字段（`provider.Snapshot.KeySource`）与用例层的诊断分支
 // 都要用它。留在 infra 里会让 `domain` 与 `service` 为了一个枚举反向依赖基础设施。
 type Source string

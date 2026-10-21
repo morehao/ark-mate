@@ -1,7 +1,7 @@
 package assembly
 
 import (
-	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

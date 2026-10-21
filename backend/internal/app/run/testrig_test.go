@@ -20,7 +20,7 @@ import (
 	"sync"
 
 	defn "github.com/morehao/ark-mate/internal/platform/definition"
-	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 	appsession "github.com/morehao/ark-mate/internal/app/session"
 	"github.com/morehao/ark-mate/internal/app/system"
 
@@ -38,7 +38,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/object/objid"
 	"github.com/morehao/ark-mate/internal/platform/resource"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
-	"github.com/morehao/ark-mate/internal/infra/credentials"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/credentials"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"

@@ -3,7 +3,7 @@ package runtime
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 )
 
 // Mode 平台统一权限模式（§5.5 词汇）。各底座的原生 mode 映射见 §6.2 ModeMapping（待实测回填），

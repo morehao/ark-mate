@@ -56,7 +56,7 @@ func TestSandboxEscalationGoesThroughApproval(t *testing.T) {
 		}
 		// v3.1：adapter 自己的词表就是底座的模式名（v3.1 §3.2.1 规则 5）——它必须能写
 		// `danger-full-access`（那是该底座的取值），判的是**平台不要顺手用它重跑**。
-		if strings.HasPrefix(relSlash, "internal/infra/dsh/") {
+		if strings.HasPrefix(relSlash, "internal/adapters/outbound/dsh/") {
 			continue
 		}
 		if strings.Contains(stripLineComments(readFileOrFatal(t, p)), "danger-full-access") {

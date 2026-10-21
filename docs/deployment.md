@@ -688,7 +688,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 
 ### 6.2 runtime 标识归一（`deepseekharness` → `dsh`）：老数据自动继续生效
 
-2026-10-11 起注册表键统一为 **`dsh`**（Go 包 `internal/infra/dsh`、展示名 `dsh`）——它本来就是同一个
+2026-10-11 起注册表键统一为 **`dsh`**（Go 包 `internal/adapters/outbound/dsh`、展示名 `dsh`）——它本来就是同一个
 东西在其余六个面上的名字：二进制 `dsh`、隔离根 `<MATE_HOME>/runtime/dsh`、随包载荷 `payloads/dsh/`、
 桌面启动器分支 `runtimeId === 'dsh'`、环境变量前缀 `DSH_`、构建期固定的 runtime id `dsh`。构建参数随之变成
 `RUNTIME=dsh` / `--build-arg MATE_RUNTIME=dsh`（不指定时的默认值）。

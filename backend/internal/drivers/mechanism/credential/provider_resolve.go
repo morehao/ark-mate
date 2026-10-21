@@ -8,7 +8,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/credential"
 	credval "github.com/morehao/ark-mate/internal/platform/credential"
 
-	"github.com/morehao/ark-mate/internal/infra/credentials"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/credentials"
 )
 
 // resolveProviderKey 解析一条 provider 的拨号密钥（provider 面**唯一**入口）。

@@ -7,7 +7,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/contract/dtoruntime"
-	"github.com/morehao/ark-mate/internal/infra/procreg"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/procreg"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

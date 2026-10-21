@@ -12,12 +12,12 @@ import (
 // 口径见 `.dsh/docs/plans/2026-10-19-hexagonal-alignment-plan.md`（终局版）。
 //
 //	L0  adapters/outbound/sqlite/model                            表行形状（零内部依赖）
-//	L1  platform/* version runtime infra/acp infra/mcp infra/logging 值对象 / 协议库
+//	L1  platform/* version runtime adapters/outbound/{acp,mcp} platform/logging 值对象 / 协议库
 //	L2  domain/*                                                  领域
 //	L3  contract/dto*                                             应用契约
 //	L4  app/*                                                     用例环
 //	L5  adapters/outbound/sqlite/{store,dao,db} infra/dsh
-//	    infra/credentials infra/procreg                           基础驱动
+//	    adapters/outbound/{dsh,credentials,procreg}                基础驱动 / 出站适配器
 //	L6  drivers/gateway drivers/mechanism drivers/registry
 //	    drivers/runtimeconn drivers/transfer config                组合驱动
 //	L7  run                                            执行面
@@ -83,12 +83,14 @@ var v32Layers = map[string]v32Layer{
 	// 其中 `definition` 承载能力定义的**值层规则**（id 合法性、patch 键语义、参数类错误出口）：
 	// 从 `drivers/mechanism/definition` 抽出来，让 `domain/*` 不必反向 import 机制层。
 	"internal/platform": {layer: 1, name: "platform", sameLayer: true},
-	// 下面四个仍是独立 key：`runtime` 有 adapter 禁入，`infra/*` 的位置与带语义各自不同。
-	"internal/version":       {layer: 1, name: "version", sameLayer: true},
-	"internal/runtime":       {layer: 1, name: "runtime", sameLayer: true, deny: []string{"internal/infra/dsh"}},
-	"internal/infra/acp":     {layer: 1, name: "infra/acp", sameLayer: true},
-	"internal/infra/mcp":     {layer: 1, name: "infra/mcp", sameLayer: true},
-	"internal/infra/logging": {layer: 1, name: "infra/logging", sameLayer: true},
+	// 底下几个仍是独立 key：`runtime` 有 adapter 禁入；`acp` / `mcp` 虽在 `adapters/outbound/`
+	// 下，性质仍是**协议库（L1）**——内圈（`domain/mcp`、`internal/runtime`）用它们是允许的，
+	// 把它们抬到 L5 会让这两条边变成"向上"。（C3 4.6 按角色重写层表时再单独讨论它们的圈层。）
+	"internal/version":                  {layer: 1, name: "version", sameLayer: true},
+	"internal/runtime":                  {layer: 1, name: "runtime", sameLayer: true, deny: []string{"internal/adapters/outbound/dsh"}},
+	"internal/adapters/outbound/acp":    {layer: 1, name: "outbound/acp", sameLayer: true},
+	"internal/adapters/outbound/mcp":    {layer: 1, name: "outbound/mcp", sameLayer: true},
+	"internal/platform/logging":         {layer: 1, name: "platform/logging", sameLayer: true},
 
 	// ——— L2：领域 ———
 	//
@@ -96,7 +98,7 @@ var v32Layers = map[string]v32Layer{
 	// 而是同一内核的分区（`session` 用 `identity` 的身份值）。
 	"internal/domain": {layer: 2, name: "domain", sameLayer: true, deny: []string{
 		"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/contract", "internal/drivers/mechanism",
-		"internal/infra/credentials", "internal/infra/dsh", "internal/drivers/registry",
+		"internal/adapters/outbound/credentials", "internal/adapters/outbound/dsh", "internal/drivers/registry",
 		"internal/app/run", "internal/adapters/outbound/runtimeconn", "internal/drivers/gateway",
 		"internal/delivery/controller", "internal/delivery/middleware", "internal/delivery/router", "internal/bootstrap/assembly",
 		"internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
@@ -117,10 +119,10 @@ var v32Layers = map[string]v32Layer{
 	// **永不 sameLayer**：这是"用例包之间零互引"（三条硬规矩第 2 条）的载体。
 	// deny `internal/app` 同时挡住兄弟用例包与自身（自 import 不会出现在图里）。
 	"internal/app": {layer: 4, name: "app", deny: []string{
-		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/infra/dsh",
+		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/dsh",
 		// C2 第二刀：用例层不写协议分类。业务错误的构造面在 `platform/code`
 		// （RequestError/ServiceError/…），分类 → 对外码的投影也住那里。
-		"internal/infra/acp",
+		"internal/adapters/outbound/acp",
 		"internal/drivers/mechanism", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
 		"internal/app/run", "internal/drivers/gateway", "internal/delivery/controller",
 		"internal/delivery/middleware", "internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app",
@@ -128,6 +130,9 @@ var v32Layers = map[string]v32Layer{
 	}},
 
 	// ——— L5：基础驱动 / 出站适配器 ———
+	//
+	// C3 4.3 第二刀：`infra/{dsh,credentials,procreg}` 搬成 `adapters/outbound/*`、
+	// `infra/logging` 搬成 `platform/logging`（日志是平台能力，不是某个外部系统的适配器）。
 	//
 	// C3 4.3：`persistence/{model,dao,store}` + `infra/dbclient` 整体搬成
 	// `adapters/outbound/sqlite/{model,dao,store,db}`（表行形状仍是 L0，持久三件套仍是 L5）。
@@ -142,10 +147,10 @@ var v32Layers = map[string]v32Layer{
 		"internal/app/run", "internal/drivers/gateway", "internal/delivery/controller",
 		"internal/delivery/router", "internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
-	"internal/infra/dsh":         {layer: 5, name: "infra/dsh", sameLayer: true, deny: v32AdapterDeny},
+	"internal/adapters/outbound/dsh":         {layer: 5, name: "outbound/dsh", sameLayer: true, deny: v32AdapterDeny},
 	"internal/adapters/outbound/sqlite/db":    {layer: 5, name: "sqlite/db", sameLayer: true},
-	"internal/infra/credentials": {layer: 5, name: "infra/credentials", sameLayer: true},
-	"internal/infra/procreg":     {layer: 5, name: "infra/procreg", sameLayer: true},
+	"internal/adapters/outbound/credentials": {layer: 5, name: "outbound/credentials", sameLayer: true},
+	"internal/adapters/outbound/procreg":     {layer: 5, name: "outbound/procreg", sameLayer: true},
 
 	// ——— L6：组合驱动 ———
 	"internal/drivers/gateway": {layer: 6, name: "gateway", sameLayer: true, deny: []string{
@@ -190,7 +195,7 @@ var v32Layers = map[string]v32Layer{
 	//
 	// 原 L7 的 deny 保持：执行面不认任何具体适配器（store / dao / dsh / registry / runtimeconn）。
 	"internal/app/run": {layer: 4, name: "app/run", deny: []string{
-		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/infra/dsh",
+		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/dsh",
 		"internal/adapters/outbound/runtimeconn", "internal/drivers/registry",
 		"internal/drivers/gateway", "internal/delivery/controller", "internal/delivery/middleware", "internal/delivery/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
@@ -229,7 +234,7 @@ var v32Layers = map[string]v32Layer{
 	"internal/bootstrap/cliops": {layer: 9, name: "cliops", sameLayer: true, deny: []string{
 		"internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model", "internal/drivers/mechanism",
 		"internal/domain", "internal/drivers/registry", "internal/adapters/outbound/runtimeconn",
-		"internal/app/run", "internal/drivers/gateway", "internal/infra",
+		"internal/app/run", "internal/drivers/gateway", "internal/adapters",
 	}},
 	"internal/bootstrap/cli": {layer: 9, name: "cli", sameLayer: true, deny: []string{
 		"internal/app", "internal/adapters/outbound/sqlite/store", "internal/adapters/outbound/sqlite/dao", "internal/adapters/outbound/sqlite/model",

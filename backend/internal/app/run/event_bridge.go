@@ -2,7 +2,7 @@ package run
 
 import (
 	"github.com/morehao/ark-mate/internal/domain/session/event"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 

@@ -82,7 +82,7 @@ func TestRuntimeDoesNotImportRuntimeAdapters(t *testing.T) {
 		return
 	}
 	for _, imp := range importedByProductionPackage(t, dir) {
-		if strings.HasPrefix(imp, modulePrefix+"internal/infra/dsh") {
+		if strings.HasPrefix(imp, modulePrefix+"internal/adapters/outbound/dsh") {
 			t.Errorf("adapter 边界：internal/runtime 不得 import %s", imp)
 		}
 	}
@@ -101,7 +101,7 @@ func TestOnlyAssemblyImportsRuntimeAdapters(t *testing.T) {
 		// 只看**生产** import：测试夹具直接用真实 adapter 是合法的（v3.1 §3.2.1 规则 5 管的是
 		// 生产代码的依赖方向；把测试包也算进来会让"装配边唯一"退化成"谁都不许写测试夹具"）。
 		for _, imp := range importedByProductionPackage(t, dir) {
-			if strings.HasPrefix(imp, modulePrefix+"internal/infra/dsh") {
+			if strings.HasPrefix(imp, modulePrefix+"internal/adapters/outbound/dsh") {
 				hits = append(hits, relPath+" → "+imp)
 			}
 		}
@@ -121,7 +121,7 @@ func TestOnlyAssemblyImportsRuntimeAdapters(t *testing.T) {
 // TestAdapterStaysOutsideAppCore adapter 不得 import 应用内核。
 func TestAdapterStaysOutsideAppCore(t *testing.T) {
 	root := backendRoot(t)
-	dir := filepath.Join(root, "internal", "infra", "dsh")
+	dir := filepath.Join(root, "internal", "adapters", "outbound", "dsh")
 	if !hasGoFiles(dir) {
 		return // P2 之前不存在
 	}
@@ -135,7 +135,7 @@ func TestAdapterStaysOutsideAppCore(t *testing.T) {
 		relImp := importPathOf(imp)
 		for _, bad := range forbidden {
 			if relImp == bad || strings.HasPrefix(relImp, bad+"/") {
-				t.Errorf("adapter 边界：internal/infra/dsh 不得 import %s", imp)
+				t.Errorf("adapter 边界：internal/adapters/outbound/dsh 不得 import %s", imp)
 			}
 		}
 	}

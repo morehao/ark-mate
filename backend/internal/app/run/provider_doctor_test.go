@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/platform/credential"
-	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
@@ -19,7 +19,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/model"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/testutil"

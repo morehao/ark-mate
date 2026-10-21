@@ -107,7 +107,7 @@
 
 ## B 段 · 端云桥接（方向，不排期）
 
-云端不是「另做一个产品」，而是把已经存在的接缝升格。**当前已有的地基**：`internal/infra/acp` 的两套远程传输
+云端不是「另做一个产品」，而是把已经存在的接缝升格。**当前已有的地基**：`internal/adapters/outbound/acp` 的两套远程传输
 （Streamable HTTP / WS）、`runtimes.json` 的远程端点声明、以及「只有构建期选中的那个 id 命中声明时
 才注册」这条 fail-closed 装配。
 

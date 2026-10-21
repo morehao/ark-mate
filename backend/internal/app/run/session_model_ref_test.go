@@ -18,7 +18,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 	"github.com/morehao/ark-mate/internal/contract/dtosession"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 )
 
 // ——— v26：会话模型引用 = **平台模型行 id**（定案「辰」）———

@@ -10,7 +10,7 @@ import (
 
 	pkgidentity "github.com/morehao/ark-mate/internal/platform/identity"
 	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
-	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 )
 
 // ——— 产品身份的五条静态守卫 ———
@@ -165,7 +165,7 @@ func TestProductIdentityMatchesUi(t *testing.T) {
 // 版本 pin 保证；真实底座校验只在一次性 probe/CI 里跑。把 dump 加回启动路径的代价是**每次
 // 启动多一次秒级子进程**，而它不会让任何测试变红。
 func TestNoStartupDumpForIdentity(t *testing.T) {
-	path := filepath.Join(backendRoot(t), "internal", "infra", "dsh", "identity.go")
+	path := filepath.Join(backendRoot(t), "internal", "adapters", "outbound", "dsh", "identity.go")
 	src := stripGoComments(readFileOrFatal(t, path))
 	// 判据落在"能不能拉起子进程"上，而不是那个 flag 的字面量：字面量在 Note 里出现是正常的
 	// （它记录的正是"刻意不在启动期跑"这条决定），真正危险的是这三样——有了它们才有 dump 的能力。

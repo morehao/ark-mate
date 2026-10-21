@@ -10,7 +10,7 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/morehao/ark-mate/internal/platform/object/objusage"
-	"github.com/morehao/ark-mate/internal/infra/logging"
+	"github.com/morehao/ark-mate/internal/platform/logging"
 )
 
 // defaultDialTimeout Dial 未显式配置且调用方 ctx 无截止时间时的握手上限。

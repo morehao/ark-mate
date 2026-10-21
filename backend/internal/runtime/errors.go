@@ -2,7 +2,7 @@ package runtime
 
 import (
 	"github.com/morehao/ark-mate/internal/platform/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 )
 
 // ——— 协议错误 → 平台视图的唯一折叠点（B4）———

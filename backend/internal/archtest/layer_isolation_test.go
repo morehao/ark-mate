@@ -287,6 +287,7 @@ var protocolFreePackages = []string{
 	modulePrefix + "internal/platform/definition",
 	modulePrefix + "internal/platform/eventbus",
 	modulePrefix + "internal/platform/identity",
+	modulePrefix + "internal/platform/logging",
 	modulePrefix + "internal/platform/object/objdelivery",
 	modulePrefix + "internal/platform/object/objid",
 	modulePrefix + "internal/platform/object/objmeta",
@@ -329,7 +330,7 @@ var protocolFreeExempt = map[string]string{
 // fail-closed：登记了的包必须真实存在（目录改名/搬走后不许静默空转）。
 func TestProtocolFreePackagesStayClean(t *testing.T) {
 	root := backendRoot(t)
-	acpPkg := modulePrefix + "internal/infra/acp"
+	acpPkg := modulePrefix + "internal/adapters/outbound/acp"
 	for _, pkgPath := range protocolFreePackages {
 		dir := filepath.Join(root, strings.TrimPrefix(pkgPath, modulePrefix))
 		if _, err := os.Stat(dir); err != nil {

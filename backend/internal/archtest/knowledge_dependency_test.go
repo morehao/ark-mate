@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 )
 
 // ——— v18「知识归属」三条判据（第二个适配下线 + adapter 层收口）———
@@ -32,7 +32,7 @@ var adapterImportRE = regexp.MustCompile(`"github\.com/morehao/ark-mate/internal
 //
 // 为什么这条是"adapter 层"的机器判据：内核要用的只是**端口**（`runtime.Registry` 的 Spec /
 // Syncer / NativePermission），而端口类型住在父包 `internal/runtime`。一旦内核 import 了
-// `internal/infra/dsh`，它多半是在按 id 分派具体底座的知识（本次收口前内核的
+// `internal/adapters/outbound/dsh`，它多半是在按 id 分派具体底座的知识（本次收口前内核的
 // `native_permission.go` 就是那个样子：`switch runtimeID` + `opencodeActionAliases` +
 // `opencodePermissionConfig`）——症状不是报错，而是
 // **下一个底座接进来时必须回内核改代码**。
@@ -143,7 +143,7 @@ func TestNativePermissionModeLiteralsMatchWire(t *testing.T) {
 	wire := nativeModeValuesOf(t, nativeModeWireFileIn(t, root))
 	// 目前的内置适配里只有 dsh 声明了"模式"这一维（原生面是逐动作表的底座不认 mode，
 	// 那种形态的实现按端口契约自己处理——内核不参与）。
-	adapter := nativeModeValuesOf(t, filepath.Join(root, "internal", "infra", "dsh", "native_permission.go"))
+	adapter := nativeModeValuesOf(t, filepath.Join(root, "internal", "adapters", "outbound", "dsh", "native_permission.go"))
 
 	if strings.Join(wire, "\x00") != strings.Join(adapter, "\x00") {
 		t.Errorf("原生权限模式字面量已分叉：\n内核(wire) %v\nadapter    %v\n"+

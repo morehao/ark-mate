@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -15,7 +15,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/object/objid"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 	appruntime "github.com/morehao/ark-mate/internal/app/runtime"
 )
 

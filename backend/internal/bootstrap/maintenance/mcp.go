@@ -12,7 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/config"
 
 	"github.com/morehao/ark-mate/internal/drivers/gateway"
-	"github.com/morehao/ark-mate/internal/infra/mcp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
 	"github.com/morehao/golib/glog"
 )
 

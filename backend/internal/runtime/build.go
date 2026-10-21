@@ -19,7 +19,7 @@ import (
 // DefaultBuildRuntime 未注入时的默认底座：deepseek-harness（dsh）。
 //
 // 字面量而不是 `dsh.ID`：`internal/runtime` **不得 import 任何 adapter**（v3.1 §3.2.1 规则 5）。
-// 两者相等由 `internal/infra/dsh` 的 `TestDefaultBuildRuntimeMatchesAdapterID` 钉住——
+// 两者相等由 `internal/adapters/outbound/dsh` 的 `TestDefaultBuildRuntimeMatchesAdapterID` 钉住——
 // 任一侧改名而另一侧没跟，就会红。
 const DefaultBuildRuntime = "dsh"
 

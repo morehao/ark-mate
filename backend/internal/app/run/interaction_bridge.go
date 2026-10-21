@@ -2,7 +2,7 @@ package run
 
 import (
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 )
 
 // ——— 权限/结构化提问的**翻译边界**（C2 第四刀）———

@@ -26,11 +26,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/platform/resource"
-	"github.com/morehao/ark-mate/internal/infra/mcp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"

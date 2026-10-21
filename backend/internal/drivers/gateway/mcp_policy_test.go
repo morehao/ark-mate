@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/drivers/registry"
-	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	apprun "github.com/morehao/ark-mate/internal/app/run"
 )

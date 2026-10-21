@@ -67,10 +67,10 @@ func TestInternalHasNoRuntimeConfigLiterals(t *testing.T) {
 		if strings.HasPrefix(filepath.ToSlash(path), filepath.ToSlash(filepath.Join(internalDir, "archtest"))+"/") {
 			continue
 		}
-		// v3.1 §3.2.1 规则 5：内核扫描**跳过 adapter**（`internal/infra/dsh/**` 就是底座私有知识
+		// v3.1 §3.2.1 规则 5：内核扫描**跳过 adapter**（`internal/adapters/outbound/dsh/**` 就是底座私有知识
 		// 的合法落点）。跳过它是这次合并的直接结果：adapter 从 `pkg/` 搬进 `internal/` 之后，
 		// 若不跳过，这条守卫会把它自己的归属地判成违规。
-		if strings.HasPrefix(filepath.ToSlash(path), filepath.ToSlash(filepath.Join(internalDir, "infra", "dsh"))+"/") {
+		if strings.HasPrefix(filepath.ToSlash(path), filepath.ToSlash(filepath.Join(internalDir, "adapters", "outbound", "dsh"))+"/") {
 			continue
 		}
 		hits += scanForLiterals(t, path, runtimeConfigLiterals, "internal/")
@@ -104,17 +104,17 @@ var storeLiterals = []string{
 // fail-closed：`internal/runtime/<adapter>` 一个都没有 → 失败（目录改名/搬迁也会让它静默空转）。
 func TestAdapterHasNoStoreLiterals(t *testing.T) {
 	root := backendRoot(t)
-	adapterDir := filepath.Join(root, "internal", "infra", "dsh")
+	adapterDir := filepath.Join(root, "internal", "adapters", "outbound", "dsh")
 	if !hasGoFiles(adapterDir) {
 		t.Fatalf("%s 下没有 Go 文件：这条守卫失去了检查对象（改名/搬迁了？）", adapterDir)
 	}
 	for _, path := range goFilesUnder(t, adapterDir) {
-		scanForLiterals(t, path, storeLiterals, "internal/infra/dsh/")
+		scanForLiterals(t, path, storeLiterals, "internal/adapters/outbound/dsh/")
 	}
 	// 反向：`internal/runtime` 只留契约与注册表，不得再长出 adapter 子包。
 	for _, dir := range subdirs(t, filepath.Join(root, "internal", "runtime")) {
 		if hasGoFiles(dir) {
-			t.Errorf("internal/runtime 下又出现 adapter 子包 %s：adapter 只能住在 internal/infra/dsh（v3.1 §3.2.1 规则 5）。",
+			t.Errorf("internal/runtime 下又出现 adapter 子包 %s：adapter 只能住在 internal/adapters/outbound/dsh（v3.1 §3.2.1 规则 5）。",
 				filepath.ToSlash(rel(root, dir)))
 		}
 	}

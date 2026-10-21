@@ -30,17 +30,17 @@ func TestBuildRuntimeDefaultIsDsh(t *testing.T) {
 	clean := stripTSComments(string(src))
 
 	// v3.1：`internal/runtime` 不得 import adapter（§3.2.1 规则 5），所以默认值是**字面量**；
-	// 它与 adapter 的 `ID` 相等由 `internal/infra/dsh` 的守卫钉住（双向：任一侧改名都会红）。
+	// 它与 adapter 的 `ID` 相等由 `internal/adapters/outbound/dsh` 的守卫钉住（双向：任一侧改名都会红）。
 	defRE := regexp.MustCompile(`(?m)^\s*const\s+DefaultBuildRuntime\s*=\s*"dsh"\s*$`)
 	if !defRE.MatchString(clean) {
 		t.Fatalf("%s 里找不到 `const DefaultBuildRuntime = \"dsh\"`："+
 			"「不指定默认 dsh」这条需求的唯一落点被改了？", path)
 	}
 	// adapter 侧必须同时声明 `ID = "dsh"`，且有一个测试断言两侧相等。
-	adapterPath := filepath.Join(backendRoot(t), "internal", "infra", "dsh", "adapter.go")
+	adapterPath := filepath.Join(backendRoot(t), "internal", "adapters", "outbound", "dsh", "adapter.go")
 	adapterSrc := stripTSComments(readFileOrFatal(t, adapterPath))
 	if !strings.Contains(adapterSrc, "runtime.Adapter") {
-		t.Fatalf("internal/infra/dsh/adapter.go 里找不到 `runtime.Adapter`：adapter 契约被改名/搬走了？")
+		t.Fatalf("internal/adapters/outbound/dsh/adapter.go 里找不到 `runtime.Adapter`：adapter 契约被改名/搬走了？")
 	}
 	// 注入变量必须是**空串初值**：初值一旦是别的 runtime id，`-X` 没注入时默认就不再是 dsh。
 	// 允许显式类型声明（`var BuildRuntime string`）或带初值（`var BuildRuntime = ""`）两种写法。

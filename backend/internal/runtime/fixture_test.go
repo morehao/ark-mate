@@ -13,7 +13,7 @@ import (
 // 又要验证"注册表 / 隔离 / 落点 / 端口表"这些机制。两者相加只剩一条路：**在测试里合成一份
 // 与内置 adapter 同形的声明**。
 //
-// 真实 adapter 的形状由 `internal/infra/dsh` 自己的测试钉住（`TestSpecShape` 等）；
+// 真实 adapter 的形状由 `internal/adapters/outbound/dsh` 自己的测试钉住（`TestSpecShape` 等）；
 // 本夹具只保证"字段齐备、形态合法"，让机制判据有对象可测。
 func fixtureSpec() Spec {
 	return Spec{

@@ -23,17 +23,17 @@ import (
 //	④ 容量列写成 `NOT NULL DEFAULT 0` ⇒ "未声明"与"声明成 0"在库里长得一模一样，而 0 会被底座的
 //	   `min(1)` 校验门拒掉——交付被拒而平台侧自报正常。
 
-// dshAdapterDir 返回 `internal/infra/dsh`（这四条守卫的扫描面）。
+// dshAdapterDir 返回 `internal/adapters/outbound/dsh`（这四条守卫的扫描面）。
 func dshAdapterDir(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(backendRoot(t), "internal", "infra", "dsh")
+	dir := filepath.Join(backendRoot(t), "internal", "adapters", "outbound", "dsh")
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		t.Fatalf("adapter 目录不存在：%s（%v）——守卫失去对象，fail-closed", dir, err)
 	}
 	return dir
 }
 
-// dshProductionFiles 返回 `internal/infra/dsh` 下**进包**的 Go 文件（排除 `_test.go`）。
+// dshProductionFiles 返回 `internal/adapters/outbound/dsh` 下**进包**的 Go 文件（排除 `_test.go`）。
 //
 // 为什么排除测试：守卫③的判据是"**生产路径**上的派生点只有一个"——测试可以（也应该）用
 // **写死的字面期望**去断言交付字节（golden 的价值就在期望不由被测实现生成）。
@@ -167,7 +167,7 @@ func TestDshDisplayNameComesFromProviderName(t *testing.T) {
 // 与 `model_value.go` 里编出的 ACP 值的第一段必须**逐字相同**。它们分布在两个文件里，只改一处
 // 就是"所有选了模型的会话立刻起不来"——而这件事在静态上完全看不出来。
 //
-// 动态那半是 `internal/infra/dsh` 的 `TestDshRouteKeyAgreesBetweenPatchAndModelValue`（真值比对，
+// 动态那半是 `internal/adapters/outbound/dsh` 的 `TestDshRouteKeyAgreesBetweenPatchAndModelValue`（真值比对，
 // 不占 archtest 的条数）。
 func TestDshRouteKeyDerivationIsSinglePoint(t *testing.T) {
 	files := dshProductionFiles(t)

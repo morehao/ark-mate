@@ -13,7 +13,7 @@ import (
 // 为什么值得一条守卫：`providers/<id>` 不是一个内部常量，是**持久化格式**——它写进
 // `<MATE_HOME>/credentials.json` 的键，也回写进 `providers.json` 的 `key_ref`。把它改掉
 // （或换个地方再拼一次）的后果是**静默**的：已有引用全部指向不存在的键，取值落空，
-// 表现为"密钥没配"；而 `internal/infra/credentials` 的分层顺序、provider 域的档案校验**都不会红**。
+// 表现为"密钥没配"；而 `internal/adapters/outbound/credentials` 的分层顺序、provider 域的档案校验**都不会红**。
 //
 // 判据三段（都 fail-closed：找不到即失败，避免改名/搬迁后守卫静默空转——这正是 P0 里
 // 反复吃过的那类假绿）：

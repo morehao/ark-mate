@@ -1,6 +1,6 @@
 package runtime
 
-import "github.com/morehao/ark-mate/internal/infra/acp"
+import "github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 
 // ——— 会话配置项的平台值类型（C2：内核契约去协议化）———
 //

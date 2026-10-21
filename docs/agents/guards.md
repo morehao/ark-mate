@@ -18,11 +18,11 @@
 
 ## 当前判据清单
 
-- **层表守卫（v3.2）**：`layers_v32_test.go` 用一张**层号表**（`v32Layers`：L0 persistence/model → L1 值层（platform/object·redact·identity·resource·credential·eventbus·code·automation·definition·capability + version·runtime·infra/acp·mcp·logging）→ L2 domain → L3 contract/dto → L4 app（含 `app/run` 执行面）→ L5 adapters/outbound/sqlite/{store,dao,db}·infra → L6 drivers/{gateway,mechanism,registry,transfer}·config·adapters/outbound/runtimeconn → L8 delivery/controller·delivery/middleware → L9 delivery/router·bootstrap/{assembly,app,cliops,cli,maintenance}）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，除非该层显式 `sameLayer: true`（`app`（原 `service`）**永不** `sameLayer`，它 `deny` 自己的前缀，逼"用例包之间零互相 import"）；③ 每层可带 `deny` 精确排除个别内层包（如 `cliops ↛ store`）。违规是**硬失败**，例外清单 `v32Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。
-  `layers_scan_test.go` 留着扫描器与三条专项判据：`runtime` 不得 import adapter、只有 `assembly`（生产代码）可以 import `internal/infra/dsh`、adapter 不得 import 应用内核。
+- **层表守卫（v3.2）**：`layers_v32_test.go` 用一张**层号表**（`v32Layers`：L0 persistence/model → L1 值层（platform/object·redact·identity·resource·credential·eventbus·code·automation·definition·capability·logging + version·runtime·adapters/outbound/{acp,mcp}）→ L2 domain → L3 contract/dto → L4 app（含 `app/run` 执行面）→ L5 adapters/outbound/sqlite/{store,dao,db}·adapters/outbound/{dsh,credentials,procreg} → L6 drivers/{gateway,mechanism,registry,transfer}·config·adapters/outbound/runtimeconn → L8 delivery/controller·delivery/middleware → L9 delivery/router·bootstrap/{assembly,app,cliops,cli,maintenance}）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，除非该层显式 `sameLayer: true`（`app`（原 `service`）**永不** `sameLayer`，它 `deny` 自己的前缀，逼"用例包之间零互相 import"）；③ 每层可带 `deny` 精确排除个别内层包（如 `cliops ↛ store`）。违规是**硬失败**，例外清单 `v32Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。
+  `layers_scan_test.go` 留着扫描器与三条专项判据：`runtime` 不得 import adapter、只有 `assembly`（生产代码）可以 import `internal/adapters/outbound/dsh`、adapter 不得 import 应用内核。
   同目录 `layers_paths_test.go` 的 `TestLayerTablePathsResolve`：`v32Layers` 的 key、每个 key 的 `deny`、`v32AdapterDeny` 必须指向真实存在的目录；挡的是“搬迁时 deny 漏改、守卫静默放行”的失效。
 
-- **层表守卫（v3.2 六边形，`layers_v32_test.go`）**：与 v3.1 表**同时生效**，两者方向相反。v3.1 把 `domain` 放第 9 层、`store` 第 7 层、`dto`/`dao` 第 6 层、`model` 第 1 层（规则是"高层可以 import 低层"），于是 `domain → store/dto/mechanism` 被那张表定义成**合法**；v3.2 把 `domain` 压到 L2、持久化与机制压到 L5/L6、`contract/dto` 挪到 L3，`domain` 的出边只剩 L0（`model` 纯列形状）与 L1（值对象/协议库）。判据三条同构（只能向内、同带默认不互链、`deny` 精确排除策略边），另有两条只属于 v3.2：`app` **永不** `sameLayer` 且 `deny internal/app`（同时挡兄弟用例包与自身，是"用例包零互引"的载体），C2 起还 `deny internal/infra/acp`（用例层只写业务错误的语义，分类 → 对外码的投影与构造都在 `platform/code`）、`cliops` 是**第二入站适配器而不是第二装配根**（`deny` `store`/`dao`/`model`/`mechanism`/`domain`/`registry`/`sessionruntime`/`gateway`/`infra`）。迁移期 26 条例外（36 处命中）登记在 `v32Exceptions`，**双向**判据（新增边红、降到 0 不删也红），`TestV32ReportOnly` 是随时可跑的收口进度表。同文件另有 **gin 围栏**（`TestGinConfinedToInboundAdaptersV32`）：gin 只许落在 `router`/`controller`/`middleware`，`assembly`/`app` 的临时白名单在刀 2 清空。
+- **层表守卫（v3.2 六边形，`layers_v32_test.go`）**：与 v3.1 表**同时生效**，两者方向相反。v3.1 把 `domain` 放第 9 层、`store` 第 7 层、`dto`/`dao` 第 6 层、`model` 第 1 层（规则是"高层可以 import 低层"），于是 `domain → store/dto/mechanism` 被那张表定义成**合法**；v3.2 把 `domain` 压到 L2、持久化与机制压到 L5/L6、`contract/dto` 挪到 L3，`domain` 的出边只剩 L0（`model` 纯列形状）与 L1（值对象/协议库）。判据三条同构（只能向内、同带默认不互链、`deny` 精确排除策略边），另有两条只属于 v3.2：`app` **永不** `sameLayer` 且 `deny internal/app`（同时挡兄弟用例包与自身，是"用例包零互引"的载体），C2 起还 `deny internal/adapters/outbound/acp`（用例层只写业务错误的语义，分类 → 对外码的投影与构造都在 `platform/code`）、`cliops` 是**第二入站适配器而不是第二装配根**（`deny` `store`/`dao`/`model`/`mechanism`/`domain`/`registry`/`sessionruntime`/`gateway`/`infra`）。迁移期 26 条例外（36 处命中）登记在 `v32Exceptions`，**双向**判据（新增边红、降到 0 不删也红），`TestV32ReportOnly` 是随时可跑的收口进度表。同文件另有 **gin 围栏**（`TestGinConfinedToInboundAdaptersV32`）：gin 只许落在 `router`/`controller`/`middleware`，`assembly`/`app` 的临时白名单在刀 2 清空。
 
 - 再加 **1 条持久层边界守卫（v3.3）**：`dao_boundary_test.go` 的 `TestDaoKeepsNoBusinessReadFace`。v3.3 把 `internal/adapters/outbound/sqlite/dao` 收成「列词汇（`XxxCond`）+ gormdao 泛型方法 + 机械原语（KV / 取号 / CAS / 只追加插入）」，**排序、筛选组合、分页、聚合**一律归 `internal/adapters/outbound/sqlite/store`。守卫扫 `internal/adapters/outbound/sqlite/dao`（剥注释）禁止 `OrderField:`/`.Order(`/`.Limit(`/`.Offset(`/`.Join(`/`.Group(`/`.Select(`/`GetListByCond(`/`GetPageListByCond(`/`CountByCond(`，以及 `tableName+` 的标识符拼接（Cond 里的表名/列名必须交给 `clause.Column` 由方言引用）；条件查询组合也只许留在 store，唯一例外是 `meta.go` 的 `GetByCond(`（键值表按 key 取一行的原语）。挡的是「把 `ListByOrder`/`RunningRuns` 这类读面方法加回 DAO」——两层各有一套顺序时，用户看到的顺序取决于调用方走了哪条路，而单表测试永远看不出来。反证（实跑）：把 `ListByOrder` 的 `OrderField` 搬回 `dao/workspace.go`、把 `RunningRuns` 的 `.Order(`/`.Limit(` 搬回 `dao/run.go`、把 `MetaCond` 的 `clause.Eq` 改回 `tableName+".key = ?"`，三者皆红。
 
@@ -46,7 +46,7 @@
 
 - 再加 **3 条底座知识归属守卫**（v12 应用层资源与底座同步，`knowledge_boundary_test.go` + `syncer_contract_test.go`：① `TestInternalHasNoRuntimeConfigLiterals`（A9）扫 `internal/**`（**跳过 `internal/archtest` 自身**——它的禁词表就写着这些字面量）剥注释后**不得**出现底座配置格式与机制字面量（`opencode.json`/`OPENCODE_CONFIG_CONTENT`/`mate-models.patch.yml`/`.credentials.yaml`/`--dump-config`/`llm-pi-ai`/`opencode_json`/`dsh_patch_yaml`）：命中即意味着**底座私有知识回流到了平台内核**（表里**已下线底座**的字面量刻意留着——删掉等于拆掉一层保护）；② `TestAdapterHasNoStoreLiterals` 扫 `internal/runtime/<adapter>/**` 剥注释后**不得**出现 SQL/DAO 标记（`SELECT `/`INSERT INTO`/`UPDATE `/`DELETE FROM`/`gorm`/`dao.`）与 `internal/{store,dao,model}` 的 import 路径——adapter 只认端口传入的 `Set`，它没有、也不该有读库的能力；**刻意不 ban `providers`/`models`**（那正是它要生成的配置键）；③ `TestSyncerContractEmptySet` 用 stub `Syncer` 断言 `Set` 为空时编排层**确实调用**了 `SyncModels`（跳过等于退回 v11 的真实缺陷：空清单什么都不做 ⇒ 上一份配置原样留在生效状态而外观正常，契约的正确实现只能在 adapter 里）；反证档同时断言「未登记 syncer 的 runtime 不该被调用」）
 
-- 再加 **1 条日志出口守卫**（`logging_boundary_test.go` 的 `TestOnlyLoggingPackageImportsSlog`：剥注释后全仓只许 `internal/infra/logging` import `"log/slog"`——本仓日志出口是 glog/zap，那一处导入是「只认 `*slog.Logger` 的第三方库（ACP SDK 的 `SetLogger`）」的边界桥；别处再写一个 `slog.Info` 照样能编译、也「看起来在工作」，但记录会绕过 glog 落到 std log 的 stderr，级别/格式/轮转/目标全不一样，只有出事那天才被注意到；跳过 `internal/archtest` 自身——它的判据字面量就写着 `"log/slog"`）
+- 再加 **1 条日志出口守卫**（`logging_boundary_test.go` 的 `TestOnlyLoggingPackageImportsSlog`：剥注释后全仓只许 `internal/platform/logging` import `"log/slog"`——本仓日志出口是 glog/zap，那一处导入是「只认 `*slog.Logger` 的第三方库（ACP SDK 的 `SetLogger`）」的边界桥；别处再写一个 `slog.Info` 照样能编译、也「看起来在工作」，但记录会绕过 glog 落到 std log 的 stderr，级别/格式/轮转/目标全不一样，只有出事那天才被注意到；跳过 `internal/archtest` 自身——它的判据字面量就写着 `"log/slog"`）
 
 - 再加 **3 条构建期底座守卫**（`runtime_pin_test.go`：「用户不能选 runtime，只能在构建时指定，不指定默认 dsh」这条产品约束的三个危险失效方式**都不会让别的测试变红**，所以各有一条机器判据：① `TestBuildRuntimeDefaultIsDsh` 读 `internal/runtime/build.go`，断言 `DefaultBuildRuntime = dsh.ID` 且注入变量初值为空串（**解析不到即失败**——改名/搬迁会让它静默空转）；② `TestNoAgentRuntimeSelectionSurface` 扫 agent 定义/请求/响应、automation 目标、会话请求与前端 `Agent` 类型，剥注释后不得出现选择面字段声明（`Runtimes []string` / `RoutingPolicy string` / `RuntimeHint string`；**拒绝用的 `json.RawMessage` 与 `SessionRec.RuntimeID`（执行事实，v17 前叫 `RuntimeHint`）刻意放行**，全仓扫会误伤投放声明）；③ `TestRuntimeSelectionRejectionsExist` 断言写面的**显式拒绝**真的存在——agent 的 `rejectRuntimeSelection`（1 处定义 + Create/Update 各 1 处调用）与 automation 的 `rejectRuntimeHintInPatch` + `dropLegacyRuntimeHint`：删掉它们请求照样 200，只是键被 JSON 绑定悄悄丢掉，用户以为"我改了底座"而什么都没发生（B1 类静默 no-op））
 
@@ -112,7 +112,7 @@
   `app/usage` 加一个 model 空白 import → 红。
 
 - 再加 **1 条「错误分类词对照」守卫**（`error_class_parity_test.go` 的 `TestErrorClassVocabularyMatchesACP`，
-  2026-10-20 C2）：`platform/code` 的平台错误分类（`code.ClassRequest` 等，7 个）与 `infra/acp` 的分类
+  2026-10-20 C2）：`platform/code` 的平台错误分类（`code.ClassRequest` 等，7 个）与 `adapters/outbound/acp` 的分类
   **逐条同值**，且协议侧每个分类在平台词汇里都有对应项；同时断言 `code.NewError` 真的把分类与 code
   带到**平台载体**（`*code.Coded` → `code.RuntimeErrorOf`）上——B4 起内圈不再产出协议错误，
   分类的双语对照只剩"同值"这一条必须守的事实。挡的是两份词汇悄悄分叉——错误照常构造、`acp.As` 照常命中，只是前端按 `class`
@@ -131,7 +131,7 @@
 - 再加 **1 条「已收口包协议无关」守卫**（`layer_isolation_test.go` 的
   `TestProtocolFreePackagesStayClean`，2026-10-20 C2）：`protocolFreePackages` 里登记的内圈包
   （**`internal/domain` 已全量收口**：18 个包逐个登记 + `platform/definition` / `platform/automation`
-  两个值包）**生产 import 不得出现 `internal/infra/acp`**。第二段判据是**全量覆盖**：
+  两个值包）**生产 import 不得出现 `internal/adapters/outbound/acp`**。第二段判据是**全量覆盖**：
   `internal/domain` 下新出现的包不登记即红（否则"新包又 import 协议库"这条回退路径没有判据）。
   **B4 之后 `platform/code` 也进了表**：协议错误 → 平台视图的折叠点搬到**适配器出口**
   （`runtime.FoldError`，由 `runtime.Connect` 与 `adapters/outbound/runtimeconn` 调用），错误码包只留
@@ -159,7 +159,7 @@
   ① **桩被删/改名**（证明没了，而所有测试照样绿）→ fail-closed 定位文件 + 断言四个端口的
   实现断言（`session.ConnPool` / `Conn` / `AgentConn` / `AgentSession`）与两条验收用例仍在；
   ② **桩悄悄 import 协议库**（"非 ACP"退化成"另一份协议实现"）→ import 表里出现
-  `internal/infra/acp` 即红。反证（实跑）：加一个 acp 空白 import → 红；把桩文件移走 → 红。
+  `internal/adapters/outbound/acp` 即红。反证（实跑）：加一个 acp 空白 import → 红；把桩文件移走 → 红。
 
 **共 179 条**——加守卫时记得同步这句话。
 

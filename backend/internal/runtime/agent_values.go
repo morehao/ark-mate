@@ -1,6 +1,6 @@
 package runtime
 
-import "github.com/morehao/ark-mate/internal/infra/acp"
+import "github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 
 // ——— 执行面的**平台值类型**（C2 收尾：连接与生命周期）———
 //

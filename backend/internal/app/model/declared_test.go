@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/drivers/registry"
-	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/platform/resource"

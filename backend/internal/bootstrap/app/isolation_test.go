@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/dsh"
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/config"

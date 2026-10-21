@@ -33,7 +33,7 @@ const LegacyDeepseekharnessID = "deepseekharness"
 // DefaultRuntimeID 归一的历史落点（= 内置底座的 id）。
 //
 // 与 `DefaultBuildRuntime` 同值但**语义不同**：前者是"未注入 -ldflags 时的默认底座"，后者是
-// "老数据里的别名归一到哪个 id"。两者都被守卫与 adapter 的 `ID` 钉住（见 `internal/infra/dsh`
+// "老数据里的别名归一到哪个 id"。两者都被守卫与 adapter 的 `ID` 钉住（见 `internal/adapters/outbound/dsh`
 // 的 `TestDefaultBuildRuntimeMatchesAdapterID`）。
 const DefaultRuntimeID = "dsh"
 

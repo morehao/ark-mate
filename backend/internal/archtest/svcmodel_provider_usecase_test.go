@@ -255,10 +255,10 @@ func TestProviderProbeUseCaseLivesInModelSvc(t *testing.T) {
 				"漏了会让这一条链悄悄退回某个中间层。", c.file, c.want, c.why)
 		}
 	}
-	// 顺带把**日志转发**那一条钉住（同批清零的另一个文件）：`logAt` 是 `internal/infra/logging.At` 的一行转发，
+	// 顺带把**日志转发**那一条钉住（同批清零的另一个文件）：`logAt` 是 `internal/platform/logging.At` 的一行转发，
 	// manager 的 `logging.go` 已随本刀删除。
 	if strings.Contains(mgrAll, "func logAt(") {
-		t.Error("`internal/app/run` 里又出现 `func logAt(`：日志出口的唯一实现是 `internal/infra/logging.At`" +
+		t.Error("`internal/app/run` 里又出现 `func logAt(`：日志出口的唯一实现是 `internal/platform/logging.At`" +
 			"（P4a 正文第四十六刀删掉了 manager 的一行转发）。多出来的这一层会让「日志走哪个出口」" +
 			"重新有两处答案，而 `TestOnlyLoggingPackageImportsSlog` 只看 slog 那一头，看不见它。")
 	}

@@ -486,7 +486,7 @@
 > **决策变更 v20（凭据去 vault 化：密钥进库 + 明文镜像 + 四层回落，2026-10-14）**：
 > 本条**推翻 v13 的硬不变量**「明文密钥结构上进不了库」，所以先写清它换来什么、代价是什么。
 > ① **为什么可以推翻**：vault 的真实收益从来不是"防本机读取"——密钥与密文同目录同属主，而 dsh 那侧的
->    原生凭据文档（`<$DSH_HOME>/.credentials.yaml`，隔离根内）本来就是**明文**（`internal/infra/dsh/credentials.go`
+>    原生凭据文档（`<$DSH_HOME>/.credentials.yaml`，隔离根内）本来就是**明文**（`internal/adapters/outbound/dsh/credentials.go`
 >    就是写它的那一处）。vault 真正防住的是"密钥进 DB / DB 备份 / 诊断包 / 事件 / transcript"这条链。
 >    既然只要保住那一条收益就够，那么加密带来的复杂度（主密钥的保管与丢失、`vault_unavailable` 与
 >    "密文解不开"两类失败态、写面"vault 与 SQLite 无法同事务"的补偿逻辑及其 H4 故障注入面）
@@ -594,7 +594,7 @@
 >    请求体 `{"model": …}`；各家自定义模型表也把"上游真实模型名"记为 `model`）。此后 `_id` 一律指
 >    "指向某表 `id`"。**判据就是"别的什么都不变"**：`git diff testdata/` 为空。
 > ② **路由键隔离 + 容量声明（v25）**：交给 dsh 的每个路由键带平台保留前缀 `mate-`
->    （`internal/infra/dsh/route_key.go` 是唯一派生点；`config.go` 两处 + `model_value.go` 一处必须同源，
+>    （`internal/adapters/outbound/dsh/route_key.go` 是唯一派生点；`config.go` 两处 + `model_value.go` 一处必须同源，
 >    只改一处就是"所有选了模型的会话立刻起不来"），`displayName` 交付**供应商展示名**（空则回落路由键）。
 >    为什么必须隔离：`providers` 的 dict 键**就是交付面**——命中 pi-ai 已装 provider 时，那一家的端点/
 >    协议/展示名/模型目录会变成这条路由的**逐字段默认值**，"平台配了 A、实际按 A 的目录解析出 B"静默发生。
@@ -675,7 +675,7 @@
 它有一张"哪种模式允许写哪儿"的裁决表。我们**不建**：ACP 面读不到 `enforcement`（见
 `docs/unimplemented.md` D10），那张表在平台侧只能是**猜**——而"猜出来的裁决"比"没有裁决"更糟，
 因为它会让界面有底气说一句平台其实无法保证的话。所以沙箱的**真值**只在底座的签名表里
-（`internal/infra/dsh/tool_failure.go` 的失败归类），平台只做**事后归类**，不做**事前承诺**。
+（`internal/adapters/outbound/dsh/tool_failure.go` 的失败归类），平台只做**事后归类**，不做**事前承诺**。
 
 ### ③ 不照抄 13 态轮次模型
 

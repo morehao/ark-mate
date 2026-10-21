@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 )
 
 // TestCapabilityFactsOfACPKeepsEveryField 连接期能力事实折成平台值时**一个字段都不能丢**，

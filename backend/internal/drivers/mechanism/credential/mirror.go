@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/infra/credentials"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/credentials"
 	"github.com/morehao/golib/glog"
 )
 

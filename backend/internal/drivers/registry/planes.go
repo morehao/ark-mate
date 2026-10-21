@@ -15,7 +15,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	credmech "github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/drivers/mechanism/definition"
-	"github.com/morehao/ark-mate/internal/infra/logging"
+	"github.com/morehao/ark-mate/internal/platform/logging"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"

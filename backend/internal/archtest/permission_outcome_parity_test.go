@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 )
 
 // TestEffectivePermissionOutcomeParity 「用户点了什么」→「agent 收到什么」这条规则只有一个语义，

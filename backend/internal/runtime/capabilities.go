@@ -1,6 +1,6 @@
 package runtime
 
-import "github.com/morehao/ark-mate/internal/infra/acp"
+import "github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 
 // ——— 连接期能力事实的平台值（C2：内核契约去协议化）———
 //

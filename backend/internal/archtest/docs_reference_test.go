@@ -51,7 +51,7 @@ var historicalDocs = []struct{ name, reason string }{
 	{"model-selection-design-20260909", "旧的模型选择设计（模型面已由决策 v24–v27 三次收口取代）"},
 	{"zacp-alignment-refactor-design-20260908", "旧的对齐重构设计（持久化 / 管理面已落地）"},
 	{"architect-design", "旧的架构基线文档（当前架构事实见 docs/architecture.md）"},
-	{"deepseekharness-acp-adaptation", "旧文件名的底座适配核实记录（v0.1.x 快照）。同名内容已重写为 docs/dsh-acp-adaptation.md——注意 README 与 internal/infra/dsh 此前指向的就是那个新名字，本次让磁盘追上引用"},
+	{"deepseekharness-acp-adaptation", "旧文件名的底座适配核实记录（v0.1.x 快照）。同名内容已重写为 docs/dsh-acp-adaptation.md——注意 README 与 internal/adapters/outbound/dsh 此前指向的就是那个新名字，本次让磁盘追上引用"},
 }
 
 // historicalDocsAllow 按 basename 查历史白名单。

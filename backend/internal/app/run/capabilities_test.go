@@ -20,7 +20,7 @@ import (
 	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/contract/dtocapability"
-	"github.com/morehao/ark-mate/internal/infra/mcp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	appcapability "github.com/morehao/ark-mate/internal/app/capability"
 	"github.com/morehao/golib/gerror"

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/platform/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 )
 
 // Connect 依投影 Spec 拉起 ACP server 子进程（stdio）并完成 initialize 握手。

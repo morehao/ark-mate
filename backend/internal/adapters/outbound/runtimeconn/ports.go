@@ -5,7 +5,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 )
 
 // ——— P4a 正文第五十四刀：执行面对外要的四个口子（装配期登记） ———

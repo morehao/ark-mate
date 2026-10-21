@@ -10,7 +10,7 @@ import (
 	defn "github.com/morehao/ark-mate/internal/platform/definition"
 	provrow "github.com/morehao/ark-mate/internal/domain/provider/row"
 
-	"github.com/morehao/ark-mate/internal/infra/logging"
+	"github.com/morehao/ark-mate/internal/platform/logging"
 	"github.com/morehao/golib/glog"
 )
 

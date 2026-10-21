@@ -24,7 +24,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/morehao/ark-mate/internal/infra/mcp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
 	"github.com/morehao/ark-mate/internal/version"
 	"github.com/morehao/golib/glog"
 )

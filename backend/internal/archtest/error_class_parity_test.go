@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/platform/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 )
 
 // TestErrorClassVocabularyMatchesACP 平台分类词与协议分类词必须逐条同值。

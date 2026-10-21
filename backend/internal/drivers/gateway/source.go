@@ -36,7 +36,7 @@ import (
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/platform/capability"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
-	"github.com/morehao/ark-mate/internal/infra/mcp"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/mcp"
 	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"

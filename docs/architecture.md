@@ -21,7 +21,7 @@ ark-mate 自上而下分两层，两层职责并列成立：
 - **能力不重造**。skill 执行、MCP 工具调用、推理循环一律复用底座原生实现；平台只做这些能力对应的**数据与配置管理**。
 - **无跨 agent 协作**。一次会话/一次运行只绑定一个 runtime，不存在委托、子 agent、并行协作。
 
-**接边有界**：内置适配只有 `dsh` 一个。但 adapter 层是完整的——接一个新底座 = 新建 `backend/internal/infra/<id>/`（实现 `runtime.Adapter`）+ 装配根加一行 + 挂三张**端口表**实现（`resource.Syncer` / `runtime.NativePermissionAdapter` / `runtime.ModelValueAdapter`），**不需要改框架内核**。内核里不得出现任何内置适配 id 的特判（守卫钉住）。
+**接边有界**：内置适配只有 `dsh` 一个。但 adapter 层是完整的——接一个新底座 = 新建 `backend/internal/adapters/outbound/<id>/`（实现 `runtime.Adapter`）+ 装配根加一行 + 挂三张**端口表**实现（`resource.Syncer` / `runtime.NativePermissionAdapter` / `runtime.ModelValueAdapter`），**不需要改框架内核**。内核里不得出现任何内置适配 id 的特判（守卫钉住）。
 
 ## 2. 交付形态三态
 
@@ -73,7 +73,7 @@ Electron 主进程（桌面态）
 
 ### 3.3 进程生命周期
 
-- **进程注册表**（`internal/infra/procreg`）：daemon 把拉起的子进程（pid / pgid / 命令 / runtime / 启动时刻 / daemon 实例 id）登记为 JSON；正常停止或断连时摘除。
+- **进程注册表**（`internal/adapters/outbound/procreg`）：daemon 把拉起的子进程（pid / pgid / 命令 / runtime / 启动时刻 / daemon 实例 id）登记为 JSON；正常停止或断连时摘除。
 - **孤儿回收**：启动时只回收**非本实例**登记的条目，SIGTERM → 宽限期 → SIGKILL **整个进程组**；以「pgid 与登记值一致」防 PID 复用误杀（不一致只清账并留日志）。取向是**宁可漏杀，不可误杀**。
 - **按需拉起 + 空闲回收**：编排器自己按下需拉起暖进程，`reapLoop` 扫「无在途 run、无会话引用、闲置超时」的暖进程并回收；之后会话与诊断面自动按需重拨。
 
@@ -103,11 +103,11 @@ Electron 主进程（桌面态）
 | 层 | 谁 | 一句话 |
 | --- | --- | --- |
 | **L0** | `adapters/outbound/sqlite/model` | 表行形状。零依赖，被所有持久侧与部分领域引用（C3 4.3 起归到出站适配器下） |
-| **L1** | `platform/{object/*,redact,identity,resource,credential,eventbus,code,automation,definition,capability}` `version` `runtime` `infra/{acp,mcp,logging}` | 值对象与协议库，**本带允许互链**（ACP 线协议、错误码折算、值类型复用） |
+| **L1** | `platform/{object/*,redact,identity,resource,credential,eventbus,code,automation,definition,capability,logging}` `version` `runtime` `adapters/outbound/{acp,mcp}` | 值对象与协议库，**本带允许互链**（ACP 线协议、错误码折算、值类型复用）。`acp`/`mcp` 虽在出站适配器目录下，性质仍是协议库；`logging` 是平台日志门面 |
 | **L2** | `domain/*` | 业务规则与状态。**出边为零**：不 import dto、store、mechanism、infra |
 | **L3** | `contract/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份）。C3 4.1 起目录由 `dto/` 搬到 `contract/`，包名保留 `dto<领域>` |
 | **L4** | `app/<领域>`（含执行面 `app/run`） | 用例环（原 `service/svc<领域>`，C3 4.2 起包名去掉 `svc` 前缀）：接口 + 实现 + 构造函数；校验、错误码、响应装配。执行面 `sessionruntime` 同批搬成 `app/run`（编排归用例环，连接归出站适配器） |
-| **L5** | `adapters/outbound/sqlite/{store,dao,db}` `infra/{credentials,procreg,dsh}` | 持久与基础设施 |
+| **L5** | `adapters/outbound/sqlite/{store,dao,db}` `adapters/outbound/{dsh,credentials,procreg}` `drivers/{mechanism,registry,transfer}` | 持久与出站适配器（C3 4.3 起持久层与 infra 逐步归到 `adapters/outbound/`） |
 | **L6** | `drivers/{gateway,mechanism,registry,transfer}` `adapters/outbound/runtimeconn` `config` | 驱动侧：机制、注册表、连接面（C3 4.2 起搬到 `adapters/outbound/`）、存量定义导入导出编排 |
 | **L8** | `delivery/controller/ctr<领域>` `delivery/middleware` | 入站适配 |
 | **L9** | `delivery/router` `bootstrap/{assembly,app,cliops,cli,maintenance}` | 装配与交付 |
@@ -192,7 +192,7 @@ internal/adapters/outbound/sqlite/model（实体定义）被上面三者依赖�
 - `models`：`id` 是 `mdl_…`（平台行 id）；`model` 是**发给上游的模型名**（外部世界的字符串）；`provider_id` 指向供应商；容量列（`max_input_tokens` / `max_output_tokens`）**可空、无 DEFAULT**——空 = 不下发该字段，「0」当不了「未声明」的哨兵。
 - **会话引用平台 id**：`sessions.model_id` 指向 `models.id`。底座的**不透明取值**不落库、不过 wire，由 adapter 每次现算（唯一解析点）。对不上平台清单的提交**显式拒**（`40401`），不静默回落默认模型。
 - **凭据只有一个事实源：库**。`providers.key` 列 + `mcp_secrets(ref, value, revision, updated_at)` 表；`<MATE_HOME>/credentials.json`（严格 `ref → value` 映射、0600、原子写）是**可重建的双写镜像**——删掉它不丢任何东西。
-- **读值走四层回落**，唯一实现在 `internal/infra/credentials`：**继承环境（只读，最高）> 托管文档 > `<cwd>/.env` > `<MATE_HOME>/.env`**。继承环境最高是因为「这次运行的显式意图」不该被静默遮蔽。
+- **读值走四层回落**，唯一实现在 `internal/adapters/outbound/credentials`：**继承环境（只读，最高）> 托管文档 > `<cwd>/.env` > `<MATE_HOME>/.env`**。继承环境最高是因为「这次运行的显式意图」不该被静默遮蔽。
 - MCP 的引用词法是 `store:<ns>/<name>`（库里的一行）或 `env:<ENV_NAME>`（进程环境变量）；**明文密钥一律拒收**，引用只在注入前一刻解析成明文。
 - **代价如实写在决策登记里**：库与其备份现在含明文密钥，因此 `backups/` 0700 与备份文件 0600 是硬要求，共享机器不再安全。
 

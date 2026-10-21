@@ -15,7 +15,7 @@ import (
 // import 协议库，于是"内圈认识外圈协议"这条裂缝从错误出口重新长回来。
 //
 // B4 之后协议库在**适配器出口**就把协议错误折成平台视图（`RuntimeError`，见 runtime_error.go），
-// 本包因此对 `internal/infra/acp` 零依赖：
+// 本包因此对 `internal/adapters/outbound/acp` 零依赖：
 //
 //	构造：内圈写 `code.NewError(code.ClassRequest, "session_not_found", …)` → `*Coded`；
 //	投影：`FromError` 把平台视图/平台带码错误按分类映射成对外业务码（下面是唯一投影点）。
