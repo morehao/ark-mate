@@ -58,7 +58,7 @@ func TestSessionProjectionCarriesSpecIdentity(t *testing.T) {
 		{"dsh", true},
 		{"rt-direct", false},
 	} {
-		rt := NewProjection(Spec{ID: tc.id, ManagesOwnContext: tc.ownCtx}, sess)
+		rt := NewProjection(Spec{ID: tc.id, Capability: StaticCapability{OwnContext: tc.ownCtx}}, sess)
 		if rt == nil {
 			t.Fatalf("%s 应拿到会话投影（投影构造不按 id 分派）", tc.id)
 		}

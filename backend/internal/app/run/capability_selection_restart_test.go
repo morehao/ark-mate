@@ -26,7 +26,8 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	setBuildRuntime(t, "stub") // 夹具只注册 stub：底座必须与它一致
 	spec := stubACPSpec(t)
-	spec.McpTransports = []string{"stdio"} // 桩 runtime 只承载 stdio（保守形态）
+	// 桩 runtime 只承载 stdio（保守形态）：能力面是**策略接口**（C3 4.7），换实现而不是改字段。
+	spec.Capability = runtime.StaticCapability{Transports: []string{"stdio"}, Binding: spec.CapabilityBinding()}
 	reg := runtime.NewRegistry(spec)
 	cwd := t.TempDir()
 

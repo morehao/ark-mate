@@ -24,10 +24,10 @@ func libraryRig(t *testing.T) *Service {
 	t.Helper()
 	dir := t.TempDir()
 	reg := runtime.NewRegistry(
-		runtime.Spec{ID: "rtx", Name: "rtx", McpTransports: []string{"stdio"},
+		runtime.Spec{ID: "rtx", Name: "rtx", Capability: runtime.StaticCapability{Transports: []string{"stdio"}},
 			Projections: []runtime.Projection{rtxSkillProjectionForTest()}},
 		// dsh 没有投影解析（未配 MATE_PROJECTION_DIRS）→ not_configured 分支。
-		runtime.Spec{ID: "dsh", Name: "dsh", McpTransports: []string{"stdio"}},
+		runtime.Spec{ID: "dsh", Name: "dsh", Capability: runtime.StaticCapability{Transports: []string{"stdio"}}},
 	)
 	svc := newServiceForTest(reg, eventbus.New())
 	planesOf(svc).LoadCapabilityDefinitions(dir)
@@ -305,7 +305,7 @@ func TestLibraryScale(t *testing.T) {
 // BenchmarkLibraryList 基准（`go test -bench=BenchmarkLibraryList`；不做缓存是刻意的，见 library.go 顶部注释）。
 func BenchmarkLibraryList(b *testing.B) {
 	dir := b.TempDir()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "rtx", McpTransports: []string{"stdio"},
+	reg := runtime.NewRegistry(runtime.Spec{ID: "rtx", Capability: runtime.StaticCapability{Transports: []string{"stdio"}},
 		Projections: []runtime.Projection{rtxSkillProjectionForTest()}})
 	svc := newServiceForTest(reg, eventbus.New())
 	planesOf(svc).LoadCapabilityDefinitions(dir)

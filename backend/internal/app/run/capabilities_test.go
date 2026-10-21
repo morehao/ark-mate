@@ -108,8 +108,8 @@ func TestRegisterToolAndSort(t *testing.T) {
 //   - 白名单优先级两态都生效：nil = 全量；非 nil = 命中制；空 = 本会话禁用注入。未知 runtime → 不下发。
 func TestMcpServersFor(t *testing.T) {
 	reg := runtime.NewRegistry(
-		runtime.Spec{ID: "stub", McpTransports: []string{"stdio"}},
-		runtime.Spec{ID: "rtx", McpTransports: []string{"stdio", "sse", "http"}},
+		runtime.Spec{ID: "stub", Capability: runtime.StaticCapability{Transports: []string{"stdio"}}},
+		runtime.Spec{ID: "rtx", Capability: runtime.StaticCapability{Transports: []string{"stdio", "sse", "http"}}},
 		runtime.Spec{ID: "plain"}, // 未声明 → 保守仅 stdio
 	)
 	svc := newServiceForTest(reg, eventbus.New())

@@ -187,7 +187,7 @@ func DeclaresModelInput(specs []goruntime.Spec, runtimeID string) bool {
 	if !ok {
 		return false
 	}
-	return spec.DeclaresModelInput
+	return spec.DeclaresModelInput()
 }
 
 // MissingDeclaredModels 声明了却没出现在运行时广告里的候选（机器面，人话化）。

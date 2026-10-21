@@ -362,7 +362,7 @@ func TestMcpServerWriteReadDelete(t *testing.T) {
 // TestMcpServerDisabledNotInjected 禁用 = 不注入（overlay）：定义、密钥引用、探测结果都保留。
 func TestMcpServerDisabledNotInjected(t *testing.T) {
 	ctx := context.Background()
-	specs := []runtime.Spec{{ID: "rtx", Name: "rtx", McpTransports: []string{"stdio", "http"}}}
+	specs := []runtime.Spec{{ID: "rtx", Name: "rtx", Capability: runtime.StaticCapability{Transports: []string{"stdio", "http"}}}}
 	for _, wf := range writeFaces(t, specs...) {
 		t.Run(wf.name, func(t *testing.T) {
 			if _, err := planesOf(wf.svc).Mcp.WriteServer(ctx, "", writeMcpReq(t,

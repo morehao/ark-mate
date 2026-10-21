@@ -266,7 +266,7 @@ for line in sys.stdin:
 	// 声明决定（ADR-4），没有声明的 runtime 平台一律不注入，`providerEnvFor` 会回 nil。
 	return runtime.Spec{ID: "stub", Name: "Stub", Launch: runtime.LaunchSpec{Command: "python3", Args: []string{script}},
 		Credential:      resource.CredentialSpec{RefPattern: "MATE_%s_API_KEY", FallbackEnv: true},
-		CapabilityScope: runtime.CapabilityScopeProcess}
+		Capability: runtime.StaticCapability{Binding: runtime.CapabilityBinding{Scope: runtime.CapabilityScopeProcess}}}
 }
 
 // newTestRig 最裸的架子：空注册表 + 事件总线，无库、无 agent。

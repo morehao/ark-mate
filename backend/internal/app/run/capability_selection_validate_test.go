@@ -28,7 +28,8 @@ func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 	t.Helper()
 	setBuildRuntime(t, "stub") // 夹具只注册 stub：底座必须与它一致
 	spec := stubACPSpec(t)
-	spec.McpTransports = []string{"stdio"}
+	// 桩 runtime 只承载 stdio（保守形态）：能力面是策略接口（C3 4.7），换实现而不是改字段。
+	spec.Capability = runtime.StaticCapability{Transports: []string{"stdio"}, Binding: spec.CapabilityBinding()}
 	reg := runtime.NewRegistry(spec)
 	svc := newServiceForTest(reg, eventbus.New())
 	// 本组用例钉的是**按传输承载能力**拒选（`mcp_gateway=off` 的回退口径）；网关在环时远程

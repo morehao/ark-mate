@@ -58,14 +58,19 @@ func Spec() runtime.Spec {
 			{Key: "DSH_HOME", Kind: runtime.IsolationPath, Path: []string{"runtime", "dsh"}, LauncherFallback: true},
 		},
 		Description: "dsh（deepseek-harness）ACP 执行后端",
-		// dsh 侧**总是**写 `models[].input`（ADR-12）：不写时 `declaredInput()` 会"问下一层"
-		// （catalog 认识的 id 保留 catalog、平台新造 id 落到 defaultInput=["text"]），
-		// 于是"平台声明的模型能不能收图"变成一件取决于底座目录版本、用户改不动也看不见的事。
-		DeclaresModelInput: true,
-		// 0.2.1 起 dsh 的模型目录按凭据过滤：apiKeyEnv 缺失 → 该 route 不列模型。
-		ModelCatalogNeedsCredential: true,
-		McpTransports:               []string{"stdio", "streamable_http"}, // §6.2：dsh 拒 sse
-		ManagesOwnContext:           true,                                 // §6.2：后端自管上下文/工具
+		// 模型清单写面（C3 4.7 策略接口）：dsh 侧**总是**写 `models[].input`（ADR-12）——不写时
+		// `declaredInput()` 会"问下一层"（catalog 认识的 id 保留 catalog、平台新造 id 落到
+		// defaultInput=["text"]），于是"平台声明的模型能不能收图"变成一件取决于底座目录版本、
+		// 用户改不动也看不见的事。0.2.1 起 dsh 的模型目录还按凭据过滤：apiKeyEnv 缺失 → 该 route
+		// 不列模型（于是「缺密钥」的表现从"请求失败"变成"模型不在列表里"）。
+		ModelConfigWriter: runtime.StaticModelConfig{DeclaresInput: true, NeedsCredentialInCat: true},
+		// 能力面（C3 4.7 策略接口）：dsh **拒 sse**、上下文与工具由后端自管（§6.2）。
+		// 绑定粒度：P-2 探针尚无结论 → 保守 process（纪律①，见 `EffectiveCapabilityScope`）。
+		Capability: runtime.StaticCapability{
+			Transports: []string{"stdio", "streamable_http"},
+			OwnContext: true,
+			Binding:    runtime.CapabilityBinding{Scope: runtime.CapabilityScopeProcess},
+		},
 		// 模型走 ACP 会话配置项（session/set_config_option，会话级、可共享连接）：
 		// 目录与取值全部由 dsh 自报（option id "model"、值 JSON.stringify([provider,model])），
 		// 平台只按 category 消费，不在此声明任何 id/格式。
@@ -118,10 +123,6 @@ func Spec() runtime.Spec {
 				"残余未取证：平台与 dsh 自身写路径「同一瞬间都写」未被压测（由 dsh 的 watch 对账与平台侧" +
 				"读-改-写兜住）；Windows 无 mode 可查、权限门未验；**版本敏感**——载荷升级时先置回 `false` 再重跑探针。",
 		},
-		// 未实测：P-2 探针尚无结论 → 保守 process。
-		CapabilityScope: runtime.CapabilityScopeProcess,
-		Tested:          false,
-		TestedOnVersion: "",
 	}
 }
 

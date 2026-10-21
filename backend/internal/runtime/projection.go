@@ -47,7 +47,7 @@ const (
 // ValidProjectionScopes 合法 scope 集合。
 var ValidProjectionScopes = map[string]bool{ScopeGlobal: true, ScopeWorkspace: true}
 
-// ——— 能力绑定范围（`Spec.CapabilityScope`）———
+// ——— 能力绑定范围（`Spec.Capability` 的 `BindScope()`）———
 //
 // 问题：runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度被确定？决定一个「代际」要独占
 // 一个进程，还是能与别的代际共享。
@@ -77,10 +77,11 @@ var ValidCapabilityScopes = map[string]bool{
 // 这是纪律③的落点：底座升级后忘了重测，声明值还可能留在 session/directory，但 `Tested`
 // 会被人工置回 false（或版本号对不上）——此时必须按最粗粒度保守处理，不能拿旧结论省内存。
 func (s Spec) EffectiveCapabilityScope() string {
-	if !s.Tested || !ValidCapabilityScopes[s.CapabilityScope] {
+	b := s.CapabilityBinding()
+	if !b.Tested || !ValidCapabilityScopes[b.Scope] {
 		return CapabilityScopeProcess
 	}
-	return s.CapabilityScope
+	return b.Scope
 }
 
 // LayoutIDToken 是落点模板里的 skill id 占位符（如 `<id>/SKILL.md`）。

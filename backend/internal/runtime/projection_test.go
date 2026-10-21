@@ -19,24 +19,25 @@ func TestAdapterProjectionDeclarations(t *testing.T) {
 		if s.ID != c.id {
 			t.Fatalf("%s spec id 不符: %q", c.id, s.ID)
 		}
-		if !s.ManagesOwnContext {
+		if !s.ManagesOwnContext() {
 			t.Fatalf("%s 应声明自管上下文（§6.2）", c.id)
 		}
 		if s.Description == "" {
 			t.Fatalf("%s 缺投影描述", c.id)
 		}
-		got := make(map[string]bool, len(s.McpTransports))
-		for _, tr := range s.McpTransports {
+		transports := s.McpTransports()
+		got := make(map[string]bool, len(transports))
+		for _, tr := range transports {
 			got[tr] = true
 		}
 		for _, tr := range c.has {
 			if !got[tr] {
-				t.Fatalf("%s 应支持传输 %q，got %v", c.id, tr, s.McpTransports)
+				t.Fatalf("%s 应支持传输 %q，got %v", c.id, tr, transports)
 			}
 		}
 		for _, tr := range c.notHas {
 			if got[tr] {
-				t.Fatalf("%s 不应支持传输 %q，got %v", c.id, tr, s.McpTransports)
+				t.Fatalf("%s 不应支持传输 %q，got %v", c.id, tr, transports)
 			}
 		}
 		if s.ModeMapping != nil {

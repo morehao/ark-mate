@@ -60,7 +60,8 @@ func newGenRigOn(t *testing.T, runtimeID string) *genRig {
 	spec := stubACPSpec(t)
 	spec.ID = runtimeID
 	spec.Name = runtimeID
-	spec.McpTransports = []string{"stdio"} // 桩只承载 stdio（保守形态）
+	// 桩只承载 stdio（保守形态）：能力面是策略接口（C3 4.7），换实现而不是改字段。
+	spec.Capability = runtime.StaticCapability{Transports: []string{"stdio"}, Binding: spec.CapabilityBinding()}
 	reg := runtime.NewRegistry(spec)
 	// 与产品装配同形：桩 Spec 保留自己的 Launch（桩命令），只把执行半场登记进来。
 	dsh.New().RegisterPorts(reg)

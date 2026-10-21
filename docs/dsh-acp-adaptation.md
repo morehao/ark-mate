@@ -40,7 +40,7 @@
 钉住「没有新的读法」。
 
 **不支持的面**：`session/load`、fork/delete、附加目录、终端、客户端 FS、SSE 与传输级 MCP。
-`McpTransports` 只声明 `stdio` + `streamable_http`（dsh 拒 `sse`）。
+`Spec.Capability`（能力面策略接口，C3 4.7 起）只声明 `stdio` + `streamable_http`（dsh 拒 `sse`）。
 
 **0.2.1 的结算语义**：`session/prompt` 要等**根 Agent + 受管后代 + 已提交输出 drain** 完才返回；
 `session/cancel` 也等当前根活动与已排队输出完成（之后到达的子消息不延迟取消响应）。
@@ -116,7 +116,7 @@ dsh 自报（option id `model`，值是 `JSON.stringify([provider, model])`）�
 
 **0.2.1 的凭据门禁**：`llm-pi-ai` 的 `listModels` 在路由的 `apiKeyEnv` 解析不到时返回空目录——
 于是「缺密钥」的表现是**模型不在广告列表里**，而 `set_config_option` 会拒绝一个不在列表里的值。
-平台在 `applyModel` 前用 `Spec.ModelCatalogNeedsCredential` + 供应商密钥状态给出可执行的
+平台在 `applyModel` 前用 `Spec.ModelConfigWriter.CatalogNeedsCredential()` + 供应商密钥状态给出可执行的
 `model_credential_missing`，不把底座的 `invalidParams` 原样甩给用户（见
 `backend/internal/domain/session/lifecycle.go`）。
 

@@ -28,11 +28,13 @@ func fixtureSpec() Spec {
 		Isolation: []IsolationVar{
 			{Key: "DSH_HOME", Kind: IsolationPath, Path: []string{"runtime", "dsh"}, LauncherFallback: true},
 		},
-		Description:                 "dsh（deepseek-harness）ACP 执行后端",
-		DeclaresModelInput:          true,
-		ModelCatalogNeedsCredential: true,
-		McpTransports:               []string{"stdio", "streamable_http"},
-		ManagesOwnContext:           true,
+		Description: "dsh（deepseek-harness）ACP 执行后端",
+		ModelConfigWriter: StaticModelConfig{DeclaresInput: true, NeedsCredentialInCat: true},
+		Capability: StaticCapability{
+			Transports: []string{"stdio", "streamable_http"},
+			OwnContext: true,
+			Binding:    CapabilityBinding{Scope: CapabilityScopeProcess},
+		},
 		ModelConfig: ModelConfigLocation{
 			Root:          "${DSH_HOME}",
 			Filename:      "mate-models.patch.yml",
@@ -52,8 +54,7 @@ func fixtureSpec() Spec {
 			Format: "SKILL.md+frontmatter",
 			Tested: true,
 		}},
-		CapabilityScope: CapabilityScopeProcess,
-		Notes:           "dsh --profile acp：启动形态说明（夹具）",
+		Notes: "dsh --profile acp：启动形态说明（夹具）",
 	}
 }
 

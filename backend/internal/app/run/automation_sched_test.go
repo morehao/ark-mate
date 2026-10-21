@@ -62,7 +62,7 @@ for line in sys.stdin:
 	}
 	return runtime.Spec{ID: "silent", Name: "Silent",
 		Launch:          runtime.LaunchSpec{Command: "python3", Args: []string{script}},
-		CapabilityScope: runtime.CapabilityScopeProcess}
+		Capability: runtime.StaticCapability{Binding: runtime.CapabilityBinding{Scope: runtime.CapabilityScopeProcess}}}
 }
 
 // schedRig automation 调度夹具：真 runtime 桩 + 注入 agent a1 + 独立 automation 目录。

@@ -71,8 +71,8 @@ func TestDshTestedVersionMatchesPayloadPin(t *testing.T) {
 
 	// 0.2.1 起 dsh 的模型目录按凭据过滤（apiKeyEnv 缺失 → listModels 为空）。平台据此在
 	// applyModel 前给出可执行的缺密钥错误；这条声明一旦丢掉，用户会退回「invalidParams」。
-	if !spec.ModelCatalogNeedsCredential {
-		t.Fatal("dsh 必须声明 ModelCatalogNeedsCredential=true（0.2.1 起模型目录按凭据过滤）")
+	if !spec.CatalogNeedsCredential() { // C3 4.7：开关住在 `ModelConfigWriter` 策略接口里
+		t.Fatal("dsh 必须声明 CatalogNeedsCredential=true（0.2.1 起模型目录按凭据过滤）")
 	}
 }
 

@@ -529,7 +529,7 @@ func (l *Lifecycle) applyModel(ctx context.Context, as *ActiveSession, spec runt
 	}
 	// 按凭据过滤目录的底座：缺密钥时它的模型根本不在广告列表里，直接下发只会得到一条
 	// 「invalidParams」——用户看不出是缺密钥。平台侧先判一次，给出可执行的出路。
-	if spec.ModelCatalogNeedsCredential && model.Provider != "" && l.providerKeyReady != nil {
+	if spec.CatalogNeedsCredential() && model.Provider != "" && l.providerKeyReady != nil {
 		if ok, reason := l.providerKeyReady(ctx, model.Provider); !ok {
 			return code.NewError(code.ClassRequest, "model_credential_missing", "[model_credential_missing] 所选模型挂靠的供应商 "+model.Provider+" 没有可用密钥（"+reason+
 				"）：该底座不会把它的模型列进会话配置；先到「设置 · 模型」补一条密钥（或把环境变量设好）", nil)

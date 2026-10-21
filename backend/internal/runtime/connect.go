@@ -91,8 +91,8 @@ func RemoteSpec(id, name, transport, endpoint string, headers map[string]string)
 			Headers:   headers,
 		},
 		Description:       "远程 ACP 端点（" + tr + "：" + endpoint + "）",
-		McpTransports:     []string{"stdio"}, // MCP 注入面由远端 agent 决定，平台侧保守声明
-		ManagesOwnContext: true,
+		// MCP 注入面由远端 agent 决定，平台侧保守声明：只认 stdio、上下文由对端自管。
+		Capability: StaticCapability{Transports: []string{"stdio"}, OwnContext: true},
 		Notes:             "远程 runtime：由 .ark-mate/config/runtimes.json 声明（A5）",
 	}
 }

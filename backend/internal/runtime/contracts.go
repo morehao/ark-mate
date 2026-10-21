@@ -91,11 +91,14 @@ type Spec struct {
 	Isolation []IsolationVar
 	// Description 投影描述（§6.1；面向路由/日志/未来 REST 只读面）。
 	Description string
-	// McpTransports 该 runtime 支持的 MCP 传输（token：stdio|sse|http|streamable_http；
-	// 空 = 仅 stdio——ACP 全 agent 必须支持）。P2 注入时据此过滤平台 MCP 子集（§5.2）。
-	McpTransports []string
-	// ManagesOwnContext 后端自管上下文/工具（对应 §4.2 ManagesOwnContext；§6.2 三投影均 true）。
-	ManagesOwnContext bool
+	// Capability 该 runtime 的**能力面行为**（MCP 传输 / 自管上下文 / 绑定粒度 + 实测记录）。
+	//
+	// 为什么是接口而不是几个字段（C3 4.7）：这三件事的答案属于**该底座怎么表现**，今天在册的两个
+	// 实现都是常量，但某个底座要现场探测才能回答时，换实现即可。未声明 = 最保守（见 policies.go）。
+	Capability CapabilityPolicy
+	// ModelConfigWriter 该 runtime 的**模型清单写面行为**（是否写 `input`、目录是否按凭据过滤）。
+	// 与 `ModelConfig ModelConfigLocation` 的分工：那个说"写到哪"，这个说"写的时候多写/多判什么"。
+	ModelConfigWriter ModelConfigPolicy
 	// ModeMapping 统一权限模式 → 该 runtime 原生 mode。实测结论：各底座的权限面形态**各异**
 	// （有的是 mode env + approval 预设、有的是逐动作 permission 表，ACP 面上没有 mode 参数），
 	// 没有可直接套用的原生词表 → **空 = 有据结论，不臆造**；统一模式语义落平台 permission 面。
@@ -126,29 +129,4 @@ type Spec struct {
 	// 与 ModelConfig 分开：清单与凭据是**两条通道**，生效时刻与失败半径都不同（ADR-4/ADR-14）。
 	// 零值 = 该 runtime 没声明凭据面。
 	Credential resource.CredentialSpec
-	// DeclaresModelInput 该 runtime 的清单交付面是否**声明**模型的输入模态（ADR-12）。
-	//
-	// true = 平台生成的配置里每个模型条目都带 `input`（dsh 的 `models[].input`）；
-	// false = 平台**不写**它，该底座自己知道模型能收什么（若某底座的对应字段是整块替换、多字段必填，
-	// 为声明 `input` 就得用猜测连带声明别的字段 ⇒ 那一侧宁可写 false）。
-	//
-	// 它存在的唯一理由是**如实可读**：用户面与 `mate doctor` 要能区分"已在该底座上声明"与
-	// "仅平台记录"——否则用户会以为在那一侧勾了图片也生效了（ADR-12 的结论段）。
-	// **它不是门禁**：能不能收图一律走连接期事实（`pkg/acp.Capabilities.Images`，ADR-14）。
-	DeclaresModelInput bool
-	// ModelCatalogNeedsCredential 该 runtime 的会话模型目录是否**按凭据过滤**。
-	//
-	// dsh 0.2.1 起 `llm-pi-ai` 的 `listModels` 在 `apiKeyEnv` 解析不到时返回空目录
-	// （`deepseek-harness:packages/llm/llm-pi-ai/src/adapter.ts:302`），于是「缺密钥」的表现
-	// 从「请求失败」变成「模型不在广告列表里」，而 `session/set_config_option` 会拒绝一个
-	// 不在列表里的值。true = 平台在 applyModel 前先给出可执行的缺密钥错误，而不是把底座的
-	// invalidParams 原样甩给用户；false = 该底座不按凭据过滤目录。
-	ModelCatalogNeedsCredential bool
-	// CapabilityScope 该 runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度被确定：
-	// "process"（默认，最粗）| "directory" | "session"。**未实测一律 process**（P-2 的三条纪律）。
-	CapabilityScope string
-	// Tested 该 CapabilityScope 是否经真实底座实测（false → 回落到最保守的 process 语义）。
-	Tested bool
-	// TestedOnVersion 实测时的底座版本；版本一变 Tested 失效（绑定范围可能随底座版本变）。
-	TestedOnVersion string
 }

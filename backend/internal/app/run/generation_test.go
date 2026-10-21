@@ -206,10 +206,11 @@ func TestGenerationPerFingerprint(t *testing.T) {
 // 就近断言：两个内置 adapter 都声明 process 且未实测（P-2 未出结论前不放宽）。
 func TestAdaptersDeclareProcessScope(t *testing.T) {
 	for _, sp := range dsh.Registry().List() {
-		if sp.CapabilityScope != runtime.CapabilityScopeProcess {
-			t.Fatalf("%s 应声明 process：%q", sp.ID, sp.CapabilityScope)
+		bind := sp.CapabilityBinding() // C3 4.7：绑定粒度是策略接口，读它而不是读裸字段
+		if bind.Scope != runtime.CapabilityScopeProcess {
+			t.Fatalf("%s 应声明 process：%q", sp.ID, bind.Scope)
 		}
-		if sp.Tested {
+		if bind.Tested {
 			t.Fatalf("%s 不应在 P-2 出结论前标记 Tested", sp.ID)
 		}
 	}

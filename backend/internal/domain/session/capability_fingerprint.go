@@ -139,7 +139,7 @@ func injectedMcpPart(m InjectedMcp) runtime.McpPart {
 func RuntimeFingerprintPart(sp runtime.Spec) runtime.RuntimePart {
 	return runtime.RuntimePart{
 		ID: sp.ID, Version: sp.Version,
-		Scope:       sp.CapabilityScope,
+		Scope:       sp.CapabilityBinding().Scope,
 		Projections: append([]runtime.Projection(nil), sp.Projections...),
 	}
 }

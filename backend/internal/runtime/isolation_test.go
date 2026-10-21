@@ -35,15 +35,17 @@ func altSpec() Spec {
 		Description: "测试用的第二个 adapter（不参与产品装配）",
 		// 传输面刻意与 dsh 不同（dsh 拒 sse/http，支持 streamable_http）：两端都有人代表，
 		// 「按声明过滤 MCP 子集」这条判据才不是只在一个方向上成立。
-		McpTransports:     []string{"stdio", "sse", "http"},
-		ManagesOwnContext: true,
-		Projections:       []Projection{altSkillProjection()},
+		Capability: StaticCapability{
+			Transports: []string{"stdio", "sse", "http"},
+			OwnContext: true,
+			Binding:    CapabilityBinding{Scope: CapabilityScopeProcess},
+		},
+		Projections: []Projection{altSkillProjection()},
 		ModelConfig: ModelConfigLocation{
 			Root:          "${" + "RT_ALT_HOME" + "}",
 			Filename:      "rt-alt-models.json",
 			CredentialDoc: ".rt-alt-credentials.json",
 		},
-		CapabilityScope: "process",
 	}
 }
 

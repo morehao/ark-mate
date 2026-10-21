@@ -92,8 +92,6 @@ func Spec(launch runtime.LaunchSpec) runtime.Spec {
 			{Key: CacheKey, Kind: runtime.IsolationPath, Path: []string{"cache", "rtx-plugins"}},
 		},
 		Description:       "合成底座（只存在于测试夹具里；用来证明 adapter 层不依赖任何具体底座）",
-		McpTransports:     []string{"stdio"},
-		ManagesOwnContext: true,
 		SetupSteps:        []string{"本底座是测试夹具：没有安装步骤"},
 		Notes:             "由 internal/testutil/runtimetest 声明；刻意不出现在 AllBuiltinSpecs() 里",
 		Projections: []runtime.Projection{{
@@ -122,9 +120,13 @@ func Spec(launch runtime.LaunchSpec) runtime.Spec {
 			FallbackEnv: true,
 			Tested:      false,
 		},
-		DeclaresModelInput: true,
-		CapabilityScope:    "process",
-		Tested:             false,
+		ModelConfigWriter: runtime.StaticModelConfig{DeclaresInput: true},
+		// 能力面（C3 4.7 策略接口）：只认 stdio、上下文自管、绑定粒度保守 process（未实测）。
+		Capability: runtime.StaticCapability{
+			Transports: []string{"stdio"},
+			OwnContext: true,
+			Binding:    runtime.CapabilityBinding{Scope: runtime.CapabilityScopeProcess},
+		},
 	}
 }
 

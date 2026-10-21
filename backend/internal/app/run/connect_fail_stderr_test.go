@@ -38,7 +38,7 @@ sys.exit(3)
 	return runtime.Spec{ID: "stub", Name: "Stub",
 		Launch: runtime.LaunchSpec{Command: "python3", Args: []string{script},
 			Env: []string{fmt.Sprintf("BOOT_LINES=%d", lines)}},
-		CapabilityScope: runtime.CapabilityScopeProcess}
+		Capability: runtime.StaticCapability{Binding: runtime.CapabilityBinding{Scope: runtime.CapabilityScopeProcess}}}
 }
 
 // nodeStyleBootFailSpec 复刻 dsh（Node）失败时的 stderr 形态：源码片段 + `Error: <真因>` +
@@ -71,7 +71,7 @@ sys.exit(1)
 	}
 	return runtime.Spec{ID: "stub", Name: "Stub",
 		Launch:          runtime.LaunchSpec{Command: "python3", Args: []string{script}},
-		CapabilityScope: runtime.CapabilityScopeProcess}
+		Capability: runtime.StaticCapability{Binding: runtime.CapabilityBinding{Scope: runtime.CapabilityScopeProcess}}}
 }
 
 // TestConnectFailurePicksCauseLineOverTail 原因在栈**之前**时（Node 形态），信封必须给出原因行。

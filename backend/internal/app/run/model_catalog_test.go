@@ -197,7 +197,7 @@ func TestApplySessionModelSemantics(t *testing.T) {
 // TestApplySessionModelFailsFastOnMissingCredential 按凭据过滤目录的底座：缺密钥时在平台侧
 // 给出可执行错误，不把底座的 invalidParams 原样甩给用户，也不下发到运行时。
 func TestApplySessionModelFailsFastOnMissingCredential(t *testing.T) {
-	reg := runtime.NewRegistry(runtime.Spec{ID: "stub", Name: "Stub", ModelCatalogNeedsCredential: true})
+	reg := runtime.NewRegistry(runtime.Spec{ID: "stub", Name: "Stub", ModelConfigWriter: runtime.StaticModelConfig{NeedsCredentialInCat: true}})
 	svc := newServiceForTest(reg, eventbus.New())
 	setBuildRuntime(t, "stub")
 	orch := newOrchestratorForTest(svc, reg)

@@ -338,10 +338,11 @@ func (r *Registry) McpTransportsFor(id string) ([]string, bool) {
 	if !ok {
 		return nil, false
 	}
-	if len(spec.McpTransports) == 0 {
+	transports := spec.McpTransports()
+	if len(transports) == 0 {
 		return []string{"stdio"}, true
 	}
-	return spec.McpTransports, true
+	return transports, true
 }
 
 // Require 返回 Spec；未知 ID 返回可读错误（供上层做参数校验）。

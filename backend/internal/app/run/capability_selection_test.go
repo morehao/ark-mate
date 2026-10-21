@@ -17,7 +17,7 @@ import (
 func selRig(t *testing.T) *Service {
 	t.Helper()
 	reg := runtime.NewRegistry(runtime.Spec{
-		ID: "rtx", McpTransports: []string{"stdio", "http"},
+		ID: "rtx", Capability: runtime.StaticCapability{Transports: []string{"stdio", "http"}},
 		Projections: []runtime.Projection{rtxSkillProjectionForTest()},
 	})
 	svc := newServiceForTest(reg, eventbus.New())

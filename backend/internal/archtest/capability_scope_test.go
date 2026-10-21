@@ -35,23 +35,26 @@ var capabilityScopeRank = map[string]int{
 func capabilityScopeViolations(specs []runtime.Spec) []string {
 	var out []string
 	for _, s := range specs {
-		rank, known := capabilityScopeRank[s.CapabilityScope]
+		// C3 4.7：绑定粒度是**策略接口**（`Spec.Capability.BindScope()`），不再是裸字段。
+		// 判据读接口而不是读字段，所以"某个 adapter 换成现场探测的实现"同样被这条守卫盯着。
+		bind := s.CapabilityBinding()
+		rank, known := capabilityScopeRank[bind.Scope]
 		if !known {
 			// 未知取值同样算违规：它不是"保守"，而是"没人知道它什么意思"。
-			out = append(out, "runtime "+s.ID+" 声明了未知 CapabilityScope "+s.CapabilityScope)
+			out = append(out, "runtime "+s.ID+" 声明了未知 CapabilityScope "+bind.Scope)
 			continue
 		}
 		if rank == 0 {
 			continue
 		}
-		if !s.Tested {
-			out = append(out, "runtime "+s.ID+" 声明 CapabilityScope="+s.CapabilityScope+
+		if !bind.Tested {
+			out = append(out, "runtime "+s.ID+" 声明 CapabilityScope="+bind.Scope+
 				" 但未实测（Tested=false）：比 process 更细的绑定必须先有 P-2 探针结论")
 			continue
 		}
-		if s.TestedOnVersion == "" {
+		if bind.TestedOnVersion == "" {
 			// 实测必须绑定版本：底座一升级，绑定范围可能就变了，那时 Tested 自动失效。
-			out = append(out, "runtime "+s.ID+" 声明 CapabilityScope="+s.CapabilityScope+
+			out = append(out, "runtime "+s.ID+" 声明 CapabilityScope="+bind.Scope+
 				" 且 Tested=true，但没写 TestedOnVersion：无法在底座升级后判定该结论是否仍成立")
 		}
 	}
@@ -69,10 +72,10 @@ func TestCapabilityScopeDeclaration(t *testing.T) {
 		name string
 		spec runtime.Spec
 	}{
-		{"session 但未实测", runtime.Spec{ID: "x", CapabilityScope: runtime.CapabilityScopeSession}},
-		{"directory 但未实测", runtime.Spec{ID: "x", CapabilityScope: runtime.CapabilityScopeDirectory}},
-		{"实测了但没写版本", runtime.Spec{ID: "x", CapabilityScope: runtime.CapabilityScopeSession, Tested: true}},
-		{"未知取值", runtime.Spec{ID: "x", CapabilityScope: "workspace"}},
+		{"session 但未实测", bindScopeSpec(runtime.CapabilityScopeSession, false, "")},
+		{"directory 但未实测", bindScopeSpec(runtime.CapabilityScopeDirectory, false, "")},
+		{"实测了但没写版本", bindScopeSpec(runtime.CapabilityScopeSession, true, "")},
+		{"未知取值", bindScopeSpec("workspace", true, "dsh 1.2.3")},
 	}
 	for _, c := range cases {
 		if bad := capabilityScopeViolations([]runtime.Spec{c.spec}); len(bad) == 0 {
@@ -82,8 +85,8 @@ func TestCapabilityScopeDeclaration(t *testing.T) {
 	// 3) 合规正例：process（显式/缺省）与"实测 + 版本"的更细声明都要放行。
 	for _, ok := range [][]runtime.Spec{
 		{{ID: "x"}},
-		{{ID: "x", CapabilityScope: runtime.CapabilityScopeProcess}},
-		{{ID: "x", CapabilityScope: runtime.CapabilityScopeSession, Tested: true, TestedOnVersion: "dsh 1.2.3"}},
+		{bindScopeSpec(runtime.CapabilityScopeProcess, false, "")},
+		{bindScopeSpec(runtime.CapabilityScopeSession, true, "dsh 1.2.3")},
 	} {
 		if bad := capabilityScopeViolations(ok); len(bad) > 0 {
 			t.Fatalf("合规声明被误判：%v → %s", ok, joinLines(bad))
@@ -97,4 +100,11 @@ func joinLines(ss []string) string {
 		out += "  - " + s + "\n"
 	}
 	return out
+}
+
+// bindScopeSpec 造一份"只声明绑定粒度"的 spec（C3 4.7：粒度住在策略接口里）。
+func bindScopeSpec(scope string, tested bool, testedOn string) runtime.Spec {
+	return runtime.Spec{ID: "x", Capability: runtime.StaticCapability{
+		Binding: runtime.CapabilityBinding{Scope: scope, Tested: tested, TestedOnVersion: testedOn},
+	}}
 }

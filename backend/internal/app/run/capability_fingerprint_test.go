@@ -19,8 +19,10 @@ func fpRig(t *testing.T) *Service {
 	t.Helper()
 	reg := runtime.NewRegistry(runtime.Spec{
 		ID: "rtx", Name: "rtx", Version: "rtx acp",
-		McpTransports:   []string{"stdio", "http"},
-		CapabilityScope: runtime.CapabilityScopeProcess,
+		Capability: runtime.StaticCapability{
+			Transports: []string{"stdio", "http"},
+			Binding:    runtime.CapabilityBinding{Scope: runtime.CapabilityScopeProcess},
+		},
 		Projections:     []runtime.Projection{rtxSkillProjectionForTest()},
 	})
 	svc := newServiceForTest(reg, eventbus.New())

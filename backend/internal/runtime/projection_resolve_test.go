@@ -298,10 +298,10 @@ func TestCapabilityScopeDefaults(t *testing.T) {
 		want string
 	}{
 		{"零值", Spec{}, CapabilityScopeProcess},
-		{"声明 session 但未实测", Spec{CapabilityScope: CapabilityScopeSession, Tested: false}, CapabilityScopeProcess},
-		{"声明 session 且已实测", Spec{CapabilityScope: CapabilityScopeSession, Tested: true}, CapabilityScopeSession},
-		{"声明 directory 且已实测", Spec{CapabilityScope: CapabilityScopeDirectory, Tested: true}, CapabilityScopeDirectory},
-		{"非法值即使 Tested 也回落", Spec{CapabilityScope: "workspace", Tested: true}, CapabilityScopeProcess},
+		{"声明 session 但未实测", bindCapability(CapabilityScopeSession, false), CapabilityScopeProcess},
+		{"声明 session 且已实测", bindCapability(CapabilityScopeSession, true), CapabilityScopeSession},
+		{"声明 directory 且已实测", bindCapability(CapabilityScopeDirectory, true), CapabilityScopeDirectory},
+		{"非法值即使 Tested 也回落", bindCapability("workspace", true), CapabilityScopeProcess},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -316,4 +316,9 @@ func TestCapabilityScopeDefaults(t *testing.T) {
 			t.Fatalf("%s 未实测应回落 process，got %q", spec.ID, got)
 		}
 	}
+}
+
+// bindCapability 造一份"只声明绑定粒度"的 spec（C3 4.7：粒度是策略接口，不再是裸字段）。
+func bindCapability(scope string, tested bool) Spec {
+	return Spec{Capability: StaticCapability{Binding: CapabilityBinding{Scope: scope, Tested: tested}}}
 }

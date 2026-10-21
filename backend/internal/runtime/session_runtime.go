@@ -50,7 +50,7 @@ func unsupported(name, details string) error {
 }
 
 func (r *sessionRuntime) ID() string              { return r.spec.ID }
-func (r *sessionRuntime) ManagesOwnContext() bool { return r.spec.ManagesOwnContext }
+func (r *sessionRuntime) ManagesOwnContext() bool { return r.spec.ManagesOwnContext() }
 func (r *sessionRuntime) Capabilities() CapabilityFacts {
 	return r.sess.Capabilities()
 }
