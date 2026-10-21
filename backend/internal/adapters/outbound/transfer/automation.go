@@ -121,7 +121,7 @@ func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRu
 
 // automationFileBody 把一行（定义正文 + 运行态列）合成**文件形态**的字节（导出与导入归一化共用）。
 //
-// 运行态键按 `pkg/pkgautomation.Automation` 的 JSON 形态写回，值用**强类型**（`[]pkgautomation.RunRecord`、
+// 运行态键按 `internal/platform/automation.Automation` 的 JSON 形态写回，值用**强类型**（`[]automation.RunRecord`、
 // 字符串时间）——`DefinitionFile.Set` 会把它 marshal 成紧凑 JSON 再统一缩进，所以导出物与老文件
 // 载体的写回形态一致，且两次导出逐字节相同。
 func automationFileBody(row *arow.Item) (string, error) {

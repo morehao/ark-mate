@@ -10,7 +10,7 @@ import (
 
 	// glog 的日志实现按 LoggerType 注册：不 import 具体 driver 时 New 直接报
 	// "unknown LoggerType ..."。匿名引入放在**装配根**（与 ark-go-starter 的
-	// cmd/init.go 一致），而不是 pkg/dbclient —— 日志出口是进程级决定，库包不替
+	// cmd/init.go 一致），而不是 internal/adapters/outbound/sqlite/db —— 日志出口是进程级决定，库包不替
 	// 调用方选；具体配置与 InitLogger 见 internal/adapters/inbound/cli/cmd/logging.go。
 	_ "github.com/morehao/golib/glog/driver/zap"
 

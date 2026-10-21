@@ -6,7 +6,7 @@ package runtime
 // 是 `status:"completed"`（探针实测，2026-10-16），而 runner 坏了是 `status:"failed"`。也就是说
 // "这一条工具调用到底为什么没成"这件事，**只在结果文本里有**。
 //
-// 归类属**底座私有知识**（签名串是那个底座的措辞），所以表在这里、实现在 `pkg/runtime/<adapter>`；
+// 归类属**底座私有知识**（签名串是那个底座的措辞），所以表在这里、实现在 `internal/adapters/outbound/<adapter>`；
 // 内核只问「这条文本该归成什么」，不认识任何具体串。
 
 // ToolFailure 一次工具失败的**平台侧归类**（对外载荷键 `fail_reason` + `biz_code`）。
@@ -24,7 +24,7 @@ type ToolFailure struct {
 //
 // 返回零值 = **不知道**，而不是"成功"。调用方据此不写 `fail_reason`
 // （写一个猜的原因比不写更糟：用户会照着它去修一个不存在的问题）。
-// 方法签名刻意只用**基础类型**：adapter 不能 import 本包（`pkg/runtime` 反过来要 import
+// 方法签名刻意只用**基础类型**：adapter 不能 import 本包（`internal/runtime` 反过来要 import
 // 每个 adapter 来登记端口，双向就成环），所以端口只能用原语表达。这与
 // `CredentialSpec` 的取值面收窄成纯值是同一条讲究。
 type ToolFailureClassifier interface {

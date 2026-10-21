@@ -26,7 +26,7 @@ func ctxT() context.Context { return context.Background() }
 // 把内存库统一改写成固定名 `file::memory:?cache=shared`，同进程两次 `Open(":memory:")`
 // 会落到同一个库上（实测症状：usage 汇总把别的用例的行一起算进去，`CostCurrency: MIXED`、
 // Runs 多出来）。v1.32.22 的纯 Go dialect 已改成每次 Open 分配新库名，`":memory:"` 重新
-// 变得安全（见 pkg/dbclient 的 TestOpenMemoryIsIndependent），但第 ① 条理由与驱动无关，
+// 变得安全（见 internal/adapters/outbound/sqlite/db 的 TestOpenMemoryIsIndependent），但第 ① 条理由与驱动无关，
 // 所以夹具继续用文件库。
 func openTestDB(t *testing.T) *Store {
 	t.Helper()
@@ -161,7 +161,7 @@ func sameWatermarks(a, b map[string]int64) bool {
 //
 // 它守的仍然是同一件事：**调用方必须自己保证 session 存在**，只是现在库也帮着拦一道。
 // 哪天它又变绿了（插入成功），说明外键又被关掉——那时先把本注释与
-// pkg/dbclient 的 TestOpenConnectionPragmasFollowGolibAndDriver 对齐，别只改断言。
+// internal/adapters/outbound/sqlite/db 的 TestOpenConnectionPragmasFollowGolibAndDriver 对齐，别只改断言。
 func TestAppendEventUnknownSession(t *testing.T) {
 	s := openTestDB(t)
 	if _, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "ghost", "session.message", map[string]any{}); err == nil {

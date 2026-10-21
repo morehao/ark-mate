@@ -15,7 +15,7 @@ import (
 // 返回被翻过的条数（0 = 没有旧前缀，调用方不必重新序列化）。
 //
 // 它只改**内存里的文档**，不写回用户文件（那条纪律是"导入不删不回写"）；调用方重新
-// `Marshal()` 之后，写进库的正文才是翻译后的形态。翻译点本身只有 `pkg/capability` 那一处。
+// `Marshal()` 之后，写进库的正文才是翻译后的形态。翻译点本身只有 `internal/platform/capability` 那一处。
 func TranslateLegacyMcpRefs(ctx context.Context, doc *capability.DefinitionFile, where string) int {
 	n := 0
 	for _, key := range []string{"secret_env", "secret_headers"} {

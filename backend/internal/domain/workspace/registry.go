@@ -544,7 +544,7 @@ func dirStatusOf(path string) string {
 	return DirStatusOK
 }
 
-// WorkspaceNotFoundError 未知工作空间 id（ClassRequest + 稳定 code 名，由 pkg/code 提档到 40401）。
+// WorkspaceNotFoundError 未知工作空间 id（ClassRequest + 稳定 code 名，由 internal/platform/code 提档到 40401）。
 func WorkspaceNotFoundError(id string) error {
 	return code.FromError(code.NewError(code.ClassRequest, "workspace_not_found", fmt.Sprintf("未知工作空间 %q", id), nil))
 }

@@ -59,7 +59,7 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *apprun.Service) {
 		t.Fatalf("装配凭据分层: %v", err)
 	}
 	// 继承环境那一层置空：这条夹具不该被跑测试的机器上恰好存在的同名变量影响
-	// （层序本身由 `pkg/credentials` 的用例与 manager 的用例覆盖）。
+	// （层序本身由 `internal/adapters/outbound/credentials` 的用例与 manager 的用例覆盖）。
 	creds.Env = func(string) string { return "" }
 	planesOf(svc).Credentials.SetLayered(creds)
 	planesOf(svc).Providers.SetProviderDir(filepath.Join(home, "providers"))
@@ -175,7 +175,7 @@ func TestRouterRoutesRegistered(t *testing.T) {
 			t.Fatalf("路由未注册: %s", want)
 		}
 	}
-	// **负向断言**：`/runtimes` 必须不存在（用户面零 runtime 选择入口；见 pkg/runtime/build.go）。
+	// **负向断言**：`/runtimes` 必须不存在（用户面零 runtime 选择入口；见 internal/runtime/build.go）。
 	if found["GET /v1/mate/runtimes"] {
 		t.Fatal("GET /v1/mate/runtimes 不该再注册：底座由构建期固定，用户面没有这个读面")
 	}
@@ -220,7 +220,7 @@ func TestRouterUnknownAPINotSPA(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 				t.Fatalf("响应体不是信封 JSON: %v（body=%s）", err, w.Body.String())
 			}
-			// code 必须取自 pkg/code 注册表：此前手写的 404 不在码表里，客户端无法判定。
+			// code 必须取自 internal/platform/code 注册表：此前手写的 404 不在码表里，客户端无法判定。
 			if env.Code != code.NotFound {
 				t.Errorf("信封 code 应为 code.NotFound(%d)，得到 %d", code.NotFound, env.Code)
 			}

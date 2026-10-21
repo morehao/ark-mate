@@ -71,7 +71,7 @@ type AutomationRunsResp struct {
 // AutomationRunResp 手动触发一次的结果（`POST /automations/:id/run`）。
 type AutomationRunResp struct {
 	ID string `json:"id"`
-	// Status claimed | overlap | duplicate | skipped（见 pkg/automation 的 RunStatus）。
+	// Status claimed | overlap | duplicate | skipped（见 internal/platform/automation 的 RunStatus）。
 	Status string `json:"status"`
 	// Trigger 固定为 manual（同一次触发的其余可能值：scheduled/recovery）。
 	Trigger string `json:"trigger"`

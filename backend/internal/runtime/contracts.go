@@ -44,15 +44,16 @@ const (
 
 // IsolationVar 一条 runtime 子进程的配置隔离声明（投影与语义见 isolation.go）。
 //
-// 为什么由 adapter 声明而不是父包 switch（本次收口）：变量名是**该底座的私有知识**
-// （实测得来：有的底座读 JS 源码、有的对二进制做 `strings`），父包不该认识任何具体底座。
-// 声明落在**该 adapter 的 Spec 汇入点**（`adapters.go` 里的 `xxxSpec()`，如 `dshSpec()`，
-// 与 `Projections` / `ModelConfig` / `Credential` / `SetupSteps` 同一处），父包只做机械投影，
-// 于是"接一个新 runtime"= 新建一个目录 + 加一个 `xxxSpec()`，而不是回来改 frameworks 文件。
+// 为什么由 adapter 声明而不是内核 switch（本次收口）：变量名是**该底座的私有知识**
+// （实测得来：有的底座读 JS 源码、有的对二进制做 `strings`），内核不该认识任何具体底座。
+// 声明落在**该 adapter 自己的 `Spec()`**（`internal/adapters/outbound/dsh/adapter.go`，与
+// `Projections` / `ModelConfig` / `Credential` / `SetupSteps` 同一处），内核只做机械投影，
+// 于是"接一个新 runtime"= 新建一个目录 + 实现 `runtime.Adapter`（`Spec()` + `RegisterPorts()`），
+// 而不是回来改内核文件。
 //
-// 为什么不放进 adapter 子包（`pkg/runtime/dsh`）：那会形成父子 import 环（父包要 import adapter
-// 才能汇入 Spec，adapter 又 import 父包才能引用本类型）。这是本仓既有的"adapter 子包只提供纯数据与
-// 端口实现，父包汇入统一 Spec"约定的直接后果，不是省事。
+// 为什么 `IsolationVar` 这类类型不放进 adapter 包：adapter 要引用它，内核也要用它表达投影；
+// 放进 adapter 会让 `internal/runtime` 反向 import 某个 adapter——`TestRuntimeDoesNotImportRuntimeAdapters`
+// 与 `TestOnlyAssemblyImportsRuntimeAdapters` 直接拦。
 type IsolationVar struct {
 	// Key 环境变量名（子进程侧）。
 	Key string
@@ -124,7 +125,7 @@ type Spec struct {
 	//
 	// 与 Projections 分开的理由见 config_location.go 文件头（一个能力一个目录 vs 一个 runtime 一个文件）。
 	ModelConfig ModelConfigLocation
-	// Credential 该 runtime 的**凭据交付面**声明（纯数据，见 pkg/resource.CredentialSpec）。
+	// Credential 该 runtime 的**凭据交付面**声明（纯数据，见 internal/platform/resource.CredentialSpec）。
 	//
 	// 与 ModelConfig 分开：清单与凭据是**两条通道**，生效时刻与失败半径都不同（ADR-4/ADR-14）。
 	// 零值 = 该 runtime 没声明凭据面。

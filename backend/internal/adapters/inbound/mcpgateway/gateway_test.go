@@ -1,9 +1,9 @@
 package mcpgateway
 
-// M7-1 的网关侧用例：MCP 服务端（`pkg/mcp`）已经逐方法验过，这里钉的是**网关这一层**：
+// M7-1 的网关侧用例：MCP 服务端（`internal/adapters/outbound/mcp`）已经逐方法验过，这里钉的是**网关这一层**：
 // 空数据面必须响亮而不是静默、真数据面的透传与"未知工具"分线、stdin EOF 即退出。
 //
-// 为什么不重复验帧形状：协议面的用例在 `pkg/mcp/server_test.go`（含自研互测与 stdout 纯度）。
+// 为什么不重复验帧形状：协议面的用例在 `internal/adapters/outbound/mcp/server_test.go`（含自研互测与 stdout 纯度）。
 // 这里也不起子进程：进程级形态（stdout 纯度、EOF 退出）由 CLI 侧的用例负责。
 
 import (

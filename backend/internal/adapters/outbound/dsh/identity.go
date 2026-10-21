@@ -1,4 +1,4 @@
-// 本文件是 dsh 的**产品身份交付实现**：把 `pkg/identity.Spec` 写成平台自己的
+// 本文件是 dsh 的**产品身份交付实现**：把 `internal/platform/identity.Spec` 写成平台自己的
 // `mate-identity.patch.yml`，经 `--patch` 递入 dsh 的 `system-prompt` 条目。
 //
 // 为什么走 dsh 的官方配置扩展点而不是改源码：`@deepseek-ai/dsh-system-prompt` 的
@@ -9,7 +9,7 @@
 // 三条边界（与 config.go 同款）：
 //
 //  1. 本包是纯数据子包：不 import `internal/**`（archtest 的 TestAdapterHasNoStoreLiterals 守），
-//     也不 import 父包 `pkg/runtime`（父子 import 环）；
+//     也不 import 父包 `internal/runtime`（父子 import 环）；
 //  2. 启动面只能经 `PatchArgs` 改（`--patch` 与模型清单共用一个 flag）；
 //  3. **启动期不跑 `--dump-config-schema`**：身份 patch 只有两个键、目标是已实测存在的条目，
 //     每次启动多一次 dump 会把启动预算吃掉。正确性由静态校验 + golden + 版本 pin 保证，
@@ -86,7 +86,7 @@ type IdentityOptions struct {
 	RootAbs string
 }
 
-// IdentityAdapter 本包的身份交付实现（结构上满足 `pkg/runtime.IdentityAdapter`）。
+// IdentityAdapter 本包的身份交付实现（结构上满足 `internal/runtime.IdentityAdapter`）。
 type IdentityAdapter interface {
 	DeliverIdentity(ctx context.Context, spec pkgidentity.Spec) (resource.Outcome, error)
 }

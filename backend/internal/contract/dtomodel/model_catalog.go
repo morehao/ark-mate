@@ -3,7 +3,7 @@ package dtomodel
 // ConfigOptionValueResp 一个可选值（运行时配置项候选项，如模型）。
 //
 // Value 是**不透明字符串**：必须原样回传给创建/PATCH 接口，前端不得解析其内部结构
-// （形态由各 adapter 自己声明，见 `pkg/runtime/model_value.go`：dsh 是
+// （形态由各 adapter 自己声明，见 `internal/runtime/model_value.go`：dsh 是
 // `JSON.stringify([provider, model])`，别的底座可能是 `provider/model`）。
 type ConfigOptionValueResp struct {
 	Value       string `json:"value"`

@@ -55,7 +55,7 @@ func (p mcpInjectionPlan) empty() bool {
 
 // planMcpInjection 算出该 runtime 的 MCP 注入计划（唯一实现：注入面与指纹共用）。
 //
-// 与 `mcpSelectionFor`（白名单优先级那一段）的关系：选择语义在 `pkg/capability.SelectMcpServers`，
+// 与 `mcpSelectionFor`（白名单优先级那一段）的关系：选择语义在 `internal/platform/capability.SelectMcpServers`，
 // 这里负责**按传输分派**——直连那一支只收 stdio，远程那一支收远程三种。开关关掉（`mcp_gateway=off`）
 // 时回到老路：远程 server 按该 runtime 声明的承载能力直连注入（能承载才注入，承载不了就跳过）。
 func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySelection) mcpInjectionPlan {

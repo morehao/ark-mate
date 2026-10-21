@@ -7,7 +7,7 @@ package capability
 // 两边各写一遍的后果不是报错，而是**静默不同面**：网关漏了 enabled 判据 → 用户停用的 server
 // 依然能被模型调；网关漏了会话白名单 → 钉过选定的会话看到 agent 的全量。
 //
-// 故选址落在 `pkg/capability`（可复用层）：它只看定义本身，不认识会话/agent/运行时的类型；
+// 故选址落在 `internal/platform/capability`（可复用层）：它只看定义本身，不认识会话/agent/运行时的类型；
 // "白名单从哪来"（会话选定 > agent 声明）仍归调用方——那是**优先级**，不是**选择**。
 
 // SelectMcpServers 按「启用开关 ∩ 传输承载 ∩ id 白名单」选出候选定义，顺序与入参一致。

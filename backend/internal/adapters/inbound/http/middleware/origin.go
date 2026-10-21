@@ -63,7 +63,7 @@ func (d Decision) Allowed() bool { return d.Status == 0 }
 //
 // 码取 InvalidRequest（40001）：这确实是**请求侧**的问题（换一个来源/主机就能过），
 // 而不是服务内部故障。为什么不新加一个码：对外错误码是三处同步的契约
-// （pkg/code ↔ README ↔ 前端 BizCode，由守卫钉住），本次范围不含前端；为什么不落 50000：
+// （internal/platform/code ↔ README ↔ 前端 BizCode，由守卫钉住），本次范围不含前端；为什么不落 50000：
 // 它是"未归类的内部错误"的兜底码，用它描述一次**刻意拒绝**会让客户端与运维以为是平台崩了。
 func (d Decision) Err() error {
 	if d.Allowed() {
@@ -267,7 +267,7 @@ func loopbackHostAllowed(host string) bool {
 
 // canonicalOrigin 请求头侧的归一：trim + 小写 + 去尾部 `/`。
 //
-// 必须与 pkg/config 对 `allowed_origins` 的归一同一规则（配置值以该形态存进 extra）。
+// 必须与 internal/config 对 `allowed_origins` 的归一同一规则（配置值以该形态存进 extra）。
 // Origin 是**大小写不敏感**的（等价于 scheme/host 的大小写规则）；尾斜杠在浏览器里不出现，
 // 但手工/脚本发起的请求可能带，去掉它不会放宽判定（主机与端口仍须逐字命中）。
 func canonicalOrigin(s string) string {

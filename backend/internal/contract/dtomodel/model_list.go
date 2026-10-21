@@ -177,7 +177,7 @@ type CredentialSyncResp struct {
 //
 // 它**不进用户面**：只在机器面（`sync[]`、`mate doctor`）出现。
 type AdvertisedModel struct {
-	// Value 运行时**不透明串**（形态由各 adapter 自己声明，见 `pkg/runtime/model_value.go`）。
+	// Value 运行时**不透明串**（形态由各 adapter 自己声明，见 `internal/runtime/model_value.go`）。
 	Value string `json:"value"`
 	Name  string `json:"name,omitempty"`
 	Group string `json:"group,omitempty"`

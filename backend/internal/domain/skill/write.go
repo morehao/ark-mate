@@ -200,7 +200,7 @@ func existsErr(id string) error {
 	return code.NewError(code.ClassLimit, "skill_exists", fmt.Sprintf("skill %q 已存在：改它用 PUT /skills/%s，或换一个 id", id, id), nil)
 }
 
-// notFoundErr 目标 skill 不存在（40401，由 pkg/code 的 notFoundCodes 提档）。
+// notFoundErr 目标 skill 不存在（40401，由 internal/platform/code 的 notFoundCodes 提档）。
 func notFoundErr(id string) error {
 	return code.NewError(code.ClassRequest, "skill_not_found", fmt.Sprintf("未知 skill %q", id), nil)
 }

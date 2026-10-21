@@ -9,5 +9,5 @@
 //     经 ClientOptions.OnEvent 交给注入的回调（manager 的 event sink），acp 不感知总线
 //   - errors:    连接/ACP 错误归类为可操作分类（connection/access/limit/request/service/unsupported）
 //
-// 依赖方向：pkg/runtime → acp；acp 不依赖 runtime（见 docs/architecture.md §4.1）。
+// 依赖方向：internal/runtime → acp；acp 不依赖 runtime（见 docs/architecture.md §4.1）。
 package acp

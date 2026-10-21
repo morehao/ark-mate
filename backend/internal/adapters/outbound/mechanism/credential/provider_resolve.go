@@ -13,7 +13,7 @@ import (
 
 // resolveProviderKey 解析一条 provider 的拨号密钥（provider 面**唯一**入口）。
 //
-// 四层顺序由 `pkg/credentials.Layered` 一处实现；这里只做一件它做不到的事——**把"库"并进
+// 四层顺序由 `internal/adapters/outbound/credentials.Layered` 一处实现；这里只做一件它做不到的事——**把"库"并进
 // 托管那一层**，因为库才是权威、镜像只是副本：
 //
 //   - 分层命中 `managed`（镜像里有）时，与库对一次账：**库里有值才采用**（两边都有时以库为准）。

@@ -2,7 +2,7 @@
 //
 // 存在的理由：同一批基础设施夹具在多个包里重复手写。仅 manager 一个包内，
 // `runtime.NewRegistry(runtime.Spec{ID: "stub", Name: "Stub"})` 这个字面量就出现过 20 余次，
-// 临时 sqlite 库的「打开 + 错误检查」出现过 12 次。重复的 Spec 字面量一旦与 pkg/runtime
+// 临时 sqlite 库的「打开 + 错误检查」出现过 12 次。重复的 Spec 字面量一旦与 internal/runtime
 // 的真实字段漂移，测试就会去验证一个并不存在的 runtime 形态，而每个重复点都在各自的
 // 文件里，没有一处能代表"我们测试里用的 stub 长这样"。
 //

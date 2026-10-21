@@ -16,7 +16,7 @@ import (
 // TestFromErrorMapping 平台错误（分类 + 稳定 code）→ 对外业务码映射矩阵。
 //
 // 这条矩阵原先在 internal/manager 里测（当时映射表是 Service.restErr 的私有实现）。
-// 映射表收归 pkg/code 后随之搬来：它测的是"码怎么定"，与 manager 的装配无关，
+// 映射表收归 internal/platform/code 后随之搬来：它测的是"码怎么定"，与 manager 的装配无关，
 // 放在这里也不再需要拉起整个 manager 测试脚手架。
 func TestFromErrorMapping(t *testing.T) {
 	cases := []struct {
@@ -128,7 +128,7 @@ func TestRegistrySelfConsistent(t *testing.T) {
 	}
 }
 
-// TestReadmeCodesMatchRegistry README「业务错误码」表必须与 pkg/code 一致。
+// TestReadmeCodesMatchRegistry README「业务错误码」表必须与 internal/platform/code 一致。
 //
 // 与 TestReadmeRoutesMatchRouter 同一个思路：对外契约写在 README 里，代码是事实源，
 // 两边靠测试钉住。加码忘记写文档、或者文档里留着已删的码，都会在这里红。
@@ -161,19 +161,19 @@ func TestReadmeCodesMatchRegistry(t *testing.T) {
 	for _, c := range code.Codes() {
 		reg[c] = true
 		if !doc[c] {
-			t.Errorf("码 %d（%s）已在 pkg/code 声明但 README 未记录", c, code.Message(c))
+			t.Errorf("码 %d（%s）已在 internal/platform/code 声明但 README 未记录", c, code.Message(c))
 		}
 	}
 	for c := range doc {
 		if !reg[c] {
-			t.Errorf("README 记录了口令码 %d，但 pkg/code 里没有", c)
+			t.Errorf("README 记录了口令码 %d，但 internal/platform/code 里没有", c)
 		}
 	}
 }
 
-// TestFrontendBizCodesMatchRegistry 前端 BizCode 常量表必须与 pkg/code 双向一致。
+// TestFrontendBizCodesMatchRegistry 前端 BizCode 常量表必须与 internal/platform/code 双向一致。
 //
-// 第三个同步点：码同时写在 pkg/code（事实源）、README（文档）、前端 response.ts（消费方）。
+// 第三个同步点：码同时写在 internal/platform/code（事实源）、README（文档）、前端 response.ts（消费方）。
 // 前两者由 TestReadmeCodesMatchRegistry 钉住，前端此前只靠人工——而人工同步正是漂移的
 // 温床（前端原先只有 Success/Unauthorized 两个，其余 7 个码只能靠魔数比较）。
 // 用 Go 读 TypeScript 源码是刻意的：不引入前端测试框架，却让"改码忘记同步前端"当场变红。
@@ -218,12 +218,12 @@ func TestFrontendBizCodesMatchRegistry(t *testing.T) {
 	for _, c := range code.Codes() {
 		reg[c] = true
 		if _, ok := fe[c]; !ok {
-			t.Errorf("码 %d（%s）在 pkg/code 已声明但前端 BizCode 缺失——前端只能拿魔数比较", c, code.Message(c))
+			t.Errorf("码 %d（%s）在 internal/platform/code 已声明但前端 BizCode 缺失——前端只能拿魔数比较", c, code.Message(c))
 		}
 	}
 	for n, name := range fe {
 		if !reg[n] {
-			t.Errorf("前端 BizCode.%s = %d，但 pkg/code 里没有这个码", name, n)
+			t.Errorf("前端 BizCode.%s = %d，但 internal/platform/code 里没有这个码", name, n)
 		}
 	}
 }
@@ -250,7 +250,7 @@ func codeTableSection(t *testing.T, readme string) string {
 	return strings.Join(lines[start:], "\n")
 }
 
-// repoRoot 从 backend/pkg/code 上溯到仓库根（含 README.md 的那一层）。
+// repoRoot 从 backend/internal/platform/code 上溯到仓库根（含 README.md 的那一层）。
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()

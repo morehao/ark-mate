@@ -3,7 +3,7 @@
 // 为什么单独成包：这个形状同时被三层使用——协议层（internal/adapters/outbound/acp 从 ACP
 // session/usage_update 归一化出来）、持久层（internal/adapters/outbound/sqlite/store 解析 runs.usage_json
 // 并做聚合）、传输层（internal/contract/dtosession 直接作为响应载荷）。
-// 放在其中任何一层都会让另外两层反向依赖该层；放在 pkg/object 下则三方都只依赖值对象。
+// 放在其中任何一层都会让另外两层反向依赖该层；放在 internal/platform/object 下则三方都只依赖值对象。
 package objusage
 
 // UsageInfo 会话用量快照（ACP session/usage_update，M3 用量统计）：

@@ -13,7 +13,7 @@ type ToolCatalog interface {
 	ListTools() ([]dtocapability.ToolResp, error)
 }
 
-// Tools 工具目录用例：只依赖**能力注册表**这一个事实（`pkg/capability`）。
+// Tools 工具目录用例：只依赖**能力注册表**这一个事实（`internal/platform/capability`）。
 //
 // 为什么在这里而不是在控制器：`capability.Tool` → `dtocapability.ToolResp` 是**响应装配**，
 // 而控制器只做参数绑定与回响应；`pkg/` 又不能 import `internal/contract`（分层方向），

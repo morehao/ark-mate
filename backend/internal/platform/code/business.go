@@ -45,7 +45,7 @@ var notFoundCodes = map[string]bool{
 	//
 	// v26 起**同一个码**还承担第二种处境：会话引用了一个平台清单里查不到的模型行（`POST /sessions`
 	// 与 `PATCH /sessions/:id` 的 `model`）。刻意**不新增码**（E9）：两者对用户是同一件事——
-	// "这个 id 指不到一行，去刷新列表/重新选一个"；新增一个码要动 `pkg/code`↔README↔前端三条边
+	// "这个 id 指不到一行，去刷新列表/重新选一个"；新增一个码要动 `internal/platform/code`↔README↔前端三条边
 	// 加三条守卫，收益为零。文案在 manager 里分开写（`sessionModelNotFoundErr`）。
 	"model_not_found": true,
 	// 工作空间登记（v14）：PATCH/DELETE/`:id/move` 打到不存在的登记。

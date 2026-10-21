@@ -7,7 +7,7 @@ import (
 	"github.com/morehao/ark-mate/internal/platform/object/objdelivery"
 )
 
-// TestApplicabilityWireShapeUnchanged 钉住 M6 迁移（类型从本包搬到 pkg/object/objdelivery）**逐字不变**的
+// TestApplicabilityWireShapeUnchanged 钉住 M6 迁移（类型从本包搬到 internal/platform/object/objdelivery）**逐字不变**的
 // JSON 形状。
 //
 // 为什么值得一条测试：前端 `packages/types/src/capability.ts` 的 `LibraryApplicability`

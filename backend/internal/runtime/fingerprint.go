@@ -27,7 +27,7 @@ import (
 // 不同指纹，后果是"每次建会话都新建代际、进程数失控"（风险表第 15 行）。所以这里只接受**切片**，
 // 且在序列化前统一排序；调用方负责把 map 展开成切片。
 //
-// **包边界**：本文件不 import `pkg/capability`——skill 的正文摘要由调用方用 sidecar 的同一算法
+// **包边界**：本文件不 import `internal/platform/capability`——skill 的正文摘要由调用方用 sidecar 的同一算法
 // 算好（`capability.PayloadHash`）后传进来。摘要算法因此只有一份实现，而投影层不必把整个能力
 // 数据面拖进来。
 
@@ -80,7 +80,7 @@ type RuntimePart struct {
 	//
 	// **已知边界（如实记录，不假装）**：这是 adapter **声明**的版本串，不是 ACP 握手**观测**到的
 	// 底座版本——握手只在建连之后发生，而指纹必须在那之前算出来（它就是用来决定复用哪个连接的）。
-	// 所以底座升级要产生新代际，得由 adapter 在升级适配时同步改声明（`pkg/runtime/adapters.go`
+	// 所以底座升级要产生新代际，得由 adapter 在升级适配时同步改声明（`internal/adapters/outbound/dsh/adapter.go`
 	// 里 `Version: <adapter 包>.<常量>` 这种写法）。P-2 顺带记录 `initialize` 能否读到真实版本，
 	// 若能，M3 之后可以换成观测值（那是"指纹更准"，不是"指纹不对"）。
 	Version string

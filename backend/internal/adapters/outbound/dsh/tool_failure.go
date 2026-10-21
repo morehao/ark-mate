@@ -30,7 +30,7 @@ const (
 //
 // 编不过 `var _ runtime.ToolFailureClassifier = ...` 是**刻意的**：adapter 不能 import 根包
 // （根包要 import 它来登记，双向就成环）。接口按方法集结构满足，编译期断言只能放在根包那一侧
-// ——`pkg/runtime` 的 `TestBuiltinToolFailureClassifiersSatisfyPort` 钉着它。
+// ——`internal/runtime` 的 `TestBuiltinToolFailureClassifiersSatisfyPort` 钉着它。
 type ToolFailure struct{}
 
 // ClassifyToolFailure 按签名表归类；不认识 → 空串（**不猜**）。

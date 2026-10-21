@@ -1,6 +1,6 @@
 // Package code 收敛 ark-mate 对外 REST 信封的业务错误码。
 //
-// 结构对齐 ark-iam 的 pkg/code：code.go 放注册表，领域码按文件分开。
+// 结构对齐 ark-iam 的 internal/platform/code：code.go 放注册表，领域码按文件分开。
 // 但**编号规则是 ark-mate 自己的**：ark-iam 是 6 位「领域段」码（1001XX…），
 // ark-mate 沿用既有的 5 位 HTTP 语义码（40001/40401/…）——这批数字已经是
 // 对外契约（README 接口摘要、前端 response.ts、大量既有测试都按它断言），

@@ -159,7 +159,7 @@ func TestWriteDefinitionIdempotent(t *testing.T) {
 // TestWriteDefinitionConflictMapsToDefinitionChanged 读→写窗口内被外部改动 → `definition_changed`
 // （40901），**绝不 last-write-wins**（风险表第 3 行）。
 //
-// 检测本身在 `pkg/capability`（`TestDefinitionFileOptimisticLock` 用真实文件改动验证）；这里验的是
+// 检测本身在 `internal/platform/capability`（`TestDefinitionFileOptimisticLock` 用真实文件改动验证）；这里验的是
 // **语义映射**：冲突必须落成"请重试"的 40901，而不是含混的 50000——用户的动作完全不同
 // （刷新重试 vs 报障）。
 func TestWriteDefinitionConflictMapsToDefinitionChanged(t *testing.T) {

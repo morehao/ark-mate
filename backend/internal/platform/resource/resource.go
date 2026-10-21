@@ -1,19 +1,18 @@
 // Package resource 定义**应用层资源**的声明值对象与「声明 → 交付 → 回带结论」端口。
 //
-// 它是 leaf 包（不 import `internal/`，也不 import `pkg/runtime`）：底座 adapter 要实现这里的
-// `Syncer`，而 `pkg/runtime` 已经 import 各 adapter 子包——接口定义在 `pkg/runtime` 会形成
-// 父子 import 环（约束⑦）。仓库已有同形先例：`pkg/object/objdelivery` 同时被 DTO、manager
-// 与守卫消费。
+// 它是 leaf 包（零 `internal` 依赖）：一侧是领域与用例用它的值对象，另一侧是底座 adapter 实现
+// 这里的 `Syncer`——两边都 import 它，所以它谁都不 import（否则任一侧都会成环）。
+// 仓库已有同形先例：`internal/platform/object/objdelivery` 同时被 DTO、装配与守卫消费。
 //
 // 本包只表达**意图与结论**，不表达任何底座的配置格式：
 //
-//	Provider / Model / Set —— 平台拥有的、与底座无关的事实（写入方是 manager 的写面）
+//	Provider / Model / Set —— 平台拥有的、与底座无关的事实（写入方是同步面 `adapters/outbound/models`）
 //	Syncer                 —— adapter 实现的交付端口（唯一接触面）
 //	Delivery               —— 平台交给 adapter 的「改启动面」窄口（进程是平台拉起的）
 //	Outcome                —— adapter 回带的事实（逐条，不给合并结论）
 //
-// 判据（archtest 守）：`pkg/runtime/<adapter>` 不得 import `internal/**`；`internal/**`
-// 不得出现底座配置格式字面量。两条合起来就是「知识归属」这件事的机器判据。
+// 判据（archtest 守）：adapter（`internal/adapters/outbound/<id>`）只许向内 import（import 值层合法）；
+// 内圈不得出现底座配置格式字面量。两条合起来就是「知识归属」这件事的机器判据。
 package resource
 
 import (
@@ -248,7 +247,7 @@ type Outcome struct {
 // Delivery 端口实现方**改启动面**的唯一手段。
 //
 // 为什么需要它：进程是**平台**拉起的，所以「往子进程注入一份内联配置」「给它加一个启动参数」
-// 这两件事只能在平台侧生效；而 adapter 是纯数据子包（不能 import `pkg/runtime`，见约束⑦），
+// 这两件事只能在平台侧生效；而 adapter 是纯数据子包（不能 import `internal/runtime`，见约束⑦），
 // 拿不到注册表——于是平台把注册表按这个窄接口交给 adapter。
 //
 // **凭据走这里，但只在「该底座声明了原生文档」时**：密钥由 `Set.Providers[i].APIKey` 交给
@@ -273,7 +272,7 @@ type Delivery interface {
 
 // Syncer 端口：把应用层声明交付给本底座。
 //
-// 实现方（`pkg/runtime/<adapter>`）自己知道写哪个文件、什么格式、怎么校验、怎么撤回。
+// 实现方（`internal/adapters/outbound/<adapter>`）自己知道写哪个文件、什么格式、怎么校验、怎么撤回。
 // 装配形态：`reg.RegisterSyncer("<id>", <id>pkg.NewSyncer(delivery))`——Delivery 从构造函数
 // 进来，SyncModels 保持最小签名。
 //

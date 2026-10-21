@@ -585,7 +585,7 @@ func readGolden(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("读不到 golden %s（首次生成用 `go test ./pkg/runtime/dsh -run Golden -update`）：%v", path, err)
+		t.Fatalf("读不到 golden %s（首次生成用 `go test ./internal/adapters/outbound/dsh -run Golden -update`）：%v", path, err)
 	}
 	return string(b)
 }

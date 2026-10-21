@@ -133,7 +133,7 @@ func resolveCredCwd(explicit string, getenv func(string) string) (cwd, source st
 	}
 	own, err := os.Getwd()
 	if err != nil {
-		// 取不到自己的 cwd 也不能让网关起不来：空 cwd 交给 `pkg/credentials`（那一层读不到
+		// 取不到自己的 cwd 也不能让网关起不来：空 cwd 交给 `internal/adapters/outbound/credentials`（那一层读不到
 		// 就是"没有这一层"，不留半截路径——与 `IsolationEnv` 对空 home 的处置同一条纪律）。
 		return "", credCwdSourceOwnGetwd
 	}
@@ -190,7 +190,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 		now:          opts.Now,
 		secretWarned: make(map[string]bool),
 	}
-	// 与核心进程同一套装配：**只注册构建期选中的那一个底座**（见 pkg/runtime/build.go）。
+	// 与核心进程同一套装配：**只注册构建期选中的那一个底座**（见 internal/runtime/build.go）。
 	// 网关子进程与核心必须看同一个底座，否则"平台说 A、网关按 B 过滤"会静默分叉。
 	remoteSpecs := make([]runtime.Spec, 0, len(opts.Cfg.RemoteRuntimes))
 	for _, rt := range opts.Cfg.RemoteRuntimes {

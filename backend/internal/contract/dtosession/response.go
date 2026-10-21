@@ -9,7 +9,7 @@ type SessionResp struct {
 	ID string `json:"id"`
 	// RuntimeSessionID 原生底座会话 id（`rt_<底座原文>`；'' = 尚未起底座会话）。
 	//
-	// v15 起它在**平台侧**一律带 `rt_` 壳（`pkg/object/objid`）：这既是"平台 id 与底座 id
+	// v15 起它在**平台侧**一律带 `rt_` 壳（`internal/platform/object/objid`）：这既是"平台 id 与底座 id
 	// 形状可分"这条不变式的载体（`id` 匹配 `^ses_…$`、本字段匹配 `^rt_.+$`，两者永不可能
 	// 相等），也是排障时一眼看出"这是哪个底座用什么形状发的"的那一层信息。
 	//

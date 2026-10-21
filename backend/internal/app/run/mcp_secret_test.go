@@ -184,7 +184,7 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 		}
 	}
 	// 旧前缀在**运行时**读到就是坏数据：它既不是 `store:` 也不是 `env:`，词法层就拒了
-	// （翻译只发生在导入档案文件那一步，判据见 `pkg/capability` 的翻译点用例；这里不写字面量，
+	// （翻译只发生在导入档案文件那一步，判据见 `internal/platform/capability` 的翻译点用例；这里不写字面量，
 	// 免得把已退役的词带回 manager 的源码里）。
 	if err := capability.ValidateSecretRef("storex:mcp/legacy"); err == nil {
 		t.Fatal("认不出的前缀应在词法层被拒")

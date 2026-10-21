@@ -79,7 +79,7 @@ func ProductRegistry(adapters []Adapter, remotes []Spec) (*Registry, error) {
 	}
 	return nil, fmt.Errorf(
 		"registry: 构建期指定的 runtime %q 未注册（内置 %v；远程声明 %v）：检查 -ldflags 注入的 "+
-			"pkg/runtime.BuildRuntime 与 .ark-mate/config/runtimes.json",
+			"internal/runtime.BuildRuntime 与 .ark-mate/config/runtimes.json",
 		id, sortedKeys(builtinIDs), remoteIDs(remotes))
 }
 

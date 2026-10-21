@@ -56,7 +56,7 @@ func TestBuildIdentityPatchGolden(t *testing.T) {
 	}
 	want, err := os.ReadFile(identityGoldenPath)
 	if err != nil {
-		t.Fatalf("读 golden 失败（%s）：%v（首次生成用 `go test ./pkg/runtime/dsh -run TestBuildIdentityPatchGolden -update`）",
+		t.Fatalf("读 golden 失败（%s）：%v（首次生成用 `go test ./internal/adapters/outbound/dsh -run TestBuildIdentityPatchGolden -update`）",
 			identityGoldenPath, err)
 	}
 	if string(data) != string(want) {

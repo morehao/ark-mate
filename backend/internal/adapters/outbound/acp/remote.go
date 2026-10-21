@@ -27,7 +27,7 @@ import (
 //
 // 两种形态（均由本文件实现，均无新依赖）：
 //   - ws   ：一条 WebSocket 长连接，一条消息 = 一个文本帧（ACP 的 NDJSON 语义原样保留）。
-//   - http ：Streamable HTTP（对齐 MCP 规范 / 本项目 pkg/mcp 的既有做法）：
+//   - http ：Streamable HTTP（对齐 MCP 规范 / 本项目 internal/adapters/outbound/mcp 的既有做法）：
 //     每条客户端消息一个 POST（Accept: application/json, text/event-stream）；
 //     响应可以是单个 JSON，也可以是 SSE 流（`data: <json>`），后者承载同一请求期间的
 //     session/update 通知与 session/request_permission 等**服务端发起**的消息；

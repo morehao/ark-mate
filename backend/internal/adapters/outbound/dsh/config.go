@@ -2,7 +2,7 @@
 // 落盘 + 装卸启动参数。
 //
 // 本包是纯数据 + 纯函数子包：不 import `internal/**`（archtest 的 TestAdapterHasNoStoreLiterals 守），
-// 也不 import 父包 `pkg/runtime`（父子 import 环，约束⑦）。改启动面的两件事（写文件 / 装卸启动参数）
+// 也不 import 父包 `internal/runtime`（父子 import 环，约束⑦）。改启动面的两件事（写文件 / 装卸启动参数）
 // 只能经端口传进来的 `resource.Delivery` 完成；跑底座级校验门所需的外部信息（可执行文件、staging
 // 目录）只能经 `Options` 传进来——adapter 拿不到注册表，也不该自己拼 HOME。
 package dsh
@@ -50,7 +50,7 @@ const (
 	patchPerm = os.FileMode(0o600)
 )
 
-// DefaultRefPattern 平台凭据引用名的默认模板（与 `pkg/runtime/adapters.go` 的 Credential.RefPattern 一致）。
+// DefaultRefPattern 平台凭据引用名的默认模板（与 `internal/platform/resource/resource.go` 的 `CredentialSpec.RefPattern` 一致）。
 //
 // adapter 用它派生**平台命名空间前缀**（`MATE_`），从而知道凭据文档里哪些 `refs` 条目是自己写的。
 // 为什么需要知道：凭据文档是**共享面**（还有 `records:` 与用户自己的 refs），契约③的空集撤回在这里
@@ -59,7 +59,7 @@ const DefaultRefPattern = "MATE_%s_API_KEY"
 
 // Options 构造同步实现所需的**已解析落点**与底座级校验门的开关。
 //
-// 路径由父包解析后传入（见 `pkg/runtime.ResolveConfigLocation`）：adapter 拿不到注册表，
+// 路径由父包解析后传入（见 `internal/runtime.ResolveConfigLocation`）：adapter 拿不到注册表，
 // 也不该自己拼 `HOME`（那正是"平台写到用户真实目录"的入口，见 `docs/agents/isolation.md` 的隔离纪律）。
 type Options struct {
 	// PatchPath overlay 的绝对落点（`--patch` 指向它）。空 = 未声明清单落点（交付面不可用）。
@@ -84,7 +84,7 @@ type Options struct {
 	PatchArgs *PatchArgs
 }
 
-// NewSyncer 构造 dsh 的清单同步实现（装配形态见 `pkg/runtime/registerBuiltinSyncers`）。
+// NewSyncer 构造 dsh 的清单同步实现（装配形态见 `internal/adapters/outbound/dsh/adapter.go` 的 `registerBuiltinSyncers`）。
 func NewSyncer(opts Options, delivery resource.Delivery) resource.Syncer {
 	patches := opts.PatchArgs
 	if patches == nil {
@@ -482,7 +482,7 @@ func buildPatch(set resource.Set) ([]byte, error) {
 // sortedModels 把模型按 `(ProviderID, Model)` 排序后返回。
 //
 // 为什么要防御性排序：dsh 的 `models[]` 是**数组**（顺序进字节），逐字节 golden 要求"同输入同字节"。
-// 编排层虽然已经按 `(ProviderID, Model)` 固定顺序（`pkg/resource.Set` 的契约），但这里再排一次
+// 编排层虽然已经按 `(ProviderID, Model)` 固定顺序（`internal/platform/resource.Set` 的契约），但这里再排一次
 // 让"顺序"这件事不依赖调用方的记性；且该序在**逐 route 过滤后**恰好是 v11 的上游模型名升序
 // （v11 的输入就是按上游模型名全局排序的），等价性因此成立。
 func sortedModels(in []resource.Model) []resource.Model {

@@ -16,7 +16,7 @@ type DiagnosticsResp struct {
 	// 它是**事实**（当前有没有活着的连接），不是 agent 的"运行态字段"——v19 之前这一项来自
 	// 每个 agent 自己的一份 state，现在直接由连接集合推导（单底座 ⇒ 一个答案）。
 	State string `json:"state"`
-	// Runtime 构建期固定的底座 id（`-X pkg/runtime.BuildRuntime`，不注入 = dsh）。
+	// Runtime 构建期固定的底座 id（`-X internal/runtime.BuildRuntime`，不注入 = dsh）。
 	Runtime string `json:"runtime"`
 	// RuntimeName 底座的展示名（空 = 取不到，界面回落用 Runtime）。
 	RuntimeName string `json:"runtime_name,omitempty"`

@@ -1,6 +1,6 @@
 // Package dbclient 装配控制面的数据库句柄（gorm + golib dbaccess 的 SQLite 驱动）。
 //
-// 与 ark-iam 的 `pkg/dbclient` 的差异：ark-iam 是「一进程一库」的多租户服务，
+// 与 ark-iam 的 `internal/adapters/outbound/sqlite/db` 的差异：ark-iam 是「一进程一库」的多租户服务，
 // 因此在包里持有 `dbMap[string]*gorm.DB` 全局单例；ark-mate 的持久层是**按实例**
 // 打开的（`store.Open(path)`，且测试大量使用各自独立的内存库），所以这里不持有
 // 单例，只提供 Open 一件事。
@@ -22,7 +22,7 @@ import (
 	// 与 glog 的 driver 不同，dbgorm 的 driver 是**数据面**的注册表：`dbgorm.New`
 	// 按 URL 前缀在注册表里匹配，不 import 具体驱动就报
 	// "no registered dialector matches url"。它属于本包自己的依赖，因此匿名引入
-	// 留在这里（与 ark-go-starter 的 pkg/dbclient 一致）；日志出口的 driver 才归装配根。
+	// 留在这里（与 ark-go-starter 的 internal/adapters/outbound/sqlite/db 一致）；日志出口的 driver 才归装配根。
 	//
 	// 驱动形态（2026-10-10 决策：用户明确选择"照字面用 golib 的 driver"；
 	// 2026-10-12 决策：随 golib v1.32.22 回到**纯 Go**）：
@@ -40,7 +40,7 @@ import (
 	//     回去而构建面仍是 0，就会原样复现那个静默故障——所以依赖与构建面两侧由
 	//     internal/archtest 的 TestSqliteDriverStaysPureGo 一起钉着。
 	//   - 相比原先自注册的纯 Go dialector，连接级行为仍由 golib 决定，且 v1.32.22 换了
-	//     一批事实（下面每条都由 pkg/dbclient/dbclient_test.go 显式记录）：
+	//     一批事实（下面每条都由 internal/adapters/outbound/sqlite/db/dbclient_test.go 显式记录）：
 	//     注入 `busy_timeout(5000)`（排在所有 PRAGMA 之前，调用方显式传入时不覆盖）、
 	//     文件库注入 `_txlock=immediate`（BEGIN IMMEDIATE，避开锁升级绕过 busy_timeout
 	//     直接报 database is locked）；**不注入** journal_mode/synchronous（仍是

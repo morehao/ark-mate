@@ -20,7 +20,7 @@ import (
 // 内存库还变成固定名共享）→ ③ golib v1.32.22 的 ncruces/go-sqlite3 纯 Go 方言（本次）。
 //
 // 下面几条守卫把 ③ 的取值钉住，**红了就说明行为又变了**：不要默默放宽，先回来看这段注释，
-// 想清楚新事实是不是我们想要的，再连同 pkg/dbclient/gorm.go 的注释一起改。
+// 想清楚新事实是不是我们想要的，再连同 internal/adapters/outbound/sqlite/db/gorm.go 的注释一起改。
 
 // TestOpenMemoryIsReallyInMemory 内存库必须真的是内存库。
 //

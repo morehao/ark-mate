@@ -16,7 +16,7 @@ package runtime
 //
 // 形状与 `resource.Syncer` 同款（ADR-2）：`Spec` 只装纯数据，**可执行对象挂注册表第二张可执行端口表**。
 //
-// **签名刻意只用内建类型**（`string` / `map[string]string`）：接口定义在父包 `pkg/runtime`，而
+// **签名刻意只用内建类型**（`string` / `map[string]string`）：接口定义在父包 `internal/runtime`，而
 // adapter 子包不能 import 父包（约束⑦的父子 import 环）。用内建类型后 adapter 只要写出**同签名的方法**
 // 就结构化满足本接口，无需 import 任何父包类型。
 type NativePermissionAdapter interface {

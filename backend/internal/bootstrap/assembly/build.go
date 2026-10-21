@@ -124,7 +124,7 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 		fn(&o)
 	}
 
-	// 产品装配：**只注册构建期选中的那一个底座**（见 pkg/runtime/build.go）。
+	// 产品装配：**只注册构建期选中的那一个底座**（见 internal/runtime/build.go）。
 	// 远程 runtime（A5）：runtimes.json 声明的远程 ACP 端点参与同一次选择——选中的 id 命中其中
 	// 一条声明时实现来自远端；未选中的声明不进入本进程的注册表（它们是**候选**，不是装配结果）。
 	// 与内置 id 冲突、或选中的 id 谁都不是 → 启动即失败（不静默覆盖内置，也不给出空注册表）。

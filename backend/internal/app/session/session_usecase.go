@@ -187,5 +187,5 @@ func rejectRemovedAgentSelection(agentID json.RawMessage) error {
 		return nil
 	}
 	return code.RequestError("agent_selection_removed", "agent 概念已并入 runtime：底座由构建期固定（本机为 "+runtime.SelectedRuntime()+"），"+
-		"会话不再有 `agent_id`；换底座要重新构建（-X pkg/runtime.BuildRuntime=<id>）")
+		"会话不再有 `agent_id`；换底座要重新构建（-X internal/runtime.BuildRuntime=<id>）")
 }

@@ -8,7 +8,7 @@ import (
 
 // registerRuntime 底座面：provider 档案、模型目录与运行时诊断。
 //
-// **没有 `/runtimes`**：底座由构建期固定（`-X pkg/runtime.BuildRuntime=<id>`，默认 dsh），
+// **没有 `/runtimes`**：底座由构建期固定（`-X internal/runtime.BuildRuntime=<id>`，默认 dsh），
 // 用户面不存在"有哪些底座 / 选哪个"的读面。运行时身份在 `/meta` 的 `runtime` 与
 // `GET /runtime/diagnostics` 里如实出现，那是事实不是选项。
 //

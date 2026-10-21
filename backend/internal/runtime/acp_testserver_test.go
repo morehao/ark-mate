@@ -15,7 +15,7 @@ import (
 	"github.com/morehao/ark-mate/internal/adapters/outbound/acp"
 )
 
-// testACPResponder 是 pkg/runtime 测试用的**自建最小 ACP responder**。
+// testACPResponder 是 internal/runtime 测试用的**自建最小 ACP responder**。
 //
 // 为什么需要它：`TestConnectRemoteTransport` 原先拿内置 echo 底座当对端（echo 已于 M0 删除）。
 // 若一并删掉该测试，`runtime.Connect` 的远程分支（ws/http）就失去覆盖，而远程 runtime 是

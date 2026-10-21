@@ -311,7 +311,7 @@ func parseV12ModelBody(m migrationV12Model) migratedV13Model {
 
 // modalityText 是 `input_modalities` 的默认值（两态里的保守那一态）。
 //
-// store 不 import `pkg/resource`：这里是**落库字面量**，与"今天应用层怎么写"是两件事
+// store 不 import `internal/platform/resource`：这里是**落库字面量**，与"今天应用层怎么写"是两件事
 // （对齐 `openAIProtocol` 的同一条理由）。
 const modalityText = "text"
 

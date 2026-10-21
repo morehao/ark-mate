@@ -423,7 +423,7 @@ const GatewayServerName = "mate-gateway"
 // `Command`/`Args`），而 cwd 是**值**——换个目录启动 `mate serve` 不该让所有会话换一次底座进程；
 // `Env` 只把**键名**入指纹（`EnvKeys`），键名恒定、取值不入，正好是"改指向不换代际"这条语义。
 //
-// 刻意**不进** `pkg/runtime/isolation.go` 的隔离表：那张表管的是"别让底座的子进程去读写用户
+// 刻意**不进** `internal/runtime/isolation.go` 的隔离表：那张表管的是"别让底座的子进程去读写用户
 // 自己的 home"，而这是我们自己的装配值，随条目一对一携带（也因此不依赖进程环境继承是否完整）。
 const GatewayCredCwdEnv = "MATE_MCP_CRED_CWD"
 
