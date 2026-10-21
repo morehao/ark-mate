@@ -1,0 +1,47 @@
+{
+  "$doc": [
+    "开发循环的阶段声明（T3）。**这是阶段表唯一的事实源**：dev-loop.mjs 读它执行，",
+    "backend 的 archtest 读它校验（同一套判据，见 TestDevStageTableIsDeclared）。",
+    "为什么单列一份 JSON 而不是写在 .mjs 里：两边（Node 与 Go 守卫）都要读同一份声明，",
+    "而 Go 守卫解析 JS 只能靠正则——那是模式匹配，不是判据。",
+    "字段：name 唯一；kind=once（等退出）|daemon（常驻）；critical 失败是否拖垮整个循环；",
+    "timeoutMs 一步的上界：once=最长运行时间，daemon=**就绪窗口**（起起来后这么久内不能退出；",
+    "带 readyProbe=http-health 的 daemon 另有健康检查预算，不适用这一项）；",
+    "dependsOn 必须指向前面的阶段；非 critical 必须写 degrade（失败之后开发循环长什么样）。"
+  ],
+  "stages": [
+    {
+      "name": "build",
+      "kind": "once",
+      "critical": true,
+      "timeoutMs": 300000,
+      "dependsOn": [],
+      "degrade": ""
+    },
+    {
+      "name": "types",
+      "kind": "daemon",
+      "critical": false,
+      "timeoutMs": 3000,
+      "dependsOn": ["build"],
+      "degrade": "类型检查不再随改跟跑：保存后不会即时报类型错（产物仍由 assets 阶段产出，应用照常可用，只是少了这道即时闸门）"
+    },
+    {
+      "name": "assets",
+      "kind": "daemon",
+      "critical": true,
+      "timeoutMs": 3000,
+      "dependsOn": ["build"],
+      "degrade": ""
+    },
+    {
+      "name": "serve",
+      "kind": "daemon",
+      "critical": true,
+      "timeoutMs": 90000,
+      "readyProbe": "http-health",
+      "dependsOn": ["assets"],
+      "degrade": ""
+    }
+  ]
+}

@@ -28,6 +28,8 @@
 
 - 再加 **1 条审计写入路径守卫**（`definition_revision_chain_test.go`，v32 / T4）：`definition_revisions` 追加**只许**经 `store.appendDefinitionRevision`（同一事务里取链尾、算哈希、插行）。判据两条，均 fail-closed（扫不到文件/找不到那句调用即失败）：① 生产代码里 `definitionRevision.WithTx(tx).Append(` 只许出现在 `definition_revision_chain.go`；② `internal/**` 生产代码（`migrate*.go` 除外）不得出现这张表的裸 `INSERT`。挡的是"另起一条插入路径"：它不会让任何测试变红——链上只是多一条 `hash=''` 的行，而 `hash=''` 在 v32 之前的历史行里**本来就合法**（它们是链的前缀），于是"新行绕过链"与"这是历史行"在库里长得一模一样。反证（实跑 2 条，均红）：把 `commitDefinitionChange` 改回直调 DAO 的 `Append`；在 `store/capability.go` 里加一句 `INSERT INTO definition_revisions`。
 
+- 再加 **1 条启动阶段表守卫**（`dev_stages_test.go`，T3）：`frontend/scripts/dev-stages.json` 是开发循环阶段表的唯一事实源（`dev-loop.mjs` 读它执行），本守卫读同一份 JSON 按**同一套规则**校验——名字唯一非空 / `kind ∈ {once,daemon}` / 每步 `timeoutMs>0` / **非 critical 必写 `degrade`** / `dependsOn` 只能指向前面的阶段；外加两条同源判据：`dev-loop.mjs` 必须真的引用 `dev-stages.json` 且调用 `loadStageTable`（不许自己另写一份表），以及**声明 ↔ 配方双向相等**（表里的阶段必须有启动配方、`recipes` 里的配方也必须在表里登记）。挡的是"少写一个阶段/表被删掉"（循环照跑、只是那个 watcher 再也不起）、"critical 与超时/降级脱钩"（挂了之后是拖垮循环还是降级只能读代码才知道）、以及"表与配方各说一套"（运行到那一步才发现）。后端那一侧同一套规则落在 `assembly.ValidateSteps`（`Build` 里 fail-closed + assembly 包的 `TestValidateStepsRejects` / `TestStartupStepsTableIsValid`）。反证（实跑 3 条，均红）：清空 `types` 的 `degrade`；把 `serve` 的 `dependsOn` 改成自指；把 `recipes` 里的 `assets` 改名。另在 assembly 包实跑 2 条：删掉 `空闲回收` 的 `Degrade`、给 `MCP 网关开关` 加 `Critical: true` 却不给 `Timeout` → 各红。
+
 - [`layout.md`](layout.md) 里的六条边界都由 `internal/archtest` 的守卫测试强制（`go test ./internal/archtest/`）；同目录还另有**四条**契约/出口守卫：事件 type 冻结快照（`TestEventTypeContractFrozen`）、前端事件同步边（`TestFrontendEventTypesMatchRegistry`）、控制器错误出口带码（`TestControllerErrorExitsCarryCode`）、**能力绑定粒度不得超出已实测范围**（`TestCapabilityScopeDeclaration`：读**策略接口** `Spec.Capability.BindScope()`——未 `Tested` 的 runtime 不得声明比 `process` 更细的绑定粒度，否则平台可能把 A 会话的能力投给 B 会话；C3 4.7 起判据读接口而不是读裸字段，所以换成"现场探测"实现的 adapter 同样被盯着）
 
 - 再加 **4 条前端侧边界守卫**（`frontend_boundary_test.go`，Go 读 TS 源码、不引前端测试框架）：`apps/web` 的产物包纪律（`dependencies` 空 / `exports` 只开产物 / `files` 排 map / 非 private）、`apps/desktop` 只消费 `apps/web` 的 dist 产物（不引其源码）、共享 UI 够不到 Electron 与 Node API（不引 `electron`/`node:*`/`@ark-mate/desktop`、不嗅探 `window.electron`）、`packages/*` 不反向相对引入 `apps/*`（界面搬进 `packages/console` 后，这条就是"搬迁方向"的守卫）；扫描根由 `uiSrcRoots()` 单点给出（`apps/web/src` + `packages/console/src` + `packages/ui/src`）——搬迁前六个守卫各自写死 `apps/web/src`，搬完会**静默空转**（目录还在、只剩入口，"目录不存在即 fatal"不触发）
@@ -185,7 +187,7 @@
   与实际 `cmd`/`ops`/`mcpgateway` 不符）。fail-closed：一条 `// Package …` 都没扫到即 `Fatal`。
   反证（实跑）：把 `app/library` 的包注释改回 `Package svclibrary` → 红；复原即绿。
 
-**共 182 条**——加守卫时记得同步这句话。
+**共 183 条**——加守卫时记得同步这句话。
 
 ## C3 目录重组：判据怎么跟着搬（2026-10-21）
 

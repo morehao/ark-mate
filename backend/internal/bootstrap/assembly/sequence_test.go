@@ -3,8 +3,12 @@ package assembly
 import (
 	"context"
 	"errors"
+	"net"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/config"
 )
 
 // TestSequenceStartStopSymmetric 钉住两条最容易静默漂移的形状：
@@ -131,4 +135,122 @@ func join(items []string) string {
 		out += s
 	}
 	return out
+}
+
+// ——— T3：启动步骤表的**声明判据**（每条都是一种"不会让别的测试变红"的错法） ———
+
+// TestValidateStepsRejects 四条规则各自**真的会拦**：名字/阶段/critical 无超时/非 critical 无降级，
+// 外加 DependsOn 的两种指错（指向不存在的、指向后面的）。
+//
+// 这些错法在改造前都是"注释里写得对、代码里悄悄错"：例如给了 `Critical: true` 却没给 Timeout，
+// 那一步挂住时进程既不起来也不退出，而所有单测都是绿的。
+func TestValidateStepsRejects(t *testing.T) {
+	ok := func(name string) Step {
+		return Step{Name: name, Phase: PhaseDomain, Critical: true, Timeout: time.Second}
+	}
+	opt := func(name string) Step {
+		return Step{Name: name, Phase: PhaseDomain, Timeout: time.Second, Degrade: "降级成 X"}
+	}
+	cases := []struct {
+		name  string
+		steps []Step
+		want  string
+	}{
+		{"合法表", []Step{ok("a"), opt("b"), ok("c")}, ""},
+		{"空名字", []Step{{Name: " ", Phase: PhaseDomain, Critical: true, Timeout: time.Second}}, "没有名字"},
+		{"重名", []Step{ok("a"), ok("a")}, "重复"},
+		{"非法阶段", []Step{{Name: "a", Phase: Phase("某阶段"), Critical: true, Timeout: time.Second}}, "Phase"},
+		{"critical 无超时", []Step{{Name: "a", Phase: PhaseDomain, Critical: true}}, "没有超时"},
+		{"非 critical 无降级", []Step{{Name: "a", Phase: PhaseDomain, Timeout: time.Second}}, "没有声明降级动作"},
+		{"依赖不存在", []Step{Step{Name: "a", Phase: PhaseDomain, Critical: true, Timeout: time.Second, DependsOn: []string{"ghost"}}}, "表里没有这一步"},
+		{"依赖排在后面", []Step{
+			Step{Name: "a", Phase: PhaseDomain, Critical: true, Timeout: time.Second, DependsOn: []string{"b"}},
+			ok("b"),
+		}, "排在它后面"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateSteps(tc.steps)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("这张表应当合法，却被判错：%v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("应当被拒（%s），实际通过", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("错误文案应含 %q，got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// TestStartupStepsTableIsValid 真实的那张表过同一份判据，并钉住三处**顺序敏感**的事实
+// （改表的人最容易在"看起来都一样"的列表里把这几行挪位）。
+func TestStartupStepsTableIsValid(t *testing.T) {
+	as := &assembly{cfg: config.Default()}
+	steps := as.steps()
+	if err := ValidateSteps(steps); err != nil {
+		t.Fatalf("启动步骤表不自洽：%v", err)
+	}
+	if len(steps) < 20 {
+		t.Fatalf("步骤数 %d 明显偏少：表被删成了骨架？", len(steps))
+	}
+	idx := make(map[string]int, len(steps))
+	for i, st := range steps {
+		idx[st.Name] = i
+	}
+	must := func(name string) int {
+		i, ok := idx[name]
+		if !ok {
+			t.Fatalf("表里少了步骤 %q（改名了？本判据跟着改）", name)
+		}
+		return i
+	}
+	if must("命令门禁") != 0 {
+		t.Fatalf("命令门禁必须最先：规则文件非法要拒绝启动，不能被后面的步骤抢先")
+	}
+	if must("凭据面") > must("持久层打开") {
+		t.Fatalf("凭据面必须在持久层打开之前（接线那一次同步就要读 provider 密钥）")
+	}
+	if must("就绪宣告") != len(steps)-1 {
+		t.Fatalf("就绪宣告必须是最后一步（监听器绑好、路由就绪之后才谈得上\"起来了\"）")
+	}
+	// 就绪宣告依赖的两项必须真的在它前面（DependsOn 已由 ValidateSteps 判过，这里钉语义）。
+	for _, dep := range []string{"路由", "监听绑定"} {
+		if must(dep) > must("就绪宣告") {
+			t.Fatalf("%s 必须排在就绪宣告之前", dep)
+		}
+	}
+}
+
+// TestReadyAnnounceIsAStep 就绪行由**序列**打，而不是 `App.Run` 里那三行：判据是"回调拿到了
+// 监听器的实际地址"，且序列**没有**交出就绪宣告时不调（测试/非桌面形态）。
+func TestReadyAnnounceIsAStep(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("起监听器: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	var got net.Addr
+	as := &assembly{
+		cfg:  config.Default(),
+		opts: Options{ReadyAnnounce: func(addr net.Addr) error { got = addr; return nil }},
+		ln:   ln,
+	}
+	if err := as.startReadyAnnounce(context.Background()); err != nil {
+		t.Fatalf("就绪宣告: %v", err)
+	}
+	if got == nil || got.String() != ln.Addr().String() {
+		t.Fatalf("回调应拿到监听器的实际地址：got %v want %v", got, ln.Addr())
+	}
+
+	// 没有回调（测试/非桌面形态）→ 什么都不做，也不报错。
+	as.opts.ReadyAnnounce = nil
+	if err := as.startReadyAnnounce(context.Background()); err != nil {
+		t.Fatalf("没有回调时不应报错：%v", err)
+	}
 }

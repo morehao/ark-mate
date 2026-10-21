@@ -60,6 +60,8 @@ Electron 主进程（桌面态）
                               └─ spawn ─► MCP server 子进程（stdio，或经平台网关代理远程 MCP）
 ```
 
+- **核心的启动过程是一张声明表**（T3）：`internal/bootstrap/assembly` 的 `steps()` 里每一步都是 `{Name, Phase, Critical, Timeout, DependsOn, Start/Stop, Degrade}`，`ValidateSteps` 在 `Build` 与测试里各跑一次——**critical 必须有超时**（挂住时既不起来也不退出是最坏的一种"半个进程活着"）、**非 critical 必须写降级动作**（"这一步挂了系统长什么样"只该有一个答案）、`DependsOn` 只能指向表里更靠前的步骤。**就绪只在一处表达**：`MATE_READY` 行的格式归 `bootstrap/app`（`ReadyLine`），**时机**归序列的最后一步「就绪宣告」（依赖「监听绑定」+「路由」）——它原先长在 `App.Run` 里，于是"什么时候算起来了"有两个答案。
+- **开发循环的阶段表同一套形状**（`frontend/scripts/dev-stages.json`，`dev-loop.mjs` 读它执行、archtest 读它校验）：`critical` 阶段自死 → 整体回红；非 critical → 显式降级后继续。两份序列描述的是两个不同的过程（核心内部 27 步 vs 开发循环 4 阶段），收敛的是**形状与判据**，不是把两件事塞进一个文件。
 - 桌面壳的启动链没有「安装」动作：无 registry 请求、无编译、不写系统目录、不改用户 `PATH`。壳按 `/v1/mate/health` 轮询直到核心就绪，再 `loadURL mate-app://app/`，并在 boot 时把事件流基址与 stream 令牌下发给渲染进程。
 - **远程端点两种传输**：除本地子进程外，同一套 ACP 客户端还能直连远程端点——`acl.HTTPTransport`（Streamable HTTP：POST 每条消息 + SSE 响应流承载通知）与 `acl.WSTransport`（一条 WebSocket，一帧一条消息）。远程 runtime 在 `.ark-mate/config/runtimes.json` 声明，且**只有被构建期选中的那个 id 命中声明时才会注册**。远程端点没有 pid，进程注册表与孤儿回收对它不适用。
 

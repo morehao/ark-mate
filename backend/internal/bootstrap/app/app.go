@@ -4,7 +4,8 @@
 //   - cmd/mate：进程级分发（把参数交给 cli，把返回码交还 shell）；
 //   - internal/bootstrap/cli：命令树（参数解析、输出、退出码）；
 //   - internal/bootstrap/assembly：**唯一装配根**（对象图 + 启停序列）；
-//   - 本包：server 启停、ready 行、信号与优雅关闭。**不构造 service/store/controller，不注册路由**。
+//   - 本包：server 启停、ready 行（**格式**；时机在装配序列的「就绪宣告」那一步）、信号与优雅关闭。
+//     **不构造 service/store/controller，不注册路由**。
 //
 // 为什么壳还在：`assembly.Build` 只把对象装好（含监听器与 http.Handler），而"把 Handler 挂到
 // `http.Server`、在监听成功后回写就绪行、按 ctx 优雅停机"这三件事只在进程交付面成立——
@@ -15,14 +16,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
 	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/ark-mate/internal/contract/dtosystem"
+	"github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/golib/glog"
 )
 
@@ -104,12 +106,36 @@ func (a *App) Meta() dtosystem.MetaInfo {
 // 仍由本包启停（`Run`/`Close`），装配根不持有 `http.Server`。
 func (a *App) Init(ctx context.Context) error {
 	res, err := assembly.Build(ctx, a.cfg, a.sources,
-		assembly.WithCredentials(a.creds), assembly.WithPayloads(a.payloads))
+		assembly.WithCredentials(a.creds), assembly.WithPayloads(a.payloads),
+		assembly.WithReadyAnnounce(a.readyAnnounce))
 	if err != nil {
 		return err
 	}
 	a.res = res
 	a.srv = newHTTPServerOn(res.Handler.Listener, res.Handler.Handler)
+	return nil
+}
+
+// readyAnnounce 就绪宣告（M1-2）：交给**启动序列**在「就绪宣告」那一步调用。
+//
+// 位置从这里（`App.Run` 里的三行）搬到序列里，是因为"什么时候算起来了"只该有一个答案：
+// 监听器在装配期就绑好了，而就绪行原先由另一段控制流打出去，于是"起来了"有两个表达处。
+// 本函数只负责**格式**（壳的解析契约，`ReadyLine`），序列负责**时机**。
+//
+// 只走 stdout 一行、不含任何令牌；壳按行首 `MATE_READY ` 匹配，拿不到就退回 health 轮询。
+// 未开 `--ready-stdout` 时不打（返回 nil，步骤无副作用）。
+func (a *App) readyAnnounce(addr net.Addr) error {
+	if !a.readyStdout {
+		return nil
+	}
+	if addr == nil {
+		return errors.New("就绪宣告: 监听器地址为空")
+	}
+	line, err := ReadyLine(addr.String())
+	if err != nil {
+		return fmt.Errorf("组装就绪行: %w", err)
+	}
+	fmt.Println(line)
 	return nil
 }
 
@@ -133,16 +159,6 @@ func (a *App) Run(ctx context.Context) error {
 			glog.Infow(ctx, "serve: MCP 自动探测已启用（startup 模式，后台逐个探测已注册 server）")
 			_ = a.res.Probe.AutoProbeMCP(ctx)
 		}()
-	}
-
-	// 就绪行（M1-2）：监听器在装配期就绑好了，这里打的是**实际**地址（`:0` 时是内核分配的端口）。
-	// 只走 stdout 一行、不含任何令牌；壳按行首 `MATE_READY ` 匹配，拿不到就退回 health 轮询。
-	if a.readyStdout {
-		if line, err := ReadyLine(a.srv.Addr()); err != nil {
-			glog.Warnw(ctx, "serve: 组装就绪行失败，壳将退回 health 轮询", "err", err)
-		} else {
-			fmt.Println(line)
-		}
 	}
 
 	if err := a.srv.Start(); err != nil {

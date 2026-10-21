@@ -90,6 +90,21 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 ### T3 · L3-1：启动过程显式建模
 
+> **已落地（2026-10-21）**：后端 `assembly` 的 `Step` 补上 `DependsOn` / `Degrade` 两列，并把
+> "自洽"变成可跑的判据 `ValidateSteps`（critical 必须有超时、非 critical 必须写降级动作、
+> 依赖只能指向前面的步骤、名字唯一、Phase 合法），`Build` 里 fail-closed 跑一次。
+> **就绪收成一处**：`MATE_READY` 的格式留 `bootstrap/app`，时机变成序列最后一步「就绪宣告」
+> （非 critical；降级 = 壳退回 health 轮询）——原先它长在 `App.Run` 里，是第二个"起来了"。
+> **开发循环的阶段表独立成声明**：`frontend/scripts/dev-stages.json`（`{name, kind, critical,
+> timeoutMs, dependsOn, degrade}`），`dev-loop.mjs` 只负责执行；`critical` 自死 → 整体回红，
+> 非 critical（今天只有 `types`）→ 显式降级后继续；`once` 阶段有运行上界、`daemon` 有就绪窗口，
+> `serve` 走健康检查预算。守卫 `TestDevStageTableIsDeclared` 读同一份 JSON 按同一套规则校验，
+> 并钉住"声明 ↔ 配方双向相等"。
+> **口径收窄（如实记账）**：两份序列描述的是两个不同的过程（核心内部 27 步 vs 开发循环 4 阶段），
+> 收敛的是**形状与判据**，不是把两者塞进一个文件——那只会让两边互相牵制。所谓"同一份声明"
+> 在这两个进程里各有一份，但**校验规则只有一套**，且 dev-loop 不再复述核心的知识
+> （`--web-dir` 缺 index.html 的退出码 3 由核心自报）。
+
 - **现状**：`frontend/scripts/dev-loop.mjs` 有阶段监督（任一阶段死即整体回红），但缺一张
   「带预算与降级策略的启动步骤表」——启动仍是一串 `await`。
 - **做什么**：定义步骤表：每步 `{name, critical, timeout, dependsOn, 降级动作}`；把

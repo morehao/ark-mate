@@ -2,6 +2,12 @@
 /**
  * 开发循环：**构建一次 → 常驻 watcher 重建 → 真实宿主服务同一份构建产物**。
  *
+ * **阶段表是声明出来的**（T3）：顺序、critical、超时、依赖、降级动作都在 `dev-stages.json` 里，
+ * 本文件只负责**执行**那张表。分档口径与后端的启动序列（`internal/bootstrap/assembly` 的
+ * `Step` / `ValidateSteps`）同形同判据：critical 必须有超时、非 critical 必须写降级动作、
+ * `dependsOn` 只能指向前面的阶段。同一份 JSON 也被 archtest 读去校验（`TestDevStageTableIsDeclared`）
+ * ——两边各写一份就是两个真相。
+ *
  * 阶段顺序（对齐参照实现 DSH 的 `scripts/dev-web.ts`，那里给了同样的三段式与理由）：
  *   1. `pnpm run build`（`--skip-build` 可跳过）：**必须先跑完**——它与阶段 2 写的是同一棵 `dist/`；
  *   2. 两个常驻 watcher：`tsc -b --watch`（类型）与 `vite build --watch --no-emptyOutDir`（改写 dist）；
@@ -65,7 +71,11 @@ const WATCH_INTERVAL_MS = 200
 /** 父进程看护间隔：`make` 被杀而信号没到我们身上时，靠它发现"自己已经没有主人了"。 */
 const ORPHAN_CHECK_MS = 2000
 
+/** 阶段声明表（唯一事实源；见文件头）。 */
+const STAGE_TABLE_PATH = new URL('./dev-stages.json', import.meta.url)
 const stageDeaths = []
+/** 已经降级的阶段（非 critical 挂了）：收尾时汇总，免得"少了一个 watcher"只留在刷过去的日志里。 */
+const degradations = []
 let stopping = false
 let requested = null
 /**
@@ -222,14 +232,22 @@ function launch(name, command, args, opts = {}) {
   })
   child.on('exit', (code, signal) => {
     if (stopping) return
-    fail(name, signal ? `被信号 ${signal} 终止` : `自行退出（退出码 ${code}）`)
+    const why = signal ? `被信号 ${signal} 终止` : `自行退出（退出码 ${code}）`
+    // critical 与非 critical 的分档与后端启动序列同一套：前者拖垮整个循环，后者如实降级。
+    if (opts.critical === true) fail(name, why)
+    else degrade(name, why)
   })
-  stages.set(name, { child, longLived: opts.longLived === true })
+  stages.set(name, { child, longLived: opts.longLived === true, critical: opts.critical === true })
   if (opts.longLived) log(`==> 阶段 ${name} 已起（pid ${child.pid}）`)
   return child
 }
 
-/** 一次性阶段：等它跑完，非 0 直接抛。 */
+/**
+ * 一次性阶段：等它跑完，非 0 直接抛；给了 `timeoutMs` 就**有上界**（超时按进程组杀掉再抛）。
+ *
+ * 上界不是可选项：一次 `tsc -b && vite build` 挂住时，没有超时的开发循环会永远停在那一行
+ * ——既没有产物也没有报错，而人只会以为"还在编译"。
+ */
 function runOnce(name, command, args, opts = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(command, args, {
@@ -238,12 +256,34 @@ function runOnce(name, command, args, opts = {}) {
       stdio: 'inherit',
       detached: true,
     })
-    child.on('error', (err) => rejectPromise(new Error(`${name}: ${err.message}`)))
-    child.on('exit', (code) => {
+    let timer = null
+    if (opts.timeoutMs > 0) {
+      timer = setTimeout(() => {
+        signalGroup(child, 'SIGKILL')
+        rejectPromise(new Error(`${name} 超过 ${Math.round(opts.timeoutMs / 1000)}s 未完成（已杀掉进程组）`))
+      }, opts.timeoutMs)
+    }
+    const settle = (fn) => (arg) => {
+      if (timer !== null) clearTimeout(timer)
+      fn(arg)
+    }
+    child.on('error', settle((err) => rejectPromise(new Error(`${name}: ${err.message}`))))
+    child.on('exit', settle((code) => {
       if (code === 0) resolvePromise()
       else rejectPromise(new Error(`${name} 失败（退出码 ${code}）`))
-    })
+    }))
   })
+}
+
+/** 常驻阶段的**就绪窗口**：起起来之后 `windowMs` 内没退出才算起来了。 */
+async function waitAlive(name, windowMs) {
+  const stage = stages.get(name)
+  const deadline = Date.now() + windowMs
+  while (Date.now() < deadline) {
+    if (!stage || stage.child.exitCode !== null || stage.child.signalCode !== null) return false
+    await sleep(100)
+  }
+  return !(stage && (stage.child.exitCode !== null || stage.child.signalCode !== null))
 }
 
 /** 收尾：先给每个进程组 SIGTERM，宽限后仍在的 SIGKILL。 */
@@ -288,9 +328,29 @@ function fail(name, why) {
   finish(1)
 }
 
+/**
+ * 非 critical 阶段挂了：**不拖垮循环**，但要留下一条显式的降级（判据在 `dev-stages.json` 的
+ * degrade 里：这一步没了之后开发循环长什么样，只该有一个答案）。
+ */
+function degrade(name, why) {
+  const declared = (stageTable.stages.find((st) => st.name === name) ?? {}).degrade
+  // 同一阶段只记一次：exit 钩子与就绪窗口可能先后发现同一件事（"它死了"），
+  // 报两遍会让"到底降级了几件事"读不清。
+  if (degradations.some((d) => d.name === name)) return
+  degradations.push({ name, why })
+  log('')
+  log(`==> 降级：阶段 ${name} ${why}。`)
+  log(`    ${declared === undefined || declared === '' ? '（这一步没声明降级动作——阶段表验证本该拦住它）' : declared}`)
+  log('    其余阶段继续跑；`make dev` 不必重跑。')
+}
+
 async function finish(code) {
   stopping = true
   await stopAll()
+  if (degradations.length > 0) {
+    log('')
+    log(`==> 本次开发循环有 ${degradations.length} 个阶段降级：${degradations.map((d) => `${d.name}（${d.why}）`).join('；')}`)
+  }
   process.exit(code)
 }
 
@@ -312,6 +372,42 @@ function parseArgs(argv) {
     }
   }
   return out
+}
+
+/**
+ * 读阶段声明表并**校验**它（fail-closed：表不存在、字段缺失、依赖指错、critical 没超时、
+ * 非 critical 没降级 —— 一律当场退出 2）。
+ *
+ * 判据与后端启动序列的 `assembly.ValidateSteps` 同形同规则，理由也一样：这些错法都不会让任何
+ * 测试变红，只会让"少了一个 watcher"看起来像"一切都好"。
+ */
+function loadStageTable(url) {
+  const raw = readFileSync(url, 'utf8')
+  const table = JSON.parse(raw)
+  const stages = Array.isArray(table.stages) ? table.stages : []
+  if (stages.length === 0) throw new Error('阶段表为空：这张表就是开发循环的唯一事实源')
+  const index = new Map()
+  for (const [i, st] of stages.entries()) {
+    if (typeof st.name !== 'string' || st.name.trim() === '') throw new Error(`第 ${i + 1} 个阶段没有名字`)
+    if (index.has(st.name)) throw new Error(`阶段名 ${st.name} 重复`)
+    index.set(st.name, i)
+    if (st.kind !== 'once' && st.kind !== 'daemon') throw new Error(`阶段 ${st.name} 的 kind=${st.kind} 非法（once|daemon）`)
+    if (typeof st.timeoutMs !== 'number' || st.timeoutMs <= 0) throw new Error(`阶段 ${st.name} 没有超时（timeoutMs）`)
+    if (st.critical !== true && (typeof st.degrade !== 'string' || st.degrade.trim() === '')) {
+      throw new Error(`非 critical 阶段 ${st.name} 没有声明降级动作（degrade）`)
+    }
+    if (st.readyProbe !== undefined && st.readyProbe !== 'http-health') {
+      throw new Error(`阶段 ${st.name} 的 readyProbe=${st.readyProbe} 非法（http-health）`)
+    }
+    if (!Array.isArray(st.dependsOn)) throw new Error(`阶段 ${st.name} 的 dependsOn 必须是数组`)
+  }
+  for (const [i, st] of stages.entries()) {
+    for (const dep of st.dependsOn) {
+      if (!index.has(dep)) throw new Error(`阶段 ${st.name} 依赖 ${dep}，但表里没有这一步`)
+      if (index.get(dep) >= i) throw new Error(`阶段 ${st.name} 依赖 ${dep}，而后者排在它后面（依赖只能指向前面的阶段）`)
+    }
+  }
+  return { stages }
 }
 
 /** 轮询健康检查；核心先死则立刻失败（不等到超时才知道）。 */
@@ -347,53 +443,115 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   })
 }
 
+// ——— 阶段表：读 + 校验（fail-closed；表不自洽就别起任何东西）———
+let stageTable
+try {
+  stageTable = loadStageTable(STAGE_TABLE_PATH)
+} catch (err) {
+  log(`==> 阶段表 ${fileURLToPath(STAGE_TABLE_PATH)} 不自洽：${err.message}`)
+  process.exit(2)
+}
+
 log('==> 开发循环  唯一资产路径：vite build --watch 改写产物，核心服务同一份产物')
 log(`   产物  ${WEB_DIR}`)
 log(`   打开  ${APP_URL}   （不要另起 vite dev server：apps/web/vite.config.ts 会在 serve 上直接报错）`)
 const runtimeHit = reportRuntimeHit(resolveRuntimeHit())
 
-if (options.build) {
-  log('==> 阶段 build（一次性）：tsc -b && vite build')
-  try {
-    await runOnce('build', 'pnpm', ['run', 'build'], { cwd: WEB_APP })
-  } catch (err) {
-    log(`==> ${err.message}`)
-    await finish(1)
-  }
-} else {
-  log('==> 跳过一次性构建（--skip-build）：假定产物树已经完整')
+// 命令行选择：`--skip-build` / `--no-serve` 只是把对应阶段标成"用户显式跳过"，
+// 依赖它的阶段据此判断（跳过 ≠ 失败：这是用户的选择，但要**说出来**）。
+const skipped = new Set()
+if (!options.build) skipped.add('build')
+if (!options.serve) skipped.add('serve')
+
+/**
+ * 阶段 → 启动配方。**声明在 JSON 里，配方在这里**：命令与参数依赖运行时事实（产物目录、
+ * ldflags、命中的底座），塞进声明表只会让那一份事实源带上环境变量。两边的对应关系由
+ * archtest 双向钉住（表里的阶段必须有配方、配方必须有登记），漏一个就红。
+ */
+const recipes = {
+  build: (st) =>
+    runOnce('build', 'pnpm', ['run', 'build'], { cwd: WEB_APP, timeoutMs: st.timeoutMs }),
+  types: (st) =>
+    // 两个 watcher 都复用阶段 1 的产物树：增量，但不会替你补一棵缺失的树。
+    launch('types', 'pnpm', ['exec', 'tsc', '-b', '--watch', '--preserveWatchOutput'],
+      { cwd: WEB_APP, longLived: true, critical: st.critical }),
+  assets: (st) =>
+    launch('assets', 'pnpm', ['exec', 'vite', 'build', '--watch', '--no-emptyOutDir'],
+      { cwd: WEB_APP, longLived: true, critical: st.critical }),
+  serve: () => {
+    const coreArgs = ['run']
+    if (CORE_LDFLAG_ARGS !== '') coreArgs.push('-ldflags', CORE_LDFLAG_ARGS)
+    coreArgs.push('./cmd/mate', 'serve', '--web-dir', WEB_DIR)
+    // 开发期资产重建通知（P6-A）：核心盯自己正在服务的那份 dist，内容真变了就经
+    // `/dev/assets/events`（SSE）通知页面刷新——省掉"改完再手动刷一次"。
+    // **只在这一处传**：`make server` 与桌面壳都不传，于是交付形态下那条路由根本不存在
+    // （见 router.New 的注册点与 archtest 的开关守卫）。间隔与 DSH 的 poll 默认值一致。
+    coreArgs.push('--asset-watch', '500ms')
+    // 命中事实交给核心：`/meta.payloads[]` 在 dev 态因此不再恒为空数组（D3 的可见性缺口）。
+    // 不传 = 与今天逐字相同（非桌面态报空数组）；`source: path` 是那份契约里为本形态预留的取值。
+    if (runtimeHit !== null) coreArgs.push('--payloads', JSON.stringify(runtimeHit))
+    // 核心在 `--web-dir` 目录没有 index.html 时**拒绝启动（退出码 3）**：这正是 `build` 阶段
+    // 必须先跑完的原因（这条依赖是**声明**出来的，见 dev-stages.json 的 dependsOn）。
+    return launch('serve', 'go', coreArgs, { cwd: CORE_DIR, longLived: true, critical: true })
+  },
 }
 
-// 两个 watcher 都在复用阶段 1 的产物树：增量，但不会替你补一棵缺失的树。
-const typeArgs = ['exec', 'tsc', '-b', '--watch', '--preserveWatchOutput']
-launch('types', 'pnpm', typeArgs, { cwd: WEB_APP, longLived: true })
-
-const assetArgs = ['exec', 'vite', 'build', '--watch', '--no-emptyOutDir']
-launch('assets', 'pnpm', assetArgs, { cwd: WEB_APP, longLived: true })
-
-if (options.serve) {
-  const coreArgs = ['run']
-  if (CORE_LDFLAG_ARGS !== '') coreArgs.push('-ldflags', CORE_LDFLAG_ARGS)
-  coreArgs.push('./cmd/mate', 'serve', '--web-dir', WEB_DIR)
-  // 开发期资产重建通知（P6-A）：核心盯自己正在服务的那份 dist，内容真变了就经
-  // `/dev/assets/events`（SSE）通知页面刷新——省掉"改完再手动刷一次"。
-  // **只在这一处传**：`make server` 与桌面壳都不传，于是交付形态下那条路由根本不存在
-  // （见 router.New 的注册点与 archtest 的开关守卫）。间隔与 DSH 的 poll 默认值一致。
-  coreArgs.push('--asset-watch', '500ms')
-  // 命中事实交给核心：`/meta.payloads[]` 在 dev 态因此不再恒为空数组（D3 的可见性缺口）。
-  // 不传 = 与今天逐字相同（非桌面态报空数组）；`source: path` 是那份契约里为本形态预留的取值。
-  if (runtimeHit !== null) coreArgs.push('--payloads', JSON.stringify(runtimeHit))
-  // 核心在 `--web-dir` 目录没有 index.html 时**拒绝启动（退出码 3）**：这正是阶段 1 必须先跑完的原因。
-  launch('serve', 'go', coreArgs, { cwd: CORE_DIR, longLived: true })
-  const healthy = await waitHealthy('serve')
-  if (stopping) await finish(1)
-  if (!healthy) {
-    log('==> 后端没能就绪，收尾。请查看上方核心输出（`--web-dir` 缺 index.html 会以退出码 3 拒启）。')
+// 按表执行（顺序 = 声明顺序；每条依赖都指向前面，所以单趟就够）。
+const started = new Set()
+for (const st of stageTable.stages) {
+  if (skipped.has(st.name)) {
+    log(`==> 跳过阶段 ${st.name}（命令行的选择，不是失败）`)
+    continue
+  }
+  const recipe = recipes[st.name]
+  if (typeof recipe !== 'function') {
+    log(`==> 阶段表里的 ${st.name} 没有启动配方（recipes 与 dev-stages.json 对不上）`)
     await finish(1)
   }
-  log(`==> 就绪：${APP_URL}`)
-} else {
-  log('==> 跳过核心（--no-serve）：只跑 watcher')
+  const missing = st.dependsOn.filter((dep) => !started.has(dep) && !skipped.has(dep))
+  if (missing.length > 0) {
+    const why = `依赖的 ${missing.join('、')} 没有起来`
+    if (st.critical) {
+      log(`==> 阶段 ${st.name} ${why}：critical 步骤不能跳过它的依赖`)
+      await finish(1)
+    }
+    degrade(st.name, why)
+    continue
+  }
+
+  log(`==> 阶段 ${st.name}（${st.kind}${st.critical ? '，critical' : ''}）`)
+  try {
+    await recipe(st)
+  } catch (err) {
+    if (st.critical) {
+      log(`==> ${err.message}`)
+      await finish(1)
+    }
+    degrade(st.name, err.message)
+    continue
+  }
+
+  // 就绪判据：常驻阶段要么过完整健康检查，要么过就绪窗口（起起来后不能立刻死）。
+  if (st.readyProbe === 'http-health') {
+    const healthy = await waitHealthy(st.name)
+    if (stopping) await finish(1)
+    if (!healthy) {
+      log('==> 后端没能就绪，收尾。请查看上方核心输出（`--web-dir` 缺 index.html 会以退出码 3 拒启）。')
+      await finish(1)
+    }
+    log(`==> 就绪：${APP_URL}`)
+  } else if (st.kind === 'daemon') {
+    if (!(await waitAlive(st.name, st.timeoutMs))) {
+      const why = `起起来后 ${st.timeoutMs}ms 内就退出了`
+      if (st.critical) {
+        log(`==> 阶段 ${st.name} ${why}`)
+        await finish(1)
+      }
+      degrade(st.name, why)
+      continue
+    }
+  }
+  started.add(st.name)
 }
 
 // 巡逻：长驻阶段已经由 exit 钩子接管，这里只保证"主流程不空转退出"。

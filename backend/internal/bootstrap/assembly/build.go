@@ -7,10 +7,10 @@ import (
 	"sync"
 
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/contract/dtosystem"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
-	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/contract/dtosystem"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -31,6 +31,13 @@ type Options struct {
 	Credentials *credential.Set
 	// Payloads 桌面壳**已解析**的随包载荷清单（M3-4）：核心只把它透出到 `/meta`，不自己探测。
 	Payloads []dtosystem.PayloadInfo
+	// ReadyAnnounce 就绪宣告（M1-2 的 `MATE_READY` 行）：装配**不拥有**那个契约，
+	// 由应用壳（`internal/bootstrap/app`）把它交进来，本包只按序列在「就绪宣告」那一步调它。
+	//
+	// 为什么是回调而不是本包自己打：就绪行的格式与"要不要打"（`--ready-stdout`）都是应用壳的
+	// 事；而"什么时候算就绪"是启动序列的事。这两件事分开之后，两边各自只有一个答案。
+	// nil = 不打（测试、`mate demo` 这类不接壳的入口）。
+	ReadyAnnounce func(net.Addr) error
 	// ConnPool 替换"会话从哪条连接来"（`session.ConnPool`；nil = 用 `runtimeconn.Pool`）。
 	//
 	// 生产路径构造 `Options` 时不填它。存在的唯一理由是 C2 §3.4 的验收缝：装配一个
@@ -44,6 +51,11 @@ type Option func(*Options)
 // WithCredentials 注入凭据表。
 func WithCredentials(creds *credential.Set) Option {
 	return func(o *Options) { o.Credentials = creds }
+}
+
+// WithReadyAnnounce 注入就绪宣告（见 `Options.ReadyAnnounce`）。
+func WithReadyAnnounce(fn func(net.Addr) error) Option {
+	return func(o *Options) { o.ReadyAnnounce = fn }
 }
 
 // WithPayloads 注入随包载荷清单。
@@ -162,7 +174,13 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 	as.svc, as.planes, as.rconn, as.rpool = NewSessionServiceWith(reg, as.bus, o.ConnPool)
 
 	as.creds = o.Credentials
-	as.lifecycle = NewSequence(as.steps()...)
+	steps := as.steps()
+	// 表本身先过判据（`archtest` 也跑同一份校验）：拿到一张自相矛盾的表时，宁可在起任何东西
+	// 之前就失败，也不要把"两个答案"的隐患带进运行期。
+	if err := ValidateSteps(steps); err != nil {
+		return nil, fatalErr("serve: 启动步骤表不自洽: %v", err)
+	}
+	as.lifecycle = NewSequence(steps...)
 	if err := as.lifecycle.Start(ctx); err != nil {
 		return nil, err
 	}

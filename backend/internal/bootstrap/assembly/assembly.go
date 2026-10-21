@@ -10,25 +10,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/adapters/inbound/http/middleware"
+	"github.com/morehao/ark-mate/internal/adapters/inbound/http/router"
+	credmech "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/credential"
+	doctorfacts "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/doctor"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/procreg"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
+	"github.com/morehao/ark-mate/internal/adapters/outbound/transfer"
+	apprun "github.com/morehao/ark-mate/internal/app/run"
+	"github.com/morehao/ark-mate/internal/bootstrap/assembly/planes"
 	"github.com/morehao/ark-mate/internal/config"
+	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
+	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/platform/code"
 	"github.com/morehao/ark-mate/internal/platform/credential"
 	"github.com/morehao/ark-mate/internal/platform/eventbus"
 	pkgidentity "github.com/morehao/ark-mate/internal/platform/identity"
 	"github.com/morehao/ark-mate/internal/platform/resource"
-	"github.com/morehao/ark-mate/internal/adapters/inbound/http/middleware"
-	"github.com/morehao/ark-mate/internal/adapters/inbound/http/router"
-	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
-	"github.com/morehao/ark-mate/internal/domain/interaction"
-	credmech "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/credential"
-	doctorfacts "github.com/morehao/ark-mate/internal/adapters/outbound/mechanism/doctor"
-	"github.com/morehao/ark-mate/internal/bootstrap/assembly/planes"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/runtimeconn"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/transfer"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/procreg"
-	"github.com/morehao/ark-mate/internal/adapters/outbound/sqlite/store"
 	"github.com/morehao/ark-mate/internal/runtime"
-	apprun "github.com/morehao/ark-mate/internal/app/run"
 	"github.com/morehao/golib/glog"
 )
 
@@ -85,49 +85,117 @@ type assembly struct {
 }
 
 // steps 声明启动序列（顺序即语义；关闭按它的逆序执行）。
+//
+// 每行都是**可判定的声明**（`ValidateSteps` 在 `Build` 与 `archtest` 里各跑一次）：
+// `Critical` 只描述失败后果、`Timeout` 给每步一个上界、`DependsOn` 把"必须在那之后"写成事实、
+// `Degrade` 回答"这一步挂了系统长什么样"（非 critical 必填）。四条规则的理由见 `ValidateSteps`。
+//
+// 顺序里有三处是**真顺序敏感**的，改表时别只看名字：
+//
+//	① 命令门禁**最先**：规则文件非法要拒绝启动，而后面任何一步都不该先把它"看起来正常"地跑掉；
+//	② 凭据面在持久层打开/接线**之前**：接线那一次同步就要读 provider 密钥；
+//	③ 就绪宣告**最后**（且是它唯一的存在处）：监听器在装配期就绑好了，就绪行只能在这之后打，
+//	   否则壳拿到的端口可能还不是最终的。
 func (as *assembly) steps() []Step {
 	return []Step{
-		{Name: "命令门禁", Phase: PhasePlatform, Critical: true, Start: as.startCommandPolicy},
-		{Name: "旧定义目录导入", Phase: PhasePlatform, Timeout: 10 * time.Second, Start: as.startLegacyProviderImport},
-		{Name: "凭据面", Phase: PhasePlatform, Timeout: 10 * time.Second, Start: as.startCredentials},
+		{Name: "命令门禁", Phase: PhasePlatform, Critical: true, Timeout: 10 * time.Second,
+			Start: as.startCommandPolicy},
+		{Name: "旧定义目录导入", Phase: PhasePlatform, Timeout: 10 * time.Second, Start: as.startLegacyProviderImport,
+			Degrade: "旧目录里的 providers.json 不搬进新位置；自定义 MATE_PROVIDERS 的用户需自行搬运（启动照常）"},
+		{Name: "凭据面", Phase: PhasePlatform, Timeout: 10 * time.Second, Start: as.startCredentials,
+			Degrade: "托盘文档那一层不装配，只有库里的密钥可用（继承环境与 .env 两层仍在）"},
 		// 产品身份（部署级常量）：必须在**任何连接被拉起之前**把系统提示面装进启动参数。
 		// 非 critical：交付失败只让模型的自述退回首轮块（`auto`），不该拒绝启动。
-		{Name: "产品身份", Phase: PhasePlatform, Timeout: 10 * time.Second, Start: as.startIdentity},
+		{Name: "产品身份", Phase: PhasePlatform, Timeout: 10 * time.Second, Start: as.startIdentity,
+			Degrade: "身份交付面退回 `auto`（模型自述改走首轮块），本部署不声明产品身份"},
 		{
 			Name: "持久层打开", Phase: PhasePersistence, Critical: true,
 			Timeout: 30 * time.Second, Start: as.startStore, Stop: as.stopStore, StopTimeout: 10 * time.Second,
 		},
-		{Name: "旧密钥搬运", Phase: PhasePersistence, Timeout: time.Minute, Start: as.startLegacySecretMigration},
-		{Name: "持久层接线", Phase: PhasePersistence, Timeout: 2 * time.Minute, Start: as.startStoreWiring},
-		{Name: "启动导入", Phase: PhasePersistence, Timeout: 2 * time.Minute, Start: as.startImports},
-		{Name: "会话恢复", Phase: PhasePersistence, Timeout: 2 * time.Minute, Start: as.startRestore},
-		{Name: "工作空间策略", Phase: PhaseDomain, Critical: true, Start: as.startWorkspacePolicy},
-		{Name: "默认工作空间", Phase: PhaseDomain, Critical: true, Start: as.startDefaultWorkspace},
-		{Name: "工作空间白名单端口", Phase: PhaseDomain, Start: as.startWorkspaceRootsStore},
+		{Name: "旧密钥搬运", Phase: PhasePersistence, Timeout: time.Minute, Start: as.startLegacySecretMigration,
+			DependsOn: []string{"持久层打开"},
+			Degrade:   "旧密文里的密钥不搬进库；库里已有的密钥不受影响，`mate doctor` 会继续报遗留物"},
+		{Name: "持久层接线", Phase: PhasePersistence, Timeout: 2 * time.Minute, Start: as.startStoreWiring,
+			DependsOn: []string{"持久层打开"},
+			Degrade:   "库句柄没接到全部部件：该走库的仍走文件侧（定义/凭据可能各看一份），需重启修好"},
+		{Name: "启动导入", Phase: PhasePersistence, Timeout: 2 * time.Minute, Start: as.startImports,
+			DependsOn: []string{"持久层接线"},
+			Degrade:   "目录里的存量定义这一轮不导入（能力面偏小，看得见）；下次启动会重跑"},
+		{Name: "会话恢复", Phase: PhasePersistence, Timeout: 2 * time.Minute, Start: as.startRestore,
+			DependsOn: []string{"持久层接线"},
+			Degrade:   "历史会话不预先恢复，首次访问该会话时才按需恢复（首轮稍慢）"},
+		{Name: "工作空间策略", Phase: PhaseDomain, Critical: true, Timeout: 10 * time.Second,
+			Start: as.startWorkspacePolicy},
+		{Name: "默认工作空间", Phase: PhaseDomain, Critical: true, Timeout: 30 * time.Second,
+			Start: as.startDefaultWorkspace, DependsOn: []string{"工作空间策略"}},
+		{Name: "工作空间白名单端口", Phase: PhaseDomain, Timeout: 10 * time.Second,
+			Start: as.startWorkspaceRootsStore, DependsOn: []string{"默认工作空间"},
+			Degrade: "工作空间白名单端口留空：会话只能落在默认工作空间下（跨工作空间选择不可用）"},
 		{
-			Name: "编排器", Phase: PhaseDomain, Critical: true,
+			Name: "编排器", Phase: PhaseDomain, Critical: true, Timeout: 30 * time.Second,
 			Start: as.startOrchestrator, Stop: as.stopOrchestrator, StopTimeout: 30 * time.Second,
+			DependsOn: []string{"默认工作空间"},
 		},
-		{Name: "子进程注册表", Phase: PhaseDomain, Timeout: as.reapTimeout(), Start: as.startProcRegistry},
-		{Name: "定义装载", Phase: PhaseDomain, Critical: true, Timeout: 2 * time.Minute, Start: as.startDefinitions},
-		{Name: "权限记忆恢复", Phase: PhaseDomain, Timeout: 30 * time.Second, Start: as.startPermissionMemories},
-		{Name: "编排参数", Phase: PhaseSettings, Start: as.startRuntimeSettings},
-		{Name: "MCP 网关开关", Phase: PhaseSettings, Start: as.startMcpGateway},
-		{Name: "原生权限开关", Phase: PhaseSettings, Start: as.startNativePermission},
-		{Name: "空闲回收", Phase: PhaseBackground, Start: as.startIdleReaper},
+		{Name: "子进程注册表", Phase: PhaseDomain, Timeout: as.reapTimeout(), Start: as.startProcRegistry,
+			DependsOn: []string{"编排器"},
+			Degrade:   "孤儿进程回收不可用：上次异常退出留下的底座子进程要手工清理（下次启动可能撞端口）"},
+		{Name: "定义装载", Phase: PhaseDomain, Critical: true, Timeout: 2 * time.Minute, Start: as.startDefinitions,
+			DependsOn: []string{"启动导入", "持久层接线"}},
+		{Name: "权限记忆恢复", Phase: PhaseDomain, Timeout: 30 * time.Second, Start: as.startPermissionMemories,
+			DependsOn: []string{"定义装载"},
+			Degrade:   "库里的权限记忆这一轮不进内存：等于每条工具调用都要重新问人（不放大授权）"},
+		{Name: "编排参数", Phase: PhaseSettings, Timeout: 10 * time.Second, Start: as.startRuntimeSettings,
+			DependsOn: []string{"定义装载"},
+			Degrade:   "运行期编排参数用缺省值（空闲回收/排队等按代码默认跑），库里的设置这一轮不生效"},
+		{Name: "MCP 网关开关", Phase: PhaseSettings, Timeout: 10 * time.Second, Start: as.startMcpGateway,
+			Degrade: "开关保持缺省 `auto`（远程 MCP 仍经平台网关代连）"},
+		{Name: "原生权限开关", Phase: PhaseSettings, Timeout: 10 * time.Second, Start: as.startNativePermission,
+			Degrade: "不向底座注入原生权限模式：权限面退回平台侧裁决（会话行为与以前一致）"},
+		{Name: "空闲回收", Phase: PhaseBackground, Timeout: 10 * time.Second, Start: as.startIdleReaper,
+			DependsOn: []string{"编排器"},
+			Degrade:   "空闲会话不自动回收：暖进程常驻，内存与子进程数只增不减（不丢数据）"},
 		{
-			Name: "自动化调度", Phase: PhaseBackground,
+			Name: "自动化调度", Phase: PhaseBackground, Timeout: 10 * time.Second,
 			Start: as.startAutomationScheduler, Stop: as.stopAutomationScheduler,
+			DependsOn: []string{"编排器"},
+			Degrade:   "定时自动化这一轮不触发（历史运行记录不受影响；存下来的 occurrence 下次启动会认领）",
 		},
-		{Name: "用例与控制器", Phase: PhaseDelivery, Critical: true, Start: as.startControllers},
-		{Name: "前端资产", Phase: PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startAssets},
+		{Name: "用例与控制器", Phase: PhaseDelivery, Critical: true, Timeout: 30 * time.Second,
+			Start: as.startControllers, DependsOn: []string{"定义装载", "编排器"}},
+		{Name: "前端资产", Phase: PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startAssets,
+			Degrade: ""},
 		{
-			Name: "资产重建通知", Phase: PhaseDelivery,
+			Name: "资产重建通知", Phase: PhaseDelivery, Timeout: 10 * time.Second,
 			Start: as.startAssetWatch, Stop: as.stopAssetWatch, StopTimeout: 5 * time.Second,
+			DependsOn: []string{"前端资产"},
+			Degrade:   "开发期没有 `/dev/assets/events` 自动刷新：改完前端手动刷一次页面",
 		},
-		{Name: "监听绑定", Phase: PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startListener},
-		{Name: "路由", Phase: PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startRouter},
+		{Name: "监听绑定", Phase: PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startListener,
+			DependsOn: []string{"用例与控制器"}},
+		{Name: "路由", Phase: PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startRouter,
+			DependsOn: []string{"监听绑定", "用例与控制器", "前端资产"}},
+		// 就绪宣告：**启动序列的唯一出口**（M1-2 的就绪行不再由 `App.Run` 自己打）。
+		// 非 critical：打不出来只是壳收不到那一行，它会退回 health 轮询。
+		{Name: "就绪宣告", Phase: PhaseDelivery, Timeout: 5 * time.Second, Start: as.startReadyAnnounce,
+			DependsOn: []string{"路由", "监听绑定"},
+			Degrade:   "壳收不到 `MATE_READY` 行，退回 health 轮询（地址发现慢一拍，服务本身没影响）"},
 	}
+}
+
+// startReadyAnnounce 打那一行 `MATE_READY {...}`（契约见 `app.ReadyLine`）。
+//
+// 为什么它是序列里的一步而不是 `App.Run` 里的三行：**"就绪"只该有一处表达**。改造前它长在
+// `App.Run` 里（监听器在装配期就绑好了，而就绪行在另一个包、另一段控制流里打出去），于是
+// "什么时候算起来了"有两个答案。现在它排在序列末尾、依赖「路由」与「监听绑定」——判据是
+// 声明出来的，不是读代码读出来的。
+//
+// 实现由应用壳交进来（`Options.ReadyAnnounce`），本包不认识就绪行的**格式**（那是
+// `internal/bootstrap/app/ready.go` 的契约）；没交 = 不打（测试与非桌面形态就是这样）。
+func (as *assembly) startReadyAnnounce(context.Context) error {
+	if as.opts.ReadyAnnounce == nil || as.ln == nil {
+		return nil
+	}
+	return as.opts.ReadyAnnounce(as.ln.Addr())
 }
 
 // reapTimeout 孤儿回收的单步预算：回收本身按 `ReapGrace` 等子进程退出，再留 30s 余量。
