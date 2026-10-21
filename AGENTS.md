@@ -1,6 +1,6 @@
 # AGENTS.md — ark-mate
 
-两层：**底座层**（`mate` 内核：多 runtime 统一接入 + 会话与能力数据面 + REST/WS 契约 + 交付形态）**与其上的产品层**（面向用户的**个人 Agent 助手**，**聚焦桌面端**）。底座支持多个 agent runtime 接入，当前内置适配只有 `dsh` 一个（第二个适配已在验证阶段下线，**adapter 层完整保留**：接一个新底座 = 新建 `internal/infra/<id>/`（实现 `runtime.Adapter`：`Spec()` + `RegisterPorts()`）+ 装配根加一行，不动框架）——**不追求数量、不承诺接入任意 ACP 生态**；浏览器入口只是**开发形态**，不是交付面（定位口径的唯一事实源 = `docs/decisions.md`（定位陈述见 `docs/positioning.md`））。前后端平级 monorepo。代码注释与 commit message 用简体中文；commit 用 conventional 前缀（`feat`/`fix`/`refactor` + 中文 scope）。
+两层：**底座层**（`mate` 内核：多 runtime 统一接入 + 会话与能力数据面 + REST/WS 契约 + 交付形态）**与其上的产品层**（面向用户的**个人 Agent 助手**，**聚焦桌面端**）。底座支持多个 agent runtime 接入，当前内置适配只有 `dsh` 一个（第二个适配已在验证阶段下线，**adapter 层完整保留**：接一个新底座 = 新建 `internal/adapters/outbound/<id>/`（实现 `runtime.Adapter`：`Spec()` + `RegisterPorts()`）+ 装配根加一行，不动框架）——**不追求数量、不承诺接入任意 ACP 生态**；浏览器入口只是**开发形态**，不是交付面（定位口径的唯一事实源 = `docs/decisions.md`（定位陈述见 `docs/positioning.md`））。前后端平级 monorepo。代码注释与 commit message 用简体中文；commit 用 conventional 前缀（`feat`/`fix`/`refactor` + 中文 scope）。
 
 **本文件只保留入口、分册索引与硬约束。** 细节（判据、口径、命令配方、每条规则换来的事故）按主题拆在 `docs/agents/`（2026-10-18 拆出）；**改到哪一块，先读对应那一份**，不要靠猜。
 

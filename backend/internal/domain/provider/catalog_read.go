@@ -20,7 +20,7 @@ import (
 //	CatalogSampler          —— 恢复一条历史会话读目录（执行面 `runtimeconn.SampleConfigOptions`）
 //	CatalogConnectionFacts  —— 鉴权引导与"能不能收图"（连接期事实，取不到就是 unknown）
 //
-// 三个端口都只有 1–2 个方法，且都由 `sessionruntime` 的同一个 Service 实现——目录逻辑搬进域
+// 三个端口都只有 1–2 个方法，且都由 `app/run` 的同一个 Service 实现——目录逻辑搬进域
 // 之后，"取样"仍然只有一处实现，域只负责**顺序、缓存、空目录说明与拒绝值标注**。
 
 // 目录取样来源标注（对外契约字段 source）。

@@ -13,7 +13,7 @@ import (
 // 连接池与运行时平面的**实现**在 `drivers/runtimeconn`（出站适配器），但端口由域声明：
 // 会话与编排只认"一条连接能给我什么"（句柄、键、配置指纹），不认池的具体类型。
 //
-// 为什么端口落在 `domain/session` 而不是 `sessionruntime`：`runtimeconn`（L6）必须**实现**
+// 为什么端口落在 `domain/session` 而不是执行面 `app/run`：`runtimeconn`（L6）必须**实现**
 // 这些端口，而它只能向下 import（L6 → L2 合法，L6 → L7 是"向上"）。端口放执行面会让适配器
 // 无法落地——那正是层表在提醒的边界方向。
 //

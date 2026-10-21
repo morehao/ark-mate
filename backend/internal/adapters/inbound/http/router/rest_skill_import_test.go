@@ -12,7 +12,7 @@ import (
 
 // ——— D1 `POST /skills/import` 的传输层契约 ———
 //
-// 写面本身（解析、同名冲突、critical 零落盘）由 `sessionruntime` 的两种载体夹具覆盖；
+// 写面本身（解析、同名冲突、critical 零落盘）由 `app/run` 的两种载体夹具覆盖；
 // 这里只钉控制器那一半：multipart 读取与"在进入域之前就能拒绝"的两条输入错误。
 // `newEngine` 是 memory 模式且没有能力目录，所以成功路径不在这里跑（会在写面报
 // `CapabilityDirUnsetErr`）——那是装配事实，不是这条路由的语义。

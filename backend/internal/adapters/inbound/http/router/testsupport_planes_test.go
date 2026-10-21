@@ -13,7 +13,7 @@ import (
 //
 // 生产代码不再有 `planesOf(Service)`：执行面只认 `PlaneFacts`。路由测试要用具体平面做
 // 前置（工作空间策略、供应商目录、凭据分层…），所以在**测试包**里留一份旁路表。
-// 它与 `sessionruntime` 包内夹具的 `planesOf` 同形，只是各自服务于自己的测试包。
+// 它与 `app/run` 包内夹具的 `planesOf` 同形，只是各自服务于自己的测试包。
 
 var routerTestPlanes sync.Map // map[*apprun.Service]*planes.Planes
 
