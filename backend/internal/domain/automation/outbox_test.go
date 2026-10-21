@@ -325,3 +325,78 @@ func TestManualTriggerSkipsOutbox(t *testing.T) {
 		t.Fatalf("手动触发不进投递队列，got %d 行", len(st.outbox))
 	}
 }
+
+// TestOutboxWorkerDeliversInBackgroundAndStops 投递 worker 的**后台形态**：
+// 起 goroutine → 到点自己把 pending 投出去 → ctx 结束即退出；重复 Start 不会起第二条。
+//
+// 为什么单独一条：其余用例都直接调 `DrainOutbox`（同步、确定），而"后台那条 goroutine"只有在
+// `-race` 下才看得见问题（ticker、`outboxOnce`、与注册表锁的交叉）。它也是 `make test-race`
+// 覆盖 `domain/automation` 的理由。
+func TestOutboxWorkerDeliversInBackgroundAndStops(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	old := nowFn
+	nowFn = func() time.Time { return now }
+	t.Cleanup(func() { nowFn = old })
+
+	st := newFakeStore()
+	host := &fakeHost{}
+	pl := NewPlane()
+	pl.SetStore(st)
+	pl.SetHost(host)
+	seedDueRec(t, pl)
+
+	// 入队一条到期的 pending（等价于"上一轮即时投递失败"）。
+	if _, _, err := st.EnqueueAutomationDelivery(context.Background(), arow.OutboxItem{
+		AutomationID: "nightly", Occurrence: now.Format(time.RFC3339Nano), Trigger: automation.TriggerScheduled,
+		Payload:        `{"prompt":"巡检","cwd":"/tmp","origin":"automation:nightly"}`,
+		IdempotencyKey: OutboxKey("nightly", now.Format(time.RFC3339Nano), automation.TriggerScheduled),
+		Status:         arow.OutboxPending, NextAttemptAt: now, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("入队: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pl.StartAutomationOutboxWorker(ctx, 5*time.Millisecond)
+	pl.StartAutomationOutboxWorker(ctx, 5*time.Millisecond) // 幂等：不许起第二条 worker
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if row, ok, _ := st.AutomationOutboxByKey(context.Background(), OutboxKey("nightly", now.Format(time.RFC3339Nano), automation.TriggerScheduled)); ok && row.Status == arow.OutboxSent {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if row := st.onlyRow(t); row.Status != arow.OutboxSent {
+		t.Fatalf("worker 应在后台把这条投出去，got %+v", row)
+	}
+	if got := host.callCount(); got != 1 {
+		t.Fatalf("重复 Start 不应起第二条 worker（应只投一次），got %d 次", got)
+	}
+
+	// ctx 结束 → worker 退出（不泄漏 goroutine；这里只验"取消之后不再投新的"）。
+	cancel()
+	time.Sleep(20 * time.Millisecond)
+	before := host.callCount()
+	if _, _, err := st.EnqueueAutomationDelivery(context.Background(), arow.OutboxItem{
+		AutomationID: "nightly", Occurrence: now.Add(time.Minute).Format(time.RFC3339Nano), Trigger: automation.TriggerScheduled,
+		Payload: `{"prompt":"巡检"}`, IdempotencyKey: "after-cancel",
+		Status: arow.OutboxPending, NextAttemptAt: now, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("入队: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if host.callCount() != before {
+		t.Fatal("worker 取消之后不该再投新的（ctx 结束即退出）")
+	}
+}
+
+// TestStartOutboxWorkerRequiresStore 无库载体（memory 模式）不起 worker：没有队列就没有补投。
+func TestStartOutboxWorkerRequiresStore(t *testing.T) {
+	pl := NewPlane() // 没 SetStore
+	pl.StartAutomationOutboxWorker(context.Background(), time.Millisecond)
+	// 不 panic、不阻塞即为通过：判据是"它自己就不该起"。
+	if sent, retried, failed := pl.DrainOutbox(context.Background(), 0); sent+retried+failed != 0 {
+		t.Fatalf("没有库时 drain 应为空操作，got sent=%d retried=%d failed=%d", sent, retried, failed)
+	}
+}

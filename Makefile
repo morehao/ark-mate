@@ -491,9 +491,21 @@ vet:
 test:
 	cd backend && go test ./...
 
-# test-race：两处"只在 -race 下才看得见"的读面（会话快照 / 执行面键），收尾与改动它们时跑。
+# test-race：几处"只在 -race 下才看得见"的并发面，收尾与改动它们时跑。
+#
+# 2026-10-21（V2）：这一行原先指的三个包在 C3 目录重组后**已不存在**
+# （`internal/service/svcsession`、`internal/runtimeconn`、`internal/manager`），于是这条命令
+# 长期处于"跑起来就报目录不存在"的状态——等于这一档验收一直没跑过。现在按**当前的归属**钉住
+# 四条并发面，并且每个包都写清为什么在这里：
+#
+#   domain/session          会话快照读面与轮次状态机（读模型投影 + 事件位次）
+#   adapters/outbound/runtimeconn  执行面键（连接/代际池）与 adapter 翻译层
+#   app/run                 编排与轮次落地（原 svcsession / manager 那部分的当前归属）
+#   domain/automation       v33 起的投递 worker（后台 goroutine + 定义注册表锁）
+#
+# **加新包要问一句"它有没有跨 goroutine 的共享状态"**；没有就别加（-race 会把它变成噪声与耗时）。
 test-race:
-	cd backend && go test -race ./internal/domain/session/ ./internal/service/svcsession/ ./internal/runtimeconn/ ./internal/manager/
+	cd backend && go test -race ./internal/domain/session/ ./internal/adapters/outbound/runtimeconn/ ./internal/app/run/ ./internal/domain/automation/
 
 clean:
 	rm -rf $(FRONTEND_ROOT)/apps/web/dist

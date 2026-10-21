@@ -241,7 +241,7 @@ cd frontend && pnpm run typecheck && pnpm run build
 | # | 做什么 | 为什么现在不做 |
 |---|---|---|
 | V1 | 真 Chrome 跑一次 `pnpm ui:accept`，看 O19 的多卡 + 46vh 滚动 | 构建级验证已过；多卡是视觉判断，需要人看一眼 |
-| V2 | `make test-race`（会话读面 / 执行面键 / manager） | 本批没动这几处；改动它们时再跑 |
+| V2 | `make test-race`（会话读面 / 执行面键 / 编排 / 投递 worker） | **2026-10-21 已跑通**：原先那条目标指的三个包在 C3 重组后已不存在（跑起来就报目录不存在，等于这一档一直没跑过）；现已按当前归属钉住 `domain/session` / `adapters/outbound/runtimeconn` / `app/run` / `domain/automation` 四条并发面，四包 `-race` 全绿（`app/run` 约 3 分钟）。改动这几处时照跑 |
 | V3 | `smoke:e2e` 补一条 `tz_offset` 断言 | 路由测试已覆盖（`tz_offset=480` 边界回显 + 越界 40001），再补是重复 |
 | V4 | 真 Chrome 跑一次 `pnpm ui:accept`，看第二轮的分类工具详情（read 预览 / diff / command / search）、已结算确认卡在过程流、搜索命中折叠块内部时的精确滚动。顺带确认：命中折叠块内部会自动展开且**保持展开**（有意，避免刚定位到就被收起） | 本轮已过 typecheck / 纯函数测试 / 构建 / archtest；这几项是视觉与真实数据判断，需要人看一眼 |
 | V5 | 造一条「已结算确认卡先于 user 出现」的恢复历史，确认轮次形态（当前会形成一个只有 notice 的轮次片段 + 身份头） | 未出现该形态样本；本轮要求的主序列（user → tool → permission → tool → assistant）已有测试。出现样本再决定是否改成独立 entry 行 |
