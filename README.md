@@ -775,35 +775,39 @@ sqlite 模式下自动跑一次 `import`，幂等靠指纹 `meta.imported_automa
 
 ```
 backend/                单 Go module（github.com/morehao/ark-mate）
-  cmd/mate             进程入口：只做子命令分发（→ internal/bootstrap/cli）
-  internal/             单 module 的全部代码（v3.1 起 `backend/pkg` 已全量并入，不再有第二层）
-    infra/acp           ACP 客户端（stdio 传输、能力探测、权限、elicitation（unstable）、错误分类）
-    infra/mcp           自研最小 MCP 客户端（stdio / http / streamable_http / sse）
-    infra/dsh           dsh adapter（`runtime.Adapter`：Spec + 五张端口表；新增底座 = 新目录 + Adapter）
-    infra/logging       zap/glog 装配
-    infra/credentials   凭据分层解析（env → 平台文档 → provider 档案 → 原生文档）
-    infra/dbclient      gorm 句柄装配 + golib SQLite dialector（纯 Go，`CGO_ENABLED=0`）
-    infra/procreg       进程注册表（孤儿 runtime 子进程回收）
-    runtime             运行时注册表 + `Spec` 契约 + `Adapter` 接口 + 隔离投影
-    capability          Skill/MCP/Tool 能力定义装载 + skill 物化（投影落点由 runtime 声明）
-    config              进程配置（flag + MATE_* 环境变量 + .ark-mate/config 目录化）
-    code                业务错误码（唯一事实源）
-    object/objusage     跨层共享值对象（会话用量快照）
-    object/objid        主键壳体（`rt_` 等）
-    assembly            唯一装配根：构造 store/平面/执行面/用例/控制器/路由 + 启停序列
-    app                 应用壳：HTTP 启停、ready、信号与优雅关闭
-    cli                 命令树：子命令名、帮助、参数分发与退出码
-    cliops              命令实现（serve / demo / migrate / doctor / capability / provider / mcp / transcripts / config）
-    router              唯一路由装配点（按领域分 routes_*.go；只收已构造的控制器）
-    controller/ctr*     传输层控制器（只收 service 接口 + DTO + gin）
-    middleware          HTTP 中间件（单操作员 token 鉴权）
-    dto/dto*            请求/响应 DTO（按领域分包，双方共用）
-    service/svc*        用例层（控制器依赖的窄接口 + 实现，装配根构造）
-    model               持久层实体 + 列与取值约定（gorm 映射；时间 TEXT/布尔 INTEGER 由 serializer 保证）
-    dao                 列词汇（各领域 Cond）+ gormdao 泛型方法 + 机械原语（不承载业务读面）
-    store               持久层业务面（排序/筛选/聚合/状态迁移 + 跨表事务与读模型 API）
-    eventbus            进程内事件总线（WS 订阅源）
-    archtest            架构守卫（机器判据的唯一集中地，169 条，含 1 条文档引用守卫）
+  cmd/mate              进程入口：只做子命令分发（→ internal/bootstrap/cli）
+  internal/             单 module 的全部代码（v3.1 起 backend/pkg 已全量并入，不再有第二层）
+    bootstrap/          组合根与生命周期：app（启停）/ assembly（唯一装配根）/ cli / cliops / maintenance
+    config              进程配置（flag + MATE_* 环境变量 + 目录化配置）
+    core/               跨域借用的纯词汇（无 I/O、无第三方协议 SDK）
+      code              业务错误码唯一事实源 + 外部失败到业务码的折算
+      failure           失败分类学（Class + 携带分类的错误类型；"用户该做什么"）
+      capability        Skill/MCP/Tool 能力定义装载 + skill 物化
+      object/objid      主键壳体（`rt_` 等）；object/objusage 会话用量快照；object/objdelivery 交付矩阵
+      automation · definition · credential · identity · eventbus · redact · resource
+    domain/             业务规则与状态（实体 / 状态机 / 域端口），不认识对方协议
+      session · interaction · workspace · provider · skill · mcp · automation · identity
+    dto/dto*            请求/响应 DTO（按领域分包；控制器、用例层、CLI、WS 共用同一份）
+    service/svc*        用例层（控制器依赖的窄接口 + 实现；包之间零互相 import）
+    persistence/        model（表形状 L0）/ dao（列词汇 + gormdao 泛型 + 机械原语）/ store（读面与事务）
+    infra/              跟外面说话的实现
+      protocol/acp      ACP 客户端（stdio 传输、能力探测、权限、elicitation（unstable）、协议错误归类）
+      protocol/mcp      自研最小 MCP 客户端（stdio / http / streamable_http / sse）
+      dsh               dsh adapter（`runtime.Adapter`：Spec + 五张端口表；新增底座 = 新目录 + Adapter）
+      logging           zap/glog 装配（全仓唯一 import log/slog 处）
+      credentials       凭据分层解析（env → 平台文档 → provider 档案 → 原生文档）
+      dbclient          gorm 句柄装配 + golib SQLite dialector（纯 Go，`CGO_ENABLED=0`）
+      procreg           进程注册表（孤儿 runtime 子进程回收）
+      host              宿主短命进程（系统目录选择面板：osascript / zenity / kdialog）
+      installed         本机可执行性探测（诊断面区分"未装配"与"命令不可执行"）
+    runtime             运行时注册表 + `Spec` 契约 + `Adapter` 接口 + 隔离投影（不 import 任何 adapter）
+    drivers/            接线：域端口 ↔ 适配体
+      mechanism         定义双载体 + CAS + 凭据镜像与分层取值（+ doctor/ 自检）
+      registry          注册表与编译期断言（端口 → 适配体）；gateway 源汇；runtimeconn 连接面；transfer 存量导入导出
+    sessionruntime      运行期编排（会话执行 / 权限 / 断连语义）
+    delivery/           controller/ctr*（只收 service 接口 + DTO + gin）· middleware · router（唯一路由装配点）
+    archtest            架构守卫（机器判据的唯一集中地，176 条）
+    testutil · version
 frontend/               pnpm workspace（apps/* + packages/*）
   apps/web/             入口 + 组装（main.tsx 挂载 + vite 构建配置）；产物 dist 是唯一一份 UI
   apps/desktop/         桌面产品（Electron 壳：src/ 主进程与 preload、renderer/ 壳静态页、scripts/ 装配与打包）
