@@ -11,10 +11,10 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/core/resource"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
 
@@ -282,10 +282,10 @@ func TestCatalogAnnotatesCandidatesWithPlatformRowID(t *testing.T) {
 	row := createProviderAndModel(t, r.svc, "p1", "m-1")
 
 	// 目录里有两条候选：一条对得上平台行（`p1/m-1`），一条底座广告了但平台没声明。
-	opts := []acp.ConfigOption{{
-		ID: "model", Name: "Model", Category: acp.CategoryModel, Type: acp.OptionTypeSelect,
+	opts := []protocol.ConfigOption{{
+		ID: "model", Name: "Model", Category: protocol.CategoryModel, Type: protocol.OptionTypeSelect,
 		CurrentValue: "p1/m-1",
-		Values: []acp.ConfigOptionValue{
+		Values: []protocol.ConfigOptionValue{
 			{Value: "p1/m-1", Name: "已声明"},
 			{Value: "p2/ghost", Name: "未声明"},
 		},

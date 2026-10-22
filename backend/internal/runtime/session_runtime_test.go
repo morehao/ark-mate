@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // dialTestSession 用自建 responder（acp_testserver_test.go）取一条**活的** acp.Session，
 // 供投影身份/行为断言使用（echo 删除后不再有进程内 stdio 对端，改走 ws 远程形态）。
-func dialTestSession(t *testing.T, r *testACPResponder) (*acp.Client, *acp.Session) {
+func dialTestSession(t *testing.T, r *testACPResponder) (protocol.Conn, protocol.Session) {
 	t.Helper()
 	tr, err := acp.NewRemoteTransport(acp.RemoteSpec{Transport: "ws", Endpoint: serveResponderWS(t, r)})
 	if err != nil {
@@ -30,7 +31,7 @@ func dialTestSession(t *testing.T, r *testACPResponder) (*acp.Client, *acp.Sessi
 	}
 	t.Cleanup(func() { _ = cl.Close(); _ = tr.Close() })
 
-	sess, err := cl.NewSession(context.Background(), acp.SessionOptions{Cwd: "/work"})
+	sess, err := cl.NewSession(context.Background(), protocol.SessionOptions{Cwd: "/work"})
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}

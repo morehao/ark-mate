@@ -2,6 +2,7 @@ package runtimeconn
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"strings"
 	"time"
 
@@ -30,14 +31,33 @@ type DialOptions struct {
 	NativeMode string
 	// CheckCredentials 凭据面校验（nil = 跳过；离线/测试路径）。
 	CheckCredentials func(ctx context.Context) error
-	// ClientOptions ACP 的三个回调（OnEvent / RequestPermission / CreateElicitation /
-	// CompleteElicitation）。
-	ClientOptions acp.ClientOptions
+	// Hooks 连接期的四个回调（事件 / 权限 / 提问 / 提问收尾）。
+	// 类型是**平台值**（`core/protocol`）：编排层只认事件与裁决的形状，不认识协议绑定；
+	// 到 `acp.ClientOptions` 的映射在本包内完成（见 toClientOptions）。
+	Hooks Hooks
 }
 
 // Dial 取（或拨）一条 runtime 连接：活着复用，断开则作废重拨；并挂断连监听。
 //
 // fingerprint 空值走的是代际键的原样返回分支，所以缺省路径与"代际机制之前"完全等价。
+// Hooks 连接期回调（平台值；由编排层提供，协议侧由本包适配）。
+type Hooks struct {
+	OnEvent             func(protocol.Event)
+	RequestPermission   func(ctx context.Context, req protocol.PermissionRequest) protocol.PermissionDecision
+	CreateElicitation   func(ctx context.Context, req protocol.ElicitationRequest) protocol.ElicitationOutcome
+	CompleteElicitation func(ctx context.Context, elicitationID string)
+}
+
+// toClientOptions 把平台回调映射成协议绑定的连接选项（唯一的翻译点）。
+func (h Hooks) toClientOptions() acp.ClientOptions {
+	return acp.ClientOptions{
+		OnEvent:             h.OnEvent,
+		RequestPermission:   h.RequestPermission,
+		CreateElicitation:   h.CreateElicitation,
+		CompleteElicitation: h.CompleteElicitation,
+	}
+}
+
 func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (*Conn, error) {
 	// 凭据面先校验（P2）：**默认模型所在的那条档案**缺失/无 key 属配置错误 → 显式
 	// credential_missing（文案含出路），不静默以「无密钥」姿态起进程。放 Dial 内可一处
@@ -74,7 +94,7 @@ func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (*
 
 	args := resolveArgs(spec.Launch.Args, "")
 	// spawn + 握手由 runtime.Connect 承载（可执行投影的拨号底座）。
-	client, err := runtime.Connect(context.WithoutCancel(ctx), spec, args, keys.Env, opt.ClientOptions)
+	client, err := runtime.Connect(context.WithoutCancel(ctx), spec, args, keys.Env, opt.Hooks.toClientOptions())
 	if err != nil {
 		return nil, err
 	}

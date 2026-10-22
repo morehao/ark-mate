@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"strings"
 	"sync"
 	"testing"
@@ -14,7 +15,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/golib/gerror"
@@ -48,8 +48,8 @@ func (s *gatedSession) Prompt(ctx context.Context, text string) (string, error) 
 	}
 }
 
-func (s *gatedSession) Cancel(context.Context) error      { return nil }
-func (s *gatedSession) ConfigOptions() []acp.ConfigOption { return nil }
+func (s *gatedSession) Cancel(context.Context) error           { return nil }
+func (s *gatedSession) ConfigOptions() []protocol.ConfigOption { return nil }
 
 func (s *gatedSession) prompts() []string {
 	s.mu.Lock()

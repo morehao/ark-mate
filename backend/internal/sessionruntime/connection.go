@@ -3,8 +3,8 @@ package sessionruntime
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -27,17 +27,17 @@ import (
 // 取键 / 复用 / 代际准入 / spawn+握手 / 登记已随 P4a 第五十七刀进 `runtimeconn.Pool.Dial`；
 // 本函数只交两样编排侧事实：三个 ACP 回调与凭据检查。
 func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*runtimeconn.Conn, error) {
-	reqPerm := func(ctx context.Context, req acp.PermissionRequest) acp.PermissionDecision {
+	reqPerm := func(ctx context.Context, req protocol.PermissionRequest) protocol.PermissionDecision {
 		if o.allowAll {
-			return acp.PermissionDecision{Allowed: true}
+			return protocol.PermissionDecision{Allowed: true}
 		}
 		return o.requestPermission(ctx, req)
 	}
-	var cli *acp.Client // Dial 成功后回填；hook 都在连接读循环里被调用，晚于 Dial 返回
-	reqElic := func(ctx context.Context, req acp.ElicitationRequest) acp.ElicitationOutcome {
+	var cli protocol.Conn // Dial 成功后回填；hook 都在连接读循环里被调用，晚于 Dial 返回
+	reqElic := func(ctx context.Context, req protocol.ElicitationRequest) protocol.ElicitationOutcome {
 		if o.allowAll {
 			// 调试/冒烟（--allow-all）：不征询，直接按空内容接受（agent 自行处理空内容）。
-			return acp.ElicitationOutcome{Action: "accept"}
+			return protocol.ElicitationOutcome{Action: "accept"}
 		}
 		sid, source, note := o.resolveElicitationScope(cli, req)
 		if sid == "" {
@@ -47,7 +47,7 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 			// 让「提问卡为什么没出现」可查，而不是无痕消失。
 			glog.Warnw(ctx, "elicitation: 无法归属会话，按取消处理", "scope_source", source, "note", note)
 			o.svc.runtimePlane.NoteScopeAmbiguous(note)
-			return acp.ElicitationOutcome{Action: "cancel"}
+			return protocol.ElicitationOutcome{Action: "cancel"}
 		}
 		req.SessionID, req.ScopeSource = sid, source
 		return o.requestElicitation(ctx, req)
@@ -62,7 +62,7 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 		Fingerprint:      fingerprint,
 		NativeMode:       nativeMode,
 		CheckCredentials: o.svc.CredentialProblem,
-		ClientOptions: acp.ClientOptions{
+		Hooks: runtimeconn.Hooks{
 			OnEvent:             o.runner.EventSink(spec.ID),
 			RequestPermission:   reqPerm,
 			CreateElicitation:   reqElic,
@@ -97,6 +97,6 @@ func (o *Orchestrator) InUseOn(c *runtimeconn.Conn) bool {
 }
 
 // busySessionForClient 返回该连接上「唯一在途」的会话 id；无在途或多会话并发在途返回空串。
-func (o *Orchestrator) busySessionForClient(client *acp.Client) string {
+func (o *Orchestrator) busySessionForClient(client protocol.Conn) string {
 	return o.inflight.SoleOwner(client)
 }

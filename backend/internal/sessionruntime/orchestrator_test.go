@@ -12,8 +12,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // stubSession 代替 acp.Session（Prompt/Cancel 可按脚本返回）。
@@ -21,14 +21,14 @@ type stubSession struct {
 	stop string
 	err  error
 	// options 会话配置项桩（nil = 运行时未提供任何选项）。
-	options []acp.ConfigOption
+	options []protocol.ConfigOption
 	// cancelOnCtx：ctx 被取消时返回 ctx.Err（模拟 agent 在取消后断开等待）
 	cancelOnCtx bool
 	cancelled   chan struct{}
 }
 
 // ConfigOptions 桩：默认无配置项（模型目录为空 → 目录来源走缓存/resume/空）。
-func (s *stubSession) ConfigOptions() []acp.ConfigOption { return s.options }
+func (s *stubSession) ConfigOptions() []protocol.ConfigOption { return s.options }
 
 func (s *stubSession) Prompt(ctx context.Context, _ string) (string, error) {
 	if s.cancelOnCtx {
@@ -280,8 +280,8 @@ func TestCancelRunAgentUnresponsive(t *testing.T) {
 // 登记/撤销/唯一性判定/nil 安全（经 Orchestrator 委托方法覆盖）。
 func TestBusyAttributionHelpers(t *testing.T) {
 	orch := &Orchestrator{inflight: session.NewInFlightTracker()}
-	c1 := &acp.Client{}
-	c2 := &acp.Client{}
+	c1 := fakeConnOf(1)
+	c2 := fakeConnOf(2)
 
 	// 未登记 / nil client → 空
 	if got := orch.busySessionForClient(c1); got != "" {
@@ -324,7 +324,7 @@ func TestBusyAttributionHelpers(t *testing.T) {
 // run 进行中能唯一归属会话，取消收尾后归属清除。
 func TestBusyAttributionLifecycle(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
-	c1 := &acp.Client{}
+	c1 := fakeConnOf(1)
 	as := session.NewActiveSession(session.HandleParams{
 		ID: "s1", Runtime: "r", Client: c1,
 		Session: &stubSession{cancelOnCtx: true},

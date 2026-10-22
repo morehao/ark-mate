@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -21,7 +21,7 @@ func (d runnerDiagnostics) RecordRuntimeError(sessionID string, ae *failure.Erro
 	d.o.svc.runtimePlane.RecordRuntimeError(sessionID, ae, tail)
 }
 
-func (d runnerDiagnostics) StderrTail(client *acp.Client) []string {
+func (d runnerDiagnostics) StderrTail(client protocol.Conn) []string {
 	if client == nil {
 		return nil
 	}
@@ -31,7 +31,7 @@ func (d runnerDiagnostics) StderrTail(client *acp.Client) []string {
 // runnerCatalog 运行时配置项（模型目录）的缓存写口。
 type runnerCatalog struct{ svc *Service }
 
-func (c runnerCatalog) PutConfigOptions(runtimeID string, options []acp.ConfigOption) {
+func (c runnerCatalog) PutConfigOptions(runtimeID string, options []protocol.ConfigOption) {
 	if c.svc.planes.Providers == nil {
 		return
 	}
@@ -56,7 +56,7 @@ func (c runnerCatalog) ClearRejection(runtimeID, value string) {
 
 // acquireClient 是 `Lifecycle.Acquire` 的实现：拨号仍归编排侧（回调与凭据检查在这里），
 // 域只拿到 ACP 客户端去开/恢复会话。
-func (o *Orchestrator) acquireClient(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acp.Client, error) {
+func (o *Orchestrator) acquireClient(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (protocol.Conn, error) {
 	rc, err := o.acquire(ctx, spec, fingerprint, nativeMode)
 	if err != nil {
 		return nil, err

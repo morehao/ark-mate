@@ -16,8 +16,8 @@ import (
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/infra/protocol/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -329,7 +329,7 @@ func TestGenerationMigrationDefersWhileBusy(t *testing.T) {
 	registered := make(chan struct{})
 	go func() {
 		r.orch.elic.RegisterAndWait(regCtx, convID,
-			acp.ElicitationRequest{Mode: "form", Message: "probe"},
+			protocol.ElicitationRequest{Mode: "form", Message: "probe"},
 			func(interaction.ElicitationItem) { close(registered) })
 	}()
 	<-registered

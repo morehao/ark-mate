@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"sync"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -28,7 +29,7 @@ type Session struct {
 func (s *Session) ID() string { return string(s.id) }
 
 // Client 返回所属连接。
-func (s *Session) Client() *Client { return s.client }
+func (s *Session) Client() protocol.Conn { return s.client }
 
 // ConfigOptions 返回该会话当前的配置项快照（副本，调用方可安全持有）。
 // 来源：session/new、session/resume、session/load 的响应，或 session/set_config_option
@@ -115,16 +116,8 @@ func (s *Session) SetConfigOption(ctx context.Context, configID, value string) (
 	return opts, nil
 }
 
-// SessionOptions 用于 new/load/resume 的会话参数。
-// McpServers 为平台选出的 MCP 注入子集（nil/空 = 不下发；P2 由能力数据面提供）。
-type SessionOptions struct {
-	Cwd                   string
-	AdditionalDirectories []string
-	McpServers            []McpServer
-}
-
 // NewSession 创建 fresh session（对应 ACP session/new），并捕获其配置项（模型目录来源之一）。
-func (c *Client) NewSession(ctx context.Context, opt SessionOptions) (*Session, error) {
+func (c *Client) NewSession(ctx context.Context, opt protocol.SessionOptions) (protocol.Session, error) {
 	resp, err := c.conn.NewSession(ctx, acpsdk.NewSessionRequest{
 		Cwd:                   opt.Cwd,
 		AdditionalDirectories: opt.AdditionalDirectories,
@@ -141,7 +134,7 @@ func (c *Client) NewSession(ctx context.Context, opt SessionOptions) (*Session, 
 
 // LoadSession 载入既有会话。仅当 agent 声明 loadSession 时可用，否则返回 ClassUnsupported
 // （dsh 即为该情形，见 docs/dsh-acp-adaptation.md §2）。
-func (c *Client) LoadSession(ctx context.Context, sessionID string, opt SessionOptions) (*Session, error) {
+func (c *Client) LoadSession(ctx context.Context, sessionID string, opt protocol.SessionOptions) (protocol.Session, error) {
 	if !c.rawCaps.LoadSession {
 		return nil, NewError(ClassUnsupported, "load_session_unsupported",
 			"该 runtime 不支持 session/load（仅 fresh session）", nil)
@@ -163,7 +156,7 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, opt SessionO
 
 // ResumeSession 恢复既有会话。仅当 agent 声明 sessionCapabilities.resume 时可用。
 // 响应同样携带配置项，是「不新建会话即读到模型目录」的协议入口。
-func (c *Client) ResumeSession(ctx context.Context, sessionID string, opt SessionOptions) (*Session, error) {
+func (c *Client) ResumeSession(ctx context.Context, sessionID string, opt protocol.SessionOptions) (protocol.Session, error) {
 	if c.rawCaps.SessionCapabilities.Resume == nil {
 		return nil, NewError(ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume", nil)

@@ -7,7 +7,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
@@ -28,11 +28,11 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	orch1 := NewOrchestrator(svc1, reg)
 	svc1.sessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
 
-	toolRun := acp.ToolCallInfo{Title: "跑脚本", Kind: "execute"}
+	toolRun := protocol.ToolCallInfo{Title: "跑脚本", Kind: "execute"}
 	orch1.perm.Remember("s1", toolRun, "reject", "option-reject-always")
 	// 同键异侧覆盖：allow 覆盖 reject（同键互斥），DB 应只有一条且为 allow。
 	orch1.perm.Remember("s1", toolRun, "allow", "option-allow-always")
-	toolWrite := acp.ToolCallInfo{Title: "写文件", Kind: "write"}
+	toolWrite := protocol.ToolCallInfo{Title: "写文件", Kind: "write"}
 	orch1.perm.Remember("s1", toolWrite, "reject", "option-reject-always")
 
 	rows, err := st1.ListMemories(ctx, "s1")
@@ -77,12 +77,12 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	}
 
 	// AutoDecision 双侧语义不丢（reject → Rejected；allow → Allowed；已撤销 → 无记忆）。
-	req := acp.PermissionRequest{ToolCall: toolRun, Options: []acp.PermissionOption{{OptionID: "x"}}}
+	req := protocol.PermissionRequest{ToolCall: toolRun, Options: []protocol.PermissionOption{{OptionID: "x"}}}
 	d, ok := orch2.perm.AutoDecision("s1", req)
 	if !ok || !d.Rejected {
 		t.Fatalf("s1 跑脚本应为 reject 记忆: %+v ok=%v", d, ok)
 	}
-	reqWrite := acp.PermissionRequest{ToolCall: toolWrite, Options: []acp.PermissionOption{{OptionID: "x"}}}
+	reqWrite := protocol.PermissionRequest{ToolCall: toolWrite, Options: []protocol.PermissionOption{{OptionID: "x"}}}
 	d2, ok2 := orch2.perm.AutoDecision("s2", reqWrite)
 	if !ok2 || !d2.Allowed {
 		t.Fatalf("s2 写文件应为 allow 记忆: %+v ok=%v", d2, ok2)

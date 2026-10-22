@@ -5,7 +5,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/core/protocol"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -210,8 +209,8 @@ func toolPayload(sessionID, runtimeID string, d protocol.ToolCallInfo) map[strin
 //
 // `runID` 是这一轮的身份（v22 起必带）：终态物化要靠它找到开轮行——从 `runs` 里"猜最近一条
 // running"只在单会话串行下碰巧成立，而猜错的代价是这一轮的事件窗口算到别的轮上。
-func (r *Runner) PublishError(sessionID, runID string, err error, cli *acp.Client) {
-	ae := acp.Classify(err)
+func (r *Runner) PublishError(sessionID, runID string, err error, cli protocol.Conn) {
+	ae := classifyFailure(err)
 	tail := ae.StderrTail
 	if len(tail) == 0 && cli != nil && r.diagnostics != nil {
 		tail = r.diagnostics.StderrTail(cli)

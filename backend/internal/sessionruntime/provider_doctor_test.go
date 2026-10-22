@@ -17,8 +17,8 @@ import (
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 
 	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -277,8 +277,8 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 }
 
 // acpValue 造一个 `category=model` 的目录取值。
-func acpValue(value string) acp.ConfigOptionValue {
-	return acp.ConfigOptionValue{Value: value}
+func acpValue(value string) protocol.ConfigOptionValue {
+	return protocol.ConfigOptionValue{Value: value}
 }
 
 // TestCollectProviderDoctorFactsNoStoreNoHome 极端输入：什么都没有时不许 panic。
@@ -304,9 +304,9 @@ func TestCollectProviderDoctorFactsNoStoreNoHome(t *testing.T) {
 // 这是把"运行时广告了什么"变成可构造输入的唯一干净办法：目录缓存本来就是内存态，
 // 而 `ModelCatalog` 在无活会话时读它（source=cache）。用真会话造这一侧会让单测依赖真底座，
 // 而本用例要钉的是**对账算法**本身。缓存键是 runtime id（v19）。
-func seedCatalog(svc *Service, runtimeID string, values ...acp.ConfigOptionValue) {
-	svc.planes.Providers.PutConfigOptions(runtimeID, []acp.ConfigOption{{
-		ID: "model", Name: "Model", Category: acp.CategoryModel, Type: "select",
+func seedCatalog(svc *Service, runtimeID string, values ...protocol.ConfigOptionValue) {
+	svc.planes.Providers.PutConfigOptions(runtimeID, []protocol.ConfigOption{{
+		ID: "model", Name: "Model", Category: protocol.CategoryModel, Type: "select",
 		Values: values,
 	}})
 }

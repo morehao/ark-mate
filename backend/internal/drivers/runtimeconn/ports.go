@@ -2,6 +2,7 @@ package runtimeconn
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
 
@@ -63,7 +64,11 @@ type ConfigDigestSource interface {
 // 于是改成把**句柄**交回去，由编排侧用自己的登记算出受影响者：`affected` 的来源只有一份。
 type ConnDrop struct {
 	// Client 刚摘下的句柄（编排侧据它找出此刻挂在它上面的会话）。
-	Client *acp.Client
+	//
+	// 类型是**平台接口**而不是 `*acp.Client`：编排侧按它查"挂在它上面的会话"，
+	// 那件事不需要认识协议。nil 必须传成**真 nil 接口**（typed nil 装进接口不等 nil，
+	// 会让"跳过查找"变成"按一个空指针查找，什么都找不到"）。
+	Client protocol.Conn
 	// Runtime 该连接的 runtime id（日志与诊断用）。
 	Runtime string
 	// WasCurrent 被摘的是该 runtime 的**当前**连接。进程状态回落只在这时为真——

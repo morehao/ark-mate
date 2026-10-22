@@ -10,7 +10,6 @@ import (
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/protocol"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -94,7 +93,7 @@ type LifecycleDeps struct {
 	// SelectedSpec 构建期选定的那个底座（`runtime_not_found` 的唯一铸点在执行面）。
 	SelectedSpec func() (runtime.Spec, error)
 	// Acquire 取（或拨）一条连接，返回它的 ACP 客户端。
-	Acquire func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acp.Client, error)
+	Acquire func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (protocol.Conn, error)
 	// ResolveModel 平台模型行 id → (行 id, 运行时值)。
 	ResolveModel func(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)
 	// ProviderKeyReady 该供应商当前是否有可用密钥（false + 原因）。nil = 不做这项前置。
@@ -128,7 +127,7 @@ type Lifecycle struct {
 	registry *runtime.Registry
 
 	selectedSpec     func() (runtime.Spec, error)
-	acquire          func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acp.Client, error)
+	acquire          func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (protocol.Conn, error)
 	resolveModel     func(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)
 	providerKeyReady func(ctx context.Context, providerID string) (bool, string)
 	mcpServers       func(runtimeID string, sel *CapabilitySelection) []protocol.McpServer
@@ -201,7 +200,7 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 		// A3：底座起不来 / 握手失败时记诊断（含该阶段的 stderr 尾巴），供
 		// `GET /runtime/diagnostics` 外露。今天唯一的启动路径就是"建会话把它拉起来"，所以落在这里。
 		if l.diagnostics != nil {
-			if ae := acp.Classify(err); ae != nil {
+			if ae := classifyFailure(err); ae != nil {
 				l.diagnostics.RecordRuntimeError(opt.SessionID, ae, ae.StderrTail)
 			}
 		}
@@ -221,7 +220,7 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 	// P2 MCP 注入：平台注册表 MCP 子集按「会话选定 > 全量」+ runtime 传输能力过滤后
 	// 随 session/new 下发。**必须传 opt.Selection**：指纹就是按它算出来的，注入若用别的口径，
 	// 会话拿到的东西会与代际台账不符。
-	sess, err := client.NewSession(ctx, acp.SessionOptions{
+	sess, err := client.NewSession(ctx, protocol.SessionOptions{
 		Cwd:        cwd,
 		McpServers: l.mcpServers(spec.ID, opt.Selection),
 	})
@@ -360,7 +359,7 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 	}
 	// **恢复路径必须用会话钉住的选定**（不是全量）：它从 `sessions.capability_json` 读回。
 	// 漏了这一步的后果是会话重启后注入集悄悄换一套，而且没有任何报错。
-	opts := acp.SessionOptions{Cwd: cwd, McpServers: l.mcpServers(spec.ID, sel)}
+	opts := protocol.SessionOptions{Cwd: cwd, McpServers: l.mcpServers(spec.ID, sel)}
 	caps := client.Capabilities()
 	sameRuntime := spec.ID == rec.RuntimeID && rec.RuntimeID != ""
 	// `nativeID` 是**平台侧的值**（`rt_` 壳）；给底座的必须是**原文**。
@@ -380,7 +379,7 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 	resumeOK := sameRuntime && rawNativeID != "" &&
 		(caps.LoadSession || caps.SessionResume)
 
-	var sess *acp.Session
+	var sess protocol.Session
 	var memo string
 	reason := "restart"
 	switch {
@@ -472,7 +471,7 @@ func (l *Lifecycle) Attach(as *ActiveSession, reason string) {
 	if old != nil && old != as {
 		// 旧句柄作废：拿到它旧指针的路径会走重建（而不是用一个已被顶替的会话）
 		old.MarkDead(false)
-		if c, ok := old.Native().(*acp.Session); ok && c != nil {
+		if c, ok := old.Native().(protocol.Session); ok && c != nil {
 			// 关会话是收尾动作：用**脱离请求**的 ctx（本轮 ctx 可能已取消）并带上限等待，
 			// 免得底座吞掉 session/close 时把这一轮拖住。0.2.1 起 close 要 drain 后代并
 			// flush，窗口用 AgentSettleTimeout（3s 的「发通知」上限不够）。

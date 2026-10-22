@@ -3,7 +3,7 @@ package session
 import (
 	"sync"
 
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 )
 
 // InFlightTracker 记录每连接（acp.Client）上正在执行 run 的会话（§17 方案 B：连接共享、
@@ -16,15 +16,15 @@ import (
 // nil client 一律安全 no-op / 空结果。所有方法自持锁，可在不持 Orchestrator.mu 时调用。
 type InFlightTracker struct {
 	mu       sync.Mutex
-	byClient map[*acp.Client]map[string]struct{}
+	byClient map[protocol.Conn]map[string]struct{}
 }
 
 func NewInFlightTracker() *InFlightTracker {
-	return &InFlightTracker{byClient: make(map[*acp.Client]map[string]struct{})}
+	return &InFlightTracker{byClient: make(map[protocol.Conn]map[string]struct{})}
 }
 
 // Mark 登记某会话在该连接上进入在途 run。
-func (t *InFlightTracker) Mark(client *acp.Client, sessionID string) {
+func (t *InFlightTracker) Mark(client protocol.Conn, sessionID string) {
 	if client == nil {
 		return
 	}
@@ -39,7 +39,7 @@ func (t *InFlightTracker) Mark(client *acp.Client, sessionID string) {
 }
 
 // Unmark 撤销登记（幂等：未登记/连接已清除均为 no-op）。
-func (t *InFlightTracker) Unmark(client *acp.Client, sessionID string) {
+func (t *InFlightTracker) Unmark(client protocol.Conn, sessionID string) {
 	if client == nil {
 		return
 	}
@@ -56,7 +56,7 @@ func (t *InFlightTracker) Unmark(client *acp.Client, sessionID string) {
 }
 
 // SoleOwner 返回该连接上「唯一在途」会话 id；无在途或多会话并发在途返回空串。
-func (t *InFlightTracker) SoleOwner(client *acp.Client) string {
+func (t *InFlightTracker) SoleOwner(client protocol.Conn) string {
 	if client == nil {
 		return ""
 	}
@@ -73,7 +73,7 @@ func (t *InFlightTracker) SoleOwner(client *acp.Client) string {
 }
 
 // Len 返回该连接在途 run 数（reap/StopAgent 忙判定）。
-func (t *InFlightTracker) Len(client *acp.Client) int {
+func (t *InFlightTracker) Len(client protocol.Conn) int {
 	if client == nil {
 		return 0
 	}
@@ -83,7 +83,7 @@ func (t *InFlightTracker) Len(client *acp.Client) int {
 }
 
 // Clear 清除该连接全部登记（连接断开作废；executeRun 收尾的 Unmark 对已清键为 no-op）。
-func (t *InFlightTracker) Clear(client *acp.Client) {
+func (t *InFlightTracker) Clear(client protocol.Conn) {
 	if client == nil {
 		return
 	}

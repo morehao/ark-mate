@@ -8,6 +8,7 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
@@ -58,7 +59,7 @@ func TestConnectRemoteTransport(t *testing.T) {
 			if cl.PidInfo().PID != 0 {
 				t.Fatalf("远程 runtime 不应报告 pid: %+v", cl.PidInfo())
 			}
-			sess, err := cl.NewSession(ctx, acp.SessionOptions{Cwd: "/tmp"})
+			sess, err := cl.NewSession(ctx, protocol.SessionOptions{Cwd: "/tmp"})
 			if err != nil {
 				t.Fatalf("NewSession: %v", err)
 			}

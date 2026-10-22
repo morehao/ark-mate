@@ -11,7 +11,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/core/protocol"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -46,16 +45,16 @@ const (
 
 // BusyTracker 在途轮次登记（每连接一份台账）。
 type BusyTracker interface {
-	Mark(client *acp.Client, sessionID string)
-	Unmark(client *acp.Client, sessionID string)
-	Clear(client *acp.Client)
-	Len(client *acp.Client) int
+	Mark(client protocol.Conn, sessionID string)
+	Unmark(client protocol.Conn, sessionID string)
+	Clear(client protocol.Conn)
+	Len(client protocol.Conn) int
 }
 
 // DiagnosticsSink 运行期诊断的写口（错误分类 + stderr 尾巴）。
 type DiagnosticsSink interface {
 	RecordRuntimeError(sessionID string, ae *failure.Error, tail []string)
-	StderrTail(client *acp.Client) []string
+	StderrTail(client protocol.Conn) []string
 }
 
 // ConfigOptionsSink 运行时配置项（模型目录）的缓存写口。
@@ -491,7 +490,7 @@ func errLooksCancelled(err error) bool {
 //
 // 拆除原因决定会话状态怎么收尾（`disconnectSession` 的注释是本仓对这条语义的唯一说明）：
 // 把停机当成故障，会让上一轮已 completed 的会话在每次重启后被改写成 failed。
-func (r *Runner) DropConn(client *acp.Client, intentional bool) {
+func (r *Runner) DropConn(client protocol.Conn, intentional bool) {
 	// 连接断开：在途登记一并作废（executeRun 的 unmark 对已清键为 no-op）。
 	r.busy.Clear(client)
 	victims := r.handles.ForClient(client)
@@ -510,7 +509,7 @@ func (r *Runner) DropConn(client *acp.Client, intentional bool) {
 // InUse 这条连接还有人用吗：有在途轮次、或仍挂着会话（含已完成态）。
 //
 // 这是空闲回收与代际回收的**唯一判据**；池在池锁之外问它，句柄表的锁与池锁不互指。
-func (r *Runner) InUse(client *acp.Client) bool {
+func (r *Runner) InUse(client protocol.Conn) bool {
 	if r.busy.Len(client) > 0 {
 		// 有在途 run：绝不打断。（挂起权限/提问只在某一轮的执行期间存在，而那一轮就是在途 run。）
 		return true

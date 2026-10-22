@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/golib/glog"
 )
@@ -38,12 +39,12 @@ func SampleConfigOptions(ctx context.Context, rc *Conn, rawSessionID, cwd string
 		return nil, failure.NewError(failure.ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
 	}
-	var sess *acp.Session
+	var sess protocol.Session
 	var err error
 	if caps.LoadSession {
-		sess, err = rc.Client.LoadSession(ctx, rawSessionID, acp.SessionOptions{Cwd: cwd})
+		sess, err = rc.Client.LoadSession(ctx, rawSessionID, protocol.SessionOptions{Cwd: cwd})
 	} else {
-		sess, err = rc.Client.ResumeSession(ctx, rawSessionID, acp.SessionOptions{Cwd: cwd})
+		sess, err = rc.Client.ResumeSession(ctx, rawSessionID, protocol.SessionOptions{Cwd: cwd})
 	}
 	if err != nil {
 		return nil, err

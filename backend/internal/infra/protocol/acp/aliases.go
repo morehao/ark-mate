@@ -51,6 +51,8 @@ type (
 	Capabilities = protocol.Capabilities
 	// AuthGuidance 见 `protocol.AuthGuidance`。
 	AuthGuidance = protocol.AuthGuidance
+	// SessionOptions 见 `protocol.SessionOptions`。
+	SessionOptions = protocol.SessionOptions
 )
 
 // 事件 Kind 与工具状态的转发（与 `protocol` 逐字同值）。

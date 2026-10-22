@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,7 +21,6 @@ import (
 	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/infra/protocol/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
@@ -131,7 +131,7 @@ func TestMcpServersFor(t *testing.T) {
 	denyAll := &session.CapabilitySelection{Mcps: ptrOf([]string{})}
 
 	// 网关条目断言：一条 stdio 条目、命令是平台自身、参数是 mcp bridge + 稳定 scope。
-	assertGatewayEntry := func(entries []acp.McpServer) {
+	assertGatewayEntry := func(entries []protocol.McpServer) {
 		t.Helper()
 		last := entries[len(entries)-1]
 		if last.Name != mcp.GatewayServerName || last.Transport != capability.TransportStdio {

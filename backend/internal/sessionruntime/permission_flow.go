@@ -14,7 +14,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 )
 
 // requestPermission 处理一次 ACP 权限请求（在 SDK 派发的 goroutine 中阻塞等待用户决策）：
@@ -23,7 +23,7 @@ import (
 //     PermissionsResolve（allow/reject × once/always）；超时或 ctx 取消自动拒绝。
 //
 // 事件发布（publish）注入的给 interaction.PermissionManager，避免 manager 依赖 bus。
-func (o *Orchestrator) requestPermission(ctx context.Context, req acp.PermissionRequest) acp.PermissionDecision {
+func (o *Orchestrator) requestPermission(ctx context.Context, req protocol.PermissionRequest) protocol.PermissionDecision {
 	// P3 双 id：权限请求只携带原生 session id → 解析为平台会话 uuid 键控（记忆/挂起/事件
 	// 均以平台会话 id 为键，与 sessions/events/permission_memories 一致）。
 	sid := o.handles.ResolveProvider(req.SessionID)
@@ -54,7 +54,7 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acp.Permission
 	if d, ok := o.perm.AutoDecision(sid, req); ok {
 		return d
 	}
-	publish := func(callID, title string, tool acp.ToolCallInfo, opts []acp.PermissionOption, timeout time.Time) {
+	publish := func(callID, title string, tool protocol.ToolCallInfo, opts []protocol.PermissionOption, timeout time.Time) {
 		// 「等用户决策」是**插曲不是终态**（S1）：它让界面说得出「等待你确认授权」，
 		// 而不是拿「进行中」蒙混过去。进入等待前的状态由域里的投影记着，决策后由
 		// `ResumeRunStatus` 送回去（否则头栏会一直停在等待态）。
@@ -81,7 +81,7 @@ func (o *Orchestrator) PendingPermissions(sessionID string) []interaction.Permis
 }
 
 // ResolvePermission 按 call_id 投递决策（allow/reject × once/always），并返回**实际回执**
-// （ACP 形态 selected/cancelled + 有效 option_id；规则见 acp.EffectivePermissionOutcome）。
+// （ACP 形态 selected/cancelled + 有效 option_id；规则见 protocol.EffectivePermissionOutcome）。
 // 拒绝分支不再折叠：optionID（所选 deny 选项）与 always 标记透传给 interaction.PermissionManager，
 // ACP 层对显式拒绝回 Selected{deny 选项}，agent 可区分「拒绝」与「取消/超时」。
 //
@@ -91,7 +91,7 @@ func (o *Orchestrator) ResolvePermission(sessionID, callID, optionID string, alw
 	if callID == "" {
 		return PermissionDecisionOutcome{}, false, failure.NewError(failure.ClassRequest, "call_id_required", "call_id 必填", nil)
 	}
-	d := acp.PermissionDecision{Allowed: allowed, Rejected: !allowed, OptionID: optionID, Always: always}
+	d := protocol.PermissionDecision{Allowed: allowed, Rejected: !allowed, OptionID: optionID, Always: always}
 	found, out := o.perm.ResolveDecision(sessionID, callID, d)
 	if !found {
 		return PermissionDecisionOutcome{}, false, nil
@@ -143,25 +143,25 @@ func (o *Orchestrator) RevokeMemory(sessionID, title, kind string) (bool, error)
 //   - inferred_inflight：`_meta` 未给，但连接上恰有一个在途 run → 按它归属；
 //   - ambiguous：两者都不成立（空闲 / 会话外 request-scope / 多会话并发）→ 空 id，调用方按取消
 //     回应并留痕，不猜测（猜错会把提问卡投到别的会话上，比不投更坏）。
-func (o *Orchestrator) resolveElicitationScope(cli *acp.Client, req acp.ElicitationRequest) (sessionID, scopeSource, ambiguousNote string) {
+func (o *Orchestrator) resolveElicitationScope(cli protocol.Conn, req protocol.ElicitationRequest) (sessionID, scopeSource, ambiguousNote string) {
 	// D-4（v15 顺手修的既有缺陷）：`req.SessionID` 来自 ACP `_meta`，那是**底座的会话 id**，
 	// 不是平台的会话 id。v15 之前两者同形（有些底座就发 `ses_…`），于是"把提问卡挂到一个
 	// 不存在的会话上"在任何测试与人工核对里都看不出来；加了 `rt_` 壳之后形状不同了，**不查就错**。
 	//
 	// 修法只有一条：先按 `runtime_session_id` 反查平台会话，查不到退 `ScopeAmbiguous` + 留痕，
 	// **不猜**（这个函数的既有口径就是"猜错比不投更坏"）。
-	if req.ScopeSource == acp.ScopeWire && req.SessionID != "" {
+	if req.ScopeSource == protocol.ScopeWire && req.SessionID != "" {
 		if sid := o.platformSessionIDForProvider(req.SessionID); sid != "" {
-			return sid, acp.ScopeWire, ""
+			return sid, protocol.ScopeWire, ""
 		}
-		return "", acp.ScopeAmbiguous,
+		return "", protocol.ScopeAmbiguous,
 			"elicitation 的 wire `_meta` 带来了一个底座会话 id，但平台上没有会话登记它" +
 				"（跨会话 / 已删除 / 底座换了 id）：按不可归属处理，不猜测"
 	}
 	if sid := o.busySessionForClient(cli); sid != "" {
-		return sid, acp.ScopeInferred, ""
+		return sid, protocol.ScopeInferred, ""
 	}
-	return "", acp.ScopeAmbiguous,
+	return "", protocol.ScopeAmbiguous,
 		"elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 run）"
 }
 
@@ -204,7 +204,7 @@ func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string
 //     并阻塞等待 ElicitationResolve（accept/decline/cancel）；超时或 ctx 取消自动按取消处理。
 //
 // 事件发布（publish）注入给 interaction.ElicitationManager，避免 manager 依赖 bus。
-func (o *Orchestrator) requestElicitation(ctx context.Context, req acp.ElicitationRequest) acp.ElicitationOutcome {
+func (o *Orchestrator) requestElicitation(ctx context.Context, req protocol.ElicitationRequest) protocol.ElicitationOutcome {
 	sid := req.SessionID // 断点恢复别名归一
 	publish := func(it interaction.ElicitationItem) {
 		o.runner.RunStatusFor(sid, session.RunStatusWaitingForUser, session.RunStatusOpts{WaitingFor: "elicitation"})
@@ -348,24 +348,24 @@ func lateAnswerText(question string, content map[string]any) string {
 //
 // decided=false 表示**交回既有流程**（prompt / 非 shell 命令 / 未配置规则）；true 表示门禁已经
 // 给出终局（allow / forbidden），调用方直接返回它，不再走记忆与人工审批。
-func (o *Orchestrator) commandGateDecision(tool acp.ToolCallInfo, opts []acp.PermissionOption) (acp.PermissionDecision, string, bool) {
+func (o *Orchestrator) commandGateDecision(tool protocol.ToolCallInfo, opts []protocol.PermissionOption) (protocol.PermissionDecision, string, bool) {
 	d, rule, isShell := interaction.GateCommand(o.commandPolicy, tool.Input)
 	if !isShell {
-		return acp.PermissionDecision{}, "", false
+		return protocol.PermissionDecision{}, "", false
 	}
 	switch d {
 	case interaction.CommandForbidden:
-		return acp.PermissionDecision{Rejected: true, OptionID: permissionOptionID(opts, false)}, rule, true
+		return protocol.PermissionDecision{Rejected: true, OptionID: permissionOptionID(opts, false)}, rule, true
 	case interaction.CommandAllow:
-		return acp.PermissionDecision{Allowed: true, OptionID: permissionOptionID(opts, true)}, rule, true
+		return protocol.PermissionDecision{Allowed: true, OptionID: permissionOptionID(opts, true)}, rule, true
 	default:
-		return acp.PermissionDecision{}, rule, false
+		return protocol.PermissionDecision{}, rule, false
 	}
 }
 
 // permissionOptionID 选一个放行/拒绝选项：优先 `_once`（最小授权），其次同类任一；没有 → 空串
 // （ACP 层按 EffectivePermissionOutcome 兜底：放行选第一个，拒绝落回 cancelled）。
-func permissionOptionID(opts []acp.PermissionOption, allow bool) string {
+func permissionOptionID(opts []protocol.PermissionOption, allow bool) string {
 	prefix, once := "reject", "reject_once"
 	if allow {
 		prefix, once = "allow", "allow_once"

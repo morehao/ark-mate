@@ -7,7 +7,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/protocol"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -23,7 +22,7 @@ import (
 // 同属一个聚合；把它们留在编排层会让「会话状态」有两个持有者。执行面（`runtimeconn`）只持有
 // **连接**，它不拥有会话——拆连时它回调编排侧（`DropSink`），由这边把句柄作废。
 
-// ACP 是 acp.Session 的最小接口（测试可注入桩；真实实现为 *acp.Session）。
+// ACP 是 acp.Session 的最小接口（测试可注入桩；真实实现为 protocol.Session）。
 type ACP interface {
 	Prompt(ctx context.Context, text string) (string, error)
 	Cancel(ctx context.Context) error
@@ -44,7 +43,7 @@ type ActiveSession struct {
 	// 下发，所以两个模式不同的会话不能共用一个暖进程（见 `runtimeconn.Pool.KeyFor`）。
 	NativeMode string
 
-	client *acp.Client
+	client protocol.Conn
 	sess   ACP
 	// providerID 底座侧的原生会话 id（`sess.ID()`）。存一份是因为换句柄（代际迁移）时要拿旧值
 	// 摘 `byProvider` 映射与关掉旧会话，而 `sess` 是接口（`ACP` 上没有 ID()）。
@@ -81,7 +80,7 @@ type HandleParams struct {
 	// 它随**句柄**交付（而不是随会话记录）：每建一次执行上下文（新建、原生恢复、handoff、
 	// 代际迁移）都重新声明一次身份——那是刻意的"重新锚定"，代价是每个上下文多 ~100 tokens。
 	Identity   string
-	Client     *acp.Client
+	Client     protocol.Conn
 	Session    ACP
 	Projection runtime.Runtime
 }
@@ -97,7 +96,7 @@ func NewActiveSession(p HandleParams) *ActiveSession {
 }
 
 // Client 所属连接（nil = 未拨号/测试桩）。
-func (as *ActiveSession) Client() *acp.Client { return as.client }
+func (as *ActiveSession) Client() protocol.Conn { return as.client }
 
 // Native 原生 ACP 会话（nil = 尚未建立）。
 func (as *ActiveSession) Native() ACP { return as.sess }
@@ -224,7 +223,7 @@ func (as *ActiveSession) BeginRun(ctx context.Context) (*Run, RunPrefix, error) 
 }
 
 // FinishRun 收尾一轮：清 busy/run 并把所属连接一并交回（取消在途登记要用它）。
-func (as *ActiveSession) FinishRun() (*Run, *acp.Client) {
+func (as *ActiveSession) FinishRun() (*Run, protocol.Conn) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	t := as.run
@@ -386,7 +385,7 @@ func (h *Handles) ForgetSession(sessionID string) {
 }
 
 // ForClient 该连接上挂着哪些句柄（含已完成态）。
-func (h *Handles) ForClient(client *acp.Client) []*ActiveSession {
+func (h *Handles) ForClient(client protocol.Conn) []*ActiveSession {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out := make([]*ActiveSession, 0, 1)

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
@@ -16,12 +17,12 @@ import (
 // 错误（§6.2 ModeMapping / §5.5 模型面为文档开放项），不静默吞掉。
 type sessionRuntime struct {
 	spec Spec
-	sess *acp.Session
+	sess protocol.Session
 }
 
 // newSessionRuntime 以给定 Spec 包装已拨活的会话。调用方负责会话生命周期（acp.Session 的
 // Close，与 Orchestrator 持有连接回收的方式一致）。
-func newSessionRuntime(spec Spec, sess *acp.Session) *sessionRuntime {
+func newSessionRuntime(spec Spec, sess protocol.Session) *sessionRuntime {
 	return &sessionRuntime{spec: spec, sess: sess}
 }
 
@@ -110,6 +111,6 @@ func (r *sessionRuntime) Resume(_ context.Context, _ string) error {
 // `run.go` / `session_start.go` 都有显式判空。
 //
 // sess 为 nil 时仍返回非 nil 实例（构造不触碰会话；方法调用方负责非 nil）。
-func NewProjection(spec Spec, sess *acp.Session) Runtime {
+func NewProjection(spec Spec, sess protocol.Session) Runtime {
 	return newSessionRuntime(spec, sess)
 }
