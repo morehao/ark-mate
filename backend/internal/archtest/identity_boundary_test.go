@@ -74,33 +74,74 @@ func TestIdentityPromptHasNoTemplateBraces(t *testing.T) {
 
 // TestDshIdentityPatchMatchesPayloadPin ③：身份交付面声明「已实测」时，版本必须等于载荷 pin。
 //
-// pin 的唯一事实源是 `frontend/apps/desktop/release.json` 的 `payloads[]`（与
-// `TestDshTestedVersionMatchesPayloadPin` 读同一套事实，但那条读的是 package.json 的依赖 pin；
-// 这里读的是**打包产物声明的版本**——两者分叉本身就是一种事故，所以故意分别钉）。
+// 两个事实源分别钉（两者分叉本身就是一种事故）：
+//   - `frontend/apps/desktop/release.json` 的 `payloads[]` = **打包产物声明的版本**（本判据的主源）；
+//   - `frontend/apps/desktop/runtime/dsh/package.json` 的精确 pin = **手写真源**
+//     （`TestDshTestedVersionMatchesPayloadPin` 读的那份）。
+//
+// 为什么要处理 release.json 缺失（2026-10-22，CI 基线）：它是 `.gitignore` 的**本地生成物**
+// （`build-release-json.mjs` 从实际产物生成），干净检出/CI 里根本不存在。原先这里直接 Fatal，
+// 于是"干净检出跑判据"必红——那不是判据想抓的事故，而是环境的常态；而在 CI 里给它生成一份
+// 又要把整个打包链（前端 dist + 内核二进制）拖进来，那是"为了让判据有文件"付出的错代价。
+//
+// 所以：release.json 在就用它，并**顺带断言它等于手写真源**（这条交叉检查以前没人做）；
+// 不在就退回手写真源并打印一行说明（`t.Logf` 会出现在 `-v` 输出里，**不是**静默降级）；
+// 两个都没有 → Fatal（fail-closed，判据不许空转）。
 func TestDshIdentityPatchMatchesPayloadPin(t *testing.T) {
-	path := filepath.Join(frontendRoot(t), "apps", "desktop", "release.json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("读 release.json 失败（%s）：%v", path, err)
-	}
-	var doc struct {
-		Payloads []struct {
-			Name    string `json:"name"`
-			Version string `json:"version"`
-		} `json:"payloads"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("解析 release.json 失败（%s）：%v", path, err)
-	}
-	pin := ""
-	for _, p := range doc.Payloads {
-		if p.Name == dsh.ID {
-			pin = strings.TrimSpace(p.Version)
-			break
+	artifactPath := filepath.Join(frontendRoot(t), "apps", "desktop", "release.json")
+	handwrittenPath := filepath.Join(frontendRoot(t), "apps", "desktop", "runtime", "dsh", "package.json")
+
+	artifactPin := ""
+	if raw, err := os.ReadFile(artifactPath); err == nil {
+		var doc struct {
+			Payloads []struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"payloads"`
 		}
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatalf("解析 release.json 失败（%s）：%v", artifactPath, err)
+		}
+		for _, p := range doc.Payloads {
+			if p.Name == dsh.ID {
+				artifactPin = strings.TrimSpace(p.Version)
+				break
+			}
+		}
+		if artifactPin == "" {
+			t.Fatalf("%s 的 payloads[] 里没有 %q：本判据没有对象（fail-closed）", artifactPath, dsh.ID)
+		}
+	} else {
+		t.Logf("release.json 不存在（%s）：它是 .gitignore 的本地生成物，干净检出/CI 里没有。"+
+			"本次改用 runtime/dsh/package.json 的手写 pin 判定；打包态请以 release.json 为准。", artifactPath)
 	}
-	if pin == "" {
-		t.Fatalf("%s 的 payloads[] 里没有 %q：本判据没有对象（fail-closed）", path, dsh.ID)
+
+	raw, err := os.ReadFile(handwrittenPath)
+	if err != nil {
+		t.Fatalf("读 dsh 载荷 pin 失败（%s）：%v", handwrittenPath, err)
+	}
+	var pkg struct {
+		Dependencies map[string]string `json:"dependencies"`
+	}
+	if err := json.Unmarshal(raw, &pkg); err != nil {
+		t.Fatalf("解析 dsh 载荷 pin 失败（%s）：%v", handwrittenPath, err)
+	}
+	handwrittenPin := strings.TrimSpace(pkg.Dependencies["@deepseek-ai/dsh"])
+	if handwrittenPin == "" {
+		t.Fatalf("%s 的 dependencies 里没有 @deepseek-ai/dsh：本判据没有对象（fail-closed）", handwrittenPath)
+	}
+
+	// 两个源同时在场时**必须一致**：产物里写着一个版本、手写里写着另一个，等于打包出来的
+	// 不是我们声称验证过的那个底座，而两边各自的测试都绿。
+	if artifactPin != "" && artifactPin != handwrittenPin {
+		t.Fatalf("载荷 pin 分叉：release.json 的 payloads[]=%q，runtime/dsh/package.json 的 pin=%q。\n"+
+			"  说明打包产物与手写 pin 不是同一个版本——重新生成 release.json，或先按升级顺序改 pin。",
+			artifactPin, handwrittenPin)
+	}
+
+	pin := handwrittenPin
+	if artifactPin != "" {
+		pin = artifactPin
 	}
 
 	if dsh.Identity.Tested {

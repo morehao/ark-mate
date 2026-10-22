@@ -63,6 +63,8 @@
 | v28 | WorkBuddy 对齐（2026-10-16）：轮次状态成为服务端事实 + 工作空间默认值 + 队列三动作 + 超时转 pending；**五条刻意偏离参照产品** + 一条长期纪律 | 仍有效 |
 | v29 | L2：未实现清单 §2 十四条逐条决策（关闭 11 条 / 保留排期 3 条） | 仍有效 |
 | v30 | 后端分层：保持 L0–L9 水平层带 + 顶层目录角色卡（不做按业务模块的垂直切片） | 仍有效 |
+| v31 | 外部协议端口化：MCP 网关形状进平台值（A1）+ MCP 客户端走窄端口 `LiveClient`（A2） | 仍有效（含一处自我纠正：A1 往返判据曾不在形状所在包，已归位；别名去留由 v32 裁决） |
+| v32 | 协议包类型别名：保留（协议侧读法）+ 只许协议包自用（G6 判据） | 仍有效 |
 
 ## 正文
 
@@ -846,3 +848,99 @@ O19（确认区只画一张卡）是交互缺陷：卡片之间没有先后依�
 它们不是"目录得有什么用"，而是**角色得唯一**：G1/G2/G5 以双向登记表表达"现状欠账"，清空即转硬（三张表 2026-10-22 已全部清空）；G3/G4 从第一天起就是硬判据。
 
 ---
+
+## v31 · 外部协议端口化：MCP 网关形状进平台值（A1）+ 客户端走窄端口（A2）·2026-10-22
+
+> 本条补的是 v30 留下的**口径缺口**：A1/A2 两块改造此前只以"守卫名单 + 沿革"的形式存在
+> （`docs/agents/guards.md` 的 G2 段、`guards-history.md` 的 2026-10-22 条目、v30 ⑤ 的一行），
+> 下一个读到 `internal/domain/mcp` 的人无法只靠 `docs/` 回答"这里为什么有一层端口、什么时候可以拆掉"。
+> 改造本身已完成（`844a8517` / `a90d12ee` / `d14926dd`），本条只登记口径，不改代码行为。
+
+### ① 结论
+
+MCP 这一面有**两处**与外部协议的接触，都按「平台值 + 端口」处理，内圈不再认识协议实现：
+
+| # | 对象 | 落点 | 为什么是它 |
+| --- | --- | --- | --- |
+| **A1** | 网关条目的**参数形状**：`GatewayServerName`（`mate-gateway`）、`GatewayCredCwdEnv`、`GatewayScope`、拼装 `GatewayBridgeArgs` 与解析 `ParseScopeArgs` | `internal/core/protocol/gateway.go`（纯值 + 纯计算，只 import 标准库） | 它是**平台自己拼 bridge 命令**的约定，两端（注入端 `sessionruntime/mcp_injection.go` 拼条目、网关端 `drivers/gateway` + `mate mcp bridge` 解参数）都是内圈或装配面代码；挂在 `infra` 协议包上等于让内圈为了一份 argv 约定去认识协议客户端 |
+| **A2** | MCP **客户端**：结果值（`McpToolList` / `McpCallResult` / `McpResourceList` / `McpReadResourceResult` / `McpPrompt` / `McpGetPromptResult` …）+ 域侧端口 `LiveClient` | 值 → `internal/core/protocol/mcp.go`；端口 → `internal/domain/mcp/ports.go`（7 个方法：`ListTools` / `CallTool` / `ListResources` / `ReadResource` / `ListPrompts` / `GetPrompt` / `CodeOf`，签名只用 `protocol.McpServer` + `protocol.Mcp*`）；实现体 → `internal/drivers/registry/mcplive.go`（L6 装配面），由 `NewMcpLiveClient()` 注入 `mcp.NewPlane` | 域**是** MCP 的编排者（选 server、解析凭据、控超时），但它要的结果形状属于平台词汇；把形状留在协议包里，"换底座只动 adapter"这句承诺对 MCP 面就是假的 |
+
+**为什么这层端口留得住**（不是"以后可能有第二个实现"）：按 `docs/agents/layout.md` 的「新增一层/一个接口/一个抽象之前的五问」，A2 的端口在 ③（隔离外部技术依赖）与 ⑤（去掉它调用方就会耦合不该暴露的细节）上明确成立——去掉 `LiveClient`，`domain/mcp` 立刻要 import MCP 的线协议实现，那就是 2026-10-22 之前的状态。① 只有一个生产实现、② 没有第二个实现，**这两问答"否"也不构成拆掉的理由**：五问的用法是"别为不存在的东西加层"，不是"只留一个实现时把层拆掉"。
+
+### ② 依据（2026-10-22 实测）
+
+- **内圈零 `infra` 协议依赖**：`go list` 实证 `domain` / `sessionruntime` / `runtime` 三目录对 `infra/protocol/{acp,mcp}` 的生产依赖 = 0；G2 的登记表 `innerInfraImports` 清零后转**硬判据**。清掉的最后一条欠账正是 `domain/mcp → infra/protocol/mcp`。
+- **`infra` 因此回到单层带**：角色卡成本 `{5}`（唯一具名例外 `infra/logging → L1`，双向登记）——域不再直接使用协议绑定，它们才不必停在 L1。
+- **A1 的消费者共四个面**，全部经平台值：`sessionruntime/mcp_injection.go`（拼条目）、`drivers/gateway`（解参数）、`bootstrap/maintenance/mcp.go`（子命令）、`infra/protocol/mcp`（协议侧自身）；`sessionruntime` 对 `infra/protocol/mcp` 零命中。
+- **映射只有一处**：`mcplive.go` 的 `toClientServer` 做平台值 → 协议输入（`protocol.McpServer.Name` → 实现的 `Server.ID`，同名不同义），`CodeOf` 把实现产生的错误折成稳定 code；`var _ dommcp.LiveClient = mcpLiveClient{}` 编译期钉住方法集（端口加方法时这行先红，比运行期空指针早）。
+
+### ③ 代价如实写
+
+- **加一个 MCP 动作要改三处**：域端口（`ports.go`）、实现体（`mcplive.go`）、协议包（`infra/protocol/mcp`）；再加结果值就四处。直连协议包只需改两处——这层端口是**用改动量换依赖方向**，不是免费的。
+- **`LiveClient` 眼下只有一份生产实现**，代价是"读代码的人要多跳一层才看到真实现"；换来的是域不认识协议。这条被明确接受（见 ① 五问③⑤）。
+- **网关 argv 的往返判据曾经不住在形状所在包**（**自我纠正**，2026-10-22 首次登记后复核发现）：A1 的往返用例（`TestGatewayArgsRoundTrip`）本来就在 `infra/protocol/mcp/server_test.go`——形状搬去 `core/protocol` 时**判据没跟过来**。后果不是"没有覆盖"，而是覆盖**会静默消失**：协议包一旦重组、或那条用例被顺手删掉，`core/protocol` 的形状就零覆盖，而形状本身看起来仍有测试。已搬成 `core/protocol/gateway_test.go` 的 `TestGatewayBridgeArgsRoundTrip`，并补强到四类断言：三态（未钉 / 显式空集 / 白名单）用 `reflect.DeepEqual` 逐字往返（能区分 nil 与非 nil 空集）、白名单 id 带空格/逗号/引号/中文（"为什么选 JSON 数组"从注释变成可执行断言）、参数漂移与坏 JSON 必须报错、`MATE_MCP_CRED_CWD` 不得出现在 `Args`（进了 `Args` 就进能力指纹）。**本条初次登记时把它写成"完全没有往返判据"，那次判断是错的**——错误留痕比抹平有用，故按实改写而不是删掉一提了之。
+- **协议包类型别名仍在**（`infra/protocol/mcp/values.go` 41 行、`infra/protocol/acp/aliases.go` 109 行）：类型只有一处定义、别名不新增行为，但"内圈不许用别名"目前只有 G2 在守（内圈用了别名会让域重新认识协议实现），**其余面用别名没有判据**。别名是"读起来自然"的净收益还是第二条事实源的隐患，**本条不裁决**，见 ⑥。
+
+### ④ 推翻条件（满足任一即重开评估）
+
+1. MCP 客户端出现**第二个真实实现**且两者方法集差异 > 30%：那时应拆成两个端口，而不是继续共用 `LiveClient`。
+2. 域为了编排 MCP **开始需要实现侧细节**（池键、指纹、日志字段名）：那是平台值切错了，该改协议包边界，**不是给端口加方法**。
+3. 网关不再由平台 spawn（改成底座内建或远程共享网关）：`GatewayBridgeArgs` / `ParseScopeArgs` 这对 argv 契约就失去对象，A1 整块可删。
+4. 端口方法数 **> 12**（当前 7）：说明域在当"协议代理"而不是"域编排"，该重切职责。
+
+### ⑤ 判据落地
+
+- `TestInnerCircleAvoidsInfraProtocol`（G2，`backend/internal/archtest/layer_roles_test.go`）：内圈三目录不得 import `infra` 的协议/进程/句柄子包，白名单只有 `infra/logging`；**双向登记表为空 = 硬判据**；fail-closed：三目录各自扫到 0 个包即 Fatal（包改名后不会静默空转）。
+- `TestProtocolValuesStayFreeOfInfra`（G5）：`core/protocol` 只装值，不得 import `internal/infra`——否则 `core → infra` 会从平台值包这个后门长回来，而层表不会红。
+- 端口与实现的一致性**不是独立判据**，是编译期断言（`mcplive.go` 的 `var _ dommcp.LiveClient = mcpLiveClient{}`）——这类约束交给类型系统比交给扫描稳。
+- 本条**不新增守卫**，判据仍 **177** 条；口径正文落 `docs/agents/layout.md` 的「外部协议同样走端口（A2）」段与 `docs/agents/guards.md` 的 G2 段，本条是它们的上级依据，不再是第三处平行表述。
+
+### ⑥ 未决（登记在此，避免被误读成已决）
+
+- ~~`infra/protocol/{acp,mcp}` 的类型别名去留~~ **已由 v32 裁决**：保留（协议侧读法），但只许协议包自用，包外一律走 `core/protocol`；判据 G6。本条登记的那条约束（别名不得被内圈使用）随之变成 G6 的一个特例。
+- **网关 argv 往返判据**（③ 的留白）：建议的补法写在 ③，未做。
+
+---
+
+## v32 · 协议包类型别名：保留读法，封死出口（2026-10-22）
+
+> 回答 v31 ⑥ 留下的问题：`infra/protocol/{acp,mcp}` 把 `core/protocol` 的载荷类型、事件常量与
+> 网关函数转发成同名读法（`aliases.go` / `values.go` / `server.go` 的 A1 转发块），这是
+> "让协议侧读起来自然"的净收益，还是第二条事实源的隐患？
+> 结论：**收益是真的，隐患也是真的，但两者不在同一层——用"只许自用"封住隐患那一半。**
+
+### ① 结论
+
+**保留别名，但把它从"第二个出口"降级为"协议包内部读法"**：
+
+1. 别名照旧存在（`acp.Event` / `mcp.Tool` / `mcp.GatewayBridgeArgs` …），协议实现自己的代码与测试继续用；
+2. **协议包以外的生产代码一律不许用**（改用 `core/protocol` 的 `protocol.X`）；今天包外 4 个生产文件已迁移到位；
+3. 这条边界由 G6 `TestProtocolAliasesStayInProtocolPackages` 守着（判据 177 → **178**），不再靠注释。
+
+### ② 依据（2026-10-22 实测，两边都算过）
+
+- **收益侧**：协议包内部有 **362 处**不带前缀的引用（`acp` 24 个文件、`mcp` 8 个文件）。删掉别名 = 这些全部要写成 `protocol.X`（约 380 处、25 个文件），换来的是删掉 150 行转发。**这是一次纯机械重写，收益只有行数**。
+- **隐患侧**：别名本身不是第二事实源——`type X = protocol.X` 只有一处定义、零行为、零分支，类型系统保证二者同一。真正的隐患是**导出面**：协议包因此多出约 70 个与平台值同名的导出名，包外任何一个消费方都能用"取一个值"的名义把整条协议实现拖进自己的依赖图。事故形状不是"两份实现分叉"，而是"这条边看起来只取了个常量"。
+- **实测的隐患规模很小但确实存在**：包外只有 **4 个生产文件**在用别名（`bootstrap/maintenance/mcp.go` 的 `ParseScopeArgs`；`drivers/gateway/{gateway,source}.go` 的 `Tool`/`CallResult`/网关常量；`drivers/runtimeconn/sample.go` 的 `ConfigOption`），另 5 个测试文件与 2 处注释。**已全部迁到 `core/protocol`**；`maintenance/mcp.go` 因此不再 import 协议包，`sample.go` 不再 import `acp`。
+- **为什么这条边此前没有判据**：G2 只扫内圈三目录（`domain` / `sessionruntime` / `runtime`）对 `infra` 的 import。装配面、驱动面、协议包的同族消费方都不在扫描面上，所以"包外用别名"在 G2 眼里是合法的——它不是 G2 的漏洞，是 G2 的**射程之外**。
+
+### ③ 代价如实写
+
+- **判据靠解析声明而不是名单**：G6 从 `X = protocol.Y` 与"函数体就是一行 `return protocol.X`"两种形态里读出别名集合。好处是声明变、判据跟着变；代价是**新增一种转发写法**（例如 `var X = protocol.Y` 已覆盖，但函数体多一行注释就不再匹配）会让某个名字漏出集合——所以协议侧要新增转发形态时，得先让 G6 认它。
+- **测试文件不在扫描面内**：G6 只扫生产包（`scanProductionPackages` 的既有约定）。驱动/协议测试仍可以用 `mcp.Tool` 造夹具，理由是测试要贴近被测对象；代价是"测试里的第二出口"没有判据。
+- **保留别名意味着保留一份**"为什么这里有两个名字"**的解释成本**：每个新人看到 `acp.Event` 与 `protocol.Event` 仍要读一次 `aliases.go` 的头注释。选择这条的代价是**文档**，不是正确性。
+- **不删的另一个后果**：别名集合会继续跟着 `core/protocol` 长——平台值加一个类型，协议包就多一个可选转发。G6 不阻止这件事（它只阻止包外用），所以"转发面膨胀"仍需人工克制。
+
+### ④ 推翻条件（满足任一即重开）
+
+1. 协议包内部对别名的引用降到 **< 50 处**（今天 362）：那时保留的理由（读法收益）就撑不住 150 行转发了，该整块删。
+2. 别名的**测试面**也要管起来（`_test.go` 纳入扫描）：那说明"第二出口"在测试里已造成误解，届时把迁移做完而不是放宽判据。
+3. `core/protocol` 与协议包的同名导出出现**语义**差异（有人开始给别名加方法/文档却说不同的话）：那就不是别名了，是两份定义，届时按新事实源处理。
+4. 出现**第三个**协议绑定包并各自复制这套转发：说明该有一个共享的转发层，而不是每个协议包抄一遍。
+
+### ⑤ 判据落地
+
+- G6 `TestProtocolAliasesStayInProtocolPackages`（`backend/internal/archtest/protocol_alias_test.go`）：解析两个协议包的转发声明得到别名集合 → 扫包外生产代码的 `<import 本地名>.<别名>` → 命中即红；白名单只有两个协议包自己。
+- fail-closed 两侧：某个协议包解析到 **0 条**转发声明 → Fatal（判据会静默空转）；没有任何生产包 import 协议包 → Fatal（协议包改名/搬迁后这条会静默变绿）。正向断言：协议包内部确实还有别名引用，否则整套转发已无收益。
+- 反证（实跑 2 条，均红后复原）：在 `drivers/gateway` 里写 `var _ = []mcp.Tool{}` → 红；把 `protocolAliasDirs` 改成不存在的目录 → 失锚 Fatal。
+- 判据 177 → **178**；口径落 `docs/agents/layout.md` 的别名段、`guards.md` 的 G6 条目与沿革。

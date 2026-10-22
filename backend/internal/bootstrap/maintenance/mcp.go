@@ -10,9 +10,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
 	"github.com/morehao/ark-mate/internal/config"
-
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/drivers/gateway"
-	"github.com/morehao/ark-mate/internal/infra/protocol/mcp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -47,7 +46,7 @@ const mcpUsage = `mcp 用法：
 // 三条纪律（都不是风格问题）：
 //  1. **stdout 只走协议**（C10）：日志 handler 显式绑 stderr，不用 fmt.Print 写任何诊断；
 //     连用法/错误都走 stderr —— 底座把 stdout 当 JSON-RPC 流读。
-//  2. **参数解析与注入端同源**（P-2）：用 `mcp.ParseScopeArgs` 解 `mcp.GatewayBridgeArgs`
+//  2. **参数解析与注入端同源**（P-2）：用 `protocol.ParseScopeArgs` 解 `mcp.GatewayBridgeArgs`
 //     拼出来的那串。未知参数**当场失败**——静默忽略会表现成"网关起来了但 scope 不对"，
 //     而 scope 不对的症状是"工具面不对"，最难查的一类。
 //  3. **配置只用来定位数据面**（M7-2）：网关要自己打开 core 那份库（`MATE_DB` /
@@ -61,7 +60,7 @@ func mcpBridge(args []string) {
 		fmt.Fprint(os.Stderr, mcpUsage)
 		return
 	}
-	scope, err := mcp.ParseScopeArgs(args)
+	scope, err := protocol.ParseScopeArgs(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp bridge: %v\n\n%s", err, mcpUsage)
 		os.Exit(2)

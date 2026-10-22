@@ -1,17 +1,17 @@
 // mate 是 ark-mate 控制面的单二进制入口（无默认子命令）。
 //
 // 本文件只做进程级收尾：把参数交给 internal/bootstrap/cli 分发，并把返回码交还 shell。
-// 各子命令实现（serve/demo/migrate/transcripts/config）见
-// internal/bootstrap/cli/。
+// 命令树（子命令名/帮助/退出码）在 internal/bootstrap/cli/；命令实现在
+// internal/bootstrap/cliops/ 与 internal/bootstrap/maintenance/。
 package main
 
 import (
 	"os"
 
 	// glog 的日志实现按 LoggerType 注册：不 import 具体 driver 时 New 直接报
-	// "unknown LoggerType ..."。匿名引入放在**装配根**（与 ark-go-starter 的
+	// "unknown LoggerType ..."。匿名引入放在**进程入口**（与 ark-go-starter 的
 	// cmd/init.go 一致），而不是 pkg/dbclient —— 日志出口是进程级决定，库包不替
-	// 调用方选；具体配置与 InitLogger 见 internal/bootstrap/cli/logging.go。
+	// 调用方选；具体配置与 InitProcessLogger 见 internal/bootstrap/maintenance/logging.go。
 	_ "github.com/morehao/golib/glog/driver/zap"
 
 	// 内嵌 IANA 时区库（约 +450KB 二进制）。

@@ -380,8 +380,9 @@ func TestServerInteropWithOwnClient(t *testing.T) {
 //
 // 2026-10-10 起诊断出口是 **glog**，而 glog 的 console writer 写的就是 os.Stdout（golib 里
 // 硬编码，没有 stderr 选项）——所以真实 `mate mcp` 只能把它配成**文件** writer
-// （见 internal/bootstrap/app/command/logging.go）。子进程这里照同一形态初始化，断言落在文件上；
-// "mcp 子命令绝不配 console writer"这条本身由 internal/bootstrap/app/command 的守卫直接钉住。
+// （见 internal/bootstrap/maintenance/logging.go）。子进程这里照同一形态初始化，断言落在文件上；
+// "mcp 子命令绝不配 console writer"这条本身由
+// internal/bootstrap/maintenance/logging_test.go 的 `TestDataStdoutCommandsNeverUseConsoleWriter` 直接钉住。
 func TestServerStdoutPurity(t *testing.T) {
 	logDir := t.TempDir()
 	cmd := exec.Command(os.Args[0])
@@ -473,56 +474,7 @@ func readLogTree(t *testing.T, dir string) string {
 	return sb.String()
 }
 
-// TestGatewayArgsRoundTrip 注入端与网关端的参数形态同源：拼出来的必须能解回来，
-// 且未知参数/缺参数**报错**（静默忽略会让"网关起来了但 scope 不对"）。
-func TestGatewayArgsRoundTrip(t *testing.T) {
-	args := GatewayBridgeArgs(GatewayScope{RuntimeID: "r1"})
-	if args[0] != "mcp" || args[1] != "bridge" {
-		t.Fatalf("子命令形态不符: %v", args)
-	}
-	// v19：scope 里没有任何 agent 面——条目只由 runtime（+ 会话钉住的白名单）决定。
-	for _, a := range args {
-		if a == "--agent" {
-			t.Fatalf("v19 起 --agent 已撤销（agent 概念整个并入 runtime）: %v", args)
-		}
-	}
-	sc, err := ParseScopeArgs(args[2:])
-	if err != nil || sc.RuntimeID != "r1" || sc.McpsPinned != nil {
-		t.Fatalf("往返不符: %+v err=%v", sc, err)
-	}
-
-	// 会话钉住的白名单：三态必须原样往返（nil = 未钉 / [] = 显式不要 / [ids] = 白名单）。
-	pinned := []string{"gh", "pg"}
-	withPin := GatewayBridgeArgs(GatewayScope{RuntimeID: "r1", McpsPinned: &pinned})
-	sc2, err := ParseScopeArgs(withPin[2:])
-	if err != nil || sc2.McpsPinned == nil || strings.Join(*sc2.McpsPinned, ",") != "gh,pg" {
-		t.Fatalf("钉住的白名单往返不符: %+v err=%v", sc2, err)
-	}
-	empty := []string{}
-	withEmpty := GatewayBridgeArgs(GatewayScope{RuntimeID: "r1", McpsPinned: &empty})
-	sc3, err := ParseScopeArgs(withEmpty[2:])
-	if err != nil || sc3.McpsPinned == nil || len(*sc3.McpsPinned) != 0 {
-		// `[]` 若解成 nil，"本会话一个远程 MCP 都不要"就退化成"全量远程面"——授权放大。
-		t.Fatalf("显式空集必须往返成非 nil 空集: %+v err=%v", sc3, err)
-	}
-
-	for _, bad := range [][]string{
-		{},                                      // 缺 scope（--runtime 必填）
-		{"--runtime"},                           // 缺取值
-		{"--mcps", "[]"},                        // 只有白名单、没有 scope
-		{"--runtime", "r1", "-x"},               // 未知参数（参数漂移必须当场失败）
-		{"--servers", "a,b"},                    // P-2 的反例：server 列表绝不能进参数
-		{"--runtime", "r1", "--mcps", "a,b"},    // 非 JSON
-		{"--runtime", "r1", "--mcps", `["a",]`}, // 坏 JSON
-		{"--runtime", "r1", "--mcps", `[" "]`},  // 空 id
-		// v19 撤销的 `--agent`：**未知参数即失败**（静默忽略会让网关"起来了但 scope 不对"）。
-		{"--agent", "a1", "--runtime", "r1"},
-	} {
-		if _, err := ParseScopeArgs(bad); err == nil {
-			t.Fatalf("%v 应报错", bad)
-		}
-	}
-	if GatewayServerName != "mate-gateway" {
-		t.Fatalf("条目名是底座会话里可见的稳定标识，不该改: %q", GatewayServerName)
-	}
-}
+// 网关条目参数形态（`GatewayBridgeArgs` / `ParseScopeArgs`）的往返判据在
+// `internal/core/protocol/gateway_test.go` 的 `TestGatewayBridgeArgsRoundTrip`——
+// 形状自 2026-10-22（A1）搬去 `core/protocol` 后，判据跟着形状走：留在本包会在协议包
+// 重组/测试被删时静默失去覆盖，而形状本身看起来仍有测试。

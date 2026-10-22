@@ -52,8 +52,9 @@ var transcriptOwnerLiterals = []string{
 // 需要按文件名造夹具，`_test.go` 一律跳过）。
 //
 // 为什么点这两个：`internal/sessionruntime` 是拆分中的实现层、`internal/service/svc*` 是用例端口层
-// ——两处都只该经会话域的动作面碰 transcript。CLI（`internal/bootstrap/app/command`）与装配根
-// （`internal/bootstrap/app`）**刻意不在名单里**：它们的职责就是"按目录扫文件"（`mate migrate` /
+// ——两处都只该经会话域的动作面碰 transcript。CLI（`internal/bootstrap/cli` 命令树 +
+// `internal/bootstrap/cliops` 命令实现）与装配根（`internal/bootstrap/assembly`）**刻意不在
+// 名单里**：它们的职责就是"按目录扫文件"（`mate migrate` /
 // `transcripts prune` / `doctor` / serve 的空库提示），ban 了它们等于让守卫与产品行为对打。
 var transcriptNonOwnerRoots = []string{
 	filepath.Join("internal", "sessionruntime"),
@@ -100,7 +101,7 @@ func TestTranscriptStateLivesInSessionPlane(t *testing.T) {
 						"归 %s 唯一所有（P3b-2b）。在别处再实现一份的后果是**两份实现静默分叉**"+
 						"（header 写不写、装载按会话还是按文件），而两边都编译得过；"+
 						"要写一行请调会话域的 `Plane.BeginTranscript` / 让它回读。"+
-						"\n\t（`internal/bootstrap/app/command` 的 CLI 与 `internal/bootstrap/app` 的装配按目录扫文件是有意保留的）",
+						"\n\t（`internal/bootstrap/cliops` 的 CLI 与 `internal/bootstrap/assembly` 的装配按目录扫文件是有意保留的）",
 						rel(root, path), lit, transcriptOwnerDir)
 				}
 			}

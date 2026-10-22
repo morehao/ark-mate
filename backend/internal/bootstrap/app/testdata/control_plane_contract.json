@@ -433,7 +433,6 @@
     ],
     "data_kind": "object",
     "data_keys": [
-      "image_input",
       "note",
       "options",
       "runtime",
@@ -554,7 +553,7 @@
       "checked_at",
       "command",
       "connected",
-      "pid",
+      "remediation",
       "runtime",
       "runtime_name",
       "state",

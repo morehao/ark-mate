@@ -2,7 +2,7 @@ package app
 
 // 测试二进制里的日志 driver 注册。
 //
-// 本仓的日志出口归**装配根**（`cmd/mate/main.go` 的匿名引入，见 internal/bootstrap/app/command/logging.go
+// 本仓的日志出口归**进程入口**（`cmd/mate/main.go` 的匿名引入，见 internal/bootstrap/maintenance/logging.go
 // 的分工说明）；而 `go test ./internal/bootstrap/app` 编译出的二进制不含 `cmd/mate`，于是
 // `store.Open → dbclient.Open → dbgorm.New → glog.NewLogger` 会因为
 // "unknown LoggerType zap" 直接失败。

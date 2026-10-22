@@ -2,8 +2,8 @@ package maintenance
 
 // 测试二进制里的日志 driver 注册（见 internal/bootstrap/app/logging_test.go 的说明）。
 //
-// 本包的测试直接调 `Run`/各子命令函数（`initProcessLogger` 会被调到），但
-// `go test ./internal/bootstrap/app/command` 的二进制不含 `cmd/mate` 的匿名引入，
+// 本包的测试直接调 `Run`/各子命令函数（`InitProcessLogger` 会被调到），但
+// `go test ./internal/bootstrap/maintenance` 的二进制不含 `cmd/mate` 的匿名引入，
 // 因此 store.Open 会因为 "unknown LoggerType zap" 失败。
 import (
 	"testing"

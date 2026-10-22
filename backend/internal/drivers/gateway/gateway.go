@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"io"
 
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/infra/protocol/mcp"
 	"github.com/morehao/ark-mate/internal/version"
 	"github.com/morehao/golib/glog"
@@ -47,9 +48,9 @@ type Scope struct {
 // 但它必须**响亮**（每次 tools/list 记一条 WARN），否则将来接线失败会表现成"工具莫名不见了"。
 type Source interface {
 	// Tools 返回该 scope **当下**的全部工具（每次调用都重读定义与启用状态）。
-	Tools(ctx context.Context) ([]mcp.Tool, error)
+	Tools(ctx context.Context) ([]protocol.McpTool, error)
 	// Call 代理一次工具调用。工具不在当下工具面里 → 返回 `mcp.ErrToolNotFound`。
-	Call(ctx context.Context, tool string, args json.RawMessage) (mcp.CallResult, error)
+	Call(ctx context.Context, tool string, args json.RawMessage) (protocol.McpCallResult, error)
 }
 
 // Options 网关运行参数。
@@ -74,7 +75,7 @@ func Run(ctx context.Context, in io.Reader, out io.Writer, opts Options) error {
 		"runtime", opts.Scope.RuntimeID, "pid", pidOf())
 
 	return mcp.Serve(ctx, in, out, mcp.ServerInfo{
-		Name:         mcp.GatewayServerName,
+		Name:         protocol.GatewayServerName,
 		Version:      version.Version,
 		Instructions: instructions(opts.Scope),
 	}, h, mcp.ServerOptions{PageSize: opts.PageSize})
@@ -88,7 +89,7 @@ type handler struct {
 	warnedEmpty bool // "数据面未接线"只响一次，别把 stderr 刷爆
 }
 
-func (h *handler) ListTools(ctx context.Context) ([]mcp.Tool, error) {
+func (h *handler) ListTools(ctx context.Context) ([]protocol.McpTool, error) {
 	if h.src == nil {
 		if !h.warnedEmpty {
 			h.warnedEmpty = true
@@ -107,9 +108,9 @@ func (h *handler) ListTools(ctx context.Context) ([]mcp.Tool, error) {
 	return tools, nil
 }
 
-func (h *handler) CallTool(ctx context.Context, tool string, args json.RawMessage) (mcp.CallResult, error) {
+func (h *handler) CallTool(ctx context.Context, tool string, args json.RawMessage) (protocol.McpCallResult, error) {
 	if h.src == nil {
-		return mcp.CallResult{}, mcp.ErrToolNotFound
+		return protocol.McpCallResult{}, mcp.ErrToolNotFound
 	}
 	// 每次调用都走 Source：数据面自己承担"按当下定义重查 + 密钥重解析 + 远端代理"（P-4）。
 	return h.src.Call(ctx, tool, args)

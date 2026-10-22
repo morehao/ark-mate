@@ -134,7 +134,7 @@ func TestMcpBridgeCLI(t *testing.T) {
 	//
 	// 出口自 2026-10-10 起是 `<MATE_HOME>/logs/<日期>/ark-mate-mcp_full.log`：glog 的
 	// console writer 写的是 os.Stdout（golib 里硬编码），而这里的 stdout 是协议流（C10），
-	// 所以 mcp 子命令只能用文件 writer（见 internal/bootstrap/app/command/logging.go）。
+	// 所以 mcp 子命令只能用文件 writer（见 internal/bootstrap/maintenance/logging.go）。
 	logs := readCLILogs(t, home)
 	// 空工具面**不再**走"取数失败"那条（v19 起 scope 只有 runtime，数据面就绪即空面）：
 	// 那条失败出口由 `internal/drivers/gateway/gateway_test.go` 的单测负责。

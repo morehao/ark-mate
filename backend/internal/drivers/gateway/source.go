@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 
 	"github.com/morehao/ark-mate/internal/config"
@@ -68,7 +69,7 @@ type SourceOptions struct {
 
 	// CredCwd **凭据 cwd**（v20）：`<cwd>/.env` 那一层的 cwd，即"用户启动 `mate serve` 的目录"。
 	//
-	// 常规路径下留空——核心会把它经 `mcp.GatewayCredCwdEnv` 放在网关条目的 `env` 里（见
+	// 常规路径下留空——核心会把它经 `protocol.GatewayCredCwdEnv` 放在网关条目的 `env` 里（见
 	// `resolveCredCwd` 的优先级：显式入参 > 环境变量 > 网关自己的 cwd）。留出这个字段是为了让
 	// 调用方与测试能**显式**给一个值，而不必去摆布进程环境。
 	CredCwd string
@@ -86,7 +87,7 @@ const (
 // 为什么这一层这么较真：`<cwd>/.env` 是四层回落里的第三层，而网关是**底座 spawn 的子进程**——
 // 它的 cwd（通常是会话工作区）是用户没选过的目录。核心与网关各自 `os.Getwd()` 时，同一个引用
 // 会在两个进程里解析出不同的值（面板说"取不到"而网关注解得出来，或反过来），而两边各自的测试
-// 都是绿的。所以：核心**显式交下来**（`mcp.GatewayCredCwdEnv`），网关只在确实没拿到时才回落，
+// 都是绿的。所以：核心**显式交下来**（`protocol.GatewayCredCwdEnv`），网关只在确实没拿到时才回落，
 // 并把回落这件事交给调用方 WARN。
 //
 // 纯函数（`getenv` 注入）：判据可测，不必摆布进程环境。
@@ -95,7 +96,7 @@ func resolveCredCwd(explicit string, getenv func(string) string) (cwd, source st
 		return v, credCwdSourceOption
 	}
 	if getenv != nil {
-		if v := strings.TrimSpace(getenv(mcp.GatewayCredCwdEnv)); v != "" {
+		if v := strings.TrimSpace(getenv(protocol.GatewayCredCwdEnv)); v != "" {
 			return v, credCwdSourceEnv
 		}
 	}
@@ -177,7 +178,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	// 网关与核心进程**同一套装配**——两处各写一遍必然分叉，而分叉的表现是
 	// "核心能注入的服务器，网关注入不了"（用户只会看到工具少了一半）。
 	//
-	// **cwd 由核心传入**（`mcp.GatewayCredCwdEnv`，见 `resolveCredCwd`）：`<cwd>/.env` 那一层的
+	// **cwd 由核心传入**（`protocol.GatewayCredCwdEnv`，见 `resolveCredCwd`）：`<cwd>/.env` 那一层的
 	// 语义是"用户启动 `mate serve` 的目录"，而网关的 cwd 是**底座给的**（会话工作区）——
 	// 各自 `os.Getwd()` 会让同一个引用在这里和核心解析出不同的值。
 	credCwd, credCwdSource := resolveCredCwd(opts.CredCwd, os.Getenv)
@@ -186,7 +187,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 		// 这一条 WARN 就是本裁决的判据：核心没把 cwd 交下来时，"两个进程用了不同的 cwd"
 		// 必须看得见，而不是静默地各解析各的。
 		glog.Warnw(ctx, "mcp 网关: 核心没有传凭据 cwd，本次用网关自己的 cwd（与核心可能不同）",
-			"cwd", credCwd, "env", mcp.GatewayCredCwdEnv)
+			"cwd", credCwd, "env", protocol.GatewayCredCwdEnv)
 	} else {
 		glog.Infow(ctx, "mcp 网关: 凭据 cwd 已确定", "cwd", credCwd, "source", credCwdSource)
 	}
@@ -235,14 +236,14 @@ func (s *MateSource) Close() error {
 }
 
 // Tools 取当下该 scope 的远程工具面（命名空间化后的名字）。
-func (s *MateSource) Tools(ctx context.Context) ([]mcp.Tool, error) {
+func (s *MateSource) Tools(ctx context.Context) ([]protocol.McpTool, error) {
 	servers, err := s.servers(ctx)
 	if err != nil {
 		return nil, err
 	}
 	type outcome struct {
 		idx   int
-		tools []mcp.Tool
+		tools []protocol.McpTool
 		err   error
 	}
 	out := make([]outcome, len(servers))
@@ -265,7 +266,7 @@ func (s *MateSource) Tools(ctx context.Context) ([]mcp.Tool, error) {
 	wg.Wait()
 
 	// 先按 server 收齐，再**统一命名**：跨 server 的重名只有在这一层才看得见（见 NamespaceTools）。
-	payload := make([]mcp.Tool, 0, 16)
+	payload := make([]protocol.McpTool, 0, 16)
 	names := make([]capability.NamespacedTool, 0, 16)
 	for i, o := range out {
 		srv := servers[i]
@@ -296,7 +297,7 @@ func (s *MateSource) Tools(ctx context.Context) ([]mcp.Tool, error) {
 		glog.Errorw(ctx, "mcp 网关: 工具名跨 server 冲突，整组丢弃（fail-closed）",
 			"name", c.Name, "claims", strings.Join(owners, ", "))
 	}
-	tools := make([]mcp.Tool, 0, len(kept))
+	tools := make([]protocol.McpTool, 0, len(kept))
 	for _, i := range kept {
 		t := payload[i]
 		t.Name = names[i].Name
@@ -309,10 +310,10 @@ func (s *MateSource) Tools(ctx context.Context) ([]mcp.Tool, error) {
 
 // Call 代理一次远端工具调用。**每次都重取定义**（P-4）：这样"停用一台 server"或"轮换密钥"
 // 在下一次调用就生效，而不是等底座换代际。
-func (s *MateSource) Call(ctx context.Context, name string, args json.RawMessage) (mcp.CallResult, error) {
+func (s *MateSource) Call(ctx context.Context, name string, args json.RawMessage) (protocol.McpCallResult, error) {
 	servers, err := s.servers(ctx)
 	if err != nil {
-		return mcp.CallResult{}, err
+		return protocol.McpCallResult{}, err
 	}
 	ids := make([]string, 0, len(servers))
 	for _, srv := range servers {
@@ -325,7 +326,7 @@ func (s *MateSource) Call(ctx context.Context, name string, args json.RawMessage
 		// 而不是"远端没回话"——同样的 (tool, allow/deny) 证据面。
 		glog.Infow(ctx, "mcp 网关: 工具调用被拒（不在当下工具面）",
 			"tool", name, "outcome", "deny", "candidates", strings.Join(ids, ","))
-		return mcp.CallResult{}, mcp.ErrToolNotFound
+		return protocol.McpCallResult{}, mcp.ErrToolNotFound
 	}
 	var target *gatewayServer
 	for i := range servers {
@@ -335,7 +336,7 @@ func (s *MateSource) Call(ctx context.Context, name string, args json.RawMessage
 		}
 	}
 	if target == nil {
-		return mcp.CallResult{}, mcp.ErrToolNotFound
+		return protocol.McpCallResult{}, mcp.ErrToolNotFound
 	}
 	cctx, cancel := context.WithTimeout(ctx, s.perServer)
 	defer cancel()
