@@ -1,4 +1,4 @@
-// 本文件是 dsh 的**产品身份交付实现**：把 `pkg/identity.Spec` 写成平台自己的
+// 本文件是 dsh 的**产品身份交付实现**：把 `internal/core/identity.Spec` 写成平台自己的
 // `mate-identity.patch.yml`，经 `--patch` 递入 dsh 的 `system-prompt` 条目。
 //
 // 为什么走 dsh 的官方配置扩展点而不是改源码：`@deepseek-ai/dsh-system-prompt` 的

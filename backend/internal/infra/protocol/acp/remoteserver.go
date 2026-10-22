@@ -26,7 +26,7 @@ import (
 //     （历史上的 `mate acp-serve` 已随 echo 演示底座一并删除，远程传输**功能不受影响**）；
 //   - 单测/端到端测试以真实 SDK agent 侧验证客户端传输适配器。
 //
-// HTTP 形态对齐 MCP Streamable HTTP 的既有约定（本项目 pkg/mcp 同款）：
+// HTTP 形态对齐 MCP Streamable HTTP 的既有约定（本项目 internal/infra/protocol/mcp 同款）：
 //   - POST 一条客户端消息 → 200 + SSE 流（该请求期间的通知与 request_permission 都在流上），
 //     客户端→服务端的「响应/通知」按约定回 202 且不占响应流；
 //   - GET 长流承载「没有在途请求时」的服务端消息；

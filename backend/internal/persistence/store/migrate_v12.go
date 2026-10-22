@@ -285,7 +285,7 @@ func rewriteV11ProviderBody(p migrationV11Provider) (string, string, error) {
 
 // openAIProtocol 是 `resource.ProtocolOpenAI` 的字面量副本。
 //
-// store 不 import `pkg/resource`：迁移描述的是**历史形状**，它与"今天应用层怎么写"是两件事。
+// store 不 import `internal/core/resource`：迁移描述的是**历史形状**，它与"今天应用层怎么写"是两件事。
 // 这条字符串是落库值（对外契约的一部分），在这里写死比引一个会演进的类型更稳。
 const openAIProtocol = "openai"
 

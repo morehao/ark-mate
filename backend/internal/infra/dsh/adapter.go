@@ -157,7 +157,7 @@ const dshModelConfigEvidence = "清单通道端到端实测（2026-10-10，随�
 // Tested=true 的依据（两段，缺一不可）：
 //  1. **形态**：`<root>/<id>/SKILL.md` + 强制 frontmatter，于 2026-09-09 用 `dsh-skill-filesystem`
 //     真实 provider 实测过（无 frontmatter / 只有 name / 只有 description 三种都丢弃，嵌套不扫）
-//     ——与上面的「只扫根下一层」互相印证（见 pkg/capability/skill_materialize.go 顶部实测记录）。
+//     ——与上面的「只扫根下一层」互相印证（见 internal/core/capability/skill_materialize.go 顶部实测记录）。
 //  2. **端到端**：「平台默认根下写进去、底座开箱即读到」，于 2026-10-08 用 dsh **0.2.0-rc.2** 确认（2026-10-18 在 **0.2.1-rc.2** 复测通过）
 //     （报告：.dsh/docs/notes/2026-10-08-skill-projection-e2e-probe-notes.md §B-6）。取证分两路：
 //     · **源码链**（读本机安装版本 app.asar 内的实际代码）：`PROFILE_TEMPLATES.acp = [dsh-base, dsh-acp-app]`

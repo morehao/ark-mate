@@ -108,7 +108,7 @@ func NewSyncer(opts Options, delivery resource.Delivery) resource.Syncer {
 // **刻意不在 `NewSyncer` / `registerBuiltinSyncers` 里自动调用它**：注册表是装机期静态构造的，
 // 在那里探测会让"这台机器上恰好装了 dsh"决定平台行为——包括**测试**（`go test ./...` 会去执行宿主的
 // dsh，而本仓的纪律是全量测试不依赖外部 runtime，且隔离纪律要求不碰用户自己的底座）。所以这一步只由
-// **真正拉起底座的调用方**（internal/manager）在需要底座级校验门时显式做，结果经 `Options.DshBin` 传进来。
+// **登记点**（`internal/infra/dsh/adapter.go` 的 `registerBuiltinSyncers`）在需要底座级校验门时显式给，结果经 `Options.DshBin` 传进来。
 //
 // 也**不得**硬编码 `/opt/homebrew/bin/dsh`、`/usr/local/bin/dsh` 这类宿主路径：那是"依赖宿主机环境"，
 // 与桌面态"随包载荷"的交付形态反向。
@@ -482,7 +482,7 @@ func buildPatch(set resource.Set) ([]byte, error) {
 // sortedModels 把模型按 `(ProviderID, Model)` 排序后返回。
 //
 // 为什么要防御性排序：dsh 的 `models[]` 是**数组**（顺序进字节），逐字节 golden 要求"同输入同字节"。
-// 编排层虽然已经按 `(ProviderID, Model)` 固定顺序（`pkg/resource.Set` 的契约），但这里再排一次
+// 编排层虽然已经按 `(ProviderID, Model)` 固定顺序（`internal/core/resource.Set` 的契约），但这里再排一次
 // 让"顺序"这件事不依赖调用方的记性；且该序在**逐 route 过滤后**恰好是 v11 的上游模型名升序
 // （v11 的输入就是按上游模型名全局排序的），等价性因此成立。
 func sortedModels(in []resource.Model) []resource.Model {

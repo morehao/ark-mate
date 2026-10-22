@@ -112,7 +112,8 @@ func (s Skill) AppliesToRuntime(runtime string) bool {
 //	Headers       明文 header（非密钥）
 //	SecretHeaders 密钥型 header：值只能是引用
 //
-// 引用在注入前一刻才解析成明文（internal/manager 查库），所以定义文件里永远没有密钥本体。
+// 引用在注入前一刻才解析成明文（会话编排面在注入前查库，见 `internal/sessionruntime`），
+// 所以定义文件里永远没有密钥本体。
 type McpServer struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name,omitempty"`

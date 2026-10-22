@@ -638,7 +638,7 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 	}
 	// 快照这一格自 P4a 正文第十九刀起走**真域平面**（读模型由域折好 DTO）：这里只证
 	// "信封形状对 + 空平面如实自报不可写、来源 unavailable"，"配置过的名单原样透出"由
-	// `internal/manager` 的设置面测试用真策略/真端口钉（那边才是判定的本体）。
+	// `internal/sessionruntime/workspace_settings_test.go` 用真策略/真端口钉（那边才是判定的本体）。
 	// 空名单在 JSON 上被 omitempty 抹成缺省（前端按"没有"渲染），这里只钉状态两格。
 	if got.Writable || got.Source != "unavailable" {
 		t.Fatalf("空平面快照形状不符: %+v", got)
@@ -647,7 +647,7 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 	// PUT 自 P4a 正文第三十一刀起也走**真域平面**（`h.plane.UpdateSettings`）：这一格能证的是
 	// "领域错误经带码信封原样出去"——本用例的平面没有配置目录，写面给的就是 `settings_readonly`
 	// （code 40001）。roots 是否原样下发（含空数组 / 字段缺省 = 取消限制）由
-	// `internal/manager` 的设置面测试用**真策略 + 假端口**钉（那边才是判定的本体）。
+	// `internal/sessionruntime/workspace_settings_test.go` 用**真策略 + 假端口**钉（那边才是判定的本体）。
 	for _, body := range []string{`{"roots":["/srv/docs"]}`, `{"roots":[]}`, `{}`} {
 		env, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", body)
 		if env.Code != 40001 || !strings.Contains(env.Msg, "未启用设置持久化") {
@@ -661,7 +661,7 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 	}
 
 	// 领域拒绝的三种语义码（锁定 / 只读 / 非法目录）不再由替身伪造：`settings_readonly` 已由上面
-	// 那一组用**真平面**钉住，`settings_locked` 与 `workspace_invalid` 由 `internal/manager` 的
+	// 那一组用**真平面**钉住，`settings_locked` 与 `workspace_invalid` 由 `internal/sessionruntime` 的
 	// 设置面测试用真策略（env 锁 / 非法目录）钉——判定的本体在域里，替身只会重复它自己的假设。
 }
 
@@ -1604,7 +1604,7 @@ func TestCapabilityRoutes(t *testing.T) {
 //
 // 所以这里改成证"请求确实打到了域平面"：本用例的引擎里没有那份 skill 定义，域平面的自然答复是
 // `skill_not_found`（40401）——这正是真平面与替身的分界（替身会回 200 并自报成功）。
-// 启停两个方向 + 物化成功路径的**本体**由 `internal/manager/skills_test.go` 用真平面 + 真目录钉。
+// 启停两个方向 + 物化成功路径的**本体**由 `internal/sessionruntime/skills_test.go` 用真平面 + 真目录钉。
 func TestSkillToggleRoute(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(t, svc))
@@ -1643,7 +1643,8 @@ func TestSkillMaterializationRoute(t *testing.T) {
 //	· 已注册但连不上 → 50201（域真的去连了，失败码同样是域铸的）
 //
 // "探测成功 → Tool 目录整体替换 / 状态写回"那条路要一台真 MCP server（httptest），
-// 在 `internal/manager` 的 `TestProbeMcpServer` 里覆盖；替身时代这里的"成功"是测试自己编的响应，
+// 在 `internal/sessionruntime` 的 `TestProbeMcpServer`（`capabilities_test.go`）里覆盖；
+// 替身时代这里的"成功"是测试自己编的响应，
 // 它能证明的只有"控制器把 X 原样转发"，证明不了"X 本身对"。
 func TestProbeMcpServerRoute(t *testing.T) {
 	svc := &stubSvc{}
@@ -1891,7 +1892,8 @@ func TestRuntimeDiagnosticsRoute(t *testing.T) {
 // 并被真的发给了 server"。回显让 id/tool/uri/name/arguments 与"空 body = 零参数"都成了
 // **能从响应里读出来**的事实。
 //
-// 与 `internal/manager` 那台假服务器同一手法而**刻意不复用**：那是包内夹具（`package manager`），
+// 与 `internal/sessionruntime` 那台假服务器同一手法而**刻意不复用**：那是包内夹具
+// （`package sessionruntime`），
 // 两个包的用例各自持有自己的夹具，比把夹具提到一个"谁都能改"的公共位置更不容易漂。
 func fakeMcpServer(t *testing.T) string {
 	t.Helper()

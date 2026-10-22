@@ -8,7 +8,7 @@ import (
 // ——— 能力集 → 指纹输入（§13.4 代际；`internal/runtime.Fingerprint` 的唯一装配点） ———
 //
 // 指纹算法在 `internal/runtime`（它要拿 `Projection`/`Spec` 的类型）；**"哪些内容进指纹"在这里决定**
-// ——这里是唯一同时看得见能力定义（`pkg/capability`）、投影形态（`internal/runtime`）与会话钉住的
+// ——这里是唯一同时看得见能力定义（`internal/core/capability`）、投影形态（`internal/runtime`）与会话钉住的
 // 选定（`CapabilitySelection`）的地方。
 //
 // 三条边界（每条都有对应的测试，P3c 起随代码一起搬到本域，判据一字未改）：

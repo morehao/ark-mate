@@ -70,7 +70,7 @@ const (
 //
 // 为什么留痕落**定义文件**而不是 events 表：events 表的 `session_id` 是
 // `NOT NULL REFERENCES sessions(id)`（DDL 与 DSN 的 foreign_keys(1) 都在，
-// `pkg/dbclient` 有守卫测试），而 `duplicate`/`overlap`/`skipped` 这三类结果**根本没有会话可挂**——
+// `internal/infra/dbclient` 有守卫测试），而 `duplicate`/`overlap`/`skipped` 这三类结果**根本没有会话可挂**——
 // 硬塞一个假 agg id 会直接撞外键。与其放宽约束，不如把"最近 N 次"放在文件里：
 // 它本来就已经在每次触发时被重写一次（overlay），多带一个环形缓冲不增加写次数，
 // 且 memory 模式（无 events 表）下运行史照样在。

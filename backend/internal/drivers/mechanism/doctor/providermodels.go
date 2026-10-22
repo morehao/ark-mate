@@ -19,7 +19,7 @@ import (
 //	  四件都由调用方经 `ModelFactsSource` 交下来。
 //
 // 于是本包**不再 `NewService`**："造一个只读 Service 去读数"这件事留在拥有实现的那一层
-// （`internal/manager`），机制层只认端口。
+// （会话/装配侧：`internal/sessionruntime` 与 `internal/bootstrap/assembly`），机制层只认端口。
 
 // ProviderRuntimeFacts 某 runtime 的清单同步事实（状态 + 对账）。
 //

@@ -25,7 +25,7 @@ func isAPIPath(p string) bool { return strings.HasPrefix(p, apiPrefix) }
 //     HTTP 语义问题，代理、客户端与抓包工具都靠状态码识别，混为一谈会让"接口不存在"
 //     看起来像"接口存在但拒绝了"。
 //
-//   - **响应体仍是标准信封**，且 code 取自 pkg/code 注册表。此前这里手写的是
+//   - **响应体仍是标准信封**，且 code 取自 internal/core/code 注册表。此前这里手写的是
 //     `{"code":404,"msg":"not found"}`：404 既不在注册表里、也不在任何对外码表里
 //     （契约里"资源不存在"是 40401），客户端拿不到可判定的取值；而且缺 requestID 与 data，
 //     是全部错误出口里唯一形状不完整的一处。

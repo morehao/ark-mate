@@ -663,7 +663,7 @@ func assertOpenableSnapshot(t *testing.T, path string) {
 // 迁移备份必须含 `-wal` 里**已提交但未 checkpoint** 的行。
 //
 // 这条用例钉的是"为什么备份不能拷文件"：`journal_mode` 是库的持久属性，本机用户库头部就是 WAL
-// （平台自己开的新库是 `delete`，见 pkg/dbclient），WAL 下已提交的事务先落 `-wal`。纯拷主文件
+// （平台自己开的新库是 `delete`，见 internal/infra/dbclient），WAL 下已提交的事务先落 `-wal`。纯拷主文件
 // 会静默漏掉它们（反向断言就在本用例里：同一时刻的主文件副本查不到那一行），而文件名写着
 // `bak-v19-<ts>`——回退窗口在真正需要它的那天才发现是缺的。修复 = 用 `VACUUM INTO` 取快照。
 func TestMigrationBackupIncludesUncheckpointedWAL(t *testing.T) {

@@ -27,7 +27,7 @@ import (
 // 不同指纹，后果是"每次建会话都新建代际、进程数失控"（风险表第 15 行）。所以这里只接受**切片**，
 // 且在序列化前统一排序；调用方负责把 map 展开成切片。
 //
-// **包边界**：本文件不 import `pkg/capability`——skill 的正文摘要由调用方用 sidecar 的同一算法
+// **包边界**：本文件不 import `internal/core/capability`——skill 的正文摘要由调用方用 sidecar 的同一算法
 // 算好（`capability.PayloadHash`）后传进来。摘要算法因此只有一份实现，而投影层不必把整个能力
 // 数据面拖进来。
 

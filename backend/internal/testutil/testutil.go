@@ -6,11 +6,11 @@
 // 的真实字段漂移，测试就会去验证一个并不存在的 runtime 形态，而每个重复点都在各自的
 // 文件里，没有一处能代表"我们测试里用的 stub 长这样"。
 //
-// **本包不得 import internal/manager**——这不是风格偏好，是 Go 的硬约束，已实测：
+// **本包不得 import 会话编排面（`internal/sessionruntime`）**——这不是风格偏好，是 Go 的硬约束，已实测：
 // manager 的测试是内部测试包（`package manager`），而内部测试包 import 一个反向
 // import 它自己的包会直接编译失败（`import cycle not allowed in test`，换外部测试包
 // `package manager_test` 才允许）。因此这里只放 manager 无关的夹具；manager 专属的组合
-// （Service + Orchestrator 装配）留在 backend/internal/manager/testrig_test.go。
+// （Service + Orchestrator 装配）留在 backend/internal/sessionruntime/testrig_test.go。
 // 这条约束由 internal/archtest 的 TestTestutilMustNotImportImplementations 守卫。
 package testutil
 

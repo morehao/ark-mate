@@ -101,7 +101,7 @@ func resolveCredCwd(explicit string, getenv func(string) string) (cwd, source st
 	}
 	own, err := os.Getwd()
 	if err != nil {
-		// 取不到自己的 cwd 也不能让网关起不来：空 cwd 交给 `pkg/credentials`（那一层读不到
+		// 取不到自己的 cwd 也不能让网关起不来：空 cwd 交给 `internal/infra/credentials`（那一层读不到
 		// 就是"没有这一层"，不留半截路径——与 `IsolationEnv` 对空 home 的处置同一条纪律）。
 		return "", credCwdSourceOwnGetwd
 	}

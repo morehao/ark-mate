@@ -1,7 +1,7 @@
 // Package dtolibrary 定义能力 Library 的统一读模型（M2-4）。
 //
 // Library **不拥有任何数据**（选型 E1）：它是一次请求内的聚合视图，事实源分别是
-// `pkg/capability` 的注册表、`manager.agents` 与（后续）`manager.automation`。
+// `internal/core/capability` 的注册表、`manager.agents` 与（后续）`manager.automation`。
 package dtolibrary
 
 import "github.com/morehao/ark-mate/internal/core/object/objdelivery"
@@ -35,7 +35,7 @@ type LibraryItem struct {
 
 // Applicability 某条目在**某一个** runtime 上的可达性。
 //
-// M6 起类型定义迁到 `pkg/object/objdelivery`（交付矩阵与可达性是两个面共用的值对象：
+// M6 起类型定义迁到 `internal/core/object/objdelivery`（交付矩阵与可达性是两个面共用的值对象：
 // `/library` 与 `/providers` 用同一套形状），这里留**类型别名**——JSON 形状逐字不变（前端零改），
 // 既有调用点也零改。取值语义（projected/written/untested/not_configured/not_applicable/disabled）
 // 与注释见 objdelivery.Applicability。

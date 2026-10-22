@@ -109,7 +109,7 @@ const (
 	// DefinitionKindSkill 定义种类：skill（definition_revisions.kind）。
 	//
 	// 这一族**记的是「用户可编辑定义」的种别**（v16 之前叫 CapabilityKind*）：它的范围与
-	// "能力面"（skill+mcp，见 `pkg/capability`）和"底座能力声明面"（`CapabilityScope`）都不同，
+	// "能力面"（skill+mcp，见 `internal/core/capability`）和"底座能力声明面"（`CapabilityScope`）都不同，
 	// 后两者各自占用了 capability 这个词——别再把本族叫回去（`TestDefinitionVocabulary`）。
 	DefinitionKindSkill = "skill"
 	// DefinitionKindMcp 定义种类：mcp server（definition_revisions.kind）。

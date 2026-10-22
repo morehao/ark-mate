@@ -1,10 +1,10 @@
 // Package objdelivery 承载「应用层资源 → 底座生效方式」的共享值对象与**静态交付矩阵**（M6）。
 //
 // 为什么单独成包：这套形状同时被三层使用——传输层（`internal/dto/dtomodel` 把它直接作为
-// 响应载荷、`internal/dto/dtolibrary` 的能力条目复用它）、实现层（`internal/manager` 逐 kind
-// 组装 delivery/applicability），以及模型面（M5 的清单回执）。放在其中任何一层都会让另外两层
+// 响应载荷、`internal/dto/dtolibrary` 的能力条目复用它）、实现层（`internal/drivers/registry`
+// 与各 adapter 逐 kind 组装 delivery/applicability），以及模型面（M5 的清单回执）。放在其中任何一层都会让另外两层
 // 反向依赖该层；而 `pkg/` 不得 import `internal/`（`internal/archtest` 守卫），所以它只能待在
-// `pkg/object` 下，三方都只依赖值对象。
+// `internal/core/object` 下，三方都只依赖值对象。
 //
 // 本包里的交付矩阵是**静态事实表**：**通道按资源种类固定，不随 runtime 变**——provider 密钥走
 // 子进程 env（或该底座的原生文档，见 `resource.CredentialSpec`）、会话级模型走会话配置项、

@@ -123,9 +123,10 @@ func yamlScalar(v string) string {
 
 // MaterializeSpec 一次物化的**平凡形态描述**（P-1 的包边界决定）。
 //
-// 为什么不收 `runtime.Projection`：`pkg/capability` 是能力数据面（可复用基础设施），
+// 为什么不收 `runtime.Projection`：`internal/core/capability` 是能力数据面（可复用基础设施），
 // 不该知道"哪个底座把技能放哪、要什么格式"这件事——那是 runtime 的投影声明。
-// 调用方（internal/manager）用 `runtime.Resolve` 解析出形态，再把这三个字符串 + 归属名传进来；
+// 调用方（会话编排面 `internal/sessionruntime`）用 `runtime.ResolveConfigLocation` 解析出形态，
+// 再把这三个字符串 + 归属名传进来；
 // 本包只负责"在 root 下按 layout 合成 format 的内容并原子落盘"。
 type MaterializeSpec struct {
 	// Root 已展开的**绝对**根目录（占位符由 runtime 层展开；本层不做任何猜测）。
@@ -172,7 +173,7 @@ func (m MaterializeSpec) FileFor(id string) (string, error) {
 //
 // 本包**不 import internal/runtime**，故这里复刻了 `runtime.ValidateProjectionLayout` /
 // `ApplyProjectionLayout` 的判定（那两处是声明期校验，这里是写入期的最后一道闸）。两处规则
-// 必须一致：`pkg/capability/skill_materialize_test.go` 里有一条断言把两边的取值钉在一起。
+// 必须一致：`internal/core/capability/skill_materialize_test.go` 里有一条断言把两边的取值钉在一起。
 func applyLayout(layout, id string) (string, error) {
 	if strings.TrimSpace(layout) == "" {
 		return "", fmt.Errorf("skill 物化: 落点模板为空")

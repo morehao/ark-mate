@@ -198,8 +198,8 @@ type Config struct {
 	McpGateway string
 	// IdentityMode 产品身份的交付模式（`MATE_IDENTITY_MODE` 覆盖，默认 auto）。
 	//
-	// 四个取值的语义见 `pkg/identity.Mode`（auto=系统提示+首轮兜底 / system=只系统提示 /
-	// user=只首轮块 / off=都不交付）。**取值域只有一处**（`pkg/identity`）：配置校验与装配
+	// 四个取值的语义见 `internal/core/identity.Mode`（auto=系统提示+首轮兜底 / system=只系统提示 /
+	// user=只首轮块 / off=都不交付）。**取值域只有一处**（`internal/core/identity`）：配置校验与装配
 	// 都读它，两处各写一份清单的结果是"设了一个合法值却被判非法"或反之。
 	//
 	// 为什么它是**进程级**配置而不是会话级：身份是部署级常量（一个二进制对应一个产品身份），
@@ -215,7 +215,7 @@ const (
 
 // AutoIdentityMode 产品身份的默认模式（`auto`）。
 //
-// 它刻意不另立一份取值域：值就是 `pkg/identity.ModeAuto` 的字面量，合法性由
+// 它刻意不另立一份取值域：值就是 `internal/core/identity.ModeAuto` 的字面量，合法性由
 // `identity.ParseMode` 判。这里只是给"默认值"一个可读的名字（零值空串同样解析成 auto）。
 const AutoIdentityMode = string(identity.ModeAuto)
 
@@ -856,7 +856,7 @@ func materialize(r *resolver) (Config, error) {
 		}
 	}
 
-	// 产品身份模式：取值域只有一个事实源（pkg/identity），这里只做"能不能用"的翻译。
+	// 产品身份模式：取值域只有一个事实源（internal/core/identity），这里只做"能不能用"的翻译。
 	// 非法取值**报错**而不是回落 auto：回落会让"我以为关掉了身份"与"其实还在交付"长得一模一样。
 	if v, ok := r.get("identity_mode"); ok {
 		m, err := identity.ParseMode(v)

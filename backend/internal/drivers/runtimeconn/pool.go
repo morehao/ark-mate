@@ -324,7 +324,7 @@ func (pl *Pool) CloseAll() {
 
 // NativeEnvSource 原生权限/沙箱 env 的来源（adapter 拥有措辞，这里只要结果）。
 //
-// 签名只用基础类型：实现在 `internal/manager`，这一层不该认识 runtime 根包的类型细节
+// 签名只用基础类型：实现在会话编排面（`internal/sessionruntime`），这一层不该认识 runtime 根包的类型细节
 // （`NativePermissionAdapter.Env` 的两个额外参数由实现侧补齐）。
 type NativeEnvSource interface {
 	// NativePermissionEnv 该 runtime 在给定原生模式下的进程 env（空模式/未知 → nil）。

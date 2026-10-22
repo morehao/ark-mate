@@ -112,7 +112,7 @@ type RunStatusOpts struct {
 // RunStatusPayload 铸造一条 `run.status` 的载荷（**唯一实现**）。
 //
 // 「唯一」是判据而不是措辞：`internal/archtest` 的 `TestRunStatusIsSingleSource` 要求
-// `internal/manager/**` 的生产代码里**零命中** `BusRunStatus` / `"run.status"`——manager 里再手拼
+// `internal/domain/session` 之外的**生产代码里零命中** `BusRunStatus` / `"run.status"`——别处再手拼
 // 一份 `map[string]any` 会让「同状态去重」「取值校验」这两件事悄悄少一半，而两条路径都照常工作。
 //
 // 载荷里的 `session_id` 与事件的 agg_id 是同一个值：事件载荷一贯带它（前端按载荷渲染，不按帧的

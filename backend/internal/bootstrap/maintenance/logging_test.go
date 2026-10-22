@@ -19,7 +19,7 @@ import (
 //     症状是"工具莫名不可用"；
 //   - `--json` 系（config/doctor…）的 stdout 是机器可读产物：混一行日志就毁掉 CI/诊断包。
 //
-// 这是**配置层**的判据；协议层那半（stdout 真的只有帧、诊断真的进了文件）由 pkg/mcp 的
+// 这是**配置层**的判据；协议层那半（stdout 真的只有帧、诊断真的进了文件）由 internal/infra/protocol/mcp 的
 // stdout 纯度用例与 TestMcpBridgeCLI 真起进程验证。
 func TestDataStdoutCommandsNeverUseConsoleWriter(t *testing.T) {
 	cases := []struct {

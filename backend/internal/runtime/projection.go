@@ -16,7 +16,8 @@ import (
 // 问题——这也是删掉 `capability.SkillSource` 的原因。
 //
 // 类型与解析都放**本包**：本包零依赖 `core/capability`，
-// 物化函数收平凡参数 (root, layout, format)，编排留给 internal/manager。
+// 物化函数收平凡参数 (root, layout, format)，编排（解 `${...}` 占位、决定落到哪）留给调用方
+// ——`internal/sessionruntime` 的技能物化与装配面。
 
 // ProjectionKind 可投影的能力种类。
 type ProjectionKind string

@@ -42,13 +42,13 @@ func fileExists(p string) bool {
 //
 // **v20 的密钥面**：权威是库里的 `providers.key` 一列（sqlite 载体）或托管文档
 // `<MATE_HOME>/credentials.json`（memory 载体就是事实源）。档案文件里只剩**派生**的
-// `key_ref`（= `providers/<id>`，托管文档里的键）；解析顺序的唯一实现是 `pkg/credentials`。
+// `key_ref`（= `providers/<id>`，托管文档里的键）；解析顺序的唯一实现是 `internal/infra/credentials`。
 // 明文只存在于内存、adapter 的原生凭据文档与子进程 env 三处，绝不写进档案文件。
 
 // applyResolution 把一次凭据解析的结果落到档案上（三个字段同进同出，避免半更新）。
 //
 // 顺带把**解析出来的值**登记进脱敏闸门的动态表：这是 v20 之后唯一可靠的"真值来源"
-// （`pkg/redact` 的第 1 档：按值替换、零误报）。放在这里而不是各通道的注入点上，是因为
+// （`internal/core/redact` 的第 1 档：按值替换、零误报）。放在这里而不是各通道的注入点上，是因为
 // 密钥现在可能走**原生凭据文档**那条路（`Credential.Tested && NativeDoc != ""`，dsh 就是），
 // 那条路不经过 `ProviderEnvFor`——只在那里登记会让"平台上唯一真实存在的那把密钥"漏出闸门。
 func (d *Def) applyResolution(k credential.ProviderKey) {
@@ -214,7 +214,7 @@ func (pl *Plane) ListProviders(ctx context.Context) ([]ProviderItem, error) {
 
 // providerRespLocked 把一条档案投影成对外表示（**调用方必须持 pl.mu**）。
 //
-// 密钥面**读时现解析**（`KeyFor`）：解析顺序的唯一实现是 `pkg/credentials`，
+// 密钥面**读时现解析**（`KeyFor`）：解析顺序的唯一实现是 `internal/infra/credentials`，
 // 而它要读的四处（进程环境、托管文档、两份 `.env`、库）都可能在本进程之外被改动。顺手把结果
 // 回写到档案上，让读面与注入面（`providerForSync`）看到同一份事实。
 //
@@ -307,7 +307,7 @@ func (pl *Plane) providerApplicabilityLocked(d *Def) []objdelivery.Applicability
 
 // providerRefNameFor 派生某供应商在某 runtime 上的凭据引用名（逐供应商唯一，ADR-16）。
 //
-// 归一化与哈希后缀的算法在 `pkg/resource.RefFor`——**只有一份**：编排层与诊断面共用它，
+// 归一化与哈希后缀的算法在 `internal/core/resource.RefFor`——**只有一份**：编排层与诊断面共用它，
 // 两处各写一遍迟早分叉（而分叉的后果是"界面显示的变量名不是真正注入的那个"）。
 func providerRefNameFor(spec runtime.Spec, providerID string) string {
 	return resource.RefFor(spec.Credential.RefPattern, providerID)

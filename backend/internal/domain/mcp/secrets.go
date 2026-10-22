@@ -124,7 +124,7 @@ func (p *Secrets) ResolveRef(ref string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// 解析出来的明文登记进脱敏闸门的动态表（`pkg/redact` 的第 1 档：按值替换、零误报）。
+	// 解析出来的明文登记进脱敏闸门的动态表（`internal/core/redact` 的第 1 档：按值替换、零误报）。
 	//
 	// 为什么 MCP 密钥也要登记（v19 及更早只有 provider key 登记）：这些值会被塞进 stdio
 	// 子进程的环境变量/请求头，而子进程把凭据打进 stderr 是最常见的形态（"401，token=…"）。

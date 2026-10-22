@@ -141,7 +141,7 @@ func RemoveDefinitionPermanently(dir, Kind, id string) (bool, error) {
 //   - 乐观锁冲突 → `definition_changed`（40901）：**请刷新重试**，你的改动没写入（绝不 last-write-wins）；
 //   - 其余 IO 失败 → `definition_write_failed`（50000）：服务端出错了，用户报障而不是重试。
 //
-// 抽成函数是为了让这条映射可被单测直接钉住（冲突本身由 `pkg/capability` 用真实文件改动验证）。
+// 抽成函数是为了让这条映射可被单测直接钉住（冲突本身由 `internal/core/capability` 用真实文件改动验证）。
 func DefinitionSaveErr(path string, err error) error {
 	if capability.IsConflict(err) {
 		// ClassLimit 是"与当前状态冲突"这一类（→ 40901）。用 ClassRequest 会落成 40001

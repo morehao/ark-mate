@@ -4,7 +4,7 @@
 // 它**负责**：密钥引用（`store:` / `env:`）到明文的解析与"当前是否解析得出来"的体检、
 // 密钥解析的失败原因文案（只含键名与引用，**绝不含值**）、以及把解析结果合成最终注入值。
 //
-// 它**不负责**：凭据的来源与分层顺序（那是 `mechanism` 与 `pkg/credentials`——
+// 它**不负责**：凭据的来源与分层顺序（那是 `mechanism` 与 `internal/infra/credentials`——
 // 本包只调它的 `ResolveStoreSecret`）、会话的注入选址（那要读会话钉住的白名单，属会话平面）、
 // 定义载体的读写（`mechanism`）、对外 DTO 与错误码（`service/svc*` 与 `dto/*`）。
 //

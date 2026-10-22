@@ -372,7 +372,7 @@ func TestRunDoctorProviderSectionNoFailures(t *testing.T) {
 // TestDoctorCredentialsPermFail 托管文档**真的会 fail** 的形态：权限过宽。
 //
 // 这是 v20 新增的最重要一档：文档是可自由复制的明文，而权限是它唯一的边界。平台读它时**硬失败**
-// （`pkg/credentials` 的纪律），于是"面板里保存的密钥不被采用"——事实与声明不符，必须判失败。
+// （`internal/infra/credentials` 的纪律），于是"面板里保存的密钥不被采用"——事实与声明不符，必须判失败。
 // 同一现场里库那一列照样有值，所以 `provider keys` 仍是 ok：两条判据回答的是两个问题。
 func TestDoctorCredentialsPermFail(t *testing.T) {
 	r := newProviderDoctorRig(t)

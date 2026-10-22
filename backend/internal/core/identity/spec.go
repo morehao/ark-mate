@@ -58,7 +58,7 @@ func (s Spec) UsesUserContext() bool { return strings.TrimSpace(s.UserContext) !
 
 // Fingerprint 幂等判据：由**文案与版本**算出，不由产物算出。
 //
-// 为什么由文案算（与 `pkg/resource` 的同步指纹同一条讲究）：同一份身份重复交付必须收敛
+// 为什么由文案算（与 `internal/core/resource` 的同步指纹同一条讲究）：同一份身份重复交付必须收敛
 // （不重写字节、不重装参数）。若用产物（含时间戳/格式差异）算，任何一次无意义的格式化都会
 // 让"身份变了"看起来成立，而真正变了的文案反而被吞掉。
 //

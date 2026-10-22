@@ -162,7 +162,7 @@ func (pl *Plane) Tick(ctx context.Context, now time.Time) {
 
 // automationRunOnce 认领并执行一条到期的 automation。
 //
-// 认领三态（`pkg/automation.Decide`）：Claimed / duplicate / overlap。
+// 认领三态（`internal/core/automation.Decide`）：Claimed / duplicate / overlap。
 // `duplicate` 在前：**"这次触发过没有"必须优先于"上一次还在不在跑"**——否则一个
 // "上次会话卡住不结束"的 automation，会在重启后把同一 occurrence 再跑一遍。
 func (pl *Plane) RunOnce(ctx context.Context, rec Rec, ScheduledFor time.Time, trigger string) RunOutcome {
@@ -397,9 +397,9 @@ func (pl *Plane) FinishAutomationRun(ctx context.Context, rec Rec, out RunOutcom
 // emitAutomationRun 推 `automation.run` 事件（**只进 bus，不落 events 表**）。
 //
 // 为什么不在 publishRaw 里走一遍：events 表的 `session_id` 是
-// `NOT NULL REFERENCES sessions(id)`（`foreign_keys(1)` 由 pkg/dbclient 的守卫钉着），
+// `NOT NULL REFERENCES sessions(id)`（`foreign_keys(1)` 由 internal/infra/dbclient 的守卫钉着），
 // 而 duplicate/overlap/触发失败这三类结果**没有会话可挂**——硬塞一个假 id 会直接撞外键。
-// 运行史（含这三类）落在定义文件的 `recent_runs` 里（见 `pkg/automation.RunRecord` 注释），
+// 运行史（含这三类）落在定义文件的 `recent_runs` 里（见 `internal/core/automation.RunRecord` 注释），
 // 这条事件只负责**实时推送**（面板不必等轮询）。
 func (pl *Plane) emitAutomationRun(id string, out RunOutcome) {
 	host := pl.hostOf()

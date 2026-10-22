@@ -9,7 +9,7 @@
 //
 // 所以这里放一个**框架完全不认识**的底座：它不在 `AllBuiltinSpecs()` 里、不在任何隔离表的
 // Go 侧声明里、不在前端启动器的表里，内核与 `internal/runtime` 都从未听说过 `rtx`。
-// 只要 `internal/manager` 的 `TestSyntheticAdapterIsFirstClass` 还能带着它跑完整条链路
+// 只要 `internal/sessionruntime` 的 `TestSyntheticAdapterIsFirstClass` 还能带着它跑完整条链路
 // （隔离投影 → 拉起子进程 → 原生权限注入 → 清单端口被调用），
 // 「adapter 层能承载一个没被硬编码过的底座」这件事就是**被机器执行过**的，而不是被声明的。
 //
@@ -189,7 +189,7 @@ type Syncer struct {
 	Fail error
 }
 
-// SyncModels 见 `pkg/resource` 的 Syncer 契约。
+// SyncModels 见 `internal/core/resource` 的 Syncer 契约。
 func (s *Syncer) SyncModels(_ context.Context, set resource.Set) (resource.Outcome, error) {
 	s.Calls++
 	s.Last = set

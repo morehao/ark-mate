@@ -23,7 +23,7 @@ import (
 
 const (
 	// Version 产品身份版本。改文案（任何一段）就要 +1：它进 `/meta.product.identityVersion` 与
-	// 日志，用于回答"这段历史/这次会话用的是哪一代身份"。**不进 prompt 正文**（见 pkg/identity）。
+	// 日志，用于回答"这段历史/这次会话用的是哪一代身份"。**不进 prompt 正文**（见 internal/core/identity）。
 	Version = "v1"
 	// Name 产品名（英文标识）。界面、`/meta` 与提示词里必须逐字一致。
 	Name = "ark-mate"

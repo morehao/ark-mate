@@ -68,7 +68,7 @@ type SessionCreateReq struct {
 	// 这里曾有 `RuntimeHint string `json:"-"``（automation 的 target.runtime_hint）：底座由构建期
 	// 固定（internal/runtime/build.go），"按会话指定底座"这条路径整体下线——留着它只会让下一个人以为
 	// 平台还能按会话切换。automation 定义里若还写着 `target.runtime_hint`，写面会 40001（见
-	// internal/manager/automation.go 的闸门），读面按已下线键 WARN 后忽略。
+	// `internal/domain/automation` 的闸门），读面按已下线键 WARN 后忽略。
 }
 
 // SkillsPtr / McpsPtr 取字段（nil 安全的取值，供调用方少写一层判空）。

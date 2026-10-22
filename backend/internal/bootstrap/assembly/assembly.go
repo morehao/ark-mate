@@ -220,7 +220,7 @@ func (as *assembly) startStore(ctx context.Context) error {
 		// 会话 wire transcript（~/.ark-mate/transcripts 或 MATE_TRANSCRIPTS）。
 		as.svc.SessionPlane().SetTranscriptDir(cfg.TranscriptDir)
 	default:
-		// 不可达：pkg/config 的 materialize 已按 ValidStoreModes 校验并把 auto 归一成空串。
+		// 不可达：internal/config 的 materialize 已按 ValidStoreModes 校验并把 auto 归一成空串。
 		// 保留为内部错误（不是 usageErr——这不是用户输入错，是代码不一致）。
 		return fatalErr("serve: 内部错误：持久层模式 %q 未被处理（配置层校验与装机层取值集合不一致）", as.mode)
 	}
@@ -521,7 +521,7 @@ func (as *assembly) startMcpGateway(ctx context.Context) error {
 // startNativePermission 原生权限映射（B5）：MATE_NATIVE_PERMISSION=off 时关闭（默认 auto）。
 //
 // v19 起平台**没有策略来源**（per-agent 默认权限策略随 agent 面撤销），这条开关因此不改变任何
-// 注入结果。保留接线点而不是删掉它，是因为 `pkg/config` 的键仍在（部署脚本会设它）：
+// 注入结果。保留接线点而不是删掉它，是因为 `internal/config` 的键仍在（部署脚本会设它）：
 // 静默失效比"读一次并如实说出当前没有策略来源"更糟。
 func (as *assembly) startNativePermission(ctx context.Context) error {
 	if as.cfg.NativePermission != config.NativePermissionOff {

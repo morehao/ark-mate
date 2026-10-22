@@ -36,7 +36,7 @@ import (
 //	③ 同步结论**持久化**（`GET /models` 是只读面，读一次列表不该写文件、改启动参数）。
 //
 // 落点为什么是 `registry` 而不是 `manager`（P5a）：同步要读的是**装配事实**——各底座配置写面
-// （注册表 + `pkg/resource.Syncer`）、凭据通道（供应商密钥 + 交付面 `Delivery`）、同步结果
+// （注册表 + `internal/core/resource.Syncer`）、凭据通道（供应商密钥 + 交付面 `Delivery`）、同步结果
 // （meta 里的摘要与结论）。这三样没有一样来自会话/编排，而 `mate doctor` 与网关子进程也要
 // 同一份事实。把状态、`EnableStore`、同步与结果记录**四件一起**搬过来，避免"同步写了一半、
 // 下一轮读到另一份状态"的静默缺口。
@@ -174,7 +174,7 @@ func (r *Resources) SyncModels(ctx context.Context, runtimeID string) (*dtomodel
 		}
 	}
 	if len(failed) > 0 {
-		// 失败面按设计映 50001（见 `pkg/code/acp.go` 的 classCodeOverrides）：
+		// 失败面按设计映 50001（见 `internal/core/code/acp.go` 的 classCodeOverrides）：
 		// 这是**服务侧**失败，不是 50201"上游连接失败"——后者的排障方向是底座进程/网络，
 		// 而这里真因更可能在平台自己的生成器、校验门或磁盘上。
 		return nil, failure.NewError(failure.ClassService, "resource_sync_failed",
@@ -223,7 +223,7 @@ func (r *Resources) SyncRuntime(ctx context.Context, runtimeID string) (resource
 		return resource.Outcome{
 			Status: resource.StatusUnsupported,
 			Where:  "未声明模型清单交付面",
-			Problems: []string{"该交付面没有实现同步端口（pkg/resource.Syncer）：" +
+			Problems: []string{"该交付面没有实现同步端口（internal/core/resource.Syncer）：" +
 				"平台只交付它认得的交付面，不写猜出来的配置文件"},
 		}, nil
 	}
@@ -656,7 +656,7 @@ func (r *Resources) RuntimeConfigStates(ctx context.Context) map[string]dtomodel
 			if _, hasSyncer := r.reg.Syncer(spec.ID); !hasSyncer {
 				o = resource.Outcome{Status: resource.StatusUnsupported,
 					Where:    "未声明模型清单交付面",
-					Problems: []string{"该交付面没有实现同步端口（pkg/resource.Syncer）"}}
+					Problems: []string{"该交付面没有实现同步端口（internal/core/resource.Syncer）"}}
 			} else {
 				o = resource.Outcome{Status: resource.StatusUntested,
 					Where:    "尚未同步过",

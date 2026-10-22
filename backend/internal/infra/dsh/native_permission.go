@@ -12,11 +12,12 @@ import "strings"
 
 // 原生权限模式取值。
 //
-// **必须与 `internal/manager` 的 `NativeMode*` 常量逐字相同**（那是 wire 契约
+// **必须与 `internal/domain/interaction` 的 `NativeMode*` 常量逐字相同**（那是 wire 契约
 // `permission_policy.native_mode` 的唯一事实源）。这里刻意**不** import 它：adapter 与上层之间
 // 是单向依赖（上层认识 adapter，adapter 不认识上层），为几个字面量把方向弄反得不偿失。
-// 同形先例：本包的 `SkillFormat` 与 `pkg/capability.FormatSkillMDFrontmatter` 逐字相同但互不 import。
-// 两侧对不上时由 `TestNativePermissionModeLiteralsMatchWire`（internal/manager）报错，
+// 同形先例：本包的 `SkillFormat` 与 `internal/core/capability.FormatSkillMDFrontmatter` 逐字相同但互不 import。
+// 两侧对不上时由 `TestNativePermissionModeLiteralsMatchWire`（`internal/archtest` 的
+// `knowledge_dependency_test.go`）报错，
 // 而不是靠类型系统假装对得上。
 const (
 	NativeModeAuto           = "auto"
@@ -69,7 +70,7 @@ func (NativePermission) Env(mode, def string, tools map[string]string) ([]string
 	}
 }
 
-// 策略动作取值（与 `internal/manager.Permission*` 逐字相同；理由同上面的模式常量）。
+// 策略动作取值（与 `internal/domain/interaction.Permission*` 逐字相同；理由同上面的模式常量）。
 const (
 	permissionAsk  = "ask"
 	permissionDeny = "deny"
