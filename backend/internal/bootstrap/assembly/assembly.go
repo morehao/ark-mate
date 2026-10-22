@@ -3,6 +3,7 @@ package assembly
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"net"
 	"net/http"
 	"os"
@@ -19,12 +20,12 @@ import (
 	"github.com/morehao/ark-mate/internal/delivery/router"
 	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	credmech "github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
 	"github.com/morehao/ark-mate/internal/infra/procreg"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -182,7 +183,7 @@ func (as *assembly) startCredentials(ctx context.Context) error {
 	// 凭据 cwd **显式登记**（不是让用到的每一处各自 `os.Getwd()`）：它要随网关条目交给网关
 	// **子进程**，而网关的 cwd 是底座给的（会话工作区）——见 `mcp.GatewayCredCwdEnv`。
 	as.planes.Credentials.SetCwd(cwd)
-	layered, mirrorPath, err := credmech.OpenCredentialSource(cfg.HomeDir, cwd)
+	layered, mirrorPath, err := mechanism.OpenCredentialSource(cfg.HomeDir, cwd)
 	if err != nil {
 		glog.Warnw(ctx, "serve: 凭据分层未装配（只有库里的那一份可用）", "err", err,
 			"home", config.DisplayHome(cfg.HomeDir))
@@ -219,7 +220,7 @@ func (as *assembly) startStore(ctx context.Context) error {
 		// 会话 wire transcript（~/.ark-mate/transcripts 或 MATE_TRANSCRIPTS）。
 		as.svc.SessionPlane().SetTranscriptDir(cfg.TranscriptDir)
 	default:
-		// 不可达：pkg/config 的 materialize 已按 ValidStoreModes 校验并把 auto 归一成空串。
+		// 不可达：internal/config 的 materialize 已按 ValidStoreModes 校验并把 auto 归一成空串。
 		// 保留为内部错误（不是 usageErr——这不是用户输入错，是代码不一致）。
 		return fatalErr("serve: 内部错误：持久层模式 %q 未被处理（配置层校验与装机层取值集合不一致）", as.mode)
 	}
@@ -493,7 +494,7 @@ func (as *assembly) startIdentity(ctx context.Context) error {
 		glog.Warnw(ctx, "serve: 产品身份的系统提示面未交付（模型的自述会退回首轮块或无名）",
 			"mode", string(mode), "status", outcome.Status, "problems", strings.Join(outcome.Problems, "；"), "err", cause)
 		if as.rconn != nil {
-			ae := acp.NewError(acp.ClassService, "identity_patch_failed",
+			ae := failure.NewError(failure.ClassService, "identity_patch_failed",
 				"产品身份的系统提示面未交付（会话仍可用；模型的自述退回首轮块或无身份）："+
 					strings.Join(outcome.Problems, "；"), nil)
 			as.rconn.RecordRuntimeError("", ae, nil)
@@ -520,7 +521,7 @@ func (as *assembly) startMcpGateway(ctx context.Context) error {
 // startNativePermission 原生权限映射（B5）：MATE_NATIVE_PERMISSION=off 时关闭（默认 auto）。
 //
 // v19 起平台**没有策略来源**（per-agent 默认权限策略随 agent 面撤销），这条开关因此不改变任何
-// 注入结果。保留接线点而不是删掉它，是因为 `pkg/config` 的键仍在（部署脚本会设它）：
+// 注入结果。保留接线点而不是删掉它，是因为 `internal/config` 的键仍在（部署脚本会设它）：
 // 静默失效比"读一次并如实说出当前没有策略来源"更糟。
 func (as *assembly) startNativePermission(ctx context.Context) error {
 	if as.cfg.NativePermission != config.NativePermissionOff {

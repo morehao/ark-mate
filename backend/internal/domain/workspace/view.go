@@ -3,13 +3,12 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // 工作空间的**只读辅助面**（浏览 + 最近使用）。
@@ -57,7 +56,7 @@ func (pl *Plane) BrowseWorkspace(path string, includeHidden bool) (*BrowseView, 
 		} else if home != "" {
 			path = home
 		} else {
-			return nil, acp.NewError(acp.ClassService, "workspace_unavailable",
+			return nil, failure.NewError(failure.ClassService, "workspace_unavailable",
 				"未指定 path 且无法定位服务进程家目录", nil)
 		}
 	}
@@ -69,7 +68,7 @@ func (pl *Plane) BrowseWorkspace(path string, includeHidden bool) (*BrowseView, 
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
+		return nil, failure.NewError(failure.ClassRequest, "workspace_invalid",
 			"目录不可读: "+dir, err)
 	}
 	out := make([]BrowseEntry, 0, len(entries))
@@ -145,10 +144,10 @@ func (pl *Plane) CreateWorkspaceDir(parent, name string) (*WorkspaceDirCreate, e
 	target := filepath.Join(dir, name)
 	if err := os.Mkdir(target, 0o755); err != nil {
 		if os.IsExist(err) {
-			return nil, acp.NewError(acp.ClassLimit, "workspace_exists",
+			return nil, failure.NewError(failure.ClassLimit, "workspace_exists",
 				fmt.Sprintf("目录已存在: %s", target), nil)
 		}
-		return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
+		return nil, failure.NewError(failure.ClassRequest, "workspace_invalid",
 			fmt.Sprintf("创建目录失败: %s", target), err)
 	}
 	return &WorkspaceDirCreate{Path: ResolveRealPath(target)}, nil
@@ -194,7 +193,7 @@ func ancestryCrumbs(target string) []BrowseCrumb {
 func (pl *Plane) ListWorkspaceFiles(path string, includeHidden bool) (*FilesView, error) {
 	roots := pl.WorkspaceRoots()
 	if strings.TrimSpace(path) == "" {
-		return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
+		return nil, failure.NewError(failure.ClassRequest, "workspace_invalid",
 			"未指定 path：列目录内容必须给出要看的目录", nil)
 	}
 	dir, err := ValidateWorkspace(path)
@@ -203,7 +202,7 @@ func (pl *Plane) ListWorkspaceFiles(path string, includeHidden bool) (*FilesView
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, acp.NewError(acp.ClassRequest, "workspace_invalid", "目录不可读: "+dir, err)
+		return nil, failure.NewError(failure.ClassRequest, "workspace_invalid", "目录不可读: "+dir, err)
 	}
 	out := make([]FileEntry, 0, len(entries))
 	for _, e := range entries {

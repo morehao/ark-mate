@@ -216,7 +216,9 @@ func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：判据失去检查对象", internalDir)
 	}
-	mint := `acp.NewError(acp.ClassRequest, "runtime_not_found"`
+	// P1（2026-10-21）起分类词汇归 `core/failure`，铸码点的构造文本随之改名——
+	// 判据方向不变：**恰好一处**在运行面，另一处在请求同步面，`sessionruntime` 零处。
+	mint := `failure.NewError(failure.ClassRequest, "runtime_not_found"`
 	inRuntimeconn, inManager, inResourceSync := 0, 0, 0
 	for _, path := range files {
 		body := readFileOrFatal(t, path)

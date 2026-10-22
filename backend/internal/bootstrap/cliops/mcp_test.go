@@ -1,7 +1,7 @@
 package cliops
 
 // `mate mcp bridge` 的**进程级**用例：帧形状与 stdout 纯度已经在包内验过
-// （`pkg/mcp/server_test.go`、`internal/drivers/gateway/gateway_test.go`），这里钉的是**进程入口**：
+// （`internal/infra/protocol/mcp/server_test.go`、`internal/drivers/gateway/gateway_test.go`），这里钉的是**进程入口**：
 // 子命令分发、参数解析、退出码，以及"诊断绝不写 stdout"这条在真实二进制上是否成立。
 //
 // 为什么真编一个二进制：网关是**底座拉起的子进程**，它的入口形态（argv → 退出码 → 两个流）

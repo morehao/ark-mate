@@ -5,7 +5,7 @@
 
 - `backend/`：唯一 Go module（`github.com/morehao/ark-mate`，go 1.26.1）。**仓库根没有 go.mod / go.work——所有 go 命令必须在 `backend/` 下运行**。
   - **`backend/pkg` 已全量并入 `internal/`**（v3.1 §3.1.12，P2）：仓库只有一个代码层，不再有"可复用基础设施 vs 应用专属"的目录分界。原先在 `pkg/` 的包按职责落到 `internal/` 下：
-    - `internal/infra/{acp,mcp,dsh,logging,credentials,dbclient,procreg}`：协议客户端与运行期基础设施。`infra/dsh` 是**唯一 adapter**（实现 `runtime.Adapter`：`Spec()` + `RegisterPorts()`，五张端口表：syncer / 原生权限 / 模型值 / 工具失败归类 / 产品身份）。
+    - `internal/infra/protocol/{acp,mcp}` + `internal/infra/{logging,credentials,dbclient,procreg,dsh,host,installed}`：协议客户端与运行期基础设施。`infra/dsh` 是**唯一 adapter**（实现 `runtime.Adapter`：`Spec()` + `RegisterPorts()`，五张端口表：syncer / 原生权限 / 模型值 / 工具失败归类 / 产品身份）。
     - `internal/runtime`：注册表 + `Spec` 契约 + `Adapter` 接口 + 隔离投影。**不得 import 任何 adapter**（`TestRuntimeDoesNotImportRuntimeAdapters`）。
     - `internal/core/{code,capability,automation,identity,resource,redact,object/*}`：错误码、能力装载、自动化解析、身份常量、跨层值对象等；`internal/config` 仍是独立的进程配置包。
     - 新增/搬迁包时只问一句：**它在层表的哪一层**（见下），不再问"进 pkg 还是 internal"。
@@ -14,6 +14,27 @@
     - **装配只能自上而下，不许反向**：`assembly` 构造用例与控制器，`router` 只收已构造的控制器（`router.Deps`），`app` 只消费 `assembly.BuildResult`。**`app`/`router`/`cli` 都不得引用 `service/svc*`**，控制器也不得 import `domain`/`store`/`model`——判据见 `layers_v32_test.go`。
     - 持久侧：`dbclient → persistence/dao → persistence/store`，`model` 被三者依赖且自身不依赖任何一层；`dao` 不得 import `store`（会成环），`model` 不得 import `dao`/`store`。
     - **厚域与用例都走窄端口，不 import 门面**（P4）：`domain/session` 声明 `Store` 端口（`store_port.go`），`domain/interaction` 零 `store`；用例层同理声明 `svcmodel.ModelStore` / `svcsession.EventReader` / `svcsystem.SourceFactsReader`。`*store.Store` 结构上满足它们、由装配根交下来；**交下来时必须现判 nil**——typed-nil 装进接口不是 nil，会让"内存模式 40501 / 只读镜像"那几条判据静默失效（`assembly/services.go` 的 `eventReader`/`sourceFactsReader`/`modelStore` 就是这条规矩的落点）。`model` 仍可被 `domain/session` 引用：它是纯列形状（无行为），把它也搬走只会换来 30 多个镜像结构。
+    外部协议同样走端口（A2，2026-10-22）：`domain/mcp` 声明 `LiveClient`（探测/工具调用/资源/提示词，签名只用 `protocol.McpServer` + `protocol.Mcp*` 平台值），实现体是 `infra/protocol/mcp`，由 `drivers/registry` 接上——域因此**零 `infra/*`**（`TestInnerCircleAvoidsInfraProtocol` 已是硬判据）。
+    `infra/protocol/{acp,mcp}` 里的类型别名（`aliases.go` / `values.go`）是**唯一出口**：只为让协议侧实现与测试读起来自然，事实源在 `core/protocol`；**内圈（`domain` / `sessionruntime` / `runtime`）不得用别名**，用了等于重新认识协议实现。
+  - **新增一层 / 一个接口 / 一个抽象之前，先回答五问**（2026-10-21，来源是一份外部"轻量化"方案里唯一被完整采纳的判据段）：
+    ① 它是否有独立、稳定的职责？② 是否有多个真实实现，或确实需要替换实现？③ 是否能隔离外部技术依赖？
+    ④ 是否有明确的测试、事务、生命周期或安全边界？⑤ 去掉它后，是否会导致调用方直接耦合不希望暴露的细节？
+    大多答"否" ⇒ **不加这一层**。反过来也成立：一个模块已经有复杂状态转换、多条用例、明确事务边界或
+    多个 Runtime 实现，**多几个文件或子目录不算架构过重**——这条防的是把五问读成"越少越好"。
+    顶层目录本身的角色另有一张卡（`core` / `domain` / `infra` 各自的准入与禁止）与四条机器判据，
+    见决策 v30 与 `guards.md` 的「顶层目录角色」段。
+  - **Runtime 侧的职责归属（回归检查项，不是新判据）**：改 `sessionruntime` / `drivers/runtimeconn` /
+    `infra/protocol` / `infra/dsh` 时对照下表，确认每件事仍只有一个归属——
+    | 职责 | 唯一归属 | 证据锚点 |
+    | --- | --- | --- |
+    | 长命底座的子进程 spawn | `infra/protocol/acp` 的 stdio transport | `infra/protocol/acp/transport.go` 的 `exec.CommandContext` / `cmd.Start()` |
+    | 一次性子进程（config 探测，须在 staging home 上跑） | `infra/dsh` | `infra/dsh/config.go` 的 `exec.CommandContext` + 隔离 env 注释 |
+    | 宿主短命进程（选目录面板） | `infra/host` | `infra/host/runner.go` 的 `Run` |
+    | 连接生命周期（拨号 / 断连 / 空闲回收 / 意外断开判定） | `drivers/runtimeconn` | `runtimeconn/dial.go` 的 `Pool.Dial` + `watchConn` |
+    | 协议事件 → 平台事件 | `drivers/runtimeconn` | 内圈对 `acp` 的依赖只能经它翻译（决策 v30 的 G2） |
+    | 底座差异（启动参数 / 能力 / 注入 / 产品身份） | `runtime.Adapter` 端口 | 五张端口表：syncer / 原生权限 / 模型值 / 工具失败归类 / 产品身份 |
+    | 会话编排（何时重建、何时收成 interrupted） | `sessionruntime`（L7） | `guards.md` 的「连接拆除语义」段 + `disconnectSession` |
+    判据清单的唯一事实源仍是 [`guards.md`](guards.md)；本表只回答"这件事归谁"，不新增守卫。
   - **用例层（`service/svc<领域>`）的三条硬规矩**（2026-10-16 定案；违反者由 `internal/archtest` 拦，别靠注释）：
 
     1. **只有 `internal/delivery/controller/ctr<领域>` 可以引用 `internal/service/svc<领域>`**——「引用」包括调用、构造与**写类型名**。

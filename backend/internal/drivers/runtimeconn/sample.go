@@ -3,7 +3,9 @@ package runtimeconn
 import (
 	"context"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/protocol"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -29,20 +31,20 @@ import (
 // 事实，不是故障——调用方据此把说明文案与留痕级别分开。
 func SampleConfigOptions(ctx context.Context, rc *Conn, rawSessionID, cwd string) ([]acp.ConfigOption, error) {
 	if rc == nil || rc.Client == nil {
-		return nil, acp.NewError(acp.ClassConnection, "runtime_not_connected",
+		return nil, failure.NewError(failure.ClassConnection, "runtime_not_connected",
 			"执行面没有可用的客户端连接，无法取样模型目录", nil)
 	}
 	caps := rc.Client.Capabilities()
-	if !caps.SessionResume && !caps.Raw.LoadSession {
-		return nil, acp.NewError(acp.ClassUnsupported, "resume_session_unsupported",
+	if !caps.SessionResume && !caps.LoadSession {
+		return nil, failure.NewError(failure.ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
 	}
-	var sess *acp.Session
+	var sess protocol.Session
 	var err error
-	if caps.Raw.LoadSession {
-		sess, err = rc.Client.LoadSession(ctx, rawSessionID, acp.SessionOptions{Cwd: cwd})
+	if caps.LoadSession {
+		sess, err = rc.Client.LoadSession(ctx, rawSessionID, protocol.SessionOptions{Cwd: cwd})
 	} else {
-		sess, err = rc.Client.ResumeSession(ctx, rawSessionID, acp.SessionOptions{Cwd: cwd})
+		sess, err = rc.Client.ResumeSession(ctx, rawSessionID, protocol.SessionOptions{Cwd: cwd})
 	}
 	if err != nil {
 		return nil, err

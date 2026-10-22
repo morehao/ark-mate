@@ -35,7 +35,7 @@ var ValidToolSources = map[string]bool{
 // Skill 是 Skill 目录的一个条目（平台唯一事实源）。
 //
 // Body 为 SKILL.md 内容；**Runtimes 只表达「给谁用」，不表达「放哪、什么格式」**——后者是
-// runtime 的投影声明（见 `pkg/runtime.Projection`）。这也是删掉旧 `Sources` 的原因：
+// runtime 的投影声明（见 `internal/runtime.Projection`）。这也是删掉旧 `Sources` 的原因：
 // 条目侧写 path/format 等于让用户为每个底座抄一遍它自己的目录约定，而且两处声明同一件事
 // 必然要引入优先级规则。
 type Skill struct {
@@ -112,7 +112,8 @@ func (s Skill) AppliesToRuntime(runtime string) bool {
 //	Headers       明文 header（非密钥）
 //	SecretHeaders 密钥型 header：值只能是引用
 //
-// 引用在注入前一刻才解析成明文（internal/manager 查库），所以定义文件里永远没有密钥本体。
+// 引用在注入前一刻才解析成明文（会话编排面在注入前查库，见 `internal/sessionruntime`），
+// 所以定义文件里永远没有密钥本体。
 type McpServer struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name,omitempty"`

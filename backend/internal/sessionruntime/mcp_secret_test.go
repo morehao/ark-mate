@@ -184,7 +184,7 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 		}
 	}
 	// 旧前缀在**运行时**读到就是坏数据：它既不是 `store:` 也不是 `env:`，词法层就拒了
-	// （翻译只发生在导入档案文件那一步，判据见 `pkg/capability` 的翻译点用例；这里不写字面量，
+	// （翻译只发生在导入档案文件那一步，判据见 `internal/core/capability` 的翻译点用例；这里不写字面量，
 	// 免得把已退役的词带回 manager 的源码里）。
 	if err := capability.ValidateSecretRef("storex:mcp/legacy"); err == nil {
 		t.Fatal("认不出的前缀应在词法层被拒")
@@ -237,7 +237,7 @@ func TestSecretRefLexiconMatchesStore(t *testing.T) {
 
 // TestMcpLiveAndProbeCarryResolvedEnv 密钥解析必须到得了**探测面与调用面**，不能只有注入面有。
 //
-// 这条钉的是一个实测过的缺陷（2026-10-09）：`mcp.Server` 当时连 `Env` 字段都没有，探测/调用路径
+// 这条钉的是一个实测过的缺陷（2026-10-09）：`protocol.McpServer`（当时的 `mcp.Server`）连 `Env` 字段都没有，探测/调用路径
 // 于是既不传 env 也不传 secret_headers ⇒ 一个靠 env 拿凭据的 stdio server 会"会话里能用、
 // `POST /mcps/:id/probe` 必然失败"（`GET /mcps` 长期红）。证据是同一个 server 两处 spawn 的
 // 进程环境截然相反：探测路径 `core_pid=""`、ACP 注入路径 `core_pid="46579"`。
@@ -262,7 +262,7 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1) 调用面（mcpLiveServer）：明文 + 解析后的密钥一起进 mcp.Server。
+	// 1) 调用面（mcpLiveServer）：明文 + 解析后的密钥一起进 `protocol.McpServer`（A2 起是平台值，不再是协议包的 `Server`）。
 	got, err := svc.Planes().Mcp.LiveServer("live")
 	if err != nil {
 		t.Fatalf("mcpLiveServer: %v", err)

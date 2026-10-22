@@ -2,18 +2,18 @@ package interaction
 
 import (
 	"context"
+
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"testing"
 	"time"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // TestPermissionResolveOnce verify 注册挂起 → 决策投递链路（allow/reject，once）。
 func TestPermissionResolveOnce(t *testing.T) {
 	m := NewPermissionManager(5 * time.Second)
-	req := acp.PermissionRequest{ToolCall: acp.ToolCallInfo{ID: "tc1", Title: "运行命令", Kind: "bash"},
-		Options: []acp.PermissionOption{{OptionID: "o1", Name: "允许", Kind: permKindAllowOnce}}}
-	exited := make(chan acp.PermissionDecision, 1)
+	req := protocol.PermissionRequest{ToolCall: protocol.ToolCallInfo{ID: "tc1", Title: "运行命令", Kind: "bash"},
+		Options: []protocol.PermissionOption{{OptionID: "o1", Name: "允许", Kind: permKindAllowOnce}}}
+	exited := make(chan protocol.PermissionDecision, 1)
 	go func() {
 		exited <- m.RegisterAndWait(context.Background(), "s1", req, nil)
 	}()
@@ -38,7 +38,7 @@ func TestPermissionResolveOnce(t *testing.T) {
 // TestPermissionTimeoutAutoReject verify 超时自动拒绝。
 func TestPermissionTimeoutAutoReject(t *testing.T) {
 	m := NewPermissionManager(50 * time.Millisecond)
-	req := acp.PermissionRequest{ToolCall: acp.ToolCallInfo{ID: "tc2", Title: "写文件", Kind: "write"}}
+	req := protocol.PermissionRequest{ToolCall: protocol.ToolCallInfo{ID: "tc2", Title: "写文件", Kind: "write"}}
 	start := time.Now()
 	d := m.RegisterAndWait(context.Background(), "s2", req, nil)
 	if elapsed := time.Since(start); elapsed < 40*time.Millisecond {
@@ -52,9 +52,9 @@ func TestPermissionTimeoutAutoReject(t *testing.T) {
 // TestPermissionAllowAlways记忆 verify allow_always 记录会话级始终允许，二次请求放行。
 func TestPermissionAllowAlwaysMemory(t *testing.T) {
 	m := NewPermissionManager(5 * time.Second)
-	tool := acp.ToolCallInfo{ID: "tc3", Title: "执行脚本", Kind: "bash"}
-	req := acp.PermissionRequest{ToolCall: tool}
-	exited := make(chan acp.PermissionDecision, 1)
+	tool := protocol.ToolCallInfo{ID: "tc3", Title: "执行脚本", Kind: "bash"}
+	req := protocol.PermissionRequest{ToolCall: tool}
+	exited := make(chan protocol.PermissionDecision, 1)
 	go func() { exited <- m.RegisterAndWait(context.Background(), "s3", req, nil) }()
 	waitRegistered(t, m, "s3")
 	callID := pendingCallID(t, m, "s3")
@@ -74,8 +74,8 @@ func TestPermissionAllowAlwaysMemory(t *testing.T) {
 // TestPermissionReject verify 拒绝路径。
 func TestPermissionReject(t *testing.T) {
 	m := NewPermissionManager(5 * time.Second)
-	req := acp.PermissionRequest{ToolCall: acp.ToolCallInfo{ID: "tc4", Title: "删除", Kind: "bash"}}
-	exited := make(chan acp.PermissionDecision, 1)
+	req := protocol.PermissionRequest{ToolCall: protocol.ToolCallInfo{ID: "tc4", Title: "删除", Kind: "bash"}}
+	exited := make(chan protocol.PermissionDecision, 1)
 	go func() { exited <- m.RegisterAndWait(context.Background(), "s4", req, nil) }()
 	waitRegistered(t, m, "s4")
 	callID := pendingCallID(t, m, "s4")
@@ -92,8 +92,8 @@ func TestPermissionReject(t *testing.T) {
 func TestPermissionCancelSession(t *testing.T) {
 	m := NewPermissionManager(5 * time.Second)
 	for i := 0; i < 2; i++ {
-		req := acp.PermissionRequest{ToolCall: acp.ToolCallInfo{ID: "tc", Title: "op", Kind: "bash"}}
-		exited := make(chan acp.PermissionDecision, 1)
+		req := protocol.PermissionRequest{ToolCall: protocol.ToolCallInfo{ID: "tc", Title: "op", Kind: "bash"}}
+		exited := make(chan protocol.PermissionDecision, 1)
 		go func() { exited <- m.RegisterAndWait(context.Background(), "s5", req, nil) }()
 	}
 	waitRegistered(t, m, "s5")
@@ -139,27 +139,27 @@ func pendingCallID(t *testing.T, m *PermissionManager, sessionID string) string 
 func TestResolveDecisionReportsEffectiveOutcome(t *testing.T) {
 	cases := []struct {
 		name     string
-		options  []acp.PermissionOption
-		d        acp.PermissionDecision
+		options  []protocol.PermissionOption
+		d        protocol.PermissionDecision
 		kind     string
 		selected string
 	}{
-		{"放行+指定选项", []acp.PermissionOption{{OptionID: "allow_once"}, {OptionID: "allow_always"}},
-			acp.PermissionDecision{Allowed: true, OptionID: "allow_always"}, acp.OutcomeSelected, "allow_always"},
-		{"放行+缺省→第一个", []acp.PermissionOption{{OptionID: "allow_once"}, {OptionID: "allow_always"}},
-			acp.PermissionDecision{Allowed: true}, acp.OutcomeSelected, "allow_once"},
-		{"放行+无效→第一个", []acp.PermissionOption{{OptionID: "allow_once"}},
-			acp.PermissionDecision{Allowed: true, OptionID: "nope"}, acp.OutcomeSelected, "allow_once"},
-		{"拒绝+deny 选项→selected", []acp.PermissionOption{{OptionID: "reject_once"}},
-			acp.PermissionDecision{Rejected: true, OptionID: "reject_once"}, acp.OutcomeSelected, "reject_once"},
-		{"拒绝+无 deny 选项→cancelled", []acp.PermissionOption{{OptionID: "allow_once"}},
-			acp.PermissionDecision{Rejected: true}, acp.OutcomeCancelled, ""},
+		{"放行+指定选项", []protocol.PermissionOption{{OptionID: "allow_once"}, {OptionID: "allow_always"}},
+			protocol.PermissionDecision{Allowed: true, OptionID: "allow_always"}, protocol.OutcomeSelected, "allow_always"},
+		{"放行+缺省→第一个", []protocol.PermissionOption{{OptionID: "allow_once"}, {OptionID: "allow_always"}},
+			protocol.PermissionDecision{Allowed: true}, protocol.OutcomeSelected, "allow_once"},
+		{"放行+无效→第一个", []protocol.PermissionOption{{OptionID: "allow_once"}},
+			protocol.PermissionDecision{Allowed: true, OptionID: "nope"}, protocol.OutcomeSelected, "allow_once"},
+		{"拒绝+deny 选项→selected", []protocol.PermissionOption{{OptionID: "reject_once"}},
+			protocol.PermissionDecision{Rejected: true, OptionID: "reject_once"}, protocol.OutcomeSelected, "reject_once"},
+		{"拒绝+无 deny 选项→cancelled", []protocol.PermissionOption{{OptionID: "allow_once"}},
+			protocol.PermissionDecision{Rejected: true}, protocol.OutcomeCancelled, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := NewPermissionManager(2 * time.Second)
-			req := acp.PermissionRequest{ToolCall: acp.ToolCallInfo{ID: "tc1", Title: "运行命令"}, Options: tc.options}
-			got := make(chan acp.PermissionDecision, 1)
+			req := protocol.PermissionRequest{ToolCall: protocol.ToolCallInfo{ID: "tc1", Title: "运行命令"}, Options: tc.options}
+			got := make(chan protocol.PermissionDecision, 1)
 			go func() { got <- m.RegisterAndWait(context.Background(), "s1", req, nil) }()
 			waitRegistered(t, m, "s1")
 			callID := pendingCallID(t, m, "s1")
@@ -175,7 +175,7 @@ func TestResolveDecisionReportsEffectiveOutcome(t *testing.T) {
 	}
 	// 未知 call_id：found=false + 零值回执（不猜测）。
 	m := NewPermissionManager(time.Second)
-	if found, out := m.ResolveDecision("s1", "no-such", acp.PermissionDecision{Allowed: true}); found || out.Kind != "" {
+	if found, out := m.ResolveDecision("s1", "no-such", protocol.PermissionDecision{Allowed: true}); found || out.Kind != "" {
 		t.Fatalf("未知 call_id 应为 (false, 零值)，得到 (%v,%+v)", found, out)
 	}
 }
@@ -185,17 +185,17 @@ func TestResolveDecisionReportsEffectiveOutcome(t *testing.T) {
 // （这正是「陈旧标签页/串号请求」不能把别人的权限卡消掉的保证）。
 func TestResolveDecisionRejectsCrossSession(t *testing.T) {
 	m := NewPermissionManager(5 * time.Second)
-	req := acp.PermissionRequest{
-		ToolCall: acp.ToolCallInfo{ID: "tc-scope", Title: "写文件", Kind: "write"},
-		Options:  []acp.PermissionOption{{OptionID: "allow_once", Name: "允许", Kind: permKindAllowOnce}},
+	req := protocol.PermissionRequest{
+		ToolCall: protocol.ToolCallInfo{ID: "tc-scope", Title: "写文件", Kind: "write"},
+		Options:  []protocol.PermissionOption{{OptionID: "allow_once", Name: "允许", Kind: permKindAllowOnce}},
 	}
-	exited := make(chan acp.PermissionDecision, 1)
+	exited := make(chan protocol.PermissionDecision, 1)
 	go func() { exited <- m.RegisterAndWait(context.Background(), "owner", req, nil) }()
 	waitRegistered(t, m, "owner")
 	callID := pendingCallID(t, m, "owner")
 
 	// 跨会话决策：拒绝且挂起项原样保留。
-	found, out := m.ResolveDecision("intruder", callID, acp.PermissionDecision{Allowed: true, OptionID: "allow_once"})
+	found, out := m.ResolveDecision("intruder", callID, protocol.PermissionDecision{Allowed: true, OptionID: "allow_once"})
 	if found || out.Kind != "" {
 		t.Fatalf("跨会话决策应被拒（false+零值），得到 (%v,%+v)", found, out)
 	}
@@ -209,8 +209,8 @@ func TestResolveDecisionRejectsCrossSession(t *testing.T) {
 	}
 
 	// 归属会话决策：正常命中并唤醒消费者。
-	found, out = m.ResolveDecision("owner", callID, acp.PermissionDecision{Allowed: true, OptionID: "allow_once"})
-	if !found || out.Kind != acp.OutcomeSelected || out.OptionID != "allow_once" {
+	found, out = m.ResolveDecision("owner", callID, protocol.PermissionDecision{Allowed: true, OptionID: "allow_once"})
+	if !found || out.Kind != protocol.OutcomeSelected || out.OptionID != "allow_once" {
 		t.Fatalf("归属会话决策应命中 (selected,allow_once)，得到 (%v,%+v)", found, out)
 	}
 	d := <-exited

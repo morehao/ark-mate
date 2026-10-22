@@ -2,10 +2,11 @@ package runtimeconn
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -19,7 +20,7 @@ import (
 //	② 一个凭据检查（默认模型所在档案缺失 → 显式 credential_missing）。
 //
 // 拨号用「脱离调用方 ctx」的上下文：子进程以 exec.CommandContext 启动，若绑定请求 ctx，
-// 请求返回即被杀（暖启动后立刻断连）。WithoutCancel 后 `runtime.Connect` 自带的默认握手限时
+// 请求返回即被杀（暖启动后立刻断连）。WithoutCancel 后本包 `connect` 自带的默认握手限时
 // 仍保证拨号有界；连接生命周期归执行面（watch/Close），与任一请求无关。
 
 // DialOptions 一次拨号所需的编排侧事实。
@@ -30,14 +31,33 @@ type DialOptions struct {
 	NativeMode string
 	// CheckCredentials 凭据面校验（nil = 跳过；离线/测试路径）。
 	CheckCredentials func(ctx context.Context) error
-	// ClientOptions ACP 的三个回调（OnEvent / RequestPermission / CreateElicitation /
-	// CompleteElicitation）。
-	ClientOptions acp.ClientOptions
+	// Hooks 连接期的四个回调（事件 / 权限 / 提问 / 提问收尾）。
+	// 类型是**平台值**（`core/protocol`）：编排层只认事件与裁决的形状，不认识协议绑定；
+	// 到 `acp.ClientOptions` 的映射在本包内完成（见 toClientOptions）。
+	Hooks Hooks
 }
 
 // Dial 取（或拨）一条 runtime 连接：活着复用，断开则作废重拨；并挂断连监听。
 //
 // fingerprint 空值走的是代际键的原样返回分支，所以缺省路径与"代际机制之前"完全等价。
+// Hooks 连接期回调（平台值；由编排层提供，协议侧由本包适配）。
+type Hooks struct {
+	OnEvent             func(protocol.Event)
+	RequestPermission   func(ctx context.Context, req protocol.PermissionRequest) protocol.PermissionDecision
+	CreateElicitation   func(ctx context.Context, req protocol.ElicitationRequest) protocol.ElicitationOutcome
+	CompleteElicitation func(ctx context.Context, elicitationID string)
+}
+
+// toClientOptions 把平台回调映射成协议绑定的连接选项（唯一的翻译点）。
+func (h Hooks) toClientOptions() acp.ClientOptions {
+	return acp.ClientOptions{
+		OnEvent:             h.OnEvent,
+		RequestPermission:   h.RequestPermission,
+		CreateElicitation:   h.CreateElicitation,
+		CompleteElicitation: h.CompleteElicitation,
+	}
+}
+
 func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (*Conn, error) {
 	// 凭据面先校验（P2）：**默认模型所在的那条档案**缺失/无 key 属配置错误 → 显式
 	// credential_missing（文案含出路），不静默以「无密钥」姿态起进程。放 Dial 内可一处
@@ -73,8 +93,8 @@ func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (*
 	}
 
 	args := resolveArgs(spec.Launch.Args, "")
-	// spawn + 握手由 runtime.Connect 承载（可执行投影的拨号底座）。
-	client, err := runtime.Connect(context.WithoutCancel(ctx), spec, args, keys.Env, opt.ClientOptions)
+	// spawn + 握手由本包 `connect` 承载（可执行投影的拨号底座）。
+	client, err := connect(context.WithoutCancel(ctx), spec, args, keys.Env, opt.Hooks.toClientOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -82,16 +102,15 @@ func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (*
 	// 底座调研/诊断依赖（sessionCapabilities resume/list/fork/close、loadSession 声明）。
 	// INFO 级：每 runtime 连接仅一次，serve 默认级别可见。
 	caps := client.Capabilities()
-	sc := caps.Raw.SessionCapabilities
 	glog.Infow(ctx, "runtime 握手能力",
 		"runtime", spec.ID,
 		"sessions_persistent", caps.SessionsPersistent,
 		"multi_session_concurrent", caps.MultiSessionConcurrent,
-		"load_session", caps.Raw.LoadSession,
-		"resume", sc.Resume != nil,
-		"list", sc.List != nil,
-		"fork", sc.Fork != nil,
-		"close", sc.Close != nil)
+		"load_session", caps.LoadSession,
+		"resume", caps.SessionResume,
+		"list", caps.SessionList,
+		"fork", caps.SessionFork,
+		"close", caps.SessionClose)
 
 	rc := &Conn{Client: client, Spec: spec, Key: keys.Key, BaseKey: keys.BaseKey,
 		ConfigDigest: keys.ConfigDigest, Started: time.Now()}

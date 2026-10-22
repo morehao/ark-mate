@@ -2,12 +2,13 @@ package session
 
 import (
 	"context"
+
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— 首轮身份注入（P2 的确定性判据） ———
@@ -37,8 +38,8 @@ func (c *captureACP) Prompt(_ context.Context, text string) (string, error) {
 	return "end_turn", nil
 }
 
-func (c *captureACP) Cancel(context.Context) error      { return nil }
-func (c *captureACP) ConfigOptions() []acp.ConfigOption { return nil }
+func (c *captureACP) Cancel(context.Context) error           { return nil }
+func (c *captureACP) ConfigOptions() []protocol.ConfigOption { return nil }
 
 func (c *captureACP) PromptAt(i int) string {
 	c.mu.Lock()

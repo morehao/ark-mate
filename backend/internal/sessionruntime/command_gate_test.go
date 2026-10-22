@@ -6,9 +6,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 func gateRules(t *testing.T) []interaction.PrefixRule {
@@ -23,8 +23,8 @@ func gateRules(t *testing.T) []interaction.PrefixRule {
 	return rules
 }
 
-func gateOptions() []acp.PermissionOption {
-	return []acp.PermissionOption{
+func gateOptions() []protocol.PermissionOption {
+	return []protocol.PermissionOption{
 		{OptionID: "allow-once", Kind: "allow_once"},
 		{OptionID: "allow-always", Kind: "allow_always"},
 		{OptionID: "reject-once", Kind: "reject_once"},
@@ -37,31 +37,31 @@ func TestCommandGateDecision(t *testing.T) {
 	o := &Orchestrator{commandPolicy: gateRules(t)}
 	opts := gateOptions()
 
-	d, rule, decided := o.commandGateDecision(acp.ToolCallInfo{
+	d, rule, decided := o.commandGateDecision(protocol.ToolCallInfo{
 		ID: "c1", Input: map[string]any{"command": "rm -rf /tmp/x"},
 	}, opts)
 	if !decided || !d.Rejected || d.OptionID != "reject-once" || rule != "deny rm" {
 		t.Fatalf("forbidden: got (%+v, %q, %v)，want rejected + reject-once", d, rule, decided)
 	}
 
-	d, rule, decided = o.commandGateDecision(acp.ToolCallInfo{
+	d, rule, decided = o.commandGateDecision(protocol.ToolCallInfo{
 		ID: "c2", Input: map[string]any{"command": "git status"},
 	}, opts)
 	if !decided || !d.Allowed || d.OptionID != "allow-once" || rule != "allow git status" {
 		t.Fatalf("allow: got (%+v, %q, %v)，want allowed + allow-once", d, rule, decided)
 	}
 
-	if _, _, decided := o.commandGateDecision(acp.ToolCallInfo{
+	if _, _, decided := o.commandGateDecision(protocol.ToolCallInfo{
 		ID: "c3", Input: map[string]any{"command": "ls -la"},
 	}, opts); decided {
 		t.Fatal("没命中规则必须交回既有流程（不能自己放行）")
 	}
-	if _, _, decided := o.commandGateDecision(acp.ToolCallInfo{
+	if _, _, decided := o.commandGateDecision(protocol.ToolCallInfo{
 		ID: "c4", Input: map[string]any{"command": "git status; rm -rf /"},
 	}, opts); decided {
 		t.Fatal("复杂命令必须交回人工审批（不能按空白切分猜）")
 	}
-	if _, _, decided := o.commandGateDecision(acp.ToolCallInfo{
+	if _, _, decided := o.commandGateDecision(protocol.ToolCallInfo{
 		ID: "c5", Input: map[string]any{"path": "/x"},
 	}, opts); decided {
 		t.Fatal("非 shell 命令不归门禁管")
@@ -69,7 +69,7 @@ func TestCommandGateDecision(t *testing.T) {
 
 	// 没配置规则 = 不参与（行为与改前逐字相同）。
 	plain := &Orchestrator{tools: session.NewToolCallMemory()}
-	if _, _, decided := plain.commandGateDecision(acp.ToolCallInfo{
+	if _, _, decided := plain.commandGateDecision(protocol.ToolCallInfo{
 		ID: "c6", Input: map[string]any{"command": "rm -rf /"},
 	}, opts); decided {
 		t.Fatal("未配置规则时门禁不得参与")
@@ -85,15 +85,15 @@ func TestCommandGatePrecedesPermissionMemory(t *testing.T) {
 		handles:       session.NewHandles(),
 		tools:         session.NewToolCallMemory(),
 	}
-	tool := acp.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute",
+	tool := protocol.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute",
 		Input: map[string]any{"command": "rm -rf /tmp/x"}}
 	o.tools.Remember(tool)
 	// 记忆里先放一条"这类工具始终允许"。
 	o.perm.Remember("ses_1", tool, "allow", "allow-always")
 
-	req := acp.PermissionRequest{
+	req := protocol.PermissionRequest{
 		SessionID: "ses_1",
-		ToolCall:  acp.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute"}, // 请求只带 id/标题
+		ToolCall:  protocol.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute"}, // 请求只带 id/标题
 		Options:   gateOptions(),
 	}
 	d := o.requestPermission(context.Background(), req)
@@ -105,10 +105,10 @@ func TestCommandGatePrecedesPermissionMemory(t *testing.T) {
 // TestToolCallMemoryMergesAndForgets 缓存的三条语义：合并非空字段 / 终态删除 / 有界。
 func TestToolCallMemoryMergesAndForgets(t *testing.T) {
 	o := &Orchestrator{tools: session.NewToolCallMemory()}
-	o.tools.Remember(acp.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute",
+	o.tools.Remember(protocol.ToolCallInfo{ID: "c1", Title: "bash", Kind: "execute",
 		Input: map[string]any{"command": "ls"}})
 	// 后续 update 只带 status/正文：不得把 Input 抹掉。
-	o.tools.Remember(acp.ToolCallInfo{ID: "c1", Status: acp.ToolStatusInProgress, ContentText: "out"})
+	o.tools.Remember(protocol.ToolCallInfo{ID: "c1", Status: protocol.ToolStatusInProgress, ContentText: "out"})
 
 	got, ok := o.tools.Get("c1")
 	if !ok || got.Title != "bash" || got.ContentText != "out" {
@@ -124,7 +124,7 @@ func TestToolCallMemoryMergesAndForgets(t *testing.T) {
 	}
 
 	for i := 0; i < session.MaxRememberedToolCalls+20; i++ {
-		o.tools.Remember(acp.ToolCallInfo{ID: "bulk_" + strconv.Itoa(i)})
+		o.tools.Remember(protocol.ToolCallInfo{ID: "bulk_" + strconv.Itoa(i)})
 	}
 	if o.tools.Len() > session.MaxRememberedToolCalls {
 		t.Fatalf("缓存无界: %d > %d", o.tools.Len(), session.MaxRememberedToolCalls)
@@ -148,7 +148,7 @@ func TestToolCallMemoryConcurrent(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < 200; i++ {
 				id := "c" + strconv.Itoa(w) + "_" + strconv.Itoa(i%20)
-				o.tools.Remember(acp.ToolCallInfo{ID: id, Title: "bash",
+				o.tools.Remember(protocol.ToolCallInfo{ID: id, Title: "bash",
 					Input: map[string]any{"command": "git status"}})
 				_, _ = o.tools.Get(id)
 				if i%7 == 0 {

@@ -9,7 +9,7 @@ type SessionResp struct {
 	ID string `json:"id"`
 	// RuntimeSessionID 原生底座会话 id（`rt_<底座原文>`；'' = 尚未起底座会话）。
 	//
-	// v15 起它在**平台侧**一律带 `rt_` 壳（`pkg/object/objid`）：这既是"平台 id 与底座 id
+	// v15 起它在**平台侧**一律带 `rt_` 壳（`internal/core/object/objid`）：这既是"平台 id 与底座 id
 	// 形状可分"这条不变式的载体（`id` 匹配 `^ses_…$`、本字段匹配 `^rt_.+$`，两者永不可能
 	// 相等），也是排障时一眼看出"这是哪个底座用什么形状发的"的那一层信息。
 	//
@@ -266,7 +266,7 @@ type ElicitationResp struct {
 	// 词），改名后收敛成一个键——两个词各写一遍只会在读的一侧留下一个永远取不到的字段。
 	SessionID string `json:"session_id"`
 	// ScopeSource 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 run 推断）
-	// | ambiguous（两者都无，不归属；见 internal/infra/acp/scope.go 与 manager/diagnostics.go 的留痕）。
+	// | ambiguous（两者都无，不归属；见 internal/infra/protocol/acp/scope.go 与 manager/diagnostics.go 的留痕）。
 	ScopeSource string         `json:"scope_source"`
 	Mode        string         `json:"mode"`
 	Message     string         `json:"message"`

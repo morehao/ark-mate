@@ -6,9 +6,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/core/failure"
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -23,7 +24,7 @@ import (
 //	Attach   —— 把句柄装进活跃集合（替换同 id 的旧句柄）
 //	ApplyModel —— 会话级模型的应用（建会话与「会话内改模型」共用）
 //
-// 它们只依赖三类事实：会话域自己的记录/句柄表、`pkg/runtime` 的注册表与投影、以及装配侧交来的
+// 它们只依赖三类事实：会话域自己的记录/句柄表、`internal/runtime` 的注册表与投影、以及装配侧交来的
 // 窄端口（选定的底座 / 拨号 / 模型解析 / MCP 注入 / 目录缓存 / 诊断 / 运行期状态）。
 // **连接池与权限/提问的裁决不在这里**——前者属执行面，后者属交互面。
 
@@ -92,7 +93,7 @@ type LifecycleDeps struct {
 	// SelectedSpec 构建期选定的那个底座（`runtime_not_found` 的唯一铸点在执行面）。
 	SelectedSpec func() (runtime.Spec, error)
 	// Acquire 取（或拨）一条连接，返回它的 ACP 客户端。
-	Acquire func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acp.Client, error)
+	Acquire func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (protocol.Conn, error)
 	// ResolveModel 平台模型行 id → (行 id, 运行时值)。
 	ResolveModel func(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)
 	// ProviderKeyReady 该供应商当前是否有可用密钥（false + 原因）。nil = 不做这项前置。
@@ -100,7 +101,7 @@ type LifecycleDeps struct {
 	// 只对声明了 ModelCatalogNeedsCredential 的 runtime 生效（见 applyModel）。
 	ProviderKeyReady func(ctx context.Context, providerID string) (bool, string)
 	// McpServers 该会话该下发的 MCP 条目（注册表 + 传输能力 + 选定过滤后的结果）。
-	McpServers func(runtimeID string, sel *CapabilitySelection) []acp.McpServer
+	McpServers func(runtimeID string, sel *CapabilitySelection) []protocol.McpServer
 	// Catalog 模型目录缓存。
 	Catalog ConfigCatalog
 	// Diagnostics 运行期诊断（起不来 / 恢复失败 / 模型被拒的留痕）。
@@ -126,10 +127,10 @@ type Lifecycle struct {
 	registry *runtime.Registry
 
 	selectedSpec     func() (runtime.Spec, error)
-	acquire          func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acp.Client, error)
+	acquire          func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (protocol.Conn, error)
 	resolveModel     func(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)
 	providerKeyReady func(ctx context.Context, providerID string) (bool, string)
-	mcpServers       func(runtimeID string, sel *CapabilitySelection) []acp.McpServer
+	mcpServers       func(runtimeID string, sel *CapabilitySelection) []protocol.McpServer
 	catalog          ConfigCatalog
 	diagnostics      DiagnosticsSink
 	setState         func(state string)
@@ -199,7 +200,7 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 		// A3：底座起不来 / 握手失败时记诊断（含该阶段的 stderr 尾巴），供
 		// `GET /runtime/diagnostics` 外露。今天唯一的启动路径就是"建会话把它拉起来"，所以落在这里。
 		if l.diagnostics != nil {
-			if ae := acp.Classify(err); ae != nil {
+			if ae := classifyFailure(err); ae != nil {
 				l.diagnostics.RecordRuntimeError(opt.SessionID, ae, ae.StderrTail)
 			}
 		}
@@ -219,7 +220,7 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 	// P2 MCP 注入：平台注册表 MCP 子集按「会话选定 > 全量」+ runtime 传输能力过滤后
 	// 随 session/new 下发。**必须传 opt.Selection**：指纹就是按它算出来的，注入若用别的口径，
 	// 会话拿到的东西会与代际台账不符。
-	sess, err := client.NewSession(ctx, acp.SessionOptions{
+	sess, err := client.NewSession(ctx, protocol.SessionOptions{
 		Cwd:        cwd,
 		McpServers: l.mcpServers(spec.ID, opt.Selection),
 	})
@@ -295,7 +296,7 @@ func (l *Lifecycle) Ensure(ctx context.Context, sessionID string) (*ActiveSessio
 	}
 	rec := l.plane.Rec(sessionID)
 	if rec == nil {
-		return nil, acp.NewError(acp.ClassRequest, "session_not_found",
+		return nil, failure.NewError(failure.ClassRequest, "session_not_found",
 			fmt.Sprintf("未知会话 %q", sessionID), nil)
 	}
 	// runtime 选择：**构建期选定的那一个**。
@@ -358,7 +359,7 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 	}
 	// **恢复路径必须用会话钉住的选定**（不是全量）：它从 `sessions.capability_json` 读回。
 	// 漏了这一步的后果是会话重启后注入集悄悄换一套，而且没有任何报错。
-	opts := acp.SessionOptions{Cwd: cwd, McpServers: l.mcpServers(spec.ID, sel)}
+	opts := protocol.SessionOptions{Cwd: cwd, McpServers: l.mcpServers(spec.ID, sel)}
 	caps := client.Capabilities()
 	sameRuntime := spec.ID == rec.RuntimeID && rec.RuntimeID != ""
 	// `nativeID` 是**平台侧的值**（`rt_` 壳）；给底座的必须是**原文**。
@@ -376,14 +377,14 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 		rawNativeID = raw
 	}
 	resumeOK := sameRuntime && rawNativeID != "" &&
-		(caps.Raw.LoadSession || caps.Raw.SessionCapabilities.Resume != nil)
+		(caps.LoadSession || caps.SessionResume)
 
-	var sess *acp.Session
+	var sess protocol.Session
 	var memo string
 	reason := "restart"
 	switch {
 	case resumeOK:
-		if caps.Raw.LoadSession {
+		if caps.LoadSession {
 			sess, err = client.LoadSession(ctx, rawNativeID, opts)
 		} else {
 			sess, err = client.ResumeSession(ctx, rawNativeID, opts)
@@ -396,7 +397,7 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 	}
 	if !resumeOK {
 		if l.handoffMaxChars <= 0 {
-			return nil, "", acp.NewError(acp.ClassRequest, "resume_unavailable",
+			return nil, "", failure.NewError(failure.ClassRequest, "resume_unavailable",
 				fmt.Sprintf("会话 %q 无法原生恢复（runtime %q 无 load/resume 或 provider 会话无效），且 memo 兜底关闭",
 					rec.ID, spec.ID), nil)
 		}
@@ -448,7 +449,7 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 			glog.Warnw(ctx, "恢复时按平台模型行重算运行时值失败（跳过重放，继续用运行时当前值）",
 				"session", rec.ID, "runtime", spec.ID, "model", rec.ModelID, "err", rerr)
 		} else if _, err := as.Projection().ApplyModel(ctx, recCfg); err != nil {
-			if ae, ok := acp.As(err); !ok || !strings.HasPrefix(ae.Code, "unsupported_") {
+			if ae, ok := failure.As(err); !ok || !strings.HasPrefix(ae.Code, "unsupported_") {
 				l.catalog.MarkRejected(spec.ID, recCfg.Model, l.applyReason(err))
 			}
 			glog.Warnw(ctx, "恢复后重放会话模型失败（忽略，继续用运行时当前值）",
@@ -470,7 +471,7 @@ func (l *Lifecycle) Attach(as *ActiveSession, reason string) {
 	if old != nil && old != as {
 		// 旧句柄作废：拿到它旧指针的路径会走重建（而不是用一个已被顶替的会话）
 		old.MarkDead(false)
-		if c, ok := old.Native().(*acp.Session); ok && c != nil {
+		if c, ok := old.Native().(protocol.Session); ok && c != nil {
 			// 关会话是收尾动作：用**脱离请求**的 ctx（本轮 ctx 可能已取消）并带上限等待，
 			// 免得底座吞掉 session/close 时把这一轮拖住。0.2.1 起 close 要 drain 后代并
 			// flush，窗口用 AgentSettleTimeout（3s 的「发通知」上限不够）。
@@ -531,14 +532,14 @@ func (l *Lifecycle) applyModel(ctx context.Context, as *ActiveSession, spec runt
 	// 「invalidParams」——用户看不出是缺密钥。平台侧先判一次，给出可执行的出路。
 	if spec.ModelCatalogNeedsCredential && model.Provider != "" && l.providerKeyReady != nil {
 		if ok, reason := l.providerKeyReady(ctx, model.Provider); !ok {
-			return acp.NewError(acp.ClassRequest, "model_credential_missing",
+			return failure.NewError(failure.ClassRequest, "model_credential_missing",
 				"[model_credential_missing] 所选模型挂靠的供应商 "+model.Provider+" 没有可用密钥（"+reason+
 					"）：该底座不会把它的模型列进会话配置；先到「设置 · 模型」补一条密钥（或把环境变量设好）", nil)
 		}
 	}
 	// 不预判、但留痕：取值不在会话当前广告列表里（缓存滞后/跨会话选择）时记一条，仍然下发由
 	// 运行时裁决——协议保证运行时只接受已广告的值，平台侧预判会因快照滞后造成假阴性。
-	if !acp.HasConfigValue(as.Projection().ConfigOptions(), acp.CategoryModel, model.Model) {
+	if !protocol.HasConfigValue(as.Projection().ConfigOptions(), protocol.CategoryModel, model.Model) {
 		glog.Debugw(ctx, "模型取值不在当前广告列表中，交由运行时裁决",
 			"session", as.ID, "model", model.Model)
 	}
@@ -550,9 +551,9 @@ func (l *Lifecycle) applyModel(ctx context.Context, as *ActiveSession, spec runt
 		}
 		return nil
 	}
-	ae, _ := acp.As(err)
+	ae, _ := failure.As(err)
 	if ae != nil && ae.Code == "unsupported_model" {
-		return acp.NewError(acp.ClassRequest, "model_not_supported",
+		return failure.NewError(failure.ClassRequest, "model_not_supported",
 			"[model_not_supported] runtime "+spec.ID+" 未提供模型配置项，无法应用所选模型", nil)
 	}
 	// 运行时明确拒绝：记录该取值不可用（目录里标灰）后原样上抛。
@@ -573,7 +574,7 @@ func (l *Lifecycle) NoteGenerationFallback(sessionID, runtimeID, from, to string
 	if l.diagnostics == nil {
 		return
 	}
-	ae := acp.NewError(acp.ClassConnection, "generation_switch_failed",
+	ae := failure.NewError(failure.ClassConnection, "generation_switch_failed",
 		"迁移到新能力集失败（已回退到旧代际继续会话）："+cause.Error(), nil)
 	l.diagnostics.RecordRuntimeError(sessionID, ae, nil)
 }

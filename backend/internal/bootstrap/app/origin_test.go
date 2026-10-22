@@ -141,7 +141,7 @@ func TestInitOriginPolicyExtraAllowTable(t *testing.T) {
 	if status, _ := doRequest(t, a, "GET", "/v1/mate/health", addr, "http://localhost:5173"); status != http.StatusOK {
 		t.Fatalf("额外表命中的 Origin 应 200，got %d", status)
 	}
-	// 大小写 + 尾斜杠变体同样命中（与 pkg/config 的归一同一规则）。
+	// 大小写 + 尾斜杠变体同样命中（与 internal/config 的归一同一规则）。
 	if status, _ := doRequest(t, a, "GET", "/v1/mate/health", addr, "HTTP://LocalHost:5173/"); status != http.StatusOK {
 		t.Fatalf("额外表归一后的变体应 200，got %d", status)
 	}

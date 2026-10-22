@@ -91,7 +91,7 @@ func normalizeAllowedOrigins(items []string) ([]string, error) {
 // canonicalOrigin 把 origin 文本归一成**比较键**：trim + 小写 + 去尾部 `/`。
 //
 // internal/delivery/middleware 的 OriginPolicy 对请求头做同一步归一再查表（配置值由本函数归一后交出去），
-// 两侧的一致性由 pkg/config 与 internal/delivery/middleware 各自的用例共同钉住（前者断言配置值归一结果，
+// 两侧的一致性由 internal/config 与 internal/delivery/middleware 各自的用例共同钉住（前者断言配置值归一结果，
 // 后者断言大小写/尾斜杠变体都能命中该值）。
 func canonicalOrigin(s string) string {
 	return strings.ToLower(strings.TrimRight(strings.TrimSpace(s), "/"))

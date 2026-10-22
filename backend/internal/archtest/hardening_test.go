@@ -283,8 +283,21 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 			t.Errorf("%s 缺少 %q（宿主判定/配方被改动了？）", hostPath, want)
 		}
 	}
-	if strings.Contains(host, "exec.Command(") == false && strings.Contains(host, "exec.CommandContext(") == false {
-		t.Errorf("%s 最终必须真的 spawn 宿主命令（否则原生那半是空的）", hostPath)
+	// e. 执行与判定**分开**（P4，2026-10-21）：判定文件是纯函数（不 spawn），真正 spawn 的
+	// 必须在一个 `infra/host` 包里存在。两半都要查——只查一半的话，"判定留着、执行被删"
+	// 或"执行留着、判定被绕开"都不会让别的测试变红。
+	if strings.Contains(host, "exec.Command(") || strings.Contains(host, "exec.CommandContext(") {
+		t.Errorf("%s 不得自己 spawn 进程：域只做判定，执行归 `internal/infra/host`"+
+			"（域认识 os/exec 会让单测被迫跑真实面板）。", hostPath)
+	}
+	hostRunPath := uniqueSourceFile(t, filepath.Join(backendRoot(t), "internal", "infra", "host"), nil,
+		declREFor("Run").String(), "宿主进程执行 `host.Runner.Run`")
+	hostRun, err := os.ReadFile(hostRunPath)
+	if err != nil {
+		t.Fatalf("读 %s 失败: %v（宿主执行被删/改名了？守卫失效）", hostRunPath, err)
+	}
+	if !strings.Contains(stripGoComments(string(hostRun)), "exec.CommandContext(") {
+		t.Errorf("%s 里没有 spawn：原生目录选择器的执行那一半是空的（判定会说 native，实际抬不起面板）。", hostRunPath)
 	}
 
 	// ——— 读模型不进用例层：宿主选目录**判定**这一格（P4a 正文第十五刀）———

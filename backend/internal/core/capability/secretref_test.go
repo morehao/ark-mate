@@ -161,7 +161,8 @@ func TestRegisterMcpServerSecretRules(t *testing.T) {
 //
 // 为什么这条必须写旧前缀：档案文件（`providers.json`、能力目录里的 `mcp/*.json`）不在库里、
 // v20 迁移改不到它们，所以导入时必须认出旧串并就地翻成 `store:`——不写旧串就测不到"认得出来"。
-// 反过来，**运行时**读到旧串必须判失败（它是坏数据，翻译会掩盖它）：那半在 `internal/manager`。
+// 反过来，**运行时**读到旧串必须判失败（它是坏数据，翻译会掩盖它）：那半在本包的词法闸门
+// （`ValidateSecretRef` 只认 `store:` / `env:` 两种前缀，`vault:` 直接判非法）。
 func TestTranslateLegacySecretRef(t *testing.T) {
 	// 认得出 + 翻得对（整串剥前缀后拼 `store:`）。
 	for _, tc := range []struct{ in, want string }{

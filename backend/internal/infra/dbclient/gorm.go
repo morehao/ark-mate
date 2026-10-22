@@ -40,7 +40,7 @@ import (
 	//     回去而构建面仍是 0，就会原样复现那个静默故障——所以依赖与构建面两侧由
 	//     internal/archtest 的 TestSqliteDriverStaysPureGo 一起钉着。
 	//   - 相比原先自注册的纯 Go dialector，连接级行为仍由 golib 决定，且 v1.32.22 换了
-	//     一批事实（下面每条都由 pkg/dbclient/dbclient_test.go 显式记录）：
+	//     一批事实（下面每条都由 internal/infra/dbclient/dbclient_test.go 显式记录）：
 	//     注入 `busy_timeout(5000)`（排在所有 PRAGMA 之前，调用方显式传入时不覆盖）、
 	//     文件库注入 `_txlock=immediate`（BEGIN IMMEDIATE，避开锁升级绕过 busy_timeout
 	//     直接报 database is locked）；**不注入** journal_mode/synchronous（仍是

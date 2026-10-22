@@ -280,7 +280,7 @@ func TestDocsHaveNoStaleClaims(t *testing.T) {
 		"docs/unimplemented.md": {
 			{"每部署一个模式", "O14 的旧事实：v29 起模式进 ConnKey，不同模式各一个暖进程"},
 			{"workspace_path_immutable", "该错误码已随 9e35fe8 删除（改路径已实现）"},
-			{"无连接池", "internal/infra/mcp/pool.go 已是连接池"},
+			{"无连接池", "internal/infra/protocol/mcp/pool.go 已是连接池"},
 			{"前端策略编辑", "该屏不存在（当前无策略路由/DTO/编辑面）"},
 		},
 		"docs/roadmap.md": {

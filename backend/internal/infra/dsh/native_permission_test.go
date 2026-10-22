@@ -9,7 +9,7 @@ import (
 // TestNativePermissionEnv B5：dsh 原生权限模式推导（auto/显式/未知）。
 //
 // `off` 不在这里出现：它是**平台级开关**，由内核在调端口之前短路
-// （见 `internal/manager/native_permission.go`）。
+// （见 `internal/domain/interaction/native_permission.go`）。
 func TestNativePermissionEnv(t *testing.T) {
 	cases := []struct {
 		name  string

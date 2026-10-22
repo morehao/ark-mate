@@ -13,7 +13,8 @@ import (
 // "带了几层都没被半路丢掉"），而 `rest_test.go` 是路由契约的主用例集——让主用例集保持
 // 零命中（`TestNoAgentVocabulary`），把"指出历史"的用例收口在这一个文件里，两件事互不牵制。
 //
-// 纪律与 `internal/domain/session/reject_removed.go` 同源：JSON / 查询串绑定默认**丢弃未知键**，
+// 纪律与 `internal/sessionruntime/sessions.go` 的 `rejectRemovedAgentSelection` 同源：
+// JSON / 查询串绑定默认**丢弃未知键**，
 // 所以"把字段从 DTO 里删掉"不等于"用户带了这个键会被拦下"——传输层必须**原样送到领域层**，
 // 拒绝与否由领域层那唯一一处判据决定（控制器既不自作聪明地读取，也不静默丢弃）。
 
@@ -31,8 +32,8 @@ func TestCreateSessionRemovedAgentKeyReachesService(t *testing.T) {
 }
 
 // TestUsageSummaryRemovedAgentKeyRejected 用量读面：查询串里的那个键必须**原样送到域**并被**显式拒绝**
-// （拒绝对不对是域的事，见 `domain/session/reject_removed.go` 与
-// `internal/manager/usage_removed_dimension_test.go` 的同源判据）。
+// （拒绝对不对是会话编排面的事，见 `sessionruntime/sessions.go` 与
+// `internal/sessionruntime/usage_removed_dimension_test.go` 的同源判据）。
 //
 // P4a 正文第四十三刀之后这一面由**域平面**直接供给（控制器只做搬运），所以判据从"替身收到了那个键"
 // 换成"域真的拒绝了它"——后者更强：静默丢弃这个键会让用户以为「按底座筛选生效了」，而这一格

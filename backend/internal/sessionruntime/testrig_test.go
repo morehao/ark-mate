@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
@@ -84,7 +84,7 @@ func newTestCredentials(t *testing.T, home string) *credentials.Layered {
 	if err := os.MkdirAll(cwd, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	l, _, err := credential.OpenCredentialSource(home, cwd)
+	l, _, err := mechanism.OpenCredentialSource(home, cwd)
 	if err != nil {
 		t.Fatalf("装配凭据面: %v", err)
 	}

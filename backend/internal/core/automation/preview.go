@@ -1,9 +1,8 @@
 package automation
 
 import (
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"time"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // PreviewCountDefault / PreviewCountMax `POST /automations/preview` 的次数约束。
@@ -25,7 +24,7 @@ func Preview(s Schedule, from time.Time, count int) ([]Occurrence, error) {
 		count = PreviewCountDefault
 	}
 	if count > PreviewCountMax {
-		return nil, acp.NewError(acp.ClassRequest, "invalid_param",
+		return nil, failure.NewError(failure.ClassRequest, "invalid_param",
 			"count 上限 20（预览是给人看的，不是导出工具）", nil)
 	}
 	if from.IsZero() {

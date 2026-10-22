@@ -13,9 +13,9 @@ import (
 	"github.com/morehao/golib/gerror"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
 )
 
@@ -39,26 +39,26 @@ func TestResolveElicitationScope(t *testing.T) {
 		RuntimeSessionID: objid.RuntimeShell + "wire-sess",
 	})
 
-	if sid, src, note := orch.resolveElicitationScope(nil, acp.ElicitationRequest{
-		SessionID: "wire-sess", ScopeSource: acp.ScopeWire,
-	}); sid != "ses_platform" || src != acp.ScopeWire || note != "" {
+	if sid, src, note := orch.resolveElicitationScope(nil, protocol.ElicitationRequest{
+		SessionID: "wire-sess", ScopeSource: protocol.ScopeWire,
+	}); sid != "ses_platform" || src != protocol.ScopeWire || note != "" {
 		t.Fatalf("wire 归属应按 runtime_session_id 反查成平台会话: sid=%q src=%q note=%q", sid, src, note)
 	}
 	// **查不到**的 wire id（底座发了个我们不认识的会话）→ ambiguous + 留痕，**不猜**。
-	if sid, src, note := orch.resolveElicitationScope(nil, acp.ElicitationRequest{
-		SessionID: "wire-unknown", ScopeSource: acp.ScopeWire,
-	}); sid != "" || src != acp.ScopeAmbiguous || note == "" {
+	if sid, src, note := orch.resolveElicitationScope(nil, protocol.ElicitationRequest{
+		SessionID: "wire-unknown", ScopeSource: protocol.ScopeWire,
+	}); sid != "" || src != protocol.ScopeAmbiguous || note == "" {
 		t.Fatalf("查不到的 wire 归属应落 ambiguous 且留痕: sid=%q src=%q note=%q", sid, src, note)
 	}
 	// ScopeSource=wire 但 SessionID 为空（脏数据）→ 不认，退到推断/歧义。
-	if sid, src, _ := orch.resolveElicitationScope(nil, acp.ElicitationRequest{
-		ScopeSource: acp.ScopeWire,
-	}); sid != "" || src != acp.ScopeAmbiguous {
+	if sid, src, _ := orch.resolveElicitationScope(nil, protocol.ElicitationRequest{
+		ScopeSource: protocol.ScopeWire,
+	}); sid != "" || src != protocol.ScopeAmbiguous {
 		t.Fatalf("空 wire 归属应落 ambiguous: sid=%q src=%q", sid, src)
 	}
-	if sid, src, _ := orch.resolveElicitationScope(nil, acp.ElicitationRequest{
+	if sid, src, _ := orch.resolveElicitationScope(nil, protocol.ElicitationRequest{
 		Mode: "form", Message: "q",
-	}); sid != "" || src != acp.ScopeAmbiguous {
+	}); sid != "" || src != protocol.ScopeAmbiguous {
 		t.Fatalf("无 wire 且无在途 run 应落 ambiguous: sid=%q src=%q", sid, src)
 	}
 }
@@ -75,9 +75,9 @@ func TestServiceResolveElicitationScope(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		orch.elic.RegisterAndWait(context.Background(), "owner", acp.ElicitationRequest{
+		orch.elic.RegisterAndWait(context.Background(), "owner", protocol.ElicitationRequest{
 			SessionID: "owner", Mode: "form", Message: "q",
-			Schema: &acp.ElicitationSchema{Properties: map[string]any{}},
+			Schema: &protocol.ElicitationSchema{Properties: map[string]any{}},
 		}, func(it interaction.ElicitationItem) { published <- it })
 	}()
 	it := <-published

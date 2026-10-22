@@ -3,9 +3,9 @@ package runtimeconn
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -63,7 +63,7 @@ func (pl *Pool) AdmitGeneration(baseKey string) error {
 	if len(keys) < limit {
 		return nil
 	}
-	return acp.NewError(acp.ClassLimit, "generation_limit_reached",
+	return failure.NewError(failure.ClassLimit, "generation_limit_reached",
 		fmt.Sprintf("该配置下的能力代际已达上限 %d（%s）：请复用现有能力集（用同一套技能/MCP 组合）、或等空闲代际被回收后重试；确需更多并发能力集时调大 MATE_GENERATION_LIMIT",
 			limit, strings.Join(ShortGenerationKeys(keys), ", ")), nil)
 }

@@ -2,9 +2,9 @@ package sessionruntime
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -50,6 +50,6 @@ func (o *Orchestrator) attachSession(as *session.ActiveSession, reason string) {
 }
 
 // liveConfigOptions 返回任一活跃会话的配置项（模型目录的**首选来源**：运行时此刻的真实状态）。
-func (o *Orchestrator) liveConfigOptions() ([]acp.ConfigOption, bool) {
+func (o *Orchestrator) liveConfigOptions() ([]protocol.ConfigOption, bool) {
 	return o.runner.LiveConfigOptions()
 }

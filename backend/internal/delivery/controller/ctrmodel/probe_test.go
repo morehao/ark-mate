@@ -9,7 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
 )
@@ -44,7 +44,7 @@ func (f *fakeProviderCatalog) ModelCatalog(context.Context) (*provider.CatalogVi
 //	   文案里带 id。把平面接错（或忘了接）在这里就会现形，而"编译通过 + 档案面照常工作"看不见它。
 func TestNewProviderCtrKeepsBothUseCases(t *testing.T) {
 	reg := dsh.Registry()
-	plane := provider.NewPlane(reg, registry.NewProviderSecrets(credential.New(reg)))
+	plane := provider.NewPlane(reg, registry.NewProviderSecrets(mechanism.NewCredentialStore(reg)))
 	plane.SetProviderDir(t.TempDir())
 	ctr := NewProviderCtr(svcmodel.NewProvider(plane), svcmodel.NewProbe(plane, &fakeProviderCatalog{}))
 

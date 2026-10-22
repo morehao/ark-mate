@@ -154,7 +154,7 @@ func TestNoAgentRuntimeSelectionSurface(t *testing.T) {
 // "调用"都要在，缺一处就是一条写路径静默忽略。
 //
 // P0：判据一律锚在**符号**上。原先它钉着四个精确文件路径（`reject_removed_keys.go` /
-// `sessions.go` / `usage.go` / `automation.go`）——它们在重构里分别归 `mechanism/definition`
+// `sessions.go` / `usage.go` / `automation.go`）——它们在重构里分别归 `mechanism`
 // 与 `domain/session`、`domain/automation`
 // （设计 §3.4），钉路径在搬家后只会"读不到文件"（假红）或静默空转。锚在符号上之后：
 // 0 处 = 判据失去对象（fail-closed），≥2 处 = 有人又抄了一份实现/调用点（旧写法只读钉死的那一个文件，看不见第二处）。

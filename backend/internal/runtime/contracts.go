@@ -50,7 +50,7 @@ const (
 // 与 `Projections` / `ModelConfig` / `Credential` / `SetupSteps` 同一处），父包只做机械投影，
 // 于是"接一个新 runtime"= 新建一个目录 + 加一个 `xxxSpec()`，而不是回来改 frameworks 文件。
 //
-// 为什么不放进 adapter 子包（`pkg/runtime/dsh`）：那会形成父子 import 环（父包要 import adapter
+// 为什么不放进 adapter 实现包（`internal/infra/dsh`）：那会形成父子 import 环（本包要 import adapter
 // 才能汇入 Spec，adapter 又 import 父包才能引用本类型）。这是本仓既有的"adapter 子包只提供纯数据与
 // 端口实现，父包汇入统一 Spec"约定的直接后果，不是省事。
 type IsolationVar struct {
@@ -121,7 +121,7 @@ type Spec struct {
 	//
 	// 与 Projections 分开的理由见 config_location.go 文件头（一个能力一个目录 vs 一个 runtime 一个文件）。
 	ModelConfig ModelConfigLocation
-	// Credential 该 runtime 的**凭据交付面**声明（纯数据，见 pkg/resource.CredentialSpec）。
+	// Credential 该 runtime 的**凭据交付面**声明（纯数据，见 internal/core/resource.CredentialSpec）。
 	//
 	// 与 ModelConfig 分开：清单与凭据是**两条通道**，生效时刻与失败半径都不同（ADR-4/ADR-14）。
 	// 零值 = 该 runtime 没声明凭据面。
@@ -134,7 +134,7 @@ type Spec struct {
 	//
 	// 它存在的唯一理由是**如实可读**：用户面与 `mate doctor` 要能区分"已在该底座上声明"与
 	// "仅平台记录"——否则用户会以为在那一侧勾了图片也生效了（ADR-12 的结论段）。
-	// **它不是门禁**：能不能收图一律走连接期事实（`pkg/acp.Capabilities.Images`，ADR-14）。
+	// **它不是门禁**：能不能收图一律走连接期事实（`internal/infra/protocol/acp.Capabilities.Images`，ADR-14）。
 	DeclaresModelInput bool
 	// ModelCatalogNeedsCredential 该 runtime 的会话模型目录是否**按凭据过滤**。
 	//

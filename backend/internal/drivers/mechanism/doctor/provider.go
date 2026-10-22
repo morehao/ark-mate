@@ -20,7 +20,7 @@ import (
 
 // ——— K2：`mate doctor` 的 provider（供应商凭据）与模型清单体检 ———
 //
-// 分工：本文件是**事实的构造函数**（只读），`internal/bootstrap/cliops/doctor.go` 只负责排版。
+// 分工：本文件是**事实的构造函数**（只读），`internal/bootstrap/cliops/command.go` 只负责排版。
 // 该包是薄打印层——SQL、凭据分层与对账算法都不该出现在那里。
 //
 // 三条纪律（与 doctor 的既有口径逐条对齐）：
@@ -458,7 +458,7 @@ type credentialsMirrorFacts struct {
 
 // readCredentialsMirror 只读读取托管镜像。
 //
-// 它**刻意不复用 `pkg/credentials.Doc`**：那个句柄的语义是"可写面"（权限不合即失败），
+// 它**刻意不复用 `internal/infra/credentials.Doc`**：那个句柄的语义是"可写面"（权限不合即失败），
 // 而医生要做的是"读得动就读、读不动如实说"——权限过宽在这里是**要报出来的事实**，
 // 不是让整段体检报错的理由。读取只解析顶层字符串映射，不解释任何值的含义。
 func readCredentialsMirror(home string) credentialsMirrorFacts {
@@ -485,7 +485,7 @@ func readCredentialsMirror(home string) credentialsMirrorFacts {
 	case fi.Mode().Perm()&0o077 == 0:
 		out.PermOK = true
 	case fi.Mode().Perm()&0o077 == 0o077:
-		// 权限过宽是**硬失败**（`pkg/credentials` 拒绝读它）：这里如实报出来，并给出出路。
+		// 权限过宽是**硬失败**（`internal/infra/credentials` 拒绝读它）：这里如实报出来，并给出出路。
 		out.PermOK = false
 		out.Note = "权限过宽（" + out.Perm + "）：平台会拒绝读它（这是硬约束——" +
 			"凭据文档是可自由复制的明文）。`chmod 600` 之后重启即可恢复"
@@ -638,7 +638,7 @@ func collectSensitiveFiles(home, providerDir string, st *store.Store, specs []go
 	// 库本体与它的迁移备份（v20 起库内含明文密钥，于是它们也是**密钥面**）。
 	//
 	// 这一条在 2026-10-14 收尾时从"刻意不列"改成"必须列"：原先的理由是"sqlite 文件的常规权限是
-	// 0644，按 0600 判会给所有正常安装报假红"——那个前提随 `pkg/dbclient` 在**打开时收口到 0600**
+	// 0644，按 0600 判会给所有正常安装报假红"——那个前提随 `internal/infra/dbclient` 在**打开时收口到 0600**
 	// 而失效（`tightenFilePerms`，含首次建库）。现在"权限宽"是一个**真事实**：密钥此刻确实可被属主
 	// 之外的人读走，所以按 fail 报是诚实的，修法也明确（`chmod 600`，或让任何一条命令打开一次库，
 	// 平台会自己收口并打 WARN）。

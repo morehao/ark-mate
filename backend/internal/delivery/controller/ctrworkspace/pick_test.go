@@ -3,12 +3,13 @@ package ctrworkspace
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
 	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 )
 
@@ -43,7 +44,7 @@ func TestWorkspacePickDirectoryThreeOutcomes(t *testing.T) {
 		{name: "选定", stub: pickStub{path: "/Users/me/proj"}, wantPath: "/Users/me/proj"},
 		{name: "取消不是错误", stub: pickStub{cancelled: true}, wantCancelled: true},
 		{name: "无可用选择器可判定",
-			stub: pickStub{err: acp.NewError(acp.ClassUnsupported, "native_pick_unsupported", "宿主没有可用的原生选择器", nil)},
+			stub: pickStub{err: failure.NewError(failure.ClassUnsupported, "native_pick_unsupported", "宿主没有可用的原生选择器", nil)},
 			// 40501：前端据此回落应用内浏览，而不是笼统 50000。
 			wantCode: 40501},
 	} {

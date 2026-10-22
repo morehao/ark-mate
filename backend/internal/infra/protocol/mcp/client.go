@@ -1,0 +1,451 @@
+// Package mcp 是最小 MCP（Model Context Protocol）客户端：只为「平台侧 live 探测 tools/list」服务。
+//
+// 范围（design doc §5.2/§5.3、§19.2）：
+//   - 传输：stdio（换行分隔 JSON-RPC 2.0）、http/streamable_http（POST + JSON 或 SSE 响应）、
+//     sse（legacy HTTP+SSE 双向通道，B3）。
+//   - 实现最小流程：initialize 握手（声明空 capabilities）→ notifications/initialized
+//     → tools/list（含 nextCursor 翻页）/ tools/call（B1）
+//     / resources/list + resources/templates/list + resources/read（B2）
+//     / prompts/list + prompts/get（B2）。
+//   - 不实现：sampling/roots、日志订阅、断线重连（后续切片）。
+//
+// 依赖克制：不引第三方 MCP SDK，协议面只覆盖探测需要的子集。
+package mcp
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/morehao/ark-mate/internal/core/capability"
+)
+
+const (
+	// protocolVersion 协商版本（客户端声明；服务端返回其支持版本，不强制相等——探测只读）。
+	protocolVersion = "2025-06-18"
+	clientName      = "ark-mate"
+	clientVersion   = "0.1.0"
+
+	// maxResponseBytes 单条消息上限（防御异常 server 打爆内存）。
+	maxResponseBytes = 4 << 20
+	// maxListPages 列表类方法（tools/list、resources/list、prompts/list…）翻页上限
+	// （防御 nextCursor 死循环）。
+	maxListPages = 20
+)
+
+// Server 是探测输入（由 capability.McpServer 映射，避免包间循环依赖）。
+type Server struct {
+	ID        string
+	Transport string
+	Command   string
+	Args      []string
+	URL       string
+	Headers   map[string]string
+	// Env 追加到 stdio 子进程的环境（在进程环境之上；非 stdio 传输忽略）。
+	//
+	// 约定与 acp.McpServer.Env 一致：**调用方已把密钥型绑定（`store:`/`env:`）解析成明文**，
+	// 本包只负责下发。缺了它，靠 env 拿凭据的 stdio server 会"会话里能用、平台探测/调用必失败"
+	// （2026-10-09 实测：同一个 server，探测路径起的进程拿不到 env、ACP 注入路径拿得到）。
+	//
+	// 纪律：任何错误文案、日志、诊断都**不得包含这里的值**（键名可以）——本包是密钥经过的一层。
+	Env map[string]string
+}
+
+// Error 带稳定 code 的探测错误：manager 依 code 决定 REST 语义/日志，msg 面向用户可读。
+//
+// 它**保留底层错误链**（`Unwrap`）：包装不该抹掉"这是一条服务端 JSON-RPC 错误响应"这类
+// 判别信息——连接池正是靠它区分"会话坏了"与"这次调用被服务端拒了"（见 pool.go 语义 2）。
+type Error struct {
+	Code string
+	Msg  string
+	// cause 底层错误（可空）。**不参与 Error() 文案**：文案是给人看的一句话，
+	// 底层细节已经拼进 Msg（见 wrapProbe），这里只服务 errors.Is/As。
+	cause error
+}
+
+func (e *Error) Error() string { return e.Msg }
+
+// Unwrap 暴露底层错误（errors.Is/As 用）。
+func (e *Error) Unwrap() error { return e.cause }
+
+func errf(code, format string, args ...any) *Error {
+	return &Error{Code: code, Msg: fmt.Sprintf(format, args...)}
+}
+
+// errWrap 同 errf，但保留底层错误链。
+func errWrap(code string, cause error, format string, args ...any) *Error {
+	return &Error{Code: code, Msg: fmt.Sprintf(format, args...), cause: cause}
+}
+
+// CodeOf 取探测错误的稳定 code（非 *Error → ""）。
+func CodeOf(err error) string {
+	var me *Error
+	if errors.As(err, &me) {
+		return me.Code
+	}
+	return ""
+}
+
+// ListTools 探测一个 MCP server 的 tools/list（含 initialize 握手）。
+// 传输不支持 → mcp_transport_unsupported；握手/列举失败 → mcp_initialize_failed / mcp_tools_list_failed。
+func ListTools(ctx context.Context, s Server) (Result, error) {
+	var res Result
+	_, err := session(ctx, s, func(ctx context.Context, tr transport, init initializeResult) error {
+		res.ServerName, res.ServerVersion = init.ServerInfo.Name, init.ServerInfo.Version
+		tools, err := listToolsPages(ctx, tr)
+		if err != nil {
+			return err
+		}
+		res.Tools = tools
+		return nil
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	return res, nil
+}
+
+// CallTool 调用一个 MCP server 的工具（tools/call）。
+//
+// 每次调用都是「建连 → initialize → initialized → tools/call → 关闭」的独立会话：
+// 不做连接池/会话复用（MCP 会话是服务端有状态资源，池化的失效/并发语义需要单独设计，
+// 首版不臆造）。args 为工具的 arguments 对象（nil = 无参数）。
+// 错误码：mcp_transport_unsupported / mcp_initialize_failed / mcp_tools_call_failed / mcp_timeout。
+func CallTool(ctx context.Context, s Server, name string, args json.RawMessage) (CallResult, error) {
+	if strings.TrimSpace(name) == "" {
+		return CallResult{}, errf("mcp_tool_name_required", "工具名必填")
+	}
+	var out CallResult
+	_, err := session(ctx, s, func(ctx context.Context, tr transport, init initializeResult) error {
+		out.ServerName, out.ServerVersion = init.ServerInfo.Name, init.ServerInfo.Version
+		params := map[string]any{"name": name}
+		if len(args) > 0 {
+			// MCP 规定 arguments 是对象（键值表）；非对象（字符串/数组/null 以外的标量）在本地拒绝，
+			// 不把协议外载荷透传给服务端。
+			var obj map[string]any
+			if err := json.Unmarshal(args, &obj); err != nil {
+				return errf("mcp_tool_args_invalid", "arguments 须为 JSON 对象：%v", err)
+			}
+			if obj != nil {
+				params["arguments"] = obj
+			}
+		}
+		var res struct {
+			Content           []json.RawMessage `json:"content"`
+			IsError           bool              `json:"isError"`
+			StructuredContent json.RawMessage   `json:"structuredContent"`
+		}
+		if err := tr.call(ctx, "tools/call", params, &res); err != nil {
+			return wrapProbe(ctx, "mcp_tools_call_failed", "tools/call 失败", err)
+		}
+		out.Content, out.IsError, out.StructuredContent = res.Content, res.IsError, res.StructuredContent
+		return nil
+	})
+	if err != nil {
+		return CallResult{}, err
+	}
+	return out, nil
+}
+
+// session 建立一次 MCP 会话（initialize + notifications/initialized），把传输交给 fn，
+// 结束后统一关闭传输。所有「需要握手」的能力（tools/list、tools/call、后续 resources/prompts）
+// 都走这里，避免每加一个能力就复制一遍传输分派与握手代码。
+func session(ctx context.Context, s Server, fn func(ctx context.Context, tr transport, init initializeResult) error) (initializeResult, error) {
+	tr, init, err := openSession(ctx, s)
+	if err != nil {
+		return initializeResult{}, err
+	}
+	defer tr.close()
+	if err := fn(ctx, tr, init); err != nil {
+		return initializeResult{}, err
+	}
+	return init, nil
+}
+
+// openSession 建连并完成握手，**把已就绪的传输交给调用方**（不关闭）。
+//
+// 与 `session` 分开是给连接池用的（M7-2）：池要留住这条传输反复用，而一次性探测要在
+// 结束时关闭它。握手的两个步骤（initialize → notifications/initialized）只有这一份实现，
+// 池化不该让"两条路径的握手不同"成为可能。
+func openSession(ctx context.Context, s Server) (transport, initializeResult, error) {
+	tr, err := dial(ctx, s)
+	if err != nil {
+		return nil, initializeResult{}, err
+	}
+	var p initializeParams
+	p.ProtocolVersion = protocolVersion
+	p.Capabilities = map[string]any{}
+	p.ClientInfo.Name = clientName
+	p.ClientInfo.Version = clientVersion
+
+	var init initializeResult
+	if err := tr.call(ctx, "initialize", p, &init); err != nil {
+		tr.close()
+		return nil, initializeResult{}, wrapProbe(ctx, "mcp_initialize_failed", "initialize 握手失败", err)
+	}
+	if err := tr.notify(ctx, "notifications/initialized", map[string]any{}); err != nil {
+		tr.close()
+		return nil, initializeResult{}, wrapProbe(ctx, "mcp_initialize_failed", "initialized 通知失败", err)
+	}
+	return tr, init, nil
+}
+
+// rpcResponseError 标记「服务端返回了 JSON-RPC 错误响应」。
+//
+// 与传输层故障分开是**池化**的前提：一条会话收到 `-32602 未知工具` 之后仍然健康，
+// 不该因此被作废重建；只有读失败/进程死/HTTP 5xx 这类才说明会话没了。
+type rpcResponseError struct{ rpc *rpcError }
+
+func (e *rpcResponseError) Error() string { return "JSON-RPC 错误：" + e.rpc.String() }
+
+// newRPCResponseError 把服务端的错误响应包成可判别的错误（三个传输共用）。
+func newRPCResponseError(e *rpcError) error { return &rpcResponseError{rpc: e} }
+
+// IsRPCResponseError 报告错误来自服务端的 JSON-RPC 错误响应（会话本身仍然健康）。
+func IsRPCResponseError(err error) bool {
+	var target *rpcResponseError
+	return errors.As(err, &target)
+}
+
+// dial 按传输形态建连；未知传输 → mcp_transport_unsupported（不臆造）。
+func dial(ctx context.Context, s Server) (transport, error) {
+	switch s.Transport {
+	case capability.TransportStdio:
+		return dialStdio(ctx, s)
+	case capability.TransportHTTP, capability.TransportStreamableHTTP:
+		return dialHTTP(s), nil
+	case capability.TransportSSE:
+		return dialSSE(ctx, s)
+	default:
+		return nil, errf("mcp_transport_unsupported", "未知 MCP 传输 %q", s.Transport)
+	}
+}
+
+// ——— B2：resources / prompts ———
+
+// ListResources 拉取某 MCP server 的资源列表（resources/list 翻页 + resources/templates/list）。
+// 模板接口不支持时降级为空并记录 TemplatesError（不臆造）。
+func ListResources(ctx context.Context, s Server) (ResourceList, error) {
+	var out ResourceList
+	_, err := session(ctx, s, func(ctx context.Context, tr transport, init initializeResult) error {
+		out.ServerName, out.ServerVersion = init.ServerInfo.Name, init.ServerInfo.Version
+		res, err := paginate(ctx, tr, "resources/list", "mcp_resources_list_failed", func(raw json.RawMessage) ([]Resource, string, error) {
+			var page struct {
+				Resources  []Resource `json:"resources"`
+				NextCursor string     `json:"nextCursor"`
+			}
+			if err := json.Unmarshal(raw, &page); err != nil {
+				return nil, "", err
+			}
+			return page.Resources, page.NextCursor, nil
+		})
+		if err != nil {
+			return err
+		}
+		out.Resources = res
+		tpl, terr := paginate(ctx, tr, "resources/templates/list", "mcp_resources_list_failed", func(raw json.RawMessage) ([]ResourceTemplate, string, error) {
+			var page struct {
+				ResourceTemplates []ResourceTemplate `json:"resourceTemplates"`
+				NextCursor        string             `json:"nextCursor"`
+			}
+			if err := json.Unmarshal(raw, &page); err != nil {
+				return nil, "", err
+			}
+			return page.ResourceTemplates, page.NextCursor, nil
+		})
+		if terr != nil {
+			out.TemplatesError = terr.Error() // 服务端未实现 → 降级（资源列表仍可用）
+			return nil
+		}
+		out.Templates = tpl
+		return nil
+	})
+	if err != nil {
+		return ResourceList{}, err
+	}
+	return out, nil
+}
+
+// ReadResource 读取一个资源（resources/read）。
+func ReadResource(ctx context.Context, s Server, uri string) (ReadResourceResult, error) {
+	if strings.TrimSpace(uri) == "" {
+		return ReadResourceResult{}, errf("mcp_resource_uri_required", "资源 uri 必填")
+	}
+	var out ReadResourceResult
+	_, err := session(ctx, s, func(ctx context.Context, tr transport, _ initializeResult) error {
+		var res struct {
+			Contents []ResourceContent `json:"contents"`
+		}
+		if err := tr.call(ctx, "resources/read", map[string]any{"uri": uri}, &res); err != nil {
+			return wrapProbe(ctx, "mcp_resource_read_failed", "resources/read 失败", err)
+		}
+		out.Contents = res.Contents
+		return nil
+	})
+	if err != nil {
+		return ReadResourceResult{}, err
+	}
+	return out, nil
+}
+
+// ListPrompts 拉取某 MCP server 的提示词模板（prompts/list 翻页）。
+func ListPrompts(ctx context.Context, s Server) ([]Prompt, error) {
+	var out []Prompt
+	_, err := session(ctx, s, func(ctx context.Context, tr transport, _ initializeResult) error {
+		res, err := paginate(ctx, tr, "prompts/list", "mcp_prompts_list_failed", func(raw json.RawMessage) ([]Prompt, string, error) {
+			var page struct {
+				Prompts    []Prompt `json:"prompts"`
+				NextCursor string   `json:"nextCursor"`
+			}
+			if err := json.Unmarshal(raw, &page); err != nil {
+				return nil, "", err
+			}
+			return page.Prompts, page.NextCursor, nil
+		})
+		if err != nil {
+			return err
+		}
+		out = res
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetPrompt 取用一条提示词模板（prompts/get）；args 为模板参数（值必须是字符串，按 MCP 约定）。
+func GetPrompt(ctx context.Context, s Server, name string, args map[string]string) (GetPromptResult, error) {
+	if strings.TrimSpace(name) == "" {
+		return GetPromptResult{}, errf("mcp_prompt_name_required", "提示词名必填")
+	}
+	var out GetPromptResult
+	_, err := session(ctx, s, func(ctx context.Context, tr transport, _ initializeResult) error {
+		params := map[string]any{"name": name}
+		if len(args) > 0 {
+			params["arguments"] = args
+		}
+		var res GetPromptResult
+		if err := tr.call(ctx, "prompts/get", params, &res); err != nil {
+			return wrapProbe(ctx, "mcp_prompt_get_failed", "prompts/get 失败", err)
+		}
+		out = res
+		return nil
+	})
+	if err != nil {
+		return GetPromptResult{}, err
+	}
+	return out, nil
+}
+
+// paginate 通用列表翻页：每页调用 method（带 cursor），extract 从 result 里取「条目 + nextCursor」。
+// 翻页上限 maxListPages；错误码由调用方给出（如 mcp_resources_list_failed）。
+func paginate[T any](ctx context.Context, tr transport, method, errCode string,
+	extract func(raw json.RawMessage) ([]T, string, error)) ([]T, error) {
+	out := make([]T, 0, 8)
+	cursor := ""
+	for page := 0; ; page++ {
+		if page >= maxListPages {
+			return nil, errf(errCode, "%s 分页超过 %d 页（疑似 nextCursor 死循环）", method, maxListPages)
+		}
+		params := map[string]any{}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		var raw json.RawMessage
+		if err := tr.call(ctx, method, params, &raw); err != nil {
+			return nil, wrapProbe(ctx, errCode, method+" 失败", err)
+		}
+		items, next, err := extract(raw)
+		if err != nil {
+			return nil, wrapProbe(ctx, errCode, method+" 响应解析失败", err)
+		}
+		out = append(out, items...)
+		if next == "" {
+			return out, nil
+		}
+		cursor = next
+	}
+}
+
+// listToolsPages tools/list 翻页（cursor 上限见 maxListPages）。
+func listToolsPages(ctx context.Context, tr transport) ([]Tool, error) {
+	return paginate(ctx, tr, "tools/list", "mcp_tools_list_failed", func(raw json.RawMessage) ([]Tool, string, error) {
+		var page listToolsResult
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return nil, "", err
+		}
+		items := make([]Tool, 0, len(page.Tools))
+		for _, tl := range page.Tools {
+			if tl.Name == "" {
+				continue // 无名字段无法目录化，跳过（不臆造）
+			}
+			items = append(items, tl)
+		}
+		return items, page.NextCursor, nil
+	})
+}
+
+// ——— JSON-RPC 2.0 最小消息面 ———
+
+type rpcMessage struct {
+	JSONRPC string           `json:"jsonrpc"`
+	ID      *json.RawMessage `json:"id,omitempty"`
+	Method  string           `json:"method,omitempty"`
+	Params  json.RawMessage  `json:"params,omitempty"`
+	Result  json.RawMessage  `json:"result,omitempty"`
+	Error   *rpcError        `json:"error,omitempty"`
+}
+
+type rpcError struct {
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+func (e *rpcError) String() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("code=%d message=%q", e.Code, e.Message)
+}
+
+// transport 是探测所需的传输抽象（一次探测内串行调用：请求→响应配对按 id）。
+type transport interface {
+	call(ctx context.Context, method string, params any, out any) error
+	notify(ctx context.Context, method string, params any) error
+	close()
+}
+
+// initializeParams 客户端握手声明：能力集为空（只做探测，不接受服务端反向调用）。
+type initializeParams struct {
+	ProtocolVersion string         `json:"protocolVersion"`
+	Capabilities    map[string]any `json:"capabilities"`
+	ClientInfo      struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	} `json:"clientInfo"`
+}
+
+type initializeResult struct {
+	ProtocolVersion string `json:"protocolVersion"`
+	ServerInfo      struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	} `json:"serverInfo"`
+}
+
+type listToolsResult struct {
+	Tools      []Tool `json:"tools"`
+	NextCursor string `json:"nextCursor,omitempty"`
+}
+
+// wrapProbe 把底层错误包成带 code 的探测错误；ctx 超时/取消优先报 mcp_timeout。
+func wrapProbe(ctx context.Context, code, what string, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return errWrap("mcp_timeout", err, "%s：%v", what, ctxErr)
+	}
+	return errWrap(code, err, "%s：%v", what, err)
+}

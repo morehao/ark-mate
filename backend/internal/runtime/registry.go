@@ -331,7 +331,7 @@ func (r *Registry) IDs() []string {
 // 为什么这条约定归注册表：它有两个消费面（Library 的逐 runtime 可达性、MCP 注入时的传输判据），
 // 各写一遍必然漂移，而漂移的表现是"面板说可达、注入时被跳过"。它读的又只有 Spec。
 //
-// 用字面量 `"stdio"` 而不是 `capability.TransportStdio`：`pkg/runtime` **零依赖 `pkg/capability`**
+// 用字面量 `"stdio"` 而不是 `capability.TransportStdio`：本包**零依赖 `core/capability`**
 // （P-1 定的包边界，见 projection.go 顶部），同包 `adapters.go` 的 Spec 声明也是这么写的。
 func (r *Registry) McpTransportsFor(id string) ([]string, bool) {
 	spec, ok := r.Get(id)

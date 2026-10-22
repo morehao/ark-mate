@@ -85,7 +85,7 @@ func Spec() runtime.Spec {
 		// 表明归属，且**不覆盖** dsh 自己的 `cordis.patch.yml`。
 		//
 		// 格式（patch 的 `- id:` 条目、`--patch` 参数、两级校验门）全部住在
-		// `pkg/runtime/dsh`——内核只知道落点，因为占位符只能靠该 runtime 的隔离 env 解出来。
+		// `internal/infra/dsh`——内核只知道落点，因为占位符只能靠该 runtime 的隔离 env 解出来。
 		ModelConfig: runtime.ModelConfigLocation{
 			Root:     "${DSH_HOME}",
 			Filename: "mate-models.patch.yml",
@@ -157,7 +157,7 @@ const dshModelConfigEvidence = "清单通道端到端实测（2026-10-10，随�
 // Tested=true 的依据（两段，缺一不可）：
 //  1. **形态**：`<root>/<id>/SKILL.md` + 强制 frontmatter，于 2026-09-09 用 `dsh-skill-filesystem`
 //     真实 provider 实测过（无 frontmatter / 只有 name / 只有 description 三种都丢弃，嵌套不扫）
-//     ——与上面的「只扫根下一层」互相印证（见 pkg/capability/skill_materialize.go 顶部实测记录）。
+//     ——与上面的「只扫根下一层」互相印证（见 internal/core/capability/skill_materialize.go 顶部实测记录）。
 //  2. **端到端**：「平台默认根下写进去、底座开箱即读到」，于 2026-10-08 用 dsh **0.2.0-rc.2** 确认（2026-10-18 在 **0.2.1-rc.2** 复测通过）
 //     （报告：.dsh/docs/notes/2026-10-08-skill-projection-e2e-probe-notes.md §B-6）。取证分两路：
 //     · **源码链**（读本机安装版本 app.asar 内的实际代码）：`PROFILE_TEMPLATES.acp = [dsh-base, dsh-acp-app]`
@@ -186,7 +186,7 @@ func dshSkillProjection() runtime.Projection {
 			"两条边界：① 该根是**最低优先**（rank 500），项目级 `<cwd>/.agents/skills`(200) 与 `~/.dsh/skills`(400) 会遮蔽它；" +
 			"② 底座按 `config.agentsHome ?? $DSH_AGENTS_HOME ?? ~/.agents` 解析该根，故**任何**注入 `DSH_AGENTS_HOME` 的地方都会让读根与本投影分叉；" +
 			"平台的配置隔离**刻意不注入它**（2026-10-09 修：曾注入，E5 实测导致 dsh 会话的 `<available_skills>` 看不到本投影根下的 skill；" +
-			"护栏见 `pkg/runtime/isolation_test.go` 的 TestIsolationKeepsSkillRootAlignedWithProjection），但用户若在平台进程环境里设了它仍会静默分叉",
+			"护栏见 `internal/runtime/isolation_test.go` 的 TestIsolationKeepsSkillRootAlignedWithProjection），但用户若在平台进程环境里设了它仍会静默分叉",
 	}
 }
 

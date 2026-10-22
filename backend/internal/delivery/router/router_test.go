@@ -15,7 +15,7 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 
 	"github.com/morehao/ark-mate/internal/domain/workspace"
-	credmech "github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/config"
@@ -54,12 +54,12 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *sessionruntime.Service) {
 	// 文档没装配会被**显式拒绝**（`credentials_write_failed`：拒绝一次只在内存里成功的写入）。
 	// home 与 providerDir 都在 `t.TempDir()` 下，绝不碰用户环境（`~/.ark-mate`）。
 	home := t.TempDir()
-	creds, _, err := credmech.OpenCredentialSource(home, home)
+	creds, _, err := mechanism.OpenCredentialSource(home, home)
 	if err != nil {
 		t.Fatalf("装配凭据分层: %v", err)
 	}
 	// 继承环境那一层置空：这条夹具不该被跑测试的机器上恰好存在的同名变量影响
-	// （层序本身由 `pkg/credentials` 的用例与 manager 的用例覆盖）。
+	// （层序本身由 `internal/infra/credentials` 的用例与 manager 的用例覆盖）。
 	creds.Env = func(string) string { return "" }
 	svc.Planes().Credentials.SetLayered(creds)
 	svc.Planes().Providers.SetProviderDir(filepath.Join(home, "providers"))
@@ -175,7 +175,7 @@ func TestRouterRoutesRegistered(t *testing.T) {
 			t.Fatalf("路由未注册: %s", want)
 		}
 	}
-	// **负向断言**：`/runtimes` 必须不存在（用户面零 runtime 选择入口；见 pkg/runtime/build.go）。
+	// **负向断言**：`/runtimes` 必须不存在（用户面零 runtime 选择入口；见 internal/runtime/build.go）。
 	if found["GET /v1/mate/runtimes"] {
 		t.Fatal("GET /v1/mate/runtimes 不该再注册：底座由构建期固定，用户面没有这个读面")
 	}
@@ -220,7 +220,7 @@ func TestRouterUnknownAPINotSPA(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 				t.Fatalf("响应体不是信封 JSON: %v（body=%s）", err, w.Body.String())
 			}
-			// code 必须取自 pkg/code 注册表：此前手写的 404 不在码表里，客户端无法判定。
+			// code 必须取自 internal/core/code 注册表：此前手写的 404 不在码表里，客户端无法判定。
 			if env.Code != code.NotFound {
 				t.Errorf("信封 code 应为 code.NotFound(%d)，得到 %d", code.NotFound, env.Code)
 			}

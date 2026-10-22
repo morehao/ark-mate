@@ -16,7 +16,7 @@ const logServiceName = "ark-mate"
 // initProcessLogger 装配进程日志出口。
 //
 // 分工与 ark-go-starter 一致：zap driver 的**匿名引入在装配根**（cmd/mate/main.go），
-// 配置与 InitLogger 在这里；pkg/ 下的包不替调用方决定日志出口（pkg/dbclient 只声明
+// 配置与 InitLogger 在这里；pkg/ 下的包不替调用方决定日志出口（internal/infra/dbclient 只声明
 // 自己要什么级别，见其 ormLogConfig）。
 //
 // **唯一的硬约束**：glog 的 console writer 写的是 **os.Stdout**（golib 里硬编码，没有 stderr

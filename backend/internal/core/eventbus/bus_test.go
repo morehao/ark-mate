@@ -8,7 +8,7 @@ import (
 // testEventID 测试用的事件行身份。
 //
 // bus **不校验也不解释** id（它只是跟着事件走的一支值），所以这里用一个固定字面量就够；
-// 真实形状由 objid 铸（`evt_<26 位 ULID>`），那部分的判据在 `pkg/object/objid` 与 archtest。
+// 真实形状由 objid 铸（`evt_<26 位 ULID>`），那部分的判据在 `internal/core/object/objid` 与 archtest。
 const testEventID = "evt_01J9Z6Q0M7X2V8K4B3N5TRW1PD"
 
 // TestPublishCarriesEventID 身份必须**原样**跟着事件走（Publish 与 PublishAt 两条路）。

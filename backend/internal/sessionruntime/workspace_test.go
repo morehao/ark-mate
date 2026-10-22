@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/golib/gerror"
@@ -42,15 +43,15 @@ func gerrCode(t *testing.T, err error) int {
 	return ge.Code
 }
 
-// acpCode 取 acp.Error 的语义错误码（resolve/validate 层返回 acp 错误，未经 restErr 映射）。
+// acpCode 取 failure.Error 的语义错误码（resolve/validate 层返回 acp 错误，未经 restErr 映射）。
 func acpCode(t *testing.T, err error) string {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("期望错误，得到 nil")
 	}
-	ae, ok := acp.As(err)
+	ae, ok := failure.As(err)
 	if !ok {
-		t.Fatalf("期望 acp.Error，得到 %T: %v", err, err)
+		t.Fatalf("期望 failure.Error，得到 %T: %v", err, err)
 	}
 	return ae.Code
 }

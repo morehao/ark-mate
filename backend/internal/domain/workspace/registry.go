@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
 )
@@ -123,10 +124,10 @@ func (pl *Plane) CreateWorkspace(req CreateRequest) (*WorkspaceItem, error) {
 	name := strings.TrimSpace(req.Name)
 	switch {
 	case path != "" && name != "":
-		return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
+		return nil, failure.NewError(failure.ClassRequest, "workspace_invalid",
 			"`path` 与 `name` 只能给一个：「选择已有目录」与「新建工作空间」是两条路", nil)
 	case path == "" && name == "":
-		return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
+		return nil, failure.NewError(failure.ClassRequest, "workspace_invalid",
 			"需要 `path`（登记已有目录）或 `name`（在落盘根下新建）之一", nil)
 	case name != "":
 		return pl.CreateNamedWorkspace(name, req.Title)
@@ -164,7 +165,7 @@ func (pl *Plane) CreateNamedWorkspace(name, title string) (*WorkspaceItem, error
 		// 未声明落盘根 → **显式拒绝**，且界面这一档不渲染入口（ADR-3 的入口纪律：
 		// 不给一个必然失败的按钮）。
 		const codeName = "workspace_create_root_unset"
-		return nil, acp.NewError(acp.ClassRequest, codeName,
+		return nil, failure.NewError(failure.ClassRequest, codeName,
 			"["+codeName+"] 未配置新建工作空间的落盘根（create_root / workspace_dir）：无法按名字新建，请改用「选择已有目录…」", nil)
 	}
 	cleaned, err := ValidateWorkspaceName(name)
@@ -181,7 +182,7 @@ func (pl *Plane) CreateNamedWorkspace(name, title string) (*WorkspaceItem, error
 		if os.IsExist(err) {
 			return nil, workspaceExistsErr(target)
 		}
-		return nil, acp.NewError(acp.ClassRequest, "workspace_invalid",
+		return nil, failure.NewError(failure.ClassRequest, "workspace_invalid",
 			fmt.Sprintf("创建目录失败: %s", target), err)
 	}
 	// 登记走 path 模式那条流水线（`strict=true`）：它与「选择已有目录…」共用同一套路径校验
@@ -226,7 +227,7 @@ func (pl *Plane) PatchWorkspace(id string, req PatchRequest) (*WorkspaceItem, er
 		case pl.st.IsPathTaken(rerr):
 			return nil, workspaceExistsErr(canonical)
 		case pl.st.IsDefaultImmutable(rerr):
-			return nil, acp.NewError(acp.ClassRequest, "workspace_default_immutable",
+			return nil, failure.NewError(failure.ClassRequest, "workspace_default_immutable",
 				"默认工作空间的路径由装配期决定，不能改", nil)
 		case rerr != nil:
 			return nil, rerr
@@ -288,7 +289,7 @@ func (pl *Plane) WorkspaceDefaultsOf(id string) (WorkspaceDefaults, bool) {
 
 // workspaceExistsErr 同名目标已存在（唯一出口：40901 + `workspace_exists`）。
 func workspaceExistsErr(target string) error {
-	return acp.NewError(acp.ClassLimit, "workspace_exists",
+	return failure.NewError(failure.ClassLimit, "workspace_exists",
 		fmt.Sprintf("目录已存在: %s", target), nil)
 }
 
@@ -309,7 +310,7 @@ func (pl *Plane) CreateRegisteredWorkspace(path, title string, strict bool) (*Wo
 		if _, ok, err := pl.st.WorkspaceByPath(ctx, canonical); err != nil {
 			return nil, err
 		} else if ok {
-			return nil, code.FromError(acp.NewError(acp.ClassLimit, "workspace_exists",
+			return nil, code.FromError(failure.NewError(failure.ClassLimit, "workspace_exists",
 				fmt.Sprintf("该目录已登记为工作空间: %s", canonical), nil))
 		}
 	}
@@ -385,7 +386,7 @@ func (pl *Plane) DeleteRegisteredWorkspace(id string) (*WorkspaceDelete, error) 
 	case errors.Is(err, errWorkspaceTxNotFound):
 		return nil, WorkspaceNotFoundError(id)
 	case errors.Is(err, errWorkspaceTxDefaultImmutable):
-		return nil, code.FromError(acp.NewError(acp.ClassRequest, "workspace_default_immutable",
+		return nil, code.FromError(failure.NewError(failure.ClassRequest, "workspace_default_immutable",
 			"默认工作空间不可删除：它是未指定工作目录的会话的落点", nil))
 	case err != nil:
 		return nil, err
@@ -444,7 +445,7 @@ func (pl *Plane) EnsureDefaultWorkspace() error {
 // provisionMemoryDefaultWorkspace 在 memory 模式建出默认工作空间（目录 + 进程内登记项）。
 func (pl *Plane) provisionMemoryDefaultWorkspace(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return code.FromError(acp.NewError(acp.ClassService, "workspace_provision_failed",
+		return code.FromError(failure.NewError(failure.ClassService, "workspace_provision_failed",
 			fmt.Sprintf("建立默认工作空间目录失败 %s: %v", dir, err), nil))
 	}
 	canonical := dir
@@ -554,9 +555,9 @@ func dirStatusOf(path string) string {
 	return DirStatusOK
 }
 
-// WorkspaceNotFoundError 未知工作空间 id（ClassRequest + 稳定 code 名，由 pkg/code 提档到 40401）。
+// WorkspaceNotFoundError 未知工作空间 id（ClassRequest + 稳定 code 名，由 internal/core/code 提档到 40401）。
 func WorkspaceNotFoundError(id string) error {
-	return code.FromError(acp.NewError(acp.ClassRequest, "workspace_not_found",
+	return code.FromError(failure.NewError(failure.ClassRequest, "workspace_not_found",
 		fmt.Sprintf("未知工作空间 %q", id), nil))
 }
 
@@ -570,7 +571,7 @@ func WorkspaceReadOnlyError() error {
 	// `workspace_schema_read_only` 不在默认文案表里——不写进去，前端就只能靠 40501 猜是
 	// "哪一种不支持"（memory 与"该底座不广告模型配置项"是同一个码）。
 	const codeName = "workspace_schema_read_only"
-	return code.FromError(acp.NewError(acp.ClassUnsupported, codeName,
+	return code.FromError(failure.NewError(failure.ClassUnsupported, codeName,
 		"["+codeName+"] 当前持久层为 memory：工作空间登记需要 sqlite（MATE_STORE=sqlite）", nil))
 }
 

@@ -3,13 +3,15 @@ package runtimeconn
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"strings"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/redact"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
+	installedpkg "github.com/morehao/ark-mate/internal/infra/installed"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -41,7 +43,7 @@ type AmbiguityNote struct {
 //
 // 脱敏与行数截断在这里做（不在调用方）：诊断是**对外可见**的面，闸门必须贴着状态本身——
 // 交给调用方记得脱敏，迟早有一处忘。
-func (pl *Plane) RecordRuntimeError(sessionID string, ae *acp.Error, tail []string) {
+func (pl *Plane) RecordRuntimeError(sessionID string, ae *failure.Error, tail []string) {
 	if ae == nil {
 		return
 	}
@@ -51,7 +53,7 @@ func (pl *Plane) RecordRuntimeError(sessionID string, ae *acp.Error, tail []stri
 		Code:       ae.Code,
 		Class:      string(ae.Class),
 		Details:    redact.String(ae.Details),
-		StderrTail: acp.TailLines(tail, MaxDiagStderrLines),
+		StderrTail: failure.TailLines(tail, MaxDiagStderrLines),
 	})
 }
 
@@ -101,7 +103,7 @@ func (pl *Plane) ScopeNote() (AmbiguityNote, bool) {
 // ——— P3a-2 第二刀：诊断的**组装面** ———
 //
 // 事实来源（按序合并、去重）：
-//  1. runtime 未装配 / 已装配但启动命令不可执行（判定见 pkg/runtime/installed.go）；
+//  1. runtime 未装配 / 已装配但启动命令不可执行（判定见 internal/infra/installed/probe.go）；
 //  2. **将被注入**的供应商档案悬空或无密钥（`CredentialProblem` 原文，已含出路）；
 //  3. 已连接时底座自报的鉴权方式（`CredentialSource.AuthGuidance`）；
 //  4. 最近失败的 stderr 呈鉴权特征 → 指向供应商档案/底座登录；
@@ -142,7 +144,7 @@ func (pl *Plane) Diagnostics(ctx context.Context) (*dtoruntime.DiagnosticsResp, 
 		if cli, pid, live := pl.live.LiveClient(runtimeID); live {
 			resp.Connected = true
 			resp.PID = pid
-			if tail := acp.TailLines(cli.StderrTail(), MaxDiagStderrLines); len(tail) > 0 {
+			if tail := failure.TailLines(cli.StderrTail(), MaxDiagStderrLines); len(tail) > 0 {
 				resp.StderrTail = tail
 				resp.StderrSource = "live"
 			}
@@ -166,7 +168,7 @@ func (pl *Plane) Diagnostics(ctx context.Context) (*dtoruntime.DiagnosticsResp, 
 	// 归属歧义留痕（若有）：诊断里给事实 + 可执行动作，而不是让提问卡无痕消失。
 	if n, ok := pl.ScopeNote(); ok {
 		resp.Remediation = append(resp.Remediation, fmt.Sprintf(
-			"%s（%s）。若该 runtime 会发 elicitation 且存在多会话并发在途：让底座在 elicitation 的 `_meta` 里带 sessionId（宿主零 fork 读取，见 internal/infra/acp/scope.go），或串行等待提问。",
+			"%s（%s）。若该 runtime 会发 elicitation 且存在多会话并发在途：让底座在 elicitation 的 `_meta` 里带 sessionId（宿主零 fork 读取，见 internal/infra/protocol/acp/scope.go），或串行等待提问。",
 			n.Detail, n.At.Format(time.RFC3339)))
 	}
 	return resp, nil
@@ -187,15 +189,15 @@ func (pl *Plane) RemediationFor(ctx context.Context, spec runtime.Spec, specOK, 
 	}
 
 	if !specOK {
-		add(fmt.Sprintf("runtime %q 未装配：它由**构建期**注入（`-X pkg/runtime.BuildRuntime`），"+
+		add(fmt.Sprintf("runtime %q 未装配：它由**构建期**注入（`-X internal/runtime.BuildRuntime`），"+
 			"请重新构建该二进制，或在 .ark-mate/config/runtimes.json 里声明同 id 的远程端点", runtime.SelectedRuntime()))
-	} else if !runtime.Installed(spec) {
+	} else if !installedpkg.Installed(spec) {
 		add(fmt.Sprintf("runtime %q 的启动命令 %q 当前不可执行：安装该底座并确保它在 PATH 中（或把配置改成绝对路径）",
 			spec.ID, spec.Launch.Command))
 	}
 	if pl.cred != nil {
 		if err := pl.cred.CredentialProblem(ctx); err != nil {
-			if ae, ok := acp.As(err); ok && ae != nil {
+			if ae, ok := failure.As(err); ok && ae != nil {
 				add(ae.Details)
 			}
 		}

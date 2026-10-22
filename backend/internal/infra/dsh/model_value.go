@@ -2,7 +2,7 @@ package dsh
 
 import "encoding/json"
 
-// ModelValue dsh 的「模型值投影」实现（见 pkg/runtime/model_value.go 的端口契约）。
+// ModelValue dsh 的「模型值投影」实现（见 internal/runtime/model_value.go 的端口契约）。
 //
 // dsh 在 ACP 的 `modelValue()` 上要的是 `["<provider>","<model>"]` 这个 JSON 数组——一段**它自己的**
 // 词表形态。这条知识此前写在内核的 `switch runtimeID` 里，2026-10-12 随第四张表搬到 adapter。

@@ -21,7 +21,7 @@ const mismatchMarkerLiteral = "DB 里有、文件里没有"
 //
 // 它们随实现一起搬进本域（`interaction` 那一批之后的做法：测试跟着所有者走）：判的是本域的
 // 纯函数与只读探测（对账分档、遗留锚点、镜像形状），与"装配起来的那份 Service"无关。
-// 需要逃生门（真 Service 造只读读数面）的用例留在 `internal/manager`：
+// 需要逃生门（真 Service 造只读读数面）的用例留在 `internal/sessionruntime`：
 // 它们验的是**装配面的接线**，而且本包若 import manager 会形成测试期循环。
 
 // TestProviderMismatchBenignOnly 对账分档：只有"库里有、文件里没有"才算快照滞后。

@@ -2,9 +2,9 @@ package sessionruntime
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -30,7 +30,7 @@ func (s *Service) ResolveModel(ctx context.Context, runtimeID, modelID string) (
 // （`s.orch.ApplySessionModel` 会炸），而"服务尚未装配编排器"是这一层能说清的事实。
 func (s *Service) ApplyModel(ctx context.Context, sessionID string, cfg runtime.ModelConfig) (bool, error) {
 	if s.orch == nil {
-		return false, acp.NewError(acp.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil)
+		return false, failure.NewError(failure.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil)
 	}
 	return s.orch.ApplySessionModel(ctx, sessionID, cfg)
 }

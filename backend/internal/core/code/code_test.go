@@ -2,6 +2,7 @@ package code_test
 
 import (
 	"errors"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,14 +11,14 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
 	"github.com/morehao/golib/gerror"
 )
 
 // TestFromErrorMapping 领域错误（acp 分类）→ 对外业务码映射矩阵。
 //
 // 这条矩阵原先在 internal/manager 里测（当时映射表是 Service.restErr 的私有实现）。
-// 映射表收归 pkg/code 后随之搬来：它测的是"码怎么定"，与 manager 的装配无关，
+// 映射表收归 internal/core/code 后随之搬来：它测的是"码怎么定"，与 manager 的装配无关，
 // 放在这里也不再需要拉起整个 manager 测试脚手架。
 func TestFromErrorMapping(t *testing.T) {
 	cases := []struct {
@@ -25,18 +26,18 @@ func TestFromErrorMapping(t *testing.T) {
 		in   error
 		want int
 	}{
-		{"agent_not_found", acp.NewError(acp.ClassRequest, "agent_not_found", "x", nil), code.NotFound},
-		{"session_not_found", acp.NewError(acp.ClassRequest, "session_not_found", "x", nil), code.NotFound},
-		{"runtime_not_found", acp.NewError(acp.ClassRequest, "runtime_not_found", "x", nil), code.NotFound},
-		{"mcp_not_found", acp.NewError(acp.ClassRequest, "mcp_not_found", "x", nil), code.NotFound},
-		{"provider_not_found", acp.NewError(acp.ClassRequest, "provider_not_found", "x", nil), code.NotFound},
-		{"request_other", acp.NewError(acp.ClassRequest, "agent_required", "x", nil), code.InvalidRequest},
-		{"limit", acp.NewError(acp.ClassLimit, "run_in_progress", "x", nil), code.Conflict},
-		{"access", acp.NewError(acp.ClassAccess, "auth_required", "x", nil), code.Unauthorized},
-		{"unsupported", acp.NewError(acp.ClassUnsupported, "resume_unsupported", "x", nil), code.NotSupported},
-		{"service", acp.NewError(acp.ClassService, "orchestrator_unavailable", "x", nil), code.BadGateway},
-		{"connection", acp.NewError(acp.ClassConnection, "connection_lost", "x", nil), code.BadGateway},
-		{"unknown_class", acp.NewError(acp.ClassUnknown, "weird", "x", nil), code.UpstreamFailed},
+		{"agent_not_found", failure.NewError(failure.ClassRequest, "agent_not_found", "x", nil), code.NotFound},
+		{"session_not_found", failure.NewError(failure.ClassRequest, "session_not_found", "x", nil), code.NotFound},
+		{"runtime_not_found", failure.NewError(failure.ClassRequest, "runtime_not_found", "x", nil), code.NotFound},
+		{"mcp_not_found", failure.NewError(failure.ClassRequest, "mcp_not_found", "x", nil), code.NotFound},
+		{"provider_not_found", failure.NewError(failure.ClassRequest, "provider_not_found", "x", nil), code.NotFound},
+		{"request_other", failure.NewError(failure.ClassRequest, "agent_required", "x", nil), code.InvalidRequest},
+		{"limit", failure.NewError(failure.ClassLimit, "run_in_progress", "x", nil), code.Conflict},
+		{"access", failure.NewError(failure.ClassAccess, "auth_required", "x", nil), code.Unauthorized},
+		{"unsupported", failure.NewError(failure.ClassUnsupported, "resume_unsupported", "x", nil), code.NotSupported},
+		{"service", failure.NewError(failure.ClassService, "orchestrator_unavailable", "x", nil), code.BadGateway},
+		{"connection", failure.NewError(failure.ClassConnection, "connection_lost", "x", nil), code.BadGateway},
+		{"unknown_class", failure.NewError(failure.ClassUnknown, "weird", "x", nil), code.UpstreamFailed},
 		{"plain_error", errors.New("boom"), code.Internal},
 	}
 	for _, tc := range cases {
@@ -50,7 +51,7 @@ func TestFromErrorMapping(t *testing.T) {
 
 	// details 为空 → msg 回落为 acp 稳定 code。
 	var ge gerror.Error
-	_ = errors.As(code.FromError(acp.NewError(acp.ClassLimit, "busy", "", nil)), &ge)
+	_ = errors.As(code.FromError(failure.NewError(failure.ClassLimit, "busy", "", nil)), &ge)
 	if ge.Msg != "busy" {
 		t.Fatalf("空 details 应回落 code: %+v", ge)
 	}
@@ -64,8 +65,8 @@ func TestFromErrorMapping(t *testing.T) {
 func TestFromErrorNeverLosesCode(t *testing.T) {
 	inputs := []error{
 		errors.New("裸错误"),
-		acp.NewError(acp.ClassRequest, "agent_not_found", "x", nil),
-		acp.NewError(acp.ClassUnknown, "weird", "", nil),
+		failure.NewError(failure.ClassRequest, "agent_not_found", "x", nil),
+		failure.NewError(failure.ClassUnknown, "weird", "", nil),
 		code.Error(code.Conflict, "已带码"),
 		code.Errorf(code.InvalidParam, "带参 %d", 1),
 	}
@@ -127,7 +128,7 @@ func TestRegistrySelfConsistent(t *testing.T) {
 	}
 }
 
-// TestReadmeCodesMatchRegistry README「业务错误码」表必须与 pkg/code 一致。
+// TestReadmeCodesMatchRegistry README「业务错误码」表必须与 internal/core/code 一致。
 //
 // 与 TestReadmeRoutesMatchRouter 同一个思路：对外契约写在 README 里，代码是事实源，
 // 两边靠测试钉住。加码忘记写文档、或者文档里留着已删的码，都会在这里红。
@@ -160,19 +161,19 @@ func TestReadmeCodesMatchRegistry(t *testing.T) {
 	for _, c := range code.Codes() {
 		reg[c] = true
 		if !doc[c] {
-			t.Errorf("码 %d（%s）已在 pkg/code 声明但 README 未记录", c, code.Message(c))
+			t.Errorf("码 %d（%s）已在 internal/core/code 声明但 README 未记录", c, code.Message(c))
 		}
 	}
 	for c := range doc {
 		if !reg[c] {
-			t.Errorf("README 记录了口令码 %d，但 pkg/code 里没有", c)
+			t.Errorf("README 记录了口令码 %d，但 internal/core/code 里没有", c)
 		}
 	}
 }
 
-// TestFrontendBizCodesMatchRegistry 前端 BizCode 常量表必须与 pkg/code 双向一致。
+// TestFrontendBizCodesMatchRegistry 前端 BizCode 常量表必须与 internal/core/code 双向一致。
 //
-// 第三个同步点：码同时写在 pkg/code（事实源）、README（文档）、前端 response.ts（消费方）。
+// 第三个同步点：码同时写在 internal/core/code（事实源）、README（文档）、前端 response.ts（消费方）。
 // 前两者由 TestReadmeCodesMatchRegistry 钉住，前端此前只靠人工——而人工同步正是漂移的
 // 温床（前端原先只有 Success/Unauthorized 两个，其余 7 个码只能靠魔数比较）。
 // 用 Go 读 TypeScript 源码是刻意的：不引入前端测试框架，却让"改码忘记同步前端"当场变红。
@@ -217,12 +218,12 @@ func TestFrontendBizCodesMatchRegistry(t *testing.T) {
 	for _, c := range code.Codes() {
 		reg[c] = true
 		if _, ok := fe[c]; !ok {
-			t.Errorf("码 %d（%s）在 pkg/code 已声明但前端 BizCode 缺失——前端只能拿魔数比较", c, code.Message(c))
+			t.Errorf("码 %d（%s）在 internal/core/code 已声明但前端 BizCode 缺失——前端只能拿魔数比较", c, code.Message(c))
 		}
 	}
 	for n, name := range fe {
 		if !reg[n] {
-			t.Errorf("前端 BizCode.%s = %d，但 pkg/code 里没有这个码", name, n)
+			t.Errorf("前端 BizCode.%s = %d，但 internal/core/code 里没有这个码", name, n)
 		}
 	}
 }
@@ -249,7 +250,7 @@ func codeTableSection(t *testing.T, readme string) string {
 	return strings.Join(lines[start:], "\n")
 }
 
-// repoRoot 从 backend/pkg/code 上溯到仓库根（含 README.md 的那一层）。
+// repoRoot 从 backend/internal/core/code 上溯到仓库根（含 README.md 的那一层）。
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -278,7 +279,7 @@ func TestErrorRedactsSecrets(t *testing.T) {
 		t.Fatalf("裸错误出口未脱敏: %q", ge.Msg)
 	}
 	// 2) acp 分类错误 → Details 过闸
-	err := code.FromError(acp.NewError(acp.ClassService, "boom", "启动失败 KEY="+secret, nil))
+	err := code.FromError(failure.NewError(failure.ClassService, "boom", "启动失败 KEY="+secret, nil))
 	if !errors.As(err, &ge) {
 		t.Fatal("acp 错误应映射为带码错误")
 	}

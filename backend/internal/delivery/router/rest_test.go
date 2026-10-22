@@ -21,6 +21,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/delivery/router"
 	"github.com/morehao/ark-mate/internal/domain/automation"
@@ -31,7 +32,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
@@ -39,7 +40,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
@@ -176,15 +177,15 @@ func (s *stubSvc) RestErr(err error) error {
 	if errors.As(err, &ge) {
 		return err
 	}
-	var ae *acp.Error
+	var ae *failure.Error
 	if errors.As(err, &ae) {
 		code := 40001
 		switch ae.Class {
-		case acp.ClassUnsupported:
+		case failure.ClassUnsupported:
 			code = 40501
-		case acp.ClassLimit:
+		case failure.ClassLimit:
 			code = 40901
-		case acp.ClassService, acp.ClassConnection:
+		case failure.ClassService, failure.ClassConnection:
 			code = 50201
 		}
 		if ae.Code == "agent_not_found" || ae.Code == "session_not_found" || ae.Code == "runtime_not_found" || ae.Code == "mcp_not_found" {
@@ -556,7 +557,7 @@ func stubDeps(t *testing.T, svc *stubSvc) restFixture {
 	reg := dsh.Registry()
 	caps := capability.NewRegistry()
 	skills := skill.NewPlane(caps, nil)
-	mcpSecrets := mcp.NewSecrets(credential.New(reg))
+	mcpSecrets := mcp.NewSecrets(mechanism.NewCredentialStore(reg))
 	return restFixture{
 		svc:             svc,
 		plane:           sessionPlaneForRouter(),
@@ -566,7 +567,7 @@ func stubDeps(t *testing.T, svc *stubSvc) restFixture {
 		automationPlane: newAutomationPlaneForTest(),
 		execution:       runtimeconn.NewPlaneFor(reg),
 		registry:        reg,
-		mcpPlane:        mcp.NewPlane(caps, nil, mcpSecrets),
+		mcpPlane:        mcp.NewPlane(caps, nil, mcpSecrets, registry.NewMcpLiveClient()),
 		mcpSecrets:      mcpSecrets,
 		skills:          skills,
 		wsPlane:         workspace.NewPlane(),
@@ -637,7 +638,7 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 	}
 	// 快照这一格自 P4a 正文第十九刀起走**真域平面**（读模型由域折好 DTO）：这里只证
 	// "信封形状对 + 空平面如实自报不可写、来源 unavailable"，"配置过的名单原样透出"由
-	// `internal/manager` 的设置面测试用真策略/真端口钉（那边才是判定的本体）。
+	// `internal/sessionruntime/workspace_settings_test.go` 用真策略/真端口钉（那边才是判定的本体）。
 	// 空名单在 JSON 上被 omitempty 抹成缺省（前端按"没有"渲染），这里只钉状态两格。
 	if got.Writable || got.Source != "unavailable" {
 		t.Fatalf("空平面快照形状不符: %+v", got)
@@ -646,7 +647,7 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 	// PUT 自 P4a 正文第三十一刀起也走**真域平面**（`h.plane.UpdateSettings`）：这一格能证的是
 	// "领域错误经带码信封原样出去"——本用例的平面没有配置目录，写面给的就是 `settings_readonly`
 	// （code 40001）。roots 是否原样下发（含空数组 / 字段缺省 = 取消限制）由
-	// `internal/manager` 的设置面测试用**真策略 + 假端口**钉（那边才是判定的本体）。
+	// `internal/sessionruntime/workspace_settings_test.go` 用**真策略 + 假端口**钉（那边才是判定的本体）。
 	for _, body := range []string{`{"roots":["/srv/docs"]}`, `{"roots":[]}`, `{}`} {
 		env, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", body)
 		if env.Code != 40001 || !strings.Contains(env.Msg, "未启用设置持久化") {
@@ -660,7 +661,7 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 	}
 
 	// 领域拒绝的三种语义码（锁定 / 只读 / 非法目录）不再由替身伪造：`settings_readonly` 已由上面
-	// 那一组用**真平面**钉住，`settings_locked` 与 `workspace_invalid` 由 `internal/manager` 的
+	// 那一组用**真平面**钉住，`settings_locked` 与 `workspace_invalid` 由 `internal/sessionruntime` 的
 	// 设置面测试用真策略（env 锁 / 非法目录）钉——判定的本体在域里，替身只会重复它自己的假设。
 }
 
@@ -1534,7 +1535,7 @@ func TestProviderRoutes(t *testing.T) {
 func testProviderPlane(t *testing.T) *provider.Plane {
 	t.Helper()
 	reg := dsh.Registry()
-	plane := provider.NewPlane(reg, registry.NewProviderSecrets(credential.New(reg)))
+	plane := provider.NewPlane(reg, registry.NewProviderSecrets(mechanism.NewCredentialStore(reg)))
 	plane.SetProviderDir(t.TempDir())
 	return plane
 }
@@ -1603,7 +1604,7 @@ func TestCapabilityRoutes(t *testing.T) {
 //
 // 所以这里改成证"请求确实打到了域平面"：本用例的引擎里没有那份 skill 定义，域平面的自然答复是
 // `skill_not_found`（40401）——这正是真平面与替身的分界（替身会回 200 并自报成功）。
-// 启停两个方向 + 物化成功路径的**本体**由 `internal/manager/skills_test.go` 用真平面 + 真目录钉。
+// 启停两个方向 + 物化成功路径的**本体**由 `internal/sessionruntime/skills_test.go` 用真平面 + 真目录钉。
 func TestSkillToggleRoute(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(t, svc))
@@ -1642,7 +1643,8 @@ func TestSkillMaterializationRoute(t *testing.T) {
 //	· 已注册但连不上 → 50201（域真的去连了，失败码同样是域铸的）
 //
 // "探测成功 → Tool 目录整体替换 / 状态写回"那条路要一台真 MCP server（httptest），
-// 在 `internal/manager` 的 `TestProbeMcpServer` 里覆盖；替身时代这里的"成功"是测试自己编的响应，
+// 在 `internal/sessionruntime` 的 `TestProbeMcpServer`（`capabilities_test.go`）里覆盖；
+// 替身时代这里的"成功"是测试自己编的响应，
 // 它能证明的只有"控制器把 X 原样转发"，证明不了"X 本身对"。
 func TestProbeMcpServerRoute(t *testing.T) {
 	svc := &stubSvc{}
@@ -1679,11 +1681,11 @@ func TestErrorEnvelopeMapping(t *testing.T) {
 		err  error
 		code int
 	}{
-		{"not_found", acp.NewError(acp.ClassRequest, "provider_not_found", "未知供应商", nil), 40401},
-		{"request", acp.NewError(acp.ClassRequest, "invalid_provider_id", "id 非法", nil), 40001},
-		{"conflict", acp.NewError(acp.ClassLimit, "provider_exists", "已存在", nil), 40901},
-		{"unsupported", acp.NewError(acp.ClassUnsupported, "credentials_unsupported", "这套底座不支持托管凭据", nil), 40501},
-		{"upstream", acp.NewError(acp.ClassService, "provider_write_failed", "载体提交失败", nil), 50201},
+		{"not_found", failure.NewError(failure.ClassRequest, "provider_not_found", "未知供应商", nil), 40401},
+		{"request", failure.NewError(failure.ClassRequest, "invalid_provider_id", "id 非法", nil), 40001},
+		{"conflict", failure.NewError(failure.ClassLimit, "provider_exists", "已存在", nil), 40901},
+		{"unsupported", failure.NewError(failure.ClassUnsupported, "credentials_unsupported", "这套底座不支持托管凭据", nil), 40501},
+		{"upstream", failure.NewError(failure.ClassService, "provider_write_failed", "载体提交失败", nil), 50201},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1890,7 +1892,8 @@ func TestRuntimeDiagnosticsRoute(t *testing.T) {
 // 并被真的发给了 server"。回显让 id/tool/uri/name/arguments 与"空 body = 零参数"都成了
 // **能从响应里读出来**的事实。
 //
-// 与 `internal/manager` 那台假服务器同一手法而**刻意不复用**：那是包内夹具（`package manager`），
+// 与 `internal/sessionruntime` 那台假服务器同一手法而**刻意不复用**：那是包内夹具
+// （`package sessionruntime`），
 // 两个包的用例各自持有自己的夹具，比把夹具提到一个"谁都能改"的公共位置更不容易漂。
 func fakeMcpServer(t *testing.T) string {
 	t.Helper()

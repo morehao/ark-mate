@@ -17,7 +17,7 @@ import (
 
 // 本文件是 v14 工作空间登记表的**进程内集成判据**（真路由 + 真 manager + 真 sqlite 库）。
 //
-// 它与服务端语义测试（internal/manager 的 workspace_registry_test.go）分工不同：
+// 它与服务端语义测试（`internal/sessionruntime/workspace_registry_test.go`）分工不同：
 // 那边验领域规则，这边验**用户硬要求那条线是真的通了**——
 // 「选择的和创建的都要落入 db」在 HTTP 面上走一遍：POST /workspaces 创建 → GET /workspaces
 // 能读回来 → 重启（重新打开同一个库）后**仍在**且顺序一致 → DELETE 只删登记不删数据。

@@ -4,11 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // 会话级权限记忆的决策侧（与 allow_always / reject_always 选项一一对应）。
@@ -87,11 +86,11 @@ func (m *PermissionManager) SetMemoryHooks(add func(it MemoryItem),
 func alwaysKeyOf(title, kind string) string { return title + "|" + kind }
 
 // alwaysKey 由工具信息算集合键。
-func alwaysKey(t acp.ToolCallInfo) string { return alwaysKeyOf(t.Title, t.Kind) }
+func alwaysKey(t protocol.ToolCallInfo) string { return alwaysKeyOf(t.Title, t.Kind) }
 
 // AutoDecision 决定「无需征询」的快速路径：会话级记忆命中 → 直接放行/拒绝。
 // 返回 (decision, ok)：ok=false 表示需要真正挂起等待用户。
-func (m *PermissionManager) AutoDecision(sessionID string, req acp.PermissionRequest) (acp.PermissionDecision, bool) {
+func (m *PermissionManager) AutoDecision(sessionID string, req protocol.PermissionRequest) (protocol.PermissionDecision, bool) {
 	// **只给"可以被记住"的请求自动裁决**（A1 / v28）。判据：这次请求的选项里有没有 `always` 那一档。
 	//
 	// 为什么这条短路是必须的：会话级记忆记的是"这个会话里这类工具**始终**允许"。而宿主（底座）
@@ -112,26 +111,26 @@ func (m *PermissionManager) AutoDecision(sessionID string, req acp.PermissionReq
 	// "只给一次"的证据。把它当证据会让那些调用方**静默失去**记忆能力——那是把一条安全判据
 	// 变成了一个功能回退（而回退比误拦更难发现）。
 	if offersOnlyOnceOptions(req) {
-		return acp.PermissionDecision{}, false
+		return protocol.PermissionDecision{}, false
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e := m.lookupLocked(sessionID, req.ToolCall)
 	if e == nil {
-		return acp.PermissionDecision{}, false
+		return protocol.PermissionDecision{}, false
 	}
 	switch e.decision {
 	case memDecisionAllow:
-		return acp.PermissionDecision{Allowed: true, OptionID: e.optionID}, true
+		return protocol.PermissionDecision{Allowed: true, OptionID: e.optionID}, true
 	case memDecisionReject:
-		return acp.PermissionDecision{Rejected: true, OptionID: e.optionID}, true
+		return protocol.PermissionDecision{Rejected: true, OptionID: e.optionID}, true
 	default:
-		return acp.PermissionDecision{}, false
+		return protocol.PermissionDecision{}, false
 	}
 }
 
 // lookupLocked 查某会话对某工具的会话级记忆（须持锁）。
-func (m *PermissionManager) lookupLocked(sessionID string, t acp.ToolCallInfo) *memoryEntry {
+func (m *PermissionManager) lookupLocked(sessionID string, t protocol.ToolCallInfo) *memoryEntry {
 	set := m.mem[sessionID]
 	if set == nil {
 		return nil
@@ -160,7 +159,7 @@ const MemoryScopeSession = "session"
 //
 // 后者是为了**可复核**：出事时能回答"当初那句话，是在哪次具体调用上说的"。入参本身不进库
 // （它可能含密钥），只进摘要。
-func (m *PermissionManager) Remember(sessionID string, t acp.ToolCallInfo, decision, optionID string) {
+func (m *PermissionManager) Remember(sessionID string, t protocol.ToolCallInfo, decision, optionID string) {
 	m.mu.Lock()
 	set := m.mem[sessionID]
 	if set == nil {
@@ -292,7 +291,7 @@ func (m *PermissionManager) List(sessionID string) []MemoryItem {
 // 拿它判"这是不是升权请求"只会得到一条时灵时不灵的规则。选项是协议字段。
 //
 // 三档语义见 `AutoDecision` 的注释：有 always → 可记住；无 always 且有 once → 不可；都没有 → 未知。
-func offersOnlyOnceOptions(req acp.PermissionRequest) bool {
+func offersOnlyOnceOptions(req protocol.PermissionRequest) bool {
 	hasAlways, hasOnce := false, false
 	for _, o := range req.Options {
 		if strings.HasSuffix(o.Kind, "_always") {

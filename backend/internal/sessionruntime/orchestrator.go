@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"sync"
 	"time"
 
@@ -11,7 +12,6 @@ import (
 
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -61,7 +61,7 @@ type Orchestrator struct {
 
 // RunOptions 一次 RunOnce（demo）的入参。
 //
-// **没有 runtime 字段**：底座是构建期固定的（pkg/runtime/build.go），不是这次运行的入参。
+// **没有 runtime 字段**：底座是构建期固定的（internal/runtime/build.go），不是这次运行的入参。
 type RunOptions struct {
 	Prompt     string
 	Cwd        string   // 空则用当前工作目录
@@ -126,7 +126,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	})
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
 	// （session.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。
-	o.perm.SetOnResolved(func(sessionID, callID, reason string, d acp.PermissionDecision) {
+	o.perm.SetOnResolved(func(sessionID, callID, reason string, d protocol.PermissionDecision) {
 		outcome := "cancelled"
 		if d.Allowed || (d.Rejected && d.OptionID != "") {
 			outcome = "selected"

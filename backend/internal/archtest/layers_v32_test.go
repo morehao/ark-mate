@@ -17,7 +17,8 @@ import (
 //	L3  dto/*                                                     应用契约
 //	L4  service/svc*                                              用例
 //	L5  persistence/store persistence/dao infra/dsh infra/dbclient
-//	    infra/credentials infra/procreg                           基础驱动
+//	    infra/credentials infra/procreg infra/host infra/installed
+//	    infra/protocol/acp                                        基础驱动（P3-d：协议绑定下移）
 //	L6  drivers/gateway drivers/mechanism drivers/registry
 //	    drivers/runtimeconn drivers/transfer config                组合驱动
 //	L7  sessionruntime                                            执行面
@@ -78,13 +79,11 @@ var v32Layers = map[string]v32Layer{
 	// code / automation / definition / capability 十个包同为 L1、都 sameLayer、都没有自己的
 	// deny，收成一个前缀不丢任何判据（按最长前缀解析的结果逐条等价）。
 	// 其中 `definition` 承载能力定义的**值层规则**（id 合法性、patch 键语义、参数类错误出口）：
-	// 从 `drivers/mechanism/definition` 抽出来，让 `domain/*` 不必反向 import 机制层。
+	// 从 `drivers/mechanism` 抽出来，让 `domain/*` 不必反向 import 机制层。
 	"internal/core": {layer: 1, name: "core", sameLayer: true},
 	// 下面四个仍是独立 key：`runtime` 有 adapter 禁入，`infra/*` 的位置与带语义各自不同。
 	"internal/version":       {layer: 1, name: "version", sameLayer: true},
 	"internal/runtime":       {layer: 1, name: "runtime", sameLayer: true, deny: []string{"internal/infra/dsh"}},
-	"internal/infra/acp":     {layer: 1, name: "infra/acp", sameLayer: true},
-	"internal/infra/mcp":     {layer: 1, name: "infra/mcp", sameLayer: true},
 	"internal/infra/logging": {layer: 1, name: "infra/logging", sameLayer: true},
 
 	// ——— L2：领域 ———
@@ -130,7 +129,19 @@ var v32Layers = map[string]v32Layer{
 	"internal/infra/dsh":         {layer: 5, name: "infra/dsh", sameLayer: true, deny: v32AdapterDeny},
 	"internal/infra/dbclient":    {layer: 5, name: "infra/dbclient", sameLayer: true},
 	"internal/infra/credentials": {layer: 5, name: "infra/credentials", sameLayer: true},
-	"internal/infra/procreg":     {layer: 5, name: "infra/procreg", sameLayer: true},
+	// P3-d（2026-10-21）：协议绑定 `acp` 从 L1 降到 L5——内圈（domain/sessionruntime/runtime）
+	// 全部改用 `core/protocol` 平台值后，只剩执行面（runtimeconn）与装配根认识它。
+	//
+	// W3/A2（2026-10-22）：`mcp` 走同一条路——`domain/mcp` 的 live 面改成 `LiveClient` 窄端口
+	// （结果值搬进 `core/protocol`，实现体在 `drivers/registry` 注入），于是
+	// `infra/protocol/mcp` 也落到 L5。至此 `infra` 里没有任何包停在 L1（单层带）。
+	"internal/infra/protocol/acp": {layer: 5, name: "protocol/acp", sameLayer: true},
+	"internal/infra/protocol/mcp": {layer: 5, name: "protocol/mcp", sameLayer: true},
+	"internal/infra/procreg":      {layer: 5, name: "infra/procreg", sameLayer: true},
+	// P4（2026-10-21）：域内的两处 I/O 归位后新增——宿主短命进程（选目录面板）与本机可执行性探测。
+	// 都是"跟本机说话"，与 dbclient/procreg 同带。
+	"internal/infra/host":      {layer: 5, name: "infra/host", sameLayer: true},
+	"internal/infra/installed": {layer: 5, name: "infra/installed", sameLayer: true},
 
 	// ——— L6：组合驱动 ———
 	"internal/drivers/gateway": {layer: 6, name: "gateway", sameLayer: true, deny: []string{

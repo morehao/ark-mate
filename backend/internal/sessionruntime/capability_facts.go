@@ -2,8 +2,8 @@ package sessionruntime
 
 import (
 	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -95,8 +95,8 @@ func injectedMcpOfServer(m capability.McpServer) session.InjectedMcp {
 	}
 }
 
-// injectedMcpOfACP 网关条目（`acp.McpServer`）→ 域侧事实。
-func injectedMcpOfACP(m acp.McpServer) session.InjectedMcp {
+// injectedMcpOfACP 网关条目（`protocol.McpServer`）→ 域侧事实。
+func injectedMcpOfACP(m protocol.McpServer) session.InjectedMcp {
 	return session.InjectedMcp{
 		ID: m.Name, Transport: m.Transport,
 		Command: m.Command, Args: append([]string(nil), m.Args...), URL: m.URL,

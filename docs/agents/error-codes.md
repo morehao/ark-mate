@@ -7,4 +7,4 @@
 - 编号沿用既有 5 位 HTTP 语义码（`40000/40001/40101/40401/40501/40901/50000/50001/50201`），**不按 ark-iam 的 6 位领域段重编**——它们已经是对外契约。ark-iam 借的是结构（`code.go` 注册表 + 按领域分文件），不是编号。
 - `50000` 是**唯一兜底码**：任何未归类 error 经 `code.FromError` 出口都落成它。历史上有 `1`（控制器手写）与 `50000`（领域层）两个泛化码，已统一为 `50000`。
 - **控制器错误出口一律带码**：`gincontext.Fail(c, code.FromError(err))` 或 `code.Error(code.X, …)`，不得透传裸 `err`——gincontext 对不带 `gerror.Error` 的错误填 `code: -1`，客户端拿不到可判定的码。由 `TestControllerErrorExitsCarryCode` 静态守卫。
-- acp 分类 → 码的映射表在 `internal/core/code/acp.go`（不在 `internal/infra/acp`：acp 是可复用的 ACP 客户端，不该知道 ark-mate 的信封编号）。`session_not_found`/`runtime_not_found`/`mcp_not_found`/`provider_not_found` 从 `ClassRequest` 提档到 `40401`（v19 起 `agent_not_found` 随 agent 概念删除，见「一个东西一个词」那节）。
+- acp 分类 → 码的映射表在 `internal/core/code/acp.go`（不在 `internal/infra/protocol/acp`：acp 是可复用的 ACP 客户端，不该知道 ark-mate 的信封编号）。`session_not_found`/`runtime_not_found`/`mcp_not_found`/`provider_not_found` 从 `ClassRequest` 提档到 `40401`（v19 起 `agent_not_found` 随 agent 概念删除，见「一个东西一个词」那节）。

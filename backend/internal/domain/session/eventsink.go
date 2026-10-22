@@ -4,13 +4,13 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/golib/glog"
 )
 
 // ——— ACP 事件的**出口**（P4a 正文第五十五刀：从 `internal/manager` 搬入）———
 //
-// 底座回传的归一化事件（`acp.Event`）在这里翻译成平台事件（`Bus*`）并发布：
+// 底座回传的归一化事件（`protocol.Event`）在这里翻译成平台事件（`Bus*`）并发布：
 //
 //	① 双 id 解析：底层事件只带原生 session id，先经 `Handles.ResolveProvider` 换成平台 uuid；
 //	   断连后迟到事件（映射已清）丢弃并留 debug——不落进孤儿聚合。
@@ -20,8 +20,8 @@ import (
 // 纯翻译 + 两个旁路写口（工具记忆 / 模型目录缓存），不持有轮次状态——轮次状态在 `Runner`。
 
 // EventSink 把 acp 归一化事件转为域事件进 eventbus（agg = 平台会话 uuid）。
-func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
-	return func(ev acp.Event) {
+func (r *Runner) EventSink(runtimeID string) func(protocol.Event) {
+	return func(ev protocol.Event) {
 		if ev.SessionID == "" {
 			return
 		}
@@ -36,28 +36,28 @@ func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
 		typ := ""
 		var payload any
 		switch ev.Kind {
-		case acp.KindMessage:
+		case protocol.KindMessage:
 			typ = BusMessage
 			// 首个文本增量到 ⇒ 「正在收模型输出」。连发由域里的去重键吞掉（同状态同 tool 只留第一帧）。
 			r.RunStatusFor(ev.SessionID, RunStatusModelStreaming, RunStatusOpts{})
-			if d, ok := ev.Payload.(acp.MessageDelta); ok {
+			if d, ok := ev.Payload.(protocol.MessageDelta); ok {
 				payload = map[string]any{"session_id": ev.SessionID, "runtime": runtimeID, "text": d.Text}
 				if d.MessageID != "" {
 					payload.(map[string]any)["msg_id"] = d.MessageID
 				}
 			}
-		case acp.KindThought:
+		case protocol.KindThought:
 			typ = BusThought
 			r.RunStatusFor(ev.SessionID, RunStatusModelStreaming, RunStatusOpts{})
-			if d, ok := ev.Payload.(acp.ThoughtDelta); ok {
+			if d, ok := ev.Payload.(protocol.ThoughtDelta); ok {
 				payload = map[string]any{"session_id": ev.SessionID, "runtime": runtimeID, "text": d.Text}
 				if d.MessageID != "" {
 					payload.(map[string]any)["msg_id"] = d.MessageID
 				}
 			}
-		case acp.KindToolCall:
+		case protocol.KindToolCall:
 			typ = BusToolCall
-			if d, ok := ev.Payload.(acp.ToolCallInfo); ok {
+			if d, ok := ev.Payload.(protocol.ToolCallInfo); ok {
 				// 权限请求只带 toolCallId（dsh 的 wire 形状）：把详情留到权限裁决那一刻。
 				r.rememberToolCall(d)
 				// 工具过程（S1）：带 `tool_name` —— 头栏那句「正在执行 Bash」正是它（Q6 选①）。
@@ -67,12 +67,12 @@ func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
 				})
 				payload = toolPayload(ev.SessionID, runtimeID, d)
 			}
-		case acp.KindToolUpdate:
+		case protocol.KindToolUpdate:
 			typ = BusToolUpdate
-			if d, ok := ev.Payload.(acp.ToolCallInfo); ok {
+			if d, ok := ev.Payload.(protocol.ToolCallInfo); ok {
 				// 终态 update 可能只带 status：先合并（不带 input 不会抹掉命令行），再按终态删除。
 				r.rememberToolCall(d)
-				if d.Status == acp.ToolStatusCompleted || d.Status == acp.ToolStatusFailed {
+				if d.Status == protocol.ToolStatusCompleted || d.Status == protocol.ToolStatusFailed {
 					r.forgetToolCall(d.ID)
 				}
 				p := toolPayload(ev.SessionID, runtimeID, d)
@@ -92,12 +92,12 @@ func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
 				}
 				payload = p
 			}
-		case acp.KindUserMessage:
+		case protocol.KindUserMessage:
 			// 用户消息以宿主侧 Prompt 提交时发布的 BusUserMessage（Runner.Prompt）为唯一来源；
 			// agent 回传的 user_message 只是会话镜像（normalizeUpdate 归一），若再转发会造成
 			// 同一条用户输入在流/历史里双入。这里丢弃镜像，不再发布。
 			glog.Debugw(context.Background(), "skip agent-echoed user_message (host publishes user input)", "session", ev.SessionID)
-		case acp.KindUsage:
+		case protocol.KindUsage:
 			typ = BusUsage
 			// ev.SessionID 已在上方解析为平台会话 uuid（cid）。
 			p := map[string]any{"session_id": ev.SessionID, "runtime": runtimeID}
@@ -109,13 +109,13 @@ func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
 				r.RecordUsage(ev.SessionID, d)
 			}
 			payload = p
-		case acp.KindPermission:
+		case protocol.KindPermission:
 			typ = BusPermission
 			payload = ev.Payload
-		case acp.KindConfigOptions:
+		case protocol.KindConfigOptions:
 			// 运行时主动推送全量配置项（dsh 在 provider 拓扑变化时推）：
 			// 刷新平台目录缓存并转发给前端，模型下拉与「当前模型」无需轮询即可保持一致。
-			if d, ok := ev.Payload.(acp.ConfigOptionsInfo); ok {
+			if d, ok := ev.Payload.(protocol.ConfigOptionsInfo); ok {
 				if d.SessionID != "" && r.catalog != nil {
 					r.catalog.PutConfigOptions(runtimeID, d.Options)
 				}
@@ -126,11 +126,11 @@ func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
 					"options":    d.Options,
 				}
 			}
-		case acp.KindCommands:
+		case protocol.KindCommands:
 			// 运行时主动通告它的可用命令（**这是可选能力**：有的底座的 ACP 面根本不含命令，故永不产生本事件）。
 			// 纯转发：平台不缓存、不合并、不做会话快照——会话重开时本事件经 since_seq
 			// 全量回放即可重建，故无需 REST 读端点（ADR-17）。
-			if d, ok := ev.Payload.(acp.CommandsInfo); ok {
+			if d, ok := ev.Payload.(protocol.CommandsInfo); ok {
 				typ = BusCommands
 				payload = map[string]any{
 					"session_id": ev.SessionID,
@@ -146,7 +146,7 @@ func (r *Runner) EventSink(runtimeID string) func(acp.Event) {
 }
 
 // rememberToolCall / forgetToolCall 是工具记忆端口的 nil 安全包装（未装配时 no-op）。
-func (r *Runner) rememberToolCall(info acp.ToolCallInfo) {
+func (r *Runner) rememberToolCall(info protocol.ToolCallInfo) {
 	if r.toolMemory != nil {
 		r.toolMemory.Remember(info)
 	}
@@ -188,7 +188,7 @@ var ToolPayloadKeys = []string{
 //
 // `fail_reason` / `biz_code` 由调用方按底座的签名表补（见 `ToolPayloadFailReason`）：
 // 它们**不是** ACP 字段，而是平台从结果正文里读出来的归类。
-func toolPayload(sessionID, runtimeID string, d acp.ToolCallInfo) map[string]any {
+func toolPayload(sessionID, runtimeID string, d protocol.ToolCallInfo) map[string]any {
 	p := map[string]any{
 		ToolPayloadSessionID: sessionID, ToolPayloadRuntime: runtimeID,
 		ToolPayloadToolCallID: d.ID, ToolPayloadTitle: d.Title, ToolPayloadStatus: d.Status,
@@ -209,8 +209,8 @@ func toolPayload(sessionID, runtimeID string, d acp.ToolCallInfo) map[string]any
 //
 // `runID` 是这一轮的身份（v22 起必带）：终态物化要靠它找到开轮行——从 `runs` 里"猜最近一条
 // running"只在单会话串行下碰巧成立，而猜错的代价是这一轮的事件窗口算到别的轮上。
-func (r *Runner) PublishError(sessionID, runID string, err error, cli *acp.Client) {
-	ae := acp.Classify(err)
+func (r *Runner) PublishError(sessionID, runID string, err error, cli protocol.Conn) {
+	ae := classifyFailure(err)
 	tail := ae.StderrTail
 	if len(tail) == 0 && cli != nil && r.diagnostics != nil {
 		tail = r.diagnostics.StderrTail(cli)

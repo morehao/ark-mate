@@ -9,7 +9,7 @@ const (
 	// v8 落地时它叫 `capability_revisions`，v16 改成现在的名字（设计
 	// `.dsh/docs/specs/2026-10-11-data-model-v16-design.md` D3）。改名理由是**一个词被三种
 	// 范围占用**，而这一种的覆盖范围与另外两种**直接冲突**：
-	//   - `ctrcapability` / `dtocapability` / `pkg/capability` / `mate capability migrate`
+	//   - `ctrcapability` / `dtocapability` / `internal/core/capability` / `mate capability migrate`
 	//     的 capability = **skill + mcp**（+ tool 目录）；
 	//   - `GET /capabilities` 的 `CapabilityScope` / `session.capability_json` 的 capability
 	//     = **底座能力声明面**（运行期事实）；
@@ -17,7 +17,7 @@ const (
 	//     其中 agent/automation/provider/model 四种根本不在 `ctrcapability` 的管辖内。
 	//
 	// `definition` 是本仓**既有**词（`store.DefinitionImportItem`、`validDefinitionID`、
-	// `pkg/capability/definition.go`），不需要新造。**`kind` 列名刻意不动**：列名活在表内
+	// `internal/core/capability/definition.go`），不需要新造。**`kind` 列名刻意不动**：列名活在表内
 	// 名字空间，表名已经给出作用域；需要带表名前缀的是索引名（与表名同一名字空间），不是列名
 	// （设计 D2 与 D3 是同一条逻辑的两面）。
 	TableNameDefinitionRevision = "definition_revisions"

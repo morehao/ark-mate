@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属与层表路径存在性）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，2026-10-21 顶层角色 4 条为 176 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，2026-10-22 平台值包对偶守卫为 177 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性与平台值包守卫）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -18,7 +18,7 @@
 
 ## 当前判据清单
 
-- **层表守卫（v3.2）**：`layers_v32_test.go` 用一张**层号表**（`v32Layers`：L0 persistence/model → L1 值层（core/object·redact·identity·resource·credential·eventbus·code·automation·definition·capability + version·runtime·infra/acp·mcp·logging）→ L2 domain → L3 dto → L4 service → L5 persistence/store·persistence/dao·infra → L6 drivers/{gateway,mechanism,registry,runtimeconn,transfer}·config → L7 sessionruntime → L8 delivery/controller·delivery/middleware → L9 delivery/router·bootstrap/{assembly,app,cliops,cli,maintenance}）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，除非该层显式 `sameLayer: true`（`service` **永不** `sameLayer`，它 `deny` 自己的前缀，逼"svc 包之间零互相 import"）；③ 每层可带 `deny` 精确排除个别内层包（如 `cliops ↛ store`）。违规是**硬失败**，例外清单 `v32Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。
+- **层表守卫（v3.2）**：`layers_v32_test.go` 用一张**层号表**（`v32Layers`：L0 persistence/model → L1 值层（core/object·redact·identity·resource·credential·eventbus·code·automation·definition·capability + version·runtime·core/protocol·infra/logging——两个协议绑定 `infra/protocol/{acp,mcp}` 已分别于 P3-d / W3 降到 L5，`infra/logging` 是 L1 唯一剩下的条目，且是 `infra` 角色卡里具名登记的例外）→ L2 domain → L3 dto → L4 service → L5 persistence/store·persistence/dao·infra → L6 drivers/{gateway,mechanism,registry,runtimeconn,transfer}·config → L7 sessionruntime → L8 delivery/controller·delivery/middleware → L9 delivery/router·bootstrap/{assembly,app,cliops,cli,maintenance}）替代原先 160+ 条"某包不得 import 某包"的名字扫描：每个包**最长前缀**归到一层，规则只有三条——① 只能向内 import（目标层号 ≤ 源层号）；② 同层默认不互链，除非该层显式 `sameLayer: true`（`service` **永不** `sameLayer`，它 `deny` 自己的前缀，逼"svc 包之间零互相 import"）；③ 每层可带 `deny` 精确排除个别内层包（如 `cliops ↛ store`）。违规是**硬失败**，例外清单 `v32Exceptions` 必须为空且**双向**（降到 0 的例外不删也判红）。
   `layers_scan_test.go` 留着扫描器与三条专项判据：`runtime` 不得 import adapter、只有 `assembly`（生产代码）可以 import `internal/infra/dsh`、adapter 不得 import 应用内核。
   同目录 `layers_paths_test.go` 的 `TestLayerTablePathsResolve`：`v32Layers` 的 key、每个 key 的 `deny`、`v32AdapterDeny` 必须指向真实存在的目录；挡的是“搬迁时 deny 漏改、守卫静默放行”的失效。
 
@@ -89,9 +89,17 @@
 `tz_offset?: number` / api 必须 `p.set('tz_offset'` / 页面必须 `tz_offset: -new Date().getTimezoneOffset()`。
 反证（实跑）：存储层改回 `UTC()` 分桶 → 红；抽掉 api 的 `p.set('tz_offset'` → 红。
 
-- 再加 **2 条「定义导入/导出归属」守卫**（`transfer_ownership_test.go`，2026-10-20：`internal/capabilityio` 拆成 `internal/drivers/transfer` + `registry` 的两个窄端口适配体。拆之前同一个概念分居两包——capability 的导入留在 `mechanism/definition`，automation/provider 的在 `capabilityio`——而包名又和 `internal/core/capability` 只差后缀，看目录的人无法判断该 import 哪个。两种静默失效各有一条判据：① **第二个家**：六入口（3 域 × import/export）与域无关框架（`ImportDefinitionRows` / `CountDryRun` / `WriteExportRows` / Options / Stats）必须全在 `internal/drivers/transfer`，且 `mechanism/definition` 与 `domain/**` 零命中，旧目录 `internal/capabilityio` 不得复活；判据 fail-closed（transfer 目录扫不到 Go 文件即 Fatal）。② **职责回流**：`automation.DefinitionFiles` / `provider.Secrets` 的编译期断言必须留在 `internal/drivers/registry`（装配点，同时看得见域端口与机制实现），`internal/drivers/transfer` 不得出现这两个端口名。反证（实跑 5 条，均红）：把 `ExportAutomationDir` 改名 → ①红；在 `mechanism/definition` 加 `func ImportProviderFile()` 桩 → ①红；`mkdir internal/capabilityio` → ①红；把 registry 的编译期断言改成 `var _ = ...` → ②红；把 `secrets.go` 复制回 `transfer` → ②红。）
+- 再加 **2 条「定义导入/导出归属」守卫**（`transfer_ownership_test.go`，2026-10-20：`internal/capabilityio` 拆成 `internal/drivers/transfer` + `registry` 的两个窄端口适配体。拆之前同一个概念分居两包——capability 的导入留在 `mechanism`，automation/provider 的在 `capabilityio`——而包名又和 `internal/core/capability` 只差后缀，看目录的人无法判断该 import 哪个。两种静默失效各有一条判据：① **第二个家**：六入口（3 域 × import/export）与域无关框架（`ImportDefinitionRows` / `CountDryRun` / `WriteExportRows` / Options / Stats）必须全在 `internal/drivers/transfer`，且 `mechanism` 与 `domain/**` 零命中，旧目录 `internal/capabilityio` 不得复活；判据 fail-closed（transfer 目录扫不到 Go 文件即 Fatal）。② **职责回流**：`automation.DefinitionFiles` / `provider.Secrets` 的编译期断言必须留在 `internal/drivers/registry`（装配点，同时看得见域端口与机制实现），`internal/drivers/transfer` 不得出现这两个端口名。反证（实跑 5 条，均红）：把 `ExportAutomationDir` 改名 → ①红；在 `mechanism` 加 `func ImportProviderFile()` 桩 → ①红；`mkdir internal/capabilityio` → ①红；把 registry 的编译期断言改成 `var _ = ...` → ②红；把 `secrets.go` 复制回 `transfer` → ②红。）
 
-**共 172 条**——加守卫时记得同步这句话。
+- **5 条「顶层目录角色」守卫**（P0，2026-10-21 立 4 条，2026-10-22 加 1 条，`layer_roles_test.go`；口径见 `.dsh/docs/specs/2026-10-21-backend-layer-roles-design.md` §2.2）。层表管**方向**，这五条管**角色**：同样落在合法方向上的边也可能不该存在——`core → infra` 就是典型（L1 同带允许，但"最内层的纯词汇"认识"外部协议"是角色错误）：
+  ① `TestCoreStaysFreeOfInfra`：`core` 不得 import `internal/infra/*`。**P1 已清零**：原先 3 个包（`automation`/`code`/`definition`）只为取通用错误分类学（`Error`/`Class*`/`NewError`/`As`，与 ACP 无关，只是住在 `infra/acp/errors.go`）而越界；那套词汇 2026-10-21 迁到 `internal/core/failure`（`code → failure` 单向），登记表 `coreInfraImports` 现为空 = **硬判据**：`core` 下任何一个包 import `infra/*` 即红。
+  ② `TestInnerCircleAvoidsInfraProtocol`：**内圈三目录**（`domain` + `sessionruntime` + `runtime`，`innerCircleDirs` 单点给出）不得 import `infra` 的协议/进程/句柄子包，白名单只有 `infra/logging`（日志是横切关注点）。2026-10-22（W4）把扫描面从 `domain` 扩到三个：`sessionruntime`（L7 运行期编排）与 `runtime`（L1 底座契约）同样不该认识外部实现，而它们的越界只会比域更晚被发现（表现为"会话行为诡异"而不是某个接口报错）；两者扩面时**已零命中**，所以扩的是**回流防护**而不是记账（fail-closed：三个目录各自扫到 0 个包即 Fatal）。登记表 `innerInfraImports` 于 2026-10-22（W3/A2）清零后 = **硬判据**：最后一条 `domain/mcp → infra/protocol/mcp` 随 MCP 客户端端口化消失——域声明 `LiveClient` 窄端口（方法签名用 `protocol.McpServer` + `protocol.Mcp*` 结果值），实现体在 `drivers/registry` 注入。收口沿革：错误分类学 → `core/failure`（P1）、载荷 → `core/protocol`（P3-a/P3-b）、连接与会话句柄 → `protocol.Conn`/`protocol.Session`（P3-c）、MCP 客户端 → `LiveClient`（A2）。
+  ③ `TestForeignSDKStaysInInfra`：第三方协议与驱动 SDK（`coder/acp-go-sdk`、`coder/websocket`、`gin`、`gorm.io/gorm`、`database/sql`）只许出现在登记的顶层目录（`infra` / `delivery` / `persistence`）。**今天零越界**，是硬判据；每个 SDK 必须全仓找得到至少一处，找不到即 Fatal（换库时不同步这张表就会空转）。
+  ④ `TestTopLevelDirsHaveRoles`：`internal/` 下每个顶层目录必须在 `topLevelRoles` 里登记**角色 + 允许的层带**，且双向（登记了却不存在也红）；每个生产包必须落在该目录声明的带内。`infra` 自 2026-10-22（W3）起收成**单层带 `{5}`**，带号由 `{1, 5}` 改小即收紧；唯一例外是 `bandExceptions` 里**具名登记**的 `infra/logging → L1`（横切日志出口），例外同样双向（那个包不在那一带/已删 → 红），所以"往 L1 再塞一个 infra 子包"不会静默通过。
+  ⑤ `TestProtocolValuesStayFreeOfInfra`（2026-10-22，W4）：**平台值包** `core/protocol` 不得 import `internal/infra/*`。它与 ① 是**对偶**的：① 管 `core` 整体（今天成立，但只是因为还没人往平台值包里塞协议依赖），这条把"值包"单独钉死——一旦有人在 `core/protocol` 里 `import infra/protocol/mcp`（"反正就是转个类型"），`core → infra` 会**从后门长回来**，而层表只会说"L1 同带，合法"。fail-closed：扫不到包即 Fatal（`protocolValuesDir` 改名/搬迁要同步）。
+  反证（实跑六条，均红后复原）：往 `core/capability` 加 `infra/acp` import → ①红；往 `domain/identity` 加 `infra/mcp` → ②红；往 `sessionruntime` 加 `infra/protocol/mcp`、往 `runtime` 加 `infra/credentials` → ②红（扩面后的两个新面）；在 `service/svcusage` import `gin` → ③红；新建未登记的 `internal/foo` → ④红；往 `core/protocol` 加 `infra/logging` import → ⑤红（同时 ① 也红）。
+
+**共 177 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/credential"
-	mechcred "github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
@@ -78,7 +78,7 @@ func providerImport(args []string) {
 	// 导入把密钥写进了库 → 顺手把托管镜像按库对账（幂等合并；失败只告警，不改变导入结论：
 	// 库已经写成功了，镜像是可重建副本）。
 	if !*dryRun {
-		if changed, sErr := mechcred.SyncCredentialMirrorFromStore(context.Background(), st, cfg.HomeDir, "mate provider import"); sErr != nil {
+		if changed, sErr := mechanism.SyncCredentialMirrorFromStore(context.Background(), st, cfg.HomeDir, "mate provider import"); sErr != nil {
 			fmt.Fprintf(os.Stderr, "  ⚠ 托管凭据文档未按库对账（库是权威、键不受影响）：%v\n", sErr)
 		} else if changed > 0 {
 			fmt.Printf("  托管凭据文档已按库对账：%d 条（%s）\n", changed, credential.CredentialsPath(cfg.HomeDir))

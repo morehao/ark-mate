@@ -15,9 +15,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
@@ -261,7 +261,7 @@ func TestGenerationMigration(t *testing.T) {
 	// 这里断言的是**白名单过滤**，故只数非网关的那几条。
 	direct := make([]any, 0, len(servers))
 	for _, s := range servers {
-		if b, err := json.Marshal(s); err == nil && strings.Contains(string(b), mcp.GatewayServerName) {
+		if b, err := json.Marshal(s); err == nil && strings.Contains(string(b), protocol.GatewayServerName) {
 			continue
 		}
 		direct = append(direct, s)
@@ -328,7 +328,7 @@ func TestGenerationMigrationDefersWhileBusy(t *testing.T) {
 	registered := make(chan struct{})
 	go func() {
 		r.orch.elic.RegisterAndWait(regCtx, convID,
-			acp.ElicitationRequest{Mode: "form", Message: "probe"},
+			protocol.ElicitationRequest{Mode: "form", Message: "probe"},
 			func(interaction.ElicitationItem) { close(registered) })
 	}()
 	<-registered
@@ -454,7 +454,7 @@ func TestGenerationPool(t *testing.T) {
 	if err == nil {
 		t.Fatal("达上限且都有引用时应拒绝新建代际")
 	}
-	ae, ok := acp.As(err)
+	ae, ok := failure.As(err)
 	if !ok || ae.Code != "generation_limit_reached" {
 		t.Fatalf("错误应带码 generation_limit_reached，got %v", err)
 	}

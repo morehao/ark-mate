@@ -25,13 +25,12 @@ package sessionruntime
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"os"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/infra/acp"
-	"github.com/morehao/ark-mate/internal/infra/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -42,7 +41,7 @@ type mcpInjectionPlan struct {
 	// **远程端点 runtime** 例外——它们没有网关条目，仍按自己声明的传输直连注入（见 planMcpInjection）。
 	Direct []capability.McpServer
 	// Gateway 平台网关条目（nil = 不需要）。远程 server **全部**由它代连，故这里只有一条。
-	Gateway *acp.McpServer
+	Gateway *protocol.McpServer
 	// Remote 交由网关代连的远程定义——**只用于日志/诊断**：它绝不进指纹，也不进条目。
 	// （任何"把远程定义塞进指纹"的改动都会让"加一个远程 server 换代际"回潮，是 M7 的头号禁忌。）
 	Remote []capability.McpServer
@@ -55,7 +54,7 @@ func (p mcpInjectionPlan) empty() bool {
 
 // planMcpInjection 算出该 runtime 的 MCP 注入计划（唯一实现：注入面与指纹共用）。
 //
-// 与 `mcpSelectionFor`（白名单优先级那一段）的关系：选择语义在 `pkg/capability.SelectMcpServers`，
+// 与 `mcpSelectionFor`（白名单优先级那一段）的关系：选择语义在 `internal/core/capability.SelectMcpServers`，
 // 这里负责**按传输分派**——直连那一支只收 stdio，远程那一支收远程三种。开关关掉（`mcp_gateway=off`）
 // 时回到老路：远程 server 按该 runtime 声明的承载能力直连注入（能承载才注入，承载不了就跳过）。
 func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySelection) mcpInjectionPlan {
@@ -125,30 +124,30 @@ func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySele
 // 已知代价（写下来免得被当成 bug）：`go run` 起的开发进程路径是临时目录、每次重启都不同，
 // 于是**钉住会话**的指纹会随之变化（缺省路径指纹恒空，不受影响）；打包/安装形态下路径稳定。
 //
-// `Env` 里带的是**凭据 cwd**（`mcp.GatewayCredCwdEnv`，不是密钥）：网关是底座 spawn 的子进程，
+// `Env` 里带的是**凭据 cwd**（`protocol.GatewayCredCwdEnv`，不是密钥）：网关是底座 spawn 的子进程，
 // 它的 cwd 是底座给的（会话工作区），而 `<cwd>/.env` 那一层的语义是"用户启动 `mate serve` 的
 // 目录"——没有这个变量，同一个引用会在两个进程里解析出不同的值。放 `Env` 而不是 `Args`：`Args`
 // 整体进指纹（换个目录启动就换代际），而 `Env` 只把**键名**入指纹（键名恒定、值不入）。
-func (s *Service) gatewayEntry(runtimeID string, sel *session.CapabilitySelection) (acp.McpServer, error) {
+func (s *Service) gatewayEntry(runtimeID string, sel *session.CapabilitySelection) (protocol.McpServer, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return acp.McpServer{}, fmt.Errorf("取自身可执行文件路径失败：%w", err)
+		return protocol.McpServer{}, fmt.Errorf("取自身可执行文件路径失败：%w", err)
 	}
-	scope := mcp.GatewayScope{RuntimeID: runtimeID}
+	scope := protocol.GatewayScope{RuntimeID: runtimeID}
 	if sel != nil {
 		// 三态原样传递：nil = 该会话没钉（网关按全量）；`[]` = 一个远程都不要。
 		scope.McpsPinned = sel.Mcps
 	}
-	entry := acp.McpServer{
-		Name:      mcp.GatewayServerName,
+	entry := protocol.McpServer{
+		Name:      protocol.GatewayServerName,
 		Transport: capability.TransportStdio,
 		Command:   exe,
-		Args:      mcp.GatewayBridgeArgs(scope),
+		Args:      protocol.GatewayBridgeArgs(scope),
 	}
 	// 空 = 装配期没登记（测试、`mate demo` 这类不经装配的入口）：**不带这个键**，让网关侧
 	// 明确知道"核心没交 cwd"，回落并 WARN——不臆造一个 `os.Getwd()` 冒充核心的答案。
 	if cwd := s.planes.Credentials.Cwd(); cwd != "" {
-		entry.Env = map[string]string{mcp.GatewayCredCwdEnv: cwd}
+		entry.Env = map[string]string{protocol.GatewayCredCwdEnv: cwd}
 	}
 	return entry, nil
 }

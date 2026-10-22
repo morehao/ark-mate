@@ -1,6 +1,6 @@
 // Package svcruntime 定义**底座身份与诊断**面的服务端口（ADR-2：provider/模型目录已拆出）。
 //
-// **没有 runtime 概览**：底座由构建期固定（backend/pkg/runtime/build.go），用户面不存在
+// **没有 runtime 概览**：底座由构建期固定（backend/internal/runtime/build.go），用户面不存在
 // "列出有哪些底座"的读面（`GET /runtimes` 已随 agent 候选面一并下线）。
 package svcruntime
 
@@ -45,7 +45,7 @@ func (r *Runtime) RuntimeDiagnostics(ctx context.Context) (*dtoruntime.Diagnosti
 type RuntimeSvc interface {
 	// RuntimeIdentity 构建期固定的底座身份（`/meta` 的 `runtime` 段：id/name/version）。
 	//
-	// 它是**这个二进制的属性**（`-X pkg/runtime.BuildRuntime=<id>`，不注入 = dsh），所以没有参数、
+	// 它是**这个二进制的属性**（`-X internal/runtime.BuildRuntime=<id>`，不注入 = dsh），所以没有参数、
 	// 也不会失败：id 恒为 `runtime.SelectedRuntime()`，name 取注册表里的展示名（取不到回落 id），
 	// version 取不到即空串（核心不探测本机安装）。
 	RuntimeIdentity(ctx context.Context) dtoruntime.IdentityResp

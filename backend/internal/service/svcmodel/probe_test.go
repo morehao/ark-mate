@@ -25,7 +25,7 @@ import (
 //
 // 真接链路的那半（建档 → 密钥真值 → `providerEnvFor` 登记动态密钥 → 自检文案不带真值）
 // **刻意留在 manager**：它验的是"装配期登记过的密钥在用例层也被遮住"，那要真的凭据面与域平面。
-// 见 `internal/manager/provider_probe_test.go`。两半分工写在两处，改动时别只改一边。
+// 见 `internal/sessionruntime/provider_secret_redact_test.go`。两半分工写在两处，改动时别只改一边。
 
 // fakeProbePorts 用例层声明的供应商读面（ADR-6）的最小实现。
 type fakeProbePorts struct {
@@ -209,7 +209,7 @@ func probeUpstreamAgainst(t *testing.T, url, protocol, key string) dtomodel.Prov
 // 这一条挡的是"错误文本恰好把 URL/头拼了进去"这类泄漏。自检段**自己**要过这道闸门的原因：
 // 动态密钥的登记发生在 `providerEnvFor`（注入子进程那条路），而自检是一个**不注入**也能被
 // 触发的读面——面板上点一下就会走。管理器侧的端到端版本（真的建档 → 真的登记 → 真的自检）
-// 在 `internal/manager/provider_probe_test.go`，两条一起才覆盖"闸门在、且这条路上真的经过它"。
+// 在 `internal/sessionruntime/provider_secret_redact_test.go`，两条一起才覆盖"闸门在、且这条路上真的经过它"。
 func TestProbeRedactsSecretInFailureText(t *testing.T) {
 	const secret = "sk-super-secret-value-1234567890"
 	unregister := redact.RegisterDynamicSecret(secret)

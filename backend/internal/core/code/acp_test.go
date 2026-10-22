@@ -1,19 +1,18 @@
 package code
 
 import (
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"strings"
 	"testing"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // TestFromACPCarriesStderrTail 底座起不来时，信封文案要带 stderr 尾巴（诊断可用性）。
 func TestFromACPCarriesStderrTail(t *testing.T) {
-	ae := acp.NewError(acp.ClassConnection, "process_exited", "agent 进程异常退出", nil)
+	ae := failure.NewError(failure.ClassConnection, "process_exited", "agent 进程异常退出", nil)
 	ae.StderrTail = []string{"dsh: .env sets DSH_VERSION", "  exit 3  "}
 	got, ok := fromACP(ae)
 	if !ok {
-		t.Fatal("fromACP 应命中 acp.Error")
+		t.Fatal("fromACP 应命中 failure.Error")
 	}
 	if got.Code != BadGateway {
 		t.Fatalf("ClassConnection 应映射为 %d，got %d", BadGateway, got.Code)
@@ -23,7 +22,7 @@ func TestFromACPCarriesStderrTail(t *testing.T) {
 		t.Fatalf("文案不符:\n got %q\nwant %q", got.Msg, want)
 	}
 	// 没有尾巴时不得凭空多出一段（既有文案保持逐字不变）。
-	plain := acp.NewError(acp.ClassRequest, "invalid_params", "参数不对", nil)
+	plain := failure.NewError(failure.ClassRequest, "invalid_params", "参数不对", nil)
 	if p, _ := fromACP(plain); p.Msg != "参数不对" {
 		t.Fatalf("无尾巴时文案应原样: %q", p.Msg)
 	}
@@ -66,20 +65,20 @@ func TestStderrMsgSuffix(t *testing.T) {
 func TestFromACPProviderModelCodesFrozen(t *testing.T) {
 	cases := []struct {
 		name  string
-		class acp.Class
+		class failure.Class
 		want  int
 	}{
-		{"provider_exists", acp.ClassLimit, Conflict},
-		{"provider_in_use", acp.ClassLimit, Conflict},
-		{"model_exists", acp.ClassLimit, Conflict},
-		{"model_not_found", acp.ClassRequest, NotFound},
-		{"provider_not_found", acp.ClassRequest, NotFound},
-		{"invalid_provider_id", acp.ClassRequest, InvalidRequest},
-		{"definition_changed", acp.ClassLimit, Conflict},
-		{"resource_sync_failed", acp.ClassService, UpstreamFailed},
+		{"provider_exists", failure.ClassLimit, Conflict},
+		{"provider_in_use", failure.ClassLimit, Conflict},
+		{"model_exists", failure.ClassLimit, Conflict},
+		{"model_not_found", failure.ClassRequest, NotFound},
+		{"provider_not_found", failure.ClassRequest, NotFound},
+		{"invalid_provider_id", failure.ClassRequest, InvalidRequest},
+		{"definition_changed", failure.ClassLimit, Conflict},
+		{"resource_sync_failed", failure.ClassService, UpstreamFailed},
 	}
 	for _, tc := range cases {
-		got, ok := fromACP(acp.NewError(tc.class, tc.name, "细节", nil))
+		got, ok := fromACP(failure.NewError(tc.class, tc.name, "细节", nil))
 		if !ok {
 			t.Fatalf("%s: fromACP 应命中", tc.name)
 		}
@@ -92,7 +91,7 @@ func TestFromACPProviderModelCodesFrozen(t *testing.T) {
 		t.Fatalf("例外表新增了条目（%v）：每一条都要有"+"这里写的那个量级"+"的理由", classCodeOverrides)
 	}
 	// 未登记的名字仍按 Class 兜底（resource_sync_failed 之外的服务侧错误仍是 50201）。
-	if got, _ := fromACP(acp.NewError(acp.ClassService, "backend_boom", "x", nil)); got.Code != BadGateway {
+	if got, _ := fromACP(failure.NewError(failure.ClassService, "backend_boom", "x", nil)); got.Code != BadGateway {
 		t.Fatalf("ClassService 的默认映射应仍是 %d，got %d", BadGateway, got.Code)
 	}
 }

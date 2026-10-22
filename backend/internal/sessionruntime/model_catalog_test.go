@@ -11,8 +11,9 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/provider"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
@@ -35,13 +36,13 @@ func catalogRig(t *testing.T) (*Service, *Orchestrator) {
 type fakeProjection struct {
 	runtime.Runtime
 	applied []runtime.ModelConfig
-	state   []acp.ConfigOption
+	state   []protocol.ConfigOption
 	err     error
 }
 
-func (f *fakeProjection) ConfigOptions() []acp.ConfigOption { return f.state }
+func (f *fakeProjection) ConfigOptions() []protocol.ConfigOption { return f.state }
 
-func (f *fakeProjection) ApplyModel(_ context.Context, m runtime.ModelConfig) ([]acp.ConfigOption, error) {
+func (f *fakeProjection) ApplyModel(_ context.Context, m runtime.ModelConfig) ([]protocol.ConfigOption, error) {
 	f.applied = append(f.applied, m)
 	if f.err != nil {
 		return nil, f.err
@@ -52,10 +53,10 @@ func (f *fakeProjection) ApplyModel(_ context.Context, m runtime.ModelConfig) ([
 // TestModelCatalogLiveSession 活会话是首选来源：直接读运行时会话自报的配置项（分组展平）。
 func TestModelCatalogLiveSession(t *testing.T) {
 	svc, orch := catalogRig(t)
-	opts := []acp.ConfigOption{{
-		ID: "model", Name: "Model", Category: acp.CategoryModel, Type: acp.OptionTypeSelect,
+	opts := []protocol.ConfigOption{{
+		ID: "model", Name: "Model", Category: protocol.CategoryModel, Type: protocol.OptionTypeSelect,
 		CurrentValue: `["deepseek","deepseek-chat"]`, Grouped: true,
-		Values: []acp.ConfigOptionValue{
+		Values: []protocol.ConfigOptionValue{
 			{Value: `["deepseek","deepseek-chat"]`, Name: "DeepSeek Chat", Group: "deepseek", GroupName: "DeepSeek"},
 			{Value: `["anthropic","claude-sonnet"]`, Name: "Claude Sonnet", Group: "anthropic", GroupName: "Anthropic"},
 		},
@@ -136,10 +137,10 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	svc, orch := catalogRig(t)
 
 	// 1) 成功：全量状态回填目录缓存，且曾失败的标记被清除。
-	proj := &fakeProjection{state: []acp.ConfigOption{{
-		ID: "model", Name: "Model", Category: acp.CategoryModel, Type: acp.OptionTypeSelect,
+	proj := &fakeProjection{state: []protocol.ConfigOption{{
+		ID: "model", Name: "Model", Category: protocol.CategoryModel, Type: protocol.OptionTypeSelect,
 		CurrentValue: "test/other",
-		Values:       []acp.ConfigOptionValue{{Value: "test/other", Name: "Other"}},
+		Values:       []protocol.ConfigOptionValue{{Value: "test/other", Name: "Other"}},
 	}}}
 	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c1", Runtime: "stub",
 		Session: &stubSession{}, Projection: proj}))
@@ -156,12 +157,12 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	}
 	// 缓存被成功状态刷新（活会话优先级更高，故直接查缓存）。
 	entry, ok := svc.planes.Providers.ConfigOptions("stub", provider.DefaultCatalogTTL)
-	if !ok || acp.CurrentConfigValue(entry.Options, acp.CategoryModel) != "test/other" {
+	if !ok || protocol.CurrentConfigValue(entry.Options, protocol.CategoryModel) != "test/other" {
 		t.Fatalf("目录缓存应被成功状态刷新: %+v", entry)
 	}
 
 	// 2) 运行时拒绝：上抛 + 标记不可用（目录里标灰）。
-	proj.err = acp.NewError(acp.ClassRequest, "invalid_params", "unknown model option: nope", nil)
+	proj.err = failure.NewError(failure.ClassRequest, "invalid_params", "unknown model option: nope", nil)
 	if _, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Model: "nope"}); err == nil {
 		t.Fatal("运行时拒绝应上抛")
 	}
@@ -171,11 +172,11 @@ func TestApplySessionModelSemantics(t *testing.T) {
 
 	// 3) 运行时未广告模型项（echo 语义）：显式指定模型 → model_not_supported；
 	//    未指定（空）→ 无操作。
-	unsupported := &fakeProjection{err: acp.NewError(acp.ClassUnsupported, "unsupported_model", "未广告模型配置项", nil)}
+	unsupported := &fakeProjection{err: failure.NewError(failure.ClassUnsupported, "unsupported_model", "未广告模型配置项", nil)}
 	orch.handles.Put(session.NewActiveSession(session.HandleParams{ID: "c2", Runtime: "stub",
 		Session: &stubSession{}, Projection: unsupported}))
 	_, err = orch.ApplySessionModel(context.Background(), "c2", runtime.ModelConfig{Model: "x"})
-	ae, ok := acp.As(err)
+	ae, ok := failure.As(err)
 	if !ok || ae.Code != "model_not_supported" {
 		t.Fatalf("未广告模型项应报 model_not_supported: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestApplySessionModelFailsFastOnMissingCredential(t *testing.T) {
 		Session: &stubSession{}, Projection: proj}))
 
 	_, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Provider: "ghost", Model: "x"})
-	ae, ok := acp.As(err)
+	ae, ok := failure.As(err)
 	if !ok || ae.Code != "model_credential_missing" {
 		t.Fatalf("缺密钥应报 model_credential_missing，got %v", err)
 	}
@@ -222,10 +223,10 @@ func TestPickListedSession(t *testing.T) {
 	if _, ok := pickListedSession(nil); ok {
 		t.Fatal("空列表不应命中")
 	}
-	if _, ok := pickListedSession([]acp.SessionInfo{{ID: "s1", Cwd: "relative/dir"}}); ok {
+	if _, ok := pickListedSession([]protocol.SessionInfo{{ID: "s1", Cwd: "relative/dir"}}); ok {
 		t.Fatal("相对 cwd 不应命中")
 	}
-	got, ok := pickListedSession([]acp.SessionInfo{
+	got, ok := pickListedSession([]protocol.SessionInfo{
 		{ID: "s1", Cwd: "relative"}, {ID: "s2", Cwd: "/work/b"},
 	})
 	if !ok || got.ID != "s2" || got.Cwd != "/work/b" {
@@ -244,14 +245,14 @@ func TestPickListedSession(t *testing.T) {
 // ④ 全读通但都零候选 = 取样成功（**不是**失败）；⑤ 空候选列表不伪装成"读到了但没有"。
 func TestSampleCandidatesFallsBackPastBrokenCandidate(t *testing.T) {
 	broken := errors.New(`no adapter registered for provider "old"`)
-	opts := []acp.ConfigOption{{
-		ID: "model", Category: acp.CategoryModel,
-		Values: []acp.ConfigOptionValue{{Value: "v1"}},
+	opts := []protocol.ConfigOption{{
+		ID: "model", Category: protocol.CategoryModel,
+		Values: []protocol.ConfigOptionValue{{Value: "v1"}},
 	}}
 	names := []string{"newest", "middle", "oldest"}
 
 	// ① 第一条报错、第二条有候选 → 用第二条的，且 sampled=true、无错。
-	got, sampled, err := sampleCandidates(names, func(n string) ([]acp.ConfigOption, error) {
+	got, sampled, err := sampleCandidates(names, func(n string) ([]protocol.ConfigOption, error) {
 		if n == "newest" {
 			return nil, broken
 		}
@@ -266,7 +267,7 @@ func TestSampleCandidatesFallsBackPastBrokenCandidate(t *testing.T) {
 	}
 
 	// ② 第一条**读通但零候选**（底座没有选中的模型）、第二条有候选 → 仍然用第二条。
-	got, sampled, err = sampleCandidates(names, func(n string) ([]acp.ConfigOption, error) {
+	got, sampled, err = sampleCandidates(names, func(n string) ([]protocol.ConfigOption, error) {
 		if n == "newest" {
 			return nil, nil
 		}
@@ -282,7 +283,7 @@ func TestSampleCandidatesFallsBackPastBrokenCandidate(t *testing.T) {
 
 	// ③ 全部报错 → sampled=false，err 是**最后一个**（它最接近"此刻为什么没有目录"）。
 	last := errors.New("oldest failed")
-	got, sampled, err = sampleCandidates(names, func(n string) ([]acp.ConfigOption, error) {
+	got, sampled, err = sampleCandidates(names, func(n string) ([]protocol.ConfigOption, error) {
 		if n == "oldest" {
 			return nil, last
 		}
@@ -293,14 +294,14 @@ func TestSampleCandidatesFallsBackPastBrokenCandidate(t *testing.T) {
 	}
 
 	// ④ 全部读通、都零候选 → 取样成功（底座确实没给），不是"我们没读到"。
-	if got, sampled, err := sampleCandidates(names, func(string) ([]acp.ConfigOption, error) {
+	if got, sampled, err := sampleCandidates(names, func(string) ([]protocol.ConfigOption, error) {
 		return nil, nil
 	}); !sampled || err != nil || got != nil {
 		t.Fatalf("全读通且零候选应记为取样成功: opts=%+v sampled=%v err=%v", got, sampled, err)
 	}
 
 	// ⑤ 没有候选：不能伪装成"读到了但没有"。
-	if _, sampled, err := sampleCandidates[string](nil, func(string) ([]acp.ConfigOption, error) {
+	if _, sampled, err := sampleCandidates[string](nil, func(string) ([]protocol.ConfigOption, error) {
 		t.Fatal("没有候选时不该调用取样")
 		return nil, nil
 	}); sampled || err == nil {
@@ -323,7 +324,7 @@ func TestResumeTargetsFromOrdersAndSkipsMalformed(t *testing.T) {
 		// 同一个原生会话的两条平台记录（重复登记）：只留第一条。
 		{ID: "ses_dup", RuntimeSessionID: "rt_raw-new", Cwd: "/w/new", UpdatedAt: now.Add(-time.Minute)},
 	}
-	listed := []acp.SessionInfo{{ID: "listed", Cwd: "/w/listed"}}
+	listed := []protocol.SessionInfo{{ID: "listed", Cwd: "/w/listed"}}
 
 	got := resumeTargetsFrom(ctx, recs, listed)
 	want := []resumeTarget{{RawID: "raw-new", Cwd: "/w/new"}, {RawID: "raw-old", Cwd: "/w/old"}}
@@ -339,7 +340,7 @@ func TestResumeTargetsFromOrdersAndSkipsMalformed(t *testing.T) {
 	}
 
 	// 两处都没有可用条目 → 空（"没有来源"是合法结论，不是错误）。
-	if got := resumeTargetsFrom(ctx, nil, []acp.SessionInfo{{ID: "x", Cwd: "relative"}}); len(got) != 0 {
+	if got := resumeTargetsFrom(ctx, nil, []protocol.SessionInfo{{ID: "x", Cwd: "relative"}}); len(got) != 0 {
 		t.Fatalf("没有可用条目应是空候选: %+v", got)
 	}
 }
@@ -369,7 +370,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 
 	// ③ 取样失败：如实说"这次没读到"，并且**不得**冒充"还没有会话可供读取"。
 	failed := r.svc.Planes().Providers.CatalogEmptyNote(ctx, false,
-		acp.NewError(acp.ClassRequest, "invalid_params", `no adapter registered for provider "old"`, nil))
+		failure.NewError(failure.ClassRequest, "invalid_params", `no adapter registered for provider "old"`, nil))
 	if !strings.Contains(failed, "取样失败") {
 		t.Fatalf("取样失败应如实说失败，实际：%s", failed)
 	}
@@ -380,7 +381,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 	// ④ "该底座不支持在不新建会话的前提下读目录"是**能力事实、不是故障**：
 	//    退回"发一条消息就会补全"这条正常出路。
 	unsupported := r.svc.Planes().Providers.CatalogEmptyNote(ctx, false,
-		acp.NewError(acp.ClassUnsupported, "resume_session_unsupported", "不支持 resume", nil))
+		failure.NewError(failure.ClassUnsupported, "resume_session_unsupported", "不支持 resume", nil))
 	if !strings.Contains(unsupported, "发送一条消息") {
 		t.Fatalf("底座不支持读时应给「发消息」这条路，实际：%s", unsupported)
 	}
@@ -391,7 +392,7 @@ func TestCatalogEmptyNoteTellsTheCauseApart(t *testing.T) {
 	//    这里的错误值**必须从产出它的那一处取**（`sampleCandidates`），不是直接引用那个哨兵：
 	//    隔离环境实测时 `fetchCatalogByResume` 自己又早退造了一个同码错误，于是用户看到"取样失败"
 	//    ——而单测只要引用哨兵就照样绿。⑤ 的取法现在钉住了"产出 → 说明"这条边。
-	_, _, noCandErr := sampleCandidates[string](nil, func(string) ([]acp.ConfigOption, error) {
+	_, _, noCandErr := sampleCandidates[string](nil, func(string) ([]protocol.ConfigOption, error) {
 		return nil, nil
 	})
 	noCandidate := r.svc.Planes().Providers.CatalogEmptyNote(ctx, false, noCandErr)

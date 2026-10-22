@@ -64,7 +64,7 @@ var automationDomainAnchors = map[string][]string{
 //
 // 这两个入口原先在 `domain/automation/import.go`：它们按 `automation.ReservedKeys` 把一份文件
 // 切成"定义 + 运行态"两半，看起来是域的知识。但它们同时是**导入框架的编排**——扫目录、计数、
-// 调 `mechanism/definition` 落库、导出写文件——域为了它要认识 `store` 与 18 个机制符号，
+// 调 `mechanism` 落库、导出写文件——域为了它要认识 `store` 与 18 个机制符号，
 // 出边被钉死的那条纪律就破了。
 //
 // 现在分工是：域只留**纯转换**（`Locator` / `RunsJSON` / `RuntimeStateOf` 这类"行 ↔ 文件片段"），
@@ -201,7 +201,7 @@ var automationUseCaseAnchors = []string{
 // **刻意不列 `"automation_not_found"`**：域里的**运行面**（`RunNow` / 调度 tick）自己也要拒绝
 // 未知 id / 坏定义 / 已停用，那三条码是领域的判决，用例层只是**透传**——把它列成"不许出现"
 // 会逼着域去 import 用例层（反向依赖）。真正要守的是"两侧同码"，见下面的 parity 判据。
-// 注意：定义值层规则已从 `mechanism/definition` 抽到 `internal/core/definition`（别名 defn），
+// 注意：定义值层规则已从 `mechanism` 抽到 `internal/core/definition`（别名 defn），
 // 所以每条痕迹都要把**两种拼写**都列出来——只留旧拼写会让守卫在改名后静默失锚。
 var automationApiFaceMarkers = []string{
 	"definition.InvalidParamErr(",

@@ -3,11 +3,12 @@ package provider
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/resource"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
@@ -86,7 +87,7 @@ func (pl *Plane) DefaultModelRow(ctx context.Context) (*model.ModelEntity, bool,
 func ModelValueFor(reg *runtime.Registry, runtimeID, providerID, model string) (string, error) {
 	a, ok := reg.ModelValue(runtimeID)
 	if !ok {
-		return "", acp.NewError(acp.ClassUnsupported, "model_value_unsupported",
+		return "", failure.NewError(failure.ClassUnsupported, "model_value_unsupported",
 			fmt.Sprintf("runtime %q 的模型值形态未声明：平台不为未知底座猜模型值的形状", runtimeID), nil)
 	}
 	return a.Value(providerID, model)
@@ -135,7 +136,7 @@ func (pl *Plane) ResolveSessionModel(ctx context.Context, runtimeID, modelID str
 		}
 		id, cfg, verr := pl.ModelValueForRow(runtimeID, row.ID, row.ProviderID, row.Model)
 		if verr != nil {
-			if ae, ok := acp.As(verr); ok && ae.Code == "model_value_unsupported" {
+			if ae, ok := failure.As(verr); ok && ae.Code == "model_value_unsupported" {
 				// 该底座**不消费**平台模型清单 = 它没有模型语义：这里"不下发"是正确结论而不是失败
 				// （与 v26 之前 `DefaultModelValueFor` 回空串的行为逐字相同——零回归的那一支）。
 				return "", runtime.ModelConfig{}, nil
@@ -182,7 +183,7 @@ func (pl *Plane) DefaultModelValueFor(ctx context.Context, runtimeID string) (st
 // 这里的处境是"这条会话声明的模型已不在清单里"，出路是**重新选一个**（或先把模型声明回来），
 // 而不是"你打错了 id"。码相同是刻意的（E9）。
 func SessionModelNotFoundErr(modelID string) error {
-	return acp.NewError(acp.ClassRequest, "model_not_found",
+	return failure.NewError(failure.ClassRequest, "model_not_found",
 		fmt.Sprintf("会话声明的模型 %q 不在平台清单里（或它还不是平台模型 id）："+
 			"请到「设置 · 模型」重新选一个——平台只接受自己声明过的模型", modelID), nil)
 }

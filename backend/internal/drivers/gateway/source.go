@@ -31,12 +31,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/drivers/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
-	"github.com/morehao/ark-mate/internal/infra/mcp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/mcp"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -101,7 +101,7 @@ func resolveCredCwd(explicit string, getenv func(string) string) (cwd, source st
 	}
 	own, err := os.Getwd()
 	if err != nil {
-		// 取不到自己的 cwd 也不能让网关起不来：空 cwd 交给 `pkg/credentials`（那一层读不到
+		// 取不到自己的 cwd 也不能让网关起不来：空 cwd 交给 `internal/infra/credentials`（那一层读不到
 		// 就是"没有这一层"，不留半截路径——与 `IsolationEnv` 对空 home 的处置同一条纪律）。
 		return "", credCwdSourceOwnGetwd
 	}
@@ -153,7 +153,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 		now:          opts.Now,
 		secretWarned: make(map[string]bool),
 	}
-	// 与核心进程同一套装配：**只注册构建期选中的那一个底座**（见 pkg/runtime/build.go）。
+	// 与核心进程同一套装配：**只注册构建期选中的那一个底座**（见 internal/runtime/build.go）。
 	// 网关子进程与核心必须看同一个底座，否则"平台说 A、网关按 B 过滤"会静默分叉。
 	remoteSpecs := make([]runtime.Spec, 0, len(opts.Cfg.RemoteRuntimes))
 	for _, rt := range opts.Cfg.RemoteRuntimes {
@@ -190,7 +190,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	} else {
 		glog.Infow(ctx, "mcp 网关: 凭据 cwd 已确定", "cwd", credCwd, "source", credCwdSource)
 	}
-	if layered, _, cErr := credential.OpenCredentialSource(opts.Cfg.HomeDir, credCwd); cErr != nil {
+	if layered, _, cErr := mechanism.OpenCredentialSource(opts.Cfg.HomeDir, credCwd); cErr != nil {
 		glog.Warnw(ctx, "mcp 网关: 凭据分层未装配（只有库里的那一份可用）", "err", cErr)
 	} else {
 		s.planes.Credentials.SetLayered(layered)

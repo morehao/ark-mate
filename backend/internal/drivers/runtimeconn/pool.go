@@ -1,13 +1,14 @@
 package runtimeconn
 
 import (
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
-	"github.com/morehao/ark-mate/internal/infra/acp"
+	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -198,8 +199,12 @@ func (pl *Pool) Drop(c *Conn) {
 		pl.bind.SetState(session.AgentStateStopped)
 	}
 	if pl.sink != nil {
+		var droppedClient protocol.Conn
+		if c.Client != nil { // nil 归一：typed nil 装进接口不等于 nil
+			droppedClient = c.Client
+		}
 		pl.sink.OnConnDropped(ConnDrop{
-			Client:      c.Client,
+			Client:      droppedClient,
 			Runtime:     c.Spec.ID,
 			WasCurrent:  wasCurrent,
 			Intentional: intentional,
@@ -210,14 +215,15 @@ func (pl *Pool) Drop(c *Conn) {
 
 // ConnOfClient 反查某客户端所属的连接（无 → nil）。连接数是代际上限量级（个位数），线性扫足够；
 // 代际迁移要拿它读"这条句柄此刻挂在哪个代际键上"（那是判"要不要迁"的唯一权威来源）。
-func (pl *Pool) ConnOfClient(client *acp.Client) *Conn {
+func (pl *Pool) ConnOfClient(client protocol.Conn) *Conn {
 	if client == nil {
 		return nil
 	}
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 	for _, c := range pl.conns {
-		if c.Client == client {
+		// 按身份比较：`*acp.Client` 与 `protocol.Conn` 是同一对象，接口比较落到指针相等。
+		if any(c.Client) == any(client) {
 			return c
 		}
 	}
@@ -318,7 +324,7 @@ func (pl *Pool) CloseAll() {
 
 // NativeEnvSource 原生权限/沙箱 env 的来源（adapter 拥有措辞，这里只要结果）。
 //
-// 签名只用基础类型：实现在 `internal/manager`，这一层不该认识 runtime 根包的类型细节
+// 签名只用基础类型：实现在会话编排面（`internal/sessionruntime`），这一层不该认识 runtime 根包的类型细节
 // （`NativePermissionAdapter.Env` 的两个额外参数由实现侧补齐）。
 type NativeEnvSource interface {
 	// NativePermissionEnv 该 runtime 在给定原生模式下的进程 env（空模式/未知 → nil）。

@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"strings"
 	"sync"
 	"testing"
@@ -12,8 +13,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/golib/gerror"
@@ -47,8 +48,8 @@ func (s *gatedSession) Prompt(ctx context.Context, text string) (string, error) 
 	}
 }
 
-func (s *gatedSession) Cancel(context.Context) error      { return nil }
-func (s *gatedSession) ConfigOptions() []acp.ConfigOption { return nil }
+func (s *gatedSession) Cancel(context.Context) error           { return nil }
+func (s *gatedSession) ConfigOptions() []protocol.ConfigOption { return nil }
 
 func (s *gatedSession) prompts() []string {
 	s.mu.Lock()
@@ -398,11 +399,11 @@ func TestPromptDeliveryValidation(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
 	startFirstRun(t, orch, g, "第一轮")
 
-	// 领域层：稳定 code 在 acp 错误上（`delivery_*` 这类码由 acp.As 读出，不进文案）。
+	// 领域层：稳定 code 在 acp 错误上（`delivery_*` 这类码由 failure.As 读出，不进文案）。
 	if _, err := session.NormalizeDelivery("whenever"); err == nil {
 		t.Fatal("非法 delivery 应报错")
 	} else {
-		var ae *acp.Error
+		var ae *failure.Error
 		if !errors.As(err, &ae) || ae.Code != "invalid_delivery" {
 			t.Fatalf("应报 invalid_delivery: %v", err)
 		}

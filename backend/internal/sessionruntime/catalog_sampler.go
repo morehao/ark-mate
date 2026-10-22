@@ -5,11 +5,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
-	"github.com/morehao/ark-mate/internal/infra/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -30,7 +31,7 @@ import (
 const maxCatalogSampleAttempts = 3
 
 // LiveConfigOptions 实现 `provider.LiveConfigOptionsSource`。
-func (s *Service) LiveConfigOptions() ([]acp.ConfigOption, bool) {
+func (s *Service) LiveConfigOptions() ([]protocol.ConfigOption, bool) {
 	if s.orch == nil {
 		return nil, false
 	}
@@ -82,13 +83,13 @@ func (s *Service) PromptImageSupported() *bool {
 }
 
 // SampleConfigOptions 实现 `provider.CatalogSampler`：枚举候选、逐条退避取样。
-func (s *Service) SampleConfigOptions(ctx context.Context) ([]acp.ConfigOption, bool, error) {
+func (s *Service) SampleConfigOptions(ctx context.Context) ([]protocol.ConfigOption, bool, error) {
 	if s.orch == nil {
 		return nil, false, provider.ErrNoSampleCandidate
 	}
 	spec, ok := s.planes.Registry.Get(runtime.SelectedRuntime())
 	if !ok {
-		return nil, false, acp.NewError(acp.ClassRequest, "runtime_not_registered",
+		return nil, false, failure.NewError(failure.ClassRequest, "runtime_not_registered",
 			"[runtime_not_registered] 构建期选定的 runtime 未装配", nil)
 	}
 	// 目录探测不绑定任何会话，按缺省代际复用连接（不额外起进程）。原生模式同样走缺省（空 =
@@ -98,8 +99,8 @@ func (s *Service) SampleConfigOptions(ctx context.Context) ([]acp.ConfigOption, 
 		return nil, false, err
 	}
 	caps := rc.Client.Capabilities()
-	if !caps.SessionResume && !caps.Raw.LoadSession {
-		return nil, false, acp.NewError(acp.ClassUnsupported, "resume_session_unsupported",
+	if !caps.SessionResume && !caps.LoadSession {
+		return nil, false, failure.NewError(failure.ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
 	}
 
@@ -109,7 +110,7 @@ func (s *Service) SampleConfigOptions(ctx context.Context) ([]acp.ConfigOption, 
 	}
 	// 逐条退避：最近那条读不通就试下一条。**没有候选时**返回 `ErrNoSampleCandidate`
 	// （正常状态：第一条消息发送前就是这样），说明文案据此与"读不通"分开。
-	return sampleCandidates(cands, func(t resumeTarget) ([]acp.ConfigOption, error) {
+	return sampleCandidates(cands, func(t resumeTarget) ([]protocol.ConfigOption, error) {
 		return runtimeconn.SampleConfigOptions(ctx, rc, t.RawID, t.Cwd)
 	})
 }
@@ -127,7 +128,7 @@ type resumeTarget struct {
 //
 // 三态：opts 非空；sampled=true（读通但零候选）；sampled=false + err（全部读不通）。
 // 没有候选时返回 `provider.ErrNoSampleCandidate`，而不是把"没有候选"讲成"取样失败"。
-func sampleCandidates[T any](cands []T, sample func(T) ([]acp.ConfigOption, error)) ([]acp.ConfigOption, bool, error) {
+func sampleCandidates[T any](cands []T, sample func(T) ([]protocol.ConfigOption, error)) ([]protocol.ConfigOption, bool, error) {
 	var lastErr error
 	sampled := false
 	for _, c := range cands {
@@ -192,7 +193,7 @@ func (s *Service) catalogResumeCandidates(ctx context.Context, rc *runtimeconn.C
 }
 
 // resumeTargetsFrom 把两处来源折成候选列表（无 ACP 依赖，顺序/跳过两条判据可单测）。
-func resumeTargetsFrom(ctx context.Context, recs []session.SessionRec, listed []acp.SessionInfo) []resumeTarget {
+func resumeTargetsFrom(ctx context.Context, recs []session.SessionRec, listed []protocol.SessionInfo) []resumeTarget {
 	targets := make([]resumeTarget, 0, 4)
 	seen := map[string]bool{}
 	add := func(rawID, cwd string) {
@@ -231,11 +232,11 @@ func resumeTargetsFrom(ctx context.Context, recs []session.SessionRec, listed []
 
 // pickListedSession 从 session/list 结果里挑一条可恢复的会话：优先带绝对 cwd 的条目
 // （resume 需要 cwd），runtime 大多按最近活跃倒序返回（dsh 明确如此），故取首个。
-func pickListedSession(items []acp.SessionInfo) (acp.SessionInfo, bool) {
+func pickListedSession(items []protocol.SessionInfo) (protocol.SessionInfo, bool) {
 	for _, it := range items {
 		if it.ID != "" && strings.HasPrefix(it.Cwd, "/") {
 			return it, true
 		}
 	}
-	return acp.SessionInfo{}, false
+	return protocol.SessionInfo{}, false
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"io"
 	"os"
 	"path"
@@ -12,8 +13,6 @@ import (
 	"unicode"
 
 	"gopkg.in/yaml.v3"
-
-	"github.com/morehao/ark-mate/internal/infra/acp"
 )
 
 // ——— 技能包导入（D1：POST /skills/import 的解析与校验） ———
@@ -178,7 +177,7 @@ func ParsePackage(r io.ReaderAt, size int64) (*Package, error) {
 func (m *Plane) ImportPackage(ctx context.Context, r io.ReaderAt, size int64) (*WriteResult, error) {
 	pkg, err := ParsePackage(r, size)
 	if err != nil {
-		return nil, acp.NewError(acp.ClassRequest, "definition_invalid", "技能包被拒绝："+err.Error(), err)
+		return nil, failure.NewError(failure.ClassRequest, "definition_invalid", "技能包被拒绝："+err.Error(), err)
 	}
 	req := WriteRequest{
 		"id":          rawJSONValue(pkg.ID),

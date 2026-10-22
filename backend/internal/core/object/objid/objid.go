@@ -1,12 +1,12 @@
 // Package objid 承载「平台铸造 id」与「底座 id 包装」的唯一实现。
 //
-// 为什么单独成包（对齐 pkg/object/objusage 的口径）：
+// 为什么单独成包（对齐 internal/core/object/objusage 的口径）：
 //   - id 形状是**对外契约**（`GET /sessions` 的 `id`、诊断包里的 id、脚本里书签的 id），
 //     与 objusage 同属"跨层共享值对象"；
 //   - 铸造点跨三层（manager 建会话/轮次/输入、store 建工作空间、dao 读回写入），
 //     放在其中任何一层都会让另外两层反向依赖；
-//   - `pkg/` 内部不得 import `internal/`（internal/archtest 守卫），而将来 `pkg/runtime/*`
-//     若需要铸号也能直接用。
+//   - 它是 **leaf**：只依赖标准库，任何一层（含 `internal/runtime` 与各 adapter）都能直接
+//     用它铸号，而它不认识 `runtime`、也不做任何 runtime 相关判定。
 //
 // 两条互不重叠的家族（这是本包最容易读错的一处）：
 //
@@ -16,7 +16,7 @@
 //	   （§4.5.2 的不变式 I2）。它属于另一个命名空间，所以刻意**不**凑成 3 字母。
 //
 // 刻意**没有** `FromLegacy` 这类"旧 id 派生"：Q10 已按"旧数据不要"定稿，旧 transcript
-// 在装载期被跳过 + WARN（见 internal/manager/transcript_load.go），不做任何映射。
+// 在装载期被跳过 + WARN（见 `internal/domain/session/transcript.go` 的装载纪律），不做任何映射。
 package objid
 
 import (

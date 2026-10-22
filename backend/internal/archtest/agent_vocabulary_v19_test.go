@@ -15,7 +15,7 @@ import (
 // 会话身份少一项而投影仍然自洽。逐处 review 挡不住这类漏，机器判据能。
 //
 // 判据**不是**「grep 到英文词 agent 就红」（那是错的）：ACP 自己的词表里 `agent` 指的就是**底座进程**
-// （SDK 的 `Agent` 接口、`AuthMethods` 的 `agent` 变体），`internal/infra/acp` 必须能照原文写；`~/.agents/skills`
+// （SDK 的 `Agent` 接口、`AuthMethods` 的 `agent` 变体），`internal/infra/protocol/acp` 必须能照原文写；`~/.agents/skills`
 // 是平台与底座的**共享投放根**，也与本概念无关。所以禁词表列的是**被撤掉的那批标识符**，
 // 与 v15 的 `conversation`、v16 的 `capability_revision`、v17 的 `provider_session` 同形。
 //
@@ -46,7 +46,7 @@ var legacyAgentVocabulary = []string{
 	// ⑥ 三层包名（dto/controller/service 端口）。
 	"dtoagent", "ctragent", "svcagent",
 	// ⑦ 身份列/字段的两种写法：`agent_id`（列名、json 键、日志键、路径段）与驼峰
-	//    `AgentID`/`agentID`（小写化后同形）。`internal/infra/procreg` 与 `internal/infra/mcp` 的网关 scope 曾用它，
+	//    `AgentID`/`agentID`（小写化后同形）。`internal/infra/procreg` 与 `internal/infra/protocol/mcp` 的网关 scope 曾用它，
 	//    而它们**不会让编译变红**——正是这条守卫存在的理由。
 	"agent_id", "agentid",
 	// ⑧ 路由段。刻意**不**写裸词 `agents`：`~/.agents/skills` 与旧的 `MATE_AGENTS` 都要放行。
@@ -133,7 +133,7 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 			"（JSON 绑定默认丢弃未知键，删掉这个字段就等于把「用户以为指定了 agent」变成静默 no-op）",
 	},
 	{
-		// 锚 = 拒绝函数的定义。它随 `reject_removed_keys.go` 一起搬进 `mechanism/definition`（P1b），
+		// 锚 = 拒绝函数的定义。它随 `reject_removed_keys.go` 一起搬进 `mechanism`（P1b），
 		// 所以这里不写路径：写路径的话，搬完就得回来改，而"回来改"正是 P0 要消灭的东西。
 		anchor: "func rejectRemovedAgentSelection(",
 		reason: removedKeyRefusalReason + "**拒绝**必须点名它拒的是哪个键，否则用户拿到的" +
@@ -179,7 +179,7 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 	},
 	{
 		// 锚 = 造那份夹具的助手（v19 之前的自动化定义就是它写出来的）。它随
-		// `automation_import_test.go` 搬进 `mechanism/definition`（P1b）。
+		// `automation_import_test.go` 搬进 `mechanism`（P1b）。
 		anchor: "automationSeedDir",
 		reason: "**停在 v19 之前的自动化定义夹具**：`target.agent_id` 是当年用户写在文件里的键，" +
 			"这条用例测的正是「导入旧定义时把已下线的键清掉并 WARN」——它必须写出旧键，否则测不到清除",

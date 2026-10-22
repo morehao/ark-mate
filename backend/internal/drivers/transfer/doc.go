@@ -5,7 +5,7 @@
 //
 // 边界（改这个包前先读）：
 //   - 只允许「某个域的 Import* / Export* 对」与域无关的导入/导出原语；
-//   - 单条定义的读写（draft / CAS / mtime 锁）在 `internal/drivers/mechanism/definition`；
+//   - 单条定义的读写（draft / CAS / mtime 锁）在 `internal/drivers/mechanism`；
 //   - 能力/定义的值层在 `internal/core/capability` 与 `internal/core/definition`；
 //   - 域声明的窄端口（DefinitionFiles / Secrets）的适配体在 `internal/drivers/registry`（装配点）。
 //

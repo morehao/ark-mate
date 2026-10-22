@@ -221,7 +221,7 @@ func TestCapabilityDefinitionColumnsFrozen(t *testing.T) {
 
 // TestDefinitionRevisionConcurrentAppend 多 goroutine 同时提交：序号唯一、单调、无空洞。
 //
-// 本仓的库是 **MaxOpenConns=1**（单写者模型，见 `pkg/dbclient`），因此并发提交在连接池上
+// 本仓的库是 **MaxOpenConns=1**（单写者模型，见 `internal/infra/dbclient`），因此并发提交在连接池上
 // 被串行化——这正是它的部署形态。要验的不是"SQLite 能并发写"，而是"计数器与插行是同一个
 // 原子动作"：若有人把 seq 改成"先查 MAX 再插"（两步），这里就会看到重复或空洞。
 func TestDefinitionRevisionConcurrentAppend(t *testing.T) {
