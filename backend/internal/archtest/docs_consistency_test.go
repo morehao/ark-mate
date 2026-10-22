@@ -219,6 +219,12 @@ func repoPathExists(root, cand string) bool {
 //
 // fail-closed：git 命令**不可用**（不是「查不到」）时直接 Fatal——「查不到就跳过」会让
 // 这条路在 CI 上静默失效，而那正是本文件要消灭的东西。
+//
+// 浅克隆同样 Fatal（2026-10-22，CI 基线第一次真实运行暴露）：要比对的提交号是**历史锚**
+// （归档文档已删，`git show <rev>` 是它唯一的复核入口），而 `actions/checkout` 默认
+// `fetch-depth: 1`——那种仓库里**任何**历史提交都 `rev-parse` 不到，于是这条判据把
+// "克隆太浅"报成二十来行「记录列无法复核」，人得读完整张表才可能想到这一层。
+// 现在直接说清楚原因和改法。
 func gitCommitExists(t *testing.T, root, hash string) bool {
 	t.Helper()
 	out, err := exec.Command("git", "-C", root, "rev-parse", "--verify", "--quiet", hash+"^{commit}").CombinedOutput()
@@ -227,9 +233,24 @@ func gitCommitExists(t *testing.T, root, hash string) bool {
 		if errors.As(err, &ee) {
 			t.Fatalf("git 不可用（%v）——记录列的可复核性依赖 git，不能静默放过", err)
 		}
+		if isShallowRepo(t, root) {
+			t.Fatalf("仓库是**浅克隆**（%s 里查不到历史提交）：本判据的复核锚点全在历史里，"+
+				"浅克隆会把「克隆太浅」报成「记录列无法复核」。CI 里请给 actions/checkout 配 "+
+				"`fetch-depth: 0`（见 .github/workflows/ci.yml）。", root)
+		}
 		return false
 	}
 	return strings.TrimSpace(string(out)) != ""
+}
+
+// isShallowRepo 报告仓库是否是浅克隆（只在 git 已确认可用后调用）。
+func isShallowRepo(t *testing.T, root string) bool {
+	t.Helper()
+	out, err := exec.Command("git", "-C", root, "rev-parse", "--is-shallow-repository").Output()
+	if err != nil {
+		return false // 老版本 git 没有这个开关：退回原行为（只报「查不到」）
+	}
+	return strings.TrimSpace(string(out)) == "true"
 }
 
 // TestShippedDocsHaveNoAdrReferences 见文件头 ③。
