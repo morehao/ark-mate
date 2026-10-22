@@ -14,7 +14,7 @@
     - **装配只能自上而下，不许反向**：`assembly` 构造用例与控制器，`router` 只收已构造的控制器（`router.Deps`），`app` 只消费 `assembly.BuildResult`。**`app`/`router`/`cli` 都不得引用 `service/svc*`**，控制器也不得 import `domain`/`store`/`model`——判据见 `layers_v32_test.go`。
     - 持久侧：`dbclient → persistence/dao → persistence/store`，`model` 被三者依赖且自身不依赖任何一层；`dao` 不得 import `store`（会成环），`model` 不得 import `dao`/`store`。
     - **厚域与用例都走窄端口，不 import 门面**（P4）：`domain/session` 声明 `Store` 端口（`store_port.go`），`domain/interaction` 零 `store`；用例层同理声明 `svcmodel.ModelStore` / `svcsession.EventReader` / `svcsystem.SourceFactsReader`。`*store.Store` 结构上满足它们、由装配根交下来；**交下来时必须现判 nil**——typed-nil 装进接口不是 nil，会让"内存模式 40501 / 只读镜像"那几条判据静默失效（`assembly/services.go` 的 `eventReader`/`sourceFactsReader`/`modelStore` 就是这条规矩的落点）。`model` 仍可被 `domain/session` 引用：它是纯列形状（无行为），把它也搬走只会换来 30 多个镜像结构。
-    外部协议同样走端口（A2，2026-10-22）：`domain/mcp` 声明 `LiveClient`（探测/工具调用/资源/提示词，签名只用 `protocol.McpServer` + `protocol.Mcp*` 平台值），实现体是 `infra/protocol/mcp`，由 `drivers/registry` 接上——域因此**零 `infra/*`**（`TestInnerCircleAvoidsInfraProtocol` 已是硬判据）。
+    外部协议同样走端口（A2，2026-10-22）：`domain/mcp` 声明 `LiveClient`（探测/工具调用/资源/提示词，签名只用 `protocol.McpServer` + `protocol.Mcp*` 平台值），实现体是 `infra/protocol/mcp`，由 `drivers/registry` 接上——域因此**零 `infra/*`**（`TestInnerCircleAvoidsInfraProtocol` 已是硬判据）。网关条目的 argv 形状（A1）同批进了 `core/protocol/gateway.go`。**这两处的留用理由、代价与推翻条件登记在决策 v31**（`../decisions.md`），本节只留做法。
     `infra/protocol/{acp,mcp}` 里的类型别名（`aliases.go` / `values.go`）是**唯一出口**：只为让协议侧实现与测试读起来自然，事实源在 `core/protocol`；**内圈（`domain` / `sessionruntime` / `runtime`）不得用别名**，用了等于重新认识协议实现。
   - **新增一层 / 一个接口 / 一个抽象之前，先回答五问**（2026-10-21，来源是一份外部"轻量化"方案里唯一被完整采纳的判据段）：
     ① 它是否有独立、稳定的职责？② 是否有多个真实实现，或确实需要替换实现？③ 是否能隔离外部技术依赖？
