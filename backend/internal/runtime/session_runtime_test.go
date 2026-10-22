@@ -8,35 +8,33 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/protocol"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
-// dialTestSession 用自建 responder（acp_testserver_test.go）取一条**活的** acp.Session，
-// 供投影身份/行为断言使用（echo 删除后不再有进程内 stdio 对端，改走 ws 远程形态）。
-func dialTestSession(t *testing.T, r *testACPResponder) (protocol.Conn, protocol.Session) {
-	t.Helper()
-	tr, err := acp.NewRemoteTransport(acp.RemoteSpec{Transport: "ws", Endpoint: serveResponderWS(t, r)})
-	if err != nil {
-		t.Fatalf("NewRemoteTransport: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	t.Cleanup(cancel)
-	cl, err := acp.Dial(ctx, tr, acp.ClientOptions{
-		RequestPermission: func(_ context.Context, _ acp.PermissionRequest) acp.PermissionDecision {
-			return acp.PermissionDecision{Allowed: true}
-		},
-	})
-	if err != nil {
-		t.Fatalf("Dial: %v", err)
-	}
-	t.Cleanup(func() { _ = cl.Close(); _ = tr.Close() })
-
-	sess, err := cl.NewSession(context.Background(), protocol.SessionOptions{Cwd: "/work"})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	return cl, sess
+// stubSession 是本包测试用的**会话桩**：投影只做身份与透传，不需要活的协议对端。
+//
+// 为什么不再拉一个真 ACP 会话：拨号/握手已随 P3-d 搬进执行面（`runtimeconn`），契约包的测试
+// 不该再把协议绑定拖回来；投影要断言的是"身份来自入参 Spec、方法原样透传"，桩足够且更快。
+type stubSession struct {
+	id      string
+	prompts []string
+	cancels int
 }
+
+func (s *stubSession) ID() string                             { return s.id }
+func (s *stubSession) Client() protocol.Conn                  { return nil }
+func (s *stubSession) Close(context.Context) error            { return nil }
+func (s *stubSession) ConfigOptions() []protocol.ConfigOption { return nil }
+func (s *stubSession) SetConfigOption(context.Context, string, string) ([]protocol.ConfigOption, error) {
+	return nil, nil
+}
+func (s *stubSession) Prompt(_ context.Context, text string) (string, error) {
+	s.prompts = append(s.prompts, text)
+	return "end_turn", nil
+}
+func (s *stubSession) Cancel(context.Context) error { s.cancels++; return nil }
+
+// newStubSession 造一条桩会话（id 固定，便于断言投影透传）。
+func newStubSession() *stubSession { return &stubSession{id: "ses_test_1"} }
 
 // TestSessionProjectionCarriesSpecIdentity 会话投影必须携带**传入那份 Spec** 的身份
 // （ID / ManagesOwnContext），而不是按 id 查表得来的身份。
@@ -45,7 +43,8 @@ func dialTestSession(t *testing.T, r *testACPResponder) (protocol.Conn, protocol
 // （测试夹具、下一个底座在进内置清单之前的形态）拿到的身份会与它手里那份 `Spec` 不一致，
 // 而这种不一致只会在很远的地方以"模型切不过去""取消没生效"的形式表现出来。
 func TestSessionProjectionCarriesSpecIdentity(t *testing.T) {
-	_, sess := dialTestSession(t, newTestACPResponder())
+	sess := newStubSession()
+	_ = sess
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

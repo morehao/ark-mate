@@ -16,7 +16,7 @@ func TestConnectEnvPlatformDeclarationWins(t *testing.T) {
 			Env: []string{"XDG_CONFIG_HOME=/home/mate/runtime/rt-alt/config", "RT_ALT_DB=/home/mate/x.db"},
 		},
 	}
-	got := connectEnv(spec, []string{"XDG_CONFIG_HOME=/home/user/.config", "OPENAI_API_KEY=sk-1"})
+	got := ConnectEnv(spec, []string{"XDG_CONFIG_HOME=/home/user/.config", "OPENAI_API_KEY=sk-1"})
 
 	counts := map[string]int{}
 	for _, kv := range got {
@@ -53,7 +53,7 @@ func containsEnv(list []string, want string) bool {
 func TestConnectEnvKeepsSpecOnly(t *testing.T) {
 	env := []string{"A=1", "B=2"}
 	spec := Spec{Launch: LaunchSpec{Env: env}}
-	got := connectEnv(spec, nil)
+	got := ConnectEnv(spec, nil)
 	if strings.Join(got, ",") != strings.Join(env, ",") {
 		t.Fatalf("期望原样返回 %v，得到 %v", env, got)
 	}

@@ -5,7 +5,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/protocol"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // sessionRuntime 是 Runtime 接口（§4.2 会话边界版）在「一条活着的 ACP 会话」上的通用实现：
@@ -36,7 +35,7 @@ func unsupported(code, details string) error {
 
 func (r *sessionRuntime) ID() string              { return r.spec.ID }
 func (r *sessionRuntime) ManagesOwnContext() bool { return r.spec.ManagesOwnContext }
-func (r *sessionRuntime) Capabilities() acp.Capabilities {
+func (r *sessionRuntime) Capabilities() protocol.Capabilities {
 	return r.sess.Client().Capabilities()
 }
 func (r *sessionRuntime) RuntimeSessionID() string { return r.sess.ID() }
@@ -60,7 +59,7 @@ func (r *sessionRuntime) ApplyMode(_ context.Context, _ Mode) error {
 }
 
 // ConfigOptions 返回本会话的会话配置项（模型目录等，全部由运行时自报）。
-func (r *sessionRuntime) ConfigOptions() []acp.ConfigOption {
+func (r *sessionRuntime) ConfigOptions() []protocol.ConfigOption {
 	return r.sess.ConfigOptions()
 }
 
@@ -77,9 +76,9 @@ func (r *sessionRuntime) ConfigOptions() []acp.ConfigOption {
 //
 // 思考档位（category=thought_level）不在平台侧下发：运行时若提供该选项，只随全量状态原样
 // 透出（展示/可观测），平台不代为选择。
-func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) ([]acp.ConfigOption, error) {
+func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) ([]protocol.ConfigOption, error) {
 	opts := r.sess.ConfigOptions()
-	mOpt, ok := acp.FindConfigOption(opts, acp.CategoryModel)
+	mOpt, ok := protocol.FindConfigOption(opts, protocol.CategoryModel)
 	if !ok {
 		return opts, unsupported("unsupported_model",
 			"runtime "+r.spec.ID+" 未广告模型配置项（category=model），无法在会话内切换模型")

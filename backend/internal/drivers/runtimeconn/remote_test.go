@@ -1,7 +1,8 @@
-package runtime
+package runtimeconn
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/runtime"
 	"testing"
 	"time"
 
@@ -39,21 +40,21 @@ func TestConnectRemoteTransport(t *testing.T) {
 	for _, transport := range []string{"ws", "http"} {
 		t.Run(transport, func(t *testing.T) {
 			endpoint := newTestRemote(t, transport)
-			spec := RemoteSpec("remote-rt", "Remote RT", transport, endpoint, nil)
+			spec := runtime.RemoteSpec("remote-rt", "Remote RT", transport, endpoint, nil)
 			if spec.Launch.Transport != transport || spec.Launch.Endpoint != endpoint {
 				t.Fatalf("RemoteSpec 未落到 Launch: %+v", spec.Launch)
 			}
 			events := make(chan acp.Event, 64)
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			cl, err := Connect(ctx, spec, nil, nil, acp.ClientOptions{
+			cl, err := connect(ctx, spec, nil, nil, acp.ClientOptions{
 				OnEvent: func(e acp.Event) { events <- e },
 				RequestPermission: func(_ context.Context, _ acp.PermissionRequest) acp.PermissionDecision {
 					return acp.PermissionDecision{Allowed: true, OptionID: "allow-all", Always: true}
 				},
 			})
 			if err != nil {
-				t.Fatalf("Connect(%s): %v", transport, err)
+				t.Fatalf("connect(%s): %v", transport, err)
 			}
 			defer cl.Close()
 			if cl.PidInfo().PID != 0 {
@@ -99,8 +100,8 @@ func TestConnectRemoteTransport(t *testing.T) {
 
 // TestConnectUnsupportedTransport 非法传输在 Connect 阶段即报 unsupported（不静默回落 stdio）。
 func TestConnectUnsupportedTransport(t *testing.T) {
-	spec := Spec{ID: "bad", Launch: LaunchSpec{Transport: "grpc", Endpoint: "127.0.0.1:1"}}
-	_, err := Connect(context.Background(), spec, nil, nil, acp.ClientOptions{})
+	spec := runtime.Spec{ID: "bad", Launch: runtime.LaunchSpec{Transport: "grpc", Endpoint: "127.0.0.1:1"}}
+	_, err := connect(context.Background(), spec, nil, nil, acp.ClientOptions{})
 	if err == nil {
 		t.Fatal("应报错")
 	}

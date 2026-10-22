@@ -17,7 +17,8 @@ import (
 //	L3  dto/*                                                     应用契约
 //	L4  service/svc*                                              用例
 //	L5  persistence/store persistence/dao infra/dsh infra/dbclient
-//	    infra/credentials infra/procreg infra/host infra/installed  基础驱动
+//	    infra/credentials infra/procreg infra/host infra/installed
+//	    infra/protocol/acp                                        基础驱动（P3-d：协议绑定下移）
 //	L6  drivers/gateway drivers/mechanism drivers/registry
 //	    drivers/runtimeconn drivers/transfer config                组合驱动
 //	L7  sessionruntime                                            执行面
@@ -83,7 +84,6 @@ var v32Layers = map[string]v32Layer{
 	// 下面四个仍是独立 key：`runtime` 有 adapter 禁入，`infra/*` 的位置与带语义各自不同。
 	"internal/version":            {layer: 1, name: "version", sameLayer: true},
 	"internal/runtime":            {layer: 1, name: "runtime", sameLayer: true, deny: []string{"internal/infra/dsh"}},
-	"internal/infra/protocol/acp": {layer: 1, name: "protocol/acp", sameLayer: true},
 	"internal/infra/protocol/mcp": {layer: 1, name: "protocol/mcp", sameLayer: true},
 	"internal/infra/logging":      {layer: 1, name: "infra/logging", sameLayer: true},
 
@@ -130,7 +130,11 @@ var v32Layers = map[string]v32Layer{
 	"internal/infra/dsh":         {layer: 5, name: "infra/dsh", sameLayer: true, deny: v32AdapterDeny},
 	"internal/infra/dbclient":    {layer: 5, name: "infra/dbclient", sameLayer: true},
 	"internal/infra/credentials": {layer: 5, name: "infra/credentials", sameLayer: true},
-	"internal/infra/procreg":     {layer: 5, name: "infra/procreg", sameLayer: true},
+	// P3-d（2026-10-21）：协议绑定 `acp` 从 L1 降到 L5——内圈（domain/sessionruntime/runtime）
+	// 全部改用 `core/protocol` 平台值后，只剩执行面（runtimeconn）与装配根认识它。
+	// `mcp` 仍在 L1：`domain/mcp` 还直连 MCP 客户端（见分层方案 §0.3）。
+	"internal/infra/protocol/acp": {layer: 5, name: "protocol/acp", sameLayer: true},
+	"internal/infra/procreg":      {layer: 5, name: "infra/procreg", sameLayer: true},
 	// P4（2026-10-21）：域内的两处 I/O 归位后新增——宿主短命进程（选目录面板）与本机可执行性探测。
 	// 都是"跟本机说话"，与 dbclient/procreg 同带。
 	"internal/infra/host":      {layer: 5, name: "infra/host", sameLayer: true},

@@ -94,7 +94,7 @@ func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (*
 
 	args := resolveArgs(spec.Launch.Args, "")
 	// spawn + 握手由 runtime.Connect 承载（可执行投影的拨号底座）。
-	client, err := runtime.Connect(context.WithoutCancel(ctx), spec, args, keys.Env, opt.Hooks.toClientOptions())
+	client, err := connect(context.WithoutCancel(ctx), spec, args, keys.Env, opt.Hooks.toClientOptions())
 	if err != nil {
 		return nil, err
 	}

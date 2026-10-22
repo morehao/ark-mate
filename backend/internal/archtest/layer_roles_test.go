@@ -87,7 +87,7 @@ var domainInfraImports = map[string]string{
 	// P3 收口进度：载荷（事件/权限/提问/配置项/命令/能力）已在 P3-a/P3-b 换成 `core/protocol` 平台值，
 	// 连接与会话句柄（`*acp.Client`/`*acp.Session`）在 P3-c 换成 `protocol.Conn`/`protocol.Session`。
 	// 于是 interaction / provider / session / automation / skill / workspace 全部清零；只剩一条：
-	"internal/domain/mcp":     "infra/protocol/mcp（MCP 客户端：连 server 与探测由域直调）",
+	"internal/domain/mcp": "infra/protocol/mcp（MCP 客户端：连 server 与探测由域直调）",
 }
 
 func TestDomainAvoidsInfraProtocol(t *testing.T) {
@@ -191,8 +191,11 @@ type topLevelRole struct {
 // 这条判据挡的是"新人随手建一个目录，然后把包塞进去，没人问它属于哪一类"——
 // 104 个包的成本主要就来自这种没人裁定的边界。
 var topLevelRoles = map[string]topLevelRole{
-	"core":           {role: "跨域借用的纯词汇（值对象 / 错误码与分类 / 事件总线 / 身份常量）", bands: []int{1}},
-	"domain":         {role: "业务规则与状态（实体 / 状态机 / 域端口）", bands: []int{2}},
+	"core":   {role: "跨域借用的纯词汇（值对象 / 错误码与分类 / 事件总线 / 身份常量）", bands: []int{1}},
+	"domain": {role: "业务规则与状态（实体 / 状态机 / 域端口）", bands: []int{2}},
+	// infra 允许两带是因为 `infra/protocol/mcp` 还在 L1（`domain/mcp` 直连 MCP 客户端，见分层方案 §0.3）。
+	// P3-d 之后 `infra/protocol/acp` 已降到 L5，只剩 mcp 这一条把 infra 撑成跨带；
+	// 它一旦收口，这里应改成 []int{5}——**改小是判据收紧，不是放宽**。
 	"infra":          {role: "跟外面说话的实现（协议客户端 / 进程 / DB 句柄 / 日志出口）", bands: []int{1, 5}},
 	"dto":            {role: "对外契约形状（REST / WS / CLI 共用同一份）", bands: []int{3}},
 	"service":        {role: "用例编排（校验 / 错误码 / 响应装配）", bands: []int{4}},

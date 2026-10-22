@@ -2,8 +2,7 @@ package runtime
 
 import (
 	"context"
-
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 )
 
 // Mode 平台统一权限模式（§5.5 词汇）。各底座的原生 mode 映射见 §6.2 ModeMapping（待实测回填），
@@ -37,8 +36,8 @@ type ModelConfig struct {
 // handoff 语义文档未定稿），先留签名避免将来破坏接口。
 type PromptRequest struct {
 	Text        string
-	McpServers  []acp.McpServer // 规划：本轮注入在 acp 会话层完成
-	HandoffMemo string          // 规划：handoff（未定稿）
+	McpServers  []protocol.McpServer // 规划：本轮注入在 acp 会话层完成
+	HandoffMemo string               // 规划：handoff（未定稿）
 }
 
 // Runtime 描述一个「活着的后端会话」的可执行投影（§4.2 的「会话边界版」）。
@@ -56,7 +55,7 @@ type Runtime interface {
 	// ManagesOwnContext 后端自管上下文/工具（§6.2 三投影均 true）。
 	ManagesOwnContext() bool
 	// Capabilities 返回底层连接握手到的能力（工具/MCP/权限面）。
-	Capabilities() acp.Capabilities
+	Capabilities() protocol.Capabilities
 	// RuntimeSessionID 返回底层 ACP 会话 id（多轮续跑与诊断定位用）。
 	RuntimeSessionID() string
 	// Cancel 取消本会话进行中的 run（会话级执行原语；best-effort，见 acp.Session.Cancel）。
@@ -68,9 +67,9 @@ type Runtime interface {
 	ApplyMode(ctx context.Context, mode Mode) error
 	// ApplyModel 切换模型，返回应用后的**全量**会话配置项状态。
 	// runtime 无模型配置项时返回不支持错误；值非法/不可用时返回运行时原始错误（不得吞）。
-	ApplyModel(ctx context.Context, m ModelConfig) ([]acp.ConfigOption, error)
+	ApplyModel(ctx context.Context, m ModelConfig) ([]protocol.ConfigOption, error)
 	// ConfigOptions 返回该会话当前的会话配置项（运行时自报：模型目录及其它选项，空 = 未提供）。
-	ConfigOptions() []acp.ConfigOption
+	ConfigOptions() []protocol.ConfigOption
 	// Resume 使 Runtime 回到指定会话（RuntimeSessionID）；无持久会话的 runtime 返回不支持错误。
 	Resume(ctx context.Context, sessionID string) error
 }
