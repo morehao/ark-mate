@@ -69,8 +69,50 @@ jobs:
       - name: 架构判据
         run: go test ./internal/archtest/ -count=1
 
-      - name: go test
-        run: go test ./... -count=1
+  # `go test ./...` 拆成 3 片（2026-10-22）：整跑在 CI 上是 2 分钟上下，而且**瓶颈在编译**
+  # 不是用例（本机实测 92 个包整跑 23.7s、冷缓存下 CI ~2min）。分片让三台 runner 各编各的一片。
+  #
+  # 切法是**按包序取模**（`NR % n == k-1`），不维护包名单：新增包自动落到某一片里，
+  # 不会出现"漏掉某个包而没人发现"。代价是**均衡性一般**——本机实测三片 17s / 3.9s / 19.8s
+  # （慢包会撞到同一片）。分片只影响墙钟，不影响覆盖面：元组按构造划分全集。
+  # 空片直接失败（`go list` 结果为空或切法失效时不许静默跑 0 个包）。
+  backend-test:
+    name: 后端 · 测试分片 ${{ matrix.shard }}/3
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      CGO_ENABLED: "0"
+      SHARD: ${{ matrix.shard }}
+      SHARDS: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: go test（本片）
+        run: |
+          set -euo pipefail
+          total=$(go list ./... | wc -l | tr -d ' ')
+          pkgs=$(go list ./... | awk -v n="$SHARDS" -v k="$SHARD" 'NR % n == k - 1')
+          n=$(printf '%s\n' "$pkgs" | grep -c . || true)
+          if [ "$n" -eq 0 ]; then
+            echo "分片 ${SHARD}/${SHARDS} 拿到了 0 个包（共 ${total} 个）：切法已失效，拒绝以空跑收工"
+            exit 1
+          fi
+          echo "分片 ${SHARD}/${SHARDS}: $n / $total 个包"
+          go test -count=1 $pkgs
 
   frontend:
     name: 前端 · typecheck / 构建 / 单测
