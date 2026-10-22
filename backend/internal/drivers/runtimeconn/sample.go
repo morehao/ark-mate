@@ -5,7 +5,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/protocol"
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -29,7 +28,7 @@ import (
 // **不新建会话**（session/new 会在两家 runtime 里落一条持久记录，而它们都没有 delete）。
 // 能力位不支持 resume/load 时返回 `resume_session_unsupported`：那是"该交付面不支持读"的
 // 事实，不是故障——调用方据此把说明文案与留痕级别分开。
-func SampleConfigOptions(ctx context.Context, rc *Conn, rawSessionID, cwd string) ([]acp.ConfigOption, error) {
+func SampleConfigOptions(ctx context.Context, rc *Conn, rawSessionID, cwd string) ([]protocol.ConfigOption, error) {
 	if rc == nil || rc.Client == nil {
 		return nil, failure.NewError(failure.ClassConnection, "runtime_not_connected",
 			"执行面没有可用的客户端连接，无法取样模型目录", nil)
