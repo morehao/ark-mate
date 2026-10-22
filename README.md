@@ -830,7 +830,7 @@ docs/                   对外/产品面文档（口径、结构、排期、边�
 
 > `docs/` 下的文档是**当前有效的对外/产品面口径**（2026-10-16 重建：旧设计文档中仍有效的内容已抽出，
 > 历史整体留在 git 里）。**外部产品的对照与逆向分析不进 `docs/`**——那类材料一律在 `.dsh/docs/`。
-> 对外契约以本 README 的「控制面接口摘要」与实际路由（`backend/internal/delivery/router/routes_*.go`）为准，
+> 对外契约以本 README 的「控制面接口摘要」与实际路由（`backend/internal/router/routes_*.go`）为准，
 > 二者由 `TestReadmeRoutesMatchRouter` 自动守卫；`docs/**` 的相互引用由 `TestDocsReferencesResolve`
 > 守卫（指向不存在的文件即红）。
 

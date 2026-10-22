@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/delivery/router"
+	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/service/svcsystem"
 )
 

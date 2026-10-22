@@ -207,8 +207,8 @@ var foreignSDKs = []struct {
 	allow []string
 }{
 	{"github.com/coder/acp-go-sdk", []string{"internal/infra"}},
-	{"github.com/coder/websocket", []string{"internal/infra", "internal/delivery"}},
-	{"github.com/gin-gonic/gin", []string{"internal/delivery"}},
+	{"github.com/coder/websocket", []string{"internal/infra", "internal/controller"}},
+	{"github.com/gin-gonic/gin", []string{"internal/controller", "internal/middleware", "internal/router"}},
 	{"gorm.io/gorm", []string{"internal/infra", "internal/persistence"}},
 	{"database/sql", []string{"internal/infra", "internal/persistence"}},
 }
@@ -279,7 +279,9 @@ var topLevelRoles = map[string]topLevelRole{
 	"runtime":        {role: "底座契约、注册表与隔离投影", bands: []int{1}},
 	"drivers":        {role: "接线：域端口 ↔ 适配体、连接面、导入导出编排", bands: []int{6}},
 	"sessionruntime": {role: "运行期编排（会话执行 / 权限 / 断连语义）", bands: []int{7}},
-	"delivery":       {role: "入站适配（HTTP / WS 参数解析与响应）", bands: []int{8, 9}},
+	"controller":     {role: "入站适配（HTTP / WS 参数解析与响应）", bands: []int{8}},
+	"middleware":     {role: "入站横切（凭据鉴权 / 来源判定）", bands: []int{8}},
+	"router":         {role: "路由表装配与前端资产交付", bands: []int{9}},
 	"bootstrap":      {role: "组合根与生命周期（装配 / CLI / 维护命令）", bands: []int{9}},
 	"config":         {role: "进程配置（加载 / 默认值 / 校验）", bands: []int{6}},
 	"version":        {role: "构建号", bands: []int{1}},

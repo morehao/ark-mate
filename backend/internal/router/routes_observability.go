@@ -2,10 +2,10 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/controller/ctrusage"
+	"github.com/morehao/ark-mate/internal/controller/ctrws"
 	"github.com/morehao/ark-mate/internal/core/credential"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrusage"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrws"
-	"github.com/morehao/ark-mate/internal/delivery/middleware"
+	"github.com/morehao/ark-mate/internal/middleware"
 )
 
 // registerUsage 用量统计（M3 首项）：runs 计数/时长 + 会话上下文/费用快照聚合

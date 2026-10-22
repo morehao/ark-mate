@@ -9,7 +9,7 @@
  * 为什么在这个包：本仓前端没有测试框架（C12），可执行判定逻辑一律放这里用 `node --test` 跑。
  */
 
-/** 核心读不到 `build-id.txt` 时 `/meta` 回报的口径（与后端 internal/delivery/router 一致）。 */
+/** 核心读不到 `build-id.txt` 时 `/meta` 回报的口径（与后端 internal/router 一致）。 */
 export const UNKNOWN_BUILD_ID = 'unknown'
 
 /** 版本闸门的判定结果。 */

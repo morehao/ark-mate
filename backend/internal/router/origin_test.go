@@ -14,8 +14,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/delivery/middleware"
-	"github.com/morehao/ark-mate/internal/delivery/router"
+	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // 本文件是 M3-5 在**路由装配层**的判据：白名单挂在哪一组、WS 握手是不是同一条判定。

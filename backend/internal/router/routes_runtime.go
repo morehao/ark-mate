@@ -2,8 +2,8 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrmodel"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrruntime"
+	"github.com/morehao/ark-mate/internal/controller/ctrmodel"
+	"github.com/morehao/ark-mate/internal/controller/ctrruntime"
 )
 
 // registerRuntime 底座面：provider 档案、模型目录与运行时诊断。

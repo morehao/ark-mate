@@ -78,7 +78,7 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	}
 
 	// ③ 用例实例必须在**控制器的构造函数里**造（判据钉在函数体上，不是整文件）。
-	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrsession", "session.go")))
+	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go")))
 	if !regexp.MustCompile(`func NewSessionCtr\(svc svcsession\.SessionSvc, hist svcsession\.HistorySvc`).MatchString(ctrSrc) {
 		t.Error("`ctrsession.NewSessionCtr` 的签名变了：v3.1 起它只收**已构造的用例接口**。")
 	}

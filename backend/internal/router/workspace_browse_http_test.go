@@ -179,7 +179,7 @@ func TestWorkspaceDirCreateHTTPFlow(t *testing.T) {
 }
 
 // 宿主原生选择器端点的三个结局（选定 / 取消 / 不支持）改在**控制器级**用替身钉：
-// `TestWorkspacePickDirectoryThreeOutcomes`（internal/delivery/controller/ctrworkspace/pick_test.go）。
+// `TestWorkspacePickDirectoryThreeOutcomes`（internal/controller/ctrworkspace/pick_test.go）。
 // 原因：搬走 manager 那条转发之后控制器直接持域平面 `*workspace.Picker`，而"选定 / 取消"
 // 要真的 spawn 宿主命令（osascript/zenity），路由级拿真对象跑不出来——**替身缝在哪一层，
 // 契约测试就在哪一层**（P4a 正文第十七刀）。

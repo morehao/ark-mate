@@ -95,7 +95,7 @@ export type Capabilities = {
  * （退回 `text/plain`），而核心侧用 Go 的 mime 表 + 显式覆盖给出 `application/manifest+json`——
  * 同一个文件从两条服务路径拿到的头不一样，asset-parity 会红（实测抓到过）。
  *
- * 核心侧有一份**等价**的 Go 映射（`internal/delivery/router` 的 `mimeOverrides`），由
+ * 核心侧有一份**等价**的 Go 映射（`internal/router` 的 `mimeOverrides`），由
  * `TestAssetContentTypesMatchContract` 守卫逐字比对——两边各写一份、靠守卫锁住，
  * 是本仓"两处下发同一策略"的既有做法（CSP 就是这么管的）。
  */

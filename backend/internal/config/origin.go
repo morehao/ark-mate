@@ -9,7 +9,7 @@ import (
 
 // Origin 白名单（M3-5，设计 §7.2 的 Origin 矩阵行 / §9.1）。
 //
-// 默认矩阵（见 internal/delivery/middleware/origin.go）**只**放行：无 Origin 的壳内反代/curl/同源导航、
+// 默认矩阵（见 internal/middleware/origin.go）**只**放行：无 Origin 的壳内反代/curl/同源导航、
 // `mate-app://app`（桌面直连）与核心自身端口上的 http 同源。本键是**额外的显式登记口**：
 // 跨源开发（`make dev` 的 vite :5173 → 代理到核心）与自建反代（页面 origin 与核心监听 origin 不同）
 // 都落在默认矩阵之外，必须在这里指名登记——**不是默认放开**，也不是"配了就放行任意 Origin"。
@@ -90,8 +90,8 @@ func normalizeAllowedOrigins(items []string) ([]string, error) {
 
 // canonicalOrigin 把 origin 文本归一成**比较键**：trim + 小写 + 去尾部 `/`。
 //
-// internal/delivery/middleware 的 OriginPolicy 对请求头做同一步归一再查表（配置值由本函数归一后交出去），
-// 两侧的一致性由 internal/config 与 internal/delivery/middleware 各自的用例共同钉住（前者断言配置值归一结果，
+// internal/middleware 的 OriginPolicy 对请求头做同一步归一再查表（配置值由本函数归一后交出去），
+// 两侧的一致性由 internal/config 与 internal/middleware 各自的用例共同钉住（前者断言配置值归一结果，
 // 后者断言大小写/尾斜杠变体都能命中该值）。
 func canonicalOrigin(s string) string {
 	return strings.ToLower(strings.TrimRight(strings.TrimSpace(s), "/"))

@@ -2,7 +2,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrcommandpolicy"
+	"github.com/morehao/ark-mate/internal/controller/ctrcommandpolicy"
 )
 
 // registerCommandPolicy 命令门禁（A2）读写面。

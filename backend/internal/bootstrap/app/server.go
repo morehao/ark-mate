@@ -15,7 +15,7 @@ const stopGrace = 5 * time.Second
 
 // httpServer 控制面 HTTP 服务，封装 `http.Handler` 的启停生命周期。
 //
-// 与路由分离的原因：路由（internal/delivery/router）回答"哪些路径由谁处理"，
+// 与路由分离的原因：路由（internal/router）回答"哪些路径由谁处理"，
 // 这里回答"监听在哪、超时多久、怎么优雅退出"——两者的变更理由完全不同。
 //
 // **监听器在构造期就建好**（而不是 ListenAndServe 内部再建）：桌面态的地址是

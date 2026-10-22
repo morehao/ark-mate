@@ -232,7 +232,7 @@ func (p *OriginPolicy) CheckFunc() func(*http.Request) (int, error) {
 	}
 }
 
-// Origin 挂载 Host 白名单 + Origin 矩阵（挂在 `/v1/mate` 组的 REST 与 /health 上，见 internal/delivery/router）。
+// Origin 挂载 Host 白名单 + Origin 矩阵（挂在 `/v1/mate` 组的 REST 与 /health 上，见 internal/router）。
 //
 // 范围说明：只覆盖 API 组里的这些路由。静态资产与 SPA 回落（`/`、`/assets/*`、深链）不在组里——
 // 页面导航与子资源加载本来就不带 Origin（除 CORS 与非 GET 同源请求），真正的攻击面是 API。
