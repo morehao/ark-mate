@@ -1,0 +1,65 @@
+# CI 基线（2026-10-22 立）
+#
+# 在这之前仓库**没有任何 CI**：历次"全绿"都只有本地证据（`docs/agents/commands.md` 里的
+# 四条命令）。这个工作流只做一件事——把本地那四条命令搬到每次 push/PR 上跑，不假装覆盖更多。
+#
+# 刻意**不做**的事（每条都有代价理由）：
+#   - 不打包、不生成 `frontend/apps/desktop/release.json`：那是 `.gitignore` 的本地生成物，
+#     生成它要把前端 dist + 内核二进制整条打包链拖进来。判据侧已改成"缺 release.json 就退回
+#     `runtime/dsh/package.json` 的手写 pin 并打印说明"（`TestDshIdentityPatchMatchesPayloadPin`），
+#     所以这里不需要为了一份产物去装 node/pnpm。
+#   - 不跑前端构建与界面验收：那是 `make dev` / `make desktop/*` 的事，需要 Electron 与真实
+#     宿主，GitHub 的 Linux runner 上跑不出有意义的结论（桌面是交付主线，见决策 v8/v9）。
+#     真要做，是独立的一轮（headless web 构建 + 类型检查），不塞进这条基线。
+#   - 不做交叉编译与容器构建：`docs/agents/build-and-runtime.md` 说清了 `CGO_ENABLED=0` 的性质，
+#     这里只用它跑测试，不产出发布物。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一条分支上的新 push 取消上一轮：这类判据的价值在于"最新提交是否绿"，不是完整历史。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: 后端 · 构建 / vet / 判据 / 测试
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # 纯 Go 的 SQLite 驱动（golib ≥ v1.32.22）让这个值成为**可执行的约定**而不是愿望：
+      # 关掉 CGO 还能编能测，才证明本仓确实不依赖 C 工具链（2026-10-10 曾因写死 0 而
+      # 在 CGO 驱动时代静默产出运行期不可用的 SQLite 面，见 build-and-runtime.md）。
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # 版本以 go.mod 为准（Go 命令一律在 backend/ 下跑，仓库根没有 go.mod）。
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      # 架构判据单独一步：它失败时的语义是"分层被破坏"，与普通单测失败不是一回事，
+      # 分开跑能让红的那一步直接说明问题（判据条数以 docs/agents/guards.md 的「共 N 条」为准）。
+      - name: 架构判据
+        run: go test ./internal/archtest/ -count=1
+
+      - name: go test
+        run: go test ./... -count=1
