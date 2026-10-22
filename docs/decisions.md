@@ -877,7 +877,7 @@ MCP 这一面有**两处**与外部协议的接触，都按「平台值 + 端口
 
 - **加一个 MCP 动作要改三处**：域端口（`ports.go`）、实现体（`mcplive.go`）、协议包（`infra/protocol/mcp`）；再加结果值就四处。直连协议包只需改两处——这层端口是**用改动量换依赖方向**，不是免费的。
 - **`LiveClient` 眼下只有一份生产实现**，代价是"读代码的人要多跳一层才看到真实现"；换来的是域不认识协议。这条被明确接受（见 ① 五问③⑤）。
-- **网关 argv 形状没有机器判据**（**留白**）：`GatewayBridgeArgs` 与 `ParseScopeArgs` 是同一对契约的两侧，改动不同步的症状是"网关起来了但 scope 不对 / 工具面不对"——现有覆盖只有 `infra/protocol/mcp` 的 JSON-RPC 纯度用例、`drivers/gateway/{gateway,mcp_policy}_test.go` 与 `bootstrap/cliops/mcp_test.go`（`TestMcpBridgeCLI`）的行为用例，**没有**"拼出来的 argv 能被自己解析回同一个 `GatewayScope`"的往返判据。要补就该补这条往返（同包内成本极低），而不是再加文本扫描。
+- **网关 argv 的往返判据曾经不住在形状所在包**（**自我纠正**，2026-10-22 首次登记后复核发现）：A1 的往返用例（`TestGatewayArgsRoundTrip`）本来就在 `infra/protocol/mcp/server_test.go`——形状搬去 `core/protocol` 时**判据没跟过来**。后果不是"没有覆盖"，而是覆盖**会静默消失**：协议包一旦重组、或那条用例被顺手删掉，`core/protocol` 的形状就零覆盖，而形状本身看起来仍有测试。已搬成 `core/protocol/gateway_test.go` 的 `TestGatewayBridgeArgsRoundTrip`，并补强到四类断言：三态（未钉 / 显式空集 / 白名单）用 `reflect.DeepEqual` 逐字往返（能区分 nil 与非 nil 空集）、白名单 id 带空格/逗号/引号/中文（"为什么选 JSON 数组"从注释变成可执行断言）、参数漂移与坏 JSON 必须报错、`MATE_MCP_CRED_CWD` 不得出现在 `Args`（进了 `Args` 就进能力指纹）。**本条初次登记时把它写成"完全没有往返判据"，那次判断是错的**——错误留痕比抹平有用，故按实改写而不是删掉一提了之。
 - **协议包类型别名仍在**（`infra/protocol/mcp/values.go` 41 行、`infra/protocol/acp/aliases.go` 109 行）：类型只有一处定义、别名不新增行为，但"内圈不许用别名"目前只有 G2 在守（内圈用了别名会让域重新认识协议实现），**其余面用别名没有判据**。别名是"读起来自然"的净收益还是第二条事实源的隐患，**本条不裁决**，见 ⑥。
 
 ### ④ 推翻条件（满足任一即重开评估）
