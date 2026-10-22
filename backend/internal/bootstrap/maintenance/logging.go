@@ -13,10 +13,10 @@ import (
 // logServiceName 日志里的服务名（glog 的 service 字段）。
 const logServiceName = "ark-mate"
 
-// initProcessLogger 装配进程日志出口。
+// InitProcessLogger 装配进程日志出口。
 //
-// 分工与 ark-go-starter 一致：zap driver 的**匿名引入在装配根**（cmd/mate/main.go），
-// 配置与 InitLogger 在这里；pkg/ 下的包不替调用方决定日志出口（internal/infra/dbclient 只声明
+// 分工与 ark-go-starter 一致：zap driver 的**匿名引入在进程入口**（cmd/mate/main.go），
+// 配置与 `glog.InitLogger` 的调用在这里；pkg/ 下的包不替调用方决定日志出口（internal/infra/dbclient 只声明
 // 自己要什么级别，见其 ormLogConfig）。
 //
 // **唯一的硬约束**：glog 的 console writer 写的是 **os.Stdout**（golib 里硬编码，没有 stderr
@@ -79,7 +79,7 @@ func consoleLogConfig(service string, level glog.Level) *glog.LogConfig {
 //
 // ok=false 表示**不装出口**（保持 glog 的默认态：driver 的匿名引入发生在 glog 包初始化
 // 之后——driver 依赖 glog，Go 保证被依赖者先初始化——所以那一刻注册表还是空的、默认 logger
-// 落在 nop 上。刻意不 InitLogger 就保住了这个 nop）。
+// 落在 nop 上。刻意不调 `glog.InitLogger` 就保住了这个 nop）。
 //
 // 除了 mcp（长命进程，诊断要能事后查，走文件），其余都是一次性命令且诊断已经在自己的输出里，
 // 直接静默——顺带避免 `mate --version` 这类打包快路径去建日志目录。

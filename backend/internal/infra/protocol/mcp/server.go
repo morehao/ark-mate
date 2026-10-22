@@ -16,8 +16,10 @@ package mcp
 //
 // 这条不是洁癖：底座把网关的 stdout 当协议流读，一行日志就会让整套 JSON-RPC 错位，表现为
 // "工具莫名不可用"。注意 glog 的 console writer 写的就是 **os.Stdout**（golib 里硬编码，
-// 没有 stderr 选项），所以 `mate mcp` 只能把出口配成文件（见 internal/bootstrap/cliops/logging.go），
-// 由 internal/bootstrap/app/command 的守卫与 `server_test.go` 的纯度用例两侧钉住。
+// 没有 stderr 选项），所以 `mate mcp` 只能把出口配成文件（见
+// internal/bootstrap/maintenance/logging.go 的 `InitProcessLogger`），由
+// internal/bootstrap/maintenance/logging_test.go 的 `TestDataStdoutCommandsNeverUseConsoleWriter`
+// 与 `server_test.go` 的纯度用例两侧钉住。
 
 import (
 	"bufio"

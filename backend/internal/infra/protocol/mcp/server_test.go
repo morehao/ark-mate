@@ -380,8 +380,9 @@ func TestServerInteropWithOwnClient(t *testing.T) {
 //
 // 2026-10-10 起诊断出口是 **glog**，而 glog 的 console writer 写的就是 os.Stdout（golib 里
 // 硬编码，没有 stderr 选项）——所以真实 `mate mcp` 只能把它配成**文件** writer
-// （见 internal/bootstrap/app/command/logging.go）。子进程这里照同一形态初始化，断言落在文件上；
-// "mcp 子命令绝不配 console writer"这条本身由 internal/bootstrap/app/command 的守卫直接钉住。
+// （见 internal/bootstrap/maintenance/logging.go）。子进程这里照同一形态初始化，断言落在文件上；
+// "mcp 子命令绝不配 console writer"这条本身由
+// internal/bootstrap/maintenance/logging_test.go 的 `TestDataStdoutCommandsNeverUseConsoleWriter` 直接钉住。
 func TestServerStdoutPurity(t *testing.T) {
 	logDir := t.TempDir()
 	cmd := exec.Command(os.Args[0])

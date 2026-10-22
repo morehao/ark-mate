@@ -1,6 +1,6 @@
 // Package logging 是「第三方库只认 log/slog」这一处边界的桥。
 //
-// 本仓自己的日志一律走 golib/glog（zap driver，装配根见 internal/bootstrap/cliops/logging.go）。
+// 本仓自己的日志一律走 golib/glog（zap driver，出口配置见 internal/bootstrap/maintenance/logging.go）。
 // 但外部依赖改不了：当前是 ACP SDK——`acpsdk.ClientSideConnection.SetLogger(*slog.Logger)`
 // 的签名就是 `*slog.Logger`，且没注入时它自己回落到 `slog.Default()`。
 // 没有这层桥，协议层诊断会绕过 glog 直接走 std log 的 stderr：级别、格式、轮转、
