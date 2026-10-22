@@ -104,9 +104,13 @@ func ParseScopeArgs(args []string) (GatewayScope, error) {
 				if err := json.Unmarshal([]byte(v), &pinned); err != nil {
 					return GatewayScope{}, fmt.Errorf("--mcps 须为 JSON 数组（未知取值 %q）：%w", v, err)
 				}
-				if pinned == nil {
-					pinned = []string{} // `[]` 必须解成"非 nil 的空集"，否则三态退化
-				}
+				// 三态里的「显式空集」（`[]` = 本会话一个远程 MCP 都不要）由 `encoding/json` 自己保住：
+				// 解 JSON 数组时它把切片长度清 0 再逐元素追加，`[]` 得到的是**非 nil 空切片**，
+				// 而这里的 `pinned` 必然经过一次 Unmarshal，所以不可能是 nil。
+				// 原先此处有一句 `if pinned == nil { pinned = []string{} }`，2026-10-22 复核确认**不可达**
+				// （探针实测 `p == nil` 为 false）后删除。这类防御代码留着比删掉更坏：它让人以为
+				// 「空集会不会退化成 nil」是本行在负责，而真正钉住它的是往返判据
+				// `TestGatewayBridgeArgsRoundTrip`（`gateway_test.go`，`reflect.DeepEqual` 区分 nil 与空集）。
 				sc.McpsPinned = &pinned
 			}
 		default:
