@@ -110,8 +110,8 @@ Electron 主进程（桌面态）
 | **L5** | `persistence/{store,dao}` `infra/{credentials,dbclient,procreg,dsh,host,installed}` `infra/protocol/{acp,mcp}` | 持久与基础设施（`host` = 宿主短命进程，`installed` = 本机可执行性探测；`protocol/*` = 协议绑定——内圈只认 `core/protocol` 平台值，翻译只在连接边界与装配面） |
 | **L6** | `drivers/{gateway,mechanism,registry,runtimeconn,transfer}` `config` | 驱动侧：机制、注册表、连接面、存量定义导入导出编排 |
 | **L7** | `sessionruntime` | 会话编排（Service / Orchestrator / 权限） |
-| **L8** | `delivery/controller/ctr<领域>` `delivery/middleware` | 入站适配 |
-| **L9** | `delivery/router` `bootstrap/{assembly,app,cliops,cli,maintenance}` | 装配与交付 |
+| **L8** | `controller/ctr<领域>` `middleware` | 入站适配（参数解析与响应 / 凭据鉴权与来源判定） |
+| **L9** | `router` `bootstrap/{assembly,app,cliops,cli,maintenance}` | 路由装配与前端资产交付 / 组合根与生命周期 |
 
 两条容易搞混的：**`domain` 在 `dto` 里侧**（域不认识对外契约，视图由用例层投影）；**`maintenance` 与组合根同级**
 （`mate doctor` 要真的把 app 装起来自检，它向下吃 `assembly`/`router`）。

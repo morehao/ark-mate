@@ -805,8 +805,10 @@ backend/                单 Go module（github.com/morehao/ark-mate）
       mechanism         定义双载体 + CAS + 凭据镜像与分层取值（+ doctor/ 自检）
       registry          注册表与编译期断言（端口 → 适配体）；gateway 源汇；runtimeconn 连接面；transfer 存量导入导出
     sessionruntime      运行期编排（会话执行 / 权限 / 断连语义）
-    delivery/           controller/ctr*（只收 service 接口 + DTO + gin）· middleware · router（唯一路由装配点）
-    archtest            架构守卫（机器判据的唯一集中地，176 条）
+    controller/         ctr*（只收 service 接口 + DTO + gin；只做参数绑定与响应）
+    middleware          入站横切（凭据鉴权 / 来源判定）
+    router              唯一路由装配点 + 前端资产交付（web*）
+    archtest            架构守卫（机器判据的唯一集中地，179 条）
     testutil · version
 frontend/               pnpm workspace（apps/* + packages/*）
   apps/web/             入口 + 组装（main.tsx 挂载 + vite 构建配置）；产物 dist 是唯一一份 UI
