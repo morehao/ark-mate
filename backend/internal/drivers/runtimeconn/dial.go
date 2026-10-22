@@ -20,7 +20,7 @@ import (
 //	② 一个凭据检查（默认模型所在档案缺失 → 显式 credential_missing）。
 //
 // 拨号用「脱离调用方 ctx」的上下文：子进程以 exec.CommandContext 启动，若绑定请求 ctx，
-// 请求返回即被杀（暖启动后立刻断连）。WithoutCancel 后 `runtime.Connect` 自带的默认握手限时
+// 请求返回即被杀（暖启动后立刻断连）。WithoutCancel 后本包 `connect` 自带的默认握手限时
 // 仍保证拨号有界；连接生命周期归执行面（watch/Close），与任一请求无关。
 
 // DialOptions 一次拨号所需的编排侧事实。
@@ -93,7 +93,7 @@ func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (*
 	}
 
 	args := resolveArgs(spec.Launch.Args, "")
-	// spawn + 握手由 runtime.Connect 承载（可执行投影的拨号底座）。
+	// spawn + 握手由本包 `connect` 承载（可执行投影的拨号底座）。
 	client, err := connect(context.WithoutCancel(ctx), spec, args, keys.Env, opt.Hooks.toClientOptions())
 	if err != nil {
 		return nil, err

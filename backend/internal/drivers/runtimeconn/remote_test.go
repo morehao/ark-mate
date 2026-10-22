@@ -33,7 +33,7 @@ func newTestRemote(t *testing.T, transport string) string {
 	}
 }
 
-// TestConnectRemoteTransport runtime.Connect 按 LaunchSpec.Transport 走远程传输（A5）：
+// TestConnectRemoteTransport 本包的 `connect` 按 LaunchSpec.Transport 走远程传输（A5）：
 // 真实 ACP server 在远端，Connect 完成 initialize 并跑通一轮会话（含权限交互）。
 // 对端由自建最小 responder 提供（echo 已删）；ws/http 两形态都覆盖，保住远程传输路径。
 func TestConnectRemoteTransport(t *testing.T) {

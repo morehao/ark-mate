@@ -5,7 +5,7 @@
 
 - `backend/`：唯一 Go module（`github.com/morehao/ark-mate`，go 1.26.1）。**仓库根没有 go.mod / go.work——所有 go 命令必须在 `backend/` 下运行**。
   - **`backend/pkg` 已全量并入 `internal/`**（v3.1 §3.1.12，P2）：仓库只有一个代码层，不再有"可复用基础设施 vs 应用专属"的目录分界。原先在 `pkg/` 的包按职责落到 `internal/` 下：
-    - `internal/infra/{acp,mcp,dsh,logging,credentials,dbclient,procreg}`：协议客户端与运行期基础设施。`infra/dsh` 是**唯一 adapter**（实现 `runtime.Adapter`：`Spec()` + `RegisterPorts()`，五张端口表：syncer / 原生权限 / 模型值 / 工具失败归类 / 产品身份）。
+    - `internal/infra/protocol/{acp,mcp}` + `internal/infra/{logging,credentials,dbclient,procreg,dsh,host,installed}`：协议客户端与运行期基础设施。`infra/dsh` 是**唯一 adapter**（实现 `runtime.Adapter`：`Spec()` + `RegisterPorts()`，五张端口表：syncer / 原生权限 / 模型值 / 工具失败归类 / 产品身份）。
     - `internal/runtime`：注册表 + `Spec` 契约 + `Adapter` 接口 + 隔离投影。**不得 import 任何 adapter**（`TestRuntimeDoesNotImportRuntimeAdapters`）。
     - `internal/core/{code,capability,automation,identity,resource,redact,object/*}`：错误码、能力装载、自动化解析、身份常量、跨层值对象等；`internal/config` 仍是独立的进程配置包。
     - 新增/搬迁包时只问一句：**它在层表的哪一层**（见下），不再问"进 pkg 还是 internal"。

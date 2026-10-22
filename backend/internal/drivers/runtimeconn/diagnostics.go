@@ -103,7 +103,7 @@ func (pl *Plane) ScopeNote() (AmbiguityNote, bool) {
 // ——— P3a-2 第二刀：诊断的**组装面** ———
 //
 // 事实来源（按序合并、去重）：
-//  1. runtime 未装配 / 已装配但启动命令不可执行（判定见 pkg/runtime/installed.go）；
+//  1. runtime 未装配 / 已装配但启动命令不可执行（判定见 internal/infra/installed/probe.go）；
 //  2. **将被注入**的供应商档案悬空或无密钥（`CredentialProblem` 原文，已含出路）；
 //  3. 已连接时底座自报的鉴权方式（`CredentialSource.AuthGuidance`）；
 //  4. 最近失败的 stderr 呈鉴权特征 → 指向供应商档案/底座登录；
