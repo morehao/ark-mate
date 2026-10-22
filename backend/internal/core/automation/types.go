@@ -48,7 +48,7 @@ type Schedule struct {
 // （`automations.ts:124-130` 的注释：切换活跃工作空间会静默改掉所有 automation 的目标）
 // 是同一类缺陷，不该复现（ADR-6）。
 //
-// **没有 runtime_hint、也没有 agent_id**：底座由构建期固定（backend/pkg/runtime/build.go），
+// **没有 runtime_hint、也没有 agent_id**：底座由构建期固定（backend/internal/runtime/build.go），
 // 会话不再有 agent 身份（v19）。老定义里若还留着这两个键：读面宽容（本结构丢弃它），
 // 写面显式拒绝（manager 的闸门 → 40001 + 指路），存量残留由写面自愈清除。
 type Target struct {

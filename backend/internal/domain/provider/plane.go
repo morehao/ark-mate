@@ -151,7 +151,7 @@ func (pl *Plane) hasCredentialDoc() bool { return pl.secrets.HasDoc() }
 
 // registeredRuntimeIDs 已注册 runtime id（升序，保证响应稳定）。
 //
-// 唯一实现落在 `pkg/runtime.Registry.IDs()` 上（迁出本域前它是 `Service` 的私有方法，
+// 唯一实现落在 `internal/runtime.Registry.IDs()` 上（迁出本域前它是 `Service` 的私有方法，
 // 而 `library.go` 也用它——两处各写一遍就是"两份实现"）。
 func (pl *Plane) registeredRuntimeIDs() []string {
 	if pl.reg == nil {

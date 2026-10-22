@@ -153,7 +153,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 		now:          opts.Now,
 		secretWarned: make(map[string]bool),
 	}
-	// 与核心进程同一套装配：**只注册构建期选中的那一个底座**（见 pkg/runtime/build.go）。
+	// 与核心进程同一套装配：**只注册构建期选中的那一个底座**（见 internal/runtime/build.go）。
 	// 网关子进程与核心必须看同一个底座，否则"平台说 A、网关按 B 过滤"会静默分叉。
 	remoteSpecs := make([]runtime.Spec, 0, len(opts.Cfg.RemoteRuntimes))
 	for _, rt := range opts.Cfg.RemoteRuntimes {

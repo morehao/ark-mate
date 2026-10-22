@@ -14,7 +14,7 @@
 //  3. **不含版本号、路径、主机名**：版本只进 `/meta` 与日志。身份正文一漂，系统提示的前缀缓存
 //     （KV cache）就跟着失效，而这件事只在账单上现形。
 //
-// 本包不 import 任何 adapter（`pkg/runtime/dsh` 等），也不认识底座的配置格式。
+// 本包不 import 任何 adapter（`internal/infra/dsh` 等），也不认识底座的配置格式。
 package identity
 
 import (

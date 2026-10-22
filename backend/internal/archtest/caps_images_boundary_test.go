@@ -9,25 +9,31 @@ import (
 
 // staticCapsImagesAllowedFiles 允许出现 `.Caps.Images` 的**唯一**地方：静态能力基线的汇入点。
 //
-// `internal/runtime/adapters.go` 把各 adapter 自己声明的 `Caps` 值拷进 `Spec.Caps`——那是"声明"，
-// 不是判据。declaration 原地（`internal/runtime/<adapter>/*.go`，例如 `internal/infra/dsh/dsh.go`）写的是
-// 结构体字面量字段（`Images: false`），不含 `.Caps.Images` 这个取值表达式。
+// `internal/infra/dsh/adapter.go` 的 `Spec()` 把 adapter 自己声明的 `Caps` 值拷进 `Spec.Caps`
+// ——那是"声明"，不是判据。declaration 原地（`internal/infra/dsh/dsh.go`）写的是结构体字面量
+// 字段（`Images: false`），不含 `.Caps.Images` 这个取值表达式，所以**今天这张白名单在代码里零命中**
+// （汇入点用的是字段赋值 `Images: Caps.Images`，不是取值表达式）。
+//
+// 2026-10-22：这张表原先把汇入点记成 `runtime/adapters.go`（`internal/runtime` 下的那个文件，
+// 已随分层重构解散）——白名单指向一个不存在的文件时，判据照样全绿（它只查"命中者是否在白名单里"），
+// 于是"汇入点搬家"这件事静默发生过一次。现在补了一条**双向**断言（见测试体末尾：
+// 白名单里的每一格都必须真实存在），这类腐烂下次会当场红。
 var staticCapsImagesAllowedFiles = map[string]string{
-	"internal/runtime/adapters.go": "把 adapter 的静态基线声明汇入 Spec（值拷贝，不做任何判据）",
+	"internal/infra/dsh/adapter.go": "把 adapter 的静态基线声明汇入 Spec（值拷贝，不做任何判据）",
 }
 
 // connectionFactImages 是**连接期事实**的取值表达式（ACP initialize 广告的能力）。
 //
-// 判据按这个**符号**收集，不按文件路径：它今天写在 `manager` 包里定义 `promptImageSupported` 的那个
-// 文件里，而那个文件会随分层重构搬到 `provider` 域包（设计 §3.4 文件去向表）。路径钉住的
-// 判据在那之后只有两种下场——读不到那个文件而红得莫名其妙，或者被"顺手"改成"任一文件存在即可"
-// 而在**判据层面**悄悄放宽。按符号扫整棵树则两种下场都没有。
+// 判据按这个**符号**收集，不按文件路径：它今天写在 `internal/sessionruntime/catalog_sampler.go`
+// 的采样点（`v := rc.Client.Capabilities().Images`）里，而那个文件已经随分层重构搬过一次家
+// （原先是 `manager` 包里的 `promptImageSupported`）。路径钉住的判据在一次搬迁之后只有两种下场
+// ——读不到那个文件而红得莫名其妙，或者被"顺手"改成"任一文件存在即可"而在**判据层面**悄悄放宽。
+// 按符号扫整棵树则两种下场都没有。
 const connectionFactImages = "Capabilities().Images"
 
-// connectionFactImagesConsumers 是 `Capabilities().Images` 在 `internal/` + `pkg/` 的**生产**文件里
-// 的**实测**命中数（2026-10-16 P0 实测：
-// `grep -rn 'Capabilities()\.Images' internal pkg` 在生产文件里恰好 1 处 =
-// `manager` 包里 `promptImageSupported` 的那一行 `v := rc.client.Capabilities().Images`）。
+// connectionFactImagesConsumers 是 `Capabilities().Images` 在 `internal/` 的**生产**文件里的
+// **实测**命中数（2026-10-22 复核：恰好 1 处 = `internal/sessionruntime/catalog_sampler.go` 的
+// `v := rc.Client.Capabilities().Images`）。
 //
 // 为什么是"恰好 N"而不是"至少一处"：N 就是这条判据的可观测面。0 处 = 连接期事实的消费者被删掉了
 // ——门禁会悄悄退回静态基线，而那正是 ADR-14 要拦的东西；多出来的处 = 有人**又**复制了一份这个
@@ -99,6 +105,15 @@ func TestStaticCapsImagesHasNoConsumer(t *testing.T) {
 	if scanned == 0 {
 		t.Fatal("`internal/` + `pkg/` 下一个生产 .go 文件都没扫到（fail-closed：判据失去对象，" +
 			"空转的守卫比没有守卫更坏——它给出虚假的安心）")
+	}
+
+	// 双向：白名单里的每一条都必须指向真实存在的文件。少这一条时，汇入点搬家/文件解散只会让
+	// 白名单变成一句**没人执行**的注释（2026-10-22 实测发生过一次：旧路径写成了 `runtime/adapters.go`）。
+	for rel := range staticCapsImagesAllowedFiles {
+		if _, err := os.Stat(filepath.Join(backend, rel)); err != nil {
+			t.Errorf("staticCapsImagesAllowedFiles 登记了 %s，但该文件不存在：请删掉这条白名单"+
+				"（双向判据，防清单腐烂——白名单指向不存在的文件时本判据照样全绿）。", rel)
+		}
 	}
 
 	if len(offenders) > 0 {

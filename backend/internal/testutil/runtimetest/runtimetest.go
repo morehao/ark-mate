@@ -8,21 +8,21 @@
 // 没有任何东西会因为它已经失效而变红（框架里悄悄长回一个 `switch runtimeID` 照样编译、照样绿）。
 //
 // 所以这里放一个**框架完全不认识**的底座：它不在 `AllBuiltinSpecs()` 里、不在任何隔离表的
-// Go 侧声明里、不在前端启动器的表里，内核与 `pkg/runtime` 都从未听说过 `rtx`。
+// Go 侧声明里、不在前端启动器的表里，内核与 `internal/runtime` 都从未听说过 `rtx`。
 // 只要 `internal/manager` 的 `TestSyntheticAdapterIsFirstClass` 还能带着它跑完整条链路
 // （隔离投影 → 拉起子进程 → 原生权限注入 → 清单端口被调用），
 // 「adapter 层能承载一个没被硬编码过的底座」这件事就是**被机器执行过**的，而不是被声明的。
 //
 // # 这也是下一个底座的骨架
 //
-// 要接一个真底座，把本文件里的五样东西各抄一份到 `pkg/runtime/<新底座>/`：
+// 要接一个真底座，把本文件里的五样东西各抄一份到 `internal/infra/<新底座>/`：
 //
-//	Spec（`xxxSpec()` 的等价物，落进 pkg/runtime/adapters.go）—— 纯声明：隔离变量、
+//	Spec（`xxxSpec()` 的等价物，落进 `internal/infra/<新底座>/adapter.go`）—— 纯声明：隔离变量、
 //	    投影、清单落点、凭据面、MCP 传输、能力基线；
-//	NativePermission（可执行端口，见 pkg/runtime/native_permission.go）；
-//	Syncer（可执行端口，见 pkg/resource 的契约五条）；
-//	ModelValue（可执行端口，见 pkg/runtime/model_value.go）；
-//	以及"把哪些 id 登记进注册表"那一段（`registerBuiltinPorts` 加一个 case）。
+//	NativePermission（可执行端口，见 internal/runtime/native_permission.go）；
+//	Syncer（可执行端口，见 `internal/core/resource` 的契约五条）；
+//	ModelValue（可执行端口，见 internal/runtime/model_value.go）；
+//	以及"把哪些 id 登记进注册表"那一段（`RegisterPorts` 的五条登记各加一个 case）。
 //
 // **"要抄几样"就是这套 adapter 层的全部接口面**：每多一张注册表，接一个底座的成本就多一样。
 // 所以加表之前先问"这一维真的不能进 `Spec` 吗"（`Spec` 侧只需纯数据，那是最便宜的形态）。
@@ -128,7 +128,7 @@ func Spec(launch runtime.LaunchSpec) runtime.Spec {
 	}
 }
 
-// ModelValue 合成底座的「模型值投影」实现（见 `pkg/runtime/model_value.go` 的端口契约）。
+// ModelValue 合成底座的「模型值投影」实现（见 `internal/runtime/model_value.go` 的端口契约）。
 //
 // 形态刻意与 dsh 不同（`<provider>/<model>` vs JSON 数组）：判据要能区分"内核按 id 挑了一个
 // 形态"与"内核把活儿交给了 adapter"——两边形态一样的话，内核里那段 `switch runtimeID` 塌成
@@ -154,7 +154,7 @@ func (ModelValue) Value(providerID, model string) (string, error) {
 //   - 显式 mode → 注入 PermissionEnvKey，**并且**把逐工具项也投影进内联配置（dsh 不做这件事）。
 type NativePermission struct{}
 
-// Env 见 `pkg/runtime/native_permission.go` 的端口契约。
+// Env 见 `internal/runtime/native_permission.go` 的端口契约。
 func (NativePermission) Env(mode, def string, tools map[string]string) (env []string, desc string) {
 	m := strings.ToLower(strings.TrimSpace(mode))
 	if m == "" || m == "auto" {

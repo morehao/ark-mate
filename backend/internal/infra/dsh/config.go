@@ -2,7 +2,7 @@
 // 落盘 + 装卸启动参数。
 //
 // 本包是纯数据 + 纯函数子包：不 import `internal/**`（archtest 的 TestAdapterHasNoStoreLiterals 守），
-// 也不 import 父包 `pkg/runtime`（父子 import 环，约束⑦）。改启动面的两件事（写文件 / 装卸启动参数）
+// 也不 import 父包 `internal/runtime`（父子 import 环，约束⑦）。改启动面的两件事（写文件 / 装卸启动参数）
 // 只能经端口传进来的 `resource.Delivery` 完成；跑底座级校验门所需的外部信息（可执行文件、staging
 // 目录）只能经 `Options` 传进来——adapter 拿不到注册表，也不该自己拼 HOME。
 package dsh
@@ -50,7 +50,7 @@ const (
 	patchPerm = os.FileMode(0o600)
 )
 
-// DefaultRefPattern 平台凭据引用名的默认模板（与 `pkg/runtime/adapters.go` 的 Credential.RefPattern 一致）。
+// DefaultRefPattern 平台凭据引用名的默认模板（`Options.RefPattern` 留空时用它）。
 //
 // adapter 用它派生**平台命名空间前缀**（`MATE_`），从而知道凭据文档里哪些 `refs` 条目是自己写的。
 // 为什么需要知道：凭据文档是**共享面**（还有 `records:` 与用户自己的 refs），契约③的空集撤回在这里
@@ -59,7 +59,7 @@ const DefaultRefPattern = "MATE_%s_API_KEY"
 
 // Options 构造同步实现所需的**已解析落点**与底座级校验门的开关。
 //
-// 路径由父包解析后传入（见 `pkg/runtime.ResolveConfigLocation`）：adapter 拿不到注册表，
+// 路径由父包解析后传入（见 `internal/runtime.ResolveConfigLocation`）：adapter 拿不到注册表，
 // 也不该自己拼 `HOME`（那正是"平台写到用户真实目录"的入口，见 `docs/agents/isolation.md` 的隔离纪律）。
 type Options struct {
 	// PatchPath overlay 的绝对落点（`--patch` 指向它）。空 = 未声明清单落点（交付面不可用）。
@@ -84,7 +84,7 @@ type Options struct {
 	PatchArgs *PatchArgs
 }
 
-// NewSyncer 构造 dsh 的清单同步实现（装配形态见 `pkg/runtime/registerBuiltinSyncers`）。
+// NewSyncer 构造 dsh 的清单同步实现（装配形态见 `internal/infra/dsh/adapter.go` 的 `registerBuiltinSyncers`）。
 func NewSyncer(opts Options, delivery resource.Delivery) resource.Syncer {
 	patches := opts.PatchArgs
 	if patches == nil {

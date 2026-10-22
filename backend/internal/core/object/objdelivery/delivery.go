@@ -11,7 +11,7 @@
 // 模型清单走「写配置文件」。
 // 把**通道**做成 per-runtime 声明会创造一个今天不存在的自由度。唯一 per-runtime 的是 T5
 // （`config_write`）的**落点**——写哪个文件、什么 schema、是否支持热更——那由
-// `pkg/runtime.Spec.ConfigProjection`（`Root`/`Filename`/`Format`/`Effect`）细化，
+// `internal/runtime.Spec.ConfigProjection`（`Root`/`Filename`/`Format`/`Effect`）细化，
 // 默认取最保守的 `next_process`；本表只声明**通道**与**默认生效时刻**。
 //
 // 「每个 kind 都必须有声明」由 `internal/archtest/delivery_matrix_test.go` 的

@@ -106,7 +106,7 @@ type Config struct {
 	// ProjectionDirs 投影根的部署级覆盖（`MATE_PROJECTION_DIRS=runtime:kind=dir[,...]`，
 	// config.json 可写 JSON 数组）。键是 `<runtime>:<kind>`，值是**绝对目录**。
 	//
-	// 它在投影解析链里优先级最高（见 pkg/runtime.Resolve）：覆盖只替换 Root，投影**形态**
+	// 它在投影解析链里优先级最高（见 internal/runtime.ResolveConfigLocation）：覆盖只替换 Root，投影**形态**
 	// （Layout/Format）仍由 adapter 声明——所以这里解决的是「默认根不适用本机」，
 	// 不是「换个摆放方式」。默认空 = 全用 adapter 声明的原生根。
 	//
@@ -128,7 +128,7 @@ type Config struct {
 	//
 	// 为什么要有独立的键：CLI / 浏览器 / 桌面三个入口**共用一份数据目录**（设计 §481）——
 	// 按入口分裂就会出现"桌面打开后会话不见了"。这里存的是**已解析**的值：transcripts / db /
-	// agents / … 的默认位置都由它派生，各 runtime 子进程的配置隔离也以它为根（pkg/runtime.IsolationEnv）。
+	// agents / … 的默认位置都由它派生，各 runtime 子进程的配置隔离也以它为根（internal/runtime.IsolationEnv）。
 	//
 	// 为什么它只吃**进程环境变量**、不进 config.json / env 文件的键值链（与 MATE_CONFIG_DIR 同级）：
 	// 数据目录决定配置目录的默认位置（`<数据目录>/config`），而配置文件又在配置目录里——让文件里的值

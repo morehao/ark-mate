@@ -6,7 +6,7 @@ import (
 )
 
 // Mode 平台统一权限模式（§5.5 词汇）。各底座的原生 mode 映射见 §6.2 ModeMapping（待实测回填），
-// 实现落在各 adapter 自己的包里（`pkg/runtime/<id>/native_permission.go`）。
+// 实现落在各 adapter 自己的包里（`internal/infra/<id>/native_permission.go`）。
 type Mode string
 
 const (

@@ -26,7 +26,7 @@ import (
 //   - **agent 作用域的操作在单底座下等价于"全部会话"作用域**：原先按 agent 过滤的句柄作废/连接拆除，
 //     现在按 runtime 全局做，行为逐字不变（每个会话都属于那一个底座）。
 type Binding struct {
-	// ID 构建期固定的那个 runtime id（`pkg/runtime.BuildRuntime`，不注入 = dsh）。
+	// ID 构建期固定的那个 runtime id（`internal/runtime.BuildRuntime`，不注入 = dsh）。
 	// 平台一切归属判定都按它（会话的 `runtime_id` 列、连接、诊断）。
 	ID string
 	// Name 底座展示名（取自注册表里的 Spec；取不到时回落 ID）。
@@ -161,6 +161,6 @@ func (pl *Plane) Info() (id, name, version string) {
 // unregisteredErr 构建期选定的 runtime 没在注册表里（单底座下只可能是装配/配置问题）。
 func unregisteredErr(id string) *failure.Error {
 	return failure.NewError(failure.ClassRequest, "runtime_not_found",
-		"构建期选定的 runtime "+id+" 未注册（检查 -ldflags 注入的 pkg/runtime.BuildRuntime "+
+		"构建期选定的 runtime "+id+" 未注册（检查 -ldflags 注入的 internal/runtime.BuildRuntime "+
 			"与 .ark-mate/config/runtimes.json）", nil)
 }

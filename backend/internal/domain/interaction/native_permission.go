@@ -16,8 +16,8 @@ import (
 // B5 在**启动时**把策略投影到底座的原生开关（不改变拦截面的存在，形成双层）。
 //
 // **本文件不认识任何具体底座**（2026-10-12 收口）：原生开关的变量名、哪些工具动作名、内联配置
-// 长什么壳，都是**该底座的私有知识**，实现住在各自的 adapter 包里（`pkg/runtime/<id>/`），
-// 按 ADR-2 挂在 `runtime.Registry` 的第二张表上（见 `pkg/runtime/native_permission.go`）。
+// 长什么壳，都是**该底座的私有知识**，实现住在各自的 adapter 包里（`internal/infra/<id>/`），
+// 按 ADR-2 挂在 `runtime.Registry` 的第二张表上（见 `internal/runtime/native_permission.go`）。
 // 内核只做两件事：把平台策略翻译成中性入参、把端口吐出的 env 交出去。
 //
 // **不注入的三种情况**（避免无谓覆盖/覆盖操作员环境）：

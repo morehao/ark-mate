@@ -50,7 +50,7 @@ const (
 // 与 `Projections` / `ModelConfig` / `Credential` / `SetupSteps` 同一处），父包只做机械投影，
 // 于是"接一个新 runtime"= 新建一个目录 + 加一个 `xxxSpec()`，而不是回来改 frameworks 文件。
 //
-// 为什么不放进 adapter 子包（`pkg/runtime/dsh`）：那会形成父子 import 环（父包要 import adapter
+// 为什么不放进 adapter 实现包（`internal/infra/dsh`）：那会形成父子 import 环（本包要 import adapter
 // 才能汇入 Spec，adapter 又 import 父包才能引用本类型）。这是本仓既有的"adapter 子包只提供纯数据与
 // 端口实现，父包汇入统一 Spec"约定的直接后果，不是省事。
 type IsolationVar struct {

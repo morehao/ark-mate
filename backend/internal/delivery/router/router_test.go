@@ -175,7 +175,7 @@ func TestRouterRoutesRegistered(t *testing.T) {
 			t.Fatalf("路由未注册: %s", want)
 		}
 	}
-	// **负向断言**：`/runtimes` 必须不存在（用户面零 runtime 选择入口；见 pkg/runtime/build.go）。
+	// **负向断言**：`/runtimes` 必须不存在（用户面零 runtime 选择入口；见 internal/runtime/build.go）。
 	if found["GET /v1/mate/runtimes"] {
 		t.Fatal("GET /v1/mate/runtimes 不该再注册：底座由构建期固定，用户面没有这个读面")
 	}

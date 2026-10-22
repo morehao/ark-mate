@@ -61,7 +61,7 @@ type Orchestrator struct {
 
 // RunOptions 一次 RunOnce（demo）的入参。
 //
-// **没有 runtime 字段**：底座是构建期固定的（pkg/runtime/build.go），不是这次运行的入参。
+// **没有 runtime 字段**：底座是构建期固定的（internal/runtime/build.go），不是这次运行的入参。
 type RunOptions struct {
 	Prompt     string
 	Cwd        string   // 空则用当前工作目录

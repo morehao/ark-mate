@@ -147,7 +147,7 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 // 判据是"同一输入产出逐字节相同的值"——本测试用两个**形态不同**的实现把"内核没有内建形态"
 // 这件事钉住：
 //
-//	dsh（真实 adapter，走 `pkg/runtime/dsh`）：`["mate-<provider>","<model>"]`（JSON 数组；第一段是
+//	dsh（真实 adapter，走 `internal/infra/dsh`）：`["mate-<provider>","<model>"]`（JSON 数组；第一段是
 //	派生路由键，v25 起带平台保留前缀）
 //	rtx（合成夹具，走 internal/testutil/runtimetest）：`<provider>/<model>`
 //

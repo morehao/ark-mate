@@ -130,7 +130,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 			nativeMode = def.PermissionMode
 		}
 	}
-	// 底座不由请求指定（构建期固定，见 pkg/runtime/build.go）：这里没有 runtime 参数要校验。
+	// 底座不由请求指定（构建期固定，见 internal/runtime/build.go）：这里没有 runtime 参数要校验。
 	res, err := s.startSession(runCtx, session.StartOptions{
 		SessionID:          convID,
 		Cwd:                ws.Path,
@@ -162,7 +162,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 }
 
 // startSession 建会话。**底座不由调用方指定**：编排器内部取构建期选定的那一个
-// （见 pkg/runtime/build.go 与 Orchestrator.StartSession）。
+// （见 internal/runtime/build.go 与 Orchestrator.StartSession）。
 func (s *Service) startSession(ctx context.Context, opt session.StartOptions) (*session.CreateResult, error) {
 	return s.orch.StartSession(ctx, opt)
 }
@@ -223,14 +223,14 @@ func (s *Service) CancelElicitations(sessionID string) {
 
 // rejectRemovedAgentSelection 显式拒绝会话写面里的 `agent_id`（v19：agent 概念整个并入 runtime）。
 //
-// 为什么宁可报错也不静默忽略：底座由**构建期固定**（`pkg/runtime/build.go`，用户不可自定义），
+// 为什么宁可报错也不静默忽略：底座由**构建期固定**（`internal/runtime/build.go`，用户不可自定义），
 // 而 JSON 绑定会默默收下 `{"agent_id":"x"}` —— 用户会以为"我给这个会话指定了 agent"，实际上
-// 那个键从未被读过。指路的方向也写在文案里：换底座要重新构建（`-X pkg/runtime.BuildRuntime=<id>`）。
+// 那个键从未被读过。指路的方向也写在文案里：换底座要重新构建（`-X internal/runtime.BuildRuntime=<id>`）。
 func rejectRemovedAgentSelection(agentID json.RawMessage) error {
 	if session.JSONNullish(agentID) {
 		return nil
 	}
 	return failure.NewError(failure.ClassRequest, "agent_selection_removed",
 		"agent 概念已并入 runtime：底座由构建期固定（本机为 "+runtime.SelectedRuntime()+"），"+
-			"会话不再有 `agent_id`；换底座要重新构建（-X pkg/runtime.BuildRuntime=<id>）", nil)
+			"会话不再有 `agent_id`；换底座要重新构建（-X internal/runtime.BuildRuntime=<id>）", nil)
 }

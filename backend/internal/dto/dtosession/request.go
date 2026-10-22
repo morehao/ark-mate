@@ -32,7 +32,7 @@ type PromptReq struct {
 type SessionCreateReq struct {
 	Prompt string `json:"prompt"`
 	// AgentID **只用于显式拒绝**（JSON `agent_id`）：agent 概念整个并入 runtime（底座构建期
-	// 固定，`pkg/runtime/build.go`），"这个会话归哪个 agent"已不是一个可选的东西。
+	// 固定，`internal/runtime/build.go`），"这个会话归哪个 agent"已不是一个可选的东西。
 	//
 	// 为什么留着这个同名 raw 字段而不是直接删：JSON 绑定默认**丢弃未知键**——删掉它会让
 	// `{"agent_id":"x"}` 被静默收下然后什么都不发生，用户以为"我指定了 agent"而实际没生效。
@@ -66,7 +66,7 @@ type SessionCreateReq struct {
 	// `GET /automations/:id/runs` 的快速路径，能自称就意味着能伪造别人的运行史。
 	Origin string `json:"-"`
 	// 这里曾有 `RuntimeHint string `json:"-"``（automation 的 target.runtime_hint）：底座由构建期
-	// 固定（pkg/runtime/build.go），"按会话指定底座"这条路径整体下线——留着它只会让下一个人以为
+	// 固定（internal/runtime/build.go），"按会话指定底座"这条路径整体下线——留着它只会让下一个人以为
 	// 平台还能按会话切换。automation 定义里若还写着 `target.runtime_hint`，写面会 40001（见
 	// internal/manager/automation.go 的闸门），读面按已下线键 WARN 后忽略。
 }

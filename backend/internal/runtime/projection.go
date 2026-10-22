@@ -15,7 +15,7 @@ import (
 // （`capability.Skill.Runtimes`），不表达位置与格式。因此不存在「两处声明同一件事」的优先级
 // 问题——这也是删掉 `capability.SkillSource` 的原因。
 //
-// 类型与解析都放 `pkg/runtime`（P-1 决定）：`pkg/runtime` 零依赖 `pkg/capability`，
+// 类型与解析都放**本包**：本包零依赖 `core/capability`，
 // 物化函数收平凡参数 (root, layout, format)，编排留给 internal/manager。
 
 // ProjectionKind 可投影的能力种类。

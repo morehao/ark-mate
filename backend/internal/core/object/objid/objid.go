@@ -5,8 +5,8 @@
 //     与 objusage 同属"跨层共享值对象"；
 //   - 铸造点跨三层（manager 建会话/轮次/输入、store 建工作空间、dao 读回写入），
 //     放在其中任何一层都会让另外两层反向依赖；
-//   - `pkg/` 内部不得 import `internal/`（internal/archtest 守卫），而将来 `pkg/runtime/*`
-//     若需要铸号也能直接用。
+//   - 它是 **leaf**：只依赖标准库，任何一层（含 `internal/runtime` 与各 adapter）都能直接
+//     用它铸号，而它不认识 `runtime`、也不做任何 runtime 相关判定。
 //
 // 两条互不重叠的家族（这是本包最容易读错的一处）：
 //

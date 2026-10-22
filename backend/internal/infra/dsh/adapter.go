@@ -85,7 +85,7 @@ func Spec() runtime.Spec {
 		// 表明归属，且**不覆盖** dsh 自己的 `cordis.patch.yml`。
 		//
 		// 格式（patch 的 `- id:` 条目、`--patch` 参数、两级校验门）全部住在
-		// `pkg/runtime/dsh`——内核只知道落点，因为占位符只能靠该 runtime 的隔离 env 解出来。
+		// `internal/infra/dsh`——内核只知道落点，因为占位符只能靠该 runtime 的隔离 env 解出来。
 		ModelConfig: runtime.ModelConfigLocation{
 			Root:     "${DSH_HOME}",
 			Filename: "mate-models.patch.yml",
@@ -186,7 +186,7 @@ func dshSkillProjection() runtime.Projection {
 			"两条边界：① 该根是**最低优先**（rank 500），项目级 `<cwd>/.agents/skills`(200) 与 `~/.dsh/skills`(400) 会遮蔽它；" +
 			"② 底座按 `config.agentsHome ?? $DSH_AGENTS_HOME ?? ~/.agents` 解析该根，故**任何**注入 `DSH_AGENTS_HOME` 的地方都会让读根与本投影分叉；" +
 			"平台的配置隔离**刻意不注入它**（2026-10-09 修：曾注入，E5 实测导致 dsh 会话的 `<available_skills>` 看不到本投影根下的 skill；" +
-			"护栏见 `pkg/runtime/isolation_test.go` 的 TestIsolationKeepsSkillRootAlignedWithProjection），但用户若在平台进程环境里设了它仍会静默分叉",
+			"护栏见 `internal/runtime/isolation_test.go` 的 TestIsolationKeepsSkillRootAlignedWithProjection），但用户若在平台进程环境里设了它仍会静默分叉",
 	}
 }
 

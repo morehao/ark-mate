@@ -96,7 +96,7 @@ func TestMaterializeSkillValidation(t *testing.T) {
 
 // TestApplyLayoutMatchesRuntime 两处落点规则的取值必须一致。
 //
-// `pkg/capability` 不 import `pkg/runtime`（P-1 的包边界），所以落点模板的判定在两边各有一份
+// `core/capability` 不 import `internal/runtime`（包边界），所以落点模板的判定在两边各有一份
 // ——这是刻意的重复，但**重复必须可验证**：这条测试把两边的判定结果钉在一起，任一边改了规则
 // 而另一边没改，这里立刻红。
 func TestApplyLayoutMatchesRuntime(t *testing.T) {
