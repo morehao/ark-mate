@@ -185,6 +185,19 @@ var contractNoRouteCases = map[string]string{
 
 // TestControlPlaneContractBaseline 逐条比对控制面契约基线。
 func TestControlPlaneContractBaseline(t *testing.T) {
+	// 采样面钉在「底座未安装」这一态：**PATH 收成一个空目录**。
+	//
+	// 为什么必须钉（2026-10-22，CI 第一次真实运行抓到的）：装配根会经 `internal/infra/installed`
+	// 的 `exec.LookPath` 判断底座在不在本机，于是两处响应形状随**宿主**变——
+	//   - `GET /models/catalog` 的 `image_input`（能力事实在场才有）；
+	//   - `GET /runtime/diagnostics` 的 `remediation`（找不到可执行文件时才给建议文案）。
+	// 不钉 PATH 的后果不是"偶尔红"，而是**基线只写基线那一刻那台机器的状态**：装了 dsh 的开发机
+	// 全绿、CI 上红两条，而两边代码逐字相同。判据的价值在于"契约变了没有"，不是"这台机器装了什么"。
+	//
+	// 代价如实记：本基线冻结的是**未安装**那一态，`image_input` 这类"装了才有"的键不在它的覆盖里
+	// （它们的存在性由各处的行为用例断言，不从基线来）。
+	t.Setenv("PATH", t.TempDir())
+
 	a, _ := newIsolationRig(t)
 	eng := a.Handler()
 	host := a.srv.Addr()
