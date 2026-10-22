@@ -34,13 +34,13 @@ func SampleConfigOptions(ctx context.Context, rc *Conn, rawSessionID, cwd string
 			"执行面没有可用的客户端连接，无法取样模型目录", nil)
 	}
 	caps := rc.Client.Capabilities()
-	if !caps.SessionResume && !caps.Raw.LoadSession {
+	if !caps.SessionResume && !caps.LoadSession {
 		return nil, failure.NewError(failure.ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
 	}
 	var sess *acp.Session
 	var err error
-	if caps.Raw.LoadSession {
+	if caps.LoadSession {
 		sess, err = rc.Client.LoadSession(ctx, rawSessionID, acp.SessionOptions{Cwd: cwd})
 	} else {
 		sess, err = rc.Client.ResumeSession(ctx, rawSessionID, acp.SessionOptions{Cwd: cwd})

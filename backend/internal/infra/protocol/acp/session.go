@@ -82,7 +82,7 @@ func (s *Session) Cancel(ctx context.Context) error {
 // 两家 runtime 也都没有 session/delete），故不得用「建会话→close」当探针。
 func (s *Session) Close(ctx context.Context) error {
 	defer s.client.unregisterSession(s.id)
-	if s.client.caps.Raw.SessionCapabilities.Close == nil {
+	if s.client.rawCaps.SessionCapabilities.Close == nil {
 		return nil
 	}
 	if _, err := s.client.conn.CloseSession(ctx, acpsdk.CloseSessionRequest{SessionId: s.id}); err != nil {
@@ -123,15 +123,6 @@ type SessionOptions struct {
 	McpServers            []McpServer
 }
 
-// SessionInfo 列出会话时的元信息（ACP session/list 的 SessionInfo 投影）。
-type SessionInfo struct {
-	ID                    string
-	Cwd                   string
-	Title                 string
-	UpdatedAt             string
-	AdditionalDirectories []string
-}
-
 // NewSession 创建 fresh session（对应 ACP session/new），并捕获其配置项（模型目录来源之一）。
 func (c *Client) NewSession(ctx context.Context, opt SessionOptions) (*Session, error) {
 	resp, err := c.conn.NewSession(ctx, acpsdk.NewSessionRequest{
@@ -151,7 +142,7 @@ func (c *Client) NewSession(ctx context.Context, opt SessionOptions) (*Session, 
 // LoadSession 载入既有会话。仅当 agent 声明 loadSession 时可用，否则返回 ClassUnsupported
 // （dsh 即为该情形，见 docs/dsh-acp-adaptation.md §2）。
 func (c *Client) LoadSession(ctx context.Context, sessionID string, opt SessionOptions) (*Session, error) {
-	if !c.caps.Raw.LoadSession {
+	if !c.rawCaps.LoadSession {
 		return nil, NewError(ClassUnsupported, "load_session_unsupported",
 			"该 runtime 不支持 session/load（仅 fresh session）", nil)
 	}
@@ -173,7 +164,7 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, opt SessionO
 // ResumeSession 恢复既有会话。仅当 agent 声明 sessionCapabilities.resume 时可用。
 // 响应同样携带配置项，是「不新建会话即读到模型目录」的协议入口。
 func (c *Client) ResumeSession(ctx context.Context, sessionID string, opt SessionOptions) (*Session, error) {
-	if c.caps.Raw.SessionCapabilities.Resume == nil {
+	if c.rawCaps.SessionCapabilities.Resume == nil {
 		return nil, NewError(ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume", nil)
 	}
@@ -195,7 +186,7 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, opt Sessio
 // ListSessions 列出运行时的持久会话（ACP session/list）。仅当 agent 声明该能力时可用。
 // 用于冷启动找「最近一条可 resume 的会话」以读取模型目录，避免创建探针会话。
 func (c *Client) ListSessions(ctx context.Context, cwd string) ([]SessionInfo, error) {
-	if c.caps.Raw.SessionCapabilities.List == nil {
+	if c.rawCaps.SessionCapabilities.List == nil {
 		return nil, NewError(ClassUnsupported, "list_sessions_unsupported",
 			"该 runtime 不支持 session/list", nil)
 	}

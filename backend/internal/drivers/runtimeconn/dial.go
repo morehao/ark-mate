@@ -82,16 +82,15 @@ func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (*
 	// 底座调研/诊断依赖（sessionCapabilities resume/list/fork/close、loadSession 声明）。
 	// INFO 级：每 runtime 连接仅一次，serve 默认级别可见。
 	caps := client.Capabilities()
-	sc := caps.Raw.SessionCapabilities
 	glog.Infow(ctx, "runtime 握手能力",
 		"runtime", spec.ID,
 		"sessions_persistent", caps.SessionsPersistent,
 		"multi_session_concurrent", caps.MultiSessionConcurrent,
-		"load_session", caps.Raw.LoadSession,
-		"resume", sc.Resume != nil,
-		"list", sc.List != nil,
-		"fork", sc.Fork != nil,
-		"close", sc.Close != nil)
+		"load_session", caps.LoadSession,
+		"resume", caps.SessionResume,
+		"list", caps.SessionList,
+		"fork", caps.SessionFork,
+		"close", caps.SessionClose)
 
 	rc := &Conn{Client: client, Spec: spec, Key: keys.Key, BaseKey: keys.BaseKey,
 		ConfigDigest: keys.ConfigDigest, Started: time.Now()}

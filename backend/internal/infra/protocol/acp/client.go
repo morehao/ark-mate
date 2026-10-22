@@ -50,8 +50,10 @@ type Client struct {
 	t    Transport
 	conn *acpsdk.ClientSideConnection
 	caps Capabilities
-	opts ClientOptions
-	host *hostClient
+	// rawCaps 是原始 SDK 能力载荷（协议侧内部状态；平台值 `Capabilities` 不再携带它）。
+	rawCaps acpsdk.AgentCapabilities
+	opts    ClientOptions
+	host    *hostClient
 	// reg 本连接内活跃会话索引：config_option_update 只携带 sessionId，
 	// 靠它路由到对应会话并刷新配置项快照。
 	reg *sessionRegistry
@@ -138,7 +140,7 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 		ae.StderrTail = tail
 		return nil, ae
 	}
-	caps := capabilityFromAgent(initResp.AgentCapabilities, initResp.AuthMethods)
+	caps, rawCaps := capabilityFromAgent(initResp.AgentCapabilities, initResp.AuthMethods)
 	// M0 鉴权收敛：仅支持 agent 自托管方式（agent 自行完成登录，methodId 取自
 	// ACP 的 `agent` 指**底座进程**，不是 ark-mate 的 agent 概念——v19 撤掉的是后者，
 	// 这个文件里的 `agent` 是别人的原文，照写；只有**我们自己起的**局部变量名不沿用该词
@@ -176,13 +178,14 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 	}
 
 	return &Client{
-		t:      t,
-		conn:   conn,
-		caps:   caps,
-		opts:   opts,
-		host:   host,
-		reg:    host.reg,
-		closed: make(chan struct{}),
+		t:       t,
+		conn:    conn,
+		caps:    caps,
+		rawCaps: rawCaps,
+		opts:    opts,
+		host:    host,
+		reg:     host.reg,
+		closed:  make(chan struct{}),
 	}, nil
 }
 

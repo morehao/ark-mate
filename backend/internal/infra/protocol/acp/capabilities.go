@@ -2,59 +2,10 @@ package acp
 
 import acpsdk "github.com/coder/acp-go-sdk"
 
-// Capabilities 是 initialize 阶段一次性冻结的能力断言（供上层裁剪接口，不随会话变化）。
-// 一律以协议自报为准：不按 runtime 名字硬编码行为差异（例如历史实测里有的底座支持
-// session/load、有的不支持，这里各自体现在 LoadSession 上）。
-type Capabilities struct {
-	// SessionsPersistent：支持 load/list/resume/fork 等持久会话能力（harness=false）。
-	SessionsPersistent bool
-	// MultiSessionConcurrent：同连接可同时存在多个会话（近似以 sessionCapabilities.list 表达）。
-	MultiSessionConcurrent bool
-	// Images：prompt 可携带图片。
-	Images bool
-	// EmbeddedContext：prompt 可内嵌 Resource 上下文。
-	EmbeddedContext bool
-	// AuthMethods：agent 声明的鉴权方式（非空则需走 Authenticate 流程）。
-	AuthMethods []string
-	// Raw 保留原始 AgentCapabilities（adapter 探测/降级时细看）。
-	Raw acpsdk.AgentCapabilities
-
-	// —— sessionCapabilities.* 展开：供上层决定「能不能 load/resume/list/close/fork」——
-	//
-	// 关键区别（历史实测两家）：dsh 广告 {close,list,resume}、另一底座（已下线）广告
-	// {close,fork,list,resume}，**两家都不广告 delete** —— 因此不得把「建会话→close」当
-	// 探针（close 不删持久记录）。
-	LoadSession   bool
-	SessionClose  bool
-	SessionList   bool
-	SessionResume bool
-	SessionDelete bool
-	SessionFork   bool
-
-	// AuthGuidance 鉴权方式的展示信息（空 = agent 未声明鉴权要求）。
-	// 用途：运行时没有可用模型（未配凭证）时给用户一条确切的补救路径。
-	AuthGuidance []AuthGuidance
-}
-
-// AuthGuidance 一条鉴权方式的展示信息。
-type AuthGuidance struct {
-	// MethodID 传给 ACP authenticate 的 methodId。
-	MethodID string
-	Name     string
-	// Description agent 给出的说明（历史实测里某底座返回形如「Run <cli> auth login in the
-	// terminal」的英文原文）。
-	Description string
-	// Terminal 是否需要在终端交互完成登录。
-	Terminal bool
-	// Command 可执行命令行；为空且 Terminal=true 时由调用方用 runtime 启动命令补齐
-	// （ACP 的 terminal 变体只带 Args，约定用 agent 自身的二进制）。
-	Command []string
-}
-
 // capabilityFromAgent 把 ACP initialize 响应折叠为内部断言。
 // authMethods 独立于 AgentCapabilities（位于 InitializeResponse 顶层）。
 // 语义：sessionCapabilities.* 为指针且非 nil 视为支持；loadSession 为独立布尔。
-func capabilityFromAgent(a acpsdk.AgentCapabilities, authMethods []acpsdk.AuthMethod) Capabilities {
+func capabilityFromAgent(a acpsdk.AgentCapabilities, authMethods []acpsdk.AuthMethod) (Capabilities, acpsdk.AgentCapabilities) {
 	sc := a.SessionCapabilities
 	caps := Capabilities{
 		SessionsPersistent:     a.LoadSession || sc.List != nil || sc.Resume != nil || sc.Fork != nil,
@@ -62,7 +13,6 @@ func capabilityFromAgent(a acpsdk.AgentCapabilities, authMethods []acpsdk.AuthMe
 		Images:                 a.PromptCapabilities.Image,
 		EmbeddedContext:        a.PromptCapabilities.EmbeddedContext,
 		AuthMethods:            make([]string, 0, len(authMethods)),
-		Raw:                    a,
 		LoadSession:            a.LoadSession,
 		SessionClose:           sc.Close != nil,
 		SessionList:            sc.List != nil,
@@ -75,7 +25,7 @@ func capabilityFromAgent(a acpsdk.AgentCapabilities, authMethods []acpsdk.AuthMe
 		caps.AuthMethods = append(caps.AuthMethods, authMethodName(m))
 		caps.AuthGuidance = append(caps.AuthGuidance, authGuidanceOf(m))
 	}
-	return caps
+	return caps, a
 }
 
 // authMethodName 返回鉴权方式的可读标签：env_var/terminal 取种类名，

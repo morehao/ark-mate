@@ -377,14 +377,14 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 		rawNativeID = raw
 	}
 	resumeOK := sameRuntime && rawNativeID != "" &&
-		(caps.Raw.LoadSession || caps.Raw.SessionCapabilities.Resume != nil)
+		(caps.LoadSession || caps.SessionResume)
 
 	var sess *acp.Session
 	var memo string
 	reason := "restart"
 	switch {
 	case resumeOK:
-		if caps.Raw.LoadSession {
+		if caps.LoadSession {
 			sess, err = client.LoadSession(ctx, rawNativeID, opts)
 		} else {
 			sess, err = client.ResumeSession(ctx, rawNativeID, opts)

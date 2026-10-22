@@ -25,48 +25,6 @@ import (
 //     ScopeSource=inferred_inflight；连接上无唯一在途 run 时置 ScopeAmbiguous（不再无痕取消）。
 // 规范顶层 scope 仍需补 SDK（触发式预案见文档 §3.2），届时本层的读取点无需再改。
 
-// ElicitationSchema 是表单字段的 JSON Schema 表示（属性为原始 schema 对象，
-// 本层不做逐字段校验，原样透传给 UI 渲染控件）。
-type ElicitationSchema struct {
-	Title       string
-	Description string
-	Properties  map[string]any // 属性名 → JSON Schema 属性对象（含 type/enum/oneOf/items…）
-	Required    []string
-}
-
-// ElicitationRequest.ScopeSource 取值（C3 归属来源）。
-const (
-	// ScopeWire：scope 由 wire（SDK 顶层 sessionId/_meta）提供——SDK 支持后启用。
-	ScopeWire = "wire"
-	// ScopeInferred：scope 由宿主按「连接上唯一在途 run」推断（SDK 未建模时的过渡实现）。
-	ScopeInferred = "inferred_inflight"
-	// ScopeAmbiguous：`_meta` 未给 scope 且连接上无唯一在途 run（多会话并发在途 / 会话外
-	// request-scope）→ 无法归属。宿主仍按取消回应（不能把 agent 挂住），但归属来源标为它并留痕，
-	// 使「为什么这张提问卡没出现」在诊断里可查，而不是无痕消失。
-	ScopeAmbiguous = "ambiguous"
-)
-
-// ElicitationRequest 是 agent 发起的一次结构化提问请求（宿主需渲染并征询用户）。
-type ElicitationRequest struct {
-	// SessionID 会话归属：acp 层先按 `_meta` 填（ScopeWire），未命中留空由宿主
-	// （orchestrator）按连接上下文注入（ScopeInferred）。
-	SessionID string
-	// ScopeSource 归属来源（wire | inferred_inflight）：由注入方填写，供 REST/WS 载荷与排障展示。
-	ScopeSource string
-	Mode        string // "form" | "url"
-	Message     string
-	Schema      *ElicitationSchema // Mode=form
-	URL         string             // Mode=url
-	URLID       string             // Mode=url：ACP 侧 elicitationId（透传）
-}
-
-// ElicitationOutcome 是宿主对一次结构化提问的决策。
-type ElicitationOutcome struct {
-	// Action ∈ accept | decline | cancel；accept 可携带用户提交的 content。
-	Action  string
-	Content map[string]any
-}
-
 // elicitationRequestFromSDK 把 SDK 的 elicitation/create 折叠为内部 ElicitationRequest。
 // SessionID/ScopeSource 先按 `_meta` 填（wire），未命中留空由宿主注入（见包注释）；
 // Form/Url 均缺失时返回 ok=false。

@@ -1,4 +1,4 @@
-package acp
+package protocol
 
 // 归一化事件 Kind（ACP notification → acp.Event，manager 再转域事件进 eventbus）。
 const (

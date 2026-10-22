@@ -99,7 +99,7 @@ func (s *Service) SampleConfigOptions(ctx context.Context) ([]acp.ConfigOption, 
 		return nil, false, err
 	}
 	caps := rc.Client.Capabilities()
-	if !caps.SessionResume && !caps.Raw.LoadSession {
+	if !caps.SessionResume && !caps.LoadSession {
 		return nil, false, failure.NewError(failure.ClassUnsupported, "resume_session_unsupported",
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
 	}

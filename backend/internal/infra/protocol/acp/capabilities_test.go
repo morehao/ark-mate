@@ -45,7 +45,10 @@ func TestCapabilityFromAgent(t *testing.T) {
 		auth := []acpsdk.AuthMethod{
 			{Agent: &acpsdk.AuthMethodAgent{Id: "google.com"}},
 		}
-		c := capabilityFromAgent(capsResponse(true, true, true, true, true, true, true), auth)
+		c, raw := capabilityFromAgent(capsResponse(true, true, true, true, true, true, true), auth)
+		if !raw.LoadSession {
+			t.Fatalf("原始 SDK 载荷未回填（rawCaps 现在是 Client 的内部状态）")
+		}
 		if !c.SessionsPersistent || !c.MultiSessionConcurrent || !c.Images || !c.EmbeddedContext {
 			t.Fatalf("全能力折叠不符: %+v", c)
 		}
@@ -56,7 +59,7 @@ func TestCapabilityFromAgent(t *testing.T) {
 
 	t.Run("harness_like_no_load", func(t *testing.T) {
 		// harness：load=false、无 fork；list/resume/close 有。
-		c := capabilityFromAgent(capsResponse(false, true, true, false, true, false, false), nil)
+		c, _ := capabilityFromAgent(capsResponse(false, true, true, false, true, false, false), nil)
 		if !c.SessionsPersistent { // list/resume 存在 → 仍判持久
 			t.Fatalf("list/resume 应判 SessionsPersistent: %+v", c)
 		}
@@ -66,7 +69,7 @@ func TestCapabilityFromAgent(t *testing.T) {
 	})
 
 	t.Run("minimal_no_session_caps", func(t *testing.T) {
-		c := capabilityFromAgent(capsResponse(false, false, false, false, false, false, false), nil)
+		c, _ := capabilityFromAgent(capsResponse(false, false, false, false, false, false, false), nil)
 		if c.SessionsPersistent || c.MultiSessionConcurrent {
 			t.Fatalf("无任何会话能力不应判持久/多会话: %+v", c)
 		}
@@ -75,7 +78,7 @@ func TestCapabilityFromAgent(t *testing.T) {
 
 // TestCapabilityForkOnlyPersistent 仅 fork 也构成持久会话能力。
 func TestCapabilityForkOnlyPersistent(t *testing.T) {
-	c := capabilityFromAgent(capsResponse(false, false, false, true, false, false, false), nil)
+	c, _ := capabilityFromAgent(capsResponse(false, false, false, true, false, false, false), nil)
 	if !c.SessionsPersistent {
 		t.Fatalf("仅 fork 也应判持久: %+v", c)
 	}
