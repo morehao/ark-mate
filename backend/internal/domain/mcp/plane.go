@@ -28,6 +28,8 @@ type Plane struct {
 	caps    *capability.Registry
 	defs    Definitions
 	secrets *Secrets
+	// live MCP 客户端实现体（A2 端口化）：装配期注入，域不认识具体协议实现。
+	live LiveClient
 
 	mu     sync.Mutex
 	probes map[string]ProbeStatus
@@ -37,8 +39,12 @@ type Plane struct {
 // NewPlane 造一个连接器平面。三个依赖都必须由装配期注入**同一个实例**：
 // `caps` 是 skill 与 mcp 共用的注册表（两份 = 两个事实源）、`defs` 是定义机制
 // （写面经它读写载体）、`secrets` 是密钥解析面（两份 = 同一份引用解析出两个结果）。
-func NewPlane(caps *capability.Registry, defs Definitions, secrets *Secrets) *Plane {
-	return &Plane{caps: caps, defs: defs, secrets: secrets, probes: make(map[string]ProbeStatus)}
+//
+// `live` 是 MCP 客户端实现体（`LiveClient`，A2 端口化）：由装配根注入
+// `infra/protocol/mcp` 的适配体。**域不再 import 任何 `infra/*`**——这条边由 G2 钉住。
+// 传 nil 的后果不是"少一个能力"而是 live 面当场报错（见 `client()`），所以装配根必须给。
+func NewPlane(caps *capability.Registry, defs Definitions, secrets *Secrets, live LiveClient) *Plane {
+	return &Plane{caps: caps, defs: defs, secrets: secrets, live: live, probes: make(map[string]ProbeStatus)}
 }
 
 // SetProbeTimeout 覆盖单次探测预算（<=0 → 默认 15s；测试注入短预算用）。

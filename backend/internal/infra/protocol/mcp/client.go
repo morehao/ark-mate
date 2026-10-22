@@ -53,20 +53,6 @@ type Server struct {
 	Env map[string]string
 }
 
-// Tool 是 tools/list 返回的一条工具（inputSchema 原样保真）。
-type Tool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
-}
-
-// Result 一次探测的结果：工具列表 + 握手拿到的服务端自述（排障/状态展示用）。
-type Result struct {
-	Tools         []Tool
-	ServerName    string
-	ServerVersion string
-}
-
 // Error 带稳定 code 的探测错误：manager 依 code 决定 REST 语义/日志，msg 面向用户可读。
 //
 // 它**保留底层错误链**（`Unwrap`）：包装不该抹掉"这是一条服务端 JSON-RPC 错误响应"这类
@@ -100,38 +86,6 @@ func CodeOf(err error) string {
 		return me.Code
 	}
 	return ""
-}
-
-// CallResult 是一次 tools/call 的结果。
-//
-// Content 保持 MCP 的联合类型原样（文本/图片/资源链接…）：平台不解释内容语义，
-// 只透传给调用方（前端/脚本），避免臆造字段。StructuredContent 为 MCP 2025-06-18 起的
-// 结构化输出（服务端可选提供），同样原样透传。
-type CallResult struct {
-	Content           []json.RawMessage `json:"content"`
-	IsError           bool              `json:"isError,omitempty"`
-	StructuredContent json.RawMessage   `json:"structuredContent,omitempty"`
-	ServerName        string            `json:"-"`
-	ServerVersion     string            `json:"-"`
-}
-
-// TextOf 把结果里的文本块拼成一段可读文本（非文本块跳过；无文本块返回空串）。
-func (r CallResult) TextOf() string {
-	var b strings.Builder
-	for _, raw := range r.Content {
-		var blk struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(raw, &blk); err != nil || blk.Type != "text" {
-			continue
-		}
-		if b.Len() > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(blk.Text)
-	}
-	return b.String()
 }
 
 // ListTools 探测一个 MCP server 的 tools/list（含 initialize 握手）。
@@ -270,78 +224,6 @@ func dial(ctx context.Context, s Server) (transport, error) {
 }
 
 // ——— B2：resources / prompts ———
-
-// Resource 一条可读资源（resources/list）。
-type Resource struct {
-	URI         string `json:"uri"`
-	Name        string `json:"name,omitempty"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	MimeType    string `json:"mimeType,omitempty"`
-	Size        *int64 `json:"size,omitempty"`
-}
-
-// ResourceTemplate 一条 URI 模板（resources/templates/list）。
-type ResourceTemplate struct {
-	URITemplate string `json:"uriTemplate"`
-	Name        string `json:"name,omitempty"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	MimeType    string `json:"mimeType,omitempty"`
-}
-
-// ResourceList resources/list + resources/templates/list 的结果。
-//
-// TemplatesError 非空表示该 server 不支持 templates（JSON-RPC -32601 等方法未找到）——
-// 这是**服务端能力差异**，不是平台错误：资源列表照常返回，模板降级为空并如实记录原因。
-type ResourceList struct {
-	Resources      []Resource         `json:"resources"`
-	Templates      []ResourceTemplate `json:"templates,omitempty"`
-	TemplatesError string             `json:"templates_error,omitempty"`
-	ServerName     string             `json:"-"`
-	ServerVersion  string             `json:"-"`
-}
-
-// ResourceContent resources/read 的一条内容（text 与 blob 二选一，原样保真）。
-type ResourceContent struct {
-	URI      string `json:"uri"`
-	MimeType string `json:"mimeType,omitempty"`
-	Text     string `json:"text,omitempty"`
-	Blob     string `json:"blob,omitempty"`
-}
-
-// ReadResourceResult resources/read 的结果。
-type ReadResourceResult struct {
-	Contents []ResourceContent `json:"contents"`
-}
-
-// PromptArgument 提示词参数声明（prompts/list 的 arguments 项）。
-type PromptArgument struct {
-	Name        string `json:"name"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	Required    bool   `json:"required,omitempty"`
-}
-
-// Prompt 一条提示词模板（prompts/list）。
-type Prompt struct {
-	Name        string           `json:"name"`
-	Title       string           `json:"title,omitempty"`
-	Description string           `json:"description,omitempty"`
-	Arguments   []PromptArgument `json:"arguments,omitempty"`
-}
-
-// PromptMessage prompts/get 返回的一条消息（content 保持 MCP 联合类型原样）。
-type PromptMessage struct {
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"`
-}
-
-// GetPromptResult prompts/get 的结果。
-type GetPromptResult struct {
-	Description string          `json:"description,omitempty"`
-	Messages    []PromptMessage `json:"messages"`
-}
 
 // ListResources 拉取某 MCP server 的资源列表（resources/list 翻页 + resources/templates/list）。
 // 模板接口不支持时降级为空并记录 TemplatesError（不臆造）。

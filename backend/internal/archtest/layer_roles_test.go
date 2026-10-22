@@ -19,7 +19,7 @@ import (
 // 四条判据：
 //
 //	G1 TestCoreStaysFreeOfInfra        core 不得 import infra/*
-//	G2 TestDomainAvoidsInfraProtocol   domain 不得 import infra 的协议/进程/句柄子包
+//	G2 TestDomainAvoidsInfraProtocol   domain 不得 import infra 的协议/进程/句柄子包（已清零=硬判据）
 //	G3 TestForeignSDKStaysInInfra      第三方协议与驱动 SDK 只许出现在 infra（显式登记例外）
 //	G4 TestTopLevelDirsHaveRoles       每个顶层目录必须在角色表里登记，且其包落在声明的层带
 //
@@ -79,16 +79,15 @@ func TestCoreStaysFreeOfInfra(t *testing.T) {
 var domainInfraAllow = []string{"internal/infra/logging"}
 
 // domainInfraImports 过渡期登记表：域包 → 它 import 的 infra 子包（原因见设计文档 §1.4）。
-// P1（错误分类归位）会让多数域包不再认识 `infra/acp`，P3（载荷归位）清空最后一批。
-// P1 之后只剩**载荷类型**这一类越界（错误分类那一半已随 `core/failure` 归位）：
-// 这三个域包用的是 ACP 的线协议载荷（权限裁决 / 提问 / 工具事件 / 选项），要等 P3
-// "平台值 + 连接边界翻译" 落地才能清空。
-var domainInfraImports = map[string]string{
-	// P3 收口进度：载荷（事件/权限/提问/配置项/命令/能力）已在 P3-a/P3-b 换成 `core/protocol` 平台值，
-	// 连接与会话句柄（`*acp.Client`/`*acp.Session`）在 P3-c 换成 `protocol.Conn`/`protocol.Session`。
-	// 于是 interaction / provider / session / automation / skill / workspace 全部清零；只剩一条：
-	"internal/domain/mcp": "infra/protocol/mcp（MCP 客户端：连 server 与探测由域直调）",
-}
+//
+// **已清零（2026-10-22，W3）**：最后一条 `domain/mcp → infra/protocol/mcp` 随 A2 端口化消失
+// ——域改声明 `LiveClient` 窄端口，`infra/protocol/mcp` 的结果值搬进 `core/protocol`，
+// 实现体在装配面（`drivers/registry`）注入。表结构保留为空，它现在是**硬判据**：
+// `domain` 下任何一个包 import `infra/*`（`infra/logging` 除外）即红。
+//
+// 收口沿革：P1 归位错误分类学（`core/failure`）→ P3-a/P3-b 载荷换 `core/protocol` 平台值
+// → P3-c 连接与会话句柄换 `protocol.Conn`/`protocol.Session` → A2 MCP 客户端端口化。
+var domainInfraImports = map[string]string{}
 
 func TestDomainAvoidsInfraProtocol(t *testing.T) {
 	pkgs := scanProductionPackages(t)
@@ -183,6 +182,16 @@ func TestForeignSDKStaysInInfra(t *testing.T) {
 type topLevelRole struct {
 	role  string
 	bands []int
+	// bandExceptions 角色带内的**具名例外**：包相对路径 → 它实际所在的带。
+	//
+	// 为什么需要它（2026-10-22，W3）：`infra` 收成单层带（L5）后仍有一个包必须停在 L1——
+	// `infra/logging` 是**横切关注点**：每一层都要能拿 logger，而"每层自造一个 logger 端口"
+	// 只会换来七份实现（G2 的白名单也据此只放它一个）。写成 {1,5} 会让"infra 到底在第几层"
+	// 重新变成一个没人能回答的问题；写成"L5 + 具名例外"则让例外**可数、可审**：往 L1 再塞一个
+	// infra 子包不会静默通过，而要在这里加一行并在 review 里说明。
+	//
+	// 双向：例外登记了但那个包已不存在/已不在那一带 → 红（清单不许腐烂）。
+	bandExceptions map[string]int
 }
 
 // topLevelRoles 顶层目录角色表（与设计文档 §2.2 逐行对应）。
@@ -193,10 +202,14 @@ type topLevelRole struct {
 var topLevelRoles = map[string]topLevelRole{
 	"core":   {role: "跨域借用的纯词汇（值对象 / 错误码与分类 / 事件总线 / 身份常量）", bands: []int{1}},
 	"domain": {role: "业务规则与状态（实体 / 状态机 / 域端口）", bands: []int{2}},
-	// infra 允许两带是因为 `infra/protocol/mcp` 还在 L1（`domain/mcp` 直连 MCP 客户端，见分层方案 §0.3）。
-	// P3-d 之后 `infra/protocol/acp` 已降到 L5，只剩 mcp 这一条把 infra 撑成跨带；
-	// 它一旦收口，这里应改成 []int{5}——**改小是判据收紧，不是放宽**。
-	"infra":          {role: "跟外面说话的实现（协议客户端 / 进程 / DB 句柄 / 日志出口）", bands: []int{1, 5}},
+	// `infra` 现在是**单层带**（2026-10-22，W3）：最后一条把它撑成跨带的是 `infra/protocol/mcp`
+	// 停在 L1（`domain/mcp` 直连 MCP 客户端）。A2 端口化把那份依赖换成 `core/protocol` 平台值
+	// + `LiveClient` 窄端口之后，协议绑定一律是 L5。带号由 `{1, 5}` 改小成 `{5}` 是**收紧**：
+	// 从此 `core`/`domain` 再往 `infra` 伸手会同时撞上 G1/G2 与这张卡。
+	//
+	// 唯一的具名例外是 `infra/logging`（L1，横切日志出口，见 bandExceptions 的说明）。
+	"infra": {role: "跟外面说话的实现（协议客户端 / 进程 / DB 句柄 / 日志出口）", bands: []int{5},
+		bandExceptions: map[string]int{"internal/infra/logging": 1}},
 	"dto":            {role: "对外契约形状（REST / WS / CLI 共用同一份）", bands: []int{3}},
 	"service":        {role: "用例编排（校验 / 错误码 / 响应装配）", bands: []int{4}},
 	"persistence":    {role: "表形状（model）+ 机械原语（dao）+ 读面与事务（store）", bands: []int{0, 5}},
@@ -248,8 +261,9 @@ func TestTopLevelDirsHaveRoles(t *testing.T) {
 				"（双向判据，防清单腐烂）。", name)
 		}
 	}
-	// ③ 每个生产包必须落在该目录声明的层带内。
+	// ③ 每个生产包必须落在该目录声明的层带内（具名例外按例外那一带判）。
 	checked := 0
+	usedExceptions := map[string]bool{}
 	for name, role := range topLevelRoles {
 		for _, rel := range byTop[name] {
 			_, layer, ok := v32Resolve(rel)
@@ -265,7 +279,12 @@ func TestTopLevelDirsHaveRoles(t *testing.T) {
 				continue
 			}
 			checked++
-			if !containsInt(role.bands, layer.layer) {
+			bands := role.bands
+			if want, isExc := role.bandExceptions[rel]; isExc {
+				usedExceptions[rel] = true
+				bands = []int{want}
+			}
+			if !containsInt(bands, layer.layer) {
 				t.Errorf("%s 落在 L%d，但 internal/%s 的角色「%s」只允许 %v —— "+
 					"一个顶层目录跨带越多，新人越无法从目录名推出层号（`infra` 曾经同时是 L1 与 L5，"+
 					"于是 core 与 domain 都有理由往里伸手）。", rel, layer.layer, name, role.role, role.bands)
@@ -274,6 +293,15 @@ func TestTopLevelDirsHaveRoles(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("一个包都没校验到层带：判据失锚（空转）")
+	}
+	// ⑤ 具名例外必须真的用上（双向：包被删/被搬到别的带 → 红，清单不许腐烂）。
+	for name, role := range topLevelRoles {
+		for rel, want := range role.bandExceptions {
+			if !usedExceptions[rel] {
+				t.Errorf("%s 的 bandExceptions 登记了 %s（L%d），但它已不在 internal/%s 的生产包里："+
+					"请删掉这条例外（双向判据，防清单腐烂）。", name, rel, want, name)
+			}
+		}
 	}
 }
 

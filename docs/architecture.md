@@ -103,11 +103,11 @@ Electron 主进程（桌面态）
 | 层 | 谁 | 一句话 |
 | --- | --- | --- |
 | **L0** | `persistence/model` | 表行形状。零依赖，被所有持久侧与部分领域引用 |
-| **L1** | `core/{object/*,redact,identity,resource,credential,eventbus,code,failure,automation,definition,capability}` `version` `runtime` `infra/{protocol/acp,protocol/mcp,logging}` | 值对象与协议库，**本带允许互链**（ACP 线协议、错误码与失败分类折算、值类型复用） |
+| **L1** | `core/{object/*,redact,identity,resource,credential,eventbus,code,failure,automation,definition,capability}` `version` `runtime` `core/protocol` `infra/logging` | 值对象与平台值，**本带允许互链**（平台载荷、错误码与失败分类折算、值类型复用）。`infra/logging` 是唯一的例外条目：日志是横切关注点（每层都要能拿 logger） |
 | **L2** | `domain/*` | 业务规则与状态。**出边为零**：不 import dto、store、mechanism、infra |
 | **L3** | `dto/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份） |
 | **L4** | `service/svc<领域>` | 用例层：接口 + 实现 + 构造函数；校验、错误码、响应装配 |
-| **L5** | `persistence/{store,dao}` `infra/{credentials,dbclient,procreg,dsh,host,installed}` | 持久与基础设施（`host` = 宿主短命进程，`installed` = 本机可执行性探测） |
+| **L5** | `persistence/{store,dao}` `infra/{credentials,dbclient,procreg,dsh,host,installed}` `infra/protocol/{acp,mcp}` | 持久与基础设施（`host` = 宿主短命进程，`installed` = 本机可执行性探测；`protocol/*` = 协议绑定——内圈只认 `core/protocol` 平台值，翻译只在连接边界与装配面） |
 | **L6** | `drivers/{gateway,mechanism,registry,runtimeconn,transfer}` `config` | 驱动侧：机制、注册表、连接面、存量定义导入导出编排 |
 | **L7** | `sessionruntime` | 会话编排（Service / Orchestrator / 权限） |
 | **L8** | `delivery/controller/ctr<领域>` `delivery/middleware` | 入站适配 |

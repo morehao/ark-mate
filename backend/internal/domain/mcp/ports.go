@@ -2,8 +2,10 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 )
 
 // ——— MCP 域的窄端口（v3.2 刀 5）———
@@ -45,4 +47,34 @@ type Definitions interface {
 // 不需要适配层。
 type SecretResolver interface {
 	ResolveStoreSecret(ctx context.Context, ref string) (string, error)
+}
+
+// LiveClient 是**实时访问 MCP server 的窄端口**（A2，2026-10-22）：探测、工具调用、资源、
+// 提示词四条 live 路径共用它。
+//
+// 为什么要有这一层：这些方法原先直接调 `infra/protocol/mcp` 的包级函数——于是"域的每一条
+// live 路径都为一份返回值形状去认识协议实现"，`infra` 也因此被迫跨带（L1 + L5）。端口化之后
+// 域只认 `protocol` 平台值，实现体（连接、握手、三个传输、错误分类）由装配根注入。
+//
+// 输入形状用 `protocol.McpServer`（`Name` 即定义 id：客户端只拿它当身份/日志键）；
+// 返回形状一律是 `protocol.Mcp*` 平台值——域不认识任何 MCP 线类型。
+//
+// **错误约定**：实现必须用本仓的稳定 code 词表（`mcp_transport_unsupported` /
+// `mcp_tool_name_required` / `mcp_timeout` …）表达失败，域据 `CodeOf` 决定 REST 分类与信封文案；
+// 词表的事实源仍是实现侧（`infra/protocol/mcp` 的 `Error`），域名只读不造。
+type LiveClient interface {
+	// ListTools 探测 tools/list（含 initialize 握手与翻页）。
+	ListTools(ctx context.Context, s protocol.McpServer) (protocol.McpToolList, error)
+	// CallTool 调用一个工具（args 为 arguments 对象；nil = 无参数）。
+	CallTool(ctx context.Context, s protocol.McpServer, name string, args json.RawMessage) (protocol.McpCallResult, error)
+	// ListResources 拉取 resources/list + resources/templates/list（模板不支持时降级为空）。
+	ListResources(ctx context.Context, s protocol.McpServer) (protocol.McpResourceList, error)
+	// ReadResource 读取一个资源（resources/read）。
+	ReadResource(ctx context.Context, s protocol.McpServer, uri string) (protocol.McpReadResourceResult, error)
+	// ListPrompts 拉取 prompts/list（翻页）。
+	ListPrompts(ctx context.Context, s protocol.McpServer) ([]protocol.McpPrompt, error)
+	// GetPrompt 取用一条提示词模板（prompts/get）。
+	GetPrompt(ctx context.Context, s protocol.McpServer, name string, args map[string]string) (protocol.McpGetPromptResult, error)
+	// CodeOf 取错误的稳定 code（非本实现产生的错误 → ""）。
+	CodeOf(err error) string
 }

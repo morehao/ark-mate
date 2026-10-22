@@ -567,7 +567,7 @@ func stubDeps(t *testing.T, svc *stubSvc) restFixture {
 		automationPlane: newAutomationPlaneForTest(),
 		execution:       runtimeconn.NewPlaneFor(reg),
 		registry:        reg,
-		mcpPlane:        mcp.NewPlane(caps, nil, mcpSecrets),
+		mcpPlane:        mcp.NewPlane(caps, nil, mcpSecrets, registry.NewMcpLiveClient()),
 		mcpSecrets:      mcpSecrets,
 		skills:          skills,
 		wsPlane:         workspace.NewPlane(),

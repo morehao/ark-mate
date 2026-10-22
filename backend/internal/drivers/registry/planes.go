@@ -108,7 +108,8 @@ func NewPlanes(reg *runtime.Registry) *Planes {
 	p.Automation.SetDefinitionFiles(AutomationDefinitionFiles{})
 	p.Skills = skill.NewPlane(p.Capabilities, skillDefs{p.Definitions})
 	p.McpSecrets = mcp.NewSecrets(p.Credentials)
-	p.Mcp = mcp.NewPlane(p.Capabilities, mcpDefs{p.Definitions}, p.McpSecrets)
+	// live 客户端实现体在这里注入（A2）：域只认窄端口，`infra/protocol/mcp` 的实现由装配面接上。
+	p.Mcp = mcp.NewPlane(p.Capabilities, mcpDefs{p.Definitions}, p.McpSecrets, NewMcpLiveClient())
 	p.Providers = provider.NewPlane(reg, NewProviderSecrets(p.Credentials))
 	p.Resources = NewResources(reg, p.Providers)
 	p.Identity = NewIdentityDelivery(reg)

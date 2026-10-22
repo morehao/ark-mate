@@ -82,10 +82,9 @@ var v32Layers = map[string]v32Layer{
 	// 从 `drivers/mechanism` 抽出来，让 `domain/*` 不必反向 import 机制层。
 	"internal/core": {layer: 1, name: "core", sameLayer: true},
 	// 下面四个仍是独立 key：`runtime` 有 adapter 禁入，`infra/*` 的位置与带语义各自不同。
-	"internal/version":            {layer: 1, name: "version", sameLayer: true},
-	"internal/runtime":            {layer: 1, name: "runtime", sameLayer: true, deny: []string{"internal/infra/dsh"}},
-	"internal/infra/protocol/mcp": {layer: 1, name: "protocol/mcp", sameLayer: true},
-	"internal/infra/logging":      {layer: 1, name: "infra/logging", sameLayer: true},
+	"internal/version":       {layer: 1, name: "version", sameLayer: true},
+	"internal/runtime":       {layer: 1, name: "runtime", sameLayer: true, deny: []string{"internal/infra/dsh"}},
+	"internal/infra/logging": {layer: 1, name: "infra/logging", sameLayer: true},
 
 	// ——— L2：领域 ———
 	//
@@ -132,8 +131,12 @@ var v32Layers = map[string]v32Layer{
 	"internal/infra/credentials": {layer: 5, name: "infra/credentials", sameLayer: true},
 	// P3-d（2026-10-21）：协议绑定 `acp` 从 L1 降到 L5——内圈（domain/sessionruntime/runtime）
 	// 全部改用 `core/protocol` 平台值后，只剩执行面（runtimeconn）与装配根认识它。
-	// `mcp` 仍在 L1：`domain/mcp` 还直连 MCP 客户端（见分层方案 §0.3）。
+	//
+	// W3/A2（2026-10-22）：`mcp` 走同一条路——`domain/mcp` 的 live 面改成 `LiveClient` 窄端口
+	// （结果值搬进 `core/protocol`，实现体在 `drivers/registry` 注入），于是
+	// `infra/protocol/mcp` 也落到 L5。至此 `infra` 里没有任何包停在 L1（单层带）。
 	"internal/infra/protocol/acp": {layer: 5, name: "protocol/acp", sameLayer: true},
+	"internal/infra/protocol/mcp": {layer: 5, name: "protocol/mcp", sameLayer: true},
 	"internal/infra/procreg":      {layer: 5, name: "infra/procreg", sameLayer: true},
 	// P4（2026-10-21）：域内的两处 I/O 归位后新增——宿主短命进程（选目录面板）与本机可执行性探测。
 	// 都是"跟本机说话"，与 dbclient/procreg 同带。
