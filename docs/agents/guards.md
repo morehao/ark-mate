@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，2026-10-21 顶层角色 4 条为 176 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，2026-10-22 平台值包对偶守卫为 177 条、同批协议包别名出口为 178 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性与平台值包守卫）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，2026-10-21 顶层角色 4 条为 176 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，2026-10-22 平台值包对偶守卫为 177 条、同批协议包别名出口为 178 条、注释路径存在性为 179 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性与平台值包守卫）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -101,7 +101,9 @@
 
 - **再加 1 条「协议包别名出口」守卫**（`protocol_alias_test.go`，2026-10-22，决策 v32）：`infra/protocol/{acp,mcp}` 把 `core/protocol` 的载荷类型、事件常量与网关函数转发成同名读法（`Event` / `Tool` / `CallResult` / `GatewayBridgeArgs` …），好让**协议实现自己的代码**读起来自然（实测：协议包内部 362 处不带前缀的引用）。这套转发不是第二事实源（`type X = protocol.X` 只有一处定义、零新行为），但它制造了**第二个出口**：包外任何一处 `acp.ToolCallInfo` / `mcp.GatewayCredCwdEnv` 都会把一个只需要值类型的消费方绑到"协议实现"上——那正是 A1/A2 刚拆掉的耦合，只是从别名这个后门接回来。G2 只挡内圈三目录 import `infra`，装配面/驱动面/测试不在它的扫描面里，所以这条边此前**没有判据**。判据先**从转发声明本身**解析别名集合（`X = protocol.Y` 与"函数体就是一行 `return protocol.X`"两种形态；手抄名单会在声明漂移时静默空转），再扫包外生产代码里的 `<import 本地名>.<别名>`，白名单只有两个协议包自己；fail-closed 两侧（某包解析到 0 条声明 / 没有任何生产包 import 协议包 → Fatal），另加正向断言（协议包内部确实还有引用，否则这套转发已无收益、该整块删）。落地同批把包外 4 个生产文件迁到 `core/protocol`：`bootstrap/maintenance/mcp.go` 的 `ParseScopeArgs`、`drivers/gateway/{gateway,source}.go` 的 `Tool`/`CallResult`/网关常量、`drivers/runtimeconn/sample.go` 的 `ConfigOption`（`maintenance/mcp.go` 因此不再 import 协议包，`sample.go` 也不再 import `acp`）。反证（实跑 2 条，均红后复原）：在 `drivers/gateway` 里写 `var _ = []mcp.Tool{}` → 红；`protocolAliasDirs` 改成不存在的目录 → 失锚 Fatal。
 
-**共 178 条**——加守卫时记得同步这句话。
+- **再加 1 条「注释路径存在性」守卫**（`comment_paths_test.go`，2026-10-22）：`internal/**` 与 `pkg/**` 的**注释**里出现的仓库路径必须真的存在，通配前缀除外。挡的是"搬完家没改注释"这一类静默失效——代码编译过、测试全绿、文档链接也不断，只有顺着注释去找那个文件的人会撞空；2026-10-22 那一轮实测出的陈旧路径（`pkg/runtime` 时代 81 处、`pkg/*` 13+107 处、`app/command` 10 处）**全部靠人工扫**才发现，而 `TestDocsReferencesResolve` 只管文档与特定形态、扫不到 Go 注释。判据只抽注释正文（代码里的字符串字面量是运行时真实路径，另有守卫管），形态 `internal/<pkg>/<sub>`、`.../<file>.go`、`.../<pkg>.<Symbol>`（带符号名的只判**包目录**是否存在——符号名有编译器管，判进来只会让判据与改名赛跑）。**通配前缀跳过**：后随 `*` 或 `<`、或末段以 `_` 结尾（`internal/service/svc*`、`internal/delivery/controller/ctr<领域>`、`internal/persistence/store/migrate_v*.go`、`internal/dto/dtomodel/model_*.go`）——这些是族名，当成一条引用去 stat 会全红。**白名单 `historicalPathRefs` 具名 + 逐条写原因**（16 条：`internal/manager` 及它的 6 个具体文件、`internal/session/prompt_chunk_coalescer.go`、`internal/sessionruntime/{credentials,transcript_load}.go`、`internal/server/{handler,router}`、`internal/capabilityio`、`internal/vault`，以及两条**外部参照实现** compozy 的 `internal/skills/{provenance,verify}.go`）：本仓有一批**刻意的历史叙述**（"P4a 第 N 刀从旧目录搬入"、"v11 生成器冻结副本抄自 `git show <rev>:…`"、"旧目录不得复活"），批量改成现存路径等于把历史读歪、还抹掉冻结副本的来源；白名单**双向**——登记了但路径现在存在 → 红（该删条目），登记了但注释里不再出现 → 红（已腐化成纯噪声）。fail-closed 三处：扫到 0 条引用 / 0 个 Go 文件 / 0 条通配前缀 → 都 Fatal（最后一条防"路径形态变了、判据静默地只查一半"）。反证（实跑 4 条，均红后复原）：注释里写回 `internal/bootstrap/app/command` → 红；白名单塞一条仍存在的路径 → 红；删掉 `internal/vault` 那条登记 → 红；扫描面改成不存在的目录 → 失锚 Fatal。
+
+**共 179 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 
