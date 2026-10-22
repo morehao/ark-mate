@@ -16,16 +16,17 @@ import (
 // L1 同带允许，但"最内层的纯词汇"认识"外部协议"是角色错误）。
 // 两层判据彼此不替代：层表管方向，本文件管角色。
 //
-// 四条判据：
+// 五条判据：
 //
-//	G1 TestCoreStaysFreeOfInfra        core 不得 import infra/*
-//	G2 TestDomainAvoidsInfraProtocol   domain 不得 import infra 的协议/进程/句柄子包（已清零=硬判据）
-//	G3 TestForeignSDKStaysInInfra      第三方协议与驱动 SDK 只许出现在 infra（显式登记例外）
-//	G4 TestTopLevelDirsHaveRoles       每个顶层目录必须在角色表里登记，且其包落在声明的层带
+//	G1 TestCoreStaysFreeOfInfra            core 不得 import infra/*
+//	G2 TestInnerCircleAvoidsInfraProtocol  内圈（domain + sessionruntime + runtime）不得 import infra 的协议/进程/句柄子包
+//	G3 TestForeignSDKStaysInInfra          第三方协议与驱动 SDK 只许出现在 infra（显式登记例外）
+//	G4 TestTopLevelDirsHaveRoles           每个顶层目录必须在角色表里登记，且其包落在声明的层带
+//	G5 TestProtocolValuesStayFreeOfInfra   `core/protocol`（平台值）不得 import infra/*
 //
-// G1/G2 现在是**双向登记的过渡态**：现状确有违规（见下表），先把它们逐条登记，
-// 既挡"新增一条"（转红），也挡"改完了没删登记"（转红）。表清空之日即判据转硬之日，
-// 这一步由设计文档 §3 的 P1/P3 完成，不需要再改本文件的结构。
+// G1/G2/G5 都是**双向登记的过渡态**：现状确有违规（见下表），先把它们逐条登记，
+// 既挡"新增一条"（转红），也挡"改完了没删登记"（转红）。表清空之日即判据转硬之日。
+// 截止 2026-10-22（W1–W4）：G1/G2/G5 三张表**全部清空**，即三条都是硬判据。
 
 // ——— G1：core 不得 import infra ———
 
@@ -72,31 +73,49 @@ func TestCoreStaysFreeOfInfra(t *testing.T) {
 	}
 }
 
-// ——— G2：domain 不得 import infra 的协议/进程/句柄子包 ———
+// ——— G2：内圈不得 import infra 的协议/进程/句柄子包 ———
 
-// domainInfraAllow 是 domain 唯一允许依赖的 infra 子包：日志出口是横切关注点，
-// 让它走"每层自造一个 logger 端口"只会换来七份实现。
-var domainInfraAllow = []string{"internal/infra/logging"}
-
-// domainInfraImports 过渡期登记表：域包 → 它 import 的 infra 子包（原因见设计文档 §1.4）。
+// innerCircleDirs 是**内圈三目录**（2026-10-22，W4 扩面）。
 //
-// **已清零（2026-10-22，W3）**：最后一条 `domain/mcp → infra/protocol/mcp` 随 A2 端口化消失
-// ——域改声明 `LiveClient` 窄端口，`infra/protocol/mcp` 的结果值搬进 `core/protocol`，
+// 为什么从 `domain` 扩到三个：这条判据挡的不是"某一层的规矩"，而是**内圈在认识外部实现**
+// 这件事本身——`sessionruntime`（L7，运行期编排）与 `runtime`（L1，底座契约/注册表）同样不该
+// 认识 `infra` 的协议/进程/句柄；它们的越界只会比域更晚被发现（编排层出问题表现为"会话行为
+// 诡异"，而不是"某个接口报错"）。扩面时两者**今天已零命中**，所以扩了不是记账，是**回流防护**：
+// 下次谁想在内圈 `import infra/protocol/mcp`，当场红。
+var innerCircleDirs = []string{"internal/domain", "internal/sessionruntime", "internal/runtime"}
+
+// innerInfraAllow 内圈唯一允许依赖的 infra 子包：日志出口是横切关注点，
+// 让它走"每层自造一个 logger 端口"只会换来七份实现。
+var innerInfraAllow = []string{"internal/infra/logging"}
+
+// innerInfraImports 过渡期登记表：内圈包 → 它 import 的 infra 子包。
+//
+// **已清零（2026-10-22，W3/A2）**：最后一条 `domain/mcp → infra/protocol/mcp` 随 MCP 客户端
+// 端口化消失——域声明 `LiveClient` 窄端口，`infra/protocol/mcp` 的结果值搬进 `core/protocol`，
 // 实现体在装配面（`drivers/registry`）注入。表结构保留为空，它现在是**硬判据**：
-// `domain` 下任何一个包 import `infra/*`（`infra/logging` 除外）即红。
+// 内圈下任何一个包 import `infra/*`（`infra/logging` 除外）即红。
 //
 // 收口沿革：P1 归位错误分类学（`core/failure`）→ P3-a/P3-b 载荷换 `core/protocol` 平台值
 // → P3-c 连接与会话句柄换 `protocol.Conn`/`protocol.Session` → A2 MCP 客户端端口化。
-var domainInfraImports = map[string]string{}
+var innerInfraImports = map[string]string{}
 
-func TestDomainAvoidsInfraProtocol(t *testing.T) {
+func TestInnerCircleAvoidsInfraProtocol(t *testing.T) {
 	pkgs := scanProductionPackages(t)
 	got := map[string]string{}
+	perDir := map[string]int{}
 	scanned := 0
 	for _, p := range pkgs {
-		if !strings.HasPrefix(p.rel, "internal/domain") {
+		dir := ""
+		for _, d := range innerCircleDirs {
+			if isUnderAny(p.rel, []string{d}) {
+				dir = d
+				break
+			}
+		}
+		if dir == "" {
 			continue
 		}
+		perDir[dir]++
 		scanned++
 		var hits []string
 		for _, imp := range p.imports {
@@ -104,7 +123,7 @@ func TestDomainAvoidsInfraProtocol(t *testing.T) {
 			if rel == "" || !strings.HasPrefix(rel, "internal/infra") {
 				continue
 			}
-			if isUnderAny(rel, domainInfraAllow) {
+			if isUnderAny(rel, innerInfraAllow) {
 				continue
 			}
 			hits = append(hits, rel)
@@ -114,23 +133,67 @@ func TestDomainAvoidsInfraProtocol(t *testing.T) {
 			got[p.rel] = strings.Join(hits, "、")
 		}
 	}
+	// fail-closed：三个目录各自都必须扫到包。漏一个的后果是"那条边再没人看"，
+	// 而守卫照样绿——正是这条判据要挡的那类静默失效。
+	for _, d := range innerCircleDirs {
+		if perDir[d] == 0 {
+			t.Fatalf("%s 下扫到 0 个生产包：判据失锚（空转；目录改名/搬迁时请同步 innerCircleDirs）", d)
+		}
+	}
 	if scanned == 0 {
-		t.Fatal("internal/domain 下扫到 0 个生产包：判据失锚（空转）")
+		t.Fatal("内圈三目录下扫到 0 个生产包：判据失锚（空转）")
 	}
 
 	for rel, why := range got {
-		if _, ok := domainInfraImports[rel]; ok {
+		if _, ok := innerInfraImports[rel]; ok {
 			continue
 		}
-		t.Errorf("%s import 了 %s：`domain` 是**业务规则与状态**，不认识对方协议、不 spawn 进程、"+
-			"不开数据库句柄。协议载荷请走平台值（`runtimeconn` 负责翻译），宿主能力放到 `infra`。"+
-			"\n（允许的唯一例外是 `infra/logging`：日志是横切关注点。）", rel, why)
+		t.Errorf("%s import 了 %s：内圈（`domain` / `sessionruntime` / `runtime`）是**业务规则、运行期编排\n"+
+			"与底座契约**，不认识对方协议、不 spawn 进程、不开数据库句柄。协议载荷请走平台值（`core/protocol`，\n"+
+			"翻译由连接边界负责），宿主能力放到 `infra` 并在装配根注入窄端口。\n"+
+			"（允许的唯一例外是 `infra/logging`：日志是横切关注点。）", rel, why)
 	}
-	for rel, why := range domainInfraImports {
+	for rel, why := range innerInfraImports {
 		if _, ok := got[rel]; !ok {
-			t.Errorf("domainInfraImports 登记了 %s（%s），但它现在已不 import infra 协议包：请删掉这条登记"+
+			t.Errorf("innerInfraImports 登记了 %s（%s），但它现在已不 import infra 协议包：请删掉这条登记"+
 				"（双向判据）。", rel, why)
 		}
+	}
+}
+
+// ——— G5：平台值包不得 import infra ———
+
+// protocolValuesDir 是**平台值包**（`core/protocol`）：事件/权限/提问/配置项/命令/能力/MCP
+// 结果值，全部是"平台自己认的形状"。
+//
+// 为什么要单独一条（W4，2026-10-22）：G1 只管 `core` **整体**——它对 `core/protocol` 成立，
+// 但那是因为今天没人给它塞协议依赖。一旦有人图省事在这里 `import infra/protocol/mcp`（"反正
+// 就是转个类型"），`core → infra` 会**从后门长回来**，而层表只会说"L1 同带，合法"：那正是
+// G1 当初要挡的失效，只是换了个门。这条判据与 G1 是**对偶**的：G1 管 `core` 的每个包、
+// 这一条把平台值包单独钉死，哪怕将来 `core` 里出现别的合法例外，平台值包也不会跟着松。
+var protocolValuesDir = "internal/core/protocol"
+
+func TestProtocolValuesStayFreeOfInfra(t *testing.T) {
+	pkgs := scanProductionPackages(t)
+	scanned := 0
+	for _, p := range pkgs {
+		if !isUnderAny(p.rel, []string{protocolValuesDir}) {
+			continue
+		}
+		scanned++
+		for _, imp := range p.imports {
+			rel := importPathOf(imp)
+			if rel == "" || !strings.HasPrefix(rel, "internal/infra") {
+				continue
+			}
+			t.Errorf("%s import 了 %s：平台值包只装**值**（纯数据 + 纯计算，标准库与 `core` 的其它值包到头了）。\n"+
+				"任何「跟外面说话」的东西——解析线协议、拨号、spawn、读库——都归 `infra`，由调用方在\n"+
+				"连接边界翻译。这条边一旦放开，`core → infra` 会从平台值包这个后门长回来，而层表\n"+
+				"（L1 同带）不会红。", p.rel, rel)
+		}
+	}
+	if scanned == 0 {
+		t.Fatalf("%s 下扫到 0 个生产包：判据失锚（空转；包改名/搬迁时请同步 protocolValuesDir）", protocolValuesDir)
 	}
 }
 

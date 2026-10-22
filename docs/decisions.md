@@ -840,8 +840,9 @@ O19（确认区只画一张卡）是交互缺陷：卡片之间没有先后依�
 
 ### ⑤ 判据落地
 
-四条守卫见 `docs/agents/guards.md`（2026-10-21 新增，172 → 176 条）：
-`TestCoreStaysFreeOfInfra` / `TestDomainAvoidsInfraProtocol` / `TestForeignSDKStaysInInfra` / `TestTopLevelDirsHaveRoles`。
-它们不是"目录得有什么用"，而是**角色得唯一**：G1/G2 以双向登记表表达"现状欠账"，清空即转硬；G3/G4 从第一天起就是硬判据。
+五条守卫见 `docs/agents/guards.md`（2026-10-21 立 4 条，172 → 176 条；2026-10-22 加 G5，176 → 177 条）：
+`TestCoreStaysFreeOfInfra` / `TestInnerCircleAvoidsInfraProtocol`（G2 的扫描面 2026-10-22 从 `domain` 扩到内圈三目录 `domain`+`sessionruntime`+`runtime`）/
+`TestForeignSDKStaysInInfra` / `TestTopLevelDirsHaveRoles` / `TestProtocolValuesStayFreeOfInfra`。
+它们不是"目录得有什么用"，而是**角色得唯一**：G1/G2/G5 以双向登记表表达"现状欠账"，清空即转硬（三张表 2026-10-22 已全部清空）；G3/G4 从第一天起就是硬判据。
 
 ---

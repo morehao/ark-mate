@@ -12,7 +12,7 @@ import (
 //
 // 它在 `infra` 而不是 `runtime`：`runtime` 是契约包（Spec/Adapter/注册表/隔离投影，纯数据与纯规则），
 // 而这里要真的去 `stat` 与 `LookPath`——那是"跟本机文件系统说话"。2026-10-21 从 `runtime` 迁出
-// （P4），判据见 `layer_roles_test.go` 的 `TestDomainAvoidsInfraProtocol` 与
+// （P4），判据见 `layer_roles_test.go` 的 `TestInnerCircleAvoidsInfraProtocol` 与
 // `.dsh/docs/specs/2026-10-21-backend-layer-roles-design.md` §3 P4。
 //
 // 唯一的消费方是诊断面（`GET /runtime/diagnostics` 的 remediation）：它要用它区分
