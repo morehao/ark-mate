@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，2026-10-21 顶层角色 4 条为 176 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，2026-10-22 平台值包对偶守卫为 177 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性与平台值包守卫）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，2026-10-21 顶层角色 4 条为 176 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，2026-10-22 平台值包对偶守卫为 177 条、同批协议包别名出口为 178 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性与平台值包守卫）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -99,7 +99,9 @@
   ⑤ `TestProtocolValuesStayFreeOfInfra`（2026-10-22，W4）：**平台值包** `core/protocol` 不得 import `internal/infra/*`。它与 ① 是**对偶**的：① 管 `core` 整体（今天成立，但只是因为还没人往平台值包里塞协议依赖），这条把"值包"单独钉死——一旦有人在 `core/protocol` 里 `import infra/protocol/mcp`（"反正就是转个类型"），`core → infra` 会**从后门长回来**，而层表只会说"L1 同带，合法"。fail-closed：扫不到包即 Fatal（`protocolValuesDir` 改名/搬迁要同步）。
   反证（实跑六条，均红后复原）：往 `core/capability` 加 `infra/acp` import → ①红；往 `domain/identity` 加 `infra/mcp` → ②红；往 `sessionruntime` 加 `infra/protocol/mcp`、往 `runtime` 加 `infra/credentials` → ②红（扩面后的两个新面）；在 `service/svcusage` import `gin` → ③红；新建未登记的 `internal/foo` → ④红；往 `core/protocol` 加 `infra/logging` import → ⑤红（同时 ① 也红）。
 
-**共 177 条**——加守卫时记得同步这句话。
+- **再加 1 条「协议包别名出口」守卫**（`protocol_alias_test.go`，2026-10-22，决策 v32）：`infra/protocol/{acp,mcp}` 把 `core/protocol` 的载荷类型、事件常量与网关函数转发成同名读法（`Event` / `Tool` / `CallResult` / `GatewayBridgeArgs` …），好让**协议实现自己的代码**读起来自然（实测：协议包内部 362 处不带前缀的引用）。这套转发不是第二事实源（`type X = protocol.X` 只有一处定义、零新行为），但它制造了**第二个出口**：包外任何一处 `acp.ToolCallInfo` / `mcp.GatewayCredCwdEnv` 都会把一个只需要值类型的消费方绑到"协议实现"上——那正是 A1/A2 刚拆掉的耦合，只是从别名这个后门接回来。G2 只挡内圈三目录 import `infra`，装配面/驱动面/测试不在它的扫描面里，所以这条边此前**没有判据**。判据先**从转发声明本身**解析别名集合（`X = protocol.Y` 与"函数体就是一行 `return protocol.X`"两种形态；手抄名单会在声明漂移时静默空转），再扫包外生产代码里的 `<import 本地名>.<别名>`，白名单只有两个协议包自己；fail-closed 两侧（某包解析到 0 条声明 / 没有任何生产包 import 协议包 → Fatal），另加正向断言（协议包内部确实还有引用，否则这套转发已无收益、该整块删）。落地同批把包外 4 个生产文件迁到 `core/protocol`：`bootstrap/maintenance/mcp.go` 的 `ParseScopeArgs`、`drivers/gateway/{gateway,source}.go` 的 `Tool`/`CallResult`/网关常量、`drivers/runtimeconn/sample.go` 的 `ConfigOption`（`maintenance/mcp.go` 因此不再 import 协议包，`sample.go` 也不再 import `acp`）。反证（实跑 2 条，均红后复原）：在 `drivers/gateway` 里写 `var _ = []mcp.Tool{}` → 红；`protocolAliasDirs` 改成不存在的目录 → 失锚 Fatal。
+
+**共 178 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 
