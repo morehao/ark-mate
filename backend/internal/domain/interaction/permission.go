@@ -2,12 +2,13 @@ package interaction
 
 import (
 	"context"
+
 	"crypto/rand"
 	"encoding/hex"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/golib/glog"
 )
 
@@ -17,7 +18,7 @@ const (
 	DefaultPermissionTimeout = 30 * time.Minute
 )
 
-// permissionRequestKind 对应 acp.PermissionOption.Kind 的可读判别（透传）。
+// permissionRequestKind 对应 protocol.PermissionOption.Kind 的可读判别（透传）。
 const (
 	permKindAllowOnce    = "allow_once"
 	permKindAllowAlways  = "allow_always"
@@ -30,9 +31,9 @@ type pendingPermission struct {
 	callID    string // 稳定 call_id（决策回传锚点）
 	sessionID string
 	title     string
-	toolCall  acp.ToolCallInfo
-	options   []acp.PermissionOption
-	ch        chan acp.PermissionDecision
+	toolCall  protocol.ToolCallInfo
+	options   []protocol.PermissionOption
+	ch        chan protocol.PermissionDecision
 	timeout   time.Time
 }
 
@@ -45,7 +46,7 @@ type PermissionManager struct {
 	pending    map[string]*pendingPermission     // key = callID
 	mem        map[string]map[string]memoryEntry // sessionID → action+identifier → 记忆（allow/reject 同键互斥）
 	timeout    time.Duration
-	onResolved func(sessionID, callID, reason string, d acp.PermissionDecision)
+	onResolved func(sessionID, callID, reason string, d protocol.PermissionDecision)
 
 	// 会话级记忆持久化挂钩（sqlite 模式：写 permission_memories 表；nil = 不持久化）。
 	// 所有记忆变更（Remember/Revoke/ForgetSession）都经此旁路，进程内存与 DB 保持一致。
@@ -74,7 +75,7 @@ func (m *PermissionManager) SetTimeout(d time.Duration) {
 }
 
 // SetOnResolved 注入「挂起请求已决」回调（user/timeout/cancel 全路径，供发布收敛事件；可为 nil）。
-func (m *PermissionManager) SetOnResolved(fn func(sessionID, callID, reason string, d acp.PermissionDecision)) {
+func (m *PermissionManager) SetOnResolved(fn func(sessionID, callID, reason string, d protocol.PermissionDecision)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onResolved = fn
@@ -101,7 +102,7 @@ func (m *PermissionManager) CancelSession(sessionID string) {
 	for _, p := range victims {
 		// 直接向持有 channel 投递（此时条目已移出 map，不能走按 call_id 的 resolve）。
 		select {
-		case p.ch <- acp.PermissionDecision{}: // 取消 → Cancelled
+		case p.ch <- protocol.PermissionDecision{}: // 取消 → Cancelled
 		default:
 		}
 	}
@@ -153,7 +154,7 @@ func (m *PermissionManager) PendingItems(sessionID string) []PermissionItem {
 	return out
 }
 
-func (m *PermissionManager) RegisterAndWait(ctx context.Context, sessionID string, req acp.PermissionRequest, publish func(callID, title string, tool acp.ToolCallInfo, opts []acp.PermissionOption, timeout time.Time)) acp.PermissionDecision {
+func (m *PermissionManager) RegisterAndWait(ctx context.Context, sessionID string, req protocol.PermissionRequest, publish func(callID, title string, tool protocol.ToolCallInfo, opts []protocol.PermissionOption, timeout time.Time)) protocol.PermissionDecision {
 	callID := genCallID()
 	p := &pendingPermission{
 		callID:    callID,
@@ -161,7 +162,7 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, sessionID strin
 		title:     req.ToolCall.Title,
 		toolCall:  req.ToolCall,
 		options:   req.Options,
-		ch:        make(chan acp.PermissionDecision, 1),
+		ch:        make(chan protocol.PermissionDecision, 1),
 		timeout:   time.Now().Add(m.timeout),
 	}
 	m.mu.Lock()
@@ -177,17 +178,17 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, sessionID strin
 	timer := time.NewTimer(m.timeout)
 	defer timer.Stop()
 
-	var d acp.PermissionDecision
+	var d protocol.PermissionDecision
 	reason := "user"
 	select {
 	case d = <-p.ch:
 		// 用户已决策（allow/reject × once/always）
 	case <-ctx.Done():
-		d = acp.PermissionDecision{} // 取消 → Cancelled
+		d = protocol.PermissionDecision{} // 取消 → Cancelled
 		reason = "cancel"
 	case <-timer.C:
 		glog.Warnw(ctx, "permission: request timeout, auto-reject", "session", sessionID, "call_id", callID, "title", req.ToolCall.Title)
-		d = acp.PermissionDecision{}
+		d = protocol.PermissionDecision{}
 		reason = "timeout"
 	}
 	m.mu.Lock()
@@ -219,7 +220,7 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, sessionID strin
 // ResolveAllow 允许（选中指定/第一个可选项）。带 always 标记会话级始终允许。
 // 按 call_id 直投、不做会话归属校验——REST 决策走 ResolveDecision（带归属校验）。
 func (m *PermissionManager) ResolveAllow(callID, optionID string, always bool) bool {
-	ok, _ := m.ResolveDecision("", callID, acp.PermissionDecision{Allowed: true, OptionID: optionID, Always: always})
+	ok, _ := m.ResolveDecision("", callID, protocol.PermissionDecision{Allowed: true, OptionID: optionID, Always: always})
 	return ok
 }
 
@@ -227,27 +228,27 @@ func (m *PermissionManager) ResolveAllow(callID, optionID string, always bool) b
 // always=true 时记录会话级「始终拒绝」记忆。
 // 按 call_id 直投、不做会话归属校验——REST 决策走 ResolveDecision（带归属校验）。
 func (m *PermissionManager) ResolveReject(callID, optionID string, always bool) bool {
-	ok, _ := m.ResolveDecision("", callID, acp.PermissionDecision{Rejected: true, OptionID: optionID, Always: always})
+	ok, _ := m.ResolveDecision("", callID, protocol.PermissionDecision{Rejected: true, OptionID: optionID, Always: always})
 	return ok
 }
 
 // DecisionOutcome 是一次权限决策的**实际回执**（投递给 agent 的 ACP 结果），供 REST 回执如实描述。
 type DecisionOutcome struct {
-	// Kind ACP 回执形态：selected | cancelled（acp.OutcomeSelected/OutcomeCancelled）。
+	// Kind ACP 回执形态：selected | cancelled（protocol.OutcomeSelected/OutcomeCancelled）。
 	Kind string
 	// OptionID 实际选中的 option_id（Kind=cancelled 时为空）。
 	OptionID string
 }
 
 // ResolveDecision 投递一次决策并返回**实际回执**（按该请求的 options 计算，与 ACP 层同一规则，
-// 见 acp.EffectivePermissionOutcome）：请求不存在/已过期时 found=false、回执为零值。
+// 见 protocol.EffectivePermissionOutcome）：请求不存在/已过期时 found=false、回执为零值。
 // 这是 REST 回执的事实来源——不再回显请求参数（option_id 可能被兜底为第一个选项或降级 Cancelled）。
 //
 // sessionID 是决策发起方会话（C3 scope 归属，与 ElicitationManager.resolve 同一立场）：
 // 只有登记该请求的会话能决策——跨会话决策（陈旧标签页/串号调用）一律拒绝，既不投递也不删除
 // 挂起项，对外统一表现为「不存在」（found=false，不泄露他会话挂起项）。空串 = 跳过归属校验，
 // 仅供 ResolveAllow/ResolveReject 这类按 call_id 直投的内部入口使用。
-func (m *PermissionManager) ResolveDecision(sessionID, callID string, d acp.PermissionDecision) (found bool, out DecisionOutcome) {
+func (m *PermissionManager) ResolveDecision(sessionID, callID string, d protocol.PermissionDecision) (found bool, out DecisionOutcome) {
 	if callID == "" {
 		return false, DecisionOutcome{}
 	}
@@ -264,7 +265,7 @@ func (m *PermissionManager) ResolveDecision(sessionID, callID string, d acp.Perm
 			"call_id", callID, "owner", owner, "caller", sessionID)
 		return false, DecisionOutcome{}
 	}
-	kind, oid := acp.EffectivePermissionOutcome(d, p.options)
+	kind, oid := protocol.EffectivePermissionOutcome(d, p.options)
 	// 非阻塞投递（通道容量 1）。若消费者（RegisterAndWait）已退出，静默丢弃。
 	select {
 	case p.ch <- d:
@@ -276,10 +277,10 @@ func (m *PermissionManager) ResolveDecision(sessionID, callID string, d acp.Perm
 
 // PermissionItem 是一条挂起权限请求的对外表示（REST/WS 载荷；options 为 ACP 可读子集）。
 type PermissionItem struct {
-	CallID    string                 `json:"call_id"`
-	SessionID string                 `json:"session_id"`
-	Title     string                 `json:"title"`
-	ToolCall  acp.ToolCallInfo       `json:"tool_call"`
-	Options   []acp.PermissionOption `json:"options"`
-	TimeoutAt time.Time              `json:"timeout_at"`
+	CallID    string                      `json:"call_id"`
+	SessionID string                      `json:"session_id"`
+	Title     string                      `json:"title"`
+	ToolCall  protocol.ToolCallInfo       `json:"tool_call"`
+	Options   []protocol.PermissionOption `json:"options"`
+	TimeoutAt time.Time                   `json:"timeout_at"`
 }

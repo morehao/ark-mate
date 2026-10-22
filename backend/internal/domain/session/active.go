@@ -6,6 +6,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
@@ -27,7 +28,7 @@ type ACP interface {
 	Prompt(ctx context.Context, text string) (string, error)
 	Cancel(ctx context.Context) error
 	// ConfigOptions 会话配置项（模型目录等，唯一来源：运行时自报）。
-	ConfigOptions() []acp.ConfigOption
+	ConfigOptions() []protocol.ConfigOption
 }
 
 // ActiveSession 是持久会话句柄：绑定一条 ACP 会话与其所属连接，

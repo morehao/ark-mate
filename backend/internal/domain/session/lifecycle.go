@@ -9,6 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/failure"
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -101,7 +102,7 @@ type LifecycleDeps struct {
 	// 只对声明了 ModelCatalogNeedsCredential 的 runtime 生效（见 applyModel）。
 	ProviderKeyReady func(ctx context.Context, providerID string) (bool, string)
 	// McpServers 该会话该下发的 MCP 条目（注册表 + 传输能力 + 选定过滤后的结果）。
-	McpServers func(runtimeID string, sel *CapabilitySelection) []acp.McpServer
+	McpServers func(runtimeID string, sel *CapabilitySelection) []protocol.McpServer
 	// Catalog 模型目录缓存。
 	Catalog ConfigCatalog
 	// Diagnostics 运行期诊断（起不来 / 恢复失败 / 模型被拒的留痕）。
@@ -130,7 +131,7 @@ type Lifecycle struct {
 	acquire          func(ctx context.Context, spec runtime.Spec, fingerprint, nativeMode string) (*acp.Client, error)
 	resolveModel     func(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)
 	providerKeyReady func(ctx context.Context, providerID string) (bool, string)
-	mcpServers       func(runtimeID string, sel *CapabilitySelection) []acp.McpServer
+	mcpServers       func(runtimeID string, sel *CapabilitySelection) []protocol.McpServer
 	catalog          ConfigCatalog
 	diagnostics      DiagnosticsSink
 	setState         func(state string)
@@ -539,7 +540,7 @@ func (l *Lifecycle) applyModel(ctx context.Context, as *ActiveSession, spec runt
 	}
 	// 不预判、但留痕：取值不在会话当前广告列表里（缓存滞后/跨会话选择）时记一条，仍然下发由
 	// 运行时裁决——协议保证运行时只接受已广告的值，平台侧预判会因快照滞后造成假阴性。
-	if !acp.HasConfigValue(as.Projection().ConfigOptions(), acp.CategoryModel, model.Model) {
+	if !protocol.HasConfigValue(as.Projection().ConfigOptions(), protocol.CategoryModel, model.Model) {
 		glog.Debugw(ctx, "模型取值不在当前广告列表中，交由运行时裁决",
 			"session", as.ID, "model", model.Model)
 	}

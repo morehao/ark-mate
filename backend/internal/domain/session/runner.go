@@ -10,6 +10,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -59,7 +60,7 @@ type DiagnosticsSink interface {
 
 // ConfigOptionsSink 运行时配置项（模型目录）的缓存写口。
 type ConfigOptionsSink interface {
-	PutConfigOptions(runtimeID string, options []acp.ConfigOption)
+	PutConfigOptions(runtimeID string, options []protocol.ConfigOption)
 }
 
 // ToolFailureClassifier 按 runtime 归类一条工具结果文本（底层是注册表的签名表）。
@@ -72,7 +73,7 @@ type ToolFailureClassifier interface {
 // 它**不是**本状态机的一部分（生命周期按 toolCallId，不按轮次），所以留在编排侧，
 // 这里只认三个窄方法。
 type ToolMemory interface {
-	Remember(info acp.ToolCallInfo)
+	Remember(info protocol.ToolCallInfo)
 	Forget(id string)
 }
 
@@ -572,7 +573,7 @@ func (r *Runner) disconnectSession(as *ActiveSession, intentional bool) {
 //
 // 注：有活跃会话但配置项为空时同样返回 ok=true（空即运行时的真实答案：未配 provider/未登录），
 // 不走 resume 兜底去「凑一份」目录。
-func (r *Runner) LiveConfigOptions() ([]acp.ConfigOption, bool) {
+func (r *Runner) LiveConfigOptions() ([]protocol.ConfigOption, bool) {
 	sess := r.handles.AnyLive()
 	if sess == nil {
 		return nil, false

@@ -1,9 +1,8 @@
 package interaction
 
 import (
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"testing"
-
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // TestPermissionPolicyDecide 匹配优先级：工具 title > ACP kind > default；大小写不敏感。
@@ -64,7 +63,7 @@ func TestPermissionPolicyValidate(t *testing.T) {
 
 // TestAutoPermissionDecision 动作 → ACP 选项选择（优先 once；无匹配选项不臆造）。
 func TestAutoPermissionDecision(t *testing.T) {
-	opts := []acp.PermissionOption{
+	opts := []protocol.PermissionOption{
 		{OptionID: "a-always", Kind: permKindAllowAlways},
 		{OptionID: "a-once", Kind: permKindAllowOnce},
 		{OptionID: "r-once", Kind: permKindRejectOnce},
@@ -78,7 +77,7 @@ func TestAutoPermissionDecision(t *testing.T) {
 		t.Fatalf("deny 应选 reject_once: %+v ok=%v", d, ok)
 	}
 	// 只有 allow_always 时回落。
-	d, ok = autoPermissionDecision(PermissionAllow, []acp.PermissionOption{{OptionID: "x", Kind: permKindAllowAlways}})
+	d, ok = autoPermissionDecision(PermissionAllow, []protocol.PermissionOption{{OptionID: "x", Kind: permKindAllowAlways}})
 	if !ok || d.OptionID != "x" {
 		t.Fatalf("应回落 allow_always: %+v ok=%v", d, ok)
 	}

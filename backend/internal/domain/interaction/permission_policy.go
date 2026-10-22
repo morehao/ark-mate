@@ -2,9 +2,8 @@ package interaction
 
 import (
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"strings"
-
-	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
 // ——— 权限策略：**类型与词表**（M2 #7 引入；v19 起平台没有策略来源） ———
@@ -129,7 +128,7 @@ func lookupAction(m map[string]string, key string) (string, bool) {
 //   - deny  → 优先 reject_once（回落任意 reject_* 选项）。
 //
 // 找不到对应选项时返回 ok=false（调用方回落征询用户，不臆造选项）。
-func autoPermissionDecision(action string, opts []acp.PermissionOption) (acp.PermissionDecision, bool) {
+func autoPermissionDecision(action string, opts []protocol.PermissionOption) (protocol.PermissionDecision, bool) {
 	want := ""
 	switch action {
 	case PermissionAllow:
@@ -137,7 +136,7 @@ func autoPermissionDecision(action string, opts []acp.PermissionOption) (acp.Per
 	case PermissionDeny:
 		want = permKindRejectOnce
 	default:
-		return acp.PermissionDecision{}, false
+		return protocol.PermissionDecision{}, false
 	}
 	pick := func(prefix string) (string, bool) {
 		for _, o := range opts {
@@ -155,13 +154,13 @@ func autoPermissionDecision(action string, opts []acp.PermissionOption) (acp.Per
 	if action == PermissionAllow {
 		id, ok := pick("allow")
 		if !ok {
-			return acp.PermissionDecision{}, false
+			return protocol.PermissionDecision{}, false
 		}
-		return acp.PermissionDecision{Allowed: true, OptionID: id}, true
+		return protocol.PermissionDecision{Allowed: true, OptionID: id}, true
 	}
 	id, ok := pick("reject")
 	if !ok {
-		return acp.PermissionDecision{}, false
+		return protocol.PermissionDecision{}, false
 	}
-	return acp.PermissionDecision{Rejected: true, OptionID: id}, true
+	return protocol.PermissionDecision{Rejected: true, OptionID: id}, true
 }
