@@ -31,7 +31,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/infra/protocol/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -125,7 +124,7 @@ func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySele
 // 已知代价（写下来免得被当成 bug）：`go run` 起的开发进程路径是临时目录、每次重启都不同，
 // 于是**钉住会话**的指纹会随之变化（缺省路径指纹恒空，不受影响）；打包/安装形态下路径稳定。
 //
-// `Env` 里带的是**凭据 cwd**（`mcp.GatewayCredCwdEnv`，不是密钥）：网关是底座 spawn 的子进程，
+// `Env` 里带的是**凭据 cwd**（`protocol.GatewayCredCwdEnv`，不是密钥）：网关是底座 spawn 的子进程，
 // 它的 cwd 是底座给的（会话工作区），而 `<cwd>/.env` 那一层的语义是"用户启动 `mate serve` 的
 // 目录"——没有这个变量，同一个引用会在两个进程里解析出不同的值。放 `Env` 而不是 `Args`：`Args`
 // 整体进指纹（换个目录启动就换代际），而 `Env` 只把**键名**入指纹（键名恒定、值不入）。
@@ -134,21 +133,21 @@ func (s *Service) gatewayEntry(runtimeID string, sel *session.CapabilitySelectio
 	if err != nil {
 		return protocol.McpServer{}, fmt.Errorf("取自身可执行文件路径失败：%w", err)
 	}
-	scope := mcp.GatewayScope{RuntimeID: runtimeID}
+	scope := protocol.GatewayScope{RuntimeID: runtimeID}
 	if sel != nil {
 		// 三态原样传递：nil = 该会话没钉（网关按全量）；`[]` = 一个远程都不要。
 		scope.McpsPinned = sel.Mcps
 	}
 	entry := protocol.McpServer{
-		Name:      mcp.GatewayServerName,
+		Name:      protocol.GatewayServerName,
 		Transport: capability.TransportStdio,
 		Command:   exe,
-		Args:      mcp.GatewayBridgeArgs(scope),
+		Args:      protocol.GatewayBridgeArgs(scope),
 	}
 	// 空 = 装配期没登记（测试、`mate demo` 这类不经装配的入口）：**不带这个键**，让网关侧
 	// 明确知道"核心没交 cwd"，回落并 WARN——不臆造一个 `os.Getwd()` 冒充核心的答案。
 	if cwd := s.planes.Credentials.Cwd(); cwd != "" {
-		entry.Env = map[string]string{mcp.GatewayCredCwdEnv: cwd}
+		entry.Env = map[string]string{protocol.GatewayCredCwdEnv: cwd}
 	}
 	return entry, nil
 }

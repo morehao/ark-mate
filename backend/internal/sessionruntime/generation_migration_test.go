@@ -18,7 +18,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
-	"github.com/morehao/ark-mate/internal/infra/protocol/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
@@ -262,7 +261,7 @@ func TestGenerationMigration(t *testing.T) {
 	// 这里断言的是**白名单过滤**，故只数非网关的那几条。
 	direct := make([]any, 0, len(servers))
 	for _, s := range servers {
-		if b, err := json.Marshal(s); err == nil && strings.Contains(string(b), mcp.GatewayServerName) {
+		if b, err := json.Marshal(s); err == nil && strings.Contains(string(b), protocol.GatewayServerName) {
 			continue
 		}
 		direct = append(direct, s)

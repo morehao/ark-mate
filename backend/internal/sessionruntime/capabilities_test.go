@@ -21,7 +21,6 @@ import (
 	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/infra/protocol/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
 	"github.com/morehao/golib/gerror"
@@ -134,7 +133,7 @@ func TestMcpServersFor(t *testing.T) {
 	assertGatewayEntry := func(entries []protocol.McpServer) {
 		t.Helper()
 		last := entries[len(entries)-1]
-		if last.Name != mcp.GatewayServerName || last.Transport != capability.TransportStdio {
+		if last.Name != protocol.GatewayServerName || last.Transport != capability.TransportStdio {
 			t.Fatalf("末条应是网关条目（stdio/mate-gateway），got %+v", last)
 		}
 		// 网关条目用**本进程的可执行文件**；测试进程就是本包的测试二进制，
@@ -160,7 +159,7 @@ func TestMcpServersFor(t *testing.T) {
 	}
 	// 白名单只钉 stdio server：直连 1 条 + **网关条目照样在**（条目恒定，不跟定义集走）；
 	// 它的远程面会是空的（网关按同一份白名单取数），所以"钉了 stdio 就没网关条目"不是判据。
-	if got := svc.McpServersFor("rtx", onlyFS); len(got) != 2 || got[0].Name != "fs_stdio" || got[1].Name != mcp.GatewayServerName {
+	if got := svc.McpServersFor("rtx", onlyFS); len(got) != 2 || got[0].Name != "fs_stdio" || got[1].Name != protocol.GatewayServerName {
 		t.Fatalf("白名单 fs_stdio 应取「直连 1 条 + 恒定网关条目」，got %+v", got)
 	}
 	if got := svc.McpServersFor("rtx", denyAll); len(got) != 0 {

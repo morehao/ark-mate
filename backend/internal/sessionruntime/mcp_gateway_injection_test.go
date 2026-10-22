@@ -9,7 +9,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 
 	"github.com/morehao/ark-mate/internal/core/capability"
-	"github.com/morehao/ark-mate/internal/infra/protocol/mcp"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -71,7 +70,7 @@ func TestGatewayRemoteMcpEntersFaceWithoutGenerationSwitch(t *testing.T) {
 	entry := string(servers[0])
 	// v19：scope 只剩 `--runtime`（会话没有 agent 身份，底座构建期固定）——
 	// 这里同时**反向**钉住 `--agent` 不再进条目。
-	for _, want := range []string{mcp.GatewayServerName, "bridge", "--runtime"} {
+	for _, want := range []string{protocol.GatewayServerName, "bridge", "--runtime"} {
 		if !strings.Contains(entry, want) {
 			t.Fatalf("网关条目应含 %q：%s", want, entry)
 		}
@@ -125,7 +124,7 @@ func TestGatewayEntryCarriesPinnedSelectionOnly(t *testing.T) {
 		entries := svc.McpServersFor("stub", sel)
 		var gw *protocol.McpServer
 		for i := range entries {
-			if entries[i].Name == mcp.GatewayServerName {
+			if entries[i].Name == protocol.GatewayServerName {
 				gw = &entries[i]
 			}
 		}
@@ -199,7 +198,7 @@ func TestGatewayFoldingKeepsSecretValuesOutOfFingerprint(t *testing.T) {
 func directMcp(servers []protocol.McpServer) []protocol.McpServer {
 	out := make([]protocol.McpServer, 0, len(servers))
 	for _, s := range servers {
-		if s.Name == mcp.GatewayServerName {
+		if s.Name == protocol.GatewayServerName {
 			continue
 		}
 		out = append(out, s)
@@ -210,7 +209,7 @@ func directMcp(servers []protocol.McpServer) []protocol.McpServer {
 // gatewayMcp 取恒定的网关条目（没有则 nil）。
 func gatewayMcp(servers []protocol.McpServer) *protocol.McpServer {
 	for i := range servers {
-		if servers[i].Name == mcp.GatewayServerName {
+		if servers[i].Name == protocol.GatewayServerName {
 			return &servers[i]
 		}
 	}
@@ -285,9 +284,9 @@ func TestGatewayEntryCarriesCredentialCwd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("合成网关条目: %v", err)
 	}
-	if got := entry.Env[mcp.GatewayCredCwdEnv]; got != "/tmp/serve-cwd" {
+	if got := entry.Env[protocol.GatewayCredCwdEnv]; got != "/tmp/serve-cwd" {
 		t.Fatalf("网关条目应把凭据 cwd 交给网关（key=%s），got %q（env=%v）",
-			mcp.GatewayCredCwdEnv, got, entry.Env)
+			protocol.GatewayCredCwdEnv, got, entry.Env)
 	}
 
 	// ② 没登记（`mate demo`、测试这类不经装配的入口）→ **不带**这个键：网关侧据此 WARN 并回落，
@@ -298,8 +297,8 @@ func TestGatewayEntryCarriesCredentialCwd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("合成网关条目: %v", err)
 		}
-		if _, ok := entry.Env[mcp.GatewayCredCwdEnv]; ok {
-			t.Fatalf("未登记 cwd（%q）时不得带 %s：%v", v, mcp.GatewayCredCwdEnv, entry.Env)
+		if _, ok := entry.Env[protocol.GatewayCredCwdEnv]; ok {
+			t.Fatalf("未登记 cwd（%q）时不得带 %s：%v", v, protocol.GatewayCredCwdEnv, entry.Env)
 		}
 	}
 }
@@ -328,8 +327,8 @@ func TestGatewayCredentialCwdDoesNotChangeFingerprint(t *testing.T) {
 		t.Fatal("应有网关条目")
 	}
 	entry := string(servers[0])
-	if !strings.Contains(entry, mcp.GatewayCredCwdEnv) || !strings.Contains(entry, "/tmp/cwd-a") {
-		t.Fatalf("网关条目应带凭据 cwd（%s=/tmp/cwd-a）：%s", mcp.GatewayCredCwdEnv, entry)
+	if !strings.Contains(entry, protocol.GatewayCredCwdEnv) || !strings.Contains(entry, "/tmp/cwd-a") {
+		t.Fatalf("网关条目应带凭据 cwd（%s=/tmp/cwd-a）：%s", protocol.GatewayCredCwdEnv, entry)
 	}
 
 	// 换一个 cwd 值 → 同一代际（值不进指纹）。
