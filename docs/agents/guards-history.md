@@ -4,6 +4,18 @@
 > 原文是一整段连续沿革；拆分时只按条目断开、去掉条目外层括号，文字未改。
 > 顺序沿用原文；不同批次的计数是**当时**的实际值，今天的计数以 guards.md 的「共 N 条」为准。
 
+## 2026-10-22
+
+内圈扩面 + 平台值包对偶守卫（176 → **177**，`layer_roles_test.go`）：G2 的扫描面从 `domain` 扩到**内圈三目录**（`domain` + `sessionruntime` + `runtime`，`innerCircleDirs` 单点给出），并新增 G5 `TestProtocolValuesStayFreeOfInfra`。
+
+挡的是两层失效。第一层是**扫不着的边**：G2 原先只看 `domain`，可是"内圈认识外部实现"这件事在 `sessionruntime`（L7 运行期编排）与 `runtime`（L1 底座契约）上同样成立——扩面当时两者都已零命中，所以扩的不是记账而是**回流防护**；它们的越界也只会比域更晚被发现（症状是"会话行为诡异"而不是某个接口报错）。第二层是**从后门长回来的 `core → infra`**：G1 管 `core` 整体，它今天成立只是因为还没人往 `core/protocol` 里塞协议依赖；一旦有人图省事在这里 `import infra/protocol/mcp`（"反正就是转个类型"），层表只会说"L1 同带，合法"，而 `core` 认识协议的那一天，"换底座只动 adapter"又是假的。G5 因此与 G1 是**对偶**的：G1 管每个 `core` 包，G5 把平台值包单独钉死，哪怕将来 `core` 里出现别的合法例外，值包也不会跟着松。
+
+两条都 fail-closed：三个内圈目录**各自**扫到 0 个生产包即 Fatal（漏一个目录的后果是"那条边再没人看"、而守卫照样绿），`internal/core/protocol` 扫不到包同样 Fatal。G2 的登记表同时改名 `domainInfraImports` → `innerInfraImports`，仍双向（新增越界红、清零不删也红）；本段 W3（MCP 客户端端口化）已把这张表和 `coreInfraImports` 一起清空，即三条角色判据（G1/G2/G5）现在都是硬判据。
+
+反证（实跑 6 条，均红后复原）：`sessionruntime` 加 `infra/protocol/mcp`、`runtime` 加 `infra/credentials` → G2 红（扩面后的两个新面）；`core/protocol` 加 `infra/logging` → G5 红（G1 同时红，说明对偶而非替代）；另三条旧反证（`core/capability` 加 `infra/acp`、`domain/identity` 加 `infra/mcp`、`service/svcusage` 加 `gin`、新建未登记的 `internal/foo`）仍红。
+
+同批的层带收紧一并记在这里：`infra` 角色卡由 `{L1, L5}` 改成 **`{5}`**（"改小是收紧不是放宽"），但 `infra/logging` 必须留在 L1（横切日志出口，`domain` 也要用它），所以没有把带放宽回去，而是加了**具名例外** `bandExceptions{"infra/logging": 1}`。为什么不用 `{1,5}`：那等于把"infra 到底属于第几层"重新变成没人回答得了的问题；具名例外则可数、可审、且双向（那个包不在那一带或已删即红）。反证（实跑 3 条）：删掉这条例外 → 红；给 `infra/host`（L5）登记成 L1 → 红；登记一个不存在的包 → 命中双向检查而红。
+
 ## 2026-10-21
 
 顶层目录角色 4 条（172 → **176**，`layer_roles_test.go`）：`core`/`domain` 不得 import `infra` 的协议实现、第三方 SDK 只许在 `infra`（及登记的入口/持久化面）、每个顶层目录必须登记角色与层带。
