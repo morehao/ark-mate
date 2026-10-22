@@ -22,7 +22,7 @@ import (
 // `HTTP → ctrautomation → svcautomation → domain/automation`。
 //
 // 两个**真平面造不出来**的码（载体 CAS 冲突、裸错误兜底 50000）随之搬到控制器自己的用例里
-// （`internal/delivery/controller/ctrautomation/automation_test.go`，那里用接口替身），因为那两条验的是
+// （`internal/controller/ctrautomation/automation_test.go`，那里用接口替身），因为那两条验的是
 // **控制器的错误出口**而不是领域行为。
 
 // autoHostDouble 宿主端口替身：建会话返回一个假 id，其余什么也不做。

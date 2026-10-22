@@ -12,10 +12,10 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/controller/ctrws"
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrws"
-	"github.com/morehao/ark-mate/internal/delivery/middleware"
+	"github.com/morehao/ark-mate/internal/middleware"
 )
 
 // 本文件是 M3-5（Origin 矩阵 + Host 白名单）的判据。三块：

@@ -944,3 +944,27 @@ MCP 这一面有**两处**与外部协议的接触，都按「平台值 + 端口
 - fail-closed 两侧：某个协议包解析到 **0 条**转发声明 → Fatal（判据会静默空转）；没有任何生产包 import 协议包 → Fatal（协议包改名/搬迁后这条会静默变绿）。正向断言：协议包内部确实还有别名引用，否则整套转发已无收益。
 - 反证（实跑 2 条，均红后复原）：在 `drivers/gateway` 里写 `var _ = []mcp.Tool{}` → 红；把 `protocolAliasDirs` 改成不存在的目录 → 失锚 Fatal。
 - 判据 177 → **178**；口径落 `docs/agents/layout.md` 的别名段、`guards.md` 的 G6 条目与沿革。
+
+## v33 · 去掉 delivery 带：controller / middleware / router 提回 internal 根下（2026-10-22）
+
+### ① 结论
+
+`backend/internal/delivery/{controller,middleware,router}` 上提为 `backend/internal/{controller,middleware,router}`。
+层号不变（controller / middleware = L8，router = L9），包名、职责、判据语义不变。
+本条**取代** v30 ① 中 `delivery` 那一行与「十二个顶层目录」的计数，并**回退** 2026-10-20 内部布局整理（S3）里
+「把三个入站目录收进 delivery 带」这一步。
+
+### ② 依据
+
+- `delivery` 带**没有自己的判据**：层表按叶子 key 解析（`controller` 与 `middleware` 是两条 deny 不同的条目），
+  带只出现在 `topLevelRoles` 的一行与 `foreignSDKs` 的两条允许面里，且是全仓唯一把 L8 与 L9 绑进同一条角色声明的角色卡。
+- 去掉之后每个入口目录各自一个层带（8 / 8 / 9），与 v30「每个顶层目录只承担一种角色」一致；
+  `bandExceptions` 零新增。
+- 顶层目录 15 → 17，仍远小于整理前的 36——那次整理"一级目录可读"的收益不靠这一个带成立。
+
+### ③ 代价如实写
+
+- 反转了 2026-10-20 S3 的收拢决定；理由是上面两条，不是"名字不好看"。
+- 入口面从"一个带"变成"三个并列目录"：新人问"HTTP 相关放哪"不再有目录名回答，只能靠角色卡与
+  `docs/agents/layout.md` 的入站面一段（本次一并写清）。
+- 一次性改动 53 文件 / 67 处 import / 91 处带外引用 / 17 行文档；纯机械，但 PR 体积大。

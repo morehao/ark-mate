@@ -2,7 +2,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrworkspace"
+	"github.com/morehao/ark-mate/internal/controller/ctrworkspace"
 )
 
 // registerWorkspace 工作空间面的两条线：**登记表**（有 id、可改写的持久实体）与**派生视图**。

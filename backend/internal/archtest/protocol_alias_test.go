@@ -144,7 +144,7 @@ func TestProtocolAliasesStayInProtocolPackages(t *testing.T) {
 			}
 			src := stripGoComments(readFileOrFatal(t, filepath.Join(abs, e.Name())))
 			for name := range aliases[dir] {
-				if regexp.MustCompile(`\b`+regexp.QuoteMeta(name)+`\b`).MatchString(src) {
+				if regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`).MatchString(src) {
 					usedInside = true
 					break
 				}

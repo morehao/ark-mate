@@ -77,8 +77,8 @@ func TestMechanismMustNotImportUpward(t *testing.T) {
 		modulePrefix + "internal/service",
 		modulePrefix + "internal/sessionruntime",
 		modulePrefix + "internal/bootstrap/app",
-		modulePrefix + "internal/delivery/router",
-		modulePrefix + "internal/delivery/controller",
+		modulePrefix + "internal/router",
+		modulePrefix + "internal/controller",
 		modulePrefix + "internal/drivers/gateway",
 	}
 	for _, dir := range layerScanPackages(t, root, "internal/drivers/mechanism", "drivers/mechanism") {
@@ -109,8 +109,8 @@ func TestDomainPackagesMustNotImportEachOther(t *testing.T) {
 		modulePrefix + "internal/service",
 		modulePrefix + "internal/sessionruntime",
 		modulePrefix + "internal/bootstrap/app",
-		modulePrefix + "internal/delivery/router",
-		modulePrefix + "internal/delivery/controller",
+		modulePrefix + "internal/router",
+		modulePrefix + "internal/controller",
 		modulePrefix + "internal/drivers/gateway",
 	}
 	for _, dir := range layerScanPackages(t, root, "internal/domain", "domain") {

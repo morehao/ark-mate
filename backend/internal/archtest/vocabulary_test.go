@@ -102,7 +102,7 @@ var conversationVocabularyWhitelist = []struct {
 			"守卫⑥ 的 R6 判据（DROP 清单 ↔ 清理清单一一对应）就靠这个字面量",
 	},
 	{
-		path: "backend/internal/delivery/router/router_test.go",
+		path: "backend/internal/router/router_test.go",
 		reason: "反向断言「README 不得出现历史名 /conversations」的**判据字面量**本身——" +
 			"这种守卫必须写出它禁的那个词，扫自己必然自证其罪",
 	},

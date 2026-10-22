@@ -12,6 +12,11 @@
   - **依赖方向单一**：
     - 层带（L0–L9 终局表，见 [`../architecture.md`](../architecture.md) 的 §4.1）：`persistence/model` → 值/协议 → `domain` → `dto` → `service` → `persistence/{store,dao}` + `infra` → 机制与注册表 → `sessionruntime` → `controller` → 装配与交付。**只能向内 import**；`dto` 被 controller / service / CLI / WS 共用（同一份对外契约），`domain` 在它的里侧、不认识它。
     - **装配只能自上而下，不许反向**：`assembly` 构造用例与控制器，`router` 只收已构造的控制器（`router.Deps`），`app` 只消费 `assembly.BuildResult`。**`app`/`router`/`cli` 都不得引用 `service/svc*`**，控制器也不得 import `domain`/`store`/`model`——判据见 `layers_v32_test.go`。
+    - **入站面是三个并列顶层目录，不是一条带**（决策 v33，2026-10-22；本条回退 2026-10-20 S3 把三者收进 `delivery/` 的那一步）：
+      `controller`（L8，参数绑定 + 简单校验 + 调 svc + 回响应，13 个 `ctr<领域>` 包）· `middleware`（L8，入站横切：凭据鉴权 / Host-Origin 判定）·
+      `router`（L9，唯一路由装配点 + 前端资产交付 `web*`）。三者各自一个层带（8 / 8 / 9）、各一行角色卡，`delivery/` 这个概念已不存在。
+      问"HTTP 相关放哪"按准入回答：新端点 → `router/routes_<领域>.go` 挂路由 + `controller/ctr<领域>` 收参数；横切拦截 → `middleware`；
+      要引 `service/svc<领域>` 的只有 `controller`。**三个目录都不放业务判断**（判断进 `service/svc<领域>`），准入与判定同 v30。
     - 持久侧：`dbclient → persistence/dao → persistence/store`，`model` 被三者依赖且自身不依赖任何一层；`dao` 不得 import `store`（会成环），`model` 不得 import `dao`/`store`。
     - **厚域与用例都走窄端口，不 import 门面**（P4）：`domain/session` 声明 `Store` 端口（`store_port.go`），`domain/interaction` 零 `store`；用例层同理声明 `svcmodel.ModelStore` / `svcsession.EventReader` / `svcsystem.SourceFactsReader`。`*store.Store` 结构上满足它们、由装配根交下来；**交下来时必须现判 nil**——typed-nil 装进接口不是 nil，会让"内存模式 40501 / 只读镜像"那几条判据静默失效（`assembly/services.go` 的 `eventReader`/`sourceFactsReader`/`modelStore` 就是这条规矩的落点）。`model` 仍可被 `domain/session` 引用：它是纯列形状（无行为），把它也搬走只会换来 30 多个镜像结构。
     外部协议同样走端口（A2，2026-10-22）：`domain/mcp` 声明 `LiveClient`（探测/工具调用/资源/提示词，签名只用 `protocol.McpServer` + `protocol.Mcp*` 平台值），实现体是 `infra/protocol/mcp`，由 `drivers/registry` 接上——域因此**零 `infra/*`**（`TestInnerCircleAvoidsInfraProtocol` 已是硬判据）。网关条目的 argv 形状（A1）同批进了 `core/protocol/gateway.go`。**这两处的留用理由、代价与推翻条件登记在决策 v31**（`../decisions.md`），本节只留做法。
@@ -37,7 +42,7 @@
     判据清单的唯一事实源仍是 [`guards.md`](guards.md)；本表只回答"这件事归谁"，不新增守卫。
   - **用例层（`service/svc<领域>`）的三条硬规矩**（2026-10-16 定案；违反者由 `internal/archtest` 拦，别靠注释）：
 
-    1. **只有 `internal/delivery/controller/ctr<领域>` 可以引用 `internal/service/svc<领域>`**——「引用」包括调用、构造与**写类型名**。
+    1. **只有 `internal/controller/ctr<领域>` 可以引用 `internal/service/svc<领域>`**——「引用」包括调用、构造与**写类型名**。
        `app` / `router` / `sessionruntime` / `domain` / `mechanism` / `dao` / `store` / `pkg` 一律不许出现 `svc*` 类型。
        连带的装配口径：**`app` 不引用 controller**（`cmd → app → router → controller` 是有向的），
        `router` 拿到的只是依赖事实；**用例实例只在装配根（`internal/bootstrap/assembly`）造**，controller 只收接口。
@@ -59,5 +64,5 @@
     一个控制器只认自己那片。
 
 - `frontend/`：pnpm workspace（`apps/web` = **入口 + 组装**（`main.tsx` 挂载 + vite 构建配置）；`packages/{console,ui,types,api,desktop-contract,tsconfig}`——**界面本身在 `packages/console`**，2026-10-11 P5 从 `apps/web/src` 搬过来，行为零变化：搬迁保留原目录结构，所以 `internal/archtest` 里禁 `packages/*` 反向引 `apps/*` 的那条从"挡路的墙"变成了"搬迁方向的保证"）。Node 看 `frontend/.nvmrc`（24.x，团队用 fnm）、pnpm 看 `frontend/package.json` 的 `packageManager`；`engines` + Makefile 守卫 node 主版本不符即失败。
-- `docs/` 是**当前有效的对外/产品面文档**（2026-10-16 重建：`positioning` / `decisions` / `architecture` / `roadmap` / `unimplemented` / `acceptance-matrix` / `dsh-acp-adaptation` / `deployment`；2026-10-18 起另有 `agents/`——仓库根 `AGENTS.md` 的分册，见 [`docs/agents/README.md`](README.md)）。旧设计文档中仍有效的内容已抽出，历史整体留在 git 里；**外部产品的对照与逆向分析不进 `docs/`**，一律落 `.dsh/docs/`。`docs/**` 的相互引用由 `TestDocsReferencesResolve` 守卫（指向不存在的文件即红）。对外契约以 README「控制面接口摘要」与 `backend/internal/delivery/router/router.go` 为准。
+- `docs/` 是**当前有效的对外/产品面文档**（2026-10-16 重建：`positioning` / `decisions` / `architecture` / `roadmap` / `unimplemented` / `acceptance-matrix` / `dsh-acp-adaptation` / `deployment`；2026-10-18 起另有 `agents/`——仓库根 `AGENTS.md` 的分册，见 [`docs/agents/README.md`](README.md)）。旧设计文档中仍有效的内容已抽出，历史整体留在 git 里；**外部产品的对照与逆向分析不进 `docs/`**，一律落 `.dsh/docs/`。`docs/**` 的相互引用由 `TestDocsReferencesResolve` 守卫（指向不存在的文件即红）。对外契约以 README「控制面接口摘要」与 `backend/internal/router/router.go` 为准。
 - `docs/assets/`：文档的**静态资源唯一收口**（图片/矢量图/后续其他静态文件），不散落在 `docs/` 根下；文档内用相对路径引用（`![alt](assets/xxx.svg)`）。

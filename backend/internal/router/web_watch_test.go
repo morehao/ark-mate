@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/delivery/router"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // 开发期资产重建通知的行为判据（P6-A）。

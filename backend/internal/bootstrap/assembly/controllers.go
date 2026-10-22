@@ -1,23 +1,23 @@
 package assembly
 
 import (
+	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
+	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
+	"github.com/morehao/ark-mate/internal/controller/ctrcommandpolicy"
+	"github.com/morehao/ark-mate/internal/controller/ctrexport"
+	"github.com/morehao/ark-mate/internal/controller/ctrlibrary"
+	"github.com/morehao/ark-mate/internal/controller/ctrmodel"
+	"github.com/morehao/ark-mate/internal/controller/ctrruntime"
+	"github.com/morehao/ark-mate/internal/controller/ctrsearch"
+	"github.com/morehao/ark-mate/internal/controller/ctrsession"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/controller/ctrusage"
+	"github.com/morehao/ark-mate/internal/controller/ctrworkspace"
+	"github.com/morehao/ark-mate/internal/controller/ctrws"
 	"github.com/morehao/ark-mate/internal/core/credential"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrautomation"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrcapability"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrcommandpolicy"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrexport"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrlibrary"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrmodel"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrruntime"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrsearch"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrsession"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrsystem"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrusage"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrworkspace"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrws"
-	"github.com/morehao/ark-mate/internal/delivery/middleware"
-	"github.com/morehao/ark-mate/internal/delivery/router"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
+	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // buildControllers 构造全部控制器（`startControllers` 的第二步）。

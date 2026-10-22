@@ -11,9 +11,9 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/controller/ctrws"
 	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrws"
 	"github.com/morehao/golib/biz/gcontext"
 	"github.com/morehao/golib/biz/gmiddleware/ginmiddleware"
 )

@@ -12,7 +12,7 @@ import (
 // `service/svc*` 只该被两类包认识：
 //
 //	① `internal/bootstrap/assembly` —— 唯一装配根，**造**用例实例（`svcsystem.New(...)`）；
-//	② `internal/delivery/controller/ctr<领域>` —— 消费用例，但只写**接口类型名**，不再构造。
+//	② `internal/controller/ctr<领域>` —— 消费用例，但只写**接口类型名**，不再构造。
 //
 // `app`/`router`/`domain`/`mechanism`/`store`/`pkg` 都不该 import 它。
 //
@@ -47,7 +47,7 @@ func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 			}
 			slashed := "/" + filepath.ToSlash(rel(root, path))
 			switch {
-			case strings.Contains(slashed, "/internal/delivery/controller/"):
+			case strings.Contains(slashed, "/internal/controller/"):
 				fromAllowed++
 				continue
 			case strings.Contains(slashed, "/internal/bootstrap/assembly/"):
@@ -91,7 +91,7 @@ func TestOnlyAssemblyAndControllersImportServicePackages(t *testing.T) {
 // 判据两侧一起钉（都 fail-closed：文件读不到直接 Fatal）：
 //
 //	① 装配根必须有建造点（`svcsystem.New(` / `svcruntime.New(` / `svcmodel.New(`）；
-//	② `internal/bootstrap/app` 与 `internal/delivery/router` 侧不得出现用例层包名。
+//	② `internal/bootstrap/app` 与 `internal/router` 侧不得出现用例层包名。
 func TestUseCaseInstancesAreBuiltByAssembly(t *testing.T) {
 	root := backendRoot(t)
 	builders := []struct {
@@ -113,7 +113,7 @@ func TestUseCaseInstancesAreBuiltByAssembly(t *testing.T) {
 
 	for _, f := range []string{
 		filepath.Join("internal", "bootstrap", "app", "app.go"),
-		filepath.Join("internal", "delivery", "router", "router.go"),
+		filepath.Join("internal", "router", "router.go"),
 	} {
 		src := stripLineComments(readFileOrFatal(t, filepath.Join(root, f)))
 		for _, banned := range []string{"svcsystem.", "svcruntime.", "svcmodel.", "svcsession.", "service/svc"} {

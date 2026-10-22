@@ -4,7 +4,7 @@
 //   - 控制器一律由 `internal/bootstrap/assembly` 构造后经 `Deps.Controllers` 交进来；
 //     本包**不构造用例、不 import `internal/service/*`、`internal/persistence/store`、`internal/domain`**；
 //   - 每个领域一个 routes_*.go，只注册自己的路由；
-//   - 鉴权等横切关注点经 internal/delivery/middleware 挂载。
+//   - 鉴权等横切关注点经 internal/middleware 挂载。
 //
 // 历史上的 `router.Ports`（"依赖事实杂物袋"）已删除：它是"装配分散在三处"的中间形态，
 // v3.1 的装配根是 `internal/bootstrap/assembly`，路由层退化为纯交付。
@@ -16,21 +16,21 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
+	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
+	"github.com/morehao/ark-mate/internal/controller/ctrcommandpolicy"
+	"github.com/morehao/ark-mate/internal/controller/ctrexport"
+	"github.com/morehao/ark-mate/internal/controller/ctrlibrary"
+	"github.com/morehao/ark-mate/internal/controller/ctrmodel"
+	"github.com/morehao/ark-mate/internal/controller/ctrruntime"
+	"github.com/morehao/ark-mate/internal/controller/ctrsearch"
+	"github.com/morehao/ark-mate/internal/controller/ctrsession"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/controller/ctrusage"
+	"github.com/morehao/ark-mate/internal/controller/ctrworkspace"
+	"github.com/morehao/ark-mate/internal/controller/ctrws"
 	"github.com/morehao/ark-mate/internal/core/credential"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrautomation"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrcapability"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrcommandpolicy"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrexport"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrlibrary"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrmodel"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrruntime"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrsearch"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrsession"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrsystem"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrusage"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrworkspace"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrws"
-	"github.com/morehao/ark-mate/internal/delivery/middleware"
+	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/golib/biz/gserver/ginserver"
 )
 
@@ -84,7 +84,7 @@ type Deps struct {
 	// "有值才挂"，不需要再加一个字段去描述"开着但没东西可挂"。
 	AssetWatch *AssetWatcher
 
-	// Origin 回环监听面的 Host 白名单 + Origin 矩阵（M3-5，internal/delivery/middleware）。
+	// Origin 回环监听面的 Host 白名单 + Origin 矩阵（M3-5，internal/middleware）。
 	//
 	// nil / 未启用 = 不判定（测试路径与**非回环监听**：设计 §9.4 明确 Host/Origin 白名单属于
 	// "对外产品化缺的四件事"之一，本期只在回环监听面生效，由装配层打 WARN 说清）。
@@ -118,7 +118,7 @@ func New(d Deps) *gin.Engine {
 	// Host 白名单 + Origin 矩阵（M3-5）挂在 **v1 整组**上：REST 与 `/health` 都属于"有人拿浏览器/
 	// 脚本打进来的 API 面"，一律先过这道判定（含 /health：DNS rebinding 只要能碰到任意一条路径，
 	// 就说明 Host 白名单没生效）。必须在注册路由**之前** Use——gin 在注册时就冻结 handler 链
-	// （见 internal/delivery/controller/ctrws/ws_test.go 的同款注记）。
+	// （见 internal/controller/ctrws/ws_test.go 的同款注记）。
 	//
 	// **WS 单独处置**：事件流那一组来源判定在控制器里做（Accept 之前，见 ctrws.Options.OriginCheck），
 	// 所以它的组要在 Use 之前取——gin 的 Group() 会复制当时的 handler 链。

@@ -57,7 +57,7 @@ var legacyAgentVocabulary = []string{
 // agentVocabularyWhitelistEntry 一条登记：**目录/文件前缀**或**路径无关锚**恰好一种，外加理由。
 //
 //   - `path`：相对仓库根的前缀（豁免整棵目录时用）。只给**落点稳定**的登记——本次分层重构不动
-//     `internal/persistence/store`、`internal/delivery/router`、`internal/config`、`internal/dto`、`internal/delivery/controller`。
+//     `internal/persistence/store`、`internal/router`、`internal/config`、`internal/dto`、`internal/controller`。
 //   - `anchor`：**路径无关锚**——一个只出现在**唯一一个**被扫描文件里的符号；含它的那个文件被豁免。
 //     `manager` 包里这几个落点会搬家（设计 §3.4 文件去向表），所以它们只有锚、没有路径：
 //     符号跟着文件走，登记不会因为一次目录改名而悬空。
@@ -117,7 +117,7 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 		reason: historicalAgentFixtureReason,
 	},
 	{
-		path: "backend/internal/delivery/router/router_test.go",
+		path: "backend/internal/router/router_test.go",
 		reason: "反向断言「README 不得出现历史名 `/agents…`」的**判据字面量**本身——" +
 			"这种守卫必须写出它禁的那个词，扫自己必然自证其罪（与 conversation 白名单里同一条理由同形）",
 	},
@@ -165,7 +165,7 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 			"用户以为在看某个底座的用量，拿到的却是全量。接住它同样要一个同名 raw 字段",
 	},
 	{
-		path: "backend/internal/delivery/controller/ctrusage/usage.go",
+		path: "backend/internal/controller/ctrusage/usage.go",
 		reason: removedKeyRefusalReason + "控制器要**点名**它拒的是哪个查询参数（与同文件里 " +
 			"`group_by` 只认 `day` 的那条校验口径一致），否则用户只拿到一句「参数不对」，改不动",
 	},
@@ -191,7 +191,7 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 			"`agent_selection_removed`」，构造请求就必须写出那个键",
 	},
 	{
-		path: "backend/internal/delivery/router/rest_removed_agent_key_test.go",
+		path: "backend/internal/router/rest_removed_agent_key_test.go",
 		reason: negativeAssertionReason + "传输层这一半钉的是相反的义务：「已下线的键**原样透传**给 " +
 			"service，不由控制器自作聪明地丢掉」（丢弃会让用户以为筛选生效了）——判据里必然出现键名",
 	},

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/delivery/router"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // 本文件是**桌面渲染进程加固基线**的守卫（M1-5，设计 §9.2）。
@@ -110,7 +110,7 @@ func TestRendererHardeningBaseline(t *testing.T) {
 			t.Fatal("契约里的 CSP_POLICY 为空")
 		}
 		if router.ContentSecurityPolicy != want {
-			t.Errorf("CSP 两处不一致：\n  契约（@ark-mate/desktop-contract/index.ts）= %q\n  核心（internal/delivery/router/csp.go）    = %q", want, router.ContentSecurityPolicy)
+			t.Errorf("CSP 两处不一致：\n  契约（@ark-mate/desktop-contract/index.ts）= %q\n  核心（internal/router/csp.go）    = %q", want, router.ContentSecurityPolicy)
 		}
 		// 纪律条款单独再钉一次：外域的"漏写"有时看起来无害（比如为了字体加个 CDN），
 		// 但 R3 的判据是"除模型 API 与用户触发的 MCP 拉取外零出站"。
@@ -348,7 +348,7 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 				"那是真动作的一行转发（P4a 正文第十七刀），控制器经窄端口直接持域平面。", filepath.Base(path))
 		}
 	}
-	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrworkspace", "workspace.go")))
+	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "workspace.go")))
 	if !strings.Contains(ctrWork, "h.svc.PickDirectory(c.Request.Context())") {
 		t.Error("`ctrworkspace` 的 PickDirectory 里找不到 `h.svc.PickDirectory(...)`：" +
 			"宿主选择器必须经用例接口（v3.1 §3.2.1：控制器不 import domain）。")
@@ -358,7 +358,7 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 		t.Error("`svcworkspace` 里找不到 `type HostPicker interface {`：窄端口是替身缝，" +
 			"删了它三个结局的契约就只能靠真 spawn 宿主命令来验。")
 	}
-	pickCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrworkspace", "pick_test.go")))
+	pickCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "pick_test.go")))
 	for _, want := range []string{"选定", "取消不是错误", "无可用选择器可判定", "native_pick_unsupported"} {
 		if !strings.Contains(pickCtr, want) {
 			t.Errorf("控制器级选择器契约测试里找不到 %q：三个结局（选定 / 取消 / 不支持）必须逐个在，", want)

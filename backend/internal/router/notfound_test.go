@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/core/code"
-	"github.com/morehao/ark-mate/internal/delivery/router"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // 未命中路由的三种去向（M2-2 把历史上按 build tag 分叉的两条测试合并成一组）：

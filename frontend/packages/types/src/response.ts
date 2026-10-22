@@ -1,4 +1,4 @@
-// 与控制面控制器（backend/internal/delivery/controller/ctr*）契约对齐的 REST 信封（gincontext 包装）。
+// 与控制面控制器（backend/internal/controller/ctr*）契约对齐的 REST 信封（gincontext 包装）。
 // 成功 code=0；业务错误 code!=0（仍以 HTTP 200 返回）。
 export interface Envelope<T> {
   code: number

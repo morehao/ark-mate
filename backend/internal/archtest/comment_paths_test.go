@@ -21,7 +21,7 @@ import (
 //     真实路径，另有守卫管）；
 //  2. 形态 `internal/<pkg>/<sub>`、`internal/<pkg>/<file>.go`、`internal/<pkg>/<pkg>.<Symbol>`
 //     （带 `.Symbol` 的只判**包目录**是否存在——符号名不在这里判，它有编译器管）；
-//  3. **通配前缀跳过**：后随 `*` 或 `<`（`internal/service/svc*`、`internal/delivery/controller/ctr<领域>`）、
+//  3. **通配前缀跳过**：后随 `*` 或 `<`（`internal/service/svc*`、`internal/controller/ctr<领域>`）、
 //     或末段以 `_` 结尾（`internal/persistence/store/migrate_v*.go` 这类族名）；
 //  4. 目录不存在且未登记的引用 → 红；登记了却**现在存在** → 红（白名单该删）；
 //     登记了却在注释里**不再出现** → 红（白名单腐化，它已经是纯噪声）。

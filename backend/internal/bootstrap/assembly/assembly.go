@@ -16,8 +16,6 @@ import (
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 	"github.com/morehao/ark-mate/internal/core/resource"
-	"github.com/morehao/ark-mate/internal/delivery/middleware"
-	"github.com/morehao/ark-mate/internal/delivery/router"
 	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/drivers/mechanism"
@@ -25,6 +23,8 @@ import (
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
+	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/ark-mate/internal/router"
 
 	"github.com/morehao/ark-mate/internal/infra/procreg"
 	"github.com/morehao/ark-mate/internal/persistence/store"

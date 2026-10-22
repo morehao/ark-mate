@@ -805,8 +805,10 @@ backend/                单 Go module（github.com/morehao/ark-mate）
       mechanism         定义双载体 + CAS + 凭据镜像与分层取值（+ doctor/ 自检）
       registry          注册表与编译期断言（端口 → 适配体）；gateway 源汇；runtimeconn 连接面；transfer 存量导入导出
     sessionruntime      运行期编排（会话执行 / 权限 / 断连语义）
-    delivery/           controller/ctr*（只收 service 接口 + DTO + gin）· middleware · router（唯一路由装配点）
-    archtest            架构守卫（机器判据的唯一集中地，176 条）
+    controller/         ctr*（只收 service 接口 + DTO + gin；只做参数绑定与响应）
+    middleware          入站横切（凭据鉴权 / 来源判定）
+    router              唯一路由装配点 + 前端资产交付（web*）
+    archtest            架构守卫（机器判据的唯一集中地，179 条）
     testutil · version
 frontend/               pnpm workspace（apps/* + packages/*）
   apps/web/             入口 + 组装（main.tsx 挂载 + vite 构建配置）；产物 dist 是唯一一份 UI
@@ -830,7 +832,7 @@ docs/                   对外/产品面文档（口径、结构、排期、边�
 
 > `docs/` 下的文档是**当前有效的对外/产品面口径**（2026-10-16 重建：旧设计文档中仍有效的内容已抽出，
 > 历史整体留在 git 里）。**外部产品的对照与逆向分析不进 `docs/`**——那类材料一律在 `.dsh/docs/`。
-> 对外契约以本 README 的「控制面接口摘要」与实际路由（`backend/internal/delivery/router/routes_*.go`）为准，
+> 对外契约以本 README 的「控制面接口摘要」与实际路由（`backend/internal/router/routes_*.go`）为准，
 > 二者由 `TestReadmeRoutesMatchRouter` 自动守卫；`docs/**` 的相互引用由 `TestDocsReferencesResolve`
 > 守卫（指向不存在的文件即红）。
 

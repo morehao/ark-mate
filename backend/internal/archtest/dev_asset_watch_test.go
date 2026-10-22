@@ -25,7 +25,7 @@ import (
 //	   引入事件流模块，且不得出现任何事件 type 字面量。
 //
 // 浏览器那半（EventSource → location.reload）由 `ui:accept` 与手工验收钉；Go 侧的行为判据在
-// `internal/delivery/router/web_watch_test.go`（开关默认关闭 / 判据是内容摘要而不是 mtime / ctx 结束即停）。
+// `internal/router/web_watch_test.go`（开关默认关闭 / 判据是内容摘要而不是 mtime / ctx 结束即停）。
 
 // devAssetWatchFlag 开发期开关在 CLI/脚本侧的字面量（`--asset-watch`）。
 const devAssetWatchFlag = "--asset-watch"
@@ -37,7 +37,7 @@ const devAssetWatchEnv = "MATE_ASSET_WATCH"
 //
 // 五段判据（缺一段就留下一种静默失效）：
 //
-//	① `internal/delivery/router/router.go` 里注册 `/dev/assets/events` 的那段必须**被开关判定包着**
+//	① `internal/router/router.go` 里注册 `/dev/assets/events` 的那段必须**被开关判定包着**
 //	   （`d.AssetWatch != nil`）——分开写就会出现"配置说开着、路由没挂"；
 //	② `frontend/scripts/dev-loop.mjs` 必须真的传这个开关（不传 = P6-A 白做，而且没有任何报错）；
 //	③ `apps/desktop/src/**` 与壳的构建脚本里**不得**出现这个开关（交付形态不该有这条端点）；
@@ -48,7 +48,7 @@ const devAssetWatchEnv = "MATE_ASSET_WATCH"
 // 反证：把 ① 的 `if d.AssetWatch != nil` 删掉（无条件注册）→ 红；把 ② 的 flag 删掉 → 红；
 // 给桌面壳加这个开关 → 红；在别处再写一个 `new EventSource(` → 红。
 func TestDevAssetWatchIsOptIn(t *testing.T) {
-	router := readFrontendFile(t, filepath.Join(backendRoot(t), "internal", "delivery", "router", "router.go"))
+	router := readFrontendFile(t, filepath.Join(backendRoot(t), "internal", "router", "router.go"))
 
 	// ① 注册点与开关同处：从注册语句往上找最近的一段，必须能看到开关判定。
 	registerAt := strings.Index(router, "d.AssetWatch.Mount(r)")
@@ -113,7 +113,7 @@ func TestDevAssetWatchIsOptIn(t *testing.T) {
 
 	// ⑤ 端点路径两侧逐字一致。
 	goPath := regexp.MustCompile(`AssetWatchPath\s*=\s*"([^"]+)"`).
-		FindStringSubmatch(readFrontendFile(t, filepath.Join(backendRoot(t), "internal", "delivery", "router", "web_watch.go")))
+		FindStringSubmatch(readFrontendFile(t, filepath.Join(backendRoot(t), "internal", "router", "web_watch.go")))
 	tsPath := regexp.MustCompile(`ASSET_WATCH_PATH\s*=\s*'([^']+)'`).
 		FindStringSubmatch(readFrontendFile(t,
 			filepath.Join(frontendRoot(t), "packages", "console", "src", "transport", "assetWatch.ts")))
@@ -156,7 +156,7 @@ func TestDevAssetWatchKeepsEventStreamsSeparate(t *testing.T) {
 		t.Error("页面半边没有用 EventSource——若改成别的方式取重建事实，请同步这条守卫与设计文档（§4.5）")
 	}
 	// 反向：Go 侧那条路由也不该挂在 v1 契约组上（它不进 README 路由表、不受 REST 凭据约束）。
-	watchGo := readFrontendFile(t, filepath.Join(backendRoot(t), "internal", "delivery", "router", "web_watch.go"))
+	watchGo := readFrontendFile(t, filepath.Join(backendRoot(t), "internal", "router", "web_watch.go"))
 	if !strings.Contains(watchGo, `AssetWatchPath = "/dev/`) {
 		t.Errorf("端点路径不在 /dev/ 面下——请确认它没有被挂进 /v1/mate 契约组（那会让它变成一条要写进 README 的 API）")
 	}

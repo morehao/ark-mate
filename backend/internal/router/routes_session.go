@@ -2,9 +2,9 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrexport"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrsearch"
-	"github.com/morehao/ark-mate/internal/delivery/controller/ctrsession"
+	"github.com/morehao/ark-mate/internal/controller/ctrexport"
+	"github.com/morehao/ark-mate/internal/controller/ctrsearch"
+	"github.com/morehao/ark-mate/internal/controller/ctrsession"
 )
 
 // registerSession 会话面：概要/详情/新建/轮次执行/历史/权限与结构化提问决策，

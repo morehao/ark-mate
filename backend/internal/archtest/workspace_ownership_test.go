@@ -251,7 +251,7 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	if _, err := os.Stat(svcDir); err != nil {
 		t.Error("`internal/service/svcworkspace` 不存在了：用例层是控制器与领域之间的唯一连接（v3.1 §3.2.1）。")
 	}
-	ctrWs := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrworkspace", "workspace.go")))
+	ctrWs := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "workspace.go")))
 	if strings.Contains(ctrWs, "internal/domain/workspace") {
 		t.Error("`ctrworkspace` 又 import 了 `internal/domain/workspace`：控制器只认用例接口。")
 	}
@@ -321,7 +321,7 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		}
 	}
 
-	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrworkspace", "workspace.go")))
+	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "workspace.go")))
 	if !strings.Contains(ctrWork, "h.svc.Settings()") {
 		t.Error("`ctrworkspace` 里找不到 `h.svc.Settings()`：设置面快照必须经用例接口（v3.1 §3.2.1）。")
 	}
@@ -429,7 +429,7 @@ func TestWorkspaceCreateModesAreExplicit(t *testing.T) {
 	// 判据只看 **`Create` 这个 handler 的函数体**：同文件里的 `CreateDir` 处理的是**另一种请求**
 	// （`WorkspaceDirCreateReq` 的 `name` 是"在已存在目录下建一层"，不是"新建工作空间"），
 	// 按文件扫会把那一处正常的字段读取当成回流（本守卫第一版就是这么假红的）。
-	ctrDir := filepath.Join(root, "internal", "delivery", "controller", "ctrworkspace")
+	ctrDir := filepath.Join(root, "internal", "controller", "ctrworkspace")
 	foundCreate := false
 	for _, p := range goFilesUnder(t, ctrDir) {
 		if strings.HasSuffix(p, "_test.go") {

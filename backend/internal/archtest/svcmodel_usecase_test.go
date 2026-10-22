@@ -191,15 +191,15 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 	}
 
 	// ③ 装配：用例在**装配根**造（`app` 与 `router` 都不许引用 `service/svc*`）。
-	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrmodel", "models.go")))
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrmodel", "models.go")))
 	for _, m := range []string{"h.declared.CreateModel(", "h.declared.UpdateModel(", "h.declared.DeleteModel("} {
 		if !strings.Contains(ctr, m) {
-			t.Errorf("internal/delivery/controller/ctrmodel/models.go 里找不到 %q：三个写动作必须走用例出口。", m)
+			t.Errorf("internal/controller/ctrmodel/models.go 里找不到 %q：三个写动作必须走用例出口。", m)
 		}
 	}
 	for _, m := range []string{"h.svc.CreateModel(", "h.svc.UpdateModel(", "h.svc.DeleteModel("} {
 		if strings.Contains(ctr, m) {
-			t.Errorf("internal/delivery/controller/ctrmodel/models.go 里仍出现 %q：写面已不在 `ModelSvc` 上——"+
+			t.Errorf("internal/controller/ctrmodel/models.go 里仍出现 %q：写面已不在 `ModelSvc` 上——"+
 				"这两条路都能编译的那一天，就是「实现收了但出口没换」的那一天。", m)
 		}
 	}
@@ -211,7 +211,7 @@ func TestModelWriteUseCaseLivesInModelSvc(t *testing.T) {
 			t.Errorf("`internal/bootstrap/assembly/services.go` 里找不到 %q：模型写面的依赖事实与用例实例都在装配根交出。", want)
 		}
 	}
-	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrmodel", "models.go")))
+	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrmodel", "models.go")))
 	if strings.Contains(ctrSrc, "svcmodel.NewDeclared(") {
 		t.Error("`ctrmodel` 里又出现 `svcmodel.NewDeclared(`：用例实例只在装配根造，控制器只收接口。")
 	}

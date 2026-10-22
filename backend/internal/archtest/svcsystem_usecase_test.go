@@ -107,7 +107,7 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcsystem.New(`：" +
 			"导出的事实来源与用例实例必须在唯一装配根造。")
 	}
-	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "delivery", "controller", "ctrexport", "export.go")))
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrexport", "export.go")))
 	if strings.Contains(ctr, "svcsystem.New") {
 		t.Error("`ctrexport` 里又出现 `svcsystem.New`：控制器只收接口，不再造用例。")
 	}

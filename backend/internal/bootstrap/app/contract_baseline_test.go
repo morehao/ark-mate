@@ -19,7 +19,7 @@ import (
 // 的稳定取值、响应信封的键集合、`data` 的形状与键集合、集合长度。这些是前端与脚本真正
 // 依赖的东西；`requestID` 每次不同，只断言"键在/不在"。
 //
-// 为什么要有它：P1 起装配根与控制器构造被整体重排，`internal/delivery/router` 的 85 个测试覆盖的是
+// 为什么要有它：P1 起装配根与控制器构造被整体重排，`internal/router` 的 85 个测试覆盖的是
 // 局部行为，不是逐字契约；没有这份基线，"装配重组没改业务"只能靠人读 diff。
 //
 // 更新方式：`go test ./internal/bootstrap/app -run TestControlPlaneContractBaseline -update`
