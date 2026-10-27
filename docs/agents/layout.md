@@ -56,6 +56,8 @@
   - **`service/svc<领域>` 的形状**（新写一个域时照抄）：接口（`XxxSvc`，消费方只认它）+ 实现（导出结构体或私有结构体）
     + 构造函数 `NewXxx(deps...) XxxSvc`；校验、错误码、响应装配、渲染都在这一层；controller 里只做
     参数绑定、简单校验、调 service、回响应（**任何业务判断都不许写在 controller**）。
+    往下游传 ctx 时 controller 写 `c.Request.Context()`、service 签名写 `ctx context.Context`——Gin 的 `*gin.Context`
+    是池化对象，不能跨出入站带；口径与依据见 [`context.md`](context.md)。
   - **2026-10-20：provider 侧并入 `svcmodel` / `ctrmodel` / `dtomodel`**——
     provider 与 model 同属 `domain/provider` 一个域（`models.provider_id` 是外键式的挂靠）。
     **包名取 `model` 系**（用户面主名词是「设置 · 模型」），域仍是 `domain/provider`；注意 `internal/persistence/model`

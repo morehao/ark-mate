@@ -15,6 +15,7 @@
 | [`docs/agents/isolation.md`](docs/agents/isolation.md) | 本机隔离纪律（开发期硬约束） | 起进程、写探针、跑验收 |
 | [`docs/agents/build-and-runtime.md`](docs/agents/build-and-runtime.md) | 构建形态（构建期固定 runtime、无嵌入资产）与运行配置（鉴权 / Origin / SQLite / CGO） | 改构建、配置或持久层 |
 | [`docs/agents/vocabulary.md`](docs/agents/vocabulary.md) | 一个东西一个词：`session` / `definition` / `run` / 凭据 / 模型 / agent 面收口 | 改表名、列名、DTO、前端类型 |
+| [`docs/agents/context.md`](docs/agents/context.md) | 请求上下文传递：handler 传 `c.Request.Context()`、service 签名是 `context.Context`、`ContextWithFallback` 不得打开 | 在 handler 下游传 ctx、改 controller 或引擎装配 |
 | [`docs/agents/error-codes.md`](docs/agents/error-codes.md) | 错误码的唯一事实源与三处同步 | 新增或修改错误码 |
 | [`docs/agents/frontend.md`](docs/agents/frontend.md) | 前端风格约束（token 与交互态 CSS 的收口） | 改界面样式 |
 | [`docs/agents/authorization.md`](docs/agents/authorization.md) | 变更授权（允许破坏性调整的边界与仍强制的例外） | 决定要不要留兼容层 |
@@ -30,6 +31,7 @@
 - **本机隔离**：开发、构建、验收、手工探针都不得读写用户自己安装与正在使用的底座（`~/.dsh` 等）；私有 `HOME` + `MATE_HOME`，目录建在工作区 `.dsh/tmp/` 下，收尾杀进程 + 清目录。细节见 [`docs/agents/isolation.md`](docs/agents/isolation.md)。
 - **词汇收口**：平台聚合概念只有一个词 `session`；`conversation` 零命中；底座侧原生会话 id 叫 `RuntimeSessionID`（`rt_` 壳），不得命名为 `session_id`。细节见 [`docs/agents/vocabulary.md`](docs/agents/vocabulary.md)。
 - **错误码三处同步**：`internal/core/code`（事实源）↔ README「业务错误码」↔ 前端 `packages/types/src/response.ts` 的 `BizCode`；控制器错误出口一律带码（`code.FromError`），不得透传裸 `err`。见 [`docs/agents/error-codes.md`](docs/agents/error-codes.md)。
+- **请求上下文**：handler 往下游传 ctx 一律 `c.Request.Context()`；service 及内层签名一律 `ctx context.Context`（零 `*gin.Context`）；**不得打开 `engine.ContextWithFallback`**（会让 `database/sql` 等长期持有池化的 `*gin.Context`，`-race` 下必然竞争）。见 [`docs/agents/context.md`](docs/agents/context.md)。
 - **改路由 / 事件 type / 数据 schema 必须同一次提交同步**：README 路由表（`TestReadmeRoutesMatchRouter` 双向比对）、`internal/domain/session/events.go`、`internal/persistence/model` 实体与 `internal/persistence/store` 迁移（三处手工一致）。
 - **交付形态**：桌面是主线（`make desktop/*`），浏览器入口（`make dev`）只是开发形态；底座由构建期固定（默认 `dsh`），用户面**没有**选择入口，被撤掉的选择键在各写面**显式拒绝**而不是静默丢弃。见 [`docs/agents/build-and-runtime.md`](docs/agents/build-and-runtime.md)。
 - **语言**：代码注释与 commit message 用简体中文；commit 用 conventional 前缀（`feat`/`fix`/`refactor` + 中文 scope）。
