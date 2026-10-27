@@ -102,8 +102,14 @@ func New(d Deps) *gin.Engine {
 	creds := d.Credentials
 
 	r := gin.New()
-	// 反向代理场景下按 X-Forwarded-For 取客户端 IP。这是引擎自身的配置，归路由层，
-	// 不归进程壳——壳不该知道 Web 框架有什么开关。
+	// **不要打开 `r.ContextWithFallback`**（2026-10-27 实测，见
+	// `.dsh/docs/plans/2026-10-27-context-boundary-plan.md` §0）。
+	//
+	// 打开它会让 `c` 看起来可以当 `context.Context` 直接传给下游，但 `*gin.Context` 是
+	// 池化复用对象：`database/sql` 的 `Rows.initContextClose` 见 `ctx.Done() != nil` 就起一个
+	// goroutine 长期监听，请求结束、`reset()` + `pool.Put(c)`、下一个请求写 `c.Request = req`
+	// 之后，那条 goroutine 仍在读同一个对象 —— `-race` 下稳定报 DATA RACE。
+	// 因此 handler 一律传 `c.Request.Context()`，它是纯 ctx，可被安全的长期持有。
 	r.ForwardedByClientIP = true
 	r.Use(gin.Recovery())
 	r.MaxMultipartMemory = 8 << 20

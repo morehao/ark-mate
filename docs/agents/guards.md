@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，2026-10-21 顶层角色 4 条为 176 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，2026-10-22 平台值包对偶守卫为 177 条、同批协议包别名出口为 178 条、注释路径存在性为 179 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性与平台值包守卫）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，2026-10-21 顶层角色 4 条为 176 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，2026-10-22 平台值包对偶守卫为 177 条、同批协议包别名出口为 178 条、注释路径存在性为 179 条，2026-10-27 请求上下文边界 2 条为 181 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性、平台值包守卫与请求上下文边界守卫）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -103,7 +103,14 @@
 
 - **再加 1 条「注释路径存在性」守卫**（`comment_paths_test.go`，2026-10-22）：`internal/**` 与 `pkg/**` 的**注释**里出现的仓库路径必须真的存在，通配前缀除外。挡的是"搬完家没改注释"这一类静默失效——代码编译过、测试全绿、文档链接也不断，只有顺着注释去找那个文件的人会撞空；2026-10-22 那一轮实测出的陈旧路径（`pkg/runtime` 时代 81 处、`pkg/*` 13+107 处、`app/command` 10 处）**全部靠人工扫**才发现，而 `TestDocsReferencesResolve` 只管文档与特定形态、扫不到 Go 注释。判据只抽注释正文（代码里的字符串字面量是运行时真实路径，另有守卫管），形态 `internal/<pkg>/<sub>`、`.../<file>.go`、`.../<pkg>.<Symbol>`（带符号名的只判**包目录**是否存在——符号名有编译器管，判进来只会让判据与改名赛跑）。**通配前缀跳过**：后随 `*` 或 `<`、或末段以 `_` 结尾（`internal/service/svc*`、`internal/controller/ctr<领域>`、`internal/persistence/store/migrate_v*.go`、`internal/dto/dtomodel/model_*.go`）——这些是族名，当成一条引用去 stat 会全红。**白名单 `historicalPathRefs` 具名 + 逐条写原因**（16 条：`internal/manager` 及它的 6 个具体文件、`internal/session/prompt_chunk_coalescer.go`、`internal/sessionruntime/{credentials,transcript_load}.go`、`internal/server/{handler,router}`、`internal/capabilityio`、`internal/vault`，以及两条**外部参照实现** compozy 的 `internal/skills/{provenance,verify}.go`）：本仓有一批**刻意的历史叙述**（"P4a 第 N 刀从旧目录搬入"、"v11 生成器冻结副本抄自 `git show <rev>:…`"、"旧目录不得复活"），批量改成现存路径等于把历史读歪、还抹掉冻结副本的来源；白名单**双向**——登记了但路径现在存在 → 红（该删条目），登记了但注释里不再出现 → 红（已腐化成纯噪声）。fail-closed 三处：扫到 0 条引用 / 0 个 Go 文件 / 0 条通配前缀 → 都 Fatal（最后一条防"路径形态变了、判据静默地只查一半"）。反证（实跑 4 条，均红后复原）：注释里写回 `internal/bootstrap/app/command` → 红；白名单塞一条仍存在的路径 → 红；删掉 `internal/vault` 那条登记 → 红；扫描面改成不存在的目录 → 失锚 Fatal。
 
-**共 179 条**——加守卫时记得同步这句话。
+- **再加 2 条「请求上下文边界」守卫**（`context_boundary_test.go`，2026-10-27，计划见 `.dsh/docs/plans/2026-10-27-context-boundary-plan.md`）：口径是**handler 写 `c`，service 写 `ctx`**。`*gin.Context` 是池化复用对象（`Engine.pool` + `Context.reset()`，且 `reset()` **不清** `c.Request`），只能活在入站带的一次请求里——一旦进到 service 及内层或被 goroutine 捕获，就可能指向被后续请求改写的对象，失败是**偶发且静默**的。这两条补的是 gin 围栏没覆盖的另一半：`TestGinConfinedToInboundAdaptersV32` 判 **import**（挡"引包"），这两条判 **类型使用**（挡"签名里写类型名"与"goroutine 捕获"）。
+  ① `TestGinTypeStaysInInboundAdapters`：内层九目录（`innerLayers`：service·sessionruntime·domain·persistence·infra·drivers·core·runtime·config）零 `*gin.Context`（AST 按类型语法判定，不是字符串）。它同时是"开发者不必纠结传 `c` 还是 `c.Request.Context()`"的机器保证——**内层签名里没有 gin 类型，`c` 就出不了入站带**。刻意不含 `internal/bootstrap`：装配期提及 gin 是合理的（计划 §7-2）。
+  ② `TestGinContextDoesNotEscapeToGoroutine`：入站带（controller·middleware·router）里，以 `c *gin.Context` 为形参的函数体内，`go` 语句的函数字面量不得引用该形参。长活任务须先派生纯 ctx（`context.WithoutCancel(...)` / golib `gincontext.AsyncContext(c)`）再交给 goroutine。
+  已知局限（写在文件注释里，别当它能兜住）：`req := c.Request` 之后再捕获**抓不到**——逃逸的对象是 `*http.Request` 而非 gin 上下文，语法上已无 gin 形参引用。兜底靠 ①：内层没 gin 类型，这类转手最多带走 `*http.Request`。
+  反证（实跑 3 条）：`internal/service/` 下新建包写 `func Probe(ctx *gin.Context)` → ①红；`ctrsession` 里 `go func(){ _ = c.Request }()` → ②红；间接转手（`req := c.Request` 后捕获）→ **不报**，即上述局限的实测确认。
+  配套结论（2026-10-27 实跑）：`r.ContextWithFallback` **不得打开**。它会让这条守卫的"内层无 gin 类型"失效于另一条路——`database/sql` 的 `Rows.initContextClose` 见 `ctx.Done() != nil` 就起 goroutine 长期读 `ctx.Err()`；把 `c` 当 ctx 传下去后，请求结束 + `pool.Put` + 下个请求写 `c.Request` 就会与那条 goroutine 竞争（`-race` 稳定复现）。handler 一律传 `c.Request.Context()`；`router.go` 就地写有理由注释。
+
+**共 181 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 
