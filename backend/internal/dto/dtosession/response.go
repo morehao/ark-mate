@@ -85,8 +85,22 @@ type SessionResp struct {
 type SessionCapabilitiesResp struct {
 	Skills *[]string `json:"skills,omitempty"`
 	Mcps   *[]string `json:"mcps,omitempty"`
+	// Expert 会话钉住的专家 id（nil = 未声明；`""` = 明确不用；非空 = id）。
+	Expert *string `json:"expert,omitempty"`
+	// ExpertMissing 专家定义已被删除（能力仍按创建时物化的列表生效）——读面据此显示「专家已删除」。
+	ExpertMissing bool `json:"expert_missing,omitempty"`
+	// Warnings 仅创建响应可能带：专家推荐里被跳过的不可达项（不含密钥值，只含键名与原因）。
+	// 读面（GET /sessions/:id）不复现它——那是创建那一刻的事实，不是会话的持久属性。
+	Warnings []CapabilityWarningResp `json:"warnings,omitempty"`
 	// Fingerprint 钉住的代际指纹（空 = 未声明能力选择）。
 	Fingerprint string `json:"fingerprint,omitempty"`
+}
+
+// CapabilityWarningResp 一条「专家推荐被跳过」的告警（kind = skill|mcp|model）。
+type CapabilityWarningResp struct {
+	Kind   string `json:"kind"`
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
 }
 
 // SessionSearchHit 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中）。
@@ -150,6 +164,9 @@ type SessionCreateResp struct {
 	Cwd                string `json:"cwd,omitempty"`
 	WorkspaceID        string `json:"workspace_id,omitempty"`
 	WorkspaceTemporary bool   `json:"workspace_temporary"`
+	// Capabilities 本次创建钉住的能力选定（专家 + 物化后的具体技能/MCP + 被跳过的推荐告警）。
+	// nil = 请求未声明能力选择（缺省路径，与引入本字段之前逐字节相同）。
+	Capabilities *SessionCapabilitiesResp `json:"capabilities,omitempty"`
 }
 
 // SessionPromptResp 追加 prompt 响应。

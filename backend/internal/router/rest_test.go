@@ -24,6 +24,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/domain/expert"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
@@ -545,6 +546,7 @@ type restFixture struct {
 	mcpPlane        *mcp.Plane
 	mcpSecrets      *mcp.Secrets
 	skills          *skill.Plane
+	expertPlane     *expert.Plane
 	wsPlane         *workspace.Plane
 }
 
@@ -570,6 +572,7 @@ func stubDeps(t *testing.T, svc *stubSvc) restFixture {
 		mcpPlane:        mcp.NewPlane(caps, nil, mcpSecrets, registry.NewMcpLiveClient()),
 		mcpSecrets:      mcpSecrets,
 		skills:          skills,
+		expertPlane:     expert.NewPlane(caps),
 		wsPlane:         workspace.NewPlane(),
 	}
 }
@@ -601,7 +604,7 @@ func (f restFixture) services() assembly.Services {
 		Provider:      svcmodel.NewProvider(f.providerPlane),
 		ProviderProbe: svcmodel.NewProbe(f.providerPlane, stubCatalog{f.svc}),
 
-		Capability: svccapability.NewCapability(f.skills, f.mcpPlane,
+		Capability: svccapability.NewCapability(f.skills, f.mcpPlane, f.expertPlane,
 			svccapability.NewTools(f.caps), svccapability.NewServers(f.caps, f.mcpPlane, f.mcpSecrets)),
 		Automation: svcautomation.New(f.automationPlane),
 		Library:    svclibrary.NewLibrary(f.caps, f.skills, f.registry, f.mcpSecrets, func() bool { return true }),

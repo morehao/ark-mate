@@ -30,14 +30,20 @@ type CapabilitySelection struct {
 	Skills *[]string `json:"skills,omitempty"`
 	// Mcps 选定的 MCP server id 白名单（nil = 未声明 → 全量）。
 	Mcps *[]string `json:"mcps,omitempty"`
+	// Expert 会话级专家（0..1）：nil = 不选专家（只有整个 capabilities 缺省时，工作空间默认才可能
+	// 带入专家）；`*""` = 明确不用专家；非空 = 专家 id。与 Skills/Mcps 三态同构。
+	//
+	// 专家 id 与 persona **不进指纹**（指纹职责是"这套能力是否需要另一个进程"；专家只影响默认值，
+	// P1 的 instructions 是首轮提示词文本，不改变进程能力）。因此改专家名字/描述不换代际。
+	Expert *string `json:"expert,omitempty"`
 }
 
 // NewCapabilitySelection 构造一个"声明了但什么都不限制"的选定（= `capabilities: {}`）。
 func NewCapabilitySelection() *CapabilitySelection { return &CapabilitySelection{} }
 
-// Empty 该选定是否什么都没限制（两个 kind 都未声明）。
+// Empty 该选定是否什么都没限制（三个 kind 都未声明）。
 func (c *CapabilitySelection) Empty() bool {
-	return c == nil || (c.Skills == nil && c.Mcps == nil)
+	return c == nil || (c.Skills == nil && c.Mcps == nil && c.Expert == nil)
 }
 
 // normalized 返回**规范化副本**：去空串、去重、升序。
@@ -51,7 +57,17 @@ func (c *CapabilitySelection) normalized() *CapabilitySelection {
 	return &CapabilitySelection{
 		Skills: NormalizeIDs(c.Skills),
 		Mcps:   NormalizeIDs(c.Mcps),
+		Expert: normalizeExpertID(c.Expert),
 	}
+}
+
+// normalizeExpertID 专家 id 只做空白归一（""=明确不用，非空=id）；nil 保持 nil（未声明）。
+func normalizeExpertID(in *string) *string {
+	if in == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*in)
+	return &v
 }
 
 // NormalizeIDs 去空串、去重、升序；nil 保持 nil（"未声明"不能被规范化成"空集"）。
@@ -118,7 +134,15 @@ func (c *CapabilitySelection) String() string {
 	if c == nil {
 		return "(未声明能力选择)"
 	}
-	return fmt.Sprintf("skills=%v mcps=%v", DerefIDs(c.Skills), DerefIDs(c.Mcps))
+	return fmt.Sprintf("skills=%v mcps=%v expert=%s", DerefIDs(c.Skills), DerefIDs(c.Mcps), DerefExpert(c.Expert))
+}
+
+// DerefExpert nil 安全的专家 id 回显（nil = "<未声明>"）。
+func DerefExpert(in *string) string {
+	if in == nil {
+		return "<未声明>"
+	}
+	return *in
 }
 
 // DerefIDs nil 安全的取值（日志用；nil 显示为 "<未声明>"，空数组显示为 "[]"）。
@@ -175,5 +199,17 @@ func (pl *Plane) SessionCapabilitiesRespOf(rec *SessionRec) *SessionCapabilities
 		v := DerefList(sel.Mcps)
 		mcps = &v
 	}
-	return &SessionCapabilities{Skills: skills, Mcps: mcps, Fingerprint: rec.Fingerprint}
+	var expert *string
+	expertMissing := false
+	if sel.Expert != nil {
+		v := *sel.Expert
+		expert = &v
+		// 读面判定定义是否已删除（空串 = 明确不用，不查；未登记查表 = 不做判定）。
+		if v != "" && pl.capLookup != nil {
+			if _, ok := pl.capLookup.LookupExpert(v); !ok {
+				expertMissing = true
+			}
+		}
+	}
+	return &SessionCapabilities{Skills: skills, Mcps: mcps, Expert: expert, ExpertMissing: expertMissing, Fingerprint: rec.Fingerprint}
 }

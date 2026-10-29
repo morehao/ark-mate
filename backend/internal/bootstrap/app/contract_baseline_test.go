@@ -78,6 +78,14 @@ func contractCases() []contractCase {
 		// ——— library ———
 		{"GET", "/v1/mate/library", ""},
 
+		// ——— experts（会话级能力预设） ———
+		{"GET", "/v1/mate/experts", ""},
+		{"POST", "/v1/mate/experts", "{}"},
+		{"GET", "/v1/mate/experts/nope", ""},
+		{"PUT", "/v1/mate/experts/nope", "{}"},
+		{"DELETE", "/v1/mate/experts/nope", ""},
+		{"PATCH", "/v1/mate/experts/nope", "{}"},
+
 		// ——— mcp ———
 		{"GET", "/v1/mate/mcps", ""},
 		{"POST", "/v1/mate/mcps", "{}"},

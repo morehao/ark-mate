@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { Checkbox, Popover, Spin, Tooltip } from 'antd'
 import { ApiOutlined, ExperimentOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import { listLibrary, listMcpServers } from '@ark-mate/api'
-import type { LibraryItem, McpServer } from '@ark-mate/types'
+import { listExperts, listLibrary, listMcpServers } from '@ark-mate/api'
+import type { Expert, LibraryItem, McpServer } from '@ark-mate/types'
 import { useMate } from '../store'
 import { Label } from './dirPath'
 import {
@@ -64,6 +64,7 @@ export function CapabilityPicker({ value, onChange, disabled }: Props) {
   const [open, setOpen] = useState(false)
   const [library, setLibrary] = useState<LibraryItem[] | null>(null)
   const [servers, setServers] = useState<McpServer[]>([])
+  const [experts, setExperts] = useState<Expert[] | null>(null)
   const [loading, setLoading] = useState(false)
 
   // 展开时装载（每次打开都取最新：能力清单是"现在有什么"，缓存一份旧快照只会让原因文案过期）。
@@ -78,16 +79,18 @@ export function CapabilityPicker({ value, onChange, disabled }: Props) {
     if (!open) return
     let alive = true
     setLoading(true)
-    Promise.all([listLibrary(), listMcpServers()])
-      .then(([lib, ss]) => {
+    Promise.all([listLibrary(), listMcpServers(), listExperts()])
+      .then(([lib, ss, ex]) => {
         if (!alive) return
         setLibrary(lib)
         setServers(ss)
+        setExperts(ex)
       })
       .catch((err) => {
         if (!alive) return
         setLibrary(null)
         setServers([])
+        setExperts(null)
         showToast(err instanceof Error ? err.message : String(err))
       })
       .finally(() => {
@@ -208,6 +211,61 @@ export function CapabilityPicker({ value, onChange, disabled }: Props) {
     )
   }
 
+  // 专家 tab：一位专家（0..1）。第一行「通用」= 明确不用专家（expert=''）；「跟随默认」= 不吃专家（expert=null）。
+  const expertRows = experts ?? []
+  const selectedExpert = expertRows.find((e) => e.id === value.expert)
+  const setExpert = (id: string | null) => onChange({ ...value, expert: id })
+  const expertSection = (
+    <div>
+      <div className="fg-cap-head">
+        <Label>专家</Label>
+        <span className="fg-cap-mode">
+          <button
+            type="button"
+            className={`fg-cap-mode-btn${value.expert === null ? ' fg-on' : ''}`}
+            onClick={() => setExpert(null)}
+          >
+            跟随默认
+          </button>
+        </span>
+      </div>
+      <div className="fg-cap-list">
+        <button
+          type="button"
+          className={`fg-cap-opt${value.expert === '' ? ' fg-on' : ''}`}
+          onClick={() => setExpert('')}
+          style={{ background: 'none', border: 'none', textAlign: 'left', width: '100%', cursor: 'pointer' }}
+        >
+          <span className="fg-cap-opt-name">通用</span>
+          <span className="fg-cap-opt-id">不用专家（仅手动选技能/MCP）</span>
+        </button>
+        {expertRows.map((e) => (
+          <button
+            key={e.id}
+            type="button"
+            className={`fg-cap-opt${value.expert === e.id ? ' fg-on' : ''}${e.enabled ? '' : ' fg-off'}`}
+            onClick={() => setExpert(e.id)}
+            style={{ background: 'none', border: 'none', textAlign: 'left', width: '100%', cursor: 'pointer' }}
+          >
+            <span className="fg-cap-opt-name">{e.name || e.id}</span>
+            <span className="fg-cap-opt-id">
+              {e.skills?.length ?? 0} 技能 · {e.mcps?.length ?? 0} MCP{e.has_instructions ? ' · 角色设定' : ''}
+              {e.enabled ? '' : '（已禁用）'}
+            </span>
+          </button>
+        ))}
+      </div>
+      {/* 人格预览（P1）：只读；说明它只首轮以隐藏上下文注入，不进正文。 */}
+      <div className="fg-cap-note">
+        {selectedExpert
+          ? selectedExpert.has_instructions
+            ? '角色设定（P1）· 已启用（首轮以隐藏上下文注入；不会出现在对话正文）。'
+            : '未设置角色设定（仅能力预设）。'
+          : '专家提供推荐与可选角色设定；可随时改手动。'}
+      </div>
+    </div>
+  )
+
   const menu = (
     <div className="fg-cap-pop">
       {loading && !library ? (
@@ -216,6 +274,8 @@ export function CapabilityPicker({ value, onChange, disabled }: Props) {
         </div>
       ) : (
         <>
+          {expertSection}
+          <div className="fg-ws-sep" />
           {section('skill')}
           <div className="fg-ws-sep" />
           {section('mcp')}
@@ -246,14 +306,14 @@ export function CapabilityPicker({ value, onChange, disabled }: Props) {
       arrow={false}
       styles={{ content: { padding: 6 } }}
     >
-      <Tooltip title={selectionHint(value)} placement="top">
+      <Tooltip title={selectionHint(value, selectedExpert?.name)} placement="top">
         <button
           type="button"
           className={`fg-ws-pill${selectionIsDefault(value) ? '' : ' fg-cap-on'}`}
           disabled={disabled}
         >
           <ExperimentOutlined style={{ fontSize: 12, color: tokens.textPlaceholder }} />
-          <span className="fg-ws-pill-name">{selectionPillText(value)}</span>
+          <span className="fg-ws-pill-name">{selectionPillText(value, selectedExpert?.name)}</span>
         </button>
       </Tooltip>
     </Popover>

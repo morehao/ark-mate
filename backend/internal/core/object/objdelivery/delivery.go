@@ -110,6 +110,8 @@ const (
 	KindModel = "model"
 	// KindSkill skill 定义。
 	KindSkill = "skill"
+	// KindExpert 专家定义（会话级能力预设：推荐技能/MCP/模型 + P1 角色设定）。
+	KindExpert = "expert"
 	// KindMcp MCP server。
 	KindMcp = "mcp"
 	// KindAutomation 自动化定义（平台自身的调度器）。
@@ -141,6 +143,11 @@ var table = map[string]Delivery{
 		Channel: ChannelSessionInject, Effect: EffectNextRun,
 		Note: "把 MCP server 注入会话的能力集（启用 ∩ transport ∩ 白名单）；" +
 			"新会话立即带上，已声明能力的会话在下一个轮次边界迁移",
+	},
+	KindExpert: {
+		Channel: ChannelSessionInject, Effect: EffectNextSession,
+		Note: "专家是建会话时的**默认值来源**：推荐的技能/MCP 在创建那一刻物化成具体 id 列表随会话注入，" +
+			"推荐模型在会话级应用；改专家定义不影响已建会话（快照），只影响之后新建的会话",
 	},
 	KindAutomation: {
 		Channel: ChannelNone, Effect: EffectImmediate,

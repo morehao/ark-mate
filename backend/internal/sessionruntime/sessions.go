@@ -27,7 +27,7 @@ func capabilitySelectionFromReq(req *dtosession.CapabilitiesReq) *session.Capabi
 		return nil
 	}
 	// P3c：选定值对象与规范化都在 `domain/session`（`NormalizeIDs` 是那条规则的唯一实现）。
-	return &session.CapabilitySelection{Skills: session.NormalizeIDs(req.Skills), Mcps: session.NormalizeIDs(req.Mcps)}
+	return &session.CapabilitySelection{Skills: session.NormalizeIDs(req.Skills), Mcps: session.NormalizeIDs(req.Mcps), Expert: req.Expert}
 }
 
 // CreateSession 在 agent 对应 runtime 上建立会话，若携带 prompt 则同步发起首轮
@@ -130,16 +130,36 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 			nativeMode = def.PermissionMode
 		}
 	}
+	// 专家解析（P0-2）：把选定里的专家展开成有效技能/MCP/模型（专家只填空缺；推荐不可达跳过+告警）。
+	// 位次在**建连之前**：专家不存在/禁用要在任何副作用之前拒绝；不可达推荐只影响返回值里的 warnings。
+	resolution, rerr := s.resolveExpert(ctx, selection, req.Model)
+	if rerr != nil {
+		workspace.DiscardWorkspace(ws)
+		return nil, code.FromError(rerr)
+	}
+	selection = resolution.selection
+	modelID := req.Model
+	if strings.TrimSpace(modelID) == "" {
+		modelID = resolution.model
+	}
+	// 首轮人格走**惰性 provider**：创建时只记专家 id，首轮 BeginRun 时才读最新 instructions
+	//（创建后、首轮前改定义能生效；被删/禁用按无人格处理 + WARN，不阻断）。
+	var personaProvider func() string
+	if resolution.expertID != "" {
+		id := resolution.expertID
+		personaProvider = func() string { return s.latestExpertPersona(id) }
+	}
 	// 底座不由请求指定（构建期固定，见 internal/runtime/build.go）：这里没有 runtime 参数要校验。
 	res, err := s.startSession(runCtx, session.StartOptions{
-		SessionID:          convID,
-		Cwd:                ws.Path,
-		WorkspaceTemporary: ws.Temporary,
-		WorkspaceID:        ws.WorkspaceID,
-		Model:              runtime.ModelConfig{Model: req.Model},
-		Selection:          selection,
-		NativeMode:         nativeMode,
-		Origin:             req.Origin,
+		SessionID:             convID,
+		Cwd:                   ws.Path,
+		WorkspaceTemporary:    ws.Temporary,
+		WorkspaceID:           ws.WorkspaceID,
+		Model:                 runtime.ModelConfig{Model: modelID},
+		Selection:             selection,
+		NativeMode:            nativeMode,
+		ExpertPersonaProvider: personaProvider,
+		Origin:                req.Origin,
 	})
 	if err != nil {
 		// v14 起这是空操作（不再有会话独占目录要清理；默认工作空间是共享的，删不得）。
@@ -149,6 +169,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	resp := &dtosession.SessionCreateResp{
 		ID: res.SessionID, RuntimeID: res.Runtime, Status: res.Status, EventSeq: res.EventSeq,
 		Cwd: ws.Path, WorkspaceID: ws.WorkspaceID, WorkspaceTemporary: ws.Temporary,
+		Capabilities: createCapabilitiesResp(selection, resolution.warnings),
 	}
 	if req.Prompt != "" {
 		seq, err := s.orch.Prompt(runCtx, res.SessionID, req.Prompt)

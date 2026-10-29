@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	domexpert "github.com/morehao/ark-mate/internal/domain/expert"
 	dommcp "github.com/morehao/ark-mate/internal/domain/mcp"
 	domskill "github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
@@ -42,20 +43,28 @@ type CapabilitySvc interface {
 	// ——— 两个读模型（工具目录 / MCP 注册表） ———
 	ListTools() ([]dtocapability.ToolResp, error)
 	ListMcpServers() ([]dtocapability.McpServerResp, error)
+
+	// ——— 专家定义面（P0） ———
+	ListExperts(ctx context.Context) ([]dtocapability.ExpertResp, error)
+	GetExpert(ctx context.Context, id string) (*dtocapability.ExpertResp, error)
+	WriteExpert(ctx context.Context, pathID string, req dtocapability.ExpertWriteReq, create bool) (*dtocapability.ExpertWriteResp, error)
+	DeleteExpert(ctx context.Context, id string) (*dtocapability.ExpertDeleteResp, error)
+	SetExpertEnabled(ctx context.Context, id string, enabled bool) (*dtocapability.ExpertToggleResp, error)
 }
 
 // capabilitySvc 是 CapabilitySvc 的实现：持有域平面与两个读模型。
 type capabilitySvc struct {
 	skills  *domskill.Plane
 	mcp     *dommcp.Plane
+	experts *domexpert.Plane
 	tools   ToolCatalog
 	catalog McpCatalog
 }
 
-// NewCapability 构造能力数据面用例。四个入参都是**依赖事实**（域平面 / 读模型），
+// NewCapability 构造能力数据面用例。入参都是**依赖事实**（域平面 / 读模型），
 // 用例实例在装配根建一次、控制器只收接口。
-func NewCapability(skills *domskill.Plane, mcp *dommcp.Plane, tools ToolCatalog, catalog McpCatalog) CapabilitySvc {
-	return &capabilitySvc{skills: skills, mcp: mcp, tools: tools, catalog: catalog}
+func NewCapability(skills *domskill.Plane, mcp *dommcp.Plane, experts *domexpert.Plane, tools ToolCatalog, catalog McpCatalog) CapabilitySvc {
+	return &capabilitySvc{skills: skills, mcp: mcp, experts: experts, tools: tools, catalog: catalog}
 }
 
 func (s *capabilitySvc) ListSkills() ([]dtocapability.SkillResp, error) {

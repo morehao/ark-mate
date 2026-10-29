@@ -766,6 +766,10 @@ var schemaMigrations = []migration{
 	// 实际用的 `in_progress`。两个值并存让 `RunningRuns` 恒空、用量 `Running` 恒 0，而这两件事
 	// 都不报错——理由写在该文件头）。
 	migrationV30,
+
+	// v31 的版本步本体在 `migrate_v31.go`（新增 `experts` 专家定义表：会话级能力预设的
+	// body+revision 载体，与 skills/mcp_servers 同形；纯 DDL、无回填——理由写在该文件头）。
+	migrationV31,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

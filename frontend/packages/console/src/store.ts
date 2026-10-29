@@ -57,6 +57,7 @@ import {
   type ToolUpdatePatch,
 } from './console/transcriptView'
 import { setExpanded } from './console/navView'
+import { skippedWarningText } from './console/capabilityView'
 import {
   cancelNotice,
   cancelTone,
@@ -624,7 +625,7 @@ export interface MateActions {
     prompt: string,
     model?: ModelRef,
     workspaceId?: string | null,
-    capabilities?: { skills?: string[]; mcps?: string[] },
+    capabilities?: { expert?: string; skills?: string[]; mcps?: string[] },
   ) => Promise<string | undefined>
   /** 拉取模型目录（来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
   loadModelCatalog: () => Promise<void>
@@ -1126,6 +1127,10 @@ export const useMate = create<MateStore>((set, get) => {
         // 新建后回「会话」视图并刷新列表（避免停在归档视图看不到新会话）。
         if (get().railMode !== 'active') set({ railMode: 'active' })
         void get().refreshSessions()
+        // 专家推荐被跳过（A4 的用户可见面）：创建**不阻断**，但必须让用户看见"少了哪几项、为什么"。
+        // 非阻断 toast：不改变导航、不进错误态。
+        const skipped = skippedWarningText(resp.capabilities?.warnings)
+        if (skipped) showToast(skipped)
         return resp.id
       } catch (err) {
         showToast(toErrorMessage(err))

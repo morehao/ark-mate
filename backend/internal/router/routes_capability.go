@@ -12,6 +12,17 @@ import (
 // 工具名与提示词名不含 "/"——gin 路径参数不匹配斜杠。
 func registerCapability(v1 *gin.RouterGroup, ctr ctrcapability.CapabilityCtr) {
 
+	// ——— 专家定义面（P0）：会话级能力预设的可管理定义面 ———
+	// GET 列表按 updated_at desc（含禁用，UI 标灰；带 has_instructions，不返回正文）；
+	// GET :id 详情返回 instructions 全文（管理页/预览用）；
+	// POST 已存在 → expert_exists(40901)；PUT 只改 body 里出现的键；DELETE 幂等。
+	v1.GET("/experts", ctr.ListExperts)
+	v1.POST("/experts", ctr.CreateExpert)
+	v1.GET("/experts/:id", ctr.GetExpert)
+	v1.PUT("/experts/:id", ctr.UpdateExpert)
+	v1.DELETE("/experts/:id", ctr.DeleteExpert)
+	v1.PATCH("/experts/:id", ctr.SetExpertEnabled)
+
 	v1.GET("/skills", ctr.ListSkills)
 	// M2 写面：能力定义可在面板里增删改，**事实源仍是文件**（<CapabilityDir>/skills/<id>.json）。
 	// POST 已存在 → skill_exists(40901)；PUT 只改 body 里出现的键（未出现的保留原值，null 删键）；

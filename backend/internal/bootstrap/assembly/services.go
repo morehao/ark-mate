@@ -125,7 +125,7 @@ func (f Facts) BuildServices() Services {
 		ProviderProbe: svcmodel.NewProbe(as.Planes.Providers, as.Planes.Providers),
 
 		Capability: svccapability.NewCapability(
-			as.Planes.Skills, as.Planes.Mcp,
+			as.Planes.Skills, as.Planes.Mcp, as.Planes.Experts,
 			svccapability.NewTools(as.Planes.Capabilities),
 			svccapability.NewServers(as.Planes.Capabilities, as.Planes.Mcp, as.Planes.McpSecrets),
 		),

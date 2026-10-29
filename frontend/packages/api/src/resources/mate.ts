@@ -23,6 +23,11 @@ import type {
   ExportResp,
   McpDeleteResp,
   McpProbeResult,
+  Expert,
+  ExpertDeleteResp,
+  ExpertToggleResp,
+  ExpertWriteBody,
+  ExpertWriteResp,
   McpPromptGetResult,
   McpPromptsResult,
   McpResourceReadResult,
@@ -372,6 +377,31 @@ export const cancelQueuedInput = (sessionId: string, inputId: string): Promise<C
 export const listSkills = (): Promise<Skill[]> => http.get<Skill[]>('/mate/skills')
 
 export const listMcpServers = (): Promise<McpServer[]> => http.get<McpServer[]>('/mate/mcps')
+
+// ——— 专家定义面（P0；会话级能力预设） ———
+
+/** 专家列表（含禁用；列表**不返回 instructions 正文**，只带 has_instructions）。 */
+export const listExperts = (): Promise<Expert[]> => http.get<Expert[]>('/mate/experts')
+
+/** 专家详情（返回 instructions 全文，供预览/编辑）。 */
+export const getExpert = (id: string): Promise<Expert> =>
+  http.get<Expert>(`/mate/experts/${encodeURIComponent(id)}`)
+
+/** 新建专家（body = 专家定义，id 必填）。 */
+export const createExpert = (body: ExpertWriteBody): Promise<ExpertWriteResp> =>
+  http.post<ExpertWriteResp>('/mate/experts', body)
+
+/** 覆盖写专家（只改 body 里出现的键）。 */
+export const updateExpert = (id: string, body: ExpertWriteBody): Promise<ExpertWriteResp> =>
+  http.put<ExpertWriteResp>(`/mate/experts/${encodeURIComponent(id)}`, body)
+
+/** 删除专家（幂等）。 */
+export const deleteExpert = (id: string): Promise<ExpertDeleteResp> =>
+  http.delete<ExpertDeleteResp>(`/mate/experts/${encodeURIComponent(id)}`)
+
+/** 启停专家。 */
+export const setExpertEnabled = (id: string, enabled: boolean): Promise<ExpertToggleResp> =>
+  http.patch<ExpertToggleResp>(`/mate/experts/${encodeURIComponent(id)}`, { enabled })
 
 export const listTools = (): Promise<Tool[]> => http.get<Tool[]>('/mate/tools')
 

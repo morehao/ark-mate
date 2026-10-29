@@ -111,6 +111,21 @@ func (d *McpServerDao) WithTx(tx *gorm.DB) *McpServerDao {
 	return &McpServerDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
 }
 
+// ExpertDao 访问 experts 表（v31）。行形态与 skills/mcp_servers 逐字相同，故直接复用 CAS 原语。
+type ExpertDao struct {
+	*DefinitionDao[model.ExpertEntity, model.ExpertEntityList]
+}
+
+// NewExpertDao 构造 ExpertDao。
+func NewExpertDao(getDB gormdao.DBGetter) *ExpertDao {
+	return &ExpertDao{DefinitionDao: newDefinitionDao[model.ExpertEntity, model.ExpertEntityList]("ExpertDao", getDB)}
+}
+
+// WithTx 返回绑定事务的新 DAO。
+func (d *ExpertDao) WithTx(tx *gorm.DB) *ExpertDao {
+	return &ExpertDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
+}
+
 // AutomationDao 访问 automations 表。
 //
 // 它比 skills/mcp_servers 多两类方法（**运行态列**的读写）——但定义列的 CAS 仍然只有
