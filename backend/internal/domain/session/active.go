@@ -70,6 +70,9 @@ type ActiveSession struct {
 	// 与 identity 的区别：identity 每个执行上下文都声明，expertRole 只在**初始**上下文声明
 	//（resume/迁移不重注入——首轮已经发过，历史里已有人格）。
 	expertRole string
+	// expertPersona 专家角色块的**惰性提供者**（P1）：首轮 BeginRun 时才调用，使"创建后、
+	// 首轮前改专家定义"按发送时最新 instructions 注入（设计沉默清单 #6）。一次性消费。
+	expertPersona func() string
 }
 
 // HandleParams 造一个运行期句柄所需的全部事实（装配侧持有连接与投影，域只持有结果）。
@@ -87,9 +90,11 @@ type HandleParams struct {
 	Identity string
 	// ExpertRole 专家角色设定块（P1，空 = 无专家人格；只在首轮注入一次）。
 	ExpertRole string
-	Client     protocol.Conn
-	Session    ACP
-	Projection runtime.Runtime
+	// ExpertPersona 专家角色块的惰性提供者（nil = 用静态 ExpertRole）。首轮 BeginRun 时才求值。
+	ExpertPersona func() string
+	Client        protocol.Conn
+	Session       ACP
+	Projection    runtime.Runtime
 }
 
 // NewActiveSession 造一个句柄。字段在构造后**不可变**（除轮次/存活/memo 这些由方法改的状态），
@@ -98,7 +103,7 @@ func NewActiveSession(p HandleParams) *ActiveSession {
 	return &ActiveSession{
 		ID: p.ID, Runtime: p.Runtime, Fingerprint: p.Fingerprint, NativeMode: p.NativeMode,
 		client: p.Client, sess: p.Session, providerID: p.ProviderID, proj: p.Projection,
-		memo: p.Memo, identity: p.Identity, expertRole: p.ExpertRole,
+		memo: p.Memo, identity: p.Identity, expertRole: p.ExpertRole, expertPersona: p.ExpertPersona,
 	}
 }
 
@@ -226,8 +231,14 @@ func (as *ActiveSession) BeginRun(ctx context.Context) (*Run, RunPrefix, error) 
 	if as.busy {
 		return nil, RunPrefix{}, failure.NewError(failure.ClassLimit, "run_in_progress", "该会话正有 run 在执行，请等待结束", nil)
 	}
-	prefix := RunPrefix{Identity: as.identity, ExpertRole: as.expertRole, Memo: as.memo}
-	as.identity, as.expertRole, as.memo = "", "", ""
+	// 首轮才求值角色块：提前到构造期会把"创建后、首轮前改专家定义"的改动丢掉。
+	// 静态 ExpertRole 优先（测试/直连注入），否则再走惰性提供者。
+	expertRole := as.expertRole
+	if expertRole == "" && as.expertPersona != nil {
+		expertRole = as.expertPersona()
+	}
+	prefix := RunPrefix{Identity: as.identity, ExpertRole: expertRole, Memo: as.memo}
+	as.identity, as.expertRole, as.memo, as.expertPersona = "", "", "", nil
 	tctx, cancel := context.WithCancel(ctx)
 	t := &Run{id: objid.New(objid.Run), done: make(chan struct{}), cancel: cancel, ctx: tctx}
 	as.run = t

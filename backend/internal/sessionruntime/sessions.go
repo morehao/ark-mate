@@ -142,17 +142,24 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	if strings.TrimSpace(modelID) == "" {
 		modelID = resolution.model
 	}
+	// 首轮人格走**惰性 provider**：创建时只记专家 id，首轮 BeginRun 时才读最新 instructions
+	//（创建后、首轮前改定义能生效；被删/禁用按无人格处理 + WARN，不阻断）。
+	var personaProvider func() string
+	if resolution.expertID != "" {
+		id := resolution.expertID
+		personaProvider = func() string { return s.latestExpertPersona(id) }
+	}
 	// 底座不由请求指定（构建期固定，见 internal/runtime/build.go）：这里没有 runtime 参数要校验。
 	res, err := s.startSession(runCtx, session.StartOptions{
-		SessionID:          convID,
-		Cwd:                ws.Path,
-		WorkspaceTemporary: ws.Temporary,
-		WorkspaceID:        ws.WorkspaceID,
-		Model:              runtime.ModelConfig{Model: modelID},
-		Selection:          selection,
-		NativeMode:         nativeMode,
-		ExpertPersona:      resolution.persona,
-		Origin:             req.Origin,
+		SessionID:             convID,
+		Cwd:                   ws.Path,
+		WorkspaceTemporary:    ws.Temporary,
+		WorkspaceID:           ws.WorkspaceID,
+		Model:                 runtime.ModelConfig{Model: modelID},
+		Selection:             selection,
+		NativeMode:            nativeMode,
+		ExpertPersonaProvider: personaProvider,
+		Origin:                req.Origin,
 	})
 	if err != nil {
 		// v14 起这是空操作（不再有会话独占目录要清理；默认工作空间是共享的，删不得）。

@@ -68,9 +68,11 @@ type StartOptions struct {
 	// 它同时是**暖进程键的一维**：模式只能以进程 env 下发，两个模式不同的会话不能共用一个
 	// 暖进程。合并链在用例层建会话处一次性解析，这里只负责把它带下去。
 	NativeMode string
-	// ExpertPersona 专家角色设定块（P1；空 = 无专家人格）。由用例层按建会话时的专家定义构造，
-	// 只交给**初始执行上下文**（StartSession），resume/迁移路径不重注入——首轮已发过即定稿。
+	// ExpertPersona 专家角色设定块（P1；空 = 无专家人格）。静态块，优先于 Provider。
 	ExpertPersona string
+	// ExpertPersonaProvider 专家角色块的惰性提供者（P1）：首轮 BeginRun 时才求值，使"创建后、
+	// 首轮前改专家定义"按发送时最新 instructions 注入。nil = 用静态 ExpertPersona。
+	ExpertPersonaProvider func() string
 }
 
 // CreateResult 是 Start 的结果。
@@ -239,7 +241,9 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 		Projection: runtime.NewProjection(spec, sess),
 		Identity:   l.identityUserContext(),
 		// 专家人格只在**初始**执行上下文交付（首轮注入一次）；resume/迁移路径不设它。
-		ExpertRole: opt.ExpertPersona,
+		// 惰性 Provider 让"创建后、首轮前改定义"的改动在首轮发送时被取到。
+		ExpertRole:    opt.ExpertPersona,
+		ExpertPersona: opt.ExpertPersonaProvider,
 	})
 	// 会话级模型应用（运行时派生模型面的落地）：
 	//   - 值由 `modelCfg` 给出（平台行 → adapter 现算）；

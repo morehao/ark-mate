@@ -9,6 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— 会话创建时的专家解析（P0-2）———
@@ -31,8 +32,10 @@ type expertResolution struct {
 	selection *session.CapabilitySelection
 	// model 专家推荐的模型（仅当请求未显式指定模型时生效；"" = 不推荐/不可达）。
 	model string
-	// persona 专家角色设定块（P1；空 = 无专家人格或 instructions 为空）。
+	// persona 专家角色设定块（P1；创建时快照，仅供测试/回退；正式注入走 provider 取最新）。
 	persona string
+	// expertID 选中的专家 id（"" = 未选专家）；CreateSession 用它构造首轮惰性 provider。
+	expertID string
 	// warnings 专家推荐里被跳过的项（kind、id、reason）。
 	warnings []dtosession.CapabilityWarningResp
 }
@@ -91,9 +94,32 @@ func (s *Service) resolveExpert(ctx context.Context, selection *session.Capabili
 		}
 	}
 	res.selection = out
+	res.expertID = expertID
 	// 角色设定块（P1）：instructions 非空才构造；空 = 纯能力预设专家，不注入人格。
 	res.persona = session.BuildExpertRoleBlock(expert.ID, expert.Name, expert.Instructions)
 	return res, nil
+}
+
+// latestExpertPersona 首轮发送时**现取**专家最新定义构造角色块（设计沉默清单 #6）。
+//
+// 专家在"会话已创建、首轮未发"之间被改：取改后的 instructions；被删/禁用：按无 instructions
+// 处理并 WARN，**不阻断**（Q1：人格是增强，不是任务前提）。任何异常都返回空串 → 按原文发送。
+func (s *Service) latestExpertPersona(expertID string) string {
+	if expertID == "" || s.planes.Capabilities == nil {
+		return ""
+	}
+	expert, ok := s.planes.Capabilities.ExpertByID(expertID)
+	if !ok {
+		glog.Warnw(context.Background(), "expert persona: 专家定义在首轮发送前已被删除，跳过人格注入",
+			"expert", expertID)
+		return ""
+	}
+	if !expert.IsEnabled() {
+		glog.Warnw(context.Background(), "expert persona: 专家在首轮发送前已被禁用，跳过人格注入",
+			"expert", expertID)
+		return ""
+	}
+	return session.BuildExpertRoleBlock(expert.ID, expert.Name, expert.Instructions)
 }
 
 // reachableSkills 过滤出对 rt 可达的推荐技能（保持升序），不可达项转成告警。

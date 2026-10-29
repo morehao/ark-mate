@@ -109,3 +109,41 @@ func TestStripExpertRolePrefix(t *testing.T) {
 		t.Fatalf("不匹配时应原样返回，got=%q ok=%v", got, ok)
 	}
 }
+
+// TestExpertRoleProviderEvaluatedAtFirstRun 惰性 provider 在首轮才求值且只取一次：
+// 使「创建后、首轮前改专家定义」能按发送时最新 instructions 注入（设计沉默清单 #6）。
+func TestExpertRoleProviderEvaluatedAtFirstRun(t *testing.T) {
+	agent := newCaptureACP()
+	calls := 0
+	as := NewActiveSession(HandleParams{
+		ID: "s1", Runtime: "r", Session: agent,
+		ExpertPersona: func() string {
+			calls++
+			return BuildExpertRoleBlock("e", "专家", "发送时最新设定")
+		},
+	})
+	r, _ := newIdentityRunner(t, as)
+
+	if _, err := r.Prompt(context.Background(), "s1", "第一问"); err != nil {
+		t.Fatalf("首轮: %v", err)
+	}
+	waitPrompt(t, agent, 1)
+	waitIdle(t, as)
+	if got := agent.PromptAt(0); !strings.Contains(got, "发送时最新设定") {
+		t.Fatalf("首轮应含 provider 给出的角色块，got %q", got)
+	}
+	if calls != 1 {
+		t.Fatalf("provider 应只在首轮求值一次，got %d", calls)
+	}
+
+	if _, err := r.Prompt(context.Background(), "s1", "第二问"); err != nil {
+		t.Fatalf("次轮: %v", err)
+	}
+	waitPrompt(t, agent, 2)
+	if calls != 1 {
+		t.Fatalf("次轮不应再调用 provider，got %d", calls)
+	}
+	if got := agent.PromptAt(1); got != "第二问" {
+		t.Fatalf("次轮应逐字等于原文，got %q", got)
+	}
+}

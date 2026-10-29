@@ -304,3 +304,28 @@ func mustJSON(t *testing.T, v any) []byte {
 	}
 	return b
 }
+
+// TestLatestExpertPersonaReadsLatest 首轮发送时现取最新 instructions；删除/禁用按无人格处理。
+func TestLatestExpertPersonaReadsLatest(t *testing.T) {
+	svc, _, _ := validateRig(t)
+	registerExpert(t, svc, capability.Expert{ID: "p", Name: "专家", Instructions: "旧设定"})
+	if got := svc.latestExpertPersona("p"); !strings.Contains(got, "旧设定") {
+		t.Fatalf("应读到旧设定，got %q", got)
+	}
+	// 创建后、首轮前改 instruction：现取应拿到新值。
+	registerExpert(t, svc, capability.Expert{ID: "p", Name: "专家", Instructions: "新设定"})
+	got := svc.latestExpertPersona("p")
+	if !strings.Contains(got, "新设定") || strings.Contains(got, "旧设定") {
+		t.Fatalf("应读到新设定，got %q", got)
+	}
+	// 禁用 → 不注入（返回空串，不阻断）。
+	registerExpert(t, svc, capability.Expert{ID: "p", Name: "专家", Instructions: "新设定", Enabled: boolPtr(false)})
+	if got := svc.latestExpertPersona("p"); got != "" {
+		t.Fatalf("禁用专家应返回空串，got %q", got)
+	}
+	// 删除 → 不注入。
+	svc.planes.Capabilities.RemoveExpert("p")
+	if got := svc.latestExpertPersona("p"); got != "" {
+		t.Fatalf("删除专家应返回空串，got %q", got)
+	}
+}
