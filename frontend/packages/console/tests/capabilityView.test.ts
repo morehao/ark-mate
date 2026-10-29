@@ -15,6 +15,7 @@ import {
   selectionPayload,
   selectionPillText,
   selectionIsDefault,
+  skippedWarningText,
   skillCreateBody,
   skillFormPatch,
   skillFormValues,
@@ -304,5 +305,12 @@ describe('capability selection wire shape', () => {
     assert.ok(v && v.text.includes('data-analyst') && v.text.includes('技能：a'))
     const del = pinnedCapabilitiesView({ expert: 'gone', expert_missing: true, skills: [] })
     assert.ok(del && del.text.includes('已删除'))
+  })
+
+  it('专家推荐被跳过的告警文案（无告警 → null）', () => {
+    assert.equal(skippedWarningText(undefined), null)
+    assert.equal(skippedWarningText([]), null)
+    const text = skippedWarningText([{ kind: 'mcp', id: 'web', reason: '不承载 http 传输' }])
+    assert.ok(text && text.includes('1 项') && text.includes('web') && text.includes('不承载 http 传输'))
   })
 })

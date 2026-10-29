@@ -1,4 +1,5 @@
 import type {
+  CapabilityWarning,
   CapabilityWriteBody,
   LibraryApplicability,
   LibraryItem,
@@ -352,6 +353,18 @@ export function selectionHint(choice: CapabilityChoice, expertName?: string): st
   )
   lines.push('能力集按进程绑定：不同选定 = 不同代际（各自一个进程），创建后按下一轮边界生效。')
   return lines.join('\n')
+}
+
+/**
+ * 创建响应里「专家推荐被跳过」的告警 → 一条**非阻断**提示文案（无告警 → null）。
+ *
+ * 只描述被跳过的事实与原因（不阻断创建、不进错误态）：专家是建议，陈旧建议不该把任务卡住，
+ * 但用户必须能看见"我选的专家少带了两个技能/一台 MCP"。
+ */
+export function skippedWarningText(warnings?: CapabilityWarning[] | null): string | null {
+  if (!warnings || warnings.length === 0) return null
+  const detail = warnings.map((w) => `${w.id}（${w.reason}）`).join('；')
+  return `专家推荐有 ${warnings.length} 项当前不可用，已跳过：${detail}`
 }
 
 /**
