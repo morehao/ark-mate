@@ -42,9 +42,6 @@ export interface NavGroup {
 
 export type NavEntry = NavLeaf | NavGroup
 
-/** pending（待开发）条目的统一说明（v19 前这句写的是「预设化 Agent（未实现）」——那个概念已撤）。 */
-export const PENDING_HINT = '预设化助手（未实现）'
-
 export const NAV_ENTRIES: readonly NavEntry[] = [
   {
     id: 'extensions',
@@ -53,7 +50,7 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
     order: 20,
     icon: <AppstoreOutlined />,
     children: [
-      { id: 'experts', label: '专家', to: '', order: 21, pending: true, hint: PENDING_HINT },
+      { id: 'experts', label: '专家', to: '/extensions/experts', order: 21 },
       { id: 'skills', label: '技能', to: '/extensions/skills', order: 22 },
       { id: 'connectors', label: '连接器', to: '/extensions/connectors', order: 23 },
     ],

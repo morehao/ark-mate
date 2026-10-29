@@ -14,6 +14,7 @@ import { AutomationsPage } from './pages/AutomationsPage'
 import { OverviewPage } from './pages/extensions/OverviewPage'
 import { SkillsPage } from './pages/extensions/SkillsPage'
 import { ConnectorsPage } from './pages/extensions/ConnectorsPage'
+import { ExpertsPage } from './pages/extensions/ExpertsPage'
 import { UsagePage } from './pages/UsagePage'
 
 /** 全局 toast 的层级。
@@ -167,6 +168,14 @@ export function App() {
               element={
                 <Manage>
                   <SkillsPage />
+                </Manage>
+              }
+            />
+            <Route
+              path="/extensions/experts"
+              element={
+                <Manage>
+                  <ExpertsPage />
                 </Manage>
               }
             />
