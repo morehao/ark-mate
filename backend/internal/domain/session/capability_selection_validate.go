@@ -49,6 +49,8 @@ type CapabilityLookup interface {
 	LookupSkill(id string) (capability.Skill, bool)
 	// LookupMcp 按 id 取 MCP server 定义（ok=false = 注册表里没有）。
 	LookupMcp(id string) (capability.McpServer, bool)
+	// LookupExpert 按 id 取专家定义（ok=false = 注册表里没有）。读面用它判定会话钉住的专家是否已删除。
+	LookupExpert(id string) (capability.Expert, bool)
 	// SkillVerdictFacts 判该 runtime 上 skill 可达性所需的事实。
 	SkillVerdictFacts(runtimeID string) SkillVerdictFacts
 	// McpVerdictFacts 判该 runtime 上 MCP 可达性所需的事实。

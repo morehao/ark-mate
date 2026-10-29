@@ -27,6 +27,14 @@ func (s *Service) LookupMcp(id string) (capability.McpServer, bool) {
 	return s.planes.Capabilities.GetMcpServer(id)
 }
 
+// LookupExpert 实现 `session.CapabilityLookup`（读面判定会话钉住的专家是否已删除）。
+func (s *Service) LookupExpert(id string) (capability.Expert, bool) {
+	if s.planes.Capabilities == nil {
+		return capability.Expert{}, false
+	}
+	return s.planes.Capabilities.ExpertByID(id)
+}
+
 // SkillVerdictFacts 实现 `session.CapabilityLookup`。
 func (s *Service) SkillVerdictFacts(runtimeID string) session.SkillVerdictFacts {
 	facts := session.SkillVerdictFacts{Runtime: runtimeID}

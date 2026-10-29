@@ -200,9 +200,16 @@ func (pl *Plane) SessionCapabilitiesRespOf(rec *SessionRec) *SessionCapabilities
 		mcps = &v
 	}
 	var expert *string
+	expertMissing := false
 	if sel.Expert != nil {
 		v := *sel.Expert
 		expert = &v
+		// 读面判定定义是否已删除（空串 = 明确不用，不查；未登记查表 = 不做判定）。
+		if v != "" && pl.capLookup != nil {
+			if _, ok := pl.capLookup.LookupExpert(v); !ok {
+				expertMissing = true
+			}
+		}
 	}
-	return &SessionCapabilities{Skills: skills, Mcps: mcps, Expert: expert, Fingerprint: rec.Fingerprint}
+	return &SessionCapabilities{Skills: skills, Mcps: mcps, Expert: expert, ExpertMissing: expertMissing, Fingerprint: rec.Fingerprint}
 }

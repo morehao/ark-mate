@@ -31,8 +31,10 @@ type SessionCapabilities struct {
 	Skills *[]string
 	Mcps   *[]string
 	// Expert 会话钉住的专家 id（nil = 未声明；`""` = 明确不用；非空 = id）。
-	Expert      *string
-	Fingerprint string
+	Expert *string
+	// ExpertMissing 专家定义已删除（能力仍按创建时物化的列表生效）。
+	ExpertMissing bool
+	Fingerprint   string
 }
 
 // SessionSearchHitItem 一条会话搜索命中（概要 + 片段与命中数）。

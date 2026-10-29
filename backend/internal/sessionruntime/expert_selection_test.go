@@ -266,6 +266,36 @@ func TestResolveExpertBuildsPersona(t *testing.T) {
 	}
 }
 
+// TestCreateSessionExpertMissingAfterDelete 读面在专家定义被删后标记 expert_missing（能力仍按快照生效）。
+func TestCreateSessionExpertMissingAfterDelete(t *testing.T) {
+	svc, _, _ := validateRig(t)
+	ctx := context.Background()
+	registerExpert(t, svc, capability.Expert{ID: "gone", Name: "会被删", Skills: []string{"ok-skill"}})
+
+	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		Cwd: t.TempDir(), Capabilities: &dtosession.CapabilitiesReq{Expert: ptrOf("gone")},
+	})
+	if err != nil {
+		t.Fatalf("创建: %v", err)
+	}
+	svc.planes.Capabilities.RemoveExpert("gone")
+
+	detail, err := detailSvc(svc).GetSession(ctx, res.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if detail.Capabilities == nil || detail.Capabilities.Expert == nil || *detail.Capabilities.Expert != "gone" {
+		t.Fatalf("应仍回显专家 id: %+v", detail.Capabilities)
+	}
+	if !detail.Capabilities.ExpertMissing {
+		t.Fatalf("专家定义已删 → expert_missing 应为 true")
+	}
+	// 能力快照不受影响。
+	if detail.Capabilities.Skills == nil || !sameSet(*detail.Capabilities.Skills, []string{"ok-skill"}) {
+		t.Fatalf("删除专家不应影响已建会话的技能快照，got %+v", detail.Capabilities.Skills)
+	}
+}
+
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)
