@@ -56,18 +56,32 @@ func (h handler) WithGroup(string) slog.Handler { return h }
 
 // At 按档位分派到 glog。
 //
-// glog 没有"级别作参数"的入口（它是 Debugw/Infow/Warnw/Errorw 四个函数），而装载内核
-// （`loadAgentDefinitionsFromStore` / `reloadCapabilityDefinitions` / `loadProviders`）只有一个
-// level 形参：核心进程用 Info、网关的长命进程用 Debug（每次 tools/list 都重装，Info 会把日志刷成噪声）。
+// glog 的具名 `*w` 入口有六个（Debug/Info/Warn/Error/Panic/Fatal），但没有"级别作参数"
+// 的入口；而装载内核（`reloadCapabilityDefinitions` / `loadProviderDefinitionsFromStore`）
+// 只有一个 level 形参：核心进程用 Info、网关的长命进程用 Debug（每次 tools/list 都重装，
+// Info 会把日志刷成噪声）。
+//
+// `glog.Level` 有六个取值，本函数只为前四个（Debug/Info/Warn/Error）提供直通入口。
+// Panic/Fatal 落进 default 分支时**不**转发 `glog.Panicw`/`Fatalw`——`At` 是装载汇总行的
+// 出口，一条"档案装载完成"不该决定进程生死；但也**不能**像改造前那样落成 Info：那正是
+// "传了 Fatal 只看到一条 Info"的静默降级。统一按 Error 记录并带上原档位。六值之外的非法值
+// （Level 是 string 类型，可以构造出来）同理。据此 `At` 只用于装载汇总等非致命场景，
+// 真要 panic/exit 请直接调对应入口。
 func At(ctx context.Context, level glog.Level, msg string, kvs ...any) {
 	switch level {
 	case glog.DebugLevel:
 		glog.Debugw(ctx, msg, kvs...)
+	case glog.InfoLevel:
+		glog.Infow(ctx, msg, kvs...)
 	case glog.WarnLevel:
 		glog.Warnw(ctx, msg, kvs...)
 	case glog.ErrorLevel:
 		glog.Errorw(ctx, msg, kvs...)
 	default:
-		glog.Infow(ctx, msg, kvs...)
+		// 重新拼一份 kv：不就地 append，避免写进调用方切片（容量足够时 append 会复用底层数组）。
+		extra := make([]any, 0, len(kvs)+2)
+		extra = append(extra, kvs...)
+		extra = append(extra, "log_level", string(level))
+		glog.Errorw(ctx, msg, extra...)
 	}
 }
