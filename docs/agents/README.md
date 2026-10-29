@@ -11,6 +11,7 @@
 | [`isolation.md`](isolation.md) | 本机隔离纪律（开发期硬约束） |
 | [`build-and-runtime.md`](build-and-runtime.md) | 构建形态与运行配置（构建期固定 runtime、鉴权/Origin/SQLite/CGO） |
 | [`vocabulary.md`](vocabulary.md) | 一个东西一个词：`session` / `definition` / `run` / 凭据 / 模型 / agent 面 |
+| [`context.md`](context.md) | 请求上下文传递：handler 传 `c.Request.Context()`、service 签名是 `context.Context`、`ContextWithFallback` 不得打开 |
 | [`error-codes.md`](error-codes.md) | 错误码的唯一事实源与三处同步 |
 | [`frontend.md`](frontend.md) | 前端风格约束（token 与交互态 CSS 的收口） |
 | [`authorization.md`](authorization.md) | 变更授权（允许破坏性调整的边界） |
