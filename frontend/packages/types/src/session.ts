@@ -87,8 +87,21 @@ export interface SessionSummary {
 export interface SessionCapabilities {
   skills?: string[]
   mcps?: string[]
+  /** 钉住的专家 id（缺键 = 未声明；`""` = 明确不用；非空 = 专家 id）。 */
+  expert?: string
+  /** 专家定义已被删除（能力仍按创建时物化的列表生效）。 */
+  expert_missing?: boolean
+  /** 创建响应里可能有：专家推荐里被跳过的不可达项。读面不复现。 */
+  warnings?: CapabilityWarning[]
   /** 钉住的代际指纹（解析后的能力集的摘要；同指纹 = 同一个进程代际）。 */
   fingerprint?: string
+}
+
+/** 一条「专家推荐被跳过」的告警（kind = skill|mcp|model）。 */
+export interface CapabilityWarning {
+  kind: string
+  id: string
+  reason: string
 }
 
 /** 单轮用量快照（解析 runs.usage_json；used/size 为上下文窗口占用，快照非增量）。 */
@@ -393,7 +406,7 @@ export interface CreateSessionReq {
    * `[]` = 一个都不要；非空 = 白名单。服务端据此算代际指纹并把选定钉进会话。
    * 不可达的 id 会被拒（40001 `capability_not_applicable`，msg 里逐条给原因）。
    */
-  capabilities?: { skills?: string[]; mcps?: string[] }
+  capabilities?: { expert?: string; skills?: string[]; mcps?: string[] }
 }
 
 export interface CreateSessionResp {
@@ -408,6 +421,8 @@ export interface CreateSessionResp {
   workspace_id?: string
   /** 该工作空间是否由平台给出（权威标志）。 */
   workspace_temporary?: boolean
+  /** 本次创建钉住的能力选定（专家 + 物化后的技能/MCP + 被跳过的推荐告警）。 */
+  capabilities?: SessionCapabilities | null
 }
 
 /** §6 投递模式：会话正忙时怎么办。空/reject = 报错（历史行为）；after_run = 排队；

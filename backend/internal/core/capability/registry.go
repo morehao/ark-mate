@@ -17,10 +17,11 @@ import (
 // Registry 是能力数据面的进程内聚合（Skill/MCP/Tool 三表），供 Service 查询与未来注入。
 // 并发安全；List* 返回排序后的值拷贝（不暴露内部指针）。
 type Registry struct {
-	mu     sync.Mutex
-	skills map[string]*Skill
-	mcps   map[string]*McpServer
-	tools  map[string]*Tool
+	mu      sync.Mutex
+	skills  map[string]*Skill
+	mcps    map[string]*McpServer
+	tools   map[string]*Tool
+	experts map[string]*Expert
 }
 
 // LoadResult 汇报一次 LoadDir 的合并数量（各表 + 总计）。
@@ -52,9 +53,10 @@ var skillIDRE = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 // NewRegistry 构造空注册表。
 func NewRegistry() *Registry {
 	return &Registry{
-		skills: make(map[string]*Skill),
-		mcps:   make(map[string]*McpServer),
-		tools:  make(map[string]*Tool),
+		skills:  make(map[string]*Skill),
+		mcps:    make(map[string]*McpServer),
+		tools:   make(map[string]*Tool),
+		experts: make(map[string]*Expert),
 	}
 }
 
@@ -309,11 +311,15 @@ func (r *Registry) ReplaceAll(from *Registry) {
 	for k, v := range from.tools {
 		tools[k] = v
 	}
+	experts := make(map[string]*Expert, len(from.experts))
+	for k, v := range from.experts {
+		experts[k] = v
+	}
 	from.mu.Unlock()
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.skills, r.mcps, r.tools = skills, mcps, tools
+	r.skills, r.mcps, r.tools, r.experts = skills, mcps, tools, experts
 }
 
 // Reset 清空三张表。
@@ -336,6 +342,7 @@ func (r *Registry) Reset() {
 	r.skills = make(map[string]*Skill)
 	r.mcps = make(map[string]*McpServer)
 	r.tools = make(map[string]*Tool)
+	r.experts = make(map[string]*Expert)
 }
 
 // SupportedFormat 报告某物化 format 是否已实证（激活判定用：声明了 runtime 但 format 未实证
@@ -394,6 +401,54 @@ func (r *Registry) GetMcpServer(id string) (McpServer, bool) {
 		return McpServer{}, false
 	}
 	return *m, true
+}
+
+// RegisterExpert 校验并注册/覆盖一条专家定义（供装载与写面在**校验通过后**入表）。
+//
+// 与 RegisterSkill 同一条纪律：入表是写面序列的最后一步（先校验、再提交载体、最后入表），
+// 这里再跑一次 `ValidateExpert` 作为最后一道防线——绕过注册表的路径不该存在。
+func (r *Registry) RegisterExpert(e *Expert) error {
+	if err := ValidateExpert(e); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.experts[e.ID] = e
+	r.mu.Unlock()
+	return nil
+}
+
+// ExpertByID 按 id 取专家（ok=false 表示未注册）。
+func (r *Registry) ExpertByID(id string) (Expert, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.experts[id]
+	if !ok {
+		return Expert{}, false
+	}
+	return *e, true
+}
+
+// RemoveExpert 摘除一条专家（装载清场/删除路径用；ok=false = 本来就不存在）。
+func (r *Registry) RemoveExpert(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.experts[id]; !ok {
+		return false
+	}
+	delete(r.experts, id)
+	return true
+}
+
+// ListExperts 返回按 ID 排序的专家副本（含被禁用的：面板要能看见并恢复它们）。
+func (r *Registry) ListExperts() []Expert {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Expert, 0, len(r.experts))
+	for _, e := range r.experts {
+		out = append(out, *e)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }
 
 // ReplaceToolsForMcpServer 用一次 live 探测结果整体替换某 MCP server 归属的 Tool 条目

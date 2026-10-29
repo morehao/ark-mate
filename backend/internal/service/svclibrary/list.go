@@ -87,7 +87,7 @@ func (l *Library) ListLibrary(q skill.Query) ([]dtolibrary.LibraryItem, error) {
 	if q.Kind != "" && !dtolibrary.ValidKinds[q.Kind] {
 		// 未知 kind 报 40000 而不是静默返回空表：静默会让"筛了但没有"与"我拼错了"长得一样。
 		return nil, code.Error(code.InvalidParam,
-			fmt.Sprintf("未知 kind %q（合法：skill|mcp|tool）", q.Kind))
+			fmt.Sprintf("未知 kind %q（合法：skill|mcp|tool|expert）", q.Kind))
 	}
 	needle := strings.ToLower(strings.TrimSpace(q.Q))
 
@@ -95,6 +95,7 @@ func (l *Library) ListLibrary(q skill.Query) ([]dtolibrary.LibraryItem, error) {
 	items = append(items, l.librarySkills()...)
 	items = append(items, l.libraryMcps()...)
 	items = append(items, l.libraryTools()...)
+	items = append(items, l.libraryExperts()...)
 
 	out := items[:0]
 	for _, it := range items {
@@ -257,6 +258,27 @@ func (l *Library) libraryTools() []dtolibrary.LibraryItem {
 			}
 		}
 		out = append(out, it)
+	}
+	return out
+}
+
+// libraryExperts 专家条目（会话级能力预设）。
+//
+// 专家没有「逐 runtime 可达性」这一维（它不是被物化到某个底座目录的东西，而是建会话时的默认值来源），
+// 因此 applicability 统一给空数组——与其它条目同形（空数组而非 null），前端不必为它写第二套分支。
+func (l *Library) libraryExperts() []dtolibrary.LibraryItem {
+	if l.caps == nil {
+		return nil
+	}
+	experts := l.caps.ListExperts()
+	out := make([]dtolibrary.LibraryItem, 0, len(experts))
+	for _, e := range experts {
+		out = append(out, dtolibrary.LibraryItem{
+			ID: e.ID, Kind: dtolibrary.KindExpert, Name: libraryName(e.Name, e.ID),
+			Description: e.Description, Origin: libraryOrigin(e.SourceFile),
+			Scope: capability.SkillScopeGlobal, Enabled: e.IsEnabled(), SourceFile: e.SourceFile,
+			Applicability: []dtolibrary.Applicability{},
+		})
 	}
 	return out
 }

@@ -284,52 +284,68 @@ export function writeErrorText(err: unknown): string {
  *  - 非空   = 白名单
  */
 export interface CapabilityChoice {
+  /** null = 跟随默认（请求不带 expert 键）；'' = 明确不用专家；非空 = 专家 id。 */
+  expert: string | null
   skills: string[] | null
   mcps: string[] | null
 }
 
 /** 未声明（跟随默认）的选定。 */
-export const FOLLOW_DEFAULT: CapabilityChoice = { skills: null, mcps: null }
+export const FOLLOW_DEFAULT: CapabilityChoice = { expert: null, skills: null, mcps: null }
 
-/** 选定 → 请求体片段；两个 kind 都未声明时返回 undefined（键都不出现）。 */
-export function selectionPayload(choice: CapabilityChoice): { skills?: string[]; mcps?: string[] } | undefined {
-  const out: { skills?: string[]; mcps?: string[] } = {}
+/** 选定 → 请求体片段；三个面都未声明时返回 undefined（键都不出现）。 */
+export function selectionPayload(
+  choice: CapabilityChoice,
+): { expert?: string; skills?: string[]; mcps?: string[] } | undefined {
+  const out: { expert?: string; skills?: string[]; mcps?: string[] } = {}
+  // expert === '' 是**明确不用专家**，必须带空串（与"缺键"语义相反）。
+  if (choice.expert !== null) out.expert = choice.expert
   if (choice.skills !== null) out.skills = choice.skills
   if (choice.mcps !== null) out.mcps = choice.mcps
-  return out.skills === undefined && out.mcps === undefined ? undefined : out
+  return out.expert === undefined && out.skills === undefined && out.mcps === undefined ? undefined : out
 }
 
-/** 选定是否已限制任何 kind（未限制 = 缺省路径，请求体里一个键都不加）。 */
+/** 选定是否已限制任何面（未限制 = 缺省路径，请求体里一个键都不加）。 */
 export function selectionIsDefault(choice: CapabilityChoice): boolean {
-  return choice.skills === null && choice.mcps === null
+  return choice.expert === null && choice.skills === null && choice.mcps === null
 }
 
-/** 选定 → 药丸文案（短）。 */
-export function selectionPillText(choice: CapabilityChoice): string {
+/** 选定 → 药丸文案（短）。`expertName` 用于把专家 id 翻成展示名（缺省时用 id）。 */
+export function selectionPillText(choice: CapabilityChoice, expertName?: string): string {
   if (selectionIsDefault(choice)) return '能力 · 跟随默认'
   const parts: string[] = []
+  if (choice.expert !== null) {
+    parts.push(choice.expert === '' ? '通用' : expertName || choice.expert)
+  }
   if (choice.skills !== null) {
     parts.push(choice.skills.length === 0 ? '技能：无' : `技能 ${choice.skills.length}`)
   }
   if (choice.mcps !== null) {
     parts.push(choice.mcps.length === 0 ? 'MCP：无' : `MCP ${choice.mcps.length}`)
   }
-  return parts.join(' · ')
+  return '能力 · ' + parts.join(' · ')
 }
 
 /** 选定 → 悬停说明（把"这一个会话会被投什么"讲清楚，含没限制的那一半）。 */
-export function selectionHint(choice: CapabilityChoice): string {
+export function selectionHint(choice: CapabilityChoice, expertName?: string): string {
   const lines: string[] = []
   lines.push(
+    choice.expert === null
+      ? '专家：不选（跟随平台默认）'
+      : choice.expert === ''
+        ? '专家：通用（明确不用专家）'
+        : `专家：${expertName || choice.expert}（推荐能力；技能/MCP 未手选时按推荐填充）`,
+  )
+  lines.push(
     choice.skills === null
-      ? '技能：不加限制（按平台默认投放）'
+      ? '技能：不加限制（按平台默认/专家推荐投放）'
       : choice.skills.length === 0
         ? '技能：一个都不要'
         : `技能：只用这 ${choice.skills.length} 个`,
   )
   lines.push(
     choice.mcps === null
-      ? 'MCP：不加限制（按平台默认投放）'
+      ? 'MCP：不加限制（按平台默认/专家推荐投放）'
       : choice.mcps.length === 0
         ? 'MCP：一个都不要'
         : `MCP：只注入这 ${choice.mcps.length} 个`,
@@ -402,12 +418,18 @@ export function mcpOptionView(row: Pick<McpRow, 'defEnabled' | 'applicability'>)
  * 两者的差别恰恰是用户需要看见的（也是 M3-6 迁移的对象）。
  */
 export function pinnedCapabilitiesView(
-  caps?: { skills?: string[]; mcps?: string[]; fingerprint?: string } | null,
+  caps?: { expert?: string; expert_missing?: boolean; skills?: string[]; mcps?: string[]; fingerprint?: string } | null,
 ): { text: string; hint: string; fingerprint: string } | null {
   if (!caps) return null
   const fmt = (list?: string[]) => (list === undefined ? '跟随默认' : list.length === 0 ? '无' : list.join('、'))
+  const expertText =
+    caps.expert === undefined
+      ? ''
+      : caps.expert === ''
+        ? '通用 ｜ '
+        : `${caps.expert_missing ? `${caps.expert}（已删除）` : caps.expert} ｜ `
   return {
-    text: `技能：${fmt(caps.skills)} ｜ MCP：${fmt(caps.mcps)}`,
+    text: `${expertText}技能：${fmt(caps.skills)} ｜ MCP：${fmt(caps.mcps)}`,
     hint: '该会话创建时钉住的能力选定：定义文件之后被改动也不会影响它（改动在下一次轮次边界按新代际生效）。',
     fingerprint: caps.fingerprint ?? '',
   }

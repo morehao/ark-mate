@@ -323,10 +323,10 @@ export interface LibraryApplicability {
   reason?: string
 }
 
-/** Library 统一能力条目（GET /library；skill | mcp | tool）。 */
+/** Library 统一能力条目（GET /library；skill | mcp | tool | expert）。 */
 export interface LibraryItem {
   id: string
-  /** skill | mcp | tool（v19 起没有 agent：它不是一种可投放的能力，而是一个已撤掉的概念） */
+  /** skill | mcp | tool | expert（v19 起没有 agent：它不是一种可投放的能力，而是一个已撤掉的概念） */
   kind: string
   name: string
   description?: string
@@ -340,4 +340,51 @@ export interface LibraryItem {
   /** 逐候选 runtime 的可达性——**刻意不给「整体可用吗」的合并结论**。 */
   applicability: LibraryApplicability[]
   warnings?: string[]
+}
+
+// ——— 专家定义面（P0；GET/POST/PUT/DELETE /experts） ———
+//
+// 专家是**会话级能力预设**：推荐技能/MCP/模型（P1 起带角色设定 `instructions`）。它不拥有技能——
+// 只是引用 id；一个会话最多一个专家。见 backend/internal/dto/dtocapability/expert.go。
+
+/** 专家定义（列表读面：**不返回 instructions 正文**，只带 has_instructions）。 */
+export interface Expert {
+  id: string
+  name: string
+  description?: string
+  /** 内置图标键（spark|chart|code|pen|search|briefcase）。 */
+  avatar?: string
+  /** 推荐模型（平台模型行 id `mdl_…`）。 */
+  model?: string
+  skills?: string[]
+  mcps?: string[]
+  enabled: boolean
+  tags?: string[]
+  /** 是否带角色设定（有则 `GET /experts/:id` 能读回 instructions 全文）。 */
+  has_instructions: boolean
+  /** 角色设定全文（**仅详情**返回；列表里为空）。 */
+  instructions?: string
+}
+
+/** 专家写面请求体（原文 JSON 对象；键的出现与否有语义，同 skill/mcp 写面）。 */
+export type ExpertWriteBody = Record<string, unknown>
+
+/** 新建/覆盖专家定义的结果。 */
+export interface ExpertWriteResp {
+  id: string
+  path: string
+  created: boolean
+}
+
+/** 删除专家定义的结果（幂等）。 */
+export interface ExpertDeleteResp {
+  id: string
+  deleted: boolean
+  path?: string
+}
+
+/** 启停专家定义的结果。 */
+export interface ExpertToggleResp {
+  id: string
+  enabled: boolean
 }

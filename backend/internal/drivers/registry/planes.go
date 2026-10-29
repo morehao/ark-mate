@@ -9,6 +9,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/domain/expert"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/skill"
@@ -41,6 +42,7 @@ type Planes struct {
 	Skills       *skill.Plane
 	McpSecrets   *mcp.Secrets
 	Mcp          *mcp.Plane
+	Experts      *expert.Plane
 	Picker       *workspace.Picker
 	Workspaces   *workspace.Plane
 	Automation   *automation.Plane
@@ -110,6 +112,7 @@ func NewPlanes(reg *runtime.Registry) *Planes {
 	p.McpSecrets = mcp.NewSecrets(p.Credentials)
 	// live 客户端实现体在这里注入（A2）：域只认窄端口，`infra/protocol/mcp` 的实现由装配面接上。
 	p.Mcp = mcp.NewPlane(p.Capabilities, mcpDefs{p.Definitions}, p.McpSecrets, NewMcpLiveClient())
+	p.Experts = expert.NewPlane(p.Capabilities)
 	p.Providers = provider.NewPlane(reg, NewProviderSecrets(p.Credentials))
 	p.Resources = NewResources(reg, p.Providers)
 	p.Identity = NewIdentityDelivery(reg)
@@ -132,6 +135,10 @@ func (p *Planes) EnableStore(st *store.Store) {
 	p.Definitions.SetStore(st)
 	p.Credentials.SetStore(st)
 	p.Skills.SetPersistence(st != nil)
+	if st != nil {
+		// 只在真的接了库时登记：把 typed-nil 装进接口会得到非 nil 接口，memory 模式下写面会误判「可写」。
+		p.Experts.SetStore(st)
+	}
 	p.Providers.SetStore(st)
 	p.Workspaces.SetStore(workspaceStore{st})
 	p.Automation.SetStore(st)
@@ -278,8 +285,35 @@ func (p *Planes) reloadCapabilityDefinitions(ctx context.Context, importDir stri
 		total++
 	}
 
+	// 专家定义（v31）：与 skill/mcp 同形装载——解码失败/闸门拒绝逐条 WARN 跳过、不阻断启动。
+	experts, err := st.ListExpertDefinitions(ctx)
+	if err != nil {
+		p.defWarnOnce("store:experts", "capability: 从持久层读专家定义失败", "err", err)
+		return total, err
+	}
+	for i := range experts {
+		row := experts[i]
+		var e capability.Expert
+		if err := json.Unmarshal([]byte(row.Body), &e); err != nil {
+			p.defWarnOnce("expert:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: 专家定义解码失败，跳过", "id", row.ID, "revision", row.Revision, "err", err)
+			continue
+		}
+		// id 以**行主键**为准（与 skill/mcp 同一条纪律）。
+		if e.ID != row.ID {
+			if e.ID != "" {
+				p.defWarnOnce("expert-id:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: 专家定义 body 里的 id 与行主键不一致，以行主键为准", "row", row.ID, "body", e.ID)
+			}
+			e.ID = row.ID
+		}
+		if err := fresh.RegisterExpert(&e); err != nil {
+			p.defWarnOnce("expert-rej:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: 专家定义未采纳", "id", row.ID, "revision", row.Revision, "err", err)
+			continue
+		}
+		total++
+	}
+
 	// 一次换面：此后所有读者看到的是完整的新目录。
 	p.Capabilities.ReplaceAll(fresh)
-	logging.At(ctx, level, "capability: 定义已从持久层装载", "skills", len(skills), "mcps", len(mcps), "adopted", total)
+	logging.At(ctx, level, "capability: 定义已从持久层装载", "skills", len(skills), "mcps", len(mcps), "experts", len(experts), "adopted", total)
 	return total, nil
 }

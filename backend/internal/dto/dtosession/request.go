@@ -95,6 +95,11 @@ func (c *CapabilitiesReq) McpsPtr() *[]string {
 type CapabilitiesReq struct {
 	Skills *[]string `json:"skills,omitempty"`
 	Mcps   *[]string `json:"mcps,omitempty"`
+	// Expert 会话级专家（0..1，三态）：键缺失 = 不选专家（只有整个 capabilities 缺省时，
+	// 工作空间默认才可能带入专家）；`""` = 明确不用；非空 = 专家 id。
+	//
+	// 用指针区分"没出现这个键"与"出现且为空串"——与 Skills/Mcps 的三态同构。
+	Expert *string `json:"expert,omitempty"`
 }
 
 // HistoryQuery 会话历史分页参数（GET /sessions/:id/history）。

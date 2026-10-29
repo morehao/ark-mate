@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import {
+  FOLLOW_DEFAULT,
   isEmptyPatch,
   mcpConnState,
   mcpCreateBody,
@@ -10,6 +11,10 @@ import {
   mcpRowDescription,
   mcpTransportView,
   parseMcpJson,
+  pinnedCapabilitiesView,
+  selectionPayload,
+  selectionPillText,
+  selectionIsDefault,
   skillCreateBody,
   skillFormPatch,
   skillFormValues,
@@ -265,5 +270,39 @@ describe('MCP JSON 导入', () => {
     assert.match(parseMcpJson('{"mcpServers":{"a":{"transport":"stdio"}}}').errors[0], /必须给 command/)
     assert.match(parseMcpJson('{"mcpServers":{"a":{"transport":"sse"}}}').errors[0], /必须给 url/)
     assert.match(parseMcpJson('{"mcpServers":{"a":{}}}').errors[0], /必须给 command（stdio）或 url/)
+  })
+})
+
+// ——— 会话能力选定的三态（含专家；A1/A3 的前端侧判据） ———
+describe('capability selection wire shape', () => {
+  it('三个面都未声明时不带 capabilities 键（缺省路径逐字节不变）', () => {
+    assert.equal(selectionPayload(FOLLOW_DEFAULT), undefined)
+    assert.equal(selectionIsDefault(FOLLOW_DEFAULT), true)
+  })
+
+  it('专家三态：null 不带键 / 空串明确不用 / 非空是 id', () => {
+    assert.equal(selectionPayload({ expert: null, skills: null, mcps: null }), undefined)
+    assert.deepEqual(selectionPayload({ expert: '', skills: null, mcps: null }), { expert: '' })
+    assert.deepEqual(selectionPayload({ expert: 'data-analyst', skills: null, mcps: null }), {
+      expert: 'data-analyst',
+    })
+  })
+
+  it('显式空数组是「一个都不要」，与缺键相反', () => {
+    assert.deepEqual(selectionPayload({ expert: null, skills: [], mcps: null }), { skills: [] })
+    assert.equal(selectionIsDefault({ expert: null, skills: [], mcps: null }), false)
+  })
+
+  it('药丸文案反映专家与手选数量', () => {
+    assert.equal(selectionPillText(FOLLOW_DEFAULT), '能力 · 跟随默认')
+    assert.match(selectionPillText({ expert: 'data-analyst', skills: null, mcps: null }, '数据分析师'), /数据分析师/)
+    assert.match(selectionPillText({ expert: null, skills: ['a', 'b'], mcps: ['m'] }), /技能 2/)
+  })
+
+  it('钉住快照回显含专家（含已删除标记）', () => {
+    const v = pinnedCapabilitiesView({ expert: 'data-analyst', skills: ['a'], mcps: [] })
+    assert.ok(v && v.text.includes('data-analyst') && v.text.includes('技能：a'))
+    const del = pinnedCapabilitiesView({ expert: 'gone', expert_missing: true, skills: [] })
+    assert.ok(del && del.text.includes('已删除'))
   })
 })

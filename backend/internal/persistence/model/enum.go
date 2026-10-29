@@ -114,6 +114,8 @@ const (
 	DefinitionKindSkill = "skill"
 	// DefinitionKindMcp 定义种类：mcp server（definition_revisions.kind）。
 	DefinitionKindMcp = "mcp"
+	// DefinitionKindExpert 定义种类：expert（专家定义；v31；definition_revisions.kind）。
+	DefinitionKindExpert = "expert"
 	// DefinitionKindAutomation 定义种类：automation（M6-7；definition_revisions.kind）。
 	DefinitionKindAutomation = "automation"
 	// DefinitionKindProvider 定义种类：provider 档案（设置 · 模型；definition_revisions.kind）。

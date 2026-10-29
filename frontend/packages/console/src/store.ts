@@ -624,7 +624,7 @@ export interface MateActions {
     prompt: string,
     model?: ModelRef,
     workspaceId?: string | null,
-    capabilities?: { skills?: string[]; mcps?: string[] },
+    capabilities?: { expert?: string; skills?: string[]; mcps?: string[] },
   ) => Promise<string | undefined>
   /** 拉取模型目录（来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
   loadModelCatalog: () => Promise<void>

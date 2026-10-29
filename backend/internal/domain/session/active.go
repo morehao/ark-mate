@@ -65,6 +65,11 @@ type ActiveSession struct {
 	// memo bounded handoff memo（P3 F3）：跨 runtime / 无原生 resume 兜底建的 fresh session
 	// 首条 prompt 注入（Prompt 消费后清空，仅生效一次）。
 	memo string
+	// expertRole 专家角色设定块（P1）：会话级专家 `instructions` 构造的隐藏 user-context，
+	// **只在首轮**注入一次（首个 BeginRun 取走），随执行上下文一次性交付，次轮不重复。
+	// 与 identity 的区别：identity 每个执行上下文都声明，expertRole 只在**初始**上下文声明
+	//（resume/迁移不重注入——首轮已经发过，历史里已有人格）。
+	expertRole string
 }
 
 // HandleParams 造一个运行期句柄所需的全部事实（装配侧持有连接与投影，域只持有结果）。
@@ -79,7 +84,9 @@ type HandleParams struct {
 	//
 	// 它随**句柄**交付（而不是随会话记录）：每建一次执行上下文（新建、原生恢复、handoff、
 	// 代际迁移）都重新声明一次身份——那是刻意的"重新锚定"，代价是每个上下文多 ~100 tokens。
-	Identity   string
+	Identity string
+	// ExpertRole 专家角色设定块（P1，空 = 无专家人格；只在首轮注入一次）。
+	ExpertRole string
 	Client     protocol.Conn
 	Session    ACP
 	Projection runtime.Runtime
@@ -91,7 +98,7 @@ func NewActiveSession(p HandleParams) *ActiveSession {
 	return &ActiveSession{
 		ID: p.ID, Runtime: p.Runtime, Fingerprint: p.Fingerprint, NativeMode: p.NativeMode,
 		client: p.Client, sess: p.Session, providerID: p.ProviderID, proj: p.Projection,
-		memo: p.Memo, identity: p.Identity,
+		memo: p.Memo, identity: p.Identity, expertRole: p.ExpertRole,
 	}
 }
 
@@ -179,22 +186,28 @@ func (as *ActiveSession) CancelACP(ctx context.Context) error {
 type RunPrefix struct {
 	// Identity 产品身份首轮块（空 = 本上下文不注入）。
 	Identity string
+	// ExpertRole 专家角色设定块（P1；空 = 无专家人格）。与 identity 一起同属"隐藏 user-context"，
+	// 由平台在**发送给底座前**拼进首条 prompt，不进事件/transcript。
+	ExpertRole string
 	// Memo bounded handoff memo（空 = 无历史摘要）。
 	Memo string
 }
 
-// Empty 两个面都为空（调用方可据此跳过拼接）。
-func (p RunPrefix) Empty() bool { return p.Identity == "" && p.Memo == "" }
+// Empty 三个面都为空（调用方可据此跳过拼接）。
+func (p RunPrefix) Empty() bool { return p.Identity == "" && p.ExpertRole == "" && p.Memo == "" }
 
-// Compose 把前缀按 **identity → memo → 用户原文** 的顺序拼成实际发给底座的文本。
+// Compose 把前缀按 **identity → expertRole → memo → 用户原文** 的顺序拼成实际发给底座的文本。
 //
-// 为什么 identity 在 memo 之前：身份是产品级、稳定的；memo 是历史摘要，可能含旧的自述
-// （"我是 coding agent"）。先立产品的规矩，再讲上一段历史——顺序反了等于让历史覆盖身份。
+// 顺序理由：identity 是产品级稳定身份，先立规矩；expertRole 是 `Role Override`，语义上要**压过**
+// 产品身份（WorkBuddy 的专家模式即如此），所以排在 identity 之后；memo 是可能含旧自述的历史摘要，
+// 排在最后（离用户原文最近）。反过来会把"角色覆盖"落到产品身份之前或之后错误的一侧。
 func (p RunPrefix) Compose(text string) string {
-	// 先挂 memo、后挂身份：两次都是"往前面插"，所以**后插的在前**。
-	// 反过来写（先插身份再插 memo）得到的实际顺序是 memo → identity → 原文，正好把判据颠倒。
+	// 三次都是"往前面插"，所以**后插的在前**：memo → expertRole → identity。
 	if p.Memo != "" {
 		text = p.Memo + "\n\n" + text
+	}
+	if p.ExpertRole != "" {
+		text = p.ExpertRole + "\n\n" + text
 	}
 	if p.Identity != "" {
 		text = p.Identity + "\n\n" + text
@@ -213,8 +226,8 @@ func (as *ActiveSession) BeginRun(ctx context.Context) (*Run, RunPrefix, error) 
 	if as.busy {
 		return nil, RunPrefix{}, failure.NewError(failure.ClassLimit, "run_in_progress", "该会话正有 run 在执行，请等待结束", nil)
 	}
-	prefix := RunPrefix{Identity: as.identity, Memo: as.memo}
-	as.identity, as.memo = "", ""
+	prefix := RunPrefix{Identity: as.identity, ExpertRole: as.expertRole, Memo: as.memo}
+	as.identity, as.expertRole, as.memo = "", "", ""
 	tctx, cancel := context.WithCancel(ctx)
 	t := &Run{id: objid.New(objid.Run), done: make(chan struct{}), cancel: cancel, ctx: tctx}
 	as.run = t

@@ -28,8 +28,10 @@ type SessionItem struct {
 
 // SessionCapabilities 会话的能力选定回显（`nil` 指针 = 该 kind 未声明，与 `[]` 语义相反）。
 type SessionCapabilities struct {
-	Skills      *[]string
-	Mcps        *[]string
+	Skills *[]string
+	Mcps   *[]string
+	// Expert 会话钉住的专家 id（nil = 未声明；`""` = 明确不用；非空 = id）。
+	Expert      *string
 	Fingerprint string
 }
 

@@ -134,6 +134,55 @@ func (s *Store) CountMcpServerDefinitions(ctx context.Context) (int64, error) {
 	return s.mcpServers.CountByCond(ctx, &gormdao.BaseCond{})
 }
 
+// UpsertExpertDefinition 提交一次专家定义写入（新建或覆盖）+ 一条审计，同事务。
+//
+// 语义逐字同 UpsertSkillDefinition：expectedRev == 0 → 新建；> 0 → 覆盖且仅当 revision 仍等于它。
+func (s *Store) UpsertExpertDefinition(ctx context.Context, id, body string, expectedRev int64, actor string) (bool, error) {
+	action := model.DefinitionActionUpdate
+	if expectedRev == 0 {
+		action = model.DefinitionActionCreate
+	}
+	return s.commitDefinitionChange(ctx, model.DefinitionKindExpert, id, actor, action, bodyDigest(body), expectedRev,
+		func(tx *gorm.DB, now time.Time) (bool, error) {
+			if expectedRev == 0 {
+				return s.experts.WithTx(tx).CreateCAS(ctx, &model.ExpertEntity{
+					ID: id, Body: body, Revision: 1, UpdatedAt: now,
+				})
+			}
+			return s.experts.WithTx(tx).UpdateCAS(ctx, id, body, expectedRev, now)
+		})
+}
+
+// DeleteExpertDefinition 删除一条专家定义 + 一条审计，同事务（语义同 DeleteSkillDefinition）。
+func (s *Store) DeleteExpertDefinition(ctx context.Context, id string, expectedRev int64, actor string) (bool, error) {
+	return s.commitDefinitionChange(ctx, model.DefinitionKindExpert, id, actor, model.DefinitionActionDelete, "", expectedRev,
+		func(tx *gorm.DB, _ time.Time) (bool, error) {
+			return s.experts.WithTx(tx).DeleteCAS(ctx, id, expectedRev)
+		})
+}
+
+// GetExpertDefinition 读一条专家定义（不存在 → (nil, false, nil)）。
+func (s *Store) GetExpertDefinition(ctx context.Context, id string) (*model.ExpertEntity, bool, error) {
+	row, err := s.experts.GetByID(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if row == nil {
+		return nil, false, nil
+	}
+	return row, true, nil
+}
+
+// ListExpertDefinitions 列出全部专家定义（id 升序）。
+func (s *Store) ListExpertDefinitions(ctx context.Context) (model.ExpertEntityList, error) {
+	return s.experts.GetListByCond(ctx, &gormdao.BaseCond{OrderField: definitionListOrder})
+}
+
+// CountExpertDefinitions 返回专家定义行数。
+func (s *Store) CountExpertDefinitions(ctx context.Context) (int64, error) {
+	return s.experts.CountByCond(ctx, &gormdao.BaseCond{})
+}
+
 // ListDefinitionRevisions 列出某条能力的变更历史（seq 升序，含已删除的能力）。
 func (s *Store) ListDefinitionRevisions(ctx context.Context, kind, definitionID string) (model.DefinitionRevisionEntityList, error) {
 	return s.definitionRevision.GetListByCond(ctx, &dao.DefinitionRevisionCond{

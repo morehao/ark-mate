@@ -71,6 +71,7 @@ type Store struct {
 	skills             *dao.SkillDao
 	mcpServers         *dao.McpServerDao
 	automations        *dao.AutomationDao
+	experts            *dao.ExpertDao
 	definitionRevision *dao.DefinitionRevisionDao
 
 	// 设置 · 模型（v11）：供应商凭据 + 平台模型清单。
@@ -121,6 +122,7 @@ func New(db *gorm.DB) *Store {
 		skills:             dao.NewSkillDao(getDB),
 		mcpServers:         dao.NewMcpServerDao(getDB),
 		automations:        dao.NewAutomationDao(getDB),
+		experts:            dao.NewExpertDao(getDB),
 		definitionRevision: dao.NewDefinitionRevisionDao(getDB),
 
 		providers:  dao.NewProviderDao(getDB),

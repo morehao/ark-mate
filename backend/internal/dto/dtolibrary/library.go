@@ -56,12 +56,15 @@ const (
 	KindSkill = "skill"
 	KindMcp   = "mcp"
 	KindTool  = "tool"
+	// KindExpert 专家（会话级能力预设；P0）。它只是一个「推荐集合」的读模型条目，
+	// 与 skill/mcp 同列，便于面板一次性拉全量能力清单。
+	KindExpert = "expert"
 )
 
 // ValidKinds 合法 kind 集合（`?kind=` 校验用；未知值报 invalid_param 而不是静默返回空表——
 // 静默会让"我筛了但没有"和"我拼错了"看起来一样）。
 var ValidKinds = map[string]bool{
-	KindSkill: true, KindMcp: true, KindTool: true,
+	KindSkill: true, KindMcp: true, KindTool: true, KindExpert: true,
 }
 
 // Origin 取值。

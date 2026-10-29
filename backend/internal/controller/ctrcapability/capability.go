@@ -38,6 +38,14 @@ type CapabilityCtr interface {
 	ListMcpPrompts(c *gin.Context)
 	GetMcpPrompt(c *gin.Context)
 	ProbeMcpServer(c *gin.Context)
+
+	// 专家定义面（P0）
+	ListExperts(c *gin.Context)
+	GetExpert(c *gin.Context)
+	CreateExpert(c *gin.Context)
+	UpdateExpert(c *gin.Context)
+	DeleteExpert(c *gin.Context)
+	SetExpertEnabled(c *gin.Context)
 }
 
 var _ CapabilityCtr = (*capabilityCtr)(nil)
