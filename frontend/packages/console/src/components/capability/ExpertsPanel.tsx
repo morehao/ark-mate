@@ -6,10 +6,10 @@ import type { Expert } from '@ark-mate/types'
 import { expertModelShort, missingExpertRefs } from '../../console/expertView'
 import { CapabilityEmpty, SectionHeader } from './shared'
 import { ExpertCard } from './ExpertCard'
-import { ExpertDrawer } from './ExpertDrawer'
+import { ExpertDialog } from './ExpertDialog'
 import { useExpertData } from './useExpertData'
 
-/** 专家管理页：卡片画廊 + 右抽屉，管理本机专家定义（列表/创建/编辑/启停/删除 + 角色设定）。 */
+/** 专家管理页：卡片画廊 + 居中弹窗编辑器，管理本机专家定义（列表/创建/编辑/启停/删除 + 角色设定）。 */
 export function ExpertsPanel() {
   const d = useExpertData()
   const [query, setQuery] = useState('')
@@ -118,26 +118,26 @@ export function ExpertsPanel() {
         )}
       </div>
 
-      <ExpertDrawer
-        open={d.drawer.open}
-        created={d.drawer.created}
-        expert={d.drawer.detail}
-        loading={d.drawer.detailLoading}
-        loadError={d.drawer.detailError}
+      <ExpertDialog
+        open={d.dialog.open}
+        created={d.dialog.created}
+        expert={d.dialog.detail}
+        loading={d.dialog.detailLoading}
+        loadError={d.dialog.detailError}
         options={d.options}
         busy={d.busy}
         error={d.formError}
-        toggleBusy={d.toggleBusy === d.drawer.detail?.id}
-        delBusy={d.delBusy === d.drawer.detail?.id}
-        onClose={d.closeDrawer}
+        toggleBusy={d.toggleBusy === d.dialog.detail?.id}
+        delBusy={d.delBusy === d.dialog.detail?.id}
+        onClose={d.closeDialog}
         onRetry={d.retryDetail}
         onSave={d.save}
         onToggleEnabled={(next) => {
-          const id = d.drawer.detail?.id
+          const id = d.dialog.detail?.id
           return id ? d.toggle(id, next) : Promise.resolve()
         }}
         onDelete={async () => {
-          const id = d.drawer.detail?.id
+          const id = d.dialog.detail?.id
           if (id) await d.remove(id)
         }}
       />

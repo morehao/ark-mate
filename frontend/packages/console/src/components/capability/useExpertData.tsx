@@ -16,7 +16,7 @@ import { useMate } from '../../store'
 import { writeErrorText } from '../../console/capabilityView'
 import type { ExpertRefOption } from '../../console/expertView'
 
-/** 抽屉里引用选择器的候选（技能 / MCP / 模型）。清单取不到时留空并允许留空保存。 */
+/** 弹窗里引用选择器的候选（技能 / MCP / 模型）。清单取不到时留空并允许留空保存。 */
 export interface ExpertOptions {
   skills: ExpertRefOption[]
   mcps: ExpertRefOption[]
@@ -29,7 +29,7 @@ const EMPTY_OPTIONS: ExpertOptions = { skills: [], mcps: [], models: [] }
  * 专家数据的唯一加载 / 变更入口（设计「模块划分」：面板只画，写面语义交给纯函数与这里）。
  *
  * - 列表：`listExperts()`（含禁用，**不含 instructions 正文**）；
- * - 正文：打开抽屉时 `getExpert(id)` 才拉 instructions（列表刻意不带正文，避免首屏拉 N 份长文本）；
+ * - 正文：打开弹窗时 `getExpert(id)` 才拉 instructions（列表刻意不带正文，避免首屏拉 N 份长文本）；
  * - 写面：create/update/delete/toggle 全部复用现有 `/experts` 六接口，**零后端改动**；
  * - 保存后重新 `listExperts` 刷新列表，不用本地乐观状态覆盖服务端。
  */
@@ -40,7 +40,7 @@ export function useExpertData() {
   const [listError, setListError] = useState<string | null>(null)
   const [options, setOptions] = useState<ExpertOptions>(EMPTY_OPTIONS)
 
-  // 抽屉状态：created=true 表示新建；否则按 targetId 拉详情正文。
+  // 弹窗状态：created=true 表示新建；否则按 targetId 拉详情正文。
   const [open, setOpen] = useState(false)
   const [created, setCreated] = useState(false)
   const [targetId, setTargetId] = useState<string | null>(null)
@@ -124,7 +124,7 @@ export function useExpertData() {
     if (targetId) void fetchDetail(targetId)
   }
 
-  const closeDrawer = (): void => {
+  const closeDialog = (): void => {
     setOpen(false)
     setBusy(false)
   }
@@ -151,7 +151,7 @@ export function useExpertData() {
       setOpen(false)
       await loadExperts()
     } catch (err) {
-      // 错误留在抽屉里：用户刚填的内容还在，改一处就能重试。
+      // 错误留在弹窗里：用户刚填的内容还在，改一处就能重试。
       setFormError(writeErrorText(err))
     } finally {
       setBusy(false)
@@ -164,7 +164,7 @@ export function useExpertData() {
       await setExpertEnabled(id, enabled)
       showToast(`${enabled ? '已启用' : '已禁用'} ${id}${enabled ? '' : '（仅影响新选择，不影响历史会话）'}`)
       await loadExperts()
-      // 同步抽屉里的 detail.enabled（不重新拉正文，避免把正在编辑的草稿冲掉）。
+      // 同步弹窗里的 detail.enabled（不重新拉正文，避免把正在编辑的草稿冲掉）。
       setDetail((cur) => (cur && cur.id === id ? { ...cur, enabled } : cur))
     } catch (err) {
       showToast(`切换 ${id} 失败：${writeErrorText(err)}`)
@@ -192,7 +192,7 @@ export function useExpertData() {
     loading,
     listError,
     options,
-    drawer: { open, created, detail, detailLoading, detailError },
+    dialog: { open, created, detail, detailLoading, detailError },
     busy,
     formError,
     toggleBusy,
@@ -200,7 +200,7 @@ export function useExpertData() {
     refresh,
     openNew,
     openEdit,
-    closeDrawer,
+    closeDialog,
     retryDetail,
     save,
     toggle,
