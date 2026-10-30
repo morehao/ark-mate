@@ -617,7 +617,7 @@ export function ModelSettingsPanel() {
       closeProviderCard()
       setSavedLine(`已保存「${v.name || row.id}」。`)
       if (eff && eff.effect === 'none') {
-        showToast('这些字段不驱动行为，本轮与后续轮次都不变')
+        showToast('这些字段不驱动行为，本轮与后续轮次都不变', 'info')
       }
       await reloadAll()
     }
@@ -627,10 +627,10 @@ export function ModelSettingsPanel() {
     const resp = await guard(deleteProvider(row.id))
     if (!resp) return
     if (!resp.deleted) {
-      showToast('这条供应商已经不存在')
+      showToast('这条供应商已经不存在', 'info')
     } else {
       // v20：密钥是 providers 表上的 `key` 列，随行一起消失——不再有「密文残留」这个半成功态。
-      showToast('供应商已删除')
+      showToast('供应商已删除', 'success')
     }
     await reloadAll()
   }
@@ -763,7 +763,7 @@ export function ModelSettingsPanel() {
   const setImageInput = async (row: ModelRow, on: boolean): Promise<void> => {
     const updated = await guard(patchModel(row.id, { input_modalities: modalitiesWithImage(on) }))
     if (!updated) return
-    showToast(on ? '已允许图片输入，已提交同步' : '已改回仅文本，已提交同步')
+    showToast(on ? '已允许图片输入，已提交同步' : '已改回仅文本，已提交同步', 'success')
     await loadModels()
   }
 
@@ -771,11 +771,11 @@ export function ModelSettingsPanel() {
     const resp = await guard(deleteModel(row.id))
     if (!resp) return
     if (!resp.deleted) {
-      showToast('这条模型已经不存在')
+      showToast('这条模型已经不存在', 'info')
     } else if (resp.default_cleared) {
-      showToast('模型已删除；它正好是默认模型，默认已一并清空')
+      showToast('模型已删除；它正好是默认模型，默认已一并清空', 'success')
     } else {
-      showToast('模型已删除')
+      showToast('模型已删除', 'success')
     }
     await loadModels()
   }
@@ -795,13 +795,13 @@ export function ModelSettingsPanel() {
       if (!current) return
       const updated = await guard(patchModel(current, { is_default: false }))
       if (!updated) return
-      showToast('已取消默认模型：新会话按会话自己的默认起')
+      showToast('已取消默认模型：新会话按会话自己的默认起', 'success')
     } else {
       const target = (view?.models ?? []).find((m) => m.id === id)
       if (!target) return
       const updated = await guard(patchModel(id, { is_default: true }))
       if (!updated) return
-      showToast(`已把「${modelLabel(target)}」设为默认模型`)
+      showToast(`已把「${modelLabel(target)}」设为默认模型`, 'success')
     }
     await loadModels()
   }
@@ -809,7 +809,7 @@ export function ModelSettingsPanel() {
   const resync = async (): Promise<void> => {
     const resp = await guard(syncModels())
     if (!resp) return
-    showToast('已提交同步：生效时刻见「模型」块顶部的状态')
+    showToast('已提交同步：生效时刻见「模型」块顶部的状态', 'success')
     await loadModels(true)
   }
 

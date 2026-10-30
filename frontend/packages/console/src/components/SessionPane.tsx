@@ -215,7 +215,7 @@ export function SessionPane({ onCreate }: Props) {
       const resp = await exportSessions([id], 'markdown')
       const f = resp.files[0]
       if (!f) {
-        showToast('该会话暂无可导出内容')
+        showToast('该会话暂无可导出内容', 'info')
         return
       }
       const blob = new Blob([f.content], { type: 'text/markdown;charset=utf-8' })
@@ -227,7 +227,7 @@ export function SessionPane({ onCreate }: Props) {
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
-      showToast(`已导出「${title || id}」（${f.bytes} 字节）`)
+      showToast(`已导出「${title || id}」（${f.bytes} 字节）`, 'success')
     } catch (e) {
       showToast(`导出失败：${toErrorMessage(e)}`)
     } finally {

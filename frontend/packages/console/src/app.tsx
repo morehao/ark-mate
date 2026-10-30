@@ -27,6 +27,15 @@ import { UsagePage } from './pages/UsagePage'
  * 所以修在这里而不是各面板里。 */
 const TOAST_Z = 2010
 
+/** toast 三态的图标与颜色（与 `store.ts` 的 `ToastTone` 一一对应）。
+ *
+ * 之前这里写死红色 `⚠`，成功回执也戴红警告——分不开「做成了」和「出错了」。 */
+const TOAST_TONE_META = {
+  error: { color: tokens.error, glyph: '⚠' },
+  success: { color: tokens.success, glyph: '✓' },
+  info: { color: tokens.textSecondary, glyph: 'ℹ' },
+} as const
+
 function Manage({ children }: { children: ReactNode }) {
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', background: tokens.bg }}>
@@ -239,7 +248,9 @@ export function App() {
             color: tokens.text,
           }}
         >
-          <span style={{ color: tokens.error, flex: 'none' }}>⚠</span>
+          <span style={{ color: TOAST_TONE_META[toast.tone].color, flex: 'none' }}>
+            {TOAST_TONE_META[toast.tone].glyph}
+          </span>
           <span style={{ overflowWrap: 'anywhere' }}>{toast.msg}</span>
         </div>
       )}

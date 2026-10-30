@@ -42,7 +42,7 @@ export function SkillDetailModal({
     const text = `@${skill.id}`
     try {
       await navigator.clipboard.writeText(text)
-      showToast(`已复制 ${text}`)
+      showToast(`已复制 ${text}`, 'success')
     } catch {
       showToast(`复制失败，请手动选中：${text}`)
     }

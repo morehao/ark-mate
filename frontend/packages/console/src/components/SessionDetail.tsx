@@ -139,7 +139,7 @@ export function SessionDetailDrawer({
     if (!ft.text) return
     void promptSession(sessionId, { prompt: ft.text })
       .then(() => {
-        showToast('已重发该轮输入，结果将实时流出…')
+        showToast('已重发该轮输入，结果将实时流出…', 'success')
         window.setTimeout(() => void load(), 1500)
       })
       .catch((e) => setErr(toErrorMessage(e)))
@@ -380,7 +380,7 @@ export function SessionDetailDrawer({
                     icon={<CopyOutlined style={{ fontSize: 11 }} />}
                     onClick={() =>
                       void copyText(s.id).then((copied) =>
-                        showToast(copied ? '已复制会话 ID' : '复制失败（浏览器未授权剪贴板）'),
+                        showToast(copied ? '已复制会话 ID' : '复制失败（浏览器未授权剪贴板）', copied ? 'success' : 'error'),
                       )
                     }
                   />

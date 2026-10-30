@@ -349,7 +349,7 @@ export function ChatPage() {
     if (!activeId) return
     try {
       await archiveSession(activeId, true)
-      showToast('当前会话已归档，可随时从「归档」恢复')
+      showToast('当前会话已归档，可随时从「归档」恢复', 'success')
       openNew()
     } catch {
       /* archiveSession 内部已 toast 错误 */

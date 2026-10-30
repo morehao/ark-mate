@@ -35,7 +35,7 @@ export function SkillChatCreateModal({ open, onClose }: { open: boolean; onClose
     try {
       await navigator.clipboard.writeText(SKILL_CREATE_PROMPT)
       setCopied(true)
-      showToast('提示词已复制')
+      showToast('提示词已复制', 'success')
     } catch {
       showToast('复制失败：请手动选中文本复制')
     }

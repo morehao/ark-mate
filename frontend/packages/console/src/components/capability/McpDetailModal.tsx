@@ -131,7 +131,7 @@ export function McpDetailModal({
   const copy = async (text: string, label: string): Promise<void> => {
     try {
       await navigator.clipboard.writeText(text)
-      showToast(`已复制${label}`)
+      showToast(`已复制${label}`, 'success')
     } catch {
       showToast('复制失败：请手动选中复制')
     }

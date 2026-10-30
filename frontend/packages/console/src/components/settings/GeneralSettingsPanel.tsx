@@ -97,7 +97,7 @@ export function GeneralSettingsPanel() {
       const s = await updateWorkspaceSettings(roots)
       setSnap(s)
       setDraft(s.configured ?? [])
-      showToast(roots.length > 0 ? '已保存：目录浏览从第一个位置开始，并列成快捷入口' : '已保存：未设置起点（从服务进程家目录开始）')
+      showToast(roots.length > 0 ? '已保存：目录浏览从第一个位置开始，并列成快捷入口' : '已保存：未设置起点（从服务进程家目录开始）', 'success')
     } catch (err) {
       // 锁定 / 校验失败都以服务端文案为准（它点明了是哪一项、该去改哪里）。
       showToast(toErrorMessage(err))

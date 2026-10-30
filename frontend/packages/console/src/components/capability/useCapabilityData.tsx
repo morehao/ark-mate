@@ -212,7 +212,7 @@ export function useCapabilityData(scope: CapScope) {
       ? skillCreateBody(values)
       : skillFormPatch(skillFormValues(skillForm.skill as Skill), values)
     if (!created && isEmptyPatch(body)) {
-      showToast('没有改动')
+      showToast('没有改动', 'info')
       setSkillForm(null)
       return
     }
@@ -222,7 +222,7 @@ export function useCapabilityData(scope: CapScope) {
       const res: SkillWriteResp = created
         ? await createSkill(body)
         : await updateSkill((skillForm.skill as Skill).id, body)
-      showToast(`${created ? '已创建' : '已保存'}技能「${skillForm.skill?.name || res.id}」`)
+      showToast(`${created ? '已创建' : '已保存'}技能「${skillForm.skill?.name || res.id}」`, 'success')
       setSkillForm(null)
       await loadAll()
     } catch (err) {
@@ -240,7 +240,7 @@ export function useCapabilityData(scope: CapScope) {
       ? mcpCreateBody(values)
       : mcpFormPatch(mcpFormValues(mcpForm.server as McpServer), values)
     if (!created && isEmptyPatch(body)) {
-      showToast('没有改动')
+      showToast('没有改动', 'info')
       setMcpForm(null)
       return
     }
@@ -253,7 +253,7 @@ export function useCapabilityData(scope: CapScope) {
       const unresolved = res.unresolved_secret_keys?.length
         ? `；密钥引用当前解析不出：${res.unresolved_secret_keys.join('、')}`
         : ''
-      showToast(`${created ? '已创建' : '已保存'}连接器「${res.id}」${unresolved}`)
+      showToast(`${created ? '已创建' : '已保存'}连接器「${res.id}」${unresolved}`, 'success')
       setMcpForm(null)
       await loadAll()
     } catch (err) {
@@ -291,13 +291,13 @@ export function useCapabilityData(scope: CapScope) {
     try {
       if (edit.kind === 'skill') {
         const res = edit.created ? await createSkill(body) : await updateSkill(edit.id, body)
-        showToast(`${res.created ? '已创建' : '已保存'}技能「${res.id}」`)
+        showToast(`${res.created ? '已创建' : '已保存'}技能「${res.id}」`, 'success')
       } else {
         const res = edit.created ? await createMcpServer(body) : await updateMcpServer(edit.id, body)
         const unresolved = res.unresolved_secret_keys?.length
           ? `；密钥引用当前解析不出：${res.unresolved_secret_keys.join('、')}`
           : ''
-        showToast(`${res.created ? '已创建' : '已保存'}连接器「${res.id}」${unresolved}`)
+        showToast(`${res.created ? '已创建' : '已保存'}连接器「${res.id}」${unresolved}`, 'success')
       }
       setEdit(null)
       await loadAll()
@@ -313,7 +313,7 @@ export function useCapabilityData(scope: CapScope) {
     setToggleBusy(s.id)
     try {
       await setSkillEnabled(s.id, next)
-      showToast(`${next ? '已启用' : '已停用'}技能「${s.name || s.id}」`)
+      showToast(`${next ? '已启用' : '已停用'}技能「${s.name || s.id}」`, 'success')
       await loadSkills()
     } catch (err) {
       showToast(`切换 ${s.id} 失败：${toErrorMessage(err)}`)
@@ -327,7 +327,7 @@ export function useCapabilityData(scope: CapScope) {
     setToggleBusy(m.id)
     try {
       await updateMcpServer(m.id, { enabled: next })
-      showToast(`${next ? '已启用' : '已停用'}连接器「${m.name || m.id}」${next ? '' : '（配置与密钥会保留）'}`)
+      showToast(`${next ? '已启用' : '已停用'}连接器「${m.name || m.id}」${next ? '' : '（配置与密钥会保留）'}`, 'success')
       await loadMcps()
     } catch (err) {
       showToast(`切换「${m.name || m.id}」失败：${writeErrorText(err)}`)
@@ -342,13 +342,14 @@ export function useCapabilityData(scope: CapScope) {
       if (kind === 'skill') {
         const res = await deleteSkill(id)
         const name = skills.find((x) => x.id === id)?.name || id
-        showToast(res.deleted ? `已删除技能「${name}」` : `技能「${name}」本就不存在（已同步列表）`)
+        showToast(res.deleted ? `已删除技能「${name}」` : `技能「${name}」本就不存在（已同步列表）`, 'success')
       } else {
         const res = await deleteMcpServer(id)
         showToast(
           res.deleted
             ? `已删除连接器「${id}」（一并移除 ${res.tools_removed} 个工具）`
             : `连接器「${id}」本就不存在（已同步列表）`,
+          'success',
         )
       }
       if (detail && detail.kind === kind && detail.id === id) setDetail(null)
@@ -364,7 +365,7 @@ export function useCapabilityData(scope: CapScope) {
     setProbing(id)
     try {
       const res = await probeMcpServer(id)
-      showToast(`已更新「${id}」：${probeSummary(res)}`)
+      showToast(`已更新「${id}」：${probeSummary(res)}`, 'success')
       await Promise.all([loadTools(), loadMcps()])
     } catch (err) {
       showToast(`更新「${id}」失败：${toErrorMessage(err)}`)
@@ -377,7 +378,7 @@ export function useCapabilityData(scope: CapScope) {
   // ——— 技能包上传（D1）与 MCP JSON 导入 ———
   const doImportSkillPackage = async (file: File): Promise<SkillWriteResp> => {
     const res = await importSkillPackage(file)
-    showToast(`${res.created ? '已安装' : '已更新'}技能「${res.id}」`)
+    showToast(`${res.created ? '已安装' : '已更新'}技能「${res.id}」`, 'success')
     await loadAll()
     return res
   }
