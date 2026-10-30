@@ -23,7 +23,7 @@ import { UsagePage } from './pages/UsagePage'
  * 实测就是 1000/1200；antd 自己的 message 用 2010）。旧值 90 看着"够高"，实际被弹窗遮罩压住：
  * 2026-10-11 实测——设置弹窗里点保存，提示被两层遮罩叠加压到约 30% 亮度（toast 90、遮罩
  * 1000/1200，`elementFromPoint` 命中的是 `.ant-modal-wrap`），用户看到的就是"点了保存什么都不
- * 发生"。设置弹窗里**每一个**动作（供应商/模型/工作区/令牌）的成败提示都在这个坑里，
+ * 发生"。设置弹窗里**每一个**动作（供应商/模型/工作区）的成败提示都在这个坑里，
  * 所以修在这里而不是各面板里。 */
 const TOAST_Z = 2010
 
@@ -142,7 +142,7 @@ export function App() {
               className="fg-anim-pulse"
               style={{ width: 7, height: 7, borderRadius: '50%', background: tokens.warning, display: 'inline-block' }}
             />
-            {wsState === 'connecting' ? '连接中…' : 'WS 已断开，正在自动重连（重连后按会话水位续传）…'}
+            {wsState === 'connecting' ? '连接中…' : '连接已断开，正在自动重连…'}
           </div>
         )}
 

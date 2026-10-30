@@ -799,7 +799,7 @@ export function toolDetail(entry: StreamEntry, view?: ToolView): ToolDetail | nu
   const output = entry.output
   const text = outputText(output)
   const notes: string[] = []
-  if (output === undefined || output === null) notes.push('结果不可用（底座未上报）')
+  if (output === undefined || output === null) notes.push('结果不可用（未上报）')
 
   if (tool.group === 'read') {
     const path = pickText(input, PATH_KEYS)

@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import {
-  HttpError,
   cancelSession,
   cancelQueuedInput as apiCancelQueuedInput,
   moveQueuedInput as apiMoveQueuedInput,
@@ -22,8 +21,6 @@ import {
   promptSession,
   resolveElicitation,
   resolvePermission,
-  setToken as persistToken,
-  getToken,
   getMeta,
   getRuntimeDiagnostics,
   toErrorMessage,
@@ -49,7 +46,7 @@ import type {
   WorkspaceListResp,
   WsServerFrame,
 } from '@ark-mate/types'
-import { BizCode, Ev } from '@ark-mate/types'
+import { Ev } from '@ark-mate/types'
 import { resolveStreamConfig, type StreamConfig } from './carrier'
 import { WsTransport } from './transport/ws'
 import {
@@ -546,9 +543,6 @@ export interface MateState {
    * 读了不清会让用户下一次打开新建面板时被上一轮的提示词顶掉输入。
    */
   pendingPrompt: string | null
-  /** A6 单操作员令牌是否已配置（true = 后端启用鉴权且本机已填令牌）。 */
-  token: string
-  /** 令牌设置弹窗开关（顶栏锁图标 / 收到 401 时自动打开）。 */
   /** C2：该会话是否已翻到最早（false/缺省 = 可能还有更早，ChatPage 显示「加载更早」）。 */
   historyStart: Record<string, boolean>
   /**
@@ -672,8 +666,6 @@ export interface MateActions {
   /** 打开设置弹窗并直接切到某一节（深链接 / 401 自动弹出用）。id 见 console/settingsView.tsx。 */
   openSettingsSection: (id: string) => void
   closeSettings: () => void
-  /** A6：设置/清除单操作员令牌并重连 WS + 重新拉取数据。 */
-  saveToken: (token: string) => void
   /** C2：向服务端翻页加载更早的事件（before 游标），返回本页是否还有更早。 */
   loadOlder: (id: string) => Promise<boolean>
   /** P3 加载四态：hydration 超时兜底（仍无 snapshot/事件 → 退出加载态显示空态）。 */
@@ -705,7 +697,6 @@ export const initialState: MateState = {
   settingsOpen: false,
   settingsSection: 'general',
   railMode: 'active',
-  token: getToken(),
   historyStart: {},
   modelCatalog: null,
 }
@@ -723,13 +714,8 @@ let transportRef: WsTransport | null = null
  */
 const coldFullReplay = new Set<string>()
 
-// reportApiError：401（A6 令牌缺失/无效）时自动弹出「设置 → 访问令牌」那一节，其余走 toast。
+// reportApiError：统一走 toast。
 function reportApiError(err: unknown): void {
-  if (err instanceof HttpError && err.code === BizCode.Unauthorized) {
-    useMate.getState().openSettingsSection('token')
-    useMate.getState().showToast('需要访问令牌：请在左栏「设置 → 访问令牌」中填写 MATE_TOKEN')
-    return
-  }
   useMate.getState().showToast(toErrorMessage(err))
 }
 
@@ -1017,23 +1003,6 @@ export const useMate = create<MateStore>((set, get) => {
         await get().loadWorkspaces()
         showToast(toErrorMessage(err))
       }
-    },
-
-    saveToken: (token) => {
-      const v = token.trim()
-      persistToken(v)
-      set({ token: v })
-      // 令牌变化必须重连 WS（凭据走带内首帧 attach，重连才会带上新值）并重新拉取数据。
-      // 浏览器态的通道凭据就是它，因此要重解析一次载体配置再连。
-      const t = ensureTransport()
-      void resolveStreamConfig().then((cfg) => {
-        t.configure(cfg)
-        t.connect()
-      })
-      void get().loadMeta()
-      void get().refreshSessions()
-      get().closeSettings()
-      get().showToast(v ? '已保存访问令牌，正在重连…' : '已清除访问令牌')
     },
 
     boot: () => {

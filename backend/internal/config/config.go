@@ -173,11 +173,6 @@ type Config struct {
 	// （设计 §9.4 明确 Host/Origin 白名单属于"对外产品化缺的四件事"之一，本期范围外），
 	// 此时本键也不参与判定——启动日志会打一条 WARN 说清楚。
 	AllowedOrigins []string
-	// Token 独立态单操作员访问令牌（A6；MATE_TOKEN 覆盖，默认空 = 不鉴权，仅回环可访问）。
-	// 非空时除 /health 外的所有 REST 路由都要求 `Authorization: Bearer <token>`，
-	// 事件流则由连接后的首帧 attach 携带同一令牌（M1-1 起令牌不进 URL）。
-	// 桌面态不使用它：那两个面互斥的凭据由壳经 --auth-stdin 下发。
-	Token string
 	// NativePermission 原生权限映射开关（B5；MATE_NATIVE_PERMISSION 覆盖，默认 auto）：
 	//   auto = 走底座的原生权限端口——上游有策略就投影，没有就如实不注入（v19 起平台侧
 	//          **没有** per-agent 策略来源，所以今天的实际结果是不注入；注入点原样留给会话级策略）；
@@ -342,7 +337,6 @@ var knownKeys = map[string]string{
 	"elicitation_timeout": "MATE_ELICITATION_TIMEOUT",
 	"proc_registry":       "MATE_PROC_REGISTRY",
 	"reap_grace":          "MATE_REAP_GRACE",
-	"token":               "MATE_TOKEN",
 	"allowed_origins":     "MATE_ALLOWED_ORIGINS",
 	"web_dir":             "MATE_WEB_DIR",
 	"mcp_auto_probe":      "MATE_MCP_AUTO_PROBE",
@@ -813,9 +807,6 @@ func materialize(r *resolver) (Config, error) {
 	}
 	if v, ok := r.get("web_dir"); ok {
 		c.WebDir = strings.TrimSpace(v)
-	}
-	if v, ok := r.get("token"); ok {
-		c.Token = strings.TrimSpace(v)
 	}
 	// allowed_origins：额外允许的来源白名单（M3-5；逗号分隔或 JSON 数组，两种形式汇到同一条解析路径）。
 	if list, ok := r.list("allowed_origins"); ok {

@@ -34,17 +34,10 @@ export function OverviewPanel() {
               {origin.text}
             </Tag>
           </Tooltip>
-          {it.scope === 'workspace' && (
-            <Tooltip title="作用域 workspace：只投放到工作区内的落点（待实测的形态会标「未实测」）">
-              <Tag color="purple" style={smallTag}>
-                workspace
-              </Tag>
-            </Tooltip>
-          )}
           {!it.enabled && (
-            <Tooltip title="已禁用（定义与引用都保留，可随时恢复）">
+            <Tooltip title="已停用（可随时恢复）">
               <Tag color="red" style={smallTag}>
-                已禁用
+                已停用
               </Tag>
             </Tooltip>
           )}
@@ -57,31 +50,15 @@ export function OverviewPanel() {
           )}
           <span style={{ flex: 1, fontSize: 12, color: tokens.textSecondary }}>
             {it.description}
-            {it.source_file && <span style={{ ...mono, fontSize: 11, color: tokens.textPlaceholder }}> · {it.source_file}</span>}
           </span>
           {it.applicability.length === 0 ? (
-            <Tooltip title="没有任何候选 runtime（如归属 server 已消失的工具）">
-              <Tag style={{ ...smallTag, color: tokens.textPlaceholder }}>无候选底座</Tag>
-            </Tooltip>
+            <Tag style={{ ...smallTag, color: tokens.textPlaceholder }}>不可用</Tag>
           ) : (
-            it.applicability.map((a) => {
-              const v = libraryStatusView(a.status)
-              return (
-                <Tooltip
-                  key={a.runtime}
-                  title={
-                    <span style={{ whiteSpace: 'pre-line' }}>
-                      {a.runtime} · {v.text}
-                      {a.reason ? `\n${a.reason}` : ''}
-                    </span>
-                  }
-                >
-                  <Tag color={v.color} style={smallTag}>
-                    {a.runtime}:{v.text}
-                  </Tag>
-                </Tooltip>
-              )
-            })
+            unifiedStatusOf(it.applicability).map((s) => (
+              <Tag key={s} color={libraryStatusView(s).color} style={smallTag}>
+                {libraryStatusView(s).text}
+              </Tag>
+            ))
           )}
         </Row>
       )
@@ -90,7 +67,7 @@ export function OverviewPanel() {
   return (
     <PageContainer
       title="扩展"
-      description="能力总览：三类同构的统一清单（skill / MCP / 工具），每条给逐运行底座的交付状态与人话原因"
+      description="能力总览：技能、连接器与工具的统一清单。"
       extra={
         <Space>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadAll()}>
@@ -103,8 +80,8 @@ export function OverviewPanel() {
         {/* ——— M2-4 Library：三类同构的统一能力清单（只读聚合） ——— */}
         <Card>
           <SectionHeader
-            title="能力清单（Library）"
-            hint="skill / MCP / 工具三类同构的只读聚合视图；每条给**逐 runtime 的可达性**（不做「整体可用吗」的合并结论——对 A 可用、对 B 不可用是有用信息）"
+            title="能力清单"
+            hint="技能、连接器与工具的统一清单；每一条给出是否可以使用的状态。"
             count={library.length}
             loading={busy === 'library'}
             onRefresh={() => refresh('library')}
@@ -114,7 +91,7 @@ export function OverviewPanel() {
                   size="small"
                   allowClear
                   style={{ width: 160 }}
-                  placeholder="搜索 id / 名称 / 描述"
+                  placeholder="搜索名称 / 描述"
                   value={libQ}
                   onChange={(e) => setLibQ(e.target.value)}
                   onPressEnter={() => void loadLibrary()}
@@ -131,7 +108,7 @@ export function OverviewPanel() {
                   options={[
                     { value: 'all', label: '全部类型' },
                     { value: 'skill', label: '技能' },
-                    { value: 'mcp', label: 'MCP' },
+                    { value: 'mcp', label: '连接器' },
                     { value: 'tool', label: '工具' },
                   ]}
                 />
@@ -140,7 +117,7 @@ export function OverviewPanel() {
           />
           <div style={{ maxHeight: 380, overflowY: 'auto' }}>
             {library.length === 0 ? (
-              <SectionEmpty text="没有匹配的能力（能力定义在 ~/.ark-mate/capabilities/{skills,mcp,tools}）" />
+              <SectionEmpty text="没有匹配的能力" />
             ) : (
               library.map(libraryRow)
             )}
@@ -149,4 +126,11 @@ export function OverviewPanel() {
       </div>
     </PageContainer>
   )
+}
+
+/** 把逐条可达性收敛成一组去重后的状态（不暴露内部运行方名字）。 */
+function unifiedStatusOf(apps: LibraryItem['applicability']): string[] {
+  const order = ['disabled', 'not_configured', 'untested', 'not_applicable', 'projected']
+  const seen = new Set(apps.map((a) => a.status))
+  return order.filter((s) => seen.has(s))
 }

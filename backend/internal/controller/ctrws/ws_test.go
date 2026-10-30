@@ -12,7 +12,6 @@ import (
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/controller/ctrws"
-	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/golib/biz/gcontext"
 	"github.com/morehao/golib/biz/gmiddleware/ginmiddleware"
@@ -43,25 +42,24 @@ func startWS(t *testing.T, bus *eventbus.Bus) *websocket.Conn {
 	return dialWS(t, newWSEngine(bus))
 }
 
-// wsSetup 装配参数（M1-1）：凭据表与首帧 attach 截止。deadline 0 = 用默认 5s；
+// wsSetup 装配参数：首帧 attach 截止。deadline 0 = 用默认 5s；
 // 测超时的用例改小以免拉长整包时间。
 type wsSetup struct {
-	creds    *credential.Set
 	deadline time.Duration
 }
 
-// newWSEngine 装配一个只挂 WS 处理器的引擎（无凭据、默认截止）；mws 可选，但必须在这里传入——
+// newWSEngine 装配一个只挂 WS 处理器的引擎（默认截止）；mws 可选，但必须在这里传入——
 // gin 在注册路由时就冻结 handler 链，注册之后再 Use 不会作用于已注册路由。
 func newWSEngine(bus *eventbus.Bus, mws ...gin.HandlerFunc) *gin.Engine {
 	return newWSEngineWith(bus, wsSetup{}, mws...)
 }
 
-// newWSEngineWith 同 newWSEngine，但可指定凭据与截止（M1-1 的握手用例需要）。
+// newWSEngineWith 同 newWSEngine，但可指定截止（握手时限用例需要）。
 func newWSEngineWith(bus *eventbus.Bus, s wsSetup, mws ...gin.HandlerFunc) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	eng := gin.New()
 	eng.Use(mws...)
-	h := ctrws.NewWSCtr(bus, ctrws.Options{Credentials: s.creds, AttachDeadline: s.deadline})
+	h := ctrws.NewWSCtr(bus, ctrws.Options{AttachDeadline: s.deadline})
 	eng.GET("/ws/events", h.Handle)
 	return eng
 }
@@ -279,15 +277,11 @@ func TestWSHandlerSnapshotFallbackOnEviction(t *testing.T) {
 	}
 }
 
-// wsHandshake 发首帧 attach（通道级握手，M1-1）：桌面态必须最先发、且带上 streamToken。
+// wsHandshake 发首帧 attach（通道级握手）：必须最先发。
 // 不带 agg_id —— 握手帧本身不订阅任何聚合；随后照旧发 attach agg_id 订阅。
-func wsHandshake(t *testing.T, c *websocket.Conn, token string) {
+func wsHandshake(t *testing.T, c *websocket.Conn) {
 	t.Helper()
-	f := map[string]any{"action": "attach"}
-	if token != "" {
-		f["token"] = token
-	}
-	wsWrite(t, c, f)
+	wsWrite(t, c, map[string]any{"action": "attach"})
 }
 
 // closeStatus 读下一帧并返回连接关闭码（期望服务端主动关闭的用例用它）。
@@ -303,71 +297,11 @@ func closeStatus(t *testing.T, c *websocket.Conn) websocket.StatusCode {
 	return websocket.CloseStatus(err)
 }
 
-// TestWSHandshakeToken 首帧 attach 的凭据校验（M1-1 验收的前两条）：
-// 对 token → 正常收事件；错 token → 1008；**restToken 走事件流也必须被拒**（两个面互斥）。
-func TestWSAttachHandshakeToken(t *testing.T) {
-	const rest = "rest-token-2f9c"
-	const stream = "stream-token-71ab"
-	creds := credential.MustNew(
-		credential.Pair{Token: rest, Scopes: credential.ScopeREST},
-		credential.Pair{Token: stream, Scopes: credential.ScopeStream},
-	)
-
-	t.Run("对 token 正常收事件", func(t *testing.T) {
-		bus := eventbus.New()
-		conn := dialWS(t, newWSEngineWith(bus, wsSetup{creds: creds}))
-
-		wsHandshake(t, conn, stream)
-		// 挂载前先放一条历史事件：无 since 的全量回放会把它投回来（"订阅成功"的可见证据）。
-		bus.Publish(testEventID, "session.created", "s1", 1, map[string]any{"text": "pre"})
-		wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1"})
-		var snap frame
-		wsRead(t, conn, &snap)
-		if snap.Type != "event" || snap.AggID != "s1" || snap.Event == nil {
-			t.Fatalf("握手后应能正常订阅（全量回放）: %+v", snap)
-		}
-		bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "hi"})
-		var evt frame
-		wsRead(t, conn, &evt)
-		if evt.Type != "event" || evt.AggID != "s1" {
-			t.Fatalf("握手后应能收到事件帧，got %+v", evt)
-		}
-	})
-
-	t.Run("错 token 关闭 1008", func(t *testing.T) {
-		conn := dialWS(t, newWSEngineWith(eventbus.New(), wsSetup{creds: creds}))
-		wsHandshake(t, conn, "nope")
-		if got := closeStatus(t, conn); got != websocket.StatusPolicyViolation {
-			t.Fatalf("错 token 应以 1008 关闭，got %v", got)
-		}
-	})
-
-	t.Run("restToken 走事件流被拒（面互斥）", func(t *testing.T) {
-		conn := dialWS(t, newWSEngineWith(eventbus.New(), wsSetup{creds: creds}))
-		wsHandshake(t, conn, rest)
-		if got := closeStatus(t, conn); got != websocket.StatusPolicyViolation {
-			t.Fatalf("restToken 不得打开事件流，应以 1008 关闭，got %v", got)
-		}
-	})
-
-	t.Run("无 token（凭据已配置）被拒", func(t *testing.T) {
-		conn := dialWS(t, newWSEngineWith(eventbus.New(), wsSetup{creds: creds}))
-		wsHandshake(t, conn, "")
-		if got := closeStatus(t, conn); got != websocket.StatusPolicyViolation {
-			t.Fatalf("凭据已配置时无 token 应以 1008 关闭，got %v", got)
-		}
-	})
-}
-
-// TestWSHandshakeDeadline 超时未 attach → 服务端主动以 1008 关闭（M1-1 验收第三条）。
+// TestWSAttachHandshakeDeadline 超时未 attach → 服务端主动以 1008 关闭。
 //
-// 这是"令牌不进 URL"的直接代价：连接先建立、凭据随后到。没有这条时限，
-// 未鉴权连接就能一直占着 eventbus 订阅位。
+// 没有这条时限，空连接就能一直占着 eventbus 订阅位。
 func TestWSAttachHandshakeDeadline(t *testing.T) {
-	conn := dialWS(t, newWSEngineWith(eventbus.New(), wsSetup{
-		creds:    credential.MustNew(credential.Pair{Token: "stream-token-71ab", Scopes: credential.ScopeStream}),
-		deadline: 150 * time.Millisecond,
-	}))
+	conn := dialWS(t, newWSEngineWith(eventbus.New(), wsSetup{deadline: 150 * time.Millisecond}))
 	// 连上后什么都不发。
 	if got := closeStatus(t, conn); got != websocket.StatusPolicyViolation {
 		t.Fatalf("超时未 attach 应以 1008 关闭，got %v", got)
@@ -384,12 +318,11 @@ func TestWSAttachHandshakeFirstFrameMustBeAttach(t *testing.T) {
 	}
 }
 
-// TestWSHandshakeNotRequiredWithoutCredentials 未配置凭据（独立态默认）时，
-// 首帧 attach 仍必须发（协议形状统一），但 token 值无关紧要——不鉴权就是真不鉴权。
-func TestWSAttachHandshakeNotRequiredWithoutCredentials(t *testing.T) {
+// TestWSAttachHandshakeThenSubscribe 首帧 attach 之后即可正常订阅（无凭据校验）。
+func TestWSAttachHandshakeThenSubscribe(t *testing.T) {
 	bus := eventbus.New()
 	conn := dialWS(t, newWSEngine(bus))
-	wsHandshake(t, conn, "任意值都不校验")
+	wsHandshake(t, conn)
 	bus.Publish(testEventID, "session.created", "s1", 1, map[string]any{"text": "pre"})
 	wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1"})
 	var snap frame
@@ -425,8 +358,8 @@ func TestWSAcceptSurvivesAccessLogWriterWrap(t *testing.T) {
 	}
 
 	conn := dialWS(t, eng)
-	// 首帧必须是 attach（M1-1 的握手），之后才轮到 ping/pong。
-	wsHandshake(t, conn, "")
+	// 首帧必须是 attach（握手），之后才轮到 ping/pong。
+	wsHandshake(t, conn)
 	wsWrite(t, conn, map[string]any{"action": "ping"})
 	var pong frame
 	wsRead(t, conn, &pong)

@@ -14,7 +14,6 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrusage"
 	"github.com/morehao/ark-mate/internal/controller/ctrworkspace"
 	"github.com/morehao/ark-mate/internal/controller/ctrws"
-	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/router"
@@ -22,10 +21,10 @@ import (
 
 // buildControllers 构造全部控制器（`startControllers` 的第二步）。
 //
-// 每条构造只传**已构造的用例**与交付层设施（凭据 / 握手来源判定 / 宿主事实）；
+// 每条构造只传**已构造的用例**与交付层设施（握手来源判定 / 宿主事实）；
 // 控制器内部不再 `New` 任何 `svc*`，也不接收 store/domain 平面。
 func (as *assembly) buildControllers() router.Controllers {
-	return as.services.BuildControllers(as.creds, as.origin, func() bool {
+	return as.services.BuildControllers(as.origin, func() bool {
 		// 宿主能不能抬起系统目录面板：判据在领域里（绑回环 + 非 SSH + 有显示会话）。
 		return as.planes.Picker.NativePickerMode() == string(workspace.NativePickerHost)
 	})
@@ -34,7 +33,7 @@ func (as *assembly) buildControllers() router.Controllers {
 // BuildControllers 构造控制器集合（装配根与路由级测试共用同一套）。
 //
 // `origin` 可以为 nil（未启用来源矩阵）；`hostFacts` 为 nil 时能力声明按"宿主不支持"处理。
-func (s Services) BuildControllers(creds *credential.Set, origin *middleware.OriginPolicy, hostFacts func() bool) router.Controllers {
+func (s Services) BuildControllers(origin *middleware.OriginPolicy, hostFacts func() bool) router.Controllers {
 	if hostFacts == nil {
 		hostFacts = func() bool { return false }
 	}
@@ -54,7 +53,6 @@ func (s Services) BuildControllers(creds *credential.Set, origin *middleware.Ori
 		Usage:         ctrusage.NewUsageCtr(s.Usage),
 		System:        ctrsystem.NewSystemCtr(s.Meta, s.Capabilities, hostFacts),
 		WS: ctrws.NewWSCtr(s.Stream, ctrws.Options{
-			Credentials: creds,
 			OriginCheck: origin.CheckFunc(),
 		}),
 	}

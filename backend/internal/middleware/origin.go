@@ -144,8 +144,8 @@ func (p *OriginPolicy) Decide(r *http.Request) Decision {
 		}
 	}
 	// 无 Origin：壳内反代（壳经 protocol.handle 转发的 REST 请求）、curl、页面导航与静态子资源。
-	// 这类请求不携带浏览器自动附加的来源信息，它们的可信度由**凭据**兜底
-	// （桌面态 restToken 只在壳的主进程里，从不进渲染进程）。
+	// 这类请求不携带浏览器自动附加的来源信息；在只绑回环、不做鉴权的形态下，
+	// 它们仅受回环监听这一层约束。
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return Decision{}

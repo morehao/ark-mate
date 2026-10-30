@@ -57,7 +57,7 @@ func (s *SettingsStore) SaveWorkspaceRoots(roots []string) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
 	}
-	mode := os.FileMode(0o600) // 配置目录里可能有 MATE_TOKEN：默认不给同组/其他用户读
+	mode := os.FileMode(0o600) // 配置目录里可能有敏感信息：默认不给同组/其他用户读
 	if st, serr := os.Stat(path); serr == nil {
 		mode = st.Mode().Perm() // 已有文件保留原权限（不借写回之机改运维的设置）
 	}

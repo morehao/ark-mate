@@ -21,7 +21,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
 	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/dto/dtosystem"
 	"github.com/morehao/golib/glog"
 )
@@ -30,10 +29,6 @@ import (
 type App struct {
 	cfg     config.Config
 	sources config.Sources
-
-	// creds 凭据表（M1-1）：桌面态由命令层经 --auth-stdin 注入；独立态由 MATE_TOKEN 折叠而来。
-	// **不进 config.Config**——配置面会被 `mate config --json` 打印出来，令牌不该出现在那里。
-	creds *credential.Set
 
 	// payloads 桌面态已解析的随包运行时载荷清单（M3-4）：**唯一真源是壳**，核心只把它透出到
 	// `/meta` 的诊断面。非桌面态为 nil → `/meta` 照发空数组。
@@ -52,11 +47,6 @@ type App struct {
 // Option 装配可选项（M1-1/M1-2）。
 type Option func(*App)
 
-// WithCredentials 注入凭据表（桌面态双凭据；独立态通常不传，走 MATE_TOKEN 折叠）。
-func WithCredentials(creds *credential.Set) Option {
-	return func(a *App) { a.creds = creds }
-}
-
 // WithReadyStdout 开启就绪行回写（桌面壳 spawn 核心时传 `--ready-stdout`）。
 func WithReadyStdout(on bool) Option {
 	return func(a *App) { a.readyStdout = on }
@@ -64,7 +54,7 @@ func WithReadyStdout(on bool) Option {
 
 // WithPayloads 注入桌面壳**已解析**的随包载荷清单（M3-4；壳经 `--payloads` 交来）。
 //
-// 只收结构化值：JSON 解析与校验在命令层（照 WithCredentials 的分层），
+// 只收结构化值：JSON 解析与校验在命令层（照 `--payloads` 的分层），
 // 本包因此既不需要认识 wire 形状，也不会因为"某一层少校验一条"而透出假来源。
 func WithPayloads(payloads []dtosystem.PayloadInfo) Option {
 	return func(a *App) { a.payloads = payloads }
@@ -104,7 +94,7 @@ func (a *App) Meta() dtosystem.MetaInfo {
 // 仍由本包启停（`Run`/`Close`），装配根不持有 `http.Server`。
 func (a *App) Init(ctx context.Context) error {
 	res, err := assembly.Build(ctx, a.cfg, a.sources,
-		assembly.WithCredentials(a.creds), assembly.WithPayloads(a.payloads))
+		assembly.WithPayloads(a.payloads))
 	if err != nil {
 		return err
 	}

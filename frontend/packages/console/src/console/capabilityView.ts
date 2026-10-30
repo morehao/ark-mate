@@ -87,34 +87,6 @@ export function mcpRows(servers: McpServer[], library: LibraryItem[] = []): McpR
 // 逐 runtime 的 `applicability[]` 出「可用/未实测/未配置/不适用/已禁用」+ 人话原因），
 // 而且判据从"按某个 agent 裁剪"变成了"每个候选底座各一条"，比原来更细。
 
-/** 一个 skill 的投放对象标签（按 runtime 逐个；空 = 全部——**不是"没有"**）。 */
-export interface SkillRuntimesView {
-  labels: string[]
-  /** 空 runtimes 的说明（读成"没有投放对象"会让人以为技能废弃了）。 */
-  emptyHint: string
-  /** scope 声明（M1 只声明不消费，如实标注而不是假装生效）。 */
-  scopeTag?: { text: string; hint: string }
-}
-
-/** 由 skill 条目推出投放对象展示（runtimes + scope）。 */
-export function skillRuntimesView(runtimes?: string[], scope?: string): SkillRuntimesView {
-  const list = (runtimes ?? []).filter((r) => r !== '')
-  return {
-    labels: list.length > 0 ? list : ['全部 runtime'],
-    emptyHint:
-      list.length > 0
-        ? '该 skill 的投放对象（runtimes）'
-        : '该 skill 未声明 runtimes = 投放给所有支持 skill 投影的 runtime（升级安全默认）',
-    scopeTag:
-      scope === 'workspace'
-        ? {
-            text: '作用域 workspace',
-            hint: '该技能声明为 workspace 作用域：声明已记录不会丢，但当前版本仍按底座全局落点投放（按工作区落点待实测后生效）',
-          }
-        : undefined,
-  }
-}
-
 /** 装载期扫描告警（§13.2 S1）：critical 已拒载，这里只会是 warning/info。 */
 export interface SkillWarningsView {
   color: string
@@ -128,8 +100,8 @@ export function skillWarningsView(warnings?: SkillWarning[]): SkillWarningsView 
   if (!warnings || warnings.length === 0) return null
   const critical = warnings.filter((w) => w.severity === 'critical').length
   const color = critical > 0 ? 'red' : warnings.some((w) => w.severity === 'warning') ? 'gold' : 'default'
-  const text = critical > 0 ? `${critical} 条 critical` : `${warnings.length} 条告警`
-  return { color, text, hint: warnings.map((w) => `[${w.severity}] ${w.pattern}：${w.message}`).join('\n') }
+  const text = critical > 0 ? '内容需要处理' : `${warnings.length} 处提醒`
+  return { color, text, hint: warnings.map((w) => w.message).join('\n') }
 }
 
 /** 物化状态 → 展示元数据（颜色/短标签/含义）。取值见后端 skillMaterializationState。 */
@@ -201,7 +173,7 @@ export function libraryKindLabel(kind: string): string {
     case 'skill':
       return '技能'
     case 'mcp':
-      return 'MCP'
+      return '连接器'
     case 'tool':
       return '工具'
     default:
@@ -239,15 +211,15 @@ export function libraryStatusView(status: string): { color: string; text: string
   }
 }
 
-/** origin 标签（local = 本机定义文件可改；imported = 随平台来或探测出的，没有事实源文件可改）。 */
+/** origin 标签（local = 自己添加、可管理；imported = 平台自带或连接后自动获取）。 */
 export function libraryOriginView(origin: string): { color: string; text: string; hint: string } {
   if (origin === 'local') {
-    return { color: 'cyan', text: '本机', hint: '来自本机定义文件（source_file），可在本页增删改' }
+    return { color: 'cyan', text: '本机', hint: '你自己添加的能力，可在这里管理' }
   }
   return {
     color: 'default',
     text: '内置',
-    hint: '随平台来的或运行时探测出来的（builtin·observed 工具 / MCP 探测出的工具）：没有事实源文件可改',
+    hint: '平台自带，或连接后自动获取的能力',
   }
 }
 
@@ -262,13 +234,13 @@ export function writeErrorText(err: unknown): string {
   const code = (err as { code?: number }).code
   switch (code) {
     case 40000:
-      return `${msg}（检查字段名与取值：id 只能是小写字母/数字/-/_ 且 ≤64 字符）`
+      return `${msg}（请检查填写的内容与格式）`
     case 40001:
-      return `${msg}（按提示修正定义内容后重试：被拒的定义**不会**落盘）`
+      return `${msg}（按提示修正后重试；未通过的内容不会被保存）`
     case 40401:
-      return `${msg}（这条定义可能已被外部删除：刷新列表后重试）`
+      return `${msg}（这条可能已被外部删除：刷新后重试）`
     case 40901:
-      return `${msg}（id 已被占用或被外部改动：换个 id，或刷新后重试——平台不会覆盖别人的改动）`
+      return `${msg}（名称已被占用或被外部改动：换一个名称，或刷新后重试——平台不会覆盖别人的改动）`
     default:
       return msg
   }
@@ -334,7 +306,7 @@ export function skillOptionView(item: Pick<LibraryItem, 'applicability' | 'enabl
 } {
   if (item.enabled === false) {
     // 定义级禁用是**平台侧**状态（定义与正文都保留，可恢复），与"底座用不上"是两件事。
-    return { selectable: false, note: '这个技能已被禁用（enabled:false）：在能力页改回 true 即可恢复' }
+    return { selectable: false, note: '这个技能已停用：在扩展页重新启用即可' }
   }
   return applicabilityOptionView(item.applicability, '这个技能')
 }
@@ -348,13 +320,13 @@ export function skillOptionView(item: Pick<LibraryItem, 'applicability' | 'enabl
 function applicabilityOptionView(rows: LibraryApplicability[], what: string): { selectable: boolean; note: string } {
   const blocked = rows.filter((a) => !a.ok)
   if (rows.length === 0) {
-    return { selectable: false, note: `取不到${what}的投放对象（能力清单未装载或没有任何候选底座）：只能按默认投放` }
+    return { selectable: false, note: `暂时取不到${what}的可用信息：只能使用默认设置` }
   }
   if (blocked.length === rows.length) {
-    return { selectable: false, note: blocked.map((a) => `${a.runtime}：${a.reason || a.status}`).join('；') }
+    return { selectable: false, note: blocked.map((a) => a.reason || libraryStatusView(a.status).text).join('；') }
   }
   if (blocked.length > 0) {
-    return { selectable: true, note: blocked.map((a) => `${a.runtime}：${a.reason || a.status}`).join('；') }
+    return { selectable: true, note: blocked.map((a) => a.reason || libraryStatusView(a.status).text).join('；') }
   }
   return { selectable: true, note: '' }
 }
@@ -370,9 +342,9 @@ export function mcpOptionView(row: Pick<McpRow, 'defEnabled' | 'applicability'>)
   note: string
 } {
   if (!row.defEnabled) {
-    return { selectable: false, note: '这个 MCP 已被禁用（enabled:false）：在能力页改回 true 即可恢复' }
+    return { selectable: false, note: '这个连接器已停用：在扩展页启用即可恢复' }
   }
-  return applicabilityOptionView(row.applicability, '这个 MCP')
+  return applicabilityOptionView(row.applicability, '这个连接器')
 }
 
 /**
@@ -393,8 +365,8 @@ export function pinnedCapabilitiesView(
         ? '通用 ｜ '
         : `${caps.expert_missing ? `${caps.expert}（已删除）` : caps.expert} ｜ `
   return {
-    text: `${expertText}技能：${fmt(caps.skills)} ｜ MCP：${fmt(caps.mcps)}`,
-    hint: '该会话创建时钉住的能力选定：定义文件之后被改动也不会影响它（改动在下一次轮次边界按新代际生效）。',
+    text: `${expertText}技能：${fmt(caps.skills)} ｜ 连接器：${fmt(caps.mcps)}`,
+    hint: '这是该会话创建时固定的能力选择，之后的改动不会影响它。',
     fingerprint: caps.fingerprint ?? '',
   }
 }
@@ -497,17 +469,17 @@ export function skillStatusView(s: Pick<Skill, 'enabled' | 'warnings'>): {
   hint: string
 } {
   if (s.enabled === false) {
-    return { label: '已停用', color: 'default', tone: 'muted', hint: '定义与正文保留；启用即按 runtimes 重新投放' }
+    return { label: '已停用', color: 'default', tone: 'muted', hint: '停用后助手暂不使用；可随时重新启用' }
   }
   if (s.warnings && s.warnings.length > 0) {
     return {
       label: '需处理',
       color: 'gold',
       tone: 'warning',
-      hint: '装载期正文扫描有告警（critical 已拒载）；详情里可看逐条规则',
+      hint: '内容检查有需要注意的地方，详情里可查看',
     }
   }
-  return { label: '已启用', color: 'green', tone: 'success', hint: '启用中；物化状态在详情「投放体检」里现拉' }
+  return { label: '已启用', color: 'green', tone: 'success', hint: '启用中' }
 }
 
 // ——— 技能表单：读模型 → 表单值，表单值 → 写面请求体 ———

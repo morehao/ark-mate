@@ -1,4 +1,3 @@
-import { buildAttachFrame } from '@ark-mate/desktop-contract'
 import type { WsClientFrame, WsServerFrame } from '@ark-mate/types'
 import type { StreamConfig } from '../carrier'
 
@@ -21,9 +20,9 @@ export const STALL_CHECK_MS = 5_000
 
 export class WsTransport {
   /**
-   * 事件流配置（基址 + 通道凭据）：由**载体**解析后注入（M1-8）。
+   * 事件流配置（基址）：由**载体**解析后注入（M1-8）。
    *
-   * 为什么不让 transport 自己读 location / localStorage：桌面窗口的 origin 是 `mate-app://app`，
+   * 为什么不让 transport 自己读 location：桌面窗口的 origin 是 `mate-app://app`，
    * 事件流却要直连 `ws://127.0.0.1:<port>`——基址只可能来自壳的 `boot()`。把"配置从哪来"
    * 收在 carrier.ts 一处，transport 只消费它。
    */
@@ -51,16 +50,15 @@ export class WsTransport {
   ) {}
 
   /**
-   * 注入/更新事件流配置。若与当前连接用的配置不同（例如桌面态换了核心地址、
-   * 或浏览器态用户改了令牌），先断开再按新配置重连。
+   * 注入/更新事件流配置。若与当前连接用的配置不同（例如桌面态换了核心地址），
+   * 先断开再按新配置重连。
    */
   configure(cfg: StreamConfig): void {
-    const changed =
-      !this.stream || this.stream.baseUrl !== cfg.baseUrl || this.stream.token !== cfg.token
+    const changed = !this.stream || this.stream.baseUrl !== cfg.baseUrl
     this.stream = cfg
     if (!changed) return
     if (this.ws) {
-      // 配置变了（换核心地址 / 用户改了令牌）：拆掉旧连接，再按新配置连。
+      // 配置变了（换核心地址）：拆掉旧连接，再按新配置连。
       this.ws.onclose = null
       this.ws.close()
       this.ws = null
@@ -124,9 +122,8 @@ export class WsTransport {
       this.onState('connecting')
       return
     }
-    // M1-1：令牌**不进 URL**（URL 会同时进浏览器历史、反代/网关日志与 Referer），
-    // 改走带内首帧 attach——连接建立后的第一条帧就是它，服务端 5s 内未收到即关闭（1008）。
-    // 帧形状的唯一真源是 @ark-mate/desktop-contract 的 buildAttachFrame（桌面态带 streamToken）。
+    // 连接建立后的第一条帧必须是通道级 attach——服务端 5s 内未收到即关闭（1008）。
+    // 帧形状的唯一真源是 @ark-mate/desktop-contract 的 buildAttachFrame / types 的 WsClientFrame。
     const url = `${cfg.baseUrl}/v1/mate/ws/events`
     this.onState('connecting')
     let ws: WebSocket
@@ -143,8 +140,8 @@ export class WsTransport {
       this.lastActivity = Date.now()
       this.startPing()
       this.startStallWatch()
-      // 首帧：通道级 attach（携带凭据，无 agg_id）。必须最先发，且每次重连都要重发。
-      this.rawSend(buildAttachFrame(cfg.token))
+      // 首帧：通道级 attach（无 agg_id）。必须最先发，且每次重连都要重发。
+      this.rawSend({ action: 'attach' })
       // 重连 resync 裁决：按各 agg 已确认水位重新 attach（服务端 EventsAfter 开区间 →
       // 权威收尾，仅补缺不重复）；水位为 -1 的 agg 全量回放（冷挂载/起点已被淘汰）。
       for (const [aggId, since] of this.att) {

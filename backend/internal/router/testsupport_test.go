@@ -11,7 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
 	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/dto/dtosystem"
@@ -28,7 +27,6 @@ type testRouterOpts struct {
 	web        router.AssetInfo
 	assetWatch *router.AssetWatcher
 	origin     *middleware.OriginPolicy
-	creds      *credential.Set
 	// metaSource 覆盖诊断面的值来源；nil 时用"资产已接上"的默认值。
 	metaSource func() svcsystem.MetaSource
 	// 复用一个已装配好的会话面（调用方要先设策略/凭据时传它）。
@@ -92,8 +90,7 @@ func testRouterDeps(t *testing.T, o testRouterOpts) router.Deps {
 		MetaSource: meta,
 	}.BuildServices()
 	return router.Deps{
-		Controllers: services.BuildControllers(o.creds, o.origin, nil),
-		Credentials: o.creds,
+		Controllers: services.BuildControllers(o.origin, nil),
 		Web:         o.web,
 		AssetWatch:  o.assetWatch,
 		Origin:      o.origin,

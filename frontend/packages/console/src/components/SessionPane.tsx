@@ -21,7 +21,7 @@ import { RAIL_PAGE, pageSessions, relTime } from '../console/railView'
 import { archivedFilterToRailMode, railModeToArchivedFilter } from '../console/workspaceView'
 import { RailSectionHeader } from './RailSectionHeader'
 import { WorkspaceGroupPane } from './WorkspaceGroupPane'
-import { runtimeLabelOf, titleFor } from '../console/util'
+import { titleFor } from '../console/util'
 
 interface Props {
   onCreate: () => void
@@ -73,7 +73,6 @@ function dayLabel(iso: string): string {
 export function SessionPane({ onCreate }: Props) {
   const navigate = useNavigate()
   const sessions = useMate((s) => s.sessions)
-  const runtime = useMate((s) => s.runtime)
   const views = useMate((s) => s.views)
   const activeId = useMate((s) => s.activeId)
   const railMode = useMate((s) => s.railMode)
@@ -242,7 +241,7 @@ export function SessionPane({ onCreate }: Props) {
       key={`${h.session_id}#${h.seq}`}
       type="button"
       onClick={() => openMessageHit(h)}
-      title={`${h.title || h.session_id} · seq ${h.seq}`}
+      title={h.title || '未命名会话'}
       style={{
         display: 'block',
         width: '100%',
@@ -329,7 +328,7 @@ export function SessionPane({ onCreate }: Props) {
           color: h.archived ? tokens.textSecondary : tokens.text,
         }}
       >
-        {h.title || runtimeLabelOf(runtime, h.runtime_id)}
+        {h.title || '未命名会话'}
       </span>
       {h.snippet ? (
         <span
@@ -361,20 +360,6 @@ export function SessionPane({ onCreate }: Props) {
           color: tokens.textSecondary,
         }}
       >
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-            border: `1px solid ${tokens.border}`,
-            borderRadius: 999,
-            padding: '0 7px',
-            whiteSpace: 'nowrap',
-            color: tokens.text,
-          }}
-        >
-          {runtimeLabelOf(runtime, h.runtime_id)}
-        </span>
         {h.archived && (
           <span
             style={{
@@ -407,8 +392,8 @@ export function SessionPane({ onCreate }: Props) {
         icon: <EditOutlined />,
         label: '重命名',
         onClick: () => {
-          setDraft(sm.title || titleFor(sm, view, runtime?.name))
-          setRenaming({ id: sm.id, init: sm.title || titleFor(sm, view, runtime?.name) })
+          setDraft(sm.title || titleFor(sm, view, undefined, 'plain'))
+          setRenaming({ id: sm.id, init: sm.title || titleFor(sm, view, undefined, 'plain') })
         },
       },
       { type: 'divider' },
@@ -426,7 +411,7 @@ export function SessionPane({ onCreate }: Props) {
       if (key === 'pin' || key === 'unpin') void togglePin(sm.id)
       else if (key === 'archive') void archiveSession(sm.id, true)
       else if (key === 'restore') void archiveSession(sm.id, false)
-      else if (key === 'export') void exportOne(sm.id, sm.title || titleFor(sm, view, runtime?.name))
+      else if (key === 'export') void exportOne(sm.id, sm.title || titleFor(sm, view, undefined, 'plain'))
     }
 
     return (
@@ -485,9 +470,9 @@ export function SessionPane({ onCreate }: Props) {
                 letterSpacing: '-0.005em',
                 color: sm.archived ? tokens.textSecondary : tokens.text,
               }}
-              title={titleFor(sm, view, runtime?.name)}
+              title={titleFor(sm, view, undefined, 'plain')}
             >
-              {titleFor(sm, view, runtime?.name)}
+              {titleFor(sm, view, undefined, 'plain')}
             </span>
             {sm.pinned && <PushpinFilled style={{ fontSize: 11, color: tokens.primary, flex: 'none' }} />}
             <span className="fg-sess-time" title={sm.updated_at}>

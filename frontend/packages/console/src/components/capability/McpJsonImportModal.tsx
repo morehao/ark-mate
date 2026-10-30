@@ -74,7 +74,7 @@ export function McpJsonImportModal({
         <div>
           <div style={{ fontSize: 15, fontWeight: 600 }}>粘贴 JSON 配置</div>
           <div style={{ marginTop: 2, fontSize: 11, color: tokens.textPlaceholder }}>
-            兼容 mcpServers 片段，可一次导入多个 server。
+            可一次导入多个连接器。
           </div>
         </div>
       }
@@ -87,7 +87,7 @@ export function McpJsonImportModal({
         </div>
       }
     >
-      <div style={{ fontSize: 11, color: tokens.textSecondary, marginBottom: 4 }}>mcpServers JSON</div>
+      <div style={{ fontSize: 11, color: tokens.textSecondary, marginBottom: 4 }}>连接器配置（JSON）</div>
       <Input.TextArea
         value={text}
         onChange={(e) => {
@@ -101,8 +101,8 @@ export function McpJsonImportModal({
         style={{ fontFamily: tokens.fontMono, fontSize: 12.5 }}
       />
       <div style={{ marginTop: 4, fontSize: 10.5, color: tokens.textPlaceholder }}>
-        支持 command（STDIO）或 url（SSE / Streamable HTTP）；同名 server 会被跳过。
-        stdio 的 command 必须是绝对路径（例如 /usr/local/bin/npx），与表单保存走同一条闸门。
+        支持命令方式（STDIO）或地址方式（SSE / HTTP）；同名连接器会被跳过。
+        命令方式需要填写完整的可执行文件路径（例如 /usr/local/bin/npx）。
       </div>
 
       {parsed && parsed.errors.length > 0 && (
@@ -125,7 +125,7 @@ export function McpJsonImportModal({
           type="info"
           showIcon
           style={{ marginTop: 8, fontSize: 11.5 }}
-          message={`解析到 ${parsed.servers.length} 个 server：${parsed.servers.map((s) => s.id).join('、')}`}
+          message={`解析到 ${parsed.servers.length} 个连接器：${parsed.servers.map((s) => s.id).join('、')}`}
           description={
             skipPreview.length > 0
               ? `其中 ${skipPreview.join('、')} 已存在，导入时会跳过（不覆盖）。`

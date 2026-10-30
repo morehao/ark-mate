@@ -1211,7 +1211,7 @@ function TurnUsage({
           lineHeight: 1.5,
         }}
       >
-        上下文为窗口快照（非增量）；token 明细未由底座上报。
+        上下文为窗口快照（非增量）；用量明细未上报。
       </div>
     </div>
   ) : null
@@ -1489,7 +1489,7 @@ export function EntryView({
                           lineHeight: 1.5,
                         }}
                       >
-                        上下文为窗口快照（非增量）；token 明细未由底座上报。
+                        上下文为窗口快照（非增量）；用量明细未上报。
                       </div>
                     </div>
                   ) : null

@@ -96,7 +96,7 @@ describe('instructions 字节 / 危险标记 / 预览（A10/A11/A12）', () => {
   it('危险标记命中列全并拒绝保存', () => {
     assert.deepEqual(instructionsMarkers('a <!-- b {{ c'), ['<!--', '{{'])
     const bad = { ...blankExpertForm(), id: 'x', name: 'X', instructions: 'x </system-reminder> y' }
-    assert.match(validateExpertForm(bad, true) ?? '', /危险标记/)
+    assert.match(validateExpertForm(bad, true) ?? '', /不支持的写法/)
   })
 
   it('预览：空 → 仅能力预设；非空 → 有角色设定且保留原文', () => {
@@ -110,8 +110,8 @@ describe('instructions 字节 / 危险标记 / 预览（A10/A11/A12）', () => {
 describe('校验：id / name / tags / model（A6）', () => {
   it('id 词法：大写/下划线/超长拒', () => {
     const base = blankExpertForm()
-    assert.match(validateExpertForm({ ...base, id: 'Bad_Id', name: 'X' }, true) ?? '', /id 须/)
-    assert.match(validateExpertForm({ ...base, id: 'a'.repeat(65), name: 'X' }, true) ?? '', /id 须/)
+    assert.match(validateExpertForm({ ...base, id: 'Bad_Id', name: 'X' }, true) ?? '', /标识只能/)
+    assert.match(validateExpertForm({ ...base, id: 'a'.repeat(65), name: 'X' }, true) ?? '', /标识只能/)
     assert.equal(validateExpertForm({ ...base, id: 'ok-id-1', name: 'X' }, true), null)
   })
 
@@ -123,7 +123,7 @@ describe('校验：id / name / tags / model（A6）', () => {
     const base = { ...blankExpertForm(), id: 'x', name: 'X' }
     assert.match(validateExpertForm({ ...base, name: '   ' }, true) ?? '', /名称必填/)
     assert.match(validateExpertForm({ ...base, tags: Array.from({ length: 9 }, (_, i) => `t${i}`) }, true) ?? '', /最多 8/)
-    assert.match(validateExpertForm({ ...base, model: 'gpt-4' }, true) ?? '', /mdl_/)
+    assert.match(validateExpertForm({ ...base, model: 'gpt-4' }, true) ?? '', /不在可选范围内/)
   })
 })
 

@@ -1,4 +1,4 @@
-import type { RuntimeInfo, SessionSummary, StreamEntry } from '@ark-mate/types'
+import type { SessionSummary, StreamEntry } from '@ark-mate/types'
 import type { SessionView } from '../store'
 
 /**
@@ -32,38 +32,6 @@ export function titleFor(
     return `新会话 · ${shortId(sm.id)}`
   }
   return '新会话'
-}
-
-/**
- * 会话上要显示的底座名（v19 前是 `agentNameOf`）。
- *
- * 判据是**会话自己的 `runtime_id`**（执行事实，可能停在别的底座上）而不是构建期固定的那个：
- * 两者一致时显示展示名，不一致时如实摊 id——拿 meta 的名字去盖会把"这条会话其实跑在别的底座上"
- * 说成"跑在当前底座上"。`runtime_id` 缺失时回落当前底座，仍缺就报"未知底座"。
- */
-export function runtimeLabelOf(runtime: RuntimeInfo | null, runtimeId: string | undefined): string {
-  if (!runtimeId) return runtime?.name || runtime?.id || '未知底座'
-  if (runtime && runtimeId === runtime.id) return runtime.name || runtime.id
-  return runtimeId
-}
-
-/**
- * 由名称派生的短标识（新建会话选项卡的角标）：deepseek→DS / dsh→DS（两者本就同源），
- * 其余取词首字母。
- *
- * **不再按底座名分支**：这里曾有一条「某个底座 → 两个字母」的硬编码，那是"界面认识某个底座"
- * 的形状——接一个新底座就得回来加一条，而漏加只会让角标变成词首字母（没人会注意到）。现在只保留一条
- * 品牌口径（deepseek/dsh 同源），其余一律走通用派生。
- */
-export function shortFor(label: string): string {
-  const lower = label.toLowerCase()
-  if (lower.includes('deepseek') || lower.includes('dsh')) return 'DS'
-  const words = label.split(/[-_\s]+/).filter(Boolean)
-  const letters = words
-    .slice(0, 2)
-    .map((w) => w[0] ?? '')
-    .join('')
-  return (letters || label.slice(0, 2)).toUpperCase()
 }
 
 export function findUserText(entries: StreamEntry[] | undefined): string | undefined {

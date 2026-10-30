@@ -1,31 +1,19 @@
 /**
  * WS 首帧形状单测（`node --test`，零新依赖）。
  *
- * 除了语义，这里还**冻结键序与 JSON 字面量**：首帧是"客户端 → 核心"的 wire 形状，
- * 核心侧按字段名解析（Go 的 json tag），键序固定能让失败信息可逐字对照、也避免以后
- * 有人顺手改字段名却以为只是重构。
+ * 除了语义，这里还**冻结 JSON 字面量**：首帧是"客户端 → 核心"的 wire 形状，
+ * 固定形状能让失败信息可逐字对照、也避免以后有人顺手改字段名却以为只是重构。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { buildAttachFrame, CSP_POLICY, STREAM_ATTACH_DEADLINE_MS } from '../src/index.ts'
 
-test('attach：浏览器态 token=null', () => {
-  const f = buildAttachFrame(null)
-  assert.deepEqual(f, { action: 'attach', token: null })
-  // 键序也冻结（wire 形状）：action 在前、token 在后。
-  assert.deepEqual(Object.keys(f), ['action', 'token'])
-  assert.equal(JSON.stringify(f), '{"action":"attach","token":null}')
-})
-
-test('attach：桌面态带 streamToken', () => {
-  const f = buildAttachFrame('abc.def-GHI_123')
-  assert.deepEqual(f, { action: 'attach', token: 'abc.def-GHI_123' })
-  assert.equal(JSON.stringify(f), '{"action":"attach","token":"abc.def-GHI_123"}')
-})
-
-test('attach：空串令牌抛错（没有凭据必须显式传 null）', () => {
-  assert.throws(() => buildAttachFrame(''), /空串令牌非法/)
+test('attach：通道级首帧只有 action', () => {
+  const f = buildAttachFrame()
+  assert.deepEqual(f, { action: 'attach' })
+  assert.deepEqual(Object.keys(f), ['action'])
+  assert.equal(JSON.stringify(f), '{"action":"attach"}')
 })
 
 test('握手时限常量 = 5s（与核心侧一致）', () => {

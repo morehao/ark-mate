@@ -5,22 +5,18 @@
  *   - 一致 / 无法判定 → 正常进界面（无法判定时只记 console 警告，见契约里的理由）；
  *   - 两侧都是已知值且不一致 → **整屏状态页**（不是白屏、不是零散接口报错），带刷新按钮。
  *
- * 取数走 `/v1/mate/meta`：桌面态由壳反代注入 restToken、浏览器态同源（独立部署时带用户令牌）。
+ * 取数走 `/v1/mate/meta`：桌面态由壳反代到核心、浏览器态同源。
  *
  * "编译进页面的构建 id"由**入口**传进来（`bootstrap({ webBuildId })`）：它是应用构建期注入的常量，
  * 不是界面包的性质——包只做判定与渲染，不读 app 的全局（P5 迁包时的边界整理）。
  */
-import { getToken } from '@ark-mate/api'
 import { tokens } from '@ark-mate/ui'
 import { versionGate, type VersionGateResult } from '@ark-mate/desktop-contract'
 
 /** 从核心取它实际服务的那份资产的构建 id。失败返回 null（调用方按"无法判定"处理）。 */
 async function fetchCoreBuildId(): Promise<string | null> {
-  const token = getToken()
   try {
-    const res = await fetch('/v1/mate/meta', {
-      headers: token ? { authorization: `Bearer ${token}` } : {},
-    })
+    const res = await fetch('/v1/mate/meta')
     if (!res.ok) return null
     const body = (await res.json()) as { data?: { webBuildId?: string } }
     return body.data?.webBuildId ?? null

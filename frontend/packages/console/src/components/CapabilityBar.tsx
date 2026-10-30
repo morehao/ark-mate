@@ -44,9 +44,9 @@ interface OptionRow {
 }
 
 const MENU: { kind: PanelKind; label: string; hint: string; icon: React.ReactNode }[] = [
-  { kind: 'expert', label: '专家', hint: '换一个角色：连同它的技能/MCP 预设一起换', icon: <UserOutlined /> },
+  { kind: 'expert', label: '专家', hint: '换一个角色：连同它的技能/连接器预设一起换', icon: <UserOutlined /> },
   { kind: 'skills', label: '技能', hint: '只让这个会话用其中几个技能', icon: <ThunderboltOutlined /> },
-  { kind: 'mcps', label: '连接器', hint: '这个会话连哪些 MCP server', icon: <ApiOutlined /> },
+  { kind: 'mcps', label: '连接器', hint: '这个会话使用哪些连接器', icon: <ApiOutlined /> },
 ]
 
 const TITLE: Record<PanelKind, string> = { expert: '专家', skills: '技能', mcps: '连接器' }
@@ -225,7 +225,7 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
           <div className="fg-cap-note">
             {list.filter((r) => r.inDefault).length === 0
               ? `当前没有可用的${title}`
-              : `按平台默认投放（当前 ${list.filter((r) => r.inDefault).length} 个）`}
+              : `按默认启用（当前 ${list.filter((r) => r.inDefault).length} 个）`}
           </div>
         ) : (
           <>
@@ -259,11 +259,10 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
                       onChange={(e) => toggle(kind, row.id, e.target.checked)}
                     >
                       <span className="fg-cap-opt-name">{row.name}</span>
-                      <span className="fg-cap-opt-id">{row.id}</span>
                     </Checkbox>
                     {row.note && (
                       <Tooltip title={row.note}>
-                        <span className="fg-cap-opt-why">{row.selectable ? '部分底座不可用' : '不可选'}</span>
+                        <span className="fg-cap-opt-why">{row.selectable ? '部分不可用' : '不可选'}</span>
                       </Tooltip>
                     )}
                   </div>
@@ -312,7 +311,7 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
             }}
           >
             <span className="fg-cap-opt-name">通用</span>
-            <span className="fg-cap-opt-id">不用专家（技能/MCP 按平台默认投放）</span>
+            <span className="fg-cap-opt-id">不用专家（技能/连接器使用默认设置）</span>
           </button>
           {list.map((e) => (
             <button
@@ -335,7 +334,7 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
         </div>
         {/* 与创建页同一句口径：人格只在首轮注入；会话中途换专家只换能力预设。 */}
         <div className="fg-cap-note">
-          换专家会换成它的技能/MCP 预设；角色设定只在新会话首轮注入，中途不重注入。
+          换专家会连同它的技能/连接器预设一起换；角色设定在新会话开始时生效。
         </div>
       </div>
     )

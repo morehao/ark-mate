@@ -102,7 +102,7 @@ export function SkillUploadModal({
           把技能包拖到这里，或点击选择
         </p>
         <p style={{ margin: '3px 0 0', fontSize: 10.5, color: tokens.textPlaceholder }}>
-          支持 .zip；单包不超过 20 MB；根目录或唯一一层目录内需有 SKILL.md
+          支持 .zip；单包不超过 20 MB；包内需包含技能说明文件
         </p>
       </Upload.Dragger>
 
@@ -137,8 +137,8 @@ export function SkillUploadModal({
         type="warning"
         showIcon
         style={{ marginTop: 10, fontSize: 11.5 }}
-        message="同名 id 不会自动覆盖"
-        description="已有同名技能时，需要先删除它或换一个名称。v1 只导入 SKILL.md：包里额外的脚本/资源会被拒绝，避免「导入成功但附件没落盘」。"
+        message="同名技能不会自动覆盖"
+        description="已有同名技能时，需要先删除它或换一个名称。目前只导入技能说明文件：包内其他脚本/资源暂不支持，会被忽略。"
       />
     </Modal>
   )

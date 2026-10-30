@@ -234,8 +234,8 @@ export const consoleStyleSheet = `
     overflow-x: hidden;
   }
 
-  /* 左栏 footer：固定左下，点「设置」在**它上方**展开二级菜单（向上生长）。这一行只有「设置」一个入口
-     （令牌已收进设置菜单；WS 状态在窗口右下角的全局状态条，不重复一份）。
+  /* 左栏 footer：固定左下，点「设置」直接开设置弹窗。这一行只有「设置」一个入口
+     （WS 状态在窗口右下角的全局状态条，不重复一份）。
      高度是 auto：菜单展开时 footer 变高、会话区（flex:1）相应让位，不需要浮层/portal。 */
   .fg-rail-foot {
     flex: none;

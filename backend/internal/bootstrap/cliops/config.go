@@ -55,7 +55,6 @@ func Config(args []string) {
 				"elicitation_timeout": cfg.ElicitationTimeout.String(),
 				"proc_registry":       cfg.ProcRegistryPath,
 				"reap_grace":          cfg.ReapGrace.String(),
-				"token":               maskToken(cfg.Token),
 				"allowed_origins":     strings.Join(cfg.AllowedOrigins, ","),
 				"mcp_auto_probe":      cfg.McpAutoProbe,
 				"mcp_gateway":         cfg.McpGateway,
@@ -139,7 +138,6 @@ func Config(args []string) {
 	pf("  %-22s %-38s [%s]\n", "elicitation_timeout", cfg.ElicitationTimeout.String(), src("elicitation_timeout"))
 	pf("  %-22s %-38s [%s]\n", "proc_registry", emptyLabel(cfg.ProcRegistryPath), src("proc_registry"))
 	pf("  %-22s %-38s [%s]\n", "reap_grace", cfg.ReapGrace.String(), src("reap_grace"))
-	pf("  %-22s %-38s [%s]\n", "token", maskToken(cfg.Token), src("token"))
 	// 空 = 只用内置 Origin 矩阵（无 Origin / mate-app://app / 自身监听端口的同源）。
 	// 非空 = 跨源开发或自建反代的显式登记（M3-5），且只在回环监听时生效（见 internal/config 的注释）。
 	pf("  %-22s %-38s [%s]\n", "allowed_origins", emptyLabel(strings.Join(cfg.AllowedOrigins, ",")), src("allowed_origins"))
@@ -152,17 +150,6 @@ func Config(args []string) {
 	for _, rt := range cfg.RemoteRuntimes {
 		pf("  %-22s %-38s [%s]\n", "remote_runtime:"+rt.ID, rt.Transport+" "+rt.Endpoint, string(config.SourceFile))
 	}
-}
-
-// maskToken 令牌只显示长度与首尾各 2 字符（避免配置核对时把令牌打进日志/截图）。
-func maskToken(t string) string {
-	if t == "" {
-		return "(未设置，不鉴权)"
-	}
-	if len(t) <= 8 {
-		return fmt.Sprintf("(已设置，%d 字符)", len(t))
-	}
-	return fmt.Sprintf("%s…%s（%d 字符）", t[:2], t[len(t)-2:], len(t))
 }
 
 func storeModeLabel(mode string) string {

@@ -24,10 +24,7 @@ const carrier = isDesktopCarrier({ protocol: location.protocol, hostname: locati
 
 if (carrier) {
   const api: MateDesktop = {
-    /**
-     * 事件流的基址与通道级凭据。REST 不走这里——页面同源反代已由壳注入 restToken，
-     * 因此渲染进程从头到尾拿不到 restToken。
-     */
+    /** 事件流基址。REST 不走这里——页面同源反代已由壳转发到核心。 */
     boot: () => ipcRenderer.invoke(CH.boot),
 
     native: {

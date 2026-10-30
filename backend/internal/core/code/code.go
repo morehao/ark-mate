@@ -30,7 +30,7 @@ const (
 	// InvalidRequest 请求语义非法：游标互斥、归属不符、状态机不允许等
 	// ——参数本身格式没问题，但在这条资源上不成立。
 	InvalidRequest = 40001
-	// Unauthorized 单操作员令牌缺失或无效（HTTP 状态同时为 401）。
+	// Unauthorized 未授权：上游（底座/供应商）拒绝访问或凭据无效。
 	Unauthorized = 40101
 	// NotFound 目标资源不存在（会话/agent/runtime/provider/MCP server…）。
 	NotFound = 40401

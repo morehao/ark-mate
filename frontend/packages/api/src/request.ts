@@ -22,36 +22,6 @@ export class HttpError extends Error {
 
 const instance = axios.create({ baseURL: '/v1', timeout: 30_000 })
 
-/**
- * 单操作员令牌（A6）：后端配置 MATE_TOKEN 后，除 /health 外所有接口都要求 Bearer token。
- * 令牌只存在浏览器本地（localStorage），不写进 URL/日志；面板顶栏可设置/清除。
- */
-const TOKEN_KEY = 'mate.token'
-
-export function getToken(): string {
-  try {
-    return localStorage.getItem(TOKEN_KEY) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-export function setToken(token: string): void {
-  try {
-    const v = token.trim()
-    if (v) localStorage.setItem(TOKEN_KEY, v)
-    else localStorage.removeItem(TOKEN_KEY)
-  } catch {
-    // localStorage 不可用（隐私模式）时静默降级：本次会话内仍可通过请求头传递。
-  }
-}
-
-instance.interceptors.request.use((cfg) => {
-  const t = getToken()
-  if (t) cfg.headers.set('Authorization', `Bearer ${t}`)
-  return cfg
-})
-
 function unwrap<T>(env: Envelope<T> | undefined): T {
   if (!env || env.code !== BizCode.Success) {
     throw new HttpError(env?.code ?? -1, env?.msg || '服务响应异常')

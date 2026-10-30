@@ -17,10 +17,8 @@ import { buildAttachFrame } from '@ark-mate/desktop-contract'
 
 const E2E_BASE = process.env.E2E_BASE || 'http://127.0.0.1:10001'
 const API = E2E_BASE + '/v1/mate'
-// 后端启用凭据时用 MATE_SMOKE_TOKEN 传入：REST 走 Authorization 头，
-// WS 走带内首帧 attach（M1-1 起令牌不进 URL）。
-const TOKEN = process.env.MATE_SMOKE_TOKEN || ''
-const AUTH = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}
+// 平台不做鉴权：REST 无需 Authorization；WS 首帧 attach 无凭据。
+const AUTH = {}
 
 const [, , PROMPT = ''] = process.argv
 if (!PROMPT) {
@@ -58,7 +56,7 @@ async function main() {
     ws.onerror = () => reject(new Error('WS 升级失败'))
   })
   // 首帧：通道级 attach（凭据）；随后才是订阅帧。
-  ws.send(JSON.stringify(buildAttachFrame(TOKEN || null)))
+  ws.send(JSON.stringify(buildAttachFrame()))
   console.log('· WS 已连接，attach …')
   ws.send(JSON.stringify({ action: 'attach', agg_id: id, since_seq: event_seq }))
 

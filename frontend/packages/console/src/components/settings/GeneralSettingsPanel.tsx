@@ -124,8 +124,8 @@ export function GeneralSettingsPanel() {
   }
 
   const provisionNote = snap?.provision_dir
-    ? `平台代建目录 ${snap.provision_dir} 自动包含（每个会话在其下按会话 id 建独立目录）`
-    : '平台代建已关闭（workspace_dir 为空）：新建会话必须显式指定工作目录'
+    ? `平台代建目录 ${snap.provision_dir} 自动包含（每个会话在其下有一个独立子目录）`
+    : '平台代建已关闭：新建会话时必须指定工作目录'
 
   return (
     <div className="fg-setsec">

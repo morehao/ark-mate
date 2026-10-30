@@ -13,7 +13,6 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 	"github.com/morehao/golib/glog"
@@ -26,16 +25,12 @@ type WSCtr interface {
 
 var _ WSCtr = (*wsCtr)(nil)
 
-// defaultAttachDeadline 首帧 attach 的截止时限（真源在 credential.StreamAttachDeadline，
-// 与前端 @ark-mate/desktop-contract 的 STREAM_ATTACH_DEADLINE_MS 同值）。
-const defaultAttachDeadline = credential.StreamAttachDeadline
+// defaultAttachDeadline 首帧 attach 的截止时限（与前端 @ark-mate/desktop-contract 的
+// STREAM_ATTACH_DEADLINE_MS 同值）。
+const defaultAttachDeadline = 5 * time.Second
 
 // Options WS 控制器装配选项（M1-1）。
 type Options struct {
-	// Credentials 凭据表。非空（Required）时，连接必须在 AttachDeadline 内发出首帧
-	// `attach` 并携带具备 **stream 面**的凭据；否则服务端主动关闭（1008）。
-	// 空表 = 不鉴权（历史默认行为）。
-	Credentials *credential.Set
 	// AttachDeadline 首帧 attach 截止时限；0 取 defaultAttachDeadline（仅测试会改小）。
 	AttachDeadline time.Duration
 	// OriginCheck 握手来源判定（M3-5）：由装配层注入的**同一个**策略
@@ -56,8 +51,7 @@ type Options struct {
 // 订阅 eventbus → 按 attach 的聚合（session id）推送 event/snapshot 帧；
 // 客户端帧 action=attach/detach/ping；服务端帧 type=snapshot/event/detached/pong。
 //
-// 凭据模型（M1-1）：**握手不带凭据、连接后带内交付**——这是"令牌不进 URL"的代价与解法。
-// 因此必须有首帧 attach 时限，否则未鉴权的连接会一直占着订阅位。
+// 首帧必须是 attach（协议形状），并须在截止时限内送达；否则未订阅的连接会一直占着订阅位。
 //
 // 传输层使用 github.com/coder/websocket（context 化 API：Read/Write/Ping 带 ctx，
 // 控制帧（ping/pong/close）由库自动应答，Ping 需与 Reader 并发执行，见其 conn.go 注释）。
@@ -75,8 +69,7 @@ type EventStream interface {
 }
 
 type wsCtr struct {
-	bus   EventStream
-	creds *credential.Set
+	bus EventStream
 	// attachDeadline 首帧 attach 截止（见 Options.AttachDeadline）。
 	attachDeadline time.Duration
 	// originCheck 握手来源判定（M3-5；见 Options.OriginCheck）。nil = 不判定。
@@ -87,7 +80,6 @@ type wsCtr struct {
 func NewWSCtr(bus EventStream, opts ...Options) WSCtr {
 	c := &wsCtr{bus: bus, attachDeadline: defaultAttachDeadline}
 	if len(opts) > 0 {
-		c.creds = opts[0].Credentials
 		c.originCheck = opts[0].OriginCheck
 		if opts[0].AttachDeadline > 0 {
 			c.attachDeadline = opts[0].AttachDeadline
@@ -107,9 +99,6 @@ const (
 type wsClientFrame struct {
 	Action string `json:"action"` // attach | detach | ping
 	AggID  string `json:"agg_id"` // attach/detach 目标聚合（session id）
-	// Token 首帧 attach 携带的 stream 面凭据（M1-1；桌面态必需，独立态可选）。
-	// 形状的唯一真源在前端 @ark-mate/desktop-contract 的 buildAttachFrame。
-	Token string `json:"token"`
 	// SinceSeq attach 续传游标（**会话内**位次）：省略或负数 = 从该会话第一条起全量回放
 	// （-1 是哨兵）；`>= 0` = 从该条之后增量续传。0 是合法位次（`session.created`），
 	// 不能当"没有游标"用。
@@ -139,7 +128,7 @@ type connState struct {
 	mu       sync.Mutex
 	attached map[string]bool
 
-	// handshake 在首帧 attach 通过凭据校验后关闭（幂等）；awaitAttach 到点仍未关闭即关闭连接。
+	// handshake 在首帧 attach 通过协议校验后关闭（幂等）；awaitAttach 到点仍未关闭即关闭连接。
 	handshake     chan struct{}
 	handshakeOnce sync.Once
 
@@ -208,10 +197,10 @@ func (h *wsCtr) Handle(c *gin.Context) {
 	h.readLoop(st)
 }
 
-// awaitAttach 首帧 attach 截止（M1-1）：到点仍未完成握手即按 1008 关闭。
+// awaitAttach 首帧 attach 截止：到点仍未完成握手即按 1008 关闭。
 //
-// 为什么必须有时限：令牌不进 URL 意味着"连接先建立、凭据随后到"，这段窗口里连接
-// 已经占着 eventbus 的订阅位；没有时限就等于给了未鉴权连接一个常驻资源。
+// 为什么必须有时限：这段窗口里连接已经占着 eventbus 的订阅位；没有时限就等于给了
+// 空连接一个常驻资源。
 func (h *wsCtr) awaitAttach(st *connState) {
 	t := time.NewTimer(h.attachDeadline)
 	defer t.Stop()
@@ -224,16 +213,7 @@ func (h *wsCtr) awaitAttach(st *connState) {
 	}
 }
 
-// authorizeStream 校验首帧 attach 携带的凭据是否具备 stream 面。
-// 未配置任何凭据（独立态默认）→ 一律通过：那时这条通道本就是回环内开放的。
-func (h *wsCtr) authorizeStream(token string) bool {
-	if !h.creds.Required() {
-		return true
-	}
-	return h.creds.Authorize(token, credential.ScopeStream)
-}
-
-// rejectHandshake 握手失败：记一行（不含令牌值）后以 1008 关闭。
+// rejectHandshake 握手失败：记一行后以 1008 关闭。
 func (h *wsCtr) rejectHandshake(st *connState, reason string) {
 	glog.Warnw(st.ctx, "ws 首帧 attach 被拒，关闭连接", "reason", reason)
 	h.closeWithStatus(st, websocket.StatusPolicyViolation, reason)
@@ -251,8 +231,8 @@ func (h *wsCtr) closeWithStatus(st *connState, status websocket.StatusCode, reas
 // coder/websocket 会在 Read 内自动应答协议层 ping/pong/close 控制帧，
 // 此处只处理应用层 JSON 帧（二进制帧忽略）。
 //
-// 首帧必须是 `attach`（握手）：它承载 stream 面凭据。通过之后本连接才进入订阅语义，
-// 后续帧与 M0 一致（attach/detach/ping）。
+// 首帧必须是 `attach`（握手）。通过之后本连接才进入订阅语义，
+// 后续帧与既有语义一致（attach/detach/ping）。
 func (h *wsCtr) readLoop(st *connState) {
 	for {
 		typ, data, err := st.conn.Read(st.ctx)
@@ -270,10 +250,6 @@ func (h *wsCtr) readLoop(st *connState) {
 		if !st.handshakeDone() {
 			if f.Action != "attach" {
 				h.rejectHandshake(st, "first frame must be attach")
-				return
-			}
-			if !h.authorizeStream(f.Token) {
-				h.rejectHandshake(st, "invalid stream token")
 				return
 			}
 			st.completeHandshake()

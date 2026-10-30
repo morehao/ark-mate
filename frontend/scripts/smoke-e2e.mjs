@@ -24,11 +24,8 @@ import { buildAttachFrame } from '@ark-mate/desktop-contract'
 
 const E2E_BASE = process.env.E2E_BASE || 'http://127.0.0.1:10001'
 const API = E2E_BASE + '/v1/mate'
-// 后端启用凭据时，同一套脚本带上令牌：REST 走 Authorization 头；
-// WS 走**带内首帧 attach**（M1-1 起令牌不进 URL —— 与 apps/web 的 transport 同一条规则，
-// 帧形状也用同一个 buildAttachFrame，避免脚本与产品各写一份）。
-const TOKEN = process.env.MATE_SMOKE_TOKEN || ''
-const AUTH = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}
+// 平台不做鉴权：REST 无需 Authorization；WS 首帧 attach 无凭据（帧形状用 buildAttachFrame）。
+const AUTH = {}
 
 let failed = 0
 const ok = (name) => console.log(`  ✔ ${name}`)
@@ -314,7 +311,7 @@ async function checkWs() {
   await withTimeout(opened, 8000, 'WS open')
   // 首帧必须是通道级 attach（携带 stream 面凭据）；它没有任何服务端响应帧，
   // 因此必须在断言 snapshot 之前发出，否则后续 attach 会被当成握手帧。
-  ws.send(JSON.stringify(buildAttachFrame(TOKEN || null)))
+  ws.send(JSON.stringify(buildAttachFrame()))
   ok(`WS 升级成功（同源直连，无代理层${TOKEN ? '；凭据走带内首帧 attach' : ''}）`)
 
   const nextFrame = (what, ms = 8000) =>

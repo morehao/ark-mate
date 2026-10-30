@@ -11,16 +11,13 @@
  *   3. **桌面态要问壳要基址**：窗口的 origin 是 `mate-app://app`，事件流却必须直连回环
  *      （`protocol.handle` 不承载 WebSocket upgrade，设计 §7.2），所以基址只能由 `boot()` 给。
  *
- * 浏览器态则一切同源：REST 与事件流都打 `location`，通道凭据用独立态的 `MATE_TOKEN`
- * （有则带、无则 null——核心决定要不要）。
+ * 浏览器态则一切同源：REST 与事件流都打 `location`。
  */
-import { getToken } from '@ark-mate/api'
 import { DESKTOP_NAMESPACE, assertMateDesktop, type MateDesktop } from '@ark-mate/desktop-contract'
 
-/** 事件流连接配置：基址 + 通道级凭据（首帧 attach 用）。 */
+/** 事件流连接配置：基址。 */
 export type StreamConfig = {
   baseUrl: string
-  token: string | null
 }
 
 /**
@@ -41,19 +38,19 @@ export function isDesktopCarrier(): boolean {
 /**
  * 解析事件流配置。
  *
- * - 桌面态：`boot()` 下发 `streamBaseUrl`（`ws://127.0.0.1:<port>`）与 `streamToken`；
- * - 浏览器态：同源（dev 走 vite 的 ws 代理、生产直连核心），令牌取独立态的 localStorage。
+ * - 桌面态：`boot()` 下发 `streamBaseUrl`（`ws://127.0.0.1:<port>`）；
+ * - 浏览器态：同源（dev 走 vite 的 ws 代理、生产直连核心）。
  */
 export async function resolveStreamConfig(): Promise<StreamConfig> {
   const carrier = desktopCarrier()
   if (!carrier) {
-    return { baseUrl: sameOriginWsBase(), token: getToken() || null }
+    return { baseUrl: sameOriginWsBase() }
   }
-  const { streamBaseUrl, streamToken } = await carrier.boot()
+  const { streamBaseUrl } = await carrier.boot()
   if (!streamBaseUrl) {
     throw new Error('桌面载体没有给出事件流基址（boot() 返回空）')
   }
-  return { baseUrl: streamBaseUrl, token: streamToken || null }
+  return { baseUrl: streamBaseUrl }
 }
 
 /** 同源 WS 基址（浏览器入口）。 */

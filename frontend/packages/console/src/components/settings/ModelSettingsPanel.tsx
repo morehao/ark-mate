@@ -302,17 +302,17 @@ function ProviderForm({ form, target, busy, keyRef, noopLine, onSubmit, onCancel
       <Form form={form} layout="vertical" preserve={false} initialValues={providerFormValues(target)}>
         <div className="fg-editor-grid">
           <Form.Item
-            label="供应商 id"
+            label="供应商标识"
             name="id"
             rules={[
-              { required: true, message: '供应商 id 不能为空' },
+              { required: true, message: '供应商标识不能为空' },
               { pattern: VENDOR_ID_RE, message: '只能含字母、数字与 . _ -（1–64 位）' },
             ]}
-            extra={editing ? '建好之后不再改动：它进请求与凭据名。' : '1–64 位字母、数字与 . _ -；进请求与凭据名。'}
+            extra={editing ? '创建后不可修改。' : '1–64 位字母、数字与 . _ -。'}
           >
             <Input disabled={editing} placeholder="例如 my-gateway" autoComplete="off" />
           </Form.Item>
-          <Form.Item label="展示名" name="name" extra="只影响平台呈现；留空则显示供应商 id">
+          <Form.Item label="展示名" name="name" extra="只影响平台呈现；留空则显示供应商标识">
             <Input placeholder="可选" autoComplete="off" />
           </Form.Item>
           <Form.Item label="API 协议" name="protocol" rules={[{ required: true, message: '协议必填' }]}>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Empty, Input, Segmented, Space, Spin, Statistic, Tag, Tooltip } from 'antd'
+import { Alert, Button, Empty, Input, Segmented, Space, Spin, Statistic, Tooltip } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import { toErrorMessage, usageSummary } from '@ark-mate/api'
@@ -132,7 +132,7 @@ export function UsagePage() {
   return (
     <PageContainer
       title="用量"
-      description="按日期聚合的轮次、时长、上下文与成本（数据来自 SQLite 读模型；内存模式无统计）。上下文与成本为区间末快照，非区间增量。"
+      description="按日期统计的轮次、时长、上下文与成本。上下文与成本为区间末快照，不是区间增量。"
       extra={
         <Space>
           <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
@@ -159,9 +159,6 @@ export function UsagePage() {
         {data && (
           <span style={{ marginLeft: 'auto', fontSize: 12, color: tokens.textSecondary }}>
             区间 {fmtDay(data.from)} ~ {data.to ? fmtDay(data.to) : '至今'}
-            <Tag style={{ marginInlineStart: 8, fontSize: 11 }} color={data.source === 'sqlite' ? 'blue' : 'default'}>
-              {data.source}
-            </Tag>
           </span>
         )}
       </div>

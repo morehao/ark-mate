@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Alert, Button, Input, Modal, Select, Space } from 'antd'
+import { Alert, Button, Input, Modal, Space } from 'antd'
 import { tokens } from '@ark-mate/ui'
 import type { Skill } from '@ark-mate/types'
 import { skillFormValues, type SkillFormValues } from '../../console/capabilityView'
@@ -8,10 +8,10 @@ const SKILL_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const DEFAULT_BODY = '# 技能名\n\n## 何时使用\n\n- 说明触发场景。\n\n## 工作步骤\n\n1. 第一步。\n'
 
 /**
- * 技能编辑器（720）：表单 + 「高级（JSON）」。
+ * 技能编辑器（720）：只编辑名称、描述与技能内容。
  *
- * 表单只改**已知键**，且编辑时只提交发生变化的键（patch 在 `capabilityView.ts` 里成文）。
- * 未知键与 `null`/`[]` 这类精确表达走高级入口——那正是原文 JSON 编辑器存在的理由，不删。
+ * 投放对象 / 作用域 / 高级 JSON 这些内部配置不面向普通用户，已从界面移除；
+ * 「调用名」是技能的内部标识（同时用于 @ 调用），只读展示、不可编辑。
  */
 export function SkillEditorModal({
   open,
@@ -20,7 +20,6 @@ export function SkillEditorModal({
   error,
   onCancel,
   onSubmit,
-  onAdvanced,
 }: {
   open: boolean
   skill: Skill | null
@@ -28,7 +27,6 @@ export function SkillEditorModal({
   error: string | null
   onCancel: () => void
   onSubmit: (values: SkillFormValues) => Promise<void>
-  onAdvanced: (values: SkillFormValues) => void
 }) {
   const created = skill === null
   const [values, setValues] = useState<SkillFormValues>(() =>
@@ -55,9 +53,9 @@ export function SkillEditorModal({
   const submit = (): void => {
     const id = values.id.trim()
     if (created) {
-      if (!id) return setLocalErr('id 必填：它同时是定义文件名与投放目录名')
+      if (!id) return setLocalErr('调用名必填')
       if (!SKILL_ID_RE.test(id) || id.length > 64) {
-        return setLocalErr('id 须小写字母/数字、用连字符分段（形如 weekly-report），≤64 位')
+        return setLocalErr('调用名只能用英文小写字母/数字，用连字符分段（例如 weekly-report），≤64 位')
       }
     }
     if (!values.name.trim()) return setLocalErr('名称必填')
@@ -81,9 +79,9 @@ export function SkillEditorModal({
       destroyOnHidden
       title={
         <div>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>{created ? '新建 skill' : '编辑 skill'}</div>
-          <div style={{ marginTop: 2, fontSize: 11, color: tokens.textPlaceholder, fontFamily: tokens.fontMono }}>
-            {created ? '定义与投放目录都用 id' : values.id}
+          <div style={{ fontSize: 15, fontWeight: 600 }}>{created ? '新建技能' : '编辑技能'}</div>
+          <div style={{ marginTop: 2, fontSize: 11, color: tokens.textPlaceholder }}>
+            {created ? '创建后调用名不可修改' : `调用名：${values.id}`}
           </div>
         </div>
       }
@@ -91,9 +89,6 @@ export function SkillEditorModal({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
           <Button onClick={onCancel}>取消</Button>
           <Space size={8}>
-            <Button type="text" onClick={() => onAdvanced(values)}>
-              高级（JSON）
-            </Button>
             <Button type="primary" loading={busy} onClick={submit}>
               {created ? '新建' : '保存'}
             </Button>
@@ -103,20 +98,20 @@ export function SkillEditorModal({
     >
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <div>
-          <div style={{ fontSize: 11, color: tokens.textSecondary, marginBottom: 4 }}>id *</div>
+          <div style={{ fontSize: 11, color: tokens.textSecondary, marginBottom: 4 }}>名称 *</div>
+          <Input value={values.name} placeholder="周报生成器" onChange={(e) => patch({ name: e.target.value })} />
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: tokens.textSecondary, marginBottom: 4 }}>调用名</div>
           <Input
             value={values.id}
-            disabled={!created}
+            disabled
             placeholder="weekly-report"
             onChange={(e) => patch({ id: e.target.value })}
           />
           <div style={{ marginTop: 3, fontSize: 10.5, color: tokens.textPlaceholder }}>
-            {created ? '小写字母/数字/连字符；创建后不可改。' : '创建后不可改（要换 id 就删掉重建）。'}
+            {created ? '英文小写字母/数字/连字符；创建后不可修改。' : '创建后不可修改。'}
           </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 11, color: tokens.textSecondary, marginBottom: 4 }}>名称 *</div>
-          <Input value={values.name} placeholder="周报生成器" onChange={(e) => patch({ name: e.target.value })} />
         </div>
       </div>
 
@@ -129,40 +124,8 @@ export function SkillEditorModal({
         />,
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <div>
-          <div style={{ fontSize: 11, color: tokens.textSecondary, margin: '10px 0 4px' }}>投放对象</div>
-          <Select
-            mode="tags"
-            style={{ width: '100%' }}
-            value={values.runtimes}
-            placeholder="留空 = 全部 runtime"
-            onChange={(v: string[]) => patch({ runtimes: v })}
-            options={[{ value: 'dsh', label: 'dsh' }]}
-          />
-          <div style={{ marginTop: 3, fontSize: 10.5, color: tokens.textPlaceholder }}>
-            留空 = 投放给所有支持 skill 投影的 runtime，不是「没有投放对象」。
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 11, color: tokens.textSecondary, margin: '10px 0 4px' }}>作用域</div>
-          <Select
-            style={{ width: '100%' }}
-            value={values.scope}
-            onChange={(v: 'global' | 'workspace') => patch({ scope: v })}
-            options={[
-              { value: 'global', label: 'global' },
-              { value: 'workspace', label: 'workspace' },
-            ]}
-          />
-          <div style={{ marginTop: 3, fontSize: 10.5, color: tokens.textPlaceholder }}>
-            workspace 目前只落声明（按工作区落点待实测）。
-          </div>
-        </div>
-      </div>
-
       {field(
-        'SKILL.md',
+        '技能内容',
         <Input.TextArea
           value={values.body}
           onChange={(e) => patch({ body: e.target.value })}
@@ -170,7 +133,7 @@ export function SkillEditorModal({
           spellCheck={false}
           style={{ fontFamily: tokens.fontMono, fontSize: 12.5 }}
         />,
-        '保存前会扫描正文：critical 规则直接拒载，且零字节落盘。',
+        '描述这个技能在什么场景使用、按什么步骤做事。保存前会自动检查内容。',
       )}
 
       {localErr && <Alert type="error" showIcon style={{ marginTop: 10 }} message={localErr} />}

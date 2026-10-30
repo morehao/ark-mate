@@ -29,7 +29,6 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrusage"
 	"github.com/morehao/ark-mate/internal/controller/ctrworkspace"
 	"github.com/morehao/ark-mate/internal/controller/ctrws"
-	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/golib/biz/gserver/ginserver"
 )
@@ -61,17 +60,6 @@ type Controllers struct {
 type Deps struct {
 	Controllers Controllers
 
-	// Credentials 凭据表（见 internal/core/credential）。
-	//
-	// 空表 = 不鉴权（默认，仅绑定回环地址时的历史行为）。非空时：
-	//   - 除 /health 外的 REST 路由要求具备 **rest 面**的凭据（`Authorization: Bearer <token>`，
-	//     不接受 `?token=`）；
-	//   - `/ws/events` **不挂** REST 凭据中间件——事件流的鉴权是**带内**的：
-	//     连接建立后须在 5s 内发首帧 `attach` 并携带**stream 面**凭据（见 controller/ctrws）。
-	//
-	// 桌面态两个面互斥（restToken / streamToken），独立态是同一条令牌同时带两个面。
-	Credentials *credential.Set
-
 	// Web 已解析的前端资产（装配层用 ResolveAssets 得到）。零值 = 不挂前端（只有测试会这样）。
 	Web AssetInfo
 
@@ -99,7 +87,6 @@ type Deps struct {
 // 实时通道契约见 docs/architecture.md §6.2。
 func New(d Deps) *gin.Engine {
 	ctrls := d.Controllers
-	creds := d.Credentials
 
 	r := gin.New()
 	// **不要打开 `r.ContextWithFallback`**（2026-10-27 实测，见
@@ -128,8 +115,8 @@ func New(d Deps) *gin.Engine {
 	//
 	// **WS 单独处置**：事件流那一组来源判定在控制器里做（Accept 之前，见 ctrws.Options.OriginCheck），
 	// 所以它的组要在 Use 之前取——gin 的 Group() 会复制当时的 handler 链。
-	// 为什么不让中间件也盖住 WS：事件流的凭据本来就走**带内首帧**、不挂 REST 凭据中间件
-	// （浏览器无法为 WS 握手设请求头），来源判定同理归控制器——两处都挂会让 WS 的那份判定变成
+	// 为什么不让中间件也盖住 WS：WS 的入站判定归控制器（在其 Accept 之前完成），来源判定
+	// 与 REST 共用同一个对象——两处都挂会让 WS 的那份判定变成
 	// 永不执行的摆设，且"哪一层真正拦住了 WS"变得含糊。两处共用**同一个** OriginPolicy 对象
 	// （Decide 是唯一实现），所以哪一种挂法都不会分叉。
 	//
@@ -139,15 +126,13 @@ func New(d Deps) *gin.Engine {
 	wsGroup := v1.Group("")
 	v1.Use(middleware.Origin(d.Origin))
 
-	// 健康检查保持免鉴权（容器编排/反代的 liveness 探针不携带令牌）。
+	// 健康检查（容器编排/反代的 liveness 探针）。
 	v1.GET("/health", health)
-	// 实时事件流：鉴权在**带内**（首帧 attach 带 stream 面凭据），因此不挂 REST 凭据中间件。
-	// 来源判定走**同一个** OriginPolicy（WS 也要看 Host），见 ctrws.Options.OriginCheck。
-	registerStream(wsGroup, ctrls.WS, creds, d.Origin)
+	// 实时事件流：来源判定走**同一个** OriginPolicy（WS 也要看 Host），见 ctrws.Options.OriginCheck。
+	registerStream(wsGroup, ctrls.WS, d.Origin)
 
-	// 其余全部 REST 路由统一要求 rest 面凭据（空表时中间件是放行 no-op）。
+	// 其余全部 REST 路由。
 	rest := v1.Group("")
-	rest.Use(middleware.Credential(creds, credential.ScopeREST))
 
 	registerWorkspace(rest, ctrls.Workspace)
 	registerCommandPolicy(rest, ctrls.CommandPolicy)

@@ -2,17 +2,14 @@
  * 桌面壳主进程（M1-6：启动链 + 托盘 + 退出语义）。
  *
  * 启动链（设计 §7.1）：
- *   单实例锁 claim → 注册并锁定 `mate-app://` scheme → spawn 核心（`:0` + 双凭据经 stdin
+ *   单实例锁 claim → 注册并锁定 `mate-app://` scheme → spawn 核心（`:0`
  *   + `--ready-stdout` + `--exit-with-parent`）→ 读就绪行拿地址 → health 复核
- *   → 开窗口 `loadURL('mate-app://app/')` → 壳服务 index/assets、反代 `/v1/*`（注入 restToken）。
+ *   → 开窗口 `loadURL('mate-app://app/')` → 壳服务 index/assets、反代 `/v1/*`。
  *
  * 退出语义（设计 §7.4，M1-6）：
  *   关窗 → 隐藏到托盘（首次给一次持久化确认）→ 真正退出时：**先问核心有没有在途轮次**
  *   （2s 上限，超时按"有任务"保守处理）→ 有则二次确认 → `SIGTERM` → 宽限 3s → 对**进程组** `SIGKILL`。
  *   壳被 `kill -9` 时这条链断在中途，由核心自己的 `--exit-with-parent` 兜底。
- *
- * 令牌分层（设计 §7.2）：`restToken` 只在主进程出现（本文件 + scheme 反代）；
- * `streamToken` 经 `boot()` 下发给页面。两者都不进 argv/env/文件/URL。
  */
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import { join } from 'node:path'
@@ -303,8 +300,7 @@ if (!app.requestSingleInstanceLock()) {
     // IPC handlers：preload 暴露面的另一端（M1-4）。必须在开窗口之前装好——
     // 窗口一加载就可能调 boot()。
     installIpcHandlers({
-      streamEndpoint: () =>
-        core ? { streamBaseUrl: `ws://${core.addr}`, streamToken: core.streamToken } : null,
+      streamEndpoint: () => (core ? { streamBaseUrl: `ws://${core.addr}` } : null),
       window: () => win,
     })
 

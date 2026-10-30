@@ -175,7 +175,7 @@ function killOurTree() {
   }
 }
 
-// ——— 经壳反代说话（restToken 由壳的主进程注入，脚本拿不到也不需要）———
+// ——— 经壳反代说话（脚本不需要任何凭据）———
 
 const apiGet = (cdp, path) =>
   cdp.evalJs(`const r = await fetch(${JSON.stringify(path)}); return await r.json()`)

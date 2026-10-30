@@ -18,7 +18,7 @@ import { SessionPane } from './SessionPane'
 
 /**
  * 常驻左栏（唯一导航面）：品牌 + 一级/二级导航 + 会话区 + footer。
- * footer 只有「设置」一个入口：点一下直接开设置弹窗（分节在弹窗内切，含原来的「令牌」——
+ * footer 只有「设置」一个入口：点一下直接开设置弹窗（分节在弹窗内切——
  * 见 console/settingsView.tsx 与 components/settings/SettingsDialog.tsx）。
  *
  * 纪律：导航条目只在 `console/navView.tsx` 定义；交互态（hover / 选中 / 展开）只在
