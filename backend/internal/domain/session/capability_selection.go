@@ -172,6 +172,89 @@ func DerefList(in *[]string) []string {
 	return out
 }
 
+// ——— M3-8：会话内改能力的三态补丁 ———
+//
+// 补丁的形状必须是三态：**键缺失 = 不改**、`null` = 置回「未声明」、值 = 置为该值。
+// 只用 `*[]string` 表达不了第一条与第二条的区别（两者都反序列化成 nil），所以每层都多一个
+// `Set` 布尔：wire 侧由 `json.RawMessage` 区分「键在不在」，域侧由 `Set` 区分「要不要动」。
+//
+// 为什么不干脆做「整体替换」（像 PUT）：前端只改了技能那一格时，整体替换会把另外两格一起
+// 写一遍——那意味着"只换技能"也可能顺手把专家清掉，而用户什么都没点。
+
+// OptionalIDs 一次「可缺席的 id 列表」赋值：Set=false → 不改；Set=true → 置为 Value（nil = 未声明）。
+type OptionalIDs struct {
+	Set   bool
+	Value *[]string
+}
+
+// OptionalString 同 OptionalIDs，元素是单个字符串（专家 id：nil = 未声明、"" = 明确不用）。
+type OptionalString struct {
+	Set   bool
+	Value *string
+}
+
+// CapabilityPatch 会话内改能力的补丁（逐 kind 独立，语义见 OptionalIDs）。
+type CapabilityPatch struct {
+	Skills OptionalIDs
+	Mcps   OptionalIDs
+	Expert OptionalString
+}
+
+// ApplyCapabilityPatch 把补丁合并到当前选定上，返回**新对象**（不改入参，current 可为 nil）。
+//
+// 结果一律规范化（去空串/去重/升序、专家 id 去空白）：与创建路径同一条规则，
+// 否则"同一个选定换个写法"会算出不同指纹，白起一个进程。
+func ApplyCapabilityPatch(current *CapabilitySelection, p CapabilityPatch) *CapabilitySelection {
+	out := &CapabilitySelection{}
+	if current != nil {
+		out.Skills, out.Mcps, out.Expert = current.Skills, current.Mcps, current.Expert
+	}
+	if p.Skills.Set {
+		out.Skills = cloneIDs(p.Skills.Value)
+	}
+	if p.Mcps.Set {
+		out.Mcps = cloneIDs(p.Mcps.Value)
+	}
+	if p.Expert.Set {
+		out.Expert = cloneString(p.Expert.Value)
+	}
+	return out.normalized()
+}
+
+// EquivalentCapabilitySelection 两份选定对**用户**是不是同一件事（规范化后逐字节比较）。
+//
+// nil（未声明）与 `{}`（声明了但不限制）在这里等价：两者都回落默认投放，用户看到的能力集一样。
+// 它只用于回答「这次编辑要不要写库」——**不要**拿它判代际：空串与 `{}` 的指纹不同
+// （前者为空、后者非空），代际要的是指纹比较（见 `capability_fingerprint.go`）。
+func EquivalentCapabilitySelection(a, b *CapabilitySelection) bool {
+	if a.Empty() && b.Empty() {
+		return true
+	}
+	return MarshalCapabilitySelection(a) == MarshalCapabilitySelection(b)
+}
+
+// cloneIDs 深拷贝一份 id 列表（nil 保持 nil；**空切片保持空切片**）。
+//
+// 不能用 `append([]string(nil), (*in)...)`：空切片会被它变成 nil，于是"明确一个都不要"
+// 在合并后悄悄变成"未声明"——那正是三态里最不该被抹平的一格。
+func cloneIDs(in *[]string) *[]string {
+	if in == nil {
+		return nil
+	}
+	out := make([]string, len(*in))
+	copy(out, *in)
+	return &out
+}
+
+// cloneString 深拷贝一个可空字符串（nil 保持 nil）。
+func cloneString(in *string) *string {
+	if in == nil {
+		return nil
+	}
+	v := *in
+	return &v
+}
+
 // SessionCapabilitiesRespOf 把会话钉住的选定折叠成对外形态（nil = 未声明 → 缺省路径）。
 //
 // 判据是**记录本身**（CapabilityJSON 空 = 未声明），不是"指纹是否为空"：

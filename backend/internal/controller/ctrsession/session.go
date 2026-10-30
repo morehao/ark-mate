@@ -23,6 +23,7 @@ type SessionCtr interface {
 	Search(c *gin.Context)
 	Get(c *gin.Context)
 	Update(c *gin.Context)
+	UpdateCapabilities(c *gin.Context)
 	Permissions(c *gin.Context)
 	PermissionMemories(c *gin.Context)
 	RevokeMemory(c *gin.Context)
@@ -71,6 +72,11 @@ type sessionCtr struct {
 	//
 	// 列表 / 检索 / 待投递 / 轮次是纯读模型，域里已折好 DTO；用例层只复述窄接口。
 	read svcsession.ReadSvc
+	// capEdit 会话**能力写面**用例（M3-8）：会话内改技能/MCP/专家。
+	//
+	// 与 meta 分开持有：两者都写同一行会话记录，但判据完全不同（meta 判模型解析与元数据子集，
+	// capEdit 判三态补丁、专家物化与可达性），合成一个接口只会让两边都变厚。
+	capEdit svcsession.CapabilityEditSvc
 }
 
 // NewSessionCtr 构造 SessionCtr。
@@ -79,10 +85,10 @@ type sessionCtr struct {
 // 历史读面（第十刀）与详情读面（第四十刀）两个用例在这里造，其余方法的实现仍在 `manager`（逐刀搬）。
 func NewSessionCtr(svc svcsession.SessionSvc, hist svcsession.HistorySvc, detail svcsession.DetailSvc,
 	interaction svcsession.InteractionSvc, queue svcsession.QueueSvc, meta svcsession.MetaSvc,
-	read svcsession.ReadSvc) SessionCtr {
+	read svcsession.ReadSvc, capEdit svcsession.CapabilityEditSvc) SessionCtr {
 	return &sessionCtr{
 		svc: svc, hist: hist, detail: detail, interaction: interaction,
-		queue: queue, meta: meta, read: read,
+		queue: queue, meta: meta, read: read, capEdit: capEdit,
 	}
 }
 
@@ -147,6 +153,25 @@ func (h *sessionCtr) Update(c *gin.Context) {
 		return
 	}
 	resp, err := h.meta.UpdateSession(c.Request.Context(), c.Param("id"), req)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// UpdateCapabilities 会话内改能力（技能 / MCP / 专家）：写 `capability_json`，**下一轮边界生效**。
+//
+// 逐 kind 三态补丁（键缺失 = 不改、`null` = 回未声明、值 = 置为该值），语义与校验都在用例层：
+// 控制器只做绑定与出口。忙时**照样成功**——生效是轮次边界的事（`maybeMigrateGeneration` 会顺延），
+// 这里不替用户判断"现在能不能改"。
+func (h *sessionCtr) UpdateCapabilities(c *gin.Context) {
+	var req dtosession.SessionCapabilitiesPatch
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.capEdit.UpdateCapabilities(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

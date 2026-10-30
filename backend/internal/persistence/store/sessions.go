@@ -123,6 +123,10 @@ func (s *Store) UpdateSessionMeta(ctx context.Context, id string, patch model.Se
 	if patch.ModelID != nil {
 		set["model_id"] = *patch.ModelID
 	}
+	if patch.CapabilityJSON != nil {
+		// 空串是**合法值**（= 未声明能力选择），所以判据只能是"指针非 nil"，不能看取值。
+		set["capability_json"] = *patch.CapabilityJSON
+	}
 	return s.sessions.UpdateMap(ctx, id, set)
 }
 

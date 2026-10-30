@@ -742,6 +742,13 @@ export function ChatPage() {
                     // （dsh 的 ACP 面不含命令）。输入框里打 `/` 时据此给候选，平台不声明这些命令。
                     commands={view?.commands}
                     injectDraft={injectedDraft ?? undefined}
+                    // 会话内改能力（M3-8）：`+` 菜单 + 专家/技能/连接器 chip。能力集是**会话钉住的**
+                    // 那一份（`activeSum.capabilities` 是服务端读面快照，改动后由 store 用响应替换）。
+                    sessionId={activeId}
+                    capabilities={activeSum?.capabilities}
+                    // 底座对不上（历史会话跑在别的底座上）时禁掉入口：那条会话连 prompt 都发不出去，
+                    // 改能力只会换来一次「能力不可达」的拒绝。
+                    capabilitiesDisabled={foreignRuntime}
                   />
                   {dockLine && (
                     <div

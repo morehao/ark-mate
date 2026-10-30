@@ -842,7 +842,8 @@ export const consoleStyleSheet = `
     font-size: 10.5px;
     color: ${tokens.textSecondary};
   }
-  .fg-cap-mode-btn:hover { color: ${tokens.text}; }
+  .fg-cap-mode-btn:hover:not(:disabled) { color: ${tokens.text}; }
+  .fg-cap-mode-btn:disabled { cursor: default; opacity: 0.55; }
   .fg-cap-mode-btn.fg-on {
     border-color: ${tokens.border};
     background: ${tokens.softFill};
@@ -857,7 +858,8 @@ export const consoleStyleSheet = `
     border: none; background: transparent; cursor: pointer; padding: 0 4px;
     font-family: ${tokens.fontMono}; font-size: 10.5px; color: ${tokens.primary};
   }
-  .fg-cap-mini:hover { text-decoration: underline; }
+  .fg-cap-mini:hover:not(:disabled) { text-decoration: underline; }
+  .fg-cap-mini:disabled { cursor: default; opacity: 0.55; }
   .fg-cap-list { display: flex; flex-direction: column; max-height: 190px; overflow-y: auto; }
   .fg-cap-opt {
     display: flex; align-items: center; justify-content: space-between; gap: 6px;
@@ -884,6 +886,63 @@ export const consoleStyleSheet = `
   .fg-ws-pill.fg-cap-on {
     border-color: ${tokens.primary};
     color: ${tokens.primary};
+  }
+
+  /* ——— 会话内改能力（M3-8）：输入区的 `+` 菜单与能力 chip ———
+     默认态只有一颗 `+`（没有任何 chip）：这是"这条会话没限制能力"的如实样子，不是省掉了一层。 */
+  .fg-cap-bar { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+  .fg-cap-add {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; padding: 0;
+    border: 1px solid ${tokens.border}; border-radius: 999px;
+    background: ${tokens.surface}; color: ${tokens.textSecondary};
+    cursor: pointer; transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+  }
+  .fg-cap-add:hover:not(:disabled) { border-color: ${tokens.borderStrong}; background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-cap-add:disabled { cursor: default; opacity: 0.55; }
+  /* chip 只在"声明过"的那一格出现：专家用名字首字当头图，技能/连接器带数量。 */
+  .fg-cap-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 24px; max-width: 200px; padding: 0 8px;
+    border: 1px solid ${tokens.border}; border-radius: 999px;
+    background: ${tokens.surface}; color: ${tokens.textSecondary};
+    cursor: pointer; font-size: 11.5px;
+    transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+  }
+  .fg-cap-chip:hover:not(:disabled) { border-color: ${tokens.borderStrong}; background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-cap-chip:disabled { cursor: default; opacity: 0.55; }
+  .fg-cap-chip-avatar {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 999px;
+    background: ${tokens.softFill}; color: ${tokens.text};
+    font-size: 10px; line-height: 1;
+  }
+  .fg-cap-chip-ico { display: inline-flex; color: ${tokens.textPlaceholder}; }
+  .fg-cap-chip-label {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: ${tokens.text};
+  }
+  .fg-cap-chip-count {
+    font-family: ${tokens.fontMono}; font-size: 10.5px; color: ${tokens.textPlaceholder};
+  }
+  .fg-cap-chip-chev { font-size: 9px; color: ${tokens.textPlaceholder}; }
+  /* `+` 菜单（专家 / 技能 / 连接器）：一行一项 + 右侧 chevron，与工作空间弹层同一套语言。 */
+  .fg-cap-menu { display: flex; flex-direction: column; min-width: 200px; }
+  .fg-cap-menu-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border: none; border-radius: 8px;
+    background: transparent; cursor: pointer; text-align: left;
+    font-size: 12.5px; color: ${tokens.text};
+    transition: background 0.12s ease;
+  }
+  .fg-cap-menu-item:hover { background: ${tokens.softFill}; }
+  .fg-cap-menu-ico { display: inline-flex; color: ${tokens.textPlaceholder}; }
+  .fg-cap-menu-label { flex: 1; min-width: 0; }
+  .fg-cap-menu-chev { color: ${tokens.textPlaceholder}; font-size: 12px; }
+  /* 专家行在输入区是 <button>（没有勾选框），把浏览器默认样式抹平。 */
+  button.fg-cap-opt {
+    width: 100%; border: none; background: transparent; cursor: pointer; text-align: left;
+    font: inherit;
   }
 
   .fg-ws-pop { display: flex; flex-direction: column; }

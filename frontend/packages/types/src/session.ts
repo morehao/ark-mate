@@ -248,6 +248,23 @@ export interface SessionPatch {
   model?: string
 }
 
+/**
+ * 会话内改能力的**三态补丁**（`PATCH /sessions/:id/capabilities`）。
+ *
+ * 每一格独立三态，**缺键与 `null` 是两件事**：
+ *  - 缺键（`undefined`）→ 不改这一格；
+ *  - `null` → 回「未声明」（技能/MCP 回默认全量；专家回跟随默认）；
+ *  - `[]` → 明确一个都不要（技能/MCP）；非空 → 白名单；
+ *  - `expert` 的 `''` → 明确不用专家，非空 → 专家 id。
+ *
+ * 语义是**补丁不是整体替换**：只提交被改动的那一格（见 `console/capabilityEdit.ts`）。
+ */
+export interface SessionCapabilitiesPatch {
+  skills?: string[] | null
+  mcps?: string[] | null
+  expert?: string | null
+}
+
 // ——— 权限确认通道（ACP session/request_permission ↔ 用户决策） ———
 
 export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always'

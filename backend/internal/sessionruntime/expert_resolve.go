@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
@@ -36,14 +37,42 @@ type expertResolution struct {
 	persona string
 	// expertID 选中的专家 id（"" = 未选专家）；CreateSession 用它构造首轮惰性 provider。
 	expertID string
+	// expert 解析到的专家定义（nil = 没选/明确不用）。会话内改能力的边界提示要用它的
+	// `Instructions`（人格不重注入）与 `Model`（推荐模型不切换）。
+	expert *capability.Expert
 	// warnings 专家推荐里被跳过的项（kind、id、reason）。
 	warnings []dtosession.CapabilityWarningResp
 }
 
-// resolveExpert 把选定里的专家展开成有效技能/MCP/模型。
+// resolveExpert 把选定里的专家展开成有效技能/MCP/模型（会话创建路径）。
 //
 // selection == nil（未声明能力选择）→ 原样返回，零副作用（缺省路径行为不变）。
 func (s *Service) resolveExpert(ctx context.Context, selection *session.CapabilitySelection, reqModel string) (*expertResolution, error) {
+	// 创建路径的 runtime 就是构建期选定的那一个（会话还没建出来，没有"它自己的 runtime"可读）。
+	res, err := s.resolveExpertFor(runtime.SelectedRuntime(), selection)
+	if err != nil {
+		return nil, err
+	}
+	if res.expert == nil || strings.TrimSpace(reqModel) != "" || strings.TrimSpace(res.expert.Model) == "" {
+		return res, nil
+	}
+	// model：仅当请求未显式指定模型时采用专家推荐；模型行不存在 → 跳过 + 告警，回落平台默认。
+	if s.modelExists(ctx, res.expert.Model) {
+		res.model = res.expert.Model
+	} else {
+		res.warnings = append(res.warnings, dtosession.CapabilityWarningResp{
+			Kind: "model", ID: res.expert.Model, Reason: "专家推荐的模型行不存在，已回落到平台默认",
+		})
+	}
+	return res, nil
+}
+
+// resolveExpertFor 在**指定的 runtime** 上把选定里的专家展开成有效技能/MCP（不碰模型）。
+//
+// 与 `resolveExpert` 分开的理由是**会话内改能力**（M3-8）：那条路径上的 runtime 是会话自己
+// 钉住的那一个（历史会话可能停在别的底座上），不能拿构建期选定的 runtime 去判可达性；而它
+// 也不该顺手改模型（会话内换模型是 `PATCH /sessions/:id` 的事）。
+func (s *Service) resolveExpertFor(rt string, selection *session.CapabilitySelection) (*expertResolution, error) {
 	res := &expertResolution{selection: selection}
 	if selection == nil || selection.Expert == nil {
 		return res, nil
@@ -68,7 +97,6 @@ func (s *Service) resolveExpert(ctx context.Context, selection *session.Capabili
 	// 物化一份**副本**（不改调用方持有的选择；列表来源保持 nil 的语义另见下方）。
 	out := &session.CapabilitySelection{Skills: selection.Skills, Mcps: selection.Mcps, Expert: selection.Expert}
 
-	rt := runtime.SelectedRuntime()
 	// skills：仅当请求未声明该 kind 时吃专家推荐。
 	if out.Skills == nil {
 		if reachable, warns := s.reachableSkills(rt, expert.Skills); len(expert.Skills) > 0 {
@@ -83,18 +111,11 @@ func (s *Service) resolveExpert(ctx context.Context, selection *session.Capabili
 			res.warnings = append(res.warnings, warns...)
 		}
 	}
-	// model：仅当请求未显式指定模型时采用专家推荐；模型行不存在 → 跳过 + 告警，回落平台默认。
-	if strings.TrimSpace(reqModel) == "" && strings.TrimSpace(expert.Model) != "" {
-		if s.modelExists(ctx, expert.Model) {
-			res.model = expert.Model
-		} else {
-			res.warnings = append(res.warnings, dtosession.CapabilityWarningResp{
-				Kind: "model", ID: expert.Model, Reason: "专家推荐的模型行不存在，已回落到平台默认",
-			})
-		}
-	}
+	// model 不在这里处理：模型是创建路径的额外一层（`resolveExpert` 里按"请求没指定"才采用），
+	// 会话内改能力不该顺手换模型。
 	res.selection = out
 	res.expertID = expertID
+	res.expert = &expert
 	// 角色设定块（P1）：instructions 非空才构造；空 = 纯能力预设专家，不注入人格。
 	res.persona = session.BuildExpertRoleBlock(expert.ID, expert.Name, expert.Instructions)
 	return res, nil

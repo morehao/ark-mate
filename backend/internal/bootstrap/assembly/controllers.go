@@ -40,7 +40,7 @@ func (s Services) BuildControllers(creds *credential.Set, origin *middleware.Ori
 	}
 	return router.Controllers{
 		Session: ctrsession.NewSessionCtr(s.Session, s.SessionHistory, s.SessionDetail,
-			s.SessionInteraction, s.SessionQueue, s.SessionMeta, s.SessionRead),
+			s.SessionInteraction, s.SessionQueue, s.SessionMeta, s.SessionRead, s.SessionCapability),
 		Search:        ctrsearch.NewSearchCtr(s.Search),
 		Export:        ctrexport.NewExportCtr(s.Export),
 		Workspace:     ctrworkspace.NewWorkspaceCtr(s.Workspace),
