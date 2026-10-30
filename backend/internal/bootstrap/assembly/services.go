@@ -36,6 +36,7 @@ type Services struct {
 	SessionInteraction svcsession.InteractionSvc
 	SessionQueue       svcsession.QueueSvc
 	SessionMeta        svcsession.MetaSvc
+	SessionCapability  svcsession.CapabilityEditSvc
 	SessionRead        svcsession.ReadSvc
 	Search             svcsearch.SearchSvc
 	Usage              svcusage.UsageSvc
@@ -110,6 +111,7 @@ func (f Facts) BuildServices() Services {
 		SessionInteraction: svcsession.NewInteraction(plane, as.Session),
 		SessionQueue:       svcsession.NewQueue(plane, as.Session),
 		SessionMeta:        svcsession.NewMeta(plane, as.Session),
+		SessionCapability:  svcsession.NewCapabilityEdit(plane, as.Session),
 		SessionRead:        svcsession.NewRead(plane),
 		Search:             svcsearch.New(plane),
 		Usage:              svcusage.New(plane),

@@ -13,6 +13,7 @@ import type {
   CapabilityWriteBody,
   SessionDetail,
   SessionPatch,
+  SessionCapabilitiesPatch,
   SessionPromptResp,
   SessionRun,
   SessionSearchHit,
@@ -250,6 +251,18 @@ export const sessionRuns = (id: string): Promise<{ id: string; runs: SessionRun[
 /** 更新会话元数据（title/pinned/archived 子集，nil 不更新）。 */
 export const updateSession = (id: string, patch: SessionPatch): Promise<SessionSummary> =>
   http.patch<SessionSummary>(`/mate/sessions/${encodeURIComponent(id)}`, patch)
+
+/**
+ * 会话内改能力（技能/MCP/专家）：逐 kind 三态补丁，**下一轮边界生效**（忙时顺延，不打断当前轮）。
+ *
+ * 响应是改后的会话快照：`capabilities` 是**物化后**的选定（专家推荐已展开成具体 id 列表），
+ * `capabilities.warnings` 带被跳过的推荐与本次编辑的边界提示（换专家不重注入人格等）。
+ */
+export const patchSessionCapabilities = (
+  id: string,
+  patch: SessionCapabilitiesPatch,
+): Promise<SessionSummary> =>
+  http.patch<SessionSummary>(`/mate/sessions/${encodeURIComponent(id)}/capabilities`, patch)
 
 /** 新建会话：首轮 prompt + 可选工作空间/模型，后台即起真实会话；返回 attach 续传水位。 */
 export const createSession = (req: CreateSessionReq): Promise<CreateSessionResp> =>

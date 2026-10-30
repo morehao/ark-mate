@@ -753,6 +753,20 @@
     "data_kind": "object"
   },
   {
+    "method": "PATCH",
+    "path": "/v1/mate/sessions/nope/capabilities",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
     "method": "GET",
     "path": "/v1/mate/__no_such_route__",
     "status": 404,

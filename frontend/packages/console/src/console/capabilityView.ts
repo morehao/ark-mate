@@ -306,55 +306,6 @@ export function selectionPayload(
   return out.expert === undefined && out.skills === undefined && out.mcps === undefined ? undefined : out
 }
 
-/** 选定是否已限制任何面（未限制 = 缺省路径，请求体里一个键都不加）。 */
-export function selectionIsDefault(choice: CapabilityChoice): boolean {
-  return choice.expert === null && choice.skills === null && choice.mcps === null
-}
-
-/** 选定 → 药丸文案（短）。`expertName` 用于把专家 id 翻成展示名（缺省时用 id）。 */
-export function selectionPillText(choice: CapabilityChoice, expertName?: string): string {
-  if (selectionIsDefault(choice)) return '能力 · 跟随默认'
-  const parts: string[] = []
-  if (choice.expert !== null) {
-    parts.push(choice.expert === '' ? '通用' : expertName || choice.expert)
-  }
-  if (choice.skills !== null) {
-    parts.push(choice.skills.length === 0 ? '技能：无' : `技能 ${choice.skills.length}`)
-  }
-  if (choice.mcps !== null) {
-    parts.push(choice.mcps.length === 0 ? 'MCP：无' : `MCP ${choice.mcps.length}`)
-  }
-  return '能力 · ' + parts.join(' · ')
-}
-
-/** 选定 → 悬停说明（把"这一个会话会被投什么"讲清楚，含没限制的那一半）。 */
-export function selectionHint(choice: CapabilityChoice, expertName?: string): string {
-  const lines: string[] = []
-  lines.push(
-    choice.expert === null
-      ? '专家：不选（跟随平台默认）'
-      : choice.expert === ''
-        ? '专家：通用（明确不用专家）'
-        : `专家：${expertName || choice.expert}（推荐能力；技能/MCP 未手选时按推荐填充）`,
-  )
-  lines.push(
-    choice.skills === null
-      ? '技能：不加限制（按平台默认/专家推荐投放）'
-      : choice.skills.length === 0
-        ? '技能：一个都不要'
-        : `技能：只用这 ${choice.skills.length} 个`,
-  )
-  lines.push(
-    choice.mcps === null
-      ? 'MCP：不加限制（按平台默认/专家推荐投放）'
-      : choice.mcps.length === 0
-        ? 'MCP：一个都不要'
-        : `MCP：只注入这 ${choice.mcps.length} 个`,
-  )
-  lines.push('能力集按进程绑定：不同选定 = 不同代际（各自一个进程），创建后按下一轮边界生效。')
-  return lines.join('\n')
-}
-
 /**
  * 创建响应里「专家推荐被跳过」的告警 → 一条**非阻断**提示文案（无告警 → null）。
  *

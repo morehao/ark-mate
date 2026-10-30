@@ -19,6 +19,28 @@ type SessionPatch struct {
 	Model *string `json:"model"`
 }
 
+// SessionCapabilitiesPatch 会话内改能力（`PATCH /sessions/:id/capabilities`）。
+//
+// **逐 kind 三态**，三个字段都是 `json.RawMessage`：
+//
+//	键缺失      → nil（不改这一格；gin 的绑定不会给它填值）
+//	null        → 置为「未声明」→ 回落上一层（技能/MCP = 默认全量；专家 = 跟随默认）
+//	[]          → 明确一个都不要（技能/MCP）
+//	["a","b"]   → 白名单（服务端规范化：去空串/去重/升序）
+//	""          → 明确不用专家
+//	"exp_..."   → 选中该专家
+//
+// 为什么不用 `*[]string`：它区分不了「键缺失」与「null」（两者都反序列化成 nil），而这两件事
+// 一个是"别动"、一个是"改回未声明"——混起来会让"只换技能"顺手清掉专家。同样的手法见
+// `SessionCreateReq.AgentID`（那里是为了"出现即拒绝"）。
+//
+// 语义是**补丁**而不是整体替换：前端只提交被改动的 kind（见 `frontend/.../capabilityEdit.ts`）。
+type SessionCapabilitiesPatch struct {
+	Skills json.RawMessage `json:"skills"`
+	Mcps   json.RawMessage `json:"mcps"`
+	Expert json.RawMessage `json:"expert"`
+}
+
 // PromptReq 追加 prompt 请求体（POST /sessions/:id/prompt）。
 type PromptReq struct {
 	Prompt string `json:"prompt" binding:"required"`

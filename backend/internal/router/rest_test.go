@@ -167,6 +167,9 @@ type stubSvc struct {
 	applyModelInactive   bool // ApplyModel 回 false（会话不活跃）
 	metaPatchedID        string
 	metaPatch            model.SessionMetaPatch
+	// 能力写面（M3-8）的两份依赖：替身原样放过（专家物化与可达性由 sessionruntime 的单测覆盖），
+	// 只记下落库值，供"控制器真的把用例接上了"这一层断言。
+	capabilityJSON string
 }
 
 // RestErr 桩：与 manager 一致——已映射错误透传，acp 错误按分类映射（测试只关心 acp→信封码）。
@@ -437,6 +440,20 @@ func (s *stubSvc) UpdateMeta(_ context.Context, id string, meta model.SessionMet
 	s.metaPatchedID, s.metaPatch = id, meta
 }
 
+// ExpandCapabilities 能力写面的物化依赖（M3-8）：替身**原样放过**选定、不产生告警。
+//
+// 这条替身刻意不模拟专家物化：那是 sessionruntime 的判据（`capability_edit_test.go` 覆盖），
+// 路由层只需要确认"请求到了用例、响应回到信封"。
+func (s *stubSvc) ExpandCapabilities(_ context.Context, _ string, sel *session.CapabilitySelection) (
+	*session.CapabilitySelection, []dtosession.CapabilityWarningResp, error) {
+	return sel, nil, nil
+}
+
+// UpdateCapability 能力写面的落库依赖（M3-8）：只记录，不报错。
+func (s *stubSvc) UpdateCapability(_ context.Context, _ string, capabilityJSON string) {
+	s.capabilityJSON = capabilityJSON
+}
+
 // ——— 会话交互面的三份事实（P4a 正文第四十刀）：端口吃**域值对象**，投影在用例层 ———
 //
 // 替身只提供事实、不再提供"已经折好的响应"——后者会让"投影真的发生了吗"无从验证
@@ -590,6 +607,7 @@ func (f restFixture) services() assembly.Services {
 		SessionInteraction: svcsession.NewInteraction(f.plane, f.svc),
 		SessionQueue:       svcsession.NewQueue(f.plane, f.svc),
 		SessionMeta:        svcsession.NewMeta(f.plane, f.svc),
+		SessionCapability:  svcsession.NewCapabilityEdit(f.plane, f.svc),
 		SessionRead:        svcsession.NewRead(f.plane),
 		Search:             svcsearch.New(f.plane),
 		Usage:              svcusage.New(f.plane),
@@ -1107,6 +1125,57 @@ func TestUpdateSessionRoute(t *testing.T) {
 
 	// ④ 未知会话 → 40401（域的存在性判据）。
 	if env, _ := do(t, r, "PATCH", "/v1/mate/sessions/nope", `{"title":"x"}`); env.Code != 40401 {
+		t.Fatalf("未知会话应 40401: %+v", env)
+	}
+}
+
+// TestUpdateCapabilitiesRoute PATCH /sessions/:id/capabilities：会话**能力写面**（M3-8）。
+//
+// 判据落在"请求真的走到用例、结果真的落进记录"上：三态补丁只动出现过的 kind、空数组是
+// "一个都不要"（不是"不改"）、形状不对带码被拒且一个字节都不落库。
+func TestUpdateCapabilitiesRoute(t *testing.T) {
+	svc := &stubSvc{}
+	deps := stubDeps(t, svc)
+	deps.plane.RegisterSession(&session.SessionRec{
+		ID: "s1", RuntimeID: "rtx", Status: "completed", CapabilityJSON: `{"mcps":["fs"]}`,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
+	r := newRestEngine(deps)
+
+	// ① 只改 MCP，且改成"一个都不要"：skills 那一格（没出现在补丁里）必须原样保留。
+	env, code := do(t, r, "PATCH", "/v1/mate/sessions/s1/capabilities", `{"mcps":[]}`)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("信封不符: http=%d env=%+v", code, env)
+	}
+	var resp dtosession.SessionResp
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("data 解析: %v", err)
+	}
+	if resp.Capabilities == nil || resp.Capabilities.Mcps == nil || len(*resp.Capabilities.Mcps) != 0 {
+		t.Fatalf("回执应回显「MCP 一个都不要」: %+v", resp.Capabilities)
+	}
+	if resp.Capabilities.Skills != nil {
+		t.Fatalf("没在补丁里出现的 kind 不该被写成任何值: %+v", resp.Capabilities.Skills)
+	}
+	if got := deps.plane.Rec("s1").CapabilityJSON; got != `{"mcps":[]}` {
+		t.Fatalf("记录里的选定明细不符: %q", got)
+	}
+	if svc.capabilityJSON != `{"mcps":[]}` {
+		t.Fatalf("落库依赖应收到同一份 JSON: %q", svc.capabilityJSON)
+	}
+
+	// ② 形状不对（skills 给了字符串）→ 40001，且记录与落库都停在原处。
+	svc.capabilityJSON = ""
+	env, _ = do(t, r, "PATCH", "/v1/mate/sessions/s1/capabilities", `{"skills":"oops"}`)
+	if env.Code != 40001 {
+		t.Fatalf("内层形状不对应 40001: %+v", env)
+	}
+	if got := deps.plane.Rec("s1").CapabilityJSON; got != `{"mcps":[]}` || svc.capabilityJSON != "" {
+		t.Fatalf("被拒的请求不得改记录/落库: rec=%q stored=%q", got, svc.capabilityJSON)
+	}
+
+	// ③ 未知会话 → 40401（与其余会话写面同一出口）。
+	if env, _ := do(t, r, "PATCH", "/v1/mate/sessions/nope/capabilities", `{"mcps":null}`); env.Code != 40401 {
 		t.Fatalf("未知会话应 40401: %+v", env)
 	}
 }

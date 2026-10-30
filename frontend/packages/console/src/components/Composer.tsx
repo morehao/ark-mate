@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Select } from 'antd'
 import { ArrowUpOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import type { CommandInfo } from '@ark-mate/types'
+import type { CommandInfo, SessionCapabilities } from '@ark-mate/types'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
 import { DELIVERY_HINT, DELIVERY_LABEL, type DeliveryChoice } from '../console/queueView'
 import { applyCommandHint, commandHintQuery, matchCommands, moveHintIndex } from '../console/commandHints'
 import { WorkspaceChipStatic } from './WorkspacePicker'
+import { ComposerCapabilities } from './ComposerCapabilities'
 
 interface Props {
   busy: boolean
@@ -41,6 +42,18 @@ interface Props {
    * 有本地拼写习惯、有 ↑ 翻历史），改成受控会把每一次按键都提给父组件。窄口进、状态自持。
    */
   injectDraft?: { text: string; nonce: number }
+  /**
+   * 当前会话 id（有值才渲染输入区的**能力编辑**入口：`+` 菜单 + 专家/技能/连接器选择器）。
+   *
+   * 新建会话页刻意**不给**：那里走的是 `StartPanel` 的创建流程（选定随 `POST /sessions` 提交），
+   * 而这里是"已建会话改能力"（`PATCH /sessions/:id/capabilities`，下一轮生效）。两条路径的
+   * 语义不同，入口也就该不同——把创建页也改成 `+` 菜单属于另一刀。
+   */
+  sessionId?: string
+  /** 该会话钉住的能力选定（读面快照；缺失 = 三格都未声明）。 */
+  capabilities?: SessionCapabilities | null
+  /** 会话不能继续时禁用能力入口（底座与构建期不一致的历史会话：改了也跑不起来）。 */
+  capabilitiesDisabled?: boolean
 }
 
 /**
@@ -67,6 +80,9 @@ export function Composer({
   workspace,
   commands,
   injectDraft,
+  sessionId,
+  capabilities,
+  capabilitiesDisabled,
 }: Props) {
   const [draft, setDraft] = useState('')
   // 「取出编辑」塞回来的草稿：只在 nonce 变化时生效一次（同一条再取一次也要能生效，故用计数）。
@@ -257,45 +273,57 @@ export function Composer({
             }}
           />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 12,
-                minWidth: 0,
-                fontFamily: tokens.fontMono,
-                fontSize: 10.5,
-                color: tokens.textSecondary,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-              }}
-            >
-              {busy && busyNote && (
-                <span style={{ color: tokens.text, overflow: 'hidden', textOverflow: 'ellipsis' }}>{busyNote}</span>
-              )}
-              {busy && (
-                // 忙时投递模式：排队（等这轮完）或打断（先取消再发）。它紧跟在旁白后面——
-                // 「怎么发」与「现在在干什么」是同一行上的两件事，别让快捷键提示夹在中间。
-                <Select
-                  size="small"
-                  value={delivery}
-                  onChange={(v) => setDelivery(v)}
-                  style={{ minWidth: 118 }}
-                  options={(['after_run', 'interrupt_then_prompt'] as DeliveryChoice[]).map((d) => ({
-                    value: d,
-                    label: DELIVERY_LABEL[d],
-                    title: DELIVERY_HINT[d],
-                  }))}
+            {/* 左下：能力入口（`+` 菜单 + 选中后的 chip）+ 状态/发送键提示。
+                能力 chip 是**输入区的一部分**（"这条会话用哪些能力"与"这条消息怎么发"在同一行），
+                未选中时只留一个 `+`——默认态不加任何装饰（原型第 1 条）。 */}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              {sessionId && (
+                <ComposerCapabilities
+                  sessionId={sessionId}
+                  capabilities={capabilities}
+                  disabled={capabilitiesDisabled}
                 />
               )}
-              <button
-                type="button"
-                title="点击切换发送键：Enter 发送 / Enter 换行"
-                onClick={() => setSendMode((m) => toggleSendKey(m))}
-                className="fg-hint-kbd"
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  minWidth: 0,
+                  fontFamily: tokens.fontMono,
+                  fontSize: 10.5,
+                  color: tokens.textSecondary,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                }}
               >
-                {sendKeyHint(sendMode)} ⇄
-              </button>
+                {busy && busyNote && (
+                  <span style={{ color: tokens.text, overflow: 'hidden', textOverflow: 'ellipsis' }}>{busyNote}</span>
+                )}
+                {busy && (
+                  // 忙时投递模式：排队（等这轮完）或打断（先取消再发）。它紧跟在旁白后面——
+                  // 「怎么发」与「现在在干什么」是同一行上的两件事，别让快捷键提示夹在中间。
+                  <Select
+                    size="small"
+                    value={delivery}
+                    onChange={(v) => setDelivery(v)}
+                    style={{ minWidth: 118 }}
+                    options={(['after_run', 'interrupt_then_prompt'] as DeliveryChoice[]).map((d) => ({
+                      value: d,
+                      label: DELIVERY_LABEL[d],
+                      title: DELIVERY_HINT[d],
+                    }))}
+                  />
+                )}
+                <button
+                  type="button"
+                  title="点击切换发送键：Enter 发送 / Enter 换行"
+                  onClick={() => setSendMode((m) => toggleSendKey(m))}
+                  className="fg-hint-kbd"
+                >
+                  {sendKeyHint(sendMode)} ⇄
+                </button>
+              </span>
             </span>
             <button
               type="button"

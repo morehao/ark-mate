@@ -97,10 +97,16 @@ type SessionMetaPatch struct {
 	Status   *string
 	// ModelID 平台模型行 id（v26 起；`nil` = 不改）。删掉了与之并列的 `ProviderID`——那一列已出列。
 	ModelID *string
+	// CapabilityJSON 会话钉住的能力选定（M3-8 会话内改能力；`nil` = 不改）。
+	//
+	// 它与 `CapabilityFingerprint` 的分工不变：这一列是**用户要的**，指纹是**此刻跑着的**
+	// （下一轮边界才追上来）。刻意**不**在这里一起写指纹——改能力不换代际，换代际发生在
+	// 轮次边界的迁移路径上（`ConnectSession` 落账）。
+	CapabilityJSON *string
 }
 
 // Empty 判断补丁是否为空（空补丁不产生 SQL）。
 func (p SessionMetaPatch) Empty() bool {
 	return p.Title == nil && p.Pinned == nil && p.Archived == nil &&
-		p.Status == nil && p.ModelID == nil
+		p.Status == nil && p.ModelID == nil && p.CapabilityJSON == nil
 }

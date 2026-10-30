@@ -22,6 +22,10 @@ func registerSession(v1 *gin.RouterGroup, ctr ctrsession.SessionCtr, search ctrs
 	v1.POST("/sessions", ctr.Create)
 	v1.GET("/sessions/:id", ctr.Get)
 	v1.PATCH("/sessions/:id", ctr.Update)
+	// M3-8：会话内改能力（技能/MCP/专家）。独立端点而不是塞进 `PATCH /sessions/:id`：
+	// 那条是元数据子集（title/pinned/archived/model），能力选定是另一份语义（逐 kind 三态补丁 +
+	// 专家物化 + 可达性校验），混进去会让两边都长出对方的判断。
+	v1.PATCH("/sessions/:id/capabilities", ctr.UpdateCapabilities)
 	v1.GET("/sessions/:id/history", ctr.History)
 	v1.GET("/sessions/:id/runs", ctr.Runs)
 	v1.POST("/sessions/:id/prompt", ctr.Prompt)

@@ -124,6 +124,8 @@ func contractCases() []contractCase {
 		{"POST", "/v1/mate/sessions", "{not json"},
 		{"GET", "/v1/mate/sessions/nope", ""},
 		{"PATCH", "/v1/mate/sessions/nope", "{}"},
+		// M3-8：会话内改能力（逐 kind 三态补丁；未知会话 → 40401）。
+		{"PATCH", "/v1/mate/sessions/nope/capabilities", "{}"},
 		{"GET", "/v1/mate/__no_such_route__", ""},
 		{"GET", "/v1/mate/sessions/search", ""},
 		{"POST", "/v1/mate/sessions/export", "{}"},

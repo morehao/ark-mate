@@ -89,8 +89,9 @@ type SessionCapabilitiesResp struct {
 	Expert *string `json:"expert,omitempty"`
 	// ExpertMissing 专家定义已被删除（能力仍按创建时物化的列表生效）——读面据此显示「专家已删除」。
 	ExpertMissing bool `json:"expert_missing,omitempty"`
-	// Warnings 仅创建响应可能带：专家推荐里被跳过的不可达项（不含密钥值，只含键名与原因）。
-	// 读面（GET /sessions/:id）不复现它——那是创建那一刻的事实，不是会话的持久属性。
+	// Warnings 仅**写面响应**可能带（创建、会话内改能力）：专家推荐里被跳过的不可达项
+	// （不含密钥值，只含键名与原因），以及「专家人格只在首轮注入」这类本次编辑的边界提示。
+	// 读面（GET /sessions/:id）不复现它——那是某次写动作那一刻的事实，不是会话的持久属性。
 	Warnings []CapabilityWarningResp `json:"warnings,omitempty"`
 	// Fingerprint 钉住的代际指纹（空 = 未声明能力选择）。
 	Fingerprint string `json:"fingerprint,omitempty"`

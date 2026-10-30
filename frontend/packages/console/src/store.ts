@@ -18,6 +18,7 @@ import {
   moveWorkspace as apiMoveWorkspace,
   renameWorkspace as apiRenameWorkspace,
   relocateWorkspace as apiRelocateWorkspace,
+  patchSessionCapabilities,
   promptSession,
   resolveElicitation,
   resolvePermission,
@@ -39,6 +40,7 @@ import type {
   ModelCatalogResp,
   ModelRef,
   QueuedInput,
+  SessionCapabilitiesPatch,
   RunPhase,
   RuntimeDiagnostics,
   RuntimeInfo,
@@ -58,6 +60,7 @@ import {
 } from './console/transcriptView'
 import { setExpanded } from './console/navView'
 import { skippedWarningText } from './console/capabilityView'
+import { capabilityToastText } from './console/capabilityEdit'
 import {
   cancelNotice,
   cancelTone,
@@ -631,6 +634,13 @@ export interface MateActions {
   loadModelCatalog: () => Promise<void>
   /** 会话级模型变更（经运行时 set_config_option 立即生效；运行时拒绝 → 报错且不改元数据）。 */
   updateSessionModel: (id: string, model?: string) => Promise<void>
+  /**
+   * 会话内改能力（技能/MCP/专家）：**下一轮生效**，忙时顺延（不打断当前轮）。
+   *
+   * 用响应**就地替换**那条会话快照（不整表刷新）：响应就是改后的权威读面，能力 chip 要在
+   * 同一次渲染里跟上；失败只 toast——界面因此自然停在旧状态上，不会出现「看起来改了、其实没改」。
+   */
+  updateSessionCapabilities: (id: string, patch: SessionCapabilitiesPatch) => Promise<void>
   /** 发送一轮 prompt；`delivery` 仅在会话正忙时有意义（§6 排队/插话）。 */
   sendPrompt: (text: string, delivery?: DeliveryChoice) => Promise<void>
   /** §6：撤下一条尚未投递的排队输入（收敛以 input_cancelled 事件为准）。 */
@@ -1156,6 +1166,17 @@ export const useMate = create<MateStore>((set, get) => {
       try {
         await updateSession(id, { model })
         await get().refreshSessions()
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    updateSessionCapabilities: async (id, patch) => {
+      try {
+        const next = await patchSessionCapabilities(id, patch)
+        set((s) => ({ sessions: s.sessions.map((x) => (x.id === id ? next : x)) }))
+        // 提示语只说「下一条生效」；服务端回带的告警（推荐被跳过、换专家不重注入人格）缀在后面。
+        showToast(capabilityToastText(next.capabilities?.warnings))
       } catch (err) {
         showToast(toErrorMessage(err))
       }
