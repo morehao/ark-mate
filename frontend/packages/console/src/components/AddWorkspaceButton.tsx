@@ -4,7 +4,6 @@ import { FolderAddOutlined, FolderOpenOutlined, PlusOutlined } from '@ant-design
 import { toErrorMessage } from '@ark-mate/api'
 import { useMate } from '../store'
 import { directoryPickerKind, pickDirectoryNative } from '../directoryPicker'
-import { workspaceLabel } from './WorkspacePicker'
 import { DirectoryBrowser } from './DirectoryBrowser'
 
 /**
@@ -43,9 +42,10 @@ export function AddWorkspaceButton() {
   const adopt = async (path: string) => {
     setBusy(true)
     try {
-      const ws = await createWorkspace(path)
+      await createWorkspace(path)
       setOpen(false)
-      showToast(`已添加工作空间「${workspaceLabel(ws)}」`)
+      // 不加成功 toast：工作空间登记成功后左栏列表会立即刷新出现该条目，这本身就是回执；
+      // 再叠一条「已添加工作空间…」既冗余、又会在点完的瞬间抢视线（见 2026-10-30 反馈）。
     } catch (e) {
       showToast(toErrorMessage(e))
     } finally {
@@ -75,10 +75,10 @@ export function AddWorkspaceButton() {
     setBusy(true)
     setNameError(null)
     try {
-      const ws = await createNamedWorkspace(name)
+      await createNamedWorkspace(name)
       setNaming(false)
       setDraft('')
-      showToast(`已新建工作空间「${workspaceLabel(ws)}」`)
+      // 同上：新建成功后左栏立即出现该工作空间，弹层关闭 + 列表更新已足够，不再叠成功 toast。
     } catch (e) {
       setNameError(toErrorMessage(e))
     } finally {

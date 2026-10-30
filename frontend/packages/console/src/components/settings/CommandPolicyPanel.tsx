@@ -113,7 +113,7 @@ export function CommandPolicyPanel() {
       const r = await updateCommandPolicy(toRules(drafts))
       setResp(r)
       setDrafts(fromResp(r))
-      showToast('命令规则已保存并立即生效')
+      showToast('命令规则已保存并立即生效', 'success')
     } catch (err) {
       showToast(toErrorMessage(err))
     } finally {

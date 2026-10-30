@@ -479,9 +479,17 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
   }
 }
 
+/** toast 语义：错误（默认，红 ⚠）/ 成功（绿 ✓）/ 中性提示（ℹ）。
+ *
+ * 历史包袱：这个浮层最早只服务错误，全站所有提示（含「已复制」「已保存」这种成功回执）都
+ * 戴红警告，读起来像每次都出事了。2026-10-30 起按语义分三态——**默认取 `error`** 是刻意的：
+ * 现存 100+ 个调用点里绝大多数是错误路径，不传即维持原红 ⚠ 行为；成功与中性提示显式传入。 */
+export type ToastTone = 'error' | 'success' | 'info'
+
 interface Toast {
   id: number
   msg: string
+  tone: ToastTone
 }
 
 export interface MateState {
@@ -656,7 +664,7 @@ export interface MateActions {
   setRailMode: (mode: 'active' | 'archived') => void
   /** 左栏「＋」：记下要预选的工作空间，交给新建面板消费（一次性）。 */
   setPreferredWorkspace: (id: string | null) => void
-  showToast: (msg: string) => void
+  showToast: (msg: string, tone?: ToastTone) => void
   hideToast: (id: number) => void
   setDrawer: (open: boolean) => void
   /** 导航组展开/收起（左栏「扩展」）。 */
@@ -745,9 +753,9 @@ function ensureTransport(): WsTransport {
 }
 
 export const useMate = create<MateStore>((set, get) => {
-  const showToast = (msg: string): void => {
+  const showToast = (msg: string, tone: ToastTone = 'error'): void => {
     const id = ++toastSeq
-    set({ toast: { id, msg } })
+    set({ toast: { id, msg, tone } })
     window.setTimeout(() => get().hideToast(id), 4200)
   }
 
@@ -789,7 +797,7 @@ export const useMate = create<MateStore>((set, get) => {
             historyStart: { ...s.historyStart, [id]: !page.has_more },
           }
         })
-        if (page.events.length === 0) showToast('已到会话最早一条')
+        if (page.events.length === 0) showToast('已到会话最早一条', 'info')
         return page.has_more
       } catch (err) {
         reportApiError(err)
@@ -964,7 +972,7 @@ export const useMate = create<MateStore>((set, get) => {
       // （换一个目录 / 换一个工作空间 / 根本不该改），必须让调用方就地显示服务端文案。
       const ws = await apiRelocateWorkspace(id, path)
       await get().loadWorkspaces()
-      showToast(`已把工作空间「${ws.title || ws.path}」指向新目录`)
+      showToast(`已把工作空间「${ws.title || ws.path}」指向新目录`, 'success')
     },
 
     renameWorkspace: async (id, title) => {
@@ -988,6 +996,7 @@ export const useMate = create<MateStore>((set, get) => {
           resp.released_sessions > 0
             ? `已移除登记；${resp.released_sessions} 个会话回到「默认工作空间」，目录与文件未动`
             : '已移除登记；目录与文件未动',
+          'success',
         )
       } catch (err) {
         showToast(toErrorMessage(err))
@@ -1109,7 +1118,7 @@ export const useMate = create<MateStore>((set, get) => {
         // 专家推荐被跳过（A4 的用户可见面）：创建**不阻断**，但必须让用户看见"少了哪几项、为什么"。
         // 非阻断 toast：不改变导航、不进错误态。
         const skipped = skippedWarningText(resp.capabilities?.warnings)
-        if (skipped) showToast(skipped)
+        if (skipped) showToast(skipped, 'info')
         return resp.id
       } catch (err) {
         showToast(toErrorMessage(err))
@@ -1145,7 +1154,7 @@ export const useMate = create<MateStore>((set, get) => {
         const next = await patchSessionCapabilities(id, patch)
         set((s) => ({ sessions: s.sessions.map((x) => (x.id === id ? next : x)) }))
         // 提示语只说「下一条生效」；服务端回带的告警（推荐被跳过、换专家不重注入人格）缀在后面。
-        showToast(capabilityToastText(next.capabilities?.warnings))
+        showToast(capabilityToastText(next.capabilities?.warnings), 'info')
       } catch (err) {
         showToast(toErrorMessage(err))
       }
@@ -1172,7 +1181,7 @@ export const useMate = create<MateStore>((set, get) => {
         const resp = await promptSession(id, delivery ? { prompt: text, delivery } : { prompt: text })
         if (resp.queued) {
           // 队项由 input_queued 事件建项（不靠这里乐观插入）：事件才是队列的唯一事实。
-          showToast(`会话正忙，已入队（${deliveryLabel(delivery ?? '')}）——可随时撤下`)
+          showToast(`会话正忙，已入队（${deliveryLabel(delivery ?? '')}）——可随时撤下`, 'info')
         }
       } catch (err) {
         // 失败恢复忙态（若无终态事件，回退为非忙以便重试）。入队失败时不要动 streaming：
@@ -1195,7 +1204,7 @@ export const useMate = create<MateStore>((set, get) => {
         const res = await apiCancelQueuedInput(id, inputId)
         if (!res.deleted) {
           // 已经不在了（已投递/已作废/被别的标签页撤下）：如实说，不假装成功。
-          showToast('该排队输入已不在队列里（可能已投递或已作废）')
+          showToast('该排队输入已不在队列里（可能已投递或已作废）', 'info')
         }
       } catch (err) {
         showToast(toErrorMessage(err))

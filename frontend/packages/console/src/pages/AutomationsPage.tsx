@@ -178,11 +178,11 @@ export function AutomationsPage() {
     if (editor?.mode === 'create') {
       const created = await guard(createAutomation(writeBody(v, { create: true })))
       if (!created) return
-      showToast(`已创建「${created.name || created.id}」`)
+      showToast(`已创建「${created.name || created.id}」`, 'success')
     } else if (editor?.mode === 'edit') {
       const updated = await guard(updateAutomation(editor.a.id, writeBody(v, { create: false })))
       if (!updated) return
-      showToast(`已保存「${updated.name || updated.id}」`)
+      showToast(`已保存「${updated.name || updated.id}」`, 'success')
     }
     setEditor(null)
     void load()
@@ -200,7 +200,7 @@ export function AutomationsPage() {
     try {
       const out = await runAutomationNow(a.id)
       if (out.status === 'claimed') {
-        showToast(`已启动「${a.name || a.id}」`)
+        showToast(`已启动「${a.name || a.id}」`, 'success')
         if (out.session_id) navigate(`/sessions/${out.session_id}`)
       } else {
         showToast(`「${a.name || a.id}」未运行：${RUN_STATUS_META[out.status].label}${out.reason ? ` —— ${out.reason}` : ''}`)

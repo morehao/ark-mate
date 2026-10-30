@@ -86,7 +86,7 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
    │   │   └─ 历史路径：/capabilities → /extensions；/settings、/settings/agents、/agents → 打开对应设置弹窗并落回问答页
    │   │       （设置不是页面：分节定义 `console/settingsView.tsx`，弹窗宿主 `components/settings/SettingsModals.tsx`）
    │   └─ StatusBar（30px，**常驻每个页面**）：eventbus 水位（左）+ 会话语义提示（仅问答页）+ WS 连接态（最右）
-   └─ toast（右上浮层，仅浮层可带阴影）
+   └─ toast（右上浮层，仅浮层可带阴影；三态图标：错误红 ⚠ / 成功绿 ✓ / 中性灰 ℹ）
 ```
 
 移动端 ≤920px：左栏抽屉化（fixed + translateX，top 0——顶栏已撤，抽屉盖满全高），窄屏顶条出现 burger（唯一开启入口），点导航项/遮罩即收起。
