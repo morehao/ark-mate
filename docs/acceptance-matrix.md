@@ -18,9 +18,7 @@
 | # | 桌面独有的东西 | 桌面侧落地 | 浏览器入口怎么完成 | 桌面靶（`pnpm ui:accept:desktop` 断言） | 浏览器靶（`pnpm ui:accept` 断言） |
 | --- | --- | --- | --- | --- | --- |
 | D1 | 宿主原生目录选择器 | 声明面 `native-dialog`；执行面 `native.pickDirectory`（壳抬 `dialog`） | **同一套**：`POST /workspaces/pick-directory`（核心 spawn `osascript`/zenity）；宿主抬不起来时退化成应用内浏览 | `native 键与契约一致（只剩 pickDirectory）`；`顶层键 = boot/native（无 capabilities / 无 platform）` | `能力声明里 native-dialog 存在且有 browserFallback`；`wsdir`（应用内浏览那一态） |
-| D2 | 事件流的基址与通道级凭据 | `boot()` 下发 `streamBaseUrl` + `streamToken`；WS **直连回环**（不经营反代，见 [`architecture.md`](./architecture.md) §6.2） | 浏览器入口连**同源** `/v1/mate/ws`，令牌走带内首帧 attach（无 token 时免鉴权） | `boot() 下发回环基址与 streamToken`；`streamToken 不在 localStorage/sessionStorage/cookie/HTML`；`streamToken 走首帧 attach → 正常订阅（attach 后 ping/pong 往返）` | `smoke:e2e` / `e2e-live-turn` 的同源连流 |
-| D3 | REST 凭据由壳注入 | 壳反代**覆盖**客户端带来的 `Authorization`（`scheme.ts`），页面从头到尾拿不到 `restToken` | 浏览器入口自己在「设置 → 访问令牌」粘 `MATE_TOKEN`（只存本浏览器 localStorage） | `fetch /v1/mate/meta 经壳反代（restToken 由主进程注入）`；`streamToken 调 REST → 401（V15 互斥）`；**设置里没有「访问令牌」这一节**（见 D3′） | 「设置 → 访问令牌」那一节的读写（A6 单操作员令牌） |
-| D3′ | 由 D3 派生：桌面态**不渲染**「访问令牌」 | 该节在桌面壳里是死 UI——壳反代覆盖 Authorization，粘什么都无效 | 浏览器入口**照常渲染**（那是唯一能配令牌的地方） | 无靶：那一节**不该**在桌面态出现（负向断言，靶只能钉「它在」、钉不了「它不在」）；实现判据在 `settingsView.tsx` 的 `settingsSections()`（按 `entries.desktop` 过滤），声明拉不到时照常渲染 | 同 D3 那格 |
+| D2 | 事件流的基址（WS 直连回环） | `boot()` 下发 `streamBaseUrl`；WS **直连回环**（不经营反代，见 [`architecture.md`](./architecture.md) §6.2） | 浏览器入口连**同源** `/v1/mate/ws`，首帧 attach（无凭据） | 无靶：事件流基址由 boot() 下发，平台不做鉴权、无凭据可断言 | `smoke:e2e` / `e2e-live-turn` 的同源连流 |
 | D4 | 托盘图标与菜单 | `apps/desktop/src/tray.ts`（壳进程，**不进契约**） | **无等价物，也不需要**：纯增强、不阻塞任何流程，声明面里 `browserFallback: none` | 无靶：纯增强、UI 不可观测（壳进程行为，验收脚本够不到）——由 archtest 的 `declaredWithoutConsumer` 登记表兜住「声明了但界面不读」 | 不适用 |
 | D5 | 窗口控制（`setBounds`/`close`）、拖入/粘贴文件真实路径、用系统程序打开 | **已删**（2026-10-11，P3/D5；零调用方） | 不适用（功能本身不存在） | 反过来断言**没有**：`顶层键 = boot/native（无 capabilities / 无 platform）`、`native 键与契约一致（只剩 pickDirectory）` | 不适用 |
 

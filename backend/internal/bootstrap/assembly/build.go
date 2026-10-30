@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
@@ -30,19 +29,12 @@ import (
 
 // Options 装配可选项（M1-1/M1-2；值由命令层解析后交来）。
 type Options struct {
-	// Credentials 凭据表（桌面态双凭据；独立态由 MATE_TOKEN 折叠成一条，见 `credentials`）。
-	Credentials *credential.Set
 	// Payloads 桌面壳**已解析**的随包载荷清单（M3-4）：核心只把它透出到 `/meta`，不自己探测。
 	Payloads []dtosystem.PayloadInfo
 }
 
 // Option 装配可选项的函数式写法。
 type Option func(*Options)
-
-// WithCredentials 注入凭据表。
-func WithCredentials(creds *credential.Set) Option {
-	return func(o *Options) { o.Credentials = creds }
-}
 
 // WithPayloads 注入随包载荷清单。
 func WithPayloads(payloads []dtosystem.PayloadInfo) Option {
@@ -69,7 +61,6 @@ type BuildResult struct {
 	Handler     http.Handler
 	Listener    net.Listener
 	Assets      router.AssetInfo
-	Credentials *credential.Set
 
 	closeOnce sync.Once
 	stop      func()
@@ -136,7 +127,6 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 	as.svc = sessionruntime.NewService(reg, as.bus,
 		sessionruntime.WithPlanes(as.planes), sessionruntime.WithRuntimePlane(as.rconn))
 
-	as.creds = o.Credentials
 	as.lifecycle = registry.New(as.steps()...)
 	if err := as.lifecycle.Start(ctx); err != nil {
 		return nil, err
@@ -154,7 +144,6 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 		Handler:      as.engine,
 		Listener:     as.ln,
 		Assets:       as.assets,
-		Credentials:  as.creds,
 	}
 	res.stop = func() { as.lifecycle.Stop(context.Background()) }
 	return res, nil

@@ -635,7 +635,7 @@ func (f restFixture) services() assembly.Services {
 
 // deps 现造 router.Deps（控制器在此时按当前事实构造）。
 func (f restFixture) deps() router.Deps {
-	return router.Deps{Controllers: f.services().BuildControllers(nil, nil, nil)}
+	return router.Deps{Controllers: f.services().BuildControllers(nil, nil)}
 }
 
 // newRestEngine 走**真实路由装配**（router.New）：路径、鉴权与中间件形态都与线上一致。

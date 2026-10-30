@@ -40,11 +40,10 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 
 - `--addr` 缺省时读 `MATE_ADDR`，其**默认值为 `127.0.0.1:10001`（仅回环）**——`mate serve` 裸跑
   只监听本机（实测 `lsof -nP -iTCP -sTCP:LISTEN` 显示 `127.0.0.1:10001`，非 `*:10001`）。控制面
-  **无鉴权**，因此：
+  **不做鉴权**，因此：
   - 单机自用：保持默认即可，无需额外参数；
-  - 需跨机访问：**先设 `MATE_TOKEN`（A6 单操作员令牌，见 §2.3.2）**，再显式
-    `--addr 0.0.0.0:10001`（或 `MATE_ADDR=0.0.0.0:10001`）并置于反向代理/内网之后，用防火墙或
-    安全组限制来源；**不要**无令牌直接暴露到公网。容器场景需显式 `MATE_ADDR=0.0.0.0:10001`（见 §4）。
+  - 需跨机访问：显式 `--addr 0.0.0.0:10001`（或 `MATE_ADDR=0.0.0.0:10001`）并置于反向代理/内网之后，
+    **由反向代理层自行加鉴权**，用防火墙或安全组限制来源；**不要**把裸核心直接暴露到公网。容器场景需显式 `MATE_ADDR=0.0.0.0:10001`（见 §4）。
 - 生产建议 `GIN_MODE=release`（否则每次启动打印 debug 模式告警）。
 - 会话 wire transcript（`~/.ark-mate/transcripts/*.jsonl`）与 SQLite 库含**完整对话原文**，按敏感数据
   对待（文件权限）；**v20 起库里还有明文密钥**，所以 `backups/` 目录 0700 / 备份文件 0600 是硬要求（§6），
@@ -99,10 +98,9 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
   不列文件）。**它可以枚举任意可读目录**——这是产品口径（v14.5：选工作区是全系统），不是配置疏漏。
   桌面入口更进一步：那个动作直接调**宿主原生选择器**（`__MATE_DESKTOP__.native.pickDirectory`），
   与应用内浏览**互斥编排**（载体在走原生、不在走浏览；判定只有一份 `directoryPicker.ts`）。
-  对外提供服务（反代/容器/多人）时的实际防护只剩一层：
-  1. 设 `MATE_TOKEN`（平台默认只绑回环，对外必须先鉴权）——**这是唯一的一道闸**；
-  2. `MATE_WORKSPACE_ROOTS` 现在只影响"目录浏览从哪儿起步"，**不构成边界**：设了它，能选的目录也不会变少。
-     要真正限制可写范围，请用运行用户（容器 / 系统账号）的文件权限来收。
+  对外提供服务（反代/容器/多人）时：平台**不做鉴权**（单用户、只绑回环），对外暴露请**在反向代理层自行加鉴权**；
+  `MATE_WORKSPACE_ROOTS` 只影响"目录浏览从哪儿起步"，**不构成边界**：设了它，能选的目录也不会变少。
+  要真正限制可写范围，请用运行用户（容器 / 系统账号）的文件权限来收。
   符号链接按真身判定（`entries` 与 `files` 都跟随真身取属性）。
 - **"看资料"面**：`GET /workspaces/files?path=` 列文件 + 大小 + 修改时间，与只列目录的 `browse`
   （选工作空间）分工：**files 的条目不可作为 `cwd`**（文件不是合法工作空间）。
@@ -132,10 +130,10 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
   允许挂载晚于进程出现）。交互式设置的反馈必须在当下给——否则保存成功、下次进面板就是错误页。
 - **影响面**：只影响"目录浏览从哪儿起步"与面板里的快捷入口列表。已建会话的 `cwd` 创建即定稿，
   平台不回头否决；目录浏览与建会话都不因它被拒。
-- **防护等级（务必读）**：能调到这条接口的人可以改偏好，但那已经无关紧要——**真正的闸只有
-  `MATE_TOKEN`**（以及运行用户的文件权限）。对外提供服务时请设 `MATE_TOKEN`；
-  `MATE_WORKSPACE_ROOTS` 设在**进程环境变量**里仍会让面板变只读（`mate config` 会打印
-  `面板设置 只读（由该来源锁定）`），但那只锁住"改偏好"，不锁可访问的目录范围。
+- **防护等级（务必读）**：能调到这条接口的人可以改偏好，但那已经无关紧要——平台**不做鉴权**，
+  真正的防护是运行用户的文件权限与反向代理层的鉴权。`MATE_WORKSPACE_ROOTS` 设在**进程环境变量**里
+  仍会让面板变只读（`mate config` 会打印 `面板设置 只读（由该来源锁定）`），但那只锁住"改偏好"，
+  不锁可访问的目录范围。
 
 ### 2.3 环境变量（全部来自 `backend/internal/config/config.go`）
 
@@ -247,27 +245,11 @@ skill 定义的 `runtimes[]` 候选集即可引用它；与内置 id 冲突、�
 
 systemd 场景可直接用同一目录：`EnvironmentFile=-%h/.ark-mate/config/env`（§3 单元里已注释示例）。
 
-### 2.3.2 单操作员令牌（A6）
+### 2.3.2 鉴权（平台不做）
 
-`MATE_TOKEN`（或配置目录 `token`）非空时，除 `/health` 外**全部** `/v1/mate` 路由要求令牌：
-
-```
-MATE_TOKEN=$(openssl rand -hex 24) ./mate serve --addr 0.0.0.0:10001
-curl -H "Authorization: Bearer $MATE_TOKEN" http://127.0.0.1:10001/v1/mate/sessions
-```
-
-- REST：`Authorization: Bearer <token>`（大小写不敏感，允许多余空白）；失败返回 HTTP 401 +
-  信封 `{code:40101,...}`（不是 HTTP 200 的业务错误——鉴权失败在传输层就该是 401）。
-- WS `/v1/mate/ws/events`：浏览器无法为握手设置请求头，故接受 `?token=<token>`。
-- `/health` 保持免鉴权（容器编排/反代 liveness 探针）。
-- 恒定时间比较；令牌不出现在日志里，`mate config` 只打印掩码。
-  这里的「不出现在日志里」由 golib 的访问日志默认脱敏保证（`ginmiddleware.AccessLog`
-  自 golib v1.32.16 起按字段名脱敏 `*token*`/`*secret*`/`*password*` 等，`?token=` 落进
-  日志时值为 `***`）。**反代/网关自身的访问日志不在其内**，对外暴露时仍需在那一层
-  自行处理查询串。
-- 面板：顶栏「令牌」按钮填写（localStorage，仅本浏览器）；401 时自动弹出提示。
-- 这是**单操作员**令牌，不是多用户/RBAC：无用户、无角色、无审计区分。多人共用请置于
-  带认证的反向代理之后（或等后续切片）。
+平台**不做鉴权**：面向单用户、默认只绑回环。没有 `MATE_TOKEN`、没有分面凭据、没有 `--auth-stdin`；
+`/health`、REST 与事件流一律开放（仅受 Host/Origin 矩阵约束）。`mate config` 也不再打印任何令牌。
+要对外提供服务，请在**反向代理层**自行加鉴权（Basic / OAuth / mTLS 等），不要把裸核心直接暴露到公网。
 
 ### 2.3.3 命令门禁（A2）
 
@@ -458,7 +440,7 @@ docker run -d --name ark-mate -p 127.0.0.1:10001:10001 \
 curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 ```
 
-compose 的全部可调变量（端口/令牌/工作区起始位置/镜像形态/镜像站）都有默认值，模板见仓库根
+compose 的全部可调变量（端口/工作区起始位置/镜像形态/镜像站）都有默认值，模板见仓库根
 `.env.example`：`cp .env.example .env` 后放开需要的行即可。**但 `.env` 不只 compose 读——`dsh`
 底座自己也会读它**（真实运行时读「调用目录」的 `.env`），而 `DSH_VERSION` 属于它的保留键
 （`DSH_` 前缀，另有 49 个固定名单与 `XDG_`/`DYLD_`/`BASH_FUNC_` 四个前缀）：写进 `.env` 会让
@@ -476,7 +458,7 @@ shell 环境（`export DSH_VERSION=…` 或 `DSH_VERSION=… docker compose up -
 | `MATE_WORKSPACE_DIR` | `/data/workspaces` | 代建工作空间必须落在可写挂载上，否则容器重建即丢（§2.2.1） |
 | PID 1 | `tini` | daemon 会派生底座子进程（`dsh`），容器里需要 init 回收孤儿进程 |
 | 运行用户 | `mate`（uid/gid 10001，`--build-arg MATE_UID/MATE_GID` 可改） | 非 root；bind mount 的属主需与之一致 |
-| `HEALTHCHECK` | `curl` 打 `/v1/mate/health` | 端口从 `MATE_ADDR` 现取；`/health` 免鉴权，配了 `MATE_TOKEN` 也通（§2.3.2） |
+| `HEALTHCHECK` | `curl` 打 `/v1/mate/health` | 端口从 `MATE_ADDR` 现取；`/health` 免鉴权（平台不做鉴权） |
 
 ### 4.2 容器里的底座与工作空间（两个硬要求）
 
@@ -507,7 +489,7 @@ shell 环境（`export DSH_VERSION=…` 或 `DSH_VERSION=… docker compose up -
    要在面板里维护它就别在 env 里设 `MATE_WORKSPACE_ROOTS`。
    注意它**不再是边界**：容器里能选到的目录由挂载视图与运行用户权限决定，不由这份名单决定。
    bind mount 的写权限按宿主 uid 判定，与容器内 10001 不一致时用 `--build-arg MATE_UID=$(id -u)` 重建。
-   对外暴露端口（反代 / 跨机 / 多人）**先设 `MATE_TOKEN`**，否则等于把控制面与整个挂载视图开放出去（§2.1）。
+   对外暴露端口（反代 / 跨机 / 多人）请**在反向代理层加鉴权**：平台不做鉴权，裸暴露等于把控制面与整个挂载视图开放出去（§2.1）。
 
 ### 4.3 受限网络（镜像站 / 代理 / npm 镜像）
 
@@ -784,8 +766,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
     新增 `session.resumed` 事件（echo 无原生 resume → handoff memo 兜底）。停机日志：
     `停机：会话句柄作废（会话与状态保留，重启后按需续聊） runtime=echo cause=intentional
     conversations=1`。
-  - **鉴权**：`-e MATE_TOKEN=test-token-abc` → `/health` 200（免鉴权）；`/agents` 无令牌 = **401**、
-    错令牌 = **401**、正确 `Bearer` = 200。
+  - **鉴权**：平台**不做鉴权**（历史版本曾用 `MATE_TOKEN`，现已移除）；`/health` 与其余路由均直接 200。
   - **开关守卫**：`docker build --build-arg WITH_DSH=true .`（默认最小 target）**构建失败**，报
     「需要底座 target：请加 `--target mate-runtimes`」——刻意不静默忽略。
   - **含底座镜像**：`--target mate-runtimes --build-arg WITH_DSH=true --build-arg WITH_OPENCODE=true`
@@ -878,7 +859,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
   stderr_source=last_error`，尾巴含 `ws read: ... EOF`，`last_error.code=connection_lost`。
   能力探测（`/agents/:id/capabilities`）经远程传输正常返回。
 
-- 定时任务（M4，本机实跑）：`mate serve`（memory 模式、临时目录、`MATE_TOKEN=smoke-token`）+
+- 定时任务（M4，本机实跑）：`mate serve`（memory 模式、临时目录）+
   `E2E_BASE=http://127.0.0.1:10001 MATE_SMOKE_TOKEN=smoke-token node frontend/scripts/smoke-e2e.mjs`
   → 「定时任务面」一节全 PASS：`POST /automations/preview`（`Asia/Shanghai` 09:00 →
   `2026-09-24T01:00:00Z` + 墙钟 `09:00 CST`，3 次严格升序）、非法 schedule → `40001`、
@@ -903,20 +884,15 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
   **+403 KB** 的增量虽小，但"内嵌 tzdata 是承重的"这个结论与体积无关，不受影响。
 - 最小镜像本体（M4-7 补跑）：`GO_PROXY=https://goproxy.cn,direct make image` 成功产出
   `ark-mate:local`（**142 MB**）；`docker run --tmpfs /data -e MATE_STORE=memory
-  -e MATE_TOKEN=... -p 127.0.0.1:10077:10001 ark-mate:local` 起得来且
+  -p 127.0.0.1:10077:10001 ark-mate:local` 起得来且
   `GET /v1/mate/health` → **200 `{"code":0,"msg":"ok"}`**。
   **默认 `GO_PROXY` 是 `proxy.golang.org`，在拉不到它的网络里会卡在 Go 构建阶段**——按 §4
   整组覆盖镜像源即可（本机就是走 `goproxy.cn` 才构建成功的）。
   **这条只能证明"daemon 起得来 + health 通"**：最小镜像不含任何底座，容器内**跑不通一轮对话**
   （`echo` 演示底座已于 M0 删除，容器里没有免 key 自检手段）；要验内置底座用
   `make image/runtimes` + 容器内真实一轮。
-- 单操作员令牌（A6）：`token: cfg-token-9f3a`（config.json）→ `mate config` 输出掩码
-  `cf…3a（14 字符）`；`/health` 无令牌 200；`/agents` 无令牌/错令牌 → **HTTP 401 +
-  `code=40101`**（信封含 requestID 与提示文案），正确 `Bearer` 与 `?token=` 均 200；
-  `POST /conversations/export` 无令牌 401、带令牌 200。WS 探针（Node 24 内置 WebSocket）：
-  无令牌 `ERROR → CLOSE 1006`、错令牌同样被拒、带 `?token=` `OPEN → {"type":"pong"}`。
-  `MATE_SMOKE_TOKEN=… pnpm smoke:e2e` 全 PASS（含 WS 带令牌升级）；`MATE_SMOKE_TOKEN=…
-  node scripts/e2e-live-run.mjs dsh …` 收到 `run.ended`（REST+WS 均带令牌的真实 dsh 轮次）。
+- 单操作员令牌（A6，**已移除**）：该机制不再存在；历史版本曾用 `MATE_TOKEN` / 分面凭据鉴权，
+  本节记录的 `mate config` 掩码与 401 行为仅作沿革，不再复现。今天 `/health` 与其余路由一律开放。
 
 - MCP 工具调用（B1）：真实 stdio MCP server（`/tmp/b1/mcp_pyecho.py`，`MATE_CAPABILITIES` 指向
   含 `pyecho.json` 的目录）→ `POST /mcps/pyecho/probe` `added=3`（echo/boom/slow）；

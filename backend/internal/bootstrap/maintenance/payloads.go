@@ -11,7 +11,7 @@ import (
 
 // 本文件是 `serve --payloads` 的**解析层**（M3-4 的 Go 侧一半）。
 //
-// 分层理由与 `--auth-stdin` 完全相同：JSON 只在这一层被拆开，internal/bootstrap/app 只收**结构化值**
+// 分层理由与 `--web-dir`（资产目录）相同：JSON 只在这一层被拆开，internal/bootstrap/app 只收**结构化值**
 // （app.WithPayloads）。app 包因此不认识 wire 形状，也不做任何字符串级校验。
 
 // payloadSourceBundled 等是壳侧三级解析（设计 §6.5：显式配置 → 随包 → PATH）的命中级别，

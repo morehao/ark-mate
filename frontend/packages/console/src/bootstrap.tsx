@@ -29,12 +29,10 @@ export async function bootstrap(opts: { webBuildId: string }): Promise<void> {
     return
   }
 
-  // 能力声明（`/capabilities`）在挂载界面前读一次，两个消费面都靠它：
-  //   ① 目录选择器的形态是**服务端声明**的（宿主能不能抬系统面板）——挂载后再读会让"第一次点选目录"
-  //      落在错的那条路上（本机浏览器本该用系统面板却开了应用内对话框）；
-  //   ② 设置里"访问令牌"那一节在桌面壳里是**死 UI**（壳的反代会覆盖客户端带来的 Authorization），
-  //      按 `entries.desktop` 收起。
-  // 失败不阻断：拉不到就按 UNKNOWN 走（原生面板不可用 → 应用内浏览；入口按浏览器算 → 该节照常渲染）。
+  // 能力声明（`/capabilities`）在挂载界面前读一次：目录选择器的形态是**服务端声明**的
+  //   （宿主能不能抬系统面板）——挂载后再读会让"第一次点选目录"落在错的那条路上
+  //   （本机浏览器本该用系统面板却开了应用内对话框）。
+  // 失败不阻断：拉不到就按 UNKNOWN 走（原生面板不可用 → 应用内浏览）。
   await loadCapabilityFacts()
 
   createRoot(root).render(

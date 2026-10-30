@@ -1,15 +1,11 @@
 /**
  * 核心子进程的启动与握手（M1-3 起外壳需要它；M1-6 补退出语义、M1-10 补孤儿验收）。
  *
- * 启动链（设计 §7.1）：壳生成两个令牌 → spawn 核心（`:0` + `--auth-stdin` + `--ready-stdout`）
- * → 令牌只经 **stdin 首行** 交付 → 读 stdout 的 `MATE_READY {...}` 拿到实际地址
- * → 再用 `/v1/mate/health` 复核一次（就绪行给出地址，health 证明真的在服务）。
- *
- * 令牌的落点（设计 §7.2 / §9.1）：只在**本进程内存**里——不进 argv、不进 env、不写文件；
- * 子进程环境按设计 §6.6 原样继承调用方环境，因此更不能把令牌塞进 env（runtime 子进程会继承）。
+ * 启动链（设计 §7.1）：spawn 核心（`:0` + `--ready-stdout`）→ 读 stdout 的
+ * `MATE_READY {...}` 拿到实际地址 → 再用 `/v1/mate/health` 复核一次
+ * （就绪行给出地址，health 证明真的在服务）。
  */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import { coreEnvironment } from './env'
 import { payloadEnvironmentExtras, payloadInfoList, resolveRuntimePayloads } from './payload'
@@ -27,10 +23,6 @@ export type CoreHandle = {
   /** 实际监听地址（`127.0.0.1:<内核分配端口>`）。 */
   addr: string
   port: number
-  /** 只给壳的反代用；**从不**进渲染进程。 */
-  restToken: string
-  /** 事件流通道级凭据；经 M1-8 的 boot() 下发。 */
-  streamToken: string
   /** 进程句柄（M1-6 的退出语义要用）。 */
   child: ChildProcessWithoutNullStreams
 }
@@ -41,18 +33,10 @@ export type StartCoreOptions = {
   onLog?: (line: string) => void
 }
 
-/** 生成 32 字节随机 base64url 令牌（与核心侧 `--auth-stdin` 的约定一致）。 */
-export function newToken(): string {
-  return randomBytes(32).toString('base64url')
-}
-
 /**
  * 启动核心并完成握手。失败即抛错（调用方据此显示 `boot-failed` 壳页，而不是留一个白窗口）。
  */
 export async function startCore(opts: StartCoreOptions): Promise<CoreHandle> {
-  const restToken = newToken()
-  const streamToken = newToken()
-
   // 解析随包载荷（M3-4，设计 §6.5）。**在 spawn 之前**：缺载荷时宁可走 boot-failed 恢复页，
   // 也不让核心起来后在第一次会话里才报"runtime 起不来"——那时用户已经等了一轮。
   // 依赖显式注入：载荷根来自 `paths`（那是唯一知道"随包资源在哪"的地方），环境取本进程环境。
@@ -60,12 +44,11 @@ export async function startCore(opts: StartCoreOptions): Promise<CoreHandle> {
 
   const child = spawn(
     opts.exe,
-    // 桌面态的核心：内核分配端口 + 双凭据经 stdin + 就绪行回写 + 父进程消失自退（M1-6）。
+    // 桌面态的核心：内核分配端口 + 就绪行回写 + 父进程消失自退（M1-6）。
     // 核心从不自带前端资产（2026-10-10 起 `-tags release` / `go:embed` 已删）：资产由壳服务，核心按 `--web-dir` 读同一份（M2-6 接线）。
     [
       'serve',
       '--addr', '127.0.0.1:0',
-      '--auth-stdin',
       '--ready-stdout',
       '--exit-with-parent',
       // 资产目录：核心不内嵌，壳把自己服务的那一份显式指过去（M2-6）。
@@ -73,8 +56,7 @@ export async function startCore(opts: StartCoreOptions): Promise<CoreHandle> {
       // 否则版本闸门（M2-4）会把"两份资产"误判成"版本不一致"。
       '--web-dir', webDir(),
       // 载荷清单（M3-4）：核心不解析载荷（那是壳的事），它只把这份**已解析**的结果透出到 `/meta`，
-      // 让诊断面能看到"这次用的是哪一份、来自哪一级"。载荷信息不是凭据，故可进 argv
-      // （与令牌相反：令牌只走 stdin 首行，见文件顶注）。
+      // 让诊断面能看到"这次用的是哪一份、来自哪一级"。
       '--payloads', JSON.stringify(payloadInfoList(payloads)),
     ],
     {
@@ -97,8 +79,7 @@ export async function startCore(opts: StartCoreOptions): Promise<CoreHandle> {
     child.once('error', (err) => reject(new Error(`核心进程启动失败（${opts.exe}）：${err.message}`)))
   })
 
-  // 核心只读首行；写完后关掉写端（"读完后不再读 stdin"，也不会因为管道悬着而挂住）。
-  child.stdin.write(JSON.stringify({ restToken, streamToken }) + '\n')
+  // 核心不读 stdin；直接关掉写端，避免管道悬着。
   child.stdin.end()
 
   createInterface({ input: child.stderr }).on('line', (l) => log(`[core] ${l}`))
@@ -107,7 +88,7 @@ export async function startCore(opts: StartCoreOptions): Promise<CoreHandle> {
   await Promise.race([waitHealthy(addr, log), spawnErr])
 
   const port = Number(addr.slice(addr.lastIndexOf(':') + 1))
-  return { addr, port, restToken, streamToken, child }
+  return { addr, port, child }
 }
 
 /** 读 stdout 直到就绪行（按**行首**匹配：gin 的路由转储等日志同样落在 stdout）。 */
@@ -233,7 +214,6 @@ export async function probeRunningRuns(
   const timer = setTimeout(() => ctl.abort(), timeoutMs)
   try {
     const r = await fetch(`http://${handle.addr}/v1/mate/sessions?limit=200`, {
-      headers: { authorization: `Bearer ${handle.restToken}` },
       signal: ctl.signal,
     })
     if (!r.ok) return { known: false, running: -1 }

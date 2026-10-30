@@ -77,7 +77,6 @@ type assembly struct {
 	services    Services
 	controllers router.Controllers
 	engine      http.Handler
-	creds       *credential.Set
 
 	// cmdRules 命令门禁规则（加载期已校验）。装配期**先读**（坏文件拒绝启动），
 	// 编排器造出来之后再交给裁决点——早一步交给一个还不存在的编排器等于把规则丢掉。
@@ -558,7 +557,6 @@ func (as *assembly) stopAutomationScheduler(context.Context) error {
 // `startRouter` 交给 router）。构造失败不会发生（构造函数只存字段），这里保持 error 签名
 // 只为与 Step 的形状一致。
 func (as *assembly) startControllers(context.Context) error {
-	as.creds = as.credentials()
 	as.services = as.buildServices()
 	as.controllers = as.buildControllers()
 	return nil
@@ -568,15 +566,10 @@ func (as *assembly) startControllers(context.Context) error {
 func (as *assembly) startRouter(ctx context.Context) error {
 	as.engine = router.New(router.Deps{
 		Controllers: as.controllers,
-		Credentials: as.creds,
 		Web:         as.assets,
 		AssetWatch:  as.assetWatch,
 		Origin:      as.origin,
 	})
-	if as.creds != nil && as.creds.Required() {
-		glog.Infow(ctx, "serve: 已启用凭据鉴权（除 /health 外的 REST 要求 rest 面 Bearer；WS 首帧 attach 要求 stream 面）",
-			"entries", as.creds.Count(), "ws_attach_deadline", credential.StreamAttachDeadline)
-	}
 	return nil
 }
 

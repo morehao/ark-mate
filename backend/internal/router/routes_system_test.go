@@ -69,19 +69,3 @@ func TestSystemRoutes(t *testing.T) {
 		t.Errorf("带 X-Mate-Carrier: desktop 时应按桌面入口：%v", entriesDesk)
 	}
 }
-
-// TestSystemRoutesRequireCredentials 两个端点都在 rest 面凭据之后（只有 /health 免鉴权）。
-//
-// 交叉引用：`TestCredentialCoversAllRestRoutes` 会枚举**所有**注册路由逐条断言这一点；
-// 这条则把"这两个端点确实注册了、且确实被拦"钉在同一个用例里，改动分组时更好定位。
-func TestSystemRoutesRequireCredentials(t *testing.T) {
-	eng := newAuthEngine(t, standaloneCreds("secret-token"))
-	for _, path := range []string{"/v1/mate/meta", "/v1/mate/capabilities"} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		w := httptest.NewRecorder()
-		eng.ServeHTTP(w, req)
-		if w.Code != 401 {
-			t.Errorf("%s 无令牌应 401，实际 %d", path, w.Code)
-		}
-	}
-}

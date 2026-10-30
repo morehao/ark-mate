@@ -33,7 +33,7 @@ export const META_PATH = '/v1/mate/meta'
 export const CSP_POLICY =
   "default-src 'self'; connect-src 'self' ws://127.0.0.1:*; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 
-/** WS 首帧 `attach` 的截止时限：连接建立后超时未 attach（或凭据不符）→ 服务端主动关闭（1008）。 */
+/** WS 首帧 `attach` 的截止时限：连接建立后超时未 attach → 服务端主动关闭（1008）。 */
 export const STREAM_ATTACH_DEADLINE_MS = 5000
 
 /** 只能在渲染进程内完成、必须回主进程做的事。 */
@@ -56,7 +56,7 @@ export type NativeBridge = {
  * 按功能单独立项（连同浏览器侧的等价交互一起设计），不是从这份清单里往回捡。
  */
 export type MateDesktop = {
-  boot(): Promise<{ streamBaseUrl: string; streamToken: string }>
+  boot(): Promise<{ streamBaseUrl: string }>
   native: NativeBridge
 }
 

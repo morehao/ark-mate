@@ -65,6 +65,7 @@
 | v30 | 后端分层：保持 L0–L9 水平层带 + 顶层目录角色卡（不做按业务模块的垂直切片） | 仍有效 |
 | v31 | 外部协议端口化：MCP 网关形状进平台值（A1）+ MCP 客户端走窄端口 `LiveClient`（A2） | 仍有效（含一处自我纠正：A1 往返判据曾不在形状所在包，已归位；别名去留由 v32 裁决） |
 | v32 | 协议包类型别名：保留（协议侧读法）+ 只许协议包自用（G6 判据） | 仍有效 |
+| v34 | 访问令牌 / 鉴权体系整体移除（单用户场景不做鉴权） | 仍有效 |
 
 ## 正文
 
@@ -968,3 +969,26 @@ MCP 这一面有**两处**与外部协议的接触，都按「平台值 + 端口
 - 入口面从"一个带"变成"三个并列目录"：新人问"HTTP 相关放哪"不再有目录名回答，只能靠角色卡与
   `docs/agents/layout.md` 的入站面一段（本次一并写清）。
 - 一次性改动 53 文件 / 67 处 import / 91 处带外引用 / 17 行文档；纯机械，但 PR 体积大。
+
+## v34 · 访问令牌 / 鉴权体系整体移除（2026-10-30）
+
+> 单用户场景不需要鉴权：平台此前有 A6 单操作员令牌（`MATE_TOKEN`）与 M1-1 桌面双凭据（`--auth-stdin`
+> 下发 `restToken`/`streamToken`，WS 首帧 attach 携带 stream 面凭据、`middleware.Credential` 校验）。
+> 本条把它们**前后端整体移除**，退回「只绑回环、不做鉴权」。
+
+① **后端删干净**：`config.Token` 与 `MATE_TOKEN` 映射、`internal/core/credential` 的 scope 表
+（`Scope`/`Pair`/`Set`/`New`/`Authorize`/`StreamAttachDeadline`）、`middleware/credential.go`、
+`assembly/credentials.go`、`controller/ctrws` 的 attach 凭据校验与 `--auth-stdin` 全部删除；
+`router.Deps.Credentials` 与 `credential.ScopeREST` 中间件一并撤掉。`internal/core/credential`
+包保留（它同时承载 v20 的 provider 密钥引用词汇）。
+
+② **前端删干净**：令牌的存取（localStorage）、设置里「访问令牌」一节与 `TokenSettingsPanel`、
+`store.saveToken` 与 401 自动弹窗、`carrier`/`ws` 的令牌、桌面壳的凭据生成与 `--auth-stdin`、
+`scheme.ts` 注入 `Authorization`、`desktop-contract` 的 `boot().streamToken` 全部删除。
+设置分节从五节收为四节：通用 / 模型 / 命令规则 / 关于。
+
+③ **保留**：Origin/Host 矩阵（M3-5）不变；WS 仍要求首帧 attach（协议形状 + 5s 时限），但不再带凭据；
+`code.Unauthorized(40101)` 保留（上游拒绝访问仍用它）。
+
+④ **代价如实写**：对外暴露不再有平台侧闸门，必须在反向代理层自行加鉴权；`docs/deployment.md`、
+`README.md`、`docs/agents/build-and-runtime.md` 的鉴权段已同步改写。

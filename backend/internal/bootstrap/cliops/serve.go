@@ -1,23 +1,18 @@
 package cliops
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/morehao/ark-mate/internal/bootstrap/maintenance"
 
 	"github.com/morehao/ark-mate/internal/bootstrap/app"
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
-	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/golib/glog"
 )
@@ -31,11 +26,8 @@ func Serve(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", "", "监听地址（默认读 MATE_ADDR/`127.0.0.1:10001`；对外暴露请显式指定并自担无鉴权风险）")
 	runTimeout := fs.Duration("run-timeout", 0, "单轮 run 看门狗超时（0=关闭；默认读 MATE_RUN_TIMEOUT）")
-	authStdin := fs.Bool("auth-stdin", false,
-		"从 stdin 首行读取桌面态双凭据（JSON {\"restToken\":\"…\",\"streamToken\":\"…\"}，各 32 字节随机 base64url）；"+
-			"令牌因此不进 argv/env/文件/URL。解析失败或两者之一为空 → 退出码 2")
 	readyStdout := fs.Bool("ready-stdout", false,
-		"监听成功后往 stdout 打一行 `MATE_READY {\"addr\":\"127.0.0.1:<port>\",\"port\":<port>}`（不含令牌）；"+
+		"监听成功后往 stdout 打一行 `MATE_READY {\"addr\":\"127.0.0.1:<port>\",\"port\":<port>}`（就绪行只含地址）；"+
 			"桌面壳据此立刻拿到地址，不传则壳退回 health 轮询")
 	webDir := fs.String("web-dir", "",
 		"前端资产目录（绝对路径，须含 index.html；同 MATE_WEB_DIR）。不传则用构建期内置资产；"+
@@ -76,7 +68,7 @@ func Serve(args []string) {
 	if *readyStdout {
 		opts = append(opts, app.WithReadyStdout(true))
 	}
-	// 载荷清单（M3-4）：解析在命令层（app 只收结构化值，与 --auth-stdin 同一分层），
+	// 载荷清单（M3-4）：解析在命令层（app 只收结构化值），
 	// 校验失败按"用法/配置错误"处理（退出码 2，与 --web-dir 指错目录同一档——
 	// 都是"调用方把参数给错了"，而不是核心自己崩了）。
 	if *payloads != "" {
@@ -85,13 +77,6 @@ func Serve(args []string) {
 			exitWith(&assembly.ExitError{Code: 2, Err: err})
 		}
 		opts = append(opts, app.WithPayloads(ps))
-	}
-	if *authStdin {
-		creds, err := readCredentialStdin(os.Stdin)
-		if err != nil {
-			exitWith(&assembly.ExitError{Code: 2, Err: err})
-		}
-		opts = append(opts, app.WithCredentials(creds))
 	}
 
 	// 优雅退出：SIGINT/SIGTERM → 停 HTTP → 关编排器（回收 runtime 子进程）。
@@ -119,47 +104,6 @@ func Serve(args []string) {
 	if err := a.Run(ctx); err != nil {
 		exitWith(err)
 	}
-}
-
-// readCredentialStdin 读 stdin **首行** JSON 双凭据（M1-1 的桌面握手）。
-//
-// 为什么是 stdin：argv 会被 `ps` 看到、env 会被 runtime 子进程继承、文件会落盘——
-// stdin 是三者里唯一"传完即走"的通道（壳 spawn 核心后立即关掉写端）。读完首行即返回，
-// **不再读 stdin**：那之后 stdin 不归核心使用。
-//
-// 两个令牌都必须非空（桌面态两个面都要），且互不相同（同串会让两个面失去区分，
-// 由 credential.New 拒绝）。
-func readCredentialStdin(r io.Reader) (*credential.Set, error) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 4096), 1<<20)
-	if !sc.Scan() {
-		if err := sc.Err(); err != nil {
-			return nil, fmt.Errorf("--auth-stdin: 读 stdin 失败: %w", err)
-		}
-		return nil, errors.New("--auth-stdin: stdin 没有首行（期望一行 JSON：{\"restToken\":\"…\",\"streamToken\":\"…\"}）")
-	}
-	line := strings.TrimSpace(sc.Text())
-	if line == "" {
-		return nil, errors.New("--auth-stdin: stdin 首行为空（期望一行 JSON 双凭据）")
-	}
-	var hs struct {
-		RestToken   string `json:"restToken"`
-		StreamToken string `json:"streamToken"`
-	}
-	if err := json.Unmarshal([]byte(line), &hs); err != nil {
-		return nil, fmt.Errorf("--auth-stdin: stdin 首行不是合法 JSON（%v）", err)
-	}
-	if hs.RestToken == "" || hs.StreamToken == "" {
-		return nil, errors.New("--auth-stdin: restToken 与 streamToken 都必须非空")
-	}
-	creds, err := credential.New(
-		credential.Pair{Token: hs.RestToken, Scopes: credential.ScopeREST},
-		credential.Pair{Token: hs.StreamToken, Scopes: credential.ScopeStream},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("--auth-stdin: %w", err)
-	}
-	return creds, nil
 }
 
 // exitWith 按装配错误自带的退出码收尾（配置类 2、运行期 1），未标注的按 1 处理。

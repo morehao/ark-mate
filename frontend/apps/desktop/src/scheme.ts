@@ -2,8 +2,7 @@
  * `mate-app://` 自定义 scheme 的注册与**三路分发**（M1-3，设计 §3 / §6.2 / §9.2）。
  *
  * 为什么需要它：桌面窗口的 origin 必须与随机端口解耦（`mate-app://app` 恒定，
- * 磁盘缓存与页面存储跨启动稳定复用），并且 REST 凭据只能留在主进程——
- * 因此页面发出的 `/v1/mate/*` 请求由本模块**反代**给核心并注入 `Authorization`。
+ * 磁盘缓存与页面存储跨启动稳定复用），因此页面发出的 `/v1/mate/*` 请求由本模块**反代**给核心。
  *
  * 三路（顺序即优先级）：
  *   1. `mate-app://shell/<page>` → 壳自己的静态页（welcome / boot-failed / 更新对话框）；
@@ -141,8 +140,7 @@ function cacheControlFor(pathname: string): string {
 }
 
 /**
- * 反代核心：注入 `Authorization: Bearer <restToken>`（渲染进程因此**不需要**也不持有它），
- * 剥掉逐跳头，保留方法与请求体。
+ * 反代核心：剥掉逐跳头，保留方法与请求体。
  */
 async function proxyToCore(request: Request, core: CoreHandle | null): Promise<Response> {
   if (!core) {
@@ -153,11 +151,8 @@ async function proxyToCore(request: Request, core: CoreHandle | null): Promise<R
 
   const headers = new Headers(request.headers)
   stripHopByHop(headers)
-  // 凭据只在这里出现一次：覆盖（而不是追加）任何客户端带来的 Authorization。
-  headers.set('authorization', `Bearer ${core.restToken}`)
   // 入口标识（M1-7）：核心据此回答"这次请求走的是桌面窗口还是浏览器"
-  // （`/capabilities` 的 available 与 `entries.desktop` 都看它）。壳是桌面态唯一持有
-  // restToken 的组件，因此这个头是可信的入口声明；浏览器入口的请求不经过这里，自然没有它。
+  // （`/capabilities` 的 available 与 `entries.desktop` 都看它）。浏览器入口的请求不经过这里，自然没有它。
   headers.set('x-mate-carrier', 'desktop')
 
   const init: RequestInit & { duplex?: 'half' } = { method: request.method, headers }

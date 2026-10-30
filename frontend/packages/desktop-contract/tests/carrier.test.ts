@@ -46,7 +46,7 @@ test('isDesktopCarrier：null / undefined 判否（不抛错）', () => {
 /** 一个形状完整的载体对象（正例基线；各负例在它上面改一处）。 */
 function goodCarrier(): unknown {
   return {
-    boot: async () => ({ streamBaseUrl: 'ws://127.0.0.1:1', streamToken: 't' }),
+    boot: async () => ({ streamBaseUrl: 'ws://127.0.0.1:1' }),
     native: { pickDirectory: async () => null },
   }
 }

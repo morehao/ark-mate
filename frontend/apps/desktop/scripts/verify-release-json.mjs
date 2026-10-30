@@ -188,7 +188,7 @@ async function metaFromCore() {
   const home = mkdtempSync(join(tmpdir(), 'mate-verify-home-'))
   const env = { ...process.env, MATE_HOME: home, MATE_TRANSCRIPTS: join(home, 'transcripts'), MATE_STORE: 'memory' }
   // 抹掉会影响这次测量的一切：令牌（/meta 会要求凭据）、自动化 tick、以及"用哪份资产"的旁路。
-  for (const key of ['MATE_TOKEN', 'MATE_WEB_DIR', 'MATE_ADDR', 'MATE_AUTOMATION_TICK', 'MATE_CONFIG_DIR']) {
+  for (const key of ['MATE_WEB_DIR', 'MATE_ADDR', 'MATE_AUTOMATION_TICK', 'MATE_CONFIG_DIR']) {
     delete env[key]
   }
 

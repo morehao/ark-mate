@@ -1,11 +1,10 @@
 import { Modal } from 'antd'
-import { SETTINGS_MENU, settingsSectionOf, settingsSections } from '../../console/settingsView'
+import { SETTINGS_MENU, SETTINGS_SECTIONS, settingsSectionOf } from '../../console/settingsView'
 import { useMate } from '../../store'
 import { AboutPanel } from './AboutPanel'
 import { CommandPolicyPanel } from './CommandPolicyPanel'
 import { GeneralSettingsPanel } from './GeneralSettingsPanel'
 import { ModelSettingsPanel } from './ModelSettingsPanel'
-import { TokenSettingsPanel } from './TokenSettingsPanel'
 
 /**
  * 设置弹窗（一体式）：标题「设置」+ 左侧分节列表 + 右侧内容，挂在 app.tsx（全局一份）。
@@ -22,10 +21,7 @@ export function SettingsDialog() {
   const openSettingsSection = useMate((s) => s.openSettingsSection)
   const close = useMate((s) => s.closeSettings)
 
-  // 分节清单由**入口形态**决定（桌面壳里「访问令牌」那一节是死 UI，见 settingsSections 的注释）。
-  // 请求的那一节若不在清单里（401 自动跳转、或上一次留下的状态），**落到第一节**——不能出现
-  // "左侧没有这一项、右侧却是它的内容"这种自相矛盾的界面。
-  const sections = settingsSections()
+  const sections = SETTINGS_SECTIONS
   const active = sections.find((s) => s.id === settingsSectionOf(sectionId)?.id) ?? sections[0]
 
   return (
@@ -64,7 +60,6 @@ export function SettingsDialog() {
           {active?.id === 'general' && <GeneralSettingsPanel />}
           {active?.id === 'command' && <CommandPolicyPanel />}
           {active?.id === 'model' && <ModelSettingsPanel />}
-          {active?.id === 'token' && <TokenSettingsPanel />}
           {active?.id === 'about' && <AboutPanel />}
         </div>
       </div>

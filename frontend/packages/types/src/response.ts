@@ -12,8 +12,7 @@ export interface Envelope<T> {
  * 由后端的 TestFrontendBizCodesMatchRegistry 双向守卫本文件——改码必须三层同步）。
  *
  * 后端把「未归类错误」一律归到 Internal(50000)，信封里**不会**再出现 code=-1 这类
- * 取值；前端只需对 Success 与确有专门交互的码分支（当前只有 Unauthorized 触发令牌
- * 重填），其余码统一按 msg 展示。列全这套常量的意义是让分支写名字而不是魔数。
+ * 取值；其余码统一按 msg 展示。列全这套常量的意义是让分支写名字而不是魔数。
  */
 export const BizCode = {
   Success: 0,
@@ -21,7 +20,7 @@ export const BizCode = {
   InvalidParam: 40000,
   /** 请求语义非法（游标互斥、归属不符、状态机不允许）。 */
   InvalidRequest: 40001,
-  /** 单操作员令牌缺失/无效（A6；HTTP 状态同时为 401）。 */
+  /** 未授权：上游（底座/供应商）拒绝访问或凭据无效。 */
   Unauthorized: 40101,
   /** 资源不存在（会话 / runtime / provider / MCP server）。 */
   NotFound: 40401,

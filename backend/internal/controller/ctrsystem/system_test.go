@@ -81,13 +81,6 @@ func TestMetaShape(t *testing.T) {
 	if len(ps) != 0 {
 		t.Errorf("M1-7 阶段 payloads 应为空，实际 %v", ps)
 	}
-	// 令牌绝不进诊断面。
-	if _, ok := d["restToken"]; ok {
-		t.Error("/meta 里出现了 restToken")
-	}
-	if _, ok := d["streamToken"]; ok {
-		t.Error("/meta 里出现了 streamToken")
-	}
 }
 
 // TestCapabilitiesPerEntry 两个入口**同构**：id 集合与顺序完全一致，只有 available 不同。

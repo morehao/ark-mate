@@ -49,8 +49,8 @@ function denyNonCarrier(event: IpcMainInvokeEvent, channel: string): void {
 }
 
 export type IpcDeps = {
-  /** 取当前核心句柄（boot 要下发给页面的流基址与 streamToken）。 */
-  streamEndpoint: () => { streamBaseUrl: string; streamToken: string } | null
+  /** 取当前核心句柄（boot 要下发给页面的流基址）。 */
+  streamEndpoint: () => { streamBaseUrl: string } | null
   /** 取当前窗口（原生对话框的父窗口）。 */
   window: () => BrowserWindow | null
 }
@@ -60,8 +60,7 @@ export type IpcDeps = {
  * 因此调用点只需保证在开窗口之前跑一次。
  */
 export function installIpcHandlers(deps: IpcDeps): void {
-  // boot：页面据此建事件流。返回的 streamToken **只在渲染进程内存中**
-  // （不落 localStorage —— M1-5 的验收会搜一遍存储面；前端侧由 M1-8 保证）。
+  // boot：页面据此建事件流。
   ipcMain.handle(CH.boot, (event) => {
     if (!isCarrierMainFrame(event)) denyNonCarrier(event, CH.boot)
     const ep = deps.streamEndpoint()

@@ -18,10 +18,10 @@
  *   guard        前置：不能有别的桌面壳/核心在跑（两个核心共用 ~/.ark-mate/mate.db 会让断言读到别人的内存态）
  *   shell        M1-3：origin、壳反代（页面不带凭据）、静态资产缓存头、深链与 /v1 归核心、壳静态页
  *   contract     M1-4：`__MATE_DESKTOP__` 形状与契约一致；非载体 origin 为 undefined
- *   hardening    M1-5：CSP 与契约逐字一致、streamToken 不落存储面、权限全拒、导航被拦
- *   credentials  M1-9（V15）：渲染进程搜不到 restToken；streamToken 调 REST 401；attach 正/反例
+ *   hardening    M1-5：CSP 与契约逐字一致、权限全拒、导航被拦
+ *   credentials  鉴权已移除：boot() 只下发基址；REST 与事件流直接开放
  *   stream       M1-8：事件流直连回环 + 首帧 attach + 真实订阅收到服务端帧
- *   exit         M1-10（V13）：kill -9 壳后核心 3s 内自退、无残留、令牌不进 argv/env
+ *   exit         M1-10（V13）：kill -9 壳后核心 3s 内自退、无残留
  *
  * 前置：`make core/desktop`（脚本会自己跑）与 `pnpm -C frontend build`（apps/web/dist 必须已存在）。
  * **默认跑在用户真实的数据目录上**（`$HOME/.ark-mate`）：那正是 DoD 要验的形态，所以跑之前要**独占**
@@ -244,73 +244,34 @@ async function scenarioHardening(cdp) {
   check('window.open 被 deny（不开新窗口）', opened.opened === false, JSON.stringify(opened))
 }
 
-/** credentials（M1-9，V15）：双凭据分层的四项。 */
+/** credentials（鉴权已移除）：boot() 只下发基址；REST 与事件流均直接开放。 */
 async function scenarioCredentials(cdp) {
-  section('M1-9 凭据分层（V15）')
+  section('鉴权（平台不做）')
   const boot = await cdp.evalJs(`
     const b = await window.__MATE_DESKTOP__.boot()
-    return { base: b.streamBaseUrl, stream: b.streamToken }
+    return { base: b.streamBaseUrl, hasStreamToken: 'streamToken' in b }
   `)
-  check('boot() 下发回环基址与 streamToken', /^ws:\/\/127\.0\.0\.1:\d+$/.test(boot.base) && boot.stream.length === 43, boot.base)
+  check('boot() 只下发回环基址（无 streamToken）', /^ws:\/\/127\.0\.0\.1:\d+$/.test(boot.base) && boot.hasStreamToken === false, JSON.stringify(boot))
 
-  // ① 渲染进程里搜不到 restToken（它的值只有主进程有；这里搜的是"任何 43 字符令牌形状"）
-  const leak = await cdp.evalJs(`
-    const tok = ${JSON.stringify(boot.stream)}
-    const hits = []
-    const scan = (store, name) => { for (let i = 0; i < store.length; i++) { const k = store.key(i); if (String(store.getItem(k) ?? '').includes(tok)) hits.push(name + ':' + k) } }
-    try { scan(localStorage, 'localStorage') } catch {}
-    try { scan(sessionStorage, 'sessionStorage') } catch {}
-    if (document.cookie.includes(tok)) hits.push('cookie')
-    if (document.documentElement.outerHTML.includes(tok)) hits.push('html')
-    return { hits, htmlHasRest: /restToken/.test(document.documentElement.outerHTML) }
-  `)
-  check('streamToken 不在 localStorage/sessionStorage/cookie/HTML', leak.hits.length === 0, JSON.stringify(leak.hits))
-  check('页面 HTML 里没有 restToken 字样', leak.htmlHasRest === false)
-
-  // ② streamToken 调 REST → 401。**在 Node 侧发**：页面里根本打不到核心的 REST 面
-  //    （CSP 的 connect-src 只放开 `'self'` 与 `ws://127.0.0.1:*`），这本身就是要断言的性质。
+  // REST 无凭据直接开放（在 Node 侧发：页面受 CSP connect-src 限制只能走同源反代）。
   const origin = boot.base.replace('ws://', 'http://')
-  const rest = await fetch(`${origin}/v1/mate/meta`, { headers: { authorization: `Bearer ${boot.stream}` } })
+  const rest = await fetch(`${origin}/v1/mate/meta`)
   const restBody = await rest.json().catch(() => ({}))
-  check('streamToken 调 REST → 401（V15 互斥）', rest.status === 401, `${rest.status} code=${restBody.code}`)
+  check('REST 无凭据直接 200（平台不做鉴权）', rest.status === 200 && restBody.code === 0, `${rest.status} code=${restBody.code}`)
 
-  // ②b 反向断言：页面**不能**直连核心 REST（CSP connect-src 不给 http 回环；REST 只能走壳反代）
-  const direct = await cdp.evalJs(`
-    try {
-      const r = await fetch(${JSON.stringify(origin)} + '/v1/mate/meta')
-      return { blocked: false, status: r.status }
-    } catch (e) { return { blocked: true, err: String(e).slice(0, 60) } }
-  `)
-  check('页面直连核心 REST 被 CSP 拦下（REST 只能走同源反代）', direct.blocked === true, JSON.stringify(direct))
-
-  // ③/④ attach 正反例：streamToken 通过、restToken 被拒（1008）——restToken 的值页面拿不到，
-  //      因此这里只做"streamToken 通过"；restToken 的反例由 Go 侧单测与手工验收覆盖。
+  // 首帧 attach（无凭据）→ 再订阅空聚合并 ping：pong 回来即证明握手通过、连接未被关。
   const attach = await cdp.evalJs(`
     const url = ${JSON.stringify(boot.base)} + '/v1/mate/ws/events'
     return await new Promise((resolve) => {
       const ws = new WebSocket(url)
       const out = { opened: false, closed: null, frames: [] }
-      // 通道级 attach（握手）→ 再订阅一个**空**聚合 + ping：订阅成功的证据是 pong 回来了
-      // （等价于"握手通过、连接没被 1008 关掉"）。v21 起"无 since_seq"是**全量回放**而不是
-      // snapshot，空聚合没有事件可回放 → 不会有任何 event/snapshot 帧可等（等它就是等超时）。
-      ws.onopen = () => { out.opened = true; ws.send(JSON.stringify({ action: 'attach', token: ${JSON.stringify(boot.stream)} })); setTimeout(() => { ws.send(JSON.stringify({ action: 'attach', agg_id: 'accept-probe' })); ws.send(JSON.stringify({ action: 'ping' })) }, 100) }
+      ws.onopen = () => { out.opened = true; ws.send(JSON.stringify({ action: 'attach' })); setTimeout(() => { ws.send(JSON.stringify({ action: 'attach', agg_id: 'accept-probe' })); ws.send(JSON.stringify({ action: 'ping' })) }, 100) }
       ws.onmessage = (ev) => { const f = JSON.parse(String(ev.data)); out.frames.push(f.type); if (f.type === 'pong') { ws.close(); resolve(out) } }
       ws.onclose = (ev) => { out.closed = ev.code; resolve(out) }
       setTimeout(() => resolve({ ...out, timeout: true }), 5000)
     })
   `)
-  check('streamToken 走首帧 attach → 正常订阅（attach 后 ping/pong 往返）', attach.frames?.includes('pong'), JSON.stringify(attach))
-
-  const bad = await cdp.evalJs(`
-    const url = ${JSON.stringify(boot.base)} + '/v1/mate/ws/events'
-    return await new Promise((resolve) => {
-      const ws = new WebSocket(url)
-      ws.onopen = () => ws.send(JSON.stringify({ action: 'attach', token: 'definitely-wrong-token' }))
-      ws.onclose = (ev) => resolve({ code: ev.code })
-      setTimeout(() => resolve({ timeout: true }), 5000)
-    })
-  `)
-  check('错 token 走 attach → 服务端 1008 关闭', bad.code === 1008, JSON.stringify(bad))
+  check('无凭据首帧 attach → 正常订阅（attach 后 ping/pong 往返）', attach.frames?.includes('pong'), JSON.stringify(attach))
 }
 
 /** stream（M1-8）：事件流真的通。 */
@@ -329,7 +290,7 @@ async function scenarioStream(cdp) {
   check('WS 握手 101', handshake?.params.response?.status === 101, String(handshake?.params.response?.status))
   const sent = cdp.events.filter((e) => e.method === 'Network.webSocketFrameSent').map((e) => e.params.response?.payloadData ?? '')
   const attachFrame = sent.find((f) => f.includes('"action":"attach"'))
-  check('首帧 attach 带 43 字符 streamToken', !!attachFrame && String(JSON.parse(attachFrame).token).length === 43, attachFrame?.slice(0, 60))
+  check('首帧 attach 无凭据（平台不做鉴权）', !!attachFrame && JSON.parse(attachFrame).token === undefined, attachFrame?.slice(0, 60))
 
   const conv = await cdp.evalJs(`const r = await fetch('/v1/mate/sessions'); const j = await r.json(); return j.data?.[0]?.id ?? null`)
   if (!conv) {
@@ -407,15 +368,9 @@ async function scenarioExit(shell) {
     check('壳与核心进程都在（前置）', false, `shellPid=${shellPid} corePid=${corePid}`)
     return
   }
-  // ④ 令牌不进 argv / env（runtime 子进程按设计 §6.6 继承调用方环境 → 核心没有，它们也不可能有）
+  // ④ 核心不接收任何鉴权参数（平台已移除访问令牌 / --auth-stdin）
   const argv = sh('ps', ['-o', 'args=', '-p', String(corePid)])
-  check('核心 argv 无令牌字样（只经 stdin）', !/restToken|streamToken|--token/.test(argv), argv.slice(0, 90))
-  const env = sh('ps', ['-E', '-p', String(corePid)])
-  if (env.trim()) {
-    check('核心 env 无令牌键名', !/restToken|streamToken/.test(env))
-  } else {
-    console.log('  ⚠ 本机 ps -E 读不到环境（macOS 权限）：该条以"令牌只经 stdin"的代码路径为准')
-  }
+  check('核心 argv 无 --auth-stdin（平台不做鉴权）', !/--auth-stdin/.test(argv), argv.slice(0, 90))
 
   // ② kill -9 壳 → 核心 3s 内自退（--exit-with-parent）
   process.kill(shellPid, 'SIGKILL')
