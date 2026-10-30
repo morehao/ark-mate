@@ -2,7 +2,7 @@ import { useState, type CSSProperties, type ReactNode, type Dispatch, type SetSt
 import { Alert, Button, Input, Modal, Tag, Tooltip } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import { skillRuntimesView, transportLabel } from '../../console/capabilityView'
+import { transportLabel } from '../../console/capabilityView'
 
 /** 定义编辑器的状态（hook 与面板共用的类型）。 */
 export interface CapabilityEditState { kind: 'skill' | 'mcp'; id: string; text: string; created: boolean }
@@ -82,34 +82,6 @@ export const smallTag: CSSProperties = { marginInlineEnd: 0, fontSize: 10.5 }
 // 输入是 agent 视角的 `AgentSkill`。那张视角没了，而这层语义在 `/library` 的行里本来就有
 // （`enabled` 出「已禁用」，逐 runtime 的 applicability 出「可用/未实测/未配置/不适用/已禁用」
 // 且原因进 tooltip），所以直接删掉而不是换个输入再抄一遍。
-
-/**
- * 投放对象标签（M1：取代旧的 `runtime·format` 标签）。
- *
- * 空 runtimes 显示为「全部 runtime」而不是什么都不显示：后者会被读成"这个技能没有投放对象"，
- * 而真实语义正好相反（空 = 全部，是升级安全默认）。
- */
-export function SkillRuntimeTags({ runtimes, scope }: { runtimes?: string[]; scope?: string }) {
-  const v = skillRuntimesView(runtimes, scope)
-  return (
-    <>
-      {v.labels.map((label, i) => (
-        <Tooltip key={i} title={v.emptyHint}>
-          <Tag style={{ fontSize: 10, marginInlineEnd: 0 }} color={runtimes && runtimes.length > 0 ? undefined : 'default'}>
-            {label}
-          </Tag>
-        </Tooltip>
-      ))}
-      {v.scopeTag && (
-        <Tooltip title={v.scopeTag.hint}>
-          <Tag color="blue" style={{ fontSize: 10, marginInlineEnd: 0 }}>
-            {v.scopeTag.text}
-          </Tag>
-        </Tooltip>
-      )}
-    </>
-  )
-}
 
 export function Card({ children }: { children: ReactNode }) {
   return (
@@ -313,7 +285,7 @@ export function CapabilityEditorModal({
         <Modal
           title={
             edit
-              ? `${edit.created ? '新建' : '编辑'} ${edit.kind === 'skill' ? 'skill' : 'MCP server'}${edit.id ? ` · ${edit.id}` : ''}`
+              ? `${edit.created ? '新建' : '编辑'} ${edit.kind === 'skill' ? '技能' : '连接器'}${edit.id ? ` · ${edit.id}` : ''}`
               : ''
           }
           open={edit !== null}
@@ -328,25 +300,23 @@ export function CapabilityEditorModal({
           <div style={{ fontSize: 12, color: tokens.textSecondary, lineHeight: 1.8, marginBottom: 8 }}>
             {edit?.created ? (
               <>
-                请求体就是**定义原文**（JSON 对象，<code>id</code> 必填，只能是小写字母/数字/-/_ 且 ≤64 字符）。
+                填写配置内容（JSON 对象）。
                 <br />
               </>
             ) : (
               <>
-                **只改这个框里出现过的键**：没写的键原样保留（含你自己加的字段）、写 <code>null</code> 删键、
-                写 <code>""</code>/<code>[]</code> 清空。
+                只修改这里写到的字段；没写的字段保持不变。
                 <br />
               </>
             )}
             {edit?.kind === 'mcp' && !edit.created && (
               <>
-                MCP 的明文 env 与密钥引用**后端从不读回**（界面只知道键名），所以这里不预填——
-                不动它们就别写，写了就会覆盖。密钥引用写成 <code>store:路径</code>（值在库的 <code>mcp_secrets</code> 里）或 <code>env:变量名</code>。
+                连接器的明文密钥**不会回显**（界面只知道名称），所以这里不预填——
+                不改它们就别写，写了就会覆盖。密钥引用写成 <code>store:路径</code> 或 <code>env:变量名</code>。
                 <br />
               </>
             )}
-            保存前先过闸门：正文扫描（critical 直接拒）、transport/路径/引用词法校验；
-            <b>被拒的定义不会落盘</b>（也不会进注册表）。
+            保存前会检查填写内容；<b>不通过时不会保存</b>。
           </div>
           <Input.TextArea
             value={edit?.text ?? ''}

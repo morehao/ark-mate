@@ -43,7 +43,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'general', label: '通用', hint: '工作区目录白名单', icon: <SettingOutlined />, order: 10 },
   { id: 'model', label: '模型', hint: '供应商 / 模型清单 / 默认模型 / 生效结论', icon: <ApiOutlined />, order: 15 },
   { id: 'command', label: '命令规则', hint: '哪些命令可直接执行 / 必须确认 / 禁止', icon: <SafetyCertificateOutlined />, order: 20 },
-  { id: 'token', label: '访问令牌', hint: '后端启用 MATE_TOKEN 时必填', icon: <KeyOutlined />, order: 30 },
+  { id: 'token', label: '访问令牌', hint: '需要访问保护时填写', icon: <KeyOutlined />, order: 30 },
   // 「关于」放在最后：它是**只读的产品事实**（产品名 / 核心版本 / 产品身份），不是配置项。
   // 它也是"用户不依赖问模型也能知道当前产品是什么"的那条出口——所以它不能藏在诊断页里，
   // 也不显示任何执行引擎字段（见 AboutPanel 顶部的三条口径）。

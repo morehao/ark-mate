@@ -15,13 +15,13 @@ interface ItemCopy {
 }
 
 const SKILL_ITEMS: ItemCopy[] = [
-  { key: 'skill-chat', title: '通过对话创建', sub: '创建个性化技能，将保存在本地使用', icon: <MessageOutlined /> },
-  { key: 'skill-upload', title: '上传技能', sub: '导入技能文件，仅本地化安装', icon: <UploadOutlined /> },
+  { key: 'skill-chat', title: '通过对话创建', sub: '说出你的需求，助手帮你创建', icon: <MessageOutlined /> },
+  { key: 'skill-upload', title: '上传技能', sub: '从技能文件导入', icon: <UploadOutlined /> },
 ]
 
 const MCP_ITEMS: ItemCopy[] = [
-  { key: 'mcp-manual', title: '手动填写配置', sub: '按字段填写 transport、命令或 URL', icon: <FormOutlined /> },
-  { key: 'mcp-json', title: '粘贴 JSON 配置', sub: '兼容 mcpServers 片段，可一次导入多个', icon: <CodeOutlined /> },
+  { key: 'mcp-manual', title: '手动填写配置', sub: '填写命令或地址，连接一个服务', icon: <FormOutlined /> },
+  { key: 'mcp-json', title: '粘贴 JSON 配置', sub: '可一次导入多个连接器', icon: <CodeOutlined /> },
 ]
 
 function menuLabel(item: ItemCopy): ReactNode {

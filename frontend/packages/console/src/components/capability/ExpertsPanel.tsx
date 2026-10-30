@@ -30,7 +30,7 @@ export function ExpertsPanel() {
   return (
     <PageContainer
       title="专家"
-      description="每位专家是一组推荐能力 + 一段角色设定。点卡片编辑；角色设定在会话首轮以隐藏上下文注入，不进对话正文。"
+      description="每位专家是一组推荐能力 + 一段角色设定。点卡片编辑；角色设定会在对话开始时自动生效，不显示在对话里。"
       extra={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Input
@@ -50,7 +50,7 @@ export function ExpertsPanel() {
     >
       <SectionHeader
         title="我的专家"
-        hint="本机定义 · 启用后新会话可选；禁用不影响历史会话。"
+        hint="本机创建 · 启用后新会话可选；停用不影响历史会话。"
         count={d.experts.length}
         loading={d.loading}
         onRefresh={d.refresh}

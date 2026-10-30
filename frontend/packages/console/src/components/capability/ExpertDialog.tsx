@@ -12,8 +12,6 @@ import {
   instructionsByteLength,
   instructionsMarkers,
   missingExpertRefs,
-  parseExpertJson,
-  validateExpertBody,
   validateExpertForm,
   EXPERT_INSTRUCTIONS_MAX_BYTES,
   EXPERT_MAX_DESCRIPTION,
@@ -58,12 +56,10 @@ const AVATAR_LABEL: Record<string, string> = {
 }
 
 /**
- * 专家编辑器（720 居中弹窗）：与技能 / MCP 编辑器同构——标题两行、单栏表单、
- * footer 左启停（编辑态带删除）/ 右「取消 · 高级(JSON) · 新建|保存」。
+ * 专家编辑器（720 居中弹窗）：标题两行、单栏表单、
+ * footer 左启停（编辑态带删除）/ 右「取消 · 新建|保存」。
  *
- * 「高级（JSON）」在弹窗内切换正文编辑态（专家没有像 skill/MCP 那样另开一个
- * CapabilityEditorModal：它的原文 body 就是表单本身，切一屏足够）。
- * 移除抽屉后不再需要窄屏宽度判断——弹窗自带响应式，宽度固定 720。
+ * 面向普通用户：不提供「高级（JSON）」原文编辑入口；「标识」是内部键，创建后不可修改。
  */
 export function ExpertDialog(props: DialogProps) {
   const {
@@ -85,19 +81,14 @@ export function ExpertDialog(props: DialogProps) {
   } = props
 
   const [values, setValues] = useState<ExpertFormValues>(() => blankExpertForm())
-  const [mode, setMode] = useState<'form' | 'json'>('form')
   const [localErr, setLocalErr] = useState<string | null>(null)
-  const [jsonText, setJsonText] = useState('')
-  const [jsonErr, setJsonErr] = useState<string | null>(null)
   const [enabledDraft, setEnabledDraft] = useState(true)
 
   // 每次打开（或切到另一个专家）都从当前定义重建表单：上一条的草稿不能串到下一条。
   // 编辑态 detail 异步到达后 `expert?.id` 变化会再触发一次，填上正文。
   useEffect(() => {
     if (!open) return
-    setMode('form')
     setLocalErr(null)
-    setJsonErr(null)
     setValues(created || !expert ? blankExpertForm() : expertFormValues(expert))
     setEnabledDraft(expert?.enabled ?? true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,35 +107,7 @@ export function ExpertDialog(props: DialogProps) {
 
   const enabled = created ? values.enabled : enabledDraft
 
-  const toggleMode = (): void => {
-    if (mode === 'form') {
-      setJsonText(JSON.stringify(expertCreateBody(values), null, 2))
-      setJsonErr(null)
-      setMode('json')
-      return
-    }
-    setMode('form')
-    setLocalErr(null)
-  }
-
   const submit = async (): Promise<void> => {
-    if (mode === 'json') {
-      const parsed = parseExpertJson(jsonText)
-      if (!parsed.body) {
-        setJsonErr(parsed.error)
-        return
-      }
-      const body = parsed.body
-      if (!created) delete body.id
-      const verr = validateExpertBody(body, created)
-      if (verr) {
-        setJsonErr(verr)
-        return
-      }
-      setJsonErr(null)
-      await onSave(body)
-      return
-    }
     const trimmed: ExpertFormValues = { ...values, id: values.id.trim(), name: values.name.trim() }
     const verr = validateExpertForm(trimmed, created)
     if (verr) {
@@ -185,12 +148,12 @@ export function ExpertDialog(props: DialogProps) {
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: tokens.textSecondary }}>
             <Switch size="small" checked={enabled} loading={toggleBusy} disabled={loading} onChange={onToggleSwitch} />
-            {enabled ? '启用' : '禁用'}
+            {enabled ? '启用' : '停用'}
           </span>
           {!created && (
             <Popconfirm
               title={`删除「${expert?.name || expert?.id}」？`}
-              description="删除定义不可恢复；已建会话不受影响（能力在创建时已固定）。"
+              description="删除后不可恢复；已建会话不受影响。"
               okText="删除"
               okButtonProps={{ danger: true }}
               cancelText="取消"
@@ -204,9 +167,6 @@ export function ExpertDialog(props: DialogProps) {
         </span>
         <Space size={8}>
           <Button onClick={onClose}>取消</Button>
-          <Button type="text" onClick={toggleMode} disabled={loading}>
-            {mode === 'form' ? '高级（JSON）' : '返回表单'}
-          </Button>
           <Button type="primary" loading={busy} disabled={loading} onClick={() => void submit()}>
             {created ? '新建' : '保存'}
           </Button>
@@ -223,8 +183,8 @@ export function ExpertDialog(props: DialogProps) {
       title={
         <div>
           <div style={{ fontSize: 15, fontWeight: 600 }}>{created ? '新建专家' : '编辑专家'}</div>
-          <div style={{ marginTop: 2, fontSize: 11, color: tokens.textPlaceholder, fontFamily: tokens.fontMono }}>
-            {created ? '一组推荐能力 + 一段角色设定；创建后 id 不可改' : expert?.id ?? ''}
+          <div style={{ marginTop: 2, fontSize: 11, color: tokens.textPlaceholder }}>
+            {created ? '一组推荐能力 + 一段角色设定；创建后标识不可修改' : `标识：${expert?.id ?? ''}`}
           </div>
         </div>
       }
@@ -247,7 +207,7 @@ export function ExpertDialog(props: DialogProps) {
             </Button>
           }
         />
-      ) : mode === 'form' ? (
+      ) : (
         <>
           {hasMissing && (
             <div
@@ -264,22 +224,12 @@ export function ExpertDialog(props: DialogProps) {
               引用缺失：
               {missing.skills.length > 0 && `技能 ${missing.skills.join('、')}`}
               {missing.skills.length > 0 && missing.mcps.length > 0 ? '；' : ''}
-              {missing.mcps.length > 0 && `MCP ${missing.mcps.join('、')}`}
-              {' '}指向不存在的定义。保存仍会成功，选择该专家时这些项被跳过并告警。
+              {missing.mcps.length > 0 && `连接器 ${missing.mcps.join('、')}`}
+              {' '}指向不存在的项。保存仍会成功，使用该专家时这些项会被跳过并提示。
             </div>
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div>
-              {label('id *')}
-              <Input
-                value={values.id}
-                disabled={!created}
-                placeholder="data-analyst"
-                onChange={(e) => patch({ id: e.target.value })}
-              />
-              {hint(created ? '小写字母/数字/连字符，≤64；创建后不可改' : '创建后不可改（要换 id 就删重建）')}
-            </div>
             <div>
               {label('名称 *')}
               <Input
@@ -288,6 +238,16 @@ export function ExpertDialog(props: DialogProps) {
                 maxLength={EXPERT_MAX_NAME}
                 onChange={(e) => patch({ name: e.target.value })}
               />
+            </div>
+            <div>
+              {label('标识')}
+              <Input
+                value={values.id}
+                disabled={!created}
+                placeholder="data-analyst"
+                onChange={(e) => patch({ id: e.target.value })}
+              />
+              {hint(created ? '英文小写字母/数字/连字符，≤64；创建后不可修改' : '创建后不可修改')}
             </div>
           </div>
 
@@ -340,16 +300,16 @@ export function ExpertDialog(props: DialogProps) {
               onChange={(v: string[]) => patch({ skills: v })}
               options={options.skills.map((s) => ({ value: s.id, label: s.name }))}
             />
-            {hint('允许暂指不存在的 id（保存后标「引用缺失」）')}
+            {hint('允许暂指不存在的项（保存后会标注「引用缺失」）')}
           </div>
 
           <div style={{ marginTop: 13 }}>
-            {label('推荐 MCP', <span style={{ color: tokens.textPlaceholder }}>最多 50</span>)}
+            {label('推荐连接器', <span style={{ color: tokens.textPlaceholder }}>最多 50</span>)}
             <Select
               mode="multiple"
               style={{ width: '100%' }}
               value={values.mcps}
-              placeholder={options.mcps.length === 0 ? '暂无可选 MCP（可留空）' : '从已装 MCP 多选'}
+              placeholder={options.mcps.length === 0 ? '暂无可选连接器（可留空）' : '从已装连接器多选'}
               onChange={(v: string[]) => patch({ mcps: v })}
               options={options.mcps.map((m) => ({ value: m.id, label: m.name }))}
             />
@@ -369,14 +329,14 @@ export function ExpertDialog(props: DialogProps) {
 
           <div style={{ marginTop: 13 }}>
             {label(
-              '角色设定 instructions',
+              '角色设定',
               <span style={{ fontFamily: tokens.fontMono, color: overBytes ? tokens.error : tokens.textPlaceholder }}>
                 {byteLen} / {EXPERT_INSTRUCTIONS_MAX_BYTES} 字节
               </span>,
             )}
             <Input.TextArea
               value={values.instructions}
-              placeholder="写下这位专家是谁、怎么做事；首轮以隐藏上下文注入"
+              placeholder="写下这位专家是谁、怎么做事；对话开始时会自动生效"
               autoSize={{ minRows: 6, maxRows: 14 }}
               spellCheck={false}
               style={{ fontFamily: tokens.fontMono, fontSize: 12.5 }}
@@ -394,7 +354,7 @@ export function ExpertDialog(props: DialogProps) {
                   padding: '6px 10px',
                 }}
               >
-                含危险标记：{markers.join('、')} —— 保存会被拒绝（首轮注入内容不允许逃逸，40001）。
+                含不支持的写法：{markers.join('、')} —— 保存会被拒绝。
               </div>
             )}
             <div
@@ -407,7 +367,7 @@ export function ExpertDialog(props: DialogProps) {
               }}
             >
               <div style={{ fontSize: 10.5, color: tokens.textPlaceholder, marginBottom: 6 }}>
-                ▸ 注入预览（首轮隐藏 user-context，不进入对话正文）
+                ▸ 预览（对话开始时自动生效，不会显示在对话里）
               </div>
               <div
                 style={{
@@ -427,22 +387,6 @@ export function ExpertDialog(props: DialogProps) {
 
           {localErr && <Alert type="error" showIcon style={{ marginTop: 12 }} message={localErr} />}
           {error && <Alert type="error" showIcon style={{ marginTop: 12 }} message="保存失败" description={error} />}
-        </>
-      ) : (
-        <>
-          <div style={{ fontSize: 11.5, color: tokens.textSecondary, lineHeight: 1.7, marginBottom: 8 }}>
-            原文 JSON 对象：<b>未出现的键保留原值</b>，<code>null</code> 删键，<code>""</code>/<code>[]</code> 清空；未知键原样保留。
-            {!created && '编辑态不预填未知键，因此不会被误删。'}
-          </div>
-          <Input.TextArea
-            value={jsonText}
-            onChange={(e) => setJsonText(e.target.value)}
-            autoSize={{ minRows: 14, maxRows: 22 }}
-            spellCheck={false}
-            style={{ fontFamily: tokens.fontMono, fontSize: 12.5 }}
-          />
-          {jsonErr && <Alert type="error" showIcon style={{ marginTop: 8 }} message={jsonErr} />}
-          {error && <Alert type="error" showIcon style={{ marginTop: 8 }} message="保存失败" description={error} />}
         </>
       )}
     </Modal>

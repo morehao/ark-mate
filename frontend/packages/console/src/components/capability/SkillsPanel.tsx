@@ -9,18 +9,10 @@ import { SkillChatCreateModal } from './SkillChatCreateModal'
 import { SkillDetailModal } from './SkillDetailModal'
 import { SkillEditorModal } from './SkillEditorModal'
 import { SkillUploadModal } from './SkillUploadModal'
-import {
-  CapabilityEmpty,
-  CapabilityEditorModal,
-  CapabilityRow,
-  SectionHeader,
-  SkillRuntimeTags,
-  StatusTag,
-  smallTag,
-} from './shared'
+import { CapabilityEmpty, CapabilityRow, SectionHeader, StatusTag, smallTag } from './shared'
 import { useCapabilityData } from './useCapabilityData'
 
-/** 技能页：管理 skill 定义、投放对象与启用状态；添加 = 通过对话创建 / 上传技能。 */
+/** 技能页：管理技能与启用状态；添加 = 通过对话创建 / 上传技能。 */
 export function SkillsPanel() {
   const d = useCapabilityData('skills')
   const [query, setQuery] = useState('')
@@ -41,7 +33,7 @@ export function SkillsPanel() {
   return (
     <PageContainer
       title="技能"
-      description="管理 skill 定义、投放对象与启用状态；启用即按 runtimes 投放，禁用只撤回副本。"
+      description="管理你的技能。启用后，助手会在合适的对话里自动使用；停用后随时可以恢复。"
       extra={
         <Space size={8}>
           <Input
@@ -49,7 +41,7 @@ export function SkillsPanel() {
             allowClear
             prefix={<SearchOutlined style={{ color: tokens.textPlaceholder }} />}
             style={{ width: 210 }}
-            placeholder="搜索 skill"
+            placeholder="搜索技能"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -58,8 +50,8 @@ export function SkillsPanel() {
       }
     >
       <SectionHeader
-        title="Skills"
-        hint="启用会写盘并投放；禁用会撤回已投放副本，定义与正文保留。目录条目是平台唯一事实源。"
+        title="我的技能"
+        hint="启用后助手会在合适的对话里自动使用；停用只是暂不使用，技能本身会保留。"
         count={visible.length}
         loading={d.busy === 'skills'}
         onRefresh={() => d.refresh('skills')}
@@ -69,8 +61,8 @@ export function SkillsPanel() {
           <CapabilityEmpty
             text={
               d.skills.length === 0
-                ? '暂无 skill。新建一个后，它会出现在这里。'
-                : `没有找到匹配「${query}」的 skill。`
+                ? '暂无技能。你可以通过对话创建，或上传技能。'
+                : `没有找到匹配「${query}」的技能。`
             }
             action={
               d.skills.length === 0 ? (
@@ -111,7 +103,7 @@ export function SkillsPanel() {
                     >
                       {s.name || s.id}
                     </span>
-                    <span style={{ fontFamily: tokens.fontMono, fontSize: 10, color: tokens.textPlaceholder }}>{s.id}</span>
+                    <span style={{ fontSize: 10.5, color: tokens.textPlaceholder }}>调用名 {s.id}</span>
                     {warn && (
                       <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{warn.hint}</span>}>
                         <Tag color={warn.color} style={smallTag}>
@@ -124,21 +116,17 @@ export function SkillsPanel() {
                 description={s.description || '（无描述）'}
                 meta={
                   <>
-                    <SkillRuntimeTags runtimes={s.runtimes} scope={s.scope} />
                     <StatusTag label={health.label} tone={health.tone} hint={health.hint} />
                   </>
                 }
                 actions={
                   <>
-                    <Button size="small" onClick={() => d.openDetail('skill', s.id, 'health')}>
-                      体检
-                    </Button>
                     <Button size="small" onClick={() => d.openSkillForm(s)}>
                       编辑
                     </Button>
                     <Popconfirm
-                      title={`删除 ${s.name || s.id}？`}
-                      description="定义文件会被删除，已投放的副本会被撤回。此操作不可撤销（正文可先复制走）。"
+                      title={`删除「${s.name || s.id}」？`}
+                      description="删除后不可恢复；已产生的副本会一并移除。"
                       okText="删除"
                       okButtonProps={{ danger: true }}
                       cancelText="取消"
@@ -148,7 +136,7 @@ export function SkillsPanel() {
                         删除
                       </Button>
                     </Popconfirm>
-                    <Tooltip title={enabled ? '禁用：撤回已投放副本（定义与正文保留，可恢复）' : '启用：按其 runtimes 重新投放'}>
+                    <Tooltip title={enabled ? '停用：助手暂不使用，可随时恢复' : '启用：助手会在合适的对话里自动使用'}>
                       <Switch
                         size="small"
                         checked={enabled}
@@ -183,17 +171,9 @@ export function SkillsPanel() {
         error={d.formErr}
         onCancel={d.closeSkillForm}
         onSubmit={d.submitSkillForm}
-        onAdvanced={d.openSkillAdvanced}
       />
       <SkillChatCreateModal open={d.chatOpen} onClose={() => d.setChatOpen(false)} />
       <SkillUploadModal open={d.uploadOpen} onClose={() => d.setUploadOpen(false)} onUpload={d.doImportSkillPackage} />
-      <CapabilityEditorModal
-        edit={d.edit}
-        setEdit={d.setEdit}
-        submitEdit={d.submitEdit}
-        editBusy={d.editBusy}
-        editErr={d.editErr}
-      />
     </PageContainer>
   )
 }
@@ -202,9 +182,6 @@ function filterSkills(skills: Skill[], query: string) {
   const q = query.trim().toLowerCase()
   if (!q) return skills
   return skills.filter((s) =>
-    [s.name, s.id, s.description, ...(s.runtimes ?? []), s.scope ?? '']
-      .join(' ')
-      .toLowerCase()
-      .includes(q),
+    [s.name, s.id, s.description ?? ''].join(' ').toLowerCase().includes(q),
   )
 }

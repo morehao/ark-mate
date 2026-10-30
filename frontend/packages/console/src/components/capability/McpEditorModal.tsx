@@ -87,12 +87,12 @@ export function McpEditorModal({
     }
     if (values.transport === 'stdio') {
       const command = values.command.trim()
-      if (!command) return setLocalErr('stdio 必须给命令')
+      if (!command) return setLocalErr('本地命令不能为空')
       if (!command.startsWith('/')) {
-        return setLocalErr('命令必须是绝对路径（底座的硬契约）：例如 /usr/local/bin/npx，不能写 npx')
+        return setLocalErr('命令要填完整的可执行文件路径，例如 /usr/local/bin/npx（只写 npx 无法启动）')
       }
     } else if (!values.url.trim()) {
-      return setLocalErr('远程 transport 必须给 URL')
+      return setLocalErr('远程服务必须填写地址')
     }
     setLocalErr(null)
     void onSubmit({ ...values, id })
@@ -108,9 +108,9 @@ export function McpEditorModal({
       destroyOnHidden
       title={
         <div>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>{created ? '新建 MCP server' : '编辑 MCP server'}</div>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>{created ? '新建连接器' : '编辑连接器'}</div>
           <div style={{ marginTop: 2, fontSize: 11, color: tokens.textPlaceholder }}>
-            {created ? '定义保存后会做词法校验：被拒的定义不会落盘。' : `${values.id} · 只提交发生变化的键`}
+            {created ? '保存前会检查填写内容；不通过时不会保存。' : '只会提交改动过的内容。'}
           </div>
         </div>
       }
@@ -148,7 +148,7 @@ export function McpEditorModal({
       />
       {!created && values.originalTransport === 'http' && values.transport !== 'streamable_http' && (
         <div style={{ marginTop: 4, fontSize: 10.5, color: tokens.textPlaceholder }}>
-          原定义用的是旧 http；只有你改了传输才会写成 {values.transport}，不动它就保持原值。
+          原配置使用的是旧式 HTTP；只有你改动了连接方式才会更新，不动它就保持原样。
         </div>
       )}
 
@@ -162,7 +162,7 @@ export function McpEditorModal({
             style={{ fontFamily: tokens.fontMono }}
           />
           <div style={{ margin: '3px 0 0', fontSize: 10.5, color: tokens.textPlaceholder }}>
-            只写可执行文件的绝对路径；参数放下一行。底座按绝对路径拉起进程，相对命令会被拒。
+            请填写完整的可执行文件路径；参数放在下一行。只写命令名无法启动。
           </div>
           <div style={{ fontSize: 11, color: tokens.textSecondary, margin: '10px 0 4px' }}>参数</div>
           <Input
@@ -206,7 +206,7 @@ export function McpEditorModal({
                 value={row.value}
                 onChange={(e) => updateRow('env', i, { value: e.target.value })}
               />
-              <Tooltip title="密钥型：值只接受 store:/env: 引用，明文不会落盘">
+              <Tooltip title="密钥型：值只接受 store:/env: 引用，不会保存明文">
                 <Checkbox checked={row.secret} onChange={(e) => updateRow('env', i, { secret: e.target.checked })}>
                   <span style={{ fontSize: 11 }}>密钥</span>
                 </Checkbox>
@@ -264,7 +264,7 @@ export function McpEditorModal({
       )}
 
       <div style={{ fontSize: 11, color: tokens.textSecondary, margin: '12px 0 4px' }}>
-        {created ? '定义 JSON（预览）' : '将提交的变更（patch；只有变化的键）'}
+        {created ? '配置预览（JSON）' : '将提交的变更'}
       </div>
       <pre
         style={{

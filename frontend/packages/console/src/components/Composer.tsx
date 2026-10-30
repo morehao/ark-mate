@@ -217,7 +217,7 @@ export function Composer({
             // 候选列表（贴输入框上方，走文档流：弹层出现时输入框整体上移，不盖住正在打的字）。
             // mousedown 而不是 click：click 要等 mouseup，而 textarea 会先因失焦收起弹层。
             // 页脚放在**滚动区之外**：候选多时（实测通告过 20 余条）说明文字不该被滚没。
-            <div className="fg-cmd-pop" role="listbox" aria-label="底座提供的命令">
+            <div className="fg-cmd-pop" role="listbox" aria-label="可用命令">
               <div className="fg-cmd-list">
                 {hints.map((c, i) => (
                   <button
@@ -239,7 +239,7 @@ export function Composer({
                   </button>
                 ))}
               </div>
-              <div className="fg-cmd-foot">↑↓ 选择 · Enter 填入 · Esc 关闭 —— 命令由底座提供，平台只做回显</div>
+              <div className="fg-cmd-foot">↑↓ 选择 · Enter 填入 · Esc 关闭 —— 命令由助手提供</div>
             </div>
           )}
           <textarea

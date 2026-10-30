@@ -8,11 +8,10 @@ import { useMate } from '../../store'
 /**
  * 「通过对话创建」的提示词。
  *
- * 它同时是**产品文案**与**操作指引**：用户把它发给 Agent，Agent 再走平台的能力写面。
- * `name` 取 id 词法（小写字母/数字/连字符）是底座的硬契约，所以提示词里直接写清，
- * 免得用户拿到一条「创建成功但底座读不到」的技能。
+ * 它同时是**产品文案**与**操作指引**：用户把它发给助手，助手再走平台的能力写面。
+ * 提示词里不出现内部文件格式与内部标识，只用用户能理解的说法。
  */
-const SKILL_CREATE_PROMPT = `请帮我创建一个技能，并保存为当前平台的 skill 定义。
+const SKILL_CREATE_PROMPT = `请帮我创建一个技能，并保存到当前平台。
 
 技能信息：
 - 名称：
@@ -21,9 +20,9 @@ const SKILL_CREATE_PROMPT = `请帮我创建一个技能，并保存为当前平
 - 工作步骤：
 
 要求：
-1. SKILL.md 的 YAML front matter 必须包含 name 与 description；name 用小写字母/数字/连字符（例如 weekly-report），它是定义 id；
+1. 按平台的技能格式保存，包含名称与用途说明；
 2. 正文写清「何时使用」与「工作步骤」，不要写成营销文案；
-3. 保存后确认它出现在「扩展 · 技能」列表里，并告诉我 id。`
+3. 保存后确认它出现在「扩展 · 技能」列表里，并告诉我技能名称。`
 
 /** 通过对话创建：给一段可直接发送的提示词 + 复制 + 去对话（D2 会把提示词预填进新建面板）。 */
 export function SkillChatCreateModal({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -78,8 +77,8 @@ export function SkillChatCreateModal({ open, onClose }: { open: boolean; onClose
         type="info"
         showIcon
         style={{ fontSize: 12 }}
-        message="在对话里把需求说清楚，Agent 会按平台的能力写面创建它"
-        description="保存时会走与表单相同的闸门：正文扫描不过（critical）→ 拒载且零字节落盘。"
+        message="在对话里把需求说清楚，助手会帮你创建并保存"
+        description="保存前会自动检查内容是否安全。"
       />
       <pre
         style={{

@@ -105,7 +105,7 @@ export function CommandPolicyPanel() {
 
   const save = async () => {
     if (drafts.some((d) => !ruleValid(d))) {
-      showToast('每条规则至少要有 1 个 token（空格分隔；备选用 |）')
+      showToast('每条规则至少要有 1 个词（空格分隔；备选用 |）')
       return
     }
     setSaving(true)
@@ -179,7 +179,7 @@ export function CommandPolicyPanel() {
               />
               <Input
                 value={d.patternText}
-                placeholder="前缀 token，例如：git push origin（备选用 |）"
+                placeholder="命令词，例如：git push origin（备选用 |）"
                 status={ruleValid(d) ? undefined : 'error'}
                 onChange={(e) => patch(i, { patternText: e.target.value })}
               />

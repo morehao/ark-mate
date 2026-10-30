@@ -178,11 +178,11 @@ export function AutomationsPage() {
     if (editor?.mode === 'create') {
       const created = await guard(createAutomation(writeBody(v, { create: true })))
       if (!created) return
-      showToast(`已新建 ${created.id}`)
+      showToast(`已创建「${created.name || created.id}」`)
     } else if (editor?.mode === 'edit') {
       const updated = await guard(updateAutomation(editor.a.id, writeBody(v, { create: false })))
       if (!updated) return
-      showToast(`已保存 ${updated.id}`)
+      showToast(`已保存「${updated.name || updated.id}」`)
     }
     setEditor(null)
     void load()
@@ -200,10 +200,10 @@ export function AutomationsPage() {
     try {
       const out = await runAutomationNow(a.id)
       if (out.status === 'claimed') {
-        showToast(`已触发 ${a.id}${out.session_id ? `（会话 ${out.session_id}）` : ''}`)
+        showToast(`已启动「${a.name || a.id}」`)
         if (out.session_id) navigate(`/sessions/${out.session_id}`)
       } else {
-        showToast(`${a.id} 未触发：${RUN_STATUS_META[out.status].label}${out.reason ? ` —— ${out.reason}` : ''}`)
+        showToast(`「${a.name || a.id}」未运行：${RUN_STATUS_META[out.status].label}${out.reason ? ` —— ${out.reason}` : ''}`)
       }
     } catch (err) {
       // 手动触发失败**既报错又留痕**：错误信封就是原因，运行史里也已经有这一条
@@ -235,7 +235,6 @@ export function AutomationsPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Space size={6} align="center">
             <span style={{ fontWeight: 600 }}>{a.name || a.id}</span>
-            <Tag style={{ marginInlineEnd: 0 }}>{a.id}</Tag>
             {isNeedsAttention(a) && (
               <Tooltip title={`连续 ${a.consecutive_failures} 次没跑成，平台不自动重试（避免把同一次错过重放）`}>
                 <Tag color="error" style={{ marginInlineEnd: 0 }}>
@@ -314,7 +313,7 @@ export function AutomationsPage() {
             loading={busyId === a.id}
             onChange={(v) => void onToggle(a, v)}
           />
-          <Popconfirm title={`删除 ${a.id}？`} description="只删定义文件；已产生的会话不受影响。" onConfirm={() => void onDelete(a)}>
+          <Popconfirm title={`删除「${a.name || a.id}」？`} description="删除后不可恢复；已产生的会话不受影响。" onConfirm={() => void onDelete(a)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
@@ -327,9 +326,8 @@ export function AutomationsPage() {
       title="定时任务"
       description={
         <span>
-          定义文件（<code>{'<AutomationDir>/<id>.json'}</code>）是唯一事实源：任务到点建一条会话，运行史
-          <b>含没跑成的那些</b>（重复/上一次还在跑/触发失败）。停机会在启动时收敛一次——过期的
-          <code>once</code> 不补跑，<code>daily</code>/<code>weekly</code> 补最近一次。
+          任务到点会自动新建一条会话，并发送你设定的话；运行史
+          <b>包含没跑成的那些</b>（重复、上一次还在跑、触发失败）。停用或错过的时间会在下次启动时按规则处理。
         </span>
       }
       extra={
@@ -350,13 +348,13 @@ export function AutomationsPage() {
         dataSource={rows}
         columns={columns}
         pagination={false}
-        locale={{ emptyText: <Empty description="还没有定时任务（定义文件落 <AutomationDir>/<id>.json）" /> }}
+        locale={{ emptyText: <Empty description="还没有定时任务" /> }}
       />
 
       {/* 编辑器：预览与保存同屏——"什么时候跑"必须能在保存之前看到 */}
       <Modal
         open={editor !== null}
-        title={editor?.mode === 'create' ? '新建定时任务' : `编辑 ${editor?.mode === 'edit' ? editor.a.id : ''}`}
+        title={editor?.mode === 'create' ? '新建定时任务' : `编辑「${editor?.mode === 'edit' ? editor.a.name || editor.a.id : ''}」`}
         width={720}
         onCancel={() => setEditor(null)}
         onOk={() => void onSubmit()}
@@ -367,7 +365,7 @@ export function AutomationsPage() {
           {editor?.mode === 'create' && (
             <Form.Item
               name="id"
-              label="ID（文件名，创建后不可改）"
+              label="任务标识（创建后不可改）"
               rules={[{ required: true, pattern: /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/, message: '字母数字开头，≤64 位，不含路径分隔符' }]}
             >
               <Input placeholder="daily-deps-check" />
@@ -427,7 +425,7 @@ export function AutomationsPage() {
                   预览接下来 5 次
                 </Button>
                 <span style={{ fontSize: 12, color: tokens.textSecondary }}>
-                  预览不落盘、不建会话；时区与夏令时都按上面的选择算
+                  预览不会保存，也不会新建会话；时区与夏令时都按上面的选择计算
                 </span>
               </Space>
               {previewErr && <Alert type="error" showIcon message={previewErr} />}
@@ -472,10 +470,10 @@ export function AutomationsPage() {
           >
             <CwdPicker />
           </Form.Item>
-          <Form.Item name="model" label="模型（可空 = 用底座默认）">
+          <Form.Item name="model" label="模型（可空 = 使用默认模型）">
             <Input placeholder="留空即不指定" />
           </Form.Item>
-          <Form.Item name="prompt" label="Prompt" rules={[{ required: true, message: '任务内容不能为空' }]}>
+          <Form.Item name="prompt" label="任务内容" rules={[{ required: true, message: '任务内容不能为空' }]}>
             <Input.TextArea rows={3} placeholder="每次触发时发给助手的话" />
           </Form.Item>
           <Form.Item name="max_run_duration" label="单轮上限（可空，如 10m）" extra="只收紧，不替代平台既有的轮次超时看门狗">
@@ -592,7 +590,7 @@ const FIELD_LABEL: Record<string, string> = {
   days_of_week: '每周的哪几天',
   cwd: '工作空间',
   model: '模型',
-  prompt: 'Prompt',
+  prompt: '任务内容',
   max_run_duration: '单轮上限',
 }
 

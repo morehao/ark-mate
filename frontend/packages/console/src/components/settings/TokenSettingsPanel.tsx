@@ -21,10 +21,7 @@ export function TokenSettingsPanel() {
     <div className="fg-setsec">
       <div className="fg-setsec-head">
         <span className="fg-setsec-desc">
-          后端以 <code style={{ fontFamily: tokens.fontMono }}>MATE_TOKEN</code>（或{' '}
-          <code style={{ fontFamily: tokens.fontMono }}>.ark-mate/config</code> 的{' '}
-          <code style={{ fontFamily: tokens.fontMono }}>token</code>）启用鉴权后，除{' '}
-          <code style={{ fontFamily: tokens.fontMono }}>/health</code> 外的所有接口都需要该令牌。
+          当应用启用了访问保护时，除健康检查外的所有操作都需要这个访问令牌。
         </span>
       </div>
 
@@ -35,7 +32,7 @@ export function TokenSettingsPanel() {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onPressEnter={() => saveToken(draft)}
-            placeholder="粘贴 MATE_TOKEN；留空 = 清除"
+            placeholder="粘贴访问令牌；留空表示清除"
             autoComplete="off"
           />
           <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8 }}>

@@ -139,7 +139,7 @@ export const TRIGGER_LABEL: Record<string, string> = {
 
 /** 列表副行：最近一次的事实（状态 + 原因 + 时间），没有任何运行史时给一句实话。 */
 export function lastRunText(a: Automation): string {
-  if (a.error) return `定义装载失败：${a.error}`
+  if (a.error) return `运行配置有误：${a.error}`
   if (!a.last_status) return '尚未触发过'
   const meta = RUN_STATUS_META[a.last_status]
   const when = a.last_fired_at ? `（${fmtWhen(a.last_fired_at)}）` : ''

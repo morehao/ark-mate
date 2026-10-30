@@ -16,7 +16,7 @@ import { getSession, promptSession, revokeMemory, sessionHistory, toErrorMessage
 import { useMate } from '../store'
 import { pinnedCapabilitiesView } from '../console/capabilityView'
 import { ModelSelect } from './ModelSelect'
-import { runtimeLabelOf, shortId } from '../console/util'
+import { shortId } from '../console/util'
 import { copyText } from '../console/clipboard'
 import { summarizeRun, type FailedRun, type RunSummary } from '../console/runSummary'
 
@@ -42,7 +42,6 @@ export function SessionDetailDrawer({
   sessionId: string
   onClose: () => void
 }) {
-  const runtime = useMate((s) => s.runtime)
   const views = useMate((s) => s.views)
   const respond = useMate((s) => s.respondPermission)
   const renameSession = useMate((s) => s.renameSession)
@@ -269,7 +268,6 @@ export function SessionDetailDrawer({
                 gap: 2,
               }}
             >
-              {row('底座', runtimeLabelOf(runtime, s.runtime_id))}
               {/* 工作空间（= 会话的 ACP cwd，也是原生权限 workspace-write 的沙箱边界）：
                   创建后不可变，故这里只读展示。「平台分配」标记来自服务端权威标志
                   workspace_temporary，不从路径形状猜。路径过长时中间省略，全文走 title。 */}
@@ -343,7 +341,7 @@ export function SessionDetailDrawer({
                     value={s.model ?? null}
                     allowClear
                     size="small"
-                    defaultLabel="运行时默认"
+                    defaultLabel="默认"
                     onChange={(v) => {
                       if ((v ?? undefined) === s.model) return
                       void updateSessionModel(s.id, v ?? undefined).then(() => void load())
@@ -397,8 +395,7 @@ export function SessionDetailDrawer({
                 if (!pinned) {
                   return row(
                     '能力',
-                    <span style={{ color: tokens.textPlaceholder }} title="未声明会话级能力选定：按平台默认投放">
-                      跟随默认
+                    <span style={{ color: tokens.textPlaceholder }} title="未单独设置：使用默认能力">跟随默认
                     </span>,
                   )
                 }
@@ -510,7 +507,7 @@ export function SessionDetailDrawer({
                                   gap: 8,
                                 }}
                               >
-                                <span>seq {ft.seq}</span>
+                                <span>运行出错</span>
                                 {ft.code && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ft.code}</span>}
                               </div>
                               <div
@@ -553,7 +550,7 @@ export function SessionDetailDrawer({
                       </div>
                     ) : (
                       <div style={{ fontSize: 12, color: tokens.textPlaceholder, lineHeight: 1.6 }}>
-                        无失败轮次。底座运行出错时，可在此一键重试该轮。
+                        无失败轮次。运行出错时，可在此一键重试该轮。
                       </div>
                     )}
                   </>
@@ -592,7 +589,7 @@ export function SessionDetailDrawer({
                     lineHeight: 1.6,
                   }}
                 >
-                  无待确认的权限请求。底座发起工具权限确认时会实时出现在这里与聊天流中。
+                  无待确认的权限请求。需要确认工具权限时会实时出现在这里与聊天流中。
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

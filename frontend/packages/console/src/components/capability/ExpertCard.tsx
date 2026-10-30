@@ -117,7 +117,7 @@ export function ExpertCard({
               </Tag>
             )}
             {missing && (
-              <Tooltip title="推荐技能/MCP 指向不存在的定义：保存仍成功；选择该专家时这些项被跳过并告警。">
+              <Tooltip title="推荐技能/连接器指向不存在的项：保存仍成功；使用该专家时这些项被跳过并提示。">
                 <Tag color="warning" style={badgeBase}>
                   引用缺失
                 </Tag>
@@ -129,8 +129,8 @@ export function ExpertCard({
               </Tag>
             )}
           </div>
-          <div style={{ fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textPlaceholder, marginTop: 2 }}>
-            {expert.id}
+          <div style={{ fontSize: 10.5, color: tokens.textPlaceholder, marginTop: 2 }}>
+            标识：{expert.id}
           </div>
         </div>
       </div>
@@ -163,7 +163,7 @@ export function ExpertCard({
             lineHeight: 1.55,
           }}
         >
-          已设置角色设定 · 首轮以隐藏上下文注入（打开查看正文）
+          已设置角色设定 · 对话开始时会自动生效（打开查看）
         </div>
       ) : (
         <div style={{ marginTop: 10, fontSize: 11, color: tokens.textPlaceholder }}>未设置角色设定（仅能力预设）</div>
@@ -191,7 +191,7 @@ export function ExpertCard({
           }}
         />
         <span>
-          {skillCount} 技能 · {mcpCount} MCP
+          {skillCount} 技能 · {mcpCount} 连接器
         </span>
         {modelLabel && (
           <>
@@ -223,7 +223,7 @@ export function ExpertCard({
           </Tooltip>
           <Popconfirm
             title={`删除「${expert.name || expert.id}」？`}
-            description="删除定义不可恢复；已建会话不受影响（能力在创建时已固定）。"
+            description="删除后不可恢复；已建会话不受影响。"
             okText="删除"
             okButtonProps={{ danger: true }}
             cancelText="取消"

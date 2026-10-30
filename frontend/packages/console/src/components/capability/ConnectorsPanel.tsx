@@ -54,7 +54,7 @@ export function ConnectorsPanel() {
   return (
     <PageContainer
       title="连接器"
-      description="管理 MCP server、探测工具，并查看它们承载的资源与提示词。"
+      description="管理连接器，连接后可以使用它提供的工具、资源与提示词。"
       extra={
         <Space size={8}>
           <Input
@@ -62,7 +62,7 @@ export function ConnectorsPanel() {
             allowClear
             prefix={<SearchOutlined style={{ color: tokens.textPlaceholder }} />}
             style={{ width: 210 }}
-            placeholder="搜索 MCP / 工具"
+            placeholder="搜索连接器 / 工具"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -71,8 +71,8 @@ export function ConnectorsPanel() {
       }
     >
       <SectionHeader
-        title="MCP Servers"
-        hint="传输、密钥引用与 live 探测结果；工具与资源在服务详情里查看，密钥只显示键名。删除 server 会一并摘除归属它的工具。"
+        title="我的连接器"
+        hint="连接方式、密钥与最近一次同步结果；工具与资源在详情里查看，密钥只显示名称。删除连接器会一并移除它的工具。"
         count={visible.length}
         loading={d.busy === 'mcps'}
         onRefresh={() => d.refresh('mcps')}
@@ -82,12 +82,12 @@ export function ConnectorsPanel() {
           <CapabilityEmpty
             text={
               d.mcps.length === 0
-                ? '暂无 MCP server。新建一个后，探测结果会写入工具目录。'
-                : `没有找到匹配「${query}」的 MCP server。`
+                ? '暂无连接器。添加一个后，就可以使用它提供的工具。'
+                : `没有找到匹配「${query}」的连接器。`
             }
             action={
               d.mcps.length === 0 ? (
-                <AddCapabilityMenu kind="mcp" onPick={onAdd} label="添加 MCP server" type="primary" />
+                <AddCapabilityMenu kind="mcp" onPick={onAdd} label="添加连接器" type="primary" />
               ) : undefined
             }
           />
@@ -162,11 +162,11 @@ export function ConnectorsPanel() {
                       {row.endpoint || '（未声明端点）'}
                     </span>
                     <span style={{ opacity: 0.65 }}>·</span>
-                    <span>{row.toolCount} tools</span>
+                    <span>{row.toolCount} 个工具</span>
                     {row.lastProbeAt && (
                       <>
                         <span style={{ opacity: 0.65 }}>·</span>
-                        <span>探测 {fmtProbeAt(row.lastProbeAt)}</span>
+                        <span>更新 {fmtProbeAt(row.lastProbeAt)}</span>
                       </>
                     )}
                   </>
@@ -178,14 +178,14 @@ export function ConnectorsPanel() {
                         诊断
                       </Button>
                     ) : (
-                      <Tooltip title={row.probeable ? '拉取该 server 的 tools/list 并写入 Tool 目录' : '该传输无法探测（缺少端点声明）'}>
+                      <Tooltip title={row.probeable ? '获取该连接器提供的工具并更新列表' : '该连接方式无法获取工具（缺少地址）'}>
                         <Button
                           size="small"
                           disabled={!row.probeable}
                           loading={d.probing === row.id}
                           onClick={() => void d.doProbe(row.id)}
                         >
-                          探测
+                          获取工具
                         </Button>
                       </Tooltip>
                     )}
@@ -193,8 +193,8 @@ export function ConnectorsPanel() {
                       编辑
                     </Button>
                     <Popconfirm
-                      title={`删除 ${row.name}？`}
-                      description="定义文件会被删除，归属它的工具条目会一并摘除。此操作不可撤销。"
+                      title={`删除「${row.name}」？`}
+                      description="删除后不可恢复；它提供的工具会一并移除。"
                       okText="删除"
                       okButtonProps={{ danger: true }}
                       cancelText="取消"

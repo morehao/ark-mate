@@ -189,18 +189,18 @@ function validateKnown(input: {
 }): string | null {
   if (input.created) {
     const id = input.id.trim()
-    if (!id) return 'id 必填（它同时是定义文件名）'
+    if (!id) return '标识必填'
     if (!EXPERT_ID_RE.test(id) || id.length > 64) {
-      return 'id 须小写字母/数字、用连字符分段（形如 data-analyst），≤64 位'
+      return '标识只能用英文小写字母/数字，用连字符分段（例如 data-analyst），≤64 位'
     }
   }
   const name = input.name.trim()
   if (!name) return '名称必填'
   if ([...name].length > EXPERT_MAX_NAME) return `名称 ≤${EXPERT_MAX_NAME} 字符`
   if ([...input.description].length > EXPERT_MAX_DESCRIPTION) return `描述 ≤${EXPERT_MAX_DESCRIPTION} 字符`
-  if (input.model && !input.model.startsWith('mdl_')) return '推荐模型须为平台模型行 id（mdl_…）'
+  if (input.model && !input.model.startsWith('mdl_')) return '推荐模型不在可选范围内'
   if (input.skills && input.skills.length > EXPERT_MAX_REFS) return `推荐技能最多 ${EXPERT_MAX_REFS} 个`
-  if (input.mcps && input.mcps.length > EXPERT_MAX_REFS) return `推荐 MCP 最多 ${EXPERT_MAX_REFS} 个`
+  if (input.mcps && input.mcps.length > EXPERT_MAX_REFS) return `推荐连接器最多 ${EXPERT_MAX_REFS} 个`
   const tags = input.tags ?? []
   if (tags.length > EXPERT_MAX_TAGS) return `标签最多 ${EXPERT_MAX_TAGS} 个`
   if (tags.some((t) => [...t].length > EXPERT_MAX_TAG_CHARS)) return `每个标签 ≤${EXPERT_MAX_TAG_CHARS} 字符`
@@ -209,7 +209,7 @@ function validateKnown(input: {
     return `角色设定超过 ${EXPERT_INSTRUCTIONS_MAX_BYTES} 字节（当前 ${bytes}），保存会被拒绝`
   }
   const marks = instructionsMarkers(input.instructions)
-  if (marks.length > 0) return `角色设定含危险标记：${marks.join('、')}，保存会被拒绝`
+  if (marks.length > 0) return `角色设定含不支持的写法：${marks.join('、')}，保存会被拒绝`
   return null
 }
 

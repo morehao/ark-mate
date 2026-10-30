@@ -365,16 +365,16 @@ export function ChatPage() {
 
   const renderChatHead = () => {
     if (!activeId) return null
-    // 位次是会话内的、0 是合法位次（v21）："还没有事件"是 -1，所以判据是 `>= 0`。
-    const seq = view?.lastSeq ?? -1
     // 旁白优先：`narration.label` 就是"这一刻在干什么"（服务端铸造的过程状态）。
     // 没有过程状态（历史会话 / 本轮还没开始）才回落到会话的**终态归类**——那是另一件事，
     // 它说得出「已完成/已取消」，说不出「正在执行 Bash」。
     const metaText = streaming
       ? '进行中'
       : narration.label
-        ? `${narration.label}${seq >= 0 ? ` · seq ${seq}` : ''}`
-        : `${activeSum ? statusLabel(activeSum.status) : '未知状态'}${seq >= 0 ? ` · seq ${seq}` : ''}`
+        ? narration.label
+        : activeSum
+          ? statusLabel(activeSum.status)
+          : '未知状态'
     return (
       <div
         style={{
@@ -432,7 +432,7 @@ export function ChatPage() {
               }}
             >
               <InfoCircleOutlined />
-              该会话的底座是「{activeSum?.runtime_id}」，而当前构建固定的是「{runtime?.id}」（历史仍可读，无法继续提问）：导出历史另开新会话即可继续。
+              该会话由另一个版本创建，当前版本无法继续提问（历史仍可阅读）：可导出历史后新建会话继续。
             </div>
           )}
         </div>

@@ -142,7 +142,7 @@ export function App() {
               className="fg-anim-pulse"
               style={{ width: 7, height: 7, borderRadius: '50%', background: tokens.warning, display: 'inline-block' }}
             />
-            {wsState === 'connecting' ? '连接中…' : 'WS 已断开，正在自动重连（重连后按会话水位续传）…'}
+            {wsState === 'connecting' ? '连接中…' : '连接已断开，正在自动重连…'}
           </div>
         )}
 

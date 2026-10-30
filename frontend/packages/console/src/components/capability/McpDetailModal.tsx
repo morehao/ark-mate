@@ -225,14 +225,14 @@ export function McpDetailModal({
                     type="error"
                     showIcon
                     message={`探测失败：${row.lastProbeError || '原因未知'}`}
-                    description="先确认命令能在终端独立启动，再回来点「探测」。密钥未就绪时会被跳过——见下方「密钥与 Header」。"
+                    description="先确认命令能在终端独立运行，再回来点「获取工具」。密钥未就绪时会被跳过——见下方「密钥与请求头」。"
                   />
                 ) : state.key === 'needs_setup' ? (
                   <Alert
                     type="warning"
                     showIcon
                     message={`缺少 ${row.unresolvedSecretKeys.join('、')}`}
-                    description="引用已绑定但当前解析不出值；注入时这个 server 会被跳过。检查 store: 引用在库里有没有值、env: 变量是否已设置。"
+                    description="密钥已绑定但当前取不到值；使用时会跳过这个连接器。请检查对应的密钥或环境变量是否已设置。"
                   />
                 ) : state.key === 'disabled' ? (
                   <Alert type="warning" showIcon message="已停用" description="工具不会进入模型上下文；配置与密钥保留。" />
@@ -240,15 +240,15 @@ export function McpDetailModal({
                   <Alert
                     type="info"
                     showIcon
-                    message="尚未探测"
-                    description="保存后点「探测」拉取 tools/list；工具条目属于这个 server。"
+                    message="尚未获取工具"
+                    description="保存后点「获取工具」，即可同步它提供的工具。"
                   />
                 ) : (
                   <Alert
                     type="success"
                     showIcon
                     message="已连接"
-                    description={serverTools.length > 0 ? '工具已进入模型上下文，随会话注入。' : '已连接，但该 server 没有暴露工具。'}
+                    description={serverTools.length > 0 ? '工具已就绪，可随会话使用。' : '已连接，但它没有提供工具。'}
                   />
                 )}
 
@@ -282,14 +282,14 @@ export function McpDetailModal({
                   items={[
                     { label: '传输', value: transportLongLabel(server.transport) },
                     { label: '工具', value: serverTools.length },
-                    { label: '最近探测', value: server.last_probe_at ? fmtProbeAt(server.last_probe_at) : '—' },
+                    { label: '最近更新', value: server.last_probe_at ? fmtProbeAt(server.last_probe_at) : '—' },
                     { label: '启用', value: server.enabled === false ? '否' : '是' },
                   ]}
                 />
 
-                <SectionLabel>密钥与 Header</SectionLabel>
+                <SectionLabel>密钥与请求头</SectionLabel>
                 {row.secretKeys.length === 0 ? (
-                  <div style={{ fontSize: 11.5, color: tokens.textPlaceholder }}>没有声明密钥或 Header。</div>
+                  <div style={{ fontSize: 11.5, color: tokens.textPlaceholder }}>没有声明密钥或请求头。</div>
                 ) : (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                     {row.secretKeys.map((k) => (
@@ -312,19 +312,19 @@ export function McpDetailModal({
             ) : t.key === 'tools' ? (
               <div>
                 <div style={{ fontSize: 11.5, color: tokens.textSecondary, lineHeight: 1.7, marginBottom: 8 }}>
-                  只显示属于 <code>{server.id}</code> 的工具条目；没有条目时先点「探测」拉取 <code>tools/list</code>。
-                  试调用会建独立 MCP 会话（不做连接池），写操作先走权限确认。
+                  这里显示这个连接器提供的工具；没有条目时先点「获取工具」。
+                  试运行工具时，写操作会先请求确认。
                 </div>
                 {serverTools.length === 0 ? (
                   <CapabilityEmpty
                     text={
                       row.lastProbeError
-                        ? '探测失败，工具目录还是空的——先在概览里看排查建议。'
+                        ? '获取工具失败——先在概览里看排查建议。'
                         : '还没有工具条目。'
                     }
                     action={
                       <Button size="small" icon={<ReloadOutlined />} loading={probing} onClick={onProbe}>
-                        探测
+                        获取工具
                       </Button>
                     }
                   />
@@ -415,9 +415,7 @@ export function McpDetailModal({
             ) : t.key === 'live' ? (
               <div>
                 <div style={{ fontSize: 11.5, color: tokens.textSecondary, lineHeight: 1.7, marginBottom: 8 }}>
-                  实时向该 server 拉取（<code>resources/list</code> + <code>resources/templates/list</code> /{' '}
-                  <code>prompts/list</code>）：<b>不落盘、不目录化</b>——资源与提示词随 server 权限/状态变化，
-                  每次打开现拉最诚实。
+                  这里的资源和提示词每次打开时实时获取，不会保存；它们会随连接器状态变化。
                 </div>
                 <Tabs
                   size="small"
@@ -435,7 +433,7 @@ export function McpDetailModal({
                           {liveErr && liveTab === 'resources' ? (
                             <Alert type="error" showIcon message="资源拉取失败" description={liveErr} />
                           ) : !resResult || resResult.resources.length === 0 ? (
-                            <Empty description="该 server 未暴露资源（或未实现 resources/list）" />
+                            <Empty description="该连接器没有提供资源" />
                           ) : (
                             <div style={{ maxHeight: 360, overflowY: 'auto' }}>
                               {resResult.templates_error && (
@@ -443,7 +441,7 @@ export function McpDetailModal({
                                   type="info"
                                   showIcon
                                   style={{ marginBottom: 8 }}
-                                  message="该 server 未实现 resources/templates/list（降级为空）"
+                                  message="该连接器没有提供资源模板"
                                   description={resResult.templates_error}
                                 />
                               )}
@@ -513,7 +511,7 @@ export function McpDetailModal({
                           {liveErr && liveTab === 'prompts' ? (
                             <Alert type="error" showIcon message="提示词拉取失败" description={liveErr} />
                           ) : !promptResult || promptResult.prompts.length === 0 ? (
-                            <Empty description="该 server 未暴露提示词（或未实现 prompts/list）" />
+                            <Empty description="该连接器没有提供提示词" />
                           ) : (
                             <div style={{ maxHeight: 360, overflowY: 'auto' }}>
                               {promptResult.prompts.map((p) => (

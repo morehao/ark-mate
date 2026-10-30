@@ -192,7 +192,7 @@ export function ModelSelect({
               whiteSpace: 'normal',
             }}
           >
-            {emptyNote ?? '运行时未提供模型目录'}
+            {emptyNote ?? '暂无可用模型'}
           </div>
         ) : (
           '无匹配模型'

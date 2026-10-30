@@ -136,7 +136,7 @@ export function useExpertData() {
     try {
       if (created) {
         const res = await createExpert(body)
-        showToast(`已新建专家 ${res.id}`)
+        showToast(`已创建专家「${res.id}」`)
       } else {
         // 一次「打开又保存」不该写盘：变化键为空直接关掉。
         if (Object.keys(body).length === 0) {
@@ -146,7 +146,7 @@ export function useExpertData() {
         }
         const id = detail?.id ?? targetId ?? ''
         const res = await updateExpert(id, body)
-        showToast(`已保存专家 ${res.id}`)
+        showToast(`已保存专家「${res.id}」`)
       }
       setOpen(false)
       await loadExperts()
@@ -162,12 +162,12 @@ export function useExpertData() {
     setToggleBusy(id)
     try {
       await setExpertEnabled(id, enabled)
-      showToast(`${enabled ? '已启用' : '已禁用'} ${id}${enabled ? '' : '（仅影响新选择，不影响历史会话）'}`)
+      showToast(`${enabled ? '已启用' : '已停用'}专家「${id}」${enabled ? '' : '（仅影响新选择，不影响历史会话）'}`)
       await loadExperts()
       // 同步弹窗里的 detail.enabled（不重新拉正文，避免把正在编辑的草稿冲掉）。
       setDetail((cur) => (cur && cur.id === id ? { ...cur, enabled } : cur))
     } catch (err) {
-      showToast(`切换 ${id} 失败：${writeErrorText(err)}`)
+      showToast(`切换「${id}」失败：${writeErrorText(err)}`)
     } finally {
       setToggleBusy(null)
     }
@@ -177,7 +177,7 @@ export function useExpertData() {
     setDelBusy(id)
     try {
       const res = await deleteExpert(id)
-      showToast(res.deleted ? `已删除专家 ${id}` : `专家 ${id} 本就不存在（已同步列表）`)
+      showToast(res.deleted ? `已删除专家「${id}」` : `专家「${id}」本就不存在（已同步列表）`)
       if (open && !created && targetId === id) setOpen(false)
       await loadExperts()
     } catch (err) {
