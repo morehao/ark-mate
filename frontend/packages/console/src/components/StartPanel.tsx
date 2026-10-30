@@ -8,8 +8,9 @@ import { useMate } from '../store'
 import { ModelSelect } from './ModelSelect'
 import { WorkspacePicker, type WorkspaceChoice } from './WorkspacePicker'
 import { mostRecentlyUsedWorkspaceId } from '../console/workspaceView'
-import { CapabilityPicker } from './CapabilityPicker'
+import { CapabilityBar } from './CapabilityBar'
 import { FOLLOW_DEFAULT, selectionPayload, type CapabilityChoice } from '../console/capabilityView'
+import { mergeCapabilityPatch } from '../console/capabilityEdit'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
 
 // 新建会话时记住的「上次所选模型」——存的是**平台模型行 id**（`mdl_…`；v26 起）。
@@ -120,6 +121,10 @@ export function StartPanel() {
   // 与工作空间相反，这个选择**保留上一次的**：它不是沙箱边界，而更像"这次任务的工具箱"——
   // 连着做同一类任务时每次重选一遍是纯负担；且它不影响新任务能读到/改到哪些文件，
   // 复用不会造成"静默继承上一个任务的边界"那类问题。不想要了就点回「跟随默认」。
+  //
+  // **这里是本地草稿**：新建会话还没有会话记录可 PATCH，所以 `+`/chip 改的是这份草稿，
+  // 随 `POST /sessions` 的**首轮**一起提交（首轮就用这套能力）。界面与"会话内改能力"同一套
+  // 组件（`CapabilityBar`），落库时机不同而已——"新建会话就是首轮"，没有理由长成另一个样子。
   const [capabilities, setCapabilities] = useState<CapabilityChoice>(FOLLOW_DEFAULT)
 
   // v19：建会话不再需要客户端知道任何底座事实（原来要在缺省时挑出"当前 Agent"并传 agent_id，
@@ -318,12 +323,15 @@ export function StartPanel() {
                   overflow: 'hidden',
                 }}
               >
-                {/* 「这个会话用哪些能力」= 会话级能力选定（M3）。默认不限制，限了才占位显示明细：
-                    不给未设置的状态编一个假值。 */}
-                <CapabilityPicker
+                {/* 「这个会话用哪些能力」= 会话级能力选定（M3）。与会话内输入区**同一个组件**
+                    （`+` 菜单 + 专家/技能/连接器 + chip）：新建会话就是这条会话的首轮，
+                    没有理由长成另一套交互。默认不限制 → 只有一颗 `+`，不编假值。 */}
+                <CapabilityBar
                   value={capabilities}
-                  onChange={setCapabilities}
+                  onChange={(patch) => setCapabilities((cur) => mergeCapabilityPatch(cur, patch))}
                   disabled={sending}
+                  saving={sending}
+                  applyHint="first-round"
                 />
                 <button
                   type="button"

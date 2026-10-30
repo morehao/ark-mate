@@ -6,6 +6,7 @@ import {
   capabilityToastText,
   choiceFromCapabilities,
   expertSwitchPatch,
+  mergeCapabilityPatch,
   selectionPatchFor,
 } from '../src/console/capabilityEdit.ts'
 
@@ -66,6 +67,41 @@ describe('expertSwitchPatch', () => {
 
   it('「通用」是空串（明确不用），与 null 不是一回事', () => {
     assert.deepEqual(expertSwitchPatch(''), { expert: '', skills: null, mcps: null })
+  })
+})
+
+describe('mergeCapabilityPatch', () => {
+  it('只改补丁里出现的格子，另一格原样保留（创建页的本地草稿就靠这条）', () => {
+    const cur = { expert: 'data-analyst', skills: ['a'], mcps: null }
+    assert.deepEqual(mergeCapabilityPatch(cur, { skills: ['b'] }), {
+      expert: 'data-analyst',
+      skills: ['b'],
+      mcps: null,
+    })
+  })
+
+  it('null 是一个要落下去的值（回未声明），不是"没改"', () => {
+    const cur = { expert: 'x', skills: ['a'], mcps: ['m'] }
+    assert.deepEqual(mergeCapabilityPatch(cur, { skills: null, expert: null }), {
+      expert: null,
+      skills: null,
+      mcps: ['m'],
+    })
+  })
+
+  it('空数组与 null 合并后仍是两个不同的状态', () => {
+    const cur = { expert: null, skills: null, mcps: null }
+    assert.deepEqual(mergeCapabilityPatch(cur, { skills: [] }).skills, [])
+    assert.deepEqual(mergeCapabilityPatch(cur, { skills: null }).skills, null)
+  })
+
+  it('与 expertSwitchPatch 组合：换成某个专家后本地就是"专家 + 两格未声明"', () => {
+    const cur = { expert: null, skills: ['a'], mcps: ['m'] }
+    assert.deepEqual(mergeCapabilityPatch(cur, expertSwitchPatch('data-analyst')), {
+      expert: 'data-analyst',
+      skills: null,
+      mcps: null,
+    })
   })
 })
 

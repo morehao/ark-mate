@@ -3,7 +3,7 @@ import type { CapabilityChoice } from './capabilityView'
 
 // ——— 会话内改能力的**请求语义**（M3-8；纯函数，便于 Node 侧单测） ———
 //
-// 与创建页（`CapabilityPicker`）共用同一套三态：`null` = 未声明（回落默认）、`[]` = 明确一个
+// 与输入区的能力入口（`CapabilityBar`）共用同一套三态：`null` = 未声明（回落默认）、`[]` = 明确一个
 // 都不要、非空 = 白名单；专家 `''` = 明确不用、非空 = 专家 id。
 //
 // 这里只回答两个问题：**读面怎么折成三态**、**某一格改动要发什么补丁**。两者分开写是因为
@@ -31,6 +31,23 @@ export function selectionPatchFor(
   next: string[] | null,
 ): SessionCapabilitiesPatch {
   return kind === 'skills' ? { skills: next } : { mcps: next }
+}
+
+/**
+ * 把一次三态补丁就地合并进**本地**三态选择（新建会话面板用：那边没有服务端回执可读）。
+ *
+ * 语义与 wire 一致：**键缺失 = 不改这一格**，`null` = 回未声明，`[]` = 明确一个都不要。
+ * 之所以必须按"键在不在"判而不是按"值是不是 null"，是因为 `null` 本身就是一个要落下去的值。
+ */
+export function mergeCapabilityPatch(
+  current: CapabilityChoice,
+  patch: SessionCapabilitiesPatch,
+): CapabilityChoice {
+  return {
+    expert: 'expert' in patch ? (patch.expert ?? null) : current.expert,
+    skills: 'skills' in patch ? (patch.skills ?? null) : current.skills,
+    mcps: 'mcps' in patch ? (patch.mcps ?? null) : current.mcps,
+  }
 }
 
 /**
