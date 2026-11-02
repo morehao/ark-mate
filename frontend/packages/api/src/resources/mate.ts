@@ -19,6 +19,7 @@ import type {
   SessionSearchHit,
   SessionSummary,
   CreateSessionReq,
+  Attachment,
   CreateSessionResp,
   ElicitationResp,
   ExportResp,
@@ -469,6 +470,24 @@ export const importSkillPackage = (file: File): Promise<SkillWriteResp> => {
   form.append('file', file, file.name)
   return http.post<SkillWriteResp>('/mate/skills/import', form)
 }
+
+// ——— 附件（v32）———
+//
+// 上传走 multipart（`file` 字段 + 可选 `name`）；单文件、前端循环多传。字节落 <MATE_HOME>/attachments，
+// 不写工作区。响应只元数据；预览走 attachmentContentUrl。
+export const uploadAttachment = (file: File): Promise<Attachment> => {
+  const form = new FormData()
+  form.append('file', file, file.name)
+  return http.post<Attachment>('/mate/attachments', form)
+}
+
+/** 撤下待挂附件（幂等；linked 不可撤 → 40901）。 */
+export const deleteAttachment = (id: string): Promise<{ deleted: boolean }> =>
+  http.delete<{ deleted: boolean }>(`/mate/attachments/${encodeURIComponent(id)}`)
+
+/** 附件字节流 URL（预览用；img src / 点击打开）。相对 `/v1` 前缀，与 api 同源。 */
+export const attachmentContentUrl = (id: string): string =>
+  `/v1/mate/attachments/${encodeURIComponent(id)}/content`
 
 /** M2 写面：新建一个 MCP server 定义（闸门比 skill 多：transport/绝对路径/引用词法…）。 */
 export const createMcpServer = (body: CapabilityWriteBody): Promise<McpWriteResp> =>

@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Select } from 'antd'
-import { ArrowUpOutlined } from '@ant-design/icons'
+import { Select, message as antdMessage } from 'antd'
+import { ArrowUpOutlined, PaperClipOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import type { CommandInfo, SessionCapabilities } from '@ark-mate/types'
+import type { AttachmentMeta, CommandInfo, SessionCapabilities } from '@ark-mate/types'
+import { uploadAttachment } from '@ark-mate/api'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
 import { DELIVERY_HINT, DELIVERY_LABEL, type DeliveryChoice } from '../console/queueView'
 import { applyCommandHint, commandHintQuery, matchCommands, moveHintIndex } from '../console/commandHints'
 import { WorkspaceChipStatic } from './WorkspacePicker'
 import { ComposerCapabilities } from './ComposerCapabilities'
+import { AttachmentChip } from './AttachmentChip'
 
 interface Props {
   busy: boolean
@@ -17,8 +19,13 @@ interface Props {
   onStop: () => void
   busyNote?: string
   placeholder?: string
-  /** 空闲时的发送；忙时按所选投递模式发送（§6）。 */
-  onSend: (text: string, delivery?: DeliveryChoice) => void
+  /** 空闲时的发送；忙时按所选投递模式发送（§6）。v32：可携带待发附件。 */
+  onSend: (text: string, delivery?: DeliveryChoice, attachments?: AttachmentMeta[]) => void
+  /**
+   * 当前会话模型是否支持图片输入（v32 门禁；`undefined` = 未知 → 不拦，交给服务端判）。
+   * 为 `false` 时，选图片附件会置灰/提示（发送前拦），避免发出去被服务端 40001 model_no_image_input。
+   */
+  imageSupported?: boolean
   autoFocus?: boolean
   /**
    * 本会话的工作空间（只读展示，贴在输入卡**上沿左上角**的 chip）。工作空间创建时定稿、
@@ -76,6 +83,7 @@ export function Composer({
   busyNote,
   placeholder,
   onSend,
+  imageSupported,
   autoFocus,
   workspace,
   commands,
@@ -101,7 +109,35 @@ export function Composer({
   const [hintOff, setHintOff] = useState(false)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const empty = draft.trim().length === 0
+  // ——— 附件（v32）———：待发附件 chip 的本地态（刷新不保留；pending 由服务端 TTL 收）。
+  const [pendingAtts, setPendingAtts] = useState<AttachmentMeta[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const fileRef = useRef<HTMLInputElement | null>(null)
+
+  const addFiles = async (files: FileList | File[] | null) => {
+    if (!files) return
+    const list = Array.from(files)
+    if (list.length === 0) return
+    setUploading(true)
+    for (const f of list) {
+      try {
+        const att = await uploadAttachment(f)
+        // 门禁：模型不能收图且这是图片 → 上传成功但**不挂进待发**（提示并删除，避免发出去被拒）。
+        if (att.kind === 'image' && imageSupported === false) {
+          void antdMessage.warning('当前模型不支持图片输入，已跳过该图片')
+          continue
+        }
+        setPendingAtts((prev) => [...prev, { id: att.id, name: att.name, mime_type: att.mime_type, size_bytes: att.size_bytes, kind: att.kind }])
+      } catch (err) {
+        void antdMessage.error(`上传 ${f.name} 失败：${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    setUploading(false)
+  }
+  const removeAtt = (id: string) => setPendingAtts((prev) => prev.filter((a) => a.id !== id))
+
+  const empty = draft.trim().length === 0 && pendingAtts.length === 0
   // 同一颗圆钮的三个状态（D7）：
   //  - 空闲：箭头（空文本禁用）；
   //  - 忙且可停、**草稿为空**：停止方块；忙且可停、草稿非空：按所选投递模式发送（排队/打断）；
@@ -138,11 +174,13 @@ export function Composer({
   }, [draft])
 
   const send = () => {
-    if (empty) return
+    if (empty || uploading) return
     const text = draft.trim()
+    const atts = pendingAtts
     setDraft('')
     setHintIndex(0)
-    onSend(text, busy ? delivery : undefined)
+    setPendingAtts([])
+    onSend(text, busy ? delivery : undefined, atts.length > 0 ? atts : undefined)
     taRef.current?.focus()
   }
 
@@ -212,7 +250,42 @@ export function Composer({
             />
           </div>
         )}
-        <div className="fg-composer" style={{ padding: '10px 12px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div
+          className="fg-composer"
+          style={{
+            padding: '10px 12px 8px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            // 拖拽落区：拖文件入卡片时高亮边框（走 token，不硬编码色值）。
+            outline: dragOver ? `2px dashed ${tokens.primary}` : 'none',
+            outlineOffset: dragOver ? -4 : 0,
+            borderRadius: tokens.radiusSm,
+          }}
+          onDragOver={(e) => {
+            if (e.dataTransfer?.types?.includes('Files')) {
+              e.preventDefault()
+              setDragOver(true)
+            }
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+              e.preventDefault()
+              setDragOver(false)
+              void addFiles(e.dataTransfer.files)
+            }
+          }}
+        >
+          {/* 待发附件 chips（v32）：attachments 上传成功即出现在这里，可逐个移除。 */}
+          {pendingAtts.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {pendingAtts.map((a) => (
+                <AttachmentChip key={a.id} attachment={a} onRemove={() => removeAtt(a.id)} />
+              ))}
+              {uploading && <span style={{ fontSize: 12, color: tokens.textSecondary }}>上传中…</span>}
+            </div>
+          )}
           {hintOpen && (
             // 候选列表（贴输入框上方，走文档流：弹层出现时输入框整体上移，不盖住正在打的字）。
             // mousedown 而不是 click：click 要等 mouseup，而 textarea 会先因失焦收起弹层。
@@ -277,6 +350,36 @@ export function Composer({
                 能力 chip 是**输入区的一部分**（"这条会话用哪些能力"与"这条消息怎么发"在同一行），
                 未选中时只留一个 `+`——默认态不加任何装饰（原型第 1 条）。 */}
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              {/* 回形针：选文件上传（v32）。隐藏 input + 按钮触发；拖拽落区在卡片上。 */}
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  void addFiles(e.target.files)
+                  e.target.value = '' // 允许再次选择同名文件
+                }}
+              />
+              <button
+                type="button"
+                title="添加附件（也可直接把文件拖进输入区）"
+                aria-label="添加附件"
+                disabled={uploading}
+                onClick={() => fileRef.current?.click()}
+                style={{
+                  border: 0,
+                  background: 'transparent',
+                  padding: 0,
+                  lineHeight: 1,
+                  color: uploading ? tokens.textPlaceholder : tokens.textSecondary,
+                  cursor: uploading ? 'default' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                }}
+              >
+                <PaperClipOutlined style={{ fontSize: 15 }} />
+              </button>
               {sessionId && (
                 <ComposerCapabilities
                   sessionId={sessionId}

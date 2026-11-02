@@ -27,6 +27,7 @@ import {
   updateSession,
 } from '@ark-mate/api'
 import type {
+  AttachmentMeta,
   BusEvent,
   CommandInfo,
   ElicitationFormSchema,
@@ -203,8 +204,17 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
   }
 
   switch (e.type) {
-    case Ev.UserMessage:
+    case Ev.UserMessage: {
+      // v32：附件元数据随 user 消息回带（只元数据）。有附件时**推一条新 user 条目**并挂上
+      // attachments（不在尾合并里塞，避免多轮附件错挂到同一条气泡）；无附件仍走原 mergeText。
+      const atts = Array.isArray(e.payload?.attachments)
+        ? (e.payload.attachments as StreamEntry['attachments'])
+        : undefined
+      if (atts && atts.length > 0) {
+        return { ...v, entries: push('user', text, { attachments: atts }), lastSeq }
+      }
       return { ...v, entries: mergeText('user', text), lastSeq }
+    }
     case Ev.Message:
       return { ...v, entries: mergeText('assistant', text), lastSeq }
     case Ev.Thought:
@@ -631,6 +641,7 @@ export interface MateActions {
     model?: ModelRef,
     workspaceId?: string | null,
     capabilities?: { expert?: string; skills?: string[]; mcps?: string[] },
+    attachments?: AttachmentMeta[],
   ) => Promise<string | undefined>
   /** 拉取模型目录（来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
   loadModelCatalog: () => Promise<void>
@@ -644,7 +655,7 @@ export interface MateActions {
    */
   updateSessionCapabilities: (id: string, patch: SessionCapabilitiesPatch) => Promise<void>
   /** 发送一轮 prompt；`delivery` 仅在会话正忙时有意义（§6 排队/插话）。 */
-  sendPrompt: (text: string, delivery?: DeliveryChoice) => Promise<void>
+  sendPrompt: (text: string, delivery?: DeliveryChoice, attachments?: AttachmentMeta[]) => Promise<void>
   /** §6：撤下一条尚未投递的排队输入（收敛以 input_cancelled 事件为准）。 */
   cancelQueuedInput: (inputId: string) => Promise<void>
   /** ADR-10 动作①：重排一条队项（`beforeId` 缺省 = 追加到末尾）。 */
@@ -1081,7 +1092,7 @@ export const useMate = create<MateStore>((set, get) => {
 
     clearAnchor: () => set({ anchorSeq: null }),
 
-    createAndRun: async (prompt, model, workspaceId, capabilities) => {
+    createAndRun: async (prompt, model, workspaceId, capabilities, attachments) => {
       try {
         const resp = await createSession({
           prompt,
@@ -1092,6 +1103,8 @@ export const useMate = create<MateStore>((set, get) => {
           // ——缺省路径必须与 M3 之前逐字节相同，判据只留一处。传了就钉住代际；
           // 不可达的 id 由服务端拒（40001，msg 里逐条给原因）。
           capabilities,
+          // 首轮附件（v32；空/未传 = 无附件，行为逐字不变）。
+          attachments: attachments && attachments.length > 0 ? attachments.map((a) => a.id) : undefined,
         })
         // 本地先落用户气泡（echo 事件 seq 与返回水位相等，重放 seq>水位 会跳过它）。
         // attach since_seq=event_seq（exclusive）续传首轮后续事件。
@@ -1105,7 +1118,7 @@ export const useMate = create<MateStore>((set, get) => {
             ...s.views,
             [resp.id]: {
               ...emptyView(),
-              entries: [{ kind: 'user', id: nextId(), text: prompt }],
+              entries: [{ kind: 'user', id: nextId(), text: prompt, attachments: attachments && attachments.length > 0 ? attachments : undefined }],
               streaming: true,
               lastSeq: resp.event_seq,
             },
@@ -1160,7 +1173,7 @@ export const useMate = create<MateStore>((set, get) => {
       }
     },
 
-    sendPrompt: async (text, delivery) => {
+    sendPrompt: async (text, delivery, attachments) => {
       const id = get().activeId
       if (!id) return
       // 忙时是否放行取决于投递模式（§6）：排队/插话是允许的，缺省/reject 仍然是「防重入拒绝」。
@@ -1178,7 +1191,9 @@ export const useMate = create<MateStore>((set, get) => {
           })
         }
         ensureTransport().connect()
-        const resp = await promptSession(id, delivery ? { prompt: text, delivery } : { prompt: text })
+        const attIds = attachments && attachments.length > 0 ? attachments.map((a) => a.id) : undefined
+        const body = delivery ? { prompt: text, delivery, attachments: attIds } : { prompt: text, attachments: attIds }
+        const resp = await promptSession(id, body)
         if (resp.queued) {
           // 队项由 input_queued 事件建项（不靠这里乐观插入）：事件才是队列的唯一事实。
           showToast(`会话正忙，已入队（${deliveryLabel(delivery ?? '')}）——可随时撤下`, 'info')

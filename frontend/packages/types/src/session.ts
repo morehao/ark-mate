@@ -424,6 +424,8 @@ export interface CreateSessionReq {
    * 不可达的 id 会被拒（40001 `capability_not_applicable`，msg 里逐条给原因）。
    */
   capabilities?: { expert?: string; skills?: string[]; mcps?: string[] }
+  /** 首轮携带的附件 id 列表（`att_…`；v32）。 */
+  attachments?: string[]
 }
 
 export interface CreateSessionResp {
@@ -449,6 +451,29 @@ export type DeliveryMode = 'reject' | 'after_run' | 'interrupt_then_prompt'
 export interface PromptReq {
   prompt: string
   delivery?: DeliveryMode
+  /** 本轮携带的附件 id 列表（`att_…`；v32 附件链路）。 */
+  attachments?: string[]
+}
+
+/**
+ * AttachmentMeta 附件元数据（只元数据，无字节/无 path）。它是 `session.user_message.attachments[]`
+ * 载荷的元素类型，也是气泡渲染 chip 的依据（v32）。
+ */
+export interface AttachmentMeta {
+  id: string
+  name: string
+  mime_type: string
+  size_bytes: number
+  /** image | document */
+  kind: string
+}
+
+/** Attachment 附件回读响应（`POST/GET /attachments` 的 data）。 */
+export interface Attachment extends AttachmentMeta {
+  sha256: string
+  /** pending | linked | orphan */
+  state: string
+  created_at: string
 }
 
 export interface SessionPromptResp {

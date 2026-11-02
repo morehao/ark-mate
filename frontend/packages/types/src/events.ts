@@ -110,7 +110,7 @@ export interface BusEvent {
 
 // ——— 会话运行视图（前端侧拼接的事件模型） ———
 
-import type { ElicitationFormSchema, PermissionOption } from './session'
+import type { AttachmentMeta, ElicitationFormSchema, PermissionOption } from './session'
 
 export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | 'permission' | 'elicitation'
 
@@ -207,4 +207,10 @@ export interface StreamEntry {
   bizCode?: string
   /** 失败时的 runtime stderr 诊断尾巴（A3；错误条目可展开查看，空 = 无采集）。 */
   stderrTail?: string[]
+  /**
+   * user 消息携带的附件元数据（v32；`session.user_message.attachments[]`）。
+   * 只元数据（id/name/mime_type/size_bytes/kind），气泡据此画 chip；图片缩略/文档预览走
+   * `GET /attachments/:id/content`。
+   */
+  attachments?: AttachmentMeta[]
 }
