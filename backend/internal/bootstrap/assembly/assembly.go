@@ -411,6 +411,13 @@ func (as *assembly) startOrchestrator(ctx context.Context) error {
 	if len(as.cmdRules) > 0 {
 		as.orch.SetCommandPolicy(as.cmdRules)
 	}
+	// 附件目录加入会话只读白名单（P4 兜底，v32）：让模型能 read 到 <MATE_HOME>/attachments 下的
+	// 附件（与 cwd 不同目录）。只读、不物化、不写工作区（G5）。只在 sqlite 模式（有库有附件面）
+	// 才设；内存模式没有附件面，不追加。若实测表明 dsh 本就能读（P0 探针=可达），这里是冗余但
+	// 无害的兜底。
+	if as.mode == config.StoreModeSQLite {
+		as.orch.SetAdditionalReadDirs([]string{filepath.Join(as.cfg.HomeDir, "attachments")})
+	}
 	return nil
 }
 

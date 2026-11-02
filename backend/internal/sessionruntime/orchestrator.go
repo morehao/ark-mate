@@ -211,6 +211,10 @@ func (o *Orchestrator) SetCommandPolicy(rules []interaction.PrefixRule) { o.comm
 // SetHandoffMaxChars 设置 bounded handoff memo 字符预算（0 = 关闭 memo 兜底）。见 ensureSession。
 func (o *Orchestrator) SetHandoffMaxChars(n int) { o.life.SetHandoffMaxChars(n) }
 
+// SetAdditionalReadDirs 设置会话附加只读目录（v32 附件链路：让模型能 read 到 <MATE_HOME>/attachments）。
+// 装配根在持久层就绪后接。只读白名单、不物化、不写工作区（G5）。
+func (o *Orchestrator) SetAdditionalReadDirs(dirs []string) { o.life.SetAdditionalReadDirs(dirs) }
+
 // session 按 ID 取活跃会话（连接存活期内）。查找不存在（如进程重启后）按未找到处理。
 func (o *Orchestrator) session(id string) *session.ActiveSession {
 	return o.handles.Get(id)
