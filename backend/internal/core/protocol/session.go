@@ -28,6 +28,11 @@ type PromptPart struct {
 	AttachmentID string
 	// MimeType 图片 MIME（Kind=image 时有效）。
 	MimeType string
+	// Data 图片原始字节（Kind=image 时有效；仅供 ACP 层编 base64）。
+	//
+	// **transient**：只在「sessionruntime → ACP」这一跳里存活，不进事件、不进落库
+	// （平台值不持久化，base64 也不进 transcript——设计 §5.1 的"字节编码决策"）。
+	Data []byte
 }
 
 // TextParts 把一个纯文本包成单 text part（P2 及之后所有"只有文本"的调用点用它，

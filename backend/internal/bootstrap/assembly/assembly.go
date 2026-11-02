@@ -227,6 +227,8 @@ func (as *assembly) startStore(ctx context.Context) error {
 			return fatalErr("serve: 构造附件存储: %v", err)
 		}
 		as.attachStore = attachStore
+		// 附件解析端口（v32）：持久层就绪后再接给会话服务（Build 阶段 Service 已构造，那时还没库）。
+		as.svc.SetAttachmentResolver(as.facts().buildAttachmentResolver())
 		// 定义目录**先行登记**（顺序敏感）：下面的装配期同步那一刻 `providerLocator` 已经要有
 		// 确定值（否则报错文案指向空路径）。v20 起它与密钥无关。
 		as.planes.Providers.SetProviderDir(cfg.ProviderDir)

@@ -146,6 +146,14 @@ func (r *Runner) SetSettleTimeout(d time.Duration) {
 // 会话无活句柄（进程刚起、或连接已断）时按需重建：持久层有记录 → 由 Acquire 走
 // native resume / handoff memo（ADR-4：执行可丢弃、会话平台拥有）；无记录才 session_not_found。
 func (r *Runner) Prompt(ctx context.Context, sessionID, text string) (int64, error) {
+	return r.PromptParts(ctx, sessionID, text, nil)
+}
+
+// PromptParts 同 Prompt，但额外携带内容块 parts（v32 附件链路：text + image）。
+//
+// text 仍是**用户原文**（进事件/落库/开轮行）；parts 是**发给底座的**内容块（text 段的文本
+// 会再叠上首轮前缀，image 段带字节）。parts 为空时按 TextParts(text) 兜底（行为与旧 Prompt 一致）。
+func (r *Runner) PromptParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart) (int64, error) {
 	as, err := r.acquire(ctx, sessionID)
 	if err != nil {
 		return 0, err
@@ -182,7 +190,10 @@ func (r *Runner) Prompt(ctx context.Context, sessionID, text string) (int64, err
 	if !prefix.Empty() {
 		text = prefix.Compose(text)
 	}
-	go r.executeRun(as, t, text)
+	// 组装发给底座的内容块：parts 为空 → 单 text part；非空 → 把 text 段的文本换成**已叠前缀**
+	// 的 text（image 段原样保留）。事件/落库用的仍是上面的 `text` 变量（用户原文+前缀不进事件）。
+	deliverParts := composeDeliverParts(parts, text)
+	go r.executeRun(as, t, deliverParts)
 	// 看门狗：runTimeout 内未收尾则自动取消（防 runtime 吞错/挂起导致 busy 永久占用）。
 	if r.runTimeout > 0 {
 		go r.watchdogRun(as, sessionID, t)
@@ -199,12 +210,21 @@ func (r *Runner) Prompt(ctx context.Context, sessionID, text string) (int64, err
 //     「本函数还没入队」之间留一个窗口，那一项将永远不被投递。入队后再复查一次空闲，
 //     闭合「取消前旧轮已自然结束」的另一半窗口（认领是条件更新，两边都跑也只会投一次）。
 func (r *Runner) PromptWithDelivery(ctx context.Context, sessionID, text, delivery string) (PromptOutcome, error) {
+	return r.PromptWithDeliveryParts(ctx, sessionID, text, nil, delivery)
+}
+
+// PromptWithDeliveryParts 同 PromptWithDelivery，但额外携带内容块 parts（v32 附件链路）。
+//
+// 带 image 的 parts **只走立即执行的两条路径**（空闲 / reject）；会排队的路径（after_run /
+// interrupt_then_prompt 且会话忙）**显式拒绝**带 image 的附件（fail-closed，不静默丢图）——
+// 队列只存文本，把图灌进去等于丢附件。
+func (r *Runner) PromptWithDeliveryParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart, delivery string) (PromptOutcome, error) {
 	mode, err := NormalizeDelivery(delivery)
 	if err != nil {
 		return PromptOutcome{}, err
 	}
 	if mode == DeliveryReject {
-		seq, err := r.Prompt(ctx, sessionID, text)
+		seq, err := r.PromptParts(ctx, sessionID, text, parts)
 		return PromptOutcome{EventSeq: seq}, err
 	}
 	as, err := r.acquire(ctx, sessionID)
@@ -215,8 +235,13 @@ func (r *Runner) PromptWithDelivery(ctx context.Context, sessionID, text, delive
 	runID := as.RunID()
 	if !busy {
 		// 空闲：直接执行（与 reject 路径同语义——没有「等的那一轮」，不该留下队列行）。
-		seq, err := r.Prompt(ctx, sessionID, text)
+		seq, err := r.PromptParts(ctx, sessionID, text, parts)
 		return PromptOutcome{EventSeq: seq}, err
+	}
+	// 忙 → 要入队，但队列只存文本：带 image 的附件在这里显式拒绝（不静默丢图）。
+	if hasImagePart(parts) {
+		return PromptOutcome{}, failure.NewError(failure.ClassRequest, "attachment_queue_unsupported",
+			"会话正忙时暂不支持排队携带图片附件，请等本轮结束后再发", nil)
 	}
 	q, err := r.plane.EnqueueInput(ctx, sessionID, text, mode, runID, r.plane.SessionGeneration(sessionID))
 	if err != nil {
@@ -261,7 +286,39 @@ func (r *Runner) watchdogRun(as *ActiveSession, sessionID string, t *Run) {
 // executeRun 执行一轮 prompt 并发布终态事件（单写者：仅本 goroutine 改动 run 终态）。
 // Prompt 走 ActiveSession 的投影（Runtime 接口；§16 采用），proj 为 nil（测试假会话/
 // 未投影 runtime）时回退底层会话直连——两路径语义一致。
-func (r *Runner) executeRun(as *ActiveSession, t *Run, text string) {
+// composeDeliverParts 组装发给底座的内容块：parts 为空 → 单 text part（composedText）；
+// 非空 → 把其中的 text 段文本换成 composedText（叠了首轮前缀），image 段原样保留。
+func composeDeliverParts(parts []protocol.PromptPart, composedText string) []protocol.PromptPart {
+	if len(parts) == 0 {
+		return protocol.TextParts(composedText)
+	}
+	out := make([]protocol.PromptPart, 0, len(parts))
+	textReplaced := false
+	for _, p := range parts {
+		if (p.Kind == protocol.PromptPartText || p.Kind == "") && !textReplaced {
+			p.Text = composedText
+			textReplaced = true
+		}
+		out = append(out, p)
+	}
+	if !textReplaced {
+		// parts 里没有 text 段（纯图）：把 composedText 作为首个 text part 补上（保序：文本在前）。
+		out = append([]protocol.PromptPart{{Kind: protocol.PromptPartText, Text: composedText}}, out...)
+	}
+	return out
+}
+
+// hasImagePart 判断内容块里有没有 image（队列只存文本，带图要显式拒绝）。
+func hasImagePart(parts []protocol.PromptPart) bool {
+	for _, p := range parts {
+		if p.Kind == protocol.PromptPartImage {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Runner) executeRun(as *ActiveSession, t *Run, parts []protocol.PromptPart) {
 	var (
 		stop string
 		err  error
@@ -270,8 +327,8 @@ func (r *Runner) executeRun(as *ActiveSession, t *Run, text string) {
 	// 而那正是用户最容易以为「没反应」的时候（今天这段时间与「已卡住」长得一模一样）。
 	// 用 `t.id` 而不是重查：这一支里 `as.run` 就是 `t`，重查只多一个可能拿到 nil 的窗口。
 	r.plane.PublishRunStatus(as.ID, t.id, RunStatusModelRequesting, RunStatusOpts{})
-	// P2：只有 text part（行为逐字不变）。P3/P4 起在这里把附件解析成 image part / 拼 handle 文本。
-	stop, err = as.PromptACP(t.ctx, protocol.TextParts(text))
+	// 内容块（P3 起含 image part；文档/大图的 handle 文本已在 sessionruntime 拼进 text 段）。
+	stop, err = as.PromptACP(t.ctx, parts)
 
 	as.mu.Lock()
 	intentional := t.intentional

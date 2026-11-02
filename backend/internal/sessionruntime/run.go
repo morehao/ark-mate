@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/domain/session"
 )
 
@@ -22,9 +23,19 @@ func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int6
 	return o.runner.Prompt(ctx, sessionID, text)
 }
 
+// PromptParts 同 Prompt，但携带内容块 parts（v32 附件链路：text + image）。parts 为空 → 纯文本。
+func (o *Orchestrator) PromptParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart) (int64, error) {
+	return o.runner.PromptParts(ctx, sessionID, text, parts)
+}
+
 // PromptWithDelivery 带投递模式的 Prompt（§6 busy input 队列）。
 func (o *Orchestrator) PromptWithDelivery(ctx context.Context, sessionID, text, delivery string) (session.PromptOutcome, error) {
 	return o.runner.PromptWithDelivery(ctx, sessionID, text, delivery)
+}
+
+// PromptWithDeliveryParts 同 PromptWithDelivery，但携带内容块 parts（v32）。
+func (o *Orchestrator) PromptWithDeliveryParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart, delivery string) (session.PromptOutcome, error) {
+	return o.runner.PromptWithDeliveryParts(ctx, sessionID, text, parts, delivery)
 }
 
 // CancelRun 取消会话进行中的 run（无 run 时为幂等 no-op）。
