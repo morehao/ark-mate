@@ -24,7 +24,7 @@ func (f fakeResolver) Resolve(context.Context, []string) ([]session.ResolvedAtta
 // TestBuildPromptPartsNoAttachments 无附件 → 单 text part（行为与旧 Prompt 逐字一致）。
 func TestBuildPromptPartsNoAttachments(t *testing.T) {
 	s := &Service{}
-	parts, err := s.buildPromptParts(context.Background(), "s1", "hello", nil)
+	parts, _, err := s.buildPromptParts(context.Background(), "s1", "hello", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestBuildPromptPartsNoAttachments(t *testing.T) {
 // TestBuildPromptPartsMemoryMode 有附件但 resolver 为 nil（memory 模式）→ 40501。
 func TestBuildPromptPartsMemoryMode(t *testing.T) {
 	s := &Service{} // attachments nil
-	_, err := s.buildPromptParts(context.Background(), "s1", "hi", []string{"att_x"})
+	_, _, err := s.buildPromptParts(context.Background(), "s1", "hi", []string{"att_x"})
 	if err == nil || !isNotSupported(err) {
 		t.Fatalf("memory 模式应 40501，got %v", err)
 	}
@@ -45,7 +45,7 @@ func TestBuildPromptPartsMemoryMode(t *testing.T) {
 // TestBuildPromptPartsResolveError 解析失败（附件缺失）→ 错误透传（零副作用：未触达 orch）。
 func TestBuildPromptPartsResolveError(t *testing.T) {
 	s := &Service{attachments: fakeResolver{err: errors.New("attachment_not_found")}}
-	_, err := s.buildPromptParts(context.Background(), "s1", "hi", []string{"att_missing"})
+	_, _, err := s.buildPromptParts(context.Background(), "s1", "hi", []string{"att_missing"})
 	if err == nil {
 		t.Fatal("附件缺失应报错")
 	}
@@ -56,7 +56,7 @@ func TestBuildPromptPartsImageGateRejects(t *testing.T) {
 	s := &Service{attachments: fakeResolver{out: []session.ResolvedAttachment{
 		{ID: "att_img", Kind: session.AttachmentKindImage, MimeType: "image/png", SizeBytes: 4, Data: []byte{1, 2, 3, 4}},
 	}}}
-	_, err := s.buildPromptParts(context.Background(), "s1", "看图", []string{"att_img"})
+	_, _, err := s.buildPromptParts(context.Background(), "s1", "看图", []string{"att_img"})
 	if err == nil || !strings.Contains(err.Error(), "model_no_image_input") {
 		t.Fatalf("图门禁不过应 model_no_image_input，got %v", err)
 	}

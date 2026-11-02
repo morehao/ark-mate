@@ -111,6 +111,7 @@ make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native /
   `personaPrefix` 写 ark-mate 身份）。**底座源码/vendor 零改动**，只动平台自己的文件与启动参数。
 - **回退（每个执行上下文一次）**：会话首个 prompt 前注入一段 `<product_identity>`（新建 / 原生恢复 /
   handoff / 代际迁移都会重新锚定）。`session.user_message` 事件与 transcript **仍是用户原文**，前缀不进历史。
+  **附件元数据随 `session.user_message` 载荷回带**（v32）：载荷可选带 `attachments:[{id, name, mime_type, size_bytes, kind}]`——**只元数据，无字节/base64/本地路径**（G6 守卫钉住；本机路径不进 transcript）。附件**不新增事件 type**，也不进 `messages` 白名单投影（附件不作可搜正文），前端渲染 user 气泡时读该字段画附件 chip、图片缩略/文档预览走 `GET /attachments/:id/content`。
 - **开关**：`MATE_IDENTITY_MODE=auto|system|user|off`（默认 `auto` = 系统提示为主、首轮块兜底；
   `system` 只走系统提示、失败即无身份；`user` 只走首轮块；`off` 都不交付）。切到 `user`/`off` 会
   **主动撤回**已有的身份 patch（删文件 + 摘参数），不是"不写"。

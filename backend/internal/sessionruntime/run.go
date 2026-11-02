@@ -24,8 +24,8 @@ func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int6
 }
 
 // PromptParts 同 Prompt，但携带内容块 parts（v32 附件链路：text + image）。parts 为空 → 纯文本。
-func (o *Orchestrator) PromptParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart) (int64, error) {
-	return o.runner.PromptParts(ctx, sessionID, text, parts)
+func (o *Orchestrator) PromptParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart, attachMeta []session.AttachmentMeta) (int64, error) {
+	return o.runner.PromptParts(ctx, sessionID, text, parts, attachMeta)
 }
 
 // PromptWithDelivery 带投递模式的 Prompt（§6 busy input 队列）。
@@ -34,8 +34,8 @@ func (o *Orchestrator) PromptWithDelivery(ctx context.Context, sessionID, text, 
 }
 
 // PromptWithDeliveryParts 同 PromptWithDelivery，但携带内容块 parts（v32）。
-func (o *Orchestrator) PromptWithDeliveryParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart, delivery string) (session.PromptOutcome, error) {
-	return o.runner.PromptWithDeliveryParts(ctx, sessionID, text, parts, delivery)
+func (o *Orchestrator) PromptWithDeliveryParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart, attachMeta []session.AttachmentMeta, delivery string) (session.PromptOutcome, error) {
+	return o.runner.PromptWithDeliveryParts(ctx, sessionID, text, parts, attachMeta, delivery)
 }
 
 // CancelRun 取消会话进行中的 run（无 run 时为幂等 no-op）。

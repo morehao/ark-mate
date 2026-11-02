@@ -146,14 +146,16 @@ func (r *Runner) SetSettleTimeout(d time.Duration) {
 // 会话无活句柄（进程刚起、或连接已断）时按需重建：持久层有记录 → 由 Acquire 走
 // native resume / handoff memo（ADR-4：执行可丢弃、会话平台拥有）；无记录才 session_not_found。
 func (r *Runner) Prompt(ctx context.Context, sessionID, text string) (int64, error) {
-	return r.PromptParts(ctx, sessionID, text, nil)
+	return r.PromptParts(ctx, sessionID, text, nil, nil)
 }
 
-// PromptParts 同 Prompt，但额外携带内容块 parts（v32 附件链路：text + image）。
+// PromptParts 同 Prompt，但额外携带内容块 parts（v32 附件链路：text + image）与附件元数据
+// attachMeta（进 `session.user_message.attachments[]` 载荷）。
 //
 // text 仍是**用户原文**（进事件/落库/开轮行）；parts 是**发给底座的**内容块（text 段的文本
-// 会再叠上首轮前缀，image 段带字节）。parts 为空时按 TextParts(text) 兜底（行为与旧 Prompt 一致）。
-func (r *Runner) PromptParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart) (int64, error) {
+// 会再叠上首轮前缀，image 段带字节）。parts 为空时按 TextParts(text) 兜底（行为与旧 Prompt 一致）；
+// attachMeta 为空时 user_message 载荷不含 attachments 键（与无附件行为逐字一致）。
+func (r *Runner) PromptParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart, attachMeta []AttachmentMeta) (int64, error) {
 	as, err := r.acquire(ctx, sessionID)
 	if err != nil {
 		return 0, err
@@ -178,9 +180,14 @@ func (r *Runner) PromptParts(ctx context.Context, sessionID, text string, parts 
 	// 过程状态的第一帧（S1 / ADR-6）：一轮已经开始、还没向模型发请求。它落在 `run.started`
 	// **之后**（本轮窗口从 run.started 起算，状态属于这一轮）、用户消息之前。
 	r.RunStatusFor(as.ID, RunStatusPreparing, RunStatusOpts{})
-	ue := r.plane.Publish(BusUserMessage, as.ID, map[string]any{
-		"session_id": as.ID, "runtime": as.Runtime, "text": text,
-	})
+	ue := r.plane.Publish(BusUserMessage, as.ID, func() map[string]any {
+		payload := map[string]any{"session_id": as.ID, "runtime": as.Runtime, "text": text}
+		// v32：附件元数据挂 user 消息（只元数据，无字节/无 path；G6）。
+		if len(attachMeta) > 0 {
+			payload["attachments"] = attachMeta
+		}
+		return payload
+	}())
 	// 首轮前缀（P3 F3 memo + 产品身份）：只作为发给 runtime 的首条 prompt 引导——上面那条
 	// `session.user_message` 发布的是**用户原文**，前缀不进事件、不进 transcript。
 	//
@@ -210,7 +217,7 @@ func (r *Runner) PromptParts(ctx context.Context, sessionID, text string, parts 
 //     「本函数还没入队」之间留一个窗口，那一项将永远不被投递。入队后再复查一次空闲，
 //     闭合「取消前旧轮已自然结束」的另一半窗口（认领是条件更新，两边都跑也只会投一次）。
 func (r *Runner) PromptWithDelivery(ctx context.Context, sessionID, text, delivery string) (PromptOutcome, error) {
-	return r.PromptWithDeliveryParts(ctx, sessionID, text, nil, delivery)
+	return r.PromptWithDeliveryParts(ctx, sessionID, text, nil, nil, delivery)
 }
 
 // PromptWithDeliveryParts 同 PromptWithDelivery，但额外携带内容块 parts（v32 附件链路）。
@@ -218,13 +225,13 @@ func (r *Runner) PromptWithDelivery(ctx context.Context, sessionID, text, delive
 // 带 image 的 parts **只走立即执行的两条路径**（空闲 / reject）；会排队的路径（after_run /
 // interrupt_then_prompt 且会话忙）**显式拒绝**带 image 的附件（fail-closed，不静默丢图）——
 // 队列只存文本，把图灌进去等于丢附件。
-func (r *Runner) PromptWithDeliveryParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart, delivery string) (PromptOutcome, error) {
+func (r *Runner) PromptWithDeliveryParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart, attachMeta []AttachmentMeta, delivery string) (PromptOutcome, error) {
 	mode, err := NormalizeDelivery(delivery)
 	if err != nil {
 		return PromptOutcome{}, err
 	}
 	if mode == DeliveryReject {
-		seq, err := r.PromptParts(ctx, sessionID, text, parts)
+		seq, err := r.PromptParts(ctx, sessionID, text, parts, attachMeta)
 		return PromptOutcome{EventSeq: seq}, err
 	}
 	as, err := r.acquire(ctx, sessionID)
@@ -235,7 +242,7 @@ func (r *Runner) PromptWithDeliveryParts(ctx context.Context, sessionID, text st
 	runID := as.RunID()
 	if !busy {
 		// 空闲：直接执行（与 reject 路径同语义——没有「等的那一轮」，不该留下队列行）。
-		seq, err := r.PromptParts(ctx, sessionID, text, parts)
+		seq, err := r.PromptParts(ctx, sessionID, text, parts, attachMeta)
 		return PromptOutcome{EventSeq: seq}, err
 	}
 	// 忙 → 要入队，但队列只存文本：带 image 的附件在这里显式拒绝（不静默丢图）。

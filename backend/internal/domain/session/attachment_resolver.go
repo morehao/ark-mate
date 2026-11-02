@@ -45,3 +45,16 @@ type ResolvedAttachment struct {
 type AttachmentResolver interface {
 	Resolve(ctx context.Context, ids []string) ([]ResolvedAttachment, error)
 }
+
+// AttachmentMeta 附件元数据（只含可进事件的字段：id/name/mime_type/size_bytes/kind）。
+//
+// 它是 `session.user_message.attachments[]` 载荷的元素类型（v32 设计 §5.4）。**刻意不含**
+// Data/ReadPath/内容摘要之外的任何路径**：事件是持久 transcript 的一部分，"本机绝对路径"
+// 不该灌进去（同 dsh「durable session events exclude local storage paths」）。G6 钉住这一点。
+type AttachmentMeta struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	MimeType  string `json:"mime_type"`
+	SizeBytes int64  `json:"size_bytes"`
+	Kind      string `json:"kind"`
+}

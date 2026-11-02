@@ -173,11 +173,11 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	}
 	if req.Prompt != "" {
 		// 首轮附件（v32）：先解析/门禁（零副作用），再受理。附件不合 → 整条建会话也失败。
-		parts, perr := s.buildPromptParts(runCtx, res.SessionID, req.Prompt, req.Attachments)
+		parts, meta, perr := s.buildPromptParts(runCtx, res.SessionID, req.Prompt, req.Attachments)
 		if perr != nil {
 			return nil, code.FromError(perr)
 		}
-		seq, err := s.orch.PromptParts(runCtx, res.SessionID, req.Prompt, parts)
+		seq, err := s.orch.PromptParts(runCtx, res.SessionID, req.Prompt, parts, meta)
 		if err != nil {
 			return nil, code.FromError(err)
 		}
@@ -208,11 +208,11 @@ func (s *Service) PromptSession(ctx context.Context, id string, req dtosession.P
 		return nil, code.FromError(err)
 	}
 	// 附件（v32）：先解析/门禁（零副作用），再受理投递。任一附件不合 → 整条 prompt 拒收。
-	parts, perr := s.buildPromptParts(context.WithoutCancel(ctx), id, req.Prompt, req.Attachments)
+	parts, meta, perr := s.buildPromptParts(context.WithoutCancel(ctx), id, req.Prompt, req.Attachments)
 	if perr != nil {
 		return nil, code.FromError(perr)
 	}
-	out, err := s.orch.PromptWithDeliveryParts(context.WithoutCancel(ctx), id, req.Prompt, parts, req.Delivery)
+	out, err := s.orch.PromptWithDeliveryParts(context.WithoutCancel(ctx), id, req.Prompt, parts, meta, req.Delivery)
 	if err != nil {
 		return nil, code.FromError(err)
 	}

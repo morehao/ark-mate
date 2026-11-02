@@ -21,19 +21,18 @@ import (
 
 // buildPromptParts 解析附件并把它们编进 parts（text 段在前，image 段随后）。
 // text 是用户原文（作为首个 text part）。无附件时返回 TextParts(text)（与无附件行为逐字一致）。
-func (s *Service) buildPromptParts(ctx context.Context, sessionID, text string, attachments []string) ([]protocol.PromptPart, error) {
+func (s *Service) buildPromptParts(ctx context.Context, sessionID, text string, attachments []string) ([]protocol.PromptPart, []session.AttachmentMeta, error) {
 	// 无附件：纯文本（行为零变化）。
 	if len(attachments) == 0 {
-		// 即便无附件，若请求带了非法 id 也不该出现（空列表即无）。
-		return protocol.TextParts(text), nil
+		return protocol.TextParts(text), nil, nil
 	}
 	if s.attachments == nil {
-		return nil, code.Errorf(code.NotSupported, "attachments 需要 sqlite 持久层（memory 模式不支持附件）")
+		return nil, nil, code.Errorf(code.NotSupported, "attachments 需要 sqlite 持久层（memory 模式不支持附件）")
 	}
 	// 1) 解析（不存在 / 越权 / 已清理 → 整体报错，零副作用）。
 	resolved, err := s.attachments.Resolve(ctx, attachments)
 	if err != nil {
-		return nil, code.FromError(err)
+		return nil, nil, code.FromError(err)
 	}
 	// 2) 图片门禁：有 image 附件时必须确认当前路由能收图（只读连接期事实 / 模型 input_modalities，
 	//    绝不用静态 Caps.Images）——不能收图 → 建轮前拒，零副作用。
@@ -46,11 +45,22 @@ func (s *Service) buildPromptParts(ctx context.Context, sessionID, text string, 
 	}
 	if hasImage {
 		if err := s.checkImageGate(ctx, sessionID); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	// 3) 组装：text 段（原文 + 文档/大图 handle 追行）在前，image 段随后。
-	return assembleParts(resolved, text), nil
+	// 3) 组装 parts + 元数据（元数据进 user_message 载荷；只 id/name/mime/size/kind）。
+	return assembleParts(resolved, text), attachmentMetas(resolved), nil
+}
+
+// attachmentMetas 把已解析附件折成 user_message 载荷用的元数据（只元数据，无字节/无 path；G6）。
+func attachmentMetas(resolved []session.ResolvedAttachment) []session.AttachmentMeta {
+	out := make([]session.AttachmentMeta, 0, len(resolved))
+	for _, r := range resolved {
+		out = append(out, session.AttachmentMeta{
+			ID: r.ID, Name: r.Name, MimeType: r.MimeType, SizeBytes: r.SizeBytes, Kind: string(r.Kind),
+		})
+	}
+	return out
 }
 
 // assembleParts 把已解析的附件编成内容块（纯函数：不含门禁/解析，便于单测）。

@@ -72,6 +72,7 @@ type assembly struct {
 	// ——— 步骤之间传递的产物 ———
 	st          *store.Store
 	attachStore *attachmentstore.Store
+	sweeper     *attachmentstore.Sweeper
 	assets      router.AssetInfo
 	ln          net.Listener
 	origin      *middleware.OriginPolicy
@@ -119,6 +120,10 @@ func (as *assembly) steps() []registry.Step {
 		{
 			Name: "自动化调度", Phase: registry.PhaseBackground,
 			Start: as.startAutomationScheduler, Stop: as.stopAutomationScheduler,
+		},
+		{
+			Name: "附件孤儿清扫", Phase: registry.PhaseBackground,
+			Start: as.startAttachmentSweeper, Stop: as.stopAttachmentSweeper,
 		},
 		{Name: "用例与控制器", Phase: registry.PhaseDelivery, Critical: true, Start: as.startControllers},
 		{Name: "前端资产", Phase: registry.PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startAssets},
@@ -559,6 +564,26 @@ func (as *assembly) startNativePermission(ctx context.Context) error {
 func (as *assembly) startIdleReaper(ctx context.Context) error {
 	cfg := as.cfg
 	as.svc.RuntimePool().StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
+	return nil
+}
+
+// startAttachmentSweeper 附件孤儿清扫（v32）：扫 pending 超 TTL 的附件置 orphan 并删 blob。
+// 只在 sqlite 模式（有库有附件面）启动；`MATE_ATTACHMENT_SWEEP=0` 关闭。
+func (as *assembly) startAttachmentSweeper(ctx context.Context) error {
+	if as.mode != config.StoreModeSQLite || as.st == nil || as.attachStore == nil {
+		return nil
+	}
+	cfg := as.cfg
+	as.sweeper = attachmentstore.NewSweeper(as.st, as.attachStore, cfg.AttachmentPendingTTL, cfg.AttachmentSweep)
+	as.sweeper.Start(ctx)
+	return nil
+}
+
+// stopAttachmentSweeper 停止清扫循环并等待退出。
+func (as *assembly) stopAttachmentSweeper(context.Context) error {
+	if as.sweeper != nil {
+		as.sweeper.Stop()
+	}
 	return nil
 }
 
