@@ -15,6 +15,8 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 
 	"github.com/morehao/ark-mate/internal/runtime"
+
+	"github.com/morehao/golib/glog"
 )
 
 // capabilitySelectionFromReq 请求 DTO → 内部选定。
@@ -181,6 +183,10 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 		if err != nil {
 			return nil, code.FromError(err)
 		}
+		// 首轮受理成功 → 附件 pending → linked（同 PromptSession 的理由）。
+		if lerr := s.linkAttachments(runCtx, res.SessionID, req.Attachments); lerr != nil {
+			glog.Warnw(runCtx, "attachment link 失败（首轮已受理，附件仍为 pending）", "session", res.SessionID, "err", lerr)
+		}
 		resp.EventSeq = seq
 		resp.Status = session.SessionStatusInProgress
 	}
@@ -215,6 +221,12 @@ func (s *Service) PromptSession(ctx context.Context, id string, req dtosession.P
 	out, err := s.orch.PromptWithDeliveryParts(context.WithoutCancel(ctx), id, req.Prompt, parts, meta, req.Delivery)
 	if err != nil {
 		return nil, code.FromError(err)
+	}
+	// 受理成功 → 把本轮附件从 pending 标为 linked（补 session_id）。放这里而非 buildPromptParts：
+	// 解析/门禁通过但投递被拒时不该把附件钉成不可撤、也不该挡住孤儿清扫。失败只 WARN 不回溯
+	// （prompt 已受理，回滚无意义），下轮清扫前的 pending 由 TTL 兜底。
+	if lerr := s.linkAttachments(ctx, id, req.Attachments); lerr != nil {
+		glog.Warnw(ctx, "attachment link 失败（prompt 已受理，附件仍为 pending）", "session", id, "err", lerr)
 	}
 	return &dtosession.SessionPromptResp{
 		ID: id, Status: session.SessionStatusInProgress, EventSeq: out.EventSeq,

@@ -158,6 +158,18 @@ func (a attachmentResolverAdapter) Resolve(ctx context.Context, ids []string) ([
 	return out, nil
 }
 
+// Link 把这一轮附件从 pending 标为 linked（补 session_id）。只在 Resolve 全部成功、prompt 已受理后
+// 由编排层调用——避免"解析成功但投递失败"却把附件钉成不可撤。行不存在时 store 返回 ErrAttachmentNotFound，
+// 正常不会发生（调用方先 Resolve 过）；如实上抛由调用方决定是否降级。
+func (a attachmentResolverAdapter) Link(ctx context.Context, ids []string, sessionID string) error {
+	for _, id := range ids {
+		if err := a.rows.LinkAttachment(ctx, id, sessionID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // buildAttachmentResolver 构造解析器；memory 模式（rows/blobs 任一 nil）返回 nil（调用点据 nil 拒收）。
 func (f Facts) buildAttachmentResolver() session.AttachmentResolver {
 	if f.Store == nil || f.AttachStore == nil {

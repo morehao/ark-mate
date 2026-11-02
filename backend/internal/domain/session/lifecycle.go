@@ -143,15 +143,7 @@ type Lifecycle struct {
 	identity         func() pkgidentity.Spec
 
 	handoffMaxChars int
-
-	// additionalReadDirs 附加的**只读**目录白名单（v32 附件链路）：随 session/new（及恢复）下发到
-	// `SessionOptions.AdditionalDirectories`，让模型能 read 到 `<MATE_HOME>/attachments` 下的附件
-	// （与 cwd 不同目录）。空 = 不追加（内存模式/未配置）。只读白名单、不物化、不写工作区（G5）。
-	additionalReadDirs []string
 }
-
-// SetAdditionalReadDirs 设置会话附加只读目录（v32 附件链路；装配根在持久层就绪后接）。
-func (l *Lifecycle) SetAdditionalReadDirs(dirs []string) { l.additionalReadDirs = dirs }
 
 // NewLifecycle 造一个生命周期实现。所有端口在装配期一次接上。
 func NewLifecycle(d LifecycleDeps) *Lifecycle {
@@ -234,9 +226,8 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 	// 随 session/new 下发。**必须传 opt.Selection**：指纹就是按它算出来的，注入若用别的口径，
 	// 会话拿到的东西会与代际台账不符。
 	sess, err := client.NewSession(ctx, protocol.SessionOptions{
-		Cwd:                   cwd,
-		McpServers:            l.mcpServers(spec.ID, opt.Selection),
-		AdditionalDirectories: l.additionalReadDirs,
+		Cwd:        cwd,
+		McpServers: l.mcpServers(spec.ID, opt.Selection),
 	})
 	if err != nil {
 		return nil, err
@@ -377,7 +368,7 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 	}
 	// **恢复路径必须用会话钉住的选定**（不是全量）：它从 `sessions.capability_json` 读回。
 	// 漏了这一步的后果是会话重启后注入集悄悄换一套，而且没有任何报错。
-	opts := protocol.SessionOptions{Cwd: cwd, McpServers: l.mcpServers(spec.ID, sel), AdditionalDirectories: l.additionalReadDirs}
+	opts := protocol.SessionOptions{Cwd: cwd, McpServers: l.mcpServers(spec.ID, sel)}
 	caps := client.Capabilities()
 	sameRuntime := spec.ID == rec.RuntimeID && rec.RuntimeID != ""
 	// `nativeID` 是**平台侧的值**（`rt_` 壳）；给底座的必须是**原文**。

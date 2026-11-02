@@ -44,6 +44,10 @@ type ResolvedAttachment struct {
 // 由调用方 fail-closed 拒收整条 prompt——零副作用）。
 type AttachmentResolver interface {
 	Resolve(ctx context.Context, ids []string) ([]ResolvedAttachment, error)
+	// Link 把这一轮的附件从 pending 标为 linked（补 session_id）。在 prompt **受理成功后**由调用方
+	// 调用：一旦挂上即不可撤（DELETE 会以 linked 拒绝），且不被孤儿清扫（只清 pending）。幂等幂等
+	// 无行的 id 由实现忽略或报 not found（调用方已 Resolve 过，正常不会缺）。
+	Link(ctx context.Context, ids []string, sessionID string) error
 }
 
 // AttachmentMeta 附件元数据（只含可进事件的字段：id/name/mime_type/size_bytes/kind）。

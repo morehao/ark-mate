@@ -416,13 +416,12 @@ func (as *assembly) startOrchestrator(ctx context.Context) error {
 	if len(as.cmdRules) > 0 {
 		as.orch.SetCommandPolicy(as.cmdRules)
 	}
-	// 附件目录加入会话只读白名单（P4 兜底，v32）：让模型能 read 到 <MATE_HOME>/attachments 下的
-	// 附件（与 cwd 不同目录）。只读、不物化、不写工作区（G5）。只在 sqlite 模式（有库有附件面）
-	// 才设；内存模式没有附件面，不追加。若实测表明 dsh 本就能读（P0 探针=可达），这里是冗余但
-	// 无害的兜底。
-	if as.mode == config.StoreModeSQLite {
-		as.orch.SetAdditionalReadDirs([]string{filepath.Join(as.cfg.HomeDir, "attachments")})
-	}
+	// 附件目录**不**下发 `SessionOptions.AdditionalDirectories`（v32 附件链路，2026-11-02 实测更正）：
+	// 读可达性探针（.dsh/docs/notes/2026-11-02-attachment-read-reachability-notes.md）实测表明
+	// 模型用 read 能直接读到 `<MATE_HOME>/attachments` 下的绝对路径（无需提权、无白名单）——附件
+	// 投递不依赖该字段。而 dsh 0.2.1-rc.5 对 ACP `session/new` 里出现的 `additionalDirectories`
+	// **直接拒建会话**（`Invalid params: additionalDirectories is not supported`，40001，fatal），
+	// 故带它即阻断性回归：任何会话都建不起来。两相权衡（可达→不需 / 带了就炸），结论是**不下发**。
 	return nil
 }
 

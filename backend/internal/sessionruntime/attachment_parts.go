@@ -139,3 +139,15 @@ func (s *Service) modelSupportsImage(ctx context.Context, sessionID string) bool
 	}
 	return false
 }
+
+// linkAttachments 把这一轮成功受理的附件从 pending 标为 linked（补 session_id）。
+//
+// 时机：**prompt 受理成功后**才调（见 sessions.go 两处调用点）——不在 buildPromptParts 里做，
+// 因为解析/门禁通过但投递被拒时不该把附件钉成不可撤、也不该挡住孤儿清扫（只清 pending）。
+// 无附件 / 端口为 nil（memory 模式）→ no-op；失败由调用方 WARN 不回溯（prompt 已受理）。
+func (s *Service) linkAttachments(ctx context.Context, sessionID string, attachments []string) error {
+	if len(attachments) == 0 || s.attachments == nil {
+		return nil
+	}
+	return s.attachments.Link(ctx, attachments, sessionID)
+}

@@ -21,6 +21,9 @@ func (f fakeResolver) Resolve(context.Context, []string) ([]session.ResolvedAtta
 	return f.out, f.err
 }
 
+// Link 记录调用（link 测试用；无断言时忽略）。nil 指针安全。
+func (f fakeResolver) Link(context.Context, []string, string) error { return nil }
+
 // TestBuildPromptPartsNoAttachments 无附件 → 单 text part（行为与旧 Prompt 逐字一致）。
 func TestBuildPromptPartsNoAttachments(t *testing.T) {
 	s := &Service{}
@@ -104,4 +107,46 @@ func isNotSupported(err error) bool {
 		return ge.Code == 40501
 	}
 	return false
+}
+
+// recordingResolver 记录 Link 的入参，用于断言 link 时机（只在受理后、且带附件时被调用）。
+type recordingResolver struct {
+	linkCalls int
+	lastIDs   []string
+	lastSID   string
+}
+
+func (r *recordingResolver) Resolve(context.Context, []string) ([]session.ResolvedAttachment, error) {
+	return nil, nil
+}
+func (r *recordingResolver) Link(_ context.Context, ids []string, sid string) error {
+	r.linkCalls++
+	r.lastIDs = ids
+	r.lastSID = sid
+	return nil
+}
+
+// TestLinkAttachments 钉住 link 时机：仅当有附件且有 resolver 时调用 Link，且透传正确。
+func TestLinkAttachments(t *testing.T) {
+	// 有附件 + resolver → 调一次，透传 ids/session
+	r := &recordingResolver{}
+	s := &Service{attachments: r}
+	if err := s.linkAttachments(context.Background(), "ses_x", []string{"att_a", "att_b"}); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if r.linkCalls != 1 || r.lastSID != "ses_x" || len(r.lastIDs) != 2 {
+		t.Fatalf("期望调一次并透传，实得 calls=%d sid=%q ids=%v", r.linkCalls, r.lastSID, r.lastIDs)
+	}
+
+	// 无附件 → 不调
+	r2 := &recordingResolver{}
+	(&Service{attachments: r2}).linkAttachments(context.Background(), "ses_y", nil)
+	if r2.linkCalls != 0 {
+		t.Fatalf("无附件不应调 Link，实得 %d", r2.linkCalls)
+	}
+
+	// resolver 为 nil（memory 模式）→ 不 panic 不调
+	if err := (&Service{}).linkAttachments(context.Background(), "ses_z", []string{"att_a"}); err != nil {
+		t.Fatalf("nil resolver 应 no-op，实得 err=%v", err)
+	}
 }
