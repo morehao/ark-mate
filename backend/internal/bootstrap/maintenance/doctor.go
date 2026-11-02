@@ -89,9 +89,11 @@ type doctorReport struct {
 	// 它与人话的 `checks` 并存而不是互替：`checks[]` 回答"这一项过没过"，这一段回答
 	// "事实到底是几"。结构体定义在 manager（事实的构造函数也在那里），键名即它的字段序。
 	Providers doctorfacts.ProviderDoctorFacts `json:"providers"`
-	Failed    int                             `json:"failed"`
-	Warnings  int                             `json:"warnings"`
-	Passed    bool                            `json:"passed"`
+	// Attachments 附件体检段的机器可读事实（v32；键名稳定）。
+	Attachments doctorfacts.AttachmentDoctorFacts `json:"attachments"`
+	Failed      int                               `json:"failed"`
+	Warnings    int                               `json:"warnings"`
+	Passed      bool                              `json:"passed"`
 }
 
 // payloadManifestDoc 是随包载荷清单 `payload.json` 的读取形状（M3-1 的产出，M4-5 的复算对象）。
@@ -331,6 +333,10 @@ func runDoctor(opts doctorOptions) doctorReport {
 	providers, providerChecks := checkProviderSection(opts)
 	checks = append(checks, providerChecks...)
 
+	// 附件体检（v32）：只读 SQL + stat blob，事实由 manager 构造（本文件只排版）。
+	attachments, attachmentChecks := checkAttachmentSection(opts)
+	checks = append(checks, attachmentChecks...)
+
 	// 读模型重建（`--rebuild-read-models`，显式 opt-in 的写动作）：**排在体检之前**，
 	// 这样报出来的 `read-models` 是"修完之后"的状态（否则用户会先看到一条红、再看到修好了，
 	// 而两次结论对同一件事）。
@@ -369,6 +375,7 @@ func runDoctor(opts doctorOptions) doctorReport {
 		VerifyPayload: opts.VerifyPayload,
 		Checks:        checks,
 		Providers:     providers,
+		Attachments:   attachments,
 		Failed:        failed,
 		Warnings:      warnings,
 		Passed:        failed == 0,

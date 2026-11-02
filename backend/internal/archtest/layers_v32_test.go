@@ -142,6 +142,8 @@ var v32Layers = map[string]v32Layer{
 	// 都是"跟本机说话"，与 dbclient/procreg 同带。
 	"internal/infra/host":      {layer: 5, name: "infra/host", sameLayer: true},
 	"internal/infra/installed": {layer: 5, name: "infra/installed", sameLayer: true},
+	// 附件字节存储：golib filestore + local 驱动的薄适配层（v32）。L5 与其它 infra 件同层。
+	"internal/infra/attachmentstore": {layer: 5, name: "infra/attachmentstore", sameLayer: true},
 
 	// ——— L6：组合驱动 ———
 	"internal/drivers/gateway": {layer: 6, name: "gateway", sameLayer: true, deny: []string{

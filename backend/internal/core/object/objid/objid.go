@@ -59,6 +59,9 @@ const (
 	// memory 模式重启后同一条事件的身份不变）；位次仍由 `events.seq` 承担，`id` 永不当游标
 	// （守卫 G1 钉住这条）。
 	Event = "evt_"
+	// Attachment 平台附件（`attachments.id`，v32）。字节落盘去重归 golib filestore，
+	// 这个号是**平台附件行**的身份（指向 filestore 的 upload_id），不是 blob 的身份。
+	Attachment = "att_"
 )
 
 // RuntimeShell 透传壳前缀（= runtime）。

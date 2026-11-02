@@ -64,6 +64,17 @@ type Config struct {
 	// 代际按能力指纹内容寻址，指纹不同 = 能力集不同 = 各自一个进程；上限是"猜粗了只是多花内存"
 	// 这一侧的护栏：超限**带码拒绝新建**，绝不静默复用错的能力集（那才是安全 bug）。
 	GenerationLimit int
+	// ——— 附件链路（v32）———
+	// AttachmentMaxBytes 单附件上限（MATE_ATTACHMENT_MAX_BYTES 覆盖，默认 20 MiB）。
+	// 防呆/防灌盘，**不是类型约束**：文档不设类型白名单，任何文件都能传，由模型用文件工具自判。
+	AttachmentMaxBytes int64
+	// AttachmentImageMaxBytes 小图直投 ACP image 块的上限（MATE_ATTACHMENT_IMAGE_MAX_BYTES 覆盖，
+	// 默认 10 MiB）。超过则降级为 handle + read_image（dsh 自己 downscale 到 4 MiB 预算）。
+	AttachmentImageMaxBytes int64
+	// AttachmentPendingTTL 未挂载 pending 附件的存活上限（MATE_ATTACHMENT_PENDING_TTL 覆盖，默认 24h）。
+	AttachmentPendingTTL time.Duration
+	// AttachmentSweep 孤儿清扫 tick 间隔（MATE_ATTACHMENT_SWEEP 覆盖，默认 1h；**0 = 关闭清扫**）。
+	AttachmentSweep time.Duration
 	// RunTimeout 单轮 prompt 看门狗超时（0 = 关闭）。runtime 吞错/挂起（如把上游模型限流
 	// 只记进自己的日志、不上报给平台）时，超时自动 cancel 并发终态事件，避免 busy 永久占用。
 	RunTimeout time.Duration
@@ -292,6 +303,16 @@ const (
 	DefaultGenerationLimit = 4
 	// DefaultAutomationTick 调度 tick 间隔（设计：100 条 automation 一次时区换算 ≪ 1ms，无 IO）。
 	DefaultAutomationTick = 30 * time.Second
+	// DefaultAttachmentMaxBytes 单附件上限（v32 附件链路；MATE_ATTACHMENT_MAX_BYTES 覆盖）。
+	// 20 MiB：防呆/防灌盘，**不是类型约束**（对齐 dsh「文档无类型白名单」，任何文件都能传）。
+	DefaultAttachmentMaxBytes int64 = 20 << 20
+	// DefaultAttachmentImageMaxBytes 小图直投 ACP image 块的上限（MATE_ATTACHMENT_IMAGE_MAX_BYTES 覆盖）。
+	// 10 MiB → base64 后 ~13 MiB；超过则降级为 handle + read_image（dsh 自己 downscale）。
+	DefaultAttachmentImageMaxBytes int64 = 10 << 20
+	// DefaultAttachmentPendingTTL 未挂载 pending 附件的存活上限（MATE_ATTACHMENT_PENDING_TTL 覆盖）。
+	DefaultAttachmentPendingTTL = 24 * time.Hour
+	// DefaultAttachmentSweep 孤儿清扫 tick 间隔（MATE_ATTACHMENT_SWEEP 覆盖；0 = 关闭清扫）。
+	DefaultAttachmentSweep = time.Hour
 )
 
 // Default 返回默认配置（不含依赖家目录的派生路径，派生值在解析阶段补齐）。
@@ -305,6 +326,10 @@ func Default() Config {
 		ReapGrace:          DefaultReapGrace,
 		HandoffMaxChars:    DefaultHandoffMaxChars,
 		GenerationLimit:    DefaultGenerationLimit,
+		AttachmentMaxBytes:      DefaultAttachmentMaxBytes,
+		AttachmentImageMaxBytes: DefaultAttachmentImageMaxBytes,
+		AttachmentPendingTTL:    DefaultAttachmentPendingTTL,
+		AttachmentSweep:         DefaultAttachmentSweep,
 		AutomationTick:     DefaultAutomationTick,
 		McpAutoProbe:       McpAutoProbeOff,
 		McpGateway:         McpGatewayAuto,
@@ -333,6 +358,10 @@ var knownKeys = map[string]string{
 	"run_timeout":         "MATE_RUN_TIMEOUT",
 	"handoff_max_chars":   "MATE_HANDOFF_MAX_CHARS",
 	"generation_limit":    "MATE_GENERATION_LIMIT",
+	"attachment_max_bytes":       "MATE_ATTACHMENT_MAX_BYTES",
+	"attachment_image_max_bytes": "MATE_ATTACHMENT_IMAGE_MAX_BYTES",
+	"attachment_pending_ttl":     "MATE_ATTACHMENT_PENDING_TTL",
+	"attachment_sweep":           "MATE_ATTACHMENT_SWEEP",
 	"permission_timeout":  "MATE_PERMISSION_TIMEOUT",
 	"elicitation_timeout": "MATE_ELICITATION_TIMEOUT",
 	"proc_registry":       "MATE_PROC_REGISTRY",
@@ -765,6 +794,25 @@ func materialize(r *resolver) (Config, error) {
 		}
 		c.GenerationLimit = n
 	}
+	// 附件字节上限：接受「纯字节整数」或「带单位大小」（如 20MiB / 10M / 512K）。
+	// 负数拒绝；0 = 不限制（filestore 侧 <=0 即不限）。用 parseByteSize 容忍单位后缀。
+	for _, item := range []struct {
+		key string
+		dst *int64
+	}{
+		{"attachment_max_bytes", &c.AttachmentMaxBytes},
+		{"attachment_image_max_bytes", &c.AttachmentImageMaxBytes},
+	} {
+		v, ok := r.get(item.key)
+		if !ok {
+			continue
+		}
+		n, err := parseByteSize(v)
+		if err != nil || n < 0 {
+			return bad(item.key, fmt.Sprintf("需为非负字节数或带单位大小（如 20MiB / 10M / 512K），得到 %q", v))
+		}
+		*item.dst = n
+	}
 	for _, item := range []struct {
 		key string
 		dst *time.Duration
@@ -777,6 +825,8 @@ func materialize(r *resolver) (Config, error) {
 		{"reap_grace", &c.ReapGrace},
 		{"automation_tick", &c.AutomationTick},
 		{"asset_watch", &c.AssetWatch},
+		{"attachment_pending_ttl", &c.AttachmentPendingTTL},
+		{"attachment_sweep", &c.AttachmentSweep},
 	} {
 		v, ok := r.get(item.key)
 		if !ok {
@@ -1110,6 +1160,51 @@ func normalizeWorkspaceRoots(items []string) ([]string, error) {
 // parseProjectionDirs 解析 `runtime:kind=dir[,runtime:kind=dir]`（MATE_PROJECTION_DIRS）。
 func parseProjectionDirs(v string) (map[string]string, error) {
 	return normalizeProjectionDirs(strings.Split(v, ","))
+}
+
+// parseByteSize 解析字节大小：接受纯整数（字节）或带单位后缀（B/K/KB/KiB/M/MB/MiB/G/GB/GiB，
+// 大小写不敏感，KiB/MiB/GiB 与 KB/MB/GB 都按 1024 进制——本仓只用于防呆上限，不需要 SI 精确区分）。
+// 空串或非法 → 错误。
+func parseByteSize(v string) (int64, error) {
+	s := strings.TrimSpace(v)
+	if s == "" {
+		return 0, fmt.Errorf("empty size")
+	}
+	// 找数字结尾的位置：前缀是数字部分，后缀是单位。
+	i := 0
+	for i < len(s) && (s[i] >= '0' && s[i] <= '9' || s[i] == '.') {
+		i++
+	}
+	numPart := s[:i]
+	unitPart := strings.ToLower(strings.TrimSpace(s[i:]))
+	if numPart == "" {
+		return 0, fmt.Errorf("invalid size %q", v)
+	}
+	mult := int64(1)
+	switch unitPart {
+	case "", "b":
+		mult = 1
+	case "k", "kb", "kib":
+		mult = 1 << 10
+	case "m", "mb", "mib":
+		mult = 1 << 20
+	case "g", "gb", "gib":
+		mult = 1 << 30
+	default:
+		return 0, fmt.Errorf("unknown size unit %q", unitPart)
+	}
+	if strings.Contains(numPart, ".") {
+		f, err := strconv.ParseFloat(numPart, 64)
+		if err != nil {
+			return 0, err
+		}
+		return int64(f * float64(mult)), nil
+	}
+	n, err := strconv.ParseInt(numPart, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return n * mult, nil
 }
 
 // normalizeProjectionDirs 规范化投影覆盖条目（config.json 可写 JSON 数组，逗号是列表分隔符）。

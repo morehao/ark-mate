@@ -26,6 +26,7 @@ import (
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/router"
 
+	"github.com/morehao/ark-mate/internal/infra/attachmentstore"
 	"github.com/morehao/ark-mate/internal/infra/procreg"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -70,6 +71,7 @@ type assembly struct {
 
 	// ——— 步骤之间传递的产物 ———
 	st          *store.Store
+	attachStore *attachmentstore.Store
 	assets      router.AssetInfo
 	ln          net.Listener
 	origin      *middleware.OriginPolicy
@@ -211,7 +213,20 @@ func (as *assembly) startStore(ctx context.Context) error {
 			return fatalErr("serve: 打开持久层 %s: %v", cfg.DBPath, err)
 		}
 		as.st = opened
-		as.st = opened
+		// 附件字节存储（v32）：core_file / core_file_upload 两表由 golib filestore 建——这是
+		// 本仓「不用 gorm AutoMigrate」纪律的**唯一显式例外**（事实源在组件里，已登记进
+		// docs/agents/build-and-runtime.md）。在自管迁移（store.Open 里）之后调一次，幂等。
+		if err := attachmentstore.Migrate(opened.DB()); err != nil {
+			return fatalErr("serve: 建附件存储表（core_file*）: %v", err)
+		}
+		attachStore, err := attachmentstore.New(opened.DB(), attachmentstore.Options{
+			BaseDir:        filepath.Join(cfg.HomeDir, "attachments"),
+			MaxUploadBytes: cfg.AttachmentMaxBytes,
+		})
+		if err != nil {
+			return fatalErr("serve: 构造附件存储: %v", err)
+		}
+		as.attachStore = attachStore
 		// 定义目录**先行登记**（顺序敏感）：下面的装配期同步那一刻 `providerLocator` 已经要有
 		// 确定值（否则报错文案指向空路径）。v20 起它与密钥无关。
 		as.planes.Providers.SetProviderDir(cfg.ProviderDir)
