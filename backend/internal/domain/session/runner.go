@@ -270,7 +270,8 @@ func (r *Runner) executeRun(as *ActiveSession, t *Run, text string) {
 	// 而那正是用户最容易以为「没反应」的时候（今天这段时间与「已卡住」长得一模一样）。
 	// 用 `t.id` 而不是重查：这一支里 `as.run` 就是 `t`，重查只多一个可能拿到 nil 的窗口。
 	r.plane.PublishRunStatus(as.ID, t.id, RunStatusModelRequesting, RunStatusOpts{})
-	stop, err = as.PromptACP(t.ctx, text)
+	// P2：只有 text part（行为逐字不变）。P3/P4 起在这里把附件解析成 image part / 拼 handle 文本。
+	stop, err = as.PromptACP(t.ctx, protocol.TextParts(text))
 
 	as.mu.Lock()
 	intentional := t.intentional

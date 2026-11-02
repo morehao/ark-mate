@@ -35,7 +35,8 @@ func newGatedSession() *gatedSession {
 	return &gatedSession{started: make(chan string, 16), release: make(chan struct{}, 16)}
 }
 
-func (s *gatedSession) Prompt(ctx context.Context, text string) (string, error) {
+func (s *gatedSession) Prompt(ctx context.Context, parts []protocol.PromptPart) (string, error) {
+	text := partsText(parts)
 	s.mu.Lock()
 	s.all = append(s.all, text)
 	s.mu.Unlock()

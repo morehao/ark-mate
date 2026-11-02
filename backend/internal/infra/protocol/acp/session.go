@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"fmt"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 	"sync"
 
@@ -59,15 +60,37 @@ func (s *Session) setConfigOptions(opts []ConfigOption) {
 
 // Prompt 发起一次 prompt（阻塞至本 run 结束），返回 stop reason。
 // 流式输出经 ClientOptions.OnEvent（SessionUpdate → 归一化事件）到达上层。
-func (s *Session) Prompt(ctx context.Context, text string) (string, error) {
+func (s *Session) Prompt(ctx context.Context, parts []protocol.PromptPart) (string, error) {
+	blocks, bErr := s.buildContentBlocks(ctx, parts)
+	if bErr != nil {
+		return "", bErr
+	}
 	resp, err := s.client.conn.Prompt(ctx, acpsdk.PromptRequest{
 		SessionId: s.id,
-		Prompt:    []acpsdk.ContentBlock{acpsdk.TextBlock(text)},
+		Prompt:    blocks,
 	})
 	if err != nil {
 		return "", Classify(err)
 	}
 	return string(resp.StopReason), nil
+}
+
+// buildContentBlocks 把平台值 parts 编成 ACP 内容块。
+//
+// P2 只处理 text（→ TextBlock），行为与旧 `TextBlock(text)` 逐字一致；image（→ ImageBlock）
+// 由 P3 引入（届时在此取字节编 base64）。**document 不是内容块**（由 sessionruntime 拼进 text）。
+func (s *Session) buildContentBlocks(_ context.Context, parts []protocol.PromptPart) ([]acpsdk.ContentBlock, error) {
+	blocks := make([]acpsdk.ContentBlock, 0, len(parts))
+	for _, p := range parts {
+		switch p.Kind {
+		case protocol.PromptPartText, "":
+			blocks = append(blocks, acpsdk.TextBlock(p.Text))
+		default:
+			// P2 阶段不会有其它 kind；出现即上层组装有误，明确报错而不是静默丢弃。
+			return nil, fmt.Errorf("acp 会话 Prompt: 未知的内容块种类 %q", p.Kind)
+		}
+	}
+	return blocks, nil
 }
 
 // Cancel 取消当前 run（session/cancel notification，非阻塞）。

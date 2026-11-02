@@ -30,7 +30,7 @@ type stubSession struct {
 // ConfigOptions 桩：默认无配置项（模型目录为空 → 目录来源走缓存/resume/空）。
 func (s *stubSession) ConfigOptions() []protocol.ConfigOption { return s.options }
 
-func (s *stubSession) Prompt(ctx context.Context, _ string) (string, error) {
+func (s *stubSession) Prompt(ctx context.Context, _ []protocol.PromptPart) (string, error) {
 	if s.cancelOnCtx {
 		select {
 		case <-ctx.Done():
@@ -169,7 +169,7 @@ type gatedPromptSession struct {
 	returned chan struct{}
 }
 
-func (s *gatedPromptSession) Prompt(ctx context.Context, _ string) (string, error) {
+func (s *gatedPromptSession) Prompt(ctx context.Context, _ []protocol.PromptPart) (string, error) {
 	close(s.started)
 	defer close(s.returned)
 	select {

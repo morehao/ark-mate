@@ -24,7 +24,7 @@ import (
 
 // ACP 是 acp.Session 的最小接口（测试可注入桩；真实实现为 protocol.Session）。
 type ACP interface {
-	Prompt(ctx context.Context, text string) (string, error)
+	Prompt(ctx context.Context, parts []protocol.PromptPart) (string, error)
 	Cancel(ctx context.Context) error
 	// ConfigOptions 会话配置项（模型目录等，唯一来源：运行时自报）。
 	ConfigOptions() []protocol.ConfigOption
@@ -167,12 +167,12 @@ func (as *ActiveSession) RequestCancel() *Run {
 	return as.run
 }
 
-// PromptACP 发一轮 prompt：有投影走投影，否则直连原生会话。
-func (as *ActiveSession) PromptACP(ctx context.Context, text string) (string, error) {
+// PromptACP 发一轮 prompt：有投影走投影，否则直连原生会话。parts 是内容块列表（P2 只含 text）。
+func (as *ActiveSession) PromptACP(ctx context.Context, parts []protocol.PromptPart) (string, error) {
 	if as.proj != nil {
-		return as.proj.Prompt(ctx, runtime.PromptRequest{Text: text})
+		return as.proj.Prompt(ctx, runtime.PromptRequest{Parts: parts})
 	}
-	return as.sess.Prompt(ctx, text)
+	return as.sess.Prompt(ctx, parts)
 }
 
 // CancelACP 取消底层会话（投影优先，测试桩直连）。

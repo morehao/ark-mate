@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"context"
 	"testing"
 	"time"
@@ -75,7 +76,7 @@ func TestPermissionRejectEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if stop, err := sess.Prompt(context.Background(), "帮我跑个命令"); err != nil || stop != "end_turn" {
+	if stop, err := sess.Prompt(context.Background(), protocol.TextParts("帮我跑个命令")); err != nil || stop != "end_turn" {
 		t.Fatalf("Prompt: stop=%q err=%v", stop, err)
 	}
 	select {
@@ -109,7 +110,7 @@ func TestPermissionCancelledEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if _, err := sess.Prompt(context.Background(), "帮我跑个命令"); err != nil {
+	if _, err := sess.Prompt(context.Background(), protocol.TextParts("帮我跑个命令")); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 	select {
@@ -142,7 +143,7 @@ func TestPromptRefusalEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	stop, err := sess.Prompt(context.Background(), "做点不该做的事")
+	stop, err := sess.Prompt(context.Background(), protocol.TextParts("做点不该做的事"))
 	if err != nil {
 		t.Fatalf("拒绝收尾不是传输错误: %v", err)
 	}
@@ -171,7 +172,7 @@ func TestPromptAgentErrorEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if _, err := sess.Prompt(context.Background(), "boom"); err == nil {
+	if _, err := sess.Prompt(context.Background(), protocol.TextParts("boom")); err == nil {
 		t.Fatal("底座报错应上抛，不得静默成功")
 	}
 }

@@ -48,6 +48,9 @@ type PromptReq struct {
 	// after_run = 排队，当前轮结束后自动投递；interrupt_then_prompt = 取消当前轮随后投递。
 	// 非法值显式报 invalid_delivery（不静默回落：投递语义是用户意图，猜错等于丢输入）。
 	Delivery string `json:"delivery,omitempty"`
+	// Attachments 本轮携带的附件 id 列表（`att_…`；v32 附件链路）。P2 只收不用；
+	// P3/P4 起由 sessionruntime 经 AttachmentResolver 解析为 image part / handle 文本。
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // SessionCreateReq 新建会话请求体。
@@ -83,6 +86,9 @@ type SessionCreateReq struct {
 	// MCP 全量（按 runtime transport 过滤）、skill 走各自的 runtimes 声明，且不产生能力指纹。
 	// 显式传入时逐个校验 id 存在且对该 runtime 可达，不可达即报错并列出原因（不静默丢弃）。
 	Capabilities *CapabilitiesReq `json:"capabilities,omitempty"`
+	// Attachments 首轮携带的附件 id 列表（`att_…`；v32）。P2 只收不用；P3/P4 起消费。
+	// 与 PromptReq.Attachments 同一个词。
+	Attachments []string `json:"attachments,omitempty"`
 	// Origin 会话来源，**内部字段**（`json:"-"`，不从 wire 读）：'' = 人工，'automation:<id>' = 该
 	// automation 触发。不让客户端自称自动化产物——它会给会话列表打标、也是
 	// `GET /automations/:id/runs` 的快速路径，能自称就意味着能伪造别人的运行史。

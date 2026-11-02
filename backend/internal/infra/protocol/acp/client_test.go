@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"context"
 	"errors"
 	"io"
@@ -377,7 +378,7 @@ func TestClientNewSessionRoundTrip(t *testing.T) {
 		t.Fatal("Session.Client 应回指连接")
 	}
 
-	stop, err := sess.Prompt(context.Background(), "hi")
+	stop, err := sess.Prompt(context.Background(), protocol.TextParts("hi"))
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
