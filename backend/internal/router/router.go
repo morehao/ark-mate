@@ -25,6 +25,7 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrruntime"
 	"github.com/morehao/ark-mate/internal/controller/ctrsearch"
 	"github.com/morehao/ark-mate/internal/controller/ctrsession"
+	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 	"github.com/morehao/ark-mate/internal/controller/ctrusage"
 	"github.com/morehao/ark-mate/internal/controller/ctrworkspace"
@@ -54,6 +55,8 @@ type Controllers struct {
 	Usage         ctrusage.UsageCtr
 	System        ctrsystem.SystemCtr
 	WS            ctrws.WSCtr
+	// Attachment 附件面上传/回读/预览（v32）。
+	Attachment ctrattachment.AttachmentCtr
 }
 
 // Deps 路由装配依赖（只有已构造的控制器与交付层设施）。
@@ -135,6 +138,7 @@ func New(d Deps) *gin.Engine {
 	rest := v1.Group("")
 
 	registerWorkspace(rest, ctrls.Workspace)
+	registerAttachment(rest, ctrls.Attachment)
 	registerCommandPolicy(rest, ctrls.CommandPolicy)
 	registerSession(rest, ctrls.Session, ctrls.Search, ctrls.Export)
 	registerRuntime(rest, ctrls.Provider, ctrls.Model, ctrls.Runtime)

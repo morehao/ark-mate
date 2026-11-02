@@ -45,7 +45,7 @@ import (
 // v3.1 §3.2.1 起控制器不得 import `internal/domain`，于是"纯读模型"也必须有一层窄端口：
 // `svcsearch` / `svcusage` 从会话域取出，`svcworkspace` 从工作空间域取出，`svcstream` 包住事件总线。
 var servicePackageSet = []string{
-	"svcautomation", "svccapability", "svccommandpolicy", "svclibrary",
+	"svcattachment", "svcautomation", "svccapability", "svccommandpolicy", "svclibrary",
 	"svcmodel", "svcruntime", "svcsearch", "svcsession", "svcstream", "svcsystem",
 	"svcusage", "svcworkspace",
 }

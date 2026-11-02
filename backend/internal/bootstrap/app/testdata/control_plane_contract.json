@@ -215,6 +215,48 @@
     "data_len": 0
   },
   {
+    "method": "POST",
+    "path": "/v1/mate/attachments",
+    "status": 200,
+    "code": 40000,
+    "msg": "参数错误: 缺少 file 字段（multipart 单文件）: request Content-Type isn't multipart/form-data",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/attachments/nope",
+    "status": 200,
+    "code": 50000,
+    "msg": "读取附件失败: [40501] attachments 需要 sqlite 持久层（memory 模式不支持附件）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/mate/attachments/nope",
+    "status": 200,
+    "code": 50000,
+    "msg": "读取附件失败: [40501] attachments 需要 sqlite 持久层（memory 模式不支持附件）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
     "method": "GET",
     "path": "/v1/mate/experts",
     "status": 200,

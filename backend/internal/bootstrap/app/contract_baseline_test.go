@@ -78,6 +78,11 @@ func contractCases() []contractCase {
 		// ——— library ———
 		{"GET", "/v1/mate/library", ""},
 
+		// ——— attachments（v32；POST 是 multipart，空体 → 40000 参数错误，仍是 JSON 信封） ———
+		{"POST", "/v1/mate/attachments", ""},
+		{"GET", "/v1/mate/attachments/nope", ""},
+		{"DELETE", "/v1/mate/attachments/nope", ""},
+
 		// ——— experts（会话级能力预设） ———
 		{"GET", "/v1/mate/experts", ""},
 		{"POST", "/v1/mate/experts", "{}"},
@@ -185,6 +190,8 @@ var contractExcluded = map[string]string{
 	// 这条不看请求体，直接抬宿主原生目录选择器（core 进程 spawn），实测阻塞约 29s，
 	// 且结果（选中/取消/无宿主）由宿主的桌面环境决定——它是宿主交互能力，不是数据契约。
 	"POST /v1/mate/workspaces/pick-directory": "抬宿主原生目录选择器，结果依赖宿主 UI",
+	// 附件字节流：响应是原始字节流（Content-Type=探测 MIME、inline），不是 JSON 信封。
+	"GET /v1/mate/attachments/:id/content": "回原始字节流（预览），不是 JSON 信封",
 }
 
 // contractNoRouteCases 刻意不命中任何注册路由的采样：它们测的是 NoRoute 兜底的信封形状。

@@ -69,3 +69,14 @@ memory 模式写入断言 ×1）、解包 3 处（原生恢复 ×2、探测 resu
 **标识符形态**：表名 / 列名 / 索引名一律 `^[a-z][a-z0-9_]*$`（守卫 A1，与 DSH 的 `UNIT_NAME_RE` 同形）。SQLite 的标识符**大小写不敏感**，混合大小写会让「这条 SQL 查的是哪一列」只能靠人脑做不敏感匹配，而 Go 侧字段名是敏感的。
 
 **表名/列名改动的落地点是四处，改一处就得改四处**（v16 的实测教训）：`internal/persistence/store/migrate.go`（**只追加**新迁移，历史语句绝不回改）、`internal/persistence/model`（实体 + gorm `column:` 标签，**它写错编译期无感、运行期才报 no such column**）、`internal/persistence/dao`（upsert/update 的列名映射）、以及**停在那一版之前的测试夹具**（它们必须按**当时那一版**的表名走裸 SQL，同 `readLegacyConversation`/`insertLegacyDefinition`）。v24（`models.model_id` → `model`）是这条纪律的最新实例：`migrate_v13_test.go` 上界停在 v13，它读 `models` 便从 DAO 换成**裸 SQL + 当时那一版的列名**——DAO 认的是今天那一版（`ORDER BY provider_id, model`），拿它读 v13 库会当场 `no such column: model`，而那会红在**查询**上、不是红在被测的迁移上。
+
+**v32 起还有一条词规：`attachments`（附件业务索引）与 `attachment_id`**（2026-11-02，附件链路 `.dsh/docs/specs/2026-11-02-attachment-pipeline-design.md` §3）。
+
+| 词 | 指 | 落点 | 机器判据 |
+|---|---|---|---|
+| `attachments`（表） | **平台附件业务索引**：会话归属 + 投递形态（`kind`）+ 生命周期（`state`）+ 探测后 MIME + 用户文件名。**字节/去重/`core_file`·`core_file_upload` 两表归 golib `filestore`**，本表不存字节 | 表 `attachments`（v32）、`model.AttachmentEntity`、`dao.AttachmentDao`、`dtoattachment`/`svcattachment`/`ctrattachment`/`dtoattachment`、`objid.Attachment`（`att_` 前缀） | `attachment_table_test.go` 的 G1（列名+类型冻结 + 实体标签逐列一致）；G2（唯一写入点） |
+| `attachment_id`（外形 `att_…`） | **平台附件行身份**（指向 `attachments.id`），不是 blob 身份。指向 filestore upload 行的内部指针叫 `upload_id`（= `core_file_upload.id`，**不过 wire**） | `attachments.id`、请求体 `attachments: ["att_…"]` | 同 `_id` 通则：`_id` 指"指向某表 `id`"，`attachments.upload_id` → `core_file_upload.id` |
+
+**一列一义**：`kind` 只表达投递形态（`image`|`document`），不表达 MIME（MIME 只在 `mime_type`）；`state` 只表达生命周期（`pending`|`linked`|`orphan`）。**`attachments` 是本仓对 golib AutoMigrate 的唯一显式例外之外的表**——`core_file*` 走 `filestore.Migrate`（已登记 build-and-runtime.md），`attachments` 仍走自管迁移 v32。
+
+**错误文案（非独立数字码）**：`attachment_too_large`/`attachment_empty`/`attachment_unsupported_type`/`attachment_scoped` 走 `40001`；`attachment_not_found` 走 `40401`；`attachment_linked` 走 `40901`；memory 模式附件面 → `40501`。这些都复用既有数字码、只加**文案前缀**，`internal/core/code` 的 `Codes()` 注册表不变，故 G8 的三处同步（code↔README↔BizCode）天然成立（数字码无新增）。
