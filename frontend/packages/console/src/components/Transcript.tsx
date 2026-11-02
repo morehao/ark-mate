@@ -19,6 +19,7 @@ import { tokens } from '@ark-mate/ui'
 import type { ElicitationFieldSchema, PermissionOption, StreamEntry } from '@ark-mate/types'
 import { useMate, type PermissionDecision } from '../store'
 import { copyText } from '../console/clipboard'
+import { AttachmentChip } from './AttachmentChip'
 import { parseMsg } from '../console/message'
 import { runStatRows, type RunUsageInfo } from '../console/usageView'
 import {
@@ -644,11 +645,20 @@ function AgentAvatar() {
 
 function UserMessage({ e, index }: { e: StreamEntry; index?: number }) {
   const text = e.text ?? ''
-  if (!text.trim()) return null
+  const atts = e.attachments ?? []
+  if (!text.trim() && atts.length === 0) return null
   return (
     <div className="fg-turn-user" data-fg-idx={index} data-fg-entry={e.id}>
       <div className="fg-user-bubble">
-        <RichText text={text} />
+        {/* 附件 chips（v32）：气泡里按元数据画 chip（图片缩略 / 文档文件名 + 预览）。 */}
+        {atts.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: text.trim() ? 6 : 0 }}>
+            {atts.map((a) => (
+              <AttachmentChip key={a.id} attachment={a} />
+            ))}
+          </div>
+        )}
+        {text.trim() && <RichText text={text} />}
       </div>
       <div className="fg-user-actions">
         <MsgCopy text={text} />

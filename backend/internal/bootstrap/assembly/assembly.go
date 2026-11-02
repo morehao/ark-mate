@@ -26,6 +26,7 @@ import (
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/router"
 
+	"github.com/morehao/ark-mate/internal/infra/attachmentstore"
 	"github.com/morehao/ark-mate/internal/infra/procreg"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -70,6 +71,8 @@ type assembly struct {
 
 	// ——— 步骤之间传递的产物 ———
 	st          *store.Store
+	attachStore *attachmentstore.Store
+	sweeper     *attachmentstore.Sweeper
 	assets      router.AssetInfo
 	ln          net.Listener
 	origin      *middleware.OriginPolicy
@@ -117,6 +120,10 @@ func (as *assembly) steps() []registry.Step {
 		{
 			Name: "自动化调度", Phase: registry.PhaseBackground,
 			Start: as.startAutomationScheduler, Stop: as.stopAutomationScheduler,
+		},
+		{
+			Name: "附件孤儿清扫", Phase: registry.PhaseBackground,
+			Start: as.startAttachmentSweeper, Stop: as.stopAttachmentSweeper,
 		},
 		{Name: "用例与控制器", Phase: registry.PhaseDelivery, Critical: true, Start: as.startControllers},
 		{Name: "前端资产", Phase: registry.PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startAssets},
@@ -211,7 +218,22 @@ func (as *assembly) startStore(ctx context.Context) error {
 			return fatalErr("serve: 打开持久层 %s: %v", cfg.DBPath, err)
 		}
 		as.st = opened
-		as.st = opened
+		// 附件字节存储（v32）：core_file / core_file_upload 两表由 golib filestore 建——这是
+		// 本仓「不用 gorm AutoMigrate」纪律的**唯一显式例外**（事实源在组件里，已登记进
+		// docs/agents/build-and-runtime.md）。在自管迁移（store.Open 里）之后调一次，幂等。
+		if err := attachmentstore.Migrate(opened.DB()); err != nil {
+			return fatalErr("serve: 建附件存储表（core_file*）: %v", err)
+		}
+		attachStore, err := attachmentstore.New(opened.DB(), attachmentstore.Options{
+			BaseDir:        filepath.Join(cfg.HomeDir, "attachments"),
+			MaxUploadBytes: cfg.AttachmentMaxBytes,
+		})
+		if err != nil {
+			return fatalErr("serve: 构造附件存储: %v", err)
+		}
+		as.attachStore = attachStore
+		// 附件解析端口（v32）：持久层就绪后再接给会话服务（Build 阶段 Service 已构造，那时还没库）。
+		as.svc.SetAttachmentResolver(as.facts().buildAttachmentResolver())
 		// 定义目录**先行登记**（顺序敏感）：下面的装配期同步那一刻 `providerLocator` 已经要有
 		// 确定值（否则报错文案指向空路径）。v20 起它与密钥无关。
 		as.planes.Providers.SetProviderDir(cfg.ProviderDir)
@@ -394,6 +416,12 @@ func (as *assembly) startOrchestrator(ctx context.Context) error {
 	if len(as.cmdRules) > 0 {
 		as.orch.SetCommandPolicy(as.cmdRules)
 	}
+	// 附件目录**不**下发 `SessionOptions.AdditionalDirectories`（v32 附件链路，2026-11-02 实测更正）：
+	// 读可达性探针（.dsh/docs/notes/2026-11-02-attachment-read-reachability-notes.md）实测表明
+	// 模型用 read 能直接读到 `<MATE_HOME>/attachments` 下的绝对路径（无需提权、无白名单）——附件
+	// 投递不依赖该字段。而 dsh 0.2.1-rc.5 对 ACP `session/new` 里出现的 `additionalDirectories`
+	// **直接拒建会话**（`Invalid params: additionalDirectories is not supported`，40001，fatal），
+	// 故带它即阻断性回归：任何会话都建不起来。两相权衡（可达→不需 / 带了就炸），结论是**不下发**。
 	return nil
 }
 
@@ -535,6 +563,26 @@ func (as *assembly) startNativePermission(ctx context.Context) error {
 func (as *assembly) startIdleReaper(ctx context.Context) error {
 	cfg := as.cfg
 	as.svc.RuntimePool().StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
+	return nil
+}
+
+// startAttachmentSweeper 附件孤儿清扫（v32）：扫 pending 超 TTL 的附件置 orphan 并删 blob。
+// 只在 sqlite 模式（有库有附件面）启动；`MATE_ATTACHMENT_SWEEP=0` 关闭。
+func (as *assembly) startAttachmentSweeper(ctx context.Context) error {
+	if as.mode != config.StoreModeSQLite || as.st == nil || as.attachStore == nil {
+		return nil
+	}
+	cfg := as.cfg
+	as.sweeper = attachmentstore.NewSweeper(as.st, as.attachStore, cfg.AttachmentPendingTTL, cfg.AttachmentSweep)
+	as.sweeper.Start(ctx)
+	return nil
+}
+
+// stopAttachmentSweeper 停止清扫循环并等待退出。
+func (as *assembly) stopAttachmentSweeper(context.Context) error {
+	if as.sweeper != nil {
+		as.sweeper.Stop()
+	}
 	return nil
 }
 

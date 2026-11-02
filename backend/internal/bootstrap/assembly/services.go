@@ -6,8 +6,10 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
+	"github.com/morehao/ark-mate/internal/infra/attachmentstore"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/service/svcattachment"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
 	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
@@ -62,6 +64,9 @@ type Services struct {
 	Meta         svcsystem.MetaSvc
 	Capabilities svcsystem.CapabilitySvc
 	Stream       svcstream.Stream
+
+	// ——— 附件（v32）———
+	Attachment svcattachment.AttachmentSvc
 }
 
 // Facts 构造用例所需的事实集合（装配根在启动序列里填好；测试也可以直接给一份）。
@@ -79,6 +84,8 @@ type Facts struct {
 	Execution    *runtimeconn.Plane
 	// MetaSource 诊断面的值来源（nil = 空来源，测试与 CLI 最小装配用）。
 	MetaSource func() svcsystem.MetaSource
+	// AttachStore 附件字节存储（v32）；nil = memory 模式（无库无字节存储），附件面 40501/不可用。
+	AttachStore *attachmentstore.Store
 }
 
 // facts 把装配根的可变状态折成构造用例所需的事实。
@@ -93,6 +100,7 @@ func (as *assembly) facts() Facts {
 		Runtime:      as.reg,
 		Execution:    as.rconn,
 		MetaSource:   as.metaSource,
+		AttachStore:  as.attachStore,
 	}
 }
 
@@ -138,6 +146,8 @@ func (f Facts) BuildServices() Services {
 		Meta:         svcsystem.NewMeta(f.metaSource),
 		Capabilities: svcsystem.NewCapabilities(),
 		Stream:       svcstream.New(as.Bus),
+
+		Attachment: f.buildAttachmentSvc(),
 	}
 }
 

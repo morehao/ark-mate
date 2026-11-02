@@ -27,7 +27,13 @@ func (s *stubSession) ConfigOptions() []protocol.ConfigOption { return nil }
 func (s *stubSession) SetConfigOption(context.Context, string, string) ([]protocol.ConfigOption, error) {
 	return nil, nil
 }
-func (s *stubSession) Prompt(_ context.Context, text string) (string, error) {
+func (s *stubSession) Prompt(_ context.Context, parts []protocol.PromptPart) (string, error) {
+	var text string
+	for _, p := range parts {
+		if p.Kind == protocol.PromptPartText || p.Kind == "" {
+			text += p.Text
+		}
+	}
 	s.prompts = append(s.prompts, text)
 	return "end_turn", nil
 }

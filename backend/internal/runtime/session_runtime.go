@@ -46,9 +46,13 @@ func (r *sessionRuntime) Cancel(ctx context.Context) error {
 }
 
 // Prompt 透传底层会话 Prompt（权限/elicitation 决策由 Orchestrator 经 Dial 的 ClientOptions
-// 钩子注入）。
+// 钩子注入）。Parts 非空以 Parts 为准；为空按 TextParts(Text) 兜底（兼容期行为）。
 func (r *sessionRuntime) Prompt(ctx context.Context, req PromptRequest) (string, error) {
-	return r.sess.Prompt(ctx, req.Text)
+	parts := req.Parts
+	if len(parts) == 0 {
+		parts = protocol.TextParts(req.Text)
+	}
+	return r.sess.Prompt(ctx, parts)
 }
 
 // ApplyMode 应用统一权限模式。三投影的 §6.2 ModeMapping 均为文档开放项（待实测回填），

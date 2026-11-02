@@ -15,6 +15,8 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 
 	"github.com/morehao/ark-mate/internal/runtime"
+
+	"github.com/morehao/golib/glog"
 )
 
 // capabilitySelectionFromReq 请求 DTO → 内部选定。
@@ -172,9 +174,18 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 		Capabilities: createCapabilitiesResp(selection, resolution.warnings),
 	}
 	if req.Prompt != "" {
-		seq, err := s.orch.Prompt(runCtx, res.SessionID, req.Prompt)
+		// 首轮附件（v32）：先解析/门禁（零副作用），再受理。附件不合 → 整条建会话也失败。
+		parts, meta, perr := s.buildPromptParts(runCtx, res.SessionID, req.Prompt, req.Attachments)
+		if perr != nil {
+			return nil, code.FromError(perr)
+		}
+		seq, err := s.orch.PromptParts(runCtx, res.SessionID, req.Prompt, parts, meta)
 		if err != nil {
 			return nil, code.FromError(err)
+		}
+		// 首轮受理成功 → 附件 pending → linked（同 PromptSession 的理由）。
+		if lerr := s.linkAttachments(runCtx, res.SessionID, req.Attachments); lerr != nil {
+			glog.Warnw(runCtx, "attachment link 失败（首轮已受理，附件仍为 pending）", "session", res.SessionID, "err", lerr)
 		}
 		resp.EventSeq = seq
 		resp.Status = session.SessionStatusInProgress
@@ -202,9 +213,20 @@ func (s *Service) PromptSession(ctx context.Context, id string, req dtosession.P
 	if _, err := session.NormalizeDelivery(req.Delivery); err != nil {
 		return nil, code.FromError(err)
 	}
-	out, err := s.orch.PromptWithDelivery(context.WithoutCancel(ctx), id, req.Prompt, req.Delivery)
+	// 附件（v32）：先解析/门禁（零副作用），再受理投递。任一附件不合 → 整条 prompt 拒收。
+	parts, meta, perr := s.buildPromptParts(context.WithoutCancel(ctx), id, req.Prompt, req.Attachments)
+	if perr != nil {
+		return nil, code.FromError(perr)
+	}
+	out, err := s.orch.PromptWithDeliveryParts(context.WithoutCancel(ctx), id, req.Prompt, parts, meta, req.Delivery)
 	if err != nil {
 		return nil, code.FromError(err)
+	}
+	// 受理成功 → 把本轮附件从 pending 标为 linked（补 session_id）。放这里而非 buildPromptParts：
+	// 解析/门禁通过但投递被拒时不该把附件钉成不可撤、也不该挡住孤儿清扫。失败只 WARN 不回溯
+	// （prompt 已受理，回滚无意义），下轮清扫前的 pending 由 TTL 兜底。
+	if lerr := s.linkAttachments(ctx, id, req.Attachments); lerr != nil {
+		glog.Warnw(ctx, "attachment link 失败（prompt 已受理，附件仍为 pending）", "session", id, "err", lerr)
 	}
 	return &dtosession.SessionPromptResp{
 		ID: id, Status: session.SessionStatusInProgress, EventSeq: out.EventSeq,

@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，2026-10-21 顶层角色 4 条为 176 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，2026-10-22 平台值包对偶守卫为 177 条、同批协议包别名出口为 178 条、注释路径存在性为 179 条，2026-10-27 请求上下文边界 2 条为 181 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性、平台值包守卫与请求上下文边界守卫）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，2026-10-21 顶层角色 4 条为 176 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，2026-10-22 平台值包对偶守卫为 177 条、同批协议包别名出口为 178 条、注释路径存在性为 179 条，2026-10-27 请求上下文边界 2 条为 181 条，2026-11-02 附件表列集合为 182 条、附件唯一写入点为 183 条、附件解析端口为 184 条、附件不写工作区为 185 条、附件事件载荷为 186 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性、平台值包守卫、请求上下文边界守卫、附件表列集合守卫、附件唯一写入点守卫、附件解析端口守卫、附件不写工作区守卫与附件事件载荷守卫）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -110,7 +110,17 @@
   反证（实跑 3 条）：`internal/service/` 下新建包写 `func Probe(ctx *gin.Context)` → ①红；`ctrsession` 里 `go func(){ _ = c.Request }()` → ②红；间接转手（`req := c.Request` 后捕获）→ **不报**，即上述局限的实测确认。
   配套结论（2026-10-27 实跑）：`r.ContextWithFallback` **不得打开**。它会让这条守卫的"内层无 gin 类型"失效于另一条路——`database/sql` 的 `Rows.initContextClose` 见 `ctx.Done() != nil` 就起 goroutine 长期读 `ctx.Err()`；把 `c` 当 ctx 传下去后，请求结束 + `pool.Put` + 下个请求写 `c.Request` 就会与那条 goroutine 竞争（`-race` 稳定复现）。handler 一律传 `c.Request.Context()`；`router.go` 就地写有理由注释。
 
-**共 181 条**——加守卫时记得同步这句话。
+- 再加 **1 条附件表列集合守卫**（`attachment_table_test.go` 的 `TestAttachmentTableColumnsFrozen`，G1）：`attachments`（v32）的列名 + 类型**冻结快照**，并交叉断言 `model.AttachmentEntity` 的 gorm `column:` 标签逐列一致——加一列不更新快照、或实体标签与 DDL 漂移（`column:` 写错编译期无感、运行期才报 no such column）都当场红；同样 fail-closed（解析不到 `CREATE TABLE attachments` 即失败，避免改名/搬迁后静默空转）。反证（实跑）：给 v32 DDL 加一列 `note TEXT` 不同步快照 → 红；把实体某列标签改名 → 红。
+
+- 再加 **1 条附件唯一写入点守卫**（`attachment_single_write_test.go` 的 `TestAttachmentSingleWriteEntry`，G2）：`attachments` 表的写入只有一条业务入口——DAO 写入原语 `s.attachments.Insert(` 只许在 `store/attachments.go`；`store.InsertAttachment(` 的调用方只许是 `service/svcattachment`（`Upload` 是唯一上传入口）。挡的是「上传入口偷偷多一个」：多一个直写点不会让任何行为测试变红，但「谁写了 attachments」从此失锚。反证（实跑）：在 `internal/bootstrap/assembly` 里写一处 `InsertAttachment(...)` 调用 → 红。
+
+- 再加 **1 条附件解析端口守卫**（`attachment_resolver_port_test.go` 的 `TestSessionruntimeResolvesAttachmentsViaPortOnly`，G3）：`internal/sessionruntime` 的生产源码不得 import `internal/persistence/dao`——附件解析必须经 `domain/session.AttachmentResolver` 端口。层表上 sessionruntime 确实**可以** import dao，所以这条要单列。挡的是「绕过端口直接查库」：附件归属/越权/门禁的 fail-closed 判据会跟着分叉。反证（实跑）：在 sessionruntime 加一个 `import _ ".../persistence/dao"` → 红；删后绿。
+
+- 再加 **1 条附件不写工作区守卫**（`attachment_no_workspace_write_test.go` 的 `TestAttachmentsNotWrittenToWorkspace`，G5）：`backend/internal` 非测试源码不得出现「把附件物化进用户工作区」的字面量（`.mate-attachments` 等）。附件只落 `<MATE_HOME>/attachments`，prompt 里只有一行 handle 或一个 image 块，零工作区副作用（设计 §5.3.2「不脏」）。反证（实跑）：在 sessionruntime 写一个 `.mate-attachments/x` 字面量 → 红；删后绿。
+
+- 再加 **1 条附件事件载荷守卫**（`user_message_attachment_payload_test.go` 的 `TestUserMessageAttachmentPayloadIsMetadataOnly`，G6）：`session.user_message.attachments[]` 的元素类型 `session.AttachmentMeta` 的 json 键集合恰好是 `{id,name,mime_type,size_bytes,kind}`，且字段里不得出现 Data/Content/Base64/Path/ReadPath/StorageURI。挡的是「把图片字节或本机路径灌进持久事件」（transcript 撑爆 + 路径泄漏进历史）。反证（实跑）：给 AttachmentMeta 加一个 `Data []byte` 字段 → 红。
+
+**共 186 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 

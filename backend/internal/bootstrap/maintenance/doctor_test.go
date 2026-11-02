@@ -540,6 +540,7 @@ func TestDoctorReportJSONShape(t *testing.T) {
 		`"missingInStore":null,"orphanMcpSecrets":null,` +
 		`"noKeyProviders":null,"importMismatch":null,` +
 		`"importMismatchBenignOnly":false,"runtimes":null,"missingBaseUrl":null,"sensitiveFiles":null},` +
+		`"attachments":{"total":0,"pending":0,"linked":0,"orphan":0,"missing":0,"unreadable":0},` +
 		`"failed":0,"warnings":0,"passed":true}`
 	if string(b) != want {
 		t.Fatalf("--json 形状变了：\n got %s\nwant %s", b, want)

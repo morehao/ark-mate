@@ -40,6 +40,8 @@ import (
 var (
 	// ErrAlreadyImported 目录指纹与 meta.imported_transcripts 一致（已导入，幂等跳过）。
 	ErrAlreadyImported = errors.New("store: transcripts already imported (marker match)")
+	// ErrAttachmentNotFound 附件行不存在（fail-closed 出口用；svcattachment 映射成 attachment_not_found）。
+	ErrAttachmentNotFound = errors.New("store: attachment not found")
 )
 
 // Store 是持久层门面：持有 gorm 句柄，聚合 schema 迁移与各领域 DAO。
@@ -83,6 +85,9 @@ type Store struct {
 
 	// 工作空间登记（v14）：用户的工作目录这条线的持久身份。
 	workspaces *dao.WorkspaceDao
+
+	// 附件业务索引（v32）：会话归属 + 投递形态 + 生命周期；字节落盘去重归 golib filestore。
+	attachments *dao.AttachmentDao
 }
 
 // Open 打开（必要时创建）SQLite 库并自动迁移到最新 schema。
@@ -130,6 +135,8 @@ func New(db *gorm.DB) *Store {
 		mcpSecrets: dao.NewMcpSecretDao(getDB),
 
 		workspaces: dao.NewWorkspaceDao(getDB),
+
+		attachments: dao.NewAttachmentDao(getDB),
 	}
 }
 

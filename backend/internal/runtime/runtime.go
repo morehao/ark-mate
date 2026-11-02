@@ -35,7 +35,10 @@ type ModelConfig struct {
 // 字段；McpServers/HandoffMemo 为规划占位（当前 MCP 注入在 acp 会话层 SessionOptions 完成，
 // handoff 语义文档未定稿），先留签名避免将来破坏接口。
 type PromptRequest struct {
-	Text        string
+	Text string
+	// Parts 内容块列表（v32 起；P2 只填 text part，兼容期与 Text 字段并存）。
+	// Parts 非空时以 Parts 为准；为空时下层按 protocol.TextParts(Text) 兜底（保持旧行为）。
+	Parts       []protocol.PromptPart
 	McpServers  []protocol.McpServer // 规划：本轮注入在 acp 会话层完成
 	HandoffMemo string               // 规划：handoff（未定稿）
 }

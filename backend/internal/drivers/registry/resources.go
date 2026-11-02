@@ -549,6 +549,26 @@ func (r *Resources) declaredDefaultModelID(ctx context.Context) (string, bool) {
 	return row.ID, true
 }
 
+// ModelInputModalities 返回某平台模型行声明的输入模态（如 ["text","image"]）；行不存在 → 空、false。
+//
+// 供附件链路（sessionruntime 的图片门禁）读"会话所选模型能不能收图"这条**连接无关的声明事实**。
+// 只读：走同一个 declaredModels 聚合（默认 text，ADR-12）。
+func (r *Resources) ModelInputModalities(ctx context.Context, modelID string) ([]string, bool) {
+	if modelID == "" {
+		return nil, false
+	}
+	models, err := r.declaredModels(ctx)
+	if err != nil {
+		return nil, false
+	}
+	for _, m := range models {
+		if m.ID == modelID {
+			return m.InputModalities, true
+		}
+	}
+	return nil, false
+}
+
 // setFingerprint 由**声明**（而不是产物）算出同步指纹。
 //
 // 为什么由声明算：幂等的判据是"同一份声明重复同步不换代际"。若用产物算，任何一次格式化差异

@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"context"
 	"testing"
 
@@ -60,7 +61,7 @@ func TestRequestPermissionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if _, err := sess.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := sess.Prompt(context.Background(), protocol.TextParts("hi")); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 
@@ -124,7 +125,7 @@ func TestRequestPermissionReject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if _, err := sess.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := sess.Prompt(context.Background(), protocol.TextParts("hi")); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 	if got := <-agentRes; got != "cancelled" {
@@ -170,7 +171,7 @@ func TestRequestPermissionRejectSelected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if _, err := sess.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := sess.Prompt(context.Background(), protocol.TextParts("hi")); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 	if got := <-agentRes; got != "selected:reject-once" {
@@ -213,7 +214,7 @@ func TestRequestPermissionRejectWithoutOption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if _, err := sess.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := sess.Prompt(context.Background(), protocol.TextParts("hi")); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 	if got := <-agentRes; got != "cancelled" {

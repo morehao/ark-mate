@@ -111,6 +111,7 @@ make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native /
   `personaPrefix` 写 ark-mate 身份）。**底座源码/vendor 零改动**，只动平台自己的文件与启动参数。
 - **回退（每个执行上下文一次）**：会话首个 prompt 前注入一段 `<product_identity>`（新建 / 原生恢复 /
   handoff / 代际迁移都会重新锚定）。`session.user_message` 事件与 transcript **仍是用户原文**，前缀不进历史。
+  **附件元数据随 `session.user_message` 载荷回带**（v32）：载荷可选带 `attachments:[{id, name, mime_type, size_bytes, kind}]`——**只元数据，无字节/base64/本地路径**（G6 守卫钉住；本机路径不进 transcript）。附件**不新增事件 type**，也不进 `messages` 白名单投影（附件不作可搜正文），前端渲染 user 气泡时读该字段画附件 chip、图片缩略/文档预览走 `GET /attachments/:id/content`。
 - **开关**：`MATE_IDENTITY_MODE=auto|system|user|off`（默认 `auto` = 系统提示为主、首轮块兜底；
   `system` 只走系统提示、失败即无身份；`user` 只走首轮块；`off` 都不交付）。切到 `user`/`off` 会
   **主动撤回**已有的身份 patch（删文件 + 摘参数），不是"不写"。
@@ -431,6 +432,10 @@ REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`co
 | DELETE | `/workspaces/:id` | 删除一条登记**而保留数据**：目录、文件、会话历史一概不动，该工作空间下会话的 `workspace_id` 清空（读面归默认工作空间）→ `{id, released_sessions}`。`released_sessions` 是给界面说清"这 N 个会话回到了默认工作空间"的事实。**默认工作空间拒绝**（`40001 workspace_default_immutable`：它是未指定 cwd 的落点）。memory 持久层 → `40501 workspace_schema_read_only` |
 | POST | `/workspaces/:id/move` | 重排（DOM `insertBefore` 语义）：`{before_id?}`（空 = 追加到尾部；锚点是自身 = 空操作）→ `{ids:[...]}` **完整**顺序。重排在同一事务内把 `list_order` 重编号为 `0..n-1` 并**逐行对账**（行数 / 位置 / id 任一不符即回滚）——顺序有洞的库下次重排会自己漂移，而没有任何界面能显示它。未知目标或锚点 → `40401 workspace_not_found` |
 | GET · PUT | `/settings/workspace` | 工作区**起始位置偏好**的设置面（v14.5 起不再是"白名单/边界"）：GET 回 `{configured[], roots[], prefer_roots, provision_dir, provision_included, source, locked_by?, writable}`——`configured` 是面板可编辑的显式名单，`roots` 是**生效**名单（= `configured` ∪ 平台代建根；代建根**无需**手写进配置，它由平台隐式并入）。**它只决定目录浏览从哪儿起步**：任何已存在的目录都能浏览、都能当工作空间。PUT `{roots[]}` **全量替换**（`{"roots":[]}` 或字段缺省 = 没有偏好），逐项要求绝对路径 / 存在 / 是目录，落盘 `<配置目录>/config.json` 并对**新**会话与浏览面即时生效（已建会话 cwd 不变）。被进程 `MATE_*` / env 文件 / flag 改动过该键时回 `settings_locked`（写入必被覆盖 → 面板转只读），无配置目录的进程回 `settings_readonly` |
+| POST | `/attachments` | **上传一个附件**（v32；`multipart/form-data` 单文件：`file` 必填 + 可选 `name`）→ `{id, name, mime_type, size_bytes, sha256, kind, state, created_at}`。**不做批量端点**（多文件是前端循环；批量会把「部分失败」的事务语义搅浑）。服务端**按文件头判真实类型**（不信客户端 `Content-Type`）：png/jpeg/webp/gif → `kind=image`；否则 → `kind=document`（**文档不设类型白名单**，对齐 dsh「任何文件都能传」，由模型用文件工具自判）。全部 fail-closed 带码：超 `MATE_ATTACHMENT_MAX_BYTES`（默认 20 MiB）→ `40001 attachment_too_large`；空文件 → `40001 attachment_empty`；**声明是图但字节不是四类之一**（伪装图）→ `40001 attachment_unsupported_type`。字节落 `<MATE_HOME>/attachments`（golib filestore 内容寻址去重），**不写用户工作区**；`state` 初始 `pending`，挂到某一轮时置 `linked` |
+| GET | `/attachments/:id` | 回读附件元数据（不回字节）→ `AttachmentResp`。未知 id → `40401 attachment_not_found` |
+| GET | `/attachments/:id/content` | 附件字节流（预览用）：`Content-Type` 取探测后的 `mime_type`、`Content-Disposition: inline`。仅本机回环（受既有 Host/Origin 矩阵约束）。未知 id / 字节不可读 → `40401 attachment_not_found` |
+| DELETE | `/attachments/:id` | 撤下**待挂**附件 → `{deleted}`。`state=linked`（已挂进某一轮）→ `40901 attachment_linked`（与「已投递的队项不可撤」同一取舍）；不存在 → `deleted:false` 且 `code=0`（**幂等**）。删行 + `filestore.DeleteFile`（物理 blob 是否真删由内容去重决定） |
 | GET | `/sessions/search` | 会话搜索（`?q=` 必填、`?limit=` 默认 30 上限 50；含归档、`updated` 降序） |
 | GET | `/search/messages` | 跨会话消息检索（`?q=` 必填、`?limit=` 默认 30 上限 200；返回 `seq` 锚点用于跳转定位，`source` 标数据面） |
 | POST | `/sessions/export` | 批量导出 `{ids[], format?: markdown\|text\|json}`（ids 上限 50）→ `{files:[{filename, content, bytes, events, truncated?}], skipped[], total_bytes}` |

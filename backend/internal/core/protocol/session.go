@@ -2,6 +2,45 @@ package protocol
 
 import "context"
 
+// PromptPartKind 一次 prompt 里一个内容块的种类（平台值）。
+//
+// 首版只有 `text`（P2 纯重构刀：行为逐字不变，只把 Prompt 的入参从 string 升成 parts）。
+// `image` 由 P3 引入（小图直投 ACP image 块）；`document` **不是独立内容块**——由
+// sessionruntime 先把 handle 文本拼进 text part 再下发（见设计 §5.1）。
+type PromptPartKind string
+
+const (
+	// PromptPartText 文本块（→ ACP TextBlock）。
+	PromptPartText PromptPartKind = "text"
+	// PromptPartImage 图片块（→ ACP ImageBlock(base64, mime)）；P3 起使用。
+	PromptPartImage PromptPartKind = "image"
+)
+
+// PromptPart 一次 prompt 里的一个内容块（平台值，跨层传递）。
+//
+// 平台值只带**引用**（AttachmentID），不带字节/base64：image 的 base64 在 ACP 层用 resolver
+// 现取现编，不进事件、不进落库（否则 transcript 会被 base64 撑爆）。
+type PromptPart struct {
+	Kind PromptPartKind
+	// Text 文本块的内容（Kind=text 时有效）。
+	Text string
+	// AttachmentID 附件 id（Kind=image 时有效；ACP 层按它取字节编 base64）。P3 起使用。
+	AttachmentID string
+	// MimeType 图片 MIME（Kind=image 时有效）。
+	MimeType string
+	// Data 图片原始字节（Kind=image 时有效；仅供 ACP 层编 base64）。
+	//
+	// **transient**：只在「sessionruntime → ACP」这一跳里存活，不进事件、不进落库
+	// （平台值不持久化，base64 也不进 transcript——设计 §5.1 的"字节编码决策"）。
+	Data []byte
+}
+
+// TextParts 把一个纯文本包成单 text part（P2 及之后所有"只有文本"的调用点用它，
+// 行为与旧 `Prompt(ctx, text)` 逐字一致）。
+func TextParts(text string) []PromptPart {
+	return []PromptPart{{Kind: PromptPartText, Text: text}}
+}
+
 // SessionOptions 打开/恢复一个底座会话的参数（平台值）。
 // McpServers 为平台选出的 MCP 注入子集（nil/空 = 不下发；由能力数据面提供）。
 type SessionOptions struct {
@@ -36,7 +75,7 @@ type Conn interface {
 type Session interface {
 	ID() string
 	Client() Conn
-	Prompt(ctx context.Context, text string) (string, error)
+	Prompt(ctx context.Context, parts []PromptPart) (string, error)
 	Cancel(ctx context.Context) error
 	Close(ctx context.Context) error
 	ConfigOptions() []ConfigOption

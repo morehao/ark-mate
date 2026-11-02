@@ -2,6 +2,7 @@ package assembly
 
 import (
 	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
+	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
 	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
 	"github.com/morehao/ark-mate/internal/controller/ctrcommandpolicy"
 	"github.com/morehao/ark-mate/internal/controller/ctrexport"
@@ -55,5 +56,6 @@ func (s Services) BuildControllers(origin *middleware.OriginPolicy, hostFacts fu
 		WS: ctrws.NewWSCtr(s.Stream, ctrws.Options{
 			OriginCheck: origin.CheckFunc(),
 		}),
+		Attachment: ctrattachment.NewAttachmentCtr(s.Attachment),
 	}
 }

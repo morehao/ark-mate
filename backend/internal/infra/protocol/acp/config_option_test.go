@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"context"
 	"testing"
 	"time"
@@ -184,7 +185,7 @@ func TestConfigOptionUpdatePush(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if _, err := sess.Prompt(context.Background(), "hi"); err != nil {
+	if _, err := sess.Prompt(context.Background(), protocol.TextParts("hi")); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 

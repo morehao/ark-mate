@@ -39,6 +39,10 @@ type Service struct {
 	// 不是网关开关本身——开关在 `registry.Planes`，那是进程级配置事实）。
 	mcpGatewayWarnMu sync.Mutex
 	mcpGatewayWarned map[string]bool
+
+	// attachments 附件解析端口（v32；nil = memory 模式）。G3：携带附件 id 必须经它解析，
+	// 本层**不**直接用 dao。由装配根经 WithAttachments 交下来。
+	attachments session.AttachmentResolver
 }
 
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。
@@ -63,6 +67,13 @@ func WithRuntimePlane(pl *runtimeconn.Plane) Option { return func(s *Service) { 
 // 不传时本函数自己造一套（130+ 处测试与 `mate demo` 走这条默认路径）；装配层传的是
 // **同一个实例**——两份平面 = 两个事实源（"核心能注入、网关注入不了"就是那样长出来的）。
 func WithPlanes(p *registry.Planes) Option { return func(s *Service) { s.planes = p } }
+
+// WithAttachments 注入附件解析端口（v32 附件链路；memory 模式传 nil）。
+func WithAttachments(r session.AttachmentResolver) Option { return func(s *Service) { s.attachments = r } }
+
+// SetAttachmentResolver 运行期注入附件解析端口（装配根在持久层就绪后再接——Service 在 Build
+// 阶段就构造好，而附件存储要在 startStore 步骤里随库建立）。
+func (s *Service) SetAttachmentResolver(r session.AttachmentResolver) { s.attachments = r }
 
 func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Service {
 	s := &Service{bus: bus}

@@ -770,6 +770,11 @@ var schemaMigrations = []migration{
 	// v31 的版本步本体在 `migrate_v31.go`（新增 `experts` 专家定义表：会话级能力预设的
 	// body+revision 载体，与 skills/mcp_servers 同形；纯 DDL、无回填——理由写在该文件头）。
 	migrationV31,
+
+	// v32 的版本步本体在 `migrate_v32.go`（新增 `attachments` 附件业务索引表：会话归属 +
+	// 投递形态 + pending/linked/orphan 生命周期。**字节落盘与 core_file* 两表由 golib filestore
+	// 负责、不在本步**——理由写在该文件头）。
+	migrationV32,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

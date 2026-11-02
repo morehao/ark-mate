@@ -4,6 +4,7 @@ import { Button, Dropdown } from 'antd'
 import { InfoCircleOutlined, MoreOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { Ev } from '@ark-mate/types'
+import type { AttachmentMeta } from '@ark-mate/types'
 import { sessionHistory, sessionRuns } from '@ark-mate/api'
 import { useMate } from '../store'
 import { SessionDetailDrawer } from '../components/SessionDetail'
@@ -332,9 +333,9 @@ export function ChatPage() {
     setFoldOpen({})
   }, [activeId])
 
-  const onSend = (text: string, delivery?: DeliveryChoice) => {
+  const onSend = (text: string, delivery?: DeliveryChoice, attachments?: AttachmentMeta[]) => {
     if (!activeId) return
-    void sendPrompt(text, delivery)
+    void sendPrompt(text, delivery, attachments)
   }
 
   // 新建会话：清空当前选中（无会话选中时问答区本身就是新建面板）→ 回到 /sessions。

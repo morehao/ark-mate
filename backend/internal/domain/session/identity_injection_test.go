@@ -30,7 +30,13 @@ type captureACP struct {
 
 func newCaptureACP() *captureACP { return &captureACP{ch: make(chan struct{}, 8)} }
 
-func (c *captureACP) Prompt(_ context.Context, text string) (string, error) {
+func (c *captureACP) Prompt(_ context.Context, parts []protocol.PromptPart) (string, error) {
+	var text string
+	for _, p := range parts {
+		if p.Kind == protocol.PromptPartText || p.Kind == "" {
+			text += p.Text
+		}
+	}
 	c.mu.Lock()
 	c.prompts = append(c.prompts, text)
 	c.mu.Unlock()

@@ -2,6 +2,8 @@ package acp
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 	"sync"
 
@@ -59,15 +61,42 @@ func (s *Session) setConfigOptions(opts []ConfigOption) {
 
 // Prompt 发起一次 prompt（阻塞至本 run 结束），返回 stop reason。
 // 流式输出经 ClientOptions.OnEvent（SessionUpdate → 归一化事件）到达上层。
-func (s *Session) Prompt(ctx context.Context, text string) (string, error) {
+func (s *Session) Prompt(ctx context.Context, parts []protocol.PromptPart) (string, error) {
+	blocks, bErr := s.buildContentBlocks(ctx, parts)
+	if bErr != nil {
+		return "", bErr
+	}
 	resp, err := s.client.conn.Prompt(ctx, acpsdk.PromptRequest{
 		SessionId: s.id,
-		Prompt:    []acpsdk.ContentBlock{acpsdk.TextBlock(text)},
+		Prompt:    blocks,
 	})
 	if err != nil {
 		return "", Classify(err)
 	}
 	return string(resp.StopReason), nil
+}
+
+// buildContentBlocks 把平台值 parts 编成 ACP 内容块。
+//
+// text → TextBlock；image → ImageBlock(base64(p.Data), mime)——**base64 在本层现编**，
+// 平台值只带字节（transient，不进事件/落库）。document 不是内容块（由 sessionruntime 拼进 text）。
+func (s *Session) buildContentBlocks(_ context.Context, parts []protocol.PromptPart) ([]acpsdk.ContentBlock, error) {
+	blocks := make([]acpsdk.ContentBlock, 0, len(parts))
+	for _, p := range parts {
+		switch p.Kind {
+		case protocol.PromptPartText, "":
+			blocks = append(blocks, acpsdk.TextBlock(p.Text))
+		case protocol.PromptPartImage:
+			if len(p.Data) == 0 {
+				return nil, fmt.Errorf("acp 会话 Prompt: image part 缺字节（attachment=%s）", p.AttachmentID)
+			}
+			blocks = append(blocks, acpsdk.ImageBlock(base64.StdEncoding.EncodeToString(p.Data), p.MimeType))
+		default:
+			// 出现即上层组装有误，明确报错而不是静默丢弃。
+			return nil, fmt.Errorf("acp 会话 Prompt: 未知的内容块种类 %q", p.Kind)
+		}
+	}
+	return blocks, nil
 }
 
 // Cancel 取消当前 run（session/cancel notification，非阻塞）。
