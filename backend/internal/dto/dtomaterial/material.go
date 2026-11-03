@@ -14,6 +14,8 @@ type NodeResp struct {
 	NodeKind  string `json:"node_kind"`
 	Title     string `json:"title"`
 	SizeBytes int64  `json:"size_bytes"`
+	// Category 分类维度（v34）：material|artifact。
+	Category  string `json:"category,omitempty"`
 	UpdatedAt string `json:"updated_at"`
 }
 
@@ -121,4 +123,14 @@ type PublishPageResp struct {
 	ViewPath string `json:"view_path"`
 	// FilePath 落盘后的本地绝对路径（便于用户直接打开；不进对外链接语义）。
 	FilePath string `json:"file_path"`
+}
+
+// ImportArtifactReq `POST /materials/import-artifact` 的请求体：把一个产物收录进资料库。
+//
+// 幂等：同一 provenance_id 已收录 → 返回既有节点（不重复建）。
+type ImportArtifactReq struct {
+	// ArtifactID 产物的主键（artifacts.id）。
+	ArtifactID string `json:"artifact_id"`
+	// ParentID 目标父文件夹（可选；空 = 空间根）。
+	ParentID string `json:"parent_id"`
 }

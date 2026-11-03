@@ -25,6 +25,7 @@ type MaterialCtr interface {
 	PutRows(c *gin.Context)
 	Publish(c *gin.Context)
 	View(c *gin.Context)
+	ImportArtifact(c *gin.Context)
 }
 
 var _ MaterialCtr = (*materialCtr)(nil)
@@ -51,9 +52,10 @@ func listIntParam(c *gin.Context, key string) int {
 // ListNodes `GET /materials/nodes?parent=<id>&limit=&offset=`。
 func (h *materialCtr) ListNodes(c *gin.Context) {
 	parent := c.Query("parent")
+	category := c.Query("category")
 	limit := listIntParam(c, "limit")
 	offset := listIntParam(c, "offset")
-	resp, err := h.svc.ListNodes(c.Request.Context(), parent, limit, offset)
+	resp, err := h.svc.ListNodesByCategory(c.Request.Context(), parent, category, limit, offset)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -173,4 +175,19 @@ func (h *materialCtr) View(c *gin.Context) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.Status(http.StatusOK)
 	_, _ = c.Writer.WriteString(html)
+}
+
+// ImportArtifact `POST /materials/import-artifact`（JSON {artifact_id, parent_id?}）：把产物收录进资料库。
+func (h *materialCtr) ImportArtifact(c *gin.Context) {
+	var req dtomaterial.ImportArtifactReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: 请求体不是合法 JSON: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.ImportArtifact(c.Request.Context(), req)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
 }

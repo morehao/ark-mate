@@ -2,6 +2,7 @@ package assembly
 
 import (
 	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
+	"github.com/morehao/ark-mate/internal/controller/ctrartifact"
 	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
 	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
 	"github.com/morehao/ark-mate/internal/controller/ctrcommandpolicy"
@@ -59,5 +60,6 @@ func (s Services) BuildControllers(origin *middleware.OriginPolicy, hostFacts fu
 		}),
 		Attachment: ctrattachment.NewAttachmentCtr(s.Attachment),
 		Material:   ctrmaterial.NewMaterialCtr(s.Material),
+		Artifact:   ctrartifact.NewArtifactCtr(s.Artifact),
 	}
 }

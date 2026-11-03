@@ -16,6 +16,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/controller/ctrartifact"
 	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
 	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
 	"github.com/morehao/ark-mate/internal/controller/ctrcommandpolicy"
@@ -62,6 +63,8 @@ type Controllers struct {
 	Attachment ctrattachment.AttachmentCtr
 	// Material 资料库目录树 + 上传 + 关键词检索（v33）。
 	Material ctrmaterial.MaterialCtr
+	// Artifact 产物溯源（v34）。
+	Artifact ctrartifact.ArtifactCtr
 }
 
 // Deps 路由装配依赖（只有已构造的控制器与交付层设施）。
@@ -157,6 +160,7 @@ func New(d Deps) *gin.Engine {
 	registerAutomation(rest, ctrls.Automation)
 	registerLibrary(rest, ctrls.Library)
 	registerMaterial(rest, ctrls.Material)
+	registerArtifact(rest, ctrls.Artifact)
 	registerUsage(rest, ctrls.Usage)
 	registerSystem(rest, ctrls.System)
 

@@ -59,6 +59,22 @@ func (s *Store) ListLibraryChildren(ctx context.Context, spaceID, parentID strin
 	return rows, nil
 }
 
+// ListLibraryChildrenByCategory 取某父节点下、指定分类的一层子节点（时间序，updated_at DESC）。
+//
+// category 空 = 不过滤（等价 ListLibraryChildren）。v34 起用于「资料/产物」分栏浏览。
+func (s *Store) ListLibraryChildrenByCategory(ctx context.Context, spaceID, parentID, category string) ([]model.LibraryNodeEntity, error) {
+	var rows model.LibraryNodeEntityList
+	db := s.libraryNodes.DB(ctx).Model(&model.LibraryNodeEntity{}).
+		Where("space_id = ? AND parent_id = ?", spaceID, parentID)
+	if category != "" {
+		db = db.Where("category = ?", category)
+	}
+	if err := db.Order("updated_at DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // SearchLibraryNodes 关键词检索（title 或 body 子串，大小写不敏感），updated_at DESC。
 //
 // **这是关键词子串匹配，不是语义检索**（本期范围：只做资料库、不做知识库）。
@@ -165,4 +181,24 @@ func (s *Store) LibraryTableByNode(ctx context.Context, nodeID string) (model.Li
 func (s *Store) DeleteLibraryTable(ctx context.Context, nodeID string) error {
 	return s.libraryTables.DB(ctx).Model(&model.LibraryTableEntity{}).
 		Where("node_id = ?", nodeID).Delete(&model.LibraryTableEntity{}).Error
+}
+
+// LibraryNodeByProvenance 按 provenance_id 找已收录的节点（幂等收录用；无命中 → ok=false）。
+//
+// provenance_id 空串直接返回未命中（不查空串，避免把非产物节点误当命中）。
+func (s *Store) LibraryNodeByProvenance(ctx context.Context, provenanceID string) (model.LibraryNodeEntity, bool, error) {
+	if provenanceID == "" {
+		return model.LibraryNodeEntity{}, false, nil
+	}
+	var rows model.LibraryNodeEntityList
+	err := s.libraryNodes.DB(ctx).Model(&model.LibraryNodeEntity{}).
+		Where("provenance_id = ?", provenanceID).
+		Limit(1).Find(&rows).Error
+	if err != nil {
+		return model.LibraryNodeEntity{}, false, err
+	}
+	if len(rows) == 0 {
+		return model.LibraryNodeEntity{}, false, nil
+	}
+	return rows[0], true, nil
 }

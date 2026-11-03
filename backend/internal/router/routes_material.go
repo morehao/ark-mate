@@ -24,6 +24,7 @@ func registerMaterial(v1 *gin.RouterGroup, ctr ctrmaterial.MaterialCtr) {
 	v1.GET("/materials/nodes/:id", ctr.GetNode)
 	v1.PATCH("/materials/nodes/:id", ctr.PatchNode)
 	v1.DELETE("/materials/nodes/:id", ctr.DeleteNode)
+	v1.POST("/materials/import-artifact", ctr.ImportArtifact)
 	v1.GET("/materials/search", ctr.Search)
 	// P3 富节点：table 行 CRUD + page 发布/查看。
 	v1.GET("/materials/nodes/:id/rows", ctr.GetRows)

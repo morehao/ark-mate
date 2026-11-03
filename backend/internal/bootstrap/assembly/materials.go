@@ -2,6 +2,7 @@ package assembly
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,8 +14,10 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/protocol/mcp"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
+	"github.com/morehao/ark-mate/internal/service/svcartifact"
 	"github.com/morehao/ark-mate/internal/service/svcattachment"
 	"github.com/morehao/ark-mate/internal/service/svcmaterial"
+	"github.com/morehao/golib/gerror"
 )
 
 // 资料库面在装配根的接线（v33）。
@@ -68,13 +71,73 @@ func (a materialBlobReader) LocalPathByAttachmentID(ctx context.Context, attachm
 
 // buildMaterialSvc 构造资料库用例。memory 模式（Store 为 nil）时 NodeStore 交 nil，
 // 用例内 requireStore 报 40501；上传适配器包住已构造的附件用例。
-func (f Facts) buildMaterialSvc(attach svcattachment.AttachmentSvc) svcmaterial.MaterialSvc {
+// arts：产物读取窄端口（收录产物时用），由 svcartifact 适配。
+func (f Facts) buildMaterialSvc(attach svcattachment.AttachmentSvc, artifactSvc svcartifact.ArtifactSvc) svcmaterial.MaterialSvc {
 	var nodeStore svcmaterial.NodeStore
 	if f.Store != nil {
 		nodeStore = f.Store
 	}
-	return svcmaterial.New(nodeStore, materialUploadAdapter{attach: attach}, materialBlobReader{rows: f.Store, blobs: f.AttachStore}, pagePublisher{root: f.Cfg.HomeDir})
+	var arts svcmaterial.ArtifactReader
+	if artifactSvc != nil {
+		arts = materialArtifactReader{art: artifactSvc}
+	}
+	return svcmaterial.New(nodeStore, materialUploadAdapter{attach: attach}, materialBlobReader{rows: f.Store, blobs: f.AttachStore}, pagePublisher{root: f.Cfg.HomeDir}, arts)
 }
+
+// materialArtifactReader 把 svcartifact.ArtifactSvc 适配成 svcmaterial.ArtifactReader。
+type materialArtifactReader struct {
+	art svcartifact.ArtifactSvc
+}
+
+func (r materialArtifactReader) ArtifactRef(ctx context.Context, id string) (svcmaterial.ArtifactRef, bool, error) {
+	if r.art == nil {
+		return svcmaterial.ArtifactRef{}, false, nil
+	}
+	a, err := r.art.Get(ctx, id)
+	if err != nil {
+		// svcartifact 的 Get 对不存在返回 code.NotFound；此处把它当作「未命中」，让上层报 artifact_not_found。
+		var coded gerror.Error
+		if errors.As(err, &coded) && coded.Code == code.NotFound {
+			return svcmaterial.ArtifactRef{}, false, nil
+		}
+		return svcmaterial.ArtifactRef{}, false, err
+	}
+	return svcmaterial.ArtifactRef{
+		ID: a.ID, SessionID: a.SessionID, RunID: a.RunID, Kind: a.Kind,
+		Title: a.Title, MimeType: a.MimeType, SizeBytes: a.SizeBytes,
+		UploadID: a.UploadID, ContentText: a.ContentText,
+	}, true, nil
+}
+
+// buildArtifactSvc 构造产物用例。memory 模式（Store 为 nil）时 ArtifactStore 交 nil（用例内报 40501）。
+// files：file 类产物的元数据端口（取 filestore 的 sha256/size/name）。
+func (f Facts) buildArtifactSvc() svcartifact.ArtifactSvc {
+	var st svcartifact.ArtifactStore
+	if f.Store != nil {
+		st = f.Store
+	}
+	var files svcartifact.FileMeta
+	if f.AttachStore != nil {
+		files = artifactFileMeta{blobs: f.AttachStore}
+	}
+	return svcartifact.New(st, files)
+}
+
+// artifactFileMeta 把 attachmentstore.Store 适配成 svcartifact.FileMeta。
+type artifactFileMeta struct {
+	blobs *attachmentstore.Store
+}
+
+func (m artifactFileMeta) GetFileMeta(ctx context.Context, fileID string) (string, int64, string, error) {
+	detail, err := m.blobs.GetFile(ctx, fileID)
+	if err != nil {
+		return "", 0, "", err
+	}
+	return detail.ContentHash, detail.Size, detail.Name, nil
+}
+
+// 断言：*store.Store 满足 svcartifact.ArtifactStore（编译期钉住端口形状漂移）。
+var _ svcartifact.ArtifactStore = (*store.Store)(nil)
 
 // 断言：*store.Store 满足 svcmaterial.NodeStore（编译期钉住端口形状漂移）。
 var _ svcmaterial.NodeStore = (*store.Store)(nil)
@@ -112,7 +175,7 @@ func MaterialMCPHandler(cfg config.Config) (mcp.Handler, func() error, error) {
 		return nil, nil, err
 	}
 	attachSvc := svcattachment.New(st, assemblyBlobStore{st: blobs}, svcattachment.Limits{MaxBytes: cfg.AttachmentMaxBytes})
-	svc := svcmaterial.New(st, assemblyUploadAdapter{attach: attachSvc}, materialBlobReader{rows: st, blobs: blobs}, pagePublisher{root: cfg.HomeDir})
+	svc := svcmaterial.New(st, assemblyUploadAdapter{attach: attachSvc}, materialBlobReader{rows: st, blobs: blobs}, pagePublisher{root: cfg.HomeDir}, nil)
 	return materialmcp.New(svc), func() error { return st.Close() }, nil
 }
 

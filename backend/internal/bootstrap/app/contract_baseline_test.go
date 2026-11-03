@@ -85,6 +85,11 @@ func contractCases() []contractCase {
 		{"PATCH", "/v1/mate/materials/nodes/nope", "{}"},
 		{"DELETE", "/v1/mate/materials/nodes/nope", ""},
 		{"GET", "/v1/mate/materials/search", ""},
+		// v34：产物登记 + 收录（memory 模式多回 40501 artifact_unavailable，仍 JSON 信封）
+		{"POST", "/v1/mate/materials/import-artifact", "{}"},
+		{"POST", "/v1/mate/artifacts", "{}"},
+		{"GET", "/v1/mate/artifacts/nope", ""},
+		{"GET", "/v1/mate/sessions/nope/artifacts", ""},
 		// P3 富节点：table 行 CRUD + page 发布/查看（memory 模式多回 40501/40401，仍 JSON 信封）
 		{"GET", "/v1/mate/materials/nodes/nope/rows", ""},
 		{"PUT", "/v1/mate/materials/nodes/nope/rows", "{}"},
