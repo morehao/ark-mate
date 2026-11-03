@@ -2,6 +2,7 @@ package svcmaterial
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"unicode/utf8"
@@ -84,6 +85,7 @@ func (s *materialSvc) detail(ctx context.Context, n model.LibraryNodeEntity) (*d
 			return nil, code.Errorf(code.Internal, "读取表格 schema 失败: %v", err)
 		} else if ok {
 			resp.Schema = t.SchemaJSON
+			resp.Rows = t.RowsJSON
 		}
 	}
 	return resp, nil
@@ -422,4 +424,118 @@ func (s *materialSvc) DrivePath(ctx context.Context, nodeID string) (string, err
 		return "", code.Errorf(code.Internal, "解析附件本地路径失败: %v", err)
 	}
 	return path, nil
+}
+
+// ——— P3：table 行 CRUD + page 发布/查看 ———
+
+// tableNode 取一个节点并校验它是 table 种类；返回其表格行。
+func (s *materialSvc) tableNode(ctx context.Context, nodeID string) (model.LibraryNodeEntity, model.LibraryTableEntity, error) {
+	n, ok, err := s.st.LibraryNodeByID(ctx, nodeID)
+	if err != nil {
+		return model.LibraryNodeEntity{}, model.LibraryTableEntity{}, code.Errorf(code.Internal, "读取资料库节点失败: %v", err)
+	}
+	if !ok {
+		return model.LibraryNodeEntity{}, model.LibraryTableEntity{}, code.Errorf(code.NotFound, "material_node_not_found: 资料库节点不存在")
+	}
+	if material.NodeKind(n.NodeKind) != material.KindTable {
+		return model.LibraryNodeEntity{}, model.LibraryTableEntity{}, code.Errorf(code.InvalidRequest, "material_node_kind_mismatch: 只有 table 节点有表格数据")
+	}
+	t, ok, err := s.st.LibraryTableByNode(ctx, nodeID)
+	if err != nil {
+		return model.LibraryNodeEntity{}, model.LibraryTableEntity{}, code.Errorf(code.Internal, "读取表格失败: %v", err)
+	}
+	if !ok {
+		// 兼容坏数据：table 节点却无表格行 → 视为空表。
+		t = model.LibraryTableEntity{NodeID: nodeID, SchemaJSON: "{}", RowsJSON: "[]"}
+	}
+	return n, t, nil
+}
+
+// GetTableRows 取 table 节点的 schema + 行。
+func (s *materialSvc) GetTableRows(ctx context.Context, nodeID string) (*dtomaterial.RowsResp, error) {
+	if err := s.requireStore(); err != nil {
+		return nil, err
+	}
+	_, t, err := s.tableNode(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	return &dtomaterial.RowsResp{NodeID: nodeID, Schema: t.SchemaJSON, Rows: t.RowsJSON}, nil
+}
+
+// SetTableRows 整表替换行数据（首版单列 JSON 整体写；rows 必须是 JSON 数组）。
+func (s *materialSvc) SetTableRows(ctx context.Context, nodeID, rows string) (*dtomaterial.RowsResp, error) {
+	if err := s.requireStore(); err != nil {
+		return nil, err
+	}
+	_, t, err := s.tableNode(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	rows = strings.TrimSpace(rows)
+	if rows == "" {
+		rows = "[]"
+	}
+	if !json.Valid([]byte(rows)) || !strings.HasPrefix(rows, "[") {
+		return nil, code.Errorf(code.InvalidParam, "参数错误: rows 必须是 JSON 数组字符串")
+	}
+	if err := s.st.UpsertLibraryTable(ctx, model.LibraryTableEntity{
+		NodeID: nodeID, SchemaJSON: t.SchemaJSON, RowsJSON: rows,
+	}); err != nil {
+		return nil, code.Errorf(code.Internal, "写表格行失败: %v", err)
+	}
+	// 表格内容变化也更新节点 updated_at（列表按它排序）。
+	_ = s.st.UpdateLibraryNode(ctx, nodeID, nil, nil, nil)
+	return &dtomaterial.RowsResp{NodeID: nodeID, Schema: t.SchemaJSON, Rows: rows}, nil
+}
+
+// PublishPage 把 page 节点 body 落盘（page 种类）。
+func (s *materialSvc) PublishPage(ctx context.Context, nodeID string) (*dtomaterial.PublishPageResp, error) {
+	if err := s.requireStore(); err != nil {
+		return nil, err
+	}
+	n, ok, err := s.st.LibraryNodeByID(ctx, nodeID)
+	if err != nil {
+		return nil, code.Errorf(code.Internal, "读取资料库节点失败: %v", err)
+	}
+	if !ok {
+		return nil, code.Errorf(code.NotFound, "material_node_not_found: 资料库节点不存在")
+	}
+	if material.NodeKind(n.NodeKind) != material.KindPage {
+		return nil, code.Errorf(code.InvalidRequest, "material_node_kind_mismatch: 只有 page 节点可发布")
+	}
+	if s.page == nil {
+		return nil, code.Errorf(code.NotSupported, "material_unavailable: 页面发布不可用（当前为 memory 模式）")
+	}
+	html := n.Body
+	if strings.TrimSpace(html) == "" {
+		return nil, code.Errorf(code.InvalidParam, "参数错误: page 节点 body 为空，无可发布内容")
+	}
+	absPath, err := s.page.WritePage(ctx, nodeID, html)
+	if err != nil {
+		return nil, code.Errorf(code.Internal, "页面落盘失败: %v", err)
+	}
+	return &dtomaterial.PublishPageResp{
+		NodeID:   nodeID,
+		ViewPath: "/materials/nodes/" + nodeID + "/view",
+		FilePath: absPath,
+	}, nil
+}
+
+// PageHTML 取 page 节点 body（view 直接回这段 HTML）。
+func (s *materialSvc) PageHTML(ctx context.Context, nodeID string) (string, error) {
+	if err := s.requireStore(); err != nil {
+		return "", err
+	}
+	n, ok, err := s.st.LibraryNodeByID(ctx, nodeID)
+	if err != nil {
+		return "", code.Errorf(code.Internal, "读取资料库节点失败: %v", err)
+	}
+	if !ok {
+		return "", code.Errorf(code.NotFound, "material_node_not_found: 资料库节点不存在")
+	}
+	if material.NodeKind(n.NodeKind) != material.KindPage {
+		return "", code.Errorf(code.InvalidRequest, "material_node_kind_mismatch: 只有 page 节点可查看")
+	}
+	return n.Body, nil
 }

@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -244,5 +245,119 @@ func TestMaterialUpload(t *testing.T) {
 	}
 	if env.Data.NodeKind != "drive" || env.Data.DriveUploadID == "" {
 		t.Fatalf("上传应落 drive 节点且带 drive_upload_id: %+v", env.Data)
+	}
+}
+
+// TestMaterialTableFlow 建表 → 读行 → 整表替换行 → 再读一致（P3）。
+func TestMaterialTableFlow(t *testing.T) {
+	e, _ := materialApp(t)
+
+	_, code, data := matCall(t, e, "POST", "/v1/mate/materials/nodes",
+		`{"node_kind":"table","title":"账目","schema":"[{\"name\":\"金额\",\"type\":\"number\"}]"}`)
+	if code != 0 {
+		t.Fatalf("建 table 失败 code=%d", code)
+	}
+	var tbl dtomaterial.NodeDetailResp
+	_ = json.Unmarshal(data, &tbl)
+	if tbl.NodeKind != "table" || tbl.Schema == "" {
+		t.Fatalf("table 结果不符: %+v", tbl)
+	}
+
+	// 初始空行。
+	_, code, data = matCall(t, e, "GET", "/v1/mate/materials/nodes/"+tbl.ID+"/rows", "")
+	if code != 0 {
+		t.Fatalf("读行失败 code=%d", code)
+	}
+	var rr dtomaterial.RowsResp
+	_ = json.Unmarshal(data, &rr)
+	if rr.Rows != "[]" {
+		t.Fatalf("新表应为空行数组: %q", rr.Rows)
+	}
+
+	// 整表替换。
+	_, code, data = matCall(t, e, "PUT", "/v1/mate/materials/nodes/"+tbl.ID+"/rows",
+		`{"rows":"[{\"金额\":100},{\"金额\":200}]"}`)
+	if code != 0 {
+		t.Fatalf("写行失败 code=%d", code)
+	}
+	_ = json.Unmarshal(data, &rr)
+	if !strings.Contains(rr.Rows, "100") {
+		t.Fatalf("写行后应有 100: %q", rr.Rows)
+	}
+
+	// 再读一致。
+	_, _, data = matCall(t, e, "GET", "/v1/mate/materials/nodes/"+tbl.ID+"/rows", "")
+	_ = json.Unmarshal(data, &rr)
+	if !strings.Contains(rr.Rows, "200") {
+		t.Fatalf("再读应含 200: %q", rr.Rows)
+	}
+
+	// 非法 rows（不是数组）→ 40000。
+	_, code, _ = matCall(t, e, "PUT", "/v1/mate/materials/nodes/"+tbl.ID+"/rows", `{"rows":"{}"}`)
+	if code != 40000 {
+		t.Fatalf("非数组 rows 应 40000，got %d", code)
+	}
+}
+
+// TestMaterialPagePublishView 建 page → publish → view 回 HTML（P3）；非 page 拒绝。
+func TestMaterialPagePublishView(t *testing.T) {
+	e, _ := materialApp(t)
+
+	_, code, data := matCall(t, e, "POST", "/v1/mate/materials/nodes",
+		`{"node_kind":"page","title":"看板","body":"<html><body>hi</body></html>"}`)
+	if code != 0 {
+		t.Fatalf("建 page 失败 code=%d", code)
+	}
+	var pg dtomaterial.NodeDetailResp
+	_ = json.Unmarshal(data, &pg)
+
+	_, code, data = matCall(t, e, "POST", "/v1/mate/materials/nodes/"+pg.ID+"/publish", "")
+	if code != 0 {
+		t.Fatalf("publish 失败 code=%d", code)
+	}
+	var pub dtomaterial.PublishPageResp
+	_ = json.Unmarshal(data, &pub)
+	if pub.FilePath == "" || pub.ViewPath == "" {
+		t.Fatalf("publish 应给 file_path + view_path: %+v", pub)
+	}
+
+	// view 回 HTML。
+	req := httptest.NewRequest("GET", "/v1/mate/materials/nodes/"+pg.ID+"/view", nil)
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "hi") {
+		t.Fatalf("view 应回 200 + HTML: code=%d body=%s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("view Content-Type 应 text/html: %q", ct)
+	}
+
+	// 非 page 发布 → 40001。
+	_, _, d2 := matCall(t, e, "POST", "/v1/mate/materials/nodes", `{"node_kind":"doc","title":"d","body":"x"}`)
+	var doc dtomaterial.NodeDetailResp
+	_ = json.Unmarshal(d2, &doc)
+	_, code, _ = matCall(t, e, "POST", "/v1/mate/materials/nodes/"+doc.ID+"/publish", "")
+	if code != 40001 {
+		t.Fatalf("非 page 发布应 40001，got %d", code)
+	}
+}
+
+// TestMaterialLinkCreate 建 link 节点（body=剪藏 md + source_url）。
+func TestMaterialLinkCreate(t *testing.T) {
+	e, _ := materialApp(t)
+	_, code, data := matCall(t, e, "POST", "/v1/mate/materials/nodes",
+		`{"node_kind":"link","title":"剪藏","body":"# 快照","source_url":"https://example.com"}`)
+	if code != 0 {
+		t.Fatalf("建 link 失败 code=%d", code)
+	}
+	var ln dtomaterial.NodeDetailResp
+	_ = json.Unmarshal(data, &ln)
+	if ln.NodeKind != "link" || ln.SourceURL != "https://example.com" || ln.Body == "" {
+		t.Fatalf("link 结果不符: %+v", ln)
+	}
+	// link 缺 source_url → 40001（载体一致性）。
+	_, code, _ = matCall(t, e, "POST", "/v1/mate/materials/nodes", `{"node_kind":"link","title":"x","body":"y"}`)
+	if code != 40001 {
+		t.Fatalf("link 缺 url 应 40001，got %d", code)
 	}
 }

@@ -24,4 +24,9 @@ func registerMaterial(v1 *gin.RouterGroup, ctr ctrmaterial.MaterialCtr) {
 	v1.DELETE("/materials/nodes/:id", ctr.DeleteNode)
 	v1.POST("/materials/upload", ctr.Upload)
 	v1.GET("/materials/search", ctr.Search)
+	// P3 富节点：table 行 CRUD + page 发布/查看。
+	v1.GET("/materials/nodes/:id/rows", ctr.GetRows)
+	v1.PUT("/materials/nodes/:id/rows", ctr.PutRows)
+	v1.POST("/materials/nodes/:id/publish", ctr.Publish)
+	v1.GET("/materials/nodes/:id/view", ctr.View)
 }

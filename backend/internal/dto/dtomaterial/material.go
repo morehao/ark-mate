@@ -40,6 +40,8 @@ type NodeDetailResp struct {
 	TableID  string `json:"table_id,omitempty"`
 	// Schema 仅 table 种类：字段定义 JSON 原样透出。
 	Schema string `json:"schema,omitempty"`
+	// Rows 仅 table 种类：行数据 JSON 数组原样透出。
+	Rows string `json:"rows,omitempty"`
 	// DriveUploadID 仅 drive 种类：附件链路的 core_file_upload.id（内部指针，一般前端用不到）。
 	DriveUploadID string `json:"drive_upload_id,omitempty"`
 	SourceURL     string `json:"source_url,omitempty"`
@@ -87,4 +89,28 @@ type SearchHit struct {
 	Title    string `json:"title"`
 	NodeKind string `json:"node_kind"`
 	Snippet  string `json:"snippet"`
+}
+
+// SetRowsReq `PUT /materials/nodes/:id/rows` 的请求体（整表行数据替换；rows_json 为 JSON 数组字符串）。
+//
+// 首版用整体替换（单列 JSON）：最小可用、语义清晰（一次写就是一次快照）。逐行增删改在 UI 侧解析
+// 数组后整体回写。
+type SetRowsReq struct {
+	Rows string `json:"rows"`
+}
+
+// RowsResp `GET/PUT /materials/nodes/:id/rows` 的响应体。
+type RowsResp struct {
+	NodeID string `json:"node_id"`
+	Schema string `json:"schema"`
+	Rows   string `json:"rows"`
+}
+
+// PublishPageResp `POST /materials/nodes/:id/publish` 的响应体。
+type PublishPageResp struct {
+	NodeID string `json:"node_id"`
+	// ViewPath 本地只读查看路径（`/materials/nodes/:id/view`，只绑回环，非公网 URL）。
+	ViewPath string `json:"view_path"`
+	// FilePath 落盘后的本地绝对路径（便于用户直接打开；不进对外链接语义）。
+	FilePath string `json:"file_path"`
 }

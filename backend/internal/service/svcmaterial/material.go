@@ -58,6 +58,13 @@ type UploadedAttachment struct {
 	SizeBytes int64
 }
 
+// PagePublisher 把 page 节点的 HTML 落盘成本机可打开的文件（实现里用 `<MATE_HOME>/material_pages`）。
+//
+// 用例层不 import infra/config：只认「给节点 id + HTML，还落盘绝对路径」。回环查看路径由控制器拼。
+type PagePublisher interface {
+	WritePage(ctx context.Context, nodeID, html string) (absPath string, err error)
+}
+
 // AttachmentReader 由**平台附件 id**（`att_…`）解析出本地只读绝对路径。
 //
 // 适配器内部做 att→upload_id（store.AttachmentByID）→ 磁盘路径（attachmentstore.ReadPath）两步；
@@ -77,17 +84,27 @@ type MaterialSvc interface {
 	Search(ctx context.Context, q string, limit, offset int) (*dtomaterial.SearchResp, error)
 	// DrivePath 返回 drive 节点主附件的本地只读绝对路径（给 Agent 的 read 工具用）。
 	DrivePath(ctx context.Context, nodeID string) (string, error)
+
+	// GetTableRows 取 table 节点的 schema + 行（非 table → 40001）。
+	GetTableRows(ctx context.Context, nodeID string) (*dtomaterial.RowsResp, error)
+	// SetTableRows 整表替换行数据（首版单列 JSON 整体写；非 table → 40001）。
+	SetTableRows(ctx context.Context, nodeID, rows string) (*dtomaterial.RowsResp, error)
+	// PublishPage 把 page 节点 body 落盘（page 种类；非 page → 40001）。返回落盘绝对路径。
+	PublishPage(ctx context.Context, nodeID string) (*dtomaterial.PublishPageResp, error)
+	// PageHTML 取 page 节点 body（view 直接回这段 HTML）。
+	PageHTML(ctx context.Context, nodeID string) (string, error)
 }
 
 type materialSvc struct {
 	st     NodeStore
 	attach AttachmentUploader
 	blobs  AttachmentReader
+	page   PagePublisher
 }
 
 // New 构造资料库用例。st / attach / blobs 由装配根交下来（memory 模式可为 nil → 40501）。
-func New(st NodeStore, attach AttachmentUploader, blobs AttachmentReader) MaterialSvc {
-	return &materialSvc{st: st, attach: attach, blobs: blobs}
+func New(st NodeStore, attach AttachmentUploader, blobs AttachmentReader, page PagePublisher) MaterialSvc {
+	return &materialSvc{st: st, attach: attach, blobs: blobs, page: page}
 }
 
 // 默认分页。

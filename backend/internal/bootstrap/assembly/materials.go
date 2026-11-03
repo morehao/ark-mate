@@ -3,6 +3,7 @@ package assembly
 import (
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/morehao/ark-mate/internal/config"
@@ -72,7 +73,7 @@ func (f Facts) buildMaterialSvc(attach svcattachment.AttachmentSvc) svcmaterial.
 	if f.Store != nil {
 		nodeStore = f.Store
 	}
-	return svcmaterial.New(nodeStore, materialUploadAdapter{attach: attach}, materialBlobReader{rows: f.Store, blobs: f.AttachStore})
+	return svcmaterial.New(nodeStore, materialUploadAdapter{attach: attach}, materialBlobReader{rows: f.Store, blobs: f.AttachStore}, pagePublisher{root: f.Cfg.HomeDir})
 }
 
 // 断言：*store.Store 满足 svcmaterial.NodeStore（编译期钉住端口形状漂移）。
@@ -111,7 +112,7 @@ func MaterialMCPHandler(cfg config.Config) (mcp.Handler, func() error, error) {
 		return nil, nil, err
 	}
 	attachSvc := svcattachment.New(st, assemblyBlobStore{st: blobs}, svcattachment.Limits{MaxBytes: cfg.AttachmentMaxBytes})
-	svc := svcmaterial.New(st, assemblyUploadAdapter{attach: attachSvc}, materialBlobReader{rows: st, blobs: blobs})
+	svc := svcmaterial.New(st, assemblyUploadAdapter{attach: attachSvc}, materialBlobReader{rows: st, blobs: blobs}, pagePublisher{root: cfg.HomeDir})
 	return materialmcp.New(svc), func() error { return st.Close() }, nil
 }
 
@@ -159,3 +160,24 @@ func (a assemblyUploadAdapter) Upload(ctx context.Context, fileName, declaredNam
 }
 
 var _ svcattachment.BlobStore = assemblyBlobStore{}
+
+// pagePublisher 把 page 节点的 HTML 落盘到 `<root>/material_pages/<nodeID>/index.html`（本机可打开）。
+//
+// 只绑本机（不进公网语义）：`view` 由控制器回环读 body；落盘文件只是「用户能直接双击打开」的便利。
+type pagePublisher struct {
+	root string
+}
+
+func (p pagePublisher) WritePage(_ context.Context, nodeID, html string) (string, error) {
+	dir := filepath.Join(p.root, "material_pages", nodeID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	abs := filepath.Join(dir, "index.html")
+	if err := os.WriteFile(abs, []byte(html), 0o644); err != nil {
+		return "", err
+	}
+	return abs, nil
+}
+
+var _ svcmaterial.PagePublisher = pagePublisher{}

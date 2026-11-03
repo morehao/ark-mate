@@ -87,6 +87,10 @@ func contractCases() []contractCase {
 		{"GET", "/v1/mate/materials/search", ""},
 		// upload 是 multipart：空体 → 40000 参数错误（仍 JSON 信封）
 		{"POST", "/v1/mate/materials/upload", ""},
+		// P3 富节点：table 行 CRUD + page 发布/查看（memory 模式多回 40501/40401，仍 JSON 信封）
+		{"GET", "/v1/mate/materials/nodes/nope/rows", ""},
+		{"PUT", "/v1/mate/materials/nodes/nope/rows", "{}"},
+		{"POST", "/v1/mate/materials/nodes/nope/publish", ""},
 
 		// ——— attachments（v32；POST 是 multipart，空体 → 40000 参数错误，仍是 JSON 信封） ———
 		{"POST", "/v1/mate/attachments", ""},
@@ -202,6 +206,7 @@ var contractExcluded = map[string]string{
 	"POST /v1/mate/workspaces/pick-directory": "抬宿主原生目录选择器，结果依赖宿主 UI",
 	// 附件字节流：响应是原始字节流（Content-Type=探测 MIME、inline），不是 JSON 信封。
 	"GET /v1/mate/attachments/:id/content": "回原始字节流（预览），不是 JSON 信封",
+	"GET /v1/mate/materials/nodes/:id/view": "回 page 的 text/html 正文，不是 JSON 信封",
 }
 
 // contractNoRouteCases 刻意不命中任何注册路由的采样：它们测的是 NoRoute 兜底的信封形状。

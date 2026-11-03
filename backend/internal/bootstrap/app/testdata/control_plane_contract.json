@@ -313,6 +313,48 @@
     "data_kind": "object"
   },
   {
+    "method": "GET",
+    "path": "/v1/mate/materials/nodes/nope/rows",
+    "status": 200,
+    "code": 40501,
+    "msg": "material_unavailable: 资料库需要持久层（当前为 memory 模式）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PUT",
+    "path": "/v1/mate/materials/nodes/nope/rows",
+    "status": 200,
+    "code": 40501,
+    "msg": "material_unavailable: 资料库需要持久层（当前为 memory 模式）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/materials/nodes/nope/publish",
+    "status": 200,
+    "code": 40501,
+    "msg": "material_unavailable: 资料库需要持久层（当前为 memory 模式）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
     "method": "POST",
     "path": "/v1/mate/attachments",
     "status": 200,

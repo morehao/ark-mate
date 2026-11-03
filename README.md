@@ -443,6 +443,10 @@ REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`co
 | DELETE | `/materials/nodes/:id` | 删节点 → `{deleted}`（folder **级联删子树**；不存在 → `deleted:false` 且 `code=0`，**幂等**）。字节按 filestore 去重回收（附件链路），本期不主动删 blob |
 | POST | `/materials/upload` | **上传文件成节点**（v33；`multipart/form-data` 单文件：`file` 必填 + 可选 `parent_id`）→ 节点详情。**复用附件链路**落字节（先 `POST /attachments` 拿 `att_…`，再建节点 + 关联）；本期一律落 `drive` 承载（可下载），md/html/csv 的内容解析留后续 |
 | GET | `/materials/search` | **关键词检索**（v33；`?q=` 必填、`?limit=` 默认 50 上限 200、`?offset=`）→ `{hits:[{node_id,title,node_kind,snippet}], total, has_more, note?}`。对 title/body 做**大小写不敏感子串匹配**——**不是语义检索、不是问答**；空结果 `total:0` + `note` 提示换词或浏览 |
+| GET | `/materials/nodes/:id/rows` | **取表格行**（v33 P3；仅 `node_kind=table`）→ `{node_id, schema, rows}`（`rows` 为 JSON 数组字符串）。非 table → `40001 material_node_kind_mismatch` |
+| PUT | `/materials/nodes/:id/rows` | **整表替换行**（v33 P3；`{rows}`，`rows` 必须是 JSON 数组字符串）→ `{node_id, schema, rows}`。非法 JSON/非数组 → `40000`；非 table → `40001 material_node_kind_mismatch` |
+| POST | `/materials/nodes/:id/publish` | **发布 page**（v33 P3；仅 `node_kind=page`）→ `{node_id, view_path, file_path}`：把 body HTML 落盘到 `<MATE_HOME>/material_pages/<id>/index.html`（本机可打开）。空 body → `40000`；非 page → `40001 material_node_kind_mismatch`。**不做公网分享** |
+| GET | `/materials/nodes/:id/view` | **查看 page**（v33 P3）：回 body 的 HTML（`Content-Type: text/html; charset=utf-8`），仅本机回环。非 page → `40001 material_node_kind_mismatch` |
 | GET | `/sessions/search` | 会话搜索（`?q=` 必填、`?limit=` 默认 30 上限 50；含归档、`updated` 降序） |
 | GET | `/search/messages` | 跨会话消息检索（`?q=` 必填、`?limit=` 默认 30 上限 200；返回 `seq` 锚点用于跳转定位，`source` 标数据面） |
 | POST | `/sessions/export` | 批量导出 `{ids[], format?: markdown\|text\|json}`（ids 上限 50）→ `{files:[{filename, content, bytes, events, truncated?}], skipped[], total_bytes}` |

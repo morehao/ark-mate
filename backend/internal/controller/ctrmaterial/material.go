@@ -3,6 +3,7 @@
 package ctrmaterial
 
 import (
+	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,10 @@ type MaterialCtr interface {
 	DeleteNode(c *gin.Context)
 	Upload(c *gin.Context)
 	Search(c *gin.Context)
+	GetRows(c *gin.Context)
+	PutRows(c *gin.Context)
+	Publish(c *gin.Context)
+	View(c *gin.Context)
 }
 
 var _ MaterialCtr = (*materialCtr)(nil)
@@ -142,4 +147,51 @@ func (h *materialCtr) Search(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, resp)
+}
+
+// GetRows `GET /materials/nodes/:id/rows`（table 节点的 schema + 行）。
+func (h *materialCtr) GetRows(c *gin.Context) {
+	resp, err := h.svc.GetTableRows(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// PutRows `PUT /materials/nodes/:id/rows`（整表替换行数据，rows 为 JSON 数组字符串）。
+func (h *materialCtr) PutRows(c *gin.Context) {
+	var req dtomaterial.SetRowsReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: 请求体不是合法 JSON: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.SetTableRows(c.Request.Context(), c.Param("id"), req.Rows)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Publish `POST /materials/nodes/:id/publish`（page 落盘 + 本地查看路径）。
+func (h *materialCtr) Publish(c *gin.Context) {
+	resp, err := h.svc.PublishPage(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// View `GET /materials/nodes/:id/view`（page 节点 body 的 HTML，只绑回环）。
+func (h *materialCtr) View(c *gin.Context) {
+	html, err := h.svc.PageHTML(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Status(http.StatusOK)
+	_, _ = c.Writer.WriteString(html)
 }
