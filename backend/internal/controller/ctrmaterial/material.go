@@ -20,12 +20,12 @@ type MaterialCtr interface {
 	CreateNode(c *gin.Context)
 	PatchNode(c *gin.Context)
 	DeleteNode(c *gin.Context)
-	Upload(c *gin.Context)
 	Search(c *gin.Context)
 	GetRows(c *gin.Context)
 	PutRows(c *gin.Context)
 	Publish(c *gin.Context)
 	View(c *gin.Context)
+	ImportArtifact(c *gin.Context)
 }
 
 var _ MaterialCtr = (*materialCtr)(nil)
@@ -52,9 +52,10 @@ func listIntParam(c *gin.Context, key string) int {
 // ListNodes `GET /materials/nodes?parent=<id>&limit=&offset=`。
 func (h *materialCtr) ListNodes(c *gin.Context) {
 	parent := c.Query("parent")
+	category := c.Query("category")
 	limit := listIntParam(c, "limit")
 	offset := listIntParam(c, "offset")
-	resp, err := h.svc.ListNodes(c.Request.Context(), parent, limit, offset)
+	resp, err := h.svc.ListNodesByCategory(c.Request.Context(), parent, category, limit, offset)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -112,29 +113,9 @@ func (h *materialCtr) DeleteNode(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
-// Upload `POST /materials/upload`（multipart，单文件；前端循环多传）。
-//
-// 字段：`file`（必填）+ 可选 `parent_id`。
-func (h *materialCtr) Upload(c *gin.Context) {
-	fileHeader, err := c.FormFile("file")
-	if err != nil {
-		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: 缺少 file 字段（multipart 单文件）: "+err.Error()))
-		return
-	}
-	f, err := fileHeader.Open()
-	if err != nil {
-		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: 无法读取上传文件: "+err.Error()))
-		return
-	}
-	defer func() { _ = f.Close() }()
-	parentID := c.PostForm("parent_id")
-	resp, err := h.svc.Upload(c.Request.Context(), fileHeader.Filename, "", fileHeader.Header.Get("Content-Type"), parentID, f)
-	if err != nil {
-		gincontext.Fail(c, code.FromError(err))
-		return
-	}
-	gincontext.Success(c, resp)
-}
+// Upload 已随 P0′ 上传收口删除：上传文件成 drive 节点改两步式（先 `POST /files` 拿 file_id，
+// 再 `POST /materials/nodes {node_kind:drive, drive_upload_id}`）。`svcmaterial.Upload` 用例仍保留，
+// 供进程内 MCP `library_upload` 使用（不经过本机回环 HTTP）。
 
 // Search `GET /materials/search?q=&limit=&offset=`（关键词检索，非语义）。
 func (h *materialCtr) Search(c *gin.Context) {
@@ -194,4 +175,19 @@ func (h *materialCtr) View(c *gin.Context) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.Status(http.StatusOK)
 	_, _ = c.Writer.WriteString(html)
+}
+
+// ImportArtifact `POST /materials/import-artifact`（JSON {artifact_id, parent_id?}）：把产物收录进资料库。
+func (h *materialCtr) ImportArtifact(c *gin.Context) {
+	var req dtomaterial.ImportArtifactReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: 请求体不是合法 JSON: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.ImportArtifact(c.Request.Context(), req)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
 }

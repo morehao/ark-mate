@@ -67,6 +67,9 @@ const (
 	// `attachments`/filestore，本号只标识这棵树上的一个节点。`library_attachments` /
 	// `library_tables` 用复合主键或 1:1 外键，不单独铸号。
 	LibraryNode = "libnd_"
+	// Artifact 产物（`artifacts.id`，v34）。它是**产物登记行**的身份（溯源：哪次会话/哪轮/哪个工具
+	// 调用产出的），不是字节的身份——file 类产物的字节仍走 filestore（`upload_id` 指向 core_file_upload）。
+	Artifact = "art_"
 )
 
 // RuntimeShell 透传壳前缀（= runtime）。

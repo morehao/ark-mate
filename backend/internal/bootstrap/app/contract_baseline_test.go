@@ -85,14 +85,17 @@ func contractCases() []contractCase {
 		{"PATCH", "/v1/mate/materials/nodes/nope", "{}"},
 		{"DELETE", "/v1/mate/materials/nodes/nope", ""},
 		{"GET", "/v1/mate/materials/search", ""},
-		// upload 是 multipart：空体 → 40000 参数错误（仍 JSON 信封）
-		{"POST", "/v1/mate/materials/upload", ""},
+		// v34：产物登记 + 收录（memory 模式多回 40501 artifact_unavailable，仍 JSON 信封）
+		{"POST", "/v1/mate/materials/import-artifact", "{}"},
+		{"POST", "/v1/mate/artifacts", "{}"},
+		{"GET", "/v1/mate/artifacts/nope", ""},
+		{"GET", "/v1/mate/sessions/nope/artifacts", ""},
 		// P3 富节点：table 行 CRUD + page 发布/查看（memory 模式多回 40501/40401，仍 JSON 信封）
 		{"GET", "/v1/mate/materials/nodes/nope/rows", ""},
 		{"PUT", "/v1/mate/materials/nodes/nope/rows", "{}"},
 		{"POST", "/v1/mate/materials/nodes/nope/publish", ""},
 
-		// ——— attachments（v32；POST 是 multipart，空体 → 40000 参数错误，仍是 JSON 信封） ———
+		// ——— attachments（v32；P0′ 收口后 POST 是 JSON {file_id}，空体 → 40000 参数错误，仍 JSON 信封） ———
 		{"POST", "/v1/mate/attachments", ""},
 		{"GET", "/v1/mate/attachments/nope", ""},
 		{"DELETE", "/v1/mate/attachments/nope", ""},

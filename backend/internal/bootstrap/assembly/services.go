@@ -9,6 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/attachmentstore"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/service/svcartifact"
 	"github.com/morehao/ark-mate/internal/service/svcattachment"
 	"github.com/morehao/ark-mate/internal/service/svcmaterial"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
@@ -71,6 +72,9 @@ type Services struct {
 
 	// ——— 资料库（v33）———
 	Material svcmaterial.MaterialSvc
+
+	// ——— 产物溯源（v34）———
+	Artifact svcartifact.ArtifactSvc
 }
 
 // Facts 构造用例所需的事实集合（装配根在启动序列里填好；测试也可以直接给一份）。
@@ -117,6 +121,7 @@ func (f Facts) BuildServices() Services {
 	plane := as.Session.SessionPlane()
 	modelFace := sessionruntime.NewModelFace(as.Session)
 	attachmentSvc := f.buildAttachmentSvc()
+	artifactSvc := f.buildArtifactSvc()
 	return Services{
 		Session:            as.Session,
 		SessionHistory:     svcsession.NewHistory(eventReader(as.Store), plane, as.Bus),
@@ -153,7 +158,8 @@ func (f Facts) BuildServices() Services {
 		Stream:       svcstream.New(as.Bus),
 
 		Attachment: attachmentSvc,
-		Material:   f.buildMaterialSvc(attachmentSvc),
+		Material:   f.buildMaterialSvc(attachmentSvc, artifactSvc),
+		Artifact:   artifactSvc,
 	}
 }
 

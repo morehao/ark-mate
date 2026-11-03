@@ -14,6 +14,8 @@ type NodeResp struct {
 	NodeKind  string `json:"node_kind"`
 	Title     string `json:"title"`
 	SizeBytes int64  `json:"size_bytes"`
+	// Category 分类维度（v34）：material|artifact。
+	Category  string `json:"category,omitempty"`
 	UpdatedAt string `json:"updated_at"`
 }
 
@@ -46,18 +48,26 @@ type NodeDetailResp struct {
 	DriveUploadID string `json:"drive_upload_id,omitempty"`
 	SourceURL     string `json:"source_url,omitempty"`
 	SizeBytes     int64  `json:"size_bytes"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	// Category 分类维度（v34）：material（用户自建）| artifact（会话产物收录）。
+	Category string `json:"category,omitempty"`
+	// ProvenanceID 引用的产物主键（v34）：→ artifacts.id（artifact 类别时非空）。
+	ProvenanceID string `json:"provenance_id,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
-// CreateNodeReq `POST /materials/nodes` 的请求体（建 folder/doc/table/link/page；drive 走上传）。
+// CreateNodeReq `POST /materials/nodes` 的请求体（建 folder/doc/table/link/page/drive）。
+//
+// drive 走「P0′ 收口后的两步式」：先 `POST /files` 拿 file_id，再传 `drive_upload_id`。
 type CreateNodeReq struct {
 	ParentID  string `json:"parent_id"`
-	NodeKind  string `json:"node_kind"` // folder|doc|table|link|page
+	NodeKind  string `json:"node_kind"` // folder|doc|table|link|page|drive
 	Title     string `json:"title"`
 	Body      string `json:"body"`       // doc/page/link
 	Schema    string `json:"schema"`     // table: 字段定义 JSON
 	SourceURL string `json:"source_url"` // link
+	// DriveUploadID 仅 drive 种类：`POST /files` 返回的 file_id（= core_file_upload.id）。
+	DriveUploadID string `json:"drive_upload_id"`
 	// SpaceID 可选；本期只支持默认个人空间，非默认值 → 40501 space_not_supported。
 	SpaceID string `json:"space_id"`
 }
@@ -113,4 +123,14 @@ type PublishPageResp struct {
 	ViewPath string `json:"view_path"`
 	// FilePath 落盘后的本地绝对路径（便于用户直接打开；不进对外链接语义）。
 	FilePath string `json:"file_path"`
+}
+
+// ImportArtifactReq `POST /materials/import-artifact` 的请求体：把一个产物收录进资料库。
+//
+// 幂等：同一 provenance_id 已收录 → 返回既有节点（不重复建）。
+type ImportArtifactReq struct {
+	// ArtifactID 产物的主键（artifacts.id）。
+	ArtifactID string `json:"artifact_id"`
+	// ParentID 目标父文件夹（可选；空 = 空间根）。
+	ParentID string `json:"parent_id"`
 }

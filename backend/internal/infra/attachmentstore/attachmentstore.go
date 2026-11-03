@@ -32,6 +32,13 @@ type Store struct {
 	baseDir string
 }
 
+// FileStore 暴露底层的 golib filestore，供装配根把**唯一的上传 HTTP 面**（`ginupload.Register`）
+// 挂到 `/files` 上（产物溯源 P0′：全局收字节收口，见设计 §3.4）。
+//
+// 只读访问器：不改变本包对字节的唯一写路径（`UploadAndRecord` 等），只是把同一个 FileStore
+// 实例交给 ginupload 注册路由——两处共用同一实例，因此去重表、上限、驱动配置天然一致。
+func (s *Store) FileStore() *filestore.FileStore { return s.fs }
+
 // Options 构造参数。
 type Options struct {
 	// BaseDir 本地驱动落盘根目录（`<MATE_HOME>/attachments`）。

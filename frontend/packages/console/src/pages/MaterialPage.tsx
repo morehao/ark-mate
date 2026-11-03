@@ -7,6 +7,7 @@ import {
   Popconfirm,
   Space,
   Spin,
+  Segmented,
   Table,
   Tag,
   Typography,
@@ -69,6 +70,8 @@ export function MaterialPage() {
   const [hits, setHits] = useState<MaterialSearchHit[] | null>(null) // 非 null = 处于搜索结果视图
   const [detail, setDetail] = useState<MaterialNodeDetail | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  // 分类分栏（v34）：'' = 全部 / 'material' = 资料 / 'artifact' = 产物。
+  const [category, setCategory] = useState<'' | 'material' | 'artifact'>('')
 
   const currentParent = stack.length ? stack[stack.length - 1].id : ''
 
@@ -76,7 +79,7 @@ export function MaterialPage() {
     async (parent: string) => {
       setLoading(true)
       try {
-        const resp = await listMaterialNodes({ parent, limit: 200 })
+        const resp = await listMaterialNodes({ parent, category: category || undefined, limit: 200 })
         setNodes(resp.nodes)
       } catch (e) {
         message.error(toErrorMessage(e))
@@ -85,7 +88,7 @@ export function MaterialPage() {
         setLoading(false)
       }
     },
-    [],
+    [category],
   )
 
   useEffect(() => {
@@ -249,6 +252,18 @@ export function MaterialPage() {
       description="存放文档、表格、网页剪藏、文件与页面；可按目录浏览、按关键词查找。"
       extra={
         <Space>
+          <Segmented
+            value={category}
+            onChange={(v) => {
+              setCategory(v as '' | 'material' | 'artifact')
+              setHits(null)
+            }}
+            options={[
+              { label: '全部', value: '' },
+              { label: '资料', value: 'material' },
+              { label: '产物', value: 'artifact' },
+            ]}
+          />
           <Input.Search
             allowClear
             placeholder="关键词搜索"
@@ -350,6 +365,11 @@ function NodeDetailDrawer(props: {
   return (
     <Modal open={open} onCancel={onClose} footer={null} width={720} title={<Space>{meta.icon}{meta.label}：{detail.title || '未命名'}</Space>}>
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        {detail.category === 'artifact' && (
+          <Tag color="purple" style={{ alignSelf: 'flex-start' }}>
+            会话产物{detail.provenance_id ? ` · ${detail.provenance_id}` : ''}
+          </Tag>
+        )}
         <Space>
           <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} style={{ width: 280 }} />
           <Button onClick={() => void rename()} disabled={!editTitle.trim() || editTitle === detail.title}>

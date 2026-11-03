@@ -10,8 +10,13 @@ export interface MaterialNode {
   node_kind: MaterialNodeKind
   title: string
   size_bytes: number
+  /** 分类维度（v34）：material（用户自建）| artifact（会话产物收录）。 */
+  category?: MaterialCategory
   updated_at: string
 }
+
+/** 节点分类（v34，与 node_kind 正交）。 */
+export type MaterialCategory = 'material' | 'artifact'
 
 /** 节点种类（六种，封闭）。 */
 export type MaterialNodeKind = 'folder' | 'doc' | 'table' | 'link' | 'drive' | 'page'
@@ -37,6 +42,10 @@ export interface MaterialNodeDetail {
   drive_upload_id?: string
   source_url?: string
   size_bytes: number
+  /** 分类维度（v34）：material | artifact。 */
+  category?: MaterialCategory
+  /** 引用的产物主键（v34）：artifact 类别时非空（→ artifacts.id）。 */
+  provenance_id?: string
   created_at: string
   updated_at: string
 }
@@ -49,6 +58,8 @@ export interface CreateMaterialNodeReq {
   body?: string
   schema?: string
   source_url?: string
+  /** drive 种类：`POST /files` 返回的 file_id（P0′ 收口后建 drive 节点走两步式）。 */
+  drive_upload_id?: string
   space_id?: string
 }
 

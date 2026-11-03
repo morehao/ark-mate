@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/domain/artifact"
 	"github.com/morehao/ark-mate/internal/domain/material"
 	"github.com/morehao/ark-mate/internal/dto/dtomaterial"
 	"github.com/morehao/ark-mate/internal/persistence/model"
@@ -18,6 +19,19 @@ const snippetRadius = 60
 
 // ListNodes 列出某父节点下的一层子节点（分页）。
 func (s *materialSvc) ListNodes(ctx context.Context, parentID string, limit, offset int) (*dtomaterial.ListNodesResp, error) {
+	return s.listNodes(ctx, parentID, "", limit, offset)
+}
+
+// ListNodesByCategory 列目录并按分类过滤（category 空 = 全部分类）。v34 起用于「资料/产物」分栏。
+func (s *materialSvc) ListNodesByCategory(ctx context.Context, parentID, category string, limit, offset int) (*dtomaterial.ListNodesResp, error) {
+	if category != "" && category != model.LibraryNodeCategoryMaterial && category != model.LibraryNodeCategoryArtifact {
+		return nil, code.Errorf(code.InvalidParam, "参数错误: 未知分类 %q（material|artifact）", category)
+	}
+	return s.listNodes(ctx, parentID, category, limit, offset)
+}
+
+// listNodes 列目录的共用实现（category 空 = 不过滤）。
+func (s *materialSvc) listNodes(ctx context.Context, parentID, category string, limit, offset int) (*dtomaterial.ListNodesResp, error) {
 	if err := s.requireStore(); err != nil {
 		return nil, err
 	}
@@ -25,7 +39,13 @@ func (s *materialSvc) ListNodes(ctx context.Context, parentID string, limit, off
 	if offset < 0 {
 		offset = 0
 	}
-	all, err := s.st.ListLibraryChildren(ctx, defaultSpace, parentID)
+	var all []model.LibraryNodeEntity
+	var err error
+	if category == "" {
+		all, err = s.st.ListLibraryChildren(ctx, defaultSpace, parentID)
+	} else {
+		all, err = s.st.ListLibraryChildrenByCategory(ctx, defaultSpace, parentID, category)
+	}
 	if err != nil {
 		return nil, code.Errorf(code.Internal, "列出资料库目录失败: %v", err)
 	}
@@ -77,6 +97,8 @@ func (s *materialSvc) detail(ctx context.Context, n model.LibraryNodeEntity) (*d
 		DriveUploadID: n.DriveUploadID,
 		SourceURL:     n.SourceURL,
 		SizeBytes:     n.SizeBytes,
+		Category:      n.Category,
+		ProvenanceID:  n.ProvenanceID,
 		CreatedAt:     n.CreatedAt.UTC().Format(model.LayoutTS),
 		UpdatedAt:     n.UpdatedAt.UTC().Format(model.LayoutTS),
 	}
@@ -91,7 +113,10 @@ func (s *materialSvc) detail(ctx context.Context, n model.LibraryNodeEntity) (*d
 	return resp, nil
 }
 
-// CreateNode 建一个节点（folder/doc/table/link/page；drive 走 Upload）。
+// CreateNode 建一个节点（folder/doc/table/link/page/drive）。
+//
+// drive 节点由「P0′ 收口后的两步式」建：先 `POST /files` 拿 file_id，再 `CreateNode{node_kind:drive,
+// drive_upload_id:file_id}`。**不再有 `/materials/upload` 端点**（上传统一走 ginupload）。
 func (s *materialSvc) CreateNode(ctx context.Context, req dtomaterial.CreateNodeReq) (*dtomaterial.NodeDetailResp, error) {
 	if err := s.requireStore(); err != nil {
 		return nil, err
@@ -104,25 +129,24 @@ func (s *materialSvc) CreateNode(ctx context.Context, req dtomaterial.CreateNode
 	if !material.IsValidNodeKind(kind) {
 		return nil, code.Errorf(code.InvalidParam, "invalid_node_kind: 未知节点种类 %q", req.NodeKind)
 	}
-	if kind == material.KindDrive {
-		return nil, code.Errorf(code.InvalidParam, "material_upload_kind_unsupported: drive 节点请走上传接口")
-	}
 	if strings.TrimSpace(req.Title) == "" {
 		return nil, code.Errorf(code.InvalidParam, "参数错误: title 不能为空")
 	}
-	// 载体一致性（domain 判决）。
-	carrier := material.Carrier{Body: req.Body, TableID: tableIDFor(kind, req.Schema), SourceURL: req.SourceURL}
+	// 载体一致性（domain 判决）：drive 要求 drive_upload_id 非空、body 空。
+	carrier := material.Carrier{Body: req.Body, TableID: tableIDFor(kind, req.Schema), SourceURL: req.SourceURL, DriveUploadID: req.DriveUploadID}
 	if err := material.ValidateCarrier(kind, carrier); err != nil {
 		return nil, code.Errorf(code.InvalidRequest, "material_node_kind_mismatch: 节点种类与载体不匹配")
 	}
 	n := model.LibraryNodeEntity{
-		ID:        newID(),
-		SpaceID:   space,
-		ParentID:  req.ParentID,
-		NodeKind:  string(kind),
-		Title:     strings.TrimSpace(req.Title),
-		Body:      req.Body,
-		SourceURL: req.SourceURL,
+		ID:            newID(),
+		SpaceID:       space,
+		ParentID:      req.ParentID,
+		NodeKind:      string(kind),
+		Title:         strings.TrimSpace(req.Title),
+		Body:          req.Body,
+		SourceURL:     req.SourceURL,
+		DriveUploadID: req.DriveUploadID,
+		Category:      model.LibraryNodeCategoryMaterial, // 用户自建资料
 	}
 	if kind == material.KindTable {
 		n.TableID = n.ID // table_id 自指到本节点（library_tables.node_id = 本节点 id）
@@ -140,6 +164,10 @@ func (s *materialSvc) CreateNode(ctx context.Context, req dtomaterial.CreateNode
 		}); err != nil {
 			return nil, code.Errorf(code.Internal, "建表格失败: %v", err)
 		}
+	}
+	// 回填持久化时间（插入时 store 补的 CreatedAt/UpdatedAt 只写进它的副本；重查拿权威值）。
+	if saved, ok, err := s.st.LibraryNodeByID(ctx, n.ID); err == nil && ok {
+		n = saved
 	}
 	return s.detail(ctx, n)
 }
@@ -289,6 +317,7 @@ func (s *materialSvc) Upload(ctx context.Context, fileName, declaredName, declar
 		Title:         title,
 		DriveUploadID: up.ID,
 		SizeBytes:     up.SizeBytes,
+		Category:      model.LibraryNodeCategoryMaterial,
 	}
 	if err := s.st.InsertLibraryNode(ctx, n); err != nil {
 		return nil, code.Errorf(code.Internal, "建资料库节点失败: %v", err)
@@ -299,6 +328,10 @@ func (s *materialSvc) Upload(ctx context.Context, fileName, declaredName, declar
 		Role:         model.LibraryAttachmentRolePrimary,
 	}); err != nil {
 		return nil, code.Errorf(code.Internal, "登记节点附件关联失败: %v", err)
+	}
+	// 回填持久化时间（插入时 store 补的 CreatedAt/UpdatedAt 只写进它的副本；重查拿权威值）。
+	if saved, ok, err := s.st.LibraryNodeByID(ctx, n.ID); err == nil && ok {
+		n = saved
 	}
 	return s.detail(ctx, n)
 }
@@ -538,4 +571,110 @@ func (s *materialSvc) PageHTML(ctx context.Context, nodeID string) (string, erro
 		return "", code.Errorf(code.InvalidRequest, "material_node_kind_mismatch: 只有 page 节点可查看")
 	}
 	return n.Body, nil
+}
+
+// ——— P1：产物收录进资料库 ———
+
+// ImportArtifact 把一个产物收录进资料库（artifact_id → 建 category='artifact' 的节点）。
+//
+// 跨域编排只在用例层：读产物（经 ArtifactRef 窄端口）→ 按 kind 映射 node_kind → 建节点。
+// 幂等：同一 provenance_id 已收录 → 返回既有节点（不重复建）。
+// 不变量（A-3）：收录出的节点恒为 category='artifact' 且 provenance_id 非空（同真同假）。
+func (s *materialSvc) ImportArtifact(ctx context.Context, req dtomaterial.ImportArtifactReq) (*dtomaterial.NodeDetailResp, error) {
+	if err := s.requireStore(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.ArtifactID) == "" {
+		return nil, code.Errorf(code.InvalidParam, "参数错误: artifact_id 不能为空")
+	}
+	if s.arts == nil {
+		return nil, code.Errorf(code.NotSupported, "artifact_unavailable: 产物收录需要持久层（当前为 memory 模式）")
+	}
+	ref, ok, err := s.arts.ArtifactRef(ctx, req.ArtifactID)
+	if err != nil {
+		return nil, code.Errorf(code.Internal, "读取产物失败: %v", err)
+	}
+	if !ok {
+		return nil, code.Errorf(code.NotFound, "artifact_not_found: 产物不存在")
+	}
+	// 幂等：同一 provenance_id 已收录 → 返回既有节点。
+	if existing, ok, err := s.nodeByProvenance(ctx, req.ArtifactID); err != nil {
+		return nil, err
+	} else if ok {
+		return s.detail(ctx, existing)
+	}
+	// 按产物 kind 映射 node_kind（file→drive、text→doc、table→table、link→link）。
+	nk, body, err := artifactKindToNode(ref)
+	if err != nil {
+		return nil, err
+	}
+	// 父节点存在性（若给了 parent）。
+	if req.ParentID != "" {
+		if _, ok, err := s.st.LibraryNodeByID(ctx, req.ParentID); err != nil {
+			return nil, code.Errorf(code.Internal, "读取父节点失败: %v", err)
+		} else if !ok {
+			return nil, code.Errorf(code.NotFound, "material_node_not_found: 目标父节点不存在")
+		}
+	}
+	n := model.LibraryNodeEntity{
+		ID:           newID(),
+		SpaceID:      defaultSpace,
+		ParentID:     req.ParentID,
+		NodeKind:     string(nk),
+		Title:        ref.Title,
+		Body:         body,
+		SizeBytes:    ref.SizeBytes,
+		Category:     model.LibraryNodeCategoryArtifact,
+		ProvenanceID: ref.ID,
+	}
+	if nk == material.KindDrive {
+		n.DriveUploadID = ref.UploadID
+	}
+	if err := s.st.InsertLibraryNode(ctx, n); err != nil {
+		return nil, code.Errorf(code.Internal, "收录产物失败: %v", err)
+	}
+	if nk == material.KindTable {
+		if err := s.st.UpsertLibraryTable(ctx, model.LibraryTableEntity{
+			NodeID: n.ID, SchemaJSON: "{}", RowsJSON: defaultRows(ref.ContentText),
+		}); err != nil {
+			return nil, code.Errorf(code.Internal, "建表格失败: %v", err)
+		}
+	}
+	// 回填持久化后的行（插入时 store 补的时间只写进它的副本；重查拿权威 created_at/updated_at）。
+	if saved, ok, err := s.st.LibraryNodeByID(ctx, n.ID); err == nil && ok {
+		n = saved
+	}
+	return s.detail(ctx, n)
+}
+
+// nodeByProvenance 按 provenance_id 找已收录节点（store 未提供按 provenance 查的端口时，走全列表扫）。
+func (s *materialSvc) nodeByProvenance(ctx context.Context, artifactID string) (model.LibraryNodeEntity, bool, error) {
+	// 本期单机规模：从空间根逐层找代价高，改用列出全部节点里的 artifact 分类（含子层）。
+	// 简化：store 提供 SearchLibraryNodes 不覆盖；这里用 ListLibraryChildren 递归成本高。
+	// 因此直接在 store 加一个按 provenance 的查询更稳——见 store.LibraryNodeByProvenance。
+	return s.st.LibraryNodeByProvenance(ctx, artifactID)
+}
+
+// artifactKindToNode 把产物映射成 node_kind + 正文（file→drive 无正文；text→doc；link→link；table→table）。
+func artifactKindToNode(ref ArtifactRef) (material.NodeKind, string, error) {
+	switch artifact.Kind(ref.Kind) {
+	case artifact.KindFile:
+		return material.KindDrive, "", nil
+	case artifact.KindText:
+		return material.KindDoc, ref.ContentText, nil
+	case artifact.KindLink:
+		return material.KindLink, ref.ContentText, nil
+	case artifact.KindTable:
+		return material.KindTable, "", nil
+	default:
+		return "", "", code.Errorf(code.InvalidRequest, "artifact_kind_unsupported: 产物种类 %q 无法收录", ref.Kind)
+	}
+}
+
+// defaultRows 表格产物的初始行（content_text 是 JSON 数组；空则 []）。
+func defaultRows(contentText string) string {
+	if strings.TrimSpace(contentText) == "" {
+		return "[]"
+	}
+	return contentText
 }

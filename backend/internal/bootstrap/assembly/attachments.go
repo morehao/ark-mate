@@ -70,6 +70,23 @@ func (a attachmentBlobAdapter) Open(ctx context.Context, uploadID string) (io.Re
 	}, nil
 }
 
+func (a attachmentBlobAdapter) GetFile(ctx context.Context, uploadID string) (svcattachment.BlobDetail, error) {
+	if a.st == nil {
+		return svcattachment.BlobDetail{}, errAttachmentsUnsupported()
+	}
+	detail, err := a.st.GetFile(ctx, uploadID)
+	if err != nil {
+		return svcattachment.BlobDetail{}, err
+	}
+	return svcattachment.BlobDetail{
+		FileUploadID: detail.FileUploadID,
+		ContentHash:  detail.ContentHash,
+		Size:         detail.Size,
+		MimeType:     detail.MimeType,
+		Name:         detail.Name,
+	}, nil
+}
+
 func (a attachmentBlobAdapter) DeleteFile(ctx context.Context, uploadID string) error {
 	if a.st == nil {
 		return errAttachmentsUnsupported()

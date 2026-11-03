@@ -300,10 +300,52 @@
   },
   {
     "method": "POST",
-    "path": "/v1/mate/materials/upload",
+    "path": "/v1/mate/materials/import-artifact",
     "status": 200,
-    "code": 40000,
-    "msg": "参数错误: 缺少 file 字段（multipart 单文件）: request Content-Type isn't multipart/form-data",
+    "code": 40501,
+    "msg": "material_unavailable: 资料库需要持久层（当前为 memory 模式）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/artifacts",
+    "status": 200,
+    "code": 40501,
+    "msg": "artifact_unavailable: 产物需要持久层（当前为 memory 模式）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/artifacts/nope",
+    "status": 200,
+    "code": 40501,
+    "msg": "artifact_unavailable: 产物需要持久层（当前为 memory 模式）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/sessions/nope/artifacts",
+    "status": 200,
+    "code": 40501,
+    "msg": "artifact_unavailable: 产物需要持久层（当前为 memory 模式）",
     "envelope": [
       "code",
       "data",
@@ -359,7 +401,7 @@
     "path": "/v1/mate/attachments",
     "status": 200,
     "code": 40000,
-    "msg": "参数错误: 缺少 file 字段（multipart 单文件）: request Content-Type isn't multipart/form-data",
+    "msg": "参数错误: 请求体不是合法 JSON: EOF",
     "envelope": [
       "code",
       "data",

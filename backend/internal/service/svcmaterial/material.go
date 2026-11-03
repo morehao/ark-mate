@@ -29,7 +29,11 @@ type NodeStore interface {
 	InsertLibraryNode(ctx context.Context, n model.LibraryNodeEntity) error
 	LibraryNodeByID(ctx context.Context, id string) (model.LibraryNodeEntity, bool, error)
 	ListLibraryChildren(ctx context.Context, spaceID, parentID string) ([]model.LibraryNodeEntity, error)
+	// ListLibraryChildrenByCategory 按分类过滤的一层子节点（category 空 = 不过滤）。
+	ListLibraryChildrenByCategory(ctx context.Context, spaceID, parentID, category string) ([]model.LibraryNodeEntity, error)
 	SearchLibraryNodes(ctx context.Context, spaceID, q string) ([]model.LibraryNodeEntity, error)
+	// LibraryNodeByProvenance 按 provenance_id 找已收录的节点（幂等收录用；无命中 → ok=false）。
+	LibraryNodeByProvenance(ctx context.Context, provenanceID string) (model.LibraryNodeEntity, bool, error)
 	UpdateLibraryNode(ctx context.Context, id string, title, parentID, body *string) error
 	DeleteLibraryNode(ctx context.Context, id string) error
 
@@ -76,6 +80,8 @@ type AttachmentReader interface {
 // MaterialSvc 资料库面用例。
 type MaterialSvc interface {
 	ListNodes(ctx context.Context, parentID string, limit, offset int) (*dtomaterial.ListNodesResp, error)
+	// ListNodesByCategory 列目录并按分类过滤（category 空 = 全部分类）。v34 起用于「资料/产物」分栏。
+	ListNodesByCategory(ctx context.Context, parentID, category string, limit, offset int) (*dtomaterial.ListNodesResp, error)
 	GetNode(ctx context.Context, id string) (*dtomaterial.NodeDetailResp, error)
 	CreateNode(ctx context.Context, req dtomaterial.CreateNodeReq) (*dtomaterial.NodeDetailResp, error)
 	PatchNode(ctx context.Context, id string, req dtomaterial.PatchNodeReq) (*dtomaterial.NodeDetailResp, error)
@@ -93,6 +99,30 @@ type MaterialSvc interface {
 	PublishPage(ctx context.Context, nodeID string) (*dtomaterial.PublishPageResp, error)
 	// PageHTML 取 page 节点 body（view 直接回这段 HTML）。
 	PageHTML(ctx context.Context, nodeID string) (string, error)
+
+	// ImportArtifact 把一个产物收录进资料库（artifact_id → 建 category='artifact' 的节点）。
+	// 跨域编排只在用例层：读产物（经 ArtifactRef 窄端口）→ 按 kind 映射 node_kind → 建节点。
+	ImportArtifact(ctx context.Context, req dtomaterial.ImportArtifactReq) (*dtomaterial.NodeDetailResp, error)
+}
+
+// ArtifactRef 产物信息的**窄端口**（由 svcartifact/装配根适配，本包不 import svcartifact）。
+//
+// 只暴露收录真正用到的字段；ArtifactID 对应 artifacts.id，UploadID 对应 core_file_upload.id。
+type ArtifactRef struct {
+	ID          string
+	SessionID   string
+	RunID       string
+	Kind        string // file|text|table|link
+	Title       string
+	MimeType    string
+	SizeBytes   int64
+	UploadID    string
+	ContentText string
+}
+
+// ArtifactReader 按 id 读产物（不存在 → 返回 ok=false）。由装配根用 svcartifact 适配。
+type ArtifactReader interface {
+	ArtifactRef(ctx context.Context, id string) (ArtifactRef, bool, error)
 }
 
 type materialSvc struct {
@@ -100,11 +130,13 @@ type materialSvc struct {
 	attach AttachmentUploader
 	blobs  AttachmentReader
 	page   PagePublisher
+	arts   ArtifactReader
 }
 
 // New 构造资料库用例。st / attach / blobs 由装配根交下来（memory 模式可为 nil → 40501）。
-func New(st NodeStore, attach AttachmentUploader, blobs AttachmentReader, page PagePublisher) MaterialSvc {
-	return &materialSvc{st: st, attach: attach, blobs: blobs, page: page}
+// arts 为产物读取窄端口（收录产物时用；memory 模式可 nil）。
+func New(st NodeStore, attach AttachmentUploader, blobs AttachmentReader, page PagePublisher, arts ArtifactReader) MaterialSvc {
+	return &materialSvc{st: st, attach: attach, blobs: blobs, page: page, arts: arts}
 }
 
 // 默认分页。
@@ -165,6 +197,7 @@ func nodeToResp(n model.LibraryNodeEntity) dtomaterial.NodeResp {
 		NodeKind:  n.NodeKind,
 		Title:     n.Title,
 		SizeBytes: n.SizeBytes,
+		Category:  n.Category,
 		UpdatedAt: n.UpdatedAt.UTC().Format(model.LayoutTS),
 	}
 }

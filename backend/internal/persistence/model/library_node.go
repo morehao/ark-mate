@@ -38,6 +38,14 @@ const (
 	LibrarySpaceDefault = "default"
 )
 
+// 节点分类（category，v34）：与 node_kind 正交，表达「从哪来/归属类别」。
+const (
+	// LibraryNodeCategoryMaterial 用户自建资料（默认）；provenance_id 恒为空。
+	LibraryNodeCategoryMaterial = "material"
+	// LibraryNodeCategoryArtifact 会话产物收录；provenance_id 必非空（→ artifacts.id）。
+	LibraryNodeCategoryArtifact = "artifact"
+)
+
 // LibraryNodeEntity 是 library_nodes 表的一行（资料库目录树节点）。
 //
 // 迁移由自管迁移内核的 v33 步建表（字面量 DDL，见 store/migrate_v33.go）；本实体与那步
@@ -63,6 +71,15 @@ type LibraryNodeEntity struct {
 	SourceURL string `gorm:"column:source_url;not null;default:''"`
 	// SizeBytes 便于列表展示的字节数（drive 取附件大小；多附件取主附件大小；其余 0）。
 	SizeBytes int64 `gorm:"column:size_bytes;not null;default:0"`
+	// Category 分类维度（v34）：'material'（用户自建资料）| 'artifact'（会话产物收录）。
+	//
+	// 与 node_kind 正交：node_kind 说「长什么样」（载体），category 说「从哪来/归属类别」。
+	Category string `gorm:"column:category;not null;default:'material'"`
+	// ProvenanceID 引用的产物主键（v34）：→ artifacts.id（空串 = 非产物）。
+	//
+	// **引用而非复制**：产物身份以 artifacts 为唯一事实源；资料库节点只是收录/组织。
+	// 不变量：category='artifact' ⟺ provenance_id 非空（写面校验 material_provenance_mismatch）。
+	ProvenanceID string `gorm:"column:provenance_id;not null;default:''"`
 	// CreatedAt / UpdatedAt RFC3339Nano(UTC) 文本（落库格式硬契约，见 model/time.go / format_test.go）。
 	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`

@@ -3,6 +3,7 @@ package archtest
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -22,7 +23,34 @@ type colType struct {
 	typ  string
 }
 
+// v34AlterTypes 是 v34 `ALTER TABLE ... ADD COLUMN` 追加列的类型（library_nodes 的 category/provenance_id）。
+// 这些列不在 v33 的 CREATE TABLE 里，类型校验时从这张表取。
+var v34AlterTypes = map[string]string{
+	"category":      "TEXT",
+	"provenance_id": "TEXT",
+}
+
+// alterAddedColumns 从 v34 迁移源码里取 `ALTER TABLE <table> ADD COLUMN <name> ...` 的列名（书写顺序）。
+//
+// 与 createTableColumns（只认 CREATE TABLE）配套：表在 v33 建、列在 v34 追加时，两边拼起来才是完整列集合。
+func alterAddedColumns(t *testing.T, table string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(backendRoot(t), "internal", "persistence", "store", "migrate_v34.go"))
+	if err != nil {
+		t.Fatalf("读不到 migrate_v34.go: %v（路径改了请同步本守卫）", err)
+	}
+	src := stripLineComments(string(raw))
+	re := regexp.MustCompile(`ALTER TABLE\s+` + regexp.QuoteMeta(table) + `\s+ADD COLUMN\s+([a-z_][a-z0-9_]*)`)
+	var cols []string
+	for _, m := range re.FindAllStringSubmatch(src, -1) {
+		cols = append(cols, strings.ToLower(m[1]))
+	}
+	return cols
+}
+
 // libraryNodeColumnSnapshot library_nodes 冻结列（顺序 + 类型）。
+//
+// v34 起追加 `category` / `provenance_id`（产物溯源，见 migrate_v34.go 的 ALTER TABLE）。
 var libraryNodeColumnSnapshot = []colType{
 	{"id", "TEXT"},
 	{"space_id", "TEXT"},
@@ -36,6 +64,8 @@ var libraryNodeColumnSnapshot = []colType{
 	{"size_bytes", "INTEGER"},
 	{"created_at", "TEXT"},
 	{"updated_at", "TEXT"},
+	{"category", "TEXT"},
+	{"provenance_id", "TEXT"},
 }
 
 // libraryAttachmentColumnSnapshot library_attachments 冻结列。
@@ -79,6 +109,9 @@ func TestLibraryTablesColumnsFrozen(t *testing.T) {
 			t.Fatalf("在 %s 里解析不到 `CREATE TABLE %s (...)`：v33 建表语句被改名/挪走了？"+
 				"（本守卫 fail-closed：解析不到即失败，避免空转）", ddlPath, c.table)
 		}
+		// v34 对 library_nodes 有 ALTER TABLE ADD COLUMN：把追加列拼进 DDL 侧（建表 + 后续 ALTER），
+		// 才能与「已含 v34 列的 snapshot / 实体」对齐。
+		got = append(got, alterAddedColumns(t, c.table)...)
 		var wantNames []string
 		for _, col := range c.snapshot {
 			wantNames = append(wantNames, col.name)
@@ -90,7 +123,11 @@ func TestLibraryTablesColumnsFrozen(t *testing.T) {
 
 		types := createTableColumnTypes(src, c.table)
 		for _, col := range c.snapshot {
-			if tt := types[col.name]; tt != col.typ {
+			tt := types[col.name]
+			if v34t, ok := v34AlterTypes[col.name]; ok {
+				tt = v34t // v34 ALTER ADD COLUMN 的列类型（v33 CREATE 里没有）
+			}
+			if tt != col.typ {
 				t.Fatalf("%s.%s 的类型变了：got %q want %q（列类型是对外落库契约）", c.table, col.name, tt, col.typ)
 			}
 		}

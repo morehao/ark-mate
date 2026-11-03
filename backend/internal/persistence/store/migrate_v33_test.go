@@ -70,8 +70,8 @@ func TestMigrationV33FromV32PreservesData(t *testing.T) {
 	if err := raw.Migrate(ctx); err != nil {
 		t.Fatalf("v32 → v33 Migrate: %v", err)
 	}
-	if v, _ := raw.SchemaVersion(ctx); v != 33 {
-		t.Fatalf("升级后 schema 版本应为 33，got %d", v)
+	if v, _ := raw.SchemaVersion(ctx); v < 33 {
+		t.Fatalf("升级后 schema 版本应 ≥ 33，got %d", v)
 	}
 	var stillThere int
 	if err := raw.db.Raw(`SELECT COUNT(*) FROM sessions WHERE id='s-legacy'`).Row().Scan(&stillThere); err != nil || stillThere != 1 {

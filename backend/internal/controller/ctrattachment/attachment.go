@@ -14,7 +14,7 @@ import (
 
 // AttachmentCtr 附件面控制器四端点。
 type AttachmentCtr interface {
-	Upload(c *gin.Context)
+	Register(c *gin.Context)
 	Delete(c *gin.Context)
 	Get(c *gin.Context)
 	Content(c *gin.Context)
@@ -31,25 +31,25 @@ func NewAttachmentCtr(svc svcattachment.AttachmentSvc) AttachmentCtr {
 	return &attachmentCtr{svc: svc}
 }
 
-// Upload `POST /attachments`（multipart/form-data，单文件；前端循环多传）。
-//
-// 字段：`file`（必填）+ 可选 `name`。响应 {id,name,mime_type,size_bytes,sha256,kind,state,created_at}。
-func (h *attachmentCtr) Upload(c *gin.Context) {
-	fileHeader, err := c.FormFile("file")
-	if err != nil {
-		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: 缺少 file 字段（multipart 单文件）: "+err.Error()))
-		return
-	}
-	f, err := fileHeader.Open()
-	if err != nil {
-		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: 无法读取上传文件: "+err.Error()))
-		return
-	}
-	defer func() { _ = f.Close() }()
+// registerReq `POST /attachments` 的请求体（收口后只收 file_id，不再收 multipart 流）。
+type registerReq struct {
+	// FileID 上传面 `POST /files` 返回的 file_id（= core_file_upload.id）。
+	FileID string `json:"file_id"`
+	// Name 可选展示名；缺省用上传时的原始名。
+	Name string `json:"name"`
+}
 
-	declaredName := c.PostForm("name")
-	declaredMime := fileHeader.Header.Get("Content-Type")
-	resp, err := h.svc.Upload(c.Request.Context(), fileHeader.Filename, declaredName, declaredMime, f)
+// Register `POST /attachments`（JSON `{file_id, name?}`）— 从已落 filestore 的字节建附件业务索引。
+//
+// 收口后字节统一经 `POST /files`（ginupload）已落 core_file；本端点只建索引（探测 kind、落 pending 行）。
+// 响应 {id,name,mime_type,size_bytes,sha256,kind,state,created_at}。
+func (h *attachmentCtr) Register(c *gin.Context) {
+	var req registerReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: 请求体不是合法 JSON: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.Register(c.Request.Context(), req.FileID, req.Name)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
