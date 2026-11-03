@@ -88,6 +88,12 @@ type Store struct {
 
 	// 附件业务索引（v32）：会话归属 + 投递形态 + 生命周期；字节落盘去重归 golib filestore。
 	attachments *dao.AttachmentDao
+
+	// 资料库目录树（v33）：library_nodes（树）/ library_attachments（节点↔附件）/ library_tables（表格）。
+	// 字节仍走 attachments/filestore；本组只承载目录归属与节点语义。
+	libraryNodes       *dao.LibraryNodeDao
+	libraryAttachments *dao.LibraryAttachmentDao
+	libraryTables      *dao.LibraryTableDao
 }
 
 // Open 打开（必要时创建）SQLite 库并自动迁移到最新 schema。
@@ -137,6 +143,10 @@ func New(db *gorm.DB) *Store {
 		workspaces: dao.NewWorkspaceDao(getDB),
 
 		attachments: dao.NewAttachmentDao(getDB),
+
+		libraryNodes:       dao.NewLibraryNodeDao(getDB),
+		libraryAttachments: dao.NewLibraryAttachmentDao(getDB),
+		libraryTables:      dao.NewLibraryTableDao(getDB),
 	}
 }
 

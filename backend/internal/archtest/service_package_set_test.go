@@ -46,8 +46,8 @@ import (
 // `svcsearch` / `svcusage` 从会话域取出，`svcworkspace` 从工作空间域取出，`svcstream` 包住事件总线。
 var servicePackageSet = []string{
 	"svcattachment", "svcautomation", "svccapability", "svccommandpolicy", "svclibrary",
-	"svcmodel", "svcruntime", "svcsearch", "svcsession", "svcstream", "svcsystem",
-	"svcusage", "svcworkspace",
+	"svcmaterial", "svcmodel", "svcruntime", "svcsearch", "svcsession", "svcstream",
+	"svcsystem", "svcusage", "svcworkspace",
 }
 
 // serviceRuntimeMethods `svcruntime` 的 **API 端口**（`RuntimeSvc`）允许声明的方法（多一个都红）。

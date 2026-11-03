@@ -78,6 +78,16 @@ func contractCases() []contractCase {
 		// ——— library ———
 		{"GET", "/v1/mate/library", ""},
 
+		// ——— materials 资料库（v33；memory 模式下多回 40501 material_unavailable，仍是 JSON 信封） ———
+		{"GET", "/v1/mate/materials/nodes", ""},
+		{"GET", "/v1/mate/materials/nodes/nope", ""},
+		{"POST", "/v1/mate/materials/nodes", "{}"},
+		{"PATCH", "/v1/mate/materials/nodes/nope", "{}"},
+		{"DELETE", "/v1/mate/materials/nodes/nope", ""},
+		{"GET", "/v1/mate/materials/search", ""},
+		// upload 是 multipart：空体 → 40000 参数错误（仍 JSON 信封）
+		{"POST", "/v1/mate/materials/upload", ""},
+
 		// ——— attachments（v32；POST 是 multipart，空体 → 40000 参数错误，仍是 JSON 信封） ———
 		{"POST", "/v1/mate/attachments", ""},
 		{"GET", "/v1/mate/attachments/nope", ""},

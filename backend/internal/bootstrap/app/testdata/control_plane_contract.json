@@ -215,6 +215,104 @@
     "data_len": 0
   },
   {
+    "method": "GET",
+    "path": "/v1/mate/materials/nodes",
+    "status": 200,
+    "code": 40501,
+    "msg": "material_unavailable: 资料库需要持久层（当前为 memory 模式）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/materials/nodes/nope",
+    "status": 200,
+    "code": 40501,
+    "msg": "material_unavailable: 资料库需要持久层（当前为 memory 模式）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/materials/nodes",
+    "status": 200,
+    "code": 40501,
+    "msg": "material_unavailable: 资料库需要持久层（当前为 memory 模式）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PATCH",
+    "path": "/v1/mate/materials/nodes/nope",
+    "status": 200,
+    "code": 40501,
+    "msg": "material_unavailable: 资料库需要持久层（当前为 memory 模式）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/mate/materials/nodes/nope",
+    "status": 200,
+    "code": 40501,
+    "msg": "material_unavailable: 资料库需要持久层（当前为 memory 模式）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/materials/search",
+    "status": 200,
+    "code": 40501,
+    "msg": "material_unavailable: 资料库需要持久层（当前为 memory 模式）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/materials/upload",
+    "status": 200,
+    "code": 40000,
+    "msg": "参数错误: 缺少 file 字段（multipart 单文件）: request Content-Type isn't multipart/form-data",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
     "method": "POST",
     "path": "/v1/mate/attachments",
     "status": 200,
