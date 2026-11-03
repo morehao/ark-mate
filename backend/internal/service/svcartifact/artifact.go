@@ -126,6 +126,11 @@ func (s *artifactSvc) Register(ctx context.Context, req dtoartifact.RegisterReq)
 	if err := s.st.InsertArtifact(ctx, n); err != nil {
 		return nil, code.Errorf(code.Internal, "登记产物失败: %v", err)
 	}
+	// 回填持久化后的行（store 在插入时补 CreatedAt/UpdatedAt 到自己的副本，调用方这份是值拷贝、
+	// 时间仍零值）；重查一次拿到权威时间，避免「刚创建得到的 created_at 为空」。
+	if saved, ok, err := s.st.ArtifactByID(ctx, n.ID); err == nil && ok {
+		n = saved
+	}
 	return toResp(n), nil
 }
 

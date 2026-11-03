@@ -165,6 +165,10 @@ func (s *materialSvc) CreateNode(ctx context.Context, req dtomaterial.CreateNode
 			return nil, code.Errorf(code.Internal, "建表格失败: %v", err)
 		}
 	}
+	// 回填持久化时间（插入时 store 补的 CreatedAt/UpdatedAt 只写进它的副本；重查拿权威值）。
+	if saved, ok, err := s.st.LibraryNodeByID(ctx, n.ID); err == nil && ok {
+		n = saved
+	}
 	return s.detail(ctx, n)
 }
 
@@ -324,6 +328,10 @@ func (s *materialSvc) Upload(ctx context.Context, fileName, declaredName, declar
 		Role:         model.LibraryAttachmentRolePrimary,
 	}); err != nil {
 		return nil, code.Errorf(code.Internal, "登记节点附件关联失败: %v", err)
+	}
+	// 回填持久化时间（插入时 store 补的 CreatedAt/UpdatedAt 只写进它的副本；重查拿权威值）。
+	if saved, ok, err := s.st.LibraryNodeByID(ctx, n.ID); err == nil && ok {
+		n = saved
 	}
 	return s.detail(ctx, n)
 }
@@ -631,6 +639,10 @@ func (s *materialSvc) ImportArtifact(ctx context.Context, req dtomaterial.Import
 		}); err != nil {
 			return nil, code.Errorf(code.Internal, "建表格失败: %v", err)
 		}
+	}
+	// 回填持久化后的行（插入时 store 补的时间只写进它的副本；重查拿权威 created_at/updated_at）。
+	if saved, ok, err := s.st.LibraryNodeByID(ctx, n.ID); err == nil && ok {
+		n = saved
 	}
 	return s.detail(ctx, n)
 }
