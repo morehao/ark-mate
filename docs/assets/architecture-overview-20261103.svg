@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 940" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <title>ark-mate 架构总览：两层结构 + 进程拓扑 + L0–L9 分层</title>
+  <desc>这张图表达 ark-mate 的两层结构与运行时分形。左上是进程拓扑：Electron 桌面壳 spawn 出 mate 核心（单 Go 二进制），核心再 spawn 底座 ACP server 子进程与 MCP server 子进程（远程 MCP 经平台网关代连）。左下是 mate 内核的 L0–L9 层带（只能向内 import）：自上而下为 L9 交付装配、L8 入站三并列目录、L7 会话编排、L6 驱动、L5 持久与基础设施、L4 用例、L3 对外契约、L2 领域、L1 平台值、L0 表形状。右侧列出纵向数据面（会话执行、能力、资源、附件资料库专家、空间与任务）与横切硬约束（平台不做鉴权、单机单操作员、构建期固定 dsh、能力不重造），以及前端 pnpm workspace 的一份 UI 产物。读者应看出：产品层与底座层职责并列，界面够不到 Electron API，所有执行能力归底座、平台只做数据与配置管理。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line)" />
+    </marker>
+  </defs>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc; --fg: #172033; --muted: #5b6475; --line: #64748b;
+      --neutral: #e2e8f0; --input: #bfdbfe; --process: #c7d2fe;
+      --storage: #99f6e4; --external: #fde68a; --risk: #fecaca;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a; --fg: #e5e7eb; --muted: #a3adbd; --line: #94a3b8;
+        --neutral: #334155; --input: #1d4ed8; --process: #4338ca;
+        --storage: #0f766e; --external: #92400e; --risk: #991b1b;
+      }
+    }
+    svg { background: var(--bg); }
+    .title { font-size: 21px; font-weight: 650; fill: var(--fg); }
+    .sub { font-size: 12px; fill: var(--muted); }
+    .label { font-size: 13.5px; font-weight: 650; fill: var(--fg); }
+    .small { font-size: 11px; fill: var(--muted); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .node { stroke: var(--line); stroke-width: 1; }
+    .neutral { fill: var(--neutral); } .input { fill: var(--input); }
+    .process { fill: var(--process); } .storage { fill: var(--storage); }
+    .external { fill: var(--external); } .risk { fill: var(--risk); }
+    .edge { stroke: var(--line); stroke-width: 1.6; fill: none; }
+    .edge-arrow { marker-end: url(#arrow); }
+    .zone { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 6 5; opacity: 0.8; }
+    .zonelabel { font-size: 12px; font-weight: 650; fill: var(--muted); }
+  </style>
+
+  <rect x="0" y="0" width="1400" height="940" fill="var(--bg)" />
+  <text x="28" y="36" class="title">ark-mate 架构总览（代码核实 2026-11-03）</text>
+  <text x="28" y="55" class="sub">产品层 / 底座层职责并列 · 单机单操作员 · 平台不做鉴权 · 底座构建期固定（当前内置 dsh）· 能力不重造</text>
+
+  <!-- ============ 左上：进程拓扑 ============ -->
+  <rect class="zone" x="24" y="72" width="820" height="244" rx="10" />
+  <text x="38" y="92" class="zonelabel">运行期进程拓扑（交付态 = 桌面）</text>
+
+  <!-- Electron -->
+  <rect class="node external" x="150" y="102" width="360" height="34" rx="6" />
+  <text x="166" y="125" class="label mono">Electron 主进程</text>
+  <text x="166" y="156" class="small">单实例锁 · mate-app:// scheme · 托盘 · 更新 · 原生对话框</text>
+
+  <!-- core -->
+  <rect class="node process" x="130" y="172" width="400" height="66" rx="6" />
+  <text x="146" y="196" class="label mono">mate 核心（单 Go 二进制）</text>
+  <text x="146" y="216" class="small">--web-dir → frontend/apps/web/dist（没给就退出码 3）</text>
+  <text x="146" y="232" class="small">127.0.0.1:0 · 只服务调用方给的那一份 dist</text>
+
+  <!-- edges -->
+  <path class="edge edge-arrow" d="M 330 136 L 330 172" />
+  <text x="336" y="158" class="small mono">spawn</text>
+  <path class="edge edge-arrow" d="M 190 238 L 150 274" />
+  <path class="edge edge-arrow" d="M 300 238 L 300 274" />
+  <path class="edge edge-arrow" d="M 400 238 L 470 274" />
+
+  <!-- subprocesses: below the core, inside the zone -->
+  <rect class="node storage" x="64" y="274" width="172" height="42" rx="6" />
+  <text x="78" y="296" class="label mono">ACP server</text>
+  <text x="78" y="312" class="small">底座子进程 · stdio JSON-RPC</text>
+  <rect class="node storage" x="252" y="274" width="110" height="42" rx="6" />
+  <text x="266" y="296" class="label mono">MCP server</text>
+  <text x="266" y="312" class="small">stdio 子进程</text>
+  <rect class="node storage" x="378" y="274" width="152" height="42" rx="6" />
+  <text x="392" y="296" class="label mono">MCP 网关</text>
+  <text x="392" y="312" class="small">远程 MCP 代连</text>
+
+  <!-- ============ 左下：层带 ============ -->
+  <rect class="zone" x="24" y="312" width="820" height="600" rx="10" />
+  <text x="38" y="332" class="zonelabel">mate 内核 L0–L9 层带（只能向内 import，违规硬失败）</text>
+
+  <rect class="node neutral" x="40" y="342" width="788" height="40" rx="6" />
+  <text x="54" y="360" class="label">L9 交付 / 装配</text>
+  <text x="54" y="375" class="small mono">router（路由装配 + web* 资产）· bootstrap/{assembly, app, cli, cliops, maintenance}</text>
+
+  <rect class="node neutral" x="40" y="388" width="788" height="40" rx="6" />
+  <text x="54" y="406" class="label">L8 入站（三并列）</text>
+  <text x="54" y="421" class="small mono">controller/ctr&lt;域&gt;（16 个）· middleware（Host/Origin 来源判定）</text>
+
+  <rect class="node neutral" x="40" y="434" width="788" height="34" rx="6" />
+  <text x="54" y="456" class="label">L7 会话编排</text>
+  <text x="150" y="456" class="small mono">sessionruntime（Service / Orchestrator / 权限 / 附件 PromptPart 投影）</text>
+
+  <rect class="node process" x="40" y="474" width="788" height="34" rx="6" />
+  <text x="54" y="496" class="label">L6 驱动</text>
+  <text x="150" y="496" class="small mono">drivers/{mechanism, registry, runtimeconn, gateway, transfer} · config</text>
+
+  <rect class="node storage" x="40" y="514" width="788" height="56" rx="6" />
+  <text x="54" y="532" class="label">L5 持久与基础设施</text>
+  <text x="54" y="548" class="small mono">persistence/{store, dao} · infra/{credentials, dbclient, procreg, dsh, host, installed,</text>
+  <text x="54" y="563" class="small mono">attachmentstore, materialmcp} · infra/protocol/{acp, mcp}</text>
+
+  <rect class="node input" x="40" y="576" width="788" height="34" rx="6" />
+  <text x="54" y="598" class="label">L4 用例</text>
+  <text x="150" y="598" class="small mono">service/svc&lt;域&gt;（15 个，svc 之间零互 import；可在下一轮改能力）</text>
+
+  <rect class="node neutral" x="40" y="616" width="788" height="30" rx="6" />
+  <text x="54" y="636" class="label">L3 对外契约</text>
+  <text x="150" y="636" class="small mono">dto/dto&lt;域&gt;（controller / service / CLI / WS 共用同一份）</text>
+
+  <rect class="node process" x="40" y="652" width="788" height="48" rx="6" />
+  <text x="54" y="670" class="label">L2 领域</text>
+  <text x="54" y="686" class="small mono">domain/{session, workspace, provider, skill, mcp, automation, interaction,</text>
+  <text x="54" y="697" class="small mono">identity, expert, material, artifact}（出边为零）</text>
+
+  <rect class="node input" x="40" y="706" width="788" height="56" rx="6" />
+  <text x="54" y="724" class="label">L1 平台值</text>
+  <text x="54" y="740" class="small mono">core/{object/*（objid：id 铸造 + rt_ 壳）, code, capability, automation, identity, resource,</text>
+  <text x="54" y="755" class="small mono">redact, credential, definition, eventbus, failure, protocol} · runtime · infra/logging</text>
+
+  <rect class="node storage" x="40" y="768" width="788" height="34" rx="6" />
+  <text x="54" y="790" class="label">L0 表形状</text>
+  <text x="150" y="790" class="small mono">persistence/model（一表一文件，零依赖；23 表 · schema 34）</text>
+
+  <!-- 向内箭头 -->
+  <path class="edge edge-arrow" d="M 30 800 L 30 350" opacity="0.4" />
+  <text x="20" y="580" class="small" transform="rotate(-90 20 580)" text-anchor="middle">import 只能向内 ↑</text>
+
+  <!-- ============ 右侧上：数据面 ============ -->
+  <rect class="zone" x="864" y="72" width="512" height="392" rx="10" />
+  <text x="880" y="92" class="zonelabel">纵向数据面（平台做数据与配置，执行归底座）</text>
+
+  <rect class="node process" x="880" y="104" width="480" height="52" rx="6" />
+  <text x="894" y="124" class="label">会话执行</text>
+  <text x="894" y="140" class="small">sessions / runs / messages / events / inputs（事件位次每会话稠密）</text>
+  <text x="894" y="153" class="small">WS 是唯一实时出口（26 类事件，含 run.status）</text>
+
+  <rect class="node input" x="880" y="162" width="480" height="52" rx="6" />
+  <text x="894" y="182" class="label">能力面</text>
+  <text x="894" y="198" class="small">skills / mcp_servers / mcp_secrets / tools</text>
+  <text x="894" y="211" class="small">物化原子 + 指纹代际 · 执行归底座</text>
+
+  <rect class="node storage" x="880" y="220" width="480" height="52" rx="6" />
+  <text x="894" y="240" class="label">资源与凭据</text>
+  <text x="894" y="256" class="small">providers / models</text>
+  <text x="894" y="269" class="small">密钥只写不读回（has_key）· 供应商密钥 ≠ 访问鉴权</text>
+
+  <rect class="node neutral" x="880" y="278" width="480" height="52" rx="6" />
+  <text x="894" y="298" class="label">附件 / 产物 / 资料库 / 专家</text>
+  <text x="894" y="314" class="small">attachments（att_）· artifacts（art_，产物溯源）· library_nodes（libnd_，无 RAG）</text>
+  <text x="894" y="327" class="small">experts（slug + instructions，首轮注入人格）· 收字节统一 POST /files</text>
+
+  <rect class="node neutral" x="880" y="336" width="480" height="52" rx="6" />
+  <text x="894" y="356" class="label">空间与任务</text>
+  <text x="894" y="372" class="small">workspaces 登记 · automations 定时 · command-policy 命令门禁</text>
+  <text x="894" y="385" class="small">definition_revisions 变更审计（六种定义）</text>
+
+  <rect class="node risk" x="880" y="394" width="480" height="56" rx="6" />
+  <text x="894" y="414" class="label">横切硬约束</text>
+  <text x="894" y="430" class="small">平台不做鉴权（决策 v34：无令牌/无分面/无 --auth-stdin；防护靠文件权限 + 反代）</text>
+  <text x="894" y="443" class="small">单机单操作员 · 默认只绑回环 · 构建期固定 dsh · 能力不重造 · 无跨 agent 协作</text>
+
+  <!-- ============ 右下：前端 ============ -->
+  <rect class="zone" x="864" y="480" width="512" height="240" rx="10" />
+  <text x="880" y="500" class="zonelabel">前端（pnpm workspace，一份 UI 产物）</text>
+  <rect class="node external" x="880" y="512" width="480" height="44" rx="6" />
+  <text x="894" y="532" class="label">apps/desktop — Electron 壳（唯一交付形态）</text>
+  <text x="894" y="548" class="small">打包 / 签名 / 更新 / 合规门禁 · 消费 dist，不 import apps/web 源码</text>
+  <rect class="node input" x="880" y="562" width="480" height="44" rx="6" />
+  <text x="894" y="582" class="label">apps/web — 入口 + 组装（产出唯一一份 dist）</text>
+  <text x="894" y="598" class="small">不 import Electron / Node 内置；两入口都没有 HMR</text>
+  <rect class="node neutral" x="880" y="612" width="480" height="96" rx="6" />
+  <text x="894" y="632" class="label">packages/*</text>
+  <text x="894" y="650" class="small">console（界面本体 React 19 + antd）· types · api · ui</text>
+  <text x="894" y="666" class="small">desktop-contract（CSP / 契约常量）</text>
+  <text x="894" y="682" class="small">依赖方向：packages 不得反向 import apps；backend 不依赖 frontend</text>
+  <text x="894" y="698" class="small">共享 UI 在类型层面就够不到 Electron API</text>
+
+  <text x="880" y="760" class="small">图只画结构，不画历史；权威判据见 docs/agents/guards.md（193 条）与 docs/agents/layout.md。</text>
+</svg>
