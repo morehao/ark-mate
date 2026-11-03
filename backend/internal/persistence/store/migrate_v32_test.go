@@ -69,8 +69,10 @@ func TestMigrationV32FromV31PreservesData(t *testing.T) {
 	if err := raw.Migrate(ctx); err != nil {
 		t.Fatalf("v31 → v32 Migrate: %v", err)
 	}
-	if v, _ := raw.SchemaVersion(ctx); v != 32 {
-		t.Fatalf("升级后 schema 版本应为 32，got %d", v)
+	// 本用例只关心 v31 → v32 这一步的数据保全；`raw.Migrate` 会一路跑到最新版本，
+	// 故断言「≥ 32」而非「== 32」（v33 起最新版本号已增大，硬编 32 会误红）。
+	if v, _ := raw.SchemaVersion(ctx); v < 32 {
+		t.Fatalf("升级后 schema 版本应 ≥ 32，got %d", v)
 	}
 	var stillThere int
 	if err := raw.db.Raw(`SELECT COUNT(*) FROM sessions WHERE id='s-legacy'`).Row().Scan(&stillThere); err != nil || stillThere != 1 {

@@ -775,6 +775,11 @@ var schemaMigrations = []migration{
 	// 投递形态 + pending/linked/orphan 生命周期。**字节落盘与 core_file* 两表由 golib filestore
 	// 负责、不在本步**——理由写在该文件头）。
 	migrationV32,
+
+	// v33 的版本步本体在 `migrate_v33.go`（新增资料库目录树三表：`library_nodes` /
+	// `library_attachments` / `library_tables`。**字节落盘复用附件链路 filestore/attachments、
+	// 本步不建 blob 表**；本期只做资料库、不做知识库，故**无检索索引表**——理由写在该文件头）。
+	migrationV33,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

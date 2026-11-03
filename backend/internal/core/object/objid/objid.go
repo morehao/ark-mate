@@ -62,6 +62,11 @@ const (
 	// Attachment 平台附件（`attachments.id`，v32）。字节落盘去重归 golib filestore，
 	// 这个号是**平台附件行**的身份（指向 filestore 的 upload_id），不是 blob 的身份。
 	Attachment = "att_"
+	// LibraryNode 资料库节点（`library_nodes.id`，v33）。它是**目录树节点**的身份
+	// （folder/doc/table/link/drive/page），不是字节的身份——drive 节点的字节仍走
+	// `attachments`/filestore，本号只标识这棵树上的一个节点。`library_attachments` /
+	// `library_tables` 用复合主键或 1:1 外键，不单独铸号。
+	LibraryNode = "libnd_"
 )
 
 // RuntimeShell 透传壳前缀（= runtime）。

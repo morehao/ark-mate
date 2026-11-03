@@ -402,7 +402,9 @@ func TestPrimaryKeyShapesStayDeclared(t *testing.T) {
 	// ③ `objid` 的前缀登记表 == 8 个平台铸造前缀，**不含**任何定义类。
 	objidSrc := stripLineComments(readFileOrFatal(t,
 		filepath.Join(backendRoot(t), "internal", "core", "object", "objid", "objid.go")))
-	prefixRe := regexp.MustCompile(`(?m)^\s*([A-Z]\w+)\s*=\s*"([a-z]{2,3}_)\s*"`)
+	// 前缀长度放宽到 2–5：v33 起新增 `libnd_`（资料库节点，5 字母）——它同样是平台铸造前缀，
+	// 必须被这条守卫看见（否则"少登记一个前缀"那一半判据会对它空转）。
+	prefixRe := regexp.MustCompile(`(?m)^\s*([A-Z]\w+)\s*=\s*"([a-z]{2,5}_)\s*"`)
 	type kv struct{ name, value string }
 	var got []kv
 	for _, m := range prefixRe.FindAllStringSubmatch(objidSrc, -1) {
@@ -416,7 +418,7 @@ func TestPrimaryKeyShapesStayDeclared(t *testing.T) {
 		gotNames = append(gotNames, g.name)
 	}
 	sort.Strings(gotNames)
-	wantNames := []string{"Attachment", "Event", "Input", "Message", "Model", "PermissionMemory", "Run", "Session", "Workspace"}
+	wantNames := []string{"Attachment", "Event", "Input", "LibraryNode", "Message", "Model", "PermissionMemory", "Run", "Session", "Workspace"}
 	sort.Strings(wantNames)
 	if strings.Join(gotNames, ",") != strings.Join(wantNames, ",") {
 		t.Fatalf("`objid` 的铸造前缀登记表变了：\n got  %v\n want %v\n"+
