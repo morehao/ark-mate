@@ -299,20 +299,6 @@
     "data_kind": "object"
   },
   {
-    "method": "POST",
-    "path": "/v1/mate/materials/upload",
-    "status": 200,
-    "code": 40000,
-    "msg": "参数错误: 缺少 file 字段（multipart 单文件）: request Content-Type isn't multipart/form-data",
-    "envelope": [
-      "code",
-      "data",
-      "msg",
-      "requestID"
-    ],
-    "data_kind": "object"
-  },
-  {
     "method": "GET",
     "path": "/v1/mate/materials/nodes/nope/rows",
     "status": 200,
@@ -359,7 +345,7 @@
     "path": "/v1/mate/attachments",
     "status": 200,
     "code": 40000,
-    "msg": "参数错误: 缺少 file 字段（multipart 单文件）: request Content-Type isn't multipart/form-data",
+    "msg": "参数错误: 请求体不是合法 JSON: EOF",
     "envelope": [
       "code",
       "data",

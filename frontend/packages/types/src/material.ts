@@ -49,6 +49,8 @@ export interface CreateMaterialNodeReq {
   body?: string
   schema?: string
   source_url?: string
+  /** drive 种类：`POST /files` 返回的 file_id（P0′ 收口后建 drive 节点走两步式）。 */
+  drive_upload_id?: string
   space_id?: string
 }
 

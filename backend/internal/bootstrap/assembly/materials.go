@@ -141,6 +141,14 @@ func (a assemblyBlobStore) Open(ctx context.Context, uploadID string) (io.ReadCl
 	return rc, svcattachment.BlobDetail{FileUploadID: detail.FileUploadID, ContentHash: detail.ContentHash, Size: detail.Size, MimeType: detail.MimeType}, nil
 }
 
+func (a assemblyBlobStore) GetFile(ctx context.Context, uploadID string) (svcattachment.BlobDetail, error) {
+	detail, err := a.st.GetFile(ctx, uploadID)
+	if err != nil {
+		return svcattachment.BlobDetail{}, err
+	}
+	return svcattachment.BlobDetail{FileUploadID: detail.FileUploadID, ContentHash: detail.ContentHash, Size: detail.Size, MimeType: detail.MimeType, Name: detail.Name}, nil
+}
+
 func (a assemblyBlobStore) DeleteFile(ctx context.Context, uploadID string) error {
 	return a.st.DeleteFile(ctx, uploadID)
 }

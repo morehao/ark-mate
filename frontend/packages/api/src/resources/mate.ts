@@ -471,14 +471,46 @@ export const importSkillPackage = (file: File): Promise<SkillWriteResp> => {
   return http.post<SkillWriteResp>('/mate/skills/import', form)
 }
 
-// ——— 附件（v32）———
+// ——— 文件上传（P0′ 收口：全局唯一收字节端点 POST /files）———
 //
-// 上传走 multipart（`file` 字段 + 可选 `name`）；单文件、前端循环多传。字节落 <MATE_HOME>/attachments，
-// 不写工作区。响应只元数据；预览走 attachmentContentUrl。
-export const uploadAttachment = (file: File): Promise<Attachment> => {
+// 上传两步式：① `POST /mate/files` 收字节（ginupload 提供，需 content_hash）→ file_id；
+// ② 业务模块建索引（附件 `POST /mate/attachments {file_id}` / 资料库 `POST /mate/materials/nodes`）。
+// 字节落 <MATE_HOME>/attachments（filestore 内容寻址去重），不写工作区。
+
+/** 计算文件 SHA-256（十六进制）。小文件直算；大文件分片路径留后续（当前先直算）。 */
+export const sha256Hex = async (file: File): Promise<string> => {
+  const buf = await file.arrayBuffer()
+  const digest = await crypto.subtle.digest('SHA-256', buf)
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+/** `POST /files` 的响应（file_id = core_file_upload.id）。 */
+export interface UploadedFile {
+  file_id: string
+  name: string
+  mime_type: string
+  status: string
+}
+
+/** 唯一收字节端点：算 hash → `POST /mate/files` → file_id。 */
+export const uploadFile = async (file: File): Promise<UploadedFile> => {
+  const contentHash = await sha256Hex(file)
   const form = new FormData()
+  form.append('content_hash', contentHash)
   form.append('file', file, file.name)
-  return http.post<Attachment>('/mate/attachments', form)
+  return http.postForm<UploadedFile>('/mate/files', form)
+}
+
+/** 从已上传文件（file_id）建附件索引（`POST /mate/attachments {file_id, name?}`）。 */
+export const registerAttachment = (fileId: string, name?: string): Promise<Attachment> =>
+  http.post<Attachment>('/mate/attachments', { file_id: fileId, name })
+
+/** 上传一个附件（两步式：`POST /files` 收字节 → `POST /attachments` 建索引）。 */
+export const uploadAttachment = async (file: File): Promise<Attachment> => {
+  const up = await uploadFile(file)
+  return registerAttachment(up.file_id, file.name)
 }
 
 /** 撤下待挂附件（幂等；linked 不可撤 → 40901）。 */

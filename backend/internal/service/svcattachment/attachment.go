@@ -33,6 +33,8 @@ type AttachmentStore interface {
 type BlobStore interface {
 	UploadAndRecord(ctx context.Context, req BlobUploadRequest) (BlobDetail, error)
 	Open(ctx context.Context, uploadID string) (io.ReadCloser, BlobDetail, error)
+	// GetFile 按 upload_id 取元数据（供 Register 从已落字节建索引，不重读字节）。
+	GetFile(ctx context.Context, uploadID string) (BlobDetail, error)
 	DeleteFile(ctx context.Context, uploadID string) error
 }
 
@@ -52,6 +54,8 @@ type BlobDetail struct {
 	ContentHash  string
 	Size         int64
 	MimeType     string
+	// Name 上传时的原始文件名（Register 用它兜底展示名）。
+	Name string
 }
 
 // Limits 单文件上限（防呆/防灌盘，**不是类型约束**）。
@@ -63,7 +67,14 @@ type Limits struct {
 // AttachmentSvc 附件面用例。
 type AttachmentSvc interface {
 	// Upload 上传一个文件（multipart 单文件）：探测真实类型 → 落字节 + 落一条 pending 行。
+	//
+	// **注意**：本方法是**字节收口前**的进程内上传能力，产物溯源 P0′ 后 **HTTP `POST /attachments`
+	// 不再走它**（改走 `POST /files` 收字节 + `Register` 建索引）。现在只给**进程内**消费者
+	// （MCP `library_upload` 经 svcmaterial.Upload）用——它不经过本机回环 HTTP。
 	Upload(ctx context.Context, fileName, declaredName, declaredMime string, r io.Reader) (*dtoattachment.AttachmentResp, error)
+	// Register 从**已落 filestore 的字节**建一条附件业务索引（收口后的 HTTP `POST /attachments` 用它）：
+	// 按 fileID 取 FileDetail → 探测真实类型（伪装图在此拒，字节已落但不入索引）→ 落 pending 行。
+	Register(ctx context.Context, fileID, declaredName string) (*dtoattachment.AttachmentResp, error)
 	// Delete 撤下一条待挂附件；linked → attachment_linked(40901)；不存在 → deleted=false（幂等）。
 	Delete(ctx context.Context, id string) (*dtoattachment.AttachmentDeleteResp, error)
 	// Get 回读元数据。
@@ -160,6 +171,56 @@ func (s *attachmentSvc) Upload(ctx context.Context, fileName, declaredName, decl
 	if err := s.st.InsertAttachment(ctx, entity); err != nil {
 		// 行落不了 → 回滚已写字节（尽力；删记录，blob 是否真删由 filestore 去重决定）。
 		_ = s.blobs.DeleteFile(ctx, detail.FileUploadID)
+		return nil, code.Errorf(code.Internal, "登记附件失败: %v", err)
+	}
+	return toResp(entity), nil
+}
+
+// Register 从已落 filestore 的字节建附件业务索引（收口后的 HTTP `POST /attachments {file_id}`）。
+//
+// 顺序（fail-closed）：按 fileID 取 FileDetail（不存在 → attachment_not_found）→ 打开字节探测真实类型
+// （伪装图在此按 magic 拒：attachment_unsupported_type；字节已落 filestore，但不入索引）→ 落 pending 行。
+// **不重算哈希**：去重与 sha256 已由 filestore 在上传时算好（ContentHash），这里直接用。
+func (s *attachmentSvc) Register(ctx context.Context, fileID, declaredName string) (*dtoattachment.AttachmentResp, error) {
+	if strings.TrimSpace(fileID) == "" {
+		return nil, code.Errorf(code.InvalidParam, "参数错误: file_id 不能为空")
+	}
+	detail, err := s.blobs.GetFile(ctx, fileID)
+	if err != nil {
+		return nil, code.Errorf(code.NotFound, "attachment_not_found: 文件 %s 不存在或不可读: %v", fileID, err)
+	}
+	// 打开字节判真实类型（不信上传时声明的 MIME）。文件级字节可能较大，这里只读前 512 字节判魔数。
+	rc, _, err := s.blobs.Open(ctx, fileID)
+	if err != nil {
+		return nil, code.Errorf(code.NotFound, "attachment_not_found: 文件 %s 字节不可读: %v", fileID, err)
+	}
+	head, _ := readAllLimited(rc, 512)
+	_ = rc.Close()
+	kind, probedMime := probeType(head, detail.MimeType)
+	if kind == "invalid_image" {
+		return nil, code.Errorf(code.InvalidRequest,
+			"attachment_unsupported_type: 图片必须是 png/jpeg/webp/gif 之一（按文件头判定，声明=%q）", detail.MimeType)
+	}
+	name := sanitizeName(declaredName)
+	if name == "" {
+		name = sanitizeName(detail.Name)
+	}
+	if name == "" {
+		name = "attachment"
+	}
+	entity := model.AttachmentEntity{
+		ID:        objid.New(objid.Attachment),
+		UploadID:  detail.FileUploadID,
+		SessionID: "",
+		Name:      name,
+		MimeType:  probedMime,
+		SizeBytes: detail.Size,
+		Sha256:    detail.ContentHash,
+		Kind:      kind,
+		State:     model.AttachmentStatePending,
+		CreatedAt: model.NowTSTime(),
+	}
+	if err := s.st.InsertAttachment(ctx, entity); err != nil {
 		return nil, code.Errorf(code.Internal, "登记附件失败: %v", err)
 	}
 	return toResp(entity), nil

@@ -31,6 +31,7 @@ import (
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
+	"github.com/morehao/golib/filestore"
 	"github.com/morehao/golib/glog"
 )
 
@@ -612,11 +613,16 @@ func (as *assembly) startControllers(context.Context) error {
 
 // startRouter 用已绑定的监听器与已构造的控制器装配 HTTP 引擎（HTTP 服务由 app 壳启停）。
 func (as *assembly) startRouter(ctx context.Context) error {
+	var fileStore *filestore.FileStore
+	if as.attachStore != nil {
+		fileStore = as.attachStore.FileStore()
+	}
 	as.engine = router.New(router.Deps{
 		Controllers: as.controllers,
 		Web:         as.assets,
 		AssetWatch:  as.assetWatch,
 		Origin:      as.origin,
+		FileStore:   fileStore,
 	})
 	return nil
 }

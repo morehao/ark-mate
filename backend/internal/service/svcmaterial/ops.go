@@ -91,7 +91,10 @@ func (s *materialSvc) detail(ctx context.Context, n model.LibraryNodeEntity) (*d
 	return resp, nil
 }
 
-// CreateNode 建一个节点（folder/doc/table/link/page；drive 走 Upload）。
+// CreateNode 建一个节点（folder/doc/table/link/page/drive）。
+//
+// drive 节点由「P0′ 收口后的两步式」建：先 `POST /files` 拿 file_id，再 `CreateNode{node_kind:drive,
+// drive_upload_id:file_id}`。**不再有 `/materials/upload` 端点**（上传统一走 ginupload）。
 func (s *materialSvc) CreateNode(ctx context.Context, req dtomaterial.CreateNodeReq) (*dtomaterial.NodeDetailResp, error) {
 	if err := s.requireStore(); err != nil {
 		return nil, err
@@ -104,25 +107,23 @@ func (s *materialSvc) CreateNode(ctx context.Context, req dtomaterial.CreateNode
 	if !material.IsValidNodeKind(kind) {
 		return nil, code.Errorf(code.InvalidParam, "invalid_node_kind: 未知节点种类 %q", req.NodeKind)
 	}
-	if kind == material.KindDrive {
-		return nil, code.Errorf(code.InvalidParam, "material_upload_kind_unsupported: drive 节点请走上传接口")
-	}
 	if strings.TrimSpace(req.Title) == "" {
 		return nil, code.Errorf(code.InvalidParam, "参数错误: title 不能为空")
 	}
-	// 载体一致性（domain 判决）。
-	carrier := material.Carrier{Body: req.Body, TableID: tableIDFor(kind, req.Schema), SourceURL: req.SourceURL}
+	// 载体一致性（domain 判决）：drive 要求 drive_upload_id 非空、body 空。
+	carrier := material.Carrier{Body: req.Body, TableID: tableIDFor(kind, req.Schema), SourceURL: req.SourceURL, DriveUploadID: req.DriveUploadID}
 	if err := material.ValidateCarrier(kind, carrier); err != nil {
 		return nil, code.Errorf(code.InvalidRequest, "material_node_kind_mismatch: 节点种类与载体不匹配")
 	}
 	n := model.LibraryNodeEntity{
-		ID:        newID(),
-		SpaceID:   space,
-		ParentID:  req.ParentID,
-		NodeKind:  string(kind),
-		Title:     strings.TrimSpace(req.Title),
-		Body:      req.Body,
-		SourceURL: req.SourceURL,
+		ID:            newID(),
+		SpaceID:       space,
+		ParentID:      req.ParentID,
+		NodeKind:      string(kind),
+		Title:         strings.TrimSpace(req.Title),
+		Body:          req.Body,
+		SourceURL:     req.SourceURL,
+		DriveUploadID: req.DriveUploadID,
 	}
 	if kind == material.KindTable {
 		n.TableID = n.ID // table_id 自指到本节点（library_tables.node_id = 本节点 id）

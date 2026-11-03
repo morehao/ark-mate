@@ -58,6 +58,13 @@ func (f *fakeBlob) Open(_ context.Context, uploadID string) (io.ReadCloser, Blob
 	}
 	return io.NopCloser(bytes.NewReader(b)), BlobDetail{FileUploadID: uploadID, Size: int64(len(b))}, nil
 }
+func (f *fakeBlob) GetFile(_ context.Context, uploadID string) (BlobDetail, error) {
+	b, ok := f.data[uploadID]
+	if !ok {
+		return BlobDetail{}, io.EOF
+	}
+	return BlobDetail{FileUploadID: uploadID, Size: int64(len(b))}, nil
+}
 func (f *fakeBlob) DeleteFile(_ context.Context, uploadID string) error { delete(f.data, uploadID); return nil }
 
 func codeOf(t *testing.T, err error) int {

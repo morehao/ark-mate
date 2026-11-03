@@ -2,6 +2,8 @@ package router_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"mime/multipart"
 	"net/http/httptest"
@@ -62,7 +64,10 @@ func materialApp(t *testing.T) (*gin.Engine, *sessionruntime.Service) {
 		Execution:   exec,
 		AttachStore: attachStore,
 	}.BuildServices()
-	engine := router.New(router.Deps{Controllers: services.BuildControllers(nil, nil)})
+	engine := router.New(router.Deps{
+		Controllers: services.BuildControllers(nil, nil),
+		FileStore:   attachStore.FileStore(),
+	})
 	return engine, svc
 }
 
@@ -220,33 +225,50 @@ func TestMaterialErrorCodes(t *testing.T) {
 	}
 }
 
-// TestMaterialUpload 上传一个文件成 drive 节点（复用附件链路落字节 + 关联）。
+// TestMaterialUpload 上传文件成 drive 节点（P0′ 收口后两步式：POST /files 拿 file_id → POST /materials/nodes）。
 func TestMaterialUpload(t *testing.T) {
 	e, _ := materialApp(t)
 
+	content := []byte("hello material")
+	sum := sha256.Sum256(content)
+	hash := hex.EncodeToString(sum[:])
+
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("content_hash", hash)
 	fw, _ := mw.CreateFormFile("file", "notes.txt")
-	_, _ = fw.Write([]byte("hello material"))
+	_, _ = fw.Write(content)
 	_ = mw.Close()
 
-	req := httptest.NewRequest("POST", "/v1/mate/materials/upload", &buf)
+	// 第一步：POST /files 收字节（ginupload）。
+	req := httptest.NewRequest("POST", "/v1/mate/files", &buf)
 	req.Header.Set("content-type", mw.FormDataContentType())
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 	if w.Code != 200 {
-		t.Fatalf("upload HTTP %d: %s", w.Code, w.Body.String())
+		t.Fatalf("files HTTP %d: %s", w.Code, w.Body.String())
 	}
-	var env struct {
-		Code int                        `json:"code"`
-		Data dtomaterial.NodeDetailResp `json:"data"`
+	var fileEnv struct {
+		Code int `json:"code"`
+		Data struct {
+			FileID string `json:"file_id"`
+		} `json:"data"`
 	}
-	_ = json.Unmarshal(w.Body.Bytes(), &env)
-	if env.Code != 0 {
-		t.Fatalf("upload code=%d body=%s", env.Code, w.Body.String())
+	_ = json.Unmarshal(w.Body.Bytes(), &fileEnv)
+	if fileEnv.Code != 0 || fileEnv.Data.FileID == "" {
+		t.Fatalf("files code=%d body=%s", fileEnv.Code, w.Body.String())
 	}
-	if env.Data.NodeKind != "drive" || env.Data.DriveUploadID == "" {
-		t.Fatalf("上传应落 drive 节点且带 drive_upload_id: %+v", env.Data)
+
+	// 第二步：POST /materials/nodes {node_kind:drive, drive_upload_id:file_id}。
+	body := `{"node_kind":"drive","title":"notes.txt","drive_upload_id":"` + fileEnv.Data.FileID + `"}`
+	_, code, data := matCall(t, e, "POST", "/v1/mate/materials/nodes", body)
+	if code != 0 {
+		t.Fatalf("建 drive 节点 code=%d body=%s", code, string(data))
+	}
+	var node dtomaterial.NodeDetailResp
+	_ = json.Unmarshal(data, &node)
+	if node.NodeKind != "drive" || node.DriveUploadID == "" {
+		t.Fatalf("两步式应落 drive 节点且带 drive_upload_id: %+v", node)
 	}
 }
 

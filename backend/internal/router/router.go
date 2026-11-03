@@ -32,7 +32,9 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrworkspace"
 	"github.com/morehao/ark-mate/internal/controller/ctrws"
 	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/golib/biz/gserver/ginupload"
 	"github.com/morehao/golib/biz/gserver/ginserver"
+	"github.com/morehao/golib/filestore"
 )
 
 // AppName 控制面应用的业务标识，构成路由前缀部分。
@@ -85,6 +87,12 @@ type Deps struct {
 	// 非 nil 时它同时供给两处，且**必须是同一个对象**：v1 组的 REST/`/health` 中间件，
 	// 与 WS 控制器的握手判定（见 registerStream）。
 	Origin *middleware.OriginPolicy
+
+	// FileStore 是 golib filestore 实例，供 `ginupload.Register` 挂**全局唯一的上传面** `/files`
+	// （产物溯源 P0′：收字节收口，见设计 §3.4）。nil = 不挂（memory 模式无持久层）。
+	//
+	// 与 attachmentstore.Store.FileStore() 是**同一个实例**：上传、去重、附件索引共用一套字节底座。
+	FileStore *filestore.FileStore
 }
 
 // New 构建 gin.Engine 并注册控制面 REST + WS 实时事件路由。
@@ -151,6 +159,13 @@ func New(d Deps) *gin.Engine {
 	registerMaterial(rest, ctrls.Material)
 	registerUsage(rest, ctrls.Usage)
 	registerSystem(rest, ctrls.System)
+
+	// 全局唯一的上传面（产物溯源 P0′）：golib ginupload 一步挂上整套 `/files` 资源
+	// （上传 / 分片 / 详情 / 删除 / presign / serve）。业务模块只建索引、不再各自收字节。
+	// nil（memory 模式无持久层）→ 不挂，上传面整体不可用（与附件面 40501 同源）。
+	if d.FileStore != nil {
+		ginupload.Register(rest, d.FileStore)
+	}
 
 	MountWeb(r, d.Web)
 	// 开发期资产重建通知（P6-A）：**开关与注册点必须同处**（archtest 有静态守卫钉这条）——

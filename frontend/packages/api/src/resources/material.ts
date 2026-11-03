@@ -1,4 +1,5 @@
 import { http } from '../request'
+import { uploadFile } from './mate'
 import type {
   CreateMaterialNodeReq,
   DeleteMaterialNodeResp,
@@ -41,12 +42,15 @@ export const patchMaterialNode = (id: string, req: PatchMaterialNodeReq): Promis
 export const deleteMaterialNode = (id: string): Promise<DeleteMaterialNodeResp> =>
   http.delete<DeleteMaterialNodeResp>(`/mate/materials/nodes/${encodeURIComponent(id)}`)
 
-/** 上传一个文件成节点（multipart 单文件）。 */
-export const uploadMaterialFile = (file: File, parentId?: string): Promise<MaterialNodeDetail> => {
-  const form = new FormData()
-  form.append('file', file, file.name)
-  if (parentId) form.append('parent_id', parentId)
-  return http.postForm<MaterialNodeDetail>('/mate/materials/upload', form)
+/** 上传一个文件成 drive 节点（P0′ 收口后两步式：`POST /files` 拿 file_id → `POST /materials/nodes`）。 */
+export const uploadMaterialFile = async (file: File, parentId?: string): Promise<MaterialNodeDetail> => {
+  const up = await uploadFile(file)
+  return createMaterialNode({
+    node_kind: 'drive',
+    title: up.name || file.name,
+    parent_id: parentId,
+    drive_upload_id: up.file_id,
+  })
 }
 
 /** 关键词检索（**非语义**；title/body 子串匹配）。 */

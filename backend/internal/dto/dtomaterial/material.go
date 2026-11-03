@@ -50,14 +50,18 @@ type NodeDetailResp struct {
 	UpdatedAt     string `json:"updated_at"`
 }
 
-// CreateNodeReq `POST /materials/nodes` 的请求体（建 folder/doc/table/link/page；drive 走上传）。
+// CreateNodeReq `POST /materials/nodes` 的请求体（建 folder/doc/table/link/page/drive）。
+//
+// drive 走「P0′ 收口后的两步式」：先 `POST /files` 拿 file_id，再传 `drive_upload_id`。
 type CreateNodeReq struct {
 	ParentID  string `json:"parent_id"`
-	NodeKind  string `json:"node_kind"` // folder|doc|table|link|page
+	NodeKind  string `json:"node_kind"` // folder|doc|table|link|page|drive
 	Title     string `json:"title"`
 	Body      string `json:"body"`       // doc/page/link
 	Schema    string `json:"schema"`     // table: 字段定义 JSON
 	SourceURL string `json:"source_url"` // link
+	// DriveUploadID 仅 drive 种类：`POST /files` 返回的 file_id（= core_file_upload.id）。
+	DriveUploadID string `json:"drive_upload_id"`
 	// SpaceID 可选；本期只支持默认个人空间，非默认值 → 40501 space_not_supported。
 	SpaceID string `json:"space_id"`
 }
