@@ -69,7 +69,8 @@ type Config struct {
 	// 防呆/防灌盘，**不是类型约束**：文档不设类型白名单，任何文件都能传，由模型用文件工具自判。
 	AttachmentMaxBytes int64
 	// AttachmentImageMaxBytes 小图直投 ACP image 块的上限（MATE_ATTACHMENT_IMAGE_MAX_BYTES 覆盖，
-	// 默认 10 MiB）。超过则降级为 handle + read_image（dsh 自己 downscale 到 4 MiB 预算）。
+	// 默认 2 MiB）。超过则降级为 handle + read_image（dsh 自己 downscale）。2 MiB 的取值是为了绕开
+	// dsh ACP 桥对超大 base64 的正则爆栈缺陷（见 DefaultAttachmentImageMaxBytes 注释）。
 	AttachmentImageMaxBytes int64
 	// AttachmentPendingTTL 未挂载 pending 附件的存活上限（MATE_ATTACHMENT_PENDING_TTL 覆盖，默认 24h）。
 	AttachmentPendingTTL time.Duration
@@ -307,8 +308,15 @@ const (
 	// 20 MiB：防呆/防灌盘，**不是类型约束**（对齐 dsh「文档无类型白名单」，任何文件都能传）。
 	DefaultAttachmentMaxBytes int64 = 20 << 20
 	// DefaultAttachmentImageMaxBytes 小图直投 ACP image 块的上限（MATE_ATTACHMENT_IMAGE_MAX_BYTES 覆盖）。
-	// 10 MiB → base64 后 ~13 MiB；超过则降级为 handle + read_image（dsh 自己 downscale）。
-	DefaultAttachmentImageMaxBytes int64 = 10 << 20
+	//
+	// 2 MiB —— **不是性能考虑，是绕 dsh ACP 桥的爆栈缺陷**（2026-11-03 实测）：
+	// dsh-acp 用 `/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/`
+	// 校验内联 base64，对超大串会回溯爆栈（`Maximum call stack size exceeded`），
+	// 在原始字节 ≈3 MB（base64 ≈4.0M 字符）处稳定触发，把整轮 prompt 打成
+	// `Internal error: prompt was not queued: ...`。2 MiB 的 base64 ≈2.7M 字符，离崩点留足余量。
+	// 超过的一律降级为 handle + read_image（dsh 自己 downscale），实测模型可经 read_image 正确读图。
+	// 桌面态不受影响（走原生 API 不经 ACP 桥），只有 ACP 客户端才需要这条护栏。
+	DefaultAttachmentImageMaxBytes int64 = 2 << 20
 	// DefaultAttachmentPendingTTL 未挂载 pending 附件的存活上限（MATE_ATTACHMENT_PENDING_TTL 覆盖）。
 	DefaultAttachmentPendingTTL = 24 * time.Hour
 	// DefaultAttachmentSweep 孤儿清扫 tick 间隔（MATE_ATTACHMENT_SWEEP 覆盖；0 = 关闭清扫）。

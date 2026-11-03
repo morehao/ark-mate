@@ -82,22 +82,27 @@ func TestAssemblePartsSmallImage(t *testing.T) {
 	}
 }
 
-// TestAssemblePartsDocumentHandle 文档 / 大图 → text part 末尾追加 handle 行（无 image part）。
+// TestAssemblePartsDocumentHandle 文档 / 大图 → 原文 text 段 + 独立 handle text 段（无 image part）。
+//
+// handle 必须**单独成段**：下游 composeDeliverParts 会整段替换第一个 text 段（叠首轮前缀），
+// 拼在原文里会被冲掉（2026-11-03 实测的丢附件回归）。
 func TestAssemblePartsDocumentHandle(t *testing.T) {
 	resolved := []session.ResolvedAttachment{
 		{ID: "att_doc", Kind: session.AttachmentKindDocument, Name: "a.txt", SizeBytes: 5,
 			Sha256: "0123456789abcdef0000", ReadPath: "/abs/attachments/data/x/a.txt"},
 	}
 	parts := assembleParts(resolved, "读文件")
-	if len(parts) != 1 || parts[0].Kind != protocol.PromptPartText {
-		t.Fatalf("文档应只产 text part：%+v", parts)
+	if len(parts) != 2 {
+		t.Fatalf("文档应产 2 个 text part（原文 + handle），got %d: %+v", len(parts), parts)
 	}
-	txt := parts[0].Text
-	if !strings.Contains(txt, "[附件 a.txt size=5 sha256:0123456789abcdef path=/abs/attachments/data/x/a.txt]") {
-		t.Fatalf("text 末尾应含 handle 行，got %q", txt)
+	if parts[0].Kind != protocol.PromptPartText || parts[0].Text != "读文件" {
+		t.Fatalf("首段应是原文，got %+v", parts[0])
 	}
-	if !strings.HasPrefix(txt, "读文件") {
-		t.Fatalf("原文应在最前，got %q", txt)
+	if parts[1].Kind != protocol.PromptPartText {
+		t.Fatalf("次段应是 handle text，got %+v", parts[1])
+	}
+	if !strings.Contains(parts[1].Text, "[附件 a.txt size=5 sha256:0123456789abcdef path=/abs/attachments/data/x/a.txt]") {
+		t.Fatalf("次段应含 handle 行，got %q", parts[1].Text)
 	}
 }
 
