@@ -64,9 +64,17 @@ func attachmentMetas(resolved []session.ResolvedAttachment) []session.Attachment
 }
 
 // assembleParts 把已解析的附件编成内容块（纯函数：不含门禁/解析，便于单测）。
-// text 段在前（原文 + 文档/大图 handle 追行），小图 image 段随后。
+//
+// 顺序（关键）：**用户原文是第一个 text 段**，文档/大图 handle 行**单独成第二个 text 段**，
+// 小图 image 段最后。
+//
+// 为什么 handle 要单独成段而不是拼进原文：下游 `runner.composeDeliverParts` 会把**第一个** text 段
+// 整段替换成"叠了首轮前缀（identity/memo）的用户原文"（前缀只进下发内容、不进事件/落库）。
+// 若把 handle 拼在原文段里，替换时会被连根冲掉——模型收到的是纯文字、拿不到可读路径，
+// 于是文档/大图静默丢附件（v32 回归，2026-11-03 实测：大图降级后模型说"没收到图片"）。
+// 拆成第二段后，composeDeliverParts 的「只替换第一个 text 段」正好保留 handle。
 func assembleParts(resolved []session.ResolvedAttachment, text string) []protocol.PromptPart {
-	textPart := text
+	var handleText string
 	var imageParts []protocol.PromptPart
 	for _, r := range resolved {
 		switch r.Kind {
@@ -78,15 +86,18 @@ func assembleParts(resolved []session.ResolvedAttachment, text string) []protoco
 				})
 			} else {
 				// 大图（超过直投上限）：降级为 handle 文本 + read_image。
-				textPart += handleLine(r)
+				handleText += handleLine(r)
 			}
 		default:
 			// 文档：handle 文本 + read。
-			textPart += handleLine(r)
+			handleText += handleLine(r)
 		}
 	}
-	parts := make([]protocol.PromptPart, 0, 1+len(imageParts))
-	parts = append(parts, protocol.PromptPart{Kind: protocol.PromptPartText, Text: textPart})
+	parts := make([]protocol.PromptPart, 0, 2+len(imageParts))
+	parts = append(parts, protocol.PromptPart{Kind: protocol.PromptPartText, Text: text})
+	if handleText != "" {
+		parts = append(parts, protocol.PromptPart{Kind: protocol.PromptPartText, Text: handleText})
+	}
 	parts = append(parts, imageParts...)
 	return parts
 }
