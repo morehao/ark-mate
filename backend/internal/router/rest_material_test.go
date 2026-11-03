@@ -50,8 +50,10 @@ func materialApp(t *testing.T) (*gin.Engine, *sessionruntime.Service) {
 	svc := sessionruntime.NewService(reg, bus)
 	exec := runtimeconn.NewPlaneFor(reg)
 
+	cfg := config.Default()
+	cfg.HomeDir = t.TempDir() // page 发布落盘根：必须在私有临时目录（否则会写进测试 cwd）
 	services := assembly.Facts{
-		Cfg:         config.Default(),
+		Cfg:         cfg,
 		Store:       st,
 		Planes:      svc.Planes(),
 		Session:     svc,
