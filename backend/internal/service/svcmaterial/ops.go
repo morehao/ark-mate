@@ -381,3 +381,45 @@ func snippet(title, body, q string) string {
 	}
 	return prefix + string(runes[start:endR]) + suffix
 }
+
+// DrivePath 返回 drive 节点主附件的本地只读绝对路径（给 Agent 的 read 工具用）。
+//
+// 一个 drive 节点恰有一条 role=primary 的附件关联（P1 Upload 建的就是它）；取其附件 id，
+// 交给 AttachmentReader 解析成本地路径。非 drive 节点 / 无附件 → 40001。
+func (s *materialSvc) DrivePath(ctx context.Context, nodeID string) (string, error) {
+	if err := s.requireStore(); err != nil {
+		return "", err
+	}
+	if s.blobs == nil {
+		return "", code.Errorf(code.NotSupported, "material_unavailable: 附件读取不可用（当前为 memory 模式）")
+	}
+	n, ok, err := s.st.LibraryNodeByID(ctx, nodeID)
+	if err != nil {
+		return "", code.Errorf(code.Internal, "读取资料库节点失败: %v", err)
+	}
+	if !ok {
+		return "", code.Errorf(code.NotFound, "material_node_not_found: 资料库节点不存在")
+	}
+	if material.NodeKind(n.NodeKind) != material.KindDrive {
+		return "", code.Errorf(code.InvalidRequest, "material_node_kind_mismatch: 只有 drive 节点有可下载文件路径")
+	}
+	atts, err := s.st.LibraryAttachmentsByNode(ctx, nodeID)
+	if err != nil {
+		return "", code.Errorf(code.Internal, "读取节点附件关联失败: %v", err)
+	}
+	var primaryID string
+	for _, a := range atts {
+		if a.Role == model.LibraryAttachmentRolePrimary {
+			primaryID = a.AttachmentID
+			break
+		}
+	}
+	if primaryID == "" {
+		return "", code.Errorf(code.NotFound, "material_node_not_found: drive 节点没有主附件")
+	}
+	path, err := s.blobs.LocalPathByAttachmentID(ctx, primaryID)
+	if err != nil {
+		return "", code.Errorf(code.Internal, "解析附件本地路径失败: %v", err)
+	}
+	return path, nil
+}

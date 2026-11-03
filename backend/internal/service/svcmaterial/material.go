@@ -58,9 +58,12 @@ type UploadedAttachment struct {
 	SizeBytes int64
 }
 
-// AttachmentReader 读取附件字节的本地路径（drive 节点详情给下载路径用；attachmentstore.ReadPath 满足）。
+// AttachmentReader 由**平台附件 id**（`att_…`）解析出本地只读绝对路径。
+//
+// 适配器内部做 att→upload_id（store.AttachmentByID）→ 磁盘路径（attachmentstore.ReadPath）两步；
+// 用例层只认「给附件 id、还本地路径」这一个语义（不 import store/infra）。
 type AttachmentReader interface {
-	ReadPath(ctx context.Context, uploadID string) (string, error)
+	LocalPathByAttachmentID(ctx context.Context, attachmentID string) (string, error)
 }
 
 // MaterialSvc 资料库面用例。
@@ -72,6 +75,8 @@ type MaterialSvc interface {
 	DeleteNode(ctx context.Context, id string) (*dtomaterial.DeleteNodeResp, error)
 	Upload(ctx context.Context, fileName, declaredName, declaredMime string, parentID string, r io.Reader) (*dtomaterial.NodeDetailResp, error)
 	Search(ctx context.Context, q string, limit, offset int) (*dtomaterial.SearchResp, error)
+	// DrivePath 返回 drive 节点主附件的本地只读绝对路径（给 Agent 的 read 工具用）。
+	DrivePath(ctx context.Context, nodeID string) (string, error)
 }
 
 type materialSvc struct {
