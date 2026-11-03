@@ -24,6 +24,8 @@ func MCP(args []string) {
 	switch args[0] {
 	case "bridge":
 		mcpBridge(args[1:])
+	case "material":
+		materialMcp(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "未知的 mcp 动作 %q\n\n%s", args[0], mcpUsage)
 		os.Exit(2)
@@ -39,6 +41,9 @@ const mcpUsage = `mcp 用法：
       协议流走 stdout，**一切诊断走 stderr**（stdout 混进一行日志就会毁掉整条会话）
       凭据 cwd（<cwd>/.env 那一层）由核心经 env MATE_MCP_CRED_CWD 传入；没有它时用网关
       自己的 cwd 并 WARN（网关的 cwd 是底座给的，可能与核心不同）
+  mate mcp material
+      资料库文件级 MCP stdio 服务端（library_list_nodes / library_node_info / library_upload；
+      无 search——本期只做资料库、不做知识库）。详见 mate mcp material -h
 `
 
 // mcpBridge `mate mcp bridge`：平台侧 MCP stdio 网关的进程入口。

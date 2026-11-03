@@ -61,6 +61,9 @@ export const http = {
     raw<T>(instance.patch<Envelope<T>>(url, data, config)),
   delete: <T>(url: string, config?: AxiosRequestConfig): Promise<T> =>
     raw<T>(instance.delete<Envelope<T>>(url, config)),
+  // postForm 上传 multipart（FormData）：由 axios 自动带 boundary，不手设 Content-Type。
+  postForm: <T>(url: string, form: FormData, config?: AxiosRequestConfig): Promise<T> =>
+    raw<T>(instance.post<Envelope<T>>(url, form, config)),
 }
 
 /** 把任意异常归一为可展示文案。 */

@@ -21,6 +21,7 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrcommandpolicy"
 	"github.com/morehao/ark-mate/internal/controller/ctrexport"
 	"github.com/morehao/ark-mate/internal/controller/ctrlibrary"
+	"github.com/morehao/ark-mate/internal/controller/ctrmaterial"
 	"github.com/morehao/ark-mate/internal/controller/ctrmodel"
 	"github.com/morehao/ark-mate/internal/controller/ctrruntime"
 	"github.com/morehao/ark-mate/internal/controller/ctrsearch"
@@ -57,6 +58,8 @@ type Controllers struct {
 	WS            ctrws.WSCtr
 	// Attachment 附件面上传/回读/预览（v32）。
 	Attachment ctrattachment.AttachmentCtr
+	// Material 资料库目录树 + 上传 + 关键词检索（v33）。
+	Material ctrmaterial.MaterialCtr
 }
 
 // Deps 路由装配依赖（只有已构造的控制器与交付层设施）。
@@ -145,6 +148,7 @@ func New(d Deps) *gin.Engine {
 	registerCapability(rest, ctrls.Capability)
 	registerAutomation(rest, ctrls.Automation)
 	registerLibrary(rest, ctrls.Library)
+	registerMaterial(rest, ctrls.Material)
 	registerUsage(rest, ctrls.Usage)
 	registerSystem(rest, ctrls.System)
 

@@ -436,6 +436,17 @@ REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`co
 | GET | `/attachments/:id` | 回读附件元数据（不回字节）→ `AttachmentResp`。未知 id → `40401 attachment_not_found` |
 | GET | `/attachments/:id/content` | 附件字节流（预览用）：`Content-Type` 取探测后的 `mime_type`、`Content-Disposition: inline`。仅本机回环（受既有 Host/Origin 矩阵约束）。未知 id / 字节不可读 → `40401 attachment_not_found` |
 | DELETE | `/attachments/:id` | 撤下**待挂**附件 → `{deleted}`。`state=linked`（已挂进某一轮）→ `40901 attachment_linked`（与「已投递的队项不可撤」同一取舍）；不存在 → `deleted:false` 且 `code=0`（**幂等**）。删行 + `filestore.DeleteFile`（物理 blob 是否真删由内容去重决定） |
+| GET | `/materials/nodes` | **列资料库目录**（v33；`?parent=<id>&limit=&offset=`，空 parent = 空间根；一层子节点，`updated_at` 降序）→ `{nodes[], has_more, offset, limit}`。**本期只支持默认个人空间** |
+| GET | `/materials/nodes/:id` | 资料库节点详情 → `{id, parent_id, node_kind, title, body?, table_id?, schema?, drive_upload_id?, source_url?, size_bytes, created_at, updated_at}`（按 kind 裁剪载体）。未知 id → `40401 material_node_not_found` |
+| POST | `/materials/nodes` | **建节点**（v33；`{parent_id?, node_kind, title, body?, schema?, source_url?, space_id?}`）：`node_kind ∈ folder/doc/table/link/page`（`drive` 走上传）。种类与载体不匹配 → `40001 material_node_kind_mismatch`；非默认 `space_id` → `40501 space_not_supported`；未知种类 → `40000 invalid_node_kind` |
+| PATCH | `/materials/nodes/:id` | 改名/移动/改正文（`{title?, parent_id?, body?}` 指针语义）。移到自身或子孙下 → `40001 material_cycle`；目标父不存在 → `40401 material_node_not_found`；非 doc/link/page 改 body → `40001 material_node_kind_mismatch` |
+| DELETE | `/materials/nodes/:id` | 删节点 → `{deleted}`（folder **级联删子树**；不存在 → `deleted:false` 且 `code=0`，**幂等**）。字节按 filestore 去重回收（附件链路），本期不主动删 blob |
+| POST | `/materials/upload` | **上传文件成节点**（v33；`multipart/form-data` 单文件：`file` 必填 + 可选 `parent_id`）→ 节点详情。**复用附件链路**落字节（先 `POST /attachments` 拿 `att_…`，再建节点 + 关联）；本期一律落 `drive` 承载（可下载），md/html/csv 的内容解析留后续 |
+| GET | `/materials/search` | **关键词检索**（v33；`?q=` 必填、`?limit=` 默认 50 上限 200、`?offset=`）→ `{hits:[{node_id,title,node_kind,snippet}], total, has_more, note?}`。对 title/body 做**大小写不敏感子串匹配**——**不是语义检索、不是问答**；空结果 `total:0` + `note` 提示换词或浏览 |
+| GET | `/materials/nodes/:id/rows` | **取表格行**（v33 P3；仅 `node_kind=table`）→ `{node_id, schema, rows}`（`rows` 为 JSON 数组字符串）。非 table → `40001 material_node_kind_mismatch` |
+| PUT | `/materials/nodes/:id/rows` | **整表替换行**（v33 P3；`{rows}`，`rows` 必须是 JSON 数组字符串）→ `{node_id, schema, rows}`。非法 JSON/非数组 → `40000`；非 table → `40001 material_node_kind_mismatch` |
+| POST | `/materials/nodes/:id/publish` | **发布 page**（v33 P3；仅 `node_kind=page`）→ `{node_id, view_path, file_path}`：把 body HTML 落盘到 `<MATE_HOME>/material_pages/<id>/index.html`（本机可打开）。空 body → `40000`；非 page → `40001 material_node_kind_mismatch`。**不做公网分享** |
+| GET | `/materials/nodes/:id/view` | **查看 page**（v33 P3）：回 body 的 HTML（`Content-Type: text/html; charset=utf-8`），仅本机回环。非 page → `40001 material_node_kind_mismatch` |
 | GET | `/sessions/search` | 会话搜索（`?q=` 必填、`?limit=` 默认 30 上限 50；含归档、`updated` 降序） |
 | GET | `/search/messages` | 跨会话消息检索（`?q=` 必填、`?limit=` 默认 30 上限 200；返回 `seq` 锚点用于跳转定位，`source` 标数据面） |
 | POST | `/sessions/export` | 批量导出 `{ids[], format?: markdown\|text\|json}`（ids 上限 50）→ `{files:[{filename, content, bytes, events, truncated?}], skipped[], total_bytes}` |

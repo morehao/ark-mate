@@ -7,6 +7,7 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrcommandpolicy"
 	"github.com/morehao/ark-mate/internal/controller/ctrexport"
 	"github.com/morehao/ark-mate/internal/controller/ctrlibrary"
+	"github.com/morehao/ark-mate/internal/controller/ctrmaterial"
 	"github.com/morehao/ark-mate/internal/controller/ctrmodel"
 	"github.com/morehao/ark-mate/internal/controller/ctrruntime"
 	"github.com/morehao/ark-mate/internal/controller/ctrsearch"
@@ -57,5 +58,6 @@ func (s Services) BuildControllers(origin *middleware.OriginPolicy, hostFacts fu
 			OriginCheck: origin.CheckFunc(),
 		}),
 		Attachment: ctrattachment.NewAttachmentCtr(s.Attachment),
+		Material:   ctrmaterial.NewMaterialCtr(s.Material),
 	}
 }
