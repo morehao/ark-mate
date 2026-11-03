@@ -6,7 +6,7 @@
 
 ## 判据分类（v3.1 P0 盘点）
 
-161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，2026-10-21 顶层角色 4 条为 176 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，2026-10-22 平台值包对偶守卫为 177 条、同批协议包别名出口为 178 条、注释路径存在性为 179 条，2026-10-27 请求上下文边界 2 条为 181 条，2026-11-02 附件表列集合为 182 条、附件唯一写入点为 183 条、附件解析端口为 184 条、附件不写工作区为 185 条、附件事件载荷为 186 条、2026-11-03 资料库表列集合为 187 条、资料库无语义检索为 188 条、产物溯源上传收口 2 条（A-5/A-6）为 190 条、产物表列集合 A-2 为 191 条、产物域依赖单向 A-1 为 192 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性、平台值包守卫、请求上下文边界守卫、附件表列集合守卫、附件唯一写入点守卫、附件解析端口守卫、附件不写工作区守卫、附件事件载荷守卫、资料库表列集合守卫、资料库无语义检索守卫、上传收口守卫、产物表列集合守卫与产物域依赖单向守卫）：
+161 条既有判据按"失效方式"分三类（v3.1 之后为 168 条，v3.2 为 172 条，2026-10-21 顶层角色 4 条为 176 条，删 v3.1 旧层表后回到 168 条，v3.3 起为 169 条，2026-10-20 定义导入/导出归属为 171 条，再加层表路径存在性为 172 条，2026-10-22 平台值包对偶守卫为 177 条、同批协议包别名出口为 178 条、注释路径存在性为 179 条，2026-10-27 请求上下文边界 2 条为 181 条，2026-11-02 附件表列集合为 182 条、附件唯一写入点为 183 条、附件解析端口为 184 条、附件不写工作区为 185 条、附件事件载荷为 186 条、2026-11-03 资料库表列集合为 187 条、资料库无语义检索为 188 条、产物溯源上传收口 2 条（A-5/A-6）为 190 条、产物表列集合 A-2 为 191 条、产物域依赖单向 A-1 为 192 条、产物/MCP 无语义工具 A-4 为 193 条；新增的是层表、契约基线、v3.2 层表、gin 围栏、定义导入/导出归属、层表路径存在性、平台值包守卫、请求上下文边界守卫、附件表列集合守卫、附件唯一写入点守卫、附件解析端口守卫、附件不写工作区守卫、附件事件载荷守卫、资料库表列集合守卫、资料库无语义检索守卫、上传收口守卫、产物表列集合守卫、产物域依赖单向守卫与产物/MCP 无语义工具守卫）：
 
 | 类别 | 挡什么 | 典型 | v3.1 处置 |
 | --- | --- | --- | --- |
@@ -127,9 +127,10 @@
 - 再加 **1 条上传单端点守卫**（`single_upload_test.go` 的 `TestSingleUploadEndpoint`，A-5，2026-11-03 产物溯源 P0′）：`internal/` 生产源码里接收 multipart 的写端点（`c.FormFile` / `ParseMultipartForm`）只允许 `ctrcapability`（`POST /skills/import`，解包导入定义、字节不进 filestore，白名单例外）——全局收字节统一在 golib `ginupload` 的 `POST /files`（外部包、本仓不手写）。出现第二个收 multipart 的写端点即红，挡住「又给某模块开一个 upload」。反证：在某控制器加一行 `c.FormFile("file")` → 红。fail-closed：一个收 multipart 的点都没扫到即失败（白名单文件改名后不许空转）。
 - 再加 **1 条字节落点守卫**（`single_upload_test.go` 的 `TestBytesWrittenOnlyViaFilestore`，A-6）：同一生产源码文件里若同时出现「收 multipart」与「`os.Create`/`os.WriteFile`」即红——上传字节的唯一落点是 golib filestore（经 `attachmentstore`/`ginupload`），handlers 不得自己落盘。刻意宽松：只判「上传 handler 自己写盘」这一组合，不误伤 page 落盘/迁移/资产写入等非上传字节的写盘。
 - 再加 **1 条产物表列集合守卫**（`artifact_table_test.go` 的 `TestArtifactsColumnsFrozen`，A-2，2026-11-03 产物溯源 v34）：`artifacts` 表列名+类型**冻结快照**，交叉断言 `model/artifact.go` 的 gorm `column:` 标签逐列一致——加一列不更新快照、或实体标签与 DDL 漂移都当场红；fail-closed（解析不到 `CREATE TABLE artifacts` 即失败）。同时 `library_table_test.go` 的 `TestLibraryTablesColumnsFrozen` 扩了 `library_nodes` 的 `category`/`provenance_id` 两列（v34 ALTER，由 `alterAddedColumns` 拼入）。反证：给 v34 的 artifacts DDL 加一列不同步快照 → 红。
+- 再加 **1 条产物/MCP 无语义工具守卫**（`artifact_no_semantic_test.go` 的 `TestArtifactNoSemanticTool`，A-4，2026-11-03 产物溯源）：`domain/artifact`、`svcartifact`、`infra/materialmcp` 生产源码剥注释后不得出现 `embedding`/`vector`/`semantic`/`rag`/`chunks`（延续只做资料库不做知识库）。fail-closed：一个文件都扫不到即失败。
 - 再加 **1 条产物域依赖单向守卫**（`artifact_dep_test.go` 的 `TestArtifactDoesNotImportMaterial`，A-1，2026-11-03 产物溯源）：`domain/artifact` 与 `svcartifact` 的生产源码不得 import `internal/domain/material` / `internal/service/svcmaterial`（依赖只能「资料库 → 产物」，不能反向）。fail-closed：一个产物源文件都扫不到即失败（目录改名后不许空转）。另：产物收录的**不变量**（`category='artifact' ⟺ provenance_id 非空`、幂等、悬空 `artifact_not_found`）由**行为测试** `router/art_import_test.go` 的 `TestArtifactImportFlow` 覆盖（不是 archtest 静态守卫，因为它要真库真路由）。
 
-**共 192 条**——加守卫时记得同步这句话。
+**共 193 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 

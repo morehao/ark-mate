@@ -17,9 +17,10 @@ import type {
 // 本期只做资料库、不做知识库：`search` 是**关键词子串匹配**，不是语义检索。
 
 /** 列目录（一层子节点）。parent 空 = 空间根。 */
-export const listMaterialNodes = (params: { parent?: string; limit?: number; offset?: number } = {}): Promise<MaterialListResp> => {
+export const listMaterialNodes = (params: { parent?: string; category?: string; limit?: number; offset?: number } = {}): Promise<MaterialListResp> => {
   const qs = new URLSearchParams()
   if (params.parent) qs.set('parent', params.parent)
+  if (params.category) qs.set('category', params.category)
   if (params.limit != null) qs.set('limit', String(params.limit))
   if (params.offset != null) qs.set('offset', String(params.offset))
   const suffix = qs.toString()
