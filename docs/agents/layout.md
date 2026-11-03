@@ -13,7 +13,7 @@
     - 层带（L0–L9 终局表，见 [`../architecture.md`](../architecture.md) 的 §4.1）：`persistence/model` → 值/协议 → `domain` → `dto` → `service` → `persistence/{store,dao}` + `infra` → 机制与注册表 → `sessionruntime` → `controller` → 装配与交付。**只能向内 import**；`dto` 被 controller / service / CLI / WS 共用（同一份对外契约），`domain` 在它的里侧、不认识它。
     - **装配只能自上而下，不许反向**：`assembly` 构造用例与控制器，`router` 只收已构造的控制器（`router.Deps`），`app` 只消费 `assembly.BuildResult`。**`app`/`router`/`cli` 都不得引用 `service/svc*`**，控制器也不得 import `domain`/`store`/`model`——判据见 `layers_v32_test.go`。
     - **入站面是三个并列顶层目录，不是一条带**（决策 v33，2026-10-22；本条回退 2026-10-20 S3 把三者收进 `delivery/` 的那一步）：
-      `controller`（L8，参数绑定 + 简单校验 + 调 svc + 回响应，13 个 `ctr<领域>` 包）· `middleware`（L8，入站横切：凭据鉴权 / Host-Origin 判定）·
+      `controller`（L8，参数绑定 + 简单校验 + 调 svc + 回响应，16 个 `ctr<领域>` 包）· `middleware`（L8，入站横切：Host-Origin 来源判定；平台不做鉴权，见 `../../docs/deployment.md` §2.3.2）·
       `router`（L9，唯一路由装配点 + 前端资产交付 `web*`）。三者各自一个层带（8 / 8 / 9）、各一行角色卡，`delivery/` 这个概念已不存在。
       问"HTTP 相关放哪"按准入回答：新端点 → `router/routes_<领域>.go` 挂路由 + `controller/ctr<领域>` 收参数；横切拦截 → `middleware`；
       要引 `service/svc<领域>` 的只有 `controller`。**三个目录都不放业务判断**（判断进 `service/svc<领域>`），准入与判定同 v30。
