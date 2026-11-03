@@ -418,7 +418,7 @@ func TestPrimaryKeyShapesStayDeclared(t *testing.T) {
 		gotNames = append(gotNames, g.name)
 	}
 	sort.Strings(gotNames)
-	wantNames := []string{"Attachment", "Event", "Input", "LibraryNode", "Message", "Model", "PermissionMemory", "Run", "Session", "Workspace"}
+	wantNames := []string{"Artifact", "Attachment", "Event", "Input", "LibraryNode", "Message", "Model", "PermissionMemory", "Run", "Session", "Workspace"}
 	sort.Strings(wantNames)
 	if strings.Join(gotNames, ",") != strings.Join(wantNames, ",") {
 		t.Fatalf("`objid` 的铸造前缀登记表变了：\n got  %v\n want %v\n"+

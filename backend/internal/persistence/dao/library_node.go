@@ -16,6 +16,7 @@ type LibraryNodeCond struct {
 	SpaceID  string
 	ParentID string
 	NodeKind string
+	Category string
 }
 
 // BuildCondition 实现 gormdao.Cond。
@@ -31,6 +32,9 @@ func (c *LibraryNodeCond) BuildCondition(db *gorm.DB, tableName string) {
 	}
 	if c.NodeKind != "" {
 		db.Where(clause.Eq{Column: clause.Column{Table: tableName, Name: "node_kind"}, Value: c.NodeKind})
+	}
+	if c.Category != "" {
+		db.Where(clause.Eq{Column: clause.Column{Table: tableName, Name: "category"}, Value: c.Category})
 	}
 }
 

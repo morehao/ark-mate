@@ -77,6 +77,8 @@ func (s *materialSvc) detail(ctx context.Context, n model.LibraryNodeEntity) (*d
 		DriveUploadID: n.DriveUploadID,
 		SourceURL:     n.SourceURL,
 		SizeBytes:     n.SizeBytes,
+		Category:      n.Category,
+		ProvenanceID:  n.ProvenanceID,
 		CreatedAt:     n.CreatedAt.UTC().Format(model.LayoutTS),
 		UpdatedAt:     n.UpdatedAt.UTC().Format(model.LayoutTS),
 	}
@@ -124,6 +126,7 @@ func (s *materialSvc) CreateNode(ctx context.Context, req dtomaterial.CreateNode
 		Body:          req.Body,
 		SourceURL:     req.SourceURL,
 		DriveUploadID: req.DriveUploadID,
+		Category:      model.LibraryNodeCategoryMaterial, // 用户自建资料
 	}
 	if kind == material.KindTable {
 		n.TableID = n.ID // table_id 自指到本节点（library_tables.node_id = 本节点 id）
@@ -290,6 +293,7 @@ func (s *materialSvc) Upload(ctx context.Context, fileName, declaredName, declar
 		Title:         title,
 		DriveUploadID: up.ID,
 		SizeBytes:     up.SizeBytes,
+		Category:      model.LibraryNodeCategoryMaterial,
 	}
 	if err := s.st.InsertLibraryNode(ctx, n); err != nil {
 		return nil, code.Errorf(code.Internal, "建资料库节点失败: %v", err)

@@ -94,6 +94,9 @@ type Store struct {
 	libraryNodes       *dao.LibraryNodeDao
 	libraryAttachments *dao.LibraryAttachmentDao
 	libraryTables      *dao.LibraryTableDao
+
+	// 产物溯源登记（v34）：artifacts。字节仍走 filestore；本组只承载溯源/归属/快照。
+	artifacts *dao.ArtifactDao
 }
 
 // Open 打开（必要时创建）SQLite 库并自动迁移到最新 schema。
@@ -147,6 +150,8 @@ func New(db *gorm.DB) *Store {
 		libraryNodes:       dao.NewLibraryNodeDao(getDB),
 		libraryAttachments: dao.NewLibraryAttachmentDao(getDB),
 		libraryTables:      dao.NewLibraryTableDao(getDB),
+
+		artifacts: dao.NewArtifactDao(getDB),
 	}
 }
 

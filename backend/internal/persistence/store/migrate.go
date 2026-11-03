@@ -780,6 +780,10 @@ var schemaMigrations = []migration{
 	// `library_attachments` / `library_tables`。**字节落盘复用附件链路 filestore/attachments、
 	// 本步不建 blob 表**；本期只做资料库、不做知识库，故**无检索索引表**——理由写在该文件头）。
 	migrationV33,
+
+	// v34 的版本步本体在 `migrate_v34.go`（新增产物表 `artifacts` + `library_nodes` 加
+	// `category`/`provenance_id` 两列。产物不存字节，字节复用 filestore——理由写在该文件头）。
+	migrationV34,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

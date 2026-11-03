@@ -46,8 +46,12 @@ type NodeDetailResp struct {
 	DriveUploadID string `json:"drive_upload_id,omitempty"`
 	SourceURL     string `json:"source_url,omitempty"`
 	SizeBytes     int64  `json:"size_bytes"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	// Category 分类维度（v34）：material（用户自建）| artifact（会话产物收录）。
+	Category string `json:"category,omitempty"`
+	// ProvenanceID 引用的产物主键（v34）：→ artifacts.id（artifact 类别时非空）。
+	ProvenanceID string `json:"provenance_id,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // CreateNodeReq `POST /materials/nodes` 的请求体（建 folder/doc/table/link/page/drive）。
