@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Select, message as antdMessage } from 'antd'
+import { Select } from 'antd'
 import { ArrowUpOutlined, PaperClipOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import type { AttachmentMeta, CommandInfo, SessionCapabilities } from '@ark-mate/types'
-import { uploadAttachment } from '@ark-mate/api'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
 import { DELIVERY_HINT, DELIVERY_LABEL, type DeliveryChoice } from '../console/queueView'
 import { applyCommandHint, commandHintQuery, matchCommands, moveHintIndex } from '../console/commandHints'
+import { useAttachmentDraft } from '../console/useAttachmentDraft'
 import { WorkspaceChipStatic } from './WorkspacePicker'
 import { ComposerCapabilities } from './ComposerCapabilities'
 import { AttachmentChip } from './AttachmentChip'
@@ -110,32 +110,9 @@ export function Composer({
   const taRef = useRef<HTMLTextAreaElement | null>(null)
 
   // ——— 附件（v32）———：待发附件 chip 的本地态（刷新不保留；pending 由服务端 TTL 收）。
-  const [pendingAtts, setPendingAtts] = useState<AttachmentMeta[]>([])
-  const [uploading, setUploading] = useState(false)
-  const [dragOver, setDragOver] = useState(false)
-  const fileRef = useRef<HTMLInputElement | null>(null)
-
-  const addFiles = async (files: FileList | File[] | null) => {
-    if (!files) return
-    const list = Array.from(files)
-    if (list.length === 0) return
-    setUploading(true)
-    for (const f of list) {
-      try {
-        const att = await uploadAttachment(f)
-        // 门禁：模型不能收图且这是图片 → 上传成功但**不挂进待发**（提示并删除，避免发出去被拒）。
-        if (att.kind === 'image' && imageSupported === false) {
-          void antdMessage.warning('当前模型不支持图片输入，已跳过该图片')
-          continue
-        }
-        setPendingAtts((prev) => [...prev, { id: att.id, name: att.name, mime_type: att.mime_type, size_bytes: att.size_bytes, kind: att.kind }])
-      } catch (err) {
-        void antdMessage.error(`上传 ${f.name} 失败：${err instanceof Error ? err.message : String(err)}`)
-      }
-    }
-    setUploading(false)
-  }
-  const removeAtt = (id: string) => setPendingAtts((prev) => prev.filter((a) => a.id !== id))
+  // 行为与新建会话页（`StartPanel`）**共用**同一份 hook，两处只差版面。
+  const { pendingAtts, uploading, dragOver, setDragOver, fileRef, addFiles, removeAtt, clear } =
+    useAttachmentDraft(imageSupported)
 
   const empty = draft.trim().length === 0 && pendingAtts.length === 0
   // 同一颗圆钮的三个状态（D7）：
@@ -179,7 +156,7 @@ export function Composer({
     const atts = pendingAtts
     setDraft('')
     setHintIndex(0)
-    setPendingAtts([])
+    clear()
     onSend(text, busy ? delivery : undefined, atts.length > 0 ? atts : undefined)
     taRef.current?.focus()
   }

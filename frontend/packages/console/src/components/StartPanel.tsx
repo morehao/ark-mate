@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from 'antd'
-import { ArrowUpOutlined } from '@ant-design/icons'
+import { ArrowUpOutlined, PaperClipOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { advertisedModelValues, modelValues, undeclaredModelValues, isPlatformModelID } from '@ark-mate/types'
 import { useMate } from '../store'
@@ -9,6 +9,8 @@ import { ModelSelect } from './ModelSelect'
 import { WorkspacePicker, type WorkspaceChoice } from './WorkspacePicker'
 import { mostRecentlyUsedWorkspaceId } from '../console/workspaceView'
 import { CapabilityBar } from './CapabilityBar'
+import { AttachmentChip } from './AttachmentChip'
+import { useAttachmentDraft } from '../console/useAttachmentDraft'
 import { FOLLOW_DEFAULT, selectionPayload, type CapabilityChoice } from '../console/capabilityView'
 import { mergeCapabilityPatch } from '../console/capabilityEdit'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
@@ -130,8 +132,20 @@ export function StartPanel() {
   // v19：建会话不再需要客户端知道任何底座事实（原来要在缺省时挑出"当前 Agent"并传 agent_id，
   // 现在后端按构建期固定的那个底座自己填）。因此这里也不再拿"agents 列表是否为空"当发送门禁——
   // 那条门禁当初只是为了让"必然失败的提交"点不下去，而现在提交不依赖任何取不到的前置事实。
-  const empty = draft.trim().length === 0
-  const canSend = !empty && !sending
+
+  // 图片门禁（v32）：当前路由能否收图 = `GET /models/catalog` 的连接期事实 `image_input`
+  // （ADR-14 的唯一判据；`undefined` = 取不到 → 不拦，交给服务端 `model_no_image_input` 兜底）。
+  //
+  // 注意这里**只读连接期事实**、不读静态能力基线：与 `Composer` 里那条门禁同一条纪律。
+  // 新建页拿不到"会话模型"（会话还没建），所以用路由级事实——它是"这条路由的收图能力"的上界，
+  // 恰好是首轮发送前能知道的那一层；逐条模型的 `input_modalities` 由服务端在受理时再判。
+  const imageSupported = modelCatalog?.image_input
+  const { pendingAtts, uploading, dragOver, setDragOver, fileRef, addFiles, removeAtt, clear } =
+    useAttachmentDraft(imageSupported)
+
+  // v32：有附件（哪怕正文为空）也可以发——正文与附件是不同的输入，二者其一非空即可。
+  const empty = draft.trim().length === 0 && pendingAtts.length === 0
+  const canSend = !empty && !sending && !uploading
 
   // 候选的**两个面**（v27，别合并）：
   //	- `advertised`：运行时广告的全部候选 —— 只服务两条判断（目录到没到、广告了几个）；
@@ -201,6 +215,7 @@ export function StartPanel() {
       // "不合法值能发出去"的唯一保证）。形状不对 → 一个字都不带，回到「跟随默认」——
       // 平台只接受自己声明过的模型，带一个形状不对的值只会换来一次 40401。
       const picked = isPlatformModelID(model) ? model : null
+      const atts = pendingAtts
       const id = await createAndRun(
         draft.trim(),
         picked ? { modelID: picked } : undefined,
@@ -208,8 +223,12 @@ export function StartPanel() {
         // UI 三态（null = 未限制）→ wire 形态（键缺失 = 未限制）：两个 kind 都没限制时返回
         // undefined，请求体里连 capabilities 键都不出现。转换只此一处，别的层不再判。
         selectionPayload(capabilities),
+        // 首轮附件（v32）：附件 id 随 `POST /sessions` 一起提交，由后端解析成 image 块/handle。
+        atts.length > 0 ? atts : undefined,
       )
       if (picked) localStorage.setItem(LAST_MODEL_KEY, picked)
+      // 附件已随首轮受理：清掉待发 chip（发送失败则抛出到 finally 前，pending 原样保留）。
+      clear()
       if (id) navigate(`/sessions/${id}`)
     } finally {
       setSending(false)
@@ -267,8 +286,34 @@ export function StartPanel() {
               flexDirection: 'column',
               gap: 10,
               boxSizing: 'border-box',
+              // 拖拽落区（v32）：拖文件入卡片时高亮边框（与会话页 Composer 同一行为，走 token）。
+              outline: dragOver ? `2px dashed ${tokens.primary}` : 'none',
+              outlineOffset: -4,
+            }}
+            onDragOver={(e) => {
+              if (e.dataTransfer?.types?.includes('Files')) {
+                e.preventDefault()
+                setDragOver(true)
+              }
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+                e.preventDefault()
+                setDragOver(false)
+                void addFiles(e.dataTransfer.files)
+              }
             }}
           >
+            {/* 待发附件 chips（v32）：上传成功即出现，可逐个移除。首轮也随之带上。 */}
+            {pendingAtts.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {pendingAtts.map((a) => (
+                  <AttachmentChip key={a.id} attachment={a} onRemove={() => removeAtt(a.id)} />
+                ))}
+                {uploading && <span style={{ fontSize: 12, color: tokens.textSecondary }}>上传中…</span>}
+              </div>
+            )}
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -323,6 +368,37 @@ export function StartPanel() {
                   overflow: 'hidden',
                 }}
               >
+                {/* 回形针（v32）：与会话页同一入口。隐藏 input + 按钮触发；拖拽落区在卡片上。 */}
+                <input
+                  ref={fileRef}
+                  type="file"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    void addFiles(e.target.files)
+                    e.target.value = '' // 允许再次选择同名文件
+                  }}
+                />
+                <button
+                  type="button"
+                  title="添加附件（也可直接把文件拖进输入区）"
+                  aria-label="添加附件"
+                  disabled={uploading || sending}
+                  onClick={() => fileRef.current?.click()}
+                  style={{
+                    border: 0,
+                    background: 'transparent',
+                    padding: 0,
+                    lineHeight: 1,
+                    color: uploading || sending ? tokens.textPlaceholder : tokens.textSecondary,
+                    cursor: uploading || sending ? 'default' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    flex: 'none',
+                  }}
+                >
+                  <PaperClipOutlined style={{ fontSize: 15 }} />
+                </button>
                 {/* 「这个会话用哪些能力」= 会话级能力选定（M3）。与会话内输入区**同一个组件**
                     （`+` 菜单 + 专家/技能/连接器 + chip）：新建会话就是这条会话的首轮，
                     没有理由长成另一套交互。默认不限制 → 只有一颗 `+`，不编假值。 */}
