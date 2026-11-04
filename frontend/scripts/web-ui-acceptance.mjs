@@ -75,6 +75,8 @@ let SKILLS = {}
 /** `GET /meta` 的最近一次事实（底座 id 与版本）。 */
 let META = null
 const AUTO_ID = 'ui-verify-daily'
+/** 列表「任务」列展示的是**名称**（不是 id），所以断言/等待都按名称来。 */
+const AUTO_NAME = '界面验收每日任务'
 /**
  * 目录浏览对话框场景的夹具目录名（在 `mkdtempSync(tmpdir()/mate-wsdir-)` 下自建自清）。
  *
@@ -327,6 +329,11 @@ async function openPage(browser, url) {
 /** 用 JS 触发 click（元素滚出可视区或被遮挡时用；antd 按钮认合成 click）。 */
 const clickJS = (page, expr) =>
   page.evaluate(`const el = ${expr}; if (!el) return false; el.click(); return true`)
+
+/** 在「任务」列含指定名称的那一行里点指定按钮（多行时避免点到第一条）。 */
+const rowBtnClick = (name, label) =>
+  // 按钮文本比对前先去掉所有空白：antd 会给两个汉字的按钮插空格（innerText 是「运 行 史」）。
+  `return (() => { const norm = (s) => (s||'').replace(/\\s/g, ''); const tr = [...document.querySelectorAll('.ant-table-tbody tr.ant-table-row')].find(t => (t.innerText||'').includes(${JSON.stringify(name)})); if(!tr) return false; const b=[...tr.querySelectorAll('button')].find(b=>norm(b.innerText)===${JSON.stringify(label)}); if(!b) return false; b.click(); return true })()`
 
 /**
  * 等编辑卡**收起**（= 这张卡的写面已返回、表单已卸载）。
@@ -676,29 +683,40 @@ async function scenarioCapability(browser) {
   check('GET /agents 已下线（路由不存在，不是界面藏起来）', goneRead.json?.code !== 0,
     `HTTP code=${goneRead.json?.code} msg=${JSON.stringify(goneRead.json?.msg ?? '')}`)
   const page = await openPage(browser, `${WEB_URL}/agents`)
-  await page.waitFor(textExpr('可用的能力'), { label: '旧 /agents 路径落回问答页' })
+  // 旧 `/agents` 深链接落到问答页（`/sessions`）。**不能**再等「可用的能力」——那是 `/` 新建卡的
+  // 文案，`/sessions` 空态首屏没有它（历史断言正是因此一直等不到而超时）。改等路由真正落到
+  // `/sessions` 且会话页骨架已挂上（「新建会话」按钮）。
+  await page.waitFor(`return location.pathname === '/sessions'`, { label: '旧 /agents 路径落回问答页' })
+  await page.waitFor(textExpr('新建会话'), { label: '问答页骨架渲染' })
   const landedAt = await page.evaluate('return location.pathname')
   check('旧 /agents 深链接落回问答页（不落进一个已删的设置节）', landedAt === '/sessions', `pathname=${landedAt}`)
   await page.shot('01-agents-path-gone')
 
-  // 打开「可用的能力」（新建卡）
-  await page.goto(`${WEB_URL}/`, { waitText: '可用的能力' })
+  // v21 起「能力」入口从新建卡的大面板改成了输入框内的 `+` 能力条（CapabilityBar）：
+  // `+` 弹菜单（专家 / 技能 / 连接器）→ 点「技能」开面板。原来那套「能力 ·」药丸、
+  // 「按平台默认投放」文案、`.fg-cap-pop` 直开都已不存在，这里按新界面重写。
+  await page.goto(`${WEB_URL}/`, { waitText: '试试这些指令' })
   const runtimeName = META?.runtime?.name || RUNTIME
-  await page.waitFor(textExpr(runtimeName), { label: `新建卡显示构建期固定的底座=${runtimeName}` })
+  // 「构建期固定的底座，纯展示不可切换」这一条在新落点上验：能力条里没有任何"切换底座/Agent"
+  // 的入口，且菜单只有 专家/技能/连接器 三类（没有 runtime 选择）。
+  await page.waitFor(`return !!document.querySelector('.fg-cap-add')`, { label: '能力入口（+）渲染' })
   await page.shot(`02-start-with-${RUNTIME}`)
-  const startText = await page.text()
-  check(`新建卡标出构建期固定的底座（${runtimeName}，纯展示不可切换）`,
-    startText.includes(runtimeName) && /底座/.test(startText) && !/切换\s*底座|切换\s*Agent/.test(startText),
-    startText.split('\n').filter((l) => l.includes(runtimeName) || /底座|Agent/.test(l)).join(' | ').slice(0, 240))
-  const pill = byText('button', '能力 ·')
-  await page.click(pill)
-  await page.waitFor(`const el = document.querySelector('.fg-cap-pop'); return !!el && el.getClientRects().length > 0`, { label: '能力弹层打开' })
-  await sleep(500)
+  await page.evaluate(`document.querySelector('.fg-cap-add').click()`)
+  await page.waitFor(`return !!document.querySelector('.fg-cap-menu')`, { label: '能力菜单打开' })
+  const menuText = await page.evaluate(`return (document.querySelector('.fg-cap-menu')||{}).innerText || ''`)
+  check('能力菜单只有 专家/技能/连接器 三类（没有切换底座/Agent 的入口）',
+    /专家/.test(menuText) && /技能/.test(menuText) && /连接器/.test(menuText) && !/底座|Agent|runtime/i.test(menuText),
+    menuText.replace(/\n/g, ' | ').slice(0, 160))
+  // 点「技能」进面板
+  await page.evaluate(`[...document.querySelectorAll('.fg-cap-menu *')].find(e => (e.innerText||'').trim().startsWith('技能'))?.click()`)
+  await page.waitFor(`const el = document.querySelector('.fg-cap-pop'); return !!el && el.getClientRects().length > 0`, { label: '技能面板打开' })
+  await sleep(400)
   await page.shot('03-capability-popover')
   const popDefault = await page.evaluate(`return document.querySelector('.fg-cap-pop').innerText`)
-  check('缺省态不展开清单，只写"按平台默认投放（当前 N 个）"', /按平台默认投放（当前 \d+ 个）/.test(popDefault), popDefault.split('\n').slice(0, 5).join(' | '))
+  check('缺省态（跟随默认）不展开清单，只写"按默认启用（当前 N 个）"',
+    /按默认启用（当前 \d+ 个）/.test(popDefault), popDefault.split('\n').slice(0, 5).join(' | '))
 
-  // 技能区切「自定义」→ 预填默认集 → 列表才展开（三态里的"自定义"分支）
+  // 切「自定义」→ 预填默认集 → 列表才展开（三态里的"自定义"分支）
   await page.click(`[...document.querySelectorAll('.fg-cap-mode-btn')].find(b => b.innerText.trim() === '自定义')`)
   await sleep(400)
   await page.shot('04-capability-custom')
@@ -732,17 +750,20 @@ async function scenarioCapability(browser) {
     check('hover 不适用项给出原因（tooltip）', false, '没有 .fg-cap-opt-why 元素')
   }
 
-  // 真正勾一下（三态语义：一个都不勾 = 明确一个都不要；再勾回来 = 只剩它）
-  // 勾的是**适用项**（它才会被投给会话；不适用项是 fg-off，点不动）
+  // 三态语义（自定义分支）：
+  //   ① 清空 → 一个都不勾 = 明确"一个都不要"；
+  //   ② 只勾适用项 → "只投勾选的 1 个"（不适用项是 fg-off，点不动）。
+  // 注：缺省自定义继承的是**全部默认技能**（若干条），所以不是"只勾了适用那一条"——
+  // 老断言按"只勾了一条"写，取消它会剩别的（3→2）而误判；这里改成先「清空」再只勾一条。
+  await page.evaluate(`[...document.querySelectorAll('.fg-cap-mini')].find(b => b.innerText.trim() === '清空')?.click()`)
+  await sleep(350)
+  const noneSel = await page.evaluate(`return document.querySelector('.fg-cap-pop').innerText`)
+  check('清空 → 明确表达"一个都不要"', /一个都不要/.test(noneSel), noneSel.split('\n').filter((l) => /只投/.test(l)).join(' | '))
   const appCheckbox = `[...document.querySelectorAll('.fg-cap-opt')].find(o => (o.innerText||'').includes(${JSON.stringify(SKILL_DEFS[RUNTIME].name)}))`
   await page.click(`${appCheckbox}.querySelector('input[type=checkbox]')`)
   await sleep(350)
-  const noneSel = await page.evaluate(`return document.querySelector('.fg-cap-pop').innerText`)
-  check('取消勾选 → 明确表达"一个都不要"', /一个都不要/.test(noneSel), noneSel.split('\n').filter((l) => /只投/.test(l)).join(' | '))
-  await page.click(`${appCheckbox}.querySelector('input[type=checkbox]')`)
-  await sleep(350)
   const oneSel = await page.evaluate(`return document.querySelector('.fg-cap-pop').innerText`)
-  check('重新勾选 → 只投勾选的 1 个', /只投勾选的 1 个/.test(oneSel), oneSel.split('\n').filter((l) => /只投/.test(l)).join(' | '))
+  check('只勾适用项 → 只投勾选的 1 个', /只投勾选的 1 个/.test(oneSel), oneSel.split('\n').filter((l) => /只投/.test(l)).join(' | '))
   await page.shot('05-capability-selected')
 
   // 关掉弹层：它盖在输入框上方，不关就会把后面的点击/输入吃掉（第一版就是这么失败的）
@@ -813,7 +834,7 @@ async function scenarioAutomation(browser) {
 
   await page.click(byText('button', '新建任务'))
   // 用页面文本判定，不用 antd 的类名（v6 改过类名：Tooltip 的容器就不是 .ant-tooltip 了）
-  await page.waitFor(textExpr('ID（文件名，创建后不可改）'), { label: '编辑器打开' })
+  await page.waitFor(textExpr('任务标识（创建后不可改）'), { label: '编辑器打开' })
   await sleep(500)
   await page.shot('11-automation-editor')
 
@@ -848,6 +869,11 @@ async function scenarioAutomation(browser) {
   check('定时任务表单里没有「由哪个执行者执行」那一格（选择面已撤）',
     !formLabels.includes('Agent') && !formLabels.some((l) => /执行者|由哪个/.test(l)),
     `表单标签=${JSON.stringify(formLabels)}`)
+
+  // 投递方式（ADR v35）：缺省「投递到会话」，此时表单里没有工作空间那一格；要验工作空间药丸
+  // 得先切到「新建会话」（cwd 只在新建会话模式下才有意义）。这一步是下面取药丸的前置。
+  await clickJS(page, `[...document.querySelectorAll('.ant-segmented-item')].find(b => (b.innerText||'').includes('新建会话'))`)
+  await sleep(400)
 
   // 工作空间：点药丸 → 取第一条候选目录（没有就手打绝对路径）→ 用药丸文案自证已选上
   const pillName = `(document.querySelector('.fg-ws-pill-name')||{}).innerText || ''`
@@ -913,27 +939,25 @@ async function scenarioAutomation(browser) {
   const saveBtn = `[...document.querySelectorAll('button')].filter(b => /^(保存|确定|创建)$/.test((b.innerText||'').trim().replaceAll(' ',''))).pop()`
   check('编辑器底部有保存按钮（okText=保存）', await page.evaluate(`return !!(${saveBtn})`), (await page.evaluate(`return (${saveBtn}||{}).innerText || '无'`)))
   await clickJS(page, saveBtn)
-  await page.waitFor(`return !(document.body.innerText||'').includes('ID（文件名，创建后不可改）')`, { label: '编辑器关闭' })
+  await page.waitFor(`return !(document.body.innerText||'').includes('任务标识（创建后不可改）')`, { label: '编辑器关闭' })
   await sleep(900)
   await page.shot('14-automation-saved')
   const listed = await page.evaluate(`return document.body.innerText`)
-  check('新建的自动化出现在列表', listed.includes(AUTO_ID), `含 ${AUTO_ID}=${listed.includes(AUTO_ID)}`)
+  check('新建的自动化出现在列表', listed.includes(AUTO_NAME), `含 ${AUTO_NAME}=${listed.includes(AUTO_NAME)}`)
   const apiList = await api('GET', '/automations')
   check('API 侧自动化已落盘', (apiList.json.data ?? []).some((a) => a.id === AUTO_ID), (apiList.json.data ?? []).map((a) => a.id).join(','))
 
-  // 运行史（跑之前）：抽屉能开，空态如实
-  await clickJS(page, byText('button', '运行史'))
-  await page.waitFor(textExpr('的运行史'), { label: '运行史抽屉打开' })
+  // 运行史（跑之前）：抽屉能开，空态如实。**点本任务那一行**的运行史按钮（多行时别点到第一条）。
+  check('新任务这一行有「运行史」按钮', await page.evaluate(rowBtnClick(AUTO_NAME, '运行史')), '')
+  await page.waitFor(textExpr(`${AUTO_ID} 的运行史`), { label: '运行史抽屉打开' })
   await sleep(1200)
   await page.shot('15-automation-runs-empty')
   check('运行史抽屉可开且空态如实', (await page.text()).includes('还没有触发记录'), '')
 
   // 手动 run（DoD：手动 run → 会话出现在列表且带标）
   // 注意手动运行**会跳到那条会话**（AutomationsPage.onRun 里 navigate），所以先看运行史再看运行。
-  await page.goto(`${WEB_URL}/automations`, { waitText: AUTO_ID })
-  const runBtn = byText('button', '立即运行')
-  check('列表行有「立即运行」', !!(await page.evaluate(`return !!(${runBtn})`)), '')
-  await clickJS(page, runBtn)
+  await page.goto(`${WEB_URL}/automations`, { waitText: AUTO_NAME })
+  check('本任务这一行有「立即运行」按钮', await page.evaluate(rowBtnClick(AUTO_NAME, '立即运行')), '')
   await page.waitFor(`return location.pathname.startsWith('/sessions/')`, { label: '手动运行后跳到会话', timeout: 90000 })
   const autoConv = await page.evaluate('return location.pathname.split("/").pop()')
   createdSessions.push(autoConv)
@@ -944,25 +968,16 @@ async function scenarioAutomation(browser) {
   check('自动化触发的会话跑到终态（等标的前提）', st !== 'timeout', `status=${st}`)
   await page.shot('16-automation-session')
 
-  // 会话带标：侧栏/会话页上有 `title="由定时任务 <id> 触发"`
-  const originTag = `[...document.querySelectorAll('[title]')].find(e => (e.getAttribute('title')||'').includes('由定时任务') && (e.getAttribute('title')||'').includes(${JSON.stringify(AUTO_ID)}))`
-  let gotTag = false
-  try {
-    await page.waitFor(`return !!(${originTag})`, { label: '自动化来源标出现', timeout: 30000 })
-    gotTag = true
-  } catch {
-    gotTag = false
-  }
-  check('会话带自动化来源标（由定时任务 … 触发）', gotTag, await page.evaluate(`return (${originTag}||{}).getAttribute ? (${originTag}).getAttribute('title') : '无'`))
-
-  // API 交叉验证：这条会话的 origin 就是 automation:<id>
+  // 来源标：v21（#55）把会话头/侧栏那枚「由定时任务 <id> 触发」的 title 徽标撤掉了（`isAutomationOrigin`
+  // 这组 helper 仍在，但已无组件渲染），所以**不再在界面上找它**——真契约是 API 的 `origin`。
+  // 这里只留 API 交叉验证：这条会话的 origin 就是 `automation:<id>`（来源可回溯）。
   const convDetail = await api('GET', `/sessions/${autoConv}`)
   check('会话 origin 落在 automation:ui-verify-daily', (convDetail.json.data?.origin ?? '') === `automation:${AUTO_ID}`, `origin=${convDetail.json.data?.origin}`)
 
   // 运行史（跑之后）：有记录、标明是手动触发
-  await page.goto(`${WEB_URL}/automations`, { waitText: AUTO_ID })
-  await clickJS(page, byText('button', '运行史'))
-  await page.waitFor(textExpr('的运行史'), { label: '运行史抽屉打开（跑之后）' })
+  await page.goto(`${WEB_URL}/automations`, { waitText: AUTO_NAME })
+  await page.evaluate(rowBtnClick(AUTO_NAME, '运行史'))
+  await page.waitFor(textExpr(`${AUTO_ID} 的运行史`), { label: '运行史抽屉打开（跑之后）' })
   await sleep(1500)
   await page.shot('17-automation-runs')
   const drawerText = await page.text()
