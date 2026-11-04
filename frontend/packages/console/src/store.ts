@@ -269,9 +269,15 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       // P3 会话可移植：进程重启/跨 runtime 后会话按需恢复（reason=restart 原生会话续接 /
       // handoff 历史摘要重灌）。以系统提示入流，避免用户误以为会话被「重新开始」。
       const reason = String(e.payload?.reason ?? '')
-      const runtime = String(e.payload?.runtime ?? '')
       // generation（M3-6）：会话在轮次边界迁到了新的能力代际（定义被改过）。
       // 与"进程重启后原生续接"必须分开说——用户改完定义最关心的正是"到底生效了没有"。
+      //
+      // **不把底座 id（`payload.runtime`，如 `dsh`）拼进这行**：这是**进对话流的用户可见文案**
+      // （`tone:'info'` 的系统条目会渲染在问答面板里），而底座是执行事实、不是用户概念——
+      // 与「新会话 · dsh / assistant · thinking」同一类泄漏（见 `titleFor` 的 `plain` 口径、
+      // `TestAboutPanelShowsProductWithoutEngineWords`）。恢复原因本身已经说清发生了什么，
+      // 补一句底座名对用户零信息、却把内部标识摊到屏上。守卫见
+      // `TestSessionResumeNoticeHasNoRuntimeId`。
       const label =
         reason === 'handoff'
           ? '会话已恢复（历史摘要重灌）'
@@ -282,7 +288,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
         ...v,
         entries: push('system', undefined, {
           tone: 'info',
-          text: runtime ? `${label} · ${runtime}` : label,
+          text: label,
         }),
         lastSeq,
       }
