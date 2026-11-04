@@ -769,3 +769,25 @@ func TestDisplayHomeRewritesOnlyDefaultHome(t *testing.T) {
 		}
 	}
 }
+
+// TestPlatformMcpToggle 平台内置 MCP server 注入开关（MATE_PLATFORM_MCP）：默认 auto=启用，
+// 显式 off 关闭；非法取值报错（不静默回落——静默会让"我以为关掉了"与"其实还开着"长得一样）。
+func TestPlatformMcpToggle(t *testing.T) {
+	hermetic(t)
+	unset(t, "MATE_PLATFORM_MCP")
+	if !Load().PlatformMcpEnabled() {
+		t.Fatal("未设 MATE_PLATFORM_MCP 应默认启用（auto）")
+	}
+	tsetenv(t, "MATE_PLATFORM_MCP", "off")
+	c, _, err := LoadResolved("")
+	if err != nil {
+		t.Fatalf("off 应合法: %v", err)
+	}
+	if c.PlatformMcpEnabled() {
+		t.Fatal("MATE_PLATFORM_MCP=off 应关闭平台内置 MCP 注入")
+	}
+	tsetenv(t, "MATE_PLATFORM_MCP", "on")
+	if _, _, err := LoadResolved(""); err == nil {
+		t.Fatal("非法取值（on）应报错")
+	}
+}

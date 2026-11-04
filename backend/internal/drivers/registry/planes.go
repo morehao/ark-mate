@@ -74,6 +74,10 @@ type Planes struct {
 	// 放在装配面而不是编排面：它是**进程级配置事实**，网关子进程与核心必须读同一个值。
 	// 零值 false 会被 NewPlanes 显式置成 true——"忘了设"不该等于"静默关掉网关"。
 	mcpGatewayEnabled atomic.Bool
+
+	// platformMcpEnabled 平台内置 MCP server（automation/material 工具面）注入开关
+	// （MATE_PLATFORM_MCP=off 关闭；默认开启）。与网关开关同款：装配期显式置 true，防零值误关。
+	platformMcpEnabled atomic.Bool
 }
 
 // NewPlanes 构造一套领域平面（只做内存装配，不读盘、不拨号）。
@@ -118,6 +122,10 @@ func NewPlanes(reg *runtime.Registry) *Planes {
 	p.Identity = NewIdentityDelivery(reg)
 	// 默认开启（config 的 auto）：显式置位，避免 atomic.Bool 零值把默认关掉。
 	p.mcpGatewayEnabled.Store(true)
+	// 平台内置 MCP server（automation/material）**在低层构造器里默认关**：它属于「产品装配策略」
+	// （要不要把平台自带工具面塞进会话），由装配根 `startMcpGateway` 按 config 显式开启（默认 auto=开）。
+	// 这样只构造 Planes 的单测保持聚焦于它们各自声明的用户 MCP，不会被两条内置 server 干扰；
+	// 生产路径经 assembly 一律开启。platformMcpEnabled 零值 false 正好等于这里的默认。
 	// 原生权限映射默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
 	p.nativePermEnabled = true
 	return p
@@ -164,6 +172,12 @@ func (p *Planes) SetMcpGatewayEnabled(enabled bool) { p.mcpGatewayEnabled.Store(
 
 // McpGatewayEnabled 读取网关开关（默认 true）。
 func (p *Planes) McpGatewayEnabled() bool { return p.mcpGatewayEnabled.Load() }
+
+// SetPlatformMcpEnabled 设置平台内置 MCP server 注入开关（装配期与测试用）。
+func (p *Planes) SetPlatformMcpEnabled(enabled bool) { p.platformMcpEnabled.Store(enabled) }
+
+// PlatformMcpEnabled 读取平台内置 MCP server 注入开关（默认 true）。
+func (p *Planes) PlatformMcpEnabled() bool { return p.platformMcpEnabled.Load() }
 
 // defWarnOnce 同一条定义问题在一个进程内只 WARN 一次（key 须含 id 与 revision）。
 //

@@ -543,6 +543,12 @@ func (as *assembly) startMcpGateway(ctx context.Context) error {
 	if !enabled {
 		glog.Warnw(ctx, "serve: MATE_MCP_GATEWAY=off —— 远程 MCP 回到直连注入（按底座承载能力过滤）")
 	}
+	// 平台内置 MCP server（automation/material 工具面）注入开关：默认 auto（开），显式 off 才关。
+	platformEnabled := as.cfg.PlatformMcpEnabled()
+	as.planes.SetPlatformMcpEnabled(platformEnabled)
+	if !platformEnabled {
+		glog.Warnw(ctx, "serve: MATE_PLATFORM_MCP=off —— 平台内置 MCP server（automation/material）不注入会话")
+	}
 	return nil
 }
 

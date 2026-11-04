@@ -203,6 +203,13 @@ type Config struct {
 	// auto 而非 on：只有一个取值（auto）意味着"没有开关"，而这条路径改变了远程 MCP 的注入
 	// 形态，出问题时必须有一条不改文件、不改代码就能退回去的路。
 	McpGateway string
+	// PlatformMcp 平台内置 MCP server（automation/material 工具面）注入开关
+	// （MATE_PLATFORM_MCP 覆盖，默认 auto）：
+	//   auto = 把 `mate mcp automation` 与 `mate mcp material` 两条平台内置 stdio server 注入会话，
+	//          让模型直接用自然语言创建定时任务 / 用资料库工具，无需用户手动注册。
+	//   off  = 不注入平台内置 server（回到"用户自己注册 MCP"的老路）。
+	// auto 而非 on：这条路径改变了每个会话看到的工具面，出问题时必须有能不改代码退回去的开关。
+	PlatformMcp string
 	// IdentityMode 产品身份的交付模式（`MATE_IDENTITY_MODE` 覆盖，默认 auto）。
 	//
 	// 四个取值的语义见 `internal/core/identity.Mode`（auto=系统提示+首轮兜底 / system=只系统提示 /
@@ -249,6 +256,18 @@ var ValidMcpGatewayModes = []string{McpGatewayAuto, McpGatewayOff}
 
 // McpGatewayEnabled 报告平台侧 MCP 网关是否启用（默认 auto = 启用；只有显式 off 才关）。
 func (c Config) McpGatewayEnabled() bool { return c.McpGateway != McpGatewayOff }
+
+// 平台内置 MCP server 注入开关取值。
+const (
+	PlatformMcpAuto = "auto"
+	PlatformMcpOff  = "off"
+)
+
+// ValidPlatformMcpModes 合法取值（错误提示用）。
+var ValidPlatformMcpModes = []string{PlatformMcpAuto, PlatformMcpOff}
+
+// PlatformMcpEnabled 报告平台内置 MCP server 是否注入（默认 auto = 启用；只有显式 off 才关）。
+func (c Config) PlatformMcpEnabled() bool { return c.PlatformMcp != PlatformMcpOff }
 
 // 持久层模式取值。StoreModeAuto 是**显式**的 auto：Config.StoreMode 里它落成空串
 // （空串同时表示"未设置"），真正的 auto 解析在 serve 装机时做——DB 文件已存在则 sqlite，
@@ -326,60 +345,61 @@ const (
 // Default 返回默认配置（不含依赖家目录的派生路径，派生值在解析阶段补齐）。
 func Default() Config {
 	return Config{
-		Addr:               "127.0.0.1:10001",
-		PermissionTimeout:  DefaultPermissionTimeout,
-		ElicitationTimeout: DefaultElicitationTimeout,
-		IdleTimeout:        DefaultIdleTimeout,
-		ReapInterval:       DefaultReapInterval,
-		ReapGrace:          DefaultReapGrace,
-		HandoffMaxChars:    DefaultHandoffMaxChars,
-		GenerationLimit:    DefaultGenerationLimit,
+		Addr:                    "127.0.0.1:10001",
+		PermissionTimeout:       DefaultPermissionTimeout,
+		ElicitationTimeout:      DefaultElicitationTimeout,
+		IdleTimeout:             DefaultIdleTimeout,
+		ReapInterval:            DefaultReapInterval,
+		ReapGrace:               DefaultReapGrace,
+		HandoffMaxChars:         DefaultHandoffMaxChars,
+		GenerationLimit:         DefaultGenerationLimit,
 		AttachmentMaxBytes:      DefaultAttachmentMaxBytes,
 		AttachmentImageMaxBytes: DefaultAttachmentImageMaxBytes,
 		AttachmentPendingTTL:    DefaultAttachmentPendingTTL,
 		AttachmentSweep:         DefaultAttachmentSweep,
-		AutomationTick:     DefaultAutomationTick,
-		McpAutoProbe:       McpAutoProbeOff,
-		McpGateway:         McpGatewayAuto,
-		NativePermission:   NativePermissionAuto,
-		IdentityMode:       AutoIdentityMode,
+		AutomationTick:          DefaultAutomationTick,
+		McpAutoProbe:            McpAutoProbeOff,
+		McpGateway:              McpGatewayAuto,
+		NativePermission:        NativePermissionAuto,
+		IdentityMode:            AutoIdentityMode,
 	}
 }
 
 // knownKeys 支持的配置键（规范名 → 环境变量名）。config.json / env 文件可用规范名或 MATE_* 名。
 var knownKeys = map[string]string{
-	"addr":                "MATE_ADDR",
-	"transcripts":         "MATE_TRANSCRIPTS",
-	"db":                  "MATE_DB",
-	"store":               "MATE_STORE",
-	"providers":           "MATE_PROVIDERS",
-	"capabilities":        "MATE_CAPABILITIES",
-	"command_policy":      "MATE_COMMAND_POLICY",
-	"automations":         "MATE_AUTOMATIONS",
-	"automation_tick":     "MATE_AUTOMATION_TICK",
-	"asset_watch":         "MATE_ASSET_WATCH",
-	"workspace_dir":       "MATE_WORKSPACE_DIR",
-	"workspace_roots":     "MATE_WORKSPACE_ROOTS",
-	"projection_dirs":     "MATE_PROJECTION_DIRS",
-	"idle_timeout":        "MATE_IDLE_TIMEOUT",
-	"reap_interval":       "MATE_REAP_INTERVAL",
-	"run_timeout":         "MATE_RUN_TIMEOUT",
-	"handoff_max_chars":   "MATE_HANDOFF_MAX_CHARS",
-	"generation_limit":    "MATE_GENERATION_LIMIT",
+	"addr":                       "MATE_ADDR",
+	"transcripts":                "MATE_TRANSCRIPTS",
+	"db":                         "MATE_DB",
+	"store":                      "MATE_STORE",
+	"providers":                  "MATE_PROVIDERS",
+	"capabilities":               "MATE_CAPABILITIES",
+	"command_policy":             "MATE_COMMAND_POLICY",
+	"automations":                "MATE_AUTOMATIONS",
+	"automation_tick":            "MATE_AUTOMATION_TICK",
+	"asset_watch":                "MATE_ASSET_WATCH",
+	"workspace_dir":              "MATE_WORKSPACE_DIR",
+	"workspace_roots":            "MATE_WORKSPACE_ROOTS",
+	"projection_dirs":            "MATE_PROJECTION_DIRS",
+	"idle_timeout":               "MATE_IDLE_TIMEOUT",
+	"reap_interval":              "MATE_REAP_INTERVAL",
+	"run_timeout":                "MATE_RUN_TIMEOUT",
+	"handoff_max_chars":          "MATE_HANDOFF_MAX_CHARS",
+	"generation_limit":           "MATE_GENERATION_LIMIT",
 	"attachment_max_bytes":       "MATE_ATTACHMENT_MAX_BYTES",
 	"attachment_image_max_bytes": "MATE_ATTACHMENT_IMAGE_MAX_BYTES",
 	"attachment_pending_ttl":     "MATE_ATTACHMENT_PENDING_TTL",
 	"attachment_sweep":           "MATE_ATTACHMENT_SWEEP",
-	"permission_timeout":  "MATE_PERMISSION_TIMEOUT",
-	"elicitation_timeout": "MATE_ELICITATION_TIMEOUT",
-	"proc_registry":       "MATE_PROC_REGISTRY",
-	"reap_grace":          "MATE_REAP_GRACE",
-	"allowed_origins":     "MATE_ALLOWED_ORIGINS",
-	"web_dir":             "MATE_WEB_DIR",
-	"mcp_auto_probe":      "MATE_MCP_AUTO_PROBE",
-	"mcp_gateway":         "MATE_MCP_GATEWAY",
-	"native_permission":   "MATE_NATIVE_PERMISSION",
-	"identity_mode":       "MATE_IDENTITY_MODE",
+	"permission_timeout":         "MATE_PERMISSION_TIMEOUT",
+	"elicitation_timeout":        "MATE_ELICITATION_TIMEOUT",
+	"proc_registry":              "MATE_PROC_REGISTRY",
+	"reap_grace":                 "MATE_REAP_GRACE",
+	"allowed_origins":            "MATE_ALLOWED_ORIGINS",
+	"web_dir":                    "MATE_WEB_DIR",
+	"mcp_auto_probe":             "MATE_MCP_AUTO_PROBE",
+	"mcp_gateway":                "MATE_MCP_GATEWAY",
+	"platform_mcp":               "MATE_PLATFORM_MCP",
+	"native_permission":          "MATE_NATIVE_PERMISSION",
+	"identity_mode":              "MATE_IDENTITY_MODE",
 }
 
 // knownListKeys 允许在 config.json 里写成 JSON 数组的多值键。
@@ -924,6 +944,18 @@ func materialize(r *resolver) (Config, error) {
 		default:
 			return bad("mcp_gateway", fmt.Sprintf("需为 %s 之一，得到 %q",
 				strings.Join(ValidMcpGatewayModes, "|"), v))
+		}
+	}
+	if v, ok := r.get("platform_mcp"); ok {
+		mode := strings.ToLower(strings.TrimSpace(v))
+		switch mode {
+		case PlatformMcpAuto, "":
+			c.PlatformMcp = PlatformMcpAuto
+		case PlatformMcpOff:
+			c.PlatformMcp = PlatformMcpOff
+		default:
+			return bad("platform_mcp", fmt.Sprintf("需为 %s 之一，得到 %q",
+				strings.Join(ValidPlatformMcpModes, "|"), v))
 		}
 	}
 
