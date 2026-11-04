@@ -122,6 +122,11 @@ func (f Facts) BuildServices() Services {
 	modelFace := sessionruntime.NewModelFace(as.Session)
 	attachmentSvc := f.buildAttachmentSvc()
 	artifactSvc := f.buildArtifactSvc()
+	// 产物自动抽取（P2-c）：把「工具写工作区文件」旁路成 artifacts 行。依赖 store/attachStore/artifactSvc，
+	// 故在用例层构造完成后、Runner 已存在时经 setter 注入（memory 模式三者缺一 → 返回 nil，抽取自然关闭）。
+	if as.Orchestrator != nil {
+		as.Orchestrator.SetArtifactExtractor(newArtifactExtractor(as.Store, as.AttachStore, artifactSvc))
+	}
 	return Services{
 		Session:            as.Session,
 		SessionHistory:     svcsession.NewHistory(eventReader(as.Store), plane, as.Bus),

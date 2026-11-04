@@ -82,3 +82,16 @@ memory 模式写入断言 ×1）、解包 3 处（原生恢复 ×2、探测 resu
 **一列一义**：`kind` 只表达投递形态（`image`|`document`），不表达 MIME（MIME 只在 `mime_type`）；`state` 只表达生命周期（`pending`|`linked`|`orphan`）。**`attachments` 是本仓对 golib AutoMigrate 的唯一显式例外之外的表**——`core_file*` 走 `filestore.Migrate`（已登记 build-and-runtime.md），`attachments` 仍走自管迁移 v32。
 
 **错误文案（非独立数字码）**：`attachment_too_large`/`attachment_empty`/`attachment_unsupported_type`/`attachment_scoped` 走 `40001`；`attachment_not_found` 走 `40401`；`attachment_linked` 走 `40901`；memory 模式附件面 → `40501`。这些都复用既有数字码、只加**文案前缀**，`internal/core/code` 的 `Codes()` 注册表不变，故 G8 的三处同步（code↔README↔BizCode）天然成立（数字码无新增）。
+
+**v34/v35 起还有一条词规：`artifact` / `产物`（产物溯源登记册）**（2026-11-03 产物溯源设计 `.dsh/docs/specs/2026-11-03-artifact-provenance-design.md`；2026-11-04 P2 自动抽取落地并加 `path` 列）。它与 `attachments`（投递）、`library_nodes`（组织）是**并列的三条业务索引**，都只引用 `file_id`/`upload_id`，**谁也不复制字节**（字节底座是 golib filestore 的 `core_file*`）。
+
+| 词 | 指 | 落点 | 机器判据 |
+|---|---|---|---|
+| `artifacts`（表，v34+v35） | **平台产物溯源索引**：哪次会话/哪一轮/哪个工具调用产出的（`session_id`/`run_id`/`tool_call_id`）+ 载体（`kind`：file/text/table/link）+ 生成时内容快照哈希（`content_sha256`）+ 是否被改动（`dirty`）。**不存字节**：`file` 类用 `upload_id` 指向 `core_file_upload`（字节在 filestore） | 表 `artifacts`、`model.ArtifactEntity`、`dao.ArtifactDao`、`dtoartifact`/`svcartifact`/`ctrartifact`、`objid.Artifact`（`art_` 前缀） | `artifact_table_test.go` 的 A-2（列名+类型冻结，**v34 CREATE + v35 ALTER 合并** + 实体标签逐列一致）；A-1（产物域不 import 资料库域）；A-3（`category='artifact' ⟺ provenance_id` 非空） |
+| `artifact_id`（外形 `art_…`） | **平台产物行身份**（指向 `artifacts.id`），不是 blob 身份。指向 filestore upload 行的指针仍是 `upload_id`（= `core_file_upload.id`）；资料库节点引用产物用 `library_nodes.provenance_id`（→ `artifacts.id`，可空串） | `artifacts.id`、`library_nodes.provenance_id`、`POST /artifacts` 响应 | 同 `_id` 通则 |
+| `path`（`artifacts.path`，**v35 新增列**） | **工作区相对路径**（相对会话 `sessions.cwd`）：仅「dsh write/edit 工具写工作区文件」得来的 `file` 类产物有值；显式上传/内联产物为空串。用途：`dirty` 惰性判定时**定位工作区原文件**（否则只有 `title`=basename，子目录文件定位不到） | `artifacts.path`、`dtoartifact` 的 `Path` | A-2 列冻结（含 path）；**不是** `title`（title 始终是展示名=basename） |
+| `dirty`（`artifacts.dirty`） | **1 = 工作区原文件已与生成时快照不一致**（或原文件已删）；0 = 未改。**惰性判定**：仅详情 `GET /artifacts/:id` 重算工作区哈希比对 `content_sha256` 并回写，**列表页不算**（R6）。`path=''` 的产物不判 | `artifacts.dirty` | 行为测试（`artifactextract_test.go` 的 `TestArtifactDirty_*`） |
+
+**三条索引的分工（易混）**：`attachments` 管**投递**（pending/linked/orphan，喂下一轮 prompt）、`artifacts` 管**溯源归档**（快照/归属/`dirty`）、`library_nodes` 管**用户组织**（目录树）。**产物默认只进 `artifacts`（全量可查），进资料库仍由用户/Agent 显式收录**（`POST /materials/import-artifact`）——不自动全量入库。**产物自动抽取是纯旁路观察**：只消费 dsh 已上报的工具事件、只读工作区文件、只写平台自己的 filestore/artifacts，**不改 dsh 任何行为**（零侵入守卫 E-3 `TestArtifactExtractNoDshTouch` 钉死：抽取包不 import 底座、不 spawn、不写工作区）。
+
+**错误文案（非独立数字码）**：`artifact_not_found` 走 `40401`；`material_provenance_mismatch`/`artifact_kind_unsupported` 走 `40001`/`40001`；memory 模式产物面 → `40501`（复用既有数字码 + 文案前缀，`Codes()` 注册表不变）。

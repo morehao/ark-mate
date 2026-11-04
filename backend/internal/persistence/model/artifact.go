@@ -50,6 +50,10 @@ type ArtifactEntity struct {
 	Kind string `gorm:"column:kind;not null"`
 	// Title 展示名（文件名/摘要/url）。
 	Title string `gorm:"column:title;not null"`
+	// Path 工作区相对路径（v35；相对会话 cwd，file 类且由工具写工作区文件得来的产物才有；
+	// 其余为空）。用途：dirty 惰性判定「工作区当前文件是否已与快照不一致」时定位原文件。
+	// 显式上传/内联产物为空（没有「工作区原文件」这个概念）。
+	Path string `gorm:"column:path;not null;default:''"`
 	// MimeType file 类的 MIME（其余可为空）。
 	MimeType string `gorm:"column:mime_type;not null;default:''"`
 	// SizeBytes file 类的字节数（其余 0）。

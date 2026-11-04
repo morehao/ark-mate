@@ -118,7 +118,7 @@
 
   <rect class="node storage" x="40" y="768" width="788" height="34" rx="6" />
   <text x="54" y="790" class="label">L0 表形状</text>
-  <text x="150" y="790" class="small mono">persistence/model（一表一文件，零依赖；23 表 · schema 34）</text>
+  <text x="150" y="790" class="small mono">persistence/model（一表一文件，零依赖；23 表 · schema 35）</text>
 
   <!-- 向内箭头 -->
   <path class="edge edge-arrow" d="M 30 800 L 30 350" opacity="0.4" />
@@ -174,5 +174,5 @@
   <text x="894" y="682" class="small">依赖方向：packages 不得反向 import apps；backend 不依赖 frontend</text>
   <text x="894" y="698" class="small">共享 UI 在类型层面就够不到 Electron API</text>
 
-  <text x="880" y="760" class="small">图只画结构，不画历史；权威判据见 docs/agents/guards.md（193 条）与 docs/agents/layout.md。</text>
+  <text x="880" y="760" class="small">图只画结构，不画历史；权威判据见 docs/agents/guards.md（194 条）与 docs/agents/layout.md。</text>
 </svg>

@@ -199,6 +199,12 @@ func (o *Orchestrator) SetElicitationTimeout(d time.Duration) { o.elic.SetTimeou
 // SetRunTimeout 设置单轮 run 看门狗超时（0 = 关闭）。见 watchdogRun。
 func (o *Orchestrator) SetRunTimeout(d time.Duration) { o.runner.SetRunTimeout(d) }
 
+// SetArtifactExtractor 装配产物自动抽取端口（nil = 关闭）。用例层构造完成后由装配根注入
+// （抽取实现需要 store/attachStore/artifactSvc，晚于编排器构造，见 assembly.BuildServices）。
+func (o *Orchestrator) SetArtifactExtractor(ex session.ArtifactExtractor) {
+	o.runner.SetArtifactExtractor(ex)
+}
+
 // SetSettleTimeout 覆盖取消后的结算等待窗口（0 = 默认 10s）。
 //
 // 生产装配不调用它；测试用它把窗口压到毫秒级，避免每个取消用例都等满 10s。

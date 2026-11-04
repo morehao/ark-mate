@@ -1,0 +1,329 @@
+package assembly
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/morehao/ark-mate/internal/core/protocol"
+	"github.com/morehao/ark-mate/internal/infra/attachmentstore"
+	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/testutil"
+)
+
+// newExtractRig 造一个真库 + 真附件字节存储 + 真 artifactSvc 的抽取器装置（进程内集成）。
+func newExtractRig(t *testing.T) (*artifactExtractor, string, func(ctx context.Context) (int, error)) {
+	t.Helper()
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
+	t.Cleanup(func() { _ = st.Close() })
+	if err := attachmentstore.Migrate(st.DB()); err != nil {
+		t.Fatalf("filestore.Migrate: %v", err)
+	}
+	attachStore, err := attachmentstore.New(st.DB(), attachmentstore.Options{
+		BaseDir:        filepath.Join(t.TempDir(), "attachments"),
+		MaxUploadBytes: 20 << 20,
+	})
+	if err != nil {
+		t.Fatalf("attachmentstore.New: %v", err)
+	}
+	facts := Facts{Store: st, AttachStore: attachStore}
+	artSvc := facts.buildArtifactSvc()
+	x := newArtifactExtractor(st, attachStore, artSvc)
+	if x == nil {
+		t.Fatalf("抽取器不应为 nil（store/attach/artifact 都有）")
+	}
+	// 返回一个「等异步落盘完成、取产物数」的轮询器。
+	count := func(ctx context.Context) (int, error) {
+		resp, err := artSvc.ListBySession(ctx, "ses1")
+		if err != nil {
+			return 0, err
+		}
+		if resp == nil {
+			return 0, nil
+		}
+		return len(resp.Artifacts), nil
+	}
+	return x.(*artifactExtractor), st.DB().Name(), count
+}
+
+// seedSessionWithCwd 插一条 cwd 指向 tmp 的会话。
+func seedSessionWithCwd(t *testing.T, st interface{}, sessionID, cwd string) {
+	t.Helper()
+	// st 是 *store.Store
+	type upsertable interface {
+		UpsertSession(ctx context.Context, sess model.SessionEntity) error
+	}
+	u, ok := st.(upsertable)
+	if !ok {
+		t.Fatalf("st 不满足 UpsertSession")
+	}
+	at := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
+	if err := u.UpsertSession(context.Background(), model.SessionEntity{
+		ID: sessionID, Cwd: cwd, ModelID: "m1", RuntimeID: "dsh",
+		RuntimeSessionID: "rt_native", Title: "t", Status: "idle",
+		Origin: "manual", CreatedAt: at, UpdatedAt: at,
+	}); err != nil {
+		t.Fatalf("UpsertSession: %v", err)
+	}
+}
+
+func waitArtifactCount(t *testing.T, count func(ctx context.Context) (int, error), want int) {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.After(3 * time.Second)
+	for {
+		n, err := count(ctx)
+		if err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		if n >= want {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("等产物落库超时: got %d want %d", n, want)
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
+// TestArtifactExtractor_WriteEndToEnd：write 工具 → 工作区文件 → filestore 快照 → artifacts 行。
+func TestArtifactExtractor_WriteEndToEnd(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	// 造工作区文件（模拟 dsh write 工具写出的内容）。
+	if err := os.WriteFile(filepath.Join(cwd, "hello.txt"), []byte("hello artifact"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info := protocol.ToolCallInfo{
+		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "hello.txt", "content": "hello artifact"},
+	}
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", info)
+	waitArtifactCount(t, count, 1)
+
+	resp, err := x.artifact.ListBySession(context.Background(), "ses1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := resp.Artifacts[0]
+	if a.Origin != "tool_write" || a.Kind != "file" || a.Title != "hello.txt" {
+		t.Errorf("产物元数据不符: origin=%q kind=%q title=%q", a.Origin, a.Kind, a.Title)
+	}
+	if a.UploadID == "" {
+		t.Errorf("file 类产物应有 upload_id（快照已进 filestore）")
+	}
+	if a.SizeBytes != int64(len("hello artifact")) {
+		t.Errorf("size=%d 期望 %d", a.SizeBytes, len("hello artifact"))
+	}
+	if a.ContentSha256 == "" {
+		t.Errorf("应有快照哈希")
+	}
+}
+
+// TestArtifactExtractor_NotWriteSkipped：非 write/edit 工具不产生产物。
+func TestArtifactExtractor_NotWriteSkipped(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	_ = os.WriteFile(filepath.Join(cwd, "x.txt"), []byte("x"), 0o644)
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc1", Title: "read", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "x.txt"},
+	})
+	time.Sleep(80 * time.Millisecond)
+	if n, _ := count(context.Background()); n != 0 {
+		t.Fatalf("read 工具不应产生产物，实际 %d", n)
+	}
+}
+
+// TestArtifactExtractor_EscapeSkipped：路径越界（../）不产生产物。
+func TestArtifactExtractor_EscapeSkipped(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "../../etc/passwd"},
+	})
+	time.Sleep(80 * time.Millisecond)
+	if n, _ := count(context.Background()); n != 0 {
+		t.Fatalf("越界路径不应产生产物，实际 %d", n)
+	}
+}
+
+// TestArtifactExtractor_TooLargeSkipped：超阈值跳过不建行（R2 已拍板）。
+func TestArtifactExtractor_TooLargeSkipped(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	x.maxBytes = 8 // 把阈值调到很小
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	_ = os.WriteFile(filepath.Join(cwd, "big.txt"), []byte("this is longer than 8 bytes"), 0o644)
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "big.txt"},
+	})
+	time.Sleep(80 * time.Millisecond)
+	if n, _ := count(context.Background()); n != 0 {
+		t.Fatalf("超阈值文件不应建产物行，实际 %d", n)
+	}
+}
+
+// TestArtifactExtractor_MissingFileSkipped：工作区文件不存在（已被删）不建行。
+func TestArtifactExtractor_MissingFileSkipped(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "ghost.txt"},
+	})
+	time.Sleep(80 * time.Millisecond)
+	if n, _ := count(context.Background()); n != 0 {
+		t.Fatalf("文件不存在不应建产物行，实际 %d", n)
+	}
+}
+
+// TestArtifactDirty_LazyOnGet（P2-d）：抽取产物 → 改工作区文件 → Get 返回 dirty=true 并回写；
+// 改回原内容 → dirty=false。列表页不算 dirty（R6），Get 才惰性算。
+func TestArtifactDirty_LazyOnGet(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	p := filepath.Join(cwd, "a.txt")
+	if err := os.WriteFile(p, []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "a.txt"},
+	})
+	waitArtifactCount(t, count, 1)
+	// 取产物 id
+	list, _ := x.artifact.ListBySession(context.Background(), "ses1")
+	id := list.Artifacts[0].ID
+
+	// 刚抽取，未改动 → Get dirty=false
+	got, err := x.artifact.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Dirty {
+		t.Fatalf("未改动不应 dirty")
+	}
+	if got.Path != "a.txt" {
+		t.Fatalf("产物应记录工作区相对路径 path=%q", got.Path)
+	}
+
+	// 改工作区文件 → Get dirty=true 且回写
+	if err := os.WriteFile(p, []byte("v2-changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = x.artifact.Get(context.Background(), id)
+	if !got.Dirty {
+		t.Fatalf("改了工作区文件后应 dirty=true")
+	}
+	// 回写生效：查库里的 dirty 应为 1
+	ent, _, _ := x.st.ArtifactByID(context.Background(), id)
+	if ent.Dirty != 1 {
+		t.Fatalf("dirty 应已回写为 1，实际 %d", ent.Dirty)
+	}
+
+	// 改回原内容 → Get dirty=false
+	if err := os.WriteFile(p, []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = x.artifact.Get(context.Background(), id)
+	if got.Dirty {
+		t.Fatalf("改回原内容后应 dirty=false")
+	}
+}
+
+// TestArtifactDirty_FileDeleted（R5）：工作区原文件被删 → dirty=true。
+func TestArtifactDirty_FileDeleted(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	p := filepath.Join(cwd, "gone.txt")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "gone.txt"},
+	})
+	waitArtifactCount(t, count, 1)
+	list, _ := x.artifact.ListBySession(context.Background(), "ses1")
+	id := list.Artifacts[0].ID
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := x.artifact.Get(context.Background(), id)
+	if !got.Dirty {
+		t.Fatalf("工作区原文件被删后应 dirty=true（R5）")
+	}
+}
+
+// TestArtifactDirty_ListPageDoesNotCompute（R6）：列表页不算 dirty（返回存量 0，即使工作区已改）。
+func TestArtifactDirty_ListPageDoesNotCompute(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	p := filepath.Join(cwd, "b.txt")
+	if err := os.WriteFile(p, []byte("orig"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "b.txt"},
+	})
+	waitArtifactCount(t, count, 1)
+	// 改工作区文件（若列表页算 dirty 就会变 true）
+	if err := os.WriteFile(p, []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := x.artifact.ListBySession(context.Background(), "ses1")
+	if list.Artifacts[0].Dirty {
+		t.Fatalf("列表页不应计算 dirty（R6），应返回存量 false")
+	}
+}
+
+// TestArtifactSnapshotBeforeAsync（C5/E-4）：ExtractToolWrite 同步返回后立刻覆盖工作区文件，
+// 异步落盘仍应记「返回那一刻」的字节——证明捕获发生在同步段（否则会读到覆盖后的内容）。
+func TestArtifactSnapshotBeforeAsync(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	p := filepath.Join(cwd, "race.txt")
+	orig := []byte("ORIGINAL-CONTENT")
+	if err := os.WriteFile(p, orig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 同步调用（内部：同步读字节 → 异步落盘）。
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "race.txt"},
+	})
+	// 返回后立刻覆盖工作区文件（模拟 dsh 下一步写同名文件）。
+	if err := os.WriteFile(p, []byte("LATER-CONTENT-LONGER-THAN-BEFORE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitArtifactCount(t, count, 1)
+	resp, _ := x.artifact.ListBySession(context.Background(), "ses1")
+	got := resp.Artifacts[0]
+	sum := sha256.Sum256(orig)
+	wantHash := hex.EncodeToString(sum[:])
+	if got.ContentSha256 != wantHash {
+		t.Fatalf("快照应是返回那一刻的字节（C5）: got=%s want=%s（读到覆盖后内容说明捕获被延后了）",
+			got.ContentSha256, wantHash)
+	}
+	if got.SizeBytes != int64(len(orig)) {
+		t.Fatalf("size 应是原始内容长度: got=%d want=%d", got.SizeBytes, len(orig))
+	}
+}

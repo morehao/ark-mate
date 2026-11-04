@@ -23,6 +23,8 @@ type RegisterReq struct {
 	Kind string `json:"kind"`
 	// Title 展示名。
 	Title string `json:"title"`
+	// Path 工作区相对路径（可选；仅「工具写工作区文件」得来的 file 类产物有值，供 dirty 判定定位原文件）。
+	Path string `json:"path"`
 	// MimeType file 类的 MIME（可选）。
 	MimeType string `json:"mime_type"`
 	// SizeBytes file 类的字节数（可选；缺省由 filestore 补）。
@@ -38,6 +40,7 @@ type ArtifactResp struct {
 	Origin        string `json:"origin"`
 	Kind          string `json:"kind"`
 	Title         string `json:"title"`
+	Path          string `json:"path,omitempty"`
 	MimeType      string `json:"mime_type,omitempty"`
 	SizeBytes     int64  `json:"size_bytes"`
 	UploadID      string `json:"upload_id,omitempty"`

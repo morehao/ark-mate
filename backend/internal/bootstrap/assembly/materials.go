@@ -120,7 +120,12 @@ func (f Facts) buildArtifactSvc() svcartifact.ArtifactSvc {
 	if f.AttachStore != nil {
 		files = artifactFileMeta{blobs: f.AttachStore}
 	}
-	return svcartifact.New(st, files)
+	// dirty 惰性判定端口（用 sessions.cwd + artifact.Path 定位原文件，R5/R6）。memory 模式无 store → nil。
+	var dirty svcartifact.DirtyChecker
+	if f.Store != nil {
+		dirty = &artifactDirtyChecker{st: f.Store}
+	}
+	return svcartifact.New(st, files, dirty)
 }
 
 // artifactFileMeta 把 attachmentstore.Store 适配成 svcartifact.FileMeta。

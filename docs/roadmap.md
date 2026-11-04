@@ -17,7 +17,7 @@
 
 本地形态已经可用：ACP 直连（内置 `dsh`）、会话与轮次、结构化提问与权限确认、能力数据面
 （Skill / MCP / Tool）、定时任务、工作空间登记、用量、模型与供应商、附件、产物溯源、资料库、专家定义、
-桌面交付链路（Electron + 随包载荷 + 安装包）、以及 **193 条架构守卫**（条数以
+桌面交付链路（Electron + 随包载荷 + 安装包）、以及 **194 条架构守卫**（条数以
 [`docs/agents/guards.md`](./agents/guards.md) 为唯一维护处，按 `grep -c "^func Test" backend/internal/archtest/*.go` 实值）。
 
 剩下的问题都写在 [`unimplemented.md`](./unimplemented.md) 里——那份清单是 L 段的输入。
@@ -39,7 +39,7 @@
 
 **出口判据**
 
-- `go test ./internal/archtest/` 全绿（今天 193 条，含文档引用守卫）；
+- `go test ./internal/archtest/` 全绿（今天 194 条，含文档引用守卫）；
 - 新增一条 fail-closed 守卫：`README.md` / `AGENTS.md` / `docs/**` 里指向 `docs/**` 的路径必须存在
   （今天有一处断链，且没有任何机制会红）；
 - 后端搬家完成后：`make build && make vet && make test` 全绿 + `make verify/desktop-dod` 通过

@@ -36,6 +36,16 @@ type FileMeta interface {
 	GetFileMeta(ctx context.Context, fileID string) (contentHash string, size int64, name string, err error)
 }
 
+// DirtyChecker 惰性判定产物「工作区当前文件是否已与生成时快照不一致」（dirty 语义，R5/R6 已拍板）。
+//
+// 本包不认识会话 cwd（依赖单向），「工作区原文件在哪、怎么算」由装配层实现（用 sessions.cwd +
+// artifact.Path 定位并重算哈希）。读面**只在详情 `Get` 调用**（列表页不算，R6），判完回写 dirty。
+type DirtyChecker interface {
+	// CheckDirty 判定 a 当前是否 dirty。checked=false 表示无法判定（如 a.Path 为空、无 cwd），
+	// 此时读面按**不可判定**处理（不强行改 dirty 存量）。工作区文件已被删 → (true, true)。
+	CheckDirty(ctx context.Context, a model.ArtifactEntity) (dirty bool, checked bool)
+}
+
 // ArtifactSvc 产物面用例。
 type ArtifactSvc interface {
 	// Register 登记一条产物（file 类传 FileID；内联类传 ContentText）。
@@ -49,11 +59,12 @@ type ArtifactSvc interface {
 type artifactSvc struct {
 	st    ArtifactStore
 	files FileMeta
+	dirty DirtyChecker
 }
 
 // New 构造产物用例。files 可为 nil（内联产物仍可用；file 类产物登记时 file 元数据不可取 → 报错）。
-func New(st ArtifactStore, files FileMeta) ArtifactSvc {
-	return &artifactSvc{st: st, files: files}
+func New(st ArtifactStore, files FileMeta, dirty DirtyChecker) ArtifactSvc {
+	return &artifactSvc{st: st, files: files, dirty: dirty}
 }
 
 func (s *artifactSvc) requireStore() error {
@@ -96,6 +107,7 @@ func (s *artifactSvc) Register(ctx context.Context, req dtoartifact.RegisterReq)
 		Origin:      string(origin),
 		Kind:        string(kind),
 		Title:       req.Title,
+		Path:        req.Path,
 		MimeType:    req.MimeType,
 		SizeBytes:   req.SizeBytes,
 		UploadID:    req.FileID,
@@ -162,6 +174,19 @@ func (s *artifactSvc) Get(ctx context.Context, id string) (*dtoartifact.Artifact
 	if !ok {
 		return nil, code.Errorf(code.NotFound, "artifact_not_found: 产物不存在")
 	}
+	// dirty 惰性判定（R5/R6）：**仅详情**做，列表页不算。判得出 → 回写 + 反映到响应；
+	// 判不出（无工作区原文件/无 cwd）→ 保持存量 dirty（不臆造）。回写/判定失败都不影响读面。
+	if s.dirty != nil {
+		if dirty, checked := s.dirty.CheckDirty(ctx, a); checked {
+			if (dirty && a.Dirty == 0) || (!dirty && a.Dirty != 0) {
+				a.Dirty = 0
+				if dirty {
+					a.Dirty = 1
+				}
+				_ = s.st.UpdateArtifactDirty(ctx, a.ID, a.Dirty) // 回写 best-effort，失败不影响读
+			}
+		}
+	}
 	return toResp(a), nil
 }
 
@@ -175,6 +200,7 @@ func toResp(a model.ArtifactEntity) *dtoartifact.ArtifactResp {
 		Origin:        a.Origin,
 		Kind:          a.Kind,
 		Title:         a.Title,
+		Path:          a.Path,
 		MimeType:      a.MimeType,
 		SizeBytes:     a.SizeBytes,
 		UploadID:      a.UploadID,

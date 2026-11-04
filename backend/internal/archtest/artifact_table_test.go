@@ -1,8 +1,10 @@
 package archtest
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -33,6 +35,8 @@ var artifactColumnSnapshot = []colType{
 	{"dirty", "INTEGER"},
 	{"created_at", "TEXT"},
 	{"updated_at", "TEXT"},
+	// v35 追加：工作区相对路径（dirty 惰性判定定位原文件）。v34 已合入主干不可改，故新列走 v35 ALTER。
+	{"path", "TEXT"},
 }
 
 // TestArtifactsColumnsFrozen（A-2）v34 artifacts 表的列集合与类型冻结 + 实体标签逐列一致。
@@ -44,19 +48,34 @@ func TestArtifactsColumnsFrozen(t *testing.T) {
 	}
 	src := stripLineComments(string(raw))
 
-	got, ok := createTableColumns(src, "artifacts")
+	baseCols, ok := createTableColumns(src, "artifacts")
 	if !ok {
 		t.Fatalf("在 %s 里解析不到 `CREATE TABLE artifacts (...)`（本守卫 fail-closed：解析不到即失败）", ddlPath)
 	}
+	baseTypes := createTableColumnTypes(src, "artifacts")
+	// 合并 v35 的 `ALTER TABLE artifacts ADD COLUMN <name> <TYPE>`（v34 已发布不可改，新列走 v35）。
+	alterNames, alterTypes, err := parseArtifactAddColumns(filepath.Join(
+		backendRoot(t), "internal", "persistence", "store", "migrate_v35.go"))
+	if err != nil {
+		t.Fatalf("解析 v35 ALTER 失败: %v（改迁移文件请同步本守卫）", err)
+	}
+	got := append(append([]string(nil), baseCols...), alterNames...)
+	types := map[string]string{}
+	for k, v := range baseTypes {
+		types[k] = v
+	}
+	for k, v := range alterTypes {
+		types[k] = v
+	}
+
 	var wantNames []string
 	for _, col := range artifactColumnSnapshot {
 		wantNames = append(wantNames, col.name)
 	}
 	if strings.Join(got, ",") != strings.Join(wantNames, ",") {
-		t.Fatalf("artifacts 的列集合变了（A-2）：\n got  %v\n want %v\n"+
+		t.Fatalf("artifacts 的列集合变了（A-2，v34 CREATE + v35 ALTER 合并）：\n got  %v\n want %v\n"+
 			"改列必须同批更新本快照 + model/artifact.go 的 gorm 标签 + dao 列词汇。", got, wantNames)
 	}
-	types := createTableColumnTypes(src, "artifacts")
 	for _, col := range artifactColumnSnapshot {
 		if tt := types[col.name]; tt != col.typ {
 			t.Fatalf("artifacts.%s 的类型变了：got %q want %q（列类型是对外落库契约）", col.name, tt, col.typ)
@@ -78,3 +97,28 @@ func TestArtifactsColumnsFrozen(t *testing.T) {
 			"两处必须手工逐列一致。", entityCols, wantSorted)
 	}
 }
+
+// parseArtifactAddColumns 从迁移文件里解析 `ALTER TABLE artifacts ADD COLUMN <name> <TYPE>`，
+// 返回追加列名（按出现顺序）与列名→类型。仅用于 v35 那一步（artifacts 加 path）。
+func parseArtifactAddColumns(path string) (names []string, types map[string]string, err error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	src := stripLineComments(string(raw))
+	types = map[string]string{}
+	// 匹配反引号字符串里的 ALTER 语句（迁移文件里语句是 Go 原始字符串字面量）。
+	re := regexp.MustCompile("(?i)ALTER\\s+TABLE\\s+artifacts\\s+ADD\\s+COLUMN\\s+([a-z_]+)\\s+([A-Za-z]+)")
+	for _, m := range re.FindAllStringSubmatch(src, -1) {
+		name := m[1]
+		typ := strings.ToUpper(m[2])
+		names = append(names, name)
+		types[name] = typ
+	}
+	if len(names) == 0 {
+		return nil, nil, errNoAlter
+	}
+	return names, types, nil
+}
+
+var errNoAlter = errors.New("未找到 ALTER TABLE artifacts ADD COLUMN（v35 是否改动了？）")
