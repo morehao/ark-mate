@@ -12,6 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/infra/attachmentstore"
 	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/ark-mate/internal/service/svcmaterial"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
@@ -32,7 +33,10 @@ func newExtractRig(t *testing.T) (*artifactExtractor, string, func(ctx context.C
 	}
 	facts := Facts{Store: st, AttachStore: attachStore}
 	artSvc := facts.buildArtifactSvc()
-	x := newArtifactExtractor(st, attachStore, artSvc)
+	// 自动收录需要资料库用例（生产装配根走 facts.buildMaterialSvc；这里只需要 ImportArtifact 用到的
+	// NodeStore + ArtifactReader 两个端口，上传/字节读取可以给 nil）。
+	matSvc := svcmaterial.New(st, nil, nil, nil, materialArtifactReader{art: artSvc})
+	x := newArtifactExtractor(st, attachStore, artSvc, matSvc)
 	if x == nil {
 		t.Fatalf("抽取器不应为 nil（store/attach/artifact 都有）")
 	}
@@ -125,6 +129,7 @@ func TestArtifactExtractor_WriteEndToEnd(t *testing.T) {
 	if a.ContentSha256 == "" {
 		t.Errorf("应有快照哈希")
 	}
+	assertAutoImported(t, x, a.ID)
 }
 
 // TestArtifactExtractor_AbsolutePathInsideCwd（2026-11-04 真机回归）：dsh 的 write 给的是
@@ -168,6 +173,7 @@ func TestArtifactExtractor_AbsolutePathInsideCwd(t *testing.T) {
 	if got.Dirty {
 		t.Errorf("未改动不应 dirty（绝对路径产物的 path 应能回定位）")
 	}
+	assertAutoImported(t, x, a.ID)
 }
 
 // TestArtifactExtractor_AbsoluteOutsideCwdSkipped：绝对路径落在工作区外 → 跳过（WARN），不建行。
@@ -390,5 +396,94 @@ func TestArtifactSnapshotBeforeAsync(t *testing.T) {
 	}
 	if got.SizeBytes != int64(len(orig)) {
 		t.Fatalf("size 应是原始内容长度: got=%d want=%d", got.SizeBytes, len(orig))
+	}
+}
+
+// TestArtifactExtractor_AutoImportReusesNodePerPath：同一文件 write 后再 edit，产物两行，
+// 资料库只留**一个**节点且载体指向最新快照（一文件一节点，避免同名节点堆积）。
+func TestArtifactExtractor_AutoImportReusesNodePerPath(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	p := filepath.Join(cwd, "note.md")
+	if err := os.WriteFile(p, []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "note.md"},
+	})
+	waitArtifactCount(t, count, 1)
+
+	// 同一文件再 edit 一次：产物多一行，节点不增加。
+	if err := os.WriteFile(p, []byte("v2-longer"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc2", Title: "edit", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "note.md"},
+	})
+	waitArtifactCount(t, count, 2)
+
+	list, err := x.artifact.ListBySession(context.Background(), "ses1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Artifacts) != 2 {
+		t.Fatalf("产物应两行（每次写各一行），实际 %d", len(list.Artifacts))
+	}
+	latest := list.Artifacts[0].ID // created_at 降序
+	waitLibraryProvenance(t, x, latest)
+
+	resp, err := x.material.ListNodesByCategory(context.Background(), "", "artifact", 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Nodes) != 1 {
+		t.Fatalf("同一路径应只有一个资料库节点，实际 %d", len(resp.Nodes))
+	}
+	if resp.Nodes[0].ProvenanceID != latest {
+		t.Fatalf("节点应指向最新快照 %q，实际 %q", latest, resp.Nodes[0].ProvenanceID)
+	}
+	if resp.Nodes[0].SizeBytes != int64(len("v2-longer")) {
+		t.Fatalf("节点大小应换成最新快照，实际 %d", resp.Nodes[0].SizeBytes)
+	}
+}
+
+// waitLibraryProvenance 轮询到资料库的那一个产物节点指向 want（异步收录）。
+func waitLibraryProvenance(t *testing.T, x *artifactExtractor, want string) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		resp, err := x.material.ListNodesByCategory(context.Background(), "", "artifact", 50, 0)
+		if err == nil && len(resp.Nodes) == 1 && resp.Nodes[0].ProvenanceID == want {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("等资料库节点指向 %q 超时（当前 %+v）", want, resp)
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
+// assertAutoImported（2026-11-04 拍板）断言产物登记后**自动**出现在资料库的产物分栏：
+// 一条 category='artifact' 的节点，provenance_id 指回该产物。
+func assertAutoImported(t *testing.T, x *artifactExtractor, artifactID string) {
+	t.Helper()
+	if x.material == nil {
+		t.Fatal("抽取器没接资料库用例，无法自动收录")
+	}
+	resp, err := x.material.ListNodesByCategory(context.Background(), "", "artifact", 50, 0)
+	if err != nil {
+		t.Fatalf("列出资料库产物节点: %v", err)
+	}
+	if len(resp.Nodes) != 1 {
+		t.Fatalf("应自动收录 1 个产物节点，实际 %d", len(resp.Nodes))
+	}
+	n := resp.Nodes[0]
+	if n.Category != "artifact" || n.ProvenanceID != artifactID {
+		t.Fatalf("收录节点不符：category=%q provenance=%q want %q", n.Category, n.ProvenanceID, artifactID)
 	}
 }

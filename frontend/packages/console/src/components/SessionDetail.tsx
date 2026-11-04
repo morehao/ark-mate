@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Drawer, Input, Popconfirm, Spin, Tag } from 'antd'
 import {
@@ -17,6 +17,7 @@ import { modelValues } from '@ark-mate/types'
 import {
   getSession,
   importArtifact,
+  listMaterialNodes,
   listSessionArtifacts,
   promptSession,
   revokeMemory,
@@ -118,12 +119,26 @@ export function SessionDetailDrawer({
   }, [sessionId])
 
   // 产物列表独立拉：它是旁路数据，读失败不该把「会话详情」整块拖进错误态。
+  //
+  // 同时拉一次资料库的产物节点：抽取成功后平台会**自动收录**，界面要能立刻显示「已收录」而不是
+  // 让用户再点一次（不读这一份就只能靠本地点击状态，刷新一次又变回「存进资料库」）。
   const loadArtifacts = useCallback(async () => {
     if (!sessionId) return
     setArtLoading(true)
     try {
-      const resp = await listSessionArtifacts(sessionId)
+      const [resp, nodes] = await Promise.all([
+        listSessionArtifacts(sessionId),
+        listMaterialNodes({ category: 'artifact', limit: 200 }).catch(() => null),
+      ])
       setArtifacts(resp.artifacts ?? [])
+      if (nodes) {
+        const map: Record<string, string> = {}
+        for (const n of nodes.nodes) {
+          if (n.provenance_id) map[n.provenance_id] = n.id
+        }
+        // 本地刚点过的结果优先（它一定是这次会话里最新的）。
+        setImportedNodes((prev) => ({ ...map, ...prev }))
+      }
     } catch {
       setArtifacts([])
     } finally {
@@ -139,6 +154,16 @@ export function SessionDetailDrawer({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sessionId])
+
+  // 同一工作区路径只保留最新版（资料库那边也按这个口径去重）：更早的产物在列表里标「历史版本」，
+  // 不给收录按钮——否则点一下会把资料库节点又翻回旧快照。
+  const latestArtifactByPath = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const a of artifacts) {
+      if (a.path && !m.has(a.path)) m.set(a.path, a.id) // artifacts 已按 created_at 降序
+    }
+    return m
+  }, [artifacts])
 
   // 收录一个产物进资料库（幂等：重复点返回既有节点，不会长第二份）。
   const doImport = (a: ArtifactMeta) => {
@@ -670,6 +695,7 @@ export function SessionDetailDrawer({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {artifacts.map((a) => {
                     const nodeId = importedNodes[a.id]
+                    const latest = !a.path || latestArtifactByPath.get(a.path) === a.id
                     return (
                       <div
                         key={a.id}
@@ -717,7 +743,11 @@ export function SessionDetailDrawer({
                             {a.dirty && <Tag color="orange" style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: '16px' }}>已改动</Tag>}
                           </div>
                         </div>
-                        {nodeId ? (
+                        {!latest ? (
+                          <Tag style={{ flex: 'none', marginInlineEnd: 0, fontSize: 10, lineHeight: '16px' }}>
+                            历史版本
+                          </Tag>
+                        ) : nodeId ? (
                           <Button
                             size="small"
                             type="link"

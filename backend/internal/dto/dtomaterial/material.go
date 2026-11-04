@@ -15,8 +15,11 @@ type NodeResp struct {
 	Title     string `json:"title"`
 	SizeBytes int64  `json:"size_bytes"`
 	// Category 分类维度（v34）：material|artifact。
-	Category  string `json:"category,omitempty"`
-	UpdatedAt string `json:"updated_at"`
+	Category string `json:"category,omitempty"`
+	// ProvenanceID 产物节点引用的 artifact id（v34；仅 category=artifact 时非空）。
+	// 列表页带上它，前端才不必点开每个节点就能判定「这条产物已收录」。
+	ProvenanceID string `json:"provenance_id,omitempty"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // ListNodesResp `GET /materials/nodes` 的响应体（一层子节点 + 分页）。

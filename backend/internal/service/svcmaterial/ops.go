@@ -603,6 +603,30 @@ func (s *materialSvc) ImportArtifact(ctx context.Context, req dtomaterial.Import
 	} else if ok {
 		return s.detail(ctx, existing)
 	}
+	// 「一文件一节点」：同一会话、同一工作区路径的更早产物已收录 → 复用那个节点，把载体换成
+	// 最新快照（不改标题/位置）。否则一次 write + N 次 edit 会在资料库里叠出 N 份同名节点。
+	if ref.Path != "" {
+		prior, err := s.arts.PriorArtifactIDs(ctx, ref.SessionID, ref.Path, ref.ID)
+		if err != nil {
+			return nil, code.Errorf(code.Internal, "读取同路径产物失败: %v", err)
+		}
+		for _, pid := range prior {
+			n, ok, err := s.nodeByProvenance(ctx, pid)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			if err := s.st.UpdateLibraryArtifactNode(ctx, n.ID, ref.ID, ref.UploadID, ref.SizeBytes); err != nil {
+				return nil, code.Errorf(code.Internal, "更新产物节点失败: %v", err)
+			}
+			if saved, ok, err := s.st.LibraryNodeByID(ctx, n.ID); err == nil && ok {
+				n = saved
+			}
+			return s.detail(ctx, n)
+		}
+	}
 	// 按产物 kind 映射 node_kind（file→drive、text→doc、table→table、link→link）。
 	nk, body, err := artifactKindToNode(ref)
 	if err != nil {

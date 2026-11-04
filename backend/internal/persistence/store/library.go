@@ -183,6 +183,32 @@ func (s *Store) DeleteLibraryTable(ctx context.Context, nodeID string) error {
 		Where("node_id = ?", nodeID).Delete(&model.LibraryTableEntity{}).Error
 }
 
+// UpdateLibraryArtifactNode 把一条产物节点的载体换成「同一文件」的**最新快照**。
+//
+// 为什么需要它：自动收录后，一次「write + 多次 edit」会在资料库里留下多份同名节点。平台的口径是
+// **一个文件一个节点、内容跟最新**——所以同一 (session, path) 的更早产物已收录时，复用那个节点，
+// 只把「指向哪个产物 / 哪份字节 / 多大」换掉。
+//
+// 只动这三列：title 与 parent_id **不动**（用户可能已经改名、移动过；自动收录不该把它拽回根目录）。
+func (s *Store) UpdateLibraryArtifactNode(ctx context.Context, nodeID, provenanceID, driveUploadID string, sizeBytes int64) error {
+	updates := map[string]any{
+		"provenance_id": provenanceID,
+		"size_bytes":    sizeBytes,
+		"updated_at":    model.NowTSTime(),
+	}
+	if driveUploadID != "" {
+		updates["drive_upload_id"] = driveUploadID
+	}
+	res := s.libraryNodes.DB(ctx).Model(&model.LibraryNodeEntity{}).Where("id = ?", nodeID).Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("%w: id=%s", ErrLibraryNodeNotFound, nodeID)
+	}
+	return nil
+}
+
 // LibraryNodeByProvenance 按 provenance_id 找已收录的节点（幂等收录用；无命中 → ok=false）。
 //
 // provenance_id 空串直接返回未命中（不查空串，避免把非产物节点误当命中）。

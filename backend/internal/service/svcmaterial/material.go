@@ -35,6 +35,8 @@ type NodeStore interface {
 	// LibraryNodeByProvenance 按 provenance_id 找已收录的节点（幂等收录用；无命中 → ok=false）。
 	LibraryNodeByProvenance(ctx context.Context, provenanceID string) (model.LibraryNodeEntity, bool, error)
 	UpdateLibraryNode(ctx context.Context, id string, title, parentID, body *string) error
+	// UpdateLibraryArtifactNode 把产物节点的载体换成同一文件的最新快照（自动收录去重用）。
+	UpdateLibraryArtifactNode(ctx context.Context, nodeID, provenanceID, driveUploadID string, sizeBytes int64) error
 	DeleteLibraryNode(ctx context.Context, id string) error
 
 	InsertLibraryAttachment(ctx context.Context, a model.LibraryAttachmentEntity) error
@@ -109,20 +111,26 @@ type MaterialSvc interface {
 //
 // 只暴露收录真正用到的字段；ArtifactID 对应 artifacts.id，UploadID 对应 core_file_upload.id。
 type ArtifactRef struct {
-	ID          string
-	SessionID   string
-	RunID       string
-	Kind        string // file|text|table|link
-	Title       string
-	MimeType    string
-	SizeBytes   int64
-	UploadID    string
+	ID        string
+	SessionID string
+	RunID     string
+	Kind      string // file|text|table|link
+	Title     string
+	MimeType  string
+	SizeBytes int64
+	UploadID  string
+	// Path 工作区相对路径（仅工具写工作区文件的产物有；自动收录按它做「一文件一节点」去重）。
+	Path        string
 	ContentText string
 }
 
 // ArtifactReader 按 id 读产物（不存在 → 返回 ok=false）。由装配根用 svcartifact 适配。
 type ArtifactReader interface {
 	ArtifactRef(ctx context.Context, id string) (ArtifactRef, bool, error)
+	// PriorArtifactIDs 返回同一会话、同一工作区路径下**更早**的产物 id（新→旧，不含 excludeID）。
+	//
+	// 自动收录用它做「一文件一节点」：同一文件被改过多次时，复用已有节点、把载体换成最新快照。
+	PriorArtifactIDs(ctx context.Context, sessionID, path, excludeID string) ([]string, error)
 }
 
 type materialSvc struct {
@@ -192,13 +200,14 @@ func extKind(name string) material.NodeKind {
 // nodeToResp 把实体折成列表项。
 func nodeToResp(n model.LibraryNodeEntity) dtomaterial.NodeResp {
 	return dtomaterial.NodeResp{
-		ID:        n.ID,
-		ParentID:  n.ParentID,
-		NodeKind:  n.NodeKind,
-		Title:     n.Title,
-		SizeBytes: n.SizeBytes,
-		Category:  n.Category,
-		UpdatedAt: n.UpdatedAt.UTC().Format(model.LayoutTS),
+		ID:           n.ID,
+		ParentID:     n.ParentID,
+		NodeKind:     n.NodeKind,
+		Title:        n.Title,
+		SizeBytes:    n.SizeBytes,
+		Category:     n.Category,
+		ProvenanceID: n.ProvenanceID,
+		UpdatedAt:    n.UpdatedAt.UTC().Format(model.LayoutTS),
 	}
 }
 

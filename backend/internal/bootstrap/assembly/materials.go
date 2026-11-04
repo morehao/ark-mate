@@ -105,8 +105,29 @@ func (r materialArtifactReader) ArtifactRef(ctx context.Context, id string) (svc
 	return svcmaterial.ArtifactRef{
 		ID: a.ID, SessionID: a.SessionID, RunID: a.RunID, Kind: a.Kind,
 		Title: a.Title, MimeType: a.MimeType, SizeBytes: a.SizeBytes,
-		UploadID: a.UploadID, ContentText: a.ContentText,
+		UploadID: a.UploadID, Path: a.Path, ContentText: a.ContentText,
 	}, true, nil
+}
+
+// PriorArtifactIDs 同一会话、同一工作区路径的更早产物（新→旧，不含 excludeID）。
+//
+// 自动收录用它做「一文件一节点」：`ListBySession` 已按 created_at 降序返回，这里只过滤路径。
+func (r materialArtifactReader) PriorArtifactIDs(ctx context.Context, sessionID, path, excludeID string) ([]string, error) {
+	if r.art == nil {
+		return nil, nil
+	}
+	resp, err := r.art.ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, 4)
+	for _, a := range resp.Artifacts {
+		if a.ID == excludeID || a.Path != path {
+			continue
+		}
+		out = append(out, a.ID)
+	}
+	return out, nil
 }
 
 // buildArtifactSvc 构造产物用例。memory 模式（Store 为 nil）时 ArtifactStore 交 nil（用例内报 40501）。
