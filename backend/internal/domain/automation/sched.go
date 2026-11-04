@@ -2,6 +2,9 @@ package automation
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/automation"
@@ -186,12 +189,115 @@ func (pl *Plane) ReloadDefinitionsForTick(ctx context.Context) {
 		return
 	}
 	if st != nil {
-		pl.LoadAutomationDefinitionsFromStore(ctx, dir)
+		pl.reloadMergeFromStore(ctx, dir)
 		return
 	}
-	pl.LoadAutomationDefinitions(dir)
+	pl.reloadMergeFromFiles(dir)
 }
 
+// reloadMergeFromStore 每 tick 的**增量**重载（DB 载体）：只重建**定义正文变了/新增**的条目，
+// 正文未变的条目**保留内存里的 NextDue/Startup**。
+//
+// 为什么不能像 `LoadAutomationDefinitionsFromStore` 那样整体重建并按 now 重算：`interval` 的
+// "从未触发"分支每次算出的都是 `now+every`（永远在未来），整体重建会把 `NextDue` 每 tick 往后推、
+// 永远等不到 due；`once` 过期分支则会算成 expire（没有下一次）而直接不跑。正文没变就没有"重新
+// 排期"的理由——保留调度态才是正确语义（与文件载体的 mtime 乐观锁同一取向：变了才重算）。
+func (pl *Plane) reloadMergeFromStore(ctx context.Context, dir string) {
+	pl.mu.Lock()
+	pl.dir = dir
+	existing := make(map[string]*Rec, len(pl.recs))
+	for id, rec := range pl.recs {
+		existing[id] = rec
+	}
+	pl.mu.Unlock()
+	if pl.st == nil {
+		return
+	}
+	rows, err := pl.st.ListAutomationDefinitions(ctx)
+	if err != nil {
+		glog.Warnw(ctx, "automation 增量重载：读定义失败（保留当前内存态）", "err", err)
+		return
+	}
+	now := time.Now()
+	seen := make(map[string]bool, len(rows))
+	for i := range rows {
+		row := &rows[i]
+		seen[row.ID] = true
+		if prev, ok := existing[row.ID]; ok && prev.LoadErr == "" && prev.sourceBody == row.Body {
+			continue // 正文未变：保留内存调度态（关键——不重算 NextDue）
+		}
+		rec := loadAutomationRow(row, now)
+		if rec.LoadErr != "" {
+			glog.Warnw(ctx, "automation 定义装载失败（已留在列表里带 error）", "id", row.ID, "err", rec.LoadErr)
+		}
+		pl.mu.Lock()
+		if pl.recs == nil {
+			pl.recs = map[string]*Rec{}
+		}
+		pl.recs[row.ID] = rec
+		pl.mu.Unlock()
+	}
+	// 删掉载体里已不存在的条目（与整体重建同口径：库里删了不能以幽灵任务留在内存里）。
+	pl.mu.Lock()
+	for id := range pl.recs {
+		if !seen[id] {
+			delete(pl.recs, id)
+		}
+	}
+	pl.mu.Unlock()
+}
+
+// reloadMergeFromFiles 每 tick 的增量重载（文件载体）：正文（文件原文）未变的条目保留内存调度态。
+func (pl *Plane) reloadMergeFromFiles(dir string) {
+	pl.mu.Lock()
+	pl.dir = dir
+	existing := make(map[string]*Rec, len(pl.recs))
+	for id, rec := range pl.recs {
+		existing[id] = rec
+	}
+	pl.mu.Unlock()
+	if dir == "" {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			glog.Warnw(context.Background(), "automation 增量重载：目录读取失败（保留当前内存态）", "dir", dir, "err", err)
+		}
+		return
+	}
+	now := time.Now()
+	seen := make(map[string]bool)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		seen[id] = true
+		path := filepath.Join(dir, e.Name())
+		raw, rerr := os.ReadFile(path)
+		if prev, ok := existing[id]; ok && prev.LoadErr == "" && rerr == nil && prev.sourceBody == string(raw) {
+			continue // 文件原文未变：保留内存调度态
+		}
+		rec := loadAutomationFile(path, id, now)
+		if rec.LoadErr != "" {
+			glog.Warnw(context.Background(), "automation 定义装载失败（已留在列表里带 error）", "id", id, "err", rec.LoadErr)
+		}
+		pl.mu.Lock()
+		if pl.recs == nil {
+			pl.recs = map[string]*Rec{}
+		}
+		pl.recs[id] = rec
+		pl.mu.Unlock()
+	}
+	pl.mu.Lock()
+	for id := range pl.recs {
+		if !seen[id] {
+			delete(pl.recs, id)
+		}
+	}
+	pl.mu.Unlock()
+}
 
 // automationRunOnce 认领并执行一条到期的 automation。
 //

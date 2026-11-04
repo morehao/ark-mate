@@ -241,7 +241,9 @@ func loadAutomationRow(row *model.AutomationEntity, now time.Time) *Rec {
 	if err != nil {
 		return &Rec{Def: automation.Automation{ID: row.ID}, LoadErr: err.Error()}
 	}
-	return buildAutomationRec(def, row.ID, now)
+	rec := buildAutomationRec(def, row.ID, now)
+	rec.sourceBody = row.Body
+	return rec
 }
 
 // reloadAutomationFromStore 用库里的那一行刷新内存记录（运行态写回后调用）。
