@@ -1680,7 +1680,7 @@ export const consoleStyleSheet = `
   }
 
   /* ── 单行工具：图标 + 状态 + 对象 + 行号；详情按需展开 ───────── */
-  .fg-tool { min-width: 0; }
+  .fg-tool { min-width: 0; max-width: 100%; overflow: hidden; }
   .fg-tool-head {
     width: 100%;
     min-height: 25px;
@@ -1696,6 +1696,8 @@ export const consoleStyleSheet = `
     line-height: 1.75;
     cursor: default;
     min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
   }
   .fg-tool-head:disabled { opacity: 1; }
   .fg-tool-expandable { cursor: pointer; }
@@ -1727,6 +1729,8 @@ export const consoleStyleSheet = `
     text-overflow: ellipsis;
     transition: color 0.16s ease;
   }
+  /* 弹性占位：让 primary 只在真的放不下时收缩（省略号），短行时又不会莫名其妙变窄。 */
+  .fg-tool-spacer { flex: 1 1 auto; min-width: 0; }
   .fg-tool-link { color: ${tokens.primary}; }
   .fg-tool-expandable:hover .fg-tool-link { color: ${tokens.primaryHover}; text-decoration: underline; }
   .fg-tool-secondary {
@@ -1986,11 +1990,14 @@ export const consoleStyleSheet = `
   .fg-thought-chevron.fg-open { opacity: 1; transform: rotate(90deg); }
   .fg-thought-clip {
     overflow: hidden;
+    min-width: 0;
     transition: max-height 0.28s cubic-bezier(0.33, 1, 0.68, 1), opacity 0.18s ease;
   }
   .fg-thought-body {
     max-height: 200px;
     overflow-y: auto;
+    /* 只在块内纵向滚动；不写 overflow-x 时浏览器会把另一轴算成 auto，横向被长行撑开后冒横条。 */
+    overflow-x: hidden;
     scrollbar-width: thin;
     border-left: 4px solid ${tokens.border};
     margin: 8px 0 4px;
@@ -2000,6 +2007,7 @@ export const consoleStyleSheet = `
     color: ${tokens.text};
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    min-width: 0;
     transform: translateY(-6px);
     transition: transform 0.28s cubic-bezier(0.33, 1, 0.68, 1);
   }

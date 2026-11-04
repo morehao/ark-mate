@@ -901,6 +901,8 @@ function ToolRow({
           </span>
         )}
         {tool.secondary && <span className="fg-tool-secondary">{tool.secondary}</span>}
+        {/* 弹性占位：把展开箭头推到行尾，也保证长 primary 被挤窄收缩而不是把行撑宽。 */}
+        <span className="fg-tool-spacer" aria-hidden="true" />
         {canExpand && <DownOutlined className="fg-tool-arrow" />}
       </button>
       {canExpand && mounted && (

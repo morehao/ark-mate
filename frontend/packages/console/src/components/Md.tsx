@@ -228,7 +228,7 @@ export function Md({ text }: { text: string }) {
         switch (b.type) {
           case 'p':
             return (
-              <p key={key} className="md-p" style={{ margin: '1px 0 7px', whiteSpace: 'pre-wrap' }}>
+              <p key={key} className="md-p" style={{ margin: '1px 0 7px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                 <Inline text={b.text} />
               </p>
             )
