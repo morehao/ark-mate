@@ -784,6 +784,10 @@ var schemaMigrations = []migration{
 	// v34 的版本步本体在 `migrate_v34.go`（新增产物表 `artifacts` + `library_nodes` 加
 	// `category`/`provenance_id` 两列。产物不存字节，字节复用 filestore——理由写在该文件头）。
 	migrationV34,
+
+	// v35 的版本步本体在 `migrate_v35.go`（artifacts 加 `path` 列：工作区相对路径，供 dirty
+	// 惰性判定定位原文件——理由写在该文件头）。
+	migrationV35,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

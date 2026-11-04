@@ -81,6 +81,20 @@ type InteractionCanceller interface {
 	CancelSession(sessionID string)
 }
 
+// ArtifactExtractor 产物自动抽取的**窄端口**（产物面的事实）。
+//
+// 触发时机由 Runner 决定（工具**成功完成**的终态帧）；**是否是一次 write/edit 落文件、路径怎么
+// 解析、快照怎么落**一律在实现侧（装配层）判定——本层只递递原始事件，不 import 抽取实现
+// （domain 不认识 infra，零侵入 C1/C3：识别不了就由实现侧忽略）。
+//
+// **必须非阻塞**：实现在**同步返回前**完成「读工作区字节」（C5：必须在此刻捕获，否则会读到 dsh
+// 后续步骤的覆盖内容），随后「算哈希 + 落 filestore + 建行」由实现内部异步完成；同步段要快
+// （限读大小，见 MaxSnapshotBytes）。任何失败都不上抛（C4：抽取失败绝不影响会话）。nil = 不抽取。
+type ArtifactExtractor interface {
+	// ExtractToolWrite 在工具**成功完成**时尝试登记一条产物（同步捕获字节、内部异步落盘；失败静默）。
+	ExtractToolWrite(ctx context.Context, sessionID, runID string, info protocol.ToolCallInfo)
+}
+
 // RunnerDeps 造一个 Runner 所需的全部事实与端口。
 type RunnerDeps struct {
 	Plane       *Plane
@@ -94,6 +108,8 @@ type RunnerDeps struct {
 	ToolFailures ToolFailureClassifier
 	// Interactions 权限/提问的取消面（nil = 没有交互状态可收敛）。
 	Interactions InteractionCanceller
+	// Extractor 产物自动抽取端口（nil = 不抽取；工具完成时旁路触发，不影响会话）。
+	Extractor ArtifactExtractor
 }
 
 // Runner 会话轮次的运行期状态机：受理、事件出口、排队投递、收尾。
@@ -107,6 +123,14 @@ type Runner struct {
 	toolMemory  ToolMemory
 	toolFailed  ToolFailureClassifier
 	interacts   InteractionCanceller
+	extractor   ArtifactExtractor
+
+	// toolWriteMu/toolWrites 是「在途工具调用的写文件线索」：in_progress 帧的 rawInput 带路径
+	// （终态帧不带，见 R1 探针），故在 tool_call 帧缓存、终态帧取出后清掉。仅承接 write/edit 线索时用
+	// 得着的字段（这里存整条 info 由实现侧自行判断，本层不解析）。上限见 maxPendingToolWrites。
+	toolWriteMu    sync.Mutex
+	toolWrites     map[string]pendingToolWrite
+	toolWriteOrder []string
 
 	// runTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetRunTimeout / MATE_RUN_TIMEOUT）。
 	runTimeout time.Duration
@@ -125,6 +149,7 @@ func NewRunner(d RunnerDeps) *Runner {
 		plane: d.Plane, handles: d.Handles, acquire: d.Acquire, busy: d.Busy,
 		diagnostics: d.Diagnostics, catalog: d.Catalog, toolMemory: d.ToolMemory,
 		toolFailed: d.ToolFailures, interacts: d.Interactions,
+		extractor:     d.Extractor,
 		usage:         make(map[string]objusage.UsageInfo),
 		settleTimeout: AgentSettleTimeout,
 	}
@@ -132,6 +157,10 @@ func NewRunner(d RunnerDeps) *Runner {
 
 // SetRunTimeout 设置单轮 run 看门狗超时（0 = 关闭）。
 func (r *Runner) SetRunTimeout(d time.Duration) { r.runTimeout = d }
+
+// SetArtifactExtractor 装配产物抽取端口（nil = 关闭抽取）。装配根在用例层构造完成后注入
+// （Runner 早于 svc 构造，故走 setter 而非构造参数；与 SetRunTimeout 等同处）。
+func (r *Runner) SetArtifactExtractor(ex ArtifactExtractor) { r.extractor = ex }
 
 // SetSettleTimeout 覆盖取消后的结算等待窗口（0 = 用默认值；测试用它把窗口压到毫秒级）。
 func (r *Runner) SetSettleTimeout(d time.Duration) {
@@ -661,4 +690,67 @@ func (r *Runner) LatestUsage(sessionID string) (objusage.UsageInfo, bool) {
 	defer r.usageMu.Unlock()
 	u, ok := r.usage[sessionID]
 	return u, ok
+}
+
+// ——— 产物自动抽取：在途工具写文件线索的缓存（P2-b） ———
+//
+// 为什么要有这张小表：R1 探针实测 dsh 的 write/edit **只在 in_progress 的 tool_call 帧**带
+// `rawInput.file_path`，终态 tool_call_update 帧**不带**。而「产物登记」只能在**确认成功**的终态
+// 那一刻做。所以：in_progress 帧把整条 info 缓存下来，终态 completed 帧取出交给 extractor。
+//
+// 本层**不判断**它是不是 write/edit、也不解析路径——那是装配层实现的事（domain 不认识 infra）。
+// 这里只做「缓存住、终态取出、不无限增长」三件事；extractor 为 nil 时整条路径零开销。
+
+// pendingToolWrite 一条在途工具调用的缓存（含平台会话/轮次 id 与原始事件）。
+type pendingToolWrite struct {
+	sessionID string
+	runID     string
+	info      protocol.ToolCallInfo
+	// runtimeID 归一化事件所属底座（失败归类/诊断用；抽取本身不依赖它，但保留便于实现侧判断）。
+	runtimeID string
+}
+
+// maxPendingToolWrites 在途线索上限（防长跑进程里 map 只增不减）。256 与 toolMemory 同量级：
+// 覆盖「同会话并发工具 + 权限等待」窗口绰绰有余；超出按插入序淘汰最旧。
+const maxPendingToolWrites = 256
+
+// rememberToolWrite 缓存一条工具调用的写文件线索（空 id 忽略；extractor 为 nil 时不缓存，零开销）。
+func (r *Runner) rememberToolWrite(sessionID, runID, runtimeID string, info protocol.ToolCallInfo) {
+	if r.extractor == nil || info.ID == "" {
+		return
+	}
+	r.toolWriteMu.Lock()
+	defer r.toolWriteMu.Unlock()
+	if r.toolWrites == nil {
+		r.toolWrites = make(map[string]pendingToolWrite)
+	}
+	if _, seen := r.toolWrites[info.ID]; !seen {
+		r.toolWriteOrder = append(r.toolWriteOrder, info.ID)
+	}
+	r.toolWrites[info.ID] = pendingToolWrite{
+		sessionID: sessionID, runID: runID, runtimeID: runtimeID, info: info,
+	}
+	// 淘汰最旧（order 里可能含已取出的 id，循环到找到一个还在的为止）。
+	for len(r.toolWriteOrder) > maxPendingToolWrites {
+		old := r.toolWriteOrder[0]
+		r.toolWriteOrder = r.toolWriteOrder[1:]
+		if _, ok := r.toolWrites[old]; ok {
+			delete(r.toolWrites, old)
+			break
+		}
+	}
+}
+
+// takeToolWrite 取出并清除一条在途线索（不存在 → false）。
+func (r *Runner) takeToolWrite(id string) (pendingToolWrite, bool) {
+	if r.extractor == nil || id == "" {
+		return pendingToolWrite{}, false
+	}
+	r.toolWriteMu.Lock()
+	defer r.toolWriteMu.Unlock()
+	p, ok := r.toolWrites[id]
+	if ok {
+		delete(r.toolWrites, id)
+	}
+	return p, ok
 }

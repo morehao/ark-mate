@@ -60,6 +60,9 @@ func (r *Runner) EventSink(runtimeID string) func(protocol.Event) {
 			if d, ok := ev.Payload.(protocol.ToolCallInfo); ok {
 				// 权限请求只带 toolCallId（dsh 的 wire 形状）：把详情留到权限裁决那一刻。
 				r.rememberToolCall(d)
+				// 产物自动抽取（P2-b）：in_progress 帧的 rawInput 带文件路径（终态帧不带，见 R1 探针），
+				// 在**这一帧**把线索缓存起来，终态 completed 时再交给 extractor。本层不判 title/路径。
+				r.rememberToolWrite(ev.SessionID, r.ActiveRunID(ev.SessionID), runtimeID, d)
 				// 工具过程（S1）：带 `tool_name` —— 头栏那句「正在执行 Bash」正是它（Q6 选①）。
 				// 必须在 publish 工具事件**之前**发：先有「我要跑 X」再有「X 的结果」。
 				r.RunStatusFor(ev.SessionID, RunStatusToolExecuting, RunStatusOpts{
@@ -74,6 +77,15 @@ func (r *Runner) EventSink(runtimeID string) func(protocol.Event) {
 				r.rememberToolCall(d)
 				if d.Status == protocol.ToolStatusCompleted || d.Status == protocol.ToolStatusFailed {
 					r.forgetToolCall(d.ID)
+				}
+				// 产物自动抽取（P2-b）：仅在**成功完成**的终态触发；失败/取消不抽。取出即清缓存
+				// （failed 也清，避免在途线索泄漏）。触发须非阻塞——实现侧同步读字节、异步落盘（C5/C4）。
+				if d.Status == protocol.ToolStatusCompleted {
+					if pw, ok := r.takeToolWrite(d.ID); ok {
+						r.emitToolWrite(pw, d)
+					}
+				} else if d.Status == protocol.ToolStatusFailed {
+					r.takeToolWrite(d.ID) // 仅清理
 				}
 				p := toolPayload(ev.SessionID, runtimeID, d)
 				// 「这条为什么没成」的归类来自**底座的签名表**（第四张可执行端口表）：
@@ -156,6 +168,52 @@ func (r *Runner) forgetToolCall(id string) {
 	if r.toolMemory != nil {
 		r.toolMemory.Forget(id)
 	}
+}
+
+// emitToolWrite 把一次**成功完成**的工具调用交给产物抽取端口（P2-b/P2-c）。
+//
+// 三条零侵入纪律（方案 §2.5）：
+//   - C4 旁路：**同步**调用 extractor（捕获工作区字节必须发生在终态帧这一刻，C5——延后到 goroutine
+//     可能读到 dsh 后续步骤的覆盖内容）；实现的「算哈希 + 落 filestore + 建行」才是异步内部完成。
+//     这里的 `recover` 兜住一切 panic，绝不拖垮事件循环、绝不影响 run 终态、绝不向 dsh 回任何东西；
+//   - 沙箱拒绝跳过：dsh 被沙箱拒写的那一帧 `status` 是 completed（只有正文说得清），
+//     此时**没写成**，不抽（用底座的失败签名表识别，与工具失败归类同源）；
+//   - 合并终态：交给 extractor 的 info 用「缓存帧（带 rawInput）+ 终态帧」合并后的样子——
+//     终态帧带 status/content，缓存帧带 rawInput，二者缺一不可。
+func (r *Runner) emitToolWrite(pw pendingToolWrite, terminal protocol.ToolCallInfo) {
+	if r.extractor == nil {
+		return
+	}
+	// 沙箱拒绝/沙箱不可用 → 这次没真正写成，不抽。
+	//
+	// 判据是 `f.Reason != ""`（真命中某类失败签名），**不是** `ok`：注册表的 `ok` 表示
+	// 「这个底座接了失败签名表」（ok=true 时 reason 仍可能为空 = 文本不匹配任何失败——那是
+	// **成功**的常态）。早先误用 ok 会把每一次成功的工具都当成失败跳过（真机走查抓到的 bug）。
+	if r.toolFailed != nil {
+		if f, ok := r.toolFailed.ClassifyToolFailure(pw.runtimeID, terminal.ContentText); ok && f.Reason != "" {
+			return
+		}
+	}
+	// 合并：以缓存帧为底（保留 rawInput），补终态帧的 status/content（非空的覆盖——与 tool_memory 同口径）。
+	info := pw.info
+	if terminal.Status != "" {
+		info.Status = terminal.Status
+	}
+	if terminal.ContentText != "" {
+		info.ContentText = terminal.ContentText
+	}
+	if terminal.Output != nil {
+		info.Output = terminal.Output
+	}
+	// 同步调用（C5）：实现内部保证「同步捕获字节 → 异步落盘建行」，且必须非阻塞地快速返回。
+	// 独立 ctx：抽取是旁路，不继承请求生命周期（见 C4 / 方案 R3）。
+	defer func() {
+		if rec := recover(); rec != nil {
+			glog.Warnw(context.Background(), "产物自动抽取 panic（已吞，不影响会话）",
+				"session", pw.sessionID, "tool_call", info.ID, "recover", rec)
+		}
+	}()
+	r.extractor.ExtractToolWrite(context.Background(), pw.sessionID, pw.runID, info)
 }
 
 // 工具事件载荷的**白名单键**（S4 / ADR-16 的旁支）。

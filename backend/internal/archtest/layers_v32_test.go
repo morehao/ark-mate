@@ -144,6 +144,9 @@ var v32Layers = map[string]v32Layer{
 	"internal/infra/installed": {layer: 5, name: "infra/installed", sameLayer: true},
 	// 附件字节存储：golib filestore + local 驱动的薄适配层（v32）。L5 与其它 infra 件同层。
 	"internal/infra/attachmentstore": {layer: 5, name: "infra/attachmentstore", sameLayer: true},
+	// 产物自动抽取（P2）：从工具事件旁路识别 write/edit 落文件、把相对路径安全解析到 cwd 内。
+	// 纯函数（不 spawn、不读写盘、不 import 底座），只 import 内圈 protocol/domain 值；L5 与其它 infra 件同层。
+	"internal/infra/workartifact": {layer: 5, name: "infra/workartifact", sameLayer: true},
 	// 资料库 MCP 工具面（v33 P4）：把 svcmaterial 的工具面暴露成 MCP Handler（本包不 import 用例层，
 	// 只认自声明的窄端口 Service）。L5 与其它 infra 件同层，是"与外面说话"的实现。
 	"internal/infra/materialmcp": {layer: 5, name: "infra/materialmcp", sameLayer: true},
