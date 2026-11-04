@@ -992,3 +992,26 @@ MCP 这一面有**两处**与外部协议的接触，都按「平台值 + 端口
 
 ④ **代价如实写**：对外暴露不再有平台侧闸门，必须在反向代理层自行加鉴权；`docs/deployment.md`、
 `README.md`、`docs/agents/build-and-runtime.md` 的鉴权段已同步改写。
+
+## v35 · 定时任务表达力收敛：interval + 受限 monthly，主动放弃 cron（2026-11-04）
+
+> 取代 v5 条 ④ 中「automation 先定 cron 数据契约」的表述（该条当时把 `cron+tz` 写进拟定的数据契约，
+> 本条改为 interval + 受限 monthly，不落 cron）。背景：要让用户用自然语言创建/编辑定时任务
+> （`mate mcp automation` 工具面）。评审结论：表达力的正确边界是「覆盖 95% 自然语言」，而非语法完备。
+
+① **采纳**：`Schedule` 增 `interval`（`every_seconds ≥ 60`，与 DST 无关、可证明正确）与 `monthly`
+（每月某日 day 1–31，当月无此日跳过）。二者覆盖「每两小时/每天/工作日/每月 1 号」等高频诉求。
+
+② **主动放弃 cron**：cron 的真实成本在方言/规范化/DST 的组合爆炸（同类产品近千字规范化规则、
+或让模型产 RRULE 再写校验补丁即是反例）。「每月第 2 个周三」「第 15 分钟」为长尾，用自然语言近似
+或告知暂不支持。纯函数自实现、零第三方依赖、表驱动单测。
+
+③ **投递语义**：`Target.delivery` 缺省 `session`（投递回原会话，共享会话历史），`new_session`
+为显式备选。投递走既有 `Runner.Prompt`/`EnqueueInput`，默认 `after_run`（不打断当前轮）。
+会话所有权仍唯一归 ark-mate，**不引入 DSH sessionController**（双会话 owner 是本仓反模式）。
+
+④ **代价如实写**：不支持 cron 语法；老定义若缺 `delivery`/`session_id`，装载期报
+`delivery_session_unset` 进 `needs_attention`（不自动猜测），需面板或 tool 迁移。
+
+⑤ **推翻条件**：若出现大量「每月第 N 个星期几」类真实需求且自然语言近似不可接受，重开评估
+（届时优先受限的「每月第 N 个周几」，仍不引完整 cron）。
