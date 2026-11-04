@@ -3,11 +3,25 @@ package automation
 import (
 	"fmt"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/core/failure"
 )
 
 // 墙钟扫描窗口：daily/weekly 的最远下次时刻一定落在 +7 天内，留一天余量（时区数据库里
 // 存在整日被跳过的历史事件，如 2011 年萨摩亚跳掉 12-30），所以两侧各扫 8 天。
 const scanDays = 8
+
+// monthlyScanDays monthly 的前后扫描天数：要覆盖"当月无此日"的整月跳过（最坏 31 号在 2 月缺，
+// 从 1-31 一直到 3-31 跨约 59 天），留 2 个月整（62 天）足够。interval 不按天扫（见各分支）。
+const monthlyScanDays = 62
+
+// scanDaysFor 返回该调度按天扫描需要的窗口天数。
+func scanDaysFor(kind string) int {
+	if kind == KindMonthly {
+		return monthlyScanDays
+	}
+	return scanDays
+}
 
 // WallFormat Occurrence.Wall 的格式（本地墙钟 + 时区缩写）。
 const WallFormat = "2006-01-02 15:04 MST"
@@ -18,11 +32,33 @@ func (s Schedule) NextAfter(t time.Time) (Occurrence, bool, error) {
 	if err != nil {
 		return Occurrence{}, false, err
 	}
-	if s.Kind == KindOnce {
+	switch s.Kind {
+	case KindOnce:
 		return s.onceAt(loc, func(at time.Time) bool { return at.After(t) })
+	case KindInterval:
+		return s.intervalAfter(t)
 	}
-	// 按天推进：从 t 的本地日期起扫 scanDays+1 天，取第一个严格晚于 t 的候选。
+	// 按天推进：从 t 的本地日期起扫 window 天，取第一个严格晚于 t 的候选。
 	return s.firstMatching(t, loc, func(at time.Time) bool { return at.After(t) })
+}
+
+// intervalAfter interval 的下一次 = 参考时刻 + every（纯时长，与时区/DST 无关）。
+//
+// 参考时刻就是传入的 t——调用方保证传 lastFiredAt 或 now：从未跑过时 NextAfter(now)=now+every
+// （首次在未来），续跑时 NextAfter(lastFired)=lastFired+every。DST 无关：加的是绝对时长，
+// 春季前移那天墙钟"少一小时"不影响按秒计的间隔。
+func (s Schedule) intervalAfter(t time.Time) (Occurrence, bool, error) {
+	if s.EverySeconds == nil || *s.EverySeconds < 60 {
+		return Occurrence{}, false, failure.NewError(failure.ClassRequest, "invalid_schedule",
+			"interval 需要 schedule.every_seconds（秒，≥60）", nil)
+	}
+	at := t.Add(time.Duration(*s.EverySeconds) * time.Second)
+	// interval 的墙钟展示要落到配置时区（Preview/诊断用），算的是绝对时刻。
+	loc, err := s.Location()
+	if err != nil {
+		return Occurrence{}, false, err
+	}
+	return Occurrence{At: at, Wall: at.In(loc).Format(WallFormat), Timezone: s.Timezone}, true, nil
 }
 
 // LatestAtOrBefore 不晚于 t 的**最近一次**到期。停机跨了多个 occurrence 时，这里给出的是
@@ -35,11 +71,16 @@ func (s Schedule) LatestAtOrBefore(t time.Time) (Occurrence, bool, error) {
 	if s.Kind == KindOnce {
 		return s.onceAt(loc, func(at time.Time) bool { return !at.After(t) })
 	}
+	// interval 没有锚点（"上一次是什么时候"只有 lastLiredAt 知道），恢复口径在 NextDue 里
+	// 用 lastFiredAt 直接算；这里不参与，返回"无"。
+	if s.Kind == KindInterval {
+		return Occurrence{}, false, nil
+	}
 	// 从 t 的本地日期往前扫：取第一个 <= t 的候选。
 	var found Occurrence
 	ok := false
 	base := startOfLocalDay(t, loc)
-	for i := 0; i <= scanDays; i++ {
+	for i := 0; i <= scanDaysFor(s.Kind); i++ {
 		d := base.AddDate(0, 0, -i)
 		for _, c := range s.dayCandidates(d, loc) {
 			if c.At.After(t) {
@@ -71,6 +112,9 @@ func (s Schedule) LatestAtOrBefore(t time.Time) (Occurrence, bool, error) {
 // 不会连跑三次（ADR-9）；`once` 已过期且从未跑过 → 返回那一次（由调用方决定补还是置 inactive，
 // 见 Startup）。
 func (s Schedule) NextDue(lastFiredAt *time.Time, now time.Time) (Occurrence, bool, error) {
+	if s.Kind == KindInterval {
+		return s.intervalNextDue(lastFiredAt, now)
+	}
 	ref := now
 	if lastFiredAt != nil {
 		ref = *lastFiredAt
@@ -92,6 +136,43 @@ func (s Schedule) NextDue(lastFiredAt *time.Time, now time.Time) (Occurrence, bo
 		return Occurrence{}, false, nil // 这次已经跑过了
 	}
 	return latest, true, nil
+}
+
+// intervalNextDue interval 的调度口径（ADR-9：停机只补最近一次，不重放积压）。
+//
+//	从未跑过   → now + every（首次在未来，wait，不立刻补跑）
+//	跑过       → ref = lastFired，next = ref+every
+//	             next 在未来 → 返回 next（wait）
+//	             next 已过去 → 返回 ref + k*every 中**不大于 now 的最大一个**（recovery：只补最近一次）
+//
+// 用 lastFired 直接量化到 now，避免停机很久后逐个 occurrence 连续触发（雪崩）。
+func (s Schedule) intervalNextDue(lastFiredAt *time.Time, now time.Time) (Occurrence, bool, error) {
+	if s.EverySeconds == nil || *s.EverySeconds < 60 {
+		return Occurrence{}, false, failure.NewError(failure.ClassRequest, "invalid_schedule",
+			"interval 需要 schedule.every_seconds（秒，≥60）", nil)
+	}
+	gap := time.Duration(*s.EverySeconds) * time.Second
+	loc, err := s.Location()
+	if err != nil {
+		return Occurrence{}, false, err
+	}
+	mk := func(at time.Time) Occurrence {
+		return Occurrence{At: at, Wall: at.In(loc).Format(WallFormat), Timezone: s.Timezone}
+	}
+	if lastFiredAt == nil {
+		return mk(now.Add(gap)), true, nil
+	}
+	ref := *lastFiredAt
+	next := ref.Add(gap)
+	if next.After(now) {
+		return mk(next), true, nil
+	}
+	// 已经错过至少一次：取 ref + k*gap 中 ≤ now 的最大一个（k≥1）。
+	k := int(now.Sub(ref) / gap)
+	if k < 1 {
+		k = 1
+	}
+	return mk(ref.Add(time.Duration(k) * gap)), true, nil
 }
 
 // StartupAction 启动时对一条 automation 的动作（ADR-9 的落点）。
@@ -147,7 +228,7 @@ func (s Schedule) onceAt(loc *time.Location, pred func(time.Time) bool) (Occurre
 // firstMatching 从 t 起向后逐天找第一个满足 pred 的候选（比全窗口更省，且语义直白）。
 func (s Schedule) firstMatching(t time.Time, loc *time.Location, pred func(time.Time) bool) (Occurrence, bool, error) {
 	base := startOfLocalDay(t, loc)
-	for i := 0; i <= scanDays; i++ {
+	for i := 0; i <= scanDaysFor(s.Kind); i++ {
 		for _, c := range s.dayCandidates(base.AddDate(0, 0, i), loc) {
 			if pred(c.At) {
 				return c, true, nil
@@ -167,7 +248,7 @@ func (s Schedule) firstMatching(t time.Time, loc *time.Location, pred func(time.
 //   - **回拨**（秋季重复：本地 01:30 出现两次）：`time.Date` 返回**第一次**（夏令时那一次）。
 //     行为写进注释与测试，不留给读代码的人猜。
 func (s Schedule) dayCandidates(day time.Time, loc *time.Location) []Occurrence {
-	if s.Kind != KindDaily && s.Kind != KindWeekly {
+	if s.Kind != KindDaily && s.Kind != KindWeekly && s.Kind != KindMonthly {
 		return nil
 	}
 	if s.Hour == nil || s.Minute == nil {
@@ -175,6 +256,13 @@ func (s Schedule) dayCandidates(day time.Time, loc *time.Location) []Occurrence 
 	}
 	if s.Kind == KindWeekly && !containsWeekday(s.DaysOfWeek, int(day.Weekday())) {
 		return nil
+	}
+	if s.Kind == KindMonthly {
+		// 当月无此日则跳过：day.Day() 就是该本地日期在当月的日号，与请求的 Day 不符即不产候选。
+		// 例：Day=31 时 2/3/4 月都天然不产候选，由 firstMatching 向前跨到 5-31，不需特殊判断。
+		if s.Day == nil || day.Day() != *s.Day {
+			return nil
+		}
 	}
 	at := time.Date(day.Year(), day.Month(), day.Day(), *s.Hour, *s.Minute, 0, 0, loc)
 	var warning string

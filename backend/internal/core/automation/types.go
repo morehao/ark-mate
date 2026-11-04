@@ -5,7 +5,10 @@
 // 表驱动单测里被逐条钉死。定义装载与落盘在 `internal/domain/automation` 与用例层，
 // 会话创建与事件发布在 `internal/sessionruntime`。
 //
-// 时间契约（ADR-3）：`once` / `daily` / `weekly` + **IANA 时区**，不引 cron。
+// 时间契约（ADR-3，v35 修订）：`once` / `daily` / `weekly` / `interval` / `monthly` + **IANA 时区**，
+// **不引 cron**。v35 主动放弃 cron：cron 的真实成本在方言/规范化/DST 的组合爆炸，"每月第 2 个周三"
+// 这类长尾用自然语言近似或告知暂不支持；`interval`（每 N 秒，N≥60，纯加时长、DST 无关）与
+// `monthly`（每月某日，当月无此日跳过）覆盖"每两小时/每月 1 号"等高频诉求。
 // 表达力换来的三条好处：无依赖、错误消息可读、"本地墙钟"这套语义能写清楚。
 package automation
 
@@ -16,11 +19,13 @@ import (
 	"time"
 )
 
-// 调度种类。**只有这三种**（ADR-3）：不引 cron 表达式。
+// 调度种类。**只有这五种**（ADR-3，v35 增 interval/monthly）：不引 cron 表达式。
 const (
-	KindOnce   = "once"
-	KindDaily  = "daily"
-	KindWeekly = "weekly"
+	KindOnce     = "once"
+	KindDaily    = "daily"
+	KindWeekly   = "weekly"
+	KindInterval = "interval" // 每 EverySeconds 秒触发一次（≥60，DST 无关）
+	KindMonthly  = "monthly"  // 每月 Day 日（1–31）的本地墙钟点；当月无此日则跳过
 )
 
 // 触发来源（事件载荷 `trigger`）。
@@ -35,12 +40,14 @@ const (
 // `Timezone` **每个变体都必填**：不填就按 UTC 解释会让"每天 9 点"在另一个时区变成"每天 17 点"，
 // 而用户无从察觉——所以缺时区是**报错**而不是回落（见 Validate）。
 type Schedule struct {
-	Kind       string     `json:"kind"`
-	Timezone   string     `json:"timezone"`
-	At         *time.Time `json:"at,omitempty"`           // kind=once
-	Hour       *int       `json:"hour,omitempty"`         // kind=daily|weekly，本地墙钟
-	Minute     *int       `json:"minute,omitempty"`       // kind=daily|weekly
-	DaysOfWeek []int      `json:"days_of_week,omitempty"` // kind=weekly，0=周日（与 time.Weekday 对齐）
+	Kind         string     `json:"kind"`
+	Timezone     string     `json:"timezone"`
+	At           *time.Time `json:"at,omitempty"`            // kind=once
+	Hour         *int       `json:"hour,omitempty"`          // kind=daily|weekly|monthly，本地墙钟
+	Minute       *int       `json:"minute,omitempty"`        // kind=daily|weekly|monthly
+	DaysOfWeek   []int      `json:"days_of_week,omitempty"`  // kind=weekly，0=周日（与 time.Weekday 对齐）
+	EverySeconds *int       `json:"every_seconds,omitempty"` // kind=interval，≥60
+	Day          *int       `json:"day,omitempty"`           // kind=monthly，1–31（当月无此日跳过）
 }
 
 // Target 一次触发要建什么样的会话。
@@ -56,6 +63,29 @@ type Target struct {
 	Cwd    string `json:"cwd"`
 	Model  string `json:"model,omitempty"`
 	Prompt string `json:"prompt"`
+
+	// Delivery 投递模式（v35）：`""`/`session` = 投递回既有会话（共享会话历史，**缺省主语义**）；
+	// `new_session` = 新建会话跑（隔离，显式备选）。
+	Delivery string `json:"delivery,omitempty"`
+	// SessionID delivery=session 时必填：绑定被投递的原会话（写面校验其存在）。
+	SessionID string `json:"session_id,omitempty"`
+}
+
+// 投递模式取值（v35，ADR v35 ③）。
+const (
+	// DeliverySession 投递回既有会话（缺省；空串也归一到这里）。
+	DeliverySession = "session"
+	// DeliveryNewSession 新建会话跑（显式备选，行为与 v35 之前逐字相同）。
+	DeliveryNewSession = "new_session"
+)
+
+// NormalizeDelivery 把空串归一为缺省投递模式（`session`）。非法值**不在此处报错**——留给 Validate
+// 显式报错（不静默回落：投递语义是用户意图，猜错等于把会话投到错的地方）。
+func NormalizeDelivery(d string) string {
+	if d == "" {
+		return DeliverySession
+	}
+	return d
 }
 
 // Automation 定义文件（`<AutomationDir>/<id>.json`）的完整形态。
@@ -127,19 +157,42 @@ func (a *Automation) Validate() error {
 	if a.Target.Prompt == "" {
 		return failure.NewError(failure.ClassRequest, "invalid_param", "automation 缺少 target.prompt（触发时没有可执行的内容）", nil)
 	}
-	// cwd 必须**在创建时就写死**（ADR-6）。留空就等于"每次触发都按当时的活跃工作空间解析"——
-	// 那正是 openwork 吃过的亏（切换活跃工作空间会静默改掉所有 automation 的目标），
-	// 而且自动化往往是"半夜跑、改了不该改的东西"，事后极难归因。
-	if a.Target.Cwd == "" {
-		return failure.NewError(failure.ClassRequest, "invalid_param",
-			"automation 缺少 target.cwd：工作空间必须在创建时钉死（触发时不再解析活跃工作空间）", nil)
-	}
-	if !filepath.IsAbs(a.Target.Cwd) {
-		return failure.NewError(failure.ClassRequest, "invalid_param",
-			"automation 的 target.cwd 必须是绝对路径，得到 "+a.Target.Cwd, nil)
+	if err := a.Target.Validate(); err != nil {
+		return err
 	}
 	if _, err := a.RunDuration(); err != nil {
 		return err
+	}
+	return nil
+}
+
+// Validate 校验目标面（投递模式 + 工作空间）。**纯结构校验**（不查会话是否存在——那要 IO，
+// 归写面在宿主端口上做；这里只保证定义自身自洽）。
+//
+//   - `new_session`：cwd 必填**绝对路径**（ADR-6：工作空间必须在创建时钉死，触发时不再解析
+//     活跃工作空间——openwork 在这件事上吃过亏）；
+//   - `session`（含空串）：session_id 必填（缺 = `delivery_session_unset`，ADR v35 ④：老定义
+//     装进来会进 needs_attention，等用户迁移，**不silently建新会话**）；cwd 不要求。
+func (t Target) Validate() error {
+	switch NormalizeDelivery(t.Delivery) {
+	case DeliverySession:
+		if t.SessionID == "" {
+			return failure.NewError(failure.ClassRequest, "delivery_session_unset",
+				"target.delivery=session 需要 target.session_id（投递回哪个会话）；"+
+					"老定义若本意是批处理请改成 delivery=new_session 并给 target.cwd", nil)
+		}
+	case DeliveryNewSession:
+		if t.Cwd == "" {
+			return failure.NewError(failure.ClassRequest, "invalid_param",
+				"delivery=new_session 缺少 target.cwd：工作空间必须在创建时钉死（触发时不再解析活跃工作空间）", nil)
+		}
+		if !filepath.IsAbs(t.Cwd) {
+			return failure.NewError(failure.ClassRequest, "invalid_param",
+				"automation 的 target.cwd 必须是绝对路径，得到 "+t.Cwd, nil)
+		}
+	default:
+		return failure.NewError(failure.ClassRequest, "invalid_param",
+			"target.delivery 必须是 session | new_session（或留空=session），得到 "+t.Delivery, nil)
 	}
 	return nil
 }
@@ -170,10 +223,10 @@ func (a *Automation) RunDuration() (time.Duration, error) {
 // 前端要能按码把它们指到对应字段，而不是显示一句笼统的"参数错误"。
 func (s Schedule) Validate() error {
 	switch s.Kind {
-	case KindOnce, KindDaily, KindWeekly:
+	case KindOnce, KindDaily, KindWeekly, KindInterval, KindMonthly:
 	default:
 		return failure.NewError(failure.ClassRequest, "invalid_schedule",
-			"schedule.kind 必须是 once | daily | weekly，得到 "+s.Kind, nil)
+			"schedule.kind 必须是 once | daily | weekly | interval | monthly，得到 "+s.Kind, nil)
 	}
 	if _, err := s.Location(); err != nil {
 		return err
@@ -182,6 +235,31 @@ func (s Schedule) Validate() error {
 	case KindOnce:
 		if s.At == nil || s.At.IsZero() {
 			return failure.NewError(failure.ClassRequest, "invalid_schedule", "once 需要 schedule.at（绝对时刻）", nil)
+		}
+	case KindInterval:
+		// interval 是纯时长（从上次触发/创建时刻起加 N 秒），与墙钟、DST 无关；不需要 hour/minute。
+		if s.EverySeconds == nil {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "interval 需要 schedule.every_seconds（秒，≥60）", nil)
+		}
+		if *s.EverySeconds < 60 {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule",
+				"schedule.every_seconds 最小 60（每 60 秒以内的高频轮询不做，避免短间隔任务堆积）", nil)
+		}
+	case KindMonthly:
+		if s.Hour == nil || s.Minute == nil {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "monthly 需要 schedule.hour 与 schedule.minute（本地墙钟）", nil)
+		}
+		if s.Day == nil {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "monthly 需要 schedule.day（1–31，当月无此日则跳过）", nil)
+		}
+		if *s.Day < 1 || *s.Day > 31 {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "schedule.day 需在 1–31", nil)
+		}
+		if *s.Hour < 0 || *s.Hour > 23 {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "schedule.hour 需在 0–23", nil)
+		}
+		if *s.Minute < 0 || *s.Minute > 59 {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "schedule.minute 需在 0–59", nil)
 		}
 	case KindDaily, KindWeekly:
 		if s.Hour == nil || s.Minute == nil {

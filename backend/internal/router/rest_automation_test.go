@@ -33,8 +33,12 @@ type autoHostDouble struct{}
 func (autoHostDouble) CreateSession(_ context.Context, _ automation.HostSessionReq) (string, error) {
 	return "ses_stub", nil
 }
+func (autoHostDouble) DeliverSession(_ context.Context, _ automation.HostDeliverReq) error {
+	return nil
+}
 func (autoHostDouble) CancelRun(_ context.Context, _ string) error { return nil }
 func (autoHostDouble) SessionRunning(_ string) bool                { return false }
+func (autoHostDouble) SessionExists(id string) bool                { return id != "" }
 func (autoHostDouble) EmitRun(_ context.Context, _ string, _ int64, _ map[string]any) {
 }
 
@@ -63,7 +67,7 @@ func autoDef() map[string]any {
 	return map[string]any{
 		"enabled":  true,
 		"schedule": map[string]any{"kind": "daily", "timezone": "UTC", "hour": 9, "minute": 0},
-		"target":   map[string]any{"prompt": "跑一下", "cwd": "/tmp"},
+		"target":   map[string]any{"prompt": "跑一下", "cwd": "/tmp", "delivery": "new_session"},
 	}
 }
 
@@ -90,7 +94,7 @@ func TestAutomationRoutesHappyPath(t *testing.T) {
 	// 新建
 	env, _ := do(t, r, "POST", "/v1/mate/automations",
 		`{"id":"daily","name":"巡检","enabled":true,"schedule":{"kind":"daily","timezone":"UTC","hour":9,"minute":0},`+
-			`"target":{"prompt":"跑一下","cwd":"/tmp"}}`)
+			`"target":{"prompt":"跑一下","cwd":"/tmp","delivery":"new_session"}}`)
 	if env.Code != 0 || !strings.Contains(string(env.Data), `"daily"`) {
 		t.Fatalf("新建应成功: %+v", env)
 	}

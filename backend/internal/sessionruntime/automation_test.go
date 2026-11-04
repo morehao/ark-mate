@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,7 +65,7 @@ func dailyPatch(id, hour string) map[string]any {
 			"kind": "daily", "timezone": "Asia/Shanghai", "hour": 9, "minute": 0,
 		},
 		"target": map[string]any{
-			"cwd": "/tmp/ws", "prompt": "跑一遍依赖巡检",
+			"cwd": "/tmp/ws", "prompt": "跑一遍依赖巡检", "delivery": "new_session",
 		},
 	}
 }
@@ -153,12 +154,12 @@ func TestAutomationValidationZeroBytes(t *testing.T) {
 		{"duration 超上限", map[string]any{
 			"id": "bad", "enabled": true, "max_run_duration": "90m",
 			"schedule": map[string]any{"kind": "daily", "timezone": "UTC", "hour": 9, "minute": 0},
-			"target":   map[string]any{"prompt": "x"},
+			"target":   map[string]any{"cwd": "/tmp", "prompt": "x", "delivery": "new_session"},
 		}, "invalid_param"},
 		{"路径 id 与 body id 不一致", map[string]any{
 			"id": "other", "enabled": true,
 			"schedule": map[string]any{"kind": "daily", "timezone": "UTC", "hour": 9, "minute": 0},
-			"target":   map[string]any{"prompt": "x"},
+			"target":   map[string]any{"cwd": "/tmp", "prompt": "x", "delivery": "new_session"},
 		}, "invalid_param"},
 	}
 	for _, c := range cases {
@@ -187,7 +188,7 @@ func TestAutomationPreservesUnknownKeys(t *testing.T) {
 	writeAutomationFile(t, path, `{
 	  "id": "daily", "name": "巡检", "enabled": true,
 	  "schedule": {"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},
-	  "target": {"cwd":"/tmp/ws","prompt":"跑一遍"},
+	  "target": {"cwd":"/tmp/ws","prompt":"跑一遍","delivery":"new_session"},
 	  "_comment": "这是我手写的备注，平台不许动",
 	  "owner_team": "infra"
 	}`)
@@ -275,7 +276,7 @@ func TestAutomationLoadBadDefinitions(t *testing.T) {
 	writeAutomationFile(t, filepath.Join(dir, "ok.json"), `{
 	  "id":"ok","name":"好定义","enabled":true,
 	  "schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},
-	  "target":{"cwd":"/tmp/ws","prompt":"跑"}
+	  "target":{"cwd":"/tmp/ws","prompt":"跑","delivery":"new_session"}
 	}`)
 	writeAutomationFile(t, filepath.Join(dir, "broken.json"), `{not json`)
 	writeAutomationFile(t, filepath.Join(dir, "mismatch.json"), `{
@@ -286,7 +287,7 @@ func TestAutomationLoadBadDefinitions(t *testing.T) {
 	writeAutomationFile(t, filepath.Join(dir, "disabled.json"), `{
 	  "id":"disabled","name":"关着的","enabled":false,
 	  "schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},
-	  "target":{"cwd":"/tmp/ws","prompt":"跑"}
+	  "target":{"cwd":"/tmp/ws","prompt":"跑","delivery":"new_session"}
 	}`)
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	if n := svc.Planes().Automation.LoadAutomationDefinitions(dir); n != 2 {
@@ -325,20 +326,20 @@ func TestAutomationDueSnapshot(t *testing.T) {
 	// a1：昨天 09:00 跑过 → 现在已到期（recover）
 	mk("a1", `{"id":"a1","enabled":true,
 	  "schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},
-	  "target":{"cwd":"/tmp","prompt":"p"},
+	  "target":{"cwd":"/tmp","prompt":"p","delivery":"new_session"},
 	  "last_fired_at":"2020-01-01T01:00:00Z"}`)
 	// b2：未到期（未来的一次 once）
 	mk("b2", `{"id":"b2","enabled":true,
 	  "schedule":{"kind":"once","timezone":"UTC","at":"2099-01-01T00:00:00Z"},
-	  "target":{"cwd":"/tmp","prompt":"p"}}`)
+	  "target":{"cwd":"/tmp","prompt":"p","delivery":"new_session"}}`)
 	// c3：归档 → 不参与
 	mk("c3", `{"id":"c3","enabled":true,"state":"archived",
 	  "schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},
-	  "target":{"cwd":"/tmp","prompt":"p"}}`)
+	  "target":{"cwd":"/tmp","prompt":"p","delivery":"new_session"}}`)
 	// d4：once 已过期且从未跑 → expire（nextDue 为零，不排进 due）
 	mk("d4", `{"id":"d4","enabled":true,
 	  "schedule":{"kind":"once","timezone":"UTC","at":"2020-01-01T00:00:00Z"},
-	  "target":{"cwd":"/tmp","prompt":"p"}}`)
+	  "target":{"cwd":"/tmp","prompt":"p","delivery":"new_session"}}`)
 	if n := svc.Planes().Automation.LoadAutomationDefinitions(dir); n != 4 {
 		t.Fatalf("装载应为 4，got %d", n)
 	}
@@ -380,7 +381,7 @@ func TestAutomationCreateWritesNormalizedSchedule(t *testing.T) {
 			"kind": "weekly", "timezone": "UTC", "hour": 9, "minute": 0,
 			"days_of_week": []any{3, 1, 3, 0},
 		},
-		"target": map[string]any{"cwd": "/tmp", "prompt": "p"},
+		"target": map[string]any{"cwd": "/tmp", "prompt": "p", "delivery": "new_session"},
 	}, true); err != nil {
 		t.Fatalf("新建: %v", err)
 	}
@@ -397,5 +398,56 @@ func TestAutomationCreateWritesNormalizedSchedule(t *testing.T) {
 		if got.Schedule.DaysOfWeek[i] != want[i] {
 			t.Fatalf("days_of_week 应去重升序 %v，got %v", want, got.Schedule.DaysOfWeek)
 		}
+	}
+}
+
+// TestAutomationDeliverySessionUnsetLoadsNeedsAttention v35 §3.4：老定义无 session_id 且缺省
+// delivery=session → 装载期报 delivery_session_unset、留在列表里带 error（进 needs_attention），
+// **不静默新建会话**、不参与调度。
+func TestAutomationDeliverySessionUnsetLoadsNeedsAttention(t *testing.T) {
+	svc, dir := automationRig(t)
+	writeAutomationFile(t, filepath.Join(dir, "old.json"), `{
+	  "id":"old","name":"老定义","enabled":true,
+	  "schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},
+	  "target":{"prompt":"跑"}
+	}`)
+	if n := svc.Planes().Automation.LoadAutomationDefinitions(dir); n != 0 {
+		t.Fatalf("delivery=session 缺 session_id 不应装载成功，got %d", n)
+	}
+	items := svc.mustListAutomations(t)
+	if len(items) != 1 || items[0].ID != "old" {
+		t.Fatalf("坏定义应留在列表里：%+v", items)
+	}
+	if !strings.Contains(items[0].Error, "delivery_session_unset") &&
+		!strings.Contains(items[0].Error, "session_id") {
+		t.Fatalf("应报 delivery_session_unset（含 session_id 提示），got %q", items[0].Error)
+	}
+	// 不参与调度
+	if due := svc.Planes().Automation.DueSnapshot(time.Now().Add(48 * time.Hour)); len(due) != 0 {
+		t.Fatalf("坏定义不该被调度：%+v", due)
+	}
+}
+
+// TestAutomationWriteFaceSessionMustExist v35 §3.0：写面 delivery=session 时校验会话存在
+// （宿主端口返回不存在 → session_not_found）；delivery=new_session 不查会话、正常保存。
+func TestAutomationWriteFaceSessionMustExist(t *testing.T) {
+	svc, _ := automationRig(t)
+	// delivery=session + 不存在的 session_id → 写面拒绝。
+	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "s2", map[string]any{
+		"id": "s2", "enabled": true,
+		"schedule": map[string]any{"kind": "daily", "timezone": "UTC", "hour": 9, "minute": 0},
+		"target":   map[string]any{"prompt": "p", "delivery": "session", "session_id": "sess_missing"},
+	}, true); err == nil {
+		t.Fatal("会话不存在应被写面拒绝")
+	} else if got := errCode(err); got != "session_not_found" {
+		t.Fatalf("应是 session_not_found，got %q（%v）", got, err)
+	}
+	// delivery=new_session 不查会话，正常保存。
+	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "n1", map[string]any{
+		"id": "n1", "enabled": true,
+		"schedule": map[string]any{"kind": "daily", "timezone": "UTC", "hour": 9, "minute": 0},
+		"target":   map[string]any{"prompt": "p", "delivery": "new_session", "cwd": "/tmp"},
+	}, true); err != nil {
+		t.Fatalf("new_session 应可保存: %v", err)
 	}
 }

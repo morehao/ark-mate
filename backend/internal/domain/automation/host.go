@@ -8,11 +8,13 @@ import "context"
 // （`TestDomainPackagesMustNotImportEachOther`）明令两个域不许互相认识：那样"这份数据归谁"
 // 就没有答案了。所以本域只声明**它需要宿主做什么**，由装配侧（manager 的适配器）如实实现。
 //
-// 端口刻意只有四个动作，对应本域真实用到的四处跨域调用（多一个都是把编排拖进领域）：
+// 端口刻意只有这几个动作，对应本域真实用到的跨域调用（多一个都是把编排拖进领域）：
 //
-//	CreateSession  —— 触发一次（prompt/cwd/model/origin 由定义给出）
-//	CancelRun      —— max_run_duration 到点，走**既有**取消通道（不引第二套超时机制）
+//	CreateSession  —— 触发一次，**新建会话**（delivery=new_session）
+//	DeliverSession —— 触发一次，**投递回既有会话**（delivery=session，v35 缺省路径）
 //	SessionRunning —— overlap 判据（上一次还在跑 → 跳过本次）
+//	SessionExists  —— 写面校验 delivery=session 的 session_id 有对象（不让存永远投不进去的定义）
+//	CancelRun      —— max_run_duration 到点，走**既有**取消通道（不引第二套超时机制）
 //	EmitRun        —— 一条**只走实时通道**的 `automation.run` 事件
 //
 // 最后一条尤其刻意：事件的身份与落库属会话域（`domain/session/publish.go` 是唯一铸号点），
@@ -30,14 +32,26 @@ type HostSessionReq struct {
 	Origin string
 }
 
+// HostDeliverReq 向既有会话投递一条输入所需的最小入参（delivery=session，v35）。
+type HostDeliverReq struct {
+	// SessionID 投递目标会话（写面已校验其存在）。
+	SessionID string
+	// Prompt 投递内容（定义给的 prompt）。
+	Prompt string
+}
+
 // Host 宿主端口（装配期登记）。
 type Host interface {
 	// CreateSession 建一个会话，返回平台会话 id。
 	CreateSession(ctx context.Context, req HostSessionReq) (sessionID string, err error)
+	// DeliverSession 向既有会话投递一条输入（delivery=session 的触发路径；默认 after_run，不打断当前轮）。
+	DeliverSession(ctx context.Context, req HostDeliverReq) error
 	// CancelRun 取消某会话在途的那一轮（幂等；没有在途轮次时什么也不做）。
 	CancelRun(ctx context.Context, sessionID string) error
 	// SessionRunning 该会话此刻是否有一轮在跑（空 id → false）。
 	SessionRunning(sessionID string) bool
+	// SessionExists 该会话是否有对象（写面校验 delivery=session；空 id → false）。
+	SessionExists(sessionID string) bool
 	// EmitRun 发一条 automation.run 实时事件。
 	//
 	// 参数是"内容"而不是 `RunOutcome`：载荷由本域按自己的字段口径拼好（含脱敏闸门），

@@ -83,6 +83,11 @@ func (pl *Plane) StartAutomationScheduler(interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case now := <-t.C:
+				// 调度循环（真实 ticker）每次先重载定义，让 `mate mcp automation` 子进程
+				// 写进来的新定义当轮生效。**只在这个真实循环里重载**，不做进 `Tick` 里：
+				// 单测直接调 `Tick` 时会手动拨 in-memory 游标，若 Tick 自身重载会把那个
+				// 拨动冲掉（装配事实见 reloadDefinitionsForTick 的注释）。
+				pl.ReloadDefinitionsForTick(ctx)
 				pl.Tick(ctx, now)
 			}
 		}
@@ -150,6 +155,10 @@ func (pl *Plane) StartupPass(ctx context.Context) {
 }
 
 // automationTick 一次扫描（导出给测试直接驱动，不必等 ticker）。
+//
+// **不在这里重载定义**：重载由真实的调度循环（StartAutomationScheduler 的 ticker goroutine）
+// 在每次调用 Tick 前做（`reloadDefinitionsForTick`）。单测直接调 Tick 时会手动拨 in-memory
+// 游标来构造边界，Tick 自身重载会把那个拨动冲掉，故保持 Tick 只管"按当前内存态扫一遍"。
 func (pl *Plane) Tick(ctx context.Context, now time.Time) {
 	for _, rec := range pl.DueSnapshot(now) {
 		trigger := automation.TriggerScheduled
@@ -159,6 +168,30 @@ func (pl *Plane) Tick(ctx context.Context, now time.Time) {
 		pl.RunOnce(ctx, rec, rec.NextDue, trigger)
 	}
 }
+
+// ReloadDefinitionsForTick 按当前载体重载一遍定义（DB 载体读库、否则读定义目录）。
+//
+// **持 `runMu` 重载**：重载会整体替换 `recs`，若与一次在途的 `RunOnce`（同样持 runMu）重叠，
+// 会让那次触发拿到的 `rec` 在临界区里被换掉（重取 `RecByID` 只保证 id 一致，不保证"定义没被
+// 另一进程改过"）。串行到 runMu 后面，语义最稳：重载只在两次触发之间发生。
+//
+// 无载体的纯内存模式（`st==nil && dir==""`）跳过：没有跨进程来源，重载只会白白清空内存态。
+func (pl *Plane) ReloadDefinitionsForTick(ctx context.Context) {
+	pl.runMu.Lock()
+	defer pl.runMu.Unlock()
+	pl.mu.Lock()
+	st, dir := pl.st, pl.dir
+	pl.mu.Unlock()
+	if st == nil && dir == "" {
+		return
+	}
+	if st != nil {
+		pl.LoadAutomationDefinitionsFromStore(ctx, dir)
+		return
+	}
+	pl.LoadAutomationDefinitions(dir)
+}
+
 
 // automationRunOnce 认领并执行一条到期的 automation。
 //
@@ -237,7 +270,7 @@ func (pl *Plane) RunOnce(ctx context.Context, rec Rec, ScheduledFor time.Time, t
 		out.Claimed = true
 	}
 
-	// Claimed：真的建会话。
+	// Claimed：真的执行一次（按 delivery 分派）。
 	//
 	// **不在这里做第二份"前置校验"**（runtime 是否可用 / cwd 是否还在）：
 	// 那份校验必然与真实创建路径漂移，而 ADR-10 真正要求的是"失败也推进游标"——那与校验
@@ -249,24 +282,37 @@ func (pl *Plane) RunOnce(ctx context.Context, rec Rec, ScheduledFor time.Time, t
 			Trigger: trigger, Advance: true, Failure: true, Claimed: out.Claimed,
 			Reason: "宿主端口未接线（装配期漏了 SetHost）：本次跳过"})
 	}
-	respID, err := host.CreateSession(ctx, HostSessionReq{
-		Prompt: rec.Def.Target.Prompt,
-		Cwd:    rec.Def.Target.Cwd,
-		Model:  rec.Def.Target.Model,
-		Origin: Origin(rec.Def.ID),
-	})
-	if err != nil {
+	// v35：按 target.delivery 分派。缺省（空串）= session（投递回既有会话）；
+	// new_session = 新建会话（与 v35 之前逐字相同）。
+	var sessionID string
+	var runErr error
+	if automation.NormalizeDelivery(rec.Def.Target.Delivery) == automation.DeliverySession {
+		runErr = host.DeliverSession(ctx, HostDeliverReq{
+			SessionID: rec.Def.Target.SessionID,
+			Prompt:    rec.Def.Target.Prompt,
+		})
+		// 投递到既有会话：last_session_id 记的就是目标会话（不发事件时也要让运行史指向它）。
+		sessionID = rec.Def.Target.SessionID
+	} else {
+		sessionID, runErr = host.CreateSession(ctx, HostSessionReq{
+			Prompt: rec.Def.Target.Prompt,
+			Cwd:    rec.Def.Target.Cwd,
+			Model:  rec.Def.Target.Model,
+			Origin: Origin(rec.Def.ID),
+		})
+	}
+	if runErr != nil {
 		out := RunOutcome{
 			ScheduledFor: ScheduledFor, Status: automation.RunSkipped, Trigger: trigger, Advance: true,
-			Failure: true, Cause: err, Claimed: out.Claimed,
-			Reason: "触发失败（已跳过本次，等修好后的下一个 occurrence）：" + errText(err),
+			Failure: true, Cause: runErr, Claimed: out.Claimed,
+			Reason: "触发失败（已跳过本次，等修好后的下一个 occurrence）：" + errText(runErr),
 		}
-		glog.Warnw(ctx, "automation 触发失败", "automation", rec.Def.ID, "err", err)
+		glog.Warnw(ctx, "automation 触发失败", "automation", rec.Def.ID, "err", runErr)
 		return pl.FinishAutomationRun(ctx, rec, out)
 	}
 	out = RunOutcome{
 		ScheduledFor: ScheduledFor, Status: automation.RunClaimed, Trigger: trigger,
-		SessionID: respID,
+		SessionID: sessionID,
 		// 手动触发不推进游标（见字段注释）。
 		Advance: trigger != automation.TriggerManual, Claimed: out.Claimed,
 	}
@@ -274,7 +320,7 @@ func (pl *Plane) RunOnce(ctx context.Context, rec Rec, ScheduledFor time.Time, t
 	// max_run_duration：可选的**收紧**（默认只靠既有 MATE_RUN_TIMEOUT 看门狗），
 	// 走同一条取消通道，不引入第二套超时机制。
 	if d, err := rec.Def.RunDuration(); err == nil && d > 0 {
-		go pl.automationWatchdog(ctx, rec.Def.ID, respID, d)
+		go pl.automationWatchdog(ctx, rec.Def.ID, sessionID, d)
 	}
 	return res
 }

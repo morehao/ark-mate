@@ -350,6 +350,17 @@ func (pl *Plane) WriteAutomation(ctx context.Context, id string, patch map[strin
 	if err := def.Validate(); err != nil {
 		return AutomationView{}, err
 	}
+	// 写面语义校验（v35 ③）：delivery=session 时**校验该会话存在**（不让用户存一条永远投不进去
+	// 的定义）。结构校验已在 `Validate` 里保证 session_id 非空；这里只查"有没有对象"。
+	// 纯结构校验不做 IO，会话存在性是写面的事（要有宿主端口）。端口未接线时跳过该检查
+	// （装配缺口的表现为触发时 needs_attention，不在写面误拒——那会掩盖真正的装配问题）。
+	if automation.NormalizeDelivery(def.Target.Delivery) == automation.DeliverySession {
+		if host := pl.hostOf(); host != nil && !host.SessionExists(def.Target.SessionID) {
+			return AutomationView{}, failure.NewError(failure.ClassRequest, "session_not_found",
+				fmt.Sprintf("automation %s 的 target.session_id %q 指不到一个会话（刷新会话列表后重选）",
+					id, def.Target.SessionID), nil)
+		}
+	}
 	// 规范化结果要**落进文件**：否则"文件里写的"与"调度实际用的"是两个值，
 	// 而 weekly 的 days_of_week 的去重升序正是靠这一步才看得见（C9 只改必要的键：
 	// 这里只重写 schedule.days_of_week 一个键，schedule 下用户自加的别的键原样保留）。
@@ -447,11 +458,21 @@ func (pl *Plane) RecByID(id string) (Rec, bool) {
 	return *rec, true
 }
 
-// automationRuntimeState 取一条 automation 当前的**会话是否还在跑**（认领的 overlap 判据）。
+// HasActiveRun 取一条 automation 当前的**会话是否还在跑**（认领的 overlap 判据）。
 //
 // 判据用"最近一次触发产生的会话仍在 in_progress"：会话自身状态就是最权威的运行态
 // （ADR-4：不建第二套 run 状态机）。
+//
+// **按 delivery 分岔（v35 §3.3）**：
+//   - `new_session`：上一次新建的会话仍在跑 → overlap 跳过（不要再并起第二个会话——排队等于
+//     让有副作用的 prompt 堆积）；
+//   - `session`（缺省）：**不按"目标会话忙不忙"跳过**。投递到既有会话走 `after_run`（忙则入队、
+//     轮次结束后自动投——这正是不打断用户的语义），skip 掉反而丢了提醒。重复投递由 `duplicate`
+//     （`last_fired_at` 已认领同一 occurrence）挡住，不需要 overlap 这层。
 func (pl *Plane) HasActiveRun(rec Rec) bool {
+	if automation.NormalizeDelivery(rec.Def.Target.Delivery) != automation.DeliveryNewSession {
+		return false
+	}
 	// 判据只有一条：**会话状态是不是 in_progress**（不另写一份终态清单——两份清单必然漂移，
 	// 而漂移的后果是"卡住的会话"被当成已结束，于是同一 occurrence 反复重跑）。
 	if pl.hostOf() == nil {

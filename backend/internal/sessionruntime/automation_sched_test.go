@@ -15,6 +15,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/automation"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	automationcore "github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
 
@@ -97,7 +98,7 @@ func (r *schedRig) writeDaily(t *testing.T, id, lastFired string) {
 	body := map[string]any{
 		"id": id, "name": "每日巡检", "enabled": true,
 		"schedule": map[string]any{"kind": "daily", "timezone": "Asia/Shanghai", "hour": 9, "minute": 0},
-		"target":   map[string]any{"cwd": r.cwd, "prompt": "跑一遍依赖巡检"},
+		"target":   map[string]any{"cwd": r.cwd, "prompt": "跑一遍依赖巡检", "delivery": "new_session"},
 	}
 	if lastFired != "" {
 		body["last_fired_at"] = lastFired
@@ -345,7 +346,7 @@ func TestAutomationStartupPassExpireOnceOnce(t *testing.T) {
 	body := map[string]any{
 		"id": "mig", "enabled": true,
 		"schedule": map[string]any{"kind": "once", "timezone": "UTC", "at": "2020-01-01T00:00:00Z"},
-		"target":   map[string]any{"cwd": r.cwd, "prompt": "跑一次迁移"},
+		"target":   map[string]any{"cwd": r.cwd, "prompt": "跑一次迁移", "delivery": "new_session"},
 	}
 	raw, _ := json.Marshal(body)
 	writeAutomationFile(t, filepath.Join(r.dir, "mig.json"), string(raw))
@@ -532,7 +533,7 @@ func TestAutomationRejectsRuntimeHint(t *testing.T) {
 
 	// ① 请求体里带它 → 显式拒绝。
 	_, err := r.svc.Planes().Automation.WriteAutomation(context.Background(), "daily", map[string]any{
-		"target": map[string]any{"cwd": r.cwd, "prompt": "x", "runtime_hint": "silent"},
+		"target": map[string]any{"cwd": r.cwd, "prompt": "x", "delivery": "new_session", "runtime_hint": "silent"},
 	}, false)
 	if err == nil {
 		t.Fatal("写面带 target.runtime_hint 应被拒")
@@ -605,4 +606,57 @@ func TestAutomationMaxRunDurationWatchdog(t *testing.T) {
 		t.Fatalf("超过 max_run_duration 后会话应被取消（仍在 in_progress）")
 	}
 	// 桩进程回收由夹具的 t.Cleanup(orch.Close) 负责（先停编排器再关库）。
+}
+
+// TestAutomationDeliverySessionEndToEnd v35 P5：delivery=session 的真实端到端——
+// 建一个真会话 → 定义一条每天 9 点、投递回该会话的任务 → 强制到期触发 →
+// **消息投进原会话**（不是新建会话）：目标会话收到 session.user_message，且没有新建 automation 会话。
+func TestAutomationDeliverySessionEndToEnd(t *testing.T) {
+	r := newSchedRig(t)
+	// 1) 建一个真实的"原会话"（idle）。
+	target, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{Cwd: r.cwd})
+	if err != nil {
+		t.Fatalf("建目标会话: %v", err)
+	}
+	// 2) 定义一条 delivery=session 的 daily（经文件，可带 session_id）。
+	body := map[string]any{
+		"id": "remind", "name": "喝水提醒", "enabled": true,
+		"schedule": map[string]any{"kind": "daily", "timezone": "Asia/Shanghai", "hour": 9, "minute": 0},
+		"target":   map[string]any{"prompt": "该喝水了", "delivery": "session", "session_id": target.ID},
+	}
+	raw, _ := json.Marshal(body)
+	writeAutomationFile(t, filepath.Join(r.dir, "remind.json"), string(raw))
+	if n := r.svc.Planes().Automation.LoadAutomationDefinitions(r.dir); n != 1 {
+		t.Fatalf("装载应为 1，got %d", n)
+	}
+	// 3) 强制到期：把内存游标拨到过去，触发一次。
+	now := time.Now()
+	r.svc.planes.Automation.Mutate("remind", func(rec *automationcore.Rec) {
+		rec.NextDue = now.Add(-time.Minute)
+	})
+	sub := r.bus.SubscribeAfter(nil)
+	defer r.bus.Unsubscribe(sub)
+	r.svc.Planes().Automation.Tick(context.Background(), now)
+
+	// 4) 目标会话收到了 user_message（投递成功），且**没有**新建 automation 会话。
+	var delivered bool
+	for _, ev := range busEvents(r.svc) {
+		if ev.Type == session.BusUserMessage && ev.AggregID == target.ID {
+			delivered = true
+		}
+	}
+	if !delivered {
+		t.Fatalf("delivery=session 应把消息投进原会话 %s（未收到 user_message）", target.ID)
+	}
+	if newly := r.sessionsOf(t, "remind"); len(newly) != 0 {
+		t.Fatalf("delivery=session 不该新建 automation 会话，got %d", len(newly))
+	}
+	// 运行史记 claimed，last_session_id = 目标会话。
+	got := r.file(t, "remind")
+	if got["last_status"] != automation.RunClaimed {
+		t.Fatalf("last_status 应为 claimed，got %v", got["last_status"])
+	}
+	if got["last_session_id"] != target.ID {
+		t.Fatalf("last_session_id 应记目标会话，got %v", got["last_session_id"])
+	}
 }

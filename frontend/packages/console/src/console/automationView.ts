@@ -16,8 +16,10 @@ import type {
 
 export const KIND_OPTIONS: { label: string; value: AutomationScheduleKind }[] = [
   { label: '一次（once）', value: 'once' },
+  { label: '间隔（interval）', value: 'interval' },
   { label: '每天（daily）', value: 'daily' },
   { label: '每周（weekly）', value: 'weekly' },
+  { label: '每月（monthly）', value: 'monthly' },
 ]
 
 /** 0=周日，与 Go `time.Weekday` / 后端 `days_of_week` 对齐。 */
@@ -74,11 +76,23 @@ export function describeSchedule(s: AutomationSchedule): string {
   switch (s.kind) {
     case 'once':
       return `一次 · ${s.at ? fmtLocal(s.at, tz) : '未设时间'}（${tz}）`
+    case 'interval':
+      return `每 ${everySecondsText(s.every_seconds)}（与墙钟无关）`
     case 'weekly':
       return `每周 ${weekdayText(s.days_of_week)} ${hhmm(s.hour, s.minute)}（${tz}）`
+    case 'monthly':
+      return `每月 ${s.day ?? 1} 日 ${hhmm(s.hour, s.minute)}（${tz}）`
     default:
       return `每天 ${hhmm(s.hour, s.minute)}（${tz}）`
   }
+}
+
+/** 间隔秒数 → "N 秒 / N 分钟 / N 小时"（≥60，后端约束）。 */
+export function everySecondsText(sec?: number): string {
+  const n = sec ?? 3600
+  if (n % 3600 === 0) return `${n / 3600} 小时`
+  if (n % 60 === 0) return `${n / 60} 分钟`
+  return `${n} 秒`
 }
 
 /**
@@ -184,6 +198,10 @@ export interface ScheduleFormValues {
   hour?: number
   minute?: number
   days_of_week?: number[]
+  /** interval：每多少秒（≥60）。 */
+  every_seconds?: number
+  /** monthly：每月第几日（1–31）。 */
+  day?: number
 }
 
 /** 表单值 → schedule 对象（含 null 删键）。`once_at` 按**所选时区**解释成绝对时刻。 */
@@ -195,18 +213,42 @@ export function scheduleFromForm(v: ScheduleFormValues): Record<string, unknown>
       out.hour = null
       out.minute = null
       out.days_of_week = null
+      out.every_seconds = null
+      out.day = null
+      break
+    case 'interval':
+      out.at = null
+      out.hour = null
+      out.minute = null
+      out.days_of_week = null
+      // 后端约束 ≥60；表单侧兜底到 60（不是 0），避免造出必然被拒的请求。
+      out.every_seconds = Math.max(60, v.every_seconds ?? 3600)
+      out.day = null
       break
     case 'weekly':
       out.at = null
       out.hour = v.hour ?? 9
       out.minute = v.minute ?? 0
       out.days_of_week = [...(v.days_of_week ?? [])].sort((a, b) => a - b)
+      out.every_seconds = null
+      out.day = null
+      break
+    case 'monthly':
+      out.at = null
+      out.hour = v.hour ?? 9
+      out.minute = v.minute ?? 0
+      out.days_of_week = null
+      out.every_seconds = null
+      // 1–31；越界兜底到 1，避免造出必然被拒的请求。
+      out.day = Math.min(31, Math.max(1, v.day ?? 1))
       break
     default:
       out.at = null
       out.hour = v.hour ?? 9
       out.minute = v.minute ?? 0
       out.days_of_week = null
+      out.every_seconds = null
+      out.day = null
   }
   return out
 }
@@ -296,6 +338,8 @@ export function formFromAutomation(a: Automation): ScheduleFormValues & {
   model?: string
   prompt: string
   max_run_duration?: string
+  delivery: 'session' | 'new_session'
+  session_id?: string
 } {
   return {
     id: a.id,
@@ -307,10 +351,15 @@ export function formFromAutomation(a: Automation): ScheduleFormValues & {
     hour: a.schedule.hour ?? 9,
     minute: a.schedule.minute ?? 0,
     days_of_week: a.schedule.days_of_week ?? [],
+    every_seconds: a.schedule.every_seconds ?? 3600,
+    day: a.schedule.day ?? 1,
     cwd: a.target.cwd,
     model: a.target.model,
     prompt: a.target.prompt,
     max_run_duration: a.max_run_duration,
+    // 空/缺省 → session（与后端 NormalizeDelivery 一致）。
+    delivery: a.target.delivery === 'new_session' ? 'new_session' : 'session',
+    session_id: a.target.session_id,
   }
 }
 
@@ -331,21 +380,30 @@ export function writeBody(
     model?: string
     prompt: string
     max_run_duration?: string
+    delivery?: 'session' | 'new_session'
+    session_id?: string
   },
   opts: { create: boolean },
 ): Record<string, unknown> {
+  const delivery = v.delivery === 'new_session' ? 'new_session' : 'session'
+  const target: Record<string, unknown> = {
+    prompt: v.prompt,
+    delivery,
+  }
+  if (delivery === 'session') {
+    if (v.session_id) target.session_id = v.session_id
+  } else {
+    // new_session：cwd 必填（后端要求绝对路径）。
+    target.cwd = v.cwd
+  }
+  if (v.model) target.model = v.model
   const body: Record<string, unknown> = {
     name: v.name,
     enabled: v.enabled,
     schedule: scheduleFromForm(v),
-    target: {
-      cwd: v.cwd,
-      prompt: v.prompt,
-    },
+    target,
   }
   if (opts.create && v.id) body.id = v.id
-  const target = body.target as Record<string, unknown>
-  if (v.model) target.model = v.model
   if (v.max_run_duration) body.max_run_duration = v.max_run_duration
   return body
 }

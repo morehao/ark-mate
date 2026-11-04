@@ -46,7 +46,7 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 	mustWrite(t, filepath.Join(autos, "stale.json"),
 		`{"id":"stale","name":"过期闹钟","enabled":true,`+
 			`"schedule":{"kind":"once","timezone":"UTC","at":"2020-01-01T00:00:00Z"},`+
-			`"target":{"cwd":"`+cwd+`","prompt":"x"}}`)
+			`"target":{"cwd":"`+cwd+`","prompt":"x","delivery":"new_session"}}`)
 
 	cfg := config.Default()
 	cfg.HomeDir = home

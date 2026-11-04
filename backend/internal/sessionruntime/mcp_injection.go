@@ -54,10 +54,23 @@ func (p mcpInjectionPlan) empty() bool {
 
 // planMcpInjection 算出该 runtime 的 MCP 注入计划（唯一实现：注入面与指纹共用）。
 //
-// 与 `mcpSelectionFor`（白名单优先级那一段）的关系：选择语义在 `internal/core/capability.SelectMcpServers`，
-// 这里负责**按传输分派**——直连那一支只收 stdio，远程那一支收远程三种。开关关掉（`mcp_gateway=off`）
-// 时回到老路：远程 server 按该 runtime 声明的承载能力直连注入（能承载才注入，承载不了就跳过）。
+// 在 core 计划之上**追加平台内置 MCP server**（automation / material 的工具面）：
+// 这两条是平台自带的 stdio 子命令（`mate mcp automation` / `mate mcp material`），默认注入，
+// 让模型在会话里直接能用「自然语言创建定时任务 / 资料库」这些能力，无需用户手动注册。
+// 它们进 `plan.Direct`，于是注入面（McpServersFor）与指纹（CapabilityFactsFor）**共用同一份**，
+// 不会出现"指纹说没变、注入里却多了一条"。
+//
+// 三态白名单（`sel.Mcps`）：`nil` = 未钉（全量，含平台内置）；`[]` = 本会话一个 MCP 都不要
+// （平台内置也不注入——与网关条目同一口径：`[]` 是"把整个 MCP 面关掉"）；非空 = 只这些用户 server
+// （平台内置仍注入——它们是产品默认能力，不是用户可选集）。开关 `MATE_PLATFORM_MCP=off` 整体关闭。
 func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySelection) mcpInjectionPlan {
+	plan := s.planMcpInjectionCore(runtimeID, sel)
+	s.appendPlatformMcpServers(&plan, runtimeID, sel)
+	return plan
+}
+
+// planMcpInjectionCore 原有按传输分派的注入计划（不含平台内置 server）。
+func (s *Service) planMcpInjectionCore(runtimeID string, sel *session.CapabilitySelection) mcpInjectionPlan {
 	var plan mcpInjectionPlan
 	if s.planes.Capabilities == nil {
 		return plan
