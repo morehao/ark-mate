@@ -54,6 +54,18 @@ export const uploadMaterialFile = async (file: File, parentId?: string): Promise
   })
 }
 
+/**
+ * 把一条会话产物**显式收录**进资料库（`POST /materials/import-artifact`，v34）。
+ *
+ * 引用而非复制：建 `category='artifact'` 的节点并指回 `provenance_id=artifact_id`。幂等——同一
+ * 产物重复收录返回既有节点。产物默认只进 artifacts，**不自动全量入库**（目录会被会话垃圾淹没）。
+ */
+export const importArtifact = (artifactId: string, parentId?: string): Promise<MaterialNodeDetail> =>
+  http.post<MaterialNodeDetail>('/mate/materials/import-artifact', {
+    artifact_id: artifactId,
+    parent_id: parentId,
+  })
+
 /** 关键词检索（**非语义**；title/body 子串匹配）。 */
 export const searchMaterial = (q: string, params: { limit?: number; offset?: number } = {}): Promise<MaterialSearchResp> => {
   const qs = new URLSearchParams({ q })

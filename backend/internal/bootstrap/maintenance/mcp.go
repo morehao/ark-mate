@@ -42,8 +42,8 @@ const mcpUsage = `mcp 用法：
       凭据 cwd（<cwd>/.env 那一层）由核心经 env MATE_MCP_CRED_CWD 传入；没有它时用网关
       自己的 cwd 并 WARN（网关的 cwd 是底座给的，可能与核心不同）
   mate mcp material
-      资料库文件级 MCP stdio 服务端（library_list_nodes / library_node_info / library_upload；
-      无 search——本期只做资料库、不做知识库）。详见 mate mcp material -h
+      资料库 MCP stdio 服务端（library_list_nodes / library_node_info / library_upload /
+      library_import_artifact；无 search——本期只做资料库、不做知识库）。详见 mate mcp material -h
 `
 
 // mcpBridge `mate mcp bridge`：平台侧 MCP stdio 网关的进程入口。

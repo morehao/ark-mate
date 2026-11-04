@@ -3,7 +3,8 @@ package maintenance
 // ——— `mate mcp material`：资料库的文件级 MCP 工具面（stdio）———
 //
 // 底座（dsh）经 ACP 的 `mcpServers` 拉起这条命令，得到一个只暴露**文件级**工具（列目录 / 节点信息 /
-// 上传）的 MCP server；**没有 library_search**（本期只做资料库、不做知识库，无语义检索）。
+// 上传）与**产物显式收录**（library_import_artifact）的 MCP server；**没有 library_search**
+// （本期只做资料库、不做知识库，无语义检索）。
 //
 // 三条纪律与 `mate mcp bridge` 一脉相承：
 //  1. **stdout 只走协议**（JSON-RPC 帧）：一切诊断走 stderr（C10，日志出口已由 `mcp` 子命令统一配到文件）。
@@ -27,8 +28,9 @@ import (
 
 const materialMcpUsage = `mcp material 用法：
   mate mcp material
-      资料库文件级 MCP stdio 服务端：暴露 library_list_nodes / library_node_info / library_upload
-      三个工具（无 search——本期只做资料库、不做知识库）。底座经 ACP 的 mcpServers 拉起本命令。
+      资料库 MCP stdio 服务端：暴露 library_list_nodes / library_node_info / library_upload /
+      library_import_artifact 四个工具（无 search——本期只做资料库、不做知识库）。
+      底座经 ACP 的 mcpServers 拉起本命令。
       协议流走 stdout，一切诊断走 stderr（stdout 混进一行日志就会毁掉整条会话）。
 `
 
@@ -66,7 +68,7 @@ func materialMcp(args []string) {
 	err = mcp.Serve(ctx, os.Stdin, os.Stdout, mcp.ServerInfo{
 		Name:         "mate-material",
 		Version:      "1",
-		Instructions: "资料库文件级工具：library_list_nodes 浏览目录、library_node_info 读节点（drive 给本地只读路径，交给 read）、library_upload 上传本地文件成节点。本期不提供语义检索。",
+		Instructions: "资料库工具：library_list_nodes 浏览目录、library_node_info 读节点（drive 给本地只读路径，交给 read）、library_upload 上传本地文件成节点、library_import_artifact 把会话产物收录进资料库。本期不提供语义检索。",
 	}, handler, mcp.ServerOptions{})
 	switch {
 	case err == nil:

@@ -12,6 +12,8 @@ export interface MaterialNode {
   size_bytes: number
   /** 分类维度（v34）：material（用户自建）| artifact（会话产物收录）。 */
   category?: MaterialCategory
+  /** 产物节点引用的 artifact id（v34；仅 category=artifact 时非空）。 */
+  provenance_id?: string
   updated_at: string
 }
 

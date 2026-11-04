@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Button,
   Empty,
@@ -30,6 +31,7 @@ import { PageContainer, tokens } from '@ark-mate/ui'
 import {
   createMaterialNode,
   deleteMaterialNode,
+  getArtifact,
   getMaterialNode,
   listMaterialNodes,
   materialViewUrl,
@@ -39,7 +41,7 @@ import {
   toErrorMessage,
   uploadMaterialFile,
 } from '@ark-mate/api'
-import type { MaterialNode, MaterialNodeDetail, MaterialNodeKind, MaterialSearchHit } from '@ark-mate/types'
+import type { ArtifactMeta, MaterialNode, MaterialNodeDetail, MaterialNodeKind, MaterialSearchHit } from '@ark-mate/types'
 
 // ——— 资料库页（v33 P5）———
 //
@@ -63,6 +65,18 @@ interface Crumb {
 }
 
 export function MaterialPage() {
+  // 分类分栏走 URL（`?category=artifact`）：会话详情里「已收录 · 去查看」要能直接落到产物分栏，
+  // 否则用户点完还是停在「全部」，得自己再点一次分栏才找得到刚收录的东西。
+  const [searchParams, setSearchParams] = useSearchParams()
+  const categoryParam = searchParams.get('category')
+  const category: '' | 'material' | 'artifact' =
+    categoryParam === 'material' || categoryParam === 'artifact' ? categoryParam : ''
+  const setCategory = (v: '' | 'material' | 'artifact') => {
+    const next = new URLSearchParams(searchParams)
+    if (v) next.set('category', v)
+    else next.delete('category')
+    setSearchParams(next, { replace: true })
+  }
   const [stack, setStack] = useState<Crumb[]>([]) // 面包屑；末项 = 当前目录（空栈 = 根）
   const [nodes, setNodes] = useState<MaterialNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -70,8 +84,6 @@ export function MaterialPage() {
   const [hits, setHits] = useState<MaterialSearchHit[] | null>(null) // 非 null = 处于搜索结果视图
   const [detail, setDetail] = useState<MaterialNodeDetail | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
-  // 分类分栏（v34）：'' = 全部 / 'material' = 资料 / 'artifact' = 产物。
-  const [category, setCategory] = useState<'' | 'material' | 'artifact'>('')
 
   const currentParent = stack.length ? stack[stack.length - 1].id : ''
 
@@ -327,13 +339,33 @@ function NodeDetailDrawer(props: {
   onChanged: () => void
 }) {
   const { detail, open, onClose, onChanged } = props
+  const navigate = useNavigate()
   const [rows, setRows] = useState<string>('')
   const [editTitle, setEditTitle] = useState('')
+  // 会话产物回跳（v35）：产物节点详情要能回到产出它的会话（provenance_id → artifacts.session_id）。
+  const [srcArtifact, setSrcArtifact] = useState<ArtifactMeta | null>(null)
 
   useEffect(() => {
     if (detail) {
       setRows(detail.rows ?? '')
       setEditTitle(detail.title)
+    }
+  }, [detail])
+
+  useEffect(() => {
+    setSrcArtifact(null)
+    if (!detail || detail.category !== 'artifact' || !detail.provenance_id) return
+    let alive = true
+    // 读失败不影响详情展示：回跳只是便利入口。
+    void getArtifact(detail.provenance_id)
+      .then((a) => {
+        if (alive) setSrcArtifact(a)
+      })
+      .catch(() => {
+        if (alive) setSrcArtifact(null)
+      })
+    return () => {
+      alive = false
     }
   }, [detail])
 
@@ -366,9 +398,21 @@ function NodeDetailDrawer(props: {
     <Modal open={open} onCancel={onClose} footer={null} width={720} title={<Space>{meta.icon}{meta.label}：{detail.title || '未命名'}</Space>}>
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         {detail.category === 'artifact' && (
-          <Tag color="purple" style={{ alignSelf: 'flex-start' }}>
-            会话产物{detail.provenance_id ? ` · ${detail.provenance_id}` : ''}
-          </Tag>
+          <Space style={{ alignSelf: 'flex-start' }} wrap>
+            <Tag color="purple" style={{ marginInlineEnd: 0 }}>
+              会话产物{detail.provenance_id ? ` · ${detail.provenance_id}` : ''}
+            </Tag>
+            {srcArtifact?.session_id && (
+              <Button
+                size="small"
+                type="link"
+                style={{ fontSize: 12, paddingInline: 0 }}
+                onClick={() => navigate(`/sessions/${encodeURIComponent(srcArtifact.session_id)}`)}
+              >
+                查看来源会话
+              </Button>
+            )}
+          </Space>
         )}
         <Space>
           <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} style={{ width: 280 }} />

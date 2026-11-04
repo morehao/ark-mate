@@ -8,7 +8,12 @@
 //
 // 识别判据来自 R1 实探（.dsh/docs/notes/2026-11-04-r1-tool-rawinput-probe-notes.md）：
 //   - dsh 的 write/edit 工具 `title` 分别是 "write" / "edit"（`kind` 恒为 "other"，不可用）；
-//   - `rawInput.file_path` 是**相对 cwd** 的路径（write 还带 content，edit 带 old/new_string）。
+//   - `rawInput.file_path` 带路径（write 还带 content，edit 带 old/new_string）。
+//
+// **路径形态的修正（2026-11-04 真机核对）**：R1 探针当时让模型「写 r1_probe.txt」，于是看到的是
+// 相对串；真会话里模型几乎总给**绝对路径**（本次 10/10 次 write/edit 全是绝对路径，P2 上线后
+// 一条产物都没登记成——这些绝对路径全被旧判据 `filepath.IsAbs → 跳过` 静默丢弃）。所以本包
+// **两种形态都认**：相对路径按 cwd 拼接，绝对路径直接判定是否落在 cwd 内；落在外面才拒（WARN）。
 package workartifact
 
 import (
@@ -31,8 +36,8 @@ const rawInputPathKey = "file_path"
 
 // ResolvedToolWrite 是一次「工具写了哪个文件」的解析结果。
 type ResolvedToolWrite struct {
-	// RelPath 相对会话 cwd 的路径（dsh 原样给出，已 Clean，未做越界外的任何解释）。
-	RelPath string
+	// Path dsh 原样给出的 file_path（相对 cwd 或绝对路径，已 Clean；越界判定在 SafeRelPath）。
+	Path string
 	// Origin 来源：write → tool_write，edit → tool_edit。
 	Origin artifact.Origin
 }
@@ -44,6 +49,9 @@ type ResolvedToolWrite struct {
 //
 // 只认 `title ∈ {write, edit}`：R1 实测 `kind` 恒为 "other"，不能作判据；`title` 是当前
 // dsh 的 wire 事实，若将来变了 → 这里认不出 → 不抽（零侵入口径 C3，不让 dsh 为平台改）。
+//
+// 路径形态**不在这里筛选**：相对/绝对都原样交给 SafeRelPath——真机里绝对路径是常态，早先
+// 「只收相对路径」的判据会让绝大多数产物静默消失（见包注释的 2026-11-04 修正）。
 func ResolveToolWrite(info protocol.ToolCallInfo) (ResolvedToolWrite, bool) {
 	var origin artifact.Origin
 	switch info.Title {
@@ -58,12 +66,7 @@ func ResolveToolWrite(info protocol.ToolCallInfo) (ResolvedToolWrite, bool) {
 	if raw == "" {
 		return ResolvedToolWrite{}, false
 	}
-	// 只接受相对路径：绝对路径的写入不是「会话工作区产物」的常规形态，且越界风险高——保守跳过。
-	// （相对路径仍是唯一常态，R1 实测即 "../r1_probe.txt" 这种相对串。）
-	if filepath.IsAbs(raw) {
-		return ResolvedToolWrite{}, false
-	}
-	return ResolvedToolWrite{RelPath: filepath.Clean(raw), Origin: origin}, true
+	return ResolvedToolWrite{Path: filepath.Clean(raw), Origin: origin}, true
 }
 
 // rawInputPath 从 rawInput（JSON 解码后的 any，通常是 map[string]any）里取 file_path。
@@ -85,32 +88,51 @@ func rawInputPath(input any) string {
 	return strings.TrimSpace(s)
 }
 
-// SafeRelPath 把「相对 cwd 的路径」解析成「cwd 内的绝对路径」，越界即拒。
+// SafeRelPath 把 write/edit 的 file_path 解析成「cwd 内的绝对路径」+「相对 cwd 的展示路径」，越界即拒。
+//
+// 两种入参形态都支持（真机两种都会出现，绝对路径更常见）：
+//   - 相对路径 → 与 cwd 拼接；
+//   - 绝对路径 → 原样使用，但必须落在 cwd 内（不在 → `path_outside_workspace`）。
 //
 // cwd 必须是绝对路径（会话 cwd，见 model.SessionEntity.Cwd）。判定复用 workspace.WithinRoots：
 // 它做 EvalSymlinks 真身解析 + filepath.Rel，能挡住 `../` 与符号链接逃逸（macOS /var→/private/var
 // 这类真身差异也已处理）。返回 (abs, rel, err)：
-//   - abs: 绝对路径（cwd 拼接后 Clean，未经真身解析——读文件仍用 abs，与 dsh 视角一致）；
-//   - rel: 相对 cwd 的 slanch 化路径（用于展示/聚簇）。
-func SafeRelPath(cwd, relPath string) (abs string, rel string, err error) {
+//   - abs: 绝对路径（Clean，未经真身解析——读文件仍用 abs，与 dsh 视角一致）；
+//   - rel: 相对 cwd 的 slanch 化路径（用于展示/聚簇；工件表的 `path` 就是它）。
+func SafeRelPath(cwd, filePath string) (abs string, rel string, err error) {
 	if !filepath.IsAbs(cwd) {
 		return "", "", &PathError{Reason: "cwd_not_absolute", Path: cwd}
 	}
-	cleanRel := filepath.Clean(relPath)
-	if cleanRel == "." || filepath.IsAbs(cleanRel) {
-		return "", "", &PathError{Reason: "path_not_relative_file", Path: relPath}
+	cwd = filepath.Clean(cwd)
+	clean := filepath.Clean(filePath)
+	if clean == "." {
+		return "", "", &PathError{Reason: "path_not_relative_file", Path: filePath}
 	}
-	abs = filepath.Join(cwd, cleanRel)
+	if filepath.IsAbs(clean) {
+		abs = clean
+	} else {
+		abs = filepath.Join(cwd, clean)
+	}
 	// 越界判定：path 必须落在 cwd 这一个根之内（WithinRoots 空根视为放行，故这里必须显式给 [cwd]）。
 	if !workspace.WithinRoots(abs, []string{cwd}) {
-		return "", "", &PathError{Reason: "path_escape", Path: relPath}
+		reason := "path_escape"
+		if filepath.IsAbs(clean) {
+			// 绝对路径不在工作区：不是「逃逸」（没有 ../ 语义），单独给一个原因便于日志区分。
+			reason = "path_outside_workspace"
+		}
+		return "", "", &PathError{Reason: reason, Path: filePath}
 	}
-	return abs, filepath.ToSlash(cleanRel), nil
+	relSlash, err := filepath.Rel(cwd, abs)
+	if err != nil || relSlash == "." {
+		return "", "", &PathError{Reason: "path_not_relative_file", Path: filePath}
+	}
+	return abs, filepath.ToSlash(relSlash), nil
 }
 
-// PathError 是解析类失败（越界 / cwd 非绝对 / 非相对文件路径）。
+// PathError 是解析类失败（越界 / 绝对路径在工作区外 / cwd 非绝对 / 不是文件路径）。
 //
-// 携带稳定 Reason 便于上层 WARN 分类（比如 `path_escape` 要能在日志里一眼区分于普通解析失败）。
+// 携带稳定 Reason 便于上层 WARN 分类（`path_escape` / `path_outside_workspace` 要能在日志里
+// 一眼区分于普通解析失败——静默丢弃是 2026-11-04 那次「产物一条都没有」的排查成本来源）。
 type PathError struct {
 	Reason string
 	Path   string

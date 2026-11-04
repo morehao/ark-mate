@@ -11,11 +11,11 @@ import (
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/service/svcartifact"
 	"github.com/morehao/ark-mate/internal/service/svcattachment"
-	"github.com/morehao/ark-mate/internal/service/svcmaterial"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
 	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
+	"github.com/morehao/ark-mate/internal/service/svcmaterial"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/internal/service/svcsearch"
@@ -122,10 +122,12 @@ func (f Facts) BuildServices() Services {
 	modelFace := sessionruntime.NewModelFace(as.Session)
 	attachmentSvc := f.buildAttachmentSvc()
 	artifactSvc := f.buildArtifactSvc()
+	// 资料库用例先建好：产物抽取成功后要顺手把产物收录进资料库（自动收录，见 artifactextract.go）。
+	materialSvc := f.buildMaterialSvc(attachmentSvc, artifactSvc)
 	// 产物自动抽取（P2-c）：把「工具写工作区文件」旁路成 artifacts 行。依赖 store/attachStore/artifactSvc，
 	// 故在用例层构造完成后、Runner 已存在时经 setter 注入（memory 模式三者缺一 → 返回 nil，抽取自然关闭）。
 	if as.Orchestrator != nil {
-		as.Orchestrator.SetArtifactExtractor(newArtifactExtractor(as.Store, as.AttachStore, artifactSvc))
+		as.Orchestrator.SetArtifactExtractor(newArtifactExtractor(as.Store, as.AttachStore, artifactSvc, materialSvc))
 	}
 	return Services{
 		Session:            as.Session,
@@ -163,7 +165,7 @@ func (f Facts) BuildServices() Services {
 		Stream:       svcstream.New(as.Bus),
 
 		Attachment: attachmentSvc,
-		Material:   f.buildMaterialSvc(attachmentSvc, artifactSvc),
+		Material:   materialSvc,
 		Artifact:   artifactSvc,
 	}
 }

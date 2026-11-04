@@ -13,11 +13,13 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/artifact"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtoartifact"
+	"github.com/morehao/ark-mate/internal/dto/dtomaterial"
 	"github.com/morehao/ark-mate/internal/infra/attachmentstore"
 	"github.com/morehao/ark-mate/internal/infra/workartifact"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/service/svcartifact"
+	"github.com/morehao/ark-mate/internal/service/svcmaterial"
 	"github.com/morehao/golib/glog"
 )
 
@@ -34,19 +36,25 @@ const defaultMaxSnapshotBytes int64 = 32 << 20
 //
 // **零侵入（C1–C4）**：只读 dsh 已上报的事件、只读工作区文件、只写平台自己的 filestore/artifacts；
 // 不 import 底座、不 spawn、不写工作区；任何失败只 WARN 不上抛。
+//
+// **自动收录（2026-11-04 产品拍板）**：产物登记成功后顺手把它收录进资料库的「产物」分栏
+// （`category='artifact'`，引用而非复制）。早先的口径是「只登记、收录要用户显式点」，真机上
+// 用户不会主动去点——产物生成了、资料库里却永远没有。自动收录失败只 WARN：产物行已经在，
+// 会话详情里仍可手动收录。
 type artifactExtractor struct {
 	st       *store.Store
 	attach   *attachmentstore.Store
 	artifact svcartifact.ArtifactSvc
+	material svcmaterial.MaterialSvc
 	maxBytes int64
 }
 
 // newArtifactExtractor 构造抽取器。任一依赖为 nil（memory 模式）时返回 nil（Runner 侧 nil 安全）。
-func newArtifactExtractor(st *store.Store, attach *attachmentstore.Store, art svcartifact.ArtifactSvc) session.ArtifactExtractor {
+func newArtifactExtractor(st *store.Store, attach *attachmentstore.Store, art svcartifact.ArtifactSvc, mat svcmaterial.MaterialSvc) session.ArtifactExtractor {
 	if st == nil || attach == nil || art == nil {
 		return nil
 	}
-	return &artifactExtractor{st: st, attach: attach, artifact: art, maxBytes: defaultMaxSnapshotBytes}
+	return &artifactExtractor{st: st, attach: attach, artifact: art, material: mat, maxBytes: defaultMaxSnapshotBytes}
 }
 
 // ExtractToolWrite 见接口注释。任何失败仅 WARN（C4）。
@@ -62,9 +70,9 @@ func (x *artifactExtractor) ExtractToolWrite(ctx context.Context, sessionID, run
 		glog.Warnw(ctx, "产物抽取：会话不存在，跳过", "session", sessionID, "err", err)
 		return
 	}
-	abs, rel, err := workartifact.SafeRelPath(sess.Cwd, rw.RelPath)
+	abs, rel, err := workartifact.SafeRelPath(sess.Cwd, rw.Path)
 	if err != nil {
-		glog.Warnw(ctx, "产物抽取：路径解析失败，跳过", "session", sessionID, "path", rw.RelPath, "err", err)
+		glog.Warnw(ctx, "产物抽取：路径解析失败，跳过", "session", sessionID, "path", rw.Path, "err", err)
 		return
 	}
 	// ③ 只认普通文件（不抽目录/符号链接）。
@@ -115,7 +123,7 @@ func (x *artifactExtractor) persist(sessionID, runID, toolCallID, title, path, m
 		glog.Warnw(ctx, "产物抽取：上传 filestore 失败，跳过", "session", sessionID, "tool_call", toolCallID, "err", err)
 		return
 	}
-	_, err = x.artifact.Register(ctx, dtoartifact.RegisterReq{
+	resp, err := x.artifact.Register(ctx, dtoartifact.RegisterReq{
 		FileID:     detail.FileUploadID,
 		SessionID:  sessionID,
 		RunID:      runID,
@@ -130,6 +138,17 @@ func (x *artifactExtractor) persist(sessionID, runID, toolCallID, title, path, m
 	if err != nil {
 		glog.Warnw(ctx, "产物抽取：登记产物失败，跳过", "session", sessionID, "tool_call", toolCallID, "err", err)
 		return
+	}
+	// 自动收录进资料库（幂等：同一 artifact 重复收录返回既有节点）。
+	//
+	// 失败了**不回滚产物行**：artifact 是溯源事实，资料库只是它的一个组织视图；用户仍可在
+	// 会话详情「产物」区手动收录（那条路会回显真实错误）。
+	if x.material == nil {
+		return
+	}
+	if _, err := x.material.ImportArtifact(ctx, dtomaterial.ImportArtifactReq{ArtifactID: resp.ID}); err != nil {
+		glog.Warnw(ctx, "产物抽取：自动收录进资料库失败（产物行已登记，可手动收录）",
+			"session", sessionID, "artifact", resp.ID, "title", title, "err", err)
 	}
 }
 
