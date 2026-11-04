@@ -4,14 +4,19 @@
 // 前 6 个字段是**用户写的**（写面收起 `id`/`name`/`enabled`/`schedule`/`target`/`max_run_duration`），
 // 其余是**平台写回的运行事实**（写面拒收，见 PUT /automations/:id）。
 
-export type AutomationScheduleKind = 'once' | 'daily' | 'weekly'
+export type AutomationScheduleKind = 'once' | 'interval' | 'daily' | 'weekly' | 'monthly'
 
 /**
- * 调度表达式。三态共用 `timezone`（显式 IANA 名，不猜本地时区），
- * `once` 用 `at`，`daily` 用 `hour`/`minute`，`weekly` 用 `hour`/`minute` + `days_of_week`。
+ * 调度表达式。五态共用 `timezone`（显式 IANA 名，不猜本地时区），
+ * `once` 用 `at`，`interval` 用 `every_seconds`，`daily` 用 `hour`/`minute`，
+ * `weekly` 用 `hour`/`minute` + `days_of_week`，`monthly` 用 `hour`/`minute` + `day`。
+ *
+ * **没有 cron**（ADR v35）：只填语义字段，不产语法串。
  *
  * `days_of_week` 是 **0=周日** 的整数集合（与 Go `time.Weekday` 对齐）；
  * 服务端容忍重复/乱序并在装载时归一后**回写文件**。
+ * `every_seconds` ≥ 60（interval，纯加时长、与 DST 无关）。
+ * `day` 1–31（monthly，当月无此日则跳过）。
  */
 export interface AutomationSchedule {
   kind: AutomationScheduleKind
@@ -21,17 +26,26 @@ export interface AutomationSchedule {
   hour?: number
   minute?: number
   days_of_week?: number[]
+  /** kind=interval：每多少秒触发一次（≥60）。 */
+  every_seconds?: number
+  /** kind=monthly：每月第几日（1–31，当月无此日则跳过）。 */
+  day?: number
 }
 
 /**
- * 触发时怎么建会话。
+ * 触发时怎么建会话 / 投递。
+ *
+ * **投递模式 `delivery`（ADR v35）**：缺省 `session`（投递回既有会话 `session_id`，共享会话历史）；
+ * `new_session` 显式备选（新建会话跑，需 `cwd`）。空串在服务端归一到 `session`。
  *
  * **没有 runtime_hint**：底座由构建期固定（`-X pkg/runtime.BuildRuntime`）。老定义里若还留着
  * `target.runtime_hint`，写面会被服务端 40001 拒绝（`runtime_selection_removed`），不会静默忽略。
  */
+export type AutomationDelivery = 'session' | 'new_session'
+
 export interface AutomationTarget {
   /**
-   * 工作空间（**创建时钉住**；必须非空绝对路径）。
+   * 工作空间（**创建时钉住**；`new_session` 时必填绝对路径）。
    *
    * v19 起没有 `agent_id`：定时任务触发时建的那个会话落在构建期固定的底座上，
    * 没有"由哪个 agent 执行"这个选择面（老定义里若还留着它，写面会被服务端拒绝，不静默忽略）。
@@ -39,6 +53,10 @@ export interface AutomationTarget {
   cwd: string
   model?: string
   prompt: string
+  /** 投递模式（缺省 session：投递回既有会话）。 */
+  delivery?: AutomationDelivery
+  /** delivery=session 时必填：目标会话 id。 */
+  session_id?: string
 }
 
 /** `needs_attention` = 最近一次没跑成（连续失败计数 > 0），需要人看一眼。 */

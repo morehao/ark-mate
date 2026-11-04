@@ -66,6 +66,8 @@ interface FormValues extends ScheduleFormValues {
   model?: string
   prompt: string
   max_run_duration?: string
+  delivery?: 'session' | 'new_session'
+  session_id?: string
 }
 
 const toneColor = (tone: 'success' | 'muted' | 'warning' | 'danger'): string => {
@@ -95,6 +97,7 @@ export function AutomationsPage() {
   const [form] = Form.useForm<FormValues>()
   // 受控的 kind/timezone（Segmented 与预览都要立刻反映，不等 Form 提交）
   const [kind, setKind] = useState<FormValues['kind']>('daily')
+  const [delivery, setDelivery] = useState<'session' | 'new_session'>('session')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -129,6 +132,7 @@ export function AutomationsPage() {
   // 不生效，点保存只报一堆"必填"，弹窗不关——而用户以为自己没填。
   const openCreate = (): void => {
     setKind('daily')
+    setDelivery('session')
     setPreview(null)
     setPreviewErr(null)
     setEditor({ mode: 'create' })
@@ -136,6 +140,7 @@ export function AutomationsPage() {
 
   const openEdit = (a: Automation): void => {
     setKind(a.schedule.kind)
+    setDelivery(a.target.delivery === 'new_session' ? 'new_session' : 'session')
     setPreview(null)
     setPreviewErr(null)
     setEditor({ mode: 'edit', a })
@@ -150,9 +155,12 @@ export function AutomationsPage() {
         hour: 9,
         minute: 0,
         days_of_week: [],
+        every_seconds: 3600,
+        day: 1,
         enabled: true,
         cwd: '',
         prompt: '',
+        delivery: 'session',
       }
 
   /** 预览：不落盘、不建会话——所以它敢在"保存之前"点。 */
@@ -403,7 +411,18 @@ export function AutomationsPage() {
                   <Input type="datetime-local" style={{ width: 220 }} />
                 </Form.Item>
               )}
-              {kind !== 'once' && (
+              {kind === 'interval' && (
+                <Space size={8} align="center">
+                  <span style={{ fontSize: 12.5, color: tokens.textSecondary }}>每</span>
+                  <Form.Item name="every_seconds" noStyle rules={[{ required: true, message: '间隔不能为空' }]}>
+                    <InputNumber min={60} step={60} style={{ width: 120 }} addonAfter="秒" />
+                  </Form.Item>
+                  <span style={{ fontSize: 12, color: tokens.textSecondary }}>
+                    ≥60 秒；从上次触发起算，与墙钟/DST 无关
+                  </span>
+                </Space>
+              )}
+              {(kind === 'daily' || kind === 'weekly' || kind === 'monthly') && (
                 <Space size={8}>
                   <Form.Item name="hour" noStyle>
                     <InputNumber min={0} max={23} style={{ width: 80 }} addonAfter="时" />
@@ -419,6 +438,17 @@ export function AutomationsPage() {
                     options={WEEKDAYS.map((w) => ({ label: w.label, value: w.value }))}
                   />
                 </Form.Item>
+              )}
+              {kind === 'monthly' && (
+                <Space size={8} align="center">
+                  <span style={{ fontSize: 12.5, color: tokens.textSecondary }}>每月</span>
+                  <Form.Item name="day" noStyle rules={[{ required: true, message: '填一个日期（1–31）' }]}>
+                    <InputNumber min={1} max={31} style={{ width: 90 }} addonAfter="日" />
+                  </Form.Item>
+                  <span style={{ fontSize: 12, color: tokens.textSecondary }}>
+                    （当月无此日则跳过，如 31 号在小月）
+                  </span>
+                </Space>
               )}
               <Space>
                 <Button size="small" onClick={() => void onPreview()}>
@@ -459,17 +489,34 @@ export function AutomationsPage() {
             </Space>
           </Form.Item>
 
-          {/* v19：这一格原来选「由哪个 agent 执行」（`target.agent_id`）。定时任务触发时建的那个
-              会话落在**构建期固定的底座**上，没有第二个候选可选，所以整格删除而不是留个只读展示。
-              它下面那格 "Runtime" 选择器（`target.runtime_hint`）更早一批就已按同一口径删除：
-              底座由构建期固定，服务端对带这些键的写面请求一律 40001（显式拒绝，不静默忽略）。 */}
-          <Form.Item
-            name="cwd"
-            label="工作空间（创建时钉住，须为存在的绝对路径）"
-            rules={[{ required: true, message: '需要一个绝对路径的工作空间' }]}
-          >
-            <CwdPicker />
+          {/* 投递模式（ADR v35）：缺省 session（投递回既有会话，共享历史）；new_session 新建会话。 */}
+          <Form.Item name="delivery" label="投递方式">
+            <Segmented
+              options={[
+                { label: '投递到会话', value: 'session' },
+                { label: '新建会话', value: 'new_session' },
+              ]}
+              onChange={(v) => setDelivery(v as 'session' | 'new_session')}
+            />
           </Form.Item>
+          {delivery === 'session' ? (
+            <Form.Item
+              name="session_id"
+              label="目标会话"
+              extra="投递到这个会话里（共享它的历史）；留空或不存在会报错。"
+              rules={[{ required: true, message: '请填一个目标会话 id' }]}
+            >
+              <Input placeholder="sess_…（从会话列表复制 id）" />
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="cwd"
+              label="工作空间（新建会话时钉住，须为存在的绝对路径）"
+              rules={[{ required: true, message: '新建会话需要一个绝对路径的工作空间' }]}
+            >
+              <CwdPicker />
+            </Form.Item>
+          )}
           <Form.Item name="model" label="模型（可空 = 使用默认模型）">
             <Input placeholder="留空即不指定" />
           </Form.Item>
