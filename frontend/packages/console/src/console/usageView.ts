@@ -81,7 +81,11 @@ export function usageRows(summary: UsageSummary | null): UsageRow[] {
   if (!summary) return []
   const rows = summary.buckets.map((b) => ({
     key: b.key,
-    label: b.runtime_id || b.key,
+    // **行标签不回退到 `runtime_id`**（那是底座 id，如 `dsh`）：用量页是用户可见面，
+    // 底座是执行事实、不是用户概念。v19 起分组恒为 day（`key` 就是日期），`runtime_id`
+    // 只可能出现在历史/异常摘要里——那时用日期/键本身，不摊内部标识。守卫见
+    // `TestUsageRowLabelHasNoRuntimeId`。
+    label: b.key,
     bucket: b,
   }))
   if (summary.group_by === 'day') return rows.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))

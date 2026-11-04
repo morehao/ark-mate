@@ -130,7 +130,9 @@
 - 再加 **1 条产物/MCP 无语义工具守卫**（`artifact_no_semantic_test.go` 的 `TestArtifactNoSemanticTool`，A-4，2026-11-03 产物溯源）：`domain/artifact`、`svcartifact`、`infra/materialmcp` 生产源码剥注释后不得出现 `embedding`/`vector`/`semantic`/`rag`/`chunks`（延续只做资料库不做知识库）。fail-closed：一个文件都扫不到即失败。
 - 再加 **1 条产物域依赖单向守卫**（`artifact_dep_test.go` 的 `TestArtifactDoesNotImportMaterial`，A-1，2026-11-03 产物溯源）：`domain/artifact` 与 `svcartifact` 的生产源码不得 import `internal/domain/material` / `internal/service/svcmaterial`（依赖只能「资料库 → 产物」，不能反向）。fail-closed：一个产物源文件都扫不到即失败（目录改名后不许空转）。另：产物收录的**不变量**（`category='artifact' ⟺ provenance_id 非空`、幂等、悬空 `artifact_not_found`）由**行为测试** `router/art_import_test.go` 的 `TestArtifactImportFlow` 覆盖（不是 archtest 静态守卫，因为它要真库真路由）。
 
-**共 194 条**——加守卫时记得同步这句话。
+- 再加 **3 条底座标识不进用户可见面守卫**（`brand_leak_test.go`，2026-11-04「思考过程/会话输出里仍有 dsh」）：`TestSessionResumeNoticeHasNoRuntimeId`（`store.ts` 的 `SessionResumed` 系统条目不得把 `payload.runtime`——底座 id，如 `dsh`——拼进用户文案）、`TestUsageRowLabelHasNoRuntimeId`（`usageView.ts` 的 `usageRows` 行标签不得回退 `runtime_id`）、`TestIdentityPromptForbidsRuntimeInternalsInNarration`（产品身份文案必须带「不在思考/回复里引用执行层品牌名、环境变量名、home 路径」这条纪律——思考是模型自由文本，唯一能改的就是给它的提示词）。前两条与「新会话 · dsh」「assistant · thinking」同一族：把执行事实拼进用户屏。反证（实跑）：把 `· ${runtime}` 拼回 resume 文案、把 `runtime_id ||` 拼回 usageRows → 对应守卫红；删掉身份文案里那条纪律 → 第三条红。fail-closed：锚点（`case Ev.SessionResumed:` / `export function usageRows(`）解析不到即失败。
+
+**共 197 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 
