@@ -48,6 +48,13 @@ type Rec struct {
 	// LoadErr 装载失败原因（**留在注册表里**而不是静默跳过：用户写了文件却在面板上看不见，
 	// 且不知道为什么，是最难排查的一类投诉）。
 	LoadErr string
+	// sourceBody 该记录当前**内存态**所依据的定义正文字节（DB 载体现在 row.Body / 文件载体是文件原文）。
+	//
+	// 只用于调度循环的**增量重载**判据：正文没变就**保留内存里的 NextDue/Startup**，不重算。
+	// 为什么必须保留：`interval` 的"从未触发"分支每次算出的都是 `now+every`（永远在未来），
+	// `once` 过期分支会算成 expire（没有下一次）——若每 tick 无脑重载并按 `now` 重算，这两类
+	// 永远等不到 due（interval 被一直往后推、once 直接被判过期不跑）。正文变化时才重算。
+	sourceBody string
 }
 
 // automationDirFor 取自动化定义目录；未配置 → 显式报错（不静默"内存生效、盘上没留痕"）。
@@ -118,7 +125,9 @@ func loadAutomationFile(path, id string, now time.Time) *Rec {
 	if err := json.Unmarshal(raw, &def); err != nil {
 		return &Rec{Def: automation.Automation{ID: id}, LoadErr: fmt.Sprintf("不是合法 JSON：%v", err)}
 	}
-	return buildAutomationRec(def, id, now)
+	rec := buildAutomationRec(def, id, now)
+	rec.sourceBody = string(raw)
+	return rec
 }
 
 // LoadAutomationDefinitionsFromStore 从持久层装载定时任务（sqlite 模式；M6-7）。
@@ -384,7 +393,7 @@ func (pl *Plane) WriteAutomation(ctx context.Context, id string, patch map[strin
 		return AutomationView{}, err
 	}
 	def.State = automation.NormalizeState(def.State)
-	rec := &Rec{Def: def}
+	rec := &Rec{Def: def, sourceBody: string(merged)}
 	rec.ApplySchedule(time.Now())
 	pl.mu.Lock()
 	if pl.recs == nil {

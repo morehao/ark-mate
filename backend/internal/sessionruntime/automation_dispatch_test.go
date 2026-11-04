@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	domainautomation "github.com/morehao/ark-mate/internal/domain/automation"
@@ -127,5 +128,52 @@ func TestSchedulerReloadsDefinitionsAcrossProcess(t *testing.T) {
 	daemonSvc.Planes().Automation.ReloadDefinitionsForTick(context.Background())
 	if _, ok := daemonSvc.Planes().Automation.AutomationByID("x"); !ok {
 		t.Fatal("daemon 重载后应看到子进程写的新定义（跨进程生效）")
+	}
+}
+
+// TestTickReloadDoesNotDriftIntervalDue 回归：每 tick 的增量重载**不得**把 interval 的 next_due
+// 往后推（P3 引入 reload 时的真实缺陷：整体重建按 now 重算，interval"从未触发"分支恒给 now+every
+// → 永远等不到 due、永不触发；once 过期分支则会判 expire 直接不跑）。
+//
+// 用 **sqlite 载体**（reloadMergeFromStore 是缺陷所在）。断言：
+//  1. 连续重载多次，NextDue 保持不变；
+//  2. 到点后 DueSnapshot 能看到它（说明它真的会成为 due，而不是被推走）。
+func TestTickReloadDoesNotDriftIntervalDue(t *testing.T) {
+	svc, _ := automationDBRig(t, "")
+	if _, err := svc.Planes().Automation.WriteAutomation(context.Background(), "iv", map[string]any{
+		"id": "iv", "enabled": true,
+		"schedule": map[string]any{"kind": "interval", "timezone": "UTC", "every_seconds": 60},
+		"target":   map[string]any{"prompt": "p", "delivery": "new_session", "cwd": t.TempDir()},
+	}, true); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	rec0, ok := svc.Planes().Automation.RecByID("iv")
+	if !ok {
+		t.Fatal("seed 后应能取到记录")
+	}
+	due := rec0.NextDue
+	if due.IsZero() {
+		t.Fatal("interval 从未触发应有一个未来 due（now+every）")
+	}
+	for i := 0; i < 5; i++ {
+		time.Sleep(5 * time.Millisecond) // 让 now 前进，模拟多次 tick
+		svc.Planes().Automation.ReloadDefinitionsForTick(context.Background())
+		rec, _ := svc.Planes().Automation.RecByID("iv")
+		if !rec.NextDue.Equal(due) {
+			t.Fatalf("第 %d 次重载后 next_due 漂移了：%s → %s（interval 会被永久推后、永不触发）",
+				i+1, due.UTC(), rec.NextDue.UTC())
+		}
+	}
+	// 到点后应出现在 due 快照里（证明它真的会成为 due）。
+	svc.planes.Automation.ReloadDefinitionsForTick(context.Background())
+	dueList := svc.Planes().Automation.DueSnapshot(due.Add(time.Second))
+	var found bool
+	for _, r := range dueList {
+		if r.Def.ID == "iv" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("到点后 DueSnapshot 应包含 iv（next_due=%s）", due.UTC())
 	}
 }
