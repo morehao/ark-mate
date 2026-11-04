@@ -189,13 +189,18 @@ func (s *attachmentSvc) Register(ctx context.Context, fileID, declaredName strin
 	if err != nil {
 		return nil, code.Errorf(code.NotFound, "attachment_not_found: 文件 %s 不存在或不可读: %v", fileID, err)
 	}
-	// 打开字节判真实类型（不信上传时声明的 MIME）。文件级字节可能较大，这里只读前 512 字节判魔数。
+	// 打开字节判真实类型（不信上传时声明的 MIME）。只读前 512 字节判魔数：
+	// 注意必须用 readHead（截断读），**不能**用 readAllLimited——后者对超限返回 (nil, errTooLarge)，
+	// 会把"文件比 512 字节长"误判成"读不到文件头"，进而把任何正常大图当成伪装图拒掉。
 	rc, _, err := s.blobs.Open(ctx, fileID)
 	if err != nil {
 		return nil, code.Errorf(code.NotFound, "attachment_not_found: 文件 %s 字节不可读: %v", fileID, err)
 	}
-	head, _ := readAllLimited(rc, 512)
+	head, err := readHead(rc, 512)
 	_ = rc.Close()
+	if err != nil {
+		return nil, code.Errorf(code.Internal, "读取文件头部失败: %v", err)
+	}
 	kind, probedMime := probeType(head, detail.MimeType)
 	if kind == "invalid_image" {
 		return nil, code.Errorf(code.InvalidRequest,
