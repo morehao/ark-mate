@@ -506,3 +506,233 @@ func acpCode(err error) string {
 	}
 	return ""
 }
+
+// —— P0（v35）：interval + 受限 monthly ——
+
+func interval(tz string, everySeconds int) Schedule {
+	return Schedule{Kind: KindInterval, Timezone: tz, EverySeconds: &everySeconds}
+}
+
+func monthly(tz string, hour, minute, day int) Schedule {
+	return Schedule{Kind: KindMonthly, Timezone: tz, Hour: &hour, Minute: &minute, Day: &day}
+}
+
+// TestValidateIntervalMonthly 两种新 kind 的校验矩阵（错误码仍是 invalid_schedule）。
+func TestValidateIntervalMonthly(t *testing.T) {
+	e60, e59, d1, d0, d32, h9, m0 := 60, 59, 1, 0, 32, 9, 0
+	cases := []struct {
+		name    string
+		s       Schedule
+		wantErr string
+	}{
+		{"interval 正常", interval("Asia/Shanghai", 3600), ""},
+		{"interval 每分钟", interval("UTC", 60), ""},
+		{"interval 缺 every_seconds", Schedule{Kind: KindInterval, Timezone: "UTC"}, "invalid_schedule"},
+		{"interval <60", Schedule{Kind: KindInterval, Timezone: "UTC", EverySeconds: &e59}, "invalid_schedule"},
+		{"interval 缺时区", Schedule{Kind: KindInterval, EverySeconds: &e60}, "invalid_timezone"},
+		{"monthly 正常", monthly("Asia/Shanghai", 9, 0, 1), ""},
+		{"monthly 31 号", monthly("Asia/Shanghai", 9, 0, 31), ""},
+		{"monthly 缺 day", Schedule{Kind: KindMonthly, Timezone: "UTC", Hour: &h9, Minute: &m0}, "invalid_schedule"},
+		{"monthly day=0", Schedule{Kind: KindMonthly, Timezone: "UTC", Hour: &h9, Minute: &m0, Day: &d0}, "invalid_schedule"},
+		{"monthly day=32", Schedule{Kind: KindMonthly, Timezone: "UTC", Hour: &h9, Minute: &m0, Day: &d32}, "invalid_schedule"},
+		{"monthly 缺 hour/minute", Schedule{Kind: KindMonthly, Timezone: "UTC", Day: &d1}, "invalid_schedule"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.s.Validate()
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("期望通过，got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("期望报错，got nil")
+			}
+			if got := acpCode(err); got != c.wantErr {
+				t.Fatalf("期望码 %s，got %s（%v）", c.wantErr, got, err)
+			}
+		})
+	}
+}
+
+// TestIntervalNextAfter 首次 / 续跑 / 严格晚于。
+func TestIntervalNextAfter(t *testing.T) {
+	s := interval("Asia/Shanghai", 3600) // 每 1 小时
+	from := utc("2026-01-04T00:00:00Z")
+	got, ok, err := s.NextAfter(from)
+	if err != nil || !ok {
+		t.Fatalf("NextAfter: %v ok=%v", err, ok)
+	}
+	if !got.At.Equal(from.Add(time.Hour)) {
+		t.Fatalf("interval 下次应为 from+1h，got %s", got.At.UTC())
+	}
+	if got.Timezone != "Asia/Shanghai" || got.Wall == "" {
+		t.Fatalf("Occurrence 应带墙钟与时区: %+v", got)
+	}
+}
+
+// TestIntervalNextDueFirstFire 从未跑过：首次 = now+every（在未来，wait，不立刻补跑）。
+func TestIntervalNextDueFirstFire(t *testing.T) {
+	s := interval("UTC", 3600)
+	now := utc("2026-01-04T00:00:00Z")
+	got, ok, err := s.NextDue(nil, now)
+	if err != nil || !ok {
+		t.Fatalf("NextDue: %v ok=%v", err, ok)
+	}
+	if !got.At.Equal(now.Add(time.Hour)) {
+		t.Fatalf("首次应 now+1h，got %s", got.At.UTC())
+	}
+	if act, _, _ := s.Startup(nil, now); act != StartupWait {
+		t.Fatalf("首次应 wait，got %s", act)
+	}
+}
+
+// TestIntervalRecovery 停机很久：只补最近一次（≤now 的最大 occurrence），不连续触发。
+func TestIntervalRecovery(t *testing.T) {
+	s := interval("UTC", 3600)
+	now := utc("2026-01-04T12:00:00Z")
+	// 上次在 2.5 小时前；错过 2 次（+1h 与 +2h 都在过去），最近一次 = lastFired+2h = now-0.5h
+	last := now.Add(-150 * time.Minute)
+	got, ok, err := s.NextDue(&last, now)
+	if err != nil || !ok {
+		t.Fatalf("NextDue: %v ok=%v", err, ok)
+	}
+	want := last.Add(2 * time.Hour) // = now-30m
+	if !got.At.Equal(want) {
+		t.Fatalf("应补最近一次 %s（now-30m），got %s", want, got.At.UTC())
+	}
+	if !got.At.Before(now) {
+		t.Fatal("恢复点应在 now 之前（recovery）")
+	}
+	act, occ, _ := s.Startup(&last, now)
+	if act != StartupRecover || !occ.At.Equal(want) {
+		t.Fatalf("Startup 应 recovery 于 %s，got %s @ %s", want, act, occ.At.UTC())
+	}
+}
+
+// TestIntervalNextDueFuture 刚跑过、下次仍在未来 → wait，返回那个未来点。
+func TestIntervalNextDueFuture(t *testing.T) {
+	s := interval("UTC", 3600)
+	now := utc("2026-01-04T00:30:00Z")
+	last := utc("2026-01-04T00:00:00Z")
+	got, ok, _ := s.NextDue(&last, now)
+	if !ok || !got.At.Equal(utc("2026-01-04T01:00:00Z")) {
+		t.Fatalf("应返回 lastFired+1h=01:00Z，got %s ok=%v", got.At.UTC(), ok)
+	}
+}
+
+// TestIntervalDSTIrrelevant interval 加的是绝对时长：跨春季前移仍是整 1 小时。
+func TestIntervalDSTIrrelevant(t *testing.T) {
+	loc := mustLoc(t, "America/New_York")
+	s := interval("America/New_York", 3600)
+	// 2026-03-08 01:30 EST = 06:30Z；+1h = 07:30Z（= 03:30 EDT，墙钟跳过了 02:30）
+	from := time.Date(2026, 3, 8, 1, 30, 0, 0, loc)
+	got, _, err := s.NextAfter(from)
+	if err != nil {
+		t.Fatalf("NextAfter: %v", err)
+	}
+	if !got.At.Equal(from.Add(time.Hour)) {
+		t.Fatalf("绝对间隔应恒为 1h，got %s", got.At.UTC())
+	}
+	if w := got.Wall; !strings.Contains(w, "03:30") {
+		t.Fatalf("墙钟应是 03:30（DST 前移后），got %s", w)
+	}
+}
+
+// TestMonthlyNextAfter day=31 在缺此日的月份跳过：4 月无 31 → 5/31。
+func TestMonthlyNextAfter(t *testing.T) {
+	s := monthly("Asia/Shanghai", 9, 0, 31)
+	got, ok, err := s.NextAfter(utc("2026-04-01T00:00:00Z"))
+	if err != nil || !ok {
+		t.Fatalf("NextAfter: %v ok=%v", err, ok)
+	}
+	// 2026-05-31 09:00 CST = 01:00Z
+	if !got.At.Equal(utc("2026-05-31T01:00:00Z")) {
+		t.Fatalf("应从 4 月跳到 5/31 09:00（01:00Z），got %s", got.At.UTC())
+	}
+}
+
+// TestMonthlySkipsShortMonth 从 1/31 之后：2 月无 31 → 3/31（跨约 59 天，验证扫描窗口）。
+func TestMonthlySkipsShortMonth(t *testing.T) {
+	s := monthly("Asia/Shanghai", 9, 0, 31)
+	from := utc("2026-01-31T01:00:01Z") // 1/31 09:00 CST 之后 1 秒
+	got, ok, _ := s.NextAfter(from)
+	if !ok || !got.At.Equal(utc("2026-03-31T01:00:00Z")) {
+		t.Fatalf("应跳到 3/31 09:00（01:00Z），got %s ok=%v", got.At.UTC(), ok)
+	}
+}
+
+// TestMonthlyDay1Regular day=1 常规：月中之后到次月 1 号。
+func TestMonthlyDay1Regular(t *testing.T) {
+	s := monthly("Asia/Shanghai", 9, 0, 1)
+	got, ok, _ := s.NextAfter(utc("2026-01-15T00:00:00Z"))
+	if !ok || !got.At.Equal(utc("2026-02-01T01:00:00Z")) {
+		t.Fatalf("应为 2/1 09:00（01:00Z），got %s ok=%v", got.At.UTC(), ok)
+	}
+}
+
+// TestMonthlyLatestAtOrBefore 停机补最近的 31 号：3/01 往前最近是 1/31（2 月无 31）。
+func TestMonthlyLatestAtOrBefore(t *testing.T) {
+	s := monthly("Asia/Shanghai", 9, 0, 31)
+	got, ok, _ := s.LatestAtOrBefore(utc("2026-03-01T00:00:00Z"))
+	if !ok || !got.At.Equal(utc("2026-01-31T01:00:00Z")) {
+		t.Fatalf("应为 1/31 09:00（01:00Z），got %s ok=%v", got.At.UTC(), ok)
+	}
+}
+
+// TestMonthlyStartupRecovery monthly day=1 停机错过 → 补最近一次。
+func TestMonthlyStartupRecovery(t *testing.T) {
+	s := monthly("Asia/Shanghai", 9, 0, 1)
+	last := utc("2026-01-01T01:00:00Z")
+	now := at(t, "Asia/Shanghai", "2026-03-15 12:00")
+	act, occ, err := s.Startup(&last, now)
+	if err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+	if act != StartupRecover || !occ.At.Equal(utc("2026-03-01T01:00:00Z")) {
+		t.Fatalf("应 recovery 于 3/1 09:00，got %s @ %s", act, occ.At.UTC())
+	}
+}
+
+// TestMonthlyDSTShift monthly 复用同一套墙钟/DST 逻辑：day=8 02:30 在春季前移空档 → 前移 + warning。
+func TestMonthlyDSTShift(t *testing.T) {
+	s := monthly("America/New_York", 2, 30, 8)
+	got, ok, err := s.NextAfter(at(t, "America/New_York", "2026-03-01 00:00"))
+	if err != nil || !ok {
+		t.Fatalf("NextAfter: %v ok=%v", err, ok)
+	}
+	// 2026-03-08 02:30 不存在 → 前移到 03:00 EDT = 07:00Z
+	if !got.At.Equal(utc("2026-03-08T07:00:00Z")) {
+		t.Fatalf("应前移到 03:00 EDT（07:00Z），got %s", got.At.UTC())
+	}
+	if len(got.Warnings) == 0 {
+		t.Fatal("DST 空档必须产 warning")
+	}
+}
+
+// TestPreviewIntervalMonthly Preview 复用统一 occurrence 接口，两种新 kind 都给出未来多次。
+func TestPreviewIntervalMonthly(t *testing.T) {
+	iv := interval("UTC", 3600)
+	got, err := Preview(iv, utc("2026-01-01T00:00:00Z"), 3)
+	if err != nil || len(got) != 3 {
+		t.Fatalf("interval 预览: %d err=%v", len(got), err)
+	}
+	for i := 1; i < len(got); i++ {
+		if d := got[i].At.Sub(got[i-1].At); d != time.Hour {
+			t.Fatalf("interval 预览间隔应恒 1h，第 %d 条 %v", i, d)
+		}
+	}
+	mo := monthly("Asia/Shanghai", 9, 0, 1)
+	ms, err := Preview(mo, utc("2026-01-01T00:00:00Z"), 3)
+	if err != nil || len(ms) != 3 {
+		t.Fatalf("monthly 预览: %d err=%v", len(ms), err)
+	}
+	for i, want := range []time.Time{
+		utc("2026-01-01T01:00:00Z"), utc("2026-02-01T01:00:00Z"), utc("2026-03-01T01:00:00Z"),
+	} {
+		if !ms[i].At.Equal(want) {
+			t.Fatalf("monthly 预览第 %d 条 = %s，期望 %s", i+1, ms[i].At.UTC(), want)
+		}
+	}
+}

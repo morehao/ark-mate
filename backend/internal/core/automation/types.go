@@ -5,7 +5,10 @@
 // 表驱动单测里被逐条钉死。定义装载与落盘在 `internal/domain/automation` 与用例层，
 // 会话创建与事件发布在 `internal/sessionruntime`。
 //
-// 时间契约（ADR-3）：`once` / `daily` / `weekly` + **IANA 时区**，不引 cron。
+// 时间契约（ADR-3，v35 修订）：`once` / `daily` / `weekly` / `interval` / `monthly` + **IANA 时区**，
+// **不引 cron**。v35 主动放弃 cron：cron 的真实成本在方言/规范化/DST 的组合爆炸，"每月第 2 个周三"
+// 这类长尾用自然语言近似或告知暂不支持；`interval`（每 N 秒，N≥60，纯加时长、DST 无关）与
+// `monthly`（每月某日，当月无此日跳过）覆盖"每两小时/每月 1 号"等高频诉求。
 // 表达力换来的三条好处：无依赖、错误消息可读、"本地墙钟"这套语义能写清楚。
 package automation
 
@@ -16,11 +19,13 @@ import (
 	"time"
 )
 
-// 调度种类。**只有这三种**（ADR-3）：不引 cron 表达式。
+// 调度种类。**只有这五种**（ADR-3，v35 增 interval/monthly）：不引 cron 表达式。
 const (
-	KindOnce   = "once"
-	KindDaily  = "daily"
-	KindWeekly = "weekly"
+	KindOnce     = "once"
+	KindDaily    = "daily"
+	KindWeekly   = "weekly"
+	KindInterval = "interval" // 每 EverySeconds 秒触发一次（≥60，DST 无关）
+	KindMonthly  = "monthly"  // 每月 Day 日（1–31）的本地墙钟点；当月无此日则跳过
 )
 
 // 触发来源（事件载荷 `trigger`）。
@@ -35,12 +40,14 @@ const (
 // `Timezone` **每个变体都必填**：不填就按 UTC 解释会让"每天 9 点"在另一个时区变成"每天 17 点"，
 // 而用户无从察觉——所以缺时区是**报错**而不是回落（见 Validate）。
 type Schedule struct {
-	Kind       string     `json:"kind"`
-	Timezone   string     `json:"timezone"`
-	At         *time.Time `json:"at,omitempty"`           // kind=once
-	Hour       *int       `json:"hour,omitempty"`         // kind=daily|weekly，本地墙钟
-	Minute     *int       `json:"minute,omitempty"`       // kind=daily|weekly
-	DaysOfWeek []int      `json:"days_of_week,omitempty"` // kind=weekly，0=周日（与 time.Weekday 对齐）
+	Kind         string     `json:"kind"`
+	Timezone     string     `json:"timezone"`
+	At           *time.Time `json:"at,omitempty"`            // kind=once
+	Hour         *int       `json:"hour,omitempty"`          // kind=daily|weekly|monthly，本地墙钟
+	Minute       *int       `json:"minute,omitempty"`        // kind=daily|weekly|monthly
+	DaysOfWeek   []int      `json:"days_of_week,omitempty"`  // kind=weekly，0=周日（与 time.Weekday 对齐）
+	EverySeconds *int       `json:"every_seconds,omitempty"` // kind=interval，≥60
+	Day          *int       `json:"day,omitempty"`           // kind=monthly，1–31（当月无此日跳过）
 }
 
 // Target 一次触发要建什么样的会话。
@@ -170,10 +177,10 @@ func (a *Automation) RunDuration() (time.Duration, error) {
 // 前端要能按码把它们指到对应字段，而不是显示一句笼统的"参数错误"。
 func (s Schedule) Validate() error {
 	switch s.Kind {
-	case KindOnce, KindDaily, KindWeekly:
+	case KindOnce, KindDaily, KindWeekly, KindInterval, KindMonthly:
 	default:
 		return failure.NewError(failure.ClassRequest, "invalid_schedule",
-			"schedule.kind 必须是 once | daily | weekly，得到 "+s.Kind, nil)
+			"schedule.kind 必须是 once | daily | weekly | interval | monthly，得到 "+s.Kind, nil)
 	}
 	if _, err := s.Location(); err != nil {
 		return err
@@ -182,6 +189,31 @@ func (s Schedule) Validate() error {
 	case KindOnce:
 		if s.At == nil || s.At.IsZero() {
 			return failure.NewError(failure.ClassRequest, "invalid_schedule", "once 需要 schedule.at（绝对时刻）", nil)
+		}
+	case KindInterval:
+		// interval 是纯时长（从上次触发/创建时刻起加 N 秒），与墙钟、DST 无关；不需要 hour/minute。
+		if s.EverySeconds == nil {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "interval 需要 schedule.every_seconds（秒，≥60）", nil)
+		}
+		if *s.EverySeconds < 60 {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule",
+				"schedule.every_seconds 最小 60（每 60 秒以内的高频轮询不做，避免短间隔任务堆积）", nil)
+		}
+	case KindMonthly:
+		if s.Hour == nil || s.Minute == nil {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "monthly 需要 schedule.hour 与 schedule.minute（本地墙钟）", nil)
+		}
+		if s.Day == nil {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "monthly 需要 schedule.day（1–31，当月无此日则跳过）", nil)
+		}
+		if *s.Day < 1 || *s.Day > 31 {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "schedule.day 需在 1–31", nil)
+		}
+		if *s.Hour < 0 || *s.Hour > 23 {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "schedule.hour 需在 0–23", nil)
+		}
+		if *s.Minute < 0 || *s.Minute > 59 {
+			return failure.NewError(failure.ClassRequest, "invalid_schedule", "schedule.minute 需在 0–59", nil)
 		}
 	case KindDaily, KindWeekly:
 		if s.Hour == nil || s.Minute == nil {
