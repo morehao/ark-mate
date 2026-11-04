@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Button, Drawer, Input, Popconfirm, Spin, Tag } from 'antd'
 import {
   CheckOutlined,
@@ -6,19 +7,44 @@ import {
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
+  InboxOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { Dot, Pill, sessionStatusMeta } from '@ark-mate/ui'
-import type { PermissionMemory, PermissionOptionKind, PermissionResp, SessionDetail } from '@ark-mate/types'
+import type { ArtifactMeta, PermissionMemory, PermissionOptionKind, PermissionResp, SessionDetail } from '@ark-mate/types'
 import { modelValues } from '@ark-mate/types'
-import { getSession, promptSession, revokeMemory, sessionHistory, toErrorMessage } from '@ark-mate/api'
+import {
+  getSession,
+  importArtifact,
+  listSessionArtifacts,
+  promptSession,
+  revokeMemory,
+  sessionHistory,
+  toErrorMessage,
+} from '@ark-mate/api'
 import { useMate } from '../store'
 import { pinnedCapabilitiesView } from '../console/capabilityView'
 import { ModelSelect } from './ModelSelect'
 import { shortId } from '../console/util'
 import { copyText } from '../console/clipboard'
 import { summarizeRun, type FailedRun, type RunSummary } from '../console/runSummary'
+
+function fmtBytes(n: number): string {
+  if (!n || n < 0) return '—'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** 产物来源的中文（只做展示；后端枚举是唯一事实源）。 */
+const ORIGIN_LABEL: Record<string, string> = {
+  tool_write: '工具写入',
+  tool_edit: '工具编辑',
+  upload: '上传',
+  inline: '内联',
+  manual: '手动登记',
+}
 
 function fmtLocal(iso?: string): string {
   if (!iso) return '—'
@@ -32,7 +58,13 @@ function optionId(p: PermissionResp, kind: PermissionOptionKind): string | undef
   return p.options.find((o) => o.kind === kind)?.option_id
 }
 
-/** 会话详情面板（管理面）：元数据只读一瞥 + 挂起权限列表（可就地决策）。数据来自 GET /sessions/:id。 */
+/**
+ * 会话详情面板（管理面）：元数据只读一瞥 + 运行统计 + 产物 + 挂起权限（可就地决策）。
+ *
+ * 产物区是「会话 → 资料库」这一跳的入口：产物默认只登记在 artifacts（全量可查），进资料库是
+ * **显式动作**（`POST /materials/import-artifact`）。没有这个入口，用户就只能在会话里看到文件
+ * 已生成、却在资料库里永远找不到它。
+ */
 export function SessionDetailDrawer({
   open,
   sessionId,
@@ -42,6 +74,7 @@ export function SessionDetailDrawer({
   sessionId: string
   onClose: () => void
 }) {
+  const navigate = useNavigate()
   const views = useMate((s) => s.views)
   const respond = useMate((s) => s.respondPermission)
   const renameSession = useMate((s) => s.renameSession)
@@ -58,6 +91,11 @@ export function SessionDetailDrawer({
   const [err, setErr] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
+  // 产物（v34/v35）：本会话的 artifacts 行 + 哪些已收录进资料库（artifact id → 节点 id）。
+  const [artifacts, setArtifacts] = useState<ArtifactMeta[]>([])
+  const [artLoading, setArtLoading] = useState(false)
+  const [importingId, setImportingId] = useState<string | null>(null)
+  const [importedNodes, setImportedNodes] = useState<Record<string, string>>({})
 
   const load = useCallback(async () => {
     if (!sessionId) return
@@ -79,13 +117,40 @@ export function SessionDetailDrawer({
     }
   }, [sessionId])
 
+  // 产物列表独立拉：它是旁路数据，读失败不该把「会话详情」整块拖进错误态。
+  const loadArtifacts = useCallback(async () => {
+    if (!sessionId) return
+    setArtLoading(true)
+    try {
+      const resp = await listSessionArtifacts(sessionId)
+      setArtifacts(resp.artifacts ?? [])
+    } catch {
+      setArtifacts([])
+    } finally {
+      setArtLoading(false)
+    }
+  }, [sessionId])
+
   useEffect(() => {
     if (open) {
       setEditingTitle(false)
       void load()
+      void loadArtifacts()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sessionId])
+
+  // 收录一个产物进资料库（幂等：重复点返回既有节点，不会长第二份）。
+  const doImport = (a: ArtifactMeta) => {
+    setImportingId(a.id)
+    void importArtifact(a.id)
+      .then((node) => {
+        setImportedNodes((prev) => ({ ...prev, [a.id]: node.id }))
+        showToast(`已收录进资料库：${node.title || a.title}`, 'success')
+      })
+      .catch((e) => showToast(toErrorMessage(e), 'error'))
+      .finally(() => setImportingId(null))
+  }
 
   // 会话级模型目录（v19 起这条读面**无参**）。
   //
@@ -180,7 +245,10 @@ export function SessionDetailDrawer({
           size="small"
           type="text"
           icon={<ReloadOutlined />}
-          onClick={() => void load()}
+          onClick={() => {
+            void load()
+            void loadArtifacts()
+          }}
           aria-label="刷新"
           title="刷新"
         />
@@ -560,6 +628,120 @@ export function SessionDetailDrawer({
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* 产物：本会话由工具写出/登记的文件。默认只进 artifacts；「存进资料库」是显式收录。 */}
+            <div>
+              <div
+                style={{
+                  marginBottom: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: 12,
+                  fontWeight: 620,
+                  color: tokens.textSecondary,
+                }}
+              >
+                <span>产物</span>
+                <span style={{ fontFamily: tokens.fontMono, fontSize: 11 }}>
+                  {artLoading ? '…' : artifacts.length}
+                </span>
+              </div>
+              {artLoading ? (
+                <div style={{ display: 'grid', placeItems: 'center', padding: '18px 0' }}>
+                  <Spin size="small" />
+                </div>
+              ) : artifacts.length === 0 ? (
+                <div
+                  style={{
+                    border: `1px dashed ${tokens.border}`,
+                    borderRadius: 10,
+                    padding: '12px 14px',
+                    fontSize: 12.5,
+                    color: tokens.textPlaceholder,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  本会话还没有产物。助手用 write / edit 工具写出工作区文件后会自动登记到这里；
+                  要长期留存的，点「存进资料库」收录进资料库的「产物」分栏。
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {artifacts.map((a) => {
+                    const nodeId = importedNodes[a.id]
+                    return (
+                      <div
+                        key={a.id}
+                        style={{
+                          border: `1px solid ${tokens.border}`,
+                          background: tokens.surface,
+                          borderRadius: 10,
+                          padding: '8px 10px 8px 12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                        }}
+                      >
+                        <InboxOutlined style={{ flex: 'none', color: tokens.textSecondary, fontSize: 13 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            title={a.path || a.title}
+                            style={{
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              lineHeight: 1.4,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              color: tokens.text,
+                            }}
+                          >
+                            {a.title}
+                          </div>
+                          <div
+                            style={{
+                              marginTop: 2,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              flexWrap: 'wrap',
+                              fontFamily: tokens.fontMono,
+                              fontSize: 10.5,
+                              color: tokens.textSecondary,
+                            }}
+                          >
+                            <span>{ORIGIN_LABEL[a.origin] ?? a.origin}</span>
+                            <span>{fmtBytes(a.size_bytes)}</span>
+                            {a.path && <span title={a.path}>{a.path}</span>}
+                            {a.dirty && <Tag color="orange" style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: '16px' }}>已改动</Tag>}
+                          </div>
+                        </div>
+                        {nodeId ? (
+                          <Button
+                            size="small"
+                            type="link"
+                            style={{ flex: 'none', fontSize: 12 }}
+                            onClick={() => navigate('/materials?category=artifact')}
+                            title="在资料库的「产物」分栏中查看"
+                          >
+                            已收录 · 去查看
+                          </Button>
+                        ) : (
+                          <Button
+                            size="small"
+                            loading={importingId === a.id}
+                            onClick={() => doImport(a)}
+                            style={{ borderRadius: 8, flex: 'none', fontSize: 12 }}
+                          >
+                            存进资料库
+                          </Button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
 
             {/* 挂起权限（ACP 确认通道待决项，可就地决策） */}

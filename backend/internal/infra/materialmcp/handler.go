@@ -1,13 +1,14 @@
 // Package materialmcp 把「资料库」暴露成一条 **MCP 工具面**，交给底座（dsh）经 ACP 的
 // `mcpServers` 拉起（`mate mcp material` 子命令，见 internal/bootstrap/maintenance/material_mcp.go）。
 //
-// 本期范围：只做资料库、不做知识库——因此**只有文件级工具**（列目录 / 节点信息 / 上传），
+// 本期范围：只做资料库、不做知识库——因此**只有文件级工具**（列目录 / 节点信息 / 上传）加上
+// **产物的显式收录**（library_import_artifact，把 `artifacts` 行变成 `category='artifact'` 节点），
 // **没有 library_search**（无语义检索，关键词检索也只走 REST，不进工具面）。
 //
 // 三条边界（设计 .dsh/docs/specs/2026-11-03-material-library-design.md §5.4）：
 //   - 工具是**文件级**的：读正文交给底座原生 `read`，本包只回本地只读绝对路径（handle 模式），
 //     **不写用户工作区、不内联 base64**；
-//   - 用例层零改：本包只调 `svcmaterial.MaterialSvc`（ListNodes/GetNode/Upload/DrivePath），
+//   - 用例层零改：本包只调 `svcmaterial.MaterialSvc`（ListNodes/GetNode/Upload/DrivePath/ImportArtifact），
 //     不 import store/dao；
 //   - `library_upload` 的 `path` 只接受**工作区或用户可信目录内的绝对路径**（与附件链路同纪律）。
 package materialmcp
@@ -18,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/morehao/ark-mate/internal/dto/dtomaterial"
 
@@ -27,21 +29,24 @@ import (
 
 // 工具名（固定；G5 契约快照钉住）。
 const (
-	ToolListNodes = "library_list_nodes"
-	ToolNodeInfo  = "library_node_info"
-	ToolUpload    = "library_upload"
+	ToolListNodes      = "library_list_nodes"
+	ToolNodeInfo       = "library_node_info"
+	ToolUpload         = "library_upload"
+	ToolImportArtifact = "library_import_artifact"
 )
 
 // Service 是资料库工具面需要的**窄端口**（本包自声明，由装配根用 svcmaterial 实现）。
 //
 // 为什么不一上来就 import svcmaterial：层规只有装配根与控制器可以引用用例层；infra 这一层若
 // 直接 import 用例层，就把"用例可以随便改"这条纪律的收益吃掉了。这里只声明工具面真正用到的
-// 四个读/写方法（用 dto 值，不 import 用例层）。
+// 五个读/写方法（用 dto 值，不 import 用例层）。
 type Service interface {
 	ListNodes(ctx context.Context, parentID string, limit, offset int) (*dtomaterial.ListNodesResp, error)
 	GetNode(ctx context.Context, id string) (*dtomaterial.NodeDetailResp, error)
 	Upload(ctx context.Context, fileName, declaredName, declaredMime string, parentID string, r io.Reader) (*dtomaterial.NodeDetailResp, error)
 	DrivePath(ctx context.Context, nodeID string) (string, error)
+	// ImportArtifact 把一条会话产物显式收录进资料库（幂等；产物不存在 → artifact_not_found）。
+	ImportArtifact(ctx context.Context, req dtomaterial.ImportArtifactReq) (*dtomaterial.NodeDetailResp, error)
 }
 
 // Handler 是资料库的工具面实现（满足 mcp.Handler）。
@@ -54,12 +59,13 @@ func New(svc Service) *Handler { return &Handler{svc: svc} }
 
 // 工具描述（会给模型看；**刻意不含「语义/检索/知识库」字样**，G6 守卫钉住）。
 const (
-	descListNodes = "列出资料库目录下一层子节点。可选 parent_id 指定父节点（空=空间根），limit 指定返回条数。返回 [{id,parent_id,node_kind,title,size_bytes,updated_at}]。"
-	descNodeInfo  = "读取一个资料库节点的信息与载体。可选 node_id。返回 {id,node_kind,title,body?,table_id?,schema?,source_url?,drive_path?,size_bytes}；drive 节点给 drive_path（本地只读绝对路径，交给 read 工具读取内容）。"
-	descUpload    = "把一个本地文件上传为资料库节点（一次一个）。参数 path=本地绝对路径（必须在工作区或可信目录内），parent_id 可选（目标文件夹节点 id），file_name 可选（展示名，扩展名须与文件一致）。返回 {node_id,url}。"
+	descListNodes      = "列出资料库目录下一层子节点。可选 parent_id 指定父节点（空=空间根），limit 指定返回条数。返回 [{id,parent_id,node_kind,title,size_bytes,updated_at}]。"
+	descNodeInfo       = "读取一个资料库节点的信息与载体。可选 node_id。返回 {id,node_kind,title,body?,table_id?,schema?,source_url?,drive_path?,size_bytes}；drive 节点给 drive_path（本地只读绝对路径，交给 read 工具读取内容）。"
+	descUpload         = "把一个本地文件上传为资料库节点（一次一个）。参数 path=本地绝对路径（必须在工作区或可信目录内），parent_id 可选（目标文件夹节点 id），file_name 可选（展示名，扩展名须与文件一致）。返回 {node_id,url}。"
+	descImportArtifact = "把一条会话产物（artifacts 表里的一行）收录进资料库，**引用而非复制**：建 category='artifact' 的节点并指回产物 id。参数 artifact_id=产物 id（art_…），parent_id 可选（目标文件夹节点 id，空=根）。幂等：同一产物已收录 → 返回既有节点。返回资料库节点详情。"
 )
 
-// ListTools 返回三个文件级工具（无 search）。
+// ListTools 返回文件级工具 + 产物收录（无 search）。
 func (h *Handler) ListTools(ctx context.Context) ([]protocol.McpTool, error) {
 	return []protocol.McpTool{
 		{
@@ -77,6 +83,11 @@ func (h *Handler) ListTools(ctx context.Context) ([]protocol.McpTool, error) {
 			Description: descUpload,
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"本地文件绝对路径"},"parent_id":{"type":"string","description":"目标文件夹节点 id"},"file_name":{"type":"string","description":"展示名"}},"required":["path"],"additionalProperties":false}`),
 		},
+		{
+			Name:        ToolImportArtifact,
+			Description: descImportArtifact,
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"artifact_id":{"type":"string","description":"会话产物 id（art_…）"},"parent_id":{"type":"string","description":"目标文件夹节点 id；空=根"}},"required":["artifact_id"],"additionalProperties":false}`),
+		},
 	}, nil
 }
 
@@ -89,6 +100,8 @@ func (h *Handler) CallTool(ctx context.Context, name string, args json.RawMessag
 		return h.callNodeInfo(ctx, args)
 	case ToolUpload:
 		return h.callUpload(ctx, args)
+	case ToolImportArtifact:
+		return h.callImportArtifact(ctx, args)
 	default:
 		return protocol.McpCallResult{}, mcp.ErrToolNotFound
 	}
@@ -198,6 +211,37 @@ func (h *Handler) callUpload(ctx context.Context, args json.RawMessage) (protoco
 		"node_id": d.ID,
 		// url 用本地 view 路径占位（本期 page 的 view 在 P3；drive 节点给定 node 路径标识）。
 		"url": "/materials/nodes/" + d.ID,
+	})
+}
+
+// callImportArtifact 把一条会话产物收录进资料库（`POST /materials/import-artifact` 的工具面等价物）。
+//
+// 工具面只做参数校验与转发：kind 映射、幂等、`category='artifact' ⟺ provenance_id` 不变量都在
+// svcmaterial 用例层（本包不重复实现一遍，否则两处口径会漂）。
+func (h *Handler) callImportArtifact(ctx context.Context, args json.RawMessage) (protocol.McpCallResult, error) {
+	var in struct {
+		ArtifactID string `json:"artifact_id"`
+		ParentID   string `json:"parent_id"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return errResult(fmt.Errorf("参数不是合法 JSON: %w", err)), nil
+	}
+	if strings.TrimSpace(in.ArtifactID) == "" {
+		return errResult(fmt.Errorf("artifact_id 不能为空")), nil
+	}
+	d, err := h.svc.ImportArtifact(ctx, dtomaterial.ImportArtifactReq{
+		ArtifactID: in.ArtifactID,
+		ParentID:   in.ParentID,
+	})
+	if err != nil {
+		return errResult(err), nil
+	}
+	return textResult(map[string]any{
+		"node_id":       d.ID,
+		"title":         d.Title,
+		"node_kind":     d.NodeKind,
+		"category":      d.Category,
+		"provenance_id": d.ProvenanceID,
 	})
 }
 

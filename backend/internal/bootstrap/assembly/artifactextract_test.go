@@ -127,6 +127,71 @@ func TestArtifactExtractor_WriteEndToEnd(t *testing.T) {
 	}
 }
 
+// TestArtifactExtractor_AbsolutePathInsideCwd（2026-11-04 真机回归）：dsh 的 write 给的是
+// **绝对路径**（本次真会话 10/10 次都是）。旧判据把绝对路径当「非产物」静默丢弃，导致 P2 上线后
+// 一条产物都没登记过——这个用例用真会话里的形状（绝对路径 + 中文名）钉住修复。
+func TestArtifactExtractor_AbsolutePathInsideCwd(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	name := "杭州天气-2026-11-04.md"
+	body := "# 杭州天气简报\n"
+	if err := os.WriteFile(filepath.Join(cwd, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": filepath.Join(cwd, name), "content": body},
+	})
+	waitArtifactCount(t, count, 1)
+
+	resp, err := x.artifact.ListBySession(context.Background(), "ses1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := resp.Artifacts[0]
+	if a.Title != name {
+		t.Errorf("title=%q 期望 %q", a.Title, name)
+	}
+	// path 落的是**相对工作区**的展示路径（dirty 判定靠它回定位原文件）。
+	if a.Path != name {
+		t.Errorf("path=%q 期望相对路径 %q", a.Path, name)
+	}
+	if a.SizeBytes != int64(len(body)) {
+		t.Errorf("size=%d 期望 %d", a.SizeBytes, len(body))
+	}
+	// dirty 可判：未改动 → false。
+	got, err := x.artifact.Get(context.Background(), a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Dirty {
+		t.Errorf("未改动不应 dirty（绝对路径产物的 path 应能回定位）")
+	}
+}
+
+// TestArtifactExtractor_AbsoluteOutsideCwdSkipped：绝对路径落在工作区外 → 跳过（WARN），不建行。
+//
+// 边界口径：产物只快照**会话工作区**内的文件；`/tmp/...` 这类工作区外的写入不是工作区产物
+// （dirty 也无法用 sessions.cwd 回定位），保守跳过并留 WARN，而不是登记一条 path 不可解析的行。
+func TestArtifactExtractor_AbsoluteOutsideCwdSkipped(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	outside := filepath.Join(t.TempDir(), "draft.md")
+	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": outside},
+	})
+	time.Sleep(80 * time.Millisecond)
+	if n, _ := count(context.Background()); n != 0 {
+		t.Fatalf("工作区外的绝对路径不应建产物行，实际 %d", n)
+	}
+}
+
 // TestArtifactExtractor_NotWriteSkipped：非 write/edit 工具不产生产物。
 func TestArtifactExtractor_NotWriteSkipped(t *testing.T) {
 	x, _, count := newExtractRig(t)

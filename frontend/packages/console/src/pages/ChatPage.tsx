@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Dropdown } from 'antd'
-import { InfoCircleOutlined, MoreOutlined } from '@ant-design/icons'
+import { InboxOutlined, InfoCircleOutlined, MoreOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { Ev } from '@ark-mate/types'
 import type { AttachmentMeta } from '@ark-mate/types'
-import { sessionHistory, sessionRuns } from '@ark-mate/api'
+import { listSessionArtifacts, sessionHistory, sessionRuns } from '@ark-mate/api'
 import { useMate } from '../store'
 import { SessionDetailDrawer } from '../components/SessionDetail'
 import { Composer } from '../components/Composer'
@@ -99,6 +99,27 @@ export function ChatPage() {
   const activeSum = activeId ? sessions.find((x) => x.id === activeId) : undefined
   const streaming = view?.streaming ?? false
   const hydrating = view?.hydrating ?? false
+
+  // 会话产物计数（v35）：只用于头栏入口的角标。轮次结束时重拉一次——工具写出的文件是在 run
+  // 过程中登记的；不等 run 收尾就拉会永远慢一拍。
+  const [artifactCount, setArtifactCount] = useState(0)
+  useEffect(() => {
+    if (!activeId) {
+      setArtifactCount(0)
+      return
+    }
+    let alive = true
+    void listSessionArtifacts(activeId)
+      .then((r) => {
+        if (alive) setArtifactCount(r.total ?? 0)
+      })
+      .catch(() => {
+        if (alive) setArtifactCount(0)
+      })
+    return () => {
+      alive = false
+    }
+  }, [activeId, streaming])
 
   // 每轮用量：activeId 变化或轮次终态（streaming true→false）后重拉 runs；
   // 轮进行中 run 未落库，跳过以省请求。构建 last_seq → 展示行（Δ 相对前一有上报的轮）。
@@ -448,6 +469,17 @@ export function ChatPage() {
               style={{ borderRadius: 8, color: tokens.textSecondary }}
             />
           </Dropdown>
+          <Button
+            size="small"
+            type="text"
+            icon={<InboxOutlined />}
+            title="会话产物（可收录进资料库）"
+            aria-label="会话产物"
+            onClick={() => setDetailOpen(true)}
+            style={{ borderRadius: 8, color: tokens.textSecondary, fontSize: 12 }}
+          >
+            产物{artifactCount > 0 ? ` ${artifactCount}` : ''}
+          </Button>
           <Button
             size="small"
             type="text"

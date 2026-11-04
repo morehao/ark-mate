@@ -59,6 +59,16 @@ func (f *fakeSvc) Upload(_ context.Context, fileName, _ string, _ string, _ stri
 	return &dtomaterial.NodeDetailResp{ID: "libnd_up", NodeKind: "drive"}, nil
 }
 
+func (f *fakeSvc) ImportArtifact(_ context.Context, req dtomaterial.ImportArtifactReq) (*dtomaterial.NodeDetailResp, error) {
+	if req.ArtifactID != "art_1" {
+		return nil, errNotfound
+	}
+	return &dtomaterial.NodeDetailResp{
+		ID: "libnd_art", NodeKind: "drive", Title: "简报.md",
+		Category: "artifact", ProvenanceID: req.ArtifactID, ParentID: req.ParentID,
+	}, nil
+}
+
 var errNotfound = &notFoundErr{}
 
 type notFoundErr struct{}
@@ -77,7 +87,7 @@ func TestToolListShape(t *testing.T) {
 		names = append(names, tl.Name)
 	}
 	sort.Strings(names)
-	want := []string{ToolListNodes, ToolNodeInfo, ToolUpload}
+	want := []string{ToolListNodes, ToolNodeInfo, ToolUpload, ToolImportArtifact}
 	sort.Strings(want)
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("工具面不符：got %v want %v（本期只做资料库、不做知识库——无 search）", names, want)
@@ -138,12 +148,13 @@ func TestUploadRejectsUnsafePath(t *testing.T) {
 
 // g5Contract 三工具的入参/出参契约快照（加/删/改工具必须同批更新本表）。
 var g5Contract = map[string][]string{
-	ToolListNodes: {"parent_id", "limit"},
-	ToolNodeInfo:  {"node_id"},
-	ToolUpload:    {"path", "parent_id", "file_name"},
+	ToolListNodes:      {"parent_id", "limit"},
+	ToolNodeInfo:       {"node_id"},
+	ToolUpload:         {"path", "parent_id", "file_name"},
+	ToolImportArtifact: {"artifact_id", "parent_id"},
 }
 
-// TestToolInputSchemaFrozen（G5）三工具的 inputSchema properties 键集合冻结。
+// TestToolInputSchemaFrozen（G5）各工具的 inputSchema properties 键集合冻结。
 func TestToolInputSchemaFrozen(t *testing.T) {
 	h := New(&fakeSvc{})
 	tools, _ := h.ListTools(context.Background())
@@ -168,5 +179,36 @@ func TestToolInputSchemaFrozen(t *testing.T) {
 		if strings.Join(got, ",") != strings.Join(sorted, ",") {
 			t.Fatalf("%s 的入参键集合变了：got %v want %v", tl.Name, got, sorted)
 		}
+	}
+}
+
+// TestImportArtifactTool 收录工具把参数原样交给用例层，并把节点身份回给模型。
+func TestImportArtifactTool(t *testing.T) {
+	h := New(&fakeSvc{})
+	args, _ := json.Marshal(map[string]string{"artifact_id": "art_1", "parent_id": "libnd_dir"})
+	res, err := h.CallTool(context.Background(), ToolImportArtifact, args)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("收录应成功: %s", res.TextOf())
+	}
+	txt := res.TextOf()
+	for _, want := range []string{"libnd_art", "art_1", "artifact"} {
+		if !strings.Contains(txt, want) {
+			t.Fatalf("收录结果缺 %q: %s", want, txt)
+		}
+	}
+}
+
+// TestImportArtifactRequiresID artifact_id 必填（空 → isError，不调用例层）。
+func TestImportArtifactRequiresID(t *testing.T) {
+	h := New(&fakeSvc{})
+	res, err := h.CallTool(context.Background(), ToolImportArtifact, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("CallTool 不应返回协议错误: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("缺 artifact_id 应返回 isError")
 	}
 }

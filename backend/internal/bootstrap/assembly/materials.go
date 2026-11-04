@@ -180,7 +180,11 @@ func MaterialMCPHandler(cfg config.Config) (mcp.Handler, func() error, error) {
 		return nil, nil, err
 	}
 	attachSvc := svcattachment.New(st, assemblyBlobStore{st: blobs}, svcattachment.Limits{MaxBytes: cfg.AttachmentMaxBytes})
-	svc := svcmaterial.New(st, assemblyUploadAdapter{attach: attachSvc}, materialBlobReader{rows: st, blobs: blobs}, pagePublisher{root: cfg.HomeDir}, nil)
+	// 产物读取窄端口：library_import_artifact 要读 artifacts 行（与 REST 面同一套用例，不另写口径）。
+	// dirty 不传：工具面只读产物元数据做收录，不触发「工作区文件是否改动」的惰性重算。
+	artSvc := svcartifact.New(st, artifactFileMeta{blobs: blobs}, nil)
+	svc := svcmaterial.New(st, assemblyUploadAdapter{attach: attachSvc}, materialBlobReader{rows: st, blobs: blobs},
+		pagePublisher{root: cfg.HomeDir}, materialArtifactReader{art: artSvc})
 	return materialmcp.New(svc), func() error { return st.Close() }, nil
 }
 

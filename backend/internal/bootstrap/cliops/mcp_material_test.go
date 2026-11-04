@@ -9,7 +9,8 @@ import (
 
 // TestMcpMaterialCLI `mate mcp material` 的进程级用例（P4）：
 //   - stdin 送 initialize / tools/list → stdout 逐行是 JSON-RPC 帧（C10 纯度）；
-//   - tools/list 返回**恰三个文件级工具**（library_list_nodes / library_node_info / library_upload）；
+//   - tools/list 返回**恰四个工具**（library_list_nodes / library_node_info / library_upload /
+//     library_import_artifact）；
 //   - **不含 library_search**（本期只做资料库、不做知识库）；
 //   - stdin EOF → 进程 0 退出（父进程结束的正常收尾）。
 //
@@ -70,7 +71,10 @@ func TestMcpMaterialCLI(t *testing.T) {
 	if !sawTools {
 		t.Fatalf("没有收到 tools/list 响应：%s", stdout.String())
 	}
-	want := map[string]bool{"library_list_nodes": true, "library_node_info": true, "library_upload": true}
+	want := map[string]bool{
+		"library_list_nodes": true, "library_node_info": true,
+		"library_upload": true, "library_import_artifact": true,
+	}
 	got := map[string]bool{}
 	for _, n := range toolNames {
 		got[n] = true
@@ -85,7 +89,7 @@ func TestMcpMaterialCLI(t *testing.T) {
 			t.Fatalf("工具面**不得**含 library_search（本期只做资料库、不做知识库）")
 		}
 	}
-	if len(toolNames) != 3 {
-		t.Fatalf("工具面应恰 3 个文件级工具，got %v", toolNames)
+	if len(toolNames) != 4 {
+		t.Fatalf("工具面应恰 4 个工具（三个文件级 + 产物收录），got %v", toolNames)
 	}
 }

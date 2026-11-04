@@ -62,9 +62,9 @@ func (x *artifactExtractor) ExtractToolWrite(ctx context.Context, sessionID, run
 		glog.Warnw(ctx, "产物抽取：会话不存在，跳过", "session", sessionID, "err", err)
 		return
 	}
-	abs, rel, err := workartifact.SafeRelPath(sess.Cwd, rw.RelPath)
+	abs, rel, err := workartifact.SafeRelPath(sess.Cwd, rw.Path)
 	if err != nil {
-		glog.Warnw(ctx, "产物抽取：路径解析失败，跳过", "session", sessionID, "path", rw.RelPath, "err", err)
+		glog.Warnw(ctx, "产物抽取：路径解析失败，跳过", "session", sessionID, "path", rw.Path, "err", err)
 		return
 	}
 	// ③ 只认普通文件（不抽目录/符号链接）。

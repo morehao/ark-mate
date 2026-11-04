@@ -16,26 +16,36 @@ func TestResolveToolWrite_WritesAndEdits(t *testing.T) {
 		name       string
 		info       protocol.ToolCallInfo
 		wantOK     bool
-		wantRel    string
+		wantPath   string
 		wantOrigin artifact.Origin
 	}{
 		{
 			name: "write 带 file_path+content（R1 实测形状）",
 			info: protocol.ToolCallInfo{ID: "c1", Title: "write", Status: "completed",
 				Input: map[string]any{"file_path": "r1_probe.txt", "content": "alpha\nbeta\n"}},
-			wantOK: true, wantRel: "r1_probe.txt", wantOrigin: artifact.OriginToolWrite,
+			wantOK: true, wantPath: "r1_probe.txt", wantOrigin: artifact.OriginToolWrite,
 		},
 		{
 			name: "edit 带 file_path+old/new_string（R1 实测形状）",
 			info: protocol.ToolCallInfo{ID: "c2", Title: "edit", Status: "completed",
 				Input: map[string]any{"file_path": "sub/dir/a.go", "old_string": "x", "new_string": "y"}},
-			wantOK: true, wantRel: "sub/dir/a.go", wantOrigin: artifact.OriginToolEdit,
+			wantOK: true, wantPath: "sub/dir/a.go", wantOrigin: artifact.OriginToolEdit,
 		},
 		{
 			name: "相对路径带 ../ 归一（Clean，不在这里判越界）",
 			info: protocol.ToolCallInfo{ID: "c3", Title: "write",
 				Input: map[string]any{"file_path": "./a/../b.txt"}},
-			wantOK: true, wantRel: "b.txt", wantOrigin: artifact.OriginToolWrite,
+			wantOK: true, wantPath: "b.txt", wantOrigin: artifact.OriginToolWrite,
+		},
+		{
+			// 真机 2026-11-04 的形状：模型给的是**绝对路径**（10/10 次 write/edit 都是），
+			// 旧判据在这里 return false，产物从未登记成功过。绝对与否交给 SafeRelPath 判越界。
+			name: "write 绝对路径 + 中文名（真机形状）",
+			info: protocol.ToolCallInfo{ID: "c4", Title: "write",
+				Input: map[string]any{"file_path": "/Users/u/.ark-mate/workspaces/default/杭州天气-2026-11-04.md"}},
+			wantOK:     true,
+			wantPath:   "/Users/u/.ark-mate/workspaces/default/杭州天气-2026-11-04.md",
+			wantOrigin: artifact.OriginToolWrite,
 		},
 	}
 	for _, c := range cases {
@@ -47,8 +57,8 @@ func TestResolveToolWrite_WritesAndEdits(t *testing.T) {
 			if !ok {
 				return
 			}
-			if got.RelPath != c.wantRel {
-				t.Errorf("RelPath=%q 期望 %q", got.RelPath, c.wantRel)
+			if got.Path != c.wantPath {
+				t.Errorf("Path=%q 期望 %q", got.Path, c.wantPath)
 			}
 			if got.Origin != c.wantOrigin {
 				t.Errorf("Origin=%q 期望 %q", got.Origin, c.wantOrigin)
@@ -58,7 +68,7 @@ func TestResolveToolWrite_WritesAndEdits(t *testing.T) {
 }
 
 // TestResolveToolWrite_NotExtractable 覆盖「不该抽」的所有形状：非白名单 title、缺 file_path、
-// 形状不符、绝对路径。
+// 形状不符。（绝对路径**不在此列**——它是真机常态，见上一条正例。）
 func TestResolveToolWrite_NotExtractable(t *testing.T) {
 	cases := []struct {
 		name string
@@ -71,7 +81,6 @@ func TestResolveToolWrite_NotExtractable(t *testing.T) {
 		{"title=write 但 Input 为 nil", protocol.ToolCallInfo{Title: "write", Input: nil}},
 		{"title=write 但 Input 非 map（形状不符）", protocol.ToolCallInfo{Title: "write", Input: "raw-string"}},
 		{"file_path 非字符串", protocol.ToolCallInfo{Title: "write", Input: map[string]any{"file_path": 123}}},
-		{"绝对路径（非工作区产物常态，保守跳过）", protocol.ToolCallInfo{Title: "write", Input: map[string]any{"file_path": "/etc/passwd"}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -82,7 +91,7 @@ func TestResolveToolWrite_NotExtractable(t *testing.T) {
 	}
 }
 
-// TestSafeRelPath 覆盖路径安全解析：正常相对、越界 `../`、符号链接逃逸、cwd 非绝对、非相对文件。
+// TestSafeRelPath 覆盖路径安全解析：相对/绝对、越界 `../`、符号链接逃逸、cwd 非绝对、非文件。
 func TestSafeRelPath(t *testing.T) {
 	cwd := t.TempDir() // 绝对路径
 	// 造一个 cwd 内的真实文件与一个指向 cwd 外的符号链接，验证真身解析能挡逃逸。
@@ -141,9 +150,32 @@ func TestSafeRelPath(t *testing.T) {
 		assertPathReason(t, err, "cwd_not_absolute")
 	})
 
-	t.Run("绝对路径被拒（应传相对路径）", func(t *testing.T) {
+	t.Run("绝对路径在 cwd 内被接受（真机常态）", func(t *testing.T) {
+		abs, rel, err := SafeRelPath(cwd, filepath.Join(cwd, "keep.txt"))
+		if err != nil {
+			t.Fatalf("err=%v", err)
+		}
+		if abs != filepath.Join(cwd, "keep.txt") {
+			t.Errorf("abs=%q", abs)
+		}
+		if rel != "keep.txt" {
+			t.Errorf("rel=%q", rel)
+		}
+	})
+
+	t.Run("绝对路径经 .. 归一后仍在 cwd 内被接受", func(t *testing.T) {
+		_, rel, err := SafeRelPath(cwd, filepath.Join(cwd, "not-exist", "..", "keep.txt"))
+		if err != nil {
+			t.Fatalf("err=%v", err)
+		}
+		if rel != "keep.txt" {
+			t.Errorf("rel=%q", rel)
+		}
+	})
+
+	t.Run("绝对路径在 cwd 外被拒（单独原因）", func(t *testing.T) {
 		_, _, err := SafeRelPath(cwd, "/etc/passwd")
-		assertPathReason(t, err, "path_not_relative_file")
+		assertPathReason(t, err, "path_outside_workspace")
 	})
 
 	t.Run("当前目录 . 被拒（不是文件）", func(t *testing.T) {
