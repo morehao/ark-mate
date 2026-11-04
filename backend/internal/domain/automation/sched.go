@@ -83,6 +83,11 @@ func (pl *Plane) StartAutomationScheduler(interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case now := <-t.C:
+				// 调度循环（真实 ticker）每次先重载定义，让 `mate mcp automation` 子进程
+				// 写进来的新定义当轮生效。**只在这个真实循环里重载**，不做进 `Tick` 里：
+				// 单测直接调 `Tick` 时会手动拨 in-memory 游标，若 Tick 自身重载会把那个
+				// 拨动冲掉（装配事实见 reloadDefinitionsForTick 的注释）。
+				pl.ReloadDefinitionsForTick(ctx)
 				pl.Tick(ctx, now)
 			}
 		}
@@ -150,6 +155,10 @@ func (pl *Plane) StartupPass(ctx context.Context) {
 }
 
 // automationTick 一次扫描（导出给测试直接驱动，不必等 ticker）。
+//
+// **不在这里重载定义**：重载由真实的调度循环（StartAutomationScheduler 的 ticker goroutine）
+// 在每次调用 Tick 前做（`reloadDefinitionsForTick`）。单测直接调 Tick 时会手动拨 in-memory
+// 游标来构造边界，Tick 自身重载会把那个拨动冲掉，故保持 Tick 只管"按当前内存态扫一遍"。
 func (pl *Plane) Tick(ctx context.Context, now time.Time) {
 	for _, rec := range pl.DueSnapshot(now) {
 		trigger := automation.TriggerScheduled
@@ -159,6 +168,30 @@ func (pl *Plane) Tick(ctx context.Context, now time.Time) {
 		pl.RunOnce(ctx, rec, rec.NextDue, trigger)
 	}
 }
+
+// ReloadDefinitionsForTick 按当前载体重载一遍定义（DB 载体读库、否则读定义目录）。
+//
+// **持 `runMu` 重载**：重载会整体替换 `recs`，若与一次在途的 `RunOnce`（同样持 runMu）重叠，
+// 会让那次触发拿到的 `rec` 在临界区里被换掉（重取 `RecByID` 只保证 id 一致，不保证"定义没被
+// 另一进程改过"）。串行到 runMu 后面，语义最稳：重载只在两次触发之间发生。
+//
+// 无载体的纯内存模式（`st==nil && dir==""`）跳过：没有跨进程来源，重载只会白白清空内存态。
+func (pl *Plane) ReloadDefinitionsForTick(ctx context.Context) {
+	pl.runMu.Lock()
+	defer pl.runMu.Unlock()
+	pl.mu.Lock()
+	st, dir := pl.st, pl.dir
+	pl.mu.Unlock()
+	if st == nil && dir == "" {
+		return
+	}
+	if st != nil {
+		pl.LoadAutomationDefinitionsFromStore(ctx, dir)
+		return
+	}
+	pl.LoadAutomationDefinitions(dir)
+}
+
 
 // automationRunOnce 认领并执行一条到期的 automation。
 //

@@ -26,6 +26,8 @@ func MCP(args []string) {
 		mcpBridge(args[1:])
 	case "material":
 		materialMcp(args[1:])
+	case "automation":
+		automationMcp(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "未知的 mcp 动作 %q\n\n%s", args[0], mcpUsage)
 		os.Exit(2)
@@ -44,6 +46,9 @@ const mcpUsage = `mcp 用法：
   mate mcp material
       资料库 MCP stdio 服务端（library_list_nodes / library_node_info / library_upload /
       library_import_artifact；无 search——本期只做资料库、不做知识库）。详见 mate mcp material -h
+  mate mcp automation
+      定时任务 MCP stdio 服务端（automation_create / update / list / get / delete / preview；
+      schedule 五选一、无 cron；delivery 缺省 session）。详见 mate mcp automation -h
 `
 
 // mcpBridge `mate mcp bridge`：平台侧 MCP stdio 网关的进程入口。

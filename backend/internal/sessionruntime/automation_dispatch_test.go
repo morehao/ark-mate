@@ -4,7 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	domainautomation "github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/runtime"
 )
 
 // recordHost 记录触发分派走的是哪条路（CreateSession vs DeliverSession）。
@@ -97,5 +99,33 @@ func TestAutomationSessionDeliveryIgnoresBusyTarget(t *testing.T) {
 	}
 	if len(h.delivered) != 1 {
 		t.Fatalf("应 DeliverSession 一次，got %+v", h.delivered)
+	}
+}
+
+// TestSchedulerReloadsDefinitionsAcrossProcess v35 P3：daemon 只启动装载一次，MCP 子进程
+// （另一个平面/进程）写进 store 的新定义，必须靠调度循环每 tick 的 ReloadDefinitionsForTick
+// 被看到——否则"我在会话里建了它却从来不跑"。
+func TestSchedulerReloadsDefinitionsAcrossProcess(t *testing.T) {
+	// 两个 Service 共用同一个 store，模拟 daemon 与 MCP 子进程。
+	daemonSvc, st := automationDBRig(t, "")
+	subSvc := NewService(runtime.NewRegistry(silentACPSpec(t)), eventbus.New())
+	setBuildRuntime(t, "silent")
+	subSvc.EnableStore(st)
+
+	// 子进程（subSvc）写一条定义进库。daemon 此刻看不到。
+	if _, err := subSvc.Planes().Automation.WriteAutomation(context.Background(), "x", map[string]any{
+		"id": "x", "enabled": true,
+		"schedule": map[string]any{"kind": "daily", "timezone": "UTC", "hour": 9, "minute": 0},
+		"target":   map[string]any{"prompt": "p", "delivery": "new_session", "cwd": t.TempDir()},
+	}, true); err != nil {
+		t.Fatalf("子进程写入: %v", err)
+	}
+	if _, ok := daemonSvc.Planes().Automation.AutomationByID("x"); ok {
+		t.Fatal("daemon 未重载前不该看到子进程写的定义")
+	}
+	// daemon 调度循环每 tick 前调 ReloadDefinitionsForTick → 看到新定义。
+	daemonSvc.Planes().Automation.ReloadDefinitionsForTick(context.Background())
+	if _, ok := daemonSvc.Planes().Automation.AutomationByID("x"); !ok {
+		t.Fatal("daemon 重载后应看到子进程写的新定义（跨进程生效）")
 	}
 }

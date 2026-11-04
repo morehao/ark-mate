@@ -149,7 +149,8 @@ var v32Layers = map[string]v32Layer{
 	"internal/infra/workartifact": {layer: 5, name: "infra/workartifact", sameLayer: true},
 	// 资料库 MCP 工具面（v33 P4）：把 svcmaterial 的工具面暴露成 MCP Handler（本包不 import 用例层，
 	// 只认自声明的窄端口 Service）。L5 与其它 infra 件同层，是"与外面说话"的实现。
-	"internal/infra/materialmcp": {layer: 5, name: "infra/materialmcp", sameLayer: true},
+	"internal/infra/materialmcp":   {layer: 5, name: "infra/materialmcp", sameLayer: true},
+	"internal/infra/automationmcp": {layer: 5, name: "infra/automationmcp", sameLayer: true},
 
 	// ——— L6：组合驱动 ———
 	"internal/drivers/gateway": {layer: 6, name: "gateway", sameLayer: true, deny: []string{
