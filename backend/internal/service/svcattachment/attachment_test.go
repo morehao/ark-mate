@@ -33,13 +33,16 @@ func (f *fakeStore) DeleteAttachmentRow(_ context.Context, id string) error {
 	return nil
 }
 
-// fakeBlob 内存版 BlobStore（按 uploadID 存字节）。
+// fakeBlob 内存版 BlobStore（按 uploadID 存字节 + 上传时声明的 MIME）。
 type fakeBlob struct {
 	data   map[string][]byte
+	mime   map[string]string
 	nextID int
 }
 
-func newFakeBlob() *fakeBlob { return &fakeBlob{data: map[string][]byte{}} }
+func newFakeBlob() *fakeBlob {
+	return &fakeBlob{data: map[string][]byte{}, mime: map[string]string{}}
+}
 
 func (f *fakeBlob) UploadAndRecord(_ context.Context, req BlobUploadRequest) (BlobDetail, error) {
 	b, err := io.ReadAll(req.Reader)
@@ -49,23 +52,27 @@ func (f *fakeBlob) UploadAndRecord(_ context.Context, req BlobUploadRequest) (Bl
 	f.nextID++
 	id := "upl_" + string(rune('0'+f.nextID))
 	f.data[id] = b
-	return BlobDetail{FileUploadID: id, ContentHash: req.ContentHash, Size: int64(len(b)), MimeType: req.MimeType}, nil
+	f.mime[id] = req.MimeType
+	return BlobDetail{FileUploadID: id, ContentHash: req.ContentHash, Size: int64(len(b)), MimeType: req.MimeType, Name: req.Name}, nil
 }
 func (f *fakeBlob) Open(_ context.Context, uploadID string) (io.ReadCloser, BlobDetail, error) {
 	b, ok := f.data[uploadID]
 	if !ok {
 		return nil, BlobDetail{}, io.EOF
 	}
-	return io.NopCloser(bytes.NewReader(b)), BlobDetail{FileUploadID: uploadID, Size: int64(len(b))}, nil
+	return io.NopCloser(bytes.NewReader(b)), BlobDetail{FileUploadID: uploadID, Size: int64(len(b)), MimeType: f.mime[uploadID]}, nil
 }
 func (f *fakeBlob) GetFile(_ context.Context, uploadID string) (BlobDetail, error) {
 	b, ok := f.data[uploadID]
 	if !ok {
 		return BlobDetail{}, io.EOF
 	}
-	return BlobDetail{FileUploadID: uploadID, Size: int64(len(b))}, nil
+	return BlobDetail{FileUploadID: uploadID, Size: int64(len(b)), MimeType: f.mime[uploadID]}, nil
 }
-func (f *fakeBlob) DeleteFile(_ context.Context, uploadID string) error { delete(f.data, uploadID); return nil }
+func (f *fakeBlob) DeleteFile(_ context.Context, uploadID string) error {
+	delete(f.data, uploadID)
+	return nil
+}
 
 func codeOf(t *testing.T, err error) int {
 	t.Helper()
@@ -136,6 +143,50 @@ func TestUploadFakeImageRejected(t *testing.T) {
 	svc, _, _ := newSvc()
 	// 声明是 image/png，但字节是随机数据。
 	_, err := svc.Upload(context.Background(), "fake.png", "", "image/png", bytes.NewReader([]byte("not a png at all")))
+	if err == nil || codeOf(t, err) != 40001 || !strings.Contains(err.Error(), "attachment_unsupported_type") {
+		t.Fatalf("伪装图应 40001 attachment_unsupported_type，got %v", err)
+	}
+}
+
+// bigPNG 造一个「magic 正确、体积远超 512 字节」的 PNG 字节。
+// 回归用：Register 只读前 512 字节判魔数，**不能**因为文件比前缀长就当成伪装图。
+func bigPNG() []byte {
+	return append(append([]byte{}, pngMagic...), bytes.Repeat([]byte{0x00}, 5000)...)
+}
+
+// TestRegisterLargeImageKindImage 钉住回归：>512 字节的真图（真实截图就是这种）必须能建索引。
+func TestRegisterLargeImageKindImage(t *testing.T) {
+	svc, _, bl := newSvc()
+	data := bigPNG()
+	detail, err := bl.UploadAndRecord(context.Background(), BlobUploadRequest{
+		Name: "样机 (37).png", Size: int64(len(data)), MimeType: "image/png", Reader: bytes.NewReader(data),
+	})
+	if err != nil {
+		t.Fatalf("落字节失败：%v", err)
+	}
+	resp, err := svc.Register(context.Background(), detail.FileUploadID, "样机 (37).png")
+	if err != nil {
+		t.Fatalf(">512 字节的真图应能建索引，got %v", err)
+	}
+	if resp.Kind != model.AttachmentKindImage || resp.MimeType != "image/png" {
+		t.Fatalf("应 kind=image/mime=image/png，got kind=%q mime=%q", resp.Kind, resp.MimeType)
+	}
+	if resp.SizeBytes != int64(len(data)) {
+		t.Fatalf("size 应 %d，got %d", len(data), resp.SizeBytes)
+	}
+}
+
+// TestRegisterFakeImageLargeRejected 大文件同样要能判出伪装图（别为了修 bug 把门禁放宽）。
+func TestRegisterFakeImageLargeRejected(t *testing.T) {
+	svc, _, bl := newSvc()
+	data := bytes.Repeat([]byte("not a png at all "), 40) // 680 字节，声明 image/png
+	detail, err := bl.UploadAndRecord(context.Background(), BlobUploadRequest{
+		Name: "fake.png", Size: int64(len(data)), MimeType: "image/png", Reader: bytes.NewReader(data),
+	})
+	if err != nil {
+		t.Fatalf("落字节失败：%v", err)
+	}
+	_, err = svc.Register(context.Background(), detail.FileUploadID, "fake.png")
 	if err == nil || codeOf(t, err) != 40001 || !strings.Contains(err.Error(), "attachment_unsupported_type") {
 		t.Fatalf("伪装图应 40001 attachment_unsupported_type，got %v", err)
 	}

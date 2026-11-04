@@ -28,6 +28,18 @@ func readAllLimited(r io.Reader, limit int64) ([]byte, error) {
 	return buf, nil
 }
 
+// readHead 读前 n 字节，用于魔数嗅探；不足 n 字节也**不报错**，读到 EOF 即止。
+//
+// 与 readAllLimited 的分工：后者是「整文件门禁」，超限必须报 errTooLarge 且不返回半截字节
+// （免得把截断流当完整文件落盘）；这里只是「看一眼前缀」，文件多大都只吃 n 字节。
+// 判类型时**不能**复用 readAllLimited——否则任何比前缀长的文件都会被当成"读失败"。
+func readHead(r io.Reader, n int64) ([]byte, error) {
+	if n <= 0 {
+		return nil, nil
+	}
+	return io.ReadAll(io.LimitReader(r, n))
+}
+
 // probeType 按文件头（magic bytes）判定真实类型，**不信客户端声明**。
 //
 // 返回 (kind, mime)：
