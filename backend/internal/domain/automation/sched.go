@@ -237,7 +237,7 @@ func (pl *Plane) RunOnce(ctx context.Context, rec Rec, ScheduledFor time.Time, t
 		out.Claimed = true
 	}
 
-	// Claimed：真的建会话。
+	// Claimed：真的执行一次（按 delivery 分派）。
 	//
 	// **不在这里做第二份"前置校验"**（runtime 是否可用 / cwd 是否还在）：
 	// 那份校验必然与真实创建路径漂移，而 ADR-10 真正要求的是"失败也推进游标"——那与校验
@@ -249,24 +249,37 @@ func (pl *Plane) RunOnce(ctx context.Context, rec Rec, ScheduledFor time.Time, t
 			Trigger: trigger, Advance: true, Failure: true, Claimed: out.Claimed,
 			Reason: "宿主端口未接线（装配期漏了 SetHost）：本次跳过"})
 	}
-	respID, err := host.CreateSession(ctx, HostSessionReq{
-		Prompt: rec.Def.Target.Prompt,
-		Cwd:    rec.Def.Target.Cwd,
-		Model:  rec.Def.Target.Model,
-		Origin: Origin(rec.Def.ID),
-	})
-	if err != nil {
+	// v35：按 target.delivery 分派。缺省（空串）= session（投递回既有会话）；
+	// new_session = 新建会话（与 v35 之前逐字相同）。
+	var sessionID string
+	var runErr error
+	if automation.NormalizeDelivery(rec.Def.Target.Delivery) == automation.DeliverySession {
+		runErr = host.DeliverSession(ctx, HostDeliverReq{
+			SessionID: rec.Def.Target.SessionID,
+			Prompt:    rec.Def.Target.Prompt,
+		})
+		// 投递到既有会话：last_session_id 记的就是目标会话（不发事件时也要让运行史指向它）。
+		sessionID = rec.Def.Target.SessionID
+	} else {
+		sessionID, runErr = host.CreateSession(ctx, HostSessionReq{
+			Prompt: rec.Def.Target.Prompt,
+			Cwd:    rec.Def.Target.Cwd,
+			Model:  rec.Def.Target.Model,
+			Origin: Origin(rec.Def.ID),
+		})
+	}
+	if runErr != nil {
 		out := RunOutcome{
 			ScheduledFor: ScheduledFor, Status: automation.RunSkipped, Trigger: trigger, Advance: true,
-			Failure: true, Cause: err, Claimed: out.Claimed,
-			Reason: "触发失败（已跳过本次，等修好后的下一个 occurrence）：" + errText(err),
+			Failure: true, Cause: runErr, Claimed: out.Claimed,
+			Reason: "触发失败（已跳过本次，等修好后的下一个 occurrence）：" + errText(runErr),
 		}
-		glog.Warnw(ctx, "automation 触发失败", "automation", rec.Def.ID, "err", err)
+		glog.Warnw(ctx, "automation 触发失败", "automation", rec.Def.ID, "err", runErr)
 		return pl.FinishAutomationRun(ctx, rec, out)
 	}
 	out = RunOutcome{
 		ScheduledFor: ScheduledFor, Status: automation.RunClaimed, Trigger: trigger,
-		SessionID: respID,
+		SessionID: sessionID,
 		// 手动触发不推进游标（见字段注释）。
 		Advance: trigger != automation.TriggerManual, Claimed: out.Claimed,
 	}
@@ -274,7 +287,7 @@ func (pl *Plane) RunOnce(ctx context.Context, rec Rec, ScheduledFor time.Time, t
 	// max_run_duration：可选的**收紧**（默认只靠既有 MATE_RUN_TIMEOUT 看门狗），
 	// 走同一条取消通道，不引入第二套超时机制。
 	if d, err := rec.Def.RunDuration(); err == nil && d > 0 {
-		go pl.automationWatchdog(ctx, rec.Def.ID, respID, d)
+		go pl.automationWatchdog(ctx, rec.Def.ID, sessionID, d)
 	}
 	return res
 }

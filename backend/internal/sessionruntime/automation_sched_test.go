@@ -97,7 +97,7 @@ func (r *schedRig) writeDaily(t *testing.T, id, lastFired string) {
 	body := map[string]any{
 		"id": id, "name": "每日巡检", "enabled": true,
 		"schedule": map[string]any{"kind": "daily", "timezone": "Asia/Shanghai", "hour": 9, "minute": 0},
-		"target":   map[string]any{"cwd": r.cwd, "prompt": "跑一遍依赖巡检"},
+		"target":   map[string]any{"cwd": r.cwd, "prompt": "跑一遍依赖巡检", "delivery": "new_session"},
 	}
 	if lastFired != "" {
 		body["last_fired_at"] = lastFired
@@ -345,7 +345,7 @@ func TestAutomationStartupPassExpireOnceOnce(t *testing.T) {
 	body := map[string]any{
 		"id": "mig", "enabled": true,
 		"schedule": map[string]any{"kind": "once", "timezone": "UTC", "at": "2020-01-01T00:00:00Z"},
-		"target":   map[string]any{"cwd": r.cwd, "prompt": "跑一次迁移"},
+		"target":   map[string]any{"cwd": r.cwd, "prompt": "跑一次迁移", "delivery": "new_session"},
 	}
 	raw, _ := json.Marshal(body)
 	writeAutomationFile(t, filepath.Join(r.dir, "mig.json"), string(raw))
@@ -532,7 +532,7 @@ func TestAutomationRejectsRuntimeHint(t *testing.T) {
 
 	// ① 请求体里带它 → 显式拒绝。
 	_, err := r.svc.Planes().Automation.WriteAutomation(context.Background(), "daily", map[string]any{
-		"target": map[string]any{"cwd": r.cwd, "prompt": "x", "runtime_hint": "silent"},
+		"target": map[string]any{"cwd": r.cwd, "prompt": "x", "delivery": "new_session", "runtime_hint": "silent"},
 	}, false)
 	if err == nil {
 		t.Fatal("写面带 target.runtime_hint 应被拒")

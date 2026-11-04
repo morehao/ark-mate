@@ -447,12 +447,14 @@ func TestReservedKeys(t *testing.T) {
 }
 
 // TestAutomationValidate 定义级校验：跑不了的定义在装载期就该被拒（而不是每 tick 报一次）。
+//
+// v35 起缺省 delivery=session，故基础定义显式用 new_session（cwd 语义与旧版逐字相同）。
 func TestAutomationValidate(t *testing.T) {
 	base := func() *Automation {
 		return &Automation{
 			ID: "a1", Name: "每日巡检", Enabled: true,
 			Schedule: daily("Asia/Shanghai", 9, 0),
-			Target:   Target{Cwd: "/tmp/ws", Prompt: "跑一遍依赖巡检"},
+			Target:   Target{Cwd: "/tmp/ws", Prompt: "跑一遍依赖巡检", Delivery: DeliveryNewSession},
 		}
 	}
 	if err := base().Validate(); err != nil {
@@ -464,8 +466,8 @@ func TestAutomationValidate(t *testing.T) {
 	}{
 		{"缺 id", func(a *Automation) { a.ID = "" }},
 		{"缺 prompt", func(a *Automation) { a.Target.Prompt = "" }},
-		{"缺 cwd", func(a *Automation) { a.Target.Cwd = "" }},
-		{"cwd 非绝对路径", func(a *Automation) { a.Target.Cwd = "ws/相对" }},
+		{"new_session 缺 cwd", func(a *Automation) { a.Target.Cwd = "" }},
+		{"new_session cwd 非绝对路径", func(a *Automation) { a.Target.Cwd = "ws/相对" }},
 		{"调度非法", func(a *Automation) { a.Schedule = daily("Mars/Olympus", 9, 0) }},
 		{"duration 非法", func(a *Automation) { a.MaxRunDuration = "半小时" }},
 		{"duration 负数", func(a *Automation) { a.MaxRunDuration = "-5m" }},
@@ -493,6 +495,45 @@ func TestAutomationValidate(t *testing.T) {
 	a.MaxRunDuration = ""
 	if d, err := a.RunDuration(); err != nil || d != 0 {
 		t.Fatalf("空 duration 应为 0: %v %v", d, err)
+	}
+}
+
+// TestTargetDeliveryValidate delivery 归一/校验矩阵（v35）。
+func TestTargetDeliveryValidate(t *testing.T) {
+	cases := []struct {
+		name    string
+		target  Target
+		wantErr string // 空 = 通过
+	}{
+		{"空 delivery 缺 session_id → 归一 session 后报未设", Target{Prompt: "p"}, "delivery_session_unset"},
+		{"session 缺 session_id", Target{Prompt: "p", Delivery: DeliverySession}, "delivery_session_unset"},
+		{"session 有 session_id → 通过（cwd 不要求）", Target{Prompt: "p", Delivery: DeliverySession, SessionID: "sess_1"}, ""},
+		{"空 delivery + session_id → 通过", Target{Prompt: "p", SessionID: "sess_1"}, ""},
+		{"new_session 缺 cwd", Target{Prompt: "p", Delivery: DeliveryNewSession}, "invalid_param"},
+		{"new_session cwd 相对", Target{Prompt: "p", Delivery: DeliveryNewSession, Cwd: "rel/x"}, "invalid_param"},
+		{"new_session 绝对 cwd → 通过", Target{Prompt: "p", Delivery: DeliveryNewSession, Cwd: "/abs/x"}, ""},
+		{"非法 delivery", Target{Prompt: "p", Delivery: "cron", SessionID: "x"}, "invalid_param"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.target.Validate()
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("期望通过，got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("期望报错，got nil")
+			}
+			if got := acpCode(err); got != c.wantErr {
+				t.Fatalf("期望码 %s，got %s（%v）", c.wantErr, got, err)
+			}
+		})
+	}
+	// NormalizeDelivery：空串 = session，其它原样
+	if NormalizeDelivery("") != DeliverySession || NormalizeDelivery("new_session") != DeliveryNewSession {
+		t.Fatal("NormalizeDelivery 归一错误")
 	}
 }
 

@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
@@ -41,6 +42,29 @@ func (s *Service) CancelHostRun(ctx context.Context, sessionID string) error {
 	return s.CancelRun(ctx, sessionID)
 }
 
+// DeliverHostSession 实现 `automation.Host`：向既有会话投递一条输入（delivery=session，v35 缺省路径）。
+//
+// **默认 `after_run`**：提醒不该抢用户正在进行的对话（打断再投须定义里显式选，P1 尚未开放该值，
+// 故这里固定 after_run）。复用既有 `Orchestrator.PromptWithDelivery`——投递只有一份实现
+// （`Runner.DeliverQueued`/入队），不与新建会话路径分叉。会话已归档/不存在时这里由 upsert
+// 路径如实报错，域按 ADR-10 记 skipped + needs_attention（不自动重试）。
+func (s *Service) DeliverHostSession(ctx context.Context, req automation.HostDeliverReq) error {
+	if s.orch == nil {
+		return failure.NewError(failure.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil)
+	}
+	_, err := s.orch.PromptWithDelivery(ctx, req.SessionID, req.Prompt, session.DeliveryAfterRun)
+	return err
+}
+
+// HostSessionExists 实现 `automation.Host`：该会话是否有对象（写面校验 delivery=session；空 id → false）。
+func (s *Service) HostSessionExists(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	_, ok := s.sessionPlane.Lookup(sessionID)
+	return ok
+}
+
 // HostSessionRunning 实现 `automation.Host`（overlap 判据；空 id → false）。
 //
 // **不持 `s.mu`**：`sessionPlane.Lookup` 自己取会话域的锁并返回副本，所以读 `Status` 本身
@@ -71,7 +95,7 @@ func (s *Service) EmitHostRun(_ context.Context, automationID string, version in
 	s.bus.Publish("", session.BusAutomationRun, "automation:"+automationID, version, payload)
 }
 
-// automationHostAdapter 把 `Service` 的四个 `HostXxx` 方法**改名**成端口要求的方法名。
+// automationHostAdapter 把 `Service` 的 `HostXxx` 方法**改名**成端口要求的方法名。
 //
 // 为什么不直接把方法命名成 `CreateSession` / `CancelRun`：那两个名字在 `Service` 上**已经被
 // 占用**（会话创建与取消的真实入口，签名不同）。让端口适配器做一层改名，比把既有入口改名安全
@@ -83,6 +107,11 @@ func (a automationHostAdapter) CreateSession(ctx context.Context, req automation
 	return a.svc.CreateHostSession(ctx, req)
 }
 
+// DeliverSession 实现 `automation.Host`。
+func (a automationHostAdapter) DeliverSession(ctx context.Context, req automation.HostDeliverReq) error {
+	return a.svc.DeliverHostSession(ctx, req)
+}
+
 // CancelRun 实现 `automation.Host`。
 func (a automationHostAdapter) CancelRun(ctx context.Context, sessionID string) error {
 	return a.svc.CancelHostRun(ctx, sessionID)
@@ -91,6 +120,11 @@ func (a automationHostAdapter) CancelRun(ctx context.Context, sessionID string) 
 // SessionRunning 实现 `automation.Host`。
 func (a automationHostAdapter) SessionRunning(sessionID string) bool {
 	return a.svc.HostSessionRunning(sessionID)
+}
+
+// SessionExists 实现 `automation.Host`。
+func (a automationHostAdapter) SessionExists(sessionID string) bool {
+	return a.svc.HostSessionExists(sessionID)
 }
 
 // EmitRun 实现 `automation.Host`。

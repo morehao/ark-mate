@@ -63,6 +63,29 @@ type Target struct {
 	Cwd    string `json:"cwd"`
 	Model  string `json:"model,omitempty"`
 	Prompt string `json:"prompt"`
+
+	// Delivery 投递模式（v35）：`""`/`session` = 投递回既有会话（共享会话历史，**缺省主语义**）；
+	// `new_session` = 新建会话跑（隔离，显式备选）。
+	Delivery string `json:"delivery,omitempty"`
+	// SessionID delivery=session 时必填：绑定被投递的原会话（写面校验其存在）。
+	SessionID string `json:"session_id,omitempty"`
+}
+
+// 投递模式取值（v35，ADR v35 ③）。
+const (
+	// DeliverySession 投递回既有会话（缺省；空串也归一到这里）。
+	DeliverySession = "session"
+	// DeliveryNewSession 新建会话跑（显式备选，行为与 v35 之前逐字相同）。
+	DeliveryNewSession = "new_session"
+)
+
+// NormalizeDelivery 把空串归一为缺省投递模式（`session`）。非法值**不在此处报错**——留给 Validate
+// 显式报错（不静默回落：投递语义是用户意图，猜错等于把会话投到错的地方）。
+func NormalizeDelivery(d string) string {
+	if d == "" {
+		return DeliverySession
+	}
+	return d
 }
 
 // Automation 定义文件（`<AutomationDir>/<id>.json`）的完整形态。
@@ -134,19 +157,42 @@ func (a *Automation) Validate() error {
 	if a.Target.Prompt == "" {
 		return failure.NewError(failure.ClassRequest, "invalid_param", "automation 缺少 target.prompt（触发时没有可执行的内容）", nil)
 	}
-	// cwd 必须**在创建时就写死**（ADR-6）。留空就等于"每次触发都按当时的活跃工作空间解析"——
-	// 那正是 openwork 吃过的亏（切换活跃工作空间会静默改掉所有 automation 的目标），
-	// 而且自动化往往是"半夜跑、改了不该改的东西"，事后极难归因。
-	if a.Target.Cwd == "" {
-		return failure.NewError(failure.ClassRequest, "invalid_param",
-			"automation 缺少 target.cwd：工作空间必须在创建时钉死（触发时不再解析活跃工作空间）", nil)
-	}
-	if !filepath.IsAbs(a.Target.Cwd) {
-		return failure.NewError(failure.ClassRequest, "invalid_param",
-			"automation 的 target.cwd 必须是绝对路径，得到 "+a.Target.Cwd, nil)
+	if err := a.Target.Validate(); err != nil {
+		return err
 	}
 	if _, err := a.RunDuration(); err != nil {
 		return err
+	}
+	return nil
+}
+
+// Validate 校验目标面（投递模式 + 工作空间）。**纯结构校验**（不查会话是否存在——那要 IO，
+// 归写面在宿主端口上做；这里只保证定义自身自洽）。
+//
+//   - `new_session`：cwd 必填**绝对路径**（ADR-6：工作空间必须在创建时钉死，触发时不再解析
+//     活跃工作空间——openwork 在这件事上吃过亏）；
+//   - `session`（含空串）：session_id 必填（缺 = `delivery_session_unset`，ADR v35 ④：老定义
+//     装进来会进 needs_attention，等用户迁移，**不silently建新会话**）；cwd 不要求。
+func (t Target) Validate() error {
+	switch NormalizeDelivery(t.Delivery) {
+	case DeliverySession:
+		if t.SessionID == "" {
+			return failure.NewError(failure.ClassRequest, "delivery_session_unset",
+				"target.delivery=session 需要 target.session_id（投递回哪个会话）；"+
+					"老定义若本意是批处理请改成 delivery=new_session 并给 target.cwd", nil)
+		}
+	case DeliveryNewSession:
+		if t.Cwd == "" {
+			return failure.NewError(failure.ClassRequest, "invalid_param",
+				"delivery=new_session 缺少 target.cwd：工作空间必须在创建时钉死（触发时不再解析活跃工作空间）", nil)
+		}
+		if !filepath.IsAbs(t.Cwd) {
+			return failure.NewError(failure.ClassRequest, "invalid_param",
+				"automation 的 target.cwd 必须是绝对路径，得到 "+t.Cwd, nil)
+		}
+	default:
+		return failure.NewError(failure.ClassRequest, "invalid_param",
+			"target.delivery 必须是 session | new_session（或留空=session），得到 "+t.Delivery, nil)
 	}
 	return nil
 }
