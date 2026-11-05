@@ -5,7 +5,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
+
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 )
 
 // IsInternalOrigin 判断会话是否由**内部模型网关**派生（`origin = 'internal:llm'` 一类）。
@@ -73,6 +74,8 @@ func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]Session
 	// 展示字段（workspace_id / workspace_title）在**释放锁之后**补齐：它们要读库，
 	// 而持锁读库会与 registerSession 的"先写内存再落库"顺序互相卡住。
 	pl.fillWorkspaceDisplay(out)
+	// 模型展示名同理：一次清单查询建表，不逐行取（列表刷新是高频路径）。
+	pl.fillModelDisplay(out)
 	// 过程状态的投影同理在**释放锁之后**补（`RunSnapshot` 自己取锁）：持锁读它会与
 	// `recordRunStatus` 的取锁路径互相卡住——这条分界与 `fillWorkspaceDisplay` 是同一条。
 	pl.fillRunPhase(out)
@@ -101,6 +104,47 @@ func (pl *Plane) fillWorkspaceDisplay(items []SessionItem) {
 		id, title := pl.workspaceDisplayOf(items[i].WorkspaceID)
 		items[i].WorkspaceID = id
 		items[i].WorkspaceTitle = title
+	}
+}
+
+// fillModelDisplay 给一批会话行补上模型**展示名**（`ModelName`）。
+//
+// 与 `fillWorkspaceDisplay` 同一分界：必须在**释放锁之后**调（要读库）。只对**有模型引用**
+// 的行查，且整批只取一次 `ListModelDefinitions`——模型清单是几十行的小表，逐行 `Get` 会把
+// 一次列表刷新变成 N 次查询。
+//
+// 取不到（内存模式 `st == nil`、读库失败、行已删除）就留空：前端据此回落成「已设置」，
+// **不把 `mdl_…` 摊给用户**——那是平台行身份，不是模型名。
+func (pl *Plane) fillModelDisplay(items []SessionItem) {
+	if pl.st == nil {
+		return
+	}
+	need := false
+	for i := range items {
+		if items[i].Model != "" {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return
+	}
+	rows, err := pl.st.ListModelDefinitions(context.Background())
+	if err != nil {
+		return
+	}
+	label := make(map[string]string, len(rows))
+	for i := range rows {
+		name := strings.TrimSpace(rows[i].Name)
+		if name == "" {
+			name = rows[i].Model
+		}
+		label[rows[i].ID] = name
+	}
+	for i := range items {
+		if items[i].Model != "" {
+			items[i].ModelName = label[items[i].Model]
+		}
 	}
 }
 
@@ -166,8 +210,8 @@ func (pl *Plane) ToSessionRespOf(r *SessionRec) SessionItem {
 		Cwd:                r.Cwd,
 		WorkspaceTemporary: r.WorkspaceTemporary,
 		Origin:             r.Origin,
-		CreatedAt:          r.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:          r.UpdatedAt.UTC().Format(time.RFC3339),
+		CreatedAt:          objtime.Milli(r.CreatedAt),
+		UpdatedAt:          objtime.Milli(r.UpdatedAt),
 	}
 }
 

@@ -1,3 +1,5 @@
+import type { UnixMillis } from './time'
+
 // 过程状态的取值定义在事件契约那一侧（`Ev.RunStatus` 的载荷），这里只按类型引用——
 // 让「`run.status` 的取值集」在仓库里仍然只有一处定义。
 import type { RunStatus } from './events'
@@ -62,6 +64,13 @@ export interface SessionSummary {
    */
   model?: string
   /**
+   * 会话引用模型的**展示名**（服务端读面解析：`models.name`，空则回落上游模型名）。
+   *
+   * 空 = 未引用模型，或那一行已不在平台清单里。界面上要显示"用的什么模型"只读这一格，
+   * **不要**把 `model`（平台行 id `mdl_…`）摊给用户。
+   */
+  model_name?: string
+  /**
    * 钉住的能力选定（M3）。**整个字段缺失 = 未声明能力选择**（按平台默认投放 +
    * 各技能自己的 runtimes 声明），不是"没有能力"。
    */
@@ -71,8 +80,8 @@ export interface SessionSummary {
    * 面板据此给会话打标并可跳回任务页。
    */
   origin?: string
-  created_at: string // ISO 时间戳（UTC RFC3339）
-  updated_at: string
+  created_at: UnixMillis // Unix 毫秒
+  updated_at: UnixMillis
 }
 
 /**
@@ -129,8 +138,8 @@ export interface SessionRun {
   first_seq: number
   /** 窗口终点 = 终态事件的会话内位次；**-1 = 还没收口**（进行中的轮）。 */
   last_seq: number
-  started_at: string
-  ended_at?: string
+  started_at: UnixMillis
+  ended_at?: UnixMillis
   /** 本轮从用户消息到首个 assistant 输出的耗时（ms；未记录/无输出为 0）。 */
   first_token_ms?: number
   /** 该轮结束后的用量快照（无上报则缺省）。 */
@@ -165,7 +174,7 @@ export interface MessageSearchHit {
   message_id?: string
   run_id?: string
   snippet: string
-  created_at: string
+  created_at: UnixMillis
 }
 
 export interface MessageSearchResp {
@@ -192,7 +201,7 @@ export interface ExportFile {
 }
 
 export interface ExportResp {
-  generated_at: string
+  generated_at: UnixMillis
   format: string
   exported: number
   total_bytes: number
@@ -219,8 +228,8 @@ export interface RunPhase {
   waiting_for?: string
   /** 仅恢复收口带：`restart`（界面说「上一轮因进程重启中断，可重发」，不说「失败」）。 */
   reason?: string
-  /** 该状态事件的时刻（RFC3339Nano）。 */
-  at?: string
+  /** 该状态事件的时刻（Unix 毫秒）。 */
+  at?: UnixMillis
   /** 该事件在会话内的位次（与 `events.seq` 同一套）。 */
   seq: number
 }
@@ -230,7 +239,7 @@ export interface PermissionMemory {
   title: string
   kind: string
   decision: 'allow' | 'reject'
-  since: string // ISO（RFC3339 UTC），授予时刻
+  since: UnixMillis // Unix 毫秒，授予时刻
 }
 
 /** 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。 */
@@ -283,7 +292,7 @@ export interface PermissionResp {
   kind: string
   input?: unknown
   options: PermissionOption[]
-  timeout_at: string // ISO；过期即 service 自动拒绝
+  timeout_at: UnixMillis // Unix 毫秒；过期即 service 自动拒绝
 }
 
 /** 决策体：allowed=true 允许 + 可选 option_id（选中项）+ always（会话级记忆）。 */
@@ -366,7 +375,7 @@ export interface ElicitationResp {
   message: string
   schema?: ElicitationFormSchema // form 模式
   url?: string // url 模式
-  timeout_at: string // ISO；过期即 service 自动取消
+  timeout_at: UnixMillis // Unix 毫秒；过期即 service 自动取消
 }
 
 /**
@@ -473,7 +482,7 @@ export interface Attachment extends AttachmentMeta {
   sha256: string
   /** pending | linked | orphan */
   state: string
-  created_at: string
+  created_at: UnixMillis
 }
 
 export interface SessionPromptResp {
@@ -494,7 +503,7 @@ export interface QueuedInputResp {
   delivery: string
   target_run_id?: string
   generation?: number
-  created_at?: string
+  created_at?: UnixMillis
 }
 
 /** §6 撤下排队输入的响应（DELETE /sessions/:id/inputs/:input_id）。 */

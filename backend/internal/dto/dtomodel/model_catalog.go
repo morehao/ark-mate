@@ -71,8 +71,8 @@ type ModelCatalogResp struct {
 	// 而有的底座恒 true——ACP 广告与模型无关、模型级闸门在底座内部）。所以它是"这条路由的收图
 	// 能力"的上界，逐条模型的事实仍是平台清单里的 `input_modalities`。
 	ImageInput *bool `json:"image_input,omitempty"`
-	// FetchedAt 取样时间（RFC3339；source=cache 时为首次取样时间）。
-	FetchedAt string `json:"fetched_at,omitempty"`
+	// FetchedAt 取样时间（Unix 毫秒；source=cache 时为首次取样时间）。
+	FetchedAt int64 `json:"fetched_at,omitempty"`
 	// Options 运行时配置项全量投影（模型目录为主；运行时若还给出别的选项，也一并原样透出，仅作展示）。
 	Options []ConfigOptionResp `json:"options"`
 	// AuthGuidance 运行时声明的鉴权方式（例如底座给出的终端登录命令）。

@@ -66,11 +66,17 @@ export function AddCapabilityMenu({
   onPick,
   label = '添加',
   type = 'default',
+  showPlus = true,
 }: {
   kind: 'skill' | 'mcp'
   onPick: (action: CapabilityAddAction) => void
   label?: string
   type?: 'default' | 'primary'
+  /**
+   * 按钮前面那颗 `+`。默认保留（空态里的「添加技能 / 添加连接器」）；页头那颗叫「新建」的
+   * 不画——2026-11-05 反馈：新建按钮前一律不带 `+`。
+   */
+  showPlus?: boolean
 }) {
   const source = kind === 'skill' ? SKILL_ITEMS : MCP_ITEMS
   const items: MenuProps['items'] = source.map((it) => ({ key: it.key, label: menuLabel(it) }))
@@ -83,7 +89,7 @@ export function AddCapabilityMenu({
         onClick: ({ key }) => onPick(key as CapabilityAddAction),
       }}
     >
-      <Button size="small" type={type} icon={<PlusOutlined />}>
+      <Button size="small" type={type} icon={showPlus ? <PlusOutlined /> : undefined}>
         {label}
       </Button>
     </Dropdown>

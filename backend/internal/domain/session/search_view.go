@@ -13,7 +13,7 @@ type MessageSearchHit struct {
 	MessageID string
 	RunID     string
 	Snippet   string
-	CreatedAt string
+	CreatedAt int64
 }
 
 // MessageSearchResult 一次消息搜索的结果。

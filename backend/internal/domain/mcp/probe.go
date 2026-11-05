@@ -9,6 +9,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 
 	"github.com/morehao/golib/glog"
@@ -99,7 +100,7 @@ func (p *Plane) Probe(ctx context.Context, id string) (*ProbeResult, error) {
 	out := &ProbeResult{
 		ID: id, Transport: server.Transport,
 		ServerName: res.ServerName, ServerVersion: res.ServerVersion,
-		ProbedAt: time.Now().UTC().Format(time.RFC3339),
+		ProbedAt: objtime.Milli(time.Now()),
 		Added:    added, Removed: removed, Skipped: skipped,
 	}
 	for _, t := range p.caps.ListTools() {

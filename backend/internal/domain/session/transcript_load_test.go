@@ -37,7 +37,7 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 	if s.ID != sesLegacyA || s.Title != "列出当前目录文件" || s.Status != SessionStatusCompleted {
 		t.Fatalf("回灌元数据不符: %+v", s)
 	}
-	if s.CreatedAt == "" || s.UpdatedAt == "" {
+	if s.CreatedAt == 0 || s.UpdatedAt == 0 {
 		t.Fatalf("回灌时间缺失: %+v", s)
 	}
 

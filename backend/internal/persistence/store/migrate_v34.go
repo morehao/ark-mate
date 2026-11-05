@@ -10,7 +10,7 @@ package store
 // `category` 区分「用户自建资料(material)」与「会话产物(artifact)」。
 //
 // 纯 DDL、无数据回填：旧库升级后 `artifacts` 为空表，`library_nodes` 两列取默认值
-// （category='material'、provenance_id=''）。语句里的表名/列名都是字面量（与 v15–v33 同一纪律：
+// （category='material'、provenance_id=”）。语句里的表名/列名都是字面量（与 v15–v33 同一纪律：
 // 版本步只许写当时那一版的名字，绝不引用 `model.TableName*`）。
 var migrationV34 = migration{
 	version: 34,

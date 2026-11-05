@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button, Input, Popconfirm, Space, Switch, Tag, Tooltip } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
-import { fmtProbeAt, mcpConnState, mcpRowDescription } from '../../console/capabilityView'
+import { mcpConnState, mcpRowDescription } from '../../console/capabilityView'
+import { fmtProbeAt } from '../../console/time'
 import { AddCapabilityMenu, type CapabilityAddAction } from './AddCapabilityMenu'
 import { McpDetailModal } from './McpDetailModal'
 import { McpEditorModal } from './McpEditorModal'
@@ -66,7 +67,7 @@ export function ConnectorsPanel() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <AddCapabilityMenu kind="mcp" onPick={onAdd} label="新建" type="primary" />
+          <AddCapabilityMenu kind="mcp" onPick={onAdd} label="新建" type="primary" showPlus={false} />
         </Space>
       }
     >

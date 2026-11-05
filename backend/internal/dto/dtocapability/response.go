@@ -54,7 +54,7 @@ type McpServerResp struct {
 	UnresolvedSecretKeys []string `json:"unresolved_secret_keys,omitempty"`
 	// 以下为 live 探测状态（P2 §5.2；从未探测则零值/空）。
 	ToolCount    int    `json:"tool_count"`                 // 该 server 当前归属的 Tool 条目数
-	LastProbeAt  string `json:"last_probe_at,omitempty"`    // 最近一次探测时间（RFC3339）
+	LastProbeAt  int64  `json:"last_probe_at,omitempty"`    // 最近一次探测时间（Unix 毫秒）
 	LastProbeErr string `json:"last_probe_error,omitempty"` // 最近一次探测失败原因（成功则空）
 }
 
@@ -64,7 +64,7 @@ type McpProbeResp struct {
 	Transport     string     `json:"transport"`
 	ServerName    string     `json:"server_name,omitempty"`
 	ServerVersion string     `json:"server_version,omitempty"`
-	ProbedAt      string     `json:"probed_at"`
+	ProbedAt      int64      `json:"probed_at"`
 	Added         int        `json:"added"`      // 本轮写入的 Tool 条目
 	Removed       int        `json:"removed"`    // 被本轮替换掉的旧条目
 	Skipped       int        `json:"skipped"`    // 非法/无名条目（跳过，不臆造）
@@ -207,8 +207,8 @@ type SkillMaterializationState struct {
 	Hash string `json:"hash,omitempty"`
 	// ActualHash 磁盘实测摘要（仅在能算出来时给）。
 	ActualHash string `json:"actual_hash,omitempty"`
-	// WrittenAt 产物 sidecar 记录的写入时间（RFC3339；无 sidecar 则空）。
-	WrittenAt string `json:"written_at,omitempty"`
+	// WrittenAt 产物 sidecar 记录的写入时间（Unix 毫秒；无 sidecar 则空）。
+	WrittenAt int64 `json:"written_at,omitempty"`
 	// Owners 归属标记里登记的投影方集合（共享 root 下可能有多个）。
 	Owners []string `json:"owners,omitempty"`
 	// Detail 人话说明（status 不够用时才给）。

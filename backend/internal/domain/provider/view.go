@@ -7,16 +7,17 @@ import "github.com/morehao/ark-mate/internal/core/object/objdelivery"
 // 只有字段、没有 json tag：对外形态（`dtomodel.*`）由用例层 `service/svcmodel` 投影。
 // 字段名与 DTO 一一对应（投影是纯搬运，不重命名）。
 type ProviderItem struct {
-	ID            string
-	Name          string
-	Protocol      string
-	BaseURL       string
-	HasKey        bool
-	KeySource     string
-	KeyRef        string
-	Note          string
-	Revision      int64
-	UpdatedAt     string
+	ID        string
+	Name      string
+	Protocol  string
+	BaseURL   string
+	HasKey    bool
+	KeySource string
+	KeyRef    string
+	Note      string
+	Revision  int64
+	UpdatedAt int64
+
 	ModelCount    int
 	Problems      []string
 	Applicability []objdelivery.Applicability

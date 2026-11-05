@@ -58,12 +58,13 @@ type ProbeResult struct {
 	Transport     string
 	ServerName    string
 	ServerVersion string
-	ProbedAt      string
-	Added         int
-	Removed       int
-	Skipped       int
-	ToolCount     int
-	Tools         []ToolEntry
+	ProbedAt      int64
+
+	Added     int
+	Removed   int
+	Skipped   int
+	ToolCount int
+	Tools     []ToolEntry
 }
 
 // ToolCallResult 一次工具调用的结果。

@@ -976,7 +976,7 @@ export function ModelSettingsPanel() {
             )
             : (
               <button type="button" className="fg-addbtn" onClick={() => openProviderCard({ mode: 'create' })}>
-                <PlusOutlined /> 新建供应商
+                新建供应商
               </button>
             )}
         </div>

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 )
 
 // ——— 跨会话消息级检索（M3 ②：全局消息搜索 + 锚点跳转） ———
@@ -60,7 +61,7 @@ func (pl *Plane) SearchMessages(_ context.Context, q string, limit int) (*Messag
 				MessageID: h.MessageID,
 				RunID:     h.RunID,
 				Snippet:   foldPreview(h.Text),
-				CreatedAt: h.CreatedAt.UTC().Format(time.RFC3339),
+				CreatedAt: objtime.Milli(h.CreatedAt),
 			})
 		}
 		resp.Total = len(resp.Hits)
@@ -98,7 +99,7 @@ func (pl *Plane) SearchMessages(_ context.Context, q string, limit int) (*Messag
 				Role:      th.Role,
 				Seq:       th.Seq,
 				Snippet:   foldPreview(th.Text),
-				CreatedAt: r.UpdatedAt.UTC().Format(time.RFC3339),
+				CreatedAt: objtime.Milli(r.UpdatedAt),
 			}})
 		}
 	}

@@ -50,7 +50,6 @@ func relTo(t *testing.T, root, path string) string {
 	return rel
 }
 
-
 // TestAttachmentSingleWriteEntry（G2）`attachments` 表的写入只有一条业务入口。
 //
 // 判据分两层（都在剥注释后的源码上扫）：

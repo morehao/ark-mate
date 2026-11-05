@@ -8,9 +8,8 @@ import type { WorkspaceListResp } from '@ark-mate/types'
  * 用途只有一个：新建会话面板**默认预选**它（对齐 dsh：新会话落在你上次干活的那个工作空间）。
  * 三条判据都不是外观考量：
  *   - 目录不可用（`dir_status != ok`）的登记**不参选**：选中它等于给用户一个发送必被拒的默认值；
- *   - `last_used_at` 空 = 从未用过，谈不上"最近"；
- *   - 时间比较用 `Date.parse` 而不是字符串比较：服务端下发的是 RFC3339，`+08:00` 与 `Z`
- *     两种写法的字典序与时间序**不一致**（只差时区就会排错）。
+ *   - `last_used_at` 为 0 = 从未用过，谈不上"最近"；
+ *   - 时间比较直接用毫秒数值：服务端下发 Unix 毫秒，不要解析字符串。
  *
  * 返回 null = 没有可预选的登记（memory 持久层 / 服务不可达 / 一条都没用过），
  * 此时调用方保持「未指定」——会话由平台落在默认工作空间，与 v14 的行为逐字相同。
@@ -21,7 +20,7 @@ export function mostRecentlyUsedWorkspaceId(list: WorkspaceListResp | null): str
   let bestAt = Number.NEGATIVE_INFINITY
   for (const ws of list.items) {
     if (ws.dir_status !== 'ok' || !ws.last_used_at) continue
-    const at = Date.parse(ws.last_used_at)
+    const at = ws.last_used_at
     if (Number.isNaN(at) || at <= bestAt) continue
     bestId = ws.id
     bestAt = at

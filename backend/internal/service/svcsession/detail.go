@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"github.com/morehao/ark-mate/internal/core/failure"
-	"time"
 
 	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
@@ -134,7 +135,7 @@ func memoryResps(items []interaction.MemoryItem) []dtosession.MemoryResp {
 	for _, it := range items {
 		out = append(out, dtosession.MemoryResp{
 			Title: it.Title, Kind: it.Kind, Decision: it.Decision,
-			Since: it.Since.UTC().Format(time.RFC3339),
+			Since: objtime.Milli(it.Since),
 		})
 	}
 	return out
@@ -155,7 +156,7 @@ func toPermissionResp(p interaction.PermissionItem) dtosession.PermissionResp {
 		Kind:      p.ToolCall.Kind,
 		Input:     p.ToolCall.Input,
 		Options:   opts,
-		TimeoutAt: p.TimeoutAt.UTC().Format(time.RFC3339),
+		TimeoutAt: objtime.Milli(p.TimeoutAt),
 	}
 }
 
@@ -169,7 +170,7 @@ func toElicitationResp(p interaction.ElicitationItem) dtosession.ElicitationResp
 		ScopeSource:   p.ScopeSource,
 		Mode:          p.Mode,
 		Message:       p.Message,
-		TimeoutAt:     p.TimeoutAt.UTC().Format(time.RFC3339),
+		TimeoutAt:     objtime.Milli(p.TimeoutAt),
 	}
 	if p.Mode == "form" {
 		resp.Schema = p.Schema

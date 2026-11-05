@@ -12,6 +12,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+
 	"github.com/morehao/ark-mate/internal/dto/dtoexport"
 )
 
@@ -70,7 +72,7 @@ func (e *Exporter) ExportSessions(ctx context.Context, req dtoexport.ExportReq) 
 			fmt.Sprintf("一次最多导出 %d 个会话（收到 %d）[export_too_many_ids]", MaxExportIDs, len(ids)), nil))
 	}
 
-	resp := &dtoexport.ExportResp{GeneratedAt: time.Now().UTC().Format(time.RFC3339), Format: format, Files: []dtoexport.ExportFile{}}
+	resp := &dtoexport.ExportResp{GeneratedAt: objtime.Milli(time.Now()), Format: format, Files: []dtoexport.ExportFile{}}
 	for _, id := range ids {
 		meta, ok := e.src.SessionMeta(ctx, id)
 		if !ok {

@@ -19,12 +19,12 @@ import type {
   Tool,
 } from '@ark-mate/types'
 import {
-  fmtProbeAt,
   mcpConnState,
   transportLongLabel,
   transportLabel,
   type McpRow,
 } from '../../console/capabilityView'
+import { fmtProbeAt } from '../../console/time'
 import { useMate } from '../../store'
 import { CapabilityEmpty, DetailGrid, SectionLabel, StatusTag, mono, promptText, schemaSkeleton, smallTag } from './shared'
 

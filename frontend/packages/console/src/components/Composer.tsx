@@ -3,7 +3,7 @@ import { Select } from 'antd'
 import { ArrowUpOutlined, PaperClipOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import type { AttachmentMeta, CommandInfo, ConfigOptionValue, SessionCapabilities } from '@ark-mate/types'
-import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
+import { getSendKey, shouldSendKey } from '../console/sendKey'
 import { DELIVERY_HINT, DELIVERY_LABEL, type DeliveryChoice } from '../console/queueView'
 import { applyCommandHint, commandHintQuery, matchCommands, moveHintIndex } from '../console/commandHints'
 import { useAttachmentDraft } from '../console/useAttachmentDraft'
@@ -115,7 +115,7 @@ export function Composer({
     // 依赖刻意只写 nonce：`injectDraft.text` 变了但 nonce 没变时不该覆盖用户正在打的字。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [injectDraft?.nonce])
-  const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
+  // 发送键档位不缓存进 state：设置里改完立刻生效，不用等这个组件重挂（2026-11-05 起开关在设置里）。
   // 投递模式是「这次怎么送」的选择，默认排队——打断当前轮是有代价的动作，不该是默认值。
   const [delivery, setDelivery] = useState<DeliveryChoice>('after_run')
   // 候选高亮下标；`hintOff` 记录用户按 Esc 主动关掉弹层（继续打字即恢复）。
@@ -200,7 +200,7 @@ export function Composer({
         return
       }
     }
-    if (shouldSendKey(e, sendMode)) {
+    if (shouldSendKey(e, getSendKey())) {
       e.preventDefault()
       send()
     }
@@ -417,7 +417,9 @@ export function Composer({
             </span>
           </div>
         </div>
-        {/* 卡下方一行（原型 §13）：工作区 chip + 权限 chip（左），发送键提示（右）。 */}
+        {/* 卡下方一行（原型 §13）：工作区 chip + 权限 chip。
+            2026-11-05 反馈：右下角那条「Enter 发送 · Shift+Enter 换行 ⇄」整条去掉——
+            它是常驻噪声；发送键档位改到「设置 · 通用 · 键盘操作」里切换。 */}
         <div className="fg-composer-chips">
           {workspace && (
             <WorkspaceChipStatic
@@ -428,14 +430,6 @@ export function Composer({
             />
           )}
           <PermissionChip disabled={busy && !canStop} />
-          <button
-            type="button"
-            title="点击切换发送键：Enter 发送 / Enter 换行"
-            onClick={() => setSendMode((m) => toggleSendKey(m))}
-            className="fg-hint-kbd"
-          >
-            {sendKeyHint(sendMode)} ⇄
-          </button>
         </div>
       </div>
     </div>

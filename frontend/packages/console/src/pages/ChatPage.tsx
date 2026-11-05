@@ -24,7 +24,8 @@ import {
   turnStatusOf,
   windowEntries,
 } from '../console/transcriptView'
-import { elapsedLabel, runNarration } from '../console/runView'
+import { runNarration } from '../console/runView'
+import { elapsedLabel } from '../console/time'
 import type { DeliveryChoice } from '../console/queueView'
 
 /** 问答控制台主视图：会话侧栏 + 聊天（head / transcript / composer）+ 状态条。 */

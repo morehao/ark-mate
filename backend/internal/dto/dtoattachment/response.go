@@ -19,7 +19,7 @@ type AttachmentResp struct {
 	Kind string `json:"kind"`
 	// State 生命周期：pending | linked | orphan。
 	State     string `json:"state"`
-	CreatedAt string `json:"created_at"`
+	CreatedAt int64  `json:"created_at"`
 }
 
 // AttachmentDeleteResp `DELETE /attachments/:id` 的响应体（幂等：不存在 → deleted=false 且 code=0）。

@@ -20,10 +20,16 @@ type SessionItem struct {
 	WorkspaceTitle     string
 	WorkspaceTemporary bool
 	Model              string
-	CreatedAt          string
-	UpdatedAt          string
-	Origin             string
-	Capabilities       *SessionCapabilities
+	// ModelName 会话引用模型的**展示名**（`models.name` 空则回落上游模型名；空 = 未引用，
+	// 或那一行已不在平台清单里）。读面解析，与 `WorkspaceTitle` 同一条分界：`Model` 是平台
+	// 行 id（`mdl_…`），这一格才是能直接给人看的名字。
+	ModelName string
+	CreatedAt int64
+
+	UpdatedAt int64
+
+	Origin       string
+	Capabilities *SessionCapabilities
 }
 
 // SessionCapabilities 会话的能力选定回显（`nil` 指针 = 该 kind 未声明，与 `[]` 语义相反）。
@@ -54,21 +60,24 @@ type RunPhase struct {
 	ToolName   string
 	WaitingFor string
 	Reason     string
-	At         string
-	Seq        int64
+	At         int64
+
+	Seq int64
 }
 
 // RunItem 一条运行记录。
 type RunItem struct {
-	ID           string
-	UserText     string
-	Status       string
-	ErrorCode    string
-	StopReason   string
-	FirstSeq     int64
-	LastSeq      int64
-	StartedAt    string
-	EndedAt      string
+	ID         string
+	UserText   string
+	Status     string
+	ErrorCode  string
+	StopReason string
+	FirstSeq   int64
+	LastSeq    int64
+	StartedAt  int64
+
+	EndedAt int64
+
 	FirstTokenMS int64
 	Usage        *RunUsage
 }

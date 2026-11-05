@@ -204,7 +204,7 @@ var contractExcluded = map[string]string{
 	// 且结果（选中/取消/无宿主）由宿主的桌面环境决定——它是宿主交互能力，不是数据契约。
 	"POST /v1/mate/workspaces/pick-directory": "抬宿主原生目录选择器，结果依赖宿主 UI",
 	// 附件字节流：响应是原始字节流（Content-Type=探测 MIME、inline），不是 JSON 信封。
-	"GET /v1/mate/attachments/:id/content": "回原始字节流（预览），不是 JSON 信封",
+	"GET /v1/mate/attachments/:id/content":  "回原始字节流（预览），不是 JSON 信封",
 	"GET /v1/mate/materials/nodes/:id/view": "回 page 的 text/html 正文，不是 JSON 信封",
 }
 

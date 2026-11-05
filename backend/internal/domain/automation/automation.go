@@ -16,6 +16,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/automation"
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/gerror"
@@ -508,10 +509,10 @@ func (r *Rec) View() AutomationView {
 		RecentRuns:          r.Def.RecentRuns,
 	}
 	if !r.NextDue.IsZero() {
-		v.NextDueAt = r.NextDue.UTC().Format(time.RFC3339)
+		v.NextDueAt = objtime.Milli(r.NextDue)
 	}
 	if r.Def.LastFiredAt != nil {
-		v.LastFiredAt = r.Def.LastFiredAt.UTC().Format(time.RFC3339)
+		v.LastFiredAt = objtime.Millis(r.Def.LastFiredAt)
 	}
 	return v
 }

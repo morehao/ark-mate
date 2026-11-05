@@ -1,6 +1,9 @@
+import { useState } from 'react'
+import { Segmented } from 'antd'
 import { tokens } from '@ark-mate/ui'
 import type { ReactNode } from 'react'
 import { useMate } from '../../store'
+import { getSendKey, setSendKey, type SendKeyMode } from '../../console/sendKey'
 import { CardHeader } from './CardHeader'
 
 /**
@@ -11,7 +14,8 @@ import { CardHeader } from './CardHeader'
  *
  * 本节只做两件事：
  *   1. 只读展示**平台分配的默认工作区**路径（每个新会话未指定目录时的落点）；
- *   2. 说明输入区的键盘操作（Enter 发送 / Shift+Enter 换行）。
+ *   2. 输入区的键盘操作：**发送键档位可切换**（2026-11-05 起开关从输入卡右下角搬到
+ *      这里——那条常驻提示被用户判定为噪声），并说明该档位下发送/换行各是哪个键。
  *
  * **不含**「工作区起始位置」的可编辑偏好列表：v14.6 起前后端一起去掉了这个用户设置面。
  * 目录浏览的起点偏好只由部署级配置（`MATE_WORKSPACE_ROOTS` / config.json）决定，普通用户无需设置。
@@ -53,6 +57,12 @@ export function GeneralSettingsPanel() {
   const workspaces = useMate((s) => s.workspaces)
   const defaultWs =
     workspaces?.items.find((w) => w.id === workspaces.default_id) ?? workspaces?.items.find((w) => w.is_default)
+  // 发送键档位：读一次本地值做初值；改动即写回（输入区每次按键现读，所以立刻生效）。
+  const [sendMode, setMode] = useState<SendKeyMode>(getSendKey)
+  const changeSendMode = (next: SendKeyMode) => {
+    setMode(next)
+    setSendKey(next)
+  }
 
   return (
     <div className="fg-setsec">
@@ -71,15 +81,40 @@ export function GeneralSettingsPanel() {
       </div>
 
       <div className="fg-setsec-card" style={{ marginTop: 14 }}>
-        <CardHeader title="键盘操作" hint="发送消息与换行的快捷键。" />
+        <CardHeader
+          title="键盘操作"
+          hint="发送消息与换行的快捷键；发送键档位在这里切换（⌘/Ctrl + Enter 在任何档位下都能直接发送）。"
+        />
+        <KVRow
+          label="发送键"
+          value={
+            <Segmented<SendKeyMode>
+              size="small"
+              value={sendMode}
+              onChange={changeSendMode}
+              options={[
+                { label: 'Enter 发送', value: 'enter-send' },
+                { label: 'Shift+Enter 发送', value: 'enter-newline' },
+              ]}
+            />
+          }
+        />
         <KVRow
           label="发送消息"
-          value={<kbd style={{ ...mono, color: tokens.text }}>Enter</kbd>}
+          value={
+            <kbd style={{ ...mono, color: tokens.text }}>
+              {sendMode === 'enter-send' ? 'Enter' : 'Shift + Enter'}
+            </kbd>
+          }
         />
         <KVRow
           label="换行"
           last
-          value={<kbd style={{ ...mono, color: tokens.text }}>Shift + Enter</kbd>}
+          value={
+            <kbd style={{ ...mono, color: tokens.text }}>
+              {sendMode === 'enter-send' ? 'Shift + Enter' : 'Enter'}
+            </kbd>
+          }
         />
       </div>
     </div>

@@ -80,7 +80,7 @@ func TestModelCatalogLiveSession(t *testing.T) {
 	if resp.Options[0].CurrentValue != `["deepseek","deepseek-chat"]` {
 		t.Fatalf("不透明当前值应原样保留: %q", resp.Options[0].CurrentValue)
 	}
-	if resp.FetchedAt == "" {
+	if resp.FetchedAt == 0 {
 		t.Fatal("取样时间应回带")
 	}
 

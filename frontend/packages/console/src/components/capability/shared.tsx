@@ -63,18 +63,6 @@ export function SectionHeader({
   )
 }
 
-export function SectionEmpty({ text }: { text: string }) {
-  return <div style={{ padding: '28px 20px', textAlign: 'center', color: tokens.textPlaceholder, fontSize: 12.5 }}>{text}</div>
-}
-
-export function Row({ children }: { children: ReactNode }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${tokens.border}` }}>
-      {children}
-    </div>
-  )
-}
-
 /** 行内小标签统一样式（新增代码用；既有行内样式保持不动，避免无关联改动）。 */
 export const smallTag: CSSProperties = { marginInlineEnd: 0, fontSize: 10.5 }
 
@@ -83,19 +71,10 @@ export const smallTag: CSSProperties = { marginInlineEnd: 0, fontSize: 10.5 }
 // （`enabled` 出「已禁用」，逐 runtime 的 applicability 出「可用/未实测/未配置/不适用/已禁用」
 // 且原因进 tooltip），所以直接删掉而不是换个输入再抄一遍。
 
-export function Card({ children }: { children: ReactNode }) {
-  return (
-    <section style={{ border: `1px solid ${tokens.border}`, borderRadius: 12, background: tokens.surface, overflow: 'hidden' }}>
-      {children}
-    </section>
-  )
-}
-
 /**
  * 两行式能力行（名称/描述/元信息 + 右侧动作）。
  *
- * 刻意**不改** `Row`：`OverviewPanel` 与选择器还在用单行形态，把 `Row` 改成两行会让那些
- * 与本次改造无关的界面一起换行。这里独立成组件，两个管理页共用。
+ * 技能页与连接器页共用；总览页删掉后这里只剩两行形态（原单行 `Row` 与 `Card` 一并退役）。
  */
 export function CapabilityRow({
   title,

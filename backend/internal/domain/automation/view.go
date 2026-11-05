@@ -10,15 +10,17 @@ import "github.com/morehao/ark-mate/internal/core/automation"
 // `Schedule` / `Target` / `RunRecord` 直接用 `internal/core/automation` 的值类型：那是本仓的
 // **调度词汇**（L1），不是传输结构——它们本来就没有 json tag，由 DTO 侧另建同名映射。
 type AutomationView struct {
-	ID                  string
-	Name                string
-	Enabled             bool
-	State               string
-	Schedule            automation.Schedule
-	Target              automation.Target
-	MaxRunDuration      string
-	NextDueAt           string
-	LastFiredAt         string
+	ID             string
+	Name           string
+	Enabled        bool
+	State          string
+	Schedule       automation.Schedule
+	Target         automation.Target
+	MaxRunDuration string
+	NextDueAt      int64
+
+	LastFiredAt int64
+
 	LastSessionID       string
 	LastStatus          string
 	LastReason          string

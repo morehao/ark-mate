@@ -17,6 +17,7 @@ package router
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/controller/ctrartifact"
+	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
 	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
 	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
 	"github.com/morehao/ark-mate/internal/controller/ctrcommandpolicy"
@@ -27,14 +28,13 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrruntime"
 	"github.com/morehao/ark-mate/internal/controller/ctrsearch"
 	"github.com/morehao/ark-mate/internal/controller/ctrsession"
-	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 	"github.com/morehao/ark-mate/internal/controller/ctrusage"
 	"github.com/morehao/ark-mate/internal/controller/ctrworkspace"
 	"github.com/morehao/ark-mate/internal/controller/ctrws"
 	"github.com/morehao/ark-mate/internal/middleware"
-	"github.com/morehao/golib/biz/gserver/ginupload"
 	"github.com/morehao/golib/biz/gserver/ginserver"
+	"github.com/morehao/golib/biz/gserver/ginupload"
 	"github.com/morehao/golib/filestore"
 )
 

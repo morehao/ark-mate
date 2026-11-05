@@ -443,8 +443,8 @@ func TestRecentWorkspaces(t *testing.T) {
 	if list[1].Path != "/work/alpha" || list[1].Sessions != 2 {
 		t.Fatalf("同目录应聚合计数: %+v", list[1])
 	}
-	if list[1].LastUsedAt != base.Add(time.Hour).Format(time.RFC3339) {
-		t.Fatalf("last_used_at 应取该目录下最新会话: %q", list[1].LastUsedAt)
+	if list[1].LastUsedAt != base.Add(time.Hour).UnixMilli() {
+		t.Fatalf("last_used_at 应取该目录下最新会话: %d", list[1].LastUsedAt)
 	}
 
 	// limit 截断（默认 10，上限由 handler 侧收敛）。
@@ -888,7 +888,7 @@ func TestListWorkspaceFiles(t *testing.T) {
 	}
 	if i, ok := byName["a.pdf"]; !ok {
 		t.Fatalf("文件条目应列出: %+v", resp.Entries)
-	} else if got := resp.Entries[i]; got.IsDir || got.Size != int64(len(body)) || got.ModifiedAt == "" {
+	} else if got := resp.Entries[i]; got.IsDir || got.Size != int64(len(body)) || got.ModifiedAt == 0 {
 		t.Fatalf("文件条目应带大小与修改时间: %+v", got)
 	}
 	if _, ok := byName["broken"]; ok {

@@ -14,7 +14,7 @@ import { AttachmentChip } from './AttachmentChip'
 import { useAttachmentDraft } from '../console/useAttachmentDraft'
 import { FOLLOW_DEFAULT, selectionPayload, type CapabilityChoice } from '../console/capabilityView'
 import { mergeCapabilityPatch } from '../console/capabilityEdit'
-import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
+import { getSendKey, shouldSendKey } from '../console/sendKey'
 
 // 新建会话时记住的「上次所选模型」——存的是**平台模型行 id**（`mdl_…`；v26 起）。
 // 键名前缀随 M0-1 的前端产品包改名统一为 `mate.web.*`（与其它前端持久键同前缀）；
@@ -66,7 +66,6 @@ export function StartPanel() {
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
-  const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
   // 初值只认**形状合法**的本地记忆（`readStoredModel`：形状不对的当场丢弃，不等目录）。
   const [model, setModel] = useState<string | null>(readStoredModel)
   // 工作空间选择（v14）：`null` = 未指定（会话落在**默认工作空间**）；否则是选中的登记 id
@@ -306,7 +305,7 @@ export function StartPanel() {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (shouldSendKey(e, sendMode)) {
+                if (shouldSendKey(e, getSendKey())) {
                   e.preventDefault()
                   void send()
                 }
@@ -412,7 +411,8 @@ export function StartPanel() {
               </span>
             </div>
           </div>
-          {/* 卡下方一行（原型 §13）：工作区 chip + 权限 chip（左），发送键提示（右）。 */}
+          {/* 卡下方一行（原型 §13）：工作区 chip + 权限 chip。
+              2026-11-05 反馈：右下角那条发送键提示整条去掉（与输入区同一个理由）。 */}
           <div className="fg-composer-chips">
             <WorkspacePicker
               variant="chip"
@@ -422,14 +422,6 @@ export function StartPanel() {
               disabled={sending}
             />
             <PermissionChip disabled={sending} />
-            <button
-              type="button"
-              title="点击切换发送键：Enter 发送 / Enter 换行"
-              onClick={() => setSendMode((m) => toggleSendKey(m))}
-              className="fg-hint-kbd"
-            >
-              {sendKeyHint(sendMode)} ⇄
-            </button>
           </div>
         </div>
 

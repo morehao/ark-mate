@@ -9,6 +9,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/automation"
 	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+
 	"github.com/morehao/ark-mate/internal/core/redact"
 	"github.com/morehao/golib/glog"
 )
@@ -564,7 +566,7 @@ func (pl *Plane) emitAutomationRun(id string, out RunOutcome) {
 		"trigger":       out.Trigger,
 	}
 	if !out.ScheduledFor.IsZero() {
-		payload["scheduled_for"] = out.ScheduledFor.UTC().Format(time.RFC3339)
+		payload["scheduled_for"] = objtime.Milli(out.ScheduledFor)
 	}
 	if out.SessionID != "" {
 		payload["session_id"] = out.SessionID

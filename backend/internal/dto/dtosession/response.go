@@ -57,9 +57,15 @@ type SessionResp struct {
 	// 注意与 `/models` 行的 `model` **同词不同义**：那边是"发给上游的模型名"，这边是平台行 id。
 	//
 	// 这里曾有 `Provider string`（恒空，v19 后无写入点）；v26 连列一起删了。
-	Model     string `json:"model,omitempty"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	Model string `json:"model,omitempty"`
+	// ModelName 会话引用模型的**展示名**（`models.name`，空则回落上游模型名；空 = 未引用，
+	// 或那一行已不在平台清单里）。
+	//
+	// 与 `workspace_title` 同一条口径：读面解析后下发。前端为了"显示一个名字"不必再拉
+	// `GET /models`，更不该把 `model`（平台行 id）直接摊到界面上。
+	ModelName string `json:"model_name,omitempty"`
+	CreatedAt int64  `json:"created_at"` // Unix 毫秒
+	UpdatedAt int64  `json:"updated_at"`
 	// Origin 会话来源（平台判定，非用户输入）：空 = 人工创建，`automation:<id>` = 该定时任务触发。
 	// 回显的意义与 capabilities 同一条：用户要能看见"这条会话是谁开的"，而不是靠时间去猜。
 	Origin string `json:"origin,omitempty"`
@@ -139,8 +145,8 @@ type RunPhaseResp struct {
 	// Reason 仅恢复收口带（`restart`）：界面据此说「上一轮因进程重启中断，可重发」，
 	// **不**说「失败」——那是底座的结论。
 	Reason string `json:"reason,omitempty"`
-	// At 该状态事件的时刻（RFC3339Nano）。
-	At string `json:"at,omitempty"`
+	// At 该状态事件的时刻（Unix 毫秒）。
+	At int64 `json:"at,omitempty"` // Unix 毫秒
 	// Seq 该事件在会话内的位次（与 `events.seq` 同一套；界面拿它判断新鲜度与续传）。
 	Seq int64 `json:"seq"`
 }
@@ -150,7 +156,7 @@ type MemoryResp struct {
 	Title    string `json:"title"`
 	Kind     string `json:"kind"`
 	Decision string `json:"decision"` // allow | reject
-	Since    string `json:"since"`    // RFC3339，授予时刻
+	Since    int64  `json:"since"`    // Unix 毫秒，授予时刻
 }
 
 // SessionCreateResp 新建会话响应。
@@ -199,8 +205,8 @@ type QueuedInputResp struct {
 	// TargetRunID 入队时正在执行的那一轮（审计：用户排在哪一轮后面）。
 	TargetRunID string `json:"target_run_id,omitempty"`
 	// Generation 入队时会话执行代际（服务端投递前比对，不等即作废）。
-	Generation int64  `json:"generation,omitempty"`
-	CreatedAt  string `json:"created_at,omitempty"` // RFC3339Nano(UTC)
+	Generation int64 `json:"generation,omitempty"`
+	CreatedAt  int64 `json:"created_at,omitempty"` // Unix 毫秒（0 = 缺省）
 }
 
 // SessionHistoryResp 会话历史分页响应（事件按 seq 升序）。
@@ -225,10 +231,10 @@ type RunResp struct {
 	// FirstSeq/LastSeq 本轮事件窗口的**会话内**位次（`[first_seq, last_seq]` 闭区间）。
 	// 进行中的轮次（v22 起在库里就有行）：`first_seq` 已定（= 本轮 `run.started` 的位次）、
 	// `last_seq` 为 **-1**（尚未收口——0 是合法位次，不能当"未知"用）、`ended_at` 为空。
-	FirstSeq  int64  `json:"first_seq"`
-	LastSeq   int64  `json:"last_seq"`
-	StartedAt string `json:"started_at"`
-	EndedAt   string `json:"ended_at,omitempty"` // 终态时刻（进行中为空）
+	FirstSeq  int64 `json:"first_seq"`
+	LastSeq   int64 `json:"last_seq"`
+	StartedAt int64 `json:"started_at"`         // Unix 毫秒
+	EndedAt   int64 `json:"ended_at,omitempty"` // 终态时刻（进行中为空）
 	// FirstTokenMS 本轮从用户消息到首个 assistant 输出的耗时（ms；未记录/无输出为 0）。
 	FirstTokenMS int64 `json:"first_token_ms,omitempty"`
 	// Usage 该轮结束后的上下文/费用快照（解析 runs.usage_json；无上报 → nil）。
@@ -253,7 +259,7 @@ type PermissionResp struct {
 	Kind      string                 `json:"kind"`
 	Input     any                    `json:"input,omitempty"`
 	Options   []PermissionOptionResp `json:"options"`
-	TimeoutAt string                 `json:"timeout_at"`
+	TimeoutAt int64                  `json:"timeout_at"` // Unix 毫秒
 }
 
 // PermissionOptionResp 权限可选项的对外表示。
@@ -290,5 +296,5 @@ type ElicitationResp struct {
 	Message     string         `json:"message"`
 	Schema      map[string]any `json:"schema,omitempty"`
 	URL         string         `json:"url,omitempty"`
-	TimeoutAt   string         `json:"timeout_at"`
+	TimeoutAt   int64          `json:"timeout_at"` // Unix 毫秒
 }

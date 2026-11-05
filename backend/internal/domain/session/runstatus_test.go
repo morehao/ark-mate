@@ -2,7 +2,6 @@ package session
 
 import (
 	"testing"
-	"time"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 )
@@ -148,8 +147,8 @@ func TestRunStatusInterruptedPayloadCarriesReason(t *testing.T) {
 	if _, ok := m["error"]; ok {
 		t.Fatalf("恢复收口不该带 error：说「失败」是代底座下结论：%+v", m)
 	}
-	// at 必须能解析（读面按 RFC3339Nano 透出）。
-	if _, err := time.Parse(time.RFC3339Nano, m["at"].(string)); err != nil {
-		t.Fatalf("at 不是 RFC3339Nano：%v", err)
+	// at 必须是 Unix 毫秒（读面按毫秒透出）。
+	if at, ok := m["at"].(int64); !ok || at <= 0 {
+		t.Fatalf("at 不是 Unix 毫秒：%#v", m["at"])
 	}
 }

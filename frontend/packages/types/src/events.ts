@@ -1,3 +1,5 @@
+import type { UnixMillis } from './time'
+
 // 域事件 type 常量（与 backend manager/events.go 一致）。
 export const Ev = {
   SessionCreated: 'session.created',
@@ -88,8 +90,8 @@ export interface RunStatusPayload {
   /** permission | elicitation | model | tool。 */
   waiting_for?: string
   retry?: { attempt?: number; reason?: string } & Record<string, unknown>
-  /** RFC3339Nano。 */
-  at?: string
+  /** Unix 毫秒（历史载荷可能是 RFC3339 字符串，读侧用 toMillis 归一）。 */
+  at?: UnixMillis
   /** 仅恢复收口带：`restart`。 */
   reason?: string
 }
@@ -178,7 +180,7 @@ export interface StreamEntry {
   toolCallId?: string
   resolved?: boolean // 已由用户决策（按钮禁用/展示结果）
   decision?: string // resolved 时的决策摘要
-  timeoutAt?: string // 服务端超时时刻（ISO）；仅做倒计时展示，收敛以 session.permission_resolved 事件为准
+  timeoutAt?: UnixMillis // Unix 毫秒；仅做倒计时展示，收敛以 session.permission_resolved 事件为准
   // —— 结构化提问卡（kind='elicitation'）——
   elicitationId?: string // 决策回传锚点（POST /sessions/:id/elicitation）
   mode?: 'form' | 'url' // form=表单渲染 schema；url=引导链接

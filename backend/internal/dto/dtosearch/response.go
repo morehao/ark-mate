@@ -11,7 +11,7 @@ type MessageSearchHit struct {
 	MessageID string `json:"message_id,omitempty"`
 	RunID     string `json:"run_id,omitempty"`
 	Snippet   string `json:"snippet"`
-	CreatedAt string `json:"created_at"`
+	CreatedAt int64  `json:"created_at"`
 }
 
 // MessageSearchResp 消息级搜索响应（source 标明数据面，便于排障与降级提示）。

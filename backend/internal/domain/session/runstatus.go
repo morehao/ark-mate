@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 )
 
 // 一轮问答的**过程状态**（ADR-6 / ADR-7）。
@@ -126,7 +127,7 @@ func RunStatusPayload(sessionID, runID, status string, opt RunStatusOpts) map[st
 		"session_id": sessionID,
 		"run_id":     runID,
 		"status":     status,
-		"at":         at.UTC().Format(time.RFC3339Nano),
+		"at":         objtime.Milli(at),
 	}
 	if opt.Phase != "" {
 		m["phase"] = opt.Phase
@@ -162,7 +163,7 @@ func RunInterruptedPayload(sessionID, runID, reason string) map[string]any {
 		"run_id":     runID,
 		"status":     RunStatusInterrupted,
 		"reason":     reason,
-		"at":         time.Now().UTC().Format(time.RFC3339Nano),
+		"at":         objtime.Milli(time.Now().UTC()),
 	}
 }
 
@@ -190,6 +191,14 @@ func (s RunStatusSnapshot) Status() string {
 func (s RunStatusSnapshot) Str(key string) string {
 	v, _ := s.Payload[key].(string)
 	return v
+}
+
+// Millis 取载荷里的一个**时间键**，返回 Unix 毫秒；缺键/坏值 → 0。
+//
+// 必须宽容：`events.payload_json` 是不可变历史，口径切换之前落库的 `at` 仍是 RFC3339
+// 字符串（见 `internal/core/object/objtime.Parse` 的理由）。写侧只产出毫秒。
+func (s RunStatusSnapshot) Millis(key string) int64 {
+	return objtime.Parse(s.Payload[key])
 }
 
 // RunSnapshot 取某会话最近一次 `run.status` 的投影（无 → false）。
@@ -332,7 +341,7 @@ func runPhaseOfSnapshot(snap RunStatusSnapshot) *RunPhase {
 		ToolName:   snap.Str("tool_name"),
 		WaitingFor: snap.Str("waiting_for"),
 		Reason:     snap.Str("reason"),
-		At:         snap.Str("at"),
+		At:         snap.Millis("at"),
 		Seq:        snap.Seq,
 	}
 }

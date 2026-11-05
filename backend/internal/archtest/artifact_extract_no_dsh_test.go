@@ -35,18 +35,18 @@ func TestArtifactExtractNoDshTouch(t *testing.T) {
 	}
 	// 明确禁止的写/起进程调用（选择子全名，packageAlias.Func 形式在下面用 ast.SelectorExpr 匹配）。
 	forbiddenCalls := map[string]string{
-		"exec.Command":    "不得 spawn 底座进程（C1 只读事件，不注入）",
+		"exec.Command":        "不得 spawn 底座进程（C1 只读事件，不注入）",
 		"exec.CommandContext": "不得 spawn 底座进程（C1）",
-		"syscall.Exec":    "不得 exec（C1）",
-		"os.WriteFile":    "不得写工作区文件（C2 只读文件）",
-		"os.Create":       "不得写工作区文件（C2）",
-		"os.OpenFile":     "不得 OpenFile（可能带写标志）（C2）",
-		"os.Remove":       "不得删工作区文件（C2）",
-		"os.RemoveAll":    "不得删工作区文件（C2）",
-		"os.Mkdir":        "不得建目录（C2）",
-		"os.MkdirAll":     "不得建目录（C2）",
-		"os.Rename":       "不得移动工作区文件（C2）",
-		"os.Chmod":        "不得改工作区权限（C2）",
+		"syscall.Exec":        "不得 exec（C1）",
+		"os.WriteFile":        "不得写工作区文件（C2 只读文件）",
+		"os.Create":           "不得写工作区文件（C2）",
+		"os.OpenFile":         "不得 OpenFile（可能带写标志）（C2）",
+		"os.Remove":           "不得删工作区文件（C2）",
+		"os.RemoveAll":        "不得删工作区文件（C2）",
+		"os.Mkdir":            "不得建目录（C2）",
+		"os.MkdirAll":         "不得建目录（C2）",
+		"os.Rename":           "不得移动工作区文件（C2）",
+		"os.Chmod":            "不得改工作区权限（C2）",
 	}
 
 	scanned := 0

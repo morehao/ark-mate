@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { toMillis } from './console/time'
 import {
   cancelSession,
   cancelQueuedInput as apiCancelQueuedInput,
@@ -103,12 +104,13 @@ export interface SessionView {
    */
   run?: RunPhase
   /**
-   * 本轮**客户端观测到的开始时刻**（ISO）：`run_status` 首次进入忙态时记，收口/失败/取消时清空。
+   * 本轮**客户端观测到的开始时刻**（Unix 毫秒）：`run_status` 首次进入忙态时记，收口/失败/取消时清空。
    *
-   * 只用于状态行里的「已处理 Ns」。刷新/切会话回来时它是空的——**宁可不显示秒数，
-   * 也不给一个从页面打开时刻起算的假数字**（后端 `run.status` 今天不带 started_at，见 O1）。
+   * 只用于状态行里的「已处理 Ns」。优先取服务端 `run.status.at`（Unix 毫秒），
+   * 拿不到才回落到客户端时钟；刷新/切会话回来时它是空的——**宁可不显示秒数，
+   * 也不给一个从页面打开时刻起算的假数字**。
    */
-  runStartedAt?: string
+  runStartedAt?: number
 }
 
 const emptyView = (): SessionView => ({
@@ -303,10 +305,12 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       const busy = status !== 'idle' && status !== 'interrupted'
       const nextRunID = e.payload?.run_id ? String(e.payload.run_id) : undefined
       const sameRun = nextRunID !== undefined && v.run?.run_id === nextRunID
+      // 优先用**服务端**的 `at`（同一轮的首帧），拿不到才回落到客户端时钟：
+      // 本地时钟可能有偏差，而"已处理 Ns"要和后端事件对得上。
       const runStartedAt = busy
         ? sameRun && v.runStartedAt
           ? v.runStartedAt
-          : new Date().toISOString()
+          : (toMillis(e.payload?.at) ?? Date.now())
         : undefined
       return {
         ...v,
@@ -320,7 +324,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
           tool_name: e.payload?.tool_name ? String(e.payload.tool_name) : undefined,
           waiting_for: e.payload?.waiting_for ? String(e.payload.waiting_for) : undefined,
           reason: e.payload?.reason ? String(e.payload.reason) : undefined,
-          at: e.payload?.at ? String(e.payload.at) : undefined,
+          at: toMillis(e.payload?.at),
           seq: e.seq,
         },
         lastSeq,
@@ -379,7 +383,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       const title = String(e.payload?.title ?? '权限请求')
       const toolKind = String(e.payload?.kind ?? '')
       const toolCallId = String(e.payload?.tool_call_id ?? '')
-      const timeoutAt = e.payload?.timeout_at != null ? String(e.payload.timeout_at) : undefined
+      const timeoutAt = toMillis(e.payload?.timeout_at)
       const optionKinds = Array.isArray(e.payload?.options)
         ? (e.payload.options as PermissionOption[])
         : []
@@ -428,7 +432,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       const elicitationId = String(e.payload?.elicitation_id ?? '')
       const mode = String(e.payload?.mode ?? 'form') === 'url' ? 'url' : 'form'
       const message = String(e.payload?.message ?? '')
-      const timeoutAt = e.payload?.timeout_at != null ? String(e.payload.timeout_at) : undefined
+      const timeoutAt = toMillis(e.payload?.timeout_at)
       const schema = (e.payload?.schema as ElicitationFormSchema | undefined) ?? undefined
       const url = e.payload?.url != null ? String(e.payload.url) : undefined
       return {

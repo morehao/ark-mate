@@ -1,3 +1,5 @@
+import type { UnixMillis } from './time'
+
 // 资料库（Material Library）面的对外类型。
 //
 // 本期范围：只做资料库、不做知识库——**没有任何语义检索/向量/问答字段**。
@@ -14,7 +16,7 @@ export interface MaterialNode {
   category?: MaterialCategory
   /** 产物节点引用的 artifact id（v34；仅 category=artifact 时非空）。 */
   provenance_id?: string
-  updated_at: string
+  updated_at: UnixMillis
 }
 
 /** 节点分类（v34，与 node_kind 正交）。 */
@@ -48,8 +50,8 @@ export interface MaterialNodeDetail {
   category?: MaterialCategory
   /** 引用的产物主键（v34）：artifact 类别时非空（→ artifacts.id）。 */
   provenance_id?: string
-  created_at: string
-  updated_at: string
+  created_at: UnixMillis
+  updated_at: UnixMillis
 }
 
 /** `POST /materials/nodes` 的请求体。 */

@@ -35,7 +35,7 @@ func sessionRespDTO(v session.SessionItem) dtosession.SessionResp {
 		Status: v.Status, Run: runPhaseDTO(v.Run), Title: v.Title, Pinned: v.Pinned,
 		Archived: v.Archived, Cwd: v.Cwd, WorkspaceID: v.WorkspaceID,
 		WorkspaceTitle: v.WorkspaceTitle, WorkspaceTemporary: v.WorkspaceTemporary,
-		Model: v.Model, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt, Origin: v.Origin,
+		Model: v.Model, ModelName: v.ModelName, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt, Origin: v.Origin,
 		Capabilities: capabilitiesDTO(v.Capabilities),
 	}
 }

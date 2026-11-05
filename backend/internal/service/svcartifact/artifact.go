@@ -16,6 +16,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+
 	"github.com/morehao/ark-mate/internal/domain/artifact"
 	"github.com/morehao/ark-mate/internal/dto/dtoartifact"
 	"github.com/morehao/ark-mate/internal/persistence/model"
@@ -207,8 +209,8 @@ func toResp(a model.ArtifactEntity) *dtoartifact.ArtifactResp {
 		ContentText:   a.ContentText,
 		ContentSha256: a.ContentSha256,
 		Dirty:         a.Dirty != 0,
-		CreatedAt:     model.FormatTime(a.CreatedAt),
-		UpdatedAt:     model.FormatTime(a.UpdatedAt),
+		CreatedAt:     objtime.Milli(a.CreatedAt),
+		UpdatedAt:     objtime.Milli(a.UpdatedAt),
 	}
 }
 

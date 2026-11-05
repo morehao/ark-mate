@@ -16,7 +16,7 @@ type ExportFile struct {
 
 // ExportResp 批量导出响应（skipped 列出无数据/未知会话，不静默丢弃）。
 type ExportResp struct {
-	GeneratedAt string       `json:"generated_at"`
+	GeneratedAt int64        `json:"generated_at"`
 	Format      string       `json:"format"`
 	Exported    int          `json:"exported"`
 	TotalBytes  int          `json:"total_bytes"`

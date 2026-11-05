@@ -1,8 +1,8 @@
 package acp
 
 import (
-	"github.com/morehao/ark-mate/internal/core/protocol"
 	"context"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"testing"
 	"time"
 

@@ -34,8 +34,8 @@ type ModelResp struct {
 	// Revision 写面乐观锁计数（每次成功提交 +1）；**不是内容版本**——同一内容写两次它照样前进，
 	// 而"那一版到底是什么"的内容指纹在审计 digest 里（ADR-13）。
 	Revision int64 `json:"revision"`
-	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano）。
-	UpdatedAt string `json:"updated_at,omitempty"`
+	// UpdatedAt 最后一次成功提交的时刻（Unix 毫秒）。
+	UpdatedAt int64 `json:"updated_at,omitempty"`
 	// Effect 写面回执（只在写面响应里出现；列表里为空）。
 	Effect *ModelEffect `json:"effect,omitempty"`
 }

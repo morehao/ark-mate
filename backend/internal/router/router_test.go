@@ -470,7 +470,6 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 	}
 }
 
-
 // mustEvalPath 取路径真身（服务端一律按真身比较，测试期望值必须同源）。
 func mustEvalPath(t *testing.T, p string) string {
 	t.Helper()

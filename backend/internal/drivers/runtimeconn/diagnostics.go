@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 	"github.com/morehao/ark-mate/internal/core/redact"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
@@ -128,7 +129,7 @@ func (pl *Plane) Diagnostics(ctx context.Context) (*dtoruntime.DiagnosticsResp, 
 		State:        rb.State,
 		Runtime:      runtimeID,
 		StderrTail:   []string{},
-		CheckedAt:    time.Now().UTC().Format(time.RFC3339),
+		CheckedAt:    objtime.Milli(time.Now()),
 		StderrSource: "none",
 	}
 	if resp.State == "" {
@@ -152,7 +153,7 @@ func (pl *Plane) Diagnostics(ctx context.Context) (*dtoruntime.DiagnosticsResp, 
 	}
 	if le, ok := pl.LastError(); ok {
 		resp.LastError = &dtoruntime.LastErrorResp{
-			At:         le.At.Format(time.RFC3339),
+			At:         objtime.Milli(le.At),
 			SessionID:  le.SessionID,
 			Code:       le.Code,
 			Class:      le.Class,

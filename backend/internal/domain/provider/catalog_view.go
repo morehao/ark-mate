@@ -5,10 +5,11 @@ package provider
 // 只有字段、没有 json tag：对外形态（`dtomodel.*`）由用例层投影。
 // 字段名与 DTO 一一对应（投影是纯搬运）。
 type CatalogView struct {
-	Runtime      string
-	Source       string
-	ImageInput   *bool
-	FetchedAt    string
+	Runtime    string
+	Source     string
+	ImageInput *bool
+	FetchedAt  int64
+
 	Options      []CatalogOption
 	AuthGuidance []AuthGuide
 	Note         string
@@ -63,5 +64,5 @@ type ModelItem struct {
 	MaxInputTokens  *int64
 	MaxOutputTokens *int64
 	Revision        int64
-	UpdatedAt       string
+	UpdatedAt       int64
 }

@@ -1,3 +1,5 @@
+import type { UnixMillis } from './time'
+
 /**
  * 供应商面（`/providers`）。
  *
@@ -31,7 +33,7 @@ export interface Provider {
   has_key: boolean
   /** 载体版本（sqlite = 行 revision；memory = 0，文件载体没有版本号）。 */
   revision: number
-  updated_at?: string
+  updated_at?: UnixMillis
   note?: string
   /** 挂靠在本供应商下的模型条数（读取时现算的派生值）。 */
   model_count: number

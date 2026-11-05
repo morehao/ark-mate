@@ -92,4 +92,32 @@ test.describe('前端首屏与导航', () => {
     await expect(page.getByText('用量', { exact: true }).first()).toBeVisible()
     await expect(page.locator('#root')).not.toBeEmpty()
   })
+
+  // 2026-11-05：「扩展」总览页删掉后，组行**只切换展开**，不再跳页。
+  test('点「扩展」只展开二级菜单，URL 不变', async ({ page }) => {
+    await page.goto('/sessions')
+    const rail = page.locator('aside[aria-label="主导航"]')
+    const skillsLink = rail.getByRole('link', { name: '技能' })
+
+    // /sessions 上默认收起（把高度让给会话列表）
+    await expect(skillsLink).toHaveCount(0)
+
+    await rail.getByRole('button', { name: '展开「扩展」' }).click()
+    await expect(skillsLink).toBeVisible()
+    await expect(page).toHaveURL(/\/sessions$/)
+
+    await rail.getByRole('button', { name: '收起「扩展」' }).click()
+    await expect(skillsLink).toHaveCount(0)
+    await expect(page).toHaveURL(/\/sessions$/)
+  })
+
+  // 旧路径（含已删的总览页）落到默认二级页，且组自动展开、当前项高亮。
+  test('旧 /extensions 路径落到技能页', async ({ page }) => {
+    await page.goto('/extensions')
+    await expect(page).toHaveURL(/\/extensions\/skills$/)
+
+    const rail = page.locator('aside[aria-label="主导航"]')
+    await expect(rail.getByRole('link', { name: '技能' })).toHaveAttribute('aria-current', 'page')
+    await expect(rail.getByRole('button', { name: '收起「扩展」' })).toBeVisible()
+  })
 })

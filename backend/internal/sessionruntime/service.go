@@ -69,7 +69,9 @@ func WithRuntimePlane(pl *runtimeconn.Plane) Option { return func(s *Service) { 
 func WithPlanes(p *registry.Planes) Option { return func(s *Service) { s.planes = p } }
 
 // WithAttachments 注入附件解析端口（v32 附件链路；memory 模式传 nil）。
-func WithAttachments(r session.AttachmentResolver) Option { return func(s *Service) { s.attachments = r } }
+func WithAttachments(r session.AttachmentResolver) Option {
+	return func(s *Service) { s.attachments = r }
+}
 
 // SetAttachmentResolver 运行期注入附件解析端口（装配根在持久层就绪后再接——Service 在 Build
 // 阶段就构造好，而附件存储要在 startStore 步骤里随库建立）。

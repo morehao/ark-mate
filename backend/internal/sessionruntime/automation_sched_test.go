@@ -202,10 +202,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	}
 	// next_due 推到下一个 occurrence（次日的 09:00 上海 = 次日 01:00Z）
 	view, _ := r.svc.Planes().Automation.AutomationByID("daily")
-	next, err := time.Parse(time.RFC3339, view.NextDueAt)
-	if err != nil {
-		t.Fatalf("next_due 解析: %v", err)
-	}
+	next := time.UnixMilli(view.NextDueAt)
 	if d := next.Sub(fired); d != 24*time.Hour {
 		t.Fatalf("next_due 应恰好推进一天，got %s（%s → %s）", d, fired, next)
 	}
@@ -404,7 +401,7 @@ func TestRunAutomationNowManualDoesNotConsumeSchedule(t *testing.T) {
 	}
 	after, _ := r.svc.Planes().Automation.AutomationByID("daily")
 	if after.NextDueAt != before.NextDueAt {
-		t.Fatalf("手动触发不得改变 next_due：%q → %q", before.NextDueAt, after.NextDueAt)
+		t.Fatalf("手动触发不得改变 next_due：%d → %d", before.NextDueAt, after.NextDueAt)
 	}
 	runs := mustRuns(t, got)
 	if len(runs) != 1 || runs[0].(map[string]any)["trigger"] != automation.TriggerManual {
@@ -578,7 +575,7 @@ func TestAutomationReloadAfterRestart(t *testing.T) {
 	view, _ := r2.svc.Planes().Automation.AutomationByID("daily")
 	first, _ := r.svc.Planes().Automation.AutomationByID("daily")
 	if view.NextDueAt != first.NextDueAt {
-		t.Fatalf("重启后 next_due 应与停机前一致：%q vs %q", view.NextDueAt, first.NextDueAt)
+		t.Fatalf("重启后 next_due 应与停机前一致：%d vs %d", view.NextDueAt, first.NextDueAt)
 	}
 	// 重启后不重复触发同一 occurrence
 	r2.svc.Planes().Automation.Tick(context.Background(), time.Now())

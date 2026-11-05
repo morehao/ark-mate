@@ -78,7 +78,7 @@ func TestAutomationCreateUpdateDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("新建: %v", err)
 	}
-	if v.ID != "daily" || v.State != automation.StateActive || v.NextDueAt == "" {
+	if v.ID != "daily" || v.State != automation.StateActive || v.NextDueAt == 0 {
 		t.Fatalf("新建视图不符: %+v", v)
 	}
 	if v.Schedule.Kind != automation.KindDaily || v.Schedule.Hour == nil || *v.Schedule.Hour != 9 {
@@ -234,11 +234,11 @@ func TestAutomationPatchScheduleRecomputesNextDue(t *testing.T) {
 		t.Fatalf("改 schedule: %v", err)
 	}
 	after, _ := svc.Planes().Automation.AutomationByID("daily")
-	if before.NextDueAt == "" || after.NextDueAt == "" {
-		t.Fatalf("next_due 不该为空: %q → %q", before.NextDueAt, after.NextDueAt)
+	if before.NextDueAt == 0 || after.NextDueAt == 0 {
+		t.Fatalf("next_due 不该为空: %d → %d", before.NextDueAt, after.NextDueAt)
 	}
 	if before.NextDueAt == after.NextDueAt {
-		t.Fatalf("改 schedule 后 next_due 应重算：%q → %q", before.NextDueAt, after.NextDueAt)
+		t.Fatalf("改 schedule 后 next_due 应重算：%d → %d", before.NextDueAt, after.NextDueAt)
 	}
 	if after.Schedule.Hour == nil || *after.Schedule.Hour != 10 || after.Schedule.Minute == nil || *after.Schedule.Minute != 30 {
 		t.Fatalf("调度应已更新: %+v", after.Schedule)
@@ -254,17 +254,18 @@ func TestAutomationOverlayAdvancesNextDue(t *testing.T) {
 	}
 	first, _ := svc.Planes().Automation.AutomationByID("daily")
 	if err := svc.Planes().Automation.SaveOverlay(context.Background(), "daily", map[string]any{
-		"last_fired_at": first.NextDueAt, // 认领并"跑完"了这一次
+		// 定义文件/overlay 是 RFC3339 载体（不是接口时间戳），所以这里转回文本。
+		"last_fired_at": time.UnixMilli(first.NextDueAt).UTC().Format(time.RFC3339Nano), // 认领并"跑完"了这一次
 		"last_status":   automation.RunCompleted,
 	}, ""); err != nil {
 		t.Fatalf("运行态写回: %v", err)
 	}
 	second, _ := svc.Planes().Automation.AutomationByID("daily")
 	if second.NextDueAt == first.NextDueAt {
-		t.Fatalf("last_fired_at 写回后 next_due 必须推进：%q 仍是 %q", second.NextDueAt, first.NextDueAt)
+		t.Fatalf("last_fired_at 写回后 next_due 必须推进：%d 仍是 %d", second.NextDueAt, first.NextDueAt)
 	}
-	f1, _ := time.Parse(time.RFC3339, first.NextDueAt)
-	f2, _ := time.Parse(time.RFC3339, second.NextDueAt)
+	f1 := time.UnixMilli(first.NextDueAt)
+	f2 := time.UnixMilli(second.NextDueAt)
 	if d := f2.Sub(f1); d != 24*time.Hour {
 		t.Fatalf("daily 的推进应恰好一天，got %s", d)
 	}
@@ -304,7 +305,7 @@ func TestAutomationLoadBadDefinitions(t *testing.T) {
 	if byID["broken"].Error == "" || byID["mismatch"].Error == "" {
 		t.Fatalf("坏定义必须带 error: %+v", byID)
 	}
-	if byID["ok"].Error != "" || byID["ok"].NextDueAt == "" {
+	if byID["ok"].Error != "" || byID["ok"].NextDueAt == 0 {
 		t.Fatalf("好定义应无 error 且有 next_due: %+v", byID["ok"])
 	}
 	// due 快照：坏定义与 disabled 都不在

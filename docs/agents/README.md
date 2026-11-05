@@ -15,6 +15,7 @@
 | [`context.md`](context.md) | 请求上下文传递：handler 传 `c.Request.Context()`、service 签名是 `context.Context`、`ContextWithFallback` 不得打开 |
 | [`error-codes.md`](error-codes.md) | 错误码的唯一事实源与三处同步 |
 | [`frontend.md`](frontend.md) | 前端风格约束（token 与交互态 CSS 的收口） |
+| [`time.md`](time.md) | 时间口径：REST/WS 返回 Unix 毫秒、前端按需格式化、例外与历史事件兼容 |
 | [`authorization.md`](authorization.md) | 变更授权（允许破坏性调整的边界） |
 | [`positioning.md`](positioning.md) | 外部形态参照实现（DSH）与本仓对应物 |
 | [`llm-capability.md`](llm-capability.md) | 内部模型调用接入约定：prompt 单点、必带 Purpose、agent 护栏、结构化/降级语义 |

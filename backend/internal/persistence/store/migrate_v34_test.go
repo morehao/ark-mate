@@ -44,7 +44,7 @@ func TestMigrationV34CreatesArtifactsTable(t *testing.T) {
 }
 
 // TestMigrationV34FromV33PreservesData 旧库（停在 v33）升级到 v34：既有资料库节点不被改写，
-// 新列取默认值（category='material'、provenance_id=''），artifacts 为新空表。
+// 新列取默认值（category='material'、provenance_id=”），artifacts 为新空表。
 func TestMigrationV34FromV33PreservesData(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "v33.db")

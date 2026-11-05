@@ -31,7 +31,7 @@ type DiagnosticsResp struct {
 	// Remediation 可执行修复步骤（按事实推导：runtime 未装配 / 启动命令不可执行 / 要注入的
 	// 供应商悬空或无密钥 / 底座自报的鉴权方式 / 底座声明的安装步骤）。健康快照不带该字段。
 	Remediation []string `json:"remediation,omitempty"`
-	CheckedAt   string   `json:"checked_at"`
+	CheckedAt   int64    `json:"checked_at"`
 }
 
 // LastErrorResp 底座最近一次失败的诊断快照（进程起不来 / 握手失败 / 轮次失败）。
@@ -48,7 +48,7 @@ type IdentityResp struct {
 }
 
 type LastErrorResp struct {
-	At         string   `json:"at"`
+	At         int64    `json:"at"`
 	SessionID  string   `json:"session_id,omitempty"`
 	Code       string   `json:"code"`
 	Class      string   `json:"class"`

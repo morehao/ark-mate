@@ -47,8 +47,8 @@ type ArtifactResp struct {
 	ContentText   string `json:"content_text,omitempty"`
 	ContentSha256 string `json:"content_sha256,omitempty"`
 	Dirty         bool   `json:"dirty"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	CreatedAt     int64  `json:"created_at"`
+	UpdatedAt     int64  `json:"updated_at"`
 }
 
 // ListResp `GET /sessions/:id/artifacts` 的响应体。

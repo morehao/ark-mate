@@ -7,7 +7,7 @@ package store
 // v34 的 `artifacts` 只存 `title`（basename），子目录文件定位不到——故 v35 补 `path`（相对会话
 // cwd 的工作区路径；显式上传/内联产物为空）。
 //
-// 纯 DDL、无回填：旧库升级后既有 `artifacts` 行的 `path` 取默认值 `''`（表示「无工作区原文件」，
+// 纯 DDL、无回填：旧库升级后既有 `artifacts` 行的 `path` 取默认值 `”`（表示「无工作区原文件」，
 // dirty 判定对这类行跳过）。语句里的表名/列名都是字面量（与 v15–v34 同一纪律：版本步只许写
 // 当时那一版的名字，绝不引用 `model.TableName*`）。
 var migrationV35 = migration{

@@ -23,7 +23,6 @@ import {
   DeleteOutlined,
   HistoryOutlined,
   PlayCircleOutlined,
-  PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
 import { Dot, PageContainer, tokens } from '@ark-mate/ui'
@@ -48,7 +47,6 @@ import {
   TIMEZONES,
   WEEKDAYS,
   describeSchedule,
-  fmtWhen,
   formFromAutomation,
   lastRunText,
   localTimezone,
@@ -57,6 +55,7 @@ import {
   writeBody,
   type ScheduleFormValues,
 } from '../console/automationView'
+import { fmtShortDateTime } from '../console/time'
 
 // ——— 定时任务页（M4-6）———
 //
@@ -270,7 +269,7 @@ export function AutomationsPage() {
             ) : (
               <Tooltip title={a.last_reason ?? undefined}>
                 <span style={{ color: a.last_status === 'skipped' ? tokens.error : undefined }}>
-                  {a.next_due_at ? `下次 ${fmtWhen(a.next_due_at)}` : '没有下一次'}
+                  {a.next_due_at ? `下次 ${fmtShortDateTime(a.next_due_at)}` : '没有下一次'}
                   {a.last_status ? ` · 上次 ${lastRunText(a)}` : ''}
                 </span>
               </Tooltip>
@@ -321,7 +320,7 @@ export function AutomationsPage() {
           <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+          <Button type="primary" onClick={openCreate}>
             新建
           </Button>
         </Space>
@@ -450,7 +449,7 @@ export function AutomationsPage() {
                     <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 12.5, lineHeight: 1.9 }}>
                       {preview.items.map((o) => (
                         <li key={o.at}>
-                          <b>{o.wall}</b>（{o.timezone}） · <span style={{ color: tokens.textSecondary }}>{o.at}</span>
+                          <b>{o.wall}</b>（{o.timezone}） · <span style={{ color: tokens.textSecondary }}>{fmtShortDateTime(o.at)}</span>
                           {o.warnings?.map((w) => (
                             <div key={w} style={{ color: tokens.warning }}>
                               ⚠ {w}

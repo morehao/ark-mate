@@ -36,8 +36,8 @@ type ProviderResp struct {
 	// **不是内容版本**：同一内容写两次它照样前进，而"那一版到底是什么"的内容指纹在审计
 	// digest 里（ADR-13）。它今天零消费者，留着是给将来真要做 `If-Match` 的集成方一个现成判据。
 	Revision int64 `json:"revision"`
-	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano；memory 模式为空）。
-	UpdatedAt string `json:"updated_at,omitempty"`
+	// UpdatedAt 最后一次成功提交的时刻（Unix 毫秒；memory 模式为 0）。
+	UpdatedAt int64 `json:"updated_at,omitempty"`
 	// ModelCount 挂靠在本供应商下的模型条数（读取时现算的派生值——存一份必然漂移）。
 	ModelCount int `json:"model_count"`
 	// Problems 可执行的问题清单（缺端点 / 密钥缺失 / 凭据分层读不了…）。空数组 = 本地段全部通过。

@@ -1,12 +1,12 @@
 package router_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"net/http/httptest"
-	"bytes"
 	"mime/multipart"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/dto/dtomaterial"

@@ -1,3 +1,5 @@
+import type { UnixMillis } from './time'
+
 // automation（定时任务，M4）对外形态。
 //
 // 定义与运行态同住一个文件（`<AutomationDir>/<id>.json`），所以这里也是同一个对象：
@@ -21,7 +23,7 @@ export type AutomationScheduleKind = 'once' | 'interval' | 'daily' | 'weekly' | 
 export interface AutomationSchedule {
   kind: AutomationScheduleKind
   timezone: string
-  /** kind=once：RFC3339 绝对时刻。 */
+  /** kind=once：RFC3339 绝对时刻（**定义载体**，写面仍收 ISO；不是接口时间戳口径）。 */
   at?: string
   hour?: number
   minute?: number
@@ -69,8 +71,8 @@ export type AutomationRunTrigger = 'scheduled' | 'recovery' | 'manual'
 
 /** 运行史的一条（最新在前，最多 20 条；**含没跑成的那些**）。 */
 export interface AutomationRunRecord {
-  scheduled_for: string
-  fired_at?: string
+  scheduled_for: UnixMillis
+  fired_at?: UnixMillis
   status: AutomationRunStatus
   reason?: string
   /** status=claimed 时非空，可直接跳过去看那一轮。 */
@@ -87,8 +89,8 @@ export interface Automation {
   target: AutomationTarget
   max_run_duration?: string
   /** 内存态现算：空 = 没有下一次（跑完的 once / 归档 / 装载失败）。 */
-  next_due_at?: string
-  last_fired_at?: string
+  next_due_at?: UnixMillis
+  last_fired_at?: UnixMillis
   last_session_id?: string
   last_status?: AutomationRunStatus
   last_reason?: string
@@ -106,9 +108,9 @@ export interface AutomationDeleteResp {
   deleted: boolean
 }
 
-/** 预览的一项：`at` 给机器，`wall` + `timezone` 给人（"我设的 9 点到底几点跑"）。 */
+/** 预览的一项：`at` 给机器（Unix 毫秒），`wall` + `timezone` 给人（"我设的 9 点到底几点跑"）。 */
 export interface AutomationPreviewItem {
-  at: string
+  at: UnixMillis
   wall: string
   timezone: string
   warnings?: string[]

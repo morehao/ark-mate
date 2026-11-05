@@ -8,7 +8,7 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/dbclient"
 )
 
-// TestMigrationV35AddsArtifactPath v35 的判据：新库升到 v35 后 artifacts 有 path 列（TEXT、默认 ''），
+// TestMigrationV35AddsArtifactPath v35 的判据：新库升到 v35 后 artifacts 有 path 列（TEXT、默认 ”），
 // 再跑一次迁移幂等。
 func TestMigrationV35AddsArtifactPath(t *testing.T) {
 	ctx := context.Background()
