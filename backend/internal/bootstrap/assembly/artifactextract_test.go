@@ -470,20 +470,38 @@ func waitLibraryProvenance(t *testing.T, x *artifactExtractor, want string) {
 
 // assertAutoImported（2026-11-04 拍板）断言产物登记后**自动**出现在资料库的产物分栏：
 // 一条 category='artifact' 的节点，provenance_id 指回该产物。
+//
+// **必须轮询等待，不能即时断言**（2026-11-05 修 flaky）：`ExtractToolWrite` 的落盘是异步链
+// ①上传 filestore → ②登记 artifact 行 → ③`material.ImportArtifact` 自动收录进资料库。
+// `waitArtifactCount` 只等到 ②（产物行出现），③ 与 ② 之间还有一段窗口——在 `-race` / 高负载
+// 下这段窗口会被拉长，即时读库就会读到「0 个节点」而误判失败（实测：`-race` 必现、全量并发偶现）。
+// 产品行为本身正确（③ 最终一定执行），这纯是测试等待不足，故改成与 `waitArtifactCount` 同口径轮询。
 func assertAutoImported(t *testing.T, x *artifactExtractor, artifactID string) {
 	t.Helper()
 	if x.material == nil {
 		t.Fatal("抽取器没接资料库用例，无法自动收录")
 	}
-	resp, err := x.material.ListNodesByCategory(context.Background(), "", "artifact", 50, 0)
-	if err != nil {
-		t.Fatalf("列出资料库产物节点: %v", err)
-	}
-	if len(resp.Nodes) != 1 {
-		t.Fatalf("应自动收录 1 个产物节点，实际 %d", len(resp.Nodes))
-	}
-	n := resp.Nodes[0]
-	if n.Category != "artifact" || n.ProvenanceID != artifactID {
-		t.Fatalf("收录节点不符：category=%q provenance=%q want %q", n.Category, n.ProvenanceID, artifactID)
+	ctx := context.Background()
+	deadline := time.After(3 * time.Second)
+	var lastCount int
+	for {
+		resp, err := x.material.ListNodesByCategory(ctx, "", "artifact", 50, 0)
+		if err != nil {
+			t.Fatalf("列出资料库产物节点: %v", err)
+		}
+		lastCount = len(resp.Nodes)
+		if lastCount == 1 {
+			n := resp.Nodes[0]
+			if n.Category != "artifact" || n.ProvenanceID != artifactID {
+				t.Fatalf("收录节点不符：category=%q provenance=%q want %q", n.Category, n.ProvenanceID, artifactID)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("等自动收录超时: 应自动收录 1 个产物节点，实际 %d", lastCount)
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
 }
