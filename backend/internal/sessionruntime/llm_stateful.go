@@ -10,6 +10,8 @@ import (
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/runtime"
+
+	"github.com/morehao/golib/glog"
 )
 
 // internalSessionOrigin 内部（模型网关）会话在 `sessions.origin` 上的取值。
@@ -46,6 +48,12 @@ func NewStatefulExecutor(orch *Orchestrator, defaultModel, cwd string) *Stateful
 func (e *StatefulExecutor) Call(ctx context.Context, req corellm.Request) (corellm.Result, error) {
 	if e.orch == nil {
 		return corellm.Result{}, fmt.Errorf("llm: 会话执行器未接 Orchestrator")
+	}
+	// G2 结论：ACP 协议层不提供强制结构化输出，Stateful 无法产出 Result.Structured。
+	// 收到非空 Schema 时显式告警（不静默当作没要求），结构化需求应改用 Stateless 执行器。
+	if req.Schema != nil {
+		glog.Warnw(ctx, "llm: Stateful 执行器不支持结构化输出，Schema 被忽略；结构化请改用 Stateless",
+			"purpose", string(req.Purpose))
 	}
 	prompt := composeInternalPrompt(req)
 	if strings.TrimSpace(prompt) == "" {
@@ -108,7 +116,7 @@ func (e *StatefulExecutor) collectResult(ctx context.Context, sessionID string) 
 			_ = json.Unmarshal([]byte(last.TokenUsageJSON), &usage)
 		}
 	}
-	return corellm.Result{Text: sb.String(), Usage: usage}, nil
+	return corellm.Result{Text: sb.String(), Usage: usage, Outcome: corellm.OutcomeOK}, nil
 }
 
 // composeInternalPrompt 把 Request（System + Messages）编成送给会话的纯文本 prompt。

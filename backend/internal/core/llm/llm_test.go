@@ -163,3 +163,51 @@ func TestGatewayLatencyAndClock(t *testing.T) {
 		t.Fatalf("LatencyMS 应为 10，得到 %d", c.LatencyMS)
 	}
 }
+
+// TestGatewayOutcomeToStatus 执行器的 Outcome 归一为流水 Status。
+func TestGatewayOutcomeToStatus(t *testing.T) {
+	cases := []struct {
+		name    string
+		outcome Outcome
+		err     error
+		want    string
+	}{
+		{"ok", OutcomeOK, nil, StatusOK},
+		{"degraded", OutcomeDegraded, nil, StatusDegraded},
+		{"failed-no-err", OutcomeFailed, nil, StatusError},
+		{"empty-ok", "", nil, StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &fakeRecorder{}
+			g := NewGateway(GatewayConfig{
+				Executors: map[ExecutorKind]Executor{ExecutorStateful: &fakeExecutor{res: Result{Outcome: tc.outcome}, err: tc.err}},
+				Recorder:  rec,
+				Policy:    func(Purpose) ExecutorKind { return ExecutorStateful },
+			})
+			if _, err := g.Call(context.Background(), Request{Purpose: PurposeAgentTurn}); err != nil {
+				t.Fatalf("Call: %v", err)
+			}
+			if rec.calls[0].Status != tc.want {
+				t.Fatalf("status 应为 %q 得到 %q", tc.want, rec.calls[0].Status)
+			}
+		})
+	}
+}
+
+// TestGatewayOutcomeNormalized 执行器未设 Outcome 时，网关按 err 兜底。
+func TestGatewayOutcomeNormalized(t *testing.T) {
+	rec := &fakeRecorder{}
+	g := NewGateway(GatewayConfig{
+		Executors: map[ExecutorKind]Executor{ExecutorStateful: &fakeExecutor{res: Result{Text: "x"}}},
+		Recorder:  rec,
+		Policy:    func(Purpose) ExecutorKind { return ExecutorStateful },
+	})
+	res, err := g.Call(context.Background(), Request{Purpose: PurposeAgentTurn})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if res.Outcome != OutcomeOK {
+		t.Fatalf("无 err 时 Outcome 应归一为 ok，得到 %q", res.Outcome)
+	}
+}

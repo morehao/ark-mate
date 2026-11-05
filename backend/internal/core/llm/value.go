@@ -74,25 +74,64 @@ type Request struct {
 	Messages []Message
 	// Prefer 显式指定执行器（空 = 网关按 Purpose 的 policy 选）。
 	Prefer ExecutorKind
+	// Schema 结构化输出约束（非空 = 要求按此 schema 产出结构化结果）。
+	//
+	// 类型刻意用 `any` 而非具体 schema 类型，保持本包（L1）不依赖上层；具体的 schema 表达
+	// （JSON Schema / 函数调用参数等）由执行器按自己的协议适配。
+	//
+	// **仅 Stateless 执行器保证**：ACP 协议层不提供强制结构化输出能力（见 StatefulExecutor
+	// 注释），Stateful 执行器收到非空 Schema 时不会产出结构化结果（应显式告警/拒绝）。
+	Schema any
+	// Strict 严格模式：调用失败时返回 error 而非以 Outcome 表达降级/失败。
+	//
+	// 默认（false）实现"旁路不阻塞主流程"：失败以 Outcome=Failed 表达、不抛业务错误。
+	// 置 true 用于"失败必须显式拒绝"的场景（如风控类判别）。
+	Strict bool
 }
+
+// Outcome 一次调用的业务结果状态。与 error 分工：error 只表"调用/程序性异常"，
+// Outcome 表达"业务上成不成、是否降级"。
+type Outcome string
+
+const (
+	// OutcomeOK 正常，Text / Structured 可用。
+	OutcomeOK Outcome = "ok"
+	// OutcomeDegraded 用降级值兜底（有值但不保证质量）。
+	OutcomeDegraded Outcome = "degraded"
+	// OutcomeFailed 彻底失败，Text / Structured 为空。
+	OutcomeFailed Outcome = "failed"
+)
 
 // Result 一次模型调用的结果。
 type Result struct {
 	// Text 模型输出正文。
 	Text string
+	// Structured 结构化输出（Request.Schema 非空且执行器支持时填充）。
+	//
+	// 语义是"**已解析并校验过的对象**"，不是原始 JSON 串——解析、校验、修复重试都在执行器内
+	// 完成，调用方拿到的即是用得上的值。仅 Stateless 执行器会填充；Stateful 恒为 nil。
+	Structured any
 	// Usage 本次调用的 token 明细（执行器未上报时为零值，不代表消耗为 0）。
 	Usage TokenUsage
 	// CostAmount/CostCurrency 本次调用费用（可选；执行器/底座不上报时为零值）。
 	CostAmount   float64
 	CostCurrency string
+	// Outcome 业务结果状态（ok / degraded / failed）。执行器未显式设置时按"无 error 即 ok"兜底。
+	Outcome Outcome
 }
 
 // 调用状态（`LLMCall.Status` 取值）。
+//
+// Status 是**流水视角**：ok/error/timeout/cancelled/degraded 描述这次调用本身发生了什么；
+// 与 Result.Outcome（业务视角：ok/degraded/failed）在语义上对齐但不完全等价——
+// 例如超时既可能是 Status=timeout，也可能被上层归为 Outcome=failed。映射见网关 record。
 const (
 	StatusOK        = "ok"
 	StatusError     = "error"
 	StatusTimeout   = "timeout"
 	StatusCancelled = "cancelled"
+	// StatusDegraded 调用完成但结果被降级兜底（对应 Result.Outcome=Degraded）。
+	StatusDegraded = "degraded"
 )
 
 // LLMCall 一条调用流水（**一次调用 = 一条**；可跨调用累加）。
