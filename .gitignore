@@ -54,3 +54,10 @@ frontend/**/*.tsbuildinfo
 
 # pnpm 的本地 content-addressable store（沙箱下 store 落在工作区内；属可重建缓存，不入库）
 .pnpm-store/
+
+# Playwright e2e 产物（本地运行生成，不入库）
+frontend/e2e/.artifacts/
+frontend/e2e-report/
+
+# Go 覆盖率报告（make test-cover 产物）
+backend/cover.out

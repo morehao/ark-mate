@@ -8,6 +8,7 @@
 | [`guards.md`](guards.md) | `internal/archtest` 当前判据清单与测试约定（守卫计数的唯一维护处） |
 | [`guards-history.md`](guards-history.md) | 守卫沿革：每条新增挡的静默失效与实跑反证 |
 | [`commands.md`](commands.md) | 常用命令、`RUNTIME_BIN`、界面验收 |
+| [`testing.md`](testing.md) | 测试分层：L1–L5 各层职责、新增测试放哪、e2e/组件测试边界与 CI 取舍 |
 | [`isolation.md`](isolation.md) | 本机隔离纪律（开发期硬约束） |
 | [`build-and-runtime.md`](build-and-runtime.md) | 构建形态与运行配置（构建期固定 runtime、鉴权/Origin/SQLite/CGO） |
 | [`vocabulary.md`](vocabulary.md) | 一个东西一个词：`session` / `definition` / `run` / 凭据 / 模型 / agent 面 |
