@@ -1762,7 +1762,7 @@ export const consoleStyleSheet = `
   .fg-process-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 8px;
     min-width: 0;
   }
 
@@ -1839,20 +1839,28 @@ export const consoleStyleSheet = `
   }
 
   /* ── 单行工具：图标 + 状态 + 对象 + 行号；详情按需展开 ───────── */
-  .fg-tool { min-width: 0; max-width: 100%; overflow: hidden; }
+  /* 执行步骤 = 盒式卡（原型 §273 的 .step）：hairline 边框 + 11px 圆角 + 白底，头行 + 可折叠详情。 */
+  .fg-tool {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    border: 1px solid ${tokens.border};
+    border-radius: 11px;
+    background: ${tokens.surface};
+  }
   .fg-tool-head {
     width: 100%;
     min-height: 25px;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 0;
+    gap: 9px;
+    padding: 9px 13px;
     border: 0;
     background: transparent;
     text-align: left;
     color: ${tokens.textSecondary};
-    font-size: 14px;
-    line-height: 1.75;
+    font-size: 12.5px;
+    line-height: 1.6;
     cursor: default;
     min-width: 0;
     max-width: 100%;
@@ -1920,9 +1928,9 @@ export const consoleStyleSheet = `
   .fg-tool.fg-open .fg-tool-body > .fg-tool-body-inner { min-height: auto; overflow: visible; }
   .fg-tool-detail {
     background: ${tokens.softFill};
-    border-radius: 12px;
-    padding: 12px 16px;
-    margin: 4px 0 8px;
+    border-radius: 8px;
+    padding: 10px 13px;
+    margin: 0 13px 12px;
     max-height: 420px;
     overflow: auto;
     display: flex;
