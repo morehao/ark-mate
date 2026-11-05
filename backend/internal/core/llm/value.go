@@ -110,6 +110,11 @@ type Request struct {
 	// 默认下，PurposeAgentTurn 且 MaxSteps/Timeout 均为零 → 拒绝（ErrUnboundedAgentTurn），
 	// 避免内部会话跑飞。测试或可信内部场合可置 true 放行。
 	AllowUnbounded bool
+
+	// SessionID / RunID 关联的平台会话/轮次（可空）。填了 → 该调用的流水属于"会话调用"，
+	// 用量聚合据此切分「会话 vs 旁路」。旁路辅助调用留空。这是**关联标签**，不参与执行。
+	SessionID string
+	RunID     string
 }
 
 // Outcome 一次调用的业务结果状态。与 error 分工：error 只表"调用/程序性异常"，

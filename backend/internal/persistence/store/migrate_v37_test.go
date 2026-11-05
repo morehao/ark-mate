@@ -126,3 +126,43 @@ func TestLLMUsageAggregateAndSummary(t *testing.T) {
 		t.Fatalf("UsageSummary.LLM 未融入: %+v", res.LLM)
 	}
 }
+
+// TestLLMUsageFailedDegradedSessionCalls 失败/降级/会话调用切分。
+func TestLLMUsageFailedDegradedSessionCalls(t *testing.T) {
+	s := openTestDB(t)
+	ctx := context.Background()
+	at := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	mk := func(purpose, status, sessionID string) model.LLMCallEntity {
+		return model.LLMCallEntity{
+			ID: objid.New(objid.Call), At: at, Purpose: purpose, SessionID: sessionID,
+			Provider: "deepseek", Model: "m", InputTokens: 1, TotalTokens: 1, Status: status,
+		}
+	}
+	for _, r := range []model.LLMCallEntity{
+		mk("summary", "ok", ""),        // 旁路成功
+		mk("summary", "degraded", ""),  // 旁路降级
+		mk("judge", "error", "sess_1"), // 会话失败
+		mk("agent_turn", "ok", "sess_1"), // 会话成功
+	} {
+		if err := s.InsertLLMCall(ctx, r); err != nil {
+			t.Fatalf("InsertLLMCall: %v", err)
+		}
+	}
+	agg, err := s.LLMUsageAggregate(ctx, time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatalf("LLMUsageAggregate: %v", err)
+	}
+	if agg.Calls != 4 || agg.Failed != 1 || agg.Degraded != 1 || agg.SessionCalls != 2 {
+		t.Fatalf("失败/降级/会话调用统计不符: calls=%d failed=%d degraded=%d session=%d",
+			agg.Calls, agg.Failed, agg.Degraded, agg.SessionCalls)
+	}
+	// 按用途：judge 应为 1 失败。
+	for _, p := range agg.ByPurpose {
+		if p.Purpose == "judge" && p.Failed != 1 {
+			t.Fatalf("judge 失败数不符: %+v", p)
+		}
+		if p.Purpose == "summary" && p.Degraded != 1 {
+			t.Fatalf("summary 降级数不符: %+v", p)
+		}
+	}
+}

@@ -43,9 +43,14 @@ type UsageSummaryResp struct {
 
 // UsageLLMResp 内部模型调用流水的用量汇总。
 type UsageLLMResp struct {
-	Calls     int64              `json:"calls"`
-	Tokens    UsageTokensResp    `json:"tokens"`
-	ByPurpose []UsagePurposeResp `json:"by_purpose"`
+	Calls int64 `json:"calls"`
+	// Failed/Degraded 失败（error/timeout/cancelled）与降级（degraded）调用数。
+	Failed   int64 `json:"failed"`
+	Degraded int64 `json:"degraded"`
+	// SessionCalls 带 session_id 的调用数；Calls-SessionCalls 即旁路调用数。
+	SessionCalls int64              `json:"session_calls"`
+	Tokens       UsageTokensResp    `json:"tokens"`
+	ByPurpose    []UsagePurposeResp `json:"by_purpose"`
 }
 
 // UsageTokensResp 累加型 token 明细。
@@ -62,6 +67,8 @@ type UsageTokensResp struct {
 type UsagePurposeResp struct {
 	Purpose      string          `json:"purpose"`
 	Calls        int64           `json:"calls"`
+	Failed       int64           `json:"failed"`
+	Degraded     int64           `json:"degraded"`
 	Tokens       UsageTokensResp `json:"tokens"`
 	CostAmount   float64         `json:"cost_amount"`
 	CostCurrency string          `json:"cost_currency,omitempty"`

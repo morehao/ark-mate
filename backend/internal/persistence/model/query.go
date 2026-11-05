@@ -61,6 +61,11 @@ type UsageSummaryResult struct {
 type LLMUsageSummary struct {
 	// Calls 区间内调用总次数。
 	Calls int64 `json:"calls"`
+	// Failed/Degraded 失败（error/timeout/cancelled）与降级（degraded）的调用数。
+	Failed   int64 `json:"failed"`
+	Degraded int64 `json:"degraded"`
+	// SessionCalls 带 session_id 的调用数（= 会话驱动）；Calls-SessionCalls 即旁路调用数。
+	SessionCalls int64 `json:"session_calls"`
 	// Tokens 区间内 token 明细合计（可跨调用相加）。
 	Tokens LLMTokenUsage `json:"tokens"`
 	// ByPurpose 按用途分组的明细（成本归因维度）。
@@ -81,6 +86,9 @@ type LLMTokenUsage struct {
 type LLMPurposeUsage struct {
 	Purpose string `json:"purpose"`
 	Calls   int64  `json:"calls"`
+	// Failed/Degraded 该用途的失败/降级调用数。
+	Failed   int64 `json:"failed"`
+	Degraded int64 `json:"degraded"`
 	// Tokens 该用途的 token 明细合计。
 	Tokens LLMTokenUsage `json:"tokens"`
 	// CostAmount/CostCurrency 该用途费用（多币种 -> 置零 + MIXED，与用量统计同口径）。

@@ -203,3 +203,24 @@ export function fmtRunDockLine(info: RunUsageInfo | null | undefined): string {
   if (info.costAmount) parts.push(fmtCost(info.costAmount, info.costCurrency))
   return parts.join(' · ')
 }
+
+// ——— 内部模型调用（llm_calls 流水）展示辅助 ———
+
+/** 大数缩写：`3.7M` / `912k` / `642`。 */
+export function fmtTokens(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return '0'
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 1 : 2)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 1 : 1)}k`
+  return String(n)
+}
+
+/** 比率文案：`0.9%`；分母为 0 → `—`。 */
+export function fmtRate(numerator: number, denominator: number): string {
+  if (!denominator) return '—'
+  return `${((numerator / denominator) * 100).toFixed(1)}%`
+}
+
+/** 某用途调用占全部调用的比例（0..1）；总数为 0 → 0。 */
+export function purposeShare(calls: number, total: number): number {
+  return total > 0 ? calls / total : 0
+}

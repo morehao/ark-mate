@@ -57,8 +57,8 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
     ],
   },
   { id: 'materials', label: '资料库', to: '/materials', order: 30, icon: <FolderOpenOutlined /> },
-  { id: 'usage', label: '用量', to: '/usage', order: 40, icon: <BarChartOutlined /> },
-  { id: 'automations', label: '定时任务', to: '/automations', order: 50, icon: <ClockCircleOutlined /> },
+  { id: 'automations', label: '定时任务', to: '/automations', order: 40, icon: <ClockCircleOutlined /> },
+  { id: 'usage', label: '用量', to: '/usage', order: 50, icon: <BarChartOutlined /> },
 ]
 export function isGroup(entry: NavEntry): entry is NavGroup {
   return 'children' in entry

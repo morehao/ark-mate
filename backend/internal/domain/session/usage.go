@@ -99,7 +99,7 @@ func toUsageLLM(m model.LLMUsageSummary) UsageLLM {
 	by := make([]UsagePurpose, 0, len(m.ByPurpose))
 	for _, p := range m.ByPurpose {
 		by = append(by, UsagePurpose{
-			Purpose: p.Purpose, Calls: p.Calls,
+			Purpose: p.Purpose, Calls: p.Calls, Failed: p.Failed, Degraded: p.Degraded,
 			Tokens: UsageTokens{
 				InputTokens: p.Tokens.InputTokens, OutputTokens: p.Tokens.OutputTokens,
 				CachedReadTokens: p.Tokens.CachedReadTokens, CachedWriteTokens: p.Tokens.CachedWriteTokens,
@@ -109,7 +109,10 @@ func toUsageLLM(m model.LLMUsageSummary) UsageLLM {
 		})
 	}
 	return UsageLLM{
-		Calls: m.Calls,
+		Calls:        m.Calls,
+		Failed:       m.Failed,
+		Degraded:     m.Degraded,
+		SessionCalls: m.SessionCalls,
 		Tokens: UsageTokens{
 			InputTokens: m.Tokens.InputTokens, OutputTokens: m.Tokens.OutputTokens,
 			CachedReadTokens: m.Tokens.CachedReadTokens, CachedWriteTokens: m.Tokens.CachedWriteTokens,
