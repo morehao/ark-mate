@@ -115,7 +115,15 @@ func (g *gateway) Call(ctx context.Context, req Request) (Result, error) {
 	}
 
 	res, err := exec.Call(ctx, req)
-	status := classifyStatus(ctx, err)
+	// 归一 Outcome：执行器没显式给时按 err 兜底（无 err 即 OK，有 err 即 Failed）。
+	if res.Outcome == "" {
+		if err == nil {
+			res.Outcome = OutcomeOK
+		} else {
+			res.Outcome = OutcomeFailed
+		}
+	}
+	status := statusFor(ctx, res.Outcome, err)
 	g.record(ctx, req, res, start, status, kind)
 	return res, err
 }
@@ -139,6 +147,27 @@ func (g *gateway) record(ctx context.Context, req Request, res Result, start tim
 		Status:       status,
 	}
 	_ = g.rec.Record(ctx, call)
+}
+
+// statusFor 依 Outcome 与 err/ctx 判流水状态。
+//
+// 优先按 Outcome：Degraded → StatusDegraded；Failed → 再看 ctx/err 区分 timeout/cancelled/error；
+// Outcome 为空/OK 时回落 classifyStatus 的 err 逻辑。
+func statusFor(ctx context.Context, outcome Outcome, err error) string {
+	switch outcome {
+	case OutcomeDegraded:
+		return StatusDegraded
+	case OutcomeFailed:
+		// 业务失败：有 ctx 取消/超时按更精确的 status，否则记 error。
+		if ctx.Err() == context.Canceled {
+			return StatusCancelled
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return StatusTimeout
+		}
+		return StatusError
+	}
+	return classifyStatus(ctx, err)
 }
 
 // classifyStatus 依 err/ctx 判流水状态。执行器未给状态时用这个兜底。

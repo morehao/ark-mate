@@ -39,6 +39,9 @@ type chatRequest struct {
 	Model    string        `json:"model"`
 	Messages []chatMessage `json:"messages"`
 	Stream   bool          `json:"stream"`
+	// ResponseFormat 结构化输出约束（可空）。OpenAI 兼容：{"type":"json_object"} 或
+	// {"type":"json_schema","json_schema":{...}}。由执行器按 Request.Schema 装配。
+	ResponseFormat json.RawMessage `json:"response_format,omitempty"`
 }
 
 type chatMessage struct {
@@ -68,6 +71,12 @@ type chatResponse struct {
 
 // chat 发一次非流式 chat 请求，返回正文与 token 明细。
 func (c *openAIClient) chat(ctx context.Context, baseURL, apiKey, model string, msgs []corellm.Message, system string) (string, corellm.TokenUsage, error) {
+	return c.chatWithFormat(ctx, baseURL, apiKey, model, msgs, system, nil)
+}
+
+// chatWithFormat 同 chat，额外携带 response_format（结构化输出约束）。responseFormat 为 nil 时
+// 与 chat 等价。返回正文、token 明细。
+func (c *openAIClient) chatWithFormat(ctx context.Context, baseURL, apiKey, model string, msgs []corellm.Message, system string, responseFormat json.RawMessage) (string, corellm.TokenUsage, error) {
 	reqMsgs := make([]chatMessage, 0, len(msgs)+1)
 	if strings.TrimSpace(system) != "" {
 		reqMsgs = append(reqMsgs, chatMessage{Role: corellm.RoleSystem, Content: system})
@@ -79,7 +88,7 @@ func (c *openAIClient) chat(ctx context.Context, baseURL, apiKey, model string, 
 		}
 		reqMsgs = append(reqMsgs, chatMessage{Role: role, Content: m.Text})
 	}
-	body, err := json.Marshal(chatRequest{Model: model, Messages: reqMsgs, Stream: false})
+	body, err := json.Marshal(chatRequest{Model: model, Messages: reqMsgs, Stream: false, ResponseFormat: responseFormat})
 	if err != nil {
 		return "", corellm.TokenUsage{}, fmt.Errorf("llm: 编请求体失败: %w", err)
 	}

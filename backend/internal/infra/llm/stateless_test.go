@@ -135,3 +135,118 @@ func TestStatelessUpstreamError(t *testing.T) {
 		t.Fatal("401 应返回错误")
 	}
 }
+
+// TestStatelessStructuredOK 结构化请求：合法 JSON → Structured 填充、Outcome=OK，且下发 response_format。
+func TestStatelessStructuredOK(t *testing.T) {
+	var gotRF map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ResponseFormat map[string]any `json:"response_format"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotRF = body.ResponseFormat
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"name\":\"小明\",\"age\":18}"}}],"usage":{"total_tokens":5}}`))
+	}))
+	defer srv.Close()
+
+	exec := NewStatelessExecutor(StatelessConfig{
+		Providers: stubProviders{info: map[string]corellm.ProviderInfo{"p1": {Protocol: "openai", BaseURL: srv.URL, Key: "k"}}},
+		HTTP:      srv.Client(),
+	})
+	res, err := exec.Call(context.Background(), corellm.Request{
+		Purpose:  corellm.PurposeExtract,
+		Provider: "p1",
+		Model:    "m",
+		Messages: []corellm.Message{{Role: corellm.RoleUser, Text: "抽取"}},
+		Schema:   map[string]any{"type": "object"},
+	})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if res.Outcome != corellm.OutcomeOK {
+		t.Fatalf("Outcome 应为 ok，得到 %q", res.Outcome)
+	}
+	m, ok := res.Structured.(map[string]any)
+	if !ok || m["name"] != "小明" {
+		t.Fatalf("Structured 解析不符: %+v", res.Structured)
+	}
+	if gotRF == nil || gotRF["type"] != "json_schema" {
+		t.Fatalf("应下发 response_format json_schema，得到 %+v", gotRF)
+	}
+}
+
+// TestStatelessStructuredRepair 首次非法 JSON → 修复重试成功。
+func TestStatelessStructuredRepair(t *testing.T) {
+	call := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call++
+		if call == 1 {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"not json at all"}}],"usage":{"total_tokens":3}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"ok\":true}"}}],"usage":{"total_tokens":4}}`))
+	}))
+	defer srv.Close()
+
+	exec := NewStatelessExecutor(StatelessConfig{
+		Providers: stubProviders{info: map[string]corellm.ProviderInfo{"p1": {Protocol: "openai", BaseURL: srv.URL, Key: "k"}}},
+		HTTP:      srv.Client(),
+	})
+	res, err := exec.Call(context.Background(), corellm.Request{
+		Purpose:  corellm.PurposeExtract,
+		Provider: "p1",
+		Model:    "m",
+		Messages: []corellm.Message{{Role: corellm.RoleUser, Text: "x"}},
+		Schema:   "{\"type\":\"json_object\"}",
+	})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if res.Outcome != corellm.OutcomeOK {
+		t.Fatalf("修复后应 ok，得到 %q", res.Outcome)
+	}
+	if m, ok := res.Structured.(map[string]any); !ok || m["ok"] != true {
+		t.Fatalf("修复后 Structured 不符: %+v", res.Structured)
+	}
+	if res.Usage.TotalTokens != 7 { // 3 + 4 累加
+		t.Fatalf("两次调用 token 应累加为 7，得到 %d", res.Usage.TotalTokens)
+	}
+	if call != 2 {
+		t.Fatalf("应调用两次（含修复），得到 %d", call)
+	}
+}
+
+// TestStatelessStructuredStrictFailed 两次都非法 + Strict → 返回 error；非 Strict → Outcome=Failed 无 error。
+func TestStatelessStructuredStrictFailed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"still not json"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer srv.Close()
+	exec := NewStatelessExecutor(StatelessConfig{
+		Providers: stubProviders{info: map[string]corellm.ProviderInfo{"p1": {Protocol: "openai", BaseURL: srv.URL, Key: "k"}}},
+		HTTP:      srv.Client(),
+	})
+
+	// 非 Strict：Outcome=Failed，无 error。
+	res, err := exec.Call(context.Background(), corellm.Request{
+		Purpose: corellm.PurposeExtract, Provider: "p1", Model: "m",
+		Messages: []corellm.Message{{Role: corellm.RoleUser, Text: "x"}},
+		Schema:   "{}",
+	})
+	if err != nil {
+		t.Fatalf("非 Strict 不应返回 error: %v", err)
+	}
+	if res.Outcome != corellm.OutcomeFailed {
+		t.Fatalf("应 failed，得到 %q", res.Outcome)
+	}
+
+	// Strict：返回 error。
+	_, err = exec.Call(context.Background(), corellm.Request{
+		Purpose: corellm.PurposeExtract, Provider: "p1", Model: "m",
+		Messages: []corellm.Message{{Role: corellm.RoleUser, Text: "x"}},
+		Schema:   "{}", Strict: true,
+	})
+	if err == nil {
+		t.Fatal("Strict 模式解析失败应返回 error")
+	}
+}

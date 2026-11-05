@@ -17,6 +17,7 @@
 | [`frontend.md`](frontend.md) | 前端风格约束（token 与交互态 CSS 的收口） |
 | [`authorization.md`](authorization.md) | 变更授权（允许破坏性调整的边界） |
 | [`positioning.md`](positioning.md) | 外部形态参照实现（DSH）与本仓对应物 |
+| [`llm-capability.md`](llm-capability.md) | 内部模型调用接入约定：prompt 单点、必带 Purpose、agent 护栏、结构化/降级语义 |
 
 ## 维护约定
 
