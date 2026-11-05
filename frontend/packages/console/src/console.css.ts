@@ -1592,10 +1592,10 @@ export const consoleStyleSheet = `
     max-width: calc(100% - 32px);
     background: ${tokens.softFill};
     color: ${tokens.text};
-    border-radius: 14px 14px 0 14px;
-    padding: 8px 12px;
-    font-size: 13px;
-    line-height: 19px;
+    border-radius: 14px 14px 4px 14px;
+    padding: 10px 14px;
+    font-size: 14.5px;
+    line-height: 1.65;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     min-width: 0;

@@ -88,9 +88,10 @@ export function PermissionCard({ e }: { e: StreamEntry }) {
       <Role>assistant · permission</Role>
       <div
         style={{
-          border: `1px solid ${tokens.warning}`,
+          // 权限卡视觉（原型 §面 C / `.perm`）：黄底 + 警示描边，与"需要你做决定"的语义一致。
+          border: `1px solid ${tokens.warningBorder}`,
           borderRadius: 12,
-          background: tokens.surface,
+          background: tokens.warningBg,
           padding: '11px 13px',
           display: 'flex',
           flexDirection: 'column',
