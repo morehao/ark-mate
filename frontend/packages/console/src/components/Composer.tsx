@@ -3,7 +3,7 @@ import { Select } from 'antd'
 import { ArrowUpOutlined, PaperClipOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import type { AttachmentMeta, CommandInfo, ConfigOptionValue, SessionCapabilities } from '@ark-mate/types'
-import { getSendKey, shouldSendKey } from '../console/sendKey'
+import { shouldSendKey } from '../console/sendKey'
 import { DELIVERY_HINT, DELIVERY_LABEL, type DeliveryChoice } from '../console/queueView'
 import { applyCommandHint, commandHintQuery, matchCommands, moveHintIndex } from '../console/commandHints'
 import { useAttachmentDraft } from '../console/useAttachmentDraft'
@@ -75,7 +75,7 @@ interface Props {
 }
 
 /**
- * 输入区（console.html .composer）：自动增高 textarea + 底部提示行（可切发送键档）+ 发送按钮。
+ * 输入区（console.html .composer）：自动增高 textarea + 发送按钮（键位固定，见 sendKey.ts）。
  *
  * §6：会话忙时输入框**不再锁死**——底座跑着的那一轮不该让人干等。忙时多出一个投递模式选择
  * （排队 / 打断并发送），选什么就发什么；空闲时该选择器不出现（没有「忙」可谈，服务端按普通轮处理）。
@@ -115,7 +115,7 @@ export function Composer({
     // 依赖刻意只写 nonce：`injectDraft.text` 变了但 nonce 没变时不该覆盖用户正在打的字。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [injectDraft?.nonce])
-  // 发送键档位不缓存进 state：设置里改完立刻生效，不用等这个组件重挂（2026-11-05 起开关在设置里）。
+  // 发送键固定 Enter 发送 / Shift + Enter 换行（sendKey.ts 单一规则），组件不再持有档位状态。
   // 投递模式是「这次怎么送」的选择，默认排队——打断当前轮是有代价的动作，不该是默认值。
   const [delivery, setDelivery] = useState<DeliveryChoice>('after_run')
   // 候选高亮下标；`hintOff` 记录用户按 Esc 主动关掉弹层（继续打字即恢复）。
@@ -200,7 +200,7 @@ export function Composer({
         return
       }
     }
-    if (shouldSendKey(e, getSendKey())) {
+    if (shouldSendKey(e)) {
       e.preventDefault()
       send()
     }
@@ -419,7 +419,7 @@ export function Composer({
         </div>
         {/* 卡下方一行（原型 §13）：工作区 chip + 权限 chip。
             2026-11-05 反馈：右下角那条「Enter 发送 · Shift+Enter 换行 ⇄」整条去掉——
-            它是常驻噪声；发送键档位改到「设置 · 通用 · 键盘操作」里切换。 */}
+            它是常驻噪声；键位改为固定规则，只在「设置 · 通用 · 键盘操作」里只读展示。 */}
         <div className="fg-composer-chips">
           {workspace && (
             <WorkspaceChipStatic

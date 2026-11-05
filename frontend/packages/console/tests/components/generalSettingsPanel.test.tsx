@@ -4,10 +4,13 @@ import { render, screen } from '@testing-library/react'
 /**
  * GeneralSettingsPanel（设置 · 通用）——v14.6 改版后只剩两件事：
  *   1. 只读展示**平台分配的默认工作区**路径；
- *   2. 说明输入区的键盘操作（Enter 发送 / Shift+Enter 换行）。
+ *   2. 只读展示输入区的键盘操作（Enter 发送 / Shift+Enter 换行）。
  *
  * 「工作区起始位置」的可编辑偏好列表已随前后端一起删除，这里改为**反向**断言：
  * 面板不再出现任何编辑输入 / 保存入口（那一节已不存在）。
+ *
+ * 2026-11-05：键盘操作也不再给切换控件（发送键档位撤掉），只保留两行只读键位；
+ * 同样用反向断言钉住「发送键」与那句说明都不回来了。
  *
  * 依赖全部 mock：store(useMate) 注入假 workspaces。
  */
@@ -39,6 +42,14 @@ describe('GeneralSettingsPanel', () => {
     render(<GeneralSettingsPanel />)
     expect(screen.getByText('Enter')).toBeInTheDocument()
     expect(screen.getByText('Shift + Enter')).toBeInTheDocument()
+  })
+
+  it('键盘操作不提供发送键切换，标题也不带说明文案', () => {
+    render(<GeneralSettingsPanel />)
+    expect(screen.queryByText('发送键')).toBeNull()
+    expect(screen.queryByText(/Shift\+Enter 发送/)).toBeNull()
+    expect(screen.queryByText(/发送消息与换行的快捷键/)).toBeNull()
+    expect(screen.queryByText(/键位固定/)).toBeNull()
   })
 
   it('不再提供「工作区起始位置」的编辑入口（该设置面已删除）', () => {
