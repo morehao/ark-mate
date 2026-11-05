@@ -28,9 +28,13 @@
     "ui:accept:desktop-skills": "node scripts/desktop-skill-projection-acceptance.mjs",
     "ui:accept:desktop-skills:packaged": "MATE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-mate.app node scripts/desktop-skill-projection-acceptance.mjs",
     "verify:no-host": "node scripts/desktop-no-host-acceptance.mjs",
-    "ui:accept:desktop-nohost:packaged": "MATE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-mate.app node scripts/desktop-no-host-acceptance.mjs"
+    "ui:accept:desktop-nohost:packaged": "MATE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-mate.app node scripts/desktop-no-host-acceptance.mjs",
+    "test:component": "pnpm --filter @ark-mate/console test:ui",
+    "e2e:web": "playwright test",
+    "e2e:web:headed": "playwright test --headed"
   },
   "devDependencies": {
-    "@ark-mate/desktop-contract": "workspace:*"
+    "@ark-mate/desktop-contract": "workspace:*",
+    "@playwright/test": "^1.64.1"
   }
 }

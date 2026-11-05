@@ -12,6 +12,7 @@
 | [`docs/agents/guards.md`](docs/agents/guards.md) | `internal/archtest` 当前判据清单与测试约定（**守卫计数只在这里维护**） | 改任何被守卫钉住的代码、加/改守卫 |
 | [`docs/agents/guards-history.md`](docs/agents/guards-history.md) | 守卫沿革：每条新增挡的静默失效与实跑反证 | 想知道某条守卫为什么存在、怎么反证 |
 | [`docs/agents/commands.md`](docs/agents/commands.md) | 常用命令（dev / desktop / 验收 / 容器）、`RUNTIME_BIN`、界面验收 | 跑构建、开发循环或验收 |
+| [`docs/agents/testing.md`](docs/agents/testing.md) | 测试分层（L1–L5）、新增测试放哪、e2e/组件测试边界、CI 取舍 | 加/改测试、决定用哪层验证 |
 | [`docs/agents/isolation.md`](docs/agents/isolation.md) | 本机隔离纪律（开发期硬约束） | 起进程、写探针、跑验收 |
 | [`docs/agents/build-and-runtime.md`](docs/agents/build-and-runtime.md) | 构建形态（构建期固定 runtime、无嵌入资产）与运行配置（鉴权 / Origin / SQLite / CGO） | 改构建、配置或持久层 |
 | [`docs/agents/vocabulary.md`](docs/agents/vocabulary.md) | 一个东西一个词：`session` / `definition` / `run` / 凭据 / 模型 / agent 面收口 | 改表名、列名、DTO、前端类型 |

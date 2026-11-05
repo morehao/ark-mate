@@ -153,6 +153,18 @@ jobs:
       - run: pnpm build
 
       # 纯 node 单测（`node --test`，Node 24 自带 TS 类型剥离，无额外框架）：
-      # desktop-contract 钉前后端契约形状，console 钉界面组件行为。
+      # desktop-contract 钉前后端契约形状，console 钉界面组件行为（纯逻辑函数）。
       - run: pnpm test:contract
       - run: pnpm test:console
+
+      # 组件渲染单测（Vitest + Testing Library，jsdom，headless）：测 React 组件的渲染/交互/分支。
+      # 依赖全 mock（vi.mock api/store），不碰后端；见 docs/agents/testing.md L3。
+      - run: pnpm test:component
+
+      # 前端 e2e（Playwright，纯 mock 后端 + 静态服务 serve dist）：验跨组件/路由/写面装配路径。
+      # Linux runner 无系统 Chrome → 装 Playwright 自带 chromium（本地开发用系统 Chrome，不下载）。
+      # 见 docs/agents/testing.md L4。
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e:web
+        env:
+          CI: "1"

@@ -491,6 +491,12 @@ vet:
 test:
 	cd backend && go test ./...
 
+# test-cover：出覆盖率报告（**只出报告、不卡阈值**，2026-11-05 起）。
+# 覆盖率先观察 1–2 周再定门禁（R4=A），避免一上来大面积红阻塞合并。
+# 产物落在 backend/cover.out（已 gitignore），HTML 报告用 `go tool cover -html=backend/cover.out`。
+test-cover:
+	cd backend && go test -coverprofile=cover.out ./... && go tool cover -func=cover.out | tail -1
+
 # test-race：两处"只在 -race 下才看得见"的读面（会话快照 / 执行面键），收尾与改动它们时跑。
 test-race:
 	cd backend && go test -race ./internal/domain/session/ ./internal/service/svcsession/ ./internal/runtimeconn/ ./internal/manager/
