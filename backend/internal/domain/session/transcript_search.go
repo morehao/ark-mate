@@ -8,7 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
+
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 )
 
 // ——— 会话检索（标题 / runtime / 会话 id / 用户消息正文） ———
@@ -95,8 +96,8 @@ func (pl *Plane) SearchSessions(_ context.Context, q string, limit int) ([]Sessi
 				Title:     r.Title,
 				Pinned:    r.Pinned,
 				Archived:  r.Archived,
-				CreatedAt: r.CreatedAt.Format(time.RFC3339),
-				UpdatedAt: r.UpdatedAt.Format(time.RFC3339),
+				CreatedAt: objtime.Milli(r.CreatedAt),
+				UpdatedAt: objtime.Milli(r.UpdatedAt),
 			},
 			Snippet: c.snippet,
 			Matches: c.matches,

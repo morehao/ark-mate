@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -232,7 +234,7 @@ func (pl *Plane) catalogResp(ctx context.Context, runtimeID, source string, opts
 		Note:    note,
 	}
 	if !fetchedAt.IsZero() {
-		resp.FetchedAt = fetchedAt.UTC().Format(time.RFC3339)
+		resp.FetchedAt = objtime.Milli(fetchedAt)
 	}
 	for _, o := range opts {
 		item := CatalogOption{

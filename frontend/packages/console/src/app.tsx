@@ -7,11 +7,10 @@ import { consoleStyleSheet } from './console.css'
 import { NavRail } from './components/NavRail'
 import { StatusBar } from './components/StatusBar'
 import { SettingsDialog } from './components/settings/SettingsDialog'
-import { NAV_ENTRIES, isEntryActive } from './console/navView'
+import { NAV_ENTRIES, activeChildOf, isEntryActive, isGroup } from './console/navView'
 import { useMate } from './store'
 import { ChatPage } from './pages/ChatPage'
 import { AutomationsPage } from './pages/AutomationsPage'
-import { OverviewPage } from './pages/extensions/OverviewPage'
 import { SkillsPage } from './pages/extensions/SkillsPage'
 import { ConnectorsPage } from './pages/extensions/ConnectorsPage'
 import { ExpertsPage } from './pages/extensions/ExpertsPage'
@@ -63,9 +62,12 @@ function SettingsDeepLink({ section }: { section: string }) {
   return <Navigate to="/sessions" replace />
 }
 
-/** 窄屏顶条上的当前入口名（导航定义只有一份，这里不重复写别名）。 */
+/** 窄屏顶条上的当前入口名（导航定义只有一份，这里不重复写别名）。
+ *  命中组时显示具体二级项（「扩展」本身已不是页面，报组名等于没说在哪）。 */
 function currentEntryLabel(pathname: string): string {
-  return NAV_ENTRIES.find((e) => isEntryActive(pathname, e))?.label ?? '会话'
+  const entry = NAV_ENTRIES.find((e) => isEntryActive(pathname, e))
+  if (!entry) return '会话'
+  return (isGroup(entry) && activeChildOf(pathname, entry)?.label) || entry.label
 }
 
 export function App() {
@@ -163,16 +165,10 @@ export function App() {
             <Route path="/new" element={<Navigate to="/sessions" replace />} />
             <Route path="/sessions" element={<ChatPage />} />
             <Route path="/sessions/:id" element={<ChatPage />} />
-            {/* 旧「能力」路径 → 扩展总览（一行重定向：书签/深链接不静默落到问答页） */}
-            <Route path="/capabilities" element={<Navigate to="/extensions" replace />} />
-            <Route
-              path="/extensions"
-              element={
-                <Manage>
-                  <OverviewPage />
-                </Manage>
-              }
-            />
+            {/* 「扩展」没有总览页了（点左栏组行只展开二级菜单）：旧路径一律落到默认二级页，
+                书签/深链接不会静默落到问答页。 */}
+            <Route path="/capabilities" element={<Navigate to="/extensions/skills" replace />} />
+            <Route path="/extensions" element={<Navigate to="/extensions/skills" replace />} />
             <Route
               path="/extensions/skills"
               element={

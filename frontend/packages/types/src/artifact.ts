@@ -1,3 +1,5 @@
+import type { UnixMillis } from './time'
+
 // 产物面（v34/v35）的对外类型：会话里「哪个工具写出了哪个文件」的溯源索引。
 //
 // 字节**不在这里**：file 类产物用 `upload_id` 指向 filestore（内容寻址）；`path` 是工作区相对
@@ -28,8 +30,8 @@ export interface ArtifactMeta {
   content_sha256?: string
   /** 工作区原文件与生成时快照不一致（被改动/删除）。详情读面惰性计算，列表页返回存量。 */
   dirty: boolean
-  created_at: string
-  updated_at: string
+  created_at: UnixMillis
+  updated_at: UnixMillis
 }
 
 /** `GET /sessions/:id/artifacts` 的响应（含未被收录进资料库的产物）。 */

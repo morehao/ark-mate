@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morehao/ark-mate/internal/core/automation"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
@@ -59,7 +60,7 @@ func (f *fakeSvc) PreviewAutomation(req dtoautomation.AutomationPreviewReq) (*dt
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &dtoautomation.AutomationPreviewResp{Occurrences: []dtoautomation.AutomationPreviewItem{{At: "2026-01-01T01:00:00Z", Wall: "2026-01-01 09:00", Timezone: "Asia/Shanghai"}}}, nil
+	return &dtoautomation.AutomationPreviewResp{Occurrences: []dtoautomation.AutomationPreviewItem{{At: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC).UnixMilli(), Wall: "2026-01-01 09:00", Timezone: "Asia/Shanghai"}}}, nil
 }
 func (f *fakeSvc) ListAutomationRuns(id string) (*dtoautomation.AutomationRunsResp, error) {
 	return &dtoautomation.AutomationRunsResp{ID: id, Runs: nil, Limit: automation.RecentRunsMax}, nil

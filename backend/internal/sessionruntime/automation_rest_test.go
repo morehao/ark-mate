@@ -157,7 +157,7 @@ func TestAutomationPortPreview(t *testing.T) {
 		t.Fatalf("应给 3 次: %+v", resp)
 	}
 	for _, o := range resp.Occurrences {
-		if o.Wall == "" || o.Timezone != "Asia/Shanghai" || !strings.HasSuffix(o.At, "Z") {
+		if o.Wall == "" || o.Timezone != "Asia/Shanghai" || o.At <= 0 {
 			t.Fatalf("每项都要有本地墙钟与时区（UTC 供机器、墙钟供人）: %+v", o)
 		}
 	}

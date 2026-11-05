@@ -16,10 +16,11 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/object/objdelivery"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+
 	"github.com/morehao/ark-mate/internal/core/redact"
 	"github.com/morehao/ark-mate/internal/core/resource"
 
-	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -239,7 +240,7 @@ func (pl *Plane) providerRespLocked(ctx context.Context, id string, d *Def) Prov
 		Problems:      providerProblems(d),
 	}
 	if !d.UpdatedAt.IsZero() {
-		resp.UpdatedAt = model.FormatTime(d.UpdatedAt)
+		resp.UpdatedAt = objtime.Milli(d.UpdatedAt)
 	}
 	// 引用者 = 挂靠在该供应商下的模型条目；有模型挂靠才谈得上"哪个底座拿得到它"
 	// （底座是构建期常量，所以至多一个 runtime）。

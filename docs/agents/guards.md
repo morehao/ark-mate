@@ -132,7 +132,9 @@
 
 - 再加 **3 条底座标识不进用户可见面守卫**（`brand_leak_test.go`，2026-11-04「思考过程/会话输出里仍有 dsh」）：`TestSessionResumeNoticeHasNoRuntimeId`（`store.ts` 的 `SessionResumed` 系统条目不得把 `payload.runtime`——底座 id，如 `dsh`——拼进用户文案）、`TestUsageRowLabelHasNoRuntimeId`（`usageView.ts` 的 `usageRows` 行标签不得回退 `runtime_id`）、`TestIdentityPromptForbidsRuntimeInternalsInNarration`（产品身份文案必须带「不在思考/回复里引用执行层品牌名、环境变量名、home 路径」这条纪律——思考是模型自由文本，唯一能改的就是给它的提示词）。前两条与「新会话 · dsh」「assistant · thinking」同一族：把执行事实拼进用户屏。反证（实跑）：把 `· ${runtime}` 拼回 resume 文案、把 `runtime_id ||` 拼回 usageRows → 对应守卫红；删掉身份文案里那条纪律 → 第三条红。fail-closed：锚点（`case Ev.SessionResumed:` / `export function usageRows(`）解析不到即失败。
 
-**共 197 条**——加守卫时记得同步这句话。
+- 再加 **1 条时间口径守卫**（`wire_time_test.go` 的 `TestDTOInstantFieldsAreUnixMillis`，2026-11-05）：`internal/dto/*/*.go` 里字段名以 `At`/`Since` 结尾或叫 `TS`/`Ts` 的必须是 `int64`/`*int64`；非时间的同名键（目前只有 `dtomodel/model_list.go:EffectiveAt`，枚举）逐条登记并双向检查。它挡的是"新加一个 `_at` 字段顺手写 string"——编译与所有既有测试都绿，只是响应里从此有两种时间格式。fail-closed：扫不到 DTO 文件、或一条时刻字段都没命中即失败。反证：把 `SessionResp.CreatedAt` 改回 `string` → 红；把 `EffectiveAt` 的类型改成非 string → 红（登记理由失效）。口径见 [`time.md`](time.md)。
+
+**共 199 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 

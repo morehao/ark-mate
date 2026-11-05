@@ -16,6 +16,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+
 	"github.com/morehao/ark-mate/internal/domain/material"
 	"github.com/morehao/ark-mate/internal/dto/dtomaterial"
 	"github.com/morehao/ark-mate/internal/persistence/model"
@@ -207,7 +209,7 @@ func nodeToResp(n model.LibraryNodeEntity) dtomaterial.NodeResp {
 		SizeBytes:    n.SizeBytes,
 		Category:     n.Category,
 		ProvenanceID: n.ProvenanceID,
-		UpdatedAt:    n.UpdatedAt.UTC().Format(model.LayoutTS),
+		UpdatedAt:    objtime.Milli(n.UpdatedAt),
 	}
 }
 

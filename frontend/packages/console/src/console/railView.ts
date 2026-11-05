@@ -1,19 +1,25 @@
 import type { SessionSummary } from '@ark-mate/types'
 
-// ——— 会话侧栏视图模型（P3 余留：列表分页 + active 提升 + 相对时间；纯函数，便于 Node 侧校验） ———
+// ——— 会话侧栏视图模型（P3 余留：列表分页 + active 提升 + 状态点；纯函数，便于 Node 侧校验） ———
+//
+// 时间格式化已收口到 `console/time.ts`（后端返回 Unix 毫秒），本文件不再解析/格式化时间。
 
 /**
- * 会话行的**状态徽标**（`标题 + 状态点+状态文案` 那一格）：`null` = 不显示（idle，无话可说）。
+ * 会话行的**状态点**（行右端 `● 日期` 里那颗点）：`null` = 不画点（只可能是服务端给了没见过的取值）。
  *
  * 取值来源只有两处，都来自后端事实，**绝不猜**（对齐 archtest `TestNoClientSideRunInference`）：
  *   1. `SessionSummary.run`（`run.status` 读面投影，ADR-6）——优先，连没打开过的会话也能说「待授权」；
  *   2. `SessionSummary.status`（REST 快照）——`run` 缺席（历史会话 / 本轮还没开始）时回落。
  *
- * 映射到原型四态：运行中（run）/ 待授权（wait）/ 失败（fail）/ 已完成（done）。
- * `cancelled`、`interrupted`、`idle` 一律不显示——它们不是"在跑"也不是"成功/失败"，
- * 硬塞一个徽标只会把「取消/中断」说成「已完成」。
+ * 六态（2026-11-05 反馈：取消/中断也要有自己的颜色，已完成不再用灰）：
+ *   运行中（run，蓝 + 呼吸）/ 待授权（wait，琥珀实心）/ 失败（fail，红）/ 已完成（done，绿）/
+ *   已取消（cancel，灰——作废，不是失败）/ 已中断（interrupt，琥珀**空心环**——与「待授权」同族
+ *   但形态不同：中断是"上一轮没正常收尾、可重发"，不是"现在在等你"）。
+ *
+ * 为什么取消/中断不再"不显示"：不给点等于让它们跟「已完成」长得一样（都只剩日期），
+ * 而这两件事对用户的意义完全不同（作废 vs 可以重来）。颜色只表达**事实**，不表达"好坏"。
  */
-export type SessionBadgeKind = 'run' | 'wait' | 'fail' | 'done'
+export type SessionBadgeKind = 'run' | 'wait' | 'fail' | 'done' | 'cancel' | 'interrupt'
 
 export interface SessionBadge {
   readonly kind: SessionBadgeKind
@@ -45,6 +51,10 @@ export function sessionBadge(summary: Pick<SessionSummary, 'status' | 'run'>): S
       return { kind: 'fail', label: '失败' }
     case 'completed':
       return { kind: 'done', label: '已完成' }
+    case 'cancelled':
+      return { kind: 'cancel', label: '已取消' }
+    case 'interrupted':
+      return { kind: 'interrupt', label: '已中断' }
     case 'in_progress':
       return { kind: 'run', label: '运行中' }
     default:
@@ -129,30 +139,6 @@ export function quotaSessions(
     rows.push(c)
   }
   return { rows, hidden: all.length - rows.length }
-}
-
-/**
- * 相对时间标签（列表行用）：刚刚 / N 分钟前 / N 小时前 / 昨天 / N 天前 / MM-DD / YYYY-MM-DD。
- * `now` 可注入（测试稳定）；非法/空时间 → 空串（不显示噪声）。
- */
-export function relTime(iso: string | undefined, now: number = Date.now()): string {
-  if (!iso) return ''
-  const t = new Date(iso).getTime()
-  if (Number.isNaN(t)) return ''
-  const diff = now - t
-  if (diff < 0) return '刚刚' // 时钟偏差（服务端时间略超前）不显示「-1 分钟」
-  const min = Math.floor(diff / 60_000)
-  if (min < 1) return '刚刚'
-  if (min < 60) return `${min} 分钟前`
-  const hours = Math.floor(min / 60)
-  if (hours < 24) return `${hours} 小时前`
-  const days = Math.floor(hours / 24)
-  if (days === 1) return '昨天'
-  if (days < 7) return `${days} 天前`
-  const d = new Date(t)
-  const p = (n: number): string => String(n).padStart(2, '0')
-  const sameYear = new Date(now).getFullYear() === d.getFullYear()
-  return sameYear ? `${p(d.getMonth() + 1)}-${p(d.getDate())}` : `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
 /**

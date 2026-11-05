@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+
 	"github.com/morehao/ark-mate/internal/core/resource"
 
 	"github.com/morehao/ark-mate/internal/persistence/model"
@@ -201,7 +203,7 @@ func modelRespFromRow(row *model.ModelEntity) ModelItem {
 		Revision: row.Revision,
 	}
 	if !row.UpdatedAt.IsZero() {
-		out.UpdatedAt = model.FormatTime(row.UpdatedAt)
+		out.UpdatedAt = objtime.Milli(row.UpdatedAt)
 	}
 	return out
 }

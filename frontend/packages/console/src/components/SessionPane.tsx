@@ -18,6 +18,7 @@ import { sessionSearch, exportSessions, messageSearch, toErrorMessage } from '@a
 import { dedupeHits, exportDownloadName, roleLabel, sourceLabel } from '../console/searchView'
 import { useMate } from '../store'
 import { RAIL_PAGE, pageSessions, sessionBadge } from '../console/railView'
+import { dayLabel, sessDate } from '../console/time'
 import { archivedFilterToRailMode, railModeToArchivedFilter } from '../console/workspaceView'
 import { RailSectionHeader } from './RailSectionHeader'
 import { WorkspaceGroupPane } from './WorkspaceGroupPane'
@@ -53,17 +54,6 @@ function groupSessions(
   }
   for (const [label, items] of byDay) groups.push({ label, items, pinned: false })
   return groups
-}
-
-function dayLabel(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '更早'
-  const now = new Date()
-  const sd = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
-  const diff = Math.round((sd(now) - sd(d)) / 86_400_000)
-  if (diff <= 0) return '今天'
-  if (diff === 1) return '昨天'
-  return `${d.getMonth() + 1}月${d.getDate()}日`
 }
 
 /** 会话列表区（原会话侧栏 .side）：区头（视图选项 + 折叠搜索 + 添加工作区）+ 会话列表
@@ -386,6 +376,7 @@ export function SessionPane({ onCreate }: Props) {
     const view = views[sm.id]
     const on = sm.id === activeId
     const badge = sessionBadge({ status: sm.status, run: sm.run })
+    const date = sessDate(sm.updated_at)
 
     // 行内「更多」：重命名 / 置顶·取消置顶 / 归档（或恢复）
     const menuItems: MenuProps['items'] = [
@@ -453,10 +444,11 @@ export function SessionPane({ onCreate }: Props) {
             cursor: busy && !on ? 'not-allowed' : 'pointer',
           }}
         >
-          {/* 会话行**只有一行**（设计 §15）：标题在左（省略号截断）、状态点+状态文案贴行右端
-              紧邻 `⋯`，同一基线。hover / 当前行时状态淡出让位给 `⋯`（同位置切换，位置不跳）。
-              状态口径只有一份实现（`railView.sessionBadge`）：运行中/待授权/失败/已完成，
-              idle 不显示。悬停整行弹出会话信息浮层（标题/所属空间/模型/更新时间）。 */}
+          {/* 会话行**只有一行**（设计 §15）：标题在左（省略号截断）、右端贴 `⋯` 的是
+              「状态点 + 日期」，同一基线。hover / 当前行时这一格淡出让位给 `⋯`（同位置切换，位置不跳）。
+              状态口径只有一份实现（`railView.sessionBadge`）：运行中/待授权/失败/已完成/已取消/已中断
+              六态各一色（取消是灰、中断是空心琥珀环）；日期口径同样只有一份（`console/time.ts` 的 `sessDate`）。
+              悬停整行弹出会话信息浮层（标题/所属空间/模型/更新时间）。 */}
           <span
             data-sess-line="title"
             style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, paddingRight: 0 }}
@@ -478,10 +470,12 @@ export function SessionPane({ onCreate }: Props) {
               {titleFor(sm, view, undefined, 'plain')}
             </span>
             {sm.pinned && <PushpinFilled style={{ fontSize: 11, color: tokens.primary, flex: 'none' }} />}
-            {badge && (
-              <span className={`fg-sess-status fg-${badge.kind}`} title={badge.label}>
-                <span className="fg-sess-dot" />
-                {badge.label}
+            {/* 右端（2026-11-05 反馈）：**只保留状态的标志**（那颗点），文案那格换成日期。
+                状态词不丢——它进了 title（悬停可见）与会话信息浮层；行内不再占用横向空间。 */}
+            {(badge || date) && (
+              <span className={`fg-sess-status${badge ? ` fg-${badge.kind}` : ''}`} title={badge?.label}>
+                {badge && <span className="fg-sess-dot" />}
+                {date && <span className="fg-sess-date">{date}</span>}
               </span>
             )}
           </span>

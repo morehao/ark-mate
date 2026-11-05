@@ -8,6 +8,8 @@ import type {
   AutomationState,
 } from '@ark-mate/types'
 
+import { fmtLocalInZone, fmtShortDateTime } from './time.ts'
+
 // ——— automation 视图（M4-6）：纯函数，全部可在 typecheck 下穷举 ———
 //
 // 唯一一个真正需要"翻译"的地方是 schedule：时区 + DST + weekly 星期集合叠在一起，
@@ -75,7 +77,7 @@ export function describeSchedule(s: AutomationSchedule): string {
   const tz = s.timezone || 'UTC'
   switch (s.kind) {
     case 'once':
-      return `一次 · ${s.at ? fmtLocal(s.at, tz) : '未设时间'}（${tz}）`
+      return `一次 · ${s.at ? fmtLocalInZone(s.at, tz) : '未设时间'}（${tz}）`
     case 'interval':
       return `每 ${everySecondsText(s.every_seconds)}（与墙钟无关）`
     case 'weekly':
@@ -93,37 +95,6 @@ export function everySecondsText(sec?: number): string {
   if (n % 3600 === 0) return `${n / 3600} 小时`
   if (n % 60 === 0) return `${n / 60} 分钟`
   return `${n} 秒`
-}
-
-/**
- * 绝对时刻（RFC3339）→ 指定时区的墙钟 `MM-DD HH:MM`。
- *
- * 用 `Intl` 而不是手写偏移：DST 是这里唯一会咬人的东西，交给平台时区库。
- * 解析不了就原样回带——显示一个 ISO 串也远好过显示 `Invalid Date`。
- */
-export function fmtLocal(iso: string, timezone: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  try {
-    return new Intl.DateTimeFormat('zh-CN', {
-      timeZone: timezone,
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(d)
-  } catch {
-    return iso
-  }
-}
-
-/** 绝对时刻 → 本地（浏览器）`MM-DD HH:MM`；空 → `—`。 */
-export function fmtWhen(iso?: string): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 /** 状态标（颜色取自主题 token 的语义名，渲染侧再取色）。 */
@@ -156,7 +127,7 @@ export function lastRunText(a: Automation): string {
   if (a.error) return `运行配置有误：${a.error}`
   if (!a.last_status) return '尚未触发过'
   const meta = RUN_STATUS_META[a.last_status]
-  const when = a.last_fired_at ? `（${fmtWhen(a.last_fired_at)}）` : ''
+  const when = a.last_fired_at ? `（${fmtShortDateTime(a.last_fired_at)}）` : ''
   return `${meta.label}${when}${a.last_reason ? ` · ${a.last_reason}` : ''}`
 }
 
@@ -173,7 +144,7 @@ export function automationIDFromOrigin(origin?: string): string {
 
 /** 运行史时间轴的一行文案（状态 + 计划时刻 + 触发方式 + 原因）。 */
 export function runLine(r: AutomationRunRecord): string {
-  const parts = [RUN_STATUS_META[r.status].label, `计划 ${fmtWhen(r.scheduled_for)}`]
+  const parts = [RUN_STATUS_META[r.status].label, `计划 ${fmtShortDateTime(r.scheduled_for)}`]
   if (r.trigger) parts.push(TRIGGER_LABEL[r.trigger] ?? r.trigger)
   if (r.reason) parts.push(r.reason)
   return parts.join(' · ')
@@ -181,7 +152,7 @@ export function runLine(r: AutomationRunRecord): string {
 
 /** 预览项文案：墙钟（人看的）+ UTC（机器看的）。 */
 export function previewLine(o: AutomationPreviewItem): string {
-  return `${o.wall}（${o.timezone}） · ${o.at}`
+  return `${o.wall}（${o.timezone}） · ${fmtShortDateTime(o.at)}`
 }
 
 /**
@@ -302,7 +273,9 @@ function tzOffsetMs(at: Date, timezone: string): number {
   }
 }
 
-/** RFC3339 → `YYYY-MM-DDTHH:MM`（按给定/浏览器时区，回填表单）。 */
+/** RFC3339 → `YYYY-MM-DDTHH:MM`（按给定/浏览器时区，回填表单）。
+ *
+ * 入参是 `schedule.at`——**用户可编辑的定义载体**，不是接口时间戳口径（见 `console/time.ts` 的例外）。 */
 export function toLocalInput(iso: string | undefined, timezone: string): string | undefined {
   if (!iso) return undefined
   const d = new Date(iso)

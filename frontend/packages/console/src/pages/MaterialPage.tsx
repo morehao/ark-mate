@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { fmtDateTime } from '../console/time'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Button,
@@ -205,7 +206,7 @@ export function MaterialPage() {
             {row.size_bytes > 0 ? ` · ${fmtBytes(row.size_bytes)}` : ''}
           </div>
         </div>
-        <div className="fg-mat-when">{row.updated_at.replace('T', ' ').replace('Z', '').slice(0, 16)}</div>
+        <div className="fg-mat-when">{fmtDateTime(row.updated_at)}</div>
         <Popconfirm
           title="删除？"
           description={row.node_kind === 'folder' ? '文件夹将连同子节点一起删除' : '确认删除该节点？'}

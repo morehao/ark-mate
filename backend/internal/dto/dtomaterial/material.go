@@ -19,7 +19,7 @@ type NodeResp struct {
 	// ProvenanceID 产物节点引用的 artifact id（v34；仅 category=artifact 时非空）。
 	// 列表页带上它，前端才不必点开每个节点就能判定「这条产物已收录」。
 	ProvenanceID string `json:"provenance_id,omitempty"`
-	UpdatedAt    string `json:"updated_at"`
+	UpdatedAt    int64  `json:"updated_at"`
 }
 
 // ListNodesResp `GET /materials/nodes` 的响应体（一层子节点 + 分页）。
@@ -55,8 +55,8 @@ type NodeDetailResp struct {
 	Category string `json:"category,omitempty"`
 	// ProvenanceID 引用的产物主键（v34）：→ artifacts.id（artifact 类别时非空）。
 	ProvenanceID string `json:"provenance_id,omitempty"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
 }
 
 // CreateNodeReq `POST /materials/nodes` 的请求体（建 folder/doc/table/link/page/drive）。

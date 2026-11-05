@@ -1,9 +1,9 @@
 package assembly
 
 import (
-	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
 	"github.com/morehao/ark-mate/internal/controller/ctrartifact"
 	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
+	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
 	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
 	"github.com/morehao/ark-mate/internal/controller/ctrcommandpolicy"
 	"github.com/morehao/ark-mate/internal/controller/ctrexport"

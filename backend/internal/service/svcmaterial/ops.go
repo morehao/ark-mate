@@ -8,6 +8,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+
 	"github.com/morehao/ark-mate/internal/domain/artifact"
 	"github.com/morehao/ark-mate/internal/domain/material"
 	"github.com/morehao/ark-mate/internal/dto/dtomaterial"
@@ -99,8 +101,8 @@ func (s *materialSvc) detail(ctx context.Context, n model.LibraryNodeEntity) (*d
 		SizeBytes:     n.SizeBytes,
 		Category:      n.Category,
 		ProvenanceID:  n.ProvenanceID,
-		CreatedAt:     n.CreatedAt.UTC().Format(model.LayoutTS),
-		UpdatedAt:     n.UpdatedAt.UTC().Format(model.LayoutTS),
+		CreatedAt:     objtime.Milli(n.CreatedAt),
+		UpdatedAt:     objtime.Milli(n.UpdatedAt),
 	}
 	if material.NodeKind(n.NodeKind) == material.KindTable && s.st != nil {
 		if t, ok, err := s.st.LibraryTableByNode(ctx, n.ID); err != nil {

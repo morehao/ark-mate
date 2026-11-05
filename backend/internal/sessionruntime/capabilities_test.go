@@ -236,7 +236,7 @@ func TestProbeMcpServer(t *testing.T) {
 	if got.ServerName != "mgr-helper" || got.ServerVersion != "3.1" || got.Added != 1 || got.Removed != 1 || got.ToolCount != 1 {
 		t.Fatalf("探测结果不符: %+v", got)
 	}
-	if got.ProbedAt == "" {
+	if got.ProbedAt == 0 {
 		t.Fatal("ProbedAt 不应为空")
 	}
 	if len(got.Tools) != 1 || got.Tools[0].McpServer != "h" || got.Tools[0].Description != "读文件" {
@@ -256,7 +256,7 @@ func TestProbeMcpServer(t *testing.T) {
 	}
 	// 状态写回 GET /mcps。
 	mcps, _ := mcpCatalog(svc).ListMcpServers()
-	if len(mcps) != 1 || mcps[0].ToolCount != 1 || mcps[0].LastProbeAt == "" || mcps[0].LastProbeErr != "" {
+	if len(mcps) != 1 || mcps[0].ToolCount != 1 || mcps[0].LastProbeAt == 0 || mcps[0].LastProbeErr != "" {
 		t.Fatalf("mcps 探测状态不符: %+v", mcps)
 	}
 
@@ -639,7 +639,7 @@ func TestAutoProbeMcpServers(t *testing.T) {
 	for _, m := range mcps {
 		byID[m.ID] = m
 	}
-	if byID["a"].LastProbeAt == "" || byID["b"].LastProbeAt == "" {
+	if byID["a"].LastProbeAt == 0 || byID["b"].LastProbeAt == 0 {
 		t.Fatalf("成功者应有 last_probe_at: %+v", byID)
 	}
 	if byID["down"].LastProbeErr == "" {

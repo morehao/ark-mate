@@ -65,7 +65,7 @@ describe('MCP 状态派生', () => {
   const row = {
     defEnabled: true,
     lastProbeError: undefined as string | undefined,
-    lastProbeAt: undefined as string | undefined,
+    lastProbeAt: undefined as number | undefined,
     unresolvedSecretKeys: [] as string[],
   }
 
@@ -74,7 +74,7 @@ describe('MCP 状态派生', () => {
     assert.equal(mcpConnState({ ...row, lastProbeError: 'x' }).key, 'error')
     assert.equal(mcpConnState({ ...row, unresolvedSecretKeys: ['A'] }).key, 'needs_setup')
     assert.equal(mcpConnState(row).key, 'pending')
-    assert.equal(mcpConnState({ ...row, lastProbeAt: '2026-10-17T00:00:00Z' }).key, 'connected')
+    assert.equal(mcpConnState({ ...row, lastProbeAt: new Date('2026-10-17T00:00:00Z').getTime() }).key, 'connected')
   })
 
   it('描述行是事实而不是复述标签', () => {

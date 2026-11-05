@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 )
 
 // 工作空间的**只读辅助面**（浏览 + 最近使用）。
@@ -225,7 +227,7 @@ func (pl *Plane) ListWorkspaceFiles(path string, includeHidden bool) (*FilesView
 			Path:       child,
 			IsDir:      isDir,
 			Size:       st.Size(),
-			ModifiedAt: st.ModTime().UTC().Format(time.RFC3339),
+			ModifiedAt: objtime.Milli(st.ModTime()),
 		})
 	}
 	// 目录在前、文件在后，各自按名排序（资料场景先看结构、再看文件）。
@@ -254,7 +256,7 @@ func isDirEntry(e os.DirEntry, full string) bool {
 type wsUsage struct {
 	last   time.Time
 	count  int
-	latest string // RFC3339；空 = 该目录下没有可用的时间戳
+	latest int64 // Unix 毫秒；0 = 该目录下没有可用的时间戳
 }
 
 // workspaceUsage 按 cwd 聚合会话数与最近使用时间（"最近"与"资料库"共用这唯一一份口径）。
@@ -283,7 +285,7 @@ func (pl *Plane) workspaceUsage() map[string]*wsUsage {
 		a.count++
 		if r.UpdatedAt.After(a.last) {
 			a.last = r.UpdatedAt
-			a.latest = r.UpdatedAt.UTC().Format(time.RFC3339)
+			a.latest = objtime.Milli(r.UpdatedAt)
 		}
 	}
 	return byPath

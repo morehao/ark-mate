@@ -9,5 +9,5 @@ type QueuedInputItem struct {
 	Delivery    string
 	TargetRunID string
 	Generation  int64
-	CreatedAt   string
+	CreatedAt   int64
 }

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Alert, Button, Input, Skeleton } from 'antd'
-import { PlusOutlined, SearchOutlined } from '@ant-design/icons'
+import { SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import type { Expert } from '@ark-mate/types'
 import { expertModelShort, missingExpertRefs } from '../../console/expertView'
@@ -42,7 +42,8 @@ export function ExpertsPanel() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <Button type="primary" size="small" icon={<PlusOutlined />} onClick={d.openNew}>
+          {/* 2026-11-05 反馈：新建入口只在页头这一颗，空态里不再重复一颗（同一页两个「新建」）。 */}
+          <Button type="primary" size="small" onClick={d.openNew}>
             新建
           </Button>
         </div>
@@ -85,17 +86,13 @@ export function ExpertsPanel() {
           </div>
         ) : d.experts.length === 0 ? (
           d.listError ? null : (
+            // 空态只留说明：新建动作在页头（去掉重复入口后，空态不再自己再画一颗按钮）。
             <CapabilityEmpty
               text={
                 <>
                   <div style={{ fontSize: 14, color: tokens.textSecondary, marginBottom: 4 }}>还没有专家</div>
                   <div>专家是一组推荐能力，不会限制你手动选择。</div>
                 </>
-              }
-              action={
-                <Button type="primary" icon={<PlusOutlined />} onClick={d.openNew}>
-                  新建专家
-                </Button>
               }
             />
           )

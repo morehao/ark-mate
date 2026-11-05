@@ -17,6 +17,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+
 	"github.com/morehao/ark-mate/internal/dto/dtoattachment"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
@@ -290,6 +292,6 @@ func toResp(e model.AttachmentEntity) *dtoattachment.AttachmentResp {
 		Sha256:    e.Sha256,
 		Kind:      e.Kind,
 		State:     e.State,
-		CreatedAt: model.FormatTime(e.CreatedAt),
+		CreatedAt: objtime.Milli(e.CreatedAt),
 	}
 }

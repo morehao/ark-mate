@@ -1,3 +1,5 @@
+import type { UnixMillis } from './time'
+
 /**
  * 底座（runtime）面：**构建期固定**，用户没有任何选择面。
  *
@@ -89,7 +91,7 @@ export type RuntimeState = 'running' | 'stopped'
 
 /** 底座最近一次失败的诊断快照（A3）。 */
 export interface RuntimeLastError {
-  at: string
+  at: UnixMillis
   session_id?: string
   code: string
   class: string
@@ -124,5 +126,5 @@ export interface RuntimeDiagnostics {
    * 密钥 / 底座自报的鉴权方式 / 底座安装步骤）。健康快照不带该字段。
    */
   remediation?: string[]
-  checked_at: string
+  checked_at: UnixMillis
 }

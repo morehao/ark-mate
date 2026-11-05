@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { fmtShortDateTime } from '../console/time'
 import { Button, Input, Modal, Tooltip } from 'antd'
 import type { InputRef } from 'antd'
 import {
@@ -9,7 +10,6 @@ import {
   FolderOpenOutlined,
   FolderOutlined,
   HomeOutlined,
-  PlusOutlined,
   WarningOutlined,
 } from '@ant-design/icons'
 import { browseWorkspaces, createWorkspaceDir, toErrorMessage, workspaceFiles } from '@ark-mate/api'
@@ -68,14 +68,6 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
-}
-
-/** 只显示「月-日 时:分」（完整值走 title）。 */
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 /** 一栏目录行（Miller 视图渲染一到两栏）。 */
@@ -320,7 +312,6 @@ export function DirectoryBrowser({
         <div className="fg-ws-foot">
           {create && (
             <Button
-              icon={<PlusOutlined />}
               disabled={!listing || frozen || draftPending}
               onClick={() => {
                 setFolderDraft('')
@@ -521,12 +512,12 @@ export function DirectoryBrowser({
             <div className="fg-ws-label">文件</div>
             <div className="fg-ws-files">
               {fileMeta.map((f) => (
-                <div key={f.path} className="fg-ws-item fg-ws-item-static" title={`${f.path} · ${f.modified_at}`}>
+                <div key={f.path} className="fg-ws-item fg-ws-item-static" title={f.path}>
                   <span className="fg-ws-item-label">
                     <span className="fg-ws-item-name">{f.name}</span>
                   </span>
                   <span className="fg-ws-item-meta">
-                    {formatSize(f.size)} · {formatTime(f.modified_at)}
+                    {formatSize(f.size)} · {fmtShortDateTime(f.modified_at)}
                   </span>
                 </div>
               ))}

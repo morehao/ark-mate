@@ -65,7 +65,7 @@ type WorkspaceRecentResp struct {
 	Path string `json:"path"`
 	Name string `json:"name"` // 末级目录名（展示用）
 	// LastUsedAt 最近一次使用时间（该工作空间下最新会话的 updated_at）。
-	LastUsedAt string `json:"last_used_at"`
+	LastUsedAt int64 `json:"last_used_at"`
 	// Sessions 该工作空间下的会话数（含归档；不含代建的临时空间自身）。
 	Sessions int `json:"sessions"`
 }
@@ -88,8 +88,8 @@ type WorkspaceFileEntryResp struct {
 	IsDir bool   `json:"is_dir"`
 	// Size 字节数（符号链接取真身大小）。
 	Size int64 `json:"size"`
-	// ModifiedAt 最后修改时间（RFC3339，UTC）。
-	ModifiedAt string `json:"modified_at"`
+	// ModifiedAt 最后修改时间（Unix 毫秒，UTC）。
+	ModifiedAt int64 `json:"modified_at"`
 }
 
 // WorkspacePickResp `POST /workspaces/pick-directory` 响应：宿主原生选择器的结果。
@@ -129,11 +129,11 @@ type WorkspaceResp struct {
 	DirStatus string `json:"dir_status"`
 	// Sessions 该工作空间名下的会话数（含归档）。
 	Sessions int `json:"sessions"`
-	// LastUsedAt 该工作空间下最新会话的 updated_at（RFC3339；空 = 从未用过，不是 zero time）。
-	LastUsedAt string `json:"last_used_at,omitempty"`
-	// CreatedAt / UpdatedAt 登记时刻与最后一次改写时刻（RFC3339）。
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	// LastUsedAt 该工作空间下最新会话的 updated_at（Unix 毫秒；0 = 从未用过）。
+	LastUsedAt int64 `json:"last_used_at,omitempty"`
+	// CreatedAt / UpdatedAt 登记时刻与最后一次改写时刻（Unix 毫秒）。
+	CreatedAt int64 `json:"created_at"`
+	UpdatedAt int64 `json:"updated_at"`
 }
 
 // WorkspaceListResp `GET /workspaces` 响应。

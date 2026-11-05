@@ -639,7 +639,7 @@ func newRestEngine(deps restFixture) *gin.Engine {
 func TestWorkspaceRegistryCtrPassThrough(t *testing.T) {
 	one := &dtoworkspace.WorkspaceResp{
 		ID: "wsp-1", Path: "/Users/me/work/ark-mate", Title: "ark-mate",
-		DirStatus: dtoworkspace.DirStatusOK, Sessions: 12, CreatedAt: "2026-10-11T00:00:00Z",
+		DirStatus: dtoworkspace.DirStatusOK, Sessions: 12, CreatedAt: time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC).UnixMilli(),
 	}
 	svc := &stubSvc{
 		registryOne:    one,
@@ -1373,7 +1373,7 @@ func TestPermissionMemoriesList(t *testing.T) {
 	var out []dtosession.MemoryResp
 	if err := json.Unmarshal(env.Data, &out); err != nil || len(out) != 2 ||
 		out[0].Title != "运行演示命令 echo hello" || out[0].Kind != "execute" || out[0].Decision != "allow" ||
-		out[1].Decision != "reject" || out[0].Since != "2026-01-02T03:04:05Z" {
+		out[1].Decision != "reject" || out[0].Since != time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC).UnixMilli() {
 		t.Fatalf("memories data 不符: %s", env.Data)
 	}
 	// 未知会话 → 40401（用例层的校验，不是控制器的）。
@@ -1407,7 +1407,7 @@ func TestPendingPermissionsList(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &out); err != nil || len(out) != 1 ||
 		out[0].CallID != "tc1" || out[0].Kind != "execute" ||
 		len(out[0].Options) != 1 || out[0].Options[0].OptionID != "allow_once" ||
-		out[0].TimeoutAt != "2026-01-02T03:04:05Z" {
+		out[0].TimeoutAt != time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC).UnixMilli() {
 		t.Fatalf("permissions data 不符: %s", env.Data)
 	}
 	if env, _ := do(t, r, "GET", "/v1/mate/sessions/nope/permissions", ""); env.Code != 40401 {

@@ -63,7 +63,7 @@ const (
 		"**用自然语言和用户确认时间，绝不把规则串给用户看**。用户说\"在这个会话/在这里/提醒我\"→delivery=session 且 session_id=当前会话；说\"单独跑/别打扰我\"→new_session。"
 	descUpdate = "增量更新一条定时任务（只改传入的键，未传的保留）。参数：id（必填）、以及要改的 name/prompt/schedule/target/enabled/state。" +
 		"**用自然语言确认，不暴露规则串**。"
-	descList    = "列出全部定时任务（含装载失败带 error 的那些）。返回 [{id,name,enabled,state,schedule,target,next_due_at,last_status,error}]。"
+	descList    = "列出全部定时任务（含装载失败带 error 的那些）。返回 [{id,name,enabled,state,schedule,target,next_due_at,last_status,error}]；next_due_at 是 Unix 毫秒时间戳，schedule.at 仍是 RFC3339。"
 	descGet     = "取一条定时任务详情 + 最近运行史摘要。参数：id（必填）。返回 {automation, runs}。"
 	descDelete  = "删除一条定时任务（幂等：不存在 → deleted=false 且无错）。参数：id（必填）。"
 	descPreview = "只计算未来若干次到期时刻，**不落盘、不建会话**——用来跟用户确认\"到底几点跑\"。参数：schedule（必填，同 create 的五选一）、count（默认 5，上限 20）、from（可选 RFC3339 起点）。返回未来时刻列表（含本地墙钟）。"

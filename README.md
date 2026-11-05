@@ -402,6 +402,8 @@ cd frontend && pnpm build:watch
 
 REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`code=0` 成功，非 0 为业务错误（40401 未知会话/供应商/MCP server、40901 会话正忙、40501 能力不支持、50201 runtime/连接故障等）。
 
+**时间字段**：所有返回的瞬时（`created_at` / `updated_at` / `started_at` / `ended_at` / `timeout_at` / `next_due_at` / `last_fired_at` / `probed_at` / `checked_at` / `since` / `at` …）一律 **Unix 毫秒 `int64`**，前端按需格式化（`new Date(ms)`）。落库 / transcript / 导出正文 / `automation.schedule.at` / `usage` 的 `from`-`to` 保持 RFC3339 或日期串；口径与例外见 [docs/agents/time.md](docs/agents/time.md)。
+
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health` | 健康检查（`{code:0,msg:"ok"}`） |

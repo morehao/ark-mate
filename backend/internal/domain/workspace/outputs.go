@@ -42,9 +42,11 @@ type WorkspaceItem struct {
 	ListOrder  int64
 	DirStatus  string
 	Sessions   int
-	LastUsedAt string
-	CreatedAt  string
-	UpdatedAt  string
+	LastUsedAt int64
+
+	CreatedAt int64
+
+	UpdatedAt int64
 }
 
 // WorkspaceList 登记表读面。
@@ -76,8 +78,9 @@ type WorkspaceDirCreate struct {
 type RecentWorkspace struct {
 	Path       string
 	Name       string
-	LastUsedAt string
-	Sessions   int
+	LastUsedAt int64
+
+	Sessions int
 }
 
 // BrowseCrumb 面包屑的一段。
@@ -111,7 +114,7 @@ type FileEntry struct {
 	Path       string
 	IsDir      bool
 	Size       int64
-	ModifiedAt string
+	ModifiedAt int64
 }
 
 // FilesView 文件浏览结果。

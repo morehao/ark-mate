@@ -1,3 +1,5 @@
+import type { UnixMillis } from './time'
+
 /**
  * 模型面（v12）：**两个读面分得很开**，改这个文件前先认清哪一个是哪一个。
  *
@@ -85,8 +87,8 @@ export interface ModelCatalogResp {
   runtime: string
   /** 取样来源（session|resume|cache|none）。 */
   source: ModelCatalogSource
-  /** 取样时间（RFC3339；cache 时为首次取样时间）。 */
-  fetched_at?: string
+  /** 取样时间（Unix 毫秒；cache 时为首次取样时间）。 */
+  fetched_at?: UnixMillis
   options: ConfigOption[]
   auth_guidance?: AuthGuidance[]
   /** 空目录/降级说明（可直接展示给用户）。 */
@@ -137,7 +139,7 @@ export interface ModelRow {
   max_output_tokens: number | null
   /** 写面乐观锁计数（每次成功提交 +1）；**不是内容版本**（内容指纹在审计里）。 */
   revision: number
-  updated_at?: string
+  updated_at?: UnixMillis
   /** 写面回执（只在写面响应里出现；列表里为空）。 */
   effect?: ModelEffect
 }

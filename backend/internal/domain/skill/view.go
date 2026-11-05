@@ -87,7 +87,8 @@ type MaterializationStateView struct {
 	Status     string
 	Hash       string
 	ActualHash string
-	WrittenAt  string
-	Owners     []string
-	Detail     string
+	WrittenAt  int64
+
+	Owners []string
+	Detail string
 }

@@ -7,7 +7,6 @@ import {
   deleteMcpServer,
   deleteSkill,
   importSkillPackage,
-  listLibrary,
   listMcpServers,
   listSkills,
   listTools,
@@ -19,7 +18,6 @@ import {
 } from '@ark-mate/api'
 import type {
   CapabilityWriteBody,
-  LibraryItem,
   McpServer,
   McpToolCallResult,
   McpWriteResp,
@@ -57,7 +55,7 @@ import { type CapabilityEditState } from './shared'
  * 编辑只提交变化键（`capabilityView.ts` 的 patch 纯函数给出），成功后重新拉投影、
  * 不用本地乐观状态覆盖服务端。原文 JSON 仍保留为「高级」入口（未知键/精确 null/[] 的出路）。
  */
-export type CapScope = 'overview' | 'skills' | 'connectors'
+export type CapScope = 'skills' | 'connectors'
 
 /** 详情弹窗的目标与当前 tab（tab 的取值由两个面板各自解释）。 */
 export interface CapabilityDetailState {
@@ -71,10 +69,6 @@ export function useCapabilityData(scope: CapScope) {
   const [skills, setSkills] = useState<Skill[]>([])
   const [mcps, setMcps] = useState<McpServer[]>([])
   const [tools, setTools] = useState<Tool[]>([])
-  // M2-4 Library（统一读模型）：kind/q 由后端过滤（未知 kind 会报 40000，面板侧不预判）。
-  const [library, setLibrary] = useState<LibraryItem[]>([])
-  const [libKind, setLibKind] = useState<string>('')
-  const [libQ, setLibQ] = useState<string>('')
   const [busy, setBusy] = useState<string | null>(null)
   const [probing, setProbing] = useState<string | null>(null)
   const [toggleBusy, setToggleBusy] = useState<string | null>(null)
@@ -116,25 +110,13 @@ export function useCapabilityData(scope: CapScope) {
       showToast(toErrorMessage(err))
     }
   }
-  const loadLibrary = async (kind = libKind, q = libQ): Promise<void> => {
-    try {
-      setLibrary(await listLibrary({ kind: kind || undefined, q: q || undefined }))
-    } catch (err) {
-      showToast(writeErrorText(err))
-    }
-  }
-
   /** 按页加载：只拉本页真正要用的数据源。 */
   const loadAll = useCallback(async (): Promise<void> => {
     if (scope === 'skills') {
       await loadSkills()
       return
     }
-    if (scope === 'connectors') {
-      await Promise.all([loadMcps(), loadTools()])
-      return
-    }
-    await Promise.all([loadLibrary(), loadMcps()])
+    await Promise.all([loadMcps(), loadTools()])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope])
 
@@ -143,16 +125,9 @@ export function useCapabilityData(scope: CapScope) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope])
 
-  const refresh = (key: 'skills' | 'mcps' | 'tools' | 'library'): void => {
+  const refresh = (key: 'skills' | 'mcps' | 'tools'): void => {
     setBusy(key)
-    const p =
-      key === 'skills'
-        ? loadSkills()
-        : key === 'mcps'
-          ? loadMcps()
-          : key === 'tools'
-            ? loadTools()
-            : loadLibrary()
+    const p = key === 'skills' ? loadSkills() : key === 'mcps' ? loadMcps() : loadTools()
     void p.finally(() => setBusy((cur) => (cur === key ? null : cur)))
   }
 
@@ -436,18 +411,12 @@ export function useCapabilityData(scope: CapScope) {
     skills,
     mcps,
     tools,
-    library,
-    libKind,
-    setLibKind,
-    libQ,
-    setLibQ,
     busy,
     globalMcpRows,
     // 加载
     loadSkills,
     loadMcps,
     loadTools,
-    loadLibrary,
     loadAll,
     refresh,
     // 详情

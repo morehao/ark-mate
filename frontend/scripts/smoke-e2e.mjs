@@ -115,9 +115,11 @@ async function checkRest() {
   if (badRuntimeSession)
     return bad('底座（runtime）会话 id 形状', `应 rt_<底座原文>，got ${JSON.stringify(badRuntimeSession.runtime_session_id)}`)
   // P3 余留（侧栏相对时间/排序）依赖 updated_at；缺字段会让列表退化成「空时间」。
-  const noTime = convs.env.data.find((c) => typeof c?.updated_at !== 'string' || Number.isNaN(Date.parse(c.updated_at)))
-  if (noTime) return bad('会话列表时间字段', `updated_at 应为可解析时间戳，got ${JSON.stringify(noTime.updated_at)}`)
-  ok(`GET /sessions → 数组信封（id 全为 ses_<ULID>、runtime_session_id 全为 rt_*、updated_at 可解析；${convs.env.data.length} 条）`)
+  const noTime = convs.env.data.find(
+    (c) => typeof c?.updated_at !== 'number' || !Number.isFinite(c.updated_at) || c.updated_at <= 0,
+  )
+  if (noTime) return bad('会话列表时间字段', `updated_at 应为 Unix 毫秒时间戳，got ${JSON.stringify(noTime.updated_at)}`)
+  ok(`GET /sessions → 数组信封（id 全为 ses_<ULID>、runtime_session_id 全为 rt_*、updated_at 为毫秒；${convs.env.data.length} 条）`)
 
   // P2 §8.1 能力卡数据源：v19 起不再有「某个 agent 视角的统一能力目录」那张面，
   // 它折回**既有参数无关读面**——这里逐条验它们的形状仍在（这就是"折回"的判据：
@@ -155,6 +157,9 @@ async function checkRest() {
   const d = dg.env.data
   for (const key of ['state', 'runtime', 'connected', 'stderr_source', 'stderr_tail', 'checked_at']) {
     if (!(key in d)) return bad('GET /runtime/diagnostics 载荷', `缺字段 ${key}: ${JSON.stringify(d).slice(0, 200)}`)
+  }
+  if (typeof d.checked_at !== 'number') {
+    return bad('GET /runtime/diagnostics 时间字段', `checked_at 应为 Unix 毫秒，got ${JSON.stringify(d.checked_at)}`)
   }
   // 身份字段"只剩一个"这件事在这里用**封闭键集合**判：多出任何一个未声明的键（无论是旧的 agent
   // 身份，还是将来新长的字段）都会红——比逐条点名某个键更强，也避免把已撤的标识符写回脚本。
@@ -215,6 +220,7 @@ async function checkRest() {
       if (!(key in h)) return bad('GET /search/messages 命中字段', `缺 ${key}: ${JSON.stringify(h).slice(0, 200)}`)
     }
     if (!(typeof h.seq === 'number' && h.seq > 0)) return bad('GET /search/messages 锚点', `seq 非法: ${JSON.stringify(h).slice(0, 200)}`)
+    if (typeof h.created_at !== 'number') return bad('GET /search/messages 时间字段', `created_at 应为 Unix 毫秒: ${JSON.stringify(h).slice(0, 200)}`)
   }
   ok(`GET /search/messages → source=${m.source} total=${m.total}（锚点字段齐备）`)
   const msBad = await apiGet('/search/messages')

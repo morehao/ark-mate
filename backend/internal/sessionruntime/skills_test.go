@@ -271,7 +271,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 		t.Fatalf("物化失败: w=%d err=%v", w, err)
 	}
 	st := matStatus(t, svc, "demo", root)
-	if st.Status != "in_sync" || st.Hash != st.ActualHash || st.WrittenAt == "" {
+	if st.Status != "in_sync" || st.Hash != st.ActualHash || st.WrittenAt == 0 {
 		t.Fatalf("物化后应为 in_sync 且期望==实测: %+v", st)
 	}
 	if len(st.Owners) != 1 || st.Owners[0] != "rtx" {

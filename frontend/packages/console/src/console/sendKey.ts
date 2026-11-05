@@ -11,19 +11,20 @@ export function getSendKey(): SendKeyMode {
   }
 }
 
-export function toggleSendKey(cur: SendKeyMode): SendKeyMode {
-  const next: SendKeyMode = cur === 'enter-send' ? 'enter-newline' : 'enter-send'
+/**
+ * 写入发送键档位。
+ *
+ * 2026-11-05：输入卡右下角那条「Enter 发送 · Shift+Enter 换行 ⇄」撤掉了（用户反馈是噪声），
+ * 档位开关搬到「设置 · 通用 · 键盘操作」。所以这里从 `toggleSendKey` 改成**显式写入**——
+ * 开关知道自己要写哪一档，不再依赖"读当前值再取反"。
+ * 输入区每次按键都现读 `getSendKey()`（不再缓存进 state），设置里改完立刻生效。
+ */
+export function setSendKey(mode: SendKeyMode): void {
   try {
-    localStorage.setItem(LS_KEY, next)
+    localStorage.setItem(LS_KEY, mode)
   } catch {
     /* 忽略持久化失败（内存态照样生效） */
   }
-  return next
-}
-
-/** 提示行文案（随档位）。 */
-export function sendKeyHint(mode: SendKeyMode): string {
-  return mode === 'enter-send' ? 'Enter 发送 · Shift+Enter 换行' : 'Enter 换行 · ⌘/Ctrl+Enter 发送'
 }
 
 /** 换行键行为（防止默认行为需要时返回 true）。 */

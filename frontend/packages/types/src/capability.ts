@@ -1,3 +1,5 @@
+import type { UnixMillis } from './time'
+
 // P1 能力数据面对外类型（backend /v1/mate/skills|mcps|tools；见
 // backend/internal/dto/dtocapability 的 SkillResp/McpServerResp/ToolResp）。
 // MCP headers/凭证后端不读回，故此处无 headers 字段。
@@ -48,8 +50,8 @@ export interface SkillMaterializationState {
   hash?: string
   /** 磁盘实测摘要。 */
   actual_hash?: string
-  /** 产物 sidecar 记录的写入时间（RFC3339）。 */
-  written_at?: string
+  /** 产物 sidecar 记录的写入时间（Unix 毫秒）。 */
+  written_at?: UnixMillis
   /** 归属标记里登记的**投影方**集合（共享 root 下各投影方各登记一次）。 */
   owners?: string[]
   detail?: string
@@ -99,8 +101,8 @@ export interface McpServer {
   unresolved_secret_keys?: string[]
   /** —— P2 §5.2 live 探测状态（从未探测 → 0/空） —— */
   tool_count: number
-  /** 最近一次探测时间（RFC3339）。 */
-  last_probe_at?: string
+  /** 最近一次探测时间（Unix 毫秒）。 */
+  last_probe_at?: UnixMillis
   /** 最近一次探测失败原因（成功则空）。 */
   last_probe_error?: string
 }
@@ -240,7 +242,7 @@ export interface McpProbeResult {
   transport: string
   server_name?: string
   server_version?: string
-  probed_at: string
+  probed_at: UnixMillis
   added: number
   removed: number
   skipped: number

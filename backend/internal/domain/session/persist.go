@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
+
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -153,10 +155,10 @@ func (pl *Plane) ListRuns(ctx context.Context, id string) ([]RunItem, error) {
 			ID: r.ID, UserText: r.UserText, Status: r.Status,
 			ErrorCode: r.ErrorCode, StopReason: r.StopReason,
 			FirstSeq: r.FirstSeq, LastSeq: r.LastSeq, FirstTokenMS: r.FirstTokenMS,
-			StartedAt: r.StartedAt.UTC().Format(time.RFC3339Nano),
+			StartedAt: objtime.Milli(r.StartedAt),
 		}
 		if !r.EndedAt.IsZero() {
-			resp.EndedAt = r.EndedAt.UTC().Format(time.RFC3339Nano)
+			resp.EndedAt = objtime.Milli(r.EndedAt)
 		}
 		if r.UsageJSON != "" {
 			var u objusage.UsageInfo

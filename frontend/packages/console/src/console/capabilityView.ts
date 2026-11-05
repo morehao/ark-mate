@@ -8,6 +8,7 @@ import type {
   Skill,
   SkillMaterializationResp,
   SkillMaterializationState,
+  UnixMillis,
   SkillWarning,
   Tool,
 } from '@ark-mate/types'
@@ -35,7 +36,7 @@ export interface McpRow {
    */
   applicability: LibraryApplicability[]
   toolCount: number
-  lastProbeAt?: string
+  lastProbeAt?: UnixMillis
   lastProbeError?: string
   /** 是否可触发 live 探测（transport 为空/未知 → false；B3 起 sse 已支持）。 */
   probeable: boolean
@@ -156,42 +157,7 @@ export function toolSourceLabel(t: Tool): string {
   return t.source
 }
 
-/** 探测时间展示（RFC3339 → 本地 MM-DD HH:mm:ss；空/非法 → '—'）。 */
-export function fmtProbeAt(iso?: string): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  const p = (n: number): string => String(n).padStart(2, '0')
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-}
-
 // ——— M2 Library 视图模型（只读聚合；纯函数） ———
-
-/** Library 条目的类型标签文案（M5 之前不含 command）。 */
-export function libraryKindLabel(kind: string): string {
-  switch (kind) {
-    case 'skill':
-      return '技能'
-    case 'mcp':
-      return '连接器'
-    case 'tool':
-      return '工具'
-    default:
-      return kind
-  }
-}
-
-/** Library 条目的类型标签色（与能力页其它标签同一语言：skill 中性、MCP 绿、工具金）。 */
-export function libraryKindColor(kind: string): string {
-  switch (kind) {
-    case 'mcp':
-      return 'green'
-    case 'tool':
-      return 'gold'
-    default:
-      return 'default'
-  }
-}
 
 /** 逐 runtime 可达性标签（颜色 + 短文案 + tooltip 里那句人话原因）。 */
 export function libraryStatusView(status: string): { color: string; text: string } {
@@ -208,18 +174,6 @@ export function libraryStatusView(status: string): { color: string; text: string
       return { color: 'red', text: '已禁用' }
     default:
       return { color: 'default', text: status }
-  }
-}
-
-/** origin 标签（local = 自己添加、可管理；imported = 平台自带或连接后自动获取）。 */
-export function libraryOriginView(origin: string): { color: string; text: string; hint: string } {
-  if (origin === 'local') {
-    return { color: 'cyan', text: '本机', hint: '你自己添加的能力，可在这里管理' }
-  }
-  return {
-    color: 'default',
-    text: '内置',
-    hint: '平台自带，或连接后自动获取的能力',
   }
 }
 
@@ -420,7 +374,7 @@ export interface McpConnStateView {
 export function mcpConnState(row: {
   defEnabled: boolean
   lastProbeError?: string
-  lastProbeAt?: string
+  lastProbeAt?: UnixMillis
   unresolvedSecretKeys: string[]
 }): McpConnStateView {
   if (!row.defEnabled) return { key: 'disabled', label: '已停用', color: 'default', tone: 'muted' }

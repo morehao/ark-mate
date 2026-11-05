@@ -12,6 +12,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
@@ -69,6 +70,11 @@ func (pl *Plane) WorkspaceRegistry() (*WorkspaceList, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 落库是 RFC3339Nano 文本；出口统一毫秒，先在这里归一一次，后面只做整数比较。
+	lastUsedMilli := make(map[string]int64, len(lastUsed))
+	for id, at := range lastUsed {
+		lastUsedMilli[id] = objtime.Parse(at)
+	}
 	// 历史会话（workspace_id = ''）在**读面**归默认工作空间（设计 ADR-6）：
 	// 它们的数量与最近使用要并到默认那一行上，否则界面上默认工作空间永远显示 0 个会话，
 	// 而点进去却有会话——那种不一致没有任何解释余地。
@@ -94,15 +100,15 @@ func (pl *Plane) WorkspaceRegistry() (*WorkspaceList, error) {
 			IsDefault: r.IsDefault,
 			ListOrder: r.ListOrder,
 			DirStatus: dirStatusOf(r.Path),
-			CreatedAt: r.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
-			UpdatedAt: r.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+			CreatedAt: objtime.Milli(r.CreatedAt),
+			UpdatedAt: objtime.Milli(r.UpdatedAt),
 		}
 		resp.Sessions = int(counts[r.ID])
-		resp.LastUsedAt = lastUsed[r.ID]
+		resp.LastUsedAt = lastUsedMilli[r.ID]
 		if r.IsDefault {
 			// 归到默认工作空间的历史会话（workspace_id = ''）。
 			resp.Sessions += int(counts[""])
-			if v := lastUsed[""]; v > resp.LastUsedAt {
+			if v := lastUsedMilli[""]; v > resp.LastUsedAt {
 				resp.LastUsedAt = v
 			}
 		}
@@ -487,13 +493,13 @@ func (pl *Plane) workspaceRespForMemDefault(def model.WorkspaceEntity) Workspace
 		IsDefault: true,
 		ListOrder: def.ListOrder,
 		DirStatus: dirStatusOf(def.Path),
-		CreatedAt: def.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt: def.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt: objtime.Milli(def.CreatedAt),
+		UpdatedAt: objtime.Milli(def.UpdatedAt),
 	}
 	for _, rec := range pl.sessionViews() {
 		if rec.WorkspaceID == def.ID || rec.WorkspaceID == "" {
 			resp.Sessions++
-			if at := rec.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"); at > resp.LastUsedAt {
+			if at := objtime.Milli(rec.UpdatedAt); at > resp.LastUsedAt {
 				resp.LastUsedAt = at
 			}
 		}

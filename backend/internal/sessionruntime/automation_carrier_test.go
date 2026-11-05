@@ -225,7 +225,7 @@ func TestAutomationStoreLoaderToleranceAndRuntime(t *testing.T) {
 	if goodResp.LastStatus != automation.RunCompleted || len(goodResp.RecentRuns) != 1 {
 		t.Fatalf("运行态列未进视图: %+v", goodResp)
 	}
-	if goodResp.LastFiredAt == "" || goodResp.State != automation.StateActive {
+	if goodResp.LastFiredAt == 0 || goodResp.State != automation.StateActive {
 		t.Fatalf("认领游标/state 不符: %+v", goodResp)
 	}
 	// 坏行的运行史读不出来是**定义不可执行**（40001，而不是"没有运行史"）。

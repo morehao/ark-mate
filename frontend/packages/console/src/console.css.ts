@@ -78,7 +78,6 @@ export const consoleStyleSheet = `
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 7px;
     height: 38px;
     margin: 2px 12px 12px;
     border: 1px solid ${tokens.borderStrong};
@@ -96,12 +95,9 @@ export const consoleStyleSheet = `
     background: ${tokens.primarySoft};
     border-color: ${tokens.primary};
   }
-  .fg-rail-new-icon { font-size: 14px; color: ${tokens.textSecondary}; }
-  .fg-rail-new:hover .fg-rail-new-icon { color: ${tokens.primary}; }
   /* /sessions 上没有一级导航项（问答入口已去重）：选中态落在新建按钮上。
      与 .fg-navitem.fg-on 同一套语汇（底色 + 主色前缘），只是按钮自带边框，所以再点亮边框。 */
   .fg-rail-new.fg-on { background: ${tokens.primarySoft}; border-color: ${tokens.primary}; }
-  .fg-rail-new.fg-on .fg-rail-new-icon { color: ${tokens.primary}; }
 
   /* 导航区：一级 32px / 二级 30px，条目间距 1px */
   .fg-nav-rail {
@@ -151,23 +147,10 @@ export const consoleStyleSheet = `
   .fg-navitem-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fg-navitem-count { flex: none; font-family: ${tokens.fontMono}; font-size: 11px; color: ${tokens.textSecondary}; }
 
-  /* 组行：文字区（进总览 + 展开）与箭头区分工，箭头的点击面独立 */
-  .fg-navgroup-row { padding-right: 4px; }
-  .fg-navgroup-text {
-    flex: 1;
-    min-width: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    height: 32px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
+  /* 组行：整行只切换展开（组没有落地页），箭头只是视觉指示。
+     宽 100%：组行现在是 button，在块级父容器里会按内容收缩，不给就会缩到文字宽度、
+     点击热区与选中底都只剩一截（2026-11-05 实测 96px）。 */
+  .fg-navgroup-row { width: 100%; padding-right: 4px; }
   .fg-navgroup-caret {
     flex: none;
     display: inline-flex;
@@ -175,13 +158,9 @@ export const consoleStyleSheet = `
     justify-content: center;
     width: 24px;
     height: 24px;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
     color: ${tokens.textPlaceholder};
-    cursor: pointer;
   }
-  .fg-navgroup-caret:hover { background: ${tokens.border}; color: ${tokens.text}; }
+  .fg-navgroup-row:hover .fg-navgroup-caret { color: ${tokens.textSecondary}; }
 
   /* 二级项：缩进 26px；命中态用主色文字 + 弱底 */
   .fg-navsub-list { display: flex; flex-direction: column; gap: 1px; }
@@ -615,7 +594,6 @@ export const consoleStyleSheet = `
     padding: 0 2px;
     flex-wrap: wrap;
   }
-  .fg-composer-chips > .fg-hint-kbd { margin-left: auto; }
 
   /* 通用 chip（工作区 / 权限）：pill 形态，走 token。 */
   .fg-chip {
@@ -645,25 +623,6 @@ export const consoleStyleSheet = `
   .fg-perm-opt { display: flex; flex-direction: column; gap: 1px; padding: 2px 0; }
   .fg-perm-opt-name { font-size: 13px; line-height: 1.4; }
   .fg-perm-opt-desc { font-size: 11.5px; color: ${tokens.textPlaceholder}; line-height: 1.4; }
-
-  /* 输入区底栏的按键提示（可点击切档）：单行 + 省略号 + 可裁剪。
-     窄容器里逐词换行会把底栏行高撑开，溢出的文字又被后绘制的模型选择器白底盖住，
-     看起来就是「文字重影」——所以这里显式禁止换行。 */
-  .fg-hint-kbd {
-    max-width: 100%;
-    border: none;
-    background: transparent;
-    padding: 0;
-    margin: 0;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: inherit;
-    color: inherit;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .fg-hint-kbd:hover { text-decoration: underline; }
 
   /* 模型选择器关闭态：药丸（不落表单框感）——hairline 边 + 全圆角 + mono 小字，
      与同一行的「在项目中工作」弱字、圆形发送钮同一语言；hover 抬边+软底，聚焦出靛蓝环。 */
@@ -1435,16 +1394,18 @@ export const consoleStyleSheet = `
     line-height: 1.6;
   }
 
-  /* 会话行右端状态徽标（设计 §15）：状态点 + 文案，紧邻「⋯」、不参与收缩。
-     「⋯」与它共用行右端——静止态徽标在最右，hover / 当前行时徽标淡出让位，位置不跳（D11）。 */
+  /* 会话行右端（设计 §15；2026-11-05 反馈改成「状态点 + 日期」）：紧邻「⋯」、不参与收缩。
+     「⋯」与它共用行右端——静止态在最右，hover / 当前行时整格淡出让位，位置不跳（D11）。
+     颜色只落在**点**上：日期是中性事实，不该被运行中/失败的语义染成主色或红色。
+     六态见 railView.sessionBadge；已完成用 success（不再用灰——灰读起来像"没有状态"）。 */
   .fg-sess-status {
     flex: none;
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
     font-size: 11px;
     line-height: 1;
-    color: ${tokens.textSecondary};
+    color: ${tokens.textPlaceholder};
     white-space: nowrap;
     transition: opacity 0.12s ease;
   }
@@ -1455,14 +1416,22 @@ export const consoleStyleSheet = `
     border-radius: 50%;
     background: ${tokens.textPlaceholder};
   }
-  .fg-sess-status.fg-run { color: ${tokens.primary}; }
+  /* 日期：等宽数字，避免不同日期让右端宽度跳动。 */
+  .fg-sess-date {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
   .fg-sess-status.fg-run .fg-sess-dot { background: ${tokens.primary}; animation: fg-pulse 1.4s ease-in-out infinite; }
-  .fg-sess-status.fg-wait { color: ${tokens.warning}; }
   .fg-sess-status.fg-wait .fg-sess-dot { background: ${tokens.warning}; }
-  .fg-sess-status.fg-fail { color: ${tokens.error}; }
   .fg-sess-status.fg-fail .fg-sess-dot { background: ${tokens.error}; }
-  .fg-sess-status.fg-done { color: ${tokens.textPlaceholder}; }
-  .fg-sess-status.fg-done .fg-sess-dot { background: ${tokens.textPlaceholder}; }
+  .fg-sess-status.fg-done .fg-sess-dot { background: ${tokens.success}; }
+  /* 已取消：作废，什么都没留下——中性灰（不是红：取消不是失败）。 */
+  .fg-sess-status.fg-cancel .fg-sess-dot { background: ${tokens.textPlaceholder}; }
+  /* 已中断：琥珀**空心环**，与「待授权」的实心琥珀同族但形态不同（可重发 ≠ 正在等你）。 */
+  .fg-sess-status.fg-interrupt .fg-sess-dot {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px ${tokens.warning};
+  }
   .fg-sess-item:hover .fg-sess-status,
   .fg-sess-item.fg-on .fg-sess-status { opacity: 0; }
 

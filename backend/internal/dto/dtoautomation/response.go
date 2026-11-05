@@ -15,10 +15,10 @@ type AutomationResp struct {
 	Target   automation.Target   `json:"target"`
 	// MaxRunDuration 本轮外层超时（空 = 只用 MATE_RUN_TIMEOUT 看门狗）。
 	MaxRunDuration string `json:"max_run_duration,omitempty"`
-	// NextDueAt 下次到期（RFC3339 UTC；空 = 没有下一次：跑完的 once / 归档 / 装载失败）。
-	NextDueAt string `json:"next_due_at,omitempty"`
-	// LastFiredAt 最近一次**认领**的 occurrence（不论结果；ADR-10 的推进点）。
-	LastFiredAt   string `json:"last_fired_at,omitempty"`
+	// NextDueAt 下次到期（Unix 毫秒 UTC；0 = 没有下一次：跑完的 once / 归档 / 装载失败）。
+	NextDueAt int64 `json:"next_due_at,omitempty"`
+	// LastFiredAt 最近一次**认领**的 occurrence（Unix 毫秒；0 = 从未触发）。
+	LastFiredAt   int64  `json:"last_fired_at,omitempty"`
 	LastSessionID string `json:"last_session_id,omitempty"`
 	LastStatus    string `json:"last_status,omitempty"`
 	LastReason    string `json:"last_reason,omitempty"`
@@ -28,7 +28,7 @@ type AutomationResp struct {
 	// 调度也不跑、日志里一行 WARN"是最难排查的一类投诉）。
 	Error string `json:"error,omitempty"`
 	// RecentRuns 最近若干次触发（最新在前，最多 20 条）。
-	RecentRuns []automation.RunRecord `json:"recent_runs,omitempty"`
+	RecentRuns []RunRecordResp `json:"recent_runs,omitempty"`
 }
 
 // AutomationDeleteResp 删除结果（幂等：本来就不存在 → deleted=false 且无错）。
@@ -49,8 +49,8 @@ type AutomationPreviewResp struct {
 
 // AutomationPreviewItem 一个预览时刻。
 type AutomationPreviewItem struct {
-	// At 该次到期的绝对时刻（RFC3339 UTC）。
-	At string `json:"at"`
+	// At 该次到期的绝对时刻（Unix 毫秒 UTC）。
+	At int64 `json:"at"`
 	// Wall 本地墙钟（`2006-01-02 15:04`），即"用户设定意图"的那一面。
 	Wall string `json:"wall"`
 	// Timezone 解释用的 IANA 时区。
@@ -63,9 +63,29 @@ type AutomationPreviewItem struct {
 type AutomationRunsResp struct {
 	ID string `json:"id"`
 	// Runs 最近若干次触发的留痕（含 claimed/overlap/duplicate/skipped：**没跑成的那些也要看得见**）。
-	Runs []automation.RunRecord `json:"runs"`
+	Runs []RunRecordResp `json:"runs"`
 	// Limit 本次返回的条数上限（服务端固定 RecentRunsMax；回带是为了让面板不必猜）。
 	Limit int `json:"limit"`
+}
+
+// RunRecordResp 一次触发的运行痕迹（列表的 `recent_runs` 与运行史接口共用）。
+//
+// 为什么不复用 `core/automation.RunRecord`：后者是**定义文件的 JSON 形状**
+// （`time.Time` → RFC3339），而接口响应按本仓时间口径一律 Unix 毫秒。同一个结构两用
+// 会让文件载体被接口口径绑死——定义文件要能被人手写、被导入导出，它必须保持 RFC3339。
+type RunRecordResp struct {
+	// ScheduledFor 本次认领的 occurrence（Unix 毫秒 UTC）。
+	ScheduledFor int64 `json:"scheduled_for"`
+	// FiredAt 实际触发时刻（Unix 毫秒 UTC；0 = 未记录）。
+	FiredAt int64 `json:"fired_at"`
+	// Status claimed | duplicate | overlap | skipped。
+	Status string `json:"status"`
+	// Reason 结果说明（人话；overlap/skipped 时说明为什么没跑）。
+	Reason string `json:"reason,omitempty"`
+	// SessionID 本次产生的会话（claimed 之外为空）。
+	SessionID string `json:"session_id,omitempty"`
+	// Trigger scheduled | recovery | manual。
+	Trigger string `json:"trigger,omitempty"`
 }
 
 // AutomationRunResp 手动触发一次的结果（`POST /automations/:id/run`）。

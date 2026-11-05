@@ -1,5 +1,5 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { DownOutlined, PlusCircleOutlined, RightOutlined } from '@ant-design/icons'
+import { DownOutlined, RightOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { useMate } from '../store'
 import {
@@ -83,30 +83,21 @@ export function NavRail() {
     const current = activeChildOf(pathname, group)
     return (
       <div className="fg-navgroup" key={group.id}>
-        <div className={`fg-navitem fg-navgroup-row${on ? ' fg-on' : ''}`}>
-          {/* 文字区：进总览 + 展开；箭头区：只切换展开（设计 §关键逻辑） */}
-          <button
-            type="button"
-            className="fg-navgroup-text"
-            onClick={() => {
-              if (!expanded) setNavGroupExpanded(group.id, true)
-              navigate(group.to)
-              leave()
-            }}
-          >
-            <span className="fg-navitem-icon">{group.icon}</span>
-            <span className="fg-navitem-label">{group.label}</span>
-          </button>
-          <button
-            type="button"
-            className="fg-navgroup-caret"
-            aria-expanded={expanded}
-            aria-label={`${expanded ? '收起' : '展开'}「${group.label}」`}
-            onClick={() => setNavGroupExpanded(group.id, !expanded)}
-          >
+        {/* 组行整行只切换展开：组没有落地页（2026-11-05 反馈：去掉「扩展」总览页）。
+            箭头只是视觉指示，点击面就是整行。 */}
+        <button
+          type="button"
+          className={`fg-navitem fg-navgroup-row${on ? ' fg-on' : ''}`}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? '收起' : '展开'}「${group.label}」`}
+          onClick={() => setNavGroupExpanded(group.id, !expanded)}
+        >
+          <span className="fg-navitem-icon">{group.icon}</span>
+          <span className="fg-navitem-label">{group.label}</span>
+          <span className="fg-navgroup-caret" aria-hidden="true">
             {expanded ? <DownOutlined style={{ fontSize: 10 }} /> : <RightOutlined style={{ fontSize: 10 }} />}
-          </button>
-        </div>
+          </span>
+        </button>
         {expanded && (
           <div className="fg-navsub-list" role="group" aria-label={group.label}>
             {group.children.map(renderChild)}
@@ -152,7 +143,7 @@ export function NavRail() {
         aria-current={pathname === '/sessions' ? 'page' : undefined}
         onClick={openNew}
       >
-        <PlusCircleOutlined className="fg-rail-new-icon" />
+        {/* 2026-11-05 反馈：新建按钮前面不再带 `+`。 */}
         <span>新建会话</span>
       </button>
 

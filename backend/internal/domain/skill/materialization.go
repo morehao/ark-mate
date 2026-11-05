@@ -6,10 +6,10 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/morehao/ark-mate/internal/core/capability"
 	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 )
 
 // ——— §13.4 S2：物化体检（审计 / 复现面） ———
@@ -133,7 +133,7 @@ func materializationState(sk capability.Skill, p Projection) MaterializationStat
 			}
 			break
 		}
-		st.WrittenAt = prov.WrittenAt.UTC().Format(time.RFC3339)
+		st.WrittenAt = objtime.Milli(prov.WrittenAt)
 		actual, hashErr := capability.ComputeDirHash(dir)
 		switch {
 		case hashErr != nil:

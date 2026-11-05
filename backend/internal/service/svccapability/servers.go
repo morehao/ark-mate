@@ -1,9 +1,9 @@
 package svccapability
 
 import (
-	"time"
-
 	"github.com/morehao/ark-mate/internal/core/capability"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 )
@@ -55,7 +55,7 @@ func (s *Servers) ListMcpServers() ([]dtocapability.McpServerResp, error) {
 		}
 		if st, ok := probes[m.ID]; ok {
 			if !st.At.IsZero() {
-				resp.LastProbeAt = st.At.UTC().Format(time.RFC3339)
+				resp.LastProbeAt = objtime.Milli(st.At)
 			}
 			resp.LastProbeErr = st.Err
 		}

@@ -151,8 +151,8 @@ export interface RunUsageInfo {
  */
 export function runDurationMS(run: SessionRun): number {
   if (!run?.started_at) return 0
-  const s = Date.parse(run.started_at)
-  const e = run.ended_at ? Date.parse(run.ended_at) : 0
+  const s = run.started_at
+  const e = run.ended_at ?? 0
   if (!Number.isFinite(s)) return 0
   if (!Number.isFinite(e) || e <= s) return 0
   return e - s

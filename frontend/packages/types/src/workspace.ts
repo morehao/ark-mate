@@ -1,3 +1,5 @@
+import type { UnixMillis } from './time'
+
 /**
  * 工作空间（= 会话的 ACP cwd）相关的只读数据面类型。
  *
@@ -86,10 +88,10 @@ export interface Workspace {
   dir_status: WorkspaceDirStatus
   /** 该工作空间名下的会话数（含归档；历史会话算进默认工作空间那一行）。 */
   sessions: number
-  /** 最近使用时间（RFC3339；缺省 = 从未用过）。 */
-  last_used_at?: string
-  created_at: string
-  updated_at: string
+  /** 最近使用时间（Unix 毫秒；缺省 = 从未用过）。 */
+  last_used_at?: UnixMillis
+  created_at: UnixMillis
+  updated_at: UnixMillis
 }
 
 /** 目录现状。非 `ok` 时这一行**仍然在下发**（登记不会因为目录消失就凭空不见），只是不能在其中建会话。 */
@@ -150,8 +152,8 @@ export interface WorkspaceMoveResp {
 export interface WorkspaceRecent {
   path: string
   name: string
-  /** 该工作空间下最新会话的 updated_at（ISO RFC3339）。 */
-  last_used_at: string
+  /** 该工作空间下最新会话的 updated_at（Unix 毫秒）。 */
+  last_used_at: UnixMillis
   /** 该工作空间下的会话数（含归档）。 */
   sessions: number
 }
@@ -163,8 +165,8 @@ export interface WorkspaceFileEntry {
   is_dir: boolean
   /** 字节数（符号链接取真身大小）。 */
   size: number
-  /** 最后修改时间（RFC3339，UTC）。 */
-  modified_at: string
+  /** 最后修改时间（Unix 毫秒，UTC）。 */
+  modified_at: UnixMillis
 }
 
 /**

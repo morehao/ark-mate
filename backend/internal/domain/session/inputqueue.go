@@ -9,6 +9,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/golib/glog"
@@ -135,7 +136,7 @@ func (pl *Plane) ListQueuedInputs(ctx context.Context, id string) ([]QueuedInput
 		out = append(out, QueuedInputItem{
 			ID: q.ID, Text: q.Text, Delivery: q.Delivery,
 			TargetRunID: q.TargetRunID, Generation: q.Generation,
-			CreatedAt: q.CreatedAt.UTC().Format(time.RFC3339Nano),
+			CreatedAt: objtime.Milli(q.CreatedAt),
 		})
 	}
 	return out, nil

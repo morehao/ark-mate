@@ -35,7 +35,6 @@ export interface NavLeaf {
 export interface NavGroup {
   readonly id: string
   readonly label: string
-  readonly to: string
   readonly order: number
   readonly icon: ReactNode
   readonly children: readonly NavLeaf[]
@@ -47,7 +46,6 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
   {
     id: 'extensions',
     label: '扩展',
-    to: '/extensions',
     order: 20,
     icon: <AppstoreOutlined />,
     children: [
@@ -68,10 +66,11 @@ export function isGroup(entry: NavEntry): entry is NavGroup {
  * 命中判定：按**路径段前缀**——`/sessions/abc` 命中 `/sessions`，
  * `/settings/model` 命中 `/settings`（设置区内分节，左栏入口仍要高亮）。
  * 用段边界而不是裸 `startsWith`：`/settings-x` 不该命中 `/settings`。
+ *
+ * 组**没有自己的落地路由**（点组行只切换展开）：组的命中只看它有没有二级项被命中。
  */
 export function isEntryActive(pathname: string, entry: NavEntry): boolean {
   if (isGroup(entry)) {
-    if (isPathActive(pathname, entry.to)) return true
     return entry.children.some((c) => c.to !== '' && isPathActive(pathname, c.to))
   }
   return isPathActive(pathname, entry.to)
@@ -117,9 +116,9 @@ export function setExpanded(
 /**
  * 组的展开态：显式切换过就听用户的（`false` 也算显式），否则**只在当前路由命中该组时默认展开**。
  *
- * 为什么不默认全展开：左栏把导航与会话列表合在一栏里，「扩展」的 2 个二级项 + 占位项常驻要吃掉
+ * 为什么不默认全展开：左栏把导航与会话列表合在一栏里，「扩展」的 3 个二级项常驻要吃掉
  * 90px；1440×800 下会话列表可视高度只剩 332px（≈5.5 条），而 T5 的阈值是 ≥7 条。
- * 会话页根本用不到二级项、扩展页又不渲染会话列表——按需展开两边都不吃亏。
+ * 会话页根本用不到二级项——按需展开两边都不吃亏。
  */
 export function groupExpanded(
   state: Readonly<Record<string, boolean>>,

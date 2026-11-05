@@ -14,6 +14,8 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
+
 	"github.com/morehao/ark-mate/internal/core/protocol"
 )
 
@@ -69,7 +71,7 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req protocol.Permi
 			"kind":         tool.Kind,
 			"input":        tool.Input,
 			"options":      opts,
-			"timeout_at":   timeout.UTC().Format(time.RFC3339), // UI 端超时收敛（无用户决策时自动拒绝）
+			"timeout_at":   objtime.Milli(timeout), // Unix 毫秒；UI 端超时收敛（无用户决策时自动拒绝）
 		})
 	}
 	return o.perm.RegisterAndWait(ctx, sid, req, publish)
@@ -214,7 +216,7 @@ func (o *Orchestrator) requestElicitation(ctx context.Context, req protocol.Elic
 			"elicitation_id": it.ID,
 			"mode":           it.Mode,
 			"message":        it.Message,
-			"timeout_at":     it.TimeoutAt.UTC().Format(time.RFC3339),
+			"timeout_at":     objtime.Milli(it.TimeoutAt),
 		}
 		if it.Mode == "form" {
 			payload["schema"] = it.Schema

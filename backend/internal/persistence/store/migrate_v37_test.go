@@ -139,9 +139,9 @@ func TestLLMUsageFailedDegradedSessionCalls(t *testing.T) {
 		}
 	}
 	for _, r := range []model.LLMCallEntity{
-		mk("summary", "ok", ""),        // 旁路成功
-		mk("summary", "degraded", ""),  // 旁路降级
-		mk("judge", "error", "sess_1"), // 会话失败
+		mk("summary", "ok", ""),          // 旁路成功
+		mk("summary", "degraded", ""),    // 旁路降级
+		mk("judge", "error", "sess_1"),   // 会话失败
 		mk("agent_turn", "ok", "sess_1"), // 会话成功
 	} {
 		if err := s.InsertLLMCall(ctx, r); err != nil {

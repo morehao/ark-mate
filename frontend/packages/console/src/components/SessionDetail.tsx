@@ -11,6 +11,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
+import { fmtDateTime } from '../console/time'
 import { Dot, Pill, sessionStatusMeta } from '@ark-mate/ui'
 import type { ArtifactMeta, PermissionMemory, PermissionOptionKind, PermissionResp, SessionDetail } from '@ark-mate/types'
 import { modelValues } from '@ark-mate/types'
@@ -45,14 +46,6 @@ const ORIGIN_LABEL: Record<string, string> = {
   upload: '上传',
   inline: '内联',
   manual: '手动登记',
-}
-
-function fmtLocal(iso?: string): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 function optionId(p: PermissionResp, kind: PermissionOptionKind): string | undefined {
@@ -479,8 +472,8 @@ export function SessionDetailDrawer({
                   />
                 </span>,
               )}
-              {row('创建', <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}>{fmtLocal(s.created_at)}</span>)}
-              {row('更新', <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}>{fmtLocal(s.updated_at)}</span>)}
+              {row('创建', <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}>{fmtDateTime(s.created_at)}</span>)}
+              {row('更新', <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}>{fmtDateTime(s.updated_at)}</span>)}
               {(() => {
                 // 钉住的能力选定（M3）：展示的是**创建时钉住的快照**，不是"现在能用什么"——
                 // 定义文件改了以后这个会话仍跑在原来那一代上，这个差别正是用户需要看见的。
@@ -831,7 +824,7 @@ export function SessionDetailDrawer({
                         }}
                       >
                         <span>kind: {p.kind || '—'}</span>
-                        <span>截止 {fmtLocal(p.timeout_at)}</span>
+                        <span>截止 {fmtDateTime(p.timeout_at)}</span>
                       </div>
                       <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         {actBtn('允许本次', 'allow', p)}
@@ -927,7 +920,7 @@ export function SessionDetailDrawer({
                             {item.decision === 'allow' ? '始终允许' : '始终拒绝'}
                           </span>
                           <span>kind: {item.kind || '—'}</span>
-                          <span>授予 {fmtLocal(item.since)}</span>
+                          <span>授予 {fmtDateTime(item.since)}</span>
                         </div>
                       </div>
                       <Popconfirm

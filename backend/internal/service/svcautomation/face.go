@@ -11,6 +11,7 @@ import (
 	pkgauto "github.com/morehao/ark-mate/internal/core/automation"
 	"github.com/morehao/ark-mate/internal/core/code"
 	defn "github.com/morehao/ark-mate/internal/core/definition"
+	"github.com/morehao/ark-mate/internal/core/object/objtime"
 	domauto "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 )
@@ -132,7 +133,7 @@ func (s *Service) PreviewAutomation(req dtoautomation.AutomationPreviewReq) (*dt
 	resp := &dtoautomation.AutomationPreviewResp{Occurrences: make([]dtoautomation.AutomationPreviewItem, 0, len(occs))}
 	for _, o := range occs {
 		resp.Occurrences = append(resp.Occurrences, dtoautomation.AutomationPreviewItem{
-			At: o.At.UTC().Format(time.RFC3339), Wall: o.Wall, Timezone: o.Timezone,
+			At: objtime.Milli(o.At), Wall: o.Wall, Timezone: o.Timezone,
 			Warnings: o.Warnings,
 		})
 		resp.Warnings = append(resp.Warnings, o.Warnings...)
@@ -152,10 +153,8 @@ func (s *Service) ListAutomationRuns(id string) (*dtoautomation.AutomationRunsRe
 	}
 	// 空史也要是 `[]` 而不是 `null`：前端类型写的是数组，`null` 会让"没触发过"与
 	// "字段缺失"在客户端无从区分（这条是被 browser-free 冒烟脚本抓出来的真实漂移）。
-	runs := make([]pkgauto.RunRecord, 0, len(v.RecentRuns))
-	runs = append(runs, v.RecentRuns...)
 	return &dtoautomation.AutomationRunsResp{
-		ID: id, Runs: runs, Limit: pkgauto.RecentRunsMax,
+		ID: id, Runs: runRecordResps(v.RecentRuns), Limit: pkgauto.RecentRunsMax,
 	}, nil
 }
 
