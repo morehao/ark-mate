@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 /**
@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event'
  * 纯逻辑（sendKey / commandHints）已有 node --test 覆盖；这里只验**组件层**：
  *   - 空草稿发送钮禁用；
  *   - 输入后点击发送 → onSend(文本) 且清空；
- *   - Enter 触发发送（默认 enter-send 档）；
+ *   - Enter 触发发送；Shift+Enter 不发送（固定键位，无档位）；
  *   - 忙且草稿为空 → 停止钮 → onStop；
  *   - injectDraft（队列「取出编辑」）把正文塞回输入框。
  *
@@ -32,7 +32,6 @@ const baseProps = {
 beforeEach(() => {
   baseProps.onSend = vi.fn()
   baseProps.onStop = () => {}
-  localStorage.clear()
 })
 
 describe('Composer', () => {
@@ -52,12 +51,22 @@ describe('Composer', () => {
     expect(ta.value).toBe('')
   })
 
-  it('Enter 触发发送（默认 enter-send 档）', async () => {
+  it('Enter 触发发送（固定键位）', async () => {
     const user = userEvent.setup()
     render(<Composer {...baseProps} />)
     const ta = screen.getByRole('textbox')
     await user.type(ta, '快捷键发送{Enter}')
     expect(baseProps.onSend).toHaveBeenCalledWith('快捷键发送', undefined, undefined)
+  })
+
+  it('Shift+Enter 换行，不触发发送', async () => {
+    const user = userEvent.setup()
+    render(<Composer {...baseProps} />)
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+    await user.type(ta, '第一行')
+    fireEvent.keyDown(ta, { key: 'Enter', shiftKey: true })
+    expect(baseProps.onSend).not.toHaveBeenCalled()
+    expect(ta.value).toBe('第一行')
   })
 
   it('忙且草稿为空 → 停止按钮 → onStop', async () => {

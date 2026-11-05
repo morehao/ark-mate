@@ -585,7 +585,7 @@ export const consoleStyleSheet = `
     box-shadow: 0 0 0 3px ${tokens.primarySoft};
   }
 
-  /* 输入卡下方一行（原型 §13）：工作区 chip / 权限 chip 靠左，发送键提示靠右。 */
+  /* 输入卡下方一行（原型 §13）：工作区 chip / 权限 chip 靠左；发送键提示已撤掉（2026-11-05）。 */
   .fg-composer-chips {
     display: flex;
     align-items: center;

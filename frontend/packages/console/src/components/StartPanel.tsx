@@ -14,7 +14,7 @@ import { AttachmentChip } from './AttachmentChip'
 import { useAttachmentDraft } from '../console/useAttachmentDraft'
 import { FOLLOW_DEFAULT, selectionPayload, type CapabilityChoice } from '../console/capabilityView'
 import { mergeCapabilityPatch } from '../console/capabilityEdit'
-import { getSendKey, shouldSendKey } from '../console/sendKey'
+import { shouldSendKey } from '../console/sendKey'
 
 // 新建会话时记住的「上次所选模型」——存的是**平台模型行 id**（`mdl_…`；v26 起）。
 // 键名前缀随 M0-1 的前端产品包改名统一为 `mate.web.*`（与其它前端持久键同前缀）；
@@ -305,7 +305,7 @@ export function StartPanel() {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (shouldSendKey(e, getSendKey())) {
+                if (shouldSendKey(e)) {
                   e.preventDefault()
                   void send()
                 }
@@ -343,7 +343,7 @@ export function StartPanel() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
               {/* 左栏必须可裁剪：窄容器下压到很窄时，nowrap 文案要省略号收起，
                   而不是溢出到右栏下面被选择器白底盖住（那会渲染成「文字重影」）。
-                  v21：工作空间已上移到卡片上沿的 chip，这里只剩「这个会话用哪些能力」与发送键提示，
+                  v21：工作空间已上移到卡片上沿的 chip，这里只剩「这个会话用哪些能力」，
                   于是底栏回到单行——不再需要三行堆叠的左列。 */}
               <span
                 style={{
