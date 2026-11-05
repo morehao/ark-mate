@@ -141,6 +141,11 @@ type Runner struct {
 	// 随 runs.usage_json 落库；底座不上报时无条目）。
 	usageMu sync.Mutex
 	usage   map[string]objusage.UsageInfo
+	// tokenUsageMu/tokenUsage 保护「每轮 token 明细流水」（键 = run id；executeRun 在 prompt
+	// 返回后写入，run 收口时随 runs.token_usage_json 落库）。与上面的快照表**分开**：
+	// 快照按会话、后到覆盖先到；流水按轮、可逐轮保留。底座不上报时无条目。
+	tokenUsageMu sync.Mutex
+	tokenUsage   map[string]objusage.TokenUsage
 }
 
 // NewRunner 造一个运行期状态机。所有端口在装配期一次接上（nil 端口的语义见各方法）。
@@ -151,6 +156,7 @@ func NewRunner(d RunnerDeps) *Runner {
 		toolFailed: d.ToolFailures, interacts: d.Interactions,
 		extractor:     d.Extractor,
 		usage:         make(map[string]objusage.UsageInfo),
+		tokenUsage:    make(map[string]objusage.TokenUsage),
 		settleTimeout: AgentSettleTimeout,
 	}
 }
@@ -356,15 +362,24 @@ func hasImagePart(parts []protocol.PromptPart) bool {
 
 func (r *Runner) executeRun(as *ActiveSession, t *Run, parts []protocol.PromptPart) {
 	var (
-		stop string
-		err  error
+		stop  string
+		usage objusage.TokenUsage
+		err   error
 	)
 	// 「请求已发出、首个增量未到」——它覆盖从发请求到第一个 token 之间的那段空白，
 	// 而那正是用户最容易以为「没反应」的时候（今天这段时间与「已卡住」长得一模一样）。
 	// 用 `t.id` 而不是重查：这一支里 `as.run` 就是 `t`，重查只多一个可能拿到 nil 的窗口。
 	r.plane.PublishRunStatus(as.ID, t.id, RunStatusModelRequesting, RunStatusOpts{})
 	// 内容块（P3 起含 image part；文档/大图的 handle 文本已在 sessionruntime 拼进 text 段）。
-	stop, err = as.PromptACP(t.ctx, parts)
+	stop, usage, err = as.PromptACP(t.ctx, parts)
+	// 本轮 token 明细：写进 Run（收口用）并登记到按轮流水表（run 收口时随 runs.token_usage_json
+	// 落库）。零值 = 底座未上报，落库时按"未上报"处理，不臆造。
+	t.usage = usage
+	if usage.Reported() {
+		r.tokenUsageMu.Lock()
+		r.tokenUsage[t.id] = usage
+		r.tokenUsageMu.Unlock()
+	}
 
 	as.mu.Lock()
 	intentional := t.intentional
@@ -689,6 +704,18 @@ func (r *Runner) LatestUsage(sessionID string) (objusage.UsageInfo, bool) {
 	r.usageMu.Lock()
 	defer r.usageMu.Unlock()
 	u, ok := r.usage[sessionID]
+	return u, ok
+}
+
+// TokenUsageOf 取某轮（run id）的 token 明细流水（无上报 → false）。run 收口落库用。
+// 取到即删（一轮只收口一次；避免按轮表随会话增长无界堆积）。
+func (r *Runner) TokenUsageOf(runID string) (objusage.TokenUsage, bool) {
+	r.tokenUsageMu.Lock()
+	defer r.tokenUsageMu.Unlock()
+	u, ok := r.tokenUsage[runID]
+	if ok {
+		delete(r.tokenUsage, runID)
+	}
 	return u, ok
 }
 

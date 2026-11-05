@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 	"sync"
 	"testing"
@@ -30,7 +31,7 @@ type captureACP struct {
 
 func newCaptureACP() *captureACP { return &captureACP{ch: make(chan struct{}, 8)} }
 
-func (c *captureACP) Prompt(_ context.Context, parts []protocol.PromptPart) (string, error) {
+func (c *captureACP) Prompt(_ context.Context, parts []protocol.PromptPart) (string, objusage.TokenUsage, error) {
 	var text string
 	for _, p := range parts {
 		if p.Kind == protocol.PromptPartText || p.Kind == "" {
@@ -41,7 +42,7 @@ func (c *captureACP) Prompt(_ context.Context, parts []protocol.PromptPart) (str
 	c.prompts = append(c.prompts, text)
 	c.mu.Unlock()
 	c.ch <- struct{}{}
-	return "end_turn", nil
+	return "end_turn", objusage.TokenUsage{}, nil
 }
 
 func (c *captureACP) Cancel(context.Context) error           { return nil }

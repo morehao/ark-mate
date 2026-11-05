@@ -507,7 +507,7 @@ REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`co
 | DELETE | `/automations/:id` | 删定义 + 摘内存条目；幂等（本来就不存在 → `deleted:false` 且 code=0） |
 | GET | `/automations/:id/runs` | 运行史（最新 20 条；读载体的 `recent_runs`，有界）：**含 `overlap`/`duplicate`/`skipped`**——「没跑成的那些」才是最需要被看见的；定义装载失败 → 40001（不假装没有运行史） |
 | POST | `/automations/:id/run` | 手动触发一次：走**同一认领判据**（上一次还在跑 → `overlap`，手动不等于可以并发），但**不推进认领游标**（手动试跑不该静默吃掉当晚的排期）；失败既报错又留痕（`skipped` + `needs_attention`） |
-| GET | `/usage/summary` | 用量统计（`?from=&to=&group_by=day&tz_offset=`；区间半开；日期参数与 day 桶按 `tz_offset` 的**客户端时区**解释，缺省 0/UTC；无 store → 40501）。**v19 去掉了「按 agent 选择」这个维度（`group_by=agent` 与那个查询键）**（会话身份只剩 `runtime_id`，而底座构建期固定 ⇒ 按它聚合只有一桶），带上它 → 40001 `agent_selection_removed`（显式拒绝；静默忽略会让调用方以为筛过了） |
+| GET | `/usage/summary` | 用量统计（`?from=&to=&group_by=day&tz_offset=`；区间半开；日期参数与 day 桶按 `tz_offset` 的**客户端时区**解释，缺省 0/UTC；无 store → 40501）。**v19 去掉了「按 agent 选择」这个维度（`group_by=agent` 与那个查询键）**（会话身份只剩 `runtime_id`，而底座构建期固定 ⇒ 按它聚合只有一桶），带上它 → 40001 `agent_selection_removed`（显式拒绝；静默忽略会让调用方以为筛过了）。**v37 新增 `llm` 块**：内部模型调用流水（`llm_calls`）的 token 明细汇总——`{calls, tokens{input/output/cached_read/cached_write/thought/total}, by_purpose[]}`，**流水口径**（可跨调用相加、**含旁路无会话调用**）；与既有 `totals/buckets` 的**会话快照**口径（`context_*`）分开，二者不可混用 |
 | GET | `/ws/events` | 实时事件通道（见下） |
 
 ### 业务错误码

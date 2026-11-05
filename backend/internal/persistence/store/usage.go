@@ -80,6 +80,12 @@ func (s *Store) UsageSummary(ctx context.Context, q UsageQuery) (*UsageSummaryRe
 		res.Buckets = []UsageBucket{}
 	}
 	res.Totals.Key = "total"
+	// 内部模型调用流水（llm_calls）的 token 明细：与会话快照口径分开，覆盖含旁路（无会话）的调用。
+	llm, lerr := s.LLMUsageAggregate(ctx, q.From, q.To)
+	if lerr != nil {
+		return nil, lerr
+	}
+	res.LLM = llm
 	return res, nil
 }
 

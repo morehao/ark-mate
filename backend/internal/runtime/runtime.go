@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 )
 
@@ -64,8 +66,9 @@ type Runtime interface {
 	// Cancel 取消本会话进行中的 run（会话级执行原语；best-effort，见 acp.Session.Cancel）。
 	// 连接生命周期仍归 Orchestrator（§4.2 偏差），本方法只作用于会话执行面。
 	Cancel(ctx context.Context) error
-	// Prompt 发送一条用户消息并驱动到一轮停点，返回 stop reason（如 "end_turn"）。
-	Prompt(ctx context.Context, req PromptRequest) (string, error)
+	// Prompt 发送一条用户消息并驱动到一轮停点，返回 stop reason（如 "end_turn"）与本轮 token 明细
+	// （usage 为零值 = 底层未上报）。
+	Prompt(ctx context.Context, req PromptRequest) (stop string, usage objusage.TokenUsage, err error)
 	// ApplyMode 应用统一权限模式；runtime 无原生映射时返回不支持错误。
 	ApplyMode(ctx context.Context, mode Mode) error
 	// ApplyModel 切换模型，返回应用后的**全量**会话配置项状态。

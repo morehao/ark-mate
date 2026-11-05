@@ -151,6 +151,9 @@ var v32Layers = map[string]v32Layer{
 	// 只认自声明的窄端口 Service）。L5 与其它 infra 件同层，是"与外面说话"的实现。
 	"internal/infra/materialmcp":   {layer: 5, name: "infra/materialmcp", sameLayer: true},
 	"internal/infra/automationmcp": {layer: 5, name: "infra/automationmcp", sameLayer: true},
+	// 内部模型调用的执行器实现（OpenAI 兼容 HTTP 直连）。契约/值在 L1 `core/llm`，本包只做
+	// "与外面说话"，是 L5 与其它 infra 件同层的实现面。
+	"internal/infra/llm": {layer: 5, name: "infra/llm", sameLayer: true},
 
 	// ——— L6：组合驱动 ———
 	"internal/drivers/gateway": {layer: 6, name: "gateway", sameLayer: true, deny: []string{

@@ -71,12 +71,13 @@ func (s *Store) RunningRuns(ctx context.Context, sessionID string) ([]model.RunE
 // 保留手写 UPDATE：`ErrRunNotFound` 要用 RowsAffected 判定，而 `UpdateMap` 不返回它。
 func (s *Store) FinishRun(ctx context.Context, id string, p model.RunFinishPatch) error {
 	res := s.runs.DB(ctx).Model(&model.RunEntity{}).Where("id = ?", id).Updates(map[string]any{
-		"last_seq":       p.LastSeq,
-		"status":         p.Status,
-		"stop_reason":    p.StopReason,
-		"error_code":     p.ErrorCode,
-		"usage_json":     p.UsageJSON,
-		"first_token_ms": p.FirstTokenMS,
+		"last_seq":         p.LastSeq,
+		"status":           p.Status,
+		"stop_reason":      p.StopReason,
+		"error_code":       p.ErrorCode,
+		"usage_json":       p.UsageJSON,
+		"token_usage_json": p.TokenUsageJSON,
+		"first_token_ms":   p.FirstTokenMS,
 		// 落库文本在这里格式化（map 形式的 Updates 不过 serializer，见 model.LayoutTS）。
 		"ended_at": model.FormatTimeOrNow(p.EndedAt),
 	})

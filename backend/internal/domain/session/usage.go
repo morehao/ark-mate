@@ -90,7 +90,33 @@ func (pl *Plane) UsageSummary(ctx context.Context, q UsageQuery) (*UsageSummary,
 	for _, b := range res.Buckets {
 		out.Buckets = append(out.Buckets, toUsageBucket(b))
 	}
+	out.LLM = toUsageLLM(res.LLM)
 	return out, nil
+}
+
+// toUsageLLM 读模型 → 域对外形状（内部模型调用流水汇总）。
+func toUsageLLM(m model.LLMUsageSummary) UsageLLM {
+	by := make([]UsagePurpose, 0, len(m.ByPurpose))
+	for _, p := range m.ByPurpose {
+		by = append(by, UsagePurpose{
+			Purpose: p.Purpose, Calls: p.Calls,
+			Tokens: UsageTokens{
+				InputTokens: p.Tokens.InputTokens, OutputTokens: p.Tokens.OutputTokens,
+				CachedReadTokens: p.Tokens.CachedReadTokens, CachedWriteTokens: p.Tokens.CachedWriteTokens,
+				ThoughtTokens: p.Tokens.ThoughtTokens, TotalTokens: p.Tokens.TotalTokens,
+			},
+			CostAmount: p.CostAmount, CostCurrency: p.CostCurrency,
+		})
+	}
+	return UsageLLM{
+		Calls: m.Calls,
+		Tokens: UsageTokens{
+			InputTokens: m.Tokens.InputTokens, OutputTokens: m.Tokens.OutputTokens,
+			CachedReadTokens: m.Tokens.CachedReadTokens, CachedWriteTokens: m.Tokens.CachedWriteTokens,
+			ThoughtTokens: m.Tokens.ThoughtTokens, TotalTokens: m.Tokens.TotalTokens,
+		},
+		ByPurpose: by,
+	}
 }
 
 // toUsageBucketResp 读模型 → REST DTO。

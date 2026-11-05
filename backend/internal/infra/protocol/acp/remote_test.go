@@ -267,7 +267,7 @@ func TestWSTransportEndToEnd(t *testing.T) {
 	if sess.ID() != "sess-remote-1" {
 		t.Fatalf("session id 不符: %s", sess.ID())
 	}
-	stop, err := sess.Prompt(context.Background(), protocol.TextParts("远程 ws 测试"))
+	stop, _, err := sess.Prompt(context.Background(), protocol.TextParts("远程 ws 测试"))
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestHTTPTransportEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	stop, err := sess.Prompt(context.Background(), protocol.TextParts("远程 http 测试"))
+	stop, _, err := sess.Prompt(context.Background(), protocol.TextParts("远程 http 测试"))
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}

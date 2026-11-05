@@ -97,7 +97,7 @@ func TestElicitationFormAcceptEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	stop, err := sess.Prompt(context.Background(), protocol.TextParts("帮我做个单选：选个部署环境"))
+	stop, _, err := sess.Prompt(context.Background(), protocol.TextParts("帮我做个单选：选个部署环境"))
 	if err != nil || stop != "end_turn" {
 		t.Fatalf("Prompt: stop=%q err=%v", stop, err)
 	}
@@ -161,7 +161,7 @@ func TestElicitationFormDeclineEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	stop, err := sess.Prompt(context.Background(), protocol.TextParts("帮我做个多选：选任务"))
+	stop, _, err := sess.Prompt(context.Background(), protocol.TextParts("帮我做个多选：选任务"))
 	if err != nil || stop != "end_turn" {
 		t.Fatalf("Prompt: stop=%q err=%v", stop, err)
 	}
@@ -210,7 +210,7 @@ func TestElicitationURLEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if stop, err := sess.Prompt(context.Background(), protocol.TextParts("发个链接给我完成授权")); err != nil || stop != "end_turn" {
+	if stop, _, err := sess.Prompt(context.Background(), protocol.TextParts("发个链接给我完成授权")); err != nil || stop != "end_turn" {
 		t.Fatalf("Prompt: stop=%q err=%v", stop, err)
 	}
 
@@ -255,7 +255,7 @@ func TestElicitationUnsupportedHostEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	stop, err := sess.Prompt(context.Background(), protocol.TextParts("来个单选吧"))
+	stop, _, err := sess.Prompt(context.Background(), protocol.TextParts("来个单选吧"))
 	if err != nil {
 		t.Fatalf("无 elicitation 宿主下不应报错: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestElicitationWireScopeFromMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if _, err := sess.Prompt(context.Background(), protocol.TextParts("归属测试")); err != nil {
+	if _, _, err := sess.Prompt(context.Background(), protocol.TextParts("归属测试")); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 	select {

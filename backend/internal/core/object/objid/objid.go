@@ -70,6 +70,9 @@ const (
 	// Artifact 产物（`artifacts.id`，v34）。它是**产物登记行**的身份（溯源：哪次会话/哪轮/哪个工具
 	// 调用产出的），不是字节的身份——file 类产物的字节仍走 filestore（`upload_id` 指向 core_file_upload）。
 	Artifact = "art_"
+	// Call 一次模型调用流水（`llm_calls.id`，内部模型网关）。它是**调用流水**的身份，与会话/轮次
+	// 无关（旁路调用的 session_id/run_id 为空）——故单独一个前缀，不复用 run_/evt_。
+	Call = "call_"
 )
 
 // RuntimeShell 透传壳前缀（= runtime）。
@@ -180,7 +183,7 @@ func increment() {
 //
 // 只做**前缀**匹配，不校验主体形状——形状判据是 IsPlatformID。
 func Prefix(id string) (string, bool) {
-	for _, p := range []string{Session, Message, Run, Input, Workspace, Model, PermissionMemory, Event} {
+	for _, p := range []string{Session, Message, Run, Input, Workspace, Model, PermissionMemory, Event, Call} {
 		if strings.HasPrefix(id, p) {
 			return p, true
 		}

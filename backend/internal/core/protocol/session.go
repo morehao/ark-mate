@@ -1,6 +1,10 @@
 package protocol
 
-import "context"
+import (
+	"context"
+
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
+)
 
 // PromptPartKind 一次 prompt 里一个内容块的种类（平台值）。
 //
@@ -75,7 +79,8 @@ type Conn interface {
 type Session interface {
 	ID() string
 	Client() Conn
-	Prompt(ctx context.Context, parts []PromptPart) (string, error)
+	// Prompt 发一轮；返回 stop reason 与本轮 token 明细（usage 为零值 = 底座未上报）。
+	Prompt(ctx context.Context, parts []PromptPart) (stop string, usage objusage.TokenUsage, err error)
 	Cancel(ctx context.Context) error
 	Close(ctx context.Context) error
 	ConfigOptions() []ConfigOption

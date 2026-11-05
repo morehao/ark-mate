@@ -36,4 +36,33 @@ type UsageSummaryResp struct {
 	BucketsAdditive bool              `json:"buckets_additive"`
 	Totals          UsageBucketResp   `json:"totals"`
 	Buckets         []UsageBucketResp `json:"buckets"`
+	// LLM 内部模型调用流水（llm_calls）的 token 明细汇总：**流水口径**（可跨调用相加），
+	// 覆盖含旁路（无会话）的调用；与上面 totals/buckets 的**会话快照**口径分开，勿混用。
+	LLM UsageLLMResp `json:"llm"`
+}
+
+// UsageLLMResp 内部模型调用流水的用量汇总。
+type UsageLLMResp struct {
+	Calls     int64              `json:"calls"`
+	Tokens    UsageTokensResp    `json:"tokens"`
+	ByPurpose []UsagePurposeResp `json:"by_purpose"`
+}
+
+// UsageTokensResp 累加型 token 明细。
+type UsageTokensResp struct {
+	InputTokens       int64 `json:"input_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
+	CachedReadTokens  int64 `json:"cached_read_tokens"`
+	CachedWriteTokens int64 `json:"cached_write_tokens"`
+	ThoughtTokens     int64 `json:"thought_tokens"`
+	TotalTokens       int64 `json:"total_tokens"`
+}
+
+// UsagePurposeResp 一个用途维度的调用聚合。
+type UsagePurposeResp struct {
+	Purpose      string          `json:"purpose"`
+	Calls        int64           `json:"calls"`
+	Tokens       UsageTokensResp `json:"tokens"`
+	CostAmount   float64         `json:"cost_amount"`
+	CostCurrency string          `json:"cost_currency,omitempty"`
 }

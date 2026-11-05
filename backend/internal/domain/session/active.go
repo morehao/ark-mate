@@ -6,6 +6,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/runtime"
 )
@@ -24,7 +25,7 @@ import (
 
 // ACP 是 acp.Session 的最小接口（测试可注入桩；真实实现为 protocol.Session）。
 type ACP interface {
-	Prompt(ctx context.Context, parts []protocol.PromptPart) (string, error)
+	Prompt(ctx context.Context, parts []protocol.PromptPart) (stop string, usage objusage.TokenUsage, err error)
 	Cancel(ctx context.Context) error
 	// ConfigOptions 会话配置项（模型目录等，唯一来源：运行时自报）。
 	ConfigOptions() []protocol.ConfigOption
@@ -168,7 +169,8 @@ func (as *ActiveSession) RequestCancel() *Run {
 }
 
 // PromptACP 发一轮 prompt：有投影走投影，否则直连原生会话。parts 是内容块列表（P2 只含 text）。
-func (as *ActiveSession) PromptACP(ctx context.Context, parts []protocol.PromptPart) (string, error) {
+// 返回本轮 token 明细（零值 = 底座未上报）。
+func (as *ActiveSession) PromptACP(ctx context.Context, parts []protocol.PromptPart) (string, objusage.TokenUsage, error) {
 	if as.proj != nil {
 		return as.proj.Prompt(ctx, runtime.PromptRequest{Parts: parts})
 	}
@@ -288,6 +290,9 @@ type Run struct {
 	ctx         context.Context
 	stop        string
 	err         error
+	// usage 本轮 token 明细（executeRun 在 prompt 返回后填；零值 = 底座未上报）。
+	// 收口时落 runs.token_usage_json（流水语义，区别于上下文快照 usage_json）。
+	usage objusage.TokenUsage
 }
 
 // ID 本轮标识。

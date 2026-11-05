@@ -52,6 +52,40 @@ type UsageBucket struct {
 type UsageSummaryResult struct {
 	Totals  UsageBucket   `json:"totals"`
 	Buckets []UsageBucket `json:"buckets"`
+	// LLM 内部模型调用流水（llm_calls）的 token 明细汇总。**与上面的会话快照口径分开**：
+	// 这一块是**流水**（一次调用一行、可跨行相加），覆盖含"无会话"的旁路调用。
+	LLM LLMUsageSummary `json:"llm"`
+}
+
+// LLMUsageSummary 内部模型调用流水的用量汇总（数据源 llm_calls）。
+type LLMUsageSummary struct {
+	// Calls 区间内调用总次数。
+	Calls int64 `json:"calls"`
+	// Tokens 区间内 token 明细合计（可跨调用相加）。
+	Tokens LLMTokenUsage `json:"tokens"`
+	// ByPurpose 按用途分组的明细（成本归因维度）。
+	ByPurpose []LLMPurposeUsage `json:"by_purpose"`
+}
+
+// LLMTokenUsage 累加型 token 明细（与 objusage.TokenUsage 同构；此处是落库/聚合的形状）。
+type LLMTokenUsage struct {
+	InputTokens       int64 `json:"input_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
+	CachedReadTokens  int64 `json:"cached_read_tokens"`
+	CachedWriteTokens int64 `json:"cached_write_tokens"`
+	ThoughtTokens     int64 `json:"thought_tokens"`
+	TotalTokens       int64 `json:"total_tokens"`
+}
+
+// LLMPurposeUsage 一个用途维度的调用聚合。
+type LLMPurposeUsage struct {
+	Purpose string `json:"purpose"`
+	Calls   int64  `json:"calls"`
+	// Tokens 该用途的 token 明细合计。
+	Tokens LLMTokenUsage `json:"tokens"`
+	// CostAmount/CostCurrency 该用途费用（多币种 -> 置零 + MIXED，与用量统计同口径）。
+	CostAmount   float64 `json:"cost_amount"`
+	CostCurrency string  `json:"cost_currency,omitempty"`
 }
 
 // MessageHit 一条全局消息命中（跨会话搜索 + 锚点跳转用）。

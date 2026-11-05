@@ -3,6 +3,7 @@ package assembly
 import (
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
+	corellm "github.com/morehao/ark-mate/internal/core/llm"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
@@ -75,6 +76,10 @@ type Services struct {
 
 	// ——— 产物溯源（v34）———
 	Artifact svcartifact.ArtifactSvc
+
+	// ——— 内部模型调用网关（v37）———
+	// 平台内部"不经用户会话"的模型调用的唯一入口；后续用例按需消费（当前主要供旁路辅助调用）。
+	LLM corellm.Gateway
 }
 
 // Facts 构造用例所需的事实集合（装配根在启动序列里填好；测试也可以直接给一份）。
@@ -167,6 +172,8 @@ func (f Facts) BuildServices() Services {
 		Attachment: attachmentSvc,
 		Material:   materialSvc,
 		Artifact:   artifactSvc,
+
+		LLM: buildLLMGateway(f),
 	}
 }
 

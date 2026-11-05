@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 )
 
@@ -47,7 +48,7 @@ func (r *sessionRuntime) Cancel(ctx context.Context) error {
 
 // Prompt 透传底层会话 Prompt（权限/elicitation 决策由 Orchestrator 经 Dial 的 ClientOptions
 // 钩子注入）。Parts 非空以 Parts 为准；为空按 TextParts(Text) 兜底（兼容期行为）。
-func (r *sessionRuntime) Prompt(ctx context.Context, req PromptRequest) (string, error) {
+func (r *sessionRuntime) Prompt(ctx context.Context, req PromptRequest) (string, objusage.TokenUsage, error) {
 	parts := req.Parts
 	if len(parts) == 0 {
 		parts = protocol.TextParts(req.Text)

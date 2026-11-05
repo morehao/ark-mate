@@ -97,6 +97,9 @@ type Store struct {
 
 	// 产物溯源登记（v34）：artifacts。字节仍走 filestore；本组只承载溯源/归属/快照。
 	artifacts *dao.ArtifactDao
+
+	// 内部模型调用流水（v37）：llm_calls。一次调用一行，会话/旁路共用，session_id 可空。
+	llmCalls *dao.LLMCallDao
 }
 
 // Open 打开（必要时创建）SQLite 库并自动迁移到最新 schema。
@@ -152,6 +155,8 @@ func New(db *gorm.DB) *Store {
 		libraryTables:      dao.NewLibraryTableDao(getDB),
 
 		artifacts: dao.NewArtifactDao(getDB),
+
+		llmCalls: dao.NewLLMCallDao(getDB),
 	}
 }
 

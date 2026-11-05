@@ -788,6 +788,14 @@ var schemaMigrations = []migration{
 	// v35 的版本步本体在 `migrate_v35.go`（artifacts 加 `path` 列：工作区相对路径，供 dirty
 	// 惰性判定定位原文件——理由写在该文件头）。
 	migrationV35,
+
+	// v36 的版本步本体在 `migrate_v36.go`（runs 加 `token_usage_json` 列：逐轮 token 明细流水，
+	// 与 `usage_json`（上下文快照）分开落列——理由写在该文件头）。
+	migrationV36,
+
+	// v37 的版本步本体在 `migrate_v37.go`（新增 `llm_calls` 表：内部模型调用流水，一次调用一行，
+	// session_id/run_id 可空——理由写在该文件头）。
+	migrationV37,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。
