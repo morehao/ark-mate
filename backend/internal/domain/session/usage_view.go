@@ -52,9 +52,12 @@ type UsageSummary struct {
 
 // UsageLLM 内部模型调用流水的用量汇总（对外形状）。
 type UsageLLM struct {
-	Calls     int64
-	Tokens    UsageTokens
-	ByPurpose []UsagePurpose
+	Calls        int64
+	Failed       int64
+	Degraded     int64
+	SessionCalls int64
+	Tokens       UsageTokens
+	ByPurpose    []UsagePurpose
 }
 
 // UsageTokens 累加型 token 明细。
@@ -71,6 +74,8 @@ type UsageTokens struct {
 type UsagePurpose struct {
 	Purpose      string
 	Calls        int64
+	Failed       int64
+	Degraded     int64
 	Tokens       UsageTokens
 	CostAmount   float64
 	CostCurrency string

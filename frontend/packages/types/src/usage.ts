@@ -64,4 +64,43 @@ export interface UsageSummary {
   buckets_additive: boolean
   totals: UsageBucket
   buckets: UsageBucket[]
+  /**
+   * 内部模型调用流水（llm_calls）的 token 明细汇总。**与上面 totals/buckets 的会话快照口径分开**：
+   * 这一块是流水（一次调用一行、可跨调用相加），覆盖含"无会话"的旁路调用。
+   */
+  llm: UsageLLM
+}
+
+/** 累加型 token 明细。 */
+export interface UsageTokens {
+  input_tokens: number
+  output_tokens: number
+  cached_read_tokens: number
+  cached_write_tokens: number
+  thought_tokens: number
+  total_tokens: number
+}
+
+/** 一个用途维度的调用聚合。 */
+export interface UsagePurpose {
+  purpose: string
+  calls: number
+  /** 失败（error/timeout/cancelled）与降级（degraded）调用数。 */
+  failed: number
+  degraded: number
+  tokens: UsageTokens
+  cost_amount: number
+  cost_currency?: string
+}
+
+/** 内部模型调用流水汇总（数据源 llm_calls）。 */
+export interface UsageLLM {
+  calls: number
+  failed: number
+  degraded: number
+  /** 带 session_id 的调用数；calls - session_calls 即旁路调用数。 */
+  session_calls: number
+  tokens: UsageTokens
+  /** 按用途分组（按调用数降序）。 */
+  by_purpose: UsagePurpose[]
 }

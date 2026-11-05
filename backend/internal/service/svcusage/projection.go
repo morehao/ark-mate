@@ -50,9 +50,9 @@ func usageLLM(v session.UsageLLM) dtousage.UsageLLMResp {
 	by := make([]dtousage.UsagePurposeResp, 0, len(v.ByPurpose))
 	for _, p := range v.ByPurpose {
 		by = append(by, dtousage.UsagePurposeResp{
-			Purpose: p.Purpose, Calls: p.Calls, Tokens: tokens(p.Tokens),
+			Purpose: p.Purpose, Calls: p.Calls, Failed: p.Failed, Degraded: p.Degraded, Tokens: tokens(p.Tokens),
 			CostAmount: p.CostAmount, CostCurrency: p.CostCurrency,
 		})
 	}
-	return dtousage.UsageLLMResp{Calls: v.Calls, Tokens: tokens(v.Tokens), ByPurpose: by}
+	return dtousage.UsageLLMResp{Calls: v.Calls, Failed: v.Failed, Degraded: v.Degraded, SessionCalls: v.SessionCalls, Tokens: tokens(v.Tokens), ByPurpose: by}
 }

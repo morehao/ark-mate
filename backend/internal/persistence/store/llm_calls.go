@@ -32,6 +32,9 @@ type LLMCallAgg struct {
 	TotalTokens       int64
 	CostAmount        float64
 	CostCurrency      string // 多币种混加时置 CostCurrencyMixed（与用量统计同口径）
+	// Failed/Degraded 该维度下 status 为 error/timeout/cancelled（失败）与 degraded（降级）的调用数。
+	Failed   int64
+	Degraded int64
 }
 
 // LLMCallAggRow 是 GROUP BY 的 Scan 目标（金额按币种单独聚合后再归并，见 summarizeLLMByCurrency）。
@@ -46,6 +49,8 @@ type LLMCallAggRow struct {
 	TotalTokens       int64
 	CostAmount        float64
 	CostCurrency      string
+	Failed            int64
+	Degraded          int64
 }
 
 // AggregateLLMCallsBy 按指定列（purpose / model / provider 之一）分组聚合区间 [from, to) 内的流水。
@@ -62,7 +67,9 @@ func (s *Store) AggregateLLMCallsBy(ctx context.Context, dim string, from, to ti
 			"SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, " +
 			"SUM(cached_read_tokens) AS cached_read_tokens, SUM(cached_write_tokens) AS cached_write_tokens, " +
 			"SUM(thought_tokens) AS thought_tokens, SUM(total_tokens) AS total_tokens, " +
-			"SUM(cost_amount) AS cost_amount, cost_currency AS cost_currency").
+			"SUM(cost_amount) AS cost_amount, cost_currency AS cost_currency, " +
+			"SUM(CASE WHEN status IN ('error','timeout','cancelled') THEN 1 ELSE 0 END) AS failed, " +
+			"SUM(CASE WHEN status = 'degraded' THEN 1 ELSE 0 END) AS degraded").
 		Group(col + ", cost_currency")
 	if !from.IsZero() {
 		q = q.Where("at >= ?", model.FormatTime(from))
@@ -113,6 +120,8 @@ func mergeLLMCallRows(raw []LLMCallAggRow) []LLMCallAgg {
 		a.agg.CachedWriteTokens += r.CachedWriteTokens
 		a.agg.ThoughtTokens += r.ThoughtTokens
 		a.agg.TotalTokens += r.TotalTokens
+		a.agg.Failed += r.Failed
+		a.agg.Degraded += r.Degraded
 		if r.CostAmount != 0 {
 			a.cost[r.CostCurrency] += r.CostAmount
 		}
@@ -152,6 +161,8 @@ func (s *Store) LLMUsageAggregate(ctx context.Context, from, to time.Time) (mode
 	out := model.LLMUsageSummary{ByPurpose: make([]model.LLMPurposeUsage, 0, len(byPurpose))}
 	for _, a := range byPurpose {
 		out.Calls += a.Count
+		out.Failed += a.Failed
+		out.Degraded += a.Degraded
 		out.Tokens.InputTokens += a.InputTokens
 		out.Tokens.OutputTokens += a.OutputTokens
 		out.Tokens.CachedReadTokens += a.CachedReadTokens
@@ -161,10 +172,18 @@ func (s *Store) LLMUsageAggregate(ctx context.Context, from, to time.Time) (mode
 		out.ByPurpose = append(out.ByPurpose, model.LLMPurposeUsage{
 			Purpose:      a.Key,
 			Calls:        a.Count,
+			Failed:       a.Failed,
+			Degraded:     a.Degraded,
 			Tokens:       toLLMTokenUsage(a),
 			CostAmount:   a.CostAmount,
 			CostCurrency: a.CostCurrency,
 		})
+	}
+	// 会话调用数（session_id 非空）：单独一次条件计数，用于切分「会话 vs 旁路」。
+	if n, cerr := s.countLLMCallsWithSession(ctx, from, to); cerr != nil {
+		return model.LLMUsageSummary{}, cerr
+	} else {
+		out.SessionCalls = n
 	}
 	// purpose 维度按调用数降序（稳定可读）；调用数相同按用途名。
 	sort.Slice(out.ByPurpose, func(i, j int) bool {
@@ -182,4 +201,21 @@ func toLLMTokenUsage(a LLMCallAgg) model.LLMTokenUsage {
 		CachedReadTokens: a.CachedReadTokens, CachedWriteTokens: a.CachedWriteTokens,
 		ThoughtTokens: a.ThoughtTokens, TotalTokens: a.TotalTokens,
 	}
+}
+
+// countLLMCallsWithSession 统计区间内带 session_id（非空）的调用数。用于切分「会话 vs 旁路」。
+func (s *Store) countLLMCallsWithSession(ctx context.Context, from, to time.Time) (int64, error) {
+	q := s.llmCalls.DB(ctx).Table(model.TableNameLLMCall).
+		Where("session_id <> ''")
+	if !from.IsZero() {
+		q = q.Where("at >= ?", model.FormatTime(from))
+	}
+	if !to.IsZero() {
+		q = q.Where("at < ?", model.FormatTime(to))
+	}
+	var n int64
+	if err := q.Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
 }

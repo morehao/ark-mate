@@ -138,6 +138,8 @@ func (g *gateway) record(ctx context.Context, req Request, res Result, start tim
 		ID:           g.newID(),
 		At:           start,
 		Purpose:      req.Purpose,
+		SessionID:    req.SessionID,
+		RunID:        req.RunID,
 		Provider:     req.Provider,
 		Model:        req.Model,
 		Usage:        res.Usage,
