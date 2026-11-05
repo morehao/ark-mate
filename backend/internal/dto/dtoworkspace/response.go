@@ -106,44 +106,6 @@ type WorkspacePickResp struct {
 	Cancelled bool `json:"cancelled,omitempty"`
 }
 
-// WorkspaceSettingsResp 工作区**起始点偏好**的设置快照（`GET /settings/workspace`）。
-//
-// **v14.5 起这份名单不再是"允许范围"**（产品口径：选工作区是全系统）。它只回答两件事：
-// 打开目录浏览时从哪儿起步、面板里把哪些位置列成快捷入口。名字保留 `roots` 是因为它一直是
-// 那个 wire key（前端与文档都按它写），换名是纯破坏而语义已经说清。
-//
-// 为什么要同时给 Configured 与 Roots：面板编辑的是**显式配置**那一份，而代建根是平台派生的
-// （恒在生效名单内、用户删不掉）。只给生效名单，面板就永远无法表达"删掉这一条"。
-type WorkspaceSettingsResp struct {
-	// Configured 显式配置的偏好起点（= 面板可编辑的那一份；不含隐式并入的代建根）。
-	Configured []string `json:"configured"`
-	// Roots **生效**偏好起点 = Configured ∪ {ProvisionDir}（空 = 没有偏好：从服务进程家目录起步）。
-	Roots []string `json:"roots,omitempty"`
-	// PreferRoots 是否配置了偏好起点（= Configured 非空）。
-	//
-	// 字段名从 `restricted` 改来（v14.5）：名单不再是边界，叫"受限"会继续暗示"外面的目录不能用"——
-	// 而那正是这次要消灭的误解。面板据此决定要不要显示「清空偏好」。
-	PreferRoots bool `json:"prefer_roots"`
-	// ProvisionDir 平台代建工作空间的根目录（空 = 代建关闭）。
-	ProvisionDir string `json:"provision_dir,omitempty"`
-	// CreateRoot **新建工作空间的落盘根**（ADR-3；空 = 未声明 → `name` 模式显式拒绝，
-	// 界面也不给入口）。
-	//
-	// 它与 `provision_dir` 今天取同一个值，但**是两件事**：`provision_dir` 是"平台代建的默认
-	// 工作空间落哪"，`create_root` 是"用户新建的工作空间落哪"。分成两个键是为了让"将来有一条
-	// 独立配置"不需要改 wire 形状，也让面板能如实显示"新建会落在哪里"。
-	CreateRoot string `json:"create_root,omitempty"`
-	// ProvisionIncluded 代建根是否已隐式并入生效白名单（受限模式下恒 true；不受限时为 false——
-	// 那时"名单"根本不存在，谈不上包含）。
-	ProvisionIncluded bool `json:"provision_included"`
-	// Source 白名单的最终来源：default | config.json | env | env(process) | flag | unavailable。
-	Source string `json:"source"`
-	// LockedBy 非空 = 该键被更高优先级来源锁定（写入必被覆盖），面板应转只读并显示它。
-	LockedBy string `json:"locked_by,omitempty"`
-	// Writable 是否可经 `PUT /settings/workspace` 改写（LockedBy 为空且进程有持久化端口）。
-	Writable bool `json:"writable"`
-}
-
 // WorkspaceResp 一条**工作空间登记**（v14；左栏分组与选择器的唯一事实源）。
 //
 // 与 WorkspaceRecentResp / WorkspaceLibraryResp 的区别是本轮设计的核心：那两个是**派生的只读
@@ -184,8 +146,8 @@ type WorkspaceListResp struct {
 	DefaultID string `json:"default_id,omitempty"`
 	// Writable 是否可创建/改名/删除（memory 持久层 = false）。
 	//
-	// 不可写时前端**不渲染**创建与管理入口（而不是给一个必然失败的按钮）——与
-	// WorkspaceSettingsResp.Writable 同一口径，不发明第二套（设计 ADR-11）。
+	// 不可写时前端**不渲染**创建与管理入口（而不是给一个必然失败的按钮）——能力缺失就不给入口，
+	// 不发明第二套口径（设计 ADR-11）。
 	Writable bool `json:"writable"`
 	// ProvisionDir 平台默认工作空间的所在目录（空 = 代建关闭）。透出是为了让"默认那个目录在哪"
 	// 有答案，也是排障时的第一个锚点。

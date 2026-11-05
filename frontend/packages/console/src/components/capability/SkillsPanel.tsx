@@ -45,7 +45,7 @@ export function SkillsPanel() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <AddCapabilityMenu kind="skill" onPick={onAdd} />
+          <AddCapabilityMenu kind="skill" onPick={onAdd} label="新建" type="primary" />
         </Space>
       }
     >

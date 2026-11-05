@@ -28,13 +28,13 @@ import (
 //   - POST   /workspaces/dirs   在已存在的目录下建子目录（目录选择器的「新建文件夹」）
 //     它也是写动作但**不落库**：只在磁盘上建一层目录。
 //
-// 设置面：GET 看生效名单/显式名单/来源与锁定态，PUT 全量替换（即"受限 ↔ 不限制"的开关）。
-// 被 env/flag 锁定或本进程无配置目录时 PUT 被拒（面板转只读）。
-//
 // 注意路由注册顺序：`/workspaces/:id` 这类带参路径与本组几条**固定字面量**路径
 // （browse/files/recent/dirs）在 gin 里可以共存（gin 的 radix 树对静态段优先），
 // 但新增固定路径时要放在参数路径**之前**读一遍——顺序反了会让 `/workspaces/browse`
 // 被当成 id=browse 打到 Move/Rename 上。
+//
+// 目录浏览的起点偏好（`MATE_WORKSPACE_ROOTS`）是**部署级**配置，只经 env/config.json 设置，
+// 不对外暴露设置面（v14.6 起去掉「工作区起始位置」的用户设置接口）。
 func registerWorkspace(v1 *gin.RouterGroup, ctr ctrworkspace.WorkspaceCtr) {
 
 	// 固定字面量路径（静态段）在前，参数路径在后。
@@ -49,7 +49,4 @@ func registerWorkspace(v1 *gin.RouterGroup, ctr ctrworkspace.WorkspaceCtr) {
 	v1.PATCH("/workspaces/:id", ctr.Rename)
 	v1.DELETE("/workspaces/:id", ctr.Delete)
 	v1.POST("/workspaces/:id/move", ctr.Move)
-
-	v1.GET("/settings/workspace", ctr.Settings)
-	v1.PUT("/settings/workspace", ctr.UpdateSettings)
 }

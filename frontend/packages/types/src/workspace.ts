@@ -181,33 +181,3 @@ export interface WorkspaceFilesResp {
   entries: WorkspaceFileEntry[]
 }
 
-/**
- * `GET · PUT /settings/workspace` 的**起始点偏好**快照。
- *
- * **它不是"允许范围"**（v14.5 起的名义与语义都已改）：任何已存在的目录都能浏览、都能当工作空间，
- * 这份名单只决定"目录浏览从哪儿起步"与"面板里列哪些快捷入口"。
- *
- * `configured` 与 `roots` 的区分仍是这份契约的核心：面板**编辑**的是 `configured`（显式配置），
- * 而 `roots` 是**生效**名单（= configured ∪ 平台代建根）。代建根由平台自己并进来，
- * 用户在面板里删不掉它——所以后端必须把两份都给出来，否则前端无法表达"删掉这一条"。
- */
-export interface WorkspaceSettings {
-  /** 显式配置的偏好起点（面板可编辑的那一份）。 */
-  configured: string[]
-  /** 生效偏好起点（含隐式并入的代建根）；为空 = 没有偏好（从服务进程家目录起步）。 */
-  roots?: string[]
-  /** 是否配置了偏好起点（configured 非空）。名字从 `restricted` 改来：名单不再是边界。 */
-  prefer_roots: boolean
-  /** 平台代建工作空间的根目录（空 = 代建关闭）。 */
-  provision_dir?: string
-  /** 新建工作空间的落盘根（空 = 未声明 → 不给「新建工作空间…」入口）。 */
-  create_root?: string
-  /** 代建根是否已隐式并入生效名单。 */
-  provision_included: boolean
-  /** 偏好起点的最终来源：default | config.json | env | env(process) | flag | unavailable。 */
-  source: string
-  /** 非空 = 该键被更高优先级来源锁定（写入必被覆盖），面板应转只读并显示它。 */
-  locked_by?: string
-  /** 是否可经 `PUT /settings/workspace` 改写。 */
-  writable: boolean
-}

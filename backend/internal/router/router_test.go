@@ -14,11 +14,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 
-	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
@@ -472,131 +470,6 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 	}
 }
 
-// TestWorkspaceSettingsRoutes 设置面在**真实装配**下的完整闭环：
-// PUT 落盘 config.json → 生效名单即时收窄（且代建根隐式并入）→ 重启后解析出同一份名单。
-func TestWorkspaceSettingsRoutes(t *testing.T) {
-	base := t.TempDir()
-	cfgDir := t.TempDir()
-	root := filepath.Join(base, "docs")
-	provision := filepath.Join(base, "tmp")
-	outside := filepath.Join(base, "elsewhere")
-	for _, d := range []string{root, outside} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-	}
-	// 预置其它键：写回是 read-modify-write，不得把运维的配置抹掉。
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(`{"addr":"127.0.0.1:20001"}`), 0o600); err != nil {
-		t.Fatalf("写 config.json: %v", err)
-	}
-	e, svc := newEngineWithService(t)
-	if err := svc.Planes().Workspaces.SetWorkspacePolicy(provision, nil); err != nil {
-		t.Fatalf("SetWorkspacePolicy: %v", err)
-	}
-	svc.Planes().Workspaces.SetRootsStore(config.NewSettingsStore(cfgDir, ""))
-
-	// 起步：没有偏好起点（prefer_roots=false），可写，来源 = 默认值。
-	env := get(t, e, "/v1/mate/settings/workspace")
-	if env.Code != 0 {
-		t.Fatalf("settings GET 失败: %+v", env)
-	}
-	var st dtoworkspace.WorkspaceSettingsResp
-	if err := json.Unmarshal(env.Data, &st); err != nil {
-		t.Fatalf("settings data 解析: %v", err)
-	}
-	if st.PreferRoots || !st.Writable || st.Source != "default" || len(st.Roots) != 0 {
-		t.Fatalf("起步快照不符: %+v", st)
-	}
-
-	// 未画边界时任何可读目录都能浏览（默认的零配置体验不能被这次改造破坏）。
-	if env = get(t, e, "/v1/mate/workspaces/browse?path="+url.QueryEscape(outside)); env.Code != 0 {
-		t.Fatalf("不限制时根外目录应可浏览: %+v", env)
-	}
-
-	// PUT 画边界：生效名单 = 配置的根 + 隐式并入的代建根（顺序：配置项在前）。
-	env = put(t, e, "/v1/mate/settings/workspace", `{"roots":[`+jsonString(root)+`]}`)
-	if env.Code != 0 {
-		t.Fatalf("settings PUT 失败: %+v", env)
-	}
-	if err := json.Unmarshal(env.Data, &st); err != nil {
-		t.Fatalf("PUT data 解析: %v", err)
-	}
-	if !st.PreferRoots || !st.ProvisionIncluded || len(st.Configured) != 1 || len(st.Roots) != 2 {
-		t.Fatalf("更新后快照不符: %+v", st)
-	}
-	if st.Roots[0] != mustEvalPath(t, root) || filepath.Base(st.Roots[1]) != "tmp" {
-		t.Fatalf("生效名单应为「配置根 + 代建根」: %+v", st.Roots)
-	}
-
-	// 即时生效：偏好起点变了，但**不再是边界**——名录外照常可浏览。
-	env = get(t, e, "/v1/mate/workspaces/browse?path="+url.QueryEscape(outside))
-	if env.Code != 0 {
-		t.Fatalf("设了偏好起点后名录外仍应可浏览: %+v", env)
-	}
-	defDir := filepath.Join(provision, "default")
-	if err := os.MkdirAll(defDir, 0o755); err != nil {
-		t.Fatalf("mkdir default: %v", err)
-	}
-	if _, err := workspace.ResolveWorkspace("", &workspace.DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}); err != nil {
-		t.Fatalf("默认工作空间应仍可用（代建根隐式并入）: %v", err)
-	}
-
-	// 落盘：非破坏性写（addr 保留）+ 数组形式（路径含逗号也能往返）。
-	raw, err := os.ReadFile(filepath.Join(cfgDir, "config.json"))
-	if err != nil {
-		t.Fatalf("读 config.json: %v", err)
-	}
-	if !strings.Contains(string(raw), `"addr": "127.0.0.1:20001"`) {
-		t.Fatalf("写回破坏了其它键: %s", raw)
-	}
-	cfg, _, err := config.LoadResolved(cfgDir)
-	if err != nil {
-		t.Fatalf("写回后配置应合法: %v", err)
-	}
-	if len(cfg.WorkspaceRoots) != 1 || cfg.WorkspaceRoots[0] != mustEvalPath(t, root) {
-		t.Fatalf("重启后应解析出同一份名单: %+v", cfg.WorkspaceRoots)
-	}
-
-	// 坏项：逐项校验，回 40001 且不落盘。
-	env = put(t, e, "/v1/mate/settings/workspace", `{"roots":["relative"]}`)
-	if env.Code != 40001 {
-		t.Fatalf("非法根应 40001: %+v", env)
-	}
-
-	// 被更高优先级来源锁定 → 拒绝写并自报只读（面板据此转只读，而不是假装保存成功）。
-	svc.Planes().Workspaces.SetRootsStore(config.NewSettingsStore(cfgDir, config.SourceEnv))
-	env = put(t, e, "/v1/mate/settings/workspace", `{"roots":[]}`)
-	if env.Code != 40001 || !strings.Contains(env.Msg, "settings_locked") {
-		t.Fatalf("锁定时应 settings_locked: %+v", env)
-	}
-	env = get(t, e, "/v1/mate/settings/workspace")
-	if err := json.Unmarshal(env.Data, &st); err != nil {
-		t.Fatalf("锁定态解析: %v", err)
-	}
-	if st.Writable || st.LockedBy != "MATE_WORKSPACE_ROOTS" {
-		t.Fatalf("锁定态应透出: %+v", st)
-	}
-}
-
-// put 发一个带 JSON body 的 PUT 请求并解析信封。
-func put(t *testing.T, e *gin.Engine, path, body string) *respEnvelope {
-	t.Helper()
-	req := httptest.NewRequest("PUT", path, strings.NewReader(body))
-	req.Header.Set("content-type", "application/json")
-	w := httptest.NewRecorder()
-	e.ServeHTTP(w, req)
-	var env respEnvelope
-	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
-		t.Fatalf("path=%s 响应非 JSON: %v body=%s", path, err, w.Body.String())
-	}
-	return &env
-}
-
-// jsonString 把路径编成 JSON 字符串（测试里直接拼 body 时避免手写转义）。
-func jsonString(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
-}
 
 // mustEvalPath 取路径真身（服务端一律按真身比较，测试期望值必须同源）。
 func mustEvalPath(t *testing.T, p string) string {

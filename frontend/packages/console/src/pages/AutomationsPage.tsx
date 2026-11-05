@@ -322,7 +322,7 @@ export function AutomationsPage() {
             刷新
           </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建任务
+            新建
           </Button>
         </Space>
       }

@@ -85,10 +85,6 @@ type stubSvc struct {
 	recentResp  []dtoworkspace.WorkspaceRecentResp
 	recentErr   error
 
-	settingsErr    error
-	settingsCalled bool     // UpdateWorkspaceSettings 是否被调用（"传了空名单"与"没调用"必须能区分）
-	settingsRoots  []string // 最近一次 UpdateWorkspaceSettings 收到的 roots
-
 	// v14 工作空间登记表（桩只记参 + 透传；领域判断全在 manager）。
 	registryOne          *dtoworkspace.WorkspaceResp
 	registryDelete       *dtoworkspace.WorkspaceDeleteResp
@@ -371,15 +367,6 @@ func (s *stubSvc) ListWorkspaceFiles(path string, includeHidden bool) (*dtoworks
 	return s.filesResp, nil
 }
 
-func (s *stubSvc) UpdateWorkspaceSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error) {
-	s.settingsCalled = true
-	s.settingsRoots = roots
-	if s.settingsErr != nil {
-		return nil, s.settingsErr
-	}
-	return &dtoworkspace.WorkspaceSettingsResp{}, nil
-}
-
 // ——— v14 工作空间登记表桩 ———
 //
 // 这一组桩只做**透传 + 记参**：控制器在本轮里没有任何领域判断（校验、默认工作空间、
@@ -641,49 +628,6 @@ func (f restFixture) deps() router.Deps {
 // newRestEngine 走**真实路由装配**（router.New）：路径、鉴权与中间件形态都与线上一致。
 func newRestEngine(deps restFixture) *gin.Engine {
 	return router.New(deps.deps())
-}
-
-// TestWorkspaceSettingsCtrPassThrough 设置面的控制器职责：GET 透出快照、PUT 把 roots 原样交给
-// 领域层（语义判断全在 manager，handler 不做第二套）、body 非法回 40000、领域错误经 RestErr 映射。
-func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
-	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(t, svc))
-
-	env, _ := do(t, r, "GET", "/v1/mate/settings/workspace", "")
-	if env.Code != 0 {
-		t.Fatalf("GET 应成功: %+v", env)
-	}
-	var got dtoworkspace.WorkspaceSettingsResp
-	if err := json.Unmarshal(env.Data, &got); err != nil {
-		t.Fatalf("data 解析: %v", err)
-	}
-	// 快照这一格自 P4a 正文第十九刀起走**真域平面**（读模型由域折好 DTO）：这里只证
-	// "信封形状对 + 空平面如实自报不可写、来源 unavailable"，"配置过的名单原样透出"由
-	// `internal/sessionruntime/workspace_settings_test.go` 用真策略/真端口钉（那边才是判定的本体）。
-	// 空名单在 JSON 上被 omitempty 抹成缺省（前端按"没有"渲染），这里只钉状态两格。
-	if got.Writable || got.Source != "unavailable" {
-		t.Fatalf("空平面快照形状不符: %+v", got)
-	}
-
-	// PUT 自 P4a 正文第三十一刀起也走**真域平面**（`h.plane.UpdateSettings`）：这一格能证的是
-	// "领域错误经带码信封原样出去"——本用例的平面没有配置目录，写面给的就是 `settings_readonly`
-	// （code 40001）。roots 是否原样下发（含空数组 / 字段缺省 = 取消限制）由
-	// `internal/sessionruntime/workspace_settings_test.go` 用**真策略 + 假端口**钉（那边才是判定的本体）。
-	for _, body := range []string{`{"roots":["/srv/docs"]}`, `{"roots":[]}`, `{}`} {
-		env, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", body)
-		if env.Code != 40001 || !strings.Contains(env.Msg, "未启用设置持久化") {
-			t.Fatalf("PUT %s 应把域平面的 `settings_readonly` 原样透出: %+v", body, env)
-		}
-	}
-
-	// body 非法 → 参数错误码（不是 1：面板要能区分"我传错了"与"服务端坏了"）。
-	if env, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", `{`); env.Code != 40000 {
-		t.Fatalf("非法 body 应 40000: %+v", env)
-	}
-
-	// 领域拒绝的三种语义码（锁定 / 只读 / 非法目录）不再由替身伪造：`settings_readonly` 已由上面
-	// 那一组用**真平面**钉住，`settings_locked` 与 `workspace_invalid` 由 `internal/sessionruntime` 的
-	// 设置面测试用真策略（env 锁 / 非法目录）钉——判定的本体在域里，替身只会重复它自己的假设。
 }
 
 // TestWorkspaceRegistryCtrPassThrough v14 登记表的控制器职责：路径参数与 body 原样到端口、

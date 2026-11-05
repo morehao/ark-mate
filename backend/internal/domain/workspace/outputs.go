@@ -120,16 +120,3 @@ type FilesView struct {
 	Roots   []string
 	Entries []FileEntry
 }
-
-// SettingsView 工作空间设置的读面。
-type SettingsView struct {
-	Configured        []string
-	Roots             []string
-	PreferRoots       bool
-	ProvisionDir      string
-	CreateRoot        string
-	ProvisionIncluded bool
-	Source            string
-	LockedBy          string
-	Writable          bool
-}

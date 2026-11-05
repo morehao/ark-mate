@@ -1,4 +1,4 @@
-// Package ctrworkspace 承载工作空间面控制器（目录枚举/建目录/最近使用/起始点偏好设置）。
+// Package ctrworkspace 承载工作空间面控制器（目录枚举/建目录/最近使用/工作空间登记）。
 //
 // 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
 // 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
@@ -15,15 +15,13 @@ import (
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
-// WorkspaceCtr 工作空间面控制器（目录枚举/建目录/最近使用/起始点偏好设置）。
+// WorkspaceCtr 工作空间面控制器（目录枚举/建目录/最近使用/工作空间登记）。
 type WorkspaceCtr interface {
 	Browse(c *gin.Context)
 	CreateDir(c *gin.Context)
 	PickDirectory(c *gin.Context)
 	Recent(c *gin.Context)
 	Files(c *gin.Context)
-	Settings(c *gin.Context)
-	UpdateSettings(c *gin.Context)
 
 	// v14：工作空间登记表（有 id、可改写与删除的持久实体）。
 	List(c *gin.Context)
@@ -40,7 +38,7 @@ var _ WorkspaceCtr = (*workspaceCtr)(nil)
 // 因此"选一个目录"必须由控制面提供枚举能力；且**只列目录**——工作空间必须是目录
 // （见 workspace.ValidateWorkspace 的三条件）。
 type workspaceCtr struct {
-	// svc 工作空间面用例（登记表 / 派生视图 / 设置面 / 宿主目录选择器）。
+	// svc 工作空间面用例（登记表 / 派生视图 / 宿主目录选择器）。
 	svc svcworkspace.WorkspaceSvc
 }
 
@@ -133,34 +131,6 @@ func (h *workspaceCtr) Files(c *gin.Context) {
 	path := strings.TrimSpace(c.Query("path"))
 	includeHidden := c.Query("hidden") == "true"
 	resp, err := h.svc.Files(path, includeHidden)
-	if err != nil {
-		gincontext.Fail(c, code.FromError(err))
-		return
-	}
-	gincontext.Success(c, resp)
-}
-
-// Settings 返回工作区根白名单的设置快照（只读；面板「设置」页据此渲染可编辑列表）。
-//
-// 与 `/workspaces/browse` 返回的 roots 同源但**不同义**：browse 给的是生效名单（含平台代建根，
-// 供浏览面把它们列成快捷入口），这里额外区分"显式配置的"与"派生的"，否则面板无法表达"删掉这条"。
-func (h *workspaceCtr) Settings(c *gin.Context) {
-	// 快照从**域平面**取（P4a 正文第十九刀）：域里已折好 DTO（含 configured / prefer_roots /
-	// source / locked_by），用例层再包一层就只是一行转发；它没有错误出口（读自己的状态）。
-	gincontext.Success(c, h.svc.Settings())
-}
-
-// UpdateSettings 全量替换工作区根白名单（落盘 + 对新会话立即生效）。
-//
-// 三种拒绝要能分辨：`settings_locked`（被 env/flag 锁定 → 面板转只读）、`settings_readonly`
-// （本进程无配置目录）、`workspace_invalid`（某条不是绝对路径 / 不存在 / 不是目录）。
-func (h *workspaceCtr) UpdateSettings(c *gin.Context) {
-	var req dtoworkspace.WorkspaceSettingsReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
-		return
-	}
-	resp, err := h.svc.UpdateSettings(req.Roots)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

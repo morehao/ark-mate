@@ -129,25 +129,6 @@ func filesViewResp(v *workspace.FilesView) *dtoworkspace.WorkspaceFilesResp {
 	}
 }
 
-func settingsViewResp(v *workspace.SettingsView) *dtoworkspace.WorkspaceSettingsResp {
-	if v == nil {
-		return nil
-	}
-	configured := make([]string, 0, len(v.Configured))
-	configured = append(configured, v.Configured...)
-	return &dtoworkspace.WorkspaceSettingsResp{
-		Configured:        configured,
-		Roots:             append([]string(nil), v.Roots...),
-		PreferRoots:       v.PreferRoots,
-		ProvisionDir:      v.ProvisionDir,
-		CreateRoot:        v.CreateRoot,
-		ProvisionIncluded: v.ProvisionIncluded,
-		Source:            v.Source,
-		LockedBy:          v.LockedBy,
-		Writable:          v.Writable,
-	}
-}
-
 // createRequest 对外请求 → 领域入参。
 func createRequest(req dtoworkspace.WorkspaceCreateReq) workspace.CreateRequest {
 	return workspace.CreateRequest{Path: req.Path, Name: req.Name, Title: req.Title, Strict: req.Strict}
