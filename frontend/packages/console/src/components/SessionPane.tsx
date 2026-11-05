@@ -17,10 +17,11 @@ import type { SessionSearchHit, SessionSummary, MessageSearchHit, MessageSearchR
 import { sessionSearch, exportSessions, messageSearch, toErrorMessage } from '@ark-mate/api'
 import { dedupeHits, exportDownloadName, roleLabel, sourceLabel } from '../console/searchView'
 import { useMate } from '../store'
-import { RAIL_PAGE, pageSessions, relTime } from '../console/railView'
+import { RAIL_PAGE, pageSessions, sessionBadge } from '../console/railView'
 import { archivedFilterToRailMode, railModeToArchivedFilter } from '../console/workspaceView'
 import { RailSectionHeader } from './RailSectionHeader'
 import { WorkspaceGroupPane } from './WorkspaceGroupPane'
+import { SessionInfoPopover } from './SessionInfoPopover'
 import { titleFor } from '../console/util'
 
 interface Props {
@@ -384,6 +385,7 @@ export function SessionPane({ onCreate }: Props) {
   const renderItem = (sm: SessionSummary) => {
     const view = views[sm.id]
     const on = sm.id === activeId
+    const badge = sessionBadge({ status: sm.status, run: sm.run })
 
     // 行内「更多」：重命名 / 置顶·取消置顶 / 归档（或恢复）
     const menuItems: MenuProps['items'] = [
@@ -415,8 +417,8 @@ export function SessionPane({ onCreate }: Props) {
     }
 
     return (
+      <SessionInfoPopover key={sm.id} session={sm}>
       <div
-        key={sm.id}
         className={`fg-sess-item${on ? ' fg-on' : ''}`}
         style={{
           position: 'relative',
@@ -451,12 +453,13 @@ export function SessionPane({ onCreate }: Props) {
             cursor: busy && !on ? 'not-allowed' : 'pointer',
           }}
         >
-          {/* 会话行**只有一行**（需求 9 / 10）：标题在左、相对时间贴行右端，同一基线。
-              行内不再有状态点 / 阶段文案 / 来源标记——「这一轮在干什么」在会话页头与主区
-              确认区里说，左栏只回答「这条叫什么、什么时候」。 */}
+          {/* 会话行**只有一行**（设计 §15）：标题在左（省略号截断）、状态点+状态文案贴行右端
+              紧邻 `⋯`，同一基线。hover / 当前行时状态淡出让位给 `⋯`（同位置切换，位置不跳）。
+              状态口径只有一份实现（`railView.sessionBadge`）：运行中/待授权/失败/已完成，
+              idle 不显示。悬停整行弹出会话信息浮层（标题/所属空间/模型/更新时间）。 */}
           <span
             data-sess-line="title"
-            style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, paddingRight: 0 }}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, paddingRight: 0 }}
           >
             <span
               style={{
@@ -466,7 +469,7 @@ export function SessionPane({ onCreate }: Props) {
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
                 fontSize: 13.5,
-                fontWeight: 560,
+                fontWeight: 450,
                 letterSpacing: '-0.005em',
                 color: sm.archived ? tokens.textSecondary : tokens.text,
               }}
@@ -475,9 +478,12 @@ export function SessionPane({ onCreate }: Props) {
               {titleFor(sm, view, undefined, 'plain')}
             </span>
             {sm.pinned && <PushpinFilled style={{ fontSize: 11, color: tokens.primary, flex: 'none' }} />}
-            <span className="fg-sess-time" title={sm.updated_at}>
-              {relTime(sm.updated_at)}
-            </span>
+            {badge && (
+              <span className={`fg-sess-status fg-${badge.kind}`} title={badge.label}>
+                <span className="fg-sess-dot" />
+                {badge.label}
+              </span>
+            )}
           </span>
         </button>
         {/* 行尾「更多」：绝对定位在行右端（原型 `.sess .ops`）。
@@ -509,6 +515,7 @@ export function SessionPane({ onCreate }: Props) {
           </button>
         </Dropdown>
       </div>
+      </SessionInfoPopover>
     )
   }
 

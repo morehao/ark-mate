@@ -28,24 +28,14 @@ export const consoleStyleSheet = `
   .fg-anim-blink { animation: fg-blink 1.1s ease-in-out infinite; }
   .fg-anim-pulse { animation: fg-pulse 1.4s ease-in-out infinite; }
 
-  /* 会话列表项：hover / 选中（::before 选中竖条） */
+  /* 会话列表项：hover / 选中（设计 §16：选中仅浅灰底，去掉主色左竖条，标题不加粗不改色） */
   .fg-sess-item {
     position: relative;
     transition: background 0.12s ease;
   }
   .fg-sess-item:hover { background: ${tokens.softFill}; }
   .fg-sess-item.fg-on {
-    background: ${tokens.selectedBg};
-  }
-  .fg-sess-item.fg-on::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 9px;
-    bottom: 9px;
-    width: 2.5px;
-    border-radius: 2px;
-    background: ${tokens.primary};
+    background: ${tokens.softFill};
   }
   .fg-sess-item:disabled { opacity: 0.6; cursor: not-allowed; }
   .fg-sess-item:disabled:hover { background: transparent; }
@@ -144,7 +134,8 @@ export const consoleStyleSheet = `
     transition: background 0.12s ease, color 0.12s ease;
   }
   .fg-navitem:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
-  .fg-navitem.fg-on { background: ${tokens.softFill}; color: ${tokens.text}; font-weight: 600; }
+  /* 选中态（设计 §16 / §17）：浅灰底 + 主色文字 + 主色图标，**不加粗**（与未选中同字重）。 */
+  .fg-navitem.fg-on { background: ${tokens.softFill}; color: ${tokens.primary}; }
   /* 一级项图标：定宽 16 让所有文案左对齐；未选中比文案再弱一档，选中吃主色 */
   .fg-navitem-icon {
     flex: none;
@@ -208,7 +199,8 @@ export const consoleStyleSheet = `
     transition: background 0.12s ease, color 0.12s ease;
   }
   .fg-navsub:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
-  .fg-navsub.fg-on { background: ${tokens.softFill}; color: ${tokens.primary}; font-weight: 600; }
+  /* 二级项选中：同主色文字 + 浅灰底，不加粗（设计 §17）。 */
+  .fg-navsub.fg-on { background: ${tokens.softFill}; color: ${tokens.primary}; }
   .fg-navsub-label { flex: 1; min-width: 0; }
   /* pending（待开发）：可读但不可点，右挂「待开发」标签 */
   .fg-navsub.fg-pending { color: ${tokens.textPlaceholder}; cursor: default; }
@@ -1330,7 +1322,7 @@ export const consoleStyleSheet = `
   /* 不可写（memory 持久层）时区头不渲染「添加工作区」——不留一个必然失败的按钮。 */
   .fg-rail-sechead-icon:disabled { cursor: default; opacity: 0.35; }
 
-  /* 左栏工作空间分组行（比会话行略重：它是分组的头）。 */
+  /* 左栏工作空间分组行（设计 §17：与会话名**同规格** 13px / 450 / text，不再是更重的组头）。 */
   .fg-wsgroup-row {
     display: flex;
     align-items: center;
@@ -1338,8 +1330,8 @@ export const consoleStyleSheet = `
     padding: 5px 8px 5px 8px;
     border-radius: 8px;
     cursor: pointer;
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 450;
     color: ${tokens.text};
     /* 内容再多也不外溢：名字是单行省略，动作按钮一直占位（需求 5 的第二道保险）。 */
     overflow: hidden;
@@ -1395,18 +1387,69 @@ export const consoleStyleSheet = `
     line-height: 1.6;
   }
 
-  /* 会话行右端相对时间（需求 9）：与标题同一基线、不参与收缩。
-     ⋯ 与它共用行右端——静止态时间在最右，hover / 当前行时时间淡出让位，位置不跳（D11）。 */
-  .fg-sess-time {
+  /* 会话行右端状态徽标（设计 §15）：状态点 + 文案，紧邻「⋯」、不参与收缩。
+     「⋯」与它共用行右端——静止态徽标在最右，hover / 当前行时徽标淡出让位，位置不跳（D11）。 */
+  .fg-sess-status {
     flex: none;
-    font-family: ${tokens.fontMono};
-    font-size: 10.5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    line-height: 1;
     color: ${tokens.textSecondary};
     white-space: nowrap;
     transition: opacity 0.12s ease;
   }
-  .fg-sess-item:hover .fg-sess-time,
-  .fg-sess-item.fg-on .fg-sess-time { opacity: 0; }
+  .fg-sess-dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: ${tokens.textPlaceholder};
+  }
+  .fg-sess-status.fg-run { color: ${tokens.primary}; }
+  .fg-sess-status.fg-run .fg-sess-dot { background: ${tokens.primary}; animation: fg-pulse 1.4s ease-in-out infinite; }
+  .fg-sess-status.fg-wait { color: ${tokens.warning}; }
+  .fg-sess-status.fg-wait .fg-sess-dot { background: ${tokens.warning}; }
+  .fg-sess-status.fg-fail { color: ${tokens.error}; }
+  .fg-sess-status.fg-fail .fg-sess-dot { background: ${tokens.error}; }
+  .fg-sess-status.fg-done { color: ${tokens.textPlaceholder}; }
+  .fg-sess-status.fg-done .fg-sess-dot { background: ${tokens.textPlaceholder}; }
+  .fg-sess-item:hover .fg-sess-status,
+  .fg-sess-item.fg-on .fg-sess-status { opacity: 0; }
+
+  /* 会话信息浮层（悬停会话行弹出，设计 §13–§19）：白卡 + hairline + 阴影（浮层允许阴影）。
+     内容四行：标题 / 所属空间 / 模型 / 更新时间（空行不渲染）。 */
+  .fg-sess-info {
+    min-width: 220px;
+    max-width: 320px;
+    padding: 2px 0;
+  }
+  .fg-sess-info-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: ${tokens.text};
+    margin-bottom: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fg-sess-info-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 3px 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .fg-sess-info-key { flex: none; color: ${tokens.textPlaceholder}; }
+  .fg-sess-info-val {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: ${tokens.text};
+  }
 
   /* 会话行「更多」按钮：悬停浮现；触屏（移动抽屉态）常显 */
   .fg-sess-more { opacity: 0; transition: opacity 0.12s ease; }
