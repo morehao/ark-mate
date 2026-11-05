@@ -1,7 +1,9 @@
-import { type ReactNode } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { Button, Input, Select, Space, Tag, Tooltip } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
+import { ApiOutlined, ReloadOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import { PageContainer, tokens } from '@ark-mate/ui'
+import { listExperts } from '@ark-mate/api'
 import type { LibraryItem } from '@ark-mate/types'
 import { libraryKindColor, libraryKindLabel, libraryOriginView, libraryStatusView } from '../../console/capabilityView'
 import { mono, smallTag, SectionHeader, SectionEmpty, Row, Card } from './shared'
@@ -16,8 +18,49 @@ import { useCapabilityData } from './useCapabilityData'
  * 「哪些底座投得出来、为什么投不出来」这条信息由 Library 行的逐个 applicability 标签承担。
  */
 export function OverviewPanel() {
-  const { library, libKind, setLibKind, libQ, setLibQ, busy, loadLibrary, loadAll, refresh } =
+  const navigate = useNavigate()
+  const { library, libKind, setLibKind, libQ, setLibQ, busy, loadLibrary, loadAll, refresh, skills, mcps } =
     useCapabilityData('overview')
+
+  // 专家数只用于总览第三张卡（原型 §D 三卡）：取一次清单，失败退化为 0（不阻断总览）。
+  const [expertCount, setExpertCount] = useState<number | null>(null)
+  useEffect(() => {
+    let alive = true
+    listExperts()
+      .then((list) => alive && setExpertCount(list.length))
+      .catch(() => alive && setExpertCount(0))
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // 三张入口卡（原型 §D）：技能 / 连接器 / 专家，各自带「N 个」副标 + 一句说明，点击进对应页。
+  const overviewCards = [
+    {
+      key: 'skills',
+      icon: <ThunderboltOutlined />,
+      title: '技能',
+      stat: `${skills.length} 个`,
+      desc: '读文档、做表格、写代码、出图等具体本事。',
+      to: '/extensions/skills',
+    },
+    {
+      key: 'connectors',
+      icon: <ApiOutlined />,
+      title: '连接器',
+      stat: `${mcps.length} 个已连`,
+      desc: '邮箱、网盘、日历等外部服务，把数据接到助手身边。',
+      to: '/extensions/connectors',
+    },
+    {
+      key: 'experts',
+      icon: <UserOutlined />,
+      title: '专家',
+      stat: expertCount == null ? '…' : `${expertCount} 个预设`,
+      desc: '不同场景的预设：擅长什么、用哪些技能与连接器。',
+      to: '/extensions/experts',
+    },
+  ]
 
   // Library 行渲染（只被本页用）
     const libraryRow = (it: LibraryItem): ReactNode => {
@@ -70,6 +113,12 @@ export function OverviewPanel() {
       description="能力总览：技能、连接器与工具的统一清单。"
       extra={
         <Space>
+          <Button size="small" onClick={() => navigate('/extensions/skills')}>
+            管理技能
+          </Button>
+          <Button size="small" type="primary" onClick={() => navigate('/extensions/connectors')}>
+            管理连接器
+          </Button>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadAll()}>
             刷新
           </Button>
@@ -77,6 +126,46 @@ export function OverviewPanel() {
       }
     >
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* ——— 三张入口卡（原型 §D）：技能 / 连接器 / 专家，各带数量与一句说明 ——— */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14 }}>
+          {overviewCards.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => navigate(c.to)}
+              style={{
+                textAlign: 'left',
+                cursor: 'pointer',
+                border: `1px solid ${tokens.border}`,
+                borderRadius: tokens.radiusMd,
+                background: tokens.surface,
+                padding: 16,
+                font: 'inherit',
+                transition: 'border-color 0.12s ease',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = tokens.borderStrong)}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = tokens.border)}
+            >
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 11,
+                  display: 'grid',
+                  placeItems: 'center',
+                  background: tokens.primarySoft,
+                  color: tokens.primary,
+                  fontSize: 18,
+                }}
+              >
+                {c.icon}
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 650, color: tokens.text, marginTop: 12 }}>{c.title}</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: tokens.primary, marginTop: 2 }}>{c.stat}</div>
+              <div style={{ fontSize: 12.5, color: tokens.textSecondary, marginTop: 8, lineHeight: 1.6 }}>{c.desc}</div>
+            </button>
+          ))}
+        </div>
         {/* ——— M2-4 Library：三类同构的统一能力清单（只读聚合） ——— */}
         <Card>
           <SectionHeader

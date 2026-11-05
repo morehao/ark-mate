@@ -330,10 +330,12 @@ async function openPage(browser, url) {
 const clickJS = (page, expr) =>
   page.evaluate(`const el = ${expr}; if (!el) return false; el.click(); return true`)
 
-/** 在「任务」列含指定名称的那一行里点指定按钮（多行时避免点到第一条）。 */
+/** 在含指定名称的那一「行」里点指定按钮（多行时避免点到第一条）。
+ *  2026-11-05 原型重设计：定时任务列表由 `<Table>` 改为卡行（`.fg-auto-row`），
+ *  所以行选择器优先 `.fg-auto-row`，保留 `tr.ant-table-row` 兜底（老结构/其它表格页）。 */
 const rowBtnClick = (name, label) =>
   // 按钮文本比对前先去掉所有空白：antd 会给两个汉字的按钮插空格（innerText 是「运 行 史」）。
-  `return (() => { const norm = (s) => (s||'').replace(/\\s/g, ''); const tr = [...document.querySelectorAll('.ant-table-tbody tr.ant-table-row')].find(t => (t.innerText||'').includes(${JSON.stringify(name)})); if(!tr) return false; const b=[...tr.querySelectorAll('button')].find(b=>norm(b.innerText)===${JSON.stringify(label)}); if(!b) return false; b.click(); return true })()`
+  `return (() => { const norm = (s) => (s||'').replace(/\\s/g, ''); const rows = [...document.querySelectorAll('.fg-auto-row, .ant-table-tbody tr.ant-table-row')]; const tr = rows.find(t => (t.innerText||'').includes(${JSON.stringify(name)})); if(!tr) return false; const b=[...tr.querySelectorAll('button')].find(b=>norm(b.innerText)===${JSON.stringify(label)}); if(!b) return false; b.click(); return true })()`
 
 /**
  * 等编辑卡**收起**（= 这张卡的写面已返回、表单已卸载）。

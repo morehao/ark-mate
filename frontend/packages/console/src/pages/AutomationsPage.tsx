@@ -13,13 +13,19 @@ import {
   Segmented,
   Select,
   Space,
+  Spin,
   Switch,
-  Table,
   Tag,
   Tooltip,
 } from 'antd'
-import type { ColumnsType } from 'antd/es/table'
-import { DeleteOutlined, EditOutlined, HistoryOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import {
+  ClockCircleOutlined,
+  DeleteOutlined,
+  HistoryOutlined,
+  PlayCircleOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons'
 import { Dot, PageContainer, tokens } from '@ark-mate/ui'
 import {
   createAutomation,
@@ -234,72 +240,44 @@ export function AutomationsPage() {
     setRuns({ id: a.id, records: resp.runs ?? [], limit: resp.limit })
   }
 
-  const columns: ColumnsType<Automation> = [
-    {
-      title: '任务',
-      dataIndex: 'id',
-      key: 'id',
-      render: (_: unknown, a) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Space size={6} align="center">
-            <span style={{ fontWeight: 600 }}>{a.name || a.id}</span>
-            {isNeedsAttention(a) && (
-              <Tooltip title={`连续 ${a.consecutive_failures} 次没跑成，平台不自动重试（避免把同一次错过重放）`}>
-                <Tag color="error" style={{ marginInlineEnd: 0 }}>
-                  需处理
-                </Tag>
+  // 列表卡行（原型 §F `.auto-row`）：图标 + 名称/状态 + 调度 + 下次/上次 + 动作。
+  const renderAutoRow = (a: Automation) => {
+    const meta = STATE_META[a.state] ?? STATE_META.inactive
+    return (
+      <div className="fg-auto-row" key={a.id}>
+        <div className="fg-auto-ico">
+          <ClockCircleOutlined />
+        </div>
+        <div className="fg-auto-main">
+          <div className="fg-auto-name">
+            <span>{a.name || a.id}</span>
+            <Space size={6} align="center">
+              <Dot color={toneColor(meta.tone)} pulse={a.state === 'active'} />
+              <span style={{ fontSize: 12.5, color: tokens.textSecondary }}>{meta.label}</span>
+              {isNeedsAttention(a) && (
+                <Tooltip title={`连续 ${a.consecutive_failures} 次没跑成，平台不自动重试（避免把同一次错过重放）`}>
+                  <Tag color="error" style={{ marginInlineEnd: 0 }}>
+                    需处理
+                  </Tag>
+                </Tooltip>
+              )}
+            </Space>
+          </div>
+          <div className="fg-auto-sched">{describeSchedule(a.schedule)}</div>
+          <div className="fg-auto-next">
+            {a.error ? (
+              <span style={{ color: tokens.error }}>{a.error}</span>
+            ) : (
+              <Tooltip title={a.last_reason ?? undefined}>
+                <span style={{ color: a.last_status === 'skipped' ? tokens.error : undefined }}>
+                  {a.next_due_at ? `下次 ${fmtWhen(a.next_due_at)}` : '没有下一次'}
+                  {a.last_status ? ` · 上次 ${lastRunText(a)}` : ''}
+                </span>
               </Tooltip>
             )}
-          </Space>
-          <span style={{ fontSize: 12, color: tokens.textSecondary }}>{describeSchedule(a.schedule)}</span>
-          {a.error ? (
-            <span style={{ fontSize: 12, color: tokens.error }}>{a.error}</span>
-          ) : (
-            <span style={{ fontSize: 12, color: tokens.textSecondary }}>
-              {a.next_due_at ? `下次 ${fmtWhen(a.next_due_at)}` : '没有下一次'}
-            </span>
-          )}
+          </div>
         </div>
-      ),
-    },
-    {
-      title: '状态',
-      dataIndex: 'state',
-      key: 'state',
-      width: 120,
-      render: (_: unknown, a) => {
-        const meta = STATE_META[a.state] ?? STATE_META.inactive
-        return (
-          <Space size={6}>
-            <Dot color={toneColor(meta.tone)} pulse={a.state === 'active'} />
-            <span style={{ fontSize: 12.5 }}>{meta.label}</span>
-          </Space>
-        )
-      },
-    },
-    {
-      title: '最近一次',
-      dataIndex: 'last_status',
-      key: 'last',
-      render: (_: unknown, a) => (
-        <Tooltip title={a.last_reason ?? undefined}>
-          <span
-            style={{
-              fontSize: 12.5,
-              color: a.last_status === 'skipped' ? tokens.error : tokens.textSecondary,
-            }}
-          >
-            {lastRunText(a)}
-          </span>
-        </Tooltip>
-      ),
-    },
-    {
-      title: '操作',
-      key: 'ops',
-      width: 260,
-      render: (_: unknown, a) => (
-        <Space size={4} wrap>
+        <div className="fg-auto-act">
           <Button
             size="small"
             icon={<PlayCircleOutlined />}
@@ -312,7 +290,7 @@ export function AutomationsPage() {
           <Button size="small" icon={<HistoryOutlined />} onClick={() => void openRuns(a)}>
             运行史
           </Button>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(a)}>
+          <Button size="small" onClick={() => openEdit(a)}>
             编辑
           </Button>
           <Switch
@@ -324,10 +302,10 @@ export function AutomationsPage() {
           <Popconfirm title={`删除「${a.name || a.id}」？`} description="删除后不可恢复；已产生的会话不受影响。" onConfirm={() => void onDelete(a)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
-        </Space>
-      ),
-    },
-  ]
+        </div>
+      </div>
+    )
+  }
 
   return (
     <PageContainer
@@ -349,15 +327,20 @@ export function AutomationsPage() {
         </Space>
       }
     >
-      <Table<Automation>
-        rowKey="id"
-        size="middle"
-        loading={loading}
-        dataSource={rows}
-        columns={columns}
-        pagination={false}
-        locale={{ emptyText: <Empty description="还没有定时任务" /> }}
-      />
+      {/* 列表卡（原型 §F）：一行一个任务，任务名 + 状态 + 调度 + 下次/上次 + 动作。 */}
+      {loading && rows.length === 0 ? (
+        <div style={{ padding: 24, textAlign: 'center' }}>
+          <Spin />
+        </div>
+      ) : rows.length === 0 ? (
+        <div style={{ padding: 24 }}>
+          <Empty description="还没有定时任务" />
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {rows.map(renderAutoRow)}
+        </div>
+      )}
 
       {/* 编辑器：预览与保存同屏——"什么时候跑"必须能在保存之前看到 */}
       <Modal

@@ -2,6 +2,56 @@ import type { SessionSummary } from '@ark-mate/types'
 
 // ——— 会话侧栏视图模型（P3 余留：列表分页 + active 提升 + 相对时间；纯函数，便于 Node 侧校验） ———
 
+/**
+ * 会话行的**状态徽标**（`标题 + 状态点+状态文案` 那一格）：`null` = 不显示（idle，无话可说）。
+ *
+ * 取值来源只有两处，都来自后端事实，**绝不猜**（对齐 archtest `TestNoClientSideRunInference`）：
+ *   1. `SessionSummary.run`（`run.status` 读面投影，ADR-6）——优先，连没打开过的会话也能说「待授权」；
+ *   2. `SessionSummary.status`（REST 快照）——`run` 缺席（历史会话 / 本轮还没开始）时回落。
+ *
+ * 映射到原型四态：运行中（run）/ 待授权（wait）/ 失败（fail）/ 已完成（done）。
+ * `cancelled`、`interrupted`、`idle` 一律不显示——它们不是"在跑"也不是"成功/失败"，
+ * 硬塞一个徽标只会把「取消/中断」说成「已完成」。
+ */
+export type SessionBadgeKind = 'run' | 'wait' | 'fail' | 'done'
+
+export interface SessionBadge {
+  readonly kind: SessionBadgeKind
+  readonly label: string
+}
+
+export function sessionBadge(summary: Pick<SessionSummary, 'status' | 'run'>): SessionBadge | null {
+  const run = summary.run
+  if (run) {
+    switch (run.status) {
+      case 'waiting_for_permission':
+      case 'waiting_for_user':
+        return { kind: 'wait', label: '待授权' }
+      case 'preparing':
+      case 'model_requesting':
+      case 'model_streaming':
+      case 'tool_executing':
+      case 'retrying':
+      case 'compacting':
+      case 'cancelling':
+        return { kind: 'run', label: '运行中' }
+      default:
+        // idle / interrupted：落到下面的快照口径（不从这里直接下结论）。
+        break
+    }
+  }
+  switch (summary.status) {
+    case 'failed':
+      return { kind: 'fail', label: '失败' }
+    case 'completed':
+      return { kind: 'done', label: '已完成' }
+    case 'in_progress':
+      return { kind: 'run', label: '运行中' }
+    default:
+      return null
+  }
+}
+
 /** 一页渲染的会话条数（超出的以「显示更早」增量展开）。 */
 export const RAIL_PAGE = 40
 

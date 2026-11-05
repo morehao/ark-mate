@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Checkbox, Popover, Spin, Tooltip } from 'antd'
-import { ApiOutlined, PlusOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
+import {
+  ApiOutlined,
+  FileAddOutlined,
+  PlusOutlined,
+  StarOutlined,
+  ThunderboltOutlined,
+  UserOutlined,
+} from '@ant-design/icons'
 import { listExperts, listLibrary, listMcpServers } from '@ark-mate/api'
 import type { Expert, LibraryItem, McpServer, SessionCapabilitiesPatch } from '@ark-mate/types'
 import { useMate } from '../store'
@@ -24,6 +31,11 @@ interface Props {
   onChange: (patch: SessionCapabilitiesPatch) => void
   /** 入口不可用（会话底座对不上 / 正在创建）。 */
   disabled?: boolean
+  /**
+   * 「添加文件」入口：`+` 菜单第一项（原型 §2 面 B）。由调用方持有隐藏的文件 input，
+   * 这里只负责在菜单里给一个可点的项——本组件不认识上传，传 `undefined` 时该项不渲染。
+   */
+  onAddFile?: () => void
   /** 一次补丁在途：期间禁用勾选（补丁是相对当前值合并的，连点会互相覆盖）。 */
   saving?: boolean
   /**
@@ -72,7 +84,7 @@ const TITLE: Record<PanelKind, string> = { expert: '专家', skills: '技能', m
  * 技能/MCP 各有「跟随默认 / 自定义」两档：跟随默认 → 补丁里那格是 `null`（不限制）；自定义 →
  * 非空数组是白名单、`[]` 是"一个都不要"。这两档在服务端是**两个代际**，界面上就不能画成一样。
  */
-export function CapabilityBar({ value, onChange, disabled, saving, applyHint = 'next-round' }: Props) {
+export function CapabilityBar({ value, onChange, disabled, saving, applyHint = 'next-round', onAddFile }: Props) {
   const showToast = useMate((s) => s.showToast)
   const [menuOpen, setMenuOpen] = useState(false)
   const [panel, setPanel] = useState<Panel | null>(null)
@@ -355,7 +367,45 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
   )
 
   const menu = (
-    <div className="fg-cap-menu" role="menu" aria-label="添加能力">
+    <div className="fg-cap-menu" role="menu" aria-label="添加">
+      {/* 添加文件：由调用方持有隐藏 input，这里只给可点项（原型 §2 面 B 的第一项）。 */}
+      {onAddFile && (
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            className="fg-cap-menu-item"
+            title="添加附件（也可直接把文件拖进输入区）"
+            disabled={disabled}
+            onClick={() => {
+              setMenuOpen(false)
+              onAddFile()
+            }}
+          >
+            <span className="fg-cap-menu-ico">
+              <FileAddOutlined />
+            </span>
+            <span className="fg-cap-menu-label">添加文件</span>
+            <span className="fg-cap-menu-chev" aria-hidden="true">
+              ›
+            </span>
+          </button>
+          <div className="fg-cap-menu-sep" role="separator" />
+        </>
+      )}
+      {/* 模式 = 长期待开发（设计 §19.2：无写接口），置灰不可点 + 「待开发」标签。 */}
+      <span
+        className="fg-cap-menu-item fg-pending"
+        role="menuitem"
+        aria-disabled="true"
+        title="模式 · 待开发"
+      >
+        <span className="fg-cap-menu-ico">
+          <StarOutlined />
+        </span>
+        <span className="fg-cap-menu-label">模式</span>
+        <span className="fg-cap-menu-soon">待开发</span>
+      </span>
       {MENU.map((item) => (
         <button
           key={item.kind}

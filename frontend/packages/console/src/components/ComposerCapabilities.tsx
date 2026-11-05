@@ -10,6 +10,8 @@ interface Props {
   capabilities?: SessionCapabilities | null
   /** 会话不能继续时禁用入口（如底座与构建期不一致的历史会话）。 */
   disabled?: boolean
+  /** `+` 菜单「添加文件」入口（由 Composer 持有隐藏 input，透传给 CapabilityBar）。 */
+  onAddFile?: () => void
 }
 
 /**
@@ -23,7 +25,7 @@ interface Props {
  *
  * 与新建会话面板的区别只有"落库方式"：那边是本地草稿、随 `POST /sessions` 首轮提交。
  */
-export function ComposerCapabilities({ sessionId, capabilities, disabled }: Props) {
+export function ComposerCapabilities({ sessionId, capabilities, disabled, onAddFile }: Props) {
   const updateCapabilities = useMate((s) => s.updateSessionCapabilities)
   // 一次只发一个补丁：补丁是**相对服务端当前值**合并的，而界面在回执回来前还拿着旧快照——
   // 连点两下会各自基于旧值算出"只勾了这一个"，后到的那条把前一条覆盖掉（表现为"点了 A 丢了 B"）。
@@ -43,6 +45,7 @@ export function ComposerCapabilities({ sessionId, capabilities, disabled }: Prop
       disabled={disabled}
       saving={saving}
       applyHint="next-round"
+      onAddFile={onAddFile}
     />
   )
 }

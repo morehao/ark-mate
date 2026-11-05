@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Dropdown } from 'antd'
 import { InboxOutlined, InfoCircleOutlined, MoreOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import { Ev } from '@ark-mate/types'
+import { Ev, modelValues } from '@ark-mate/types'
 import type { AttachmentMeta } from '@ark-mate/types'
 import { listSessionArtifacts, sessionHistory, sessionRuns } from '@ark-mate/api'
 import { useMate } from '../store'
@@ -52,6 +52,9 @@ export function ChatPage() {
   const clearAnchor = useMate((s) => s.clearAnchor)
   const loadOlder = useMate((s) => s.loadOlder)
   const historyStart = useMate((s) => s.historyStart)
+  // 会话级模型选择（原型 §12 模型 chip）：读运行时目录，落库走既有 PATCH /sessions/:id（updateSessionModel）。
+  const modelCatalog = useMate((s) => s.modelCatalog)
+  const updateSessionModel = useMate((s) => s.updateSessionModel)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lastParamRef = useRef<string | null | undefined>(undefined)
@@ -782,6 +785,12 @@ export function ChatPage() {
                     // 底座对不上（历史会话跑在别的底座上）时禁掉入口：那条会话连 prompt 都发不出去，
                     // 改能力只会换来一次「能力不可达」的拒绝。
                     capabilitiesDisabled={foreignRuntime}
+                    // 会话级模型 chip（原型 §12）：候选 = 运行时广告 ∩ 平台清单（modelValues 收窄）。
+                    model={activeSum?.model ?? null}
+                    modelOptions={modelValues(modelCatalog ?? undefined)}
+                    onModelChange={(v) => {
+                      if (activeId) void updateSessionModel(activeId, v ?? undefined)
+                    }}
                   />
                   {dockLine && (
                     <div

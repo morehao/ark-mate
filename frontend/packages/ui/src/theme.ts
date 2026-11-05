@@ -48,6 +48,7 @@ export const tokens = {
   radiusSm: 8,
   radiusMd: 12,
   radiusLg: 14,
+  radiusPill: 999, // 圆形按钮（+ / 发送键）与 pill 形态 chip
 } as const
 
 export const themeConfig: ThemeConfig = {

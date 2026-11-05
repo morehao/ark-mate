@@ -36,6 +36,7 @@ rounded:
   card: 12px
   option: 13px
   composer: 16px
+  pill: 999px
 
 spacing:
   base: 4px

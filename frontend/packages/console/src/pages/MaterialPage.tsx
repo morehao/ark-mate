@@ -191,38 +191,32 @@ export function MaterialPage() {
     })
   }
 
-  const columns: ColumnsType<MaterialNode> = [
-    {
-      title: '名称',
-      dataIndex: 'title',
-      render: (_v, row) => {
-        const meta = KIND_META[row.node_kind]
-        return (
-          <Space size={8} style={{ cursor: 'pointer' }} onClick={() => (row.node_kind === 'folder' ? enterFolder(row) : void openNode(row.id))}>
-            <span style={{ color: meta.color }}>{meta.icon}</span>
-            <span style={{ fontWeight: 500 }}>{row.title || '未命名'}</span>
-            <Tag style={{ marginInlineStart: 4 }}>{meta.label}</Tag>
-          </Space>
-        )
-      },
-    },
-    { title: '大小', dataIndex: 'size_bytes', width: 120, render: (v: number) => (v > 0 ? fmtBytes(v) : '—') },
-    { title: '更新时间', dataIndex: 'updated_at', width: 200, render: (v: string) => v.replace('T', ' ').replace('Z', '').slice(0, 19) },
-    {
-      title: '',
-      width: 96,
-      render: (_v, row) => (
-        <Space>
-          <Button size="small" type="text" onClick={() => void openNode(row.id)}>
-            打开
-          </Button>
-          <Popconfirm title="删除？" description={row.node_kind === 'folder' ? '文件夹将连同子节点一起删除' : '确认删除该节点？'} onConfirm={() => void doDelete(row.id)}>
-            <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ]
+  // 节点卡行（原型 §E `.mat-row`）：kind 图标 + 名称/类型·大小 + 更新时间 + ⋯（打开/删除）。
+  const renderMatRow = (row: MaterialNode) => {
+    const meta = KIND_META[row.node_kind]
+    const open = () => (row.node_kind === 'folder' ? enterFolder(row) : void openNode(row.id))
+    return (
+      <div className="fg-mat-row" key={row.id}>
+        <div className="fg-mat-ico">{meta.icon}</div>
+        <div className="fg-mat-main" onClick={open} style={{ cursor: 'pointer' }}>
+          <div className="fg-mat-name">{row.title || '未命名'}</div>
+          <div className="fg-mat-meta">
+            {meta.label}
+            {row.size_bytes > 0 ? ` · ${fmtBytes(row.size_bytes)}` : ''}
+          </div>
+        </div>
+        <div className="fg-mat-when">{row.updated_at.replace('T', ' ').replace('Z', '').slice(0, 16)}</div>
+        <Popconfirm
+          title="删除？"
+          description={row.node_kind === 'folder' ? '文件夹将连同子节点一起删除' : '确认删除该节点？'}
+          onConfirm={() => void doDelete(row.id)}
+        >
+          <Button size="small" type="text" icon={<DeleteOutlined />} title="删除" />
+        </Popconfirm>
+      </div>
+    )
+  }
+
 
   const hitColumns: ColumnsType<MaterialSearchHit> = [
     {
@@ -314,7 +308,7 @@ export function MaterialPage() {
             <Empty style={{ padding: 40 }} description="没有找到匹配的资料，可换关键词或逐级浏览目录" />
           )
         ) : nodes.length ? (
-          <Table rowKey="id" columns={columns} dataSource={nodes} pagination={false} />
+          <div className="fg-mat-list">{nodes.map(renderMatRow)}</div>
         ) : (
           <Empty style={{ padding: 40 }} description="这里还没有资料，点右上角上传或新建文件夹" />
         )}
