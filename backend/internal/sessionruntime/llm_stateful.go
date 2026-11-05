@@ -55,6 +55,10 @@ func (e *StatefulExecutor) Call(ctx context.Context, req corellm.Request) (corel
 		glog.Warnw(ctx, "llm: Stateful 执行器不支持结构化输出，Schema 被忽略；结构化请改用 Stateless",
 			"purpose", string(req.Purpose))
 	}
+	// 硬约束：agent 轮次若既无步数也无超时，默认拒绝（防内部会话跑飞）。AllowUnbounded 可显式放行。
+	if req.Purpose == corellm.PurposeAgentTurn && req.MaxSteps <= 0 && req.Timeout <= 0 && !req.AllowUnbounded {
+		return corellm.Result{Outcome: corellm.OutcomeFailed}, corellm.ErrUnboundedAgentTurn
+	}
 	prompt := composeInternalPrompt(req)
 	if strings.TrimSpace(prompt) == "" {
 		return corellm.Result{}, fmt.Errorf("llm: 会话执行器的请求没有可发送的文本")
@@ -64,21 +68,174 @@ func (e *StatefulExecutor) Call(ctx context.Context, req corellm.Request) (corel
 		model = e.defaultModel
 	}
 
-	res, err := e.orch.startSessionOn(ctx, session.StartOptions{
-		Cwd:    e.cwd,
-		Model:  runtime.ModelConfig{Provider: req.Provider, Model: model},
-		Origin: internalSessionOrigin,
+	// 超时：Request.Timeout 叠加在 ctx 上（谁先到谁生效）。
+	runCtx := ctx
+	if req.Timeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, req.Timeout)
+		defer cancel()
+	}
+
+	// 工具裁剪：白名单非空才构造 Selection（nil 子项 = 该维度全量）。
+	var sel *session.CapabilitySelection
+	if req.AllowedSkills != nil || req.AllowedMcps != nil {
+		sel = buildSelection(req.AllowedSkills, req.AllowedMcps)
+	}
+
+	res, err := e.orch.startSessionOn(runCtx, session.StartOptions{
+		Cwd:       e.cwd,
+		Model:     runtime.ModelConfig{Provider: req.Provider, Model: model},
+		Origin:    internalSessionOrigin,
+		Selection: sel,
 	})
 	if err != nil {
 		return corellm.Result{}, err
 	}
-	if _, err := e.orch.Prompt(ctx, res.SessionID, prompt); err != nil {
+	if _, err := e.orch.Prompt(runCtx, res.SessionID, prompt); err != nil {
 		return corellm.Result{}, err
 	}
-	if _, err := e.orch.WaitRun(ctx, res.SessionID); err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-		return corellm.Result{}, err
+
+	// 等待本轮结束，期间按预算观察实时事件。WaitRun 放 goroutine：主流程 select 事件累计预算，
+	// 超限则 CancelRun（WaitRun 会随之返回），正常则由 WaitRun 返回收尾。
+	runErrCh := make(chan error, 1)
+	go func() {
+		_, err := e.orch.WaitRun(runCtx, res.SessionID)
+		runErrCh <- err
+	}()
+
+	budgetErr := e.waitWithBudget(runCtx, res.SessionID, req.MaxSteps, req.TokenBudget, runErrCh)
+	if budgetErr != nil {
+		// 中止会话（复用既有 CancelRun，不硬杀进程），尽量读回已产出的正文与 token。
+		_ = e.orch.CancelRun(context.WithoutCancel(ctx), res.SessionID)
+		// 等 WaitRun 收尾（取消后应立即返回；用调用方 ctx 兜底）。
+		select {
+		case <-runErrCh:
+		case <-ctx.Done():
+		}
 	}
-	return e.collectResult(ctx, res.SessionID)
+
+	out, cErr := e.collectResult(ctx, res.SessionID)
+	if cErr != nil {
+		return corellm.Result{}, cErr
+	}
+	if budgetErr != nil {
+		out.Outcome = corellm.OutcomeFailed
+		return out, budgetErr
+	}
+	return out, nil
+}
+
+// waitWithBudget 订阅会话实时事件流，累计 `session.tool_call` 次数与 token，达上限则返回错误；
+// run 结束（runErrCh 收到 WaitRun 的返回）时返回 nil。
+//
+// 语义近似（见执行计划 §7 G1）：底座不回传真实推理步数，此处以**可见的 tool_call 事件数**作 MaxSteps。
+// 无总线（测试/最小装配）时退化为纯等待。
+func (e *StatefulExecutor) waitWithBudget(ctx context.Context, sessionID string, maxSteps int, tokenBudget int64, runErrCh <-chan error) error {
+	bus := e.orch.svc.bus
+	if bus == nil {
+		// 无总线：只能等 run 结束（由调用方 ctx 施加超时）。
+		select {
+		case <-runErrCh:
+			return nil
+		case <-ctx.Done():
+			return nil
+		}
+	}
+	if maxSteps <= 0 && tokenBudget <= 0 {
+		// 无预算约束：等 run 结束即可，不必订阅。
+		select {
+		case <-runErrCh:
+			return nil
+		case <-ctx.Done():
+			return nil
+		}
+	}
+	// 从"当前水位之后"订阅：用当前最后位次作起点，避免回放历史 tool_call 重复计数。
+	start := bus.LastSeq(sessionID)
+	sub := bus.SubscribeAfter(map[string]int64{sessionID: start})
+	defer bus.Unsubscribe(sub)
+
+	steps := 0
+	var tokens int64
+	for {
+		select {
+		case <-ctx.Done():
+			return nil // 超时/取消由 ctx 与 WaitRun 处理，不算预算超限
+		case <-runErrCh:
+			return nil // run 已结束
+		case ev, ok := <-sub.C:
+			if !ok {
+				return nil
+			}
+			if ev.AggregID != sessionID {
+				continue
+			}
+			switch ev.Type {
+			case session.BusToolCall:
+				steps++
+				if maxSteps > 0 && steps > maxSteps {
+					return &corellm.StepExceededError{Limit: maxSteps, Actual: steps}
+				}
+			case session.BusUsage:
+				tokens = tokensOfEvent(ev.Payload)
+				if tokenBudget > 0 && tokens > tokenBudget {
+					return &corellm.BudgetExceededError{Kind: "token", Limit: tokenBudget, Actual: tokens}
+				}
+			}
+		case <-sub.Gap():
+			// 丢帧（慢订阅）：预算已无法精确，退化为不限制，交回正常等待，避免误判。
+			return nil
+		}
+	}
+}
+
+// tokensOfEvent 从 BusUsage 载荷里尽力取累计 token（形状可能因底座而异，取不到记 0）。
+func tokensOfEvent(payload any) int64 {
+	m, ok := payload.(map[string]any)
+	if !ok {
+		return 0
+	}
+	for _, k := range []string{"total_tokens", "totalTokens", "used"} {
+		if v, ok := m[k]; ok {
+			if n, ok := toInt64(v); ok {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+// runStatusOf 从 BusRunStatus 载荷里取 status。
+// runStatusOf 已不需要（run 结束改由 WaitRun 的返回信号判定，避免引用 BusRunStatus——
+// 该常量只能在 domain/session 铸造点使用，见 TestRunStatusIsSingleSource）。
+
+func toInt64(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int:
+		return int64(n), true
+	case int64:
+		return n, true
+	case float64:
+		return int64(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return i, err == nil
+	}
+	return 0, false
+}
+
+// buildSelection 把白名单映射成领域 CapabilitySelection（nil 子项 = 该维度全量）。
+func buildSelection(skills, mcps []string) *session.CapabilitySelection {
+	sel := &session.CapabilitySelection{}
+	if skills != nil {
+		s := append([]string{}, skills...)
+		sel.Skills = &s
+	}
+	if mcps != nil {
+		m := append([]string{}, mcps...)
+		sel.Mcps = &m
+	}
+	return sel
 }
 
 // collectResult 从会话读回本轮的助手正文与 token 明细。

@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/object/objusage"
@@ -87,6 +89,27 @@ type Request struct {
 	// 默认（false）实现"旁路不阻塞主流程"：失败以 Outcome=Failed 表达、不抛业务错误。
 	// 置 true 用于"失败必须显式拒绝"的场景（如风控类判别）。
 	Strict bool
+
+	// —— 以下为 Stateful 执行器的调用护栏；零值 = 不限制/全量（保持向后兼容）。仅 Stateful 消费 ——
+
+	// MaxSteps 本轮内部会话最多允许的**工具调用步**上限（0 = 不限制）。
+	//
+	// 语义是近似：底座不回传真实推理步数，平台以可见的 `session.tool_call` 事件数计步
+	// （见 llm_stateful.go 与执行计划 §7 G1 结论），**不等于**底座真实推理步。
+	MaxSteps int
+	// TokenBudget 本轮内部会话累计 token 上限（0 = 不限制）。累计输入+输出超过该值即中止。
+	TokenBudget int64
+	// Timeout 本轮内部会话的墙钟超时（0 = 不限制，仅靠调用方 ctx）。与 ctx 叠加，谁先到谁生效。
+	Timeout time.Duration
+	// AllowedSkills 内部会话可用的 skill 白名单（nil = 全量）。L7 会映射成领域 CapabilitySelection。
+	AllowedSkills []string
+	// AllowedMcps 内部会话可用的 MCP server 白名单（nil = 全量）。
+	AllowedMcps []string
+	// AllowUnbounded 显式允许"无护栏"的 agent 调用（默认 false）。
+	//
+	// 默认下，PurposeAgentTurn 且 MaxSteps/Timeout 均为零 → 拒绝（ErrUnboundedAgentTurn），
+	// 避免内部会话跑飞。测试或可信内部场合可置 true 放行。
+	AllowUnbounded bool
 }
 
 // Outcome 一次调用的业务结果状态。与 error 分工：error 只表"调用/程序性异常"，
@@ -161,4 +184,31 @@ type LLMCall struct {
 	LatencyMS int64
 	// Status 结果状态（Status* 常量）。
 	Status string
+}
+
+// —— 会话执行器（Stateful）的护栏错误。均实现 error，供调用方判别。 ——
+
+// ErrUnboundedAgentTurn 表示 PurposeAgentTurn 调用既无步数上限也无超时，被默认拒绝（防跑飞）。
+// 需要无护栏的 agent 调用时置 Request.AllowUnbounded=true。
+var ErrUnboundedAgentTurn = errors.New("llm: agent 轮次未设 MaxSteps/Timeout 护栏，默认拒绝（可置 AllowUnbounded 放行）")
+
+// StepExceededError 工具调用步超出 MaxSteps（近似的工具步，见 Request.MaxSteps）。
+type StepExceededError struct {
+	Limit  int
+	Actual int
+}
+
+func (e *StepExceededError) Error() string {
+	return fmt.Sprintf("llm: 超出工具调用步上限 MaxSteps=%d（实际 %d）", e.Limit, e.Actual)
+}
+
+// BudgetExceededError token 预算超限。
+type BudgetExceededError struct {
+	Kind   string
+	Limit  int64
+	Actual int64
+}
+
+func (e *BudgetExceededError) Error() string {
+	return fmt.Sprintf("llm: 超出 %s 预算 %d（实际 %d）", e.Kind, e.Limit, e.Actual)
 }
