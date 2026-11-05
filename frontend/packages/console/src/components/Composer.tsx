@@ -2,13 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Select } from 'antd'
 import { ArrowUpOutlined, PaperClipOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import type { AttachmentMeta, CommandInfo, SessionCapabilities } from '@ark-mate/types'
+import type { AttachmentMeta, CommandInfo, ConfigOptionValue, SessionCapabilities } from '@ark-mate/types'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
 import { DELIVERY_HINT, DELIVERY_LABEL, type DeliveryChoice } from '../console/queueView'
 import { applyCommandHint, commandHintQuery, matchCommands, moveHintIndex } from '../console/commandHints'
 import { useAttachmentDraft } from '../console/useAttachmentDraft'
 import { WorkspaceChipStatic } from './WorkspacePicker'
 import { ComposerCapabilities } from './ComposerCapabilities'
+import { PermissionChip } from './PermissionChip'
+import { ModelSelect } from './ModelSelect'
 import { AttachmentChip } from './AttachmentChip'
 
 interface Props {
@@ -61,6 +63,15 @@ interface Props {
   capabilities?: SessionCapabilities | null
   /** 会话不能继续时禁用能力入口（底座与构建期不一致的历史会话：改了也跑不起来）。 */
   capabilitiesDisabled?: boolean
+  /**
+   * 会话级模型选择（v 原型 §12：模型 chip 靠右、紧贴发送键）。
+   *
+   * 三个 props 一起给才渲染模型 chip（缺一不显示）——它们来自 ChatPage（`modelCatalog` 与
+   * `activeSum.model`），落库走既有的 `PATCH /sessions/:id`（`updateSessionModel`），零新接口。
+   */
+  model?: string | null
+  modelOptions?: ConfigOptionValue[]
+  onModelChange?: (value: string | null) => void
 }
 
 /**
@@ -91,6 +102,9 @@ export function Composer({
   sessionId,
   capabilities,
   capabilitiesDisabled,
+  model,
+  modelOptions,
+  onModelChange,
 }: Props) {
   const [draft, setDraft] = useState('')
   // 「取出编辑」塞回来的草稿：只在 nonce 变化时生效一次（同一条再取一次也要能生效，故用计数）。
@@ -213,20 +227,7 @@ export function Composer({
   return (
     <div style={{ flex: 'none', padding: '10px 20px 6px', background: tokens.bg }}>
       <div style={{ maxWidth: 840, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
-        {/* 本会话在哪工作：贴卡片**上沿左上角**的只读 chip（对齐 DSH 的 composerStack）。
-            工作空间创建即定稿（它是底座 ACP session 的 cwd，也是 workspace-write 的沙箱边界），
-            所以这里没有下拉、没有 hover 反馈——要换目录就新开一个会话；而"在这儿新开一条"的入口
-            在工作空间行（左栏），不在输入区。 */}
-        {workspace && (
-          <div className="fg-ws-chiprow">
-            <WorkspaceChipStatic
-              path={workspace.path}
-              temporary={workspace.temporary}
-              isDefault={workspace.isDefault}
-              title={workspace.title}
-            />
-          </div>
-        )}
+        {/* 输入卡（原型 §12–§14）：卡内只有 `+` … 模型 … 发送；工作区 / 权限 chip 移到卡下方一行。 */}
         <div
           className="fg-composer"
           style={{
@@ -322,12 +323,10 @@ export function Composer({
               outline: 'none',
             }}
           />
+          {/* 卡内底栏（原型 §12）：`+` 靠左；模型 chip + 发送圆钮靠右、紧挨。 */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-            {/* 左下：能力入口（`+` 菜单 + 选中后的 chip）+ 状态/发送键提示。
-                能力 chip 是**输入区的一部分**（"这条会话用哪些能力"与"这条消息怎么发"在同一行），
-                未选中时只留一个 `+`——默认态不加任何装饰（原型第 1 条）。 */}
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-              {/* 回形针：选文件上传（v32）。隐藏 input + 按钮触发；拖拽落区在卡片上。 */}
+              {/* 隐藏的文件 input：`+` 菜单的「添加文件」与拖拽落区都走它。 */}
               <input
                 ref={fileRef}
                 type="file"
@@ -338,88 +337,105 @@ export function Composer({
                   e.target.value = '' // 允许再次选择同名文件
                 }}
               />
-              <button
-                type="button"
-                title="添加附件（也可直接把文件拖进输入区）"
-                aria-label="添加附件"
-                disabled={uploading}
-                onClick={() => fileRef.current?.click()}
-                style={{
-                  border: 0,
-                  background: 'transparent',
-                  padding: 0,
-                  lineHeight: 1,
-                  color: uploading ? tokens.textPlaceholder : tokens.textSecondary,
-                  cursor: uploading ? 'default' : 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                }}
-              >
-                <PaperClipOutlined style={{ fontSize: 15 }} />
-              </button>
-              {sessionId && (
+              {sessionId ? (
                 <ComposerCapabilities
                   sessionId={sessionId}
                   capabilities={capabilities}
-                  disabled={capabilitiesDisabled}
+                  disabled={capabilitiesDisabled || uploading}
+                  onAddFile={() => fileRef.current?.click()}
                 />
-              )}
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  minWidth: 0,
-                  fontFamily: tokens.fontMono,
-                  fontSize: 10.5,
-                  color: tokens.textSecondary,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                }}
-              >
-                {busy && busyNote && (
-                  <span style={{ color: tokens.text, overflow: 'hidden', textOverflow: 'ellipsis' }}>{busyNote}</span>
-                )}
-                {busy && (
-                  // 忙时投递模式：排队（等这轮完）或打断（先取消再发）。它紧跟在旁白后面——
-                  // 「怎么发」与「现在在干什么」是同一行上的两件事，别让快捷键提示夹在中间。
-                  <Select
-                    size="small"
-                    value={delivery}
-                    onChange={(v) => setDelivery(v)}
-                    style={{ minWidth: 118 }}
-                    options={(['after_run', 'interrupt_then_prompt'] as DeliveryChoice[]).map((d) => ({
-                      value: d,
-                      label: DELIVERY_LABEL[d],
-                      title: DELIVERY_HINT[d],
-                    }))}
-                  />
-                )}
+              ) : (
+                // 没有会话（理论上会话页恒有 sessionId）：只留一颗裸 `+` 触发上传，不做能力编辑。
                 <button
                   type="button"
-                  title="点击切换发送键：Enter 发送 / Enter 换行"
-                  onClick={() => setSendMode((m) => toggleSendKey(m))}
-                  className="fg-hint-kbd"
+                  className="fg-cap-add"
+                  title="添加文件"
+                  aria-label="添加文件"
+                  disabled={uploading}
+                  onClick={() => fileRef.current?.click()}
                 >
-                  {sendKeyHint(sendMode)} ⇄
+                  <PaperClipOutlined style={{ fontSize: 13 }} />
                 </button>
-              </span>
-            </span>
-            <button
-              type="button"
-              className={`fg-send-btn${stopMode || waitMode ? ' fg-send-stop' : ''}${waitMode ? ' fg-send-wait' : ''}`}
-              disabled={sendDisabled}
-              title={buttonLabel}
-              aria-label={buttonLabel}
-              onClick={stopMode ? onStop : send}
-            >
-              {stopMode || waitMode ? (
-                <span className="fg-send-square" aria-hidden="true" />
-              ) : (
-                <ArrowUpOutlined style={{ fontSize: 13 }} />
               )}
-            </button>
+              {busy && busyNote && (
+                <span
+                  style={{
+                    minWidth: 0,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontFamily: tokens.fontMono,
+                    fontSize: 10.5,
+                    color: tokens.textSecondary,
+                  }}
+                >
+                  {busyNote}
+                </span>
+              )}
+              {busy && (
+                // 忙时投递模式：排队（等这轮完）或打断（先取消再发）。
+                <Select
+                  size="small"
+                  value={delivery}
+                  onChange={(v) => setDelivery(v)}
+                  style={{ minWidth: 118 }}
+                  options={(['after_run', 'interrupt_then_prompt'] as DeliveryChoice[]).map((d) => ({
+                    value: d,
+                    label: DELIVERY_LABEL[d],
+                    title: DELIVERY_HINT[d],
+                  }))}
+                />
+              )}
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flex: 'none' }}>
+              {/* 模型 chip 靠右、紧贴发送键（原型 §12）。三 prop 齐备才渲染。 */}
+              {modelOptions && onModelChange && (
+                <ModelSelect
+                  values={modelOptions}
+                  value={model ?? null}
+                  onChange={onModelChange}
+                  allowClear
+                  size="small"
+                  placeholder={modelOptions.length === 0 ? '模型 · 暂无可选' : '模型 · 跟随默认'}
+                  emptyNote="当前没有可选的模型：到「设置 · 模型」里添加供应商与模型，再选一条默认模型。"
+                />
+              )}
+              <button
+                type="button"
+                className={`fg-send-btn${stopMode || waitMode ? ' fg-send-stop' : ''}${waitMode ? ' fg-send-wait' : ''}`}
+                disabled={sendDisabled}
+                title={buttonLabel}
+                aria-label={buttonLabel}
+                onClick={stopMode ? onStop : send}
+              >
+                {stopMode || waitMode ? (
+                  <span className="fg-send-square" aria-hidden="true" />
+                ) : (
+                  <ArrowUpOutlined style={{ fontSize: 13 }} />
+                )}
+              </button>
+            </span>
           </div>
+        </div>
+        {/* 卡下方一行（原型 §13）：工作区 chip + 权限 chip（左），发送键提示（右）。 */}
+        <div className="fg-composer-chips">
+          {workspace && (
+            <WorkspaceChipStatic
+              path={workspace.path}
+              temporary={workspace.temporary}
+              isDefault={workspace.isDefault}
+              title={workspace.title}
+            />
+          )}
+          <PermissionChip disabled={busy && !canStop} />
+          <button
+            type="button"
+            title="点击切换发送键：Enter 发送 / Enter 换行"
+            onClick={() => setSendMode((m) => toggleSendKey(m))}
+            className="fg-hint-kbd"
+          >
+            {sendKeyHint(sendMode)} ⇄
+          </button>
         </div>
       </div>
     </div>

@@ -606,6 +606,46 @@ export const consoleStyleSheet = `
     box-shadow: 0 0 0 3px ${tokens.primarySoft};
   }
 
+  /* 输入卡下方一行（原型 §13）：工作区 chip / 权限 chip 靠左，发送键提示靠右。 */
+  .fg-composer-chips {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-top: 8px;
+    padding: 0 2px;
+    flex-wrap: wrap;
+  }
+  .fg-composer-chips > .fg-hint-kbd { margin-left: auto; }
+
+  /* 通用 chip（工作区 / 权限）：pill 形态，走 token。 */
+  .fg-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 32px;
+    padding: 0 11px;
+    border-radius: ${tokens.radiusPill}px;
+    border: 1px solid transparent;
+    background: none;
+    font: inherit;
+    font-size: 12px;
+    color: ${tokens.textSecondary};
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  }
+  .fg-chip:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-chip:disabled { cursor: default; opacity: 0.55; }
+  .fg-chip-ico { display: inline-flex; align-items: center; font-size: 13px; color: ${tokens.textPlaceholder}; }
+  .fg-chip-label { line-height: 1; }
+  .fg-chip-chev { font-size: 10px; color: ${tokens.textPlaceholder}; }
+  .fg-chip.fg-on { color: ${tokens.primary}; }
+  .fg-chip.fg-on .fg-chip-ico { color: ${tokens.primary}; }
+  /* 权限 chip 菜单项：一行 + 说明副行。 */
+  .fg-perm-opt { display: flex; flex-direction: column; gap: 1px; padding: 2px 0; }
+  .fg-perm-opt-name { font-size: 13px; line-height: 1.4; }
+  .fg-perm-opt-desc { font-size: 11.5px; color: ${tokens.textPlaceholder}; line-height: 1.4; }
+
   /* 输入区底栏的按键提示（可点击切档）：单行 + 省略号 + 可裁剪。
      窄容器里逐词换行会把底栏行高撑开，溢出的文字又被后绘制的模型选择器白底盖住，
      看起来就是「文字重影」——所以这里显式禁止换行。 */
@@ -928,9 +968,17 @@ export const consoleStyleSheet = `
     transition: background 0.12s ease;
   }
   .fg-cap-menu-item:hover { background: ${tokens.softFill}; }
+  .fg-cap-menu-item.fg-pending { cursor: default; color: ${tokens.textPlaceholder}; }
+  .fg-cap-menu-item.fg-pending:hover { background: transparent; }
   .fg-cap-menu-ico { display: inline-flex; color: ${tokens.textPlaceholder}; }
   .fg-cap-menu-label { flex: 1; min-width: 0; }
   .fg-cap-menu-chev { color: ${tokens.textPlaceholder}; font-size: 12px; }
+  .fg-cap-menu-sep { height: 1px; background: ${tokens.border}; margin: 4px 6px; }
+  /* 「模式」= 待开发：右侧灰色小标签（与「添加能力」菜单同一处）。 */
+  .fg-cap-menu-soon {
+    margin-left: auto; font-size: 10px; line-height: 15px; color: ${tokens.textPlaceholder};
+    border: 1px solid ${tokens.border}; border-radius: 5px; padding: 0 6px; font-family: ${tokens.fontMono};
+  }
   /* 专家行在输入区是 <button>（没有勾选框），把浏览器默认样式抹平。 */
   button.fg-cap-opt {
     width: 100%; border: none; background: transparent; cursor: pointer; text-align: left;

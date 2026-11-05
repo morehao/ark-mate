@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from 'antd'
-import { ArrowUpOutlined, PaperClipOutlined } from '@ant-design/icons'
+import { ArrowUpOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { advertisedModelValues, modelValues, undeclaredModelValues, isPlatformModelID } from '@ark-mate/types'
 import { useMate } from '../store'
@@ -9,6 +9,7 @@ import { ModelSelect } from './ModelSelect'
 import { WorkspacePicker, type WorkspaceChoice } from './WorkspacePicker'
 import { mostRecentlyUsedWorkspaceId } from '../console/workspaceView'
 import { CapabilityBar } from './CapabilityBar'
+import { PermissionChip } from './PermissionChip'
 import { AttachmentChip } from './AttachmentChip'
 import { useAttachmentDraft } from '../console/useAttachmentDraft'
 import { FOLLOW_DEFAULT, selectionPayload, type CapabilityChoice } from '../console/capabilityView'
@@ -260,20 +261,7 @@ export function StartPanel() {
             （不可切换）"）：底座由构建期固定、用户无事可做，对话框页面就不必常驻报它——
             底座事实仍在会话详情与会话头可见。 */}
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-          {/* 工作空间 = 这次会话的沙箱边界（底座 ACP session 的 cwd）。这里**只允许在既有登记项
-              之间切换**：`allowCreate={false}` 收掉「＋ 添加工作空间…」——建目录要抬宿主目录面板或
-              开应用内浏览框，那是左栏「＋」与设置的事，不该从输入区伸手到宿主的文件系统。 */}
-          <div className="fg-ws-chiprow">
-            <WorkspacePicker
-              variant="chip"
-              allowCreate={false}
-              value={workspace}
-              onChange={pickWorkspace}
-              disabled={sending}
-            />
-          </div>
-
-          {/* 内嵌输入卡 */}
+          {/* 内嵌输入卡（原型 §12–§13）：卡内只有 `+` … 模型 … 发送；工作区 / 权限 chip 移到卡下方一行。 */}
           <div
             className="fg-composer"
             style={{
@@ -368,7 +356,7 @@ export function StartPanel() {
                   overflow: 'hidden',
                 }}
               >
-                {/* 回形针（v32）：与会话页同一入口。隐藏 input + 按钮触发；拖拽落区在卡片上。 */}
+                {/* 隐藏的文件 input：`+` 菜单的「添加文件」与拖拽落区都走它。 */}
                 <input
                   ref={fileRef}
                   type="file"
@@ -379,45 +367,16 @@ export function StartPanel() {
                     e.target.value = '' // 允许再次选择同名文件
                   }}
                 />
-                <button
-                  type="button"
-                  title="添加附件（也可直接把文件拖进输入区）"
-                  aria-label="添加附件"
-                  disabled={uploading || sending}
-                  onClick={() => fileRef.current?.click()}
-                  style={{
-                    border: 0,
-                    background: 'transparent',
-                    padding: 0,
-                    lineHeight: 1,
-                    color: uploading || sending ? tokens.textPlaceholder : tokens.textSecondary,
-                    cursor: uploading || sending ? 'default' : 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    flex: 'none',
-                  }}
-                >
-                  <PaperClipOutlined style={{ fontSize: 15 }} />
-                </button>
-                {/* 「这个会话用哪些能力」= 会话级能力选定（M3）。与会话内输入区**同一个组件**
-                    （`+` 菜单 + 专家/技能/连接器 + chip）：新建会话就是这条会话的首轮，
-                    没有理由长成另一套交互。默认不限制 → 只有一颗 `+`，不编假值。 */}
+                {/* 「这个会话用哪些能力」= 会话级能力选定（M3）。与会话内输入区**同一个组件**。
+                    `+` 菜单第一项是「添加文件」，走 onAddFile 触发上面的隐藏 input。 */}
                 <CapabilityBar
                   value={capabilities}
                   onChange={(patch) => setCapabilities((cur) => mergeCapabilityPatch(cur, patch))}
-                  disabled={sending}
+                  disabled={sending || uploading}
                   saving={sending}
                   applyHint="first-round"
+                  onAddFile={() => fileRef.current?.click()}
                 />
-                <button
-                  type="button"
-                  title="点击切换发送键：Enter 发送 / Enter 换行"
-                  onClick={() => setSendMode((m) => toggleSendKey(m))}
-                  className="fg-hint-kbd"
-                  style={{ fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textPlaceholder }}
-                >
-                  {sendKeyHint(sendMode)} ⇄
-                </button>
               </span>
 
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -452,6 +411,25 @@ export function StartPanel() {
                 />
               </span>
             </div>
+          </div>
+          {/* 卡下方一行（原型 §13）：工作区 chip + 权限 chip（左），发送键提示（右）。 */}
+          <div className="fg-composer-chips">
+            <WorkspacePicker
+              variant="chip"
+              allowCreate={false}
+              value={workspace}
+              onChange={pickWorkspace}
+              disabled={sending}
+            />
+            <PermissionChip disabled={sending} />
+            <button
+              type="button"
+              title="点击切换发送键：Enter 发送 / Enter 换行"
+              onClick={() => setSendMode((m) => toggleSendKey(m))}
+              className="fg-hint-kbd"
+            >
+              {sendKeyHint(sendMode)} ⇄
+            </button>
           </div>
         </div>
 
