@@ -48,6 +48,8 @@ function isAbsolutePath(p: string): boolean {
 
 export function GeneralSettingsPanel() {
   const showToast = useMate((s) => s.showToast)
+  // 默认工作区（只读展示，原型 §H）：取自登记表的 default_id 那一项（平台分配的落地目录）。
+  const workspaces = useMate((s) => s.workspaces)
   const [snap, setSnap] = useState<WorkspaceSettings | null>(null)
   const [draft, setDraft] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
@@ -127,8 +129,22 @@ export function GeneralSettingsPanel() {
     ? `平台代建目录 ${snap.provision_dir} 自动包含（每个会话在其下有一个独立子目录）`
     : '平台代建已关闭：新建会话时必须指定工作目录'
 
+  // 默认工作区路径（原型 §H 只读行）：默认登记项的路径；取不到就显示占位。
+  const defaultWs = workspaces?.items.find((w) => w.id === workspaces.default_id) ?? workspaces?.items.find((w) => w.is_default)
+
   return (
     <div className="fg-setsec">
+      {/* 默认工作区（只读，原型 §H）：平台分配给每个新会话的落地目录。 */}
+      <div className="fg-setsec-card">
+        <CardHeader title="默认工作区" hint="每个会话都在一个「工作区」里工作——目录就是助手能读写的边界。这里是平台分配的默认工作区路径。" />
+        <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 12.5, color: tokens.textSecondary, flex: 'none' }}>默认工作区</span>
+          <span style={{ ...mono, color: tokens.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {defaultWs?.path || '（默认工作区未登记）'}
+          </span>
+        </div>
+      </div>
+
       <div className="fg-setsec-head">
         <span className="fg-setsec-desc">
           这几项是**目录浏览的起点**，不是允许范围：面板与新建会话都能选到系统里的任何目录，
