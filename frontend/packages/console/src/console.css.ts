@@ -1509,6 +1509,32 @@ export const consoleStyleSheet = `
   }
   .fg-auto-act { display: flex; gap: 6px; flex: none; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 
+  /* 资料库节点卡行（原型 §E 的 .mat-row）：图标 + 名称/类型·大小 + 更新时间 + 删除。 */
+  .fg-mat-list { display: flex; flex-direction: column; }
+  .fg-mat-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 8px;
+    border-bottom: 1px solid ${tokens.border};
+  }
+  .fg-mat-row:hover { background: ${tokens.codeBg}; }
+  .fg-mat-ico {
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    font-size: 16px;
+    background: ${tokens.softFill};
+    color: ${tokens.textSecondary};
+  }
+  .fg-mat-main { flex: 1; min-width: 0; }
+  .fg-mat-name { font-size: 13.5px; font-weight: 600; color: ${tokens.text}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fg-mat-meta { font-size: 11.5px; color: ${tokens.textPlaceholder}; font-family: ${tokens.fontMono}; margin-top: 1px; }
+  .fg-mat-when { flex: none; font-size: 11.5px; color: ${tokens.textPlaceholder}; font-family: ${tokens.fontMono}; white-space: nowrap; }
+
   /* 会话信息浮层（悬停会话行弹出，设计 §13–§19）：白卡 + hairline + 阴影（浮层允许阴影）。
      内容四行：标题 / 所属空间 / 模型 / 更新时间（空行不渲染）。 */
   .fg-sess-info {    min-width: 220px;
