@@ -21,7 +21,7 @@
 | [`docs/agents/frontend.md`](docs/agents/frontend.md) | 前端风格约束（token 与交互态 CSS 的收口） | 改界面样式 |
 | [`docs/agents/authorization.md`](docs/agents/authorization.md) | 变更授权（允许破坏性调整的边界与仍强制的例外） | 决定要不要留兼容层 |
 | [`docs/agents/positioning.md`](docs/agents/positioning.md) | 外部形态参照实现（DSH）与本仓对应物 | 定交付形态、宿主能力边界 |
-| [`docs/agents/llm-capability.md`](docs/agents/llm-capability.md) | 内部模型调用接入约定（prompt 单点、必带 Purpose、agent 护栏、结构化/降级） | 业务接入 `llm.Gateway`、新增 LLM 用途 |
+| [`docs/agents/llm-capability.md`](docs/agents/llm-capability.md) | 内部模型调用接入：决策清单（何时该用/不该用、Stateful vs Stateless、结构化/Strict）+ 接入约定（prompt 单点、必带 Purpose、agent 护栏） | 要用模型做某功能前先判断要不要接入、业务接入 `llm.Gateway`、新增 LLM 用途 |
 
 分册的总目录与维护约定见 [`docs/agents/README.md`](docs/agents/README.md)。
 
