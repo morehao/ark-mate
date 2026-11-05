@@ -1281,41 +1281,6 @@
   },
   {
     "method": "GET",
-    "path": "/v1/mate/settings/workspace",
-    "status": 200,
-    "code": 0,
-    "msg": "success",
-    "envelope": [
-      "code",
-      "data",
-      "msg",
-      "requestID"
-    ],
-    "data_kind": "object",
-    "data_keys": [
-      "configured",
-      "prefer_roots",
-      "provision_included",
-      "source",
-      "writable"
-    ]
-  },
-  {
-    "method": "PUT",
-    "path": "/v1/mate/settings/workspace",
-    "status": 200,
-    "code": 40000,
-    "msg": "参数错误: invalid character 'n' looking for beginning of object key string",
-    "envelope": [
-      "code",
-      "data",
-      "msg",
-      "requestID"
-    ],
-    "data_kind": "object"
-  },
-  {
-    "method": "GET",
     "path": "/v1/mate/skills",
     "status": 200,
     "code": 0,

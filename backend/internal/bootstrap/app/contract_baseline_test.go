@@ -169,10 +169,6 @@ func contractCases() []contractCase {
 		{"GET", "/v1/mate/sessions/nope/permissions/memories", ""},
 		{"POST", "/v1/mate/sessions/nope/permissions/memories/revoke", "{}"},
 
-		// ——— settings ———
-		{"GET", "/v1/mate/settings/workspace", ""},
-		{"PUT", "/v1/mate/settings/workspace", "{not json"},
-
 		// ——— skills ———
 		{"GET", "/v1/mate/skills", ""},
 		{"POST", "/v1/mate/skills", "{}"},

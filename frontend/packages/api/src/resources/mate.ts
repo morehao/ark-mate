@@ -79,7 +79,6 @@ import type {
   WorkspaceFilesResp,
   WorkspaceListResp,
   WorkspaceMoveResp,
-  WorkspaceSettings,
 } from '@ark-mate/types'
 
 // ——— mate 控制面 REST（/v1/mate，见 backend/internal/router/routes_*.go） ———
@@ -180,22 +179,6 @@ export const workspaceFiles = (path: string, hidden = false): Promise<WorkspaceF
   if (hidden) s.set('hidden', 'true')
   return http.get<WorkspaceFilesResp>(`/mate/workspaces/files?${s.toString()}`)
 }
-
-/**
- * 工作区根白名单快照（`GET /settings/workspace`）。
- *
- * `configured` 是可编辑的显式名单，`roots` 是含平台代建根的**生效**名单；
- * `writable=false`（被 env/flag 锁定或无配置目录）时面板必须转只读展示，不要给一个必然失败的保存按钮。
- */
-export const getWorkspaceSettings = (): Promise<WorkspaceSettings> =>
-  http.get<WorkspaceSettings>('/mate/settings/workspace')
-
-/**
- * **全量替换**工作区根白名单（`PUT /settings/workspace`）。
- * 空数组 = 恢复"不限制"；服务端逐项要求绝对路径 / 存在 / 是目录，落盘后对新会话即时生效。
- */
-export const updateWorkspaceSettings = (roots: string[]): Promise<WorkspaceSettings> =>
-  http.put<WorkspaceSettings>('/mate/settings/workspace', { roots })
 
 /**
  * 抬一次**宿主原生**目录选择器（`POST /workspaces/pick-directory`）。

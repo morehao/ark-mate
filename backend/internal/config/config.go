@@ -405,8 +405,7 @@ var knownKeys = map[string]string{
 // knownListKeys 允许在 config.json 里写成 JSON 数组的多值键。
 //
 // 为什么需要它：单值键写成数组是配置错误（不静默取第一项），而多值键的数组形式不是"语法糖"——
-// 逗号是这些键的分隔符，路径里真含逗号时逗号分隔写法**根本无法表达**，面板写回也依赖数组形式
-// 才能与读回自洽（见 SettingsStore.SaveWorkspaceRoots）。
+// 逗号是这些键的分隔符，路径里真含逗号时逗号分隔写法**根本无法表达**，只有数组能原样往返。
 var knownListKeys = map[string]bool{
 	"workspace_roots": true,
 	"projection_dirs": true,

@@ -219,7 +219,7 @@ internal/persistence/model（实体定义）被上面三者依赖，自身不依
 | 能力 | `/capabilities` · `/skills` · `/skills/import`（技能包 `.zip` 导入）· `/skills/:id/materialization` · `/mcps` · `/mcps/:id/probe` · `/mcps/:id/tools/:tool/call` · `/tools` |
 | 专家 | `/experts`（六接口：列表带 `has_instructions`、详情含正文、`POST/PUT/DELETE/PATCH`）|
 | 资源 | `/providers` · `/providers/:id/probe` · `/models` · `/models/catalog` · `/models/sync` |
-| 空间 | `/workspaces` · `…/browse` · `…/files`（列目录内容，非上传）· `…/pick-directory` · `/settings/workspace` |
+| 空间 | `/workspaces` · `…/browse` · `…/files`（列目录内容，非上传）· `…/pick-directory` |
 | 上传（全局唯一收字节面）| `/files`（ginupload：`POST` 按 `content_hash` 内容寻址去重 + `check-exist` / `:id` / `presign-url` / `redirect` / `serve` / `multipart` 分片） |
 | 附件 | `/attachments`（`POST` 只收 JSON `{file_id}` 建索引 / `DELETE` / `GET`）· `/attachments/:id/content` |
 | 产物溯源 | `/artifacts`（`POST` 只建索引不收流）· `/artifacts/:id` · `/sessions/:id/artifacts`（v34）|

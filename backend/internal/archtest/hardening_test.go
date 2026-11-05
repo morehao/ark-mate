@@ -233,11 +233,11 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 		t.Error("directoryPicker.ts 必须消费 `capabilityFacts.ts` 读到的事实（自己再读一次声明就会有两个真相）")
 	}
 
-	// b. 三个入口都必须问解析，并调用原生那半。
+	// b. 仍抬目录选择器的两个入口都必须问解析，并调用原生那半。
+	//    v14.6：`settings/GeneralSettingsPanel.tsx` 已不再是目录选择入口（「工作区起始位置」设置面删除）。
 	entrypoints := []string{
 		filepath.Join("components", "WorkspacePicker.tsx"),
 		filepath.Join("components", "AddWorkspaceButton.tsx"),
-		filepath.Join("components", "settings", "GeneralSettingsPanel.tsx"),
 	}
 	for _, rel := range entrypoints {
 		src := readSrc(rel)

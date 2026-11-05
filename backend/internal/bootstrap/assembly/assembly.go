@@ -106,7 +106,6 @@ func (as *assembly) steps() []registry.Step {
 		{Name: "会话恢复", Phase: registry.PhasePersistence, Timeout: 2 * time.Minute, Start: as.startRestore},
 		{Name: "工作空间策略", Phase: registry.PhaseDomain, Critical: true, Start: as.startWorkspacePolicy},
 		{Name: "默认工作空间", Phase: registry.PhaseDomain, Critical: true, Start: as.startDefaultWorkspace},
-		{Name: "工作空间白名单端口", Phase: registry.PhaseDomain, Start: as.startWorkspaceRootsStore},
 		{
 			Name: "编排器", Phase: registry.PhaseDomain, Critical: true,
 			Start: as.startOrchestrator, Stop: as.stopOrchestrator, StopTimeout: 30 * time.Second,
@@ -397,14 +396,6 @@ func (as *assembly) startDefaultWorkspace(ctx context.Context) error {
 	if err := as.planes.Workspaces.EnsureDefaultWorkspace(); err != nil {
 		return usageErr("serve: 建立默认工作空间失败: %v", err)
 	}
-	return nil
-}
-
-// startWorkspaceRootsStore 白名单的持久化端口：面板 PUT /settings/workspace 经它写回
-// config.json。传入该键的**最终来源**：来源高于配置文件时端口会报"锁定"，面板随之转只读。
-func (as *assembly) startWorkspaceRootsStore(ctx context.Context) error {
-	cfg := as.cfg
-	as.planes.Workspaces.SetRootsStore(config.NewSettingsStore(cfg.ConfigDir, as.sources["workspace_roots"]))
 	return nil
 }
 

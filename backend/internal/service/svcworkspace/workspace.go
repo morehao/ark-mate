@@ -7,7 +7,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 )
 
-// WorkspaceSvc 工作空间面用例端口：登记表、派生视图（浏览/文件/最近）与设置面。
+// WorkspaceSvc 工作空间面用例端口：登记表、派生视图（浏览/文件/最近）。
 //
 // 为什么这一层存在：v3.1 §3.2.1 规则 1 要求控制器不得 import `internal/domain`。
 // 域平面已经把 DTO 与错误码折好（`*dtoworkspace.*`），所以这里只复述**窄接口**并把
@@ -20,10 +20,6 @@ type WorkspaceSvc interface {
 	Files(path string, includeHidden bool) (*dtoworkspace.WorkspaceFilesResp, error)
 	// PickDirectory 抬一次宿主原生目录选择器（实现见 `domain/workspace.Picker`）。
 	PickDirectory(ctx context.Context) (path string, cancelled bool, err error)
-
-	// ——— 设置面 ———
-	Settings() *dtoworkspace.WorkspaceSettingsResp
-	UpdateSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error)
 
 	// ——— 登记表 ———
 	Registry() (*dtoworkspace.WorkspaceListResp, error)
@@ -82,18 +78,6 @@ func (s *workspaceSvc) Files(path string, includeHidden bool) (*dtoworkspace.Wor
 
 func (s *workspaceSvc) PickDirectory(ctx context.Context) (string, bool, error) {
 	return s.picker.PickDirectoryHost(ctx)
-}
-
-func (s *workspaceSvc) Settings() *dtoworkspace.WorkspaceSettingsResp {
-	return settingsViewResp(s.plane.Settings())
-}
-
-func (s *workspaceSvc) UpdateSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error) {
-	view, err := s.plane.UpdateSettings(roots)
-	if err != nil {
-		return nil, err
-	}
-	return settingsViewResp(view), nil
 }
 
 func (s *workspaceSvc) Registry() (*dtoworkspace.WorkspaceListResp, error) {

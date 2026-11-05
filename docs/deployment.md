@@ -61,7 +61,7 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 | 能力定义 | `~/.ark-mate/capabilities/` | `MATE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。**`MATE_STORE=sqlite`（默认）时这个目录不是事实源**：能力定义存在 DB 的 `skills`/`mcp_servers` 表里，本目录只作**导入/导出**位置（装配期自动导入一次、`mate capability import\|export` 手动搬运；`tools/` 不参与持久化）。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 `runtimes` 保留，只停止投放；`PATCH /skills/:id` 写回此键）。skill 的投放对象是 `runtimes: []`（空 = 全部 runtime；旧的 `sources[]` 已退役，定义里还有它会在装载期挂 `legacy_sources_key` 告警并提示 `mate capability migrate`）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `store:<ns>/<name>`（v20 起；托管密钥在库的 `mcp_secrets` 表，旧前缀 `vault:` 指的是已删除的机制，导入时会被显式翻译成 `store:` 并 WARN）或 `env:<ENV_NAME>`（§13.3 M1） |
 | 投影根覆盖 | 空（用 runtime 声明的默认根） | `MATE_PROJECTION_DIRS` | `runtime:kind=dir` 列表（如 `myrt:skill=/data/agents/skills`；`myrt` = 在册的那个底座 id，内置的是 `dsh`）。**只覆盖根、不改形态**：落到哪个文件名、写成哪种格式由 runtime 的投影声明决定。空 = 全用 adapter 声明的原生根（内置 `dsh` 的原生根是 `~/.agents/skills` + `<id>/SKILL.md`）。**取代**了旧的 `MATE_SKILLS_MATERIALIZE_DIR` / `_DIRS`（旧键仍报错，但报错会认出它并给出新键与等价写法） |
 | 默认工作空间 | `~/.ark-mate/workspaces/default/` | `MATE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时的落点（v14）。它是**一条落库的工作空间登记**（`workspaces` 表，`is_default=1`），不是"每会话一个目录"——同一台机器上所有未指定目录的会话共享它。目录由装配期建立（`<MATE_WORKSPACE_DIR>/default`），**只在登记表为空时**创建：删掉它之后不会自动重建 |
-| 工作区起始位置偏好 | 空（无偏好） | `MATE_WORKSPACE_ROOTS` | 逗号分隔绝对路径（config.json 亦可写 JSON 数组）。**它是"目录浏览从哪儿起步"的偏好，不是允许范围**（v14.5 起：选工作区是全系统，任何已存在的目录都能浏览、都能当工作空间）。**代建根由平台隐式并入**，无需手写进来；面板「设置」页可改（落盘到 `<配置目录>/config.json`） |
+| 工作区起始位置偏好 | 空（无偏好） | `MATE_WORKSPACE_ROOTS` | 逗号分隔绝对路径（config.json 亦可写 JSON 数组）。**它是"目录浏览从哪儿起步"的偏好，不是允许范围**（v14.5 起：选工作区是全系统，任何已存在的目录都能浏览、都能当工作空间）。**代建根由平台隐式并入**，无需手写进来。**v14.6 起无面板设置面**，只能由 env / config.json 设定 |
 
 持久层开关：`MATE_STORE=sqlite|memory|auto`（空或 `auto` = 按库文件定：已存在且非空 → sqlite，
 否则 memory）。**非法值启动即报错**并列出合法取值——不静默回落 auto，否则一个错字就可能悄悄
@@ -113,27 +113,17 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 - **已知限制**：平台注册表 MCP 随 `session/new` 下发，其**相对路径参数仍以 agent 进程的 cwd
   解析**（serve 进程目录），而非会话工作空间。需要工作空间相对路径的 MCP 请写绝对路径。
 
-### 2.2.2 起始位置偏好的设置面（面板可改）
+### 2.2.2 起始位置偏好：只由部署级配置决定（v14.6 起移除面板设置面）
 
-`GET · PUT /settings/workspace` 让面板直接查看/改写**工作区起始位置偏好**，不必再登机器改环境变量。
-**它不是安全边界**（见上一节）：这份名单只决定目录浏览从哪儿起步、以及面板里的快捷入口。
+> **v14.6 变更**：`GET · PUT /settings/workspace` 已**删除**（前后端一起）。工作区起始位置偏好不再
+> 能由面板在运行时改写，**只能**用 `MATE_WORKSPACE_ROOTS`（env / env 文件 / config.json 数组）设置。
+> 普通用户无需、也无法设置它：目录浏览会从这份名单起步，任何已存在的目录仍都能浏览、都能当工作空间。
 
-- **写在哪**：`<配置目录>/config.json` 的 `workspace_roots` 键（默认 `~/.ark-mate/config/config.json`）。
-  写回是 read-modify-write + 原子替换：文件里其它键原样保留，写的是 JSON 数组（含逗号的路径也能
-  原样往返），空名单 = 删掉该键（回到"没有偏好"）。**没有第二份 settings 文件**——它只应有一个事实源。
-- **写不进去的时候**（这正是以前最容易踩的坑：面板显示保存成功、重启后被覆盖）：
-  `config.json` 之上还有 env 文件、进程 `MATE_*`、CLI flag 三层，任一层设过该键，写配置文件都无效。
-  所以接口**拒绝写**并回 `settings_locked`，同时 GET 回 `locked_by`（指出是哪个来源锁定：环境变量名 /
-  `<配置目录>/env` / 命令行参数），面板据此转只读。要交还控制权，就把该来源里的 `MATE_WORKSPACE_ROOTS`
-  去掉。`settings_readonly` 则是另一种情况：该进程没有配置目录（如 `demo` 冒烟进程），不落盘。
-- **写入的校验比配置文件严**：面板设的每一条都要求「绝对路径 + 存在 + 是目录」（配置文件只校验绝对路径，
-  允许挂载晚于进程出现）。交互式设置的反馈必须在当下给——否则保存成功、下次进面板就是错误页。
-- **影响面**：只影响"目录浏览从哪儿起步"与面板里的快捷入口列表。已建会话的 `cwd` 创建即定稿，
-  平台不回头否决；目录浏览与建会话都不因它被拒。
-- **防护等级（务必读）**：能调到这条接口的人可以改偏好，但那已经无关紧要——平台**不做鉴权**，
-  真正的防护是运行用户的文件权限与反向代理层的鉴权。`MATE_WORKSPACE_ROOTS` 设在**进程环境变量**里
-  仍会让面板变只读（`mate config` 会打印 `面板设置 只读（由该来源锁定）`），但那只锁住"改偏好"，
-  不锁可访问的目录范围。
+- **写在哪**：`<配置目录>/config.json` 的 `workspace_roots` 键（默认 `~/.ark-mate/config/config.json`），
+  或进程 env / env 文件。写的是 JSON 数组（含逗号的路径能原样往返）。
+- **影响面**：只影响"目录浏览从哪儿起步"与快捷入口列表。已建会话的 `cwd` 创建即定稿；目录浏览与
+  建会话都不因它被拒（v14.5 起它不再是边界）。
+- **没有第二份 settings 文件**：它只应有一个事实源；平台代建根（`MATE_WORKSPACE_DIR`）由平台隐式并入。
 
 ### 2.3 环境变量（全部来自 `backend/internal/config/config.go`）
 
@@ -150,7 +140,7 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 | `MATE_AUTOMATION_TICK` | `30s` | 调度循环 tick 间隔；**`0` = 关闭整个 automation 调度**（维护窗口用，不是"最快跑"） |
 | `MATE_PROJECTION_DIRS` | 空 | 投影根覆盖：`runtime:kind=dir` 逗号列表（`config.json` 可写 JSON 数组），键如 `dsh:skill`（`<id>` = 在册的那个底座 id；旧写法 `deepseekharness:skill` 会被归一，见下）；值是**绝对**目录。空 = 用 adapter 声明的默认根。只覆盖根，Layout/Format 仍由 runtime 声明。旧键 `MATE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已改名：仍报错，但报错含新键与等价写法 |
 | `MATE_WORKSPACE_DIR` | `~/.ark-mate/workspaces` | 代建工作空间根目录；**空/off/disable/none = 关闭代建**（建会话未指定 `cwd` 时报 `workspace_required`，不回落 serve 进程目录） |
-| `MATE_WORKSPACE_ROOTS` | 空（无偏好） | **工作区起始位置偏好**（逗号分隔绝对路径；`config.json` 里可写 JSON 数组，含逗号的路径只有数组能表达）。**它不是允许范围**（v14.5 起：选工作区是全系统，任何已存在的目录都能浏览、都能当工作空间，不再有 `workspace_outside_roots` 这类拒绝）：这份名单只决定目录浏览从哪儿起步、以及面板里列哪些快捷入口。**平台代建根（`MATE_WORKSPACE_DIR`）恒被隐式并入生效名单**，无需手写。在**进程 env** 里设本变量会把面板设置面锁成只读（见 §2.2.2） |
+| `MATE_WORKSPACE_ROOTS` | 空（无偏好） | **工作区起始位置偏好**（逗号分隔绝对路径；`config.json` 里可写 JSON 数组，含逗号的路径只有数组能表达）。**它不是允许范围**（v14.5 起：选工作区是全系统，任何已存在的目录都能浏览、都能当工作空间，不再有 `workspace_outside_roots` 这类拒绝）：这份名单只决定目录浏览从哪儿起步、以及面板里列哪些快捷入口。**平台代建根（`MATE_WORKSPACE_DIR`）恒被隐式并入生效名单**，无需手写。**v14.6 起无面板设置面**，本变量是该偏好的唯一来源（见 §2.2.2） |
 | `MATE_RUN_TIMEOUT` | 0（关闭） | 单轮看门狗（如 `30m`），超时自动 cancel 并发终态事件 |
 | `MATE_PERMISSION_TIMEOUT` | `30m` | 挂起权限自动拒绝超时 |
 | `MATE_ELICITATION_TIMEOUT` | `30m` | 挂起结构化提问自动取消超时 |
@@ -198,7 +188,7 @@ curl -s -X POST http://127.0.0.1:10098/v1/mate/automations/preview \
 
 `config.json` 里多值键（`workspace_roots`、`projection_dirs`）可以写成 **JSON 数组**，
 也可以照旧写成逗号分隔字符串；单值键写数组会报错。数组不是语法糖：路径里含逗号时只有数组
-能表达，而面板保存起始位置偏好用的就是数组形式（见 §2.2.2）。
+能表达，部署时写入起始位置偏好用的就是数组形式（见 §2.2.2）。
 
 同目录可选 `runtimes.json`（A5）：远程 runtime 声明数组
 `[{"id","name","transport":"ws|http","endpoint","headers"}]`，启动时注册进 runtime 注册表，
@@ -232,8 +222,8 @@ skill 定义的 `runtimes[]` 候选集即可引用它；与内置 id 冲突、�
 `agents` 与旧的 agent 目录键（`agent` 前缀那几个别名）→ `providers` / `provider_dir`（v19：那个目录里只剩 `providers.json` 一件事）。
 升级动作就是改这一行——不做静默等价，否则用户会以为已经改完。
 
-`workspace_roots` 键**可能被面板改写**（`PUT /settings/workspace`，原子写 + read-modify-write，
-保留文件里其它键），所以手工编辑时留意别和面板同时改；被更高优先级来源锁定时面板只会拒绝写。
+`workspace_roots` 键**只由部署级配置设定**（env / env 文件 / config.json 数组；v14.6 起无面板写入口），
+手工编辑即可，无需担心与面板并发改写。
 
 **优先级**：内置默认值 < `config.json` < `env` < 进程环境变量 `MATE_*` < CLI flag。所以
 「文件里写基线，环境变量做覆盖，flag 做临时调试」三段式可用。目录路径由 `MATE_CONFIG_DIR`

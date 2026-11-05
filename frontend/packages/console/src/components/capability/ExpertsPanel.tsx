@@ -43,7 +43,7 @@ export function ExpertsPanel() {
             onChange={(e) => setQuery(e.target.value)}
           />
           <Button type="primary" size="small" icon={<PlusOutlined />} onClick={d.openNew}>
-            新建专家
+            新建
           </Button>
         </div>
       }

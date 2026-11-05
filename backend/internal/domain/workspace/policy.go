@@ -266,10 +266,11 @@ func (pl *Plane) SetWorkspacePolicy(dir string, roots []string) error {
 	return nil
 }
 
-// SetWorkspaceRoots 只更新白名单（面板 PUT /settings/workspace 的落地动作，见 workspace_settings.go）。
+// SetWorkspaceRoots 只更新白名单。
 //
 // 与 SetWorkspacePolicy 分工：那个是装配期整体策略（含代建根），这个是运行期改名单。
-// 已建会话不受影响（cwd 创建即定稿，平台不回头否决旧会话），新校验立即生效。
+// 无面板写入口（v14.6 起去掉「工作区起始位置」的用户设置面）——今日无生产调用点，保留为
+// 装配/测试侧可用的运行期改名单入口，免得测试为了改一个字段而重跑整套策略。
 func (pl *Plane) SetWorkspaceRoots(roots []string) error {
 	normalized, err := NormalizePolicyRoots(roots)
 	if err != nil {
@@ -330,16 +331,6 @@ func (pl *Plane) WorkspaceRoots() []string {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 	return pl.effectiveWorkspaceRootsLocked()
-}
-
-// PolicySnapshot 一次性交出设置面要的三样（生效名单 / 显式配置 / 代建根）。
-//
-// **一次取齐**而不是三次分别取：分三次的话，面板可能在两次之间看到"配置改了、生效名单还没改"
-// 的中间态（并发 PUT 时真的会发生），而那个中间态在界面上是一份自相矛盾的名单。
-func (pl *Plane) PolicySnapshot() (effective, configured []string, provisionDir, createRoot string) {
-	pl.mu.Lock()
-	defer pl.mu.Unlock()
-	return pl.effectiveWorkspaceRootsLocked(), append([]string(nil), pl.roots...), pl.dir, pl.createRootLocked()
 }
 
 // CreateRoot 返回**新建工作空间的落盘根**（ADR-3）——`name` 模式的唯一取值来源。
@@ -403,10 +394,10 @@ type Plane struct {
 	dir string
 	// roots **显式配置**的起始点偏好（'' 时读面返回 nil = 不限制）。
 	// 对外生效名单还要并上代建根，见 effectiveWorkspaceRootsLocked。
+	//
+	// 它只由**部署级**配置（`MATE_WORKSPACE_ROOTS` / config.json）在装配期设定；没有面向
+	// 用户的设置写入口（v14.6 起去掉「工作区起始位置」的设置面）。
 	roots []string
-	// rootsStore 白名单的持久化端口（nil = 只读）。**装配期一次性注入**，之后只读引用——
-	// 它的方法（Status/Save）是 infra I/O，**不持本锁调用**（见 rootsStoreRef）。
-	rootsStore WorkspaceRootsStore
 
 	// st 库句柄（登记表读写；nil = memory 模式）。**装配期一次性注入**，本锁不保护它
 	// （P2b 前置已把"持锁请求会话/库"这类边清零）。

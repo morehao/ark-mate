@@ -30,13 +30,7 @@ var workspaceDomainAnchors = map[string][]string{
 		"func ValidateWorkspaceName(",
 		"func ResolveWorkspace(",
 		"func (pl *Plane) SetWorkspacePolicy(",
-		"func (pl *Plane) PolicySnapshot(",
 		"func (pl *Plane) CreateRoot(",
-	},
-	"settings.go": {
-		"func (pl *Plane) Settings(",
-		"func (pl *Plane) UpdateSettings(",
-		"func NormalizeSettingsRoots(",
 	},
 	"view.go": {
 		"func (pl *Plane) BrowseWorkspace(",
@@ -66,7 +60,6 @@ var workspaceManagerImplMarkers = []string{
 	"os.Stat(",
 	"os.Mkdir(",
 	"filepath.EvalSymlinks(",
-	"SaveWorkspaceRoots(",
 	"dirStatusOf(",
 	"BootstrapDefaultWorkspace(",
 }
@@ -138,47 +131,36 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		}
 	}
 
-	// 设置面写（P4a 正文第三十一刀）：`UpdateWorkspaceSettings` 同样归域平面（写面：校验 + 三个
-	// 语义码 + 落盘都在域里），接口声明与 manager 转发一起删。控制器侧不再有替身可伪造语义码 ——
-	// "锁定 / 只读 / 非法目录"三条由配置面测试用真策略钉。
-	if strings.Contains(mgrAll, "func (s *Service) UpdateWorkspaceSettings(") {
-		t.Error("`internal/sessionruntime` 里又出现 `UpdateWorkspaceSettings(` 转发：那一行已删（扫描面是整目录）。")
+	// 设置面（v14.6 删除「工作区起始位置」的用户设置面）：`Plane.Settings` / `UpdateSettings` /
+	// `WorkspaceRootsStore` 端口及其 infra 实现（`config.SettingsStore`）一并删除，
+	// `settings.go` 不复存在。这里改为**反向**判据：这些符号不得复活（复活＝又接了一张用户能写的口子），
+	// 且 `sessionruntime` 里不得出现对应的 manager 转发。
+	if _, statErr := os.Stat(filepath.Join(root, "internal", "domain", "workspace", "settings.go")); statErr == nil {
+		t.Error("`internal/domain/workspace/settings.go` 又出现了：工作区起始位置设置面已删（v14.6），不要复活。")
 	}
-	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "settings.go"))),
-		"func (pl *Plane) UpdateSettings(roots []string) (*SettingsView, error)") {
-		t.Error("`internal/domain/workspace/settings.go` 里找不到 `func (pl *Plane) UpdateSettings(...)`：判据失锚＝空转。")
-	}
-
-	// 设置面快照（P4a 正文第十九刀）：域里 `Plane.Settings()` 折出**设置视图**（含
-	// configured / prefer_roots / source / locked_by）；v3.2 刀 6 起投影归 `svcworkspace`。
-	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "sessionruntime")) {
-		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "func (s *Service) WorkspaceSettings(") {
-			t.Errorf("internal/sessionruntime/%s 里又出现 `func (s *Service) WorkspaceSettings(`："+
-				"那一行转发已删（P4a 正文第十九刀）。", filepath.Base(path))
+	for _, banned := range []string{
+		"func (s *Service) UpdateWorkspaceSettings(",
+		"func (s *Service) WorkspaceSettings(",
+		"type WorkspaceRootsStore =",
+		"func (s *Service) SetWorkspaceSettingsStore(",
+	} {
+		if strings.Contains(mgrAll, banned) {
+			t.Errorf("`internal/sessionruntime` 里又出现 `%s`：工作区起始位置设置面已删（v14.6）。", banned)
 		}
 	}
-	settingsFam := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "settings.go")))
-	if !strings.Contains(settingsFam, "func (pl *Plane) Settings() *SettingsView {") {
-		t.Error("`internal/domain/workspace/settings.go` 里找不到 `func (pl *Plane) Settings()`：" +
-			"判据失锚＝空转。")
+	polPolicy := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "policy.go")))
+	for _, banned := range []string{
+		"func (pl *Plane) Settings()",
+		"func (pl *Plane) UpdateSettings(",
+		"func NormalizeSettingsRoots(",
+		"type WorkspaceRootsStore interface",
+		"rootsStore WorkspaceRootsStore",
+	} {
+		if strings.Contains(polPolicy, banned) {
+			t.Errorf("policy.go 里又出现 `%s`：设置面已删，策略只剩部署级 roots。", banned)
+		}
 	}
-	// 别名与装配期转发（P4a 正文第二十刀）：`type WorkspaceRootsStore = workspace.WorkspaceRootsStore`
-	// 正是第三条硬规矩点名的"端口别名"——一个类型两处定义，接错线时编译器不会拦（两边都满足）。
-	// 装配侧同理只有一处入口：`WorkspacePlane().SetRootsStore(...)`。
-	settingsMgr := mgrAll
-	if strings.Contains(settingsMgr, "type WorkspaceRootsStore =") {
-		t.Error("`internal/sessionruntime` 里又出现 `type WorkspaceRootsStore =`：" +
-			"端口别名为第三条硬规矩所禁（一个类型只有一处定义）。")
-	}
-	if strings.Contains(settingsMgr, "func (s *Service) SetWorkspaceSettingsStore(") {
-		t.Error("`internal/sessionruntime` 里又出现 `func (s *Service) SetWorkspaceSettingsStore(`：" +
-			"装配期接线也只有一处入口（`WorkspacePlane().SetRootsStore`）。")
-	}
-	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "policy.go"))),
-		"rootsStore WorkspaceRootsStore") {
-		t.Error("`internal/domain/workspace/policy.go` 里找不到 `rootsStore WorkspaceRootsStore`：" +
-			"端口的唯一归属是域，判据失锚＝空转。")
-	}
+
 	// 策略事实的读取（P4a 正文第二十一刀）：`WorkspaceDir()` / `WorkspaceRoots()` 是**纯事实读取**
 	// （无 DTO、无错误码），`Service` 上那两条转发连同零调用点的 `SetWorkspaceRoots` 一起删。
 	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "sessionruntime")) {
@@ -260,9 +242,9 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		t.Error("`internal/bootstrap/assembly/services.go` 里找不到 `svcworkspace.New(`。")
 	}
 	asmGo := dirProductionBody(t, filepath.Join(root, "internal", "bootstrap", "assembly"))
-	if !strings.Contains(asmGo, "as.planes.Workspaces.SetRootsStore(") {
-		t.Error("`internal/bootstrap/assembly` 里找不到 `as.planes.Workspaces.SetRootsStore(`：" +
-			"落盘端口必须接到**装配好的那个平面**上（接错一个平面时两边都编译过，表现是设置改了不落盘）。")
+	if strings.Contains(asmGo, "SetRootsStore(") {
+		t.Error("`internal/bootstrap/assembly` 里又出现 `SetRootsStore(`：" +
+			"工作区起始位置设置面已删（v14.6），不再有落盘端口要接线。")
 	}
 
 	// 写面的三条（P4a 正文第二十七刀）：Rename/Delete/Move 的投影（DTO + 三个错误码）都在域平面，
@@ -322,8 +304,8 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	}
 
 	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "workspace.go")))
-	if !strings.Contains(ctrWork, "h.svc.Settings()") {
-		t.Error("`ctrworkspace` 里找不到 `h.svc.Settings()`：设置面快照必须经用例接口（v3.1 §3.2.1）。")
+	if strings.Contains(ctrWork, "h.svc.Settings()") {
+		t.Error("`ctrworkspace` 里又出现 `h.svc.Settings()`：设置面已删（v14.6），控制器不该再有这一格。")
 	}
 	if !strings.Contains(ctrWork, "h.svc.Registry()") {
 		t.Error("`ctrworkspace` 里找不到 `h.svc.Registry()`：登记表必须经用例接口。")
@@ -490,18 +472,14 @@ func TestWorkspaceCreateRootIsDeclared(t *testing.T) {
 		}
 	}
 
-	// ③ 快照必须把 create_root 一并发出来（三样一起取，见 PolicySnapshot 注释），且 Settings 用它。
+	// ③ 落盘根的解析必须单点（`CreateRoot` 用 `createRootLocked`）。设置面已删（v14.6），
+	// 这里只钉"单点实现仍在"，不再要求 `PolicySnapshot`（它随设置面一起删了）。
 	policy := stripLineComments(readFileOrFatal(t, filepath.Join(domainDir, "policy.go")))
-	if !strings.Contains(policy, "func (pl *Plane) PolicySnapshot() (effective, configured []string, provisionDir, createRoot string)") {
-		t.Fatalf("`PolicySnapshot` 的签名里没有 `createRoot` 出参：设置面与列表响应都要它，" +
-			"分三次取会让面板看到「配置改了、这一项还没改」的中间态")
-	}
 	if !strings.Contains(policy, "func (pl *Plane) createRootLocked() string") {
-		t.Fatalf("policy.go 里找不到 `createRootLocked`：落盘根的解析必须单点（`CreateRoot` 与 `PolicySnapshot` 共用它）")
+		t.Fatalf("policy.go 里找不到 `createRootLocked`：落盘根的解析必须单点（`CreateRoot` 用它）")
 	}
-	settings := stripLineComments(readFileOrFatal(t, filepath.Join(domainDir, "settings.go")))
-	if !strings.Contains(settings, "CreateRoot:        createRoot") && !strings.Contains(settings, "CreateRoot:") {
-		t.Fatalf("settings.go 的 `Settings()` 没有填 `CreateRoot`：设置面读不到落盘根")
+	if strings.Contains(policy, "func (pl *Plane) PolicySnapshot(") {
+		t.Fatalf("policy.go 里又出现 `PolicySnapshot`：它随设置面一起删了（v14.6）")
 	}
 
 	// ④ 前端：落盘根为空时**不渲染**「新建工作空间…」入口（Go 读 TS）。
