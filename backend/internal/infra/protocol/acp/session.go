@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 	"sync"
 
@@ -59,21 +60,46 @@ func (s *Session) setConfigOptions(opts []ConfigOption) {
 	s.mu.Unlock()
 }
 
-// Prompt 发起一次 prompt（阻塞至本 run 结束），返回 stop reason。
+// Prompt 发起一次 prompt（阻塞至本 run 结束），返回 stop reason 与本轮 token 明细。
 // 流式输出经 ClientOptions.OnEvent（SessionUpdate → 归一化事件）到达上层。
-func (s *Session) Prompt(ctx context.Context, parts []protocol.PromptPart) (string, error) {
+//
+// token 明细来自 ACP `PromptResponse.usage`（可选；底座不上报时为零值 TokenUsage，不代表消耗为 0）。
+// 此前该字段被丢弃，只保留 usage_update 的上下文快照；这里把它接住，供 runs.token_usage_json 落库。
+func (s *Session) Prompt(ctx context.Context, parts []protocol.PromptPart) (string, objusage.TokenUsage, error) {
 	blocks, bErr := s.buildContentBlocks(ctx, parts)
 	if bErr != nil {
-		return "", bErr
+		return "", objusage.TokenUsage{}, bErr
 	}
 	resp, err := s.client.conn.Prompt(ctx, acpsdk.PromptRequest{
 		SessionId: s.id,
 		Prompt:    blocks,
 	})
 	if err != nil {
-		return "", Classify(err)
+		return "", objusage.TokenUsage{}, Classify(err)
 	}
-	return string(resp.StopReason), nil
+	return string(resp.StopReason), tokenUsageOf(resp.Usage), nil
+}
+
+// tokenUsageOf 把 ACP PromptResponse.Usage 映射成本仓累加型 TokenUsage（nil → 零值）。
+func tokenUsageOf(u *acpsdk.Usage) objusage.TokenUsage {
+	if u == nil {
+		return objusage.TokenUsage{}
+	}
+	t := objusage.TokenUsage{
+		InputTokens:  int64(u.InputTokens),
+		OutputTokens: int64(u.OutputTokens),
+		TotalTokens:  int64(u.TotalTokens),
+	}
+	if u.CachedReadTokens != nil {
+		t.CachedReadTokens = int64(*u.CachedReadTokens)
+	}
+	if u.CachedWriteTokens != nil {
+		t.CachedWriteTokens = int64(*u.CachedWriteTokens)
+	}
+	if u.ThoughtTokens != nil {
+		t.ThoughtTokens = int64(*u.ThoughtTokens)
+	}
+	return t
 }
 
 // buildContentBlocks 把平台值 parts 编成 ACP 内容块。

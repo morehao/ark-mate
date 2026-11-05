@@ -348,9 +348,18 @@ func (pl *Plane) MaterializeRun(sessionID, typ string, payload map[string]any, t
 			}
 		}
 	}
+	// 本轮 token 明细流水（按 run id 取；无上报 → 空串）。与上面的上下文快照分开落列。
+	tokenUsageJSON := ""
+	if pl.tokenUsageOf != nil {
+		if tu, ok := pl.tokenUsageOf(runID); ok && tu.Reported() {
+			if b, err := json.Marshal(tu); err == nil {
+				tokenUsageJSON = string(b)
+			}
+		}
+	}
 	if err := pl.st.FinishRun(ctx, runID, model.RunFinishPatch{
 		LastSeq: terminalSeq, Status: status, StopReason: stopReason, ErrorCode: errCode,
-		UsageJSON: usageJSON, FirstTokenMS: firstTokenMS, EndedAt: ended,
+		UsageJSON: usageJSON, TokenUsageJSON: tokenUsageJSON, FirstTokenMS: firstTokenMS, EndedAt: ended,
 	}); err != nil {
 		glog.Warnw(context.Background(), "store: finish run failed", "session", sessionID, "run", runID, "err", err)
 		return

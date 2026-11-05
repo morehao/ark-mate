@@ -8,9 +8,24 @@ import (
 	"time"
 )
 
+// IsInternalOrigin 判断会话是否由**内部模型网关**派生（`origin = 'internal:llm'` 一类）。
+//
+// 内部会话是辅助调用的一次执行，不是用户在聊的会话：会话列表 / 全文搜索 / 用户维度用量 UI
+// 都应过滤掉它们（按 `origin` 前缀判定，与既有 `'automation:<id>'` 同一轴）。
+func IsInternalOrigin(origin string) bool {
+	return strings.HasPrefix(origin, "internal:")
+}
+
+// isInternalSession 某会话是否内部（模型网关）派生（查内存会话表；未知会话按非内部处理）。
+func (pl *Plane) isInternalSession(sessionID string) bool {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	r := pl.sessions[sessionID]
+	return r != nil && IsInternalOrigin(r.Origin)
+}
+
 // ListSessions 返回会话概要；archived=false 仅未归档（默认），true 仅归档。
-// cwd 非空 = 只返回工作空间精确等于该路径的会话（按工作空间过滤；路径须为绝对路径，
-// 会话 cwd 已规范化为 canonical 形式，调用方传同一个字符串即可命中）。
+// cwd 非空 = 只返回工作空间精确等于该路径的会话（按工作空间过滤；路径须为绝对路径，会话 cwd 已规范化为 canonical 形式，调用方传同一个字符串即可命中）。
 // 按创建时间倒序（置顶优先）。
 // ListSessions 列出会话（archived 过滤；cwd / workspaceID 非空则再收一道）。
 //
@@ -35,6 +50,10 @@ func (pl *Plane) ListSessions(archived bool, cwd, workspaceID string) ([]Session
 	out := make([]SessionItem, 0, len(pl.sessions))
 	for _, r := range pl.sessions {
 		if r.Archived != archived {
+			continue
+		}
+		// 内部（模型网关）会话不进用户会话列表：它们不是"用户在聊的会话"，是辅助调用的一次执行。
+		if IsInternalOrigin(r.Origin) {
 			continue
 		}
 		if cwd != "" && r.Cwd != cwd {

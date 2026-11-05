@@ -63,6 +63,9 @@ type Plane struct {
 	// `Runner.LatestUsage` 的内存表，随 P4a 第五十五刀同族搬入本域；nil = 没有状态机，
 	// 同拆分前 "`s.orch == nil` 时 usage_json 留空"的语义）。
 	usageOf func(sessionID string) (objusage.UsageInfo, bool)
+	// tokenUsageOf 取某轮（run id）的 token 明细流水（**端口**：读 `Runner.TokenUsageOf` 的按轮
+	// 内存表；nil = 没有状态机 → token_usage_json 留空）。与 usageOf 分开：快照按会话，流水按轮。
+	tokenUsageOf func(runID string) (objusage.TokenUsage, bool)
 }
 
 // NewPlane 造一个会话域。库句柄与用量端口都由装配期注入（端口可后置——离线命令没有编排器）。
@@ -93,6 +96,11 @@ func (pl *Plane) SetStore(st Store) { pl.st = st }
 // SetUsageSource 装配期登记用量快照来源（执行面）。
 func (pl *Plane) SetUsageSource(fn func(sessionID string) (objusage.UsageInfo, bool)) {
 	pl.usageOf = fn
+}
+
+// SetTokenUsageSource 装配期登记按轮 token 明细来源（执行面）。与 SetUsageSource 分开登记。
+func (pl *Plane) SetTokenUsageSource(fn func(runID string) (objusage.TokenUsage, bool)) {
+	pl.tokenUsageOf = fn
 }
 
 // SetRestoring 标记"正在从库恢复"（恢复期逐条落库没有意义：刚读出来的东西立刻写回去）。

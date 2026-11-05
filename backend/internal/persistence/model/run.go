@@ -30,6 +30,10 @@ type RunEntity struct {
 	ErrorCode  string `gorm:"column:error_code;not null"`
 	StopReason string `gorm:"column:stop_reason;not null"`
 	UsageJSON  string `gorm:"column:usage_json;not null"`
+	// TokenUsageJSON 本轮 token 明细流水（ACP PromptResponse.usage 归一化的 objusage.TokenUsage，
+	// JSON；空串 = 底座未上报）。**与 UsageJSON 是两个概念**：usage_json 是上下文窗口快照
+	// （快照语义，不可相加），token_usage_json 是本轮实际消耗明细（流水语义，可逐轮累加）。
+	TokenUsageJSON string `gorm:"column:token_usage_json;not null"`
 	// FirstSeq 本轮窗口起点 = 本轮 `run.started` 事件的**会话内**位次（开轮即定，此后不变）。
 	FirstSeq int64 `gorm:"column:first_seq"`
 	// LastSeq 本轮窗口终点 = 终态事件的会话内位次；**-1 = 还没收口**（进行中的轮次）
@@ -56,6 +60,8 @@ type RunFinishPatch struct {
 	StopReason string
 	ErrorCode  string
 	UsageJSON  string
+	// TokenUsageJSON 本轮 token 明细流水（JSON；空串 = 未上报）。与 UsageJSON（快照）分开落列。
+	TokenUsageJSON string
 	// FirstTokenMS 本轮从起点到首个 assistant 输出的耗时（ms）；0 = 无输出/未记录。
 	FirstTokenMS int64
 	// EndedAt 终态时刻（零值 → 落库为空串，见 model.FormatTimeOrNow 的调用方）。

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 )
 
@@ -27,7 +28,7 @@ func (s *stubSession) ConfigOptions() []protocol.ConfigOption { return nil }
 func (s *stubSession) SetConfigOption(context.Context, string, string) ([]protocol.ConfigOption, error) {
 	return nil, nil
 }
-func (s *stubSession) Prompt(_ context.Context, parts []protocol.PromptPart) (string, error) {
+func (s *stubSession) Prompt(_ context.Context, parts []protocol.PromptPart) (string, objusage.TokenUsage, error) {
 	var text string
 	for _, p := range parts {
 		if p.Kind == protocol.PromptPartText || p.Kind == "" {
@@ -35,7 +36,7 @@ func (s *stubSession) Prompt(_ context.Context, parts []protocol.PromptPart) (st
 		}
 	}
 	s.prompts = append(s.prompts, text)
-	return "end_turn", nil
+	return "end_turn", objusage.TokenUsage{}, nil
 }
 func (s *stubSession) Cancel(context.Context) error { s.cancels++; return nil }
 

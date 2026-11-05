@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 	"strings"
 	"sync"
@@ -35,7 +36,7 @@ func newGatedSession() *gatedSession {
 	return &gatedSession{started: make(chan string, 16), release: make(chan struct{}, 16)}
 }
 
-func (s *gatedSession) Prompt(ctx context.Context, parts []protocol.PromptPart) (string, error) {
+func (s *gatedSession) Prompt(ctx context.Context, parts []protocol.PromptPart) (string, objusage.TokenUsage, error) {
 	text := partsText(parts)
 	s.mu.Lock()
 	s.all = append(s.all, text)
@@ -43,9 +44,9 @@ func (s *gatedSession) Prompt(ctx context.Context, parts []protocol.PromptPart) 
 	s.started <- text
 	select {
 	case <-s.release:
-		return "end_turn", nil
+		return "end_turn", objusage.TokenUsage{}, nil
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return "", objusage.TokenUsage{}, ctx.Err()
 	}
 }
 

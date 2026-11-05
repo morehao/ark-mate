@@ -306,6 +306,11 @@ func TestMigrateV22OnEmptyRuns(t *testing.T) {
 		}
 	}
 	// 空表上的开轮插入照常可用（唯一索引不该把第一条挡住）。
+	//
+	// 先把库迁到最新再插：`CreateRun` 走的是**当前**的 `model.RunEntity`（含 v22 之后新增的列，
+	// 如 v36 的 token_usage_json），而上面这些 v22 断言读的是 v22 那一版的表。迁移到最新只增列、
+	// 不复建 runs 表，故 v22 建出的唯一索引仍在（紧邻的 UniqueIndex 反证用例亦依赖此事实）。
+	migrateUpTo(t, s, latestSchemaVersion())
 	if err := s.CreateRun(ctx, runFixture(t, objid.New(objid.Run), v22SessionA, 0)); err != nil {
 		t.Fatalf("空库上开轮插入: %v", err)
 	}
@@ -321,6 +326,9 @@ func TestMigrateV22UniqueIndexBlocksDuplicateRun(t *testing.T) {
 	s := openV21ForV22Test(t)
 	migrateUpTo(t, s, 22)
 	seedSession(t, s, v22SessionA)
+	// 迁到最新再做下面的开轮插入：`CreateRun` 走当前 `model.RunEntity`（含 v22 之后新增的列，
+	// 如 v36 的 token_usage_json）。迁移只增列、不复建 runs 表，v22 建出的唯一索引仍在。
+	migrateUpTo(t, s, latestSchemaVersion())
 
 	first := int64(3)
 	if err := s.CreateRun(ctx, runFixture(t, objid.New(objid.Run), v22SessionA, first)); err != nil {

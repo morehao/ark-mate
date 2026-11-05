@@ -58,7 +58,7 @@ func TestAvailableCommandsUpdatePush(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if _, err := sess.Prompt(context.Background(), protocol.TextParts("hi")); err != nil {
+	if _, _, err := sess.Prompt(context.Background(), protocol.TextParts("hi")); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestAvailableCommandsUpdateEmptyStillEmitted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if _, err := sess.Prompt(context.Background(), protocol.TextParts("hi")); err != nil {
+	if _, _, err := sess.Prompt(context.Background(), protocol.TextParts("hi")); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 

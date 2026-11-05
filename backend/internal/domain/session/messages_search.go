@@ -47,6 +47,10 @@ func (pl *Plane) SearchMessages(_ context.Context, q string, limit int) (*Messag
 			hits = hits[:limit]
 		}
 		for _, h := range hits {
+			// 内部（模型网关）会话的正文不进用户检索：它们不是用户在聊的会话。
+			if pl.isInternalSession(h.SessionID) {
+				continue
+			}
 			resp.Hits = append(resp.Hits, MessageSearchHit{
 				SessionID: h.SessionID,
 				Title:     h.SessionTitle,
@@ -83,6 +87,9 @@ func (pl *Plane) SearchMessages(_ context.Context, q string, limit int) (*Messag
 	var all []hit
 	qLower := strings.ToLower(q)
 	for _, r := range recs {
+		if IsInternalOrigin(r.Origin) {
+			continue
+		}
 		for _, th := range scanTranscriptMessages(dir, r.ID, qLower) {
 			all = append(all, hit{at: r.UpdatedAt, out: MessageSearchHit{
 				SessionID: r.ID,

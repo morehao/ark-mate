@@ -1,9 +1,9 @@
 package acp
 
 import (
-	"github.com/morehao/ark-mate/internal/core/protocol"
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"io"
 	"sync"
 	"testing"
@@ -102,6 +102,8 @@ type fakeAgent struct {
 	// promptHook 若设置，在推送流式更新前调用（用于在 Prompt 中途发起
 	// session/request_permission 等交互，验证权限确认通道不阻塞读循环）。
 	promptHook func(ctx context.Context, req acpsdk.PromptRequest)
+	// usage 若设置，PromptResponse.Usage 携带它（验证客户端接住 token 明细）。
+	usage *acpsdk.Usage
 }
 
 var _ acpsdk.Agent = (*fakeAgent)(nil)
@@ -158,6 +160,7 @@ func (f *fakeAgent) Prompt(ctx context.Context, req acpsdk.PromptRequest) (acpsd
 	updates := f.promptUpdates
 	stop := f.stopReason
 	err := f.promptErr
+	usage := f.usage
 	f.mu.Unlock()
 	if err != nil {
 		return acpsdk.PromptResponse{}, err
@@ -175,7 +178,7 @@ func (f *fakeAgent) Prompt(ctx context.Context, req acpsdk.PromptRequest) (acpsd
 	if stop == "" {
 		stop = acpsdk.StopReasonEndTurn
 	}
-	return acpsdk.PromptResponse{StopReason: stop}, nil
+	return acpsdk.PromptResponse{StopReason: stop, Usage: usage}, nil
 }
 
 func (f *fakeAgent) ResumeSession(context.Context, acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
@@ -378,7 +381,7 @@ func TestClientNewSessionRoundTrip(t *testing.T) {
 		t.Fatal("Session.Client 应回指连接")
 	}
 
-	stop, err := sess.Prompt(context.Background(), protocol.TextParts("hi"))
+	stop, _, err := sess.Prompt(context.Background(), protocol.TextParts("hi"))
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}

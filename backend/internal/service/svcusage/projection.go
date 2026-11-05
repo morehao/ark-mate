@@ -34,5 +34,25 @@ func usageSummary(v *session.UsageSummary) *dtousage.UsageSummaryResp {
 		From: v.From, To: v.To, GroupBy: v.GroupBy, TZOffset: v.TZOffset, Source: v.Source,
 		ContextSemantics: v.ContextSemantics, CostSemantics: v.CostSemantics,
 		BucketsAdditive: v.BucketsAdditive, Totals: usageBucket(v.Totals), Buckets: buckets,
+		LLM: usageLLM(v.LLM),
 	}
+}
+
+// usageLLM 内部模型调用流水汇总 → DTO。
+func usageLLM(v session.UsageLLM) dtousage.UsageLLMResp {
+	tokens := func(t session.UsageTokens) dtousage.UsageTokensResp {
+		return dtousage.UsageTokensResp{
+			InputTokens: t.InputTokens, OutputTokens: t.OutputTokens,
+			CachedReadTokens: t.CachedReadTokens, CachedWriteTokens: t.CachedWriteTokens,
+			ThoughtTokens: t.ThoughtTokens, TotalTokens: t.TotalTokens,
+		}
+	}
+	by := make([]dtousage.UsagePurposeResp, 0, len(v.ByPurpose))
+	for _, p := range v.ByPurpose {
+		by = append(by, dtousage.UsagePurposeResp{
+			Purpose: p.Purpose, Calls: p.Calls, Tokens: tokens(p.Tokens),
+			CostAmount: p.CostAmount, CostCurrency: p.CostCurrency,
+		})
+	}
+	return dtousage.UsageLLMResp{Calls: v.Calls, Tokens: tokens(v.Tokens), ByPurpose: by}
 }

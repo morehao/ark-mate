@@ -399,7 +399,9 @@ func TestPrimaryKeyShapesStayDeclared(t *testing.T) {
 		}
 	}
 
-	// ③ `objid` 的前缀登记表 == 8 个平台铸造前缀，**不含**任何定义类。
+	// ③ `objid` 的前缀登记表 == 平台铸造前缀集合，**不含**任何定义类。
+	// v36（内部模型网关）：新增 `call_`（一次模型调用流水，`llm_calls.id`）——平台铸造的流水身份，
+	// 与 run_/evt_ 同属"平台拥有的行身份"，故登记进来。
 	objidSrc := stripLineComments(readFileOrFatal(t,
 		filepath.Join(backendRoot(t), "internal", "core", "object", "objid", "objid.go")))
 	// 前缀长度放宽到 2–5：v33 起新增 `libnd_`（资料库节点，5 字母）——它同样是平台铸造前缀，
@@ -418,7 +420,7 @@ func TestPrimaryKeyShapesStayDeclared(t *testing.T) {
 		gotNames = append(gotNames, g.name)
 	}
 	sort.Strings(gotNames)
-	wantNames := []string{"Artifact", "Attachment", "Event", "Input", "LibraryNode", "Message", "Model", "PermissionMemory", "Run", "Session", "Workspace"}
+	wantNames := []string{"Artifact", "Attachment", "Call", "Event", "Input", "LibraryNode", "Message", "Model", "PermissionMemory", "Run", "Session", "Workspace"}
 	sort.Strings(wantNames)
 	if strings.Join(gotNames, ",") != strings.Join(wantNames, ",") {
 		t.Fatalf("`objid` 的铸造前缀登记表变了：\n got  %v\n want %v\n"+

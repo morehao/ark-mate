@@ -64,7 +64,7 @@ func TestConnectRemoteTransport(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewSession: %v", err)
 			}
-			stop, err := sess.Prompt(ctx, protocol.TextParts("远程 runtime 冒烟"))
+			stop, _, err := sess.Prompt(ctx, protocol.TextParts("远程 runtime 冒烟"))
 			if err != nil {
 				t.Fatalf("Prompt: %v", err)
 			}

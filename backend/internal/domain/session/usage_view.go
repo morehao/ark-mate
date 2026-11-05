@@ -45,4 +45,33 @@ type UsageSummary struct {
 	BucketsAdditive  bool
 	Totals           UsageBucket
 	Buckets          []UsageBucket
+	// LLM 内部模型调用流水（llm_calls）的 token 明细汇总（**流水**口径，含旁路无会话调用；
+	// 与上面的会话快照口径分开，勿混用）。
+	LLM UsageLLM
+}
+
+// UsageLLM 内部模型调用流水的用量汇总（对外形状）。
+type UsageLLM struct {
+	Calls     int64
+	Tokens    UsageTokens
+	ByPurpose []UsagePurpose
+}
+
+// UsageTokens 累加型 token 明细。
+type UsageTokens struct {
+	InputTokens       int64
+	OutputTokens      int64
+	CachedReadTokens  int64
+	CachedWriteTokens int64
+	ThoughtTokens     int64
+	TotalTokens       int64
+}
+
+// UsagePurpose 一个用途维度的调用聚合。
+type UsagePurpose struct {
+	Purpose      string
+	Calls        int64
+	Tokens       UsageTokens
+	CostAmount   float64
+	CostCurrency string
 }

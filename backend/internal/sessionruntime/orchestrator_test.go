@@ -12,6 +12,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/object/objusage"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 )
@@ -30,19 +31,19 @@ type stubSession struct {
 // ConfigOptions 桩：默认无配置项（模型目录为空 → 目录来源走缓存/resume/空）。
 func (s *stubSession) ConfigOptions() []protocol.ConfigOption { return s.options }
 
-func (s *stubSession) Prompt(ctx context.Context, _ []protocol.PromptPart) (string, error) {
+func (s *stubSession) Prompt(ctx context.Context, _ []protocol.PromptPart) (string, objusage.TokenUsage, error) {
 	if s.cancelOnCtx {
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return "", objusage.TokenUsage{}, ctx.Err()
 		case <-time.After(3 * time.Second):
-			return "end_turn", nil
+			return "end_turn", objusage.TokenUsage{}, nil
 		}
 	}
 	if s.cancelled != nil {
 		defer close(s.cancelled)
 	}
-	return s.stop, s.err
+	return s.stop, objusage.TokenUsage{}, s.err
 }
 
 func (s *stubSession) Cancel(context.Context) error { return nil }
@@ -169,14 +170,14 @@ type gatedPromptSession struct {
 	returned chan struct{}
 }
 
-func (s *gatedPromptSession) Prompt(ctx context.Context, _ []protocol.PromptPart) (string, error) {
+func (s *gatedPromptSession) Prompt(ctx context.Context, _ []protocol.PromptPart) (string, objusage.TokenUsage, error) {
 	close(s.started)
 	defer close(s.returned)
 	select {
 	case <-s.release:
-		return "cancelled", nil
+		return "cancelled", objusage.TokenUsage{}, nil
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return "", objusage.TokenUsage{}, ctx.Err()
 	}
 }
 
