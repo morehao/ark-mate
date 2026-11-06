@@ -30,3 +30,25 @@ describe('执行步骤盒式卡（.fg-tool）', () => {
     assert.match(block('.fg-process-list {'), /gap:\s*8px/)
   })
 })
+
+describe('Composer 忙态（.fg-running / .fg-waiting / 投递 pill）', () => {
+  it('.fg-composer.fg-running 是品牌描边 + 呼吸动画', () => {
+    const b = block('.fg-composer.fg-running {')
+    assert.match(b, /border-color:/)
+    assert.match(b, /animation:\s*fg-run-breathe/)
+  })
+
+  it('@keyframes fg-run-breathe 存在', () => {
+    assert.ok(src.includes('@keyframes fg-run-breathe'))
+  })
+
+  it('.fg-composer.fg-waiting 是 warning 描边', () => {
+    const b = block('.fg-composer.fg-waiting {')
+    assert.match(b, /border-color:/)
+  })
+
+  it('.fg-delivery-pill 是 pill 形态（999 圆角）', () => {
+    const b = block('.fg-delivery-pill {')
+    assert.match(b, /border-radius:\s*TOKENpx/)
+  })
+})

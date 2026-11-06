@@ -778,15 +778,10 @@ export function ChatPage() {
                     onStop={() => void cancel()}
                     // 已有会话不再展示工作空间 chip（工作空间创建即定稿，重复一行是噪声；
                     // 仍可在会话信息浮层「所属空间」看到）。原先这里按 activeSum.cwd 拼 workspace 传下去。
-                    busyNote={
-                      // v21：原来还缀着底座名（`run 进行中 · dsh`）——底座信息不进对话框页面，
-                      // 底栏只讲用户能感知的状态。
-                      //
-                      // 「会话在服务端仍处运行中 — 可点「停止」解除」这句**已删**：它是倒推的产物
-                      // （`serverBusy`），而且它让用户去点「停止」解除一个其实已经死掉的轮次。
-                      // 现在要么有过程状态（头栏已经在说「正在执行 Bash」），要么什么都不说。
-                      streaming ? 'run 进行中' : narration.tone === 'wait' ? narration.label : undefined
-                    }
+                    // 只传**等待态**文案（等授权/等回答）：它由 Composer 渲染在卡上方一行（.fg-wait-banner）。
+                    // 进行中的"在跑"不再由一句「run 进行中」旁白表达——那已由卡片品牌描边（.fg-running）承担，
+                    // 且真实阶段（如「正在执行 Bash」）在 ChatHead 的 metaText 里已经在说（见上方 metaText）。
+                    busyNote={narration.tone === 'wait' ? narration.label : undefined}
                     placeholder={busy ? '正在回复…' : '向助手提问…（Enter 发送）'}
                     onSend={onSend}
                     // 命令发现面（ADR-17）：底座自报的斜杠命令，undefined = 该底座不提供发现面
