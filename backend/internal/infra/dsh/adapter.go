@@ -98,8 +98,10 @@ func Spec() runtime.Spec {
 			RefPattern:      "MATE_%s_API_KEY",
 			FallbackEnv:     false,
 			Tested:          true,
-			TestedOnVersion: "0.2.1-rc.2",
-			Note: "原生凭据文档**已端到端实测**（H6 探针 7/7 PASS，2026-10-18，dsh 0.2.1-rc.2）：" +
+			TestedOnVersion: "0.2.2-rc.1",
+			Note: "原生凭据文档**已端到端实测**（H6 探针 7/7 PASS，2026-10-18，dsh 0.2.1-rc.2；" +
+				"**2026-11-06 在 0.2.2-rc.1 复测热生效核心项 PASS**：本地 mock 端点同进程内把文档 refs key-A→key-B，" +
+				"下一轮请求 Authorization 即变为 key-B、未重启，文档赢、路由接通——机制零变化）：" +
 				"① **热生效成立**——同一进程内把文档的 refs 从 key-A 改成 key-B（平台式临时文件 + 原子 rename），" +
 				"下一轮请求的 `Authorization` 就是 key-B，**未重启**；" +
 				"② **文档赢**（0.2.1 起；0.2.0 是 env 赢）——文档与子进程 env 同时给时实际用的是文档。" +
@@ -127,7 +129,9 @@ func Spec() runtime.Spec {
 
 // dshModelConfigEvidence dsh 清单通道（`--patch` overlay）的实测结论与三条已知坑
 // （原先写在已删除的 `ConfigProjection.Note` 上；写入权是用实测换的，依据不能丢）。
-const dshModelConfigEvidence = "清单通道端到端实测（2026-10-10，随包 0.2.0-rc.2；2026-10-18 在 0.2.1-rc.2 复测通过）。" +
+const dshModelConfigEvidence = "清单通道端到端实测（2026-10-10，随包 0.2.0-rc.2；2026-10-18 在 0.2.1-rc.2 复测通过；" +
+	"2026-11-06 在 0.2.2-rc.1 复测通过：本仓生成的模型 patch 过 `--dump-config-schema` 门——exit0 + x-cordis.complete=true + 诊断空；" +
+	"ACP 会话里 `option[category=model]` 的 currentValue 由 `- id: acp` 决定、候选集含平台声明的自定义 route 两条模型，动态目录不破）。" +
 	"① 机制（最小 ACP 客户端直接问底座，见 .dsh/docs/notes/probes/dsh-acp-catalog.mjs）：" +
 	"在 `llm-pi-ai.config.providers.<route>` 上声明一条自定义 route（api + baseURL + apiKeyEnv + models 齐备）" +
 	"**确实**会以一组出现在 ACP 的 `options[category=model]` 里（实测候选 `[\"arkprobe\",\"ark-probe-x\"]` " +

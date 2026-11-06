@@ -68,8 +68,10 @@ type IdentityDeclaration struct {
 var Identity = IdentityDeclaration{
 	PatchFilename:   IdentityPatchFilename,
 	Tested:          true,
-	TestedOnVersion: "0.2.1-rc.2",
-	Note: "一次性 probe（2026-10-18，dsh 0.2.1-rc.2，临时 DSH_HOME + `--patch` + `--dump-config-schema`）：" +
+	TestedOnVersion: "0.2.2-rc.1",
+	Note: "一次性 probe（2026-10-18，dsh 0.2.1-rc.2，临时 DSH_HOME + `--patch` + `--dump-config-schema`；" +
+		"**2026-11-06 在 0.2.2-rc.1 复测 PASS**：`- id: system-prompt` + `includeHarnessIdentity:false` + `personaPrefix` " +
+		"两键仍被 schema 接受，dump 退出码 0、`x-cordis.complete=true`、诊断为空）：" +
 		"① `- id: system-prompt` 是**已注册条目**（dsh-base 的 cordis.patch.yml 有它，ACP bundle 也用它覆盖 personaPrefix）；" +
 		"② `includeHarnessIdentity: false` + `personaPrefix` 两个键被 schema 接受，dump 退出码 0、`x-cordis.complete=true`、诊断为空；" +
 		"③ 未知 `{{...}}` 变量在**首轮组装**时才抛错（不是启动时）——所以静态校验必须在落盘前拦掉 `{{`/`}}`，否则表现为每次会话都失败；" +
