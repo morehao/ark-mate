@@ -336,7 +336,7 @@ export function StartPanel() {
                 fontSize: 15,
                 lineHeight: 1.7,
                 fontFamily: 'inherit',
-                minHeight: 56,
+                minHeight: 72,
               }}
             />
 

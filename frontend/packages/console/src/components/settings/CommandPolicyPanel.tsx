@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Input, Select, Spin, Tag } from 'antd'
 import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
+import { IconAction } from '../capability/shared'
 import { getCommandPolicy, toErrorMessage, updateCommandPolicy } from '@ark-mate/api'
 import type { CommandDecision, CommandPolicyResp, CommandPolicyRule } from '@ark-mate/types'
 import { useMate } from '../../store'
@@ -188,11 +189,10 @@ export function CommandPolicyPanel() {
                 options={DECISION_OPTIONS}
                 onChange={(v) => patch(i, { decision: v })}
               />
-              <Button
-                type="text"
-                danger
+              <IconAction
                 icon={<DeleteOutlined />}
-                aria-label="删除这条规则"
+                title="删除这条规则"
+                danger
                 onClick={() => setDrafts((ds) => ds.filter((_, j) => j !== i))}
               />
               {(d.match_samples?.length || d.not_match_samples?.length) ? (

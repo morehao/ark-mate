@@ -70,6 +70,11 @@ interface Props {
    * `activeSum.model`），落库走既有的 `PATCH /sessions/:id`（`updateSessionModel`），零新接口。
    */
   model?: string | null
+  /**
+   * 当前模型的**展示名**（服务端解析的 `session.model_name`）：当 `model` 反查不到
+   * `modelOptions` 里的候选时，用它兜底展示，绝不把 `mdl_…` 原始 id 摊给用户。
+   */
+  modelLabel?: string
   modelOptions?: ConfigOptionValue[]
   onModelChange?: (value: string | null) => void
 }
@@ -103,6 +108,7 @@ export function Composer({
   capabilities,
   capabilitiesDisabled,
   model,
+  modelLabel,
   modelOptions,
   onModelChange,
 }: Props) {
@@ -156,12 +162,15 @@ export function Composer({
     taRef.current?.focus()
   }
 
-  // 自动增高
+  // 自动增高：静息高度不低到「一行半」以下（req：输入框太矮），内容多时增高到上限再滚动。
+  // 下限与新建会话页（StartPanel）对齐，两处输入框视觉一致。
+  const TA_MIN_HEIGHT = 72
+  const TA_MAX_HEIGHT = 200
   useEffect(() => {
     const ta = taRef.current
     if (!ta) return
     ta.style.height = 'auto'
-    ta.style.height = `${Math.min(ta.scrollHeight, 180)}px`
+    ta.style.height = `${Math.max(TA_MIN_HEIGHT, Math.min(ta.scrollHeight, TA_MAX_HEIGHT))}px`
   }, [draft])
 
   const send = () => {
@@ -231,10 +240,11 @@ export function Composer({
         <div
           className="fg-composer"
           style={{
-            padding: '10px 12px 8px',
+            // 与新建会话页（StartPanel）输入卡同一套内边距 / 间距，两处视觉一致。
+            padding: '14px 16px 10px',
             display: 'flex',
             flexDirection: 'column',
-            gap: 6,
+            gap: 10,
             // 拖拽落区：拖文件入卡片时高亮边框（走 token，不硬编码色值）。
             outline: dragOver ? `2px dashed ${tokens.primary}` : 'none',
             outlineOffset: dragOver ? -4 : 0,
@@ -310,15 +320,16 @@ export function Composer({
             onPaste={onPaste}
             style={{
               width: '100%',
+              boxSizing: 'border-box',
               border: 0,
               resize: 'none',
               background: 'transparent',
               color: tokens.text,
               font: 'inherit',
-              fontSize: 14.5,
-              lineHeight: 1.6,
-              minHeight: 24,
-              maxHeight: 180,
+              fontSize: 15,
+              lineHeight: 1.7,
+              minHeight: TA_MIN_HEIGHT,
+              maxHeight: TA_MAX_HEIGHT,
               padding: '2px 2px',
               outline: 'none',
             }}
@@ -396,6 +407,7 @@ export function Composer({
                 <ModelSelect
                   values={modelOptions}
                   value={model ?? null}
+                  valueLabel={modelLabel}
                   onChange={onModelChange}
                   allowClear
                   size="small"

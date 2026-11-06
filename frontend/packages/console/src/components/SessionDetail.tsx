@@ -53,20 +53,24 @@ function optionId(p: PermissionResp, kind: PermissionOptionKind): string | undef
 }
 
 /**
- * 会话详情面板（管理面）：元数据只读一瞥 + 运行统计 + 产物 + 挂起权限（可就地决策）。
+ * 会话信息面板（唯一内容源）：元数据只读一瞥 + 运行统计 + 产物 + 挂起权限（可就地决策）。
+ *
+ * 这是「会话信息」的**唯一**内容定义：宽屏由 ChatPage 作为可收起右栏承载，窄屏由
+ * SessionDetailDrawer 包一层 Drawer 承载。两种承载只是外壳不同，内容与行为完全一致。
  *
  * 产物区是「会话 → 资料库」这一跳的入口：产物默认只登记在 artifacts（全量可查），进资料库是
  * **显式动作**（`POST /materials/import-artifact`）。没有这个入口，用户就只能在会话里看到文件
  * 已生成、却在资料库里永远找不到它。
+ *
+ * `onRequestClose`：面板内可触发的关闭回调（如抽屉的场景）；宽屏侧栏传入收起回调。
+ * 为 `undefined` 时面板内不渲染任何"关闭"动作（侧栏有自己的头部按钮）。
  */
-export function SessionDetailDrawer({
-  open,
+export function SessionInfoPanel({
   sessionId,
-  onClose,
+  onRequestClose: _onRequestClose,
 }: {
-  open: boolean
   sessionId: string
-  onClose: () => void
+  onRequestClose?: () => void
 }) {
   const navigate = useNavigate()
   const views = useMate((s) => s.views)
@@ -140,13 +144,11 @@ export function SessionDetailDrawer({
   }, [sessionId])
 
   useEffect(() => {
-    if (open) {
-      setEditingTitle(false)
-      void load()
-      void loadArtifacts()
-    }
+    setEditingTitle(false)
+    void load()
+    void loadArtifacts()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, sessionId])
+  }, [sessionId])
 
   // 同一工作区路径只保留最新版（资料库那边也按这个口径去重）：更早的产物在列表里标「历史版本」，
   // 不给收录按钮——否则点一下会把资料库节点又翻回旧快照。
@@ -176,9 +178,9 @@ export function SessionDetailDrawer({
   // 模型（不同底座的目录本就不同），选下去必被运行时拒绝。现在底座构建期固定、读面自己按它取样，
   // 于是"取错"这条路不再存在——但**打开详情才拉**这条时序仍然保留（不打开就不打这次请求）。
   useEffect(() => {
-    if (open) void loadModelCatalog()
+    void loadModelCatalog()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [sessionId])
 
   const view = views[sessionId]
   const viewTitle = detail?.title
@@ -252,27 +254,7 @@ export function SessionDetailDrawer({
   )
 
   return (
-    <Drawer
-      title="会话详情"
-      width={360}
-      open={open}
-      onClose={onClose}
-      styles={{ body: { padding: 0, background: tokens.bg } }}
-      extra={
-        <Button
-          size="small"
-          type="text"
-          icon={<ReloadOutlined />}
-          onClick={() => {
-            void load()
-            void loadArtifacts()
-          }}
-          aria-label="刷新"
-          title="刷新"
-        />
-      }
-    >
-      <div style={{ padding: '16px 20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ padding: '16px 20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {err && <div style={{ fontSize: 12.5, color: tokens.error }}>{err}</div>}
         {!s && loading && (
           <div style={{ display: 'grid', placeItems: 'center', padding: '32px 0' }}>
@@ -939,7 +921,33 @@ export function SessionDetailDrawer({
             </div>
           </>
         )}
-      </div>
+    </div>
+  )
+}
+
+/**
+ * 会话详情抽屉（外壳）：包一层 antd Drawer 承载 SessionInfoPanel。
+ * 保留给窄屏会话页与资料库产物详情复用；内容与宽屏侧栏完全一致。
+ */
+export function SessionDetailDrawer({
+  open,
+  sessionId,
+  onClose,
+}: {
+  open: boolean
+  sessionId: string
+  onClose: () => void
+}) {
+  return (
+    <Drawer
+      title="会话信息"
+      width={360}
+      open={open}
+      onClose={onClose}
+      styles={{ body: { padding: 0, background: tokens.bg } }}
+      destroyOnClose
+    >
+      {open && <SessionInfoPanel sessionId={sessionId} onRequestClose={onClose} />}
     </Drawer>
   )
 }

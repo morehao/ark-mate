@@ -447,6 +447,9 @@ export const consoleStyleSheet = `
   .fg-rowtag.fg-clickable { cursor: pointer; }
   .fg-rowtag.fg-clickable:hover { border-color: ${tokens.primary}; color: ${tokens.primary}; }
   .fg-rowactions { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+  /* 「取消默认」行（已默认）：实心星 + 强调色描边，一眼看出这条是默认（与扩展页按钮同族） */
+  .fg-rowactions .ant-btn.fg-star-on { color: ${tokens.accent}; border-color: ${tokens.accent}; }
+  .fg-rowactions .ant-btn.fg-star-on:hover { color: ${tokens.accentHover}; border-color: ${tokens.accentHover}; background: ${tokens.accentSoft}; }
   .fg-rowproblems { margin: 0; font-size: 11.5px; line-height: 1.5; color: ${tokens.warning}; }
 
   /* 密钥状态点：绿 = 已配置、红 = 缺失。绝不回显密钥本身。 */
@@ -1298,42 +1301,21 @@ export const consoleStyleSheet = `
      **搜索展开时标题与动作两颗一起收起**，输入框占据整条区头。
      之所以要 overflow:hidden：收起靠的是 max-width 过渡而不是卸载 DOM，
      不裁掉溢出的话，宽度收缩期间图标会溢到右边压住列表。 */
-  /* 宽屏会话信息栏（v2.2，≥1600 才出现）。
-     1912 宽窗口下转录列只有 840，两侧各留 362 空白；把右侧空白做成「会话事实」，
-     比把正文拉到 1200 宽（行长失控）更合理。窄屏不渲染（display:none）。 */
-  .fg-chat-side { display: none; }
-  @media (min-width: 1600px) {
-    .fg-chat-side {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      width: 320px;
-      flex: none;
-      min-height: 0;
-      overflow-y: auto;
-      padding: 16px;
-      border-left: 1px solid ${tokens.border};
-      background: ${tokens.surface};
-    }
-  }
-  .fg-chat-side-h {
-    font-family: ${tokens.fontMono};
-    font-size: 10px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: ${tokens.textPlaceholder};
-  }
-  .fg-chat-side-row {
+  /* 会话信息右栏（v2.3，合并原只读宽栏与抽屉）：宽屏 ≥1280 才渲染（渲染与否还由
+     ChatPage 的 infoOpen 控制，默认收起 → 主列居中）。宽度 340，右侧贴边、左侧分隔线。
+     内容由 SessionInfoPanel 承载（与窄屏抽屉同源），不再是只读残缺副本。
+     窄屏（<1280）不渲染，改由切换按钮打开抽屉。 */
+  .fg-info-panel {
     display: flex;
-    gap: 8px;
-    padding: 6px 0;
-    border-top: 1px solid ${tokens.border};
-    font-size: 12px;
-    line-height: 19px;
+    flex-direction: column;
+    gap: 14px;
+    width: 340px;
+    flex: none;
+    min-height: 0;
+    overflow-y: auto;
+    border-left: 1px solid ${tokens.border};
+    background: ${tokens.surface};
   }
-  .fg-chat-side-row:first-of-type { border-top: 0; }
-  .fg-chat-side-k { flex: none; width: 62px; color: ${tokens.textPlaceholder}; font-family: ${tokens.fontMono}; font-size: 10.5px; }
-  .fg-chat-side-v { flex: 1; min-width: 0; color: ${tokens.text}; overflow-wrap: anywhere; }
 
   /* 用量页总览四卡（v2.2）：宽屏 4 列 → ≤1280 两列 → ≤760 单列。
      原来是写死的 repeat(4, minmax(0,1fr))，窄窗口上每格被压到看不清数字。 */
@@ -1524,15 +1506,15 @@ export const consoleStyleSheet = `
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .fg-wsgroup-name.fg-unnamed { font-style: italic; font-weight: 500; color: ${tokens.textSecondary}; }
+  .fg-wsgroup-name.fg-unnamed { font-weight: 500; color: ${tokens.textSecondary}; }
   .fg-wsgroup-warn { flex: none; color: ${tokens.warning}; font-size: 11.5px; }
   /* 组内配额：「展开其余 N 个会话」/「收起」——一行文字按钮，不做成大块空态。 */
   .fg-wsgroup-more {
     display: flex;
     align-items: center;
     gap: 5px;
-    width: calc(100% - 36px);
-    margin: 1px 8px 3px 28px;
+    width: calc(100% - 18px);
+    margin: 1px 8px 3px 10px;
     padding: 4px 8px;
     border: 0;
     background: transparent;
