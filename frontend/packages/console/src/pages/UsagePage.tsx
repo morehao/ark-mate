@@ -186,7 +186,7 @@ export function UsagePage() {
   return (
     <PageContainer
       title="用量"
-      description="一屏总览会话与模型调用，下方分行看细节。会话用量为区间末快照，模型调用为流水口径（可相加）。"
+      description="一屏总览会话与模型调用；会话用量看快照，模型调用看流水。"
       extra={
         <Space>
           <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>

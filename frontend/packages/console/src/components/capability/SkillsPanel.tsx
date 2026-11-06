@@ -33,7 +33,7 @@ export function SkillsPanel() {
   return (
     <PageContainer
       title="技能"
-      description="管理你的技能。启用后，助手会在合适的对话里自动使用；停用后随时可以恢复。"
+      description="让助手学会一门具体本事——读文档、做表格、写代码、出图。"
       extra={
         <Space size={8}>
           <Input
