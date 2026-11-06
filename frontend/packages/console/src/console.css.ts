@@ -1673,7 +1673,7 @@ export const consoleStyleSheet = `
     flex: none;
     display: inline-grid;
     place-items: center;
-    background: ${tokens.gradient};
+    background: ${tokens.accent};
     color: ${tokens.onPrimary};
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
   }
