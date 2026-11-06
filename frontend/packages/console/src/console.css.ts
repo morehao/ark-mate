@@ -1265,6 +1265,43 @@ export const consoleStyleSheet = `
      **搜索展开时标题与动作两颗一起收起**，输入框占据整条区头。
      之所以要 overflow:hidden：收起靠的是 max-width 过渡而不是卸载 DOM，
      不裁掉溢出的话，宽度收缩期间图标会溢到右边压住列表。 */
+  /* 宽屏会话信息栏（v2.2，≥1600 才出现）。
+     1912 宽窗口下转录列只有 840，两侧各留 362 空白；把右侧空白做成「会话事实」，
+     比把正文拉到 1200 宽（行长失控）更合理。窄屏不渲染（display:none）。 */
+  .fg-chat-side { display: none; }
+  @media (min-width: 1600px) {
+    .fg-chat-side {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      width: 320px;
+      flex: none;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 16px;
+      border-left: 1px solid ${tokens.border};
+      background: ${tokens.surface};
+    }
+  }
+  .fg-chat-side-h {
+    font-family: ${tokens.fontMono};
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-chat-side-row {
+    display: flex;
+    gap: 8px;
+    padding: 6px 0;
+    border-top: 1px solid ${tokens.border};
+    font-size: 12px;
+    line-height: 19px;
+  }
+  .fg-chat-side-row:first-of-type { border-top: 0; }
+  .fg-chat-side-k { flex: none; width: 62px; color: ${tokens.textPlaceholder}; font-family: ${tokens.fontMono}; font-size: 10.5px; }
+  .fg-chat-side-v { flex: 1; min-width: 0; color: ${tokens.text}; overflow-wrap: anywhere; }
+
   /* 用量页总览四卡（v2.2）：宽屏 4 列 → ≤1280 两列 → ≤760 单列。
      原来是写死的 repeat(4, minmax(0,1fr))，窄窗口上每格被压到看不清数字。 */
   .fg-stats {

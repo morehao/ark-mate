@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Dropdown } from 'antd'
 import { InboxOutlined, InfoCircleOutlined, MoreOutlined } from '@ant-design/icons'
-import { tokens } from '@ark-mate/ui'
+import { sessionStatusMeta, tokens } from '@ark-mate/ui'
 import { Ev, modelValues } from '@ark-mate/types'
 import type { AttachmentMeta } from '@ark-mate/types'
 import { listSessionArtifacts, sessionHistory, sessionRuns } from '@ark-mate/api'
@@ -811,6 +811,54 @@ export function ChatPage() {
             </>
           )}
         </section>
+        {/* 宽屏会话信息栏（v2.2，≥1600 才显示；窄屏由 CSS 隐藏）。
+            只读展示会话事实：把宽屏两侧的空白变成"这轮对话是什么"的答案。 */}
+        <aside className="fg-chat-side" aria-label="会话信息">
+          {activeSum && (
+            <>
+              <div>
+                <div className="fg-chat-side-h">会话</div>
+                <div className="fg-chat-side-row">
+                  <span className="fg-chat-side-k">标题</span>
+                  <span className="fg-chat-side-v">{activeSum.title || '未命名会话'}</span>
+                </div>
+                <div className="fg-chat-side-row">
+                  <span className="fg-chat-side-k">id</span>
+                  <span className="fg-chat-side-v" style={{ fontFamily: tokens.fontMono, fontSize: 10.5 }}>
+                    {activeSum.id}
+                  </span>
+                </div>
+                <div className="fg-chat-side-row">
+                  <span className="fg-chat-side-k">状态</span>
+                  <span className="fg-chat-side-v">{sessionStatusMeta(activeSum.status).label}</span>
+                </div>
+              </div>
+              <div>
+                <div className="fg-chat-side-h">运行</div>
+                <div className="fg-chat-side-row">
+                  <span className="fg-chat-side-k">模型</span>
+                  {/* `model` 是平台行 id（mdl_…），对用户没意义：只显示服务端解析出的展示名，
+                      解析不到给一句人话（与 SessionInfoPopover 同口径）。 */}
+                  <span className="fg-chat-side-v">
+                    {activeSum.model ? activeSum.model_name || '已设置（模型清单里没有它）' : '跟随默认'}
+                  </span>
+                </div>
+                <div className="fg-chat-side-row">
+                  <span className="fg-chat-side-k">工作区</span>
+                  <span className="fg-chat-side-v">
+                    {activeSum.workspace_title || activeSum.cwd || '未绑定'}
+                  </span>
+                </div>
+                <div className="fg-chat-side-row">
+                  <span className="fg-chat-side-k">底座</span>
+                  <span className="fg-chat-side-v" style={{ fontFamily: tokens.fontMono, fontSize: 10.5 }}>
+                    {activeSum.runtime_id}
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
+        </aside>
       </div>
       {activeId && (
         <SessionDetailDrawer
