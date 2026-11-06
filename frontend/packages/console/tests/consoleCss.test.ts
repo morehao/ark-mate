@@ -52,3 +52,32 @@ describe('Composer 忙态（.fg-running / .fg-waiting / 投递 pill）', () => {
     assert.match(b, /border-radius:\s*TOKENpx/)
   })
 })
+
+describe('输入卡圆角收口（radiusComposer，防止被内联覆盖）', () => {
+  // 两个输入卡实现：对话页 Composer、新建会话 StartPanel。它们外形靠 .fg-composer 类，
+  // 圆角口径是 tokens.radiusComposer。历史上 Composer 内联过 borderRadius: radiusSm(7px)，
+  // 把类上的圆角压掉了，导致输入卡比全站圆钮/pill 偏方——重开后无声回退过，因此钉死。
+  const consoleSrc = readFileSync(
+    fileURLToPath(new URL('../src/components/Composer.tsx', import.meta.url)),
+    'utf8',
+  )
+  const startSrc = readFileSync(
+    fileURLToPath(new URL('../src/components/StartPanel.tsx', import.meta.url)),
+    'utf8',
+  )
+
+  it('.fg-composer 的圆角来自 tokens.radiusComposer（不写死像素）', () => {
+    const b = block('.fg-composer {')
+    assert.match(b, /border-radius:\s*TOKENpx/)
+  })
+
+  it('Composer 不再内联写死 borderRadius（交给 .fg-composer 类）', () => {
+    // 只要出现 `borderRadius:` 就说明有内联圆角，会覆盖类上的 radiusComposer。
+    assert.doesNotMatch(consoleSrc, /borderRadius\s*:/)
+  })
+
+  it('StartPanel 输入卡用 tokens.radiusComposer（不写死 14/16）', () => {
+    assert.match(startSrc, /borderRadius:\s*tokens\.radiusComposer/)
+    assert.doesNotMatch(startSrc, /borderRadius:\s*\d/)
+  })
+})
