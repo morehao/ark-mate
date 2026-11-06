@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode, type Dispatch, type SetStateAction } from 'react'
+import { type CSSProperties, type ReactNode, type Dispatch, type SetStateAction } from 'react'
 import { Alert, Button, Input, Modal, Tag, Tooltip } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
@@ -90,73 +90,8 @@ export const smallTag: CSSProperties = { marginInlineEnd: 0, fontSize: 10.5 }
 // （`enabled` 出「已禁用」，逐 runtime 的 applicability 出「可用/未实测/未配置/不适用/已禁用」
 // 且原因进 tooltip），所以直接删掉而不是换个输入再抄一遍。
 
-/**
- * 两行式能力行（名称/描述/元信息 + 右侧动作）。
- *
- * 技能页与连接器页共用；总览页删掉后这里只剩两行形态（原单行 `Row` 与 `Card` 一并退役）。
- */
-export function CapabilityRow({
-  title,
-  description,
-  meta,
-  actions,
-}: {
-  title: ReactNode
-  description: ReactNode
-  meta: ReactNode
-  actions: ReactNode
-}) {
-  const [hover, setHover] = useState(false)
-  return (
-    <article
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 10,
-        padding: '11px 16px',
-        borderBottom: `1px solid ${tokens.border}`,
-        background: hover ? tokens.bg : undefined,
-        transition: 'background .12s ease',
-      }}
-    >
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>{title}</div>
-        <p
-          title={typeof description === 'string' ? description : undefined}
-          style={{
-            margin: '2px 0 0',
-            fontSize: 11.5,
-            lineHeight: 1.55,
-            color: tokens.textSecondary,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {description}
-        </p>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 5,
-            minWidth: 0,
-            marginTop: 5,
-            overflow: 'hidden',
-            color: tokens.textPlaceholder,
-            fontSize: 10.5,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {meta}
-        </div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 'none', paddingTop: 1 }}>{actions}</div>
-    </article>
-  )
-}
+// v37（2026-11-06）：能力列表由「行 + 细分割线」（旧 `CapabilityRow`）改为卡片网格，
+// 统一走下方 `CapabilityCard`。`CapabilityRow` 已删除（三页均不再使用）。
 
 /** 行内状态（点 + 文案）。`tone` 只决定那个点，不把整行染色。 */
 export function StatusTag({
@@ -223,6 +158,85 @@ export function DetailGrid({ items }: { items: { label: string; value: ReactNode
         </div>
       ))}
     </div>
+  )
+}
+
+/**
+ * 行内图标动作按钮（能力卡片、资料库行共用）：静息中性灰，`danger` 时红字（一眼可辨危险操作），
+ * hover 由 CSS 类 `.fg-icon-btn(.fg-icon-danger)` 统一染色。尺寸/圆角与次按钮一致，不投影。
+ */
+export function IconAction({
+  icon,
+  title,
+  danger,
+  disabled,
+  onClick,
+}: {
+  icon: ReactNode
+  title: string
+  danger?: boolean
+  disabled?: boolean
+  onClick?: (e: React.MouseEvent) => void
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={`fg-icon-btn${danger ? ' fg-icon-danger' : ''}`}
+    >
+      {icon}
+    </button>
+  )
+}
+
+/**
+ * 能力卡片（专家 / 技能 / 连接器三页共用，2026-11-06 由行列表改卡片式）。
+ *
+ * 单面白卡：`top`（头像块 + 名称/标签 + 可选开关）→ `description` → `foot`（hairline 分隔 +
+ * 元信息 + 右端动作）。动作**常显**，删除统一走 `IconAction danger`。
+ */
+export function CapabilityCard({
+  avatar,
+  title,
+  tags,
+  toggle,
+  description,
+  descriptionColor,
+  meta,
+  actions,
+  dim,
+}: {
+  avatar: ReactNode
+  title: ReactNode
+  tags?: ReactNode
+  toggle?: ReactNode
+  description: ReactNode
+  descriptionColor?: string
+  meta: ReactNode
+  actions: ReactNode
+  dim?: boolean
+}) {
+  return (
+    <article className={`fg-cap-card${dim ? ' is-dim' : ''}`}>
+      <div className="fg-cap-top">
+        <span className="fg-cap-ava">{avatar}</span>
+        <div className="fg-cap-nm">
+          <div className="fg-cap-name">{title}</div>
+          {tags && <div className="fg-cap-tags">{tags}</div>}
+        </div>
+        {toggle}
+      </div>
+      <div className="fg-cap-desc" style={descriptionColor ? { color: descriptionColor } : undefined}>
+        {description}
+      </div>
+      <div className="fg-cap-foot">
+        <div className="fg-cap-meta">{meta}</div>
+        <div className="fg-cap-acts">{actions}</div>
+      </div>
+    </article>
   )
 }
 

@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Input, Popconfirm, Switch, Tag, Tooltip } from 'antd'
-import { SearchOutlined } from '@ant-design/icons'
+import { Input, Popconfirm, Switch, Tag, Tooltip } from 'antd'
+import { ApiOutlined, DeleteOutlined, EditOutlined, MedicineBoxOutlined, SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import { mcpConnState, mcpRowDescription } from '../../console/capabilityView'
-import { fmtProbeAt } from '../../console/time'
 import { AddCapabilityMenu, type CapabilityAddAction } from './AddCapabilityMenu'
 import { McpDetailModal } from './McpDetailModal'
 import { McpEditorModal } from './McpEditorModal'
 import { McpJsonImportModal } from './McpJsonImportModal'
 import {
+  CapabilityCard,
   CapabilityEditorModal,
   CapabilityEmpty,
-  CapabilityRow,
+  IconAction,
   SectionHeader,
   TransportTag,
   mono,
@@ -90,18 +90,35 @@ export function ConnectorsPanel() {
             }
           />
         ) : (
-          visible.map((row) => {
-            const state = mcpConnState(row)
-            const desc = mcpRowDescription(row, state, row.lastProbeError)
-            const full = d.mcps.find((m) => m.id === row.id)
-            const descColor =
-              state.tone === 'error' ? tokens.error : state.tone === 'warning' ? tokens.warning : tokens.textSecondary
-            const unresolved = row.unresolvedSecretKeys.length > 0
-            return (
-              <CapabilityRow
-                key={row.id}
-                title={
-                  <>
+          <div style={gridStyle}>
+            {visible.map((row) => {
+              const state = mcpConnState(row)
+              const desc = mcpRowDescription(row, state, row.lastProbeError)
+              const full = d.mcps.find((m) => m.id === row.id)
+              const descColor =
+                state.tone === 'error' ? tokens.error : state.tone === 'warning' ? tokens.warning : tokens.textSecondary
+              const unresolved = row.unresolvedSecretKeys.length > 0
+              return (
+                <CapabilityCard
+                  key={row.id}
+                  avatar={<span style={{ fontSize: 18 }}>▦</span>}
+                  toggle={
+                    <Tooltip
+                      title={
+                        row.defEnabled
+                          ? '停用：工具不再进入模型上下文（配置与密钥保留）'
+                          : '启用：下次会话/拉起时注入'
+                      }
+                    >
+                      <Switch
+                        size="small"
+                        checked={row.defEnabled}
+                        loading={d.toggleBusy === row.id}
+                        onChange={(next) => void d.doToggleMcp(row, next)}
+                      />
+                    </Tooltip>
+                  }
+                  title={
                     <span
                       role="button"
                       tabIndex={0}
@@ -112,109 +129,102 @@ export function ConnectorsPanel() {
                           d.openDetail('mcp', row.id)
                         }
                       }}
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: tokens.text,
-                        cursor: 'pointer',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        minWidth: 0,
-                      }}
+                      style={{ cursor: 'pointer' }}
                     >
                       {row.name}
                     </span>
-                    <TransportTag transport={row.transport} />
-                    <Tooltip title={state.key === 'error' ? row.lastProbeError : undefined}>
-                      <Tag color={state.color} style={smallTag}>
-                        {state.label}
-                      </Tag>
-                    </Tooltip>
-                    {unresolved ? (
-                      <Tooltip title={`引用已绑定但当前解析不了：${row.unresolvedSecretKeys.join('、')}。注入时会被跳过。`}>
-                        <Tag color="red" style={smallTag}>
-                          {row.unresolvedSecretKeys.length === 1
-                            ? `${row.unresolvedSecretKeys[0]} 未就绪`
-                            : `${row.unresolvedSecretKeys.length} 个密钥未就绪`}
+                  }
+                  tags={
+                    <>
+                      <TransportTag transport={row.transport} />
+                      <Tooltip title={state.key === 'error' ? row.lastProbeError : undefined}>
+                        <Tag color={state.color} style={smallTag}>
+                          {state.label}
                         </Tag>
                       </Tooltip>
-                    ) : (
-                      row.secretKeys.length > 0 && (
-                        <Tooltip title={`密钥型绑定（值只在注入时解析，界面不回）：${row.secretKeys.join('、')}`}>
-                          <Tag color="geekblue" style={smallTag}>
-                            密钥 {row.secretKeys.length}
+                      {unresolved ? (
+                        <Tooltip title={`引用已绑定但当前解析不了：${row.unresolvedSecretKeys.join('、')}。注入时会被跳过。`}>
+                          <Tag color="red" style={smallTag}>
+                            {row.unresolvedSecretKeys.length === 1
+                              ? `${row.unresolvedSecretKeys[0]} 未就绪`
+                              : `${row.unresolvedSecretKeys.length} 个密钥未就绪`}
                           </Tag>
                         </Tooltip>
-                      )
-                    )}
-                  </>
-                }
-                description={<span style={{ color: descColor }}>{desc}</span>}
-                meta={
-                  <>
-                    <span
-                      title={row.endpoint}
-                      style={{ ...mono, fontSize: 10, color: tokens.textSecondary, maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis' }}
-                    >
-                      {row.endpoint || '（未声明端点）'}
-                    </span>
-                    <span style={{ opacity: 0.65 }}>·</span>
-                    <span>{row.toolCount} 个工具</span>
-                    {row.lastProbeAt && (
-                      <>
-                        <span style={{ opacity: 0.65 }}>·</span>
-                        <span>更新 {fmtProbeAt(row.lastProbeAt)}</span>
-                      </>
-                    )}
-                  </>
-                }
-                actions={
-                  <>
-                    {state.key === 'error' ? (
-                      <Button size="small" onClick={() => d.openDetail('mcp', row.id)}>
-                        诊断
-                      </Button>
-                    ) : (
-                      <Tooltip title={row.probeable ? '获取该连接器提供的工具并更新列表' : '该连接方式无法获取工具（缺少地址）'}>
-                        <Button
-                          size="small"
-                          disabled={!row.probeable}
-                          loading={d.probing === row.id}
-                          onClick={() => void d.doProbe(row.id)}
-                        >
-                          获取工具
-                        </Button>
+                      ) : (
+                        row.secretKeys.length > 0 && (
+                          <Tooltip title={`密钥型绑定（值只在注入时解析，界面不回）：${row.secretKeys.join('、')}`}>
+                            <Tag color="geekblue" style={smallTag}>
+                              密钥 {row.secretKeys.length}
+                            </Tag>
+                          </Tooltip>
+                        )
+                      )}
+                    </>
+                  }
+                  description={desc}
+                  descriptionColor={descColor}
+                  meta={
+                    <>
+                      <span
+                        title={row.endpoint}
+                        style={{ ...mono, fontSize: 10, color: tokens.textSecondary, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      >
+                        {row.endpoint || '（未声明端点）'}
+                      </span>
+                      <span style={{ opacity: 0.65 }}>·</span>
+                      <span>{row.toolCount} 个工具</span>
+                    </>
+                  }
+                  actions={
+                    <>
+                      {state.key === 'error' ? (
+                        <Tooltip title="诊断：查看探测失败详情">
+                          <IconAction
+                            icon={<MedicineBoxOutlined />}
+                            title="诊断"
+                            onClick={() => d.openDetail('mcp', row.id)}
+                          />
+                        </Tooltip>
+                      ) : (
+                        <Tooltip title={row.probeable ? '获取该连接器提供的工具并更新列表' : '该连接方式无法获取工具（缺少地址）'}>
+                          <IconAction
+                            icon={<ApiOutlined />}
+                            title="获取工具"
+                            disabled={!row.probeable || d.probing === row.id}
+                            onClick={() => void d.doProbe(row.id)}
+                          />
+                        </Tooltip>
+                      )}
+                      <Tooltip title="编辑">
+                        <IconAction
+                          icon={<EditOutlined />}
+                          title={`编辑 ${row.name}`}
+                          onClick={() => full && d.openMcpForm(full)}
+                        />
                       </Tooltip>
-                    )}
-                    <Button size="small" onClick={() => full && d.openMcpForm(full)}>
-                      编辑
-                    </Button>
-                    <Popconfirm
-                      title={`删除「${row.name}」？`}
-                      description="删除后不可恢复；它提供的工具会一并移除。"
-                      okText="删除"
-                      okButtonProps={{ danger: true }}
-                      cancelText="取消"
-                      onConfirm={() => void d.doDelete('mcp', row.id)}
-                    >
-                      <Button size="small" danger loading={d.delBusy === row.id}>
-                        删除
-                      </Button>
-                    </Popconfirm>
-                    <Tooltip title={row.defEnabled ? '停用：工具不再进入模型上下文（配置与密钥保留）' : '启用：下次会话/拉起时注入'}>
-                      <Switch
-                        size="small"
-                        checked={row.defEnabled}
-                        loading={d.toggleBusy === row.id}
-                        onChange={(next) => void d.doToggleMcp(row, next)}
-                      />
-                    </Tooltip>
-                  </>
-                }
-              />
-            )
-          })
+                      <Popconfirm
+                        title={`删除「${row.name}」？`}
+                        description="删除后不可恢复；它提供的工具会一并移除。"
+                        okText="删除"
+                        okButtonProps={{ danger: true }}
+                        cancelText="取消"
+                        onConfirm={() => void d.doDelete('mcp', row.id)}
+                      >
+                        <span>
+                          <IconAction
+                            icon={<DeleteOutlined />}
+                            title={`删除 ${row.name}`}
+                            danger
+                            disabled={d.delBusy === row.id}
+                          />
+                        </span>
+                      </Popconfirm>
+                    </>
+                  }
+                />
+              )
+            })}
+          </div>
         )}
       </div>
 
@@ -262,3 +272,11 @@ export function ConnectorsPanel() {
     </PageContainer>
   )
 }
+
+// 卡片网格（与专家/技能页同列宽；外层 maxHeight 滚动容器负责滚动）。
+const gridStyle = {
+  display: 'grid',
+  gap: 14,
+  padding: '18px 16px',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+} as const

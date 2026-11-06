@@ -1628,6 +1628,81 @@ export const consoleStyleSheet = `
   .fg-mat-meta { font-size: 11.5px; color: ${tokens.textPlaceholder}; font-family: ${tokens.fontMono}; margin-top: 1px; }
   .fg-mat-when { flex: none; font-size: 11.5px; color: ${tokens.textPlaceholder}; font-family: ${tokens.fontMono}; white-space: nowrap; }
 
+  /* —— 能力卡片网格（专家 / 技能 / 连接器三页共用，2026-11-06 起由行列表改卡片式）——
+     单面白卡：头像块 + 名称/标签 → 描述 → hairline + 元信息/动作；hover 仅抬边+轻阴影，不上移。 */
+  .fg-cap-grid { display: grid; gap: 14px; padding: 18px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .fg-cap-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    background: ${tokens.surface};
+    border: 1px solid ${tokens.border};
+    border-radius: ${tokens.radiusLg}px;
+    transition: border-color 0.14s ease, box-shadow 0.14s ease;
+  }
+  .fg-cap-card:hover { border-color: ${tokens.borderStrong}; box-shadow: 0 6px 18px rgba(17, 24, 39, 0.06); }
+  .fg-cap-card.is-dim { opacity: 0.62; }
+  .fg-cap-top { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
+  .fg-cap-ava {
+    width: 38px;
+    height: 38px;
+    flex: none;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    background: ${tokens.softFill};
+    border: 1px solid ${tokens.border};
+    color: ${tokens.textSecondary};
+    font-size: 18px;
+  }
+  .fg-cap-nm { flex: 1; min-width: 0; }
+  .fg-cap-name { font-size: 14px; font-weight: 650; letter-spacing: -0.005em; color: ${tokens.text}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fg-cap-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+  .fg-cap-desc {
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: ${tokens.textSecondary};
+    min-height: 38px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .fg-cap-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 11px;
+    margin-top: auto;
+    border-top: 1px solid ${tokens.border};
+    font-size: 11px;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-cap-meta { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; overflow: hidden; }
+  .fg-cap-acts { display: flex; align-items: center; gap: 4px; flex: none; }
+  .fg-cap-sep { width: 1px; height: 9px; background: ${tokens.borderStrong}; flex: none; }
+
+  /* 危险操作图标按钮（全站统一「删除」外观）：静息即红字一眼可辨，hover 才染红底红边；
+     与次按钮同尺寸/圆角，不投影。用于能力卡片、资料库等行内删除位。 */
+  .fg-icon-btn {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: ${tokens.radiusSm}px;
+    color: ${tokens.textPlaceholder};
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .fg-icon-btn:hover { background: ${tokens.softFill}; color: ${tokens.text}; border-color: ${tokens.border}; }
+  .fg-icon-btn.fg-icon-danger { color: ${tokens.error}; }
+  .fg-icon-btn.fg-icon-danger:hover { background: ${tokens.dangerSoft}; color: ${tokens.error}; border-color: ${tokens.dangerBorder}; }
+  .fg-icon-btn:disabled { cursor: default; opacity: 0.5; }
+
   /* 会话信息浮层（悬停会话行弹出，设计 §13–§19）：白卡 + hairline + 阴影（浮层允许阴影）。
      内容四行：标题 / 所属空间 / 模型 / 更新时间（空行不渲染）。 */
   .fg-sess-info {    min-width: 220px;
