@@ -1265,6 +1265,16 @@ export const consoleStyleSheet = `
      **搜索展开时标题与动作两颗一起收起**，输入框占据整条区头。
      之所以要 overflow:hidden：收起靠的是 max-width 过渡而不是卸载 DOM，
      不裁掉溢出的话，宽度收缩期间图标会溢到右边压住列表。 */
+  /* 用量页总览四卡（v2.2）：宽屏 4 列 → ≤1280 两列 → ≤760 单列。
+     原来是写死的 repeat(4, minmax(0,1fr))，窄窗口上每格被压到看不清数字。 */
+  .fg-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1px;
+  }
+  @media (max-width: 1280px) { .fg-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 760px) { .fg-stats { grid-template-columns: minmax(0, 1fr); } }
+
   /* 会话 / 归档：13px 下划 tab（v2.2）。
      此前两者藏在「视图选项」下拉里——高频切换不该走第二层。 */
   .fg-rail-tabs {

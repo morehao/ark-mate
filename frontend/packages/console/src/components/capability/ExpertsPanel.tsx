@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Alert, Button, Input, Skeleton } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
 import { SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import type { Expert } from '@ark-mate/types'
@@ -48,7 +49,7 @@ export function ExpertsPanel() {
               onChange={(e) => setQuery(e.target.value)}
             />
             {/* 新建入口只此一颗（空态里不重复，避免同页两个「新建」）。 */}
-            <Button type="primary" size="small" onClick={d.openNew}>
+            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={d.openNew}>
               新建
             </Button>
           </>

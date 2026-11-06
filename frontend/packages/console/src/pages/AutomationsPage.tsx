@@ -23,6 +23,7 @@ import {
   DeleteOutlined,
   HistoryOutlined,
   PlayCircleOutlined,
+  PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
 import { Dot, PageContainer, tokens } from '@ark-mate/ui'
@@ -333,11 +334,14 @@ export function AutomationsPage() {
         }
         tools={
           <>
+            {/* 工具行口径与扩展三页一致：**新建在左、刷新在右**（此前是刷新在左、新建在右，
+                与技能/专家/连接器三页相反，同一个动作在不同页面出现在不同位置）。
+                两个按钮同为 small、同为「符号 + 文本」：＋ 新建 / ↻ 刷新。 */}
+            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建
+            </Button>
             <Button size="small" icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
               刷新
-            </Button>
-            <Button size="small" type="primary" onClick={openCreate}>
-              新建
             </Button>
           </>
         }
@@ -348,8 +352,38 @@ export function AutomationsPage() {
           <Spin />
         </div>
       ) : rows.length === 0 ? (
-        <div style={{ padding: 24 }}>
-          <Empty description="还没有定时任务" />
+        /* 空态（v2.2）：轻图标 + 一句说明 + 入口。不写长文案、不放插画——
+           空页留白会把视线从"能做什么"上移开（参考实现在空态里也只给一行小字 + 可点的下一步）。 */
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 12,
+            padding: '48px 24px 44px',
+            textAlign: 'center',
+          }}
+        >
+          <span
+            style={{
+              display: 'grid',
+              placeItems: 'center',
+              width: 44,
+              height: 44,
+              borderRadius: 999,
+              background: tokens.softFill,
+              color: tokens.textPlaceholder,
+              fontSize: 18,
+            }}
+          >
+            <ClockCircleOutlined />
+          </span>
+          <span style={{ fontSize: 12.5, color: tokens.textSecondary, lineHeight: 1.7 }}>
+            还没有定时任务。建一个：让助手每天、每周或指定时刻替你跑同一件事。
+          </span>
+          <Button size="small" type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            新建定时任务
+          </Button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
