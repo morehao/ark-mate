@@ -1559,48 +1559,8 @@ export const consoleStyleSheet = `
   .fg-sess-item:hover .fg-sess-status,
   .fg-sess-item.fg-on .fg-sess-status { opacity: 0; }
 
-  /* 定时任务列表卡行（原型 §F 的 .auto-row）：图标 + 主体 + 动作三列。 */
-  .fg-auto-row {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 14px;
-    border: 1px solid ${tokens.border};
-    border-radius: ${tokens.radiusMd};
-    background: ${tokens.surface};
-    transition: border-color 0.12s ease;
-  }
-  .fg-auto-row:hover { border-color: ${tokens.borderStrong}; }
-  .fg-auto-ico {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    flex: none;
-    display: grid;
-    place-items: center;
-    font-size: 18px;
-    background: ${tokens.primarySoft};
-    color: ${tokens.primary};
-  }
-  .fg-auto-main { flex: 1; min-width: 0; }
-  .fg-auto-name {
-    font-size: 14px;
-    font-weight: 650;
-    color: ${tokens.text};
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-  .fg-auto-name > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .fg-auto-sched { font-size: 12.5px; color: ${tokens.textSecondary}; margin-top: 2px; }
-  .fg-auto-next {
-    font-size: 11px;
-    font-family: ${tokens.fontMono};
-    color: ${tokens.textPlaceholder};
-    margin-top: 3px;
-  }
-  .fg-auto-act { display: flex; gap: 8px; flex: none; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  /* 定时任务列表：2026-11-06 起由「横卡行（.fg-auto-*）」改为与能力页同款卡片网格
+     （.fg-cap-grid / .fg-cap-card），旧 .fg-auto-* 类已随迁移删除。 */
 
   /* 资料库节点卡行（原型 §E 的 .mat-row）：图标 + 名称/类型·大小 + 更新时间 + 删除。 */
   .fg-mat-list { display: flex; flex-direction: column; }

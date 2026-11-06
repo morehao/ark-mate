@@ -21,6 +21,7 @@ import {
 import {
   ClockCircleOutlined,
   DeleteOutlined,
+  EditOutlined,
   HistoryOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -42,6 +43,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMate } from '../store'
 import { WorkspacePicker } from '../components/WorkspacePicker'
 import { CardToolbar } from '../components/CardToolbar'
+import { CapabilityCard, IconAction } from '../components/capability/shared'
 import {
   KIND_OPTIONS,
   RUN_STATUS_META,
@@ -241,31 +243,45 @@ export function AutomationsPage() {
     setRuns({ id: a.id, records: resp.runs ?? [], limit: resp.limit })
   }
 
-  // 列表卡行（原型 §F `.auto-row`）：图标 + 名称/状态 + 调度 + 下次/上次 + 动作。
+  // 卡片（与专家/技能/连接器三页同款 .fg-cap-card 网格）：时钟图标 + 名称/状态 + 调度
+  // → 下次/上次（mono）→ hairline + 常显图标动作（立即运行 / 运行史 / 编辑 / 删除）。
   const renderAutoRow = (a: Automation) => {
     const meta = STATE_META[a.state] ?? STATE_META.inactive
+    const name = a.name || a.id
     return (
-      <div className="fg-auto-row" key={a.id}>
-        <div className="fg-auto-ico">
-          <ClockCircleOutlined />
-        </div>
-        <div className="fg-auto-main">
-          <div className="fg-auto-name">
-            <span>{a.name || a.id}</span>
-            <Space size={6} align="center">
+      <CapabilityCard
+        key={a.id}
+        avatar={<ClockCircleOutlined />}
+        dim={!a.enabled}
+        title={name}
+        tags={
+          <>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
               <Dot color={toneColor(meta.tone)} pulse={a.state === 'active'} />
-              <span style={{ fontSize: 12.5, color: tokens.textSecondary }}>{meta.label}</span>
-              {isNeedsAttention(a) && (
-                <Tooltip title={`连续 ${a.consecutive_failures} 次没跑成，平台不自动重试（避免把同一次错过重放）`}>
-                  <Tag color="error" style={{ marginInlineEnd: 0 }}>
-                    需处理
-                  </Tag>
-                </Tooltip>
-              )}
-            </Space>
-          </div>
-          <div className="fg-auto-sched">{describeSchedule(a.schedule)}</div>
-          <div className="fg-auto-next">
+              <span style={{ fontSize: 11, color: tokens.textSecondary }}>{meta.label}</span>
+            </span>
+            {isNeedsAttention(a) && (
+              <Tooltip title={`连续 ${a.consecutive_failures} 次没跑成，平台不自动重试（避免把同一次错过重放）`}>
+                <Tag color="error" style={{ marginInlineEnd: 0, fontSize: 10.5, lineHeight: '17px', padding: '0 7px', borderRadius: 5 }}>
+                  需处理
+                </Tag>
+              </Tooltip>
+            )}
+          </>
+        }
+        toggle={
+          <Tooltip title={a.enabled ? '停用：到点不再触发' : '启用：到点自动触发'}>
+            <Switch
+              size="small"
+              checked={a.enabled}
+              loading={busyId === a.id}
+              onChange={(v) => void onToggle(a, v)}
+            />
+          </Tooltip>
+        }
+        description={describeSchedule(a.schedule)}
+        meta={
+          <span style={{ fontFamily: tokens.fontMono, fontSize: 10.5 }}>
             {a.error ? (
               <span style={{ color: tokens.error }}>{a.error}</span>
             ) : (
@@ -276,35 +292,39 @@ export function AutomationsPage() {
                 </span>
               </Tooltip>
             )}
-          </div>
-        </div>
-        <div className="fg-auto-act">
-          <Button
-            size="small"
-            icon={<PlayCircleOutlined />}
-            loading={busyId === a.id}
-            disabled={!a.enabled || a.state === 'archived'}
-            onClick={() => void onRun(a)}
-          >
-            立即运行
-          </Button>
-          <Button size="small" icon={<HistoryOutlined />} onClick={() => void openRuns(a)}>
-            运行史
-          </Button>
-          <Button size="small" onClick={() => openEdit(a)}>
-            编辑
-          </Button>
-          <Switch
-            size="small"
-            checked={a.enabled}
-            loading={busyId === a.id}
-            onChange={(v) => void onToggle(a, v)}
-          />
-          <Popconfirm title={`删除「${a.name || a.id}」？`} description="删除后不可恢复；已产生的会话不受影响。" onConfirm={() => void onDelete(a)}>
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </div>
-      </div>
+          </span>
+        }
+        actions={
+          <>
+            <Tooltip title="立即运行一次">
+              <IconAction
+                icon={<PlayCircleOutlined />}
+                title="立即运行"
+                disabled={!a.enabled || a.state === 'archived' || busyId === a.id}
+                onClick={() => void onRun(a)}
+              />
+            </Tooltip>
+            <Tooltip title="运行史">
+              <IconAction icon={<HistoryOutlined />} title="运行史" onClick={() => void openRuns(a)} />
+            </Tooltip>
+            <Tooltip title="编辑">
+              <IconAction icon={<EditOutlined />} title={`编辑 ${name}`} onClick={() => openEdit(a)} />
+            </Tooltip>
+            <Popconfirm
+              title={`删除「${name}」？`}
+              description="删除后不可恢复；已产生的会话不受影响。"
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={() => void onDelete(a)}
+            >
+              <span>
+                <IconAction icon={<DeleteOutlined />} title={`删除 ${name}`} danger disabled={busyId === a.id} />
+              </span>
+            </Popconfirm>
+          </>
+        }
+      />
     )
   }
 
@@ -386,7 +406,7 @@ export function AutomationsPage() {
           </Button>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={gridStyle}>
           {rows.map(renderAutoRow)}
         </div>
       )}
@@ -696,3 +716,11 @@ function describeFormError(err: unknown): string {
   if (typeof err === 'object' && err !== null) return JSON.stringify(err)
   return String(err)
 }
+
+// 卡片网格（与专家/技能/连接器三页同列宽）。
+const gridStyle = {
+  display: 'grid',
+  gap: 14,
+  padding: '18px 16px',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+} as const
