@@ -69,7 +69,7 @@ export const tokens = {
   radiusSm: 7,
   radiusMd: 10,
   radiusLg: 12,
-  radiusComposer: 14, // 输入卡：比卡片大一档（它是"会话的桌面"，不是内容卡）
+  radiusComposer: 18, // 输入卡：比内容卡明显更圆一档（它是"会话的桌面"，不是内容卡）——与全站 pill/圆钮的圆润语言一致
   radiusPill: 999, // 圆形按钮（+ / 发送键）与 pill 形态 chip
 } as const
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Select } from 'antd'
+import { Dropdown } from 'antd'
+import type { MenuProps } from 'antd'
 import { ArrowUpOutlined, PaperClipOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import type { AttachmentMeta, CommandInfo, ConfigOptionValue, SessionCapabilities } from '@ark-mate/types'
@@ -138,14 +139,22 @@ export function Composer({
     useAttachmentDraft(imageSupported)
 
   const empty = draft.trim().length === 0 && pendingAtts.length === 0
-  // 同一颗圆钮的三个状态（D7）：
+  // 同一颗圆钮的四个状态（D7）：
   //  - 空闲：箭头（空文本禁用）；
-  //  - 忙且可停、**草稿为空**：停止方块；忙且可停、草稿非空：按所选投递模式发送（排队/打断）；
+  //  - 忙且可停、**草稿为空**：停止方块；
+  //  - 忙且可停、**草稿非空**：按所选投递模式发送（排队/打断），见 `sendNowMode`；
   //  - 忙但不可停（等授权/等回答）：禁用的停止态 + 说明原因的 title（不给一个"点了也没用"的按钮）。
   const stopMode = busy && canStop && empty
   const waitMode = busy && !canStop
+  const sendNowMode = busy && canStop && !empty
   const sendDisabled = waitMode || (!busy && empty)
-  const buttonLabel = waitMode ? '等待你回答后才能停止' : stopMode ? '停止' : busy ? DELIVERY_LABEL[delivery] : '发送'
+  const buttonLabel = waitMode
+    ? '等待你回答后才能停止'
+    : stopMode
+      ? '停止'
+      : sendNowMode
+        ? `${DELIVERY_LABEL[delivery]}发送`
+        : '发送'
 
   // 候选只在「正在输入命令名」时出现：`commandHintQuery` 判上下文，`matchCommands` 按前缀筛。
   // 没有命令时（dsh 不通告，或底座通告了空列表）自然为空 → 弹层不出现，**不编造占位候选**。
@@ -164,6 +173,19 @@ export function Composer({
     setHintIndex(0)
     taRef.current?.focus()
   }
+
+  // 投递下拉菜单（忙 + 草稿非空时那颗 pill 的弹出项）。默认排队；打断是带代价的少数动作，附副说明。
+  const deliveryItems: MenuProps['items'] = (['after_run', 'interrupt_then_prompt'] as DeliveryChoice[]).map(
+    (d) => ({
+      key: d,
+      label: (
+        <span className="fg-delivery-opt">
+          <span className="fg-delivery-opt-name">{DELIVERY_LABEL[d]}</span>
+          <span className="fg-delivery-opt-desc">{DELIVERY_HINT[d]}</span>
+        </span>
+      ),
+    }),
+  )
 
   // 自动增高：静息高度不低到「一行半」以下（req：输入框太矮），内容多时增高到上限再滚动。
   // 下限与新建会话页（StartPanel）对齐，两处输入框视觉一致。
@@ -239,9 +261,18 @@ export function Composer({
   return (
     <div style={{ flex: 'none', padding: '10px 20px 6px', background: tokens.bg }}>
       <div style={{ maxWidth: 840, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
-        {/* 输入卡（原型 §12–§14）：卡内只有 `+` … 模型 … 发送；工作区 / 权限 chip 移到卡下方一行。 */}
+        {/* 等待态说明行：贴在卡上方（不是塞进控件行）。等授权/等回答时才出现，文案由 ChatPage 的 busyNote 透传。 */}
+        {busy && !canStop && (
+          <span className="fg-wait-banner" role="status">
+            <span className="fg-wait-dot" aria-hidden="true" />
+            {busyNote ?? '等待你确认'}
+          </span>
+        )}
+        {/* 输入卡（原型 §12–§14/§15）：卡内只有 `+` … 模型 … 发送；工作区 / 权限 chip 移到卡下方一行。
+            忙态的"在跑"由卡片品牌描边 + 呼吸表达（.fg-running），不再在控件行摆一行「run 进行中」旁白；
+            等待态（等授权/等回答）卡转 warning 边，说明行贴在卡上方（.fg-wait-banner）。 */}
         <div
-          className="fg-composer"
+          className={`fg-composer${busy && canStop ? ' fg-running' : ''}${busy && !canStop ? ' fg-waiting' : ''}`}
           style={{
             // 与新建会话页（StartPanel）输入卡同一套内边距 / 间距，两处视觉一致。
             padding: '14px 16px 10px',
@@ -251,7 +282,8 @@ export function Composer({
             // 拖拽落区：拖文件入卡片时高亮边框（走 token，不硬编码色值）。
             outline: dragOver ? `2px dashed ${tokens.primary}` : 'none',
             outlineOffset: dragOver ? -4 : 0,
-            borderRadius: tokens.radiusSm,
+            // 圆角以 .fg-composer 类（radiusComposer）为准，这里不再内联覆盖——
+            // 旧内联 radiusSm(7px) 会压掉类的圆角，让输入卡比全站的圆钮/pill 显得"方"。
           }}
           onDragOver={(e) => {
             if (e.dataTransfer?.types?.includes('Files')) {
@@ -312,7 +344,14 @@ export function Composer({
             value={draft}
             autoFocus={autoFocus}
             placeholder={
-              busy ? `正在回复…（可${DELIVERY_LABEL[delivery]}：Enter 送入队列）` : placeholder ?? '向助手提问…'
+              // 忙时占位符本身承接"现在能干嘛"：能停（进行中）→ 可排队/打断；不可停（等待态）→ 提示先处理上面的授权。
+              busy
+                ? canStop
+                  ? delivery === 'after_run'
+                    ? '正在回复… 可直接输入，Enter 会把这条排到本轮之后'
+                    : '正在回复… 可直接输入，Enter 会打断当前轮并立刻发送'
+                  : '先处理上面的提示，再继续输入…'
+                : placeholder ?? '向助手提问…'
             }
             onChange={(e) => {
               setDraft(e.target.value)
@@ -374,34 +413,25 @@ export function Composer({
               {/* v2.2：权限 chip 在工具条内、紧贴 `+` 的**右边**（参考实现的排布）。
                   权限是"发送前必须看见的发送参数"，留在卡下方一行会被当成附件行的一部分。 */}
               <PermissionChip disabled={busy && !canStop} />
-              {busy && busyNote && (
-                <span
-                  style={{
-                    minWidth: 0,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    fontFamily: tokens.fontMono,
-                    fontSize: 10.5,
-                    color: tokens.textSecondary,
+              {/* 投递 pill：只在"忙 + 草稿非空"时出现——即用户正在给下一轮准备内容时，
+                  才问"这条怎么投"；空输入时不占位（这正是原先挤在控件行里的「run 进行中 + 排队下拉」被收掉的形态）。
+                  等待态（等授权/等回答）不给投递选择：那时本来就发不出去，文案交给卡上方 banner。 */}
+              {sendNowMode && (
+                <Dropdown
+                  trigger={['click']}
+                  placement="topLeft"
+                  menu={{
+                    items: deliveryItems,
+                    selectable: true,
+                    selectedKeys: [delivery],
+                    onClick: ({ key }) => setDelivery(key as DeliveryChoice),
                   }}
                 >
-                  {busyNote}
-                </span>
-              )}
-              {busy && (
-                // 忙时投递模式：排队（等这轮完）或打断（先取消再发）。
-                <Select
-                  size="small"
-                  value={delivery}
-                  onChange={(v) => setDelivery(v)}
-                  style={{ minWidth: 118 }}
-                  options={(['after_run', 'interrupt_then_prompt'] as DeliveryChoice[]).map((d) => ({
-                    value: d,
-                    label: DELIVERY_LABEL[d],
-                    title: DELIVERY_HINT[d],
-                  }))}
-                />
+                  <button type="button" className="fg-delivery-pill" title={DELIVERY_HINT[delivery]}>
+                    <span>{DELIVERY_LABEL[delivery]}</span>
+                    <span className="fg-delivery-chev" aria-hidden="true">▾</span>
+                  </button>
+                </Dropdown>
               )}
             </span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flex: 'none' }}>

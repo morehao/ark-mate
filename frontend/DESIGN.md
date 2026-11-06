@@ -1,5 +1,5 @@
 ---
-version: 2.3
+version: 2.4
 name: ark-mate-frontend-design
 description: "ark-mate Web 问答控制台（frontend/apps/web）统一视觉语言。**精致冷白（Refined Cool White）**：近乎无色的冷白表面 + 极细 hairline 分层 + **克制的两档控件语言——主按钮品牌实心（靛蓝底 + 白字），次按钮白底可见描边**。**全站只有一个彩色：靛蓝 #3d5afe**（主操作 / 品牌 mark / 选中态 / 焦点环 / 链接），近黑只当正文文字色、不做色块；无卡片阴影（唯一例外：输入卡 composer 的极轻浮起），浮层/toast/抽屉才用阴影；文字三级灰阶、字重字距讲究、全站 tabular-nums。列表优先用「行 + 细分割线」而不是卡片网格。代码事实源：packages/ui/src/theme.ts 的 tokens 对象（本文件与之一一对应，改动需同步两处）。"
 
@@ -45,7 +45,7 @@ rounded:
   control: 7px
   card: 10px
   option: 12px
-  composer: 14px
+  composer: 18px
   pill: 999px
 
 spacing:
@@ -117,12 +117,12 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
   3. **危险按钮**（删除 / 撤销）= 静息**中性边 + 红字**，只有 hover / active 才染红底（`danger-soft`）与红边（`danger-border`）；`dangerShadow` 必须为 `none`（antd 默认给危险按钮加红晕投影，一排动作里最抢眼）。红是语义，不是常驻装饰。
   4. **文字按钮**（折叠 / 收起 / 收起运行史）= 无底无边，中性字 `textSecondary`，hover 转 `text` + `softFill` 底。
   工具行（`.fg-toolbar`）内主按钮与图标按钮同高 32px、同一描边/圆角家族；行内动作按钮用 small（28px），与开关、计数 chip 同一条基线。
-- **菜单项交互态（v2.3 统一口径，2026-11-06）**：所有「可选中项」——左栏一级/二级导航、新建会话、会话行、设置弹窗分节、左栏·会话/归档 tab、工作空间分组行、命令补全行——**只共用一组 CSS 变量**（`console.css.ts` 顶部 `:root` 的 `--fg-menu-*`，值仍取自 tokens）：**默认**文字 `textSecondary` / 图标 `textPlaceholder`；**hover** 文字 `text` + 底 `surfaceActive`（比左栏底 `softFill` 深一档，必须看得见）；**选中** 文字与图标 `accent` + 底 `selectedBg`（**不加粗**：字重变化会让同一栏出现第三种强调）。这样「灰 → 有颜色」只在选中时发生，且新增可选中面不需要再自定一套色——改一处 = 全站一致。
+- **菜单项交互态（v2.3 统一口径，2026-11-06）**：所有「可选中项」——左栏一级/二级导航、新建会话、会话行、设置弹窗分节、左栏·会话/归档 tab、工作空间分组行、命令补全行——**只共用一组 CSS 变量**（`console.css.ts` 顶部 `:root` 的 `--fg-menu-*`，值仍取自 tokens）：**默认**文字 `textSecondary` / 图标 `textPlaceholder`；**hover** 文字 `text` + 底 `surfaceActive`（比左栏底 `softFill` 深一档，必须看得见）；**选中** 文字与图标 `accent` + 底 `selectedBg`（**不加粗**：字重变化会让同一栏出现第三种强调）。这样「灰 → 有颜色」只在选中时发生，且新增可选中面不需要再自定一套色——改一处 = 全站一致。**边界（v2.4）**：单选 chip 类（权限 chip `.fg-chip`、投递 pill `.fg-delivery-pill`）**不是**「可选中项列表」，它们沿用 chip 交互态（hover 出软底 + 抬边），不走 `--fg-menu-*`；这只针对"下拉里选一个"的单选小控件，不适用于会保持选中底色的列表行。
 - **分段控件（Segmented）**：轨道底必须比页面底深一档（`surfaceActive` `#eceff3`），选中项是白色 thumb + 轻投影——不要沿用 antd 默认的 `trackBg = colorBgLayout`（本仓布局底近白 `#fcfcfd`，会让整条分段控件隐形，只剩几个灰字）。
 - **会话条目**：单行——标题（省略号，title 全名）+ 置顶钉 + 右端「状态点 + 日期」；标题颜色走菜单项交互态（默认 `textSecondary`、hover `text`、当前会话 `accent`；归档整行降透明度）；hover / 当前行时右端整格淡出让位给 `⋯`（位置不跳），状态词进 title 与会话信息浮层。状态点六态各一色：运行中（`primary` + 呼吸）、待授权（`warning` 实心）、失败（`error`）、已完成（`success`）、已取消（`textPlaceholder` 灰——作废不是失败）、已中断（`warning` **空心环**——可重发 ≠ 正在等你）。日期口径 `MM-DD`（跨年 `YYYY-MM-DD`），中性灰、等宽数字。
 - **消息条目**：role 标签 mono 10 大写弱字（user / assistant / assistant · thinking / assistant · tool）；用户气泡右对齐 `14px 14px 4px 14px`；工具卡 header `tool_call · <name>` mono + 状态行（ok 绿勾 / running 脉冲点 / failed 红）。
 - **AI 免责提示**（2026-11-06）：输入卡下方**常驻一行** mono 10.5 弱字「内容由 AI 生成，请核对关键信息后再采用」（`.fg-ai-disclaimer`，`textPlaceholder`、居中、`user-select:none`）。**只挂在对话页 `Composer`**；新建会话面板（`StartPanel`）不展示（2026-11-06 反馈）。**不随轮次状态变化**——进行中 / 已完成 / 失败 / 取消都在。它是"这个助手生成的内容需要你核对"的长期说明，不是某一轮的脚注，所以钉在输入区、不跟着消息走。
-- **Composer**：白卡 16px 圆角 hairline 边 + focus-within 靛蓝边 + 3px `accent-soft` ring；textarea 自动增高 ≤180px；底部一行只有权限 chip + 主色发送按钮（流式期间显示「单飞 run 门控」+ 忙碌态）。**工作区 chip 在已有会话里不再展示**（2026-11-06 反馈）：工作空间创建即定稿、不可改，每次在输入框下方重复一行「默认」/目录名是常驻噪声；工作空间仍可在会话信息浮层「所属空间」与新建面板看到。**不再有常驻发送键提示**（2026-11-05 反馈）：键位固定 Enter 发送 / Shift+Enter 换行（⌘/Ctrl+Enter 也可发送），只在「设置 · 通用 · 键盘操作」里**只读展示**，不提供切换。
+- **Composer**：白卡 18px 圆角 hairline 边 + focus-within 靛蓝边 + 3px `accent-soft` ring；textarea 自动增高 ≤180px。**忙态（2026-11-06，v2.4）**：卡片用**品牌描边（`accent`）+ 极淡外晕 + 2.2s 幅度呼吸（`.fg-running`）**表达"在跑"，取代原先塞进控件行的「run 进行中」旁白（旁白已移除；真实阶段词如「正在执行 Bash」在 ChatHead 的 metaText 里说）；等待态（等授权/等回答）卡转 **`warning` 边（`.fg-waiting`）**，说明行贴在**卡上方一行**（`.fg-wait-banner`，不塞控件行）。**投递选择（`.fg-delivery-pill`，v2.4）**：从带框 antd Select 降为**无框轻 pill**，**只在「忙 + 草稿非空」时出现**（空输入不占位），点开是「排队 / 打断并发送」两项（各带副说明）；忙且有草稿时主按钮由 ■停止 变 ↑发送（按 pill 方式投递）。**工作区 chip 在已有会话里不再展示**（2026-11-06 反馈）：工作空间创建即定稿、不可改，每次在输入框下方重复一行「默认」/目录名是常驻噪声；工作空间仍可在会话信息浮层「所属空间」与新建面板看到。**不再有常驻发送键提示**（2026-11-05 反馈）：键位固定 Enter 发送 / Shift+Enter 换行（⌘/Ctrl+Enter 也可发送），只在「设置 · 通用 · 键盘操作」里**只读展示**，不提供切换。
 - **模型选择器（ModelSelect）**：关闭态是**药丸**不是表单框——`.fg-model-pill`（h=28 / 999 圆角 / `borderStrong` 边 / mono 11.5 值文案 / 10px 灰箭头），静息贴合文案（min 132、max 240），聚焦展开到 216 并出靛蓝环，hover 抬边+软底；下拉浮层 `.fg-model-pop`（hairline + 12 圆角 + 投影，仅浮层可有阴影）宽约 340，选项为**两行行**（名称 12.5 + 描述 11 灰字单行截断，hover 出全文），分组标题 mono 10.5 弱字。
 - **新建会话面板（StartPanel）**：未选中会话时问答区即为该面板（不再有独立「开始问答」空态页，也无 `/new` 独立路由）——hero 标题 + 当前 Agent 标识行 + 内嵌输入卡（模型 pill / 主色圆形发送）+ 示例指令列表；新建固定用默认 Agent，不展示 agent 选项卡（也不提供跳转，只如实标出用哪个 Agent）。
 - **当前 Agent 标识（AgentBadge）**：**纯展示、不可点**——mono 胶囊 = 状态点（running 绿 / stopped 灰）+「Agent · 名称」（+ 默认 `primary-soft` 小标）；hover 出详情浮层（状态 / provider / runtime 候选 / id）。会话与 Agent 一对一绑定，故只在新建面板与 ChatHead 各标一处，不逐条消息重复。

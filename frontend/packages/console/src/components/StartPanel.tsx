@@ -266,7 +266,7 @@ export function StartPanel() {
             style={{
               width: '100%',
               border: `1px solid ${tokens.border}`,
-              borderRadius: 16,
+              borderRadius: tokens.radiusComposer,
               background: tokens.surface,
               padding: '14px 16px 10px',
               display: 'flex',

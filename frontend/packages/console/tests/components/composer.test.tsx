@@ -77,6 +77,49 @@ describe('Composer', () => {
     expect(onStop).toHaveBeenCalledTimes(1)
   })
 
+  it('忙 + 草稿非空 → 主按钮变「排队发送」并调用 onSend(delivery=after_run)', async () => {
+    const onStop = vi.fn()
+    const user = userEvent.setup()
+    render(<Composer {...baseProps} busy canStop onStop={onStop} />)
+    const ta = screen.getByRole('textbox')
+    await user.type(ta, '插一句')
+    // 主按钮不再是"停止"，而是按投递模式的"排队发送"
+    const btn = screen.getByRole('button', { name: '排队发送' })
+    await user.click(btn)
+    expect(onStop).not.toHaveBeenCalled()
+    expect(baseProps.onSend).toHaveBeenCalledWith('插一句', 'after_run', undefined)
+  })
+
+  it('忙 + 草稿非空 → 出现投递 pill；忙 + 空 → 不出现', async () => {
+    const user = userEvent.setup()
+    const { unmount } = render(<Composer {...baseProps} busy canStop />)
+    // 空草稿：默认排队 pill 不渲染（不占位）
+    expect(document.querySelector('.fg-delivery-pill')).toBeNull()
+    await user.type(screen.getByRole('textbox'), 'x')
+    expect(document.querySelector('.fg-delivery-pill')).not.toBeNull()
+    unmount()
+    // 空闲态：也没有投递 pill
+    render(<Composer {...baseProps} />)
+    expect(document.querySelector('.fg-delivery-pill')).toBeNull()
+  })
+
+  it('等待态（busy 且不可停）→ 卡上方 banner 透传 busyNote，主按钮禁用', () => {
+    render(<Composer {...baseProps} busy canStop={false} busyNote="等待你确认授权" />)
+    expect(screen.getByRole('status')).toHaveTextContent('等待你确认授权')
+    const btn = screen.getByRole('button', { name: '等待你回答后才能停止' })
+    expect(btn).toBeDisabled()
+    // 等待态不给投递选择
+    expect(document.querySelector('.fg-delivery-pill')).toBeNull()
+  })
+
+  it('忙态卡片带 fg-running；等待态带 fg-waiting', () => {
+    const { container, unmount } = render(<Composer {...baseProps} busy canStop />)
+    expect(container.querySelector('.fg-composer.fg-running')).not.toBeNull()
+    unmount()
+    const { container: c2 } = render(<Composer {...baseProps} busy canStop={false} />)
+    expect(c2.querySelector('.fg-composer.fg-waiting')).not.toBeNull()
+  })
+
   it('injectDraft 把正文塞回输入框', async () => {
     render(<Composer {...baseProps} injectDraft={{ text: '被取回的草稿', nonce: 1 }} />)
     const ta = screen.getByRole('textbox') as HTMLTextAreaElement

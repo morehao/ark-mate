@@ -665,13 +665,53 @@ export const consoleStyleSheet = `
   /* 输入区：border/圆角由类承载，便于 :focus-within 覆盖 */
   .fg-composer {
     border: 1px solid ${tokens.border};
-    border-radius: 16px;
+    border-radius: ${tokens.radiusComposer}px;
     background: ${tokens.surface};
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
   .fg-composer:focus-within {
     border-color: ${tokens.accent};
     box-shadow: 0 0 0 3px ${tokens.accentSoft};
+  }
+  /* 忙态（进行中）：卡片用品牌描边表达"在跑"——替代原先塞进控件行的「run 进行中」旁白。
+     变体 A：描边常驻 + 极淡外晕 + 2.2s 幅度呼吸；只动 ring 扩散（2→4px），不动边框宽度，避免布局抖动。 */
+  .fg-composer.fg-running {
+    border-color: ${tokens.accent};
+    animation: fg-run-breathe 2.2s ease-in-out infinite;
+  }
+  @keyframes fg-run-breathe {
+    0%, 100% { box-shadow: 0 0 0 2px ${tokens.accentSoft}; }
+    50% { box-shadow: 0 0 0 4px ${tokens.accentSoft}; }
+  }
+  /* 等待态（等授权 / 等回答）：warning 边——要用户动手，比"在跑"更该被看见。与 fg-running 互斥。 */
+  .fg-composer.fg-waiting {
+    border-color: ${tokens.warning};
+    box-shadow: 0 0 0 3px ${tokens.warningBg};
+  }
+  /* 忙态聚焦时以 :focus-within 的 ring 为准（.fg-running 只保留品牌边，环交给 focus 规则）。 */
+  .fg-composer.fg-running:focus-within {
+    box-shadow: 0 0 0 3px ${tokens.accentSoft};
+    animation: none;
+  }
+  /* 等待态的说明行：贴在卡上方，不进控件行（那是"发送参数"的地盘）。 */
+  .fg-wait-banner {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 2px 8px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: ${tokens.warning};
+  }
+  .fg-wait-dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: ${tokens.warning};
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fg-composer.fg-running { animation: none; box-shadow: 0 0 0 3px ${tokens.accentSoft}; }
   }
 
   /* 输入卡下方一行（原型 §13）：工作区 chip / 权限 chip 靠左；发送键提示已撤掉（2026-11-05）。 */
@@ -728,6 +768,34 @@ export const consoleStyleSheet = `
   .fg-perm-opt { display: flex; flex-direction: column; gap: 1px; padding: 2px 0; }
   .fg-perm-opt-name { font-size: 13px; line-height: 1.4; }
   .fg-perm-opt-desc { font-size: 11.5px; color: ${tokens.textPlaceholder}; line-height: 1.4; }
+
+  /* 投递 pill（忙 + 有草稿才出现）：无框轻量、贴文案；hover 出软底 + 边（对比旧 antd Select 的表单框）。
+     它只决定"这条怎么投"，不是常驻控件——空草稿时不占位。 */
+  .fg-delivery-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: ${tokens.radiusPill}px;
+    background: none;
+    font: inherit;
+    font-size: 12px;
+    color: ${tokens.textSecondary};
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  }
+  .fg-delivery-pill:hover {
+    background: ${tokens.softFill};
+    border-color: ${tokens.borderStrong};
+    color: ${tokens.text};
+  }
+  .fg-delivery-chev { font-size: 9px; color: ${tokens.textPlaceholder}; }
+  .fg-delivery-opt { display: flex; flex-direction: column; gap: 1px; padding: 2px 0; }
+  .fg-delivery-opt-name { font-size: 13px; line-height: 1.4; }
+  .fg-delivery-opt-desc { font-size: 11.5px; color: ${tokens.textPlaceholder}; line-height: 1.4; }
 
   /* 模型选择器关闭态：药丸（不落表单框感）——hairline 边 + 全圆角 + mono 小字，
      与同一行的「在项目中工作」弱字、圆形发送钮同一语言；hover 抬边+软底，聚焦出靛蓝环。 */
