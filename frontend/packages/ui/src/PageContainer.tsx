@@ -8,14 +8,20 @@ interface Props {
   children?: ReactNode
 }
 
-/** 管理页骨架：标题 + 描述 + 右上操作区，下方白色内容卡（hairline 分层，无阴影）。 */
+/**
+ * 管理页骨架：标题 + 描述 + 右上操作区，下方白色内容卡（hairline 分层，无阴影）。
+ *
+ * v2.2 自适应：容器上限从写死的 960 改成 `tokens.pageMaxWidth`（1600），左右内边距随视口
+ * `clamp(16px, 2.4vw, 40px)`。旧值在 1912 宽窗口上会留出两条 362px 的空白带——
+ * 列表页是「信息密度优先」的页面，让卡片铺开比留出对称白边更有用。
+ */
 export function PageContainer({ title, description, extra, children }: Props) {
   return (
     <div
       style={{
-        maxWidth: 960,
+        maxWidth: tokens.pageMaxWidth,
         margin: '0 auto',
-        padding: '20px 24px 48px',
+        padding: '20px clamp(16px, 2.4vw, 40px) 48px',
         boxSizing: 'border-box',
         width: '100%',
       }}
