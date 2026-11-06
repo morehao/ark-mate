@@ -112,8 +112,11 @@ export function RailSectionHeader({
     onSearchingChange(false)
   }
 
+  const archivedOnly = archivedFilter === 'only'
+
   return (
-    <div className={`fg-rail-sechead${searching ? ' fg-searching' : ''}`}>
+    <>
+      <div className={`fg-rail-sechead${searching ? ' fg-searching' : ''}`}>
       <span className="fg-rail-sechead-label">工作区</span>
 
       <div className="fg-rail-sesearch">
@@ -172,6 +175,27 @@ export function RailSectionHeader({
         </Dropdown>
         {writable && <AddWorkspaceButton />}
       </div>
-    </div>
+      </div>
+      <div className="fg-rail-tabs" role="tablist" aria-label="会话视图">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!archivedOnly}
+          className={`fg-rail-tab${archivedOnly ? '' : ' fg-on'}`}
+          onClick={() => onArchivedFilterChange('hide')}
+        >
+          会话
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={archivedOnly}
+          className={`fg-rail-tab${archivedOnly ? ' fg-on' : ''}`}
+          onClick={() => onArchivedFilterChange('only')}
+        >
+          归档
+        </button>
+      </div>
+    </>
   )
 }

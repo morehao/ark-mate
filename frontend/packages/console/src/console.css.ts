@@ -52,8 +52,26 @@ export const consoleStyleSheet = `
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: ${tokens.surface};
+    /* v2.2：左栏比主区深一档（侧栏退后半步、主区是主角）。
+       两家参考实现同款（侧栏 #f6f6f6/#f7f7f7 vs 主区 #fcfcfc/#fff）。 */
+    background: ${tokens.softFill};
     border-right: 1px solid ${tokens.border};
+  }
+
+  /* 品牌 mark：圆角方形、accent 实心、白字「ark」（v2.2：不再用靛蓝→紫渐变） */
+  .fg-rail-mark {
+    width: 24px;
+    height: 24px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 7px;
+    background: ${tokens.accent};
+    color: ${tokens.onPrimary};
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1;
   }
 
   /* 品牌区：48px（原顶栏 52px，省下的 4px 留给会话区） */
@@ -62,6 +80,7 @@ export const consoleStyleSheet = `
     display: flex;
     align-items: center;
     height: 48px;
+    gap: 8px;
     padding: 0 14px;
     font-size: 15px;
     font-weight: 660;
@@ -79,35 +98,45 @@ export const consoleStyleSheet = `
     flex: none;
     display: flex;
     align-items: center;
-    justify-content: center;
-    height: 38px;
-    margin: 2px 12px 12px;
-    border: 1px solid ${tokens.accent};
+    gap: 8px;
+    height: 32px;
+    margin: 0 8px 2px;
+    padding: 0 10px;
+    border: 0;
     border-radius: 10px;
-    background: ${tokens.accent};
-    color: ${tokens.onPrimary};
+    background: transparent;
+    color: ${tokens.text};
     font: inherit;
     font-size: 13.5px;
-    font-weight: 600;
+    font-weight: 500;
+    text-align: left;
     cursor: pointer;
     user-select: none;
-    transition: background 0.12s ease, border-color 0.12s ease;
+    transition: background 0.12s ease, color 0.12s ease;
   }
-  .fg-rail-new:hover {
-    background: ${tokens.accentHover};
-    border-color: ${tokens.accentHover};
-  }
-  .fg-rail-new:active { background: ${tokens.accentActive}; border-color: ${tokens.accentActive}; }
+  /* v2.2：新建是**导航行**不是色块 CTA（参考实现里「新任务 / 新建任务」都是普通行）。
+     左栏首屏因此只留一处色块：品牌 mark。 */
+  .fg-rail-new:hover { background: ${tokens.surfaceActive}; }
+  .fg-rail-new:active { background: ${tokens.surfaceActive}; }
   .fg-rail-new:focus-visible {
     outline: 2px solid ${tokens.accent};
     outline-offset: 2px;
   }
-  /* /sessions 上没有一级导航项（问答入口已去重）：选中态落在新建按钮上。
-     「你在这」（/sessions 是新建面板）：不换色、只用一圈品牌柔光点名——
-     换深色会被读成"按下去了"，换浅底又会退回 Tag 语法。 */
+  /* /sessions 上它承载「你在这」：与导航项同一套选中语汇（底色 + 深字）。 */
   .fg-rail-new.fg-on {
-    box-shadow: 0 0 0 3px ${tokens.accentSoft};
+    background: ${tokens.surfaceActive};
+    color: ${tokens.text};
+    font-weight: 600;
   }
+  .fg-rail-new .fg-rail-new-icon {
+    width: 14px;
+    height: 14px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    color: ${tokens.textSecondary};
+  }
+  .fg-rail-new.fg-on .fg-rail-new-icon { color: ${tokens.text}; }
 
   /* 导航区：一级 32px / 二级 30px，条目间距 1px */
   .fg-nav-rail {
@@ -1236,6 +1265,43 @@ export const consoleStyleSheet = `
      **搜索展开时标题与动作两颗一起收起**，输入框占据整条区头。
      之所以要 overflow:hidden：收起靠的是 max-width 过渡而不是卸载 DOM，
      不裁掉溢出的话，宽度收缩期间图标会溢到右边压住列表。 */
+  /* 会话 / 归档：13px 下划 tab（v2.2）。
+     此前两者藏在「视图选项」下拉里——高频切换不该走第二层。 */
+  .fg-rail-tabs {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 12px;
+  }
+  .fg-rail-tab {
+    position: relative;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: ${tokens.textPlaceholder};
+    font: inherit;
+    font-size: 13px;
+    font-weight: 400;
+    cursor: pointer;
+    transition: color 0.12s ease;
+  }
+  .fg-rail-tab:hover { color: ${tokens.textSecondary}; }
+  .fg-rail-tab.fg-on { color: ${tokens.text}; font-weight: 600; }
+  .fg-rail-tab.fg-on::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    border-radius: 2px;
+    background: ${tokens.text};
+  }
+  .fg-rail-tab-n { margin-left: 4px; font-family: ${tokens.fontMono}; font-size: 10px; color: ${tokens.textPlaceholder}; }
+  .fg-rail-tab:focus-visible { outline: 2px solid ${tokens.accent}; outline-offset: 2px; border-radius: 4px; }
+
   .fg-rail-sechead {
     flex: none;
     display: flex;
