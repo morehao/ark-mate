@@ -334,10 +334,10 @@ export function SessionDetailDrawer({
 
             {/* 操作行：置顶 / 归档（归档态为恢复） */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <Button size="small" onClick={() => void togglePin(s.id).then(() => load())} style={{ borderRadius: 8 }}>
+              <Button size="small" onClick={() => void togglePin(s.id).then(() => load())}>
                 {s.pinned ? '取消置顶' : '置顶'}
               </Button>
-              <Button size="small" onClick={() => void archiveSession(s.id, !s.archived).then(() => load())} style={{ borderRadius: 8 }}>
+              <Button size="small" onClick={() => void archiveSession(s.id, !s.archived).then(() => load())}>
                 {s.archived ? '从归档恢复' : '归档'}
               </Button>
             </div>
@@ -627,7 +627,7 @@ export function SessionDetailDrawer({
                               disabled={!ft.text}
                               title={ft.text ? '重新发送该轮输入' : '该轮无输入可重试'}
                               onClick={() => retryFailedRun(ft)}
-                              style={{ borderRadius: 8, flex: 'none' }}
+                              style={{ flex: 'none' }}
                             >
                               重试
                             </Button>
@@ -755,7 +755,7 @@ export function SessionDetailDrawer({
                             size="small"
                             loading={importingId === a.id}
                             onClick={() => doImport(a)}
-                            style={{ borderRadius: 8, flex: 'none', fontSize: 12 }}
+                            style={{ flex: 'none', fontSize: 12 }}
                           >
                             存进资料库
                           </Button>

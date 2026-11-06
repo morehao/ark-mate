@@ -1,23 +1,29 @@
 ---
-version: 2.0
+version: 2.1
 name: ark-mate-frontend-design
-description: "ark-mate Web 问答控制台（frontend/apps/web）统一视觉语言。**精致冷白（Refined Cool White）**：近乎无色的冷白表面 + 极细 hairline 分层 + **浅靛蓝 tinted 主按钮（浅底 + 靛蓝字，轻量不砸黑砖）**。强调色（靛蓝 #3d5afe）克制使用：主按钮用柔和底 + 靛蓝字，另只出现在选中态 / 焦点环 / 链接 / 品牌点与状态点，不铺满页面；无卡片阴影（阴影仅留给 Modal / toast 浮层）；文字三级灰阶、字重字距讲究、全站 tabular-nums。列表优先用「行 + 细分割线」而不是卡片网格。代码事实源：packages/ui/src/theme.ts 的 tokens 对象（本文件与之一一对应，改动需同步两处）。"
+description: "ark-mate Web 问答控制台（frontend/apps/web）统一视觉语言。**精致冷白（Refined Cool White）**：近乎无色的冷白表面 + 极细 hairline 分层 + **克制的两档控件语言——主按钮品牌实心（靛蓝底 + 白字），次按钮白底可见描边**。强调色（靛蓝 #3d5afe）只出现在主操作、选中态、焦点环、链接与品牌点，不铺满页面；无卡片阴影（阴影仅留给 Modal / toast 浮层）；文字三级灰阶、字重字距讲究、全站 tabular-nums。列表优先用「行 + 细分割线」而不是卡片网格。代码事实源：packages/ui/src/theme.ts 的 tokens 对象（本文件与之一一对应，改动需同步两处）。"
 
 colors:
   brand-primary: "#0a0a0a"          # 近黑：正文/标题最重的字色；也用于极少数"最高强调"场景
   brand-primary-hover: "#000000"
   brand-primary-active: "#0a0a0a"
-  accent: "#3d5afe"                # 强调色：主按钮（tinted 底/字）、选中态 / 焦点环 / 链接 / 品牌点
-  accent-soft: "#eef1ff"           # 强调色柔和底（主按钮底色 / 选中 chip / 焦点晕）
+  accent: "#3d5afe"                # 强调色：主按钮实心底 / 选中态 / 焦点环 / 链接 / 品牌点
+  accent-hover: "#2f4ae0"          # 主按钮 hover 底（压暗，白字对比度只升不降）
+  accent-active: "#2639c4"         # 主按钮 active 底
+  accent-soft: "#eef1ff"           # 强调色柔和底（选中 chip / 焦点晕）——只当底，不做主按钮填充
   brand-gradient: "linear-gradient(135deg, #4f6ef7 0%, #7a5af8 55%, #a855f7 100%)"  # 品牌 logo 同款（= favicon.svg），不随中性色盘改
   surface-layout: "#fcfcfd"
   surface-card: "#ffffff"
   surface-soft-fill: "#f6f7f9"
   surface-selected-bg: "#f2f4ff"
+  surface-active: "#eceff3"        # 按下态填充 / Segmented 轨道底（与选中白块拉得开）
   surface-code: "#fafafa"
   border-hairline: "#eceef2"
-  border-strong: "#e1e4ea"
-  on-primary: "#ffffff"                 # 实心底上的前景色（主按钮/危险按钮/强调底文字）
+  border-strong: "#d5d9e0"         # 控件边：输入框 / 次按钮 / chip
+  border-hover: "#9aa1ac"          # 控件 hover 抬边（2.6:1）
+  danger-soft: "#fef3f2"           # 危险按钮 hover 底
+  danger-border: "#f5a9a4"         # 危险按钮 hover 边
+  on-primary: "#ffffff"            # 实心底上的前景色（主按钮/危险按钮/强调底文字）
   text-primary: "#111827"
   text-secondary: "#6b7280"
   text-placeholder: "#9aa1ac"
@@ -61,8 +67,8 @@ spacing:
 - **定位**：ark-mate Web 问答控制台（会话问答优先，Agent/Runtime 管理为次要入口）。
 - **风格**：**精致冷白（Refined Cool White）**——参考 Stripe / Linear 的克制高级感：近乎无色的冷白表面、极细 hairline 分层、讲究的字重与字距，把"高级"交给留白和层次而不是颜色。
 - **画布**：页面底 `surface-layout`（近白 `#fcfcfd`）；左栏 / 卡片 / 输入区落在白色表面 `surface-card`，以 `1px solid border-hairline`（`#eceef2`，比旧版更浅）分层、**无卡片阴影**（阴影仅 Modal / toast 浮层 / 移动端抽屉）。
-- **交互态色 = accent**：全局 `colorPrimary = tokens.accent`（靛蓝）。输入框聚焦环、开关、勾选框、滑杆、分页/标签激活一律靛蓝；近黑 `tokens.primary` 只当正文与显式深色文字，**不当交互态色**。主按钮底色见 §3（tinted）。
-- **强调色使用律（关键纪律）**：主操作按钮是**浅靛蓝 tinted**（底 `accent-soft` `#eef1ff` + 字 `accent` `#3d5afe`，见 §3 按钮规格），轻量、成"主"而不抢戏——不用近黑实心（一块黑砖太硬）、也不用饱和靛蓝实心（太重）；靛蓝的其它出现面限于选中态 / 焦点环 / 链接 / 品牌点 / 状态强调标签。彩色不铺满页面——这是本风格与旧版（靛蓝实心主按钮）最大的区别。
+- **交互态色 = accent**：全局 `colorPrimary = tokens.accent`（靛蓝）。输入框聚焦环、开关、勾选框、滑杆、分页/标签激活一律靛蓝；近黑 `tokens.primary` 只当正文与显式深色文字，**不当交互态色**。主按钮底色见 §3（品牌实心）。
+- **强调色使用律（关键纪律）**：主操作按钮是**品牌实心**（底 `accent` `#3d5afe` + 白字，hover 压暗到 `accent-hover`），一眼是主操作；次操作是白底 + 可见描边（`border-strong`）+ 深字。2026-11-06 纠偏：**撤掉"浅靛蓝底 + 靛蓝字"的 tinted 主按钮**——那套在白卡上只有 1.1:1 的底，hover/active 时字底对比度还会跌破 WCAG AA，读起来像 Tag、像禁用；"浅底 + 饱和色字"是标签语法，不是按钮语法。靛蓝的其它出现面限于选中态 / 焦点环 / 链接 / 品牌点 / 状态强调标签，仍然不铺满页面。
 - **列表优先**：管理页用「行 + 细分割线」的列表形态（信息密度高、更克制），而不是卡片网格。行 hover 出浅底 + 右端动作；分割线用 `border-hairline`。
 - **问答正文**：用户消息为中性软灰气泡（`soft-fill`），assistant 正文为纯文字 + 流式光标；思考用左侧竖线弱化区；工具调用为白卡 hairline 卡片；系统/meta 行居中 mono 弱字。
 - 全站 `tabular-nums`（由 `@ark-mate/ui` AppShell 根容器开启），seq / 计数 / 技能数等数字等宽。
@@ -98,12 +104,18 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 
 ## 3. 组件规格
 
-- **按钮（Button）已在全局统一**：两字中文按钮的字距由 antd 强插 `0.34em` 导致「编 辑」「删 除」被拉散，已在 `console.css.ts` **全站**抹平（不只工具行）；按钮文字一律推独立合成层按整像素光栅（消发虚）；字重走真实档 600；small 控件高度 `controlHeightSM=28`、常规 `controlHeight=32`。
-- **按钮（Button）**：主按钮 = **tinted**（浅靛蓝底 `accent-soft` + 靛蓝字 `accent`，`font-weight:560`，无阴影），经 `themeConfig.components.Button`（`colorPrimary=accentSoft` / `primaryColor=accent` / `primaryShadow:none`）全局生效——轻量、有品牌感、不像黑砖。默认/图标按钮（如「刷新」）= 白底 1px `borderStrong` 细边、字 `textSecondary`，hover 抬边到 `textPlaceholder` + 字转 `text`、active 底 `softFill`。圆角统一 `radiusSm`（7px），高度随 size（small=32）。工具行内主按钮与图标按钮保持同一描边/圆角家族。
+- **按钮（Button）基本口径**：两字中文按钮的字距由 antd 强插 `0.34em` 导致「编 辑」「删 除」被拉散，已在 `console.css.ts` **全站**抹平（不只工具行）；按钮文字一律推独立合成层按整像素光栅（消发虚）；字重走真实档 600；small 控件高度 `controlHeightSM=28`、常规 `controlHeight=32`；圆角统一 `radiusSm`（7px，`borderRadiusSM` 也对齐 7，避免行内出现 5px/7px 两种）。
+- **按钮（Button）四档**：
+  1. **主按钮**（新建 / 保存 / 发送）= **品牌实心** `accent` 底 + `on-primary` 白字，hover `accent-hover`、active `accent-active`，无投影（`primaryShadow:none`），经 `themeConfig.components.Button` 全局生效。对比度白字 on `#3d5afe` = 5.1:1（过 AA）。
+  2. **次按钮 / 图标按钮**（刷新 / 编辑 / 运行史 / 获取工具）= 白底 + `borderStrong`（`#d5d9e0`，比 hairline 深一档）描边 + `text` 深字；hover 底 `softFill` + 边抬到 `borderHover`（`#9aa1ac`，2.6:1）、active 底 `surfaceActive`。**不要用 hairline `#eceef2` 给可点控件做边**——白底上只有 1.16:1，按钮会读成"静止的框"。
+  3. **危险按钮**（删除 / 撤销）= 静息**中性边 + 红字**，只有 hover / active 才染红底（`danger-soft`）与红边（`danger-border`）；`dangerShadow` 必须为 `none`（antd 默认给危险按钮加红晕投影，一排动作里最抢眼）。红是语义，不是常驻装饰。
+  4. **文字按钮**（折叠 / 收起 / 收起运行史）= 无底无边，中性字 `textSecondary`，hover 转 `text` + `softFill` 底。
+  工具行（`.fg-toolbar`）内主按钮与图标按钮同高 32px、同一描边/圆角家族；行内动作按钮用 small（28px），与开关、计数 chip 同一条基线。
+- **分段控件（Segmented）**：轨道底必须比页面底深一档（`surfaceActive` `#eceff3`），选中项是白色 thumb + 轻投影——不要沿用 antd 默认的 `trackBg = colorBgLayout`（本仓布局底近白 `#fcfcfd`，会让整条分段控件隐形，只剩几个灰字）。
 - **会话条目**：单行——标题（省略号，title 全名）+ 置顶钉 + 右端「状态点 + 日期」；hover / 当前行时右端整格淡出让位给 `⋯`（位置不跳），状态词进 title 与会话信息浮层。状态点六态各一色：运行中（`primary` + 呼吸）、待授权（`warning` 实心）、失败（`error`）、已完成（`success`）、已取消（`textPlaceholder` 灰——作废不是失败）、已中断（`warning` **空心环**——可重发 ≠ 正在等你）。日期口径 `MM-DD`（跨年 `YYYY-MM-DD`），中性灰、等宽数字。
 - **消息条目**：role 标签 mono 10 大写弱字（user / assistant / assistant · thinking / assistant · tool）；用户气泡右对齐 `14px 14px 4px 14px`；工具卡 header `tool_call · <name>` mono + 状态行（ok 绿勾 / running 脉冲点 / failed 红）。
-- **Composer**：白卡 16px 圆角 hairline 边 + focus-within 靛蓝 ring（3px `primary-soft`）；textarea 自动增高 ≤180px；底部一行只有工作区 / 权限 chip + 主色发送按钮（流式期间显示「单飞 run 门控」+ 忙碌态）。**不再有常驻发送键提示**（2026-11-05 反馈）：键位固定 Enter 发送 / Shift+Enter 换行（⌘/Ctrl+Enter 也可发送），只在「设置 · 通用 · 键盘操作」里**只读展示**，不提供切换。
-- **模型选择器（ModelSelect）**：关闭态是**药丸**不是表单框——`.fg-model-pill`（h=28 / 999 圆角 / hairline 边 / mono 11.5 值文案 / 10px 灰箭头），静息贴合文案（min 132、max 240），聚焦展开到 216 并出靛蓝环，hover 抬边+软底；下拉浮层 `.fg-model-pop`（hairline + 12 圆角 + 投影，仅浮层可有阴影）宽约 340，选项为**两行行**（名称 12.5 + 描述 11 灰字单行截断，hover 出全文），分组标题 mono 10.5 弱字。
+- **Composer**：白卡 16px 圆角 hairline 边 + focus-within 靛蓝边 + 3px `accent-soft` ring；textarea 自动增高 ≤180px；底部一行只有工作区 / 权限 chip + 主色发送按钮（流式期间显示「单飞 run 门控」+ 忙碌态）。**不再有常驻发送键提示**（2026-11-05 反馈）：键位固定 Enter 发送 / Shift+Enter 换行（⌘/Ctrl+Enter 也可发送），只在「设置 · 通用 · 键盘操作」里**只读展示**，不提供切换。
+- **模型选择器（ModelSelect）**：关闭态是**药丸**不是表单框——`.fg-model-pill`（h=28 / 999 圆角 / `borderStrong` 边 / mono 11.5 值文案 / 10px 灰箭头），静息贴合文案（min 132、max 240），聚焦展开到 216 并出靛蓝环，hover 抬边+软底；下拉浮层 `.fg-model-pop`（hairline + 12 圆角 + 投影，仅浮层可有阴影）宽约 340，选项为**两行行**（名称 12.5 + 描述 11 灰字单行截断，hover 出全文），分组标题 mono 10.5 弱字。
 - **新建会话面板（StartPanel）**：未选中会话时问答区即为该面板（不再有独立「开始问答」空态页，也无 `/new` 独立路由）——hero 标题 + 当前 Agent 标识行 + 内嵌输入卡（模型 pill / 主色圆形发送）+ 示例指令列表；新建固定用默认 Agent，不展示 agent 选项卡（也不提供跳转，只如实标出用哪个 Agent）。
 - **当前 Agent 标识（AgentBadge）**：**纯展示、不可点**——mono 胶囊 = 状态点（running 绿 / stopped 灰）+「Agent · 名称」（+ 默认 `primary-soft` 小标）；hover 出详情浮层（状态 / provider / runtime 候选 / id）。会话与 Agent 一对一绑定，故只在新建面板与 ChatHead 各标一处，不逐条消息重复。
 - **左栏导航（NavRail）**：条目只在 `packages/console/src/console/navView.tsx` 定义（含 order 与图标），交互态（hover / 选中 / 展开）只在 `console.css.ts` 的 `.fg-rail*` / `.fg-nav*` 类。组的展开态是 `navExpanded[组] ?? 当前路由是否命中该组`：会话页不展开「扩展」（把左栏高度让给会话列表，1440×800 下会话列表可视 ≈7 条），命中扩展二级页时自动展开以露出当前二级项；用户显式收起过的组不再自动展开。**组没有落地页**（2026-11-05 去掉「扩展总览」）：组行整行只切换展开，箭头的视觉与点击面合一；旧 `/extensions`、`/capabilities` 落到 `/extensions/skills`。一级叶子 32px、二级 30px（缩进 26px）；**一级项带 16px 图标**（图标与条目同源在 `navView.tsx`，未选中 `textPlaceholder`、hover `textSecondary`、选中 `primary`），**二级项不给图标**（缩进子项挂图标会把层级读平）；选中 = `soft-fill` 底 + 主色（二级）；未实现的项（`pending`）**可读不可点**，右侧挂 mono「待开发」标签并给 hover 说明——不留占位页、不注册路由。主导航只放内容入口（问答 / 扩展 / 用量 / 定时任务），**「设置」不是路由入口**（它是左栏 footer 的菜单，见下一条）；会话区恒常驻所以 footer 自然在栏底，`margin-top: auto` 只是兜底。**footer 那一行只有「设置」**（令牌自 2026-10-10 起收进设置菜单，见下一条）。
@@ -120,7 +132,8 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 - 改设计值：先改 `packages/ui/src/theme.ts` 的 `tokens`，再同步本文件 front matter（两处一致）。
 - 引用颜色一律 `tokens.*`（`import { tokens } from '@ark-mate/ui'`）或 antd `theme.useToken()`。
 - 状态/语义展示用 `@ark-mate/ui` 的 `sessionStatusMeta / agentStateMeta / Dot / Pill`。
-- 主操作按钮用**浅靛蓝 tinted**（底 `tokens.accentSoft` + 字 `tokens.accent`，经 `themeConfig.components.Button` 全局生效）；icon/默认按钮用白底极细边（`borderStrong`），hover 抬边到 `textPlaceholder`、字转 `text`。禁用近黑实心 / 饱和实心主按钮。页面表面近白冷灰阶 + 白卡 + 极细 hairline。
+- 主操作按钮用**品牌实心**（底 `tokens.accent` + 字 `tokens.onPrimary`，经 `themeConfig.components.Button` 全局生效）；次按钮 / 图标按钮用白底 + 可见描边（`borderStrong`），hover 软底 + 抬边到 `borderHover`、字保持 `text`；危险按钮静息中性边 + 红字、hover 才染红。页面表面近白冷灰阶 + 白卡 + 极细 hairline。
+- 可点控件（输入框 / 按钮 / chip / 分段控件轨道）的边界与底色必须与所在表面拉得开：控件边用 `borderStrong`，不要用 hairline `border`；填充底用 `softFill` / `surfaceActive`，不要让控件靠"白的微妙差异"表达状态。
 - 数据列表优先用「行 + 细分隔线」（更高密度、更克制），而非卡片网格。
 
 ### Don't

@@ -148,7 +148,7 @@ export function PermissionCard({ e }: { e: StreamEntry }) {
                 key={opt.option_id}
                 size="small"
                 onClick={() => void respond(e.callId ?? '', decisionFor(opt))}
-                style={{ borderRadius: 8, margin: 0 }}
+                style={{ margin: 0 }}
               >
                 {opt.name || decisionFor(opt).label}
               </Button>
@@ -159,7 +159,7 @@ export function PermissionCard({ e }: { e: StreamEntry }) {
               onClick={() =>
                 void respond(e.callId ?? '', { allowed: false, always: false, optionId: denyOption, label: '拒绝 · 本次' })
               }
-              style={{ borderRadius: 8, margin: 0 }}
+              style={{ margin: 0 }}
             >
               拒绝
             </Button>
@@ -170,14 +170,14 @@ export function PermissionCard({ e }: { e: StreamEntry }) {
               size="small"
               type="primary"
               onClick={() => void respond(e.callId ?? '', { allowed: true, always: false, label: '允许 · 本次' })}
-              style={{ borderRadius: 8, margin: 0 }}
+              style={{ margin: 0 }}
             >
               允许 · 本次
             </Button>
             <Button
               size="small"
               onClick={() => void respond(e.callId ?? '', { allowed: true, always: true, label: '允许 · 始终' })}
-              style={{ borderRadius: 8, margin: 0 }}
+              style={{ margin: 0 }}
             >
               允许 · 始终
             </Button>
@@ -185,7 +185,7 @@ export function PermissionCard({ e }: { e: StreamEntry }) {
               size="small"
               danger
               onClick={() => void respond(e.callId ?? '', { allowed: false, always: false, label: '拒绝' })}
-              style={{ borderRadius: 8, margin: 0 }}
+              style={{ margin: 0 }}
             >
               拒绝
             </Button>
@@ -416,13 +416,13 @@ export function ElicitationCard({ e }: { e: StreamEntry }) {
               <span style={{ fontSize: 11.5, color: tokens.error }}>{error}</span>
             )}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <Button size="small" type="primary" disabled={busy} onClick={submit} style={{ borderRadius: 8, margin: 0 }}>
+              <Button size="small" type="primary" disabled={busy} onClick={submit} style={{ margin: 0 }}>
                 提交
               </Button>
-              <Button size="small" danger disabled={busy} onClick={decline} style={{ borderRadius: 8, margin: 0 }}>
+              <Button size="small" danger disabled={busy} onClick={decline} style={{ margin: 0 }}>
                 拒绝提供
               </Button>
-              <Button size="small" disabled={busy} onClick={cancel} style={{ borderRadius: 8, margin: 0 }}>
+              <Button size="small" disabled={busy} onClick={cancel} style={{ margin: 0 }}>
                 取消
               </Button>
             </div>
@@ -438,13 +438,13 @@ export function ElicitationCard({ e }: { e: StreamEntry }) {
               <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>完成外部操作后回到这里告知助手（URL 模式演示）。</span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <Button size="small" type="primary" disabled={busy} onClick={submit} style={{ borderRadius: 8, margin: 0 }}>
+              <Button size="small" type="primary" disabled={busy} onClick={submit} style={{ margin: 0 }}>
                 我已完成
               </Button>
-              <Button size="small" danger disabled={busy} onClick={decline} style={{ borderRadius: 8, margin: 0 }}>
+              <Button size="small" danger disabled={busy} onClick={decline} style={{ margin: 0 }}>
                 拒绝
               </Button>
-              <Button size="small" disabled={busy} onClick={cancel} style={{ borderRadius: 8, margin: 0 }}>
+              <Button size="small" disabled={busy} onClick={cancel} style={{ margin: 0 }}>
                 取消
               </Button>
             </div>
@@ -1529,7 +1529,7 @@ export function EntryView({
               icon={<ReloadOutlined />}
               onClick={onRetry}
               title="重新发送该轮输入"
-              style={{ borderRadius: 8, fontSize: 12 }}
+              style={{ fontSize: 12 }}
             >
               重试该轮
             </Button>

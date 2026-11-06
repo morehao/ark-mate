@@ -4,17 +4,20 @@ import type { ThemeConfig } from 'antd'
  * ark-mate 前端设计令牌（唯一事实源）。
  *
  * 设计方向：**精致冷白（Refined Cool White）**——近乎无色的冷白表面 + 极细 hairline 分层 +
- * 近黑实心主按钮；强调色（靛蓝）刻意稀有：只出现在选中态、焦点环、品牌点与状态点，
- * 主操作按钮用近黑（不是彩色），彩色出现面积 < 5%。字重与字距讲究、数字 tabular-nums。
- * 无卡片阴影（阴影仅留给 Modal / toast 浮层）。改动请同步 frontend/DESIGN.md 的 front matter。
+ * 克制的控件层级。强调色（靛蓝）只出现在**主操作**、选中态、焦点环、链接与品牌点；
+ * 按钮走主流两档语言：**主按钮 = 品牌实心 + 白字**（不再是浅底靛蓝字——那读起来像 Tag / 像禁用），
+ * **次按钮 = 白底 + 可见描边 + 深字**。彩色出现面积仍然小。无投影（浮层除外）。
+ * 改动请同步 frontend/DESIGN.md 的 front matter。
  */
 export const tokens = {
-  // 品牌 Brand：近黑主操作 + 稀有靛蓝强调（accent 不铺满页面）
-  primary: '#0a0a0a', // 主操作（按钮实心）/ 选中文字——近黑，非彩色
+  // 品牌 Brand：主操作 = 品牌实心；近黑只当正文与显式深色文字
+  primary: '#0a0a0a', // 正文/标题最重字色；也用于极少数"最高强调"场景
   primaryHover: '#000000',
   primaryActive: '#0a0a0a',
-  accent: '#3d5afe', // 稀有强调色：选中态/焦点环/链接/品牌点
-  accentSoft: '#eef1ff', // 强调色柔和底（选中 chip / 焦点晕）
+  accent: '#3d5afe', // 强调色：主按钮底色 / 选中态 / 焦点环 / 链接 / 品牌点
+  accentHover: '#2f4ae0', // 主按钮 hover（实心底压暗；白字对比度只升不降）
+  accentActive: '#2639c4', // 主按钮 active
+  accentSoft: '#eef1ff', // 强调色柔和底（选中 chip / 焦点晕）——只当底，不做主按钮填充
   primarySoft: '#f2f2f2', // 中性柔和底（历史名，指中性填充）
   // 品牌渐变 = 与 favicon.svg 完全一致（靛蓝→紫）。这是**品牌资产**，
   // 不随中性色盘/强调色调整；改它就会让应用内 logo 和网页图标对不上。
@@ -23,18 +26,24 @@ export const tokens = {
   // 表面 Surface（近白冷灰阶）
   bg: '#fcfcfd', // 布局底（近白）
   surface: '#ffffff', // 卡片/侧栏/输入区
-  softFill: '#f6f7f9', // 中性填充底：chip、hover、用户气泡
+  softFill: '#f6f7f9', // 中性填充底：chip、hover、用户气泡、默认按钮 hover
   codeBg: '#fafafa', // 代码/内容块底
   selectedBg: '#f2f4ff', // 选中项柔和底（偏靛蓝）
+  surfaceActive: '#eceff3', // 按下态填充 / Segmented 轨道底（要与选中白块拉得开）
 
-  // 边框 Border（极细 hairline 分层主语言）
-  border: '#eceef2',
-  borderStrong: '#e1e4ea',
+  // 边框 Border（极细 hairline 分层主语言；控件边比 hairline 深一档，保证"可点"可读）
+  border: '#eceef2', // hairline 分割线 / 卡片外框
+  borderStrong: '#d5d9e0', // 控件边（输入框 / 次按钮 / chip）——比 hairline 深，白底上可见
+  borderHover: '#9aa1ac', // 控件 hover 抬边（2.6:1，明确可点）
 
   // 文字 Text（三级灰阶，近黑主色）
   text: '#111827',
   textSecondary: '#6b7280',
   textPlaceholder: '#9aa1ac',
+
+  // 危险操作（删除/撤销）：静息中性边 + 红字，hover 才染红底——不抢占主视觉
+  dangerSoft: '#fef3f2',
+  dangerBorder: '#f5a9a4',
 
   // 实心底上的前景色（主按钮/危险按钮/强调底的文字）——统一在这里，别处不写 #fff
   onPrimary: '#ffffff',
@@ -79,31 +88,49 @@ export const themeConfig: ThemeConfig = {
     controlHeight: 32,
     controlHeightSM: 28, // 行内 small 按钮不再 24px 瘦小，和工具行同一档手感
     borderRadius: tokens.radiusSm,
+    borderRadiusSM: tokens.radiusSm, // 小按钮与常规按钮同一圆角，避免行内出现 5px/7px 两种
     borderRadiusLG: tokens.radiusMd,
     fontFamily: tokens.fontFamily,
     fontSize: 14,
   },
   components: {
-    // 主按钮走「tinted」口径：浅靛蓝底 + 靛蓝字（轻量、有品牌感，不砸一块黑砖）。
-    // antd 由 colorPrimary 派生 hover/active，浅底派生仍是浅底，视觉稳定；primaryColor 定字色。
+    // 主按钮 = **品牌实心 + 白字**（主流口径）：一眼是主操作。
+    // 旧的「浅靛蓝底 + 靛蓝字」tinted 方案撤掉——白卡上只有 1.1:1 的底、hover/active 还会
+    // 跌破对比度，读起来像 Tag / 像禁用。次按钮靠可见描边立住（见 default* 一组）。
     Button: {
-      colorPrimary: tokens.accentSoft, // primary 底色（浅靛蓝）
-      colorPrimaryHover: '#e3e8ff',
-      colorPrimaryActive: '#dbe2ff',
-      primaryColor: tokens.accent, // primary 文字色（靛蓝）
+      colorPrimary: tokens.accent, // 主按钮底
+      colorPrimaryHover: tokens.accentHover, // 主按钮 hover 底
+      colorPrimaryActive: tokens.accentActive, // 主按钮 active 底
+      primaryColor: tokens.onPrimary, // 主按钮字色
       primaryShadow: 'none',
-      fontWeight: 600, // 用真实字重档（560 无对应字形，合成会发虚）
-      defaultShadow: 'none',
-      // 默认（ghost/图标钮）按钮：白底极细边，hover 抬边，与搜索框同一族
+      dangerShadow: 'none', // 撤掉 antd 给危险按钮的红晕投影（一排按钮里最跳的那块红边）
+      fontWeight: 600, // 真实字重档，合成会发虚
+      // 次按钮：白底 + 可见描边 + 深字；hover 抬边到 2.6:1 并给中性软底
       defaultBg: tokens.surface,
-      defaultColor: tokens.text, // 默认按钮字色用主文字深色（灰字低对比会显得发虚/糊）
+      defaultColor: tokens.text,
       defaultBorderColor: tokens.borderStrong,
-      defaultHoverBg: tokens.surface,
+      defaultHoverBg: tokens.softFill,
       defaultHoverColor: tokens.text,
-      defaultHoverBorderColor: tokens.textPlaceholder,
-      defaultActiveBg: tokens.softFill,
+      defaultHoverBorderColor: tokens.borderHover,
+      defaultActiveBg: tokens.surfaceActive,
       defaultActiveColor: tokens.text,
-      defaultActiveBorderColor: tokens.textPlaceholder,
+      defaultActiveBorderColor: tokens.borderHover,
+      defaultShadow: 'none',
+      // 文字按钮（折叠 / 收起这类既不是卡片也不是控件的动作）：中性字 + hover 软底
+      textTextColor: tokens.textSecondary,
+      textTextHoverColor: tokens.text,
+      textTextActiveColor: tokens.text,
+      textHoverBg: tokens.softFill,
+    },
+    // 分段控件：默认轨道色是 colorBgLayout（近白），在近白页面上整条隐形。
+    // 轨道必须比页面底深一档，选中白块才有"thumb"感。
+    Segmented: {
+      trackBg: tokens.surfaceActive,
+      trackPadding: 2,
+      itemColor: tokens.textSecondary,
+      itemHoverColor: tokens.text,
+      itemSelectedBg: tokens.surface,
+      itemSelectedColor: tokens.text,
     },
   },
 }
