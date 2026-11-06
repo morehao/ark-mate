@@ -46,7 +46,7 @@ L3/L4 与 L5 的关系是**互补**：
 
 ## 5. 已知环境约束（本机）
 
-- **跑 L3/L4 必须用 fnm 的 node**（`engines: >=24 <25`），**不能用 dsh 自带 node**：后者带 hardened runtime 签名（Team ID `NAN929V4UM`），加载 rolldown 原生 binding 时被 macOS 拒（`different Team IDs`），Vitest 直接启动失败。CI 用标准 setup-node 不受影响。
+- **跑 L3/L4 必须用 fnm 的 node**（`engines: >=26 <27`），**不能用 dsh 自带 node**：后者带 hardened runtime 签名（Team ID `NAN929V4UM`），加载 rolldown 原生 binding 时被 macOS 拒（`different Team IDs`），Vitest 直接启动失败。CI 用标准 setup-node 不受影响。
 - **L4 复用系统 Chrome**（`channel: 'chrome'`），不下载 Playwright 浏览器（避免写 `~/Library/Caches/ms-playwright`）。
 - **pnpm store 在工作区内** `.pnpm-store`（沙箱下 `~/Library/pnpm/store` 不可写）；装卸依赖带 `--store-dir <repo>/.pnpm-store`。
 - **L3/L4 产物**（`e2e/.artifacts/`、`e2e-report/`）已 gitignore。

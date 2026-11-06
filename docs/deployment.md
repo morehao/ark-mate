@@ -483,13 +483,13 @@ shell 环境（`export DSH_VERSION=…` 或 `DSH_VERSION=… docker compose up -
 
 ### 4.3 受限网络（镜像站 / 代理 / npm 镜像）
 
-基础镜像与仓库地址都是 build-arg，默认走官方源（`node:24-bookworm` / `golang:1.26-bookworm` /
+基础镜像与仓库地址都是 build-arg，默认走官方源（`node:26-bookworm` / `golang:1.26-bookworm` /
 `debian:bookworm-slim` / `proxy.golang.org` / `registry.npmjs.org`）；在拉不到 Docker Hub 或
 `proxy.golang.org` 的网络里整组覆盖即可：
 
 ```bash
 make image \
-  NODE_IMAGE=docker.m.daocloud.io/library/node:24-bookworm \
+  NODE_IMAGE=docker.m.daocloud.io/library/node:26-bookworm \
   GO_IMAGE=docker.m.daocloud.io/library/golang:1.26-bookworm \
   RUNTIME_IMAGE=docker.m.daocloud.io/library/debian:bookworm-slim \
   GO_PROXY=https://goproxy.cn,direct \
@@ -734,7 +734,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
   （3 个 section、6 条 `Environment=`、`ExecStart` 绝对路径、`MATE_ADDR` 收在本机；**v20 后该单元另有 `MATE_HOME`**，故"6 条"是当时快照）。上线前请在
   目标机 `systemd-analyze verify` 并实测。
 - 容器镜像（§4）：`registry-1.docker.io`/`auth.docker.io` 在本机持续超时，故基础镜像改用镜像站覆盖
-  （`docker.m.daocloud.io/library/{node:24-bookworm,golang:1.26-bookworm,debian:bookworm-slim}` +
+  （`docker.m.daocloud.io/library/{node:26-bookworm,golang:1.26-bookworm,debian:bookworm-slim}` +
   `GO_PROXY=https://goproxy.cn,direct`），其余与默认路径一致：
   - **最小镜像**：`docker build -t ark-mate:local .` 成功（141 MB）。容器 `-p 127.0.0.1:18001:10001
     -v ark-mate-test-data:/data -e MATE_ADDR=0.0.0.0:10001`：`GET /v1/mate/health` =
@@ -818,7 +818,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
   [invalid_export_format]`；缺 `q` → `code=40001 [invalid_search_query]`。memory 模式
   （`MATE_STORE=memory`）实测 `source=transcript` 且导出正常（无 DB 时回扫 transcript 的明确
   降级面）。`pnpm smoke:e2e` 新增 4 项断言全 PASS；真会话 `e2e-live-run.mjs dsh` 收到
-  `run.ended`。前端 `typecheck` + `build` 通过；`console/searchView.ts` 纯函数用 Node 24 原生
+  `run.ended`。前端 `typecheck` + `build` 通过；`console/searchView.ts` 纯函数用 Node 26 原生
   类型擦除加载实跑 17 条断言（锚点定位/去重/导出摘要）。
 
 - agent 诊断面（A3）：`GET /agents/:id/diagnostics` 实测——未启动 `dsh` → `connected=false

@@ -19,7 +19,7 @@ make desktop/dist   # 出安装包（当前只出 macOS，ad-hoc 签名、未公
 # 换底座（构建期固定，默认 dsh）：make desktop/dist RUNTIME=<id>   # <id> 是占位；当前仓库内置的只有 dsh
 ```
 
-**开发态（改代码）**：本机自备 Go ≥ 1.26、Node 24.x、pnpm 11.x（见「快速开始」前置表），以及至少一个
+**开发态（改代码）**：本机自备 Go ≥ 1.26、Node 26.x、pnpm 11.x（见「快速开始」前置表），以及至少一个
 ACP 兼容底座（当前内置适配为 `dsh`）与模型 API key。数据默认落 `~/.ark-mate`（`MATE_HOME` 覆盖）。
 
 > **底座可以不装在本机**：`make dev` / `make server` 默认从 `PATH` 找**构建期固定的那个底座**
@@ -128,21 +128,21 @@ make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native /
 | 依赖 | 说明 |
 | --- | --- |
 | Go ≥ 1.26 | `go.mod` 声明 `go 1.26.1` |
-| Node 24.x（LTS） | 见 `frontend/.nvmrc` 与 `frontend/.node-version`（精确版本，唯一事实源） |
+| Node 26.x（LTS） | 见 `frontend/.nvmrc` 与 `frontend/.node-version`（精确版本，唯一事实源） |
 | pnpm 11.x | 见 `frontend/package.json` 的 `packageManager` 字段 |
 | dsh（deepseek-harness） | npm 包 `@deepseek-ai/dsh`，见下方版本注意；当前内置适配只有 `dsh` |
 
 **前端工具链约定（Node / pnpm）**：版本声明全部收在 `frontend/` 内、仓库根不持有——
-Node 同时用 `frontend/.nvmrc` 与 `frontend/.node-version` 声明（现均为 `24.20.0`，两处需保持一致），
+Node 同时用 `frontend/.nvmrc` 与 `frontend/.node-version` 声明（现均为 `26`，两处需保持一致），
 pnpm 看 `frontend/package.json` 的 `packageManager`（现为 `pnpm@11.24.0`）。
 两份声明是有意并存、**工具无关**的：`.nvmrc` 给 nvm/fnm/asdf 认，`.node-version` 给 fnm/volta/mise/asdf/nodenv 认——一个人用哪家管理器都能自动识别出同一个版本，仓库不绑定任何一家。
 
-- **推荐（主流做法）：在自己的 shell 里开启「检出目录自动切换」**，进 `frontend/`（或其子目录）即按声明自动切到 24。这是各人的个人配置、不进仓库：
+- **推荐（主流做法）：在自己的 shell 里开启「检出目录自动切换」**，进 `frontend/`（或其子目录）即按声明自动切到 26。这是各人的个人配置、不进仓库：
   - fnm：`eval "$(fnm env --use-on-cd)"`
   - nvm：用其 autoload 钩子（或 `nvm use` 手动）；mise / asdf / volta 默认带目录钩子。
-- 用哪家管理器都可以（fnm/nvm/Volta/mise/asdf），只要 node 落在 24 主版本即可——声明文件本身是工具无关的。
-- 选 Node 24 线的原因：Node 24 是 **LTS** 线（2025-10 起），团队/生产默认的稳定选择。注意 Node 24 仍捆绑 corepack（Node ≥ 25 才移除）：fnm + Node 24 下 `pnpm` 由 corepack shim 提供，首次运行会打印一次 `! Corepack is about to download …` 并把 `packageManager` 锁定的 pnpm 下载入缓存，之后静默；想彻底消除这行可机器级二选一：`corepack disable`（改走独立安装的 pnpm）或 `corepack prepare pnpm@11.24.0 --activate`（预热）。pnpm ≥ 11 也会在本机版本与 `packageManager` 不一致时自动按其下载运行。
-- 兜底两层：`engines.node`（`>=24 <25`）保证 node 不符时 `pnpm install` 直接失败；`make dev` / `make web` 在启动前端前校验 node 主版本并给出切换提示。CI（`setup-node` 的 `node-version-file: frontend/.nvmrc`）与本地读同一份声明，杜绝漂移。
+- 用哪家管理器都可以（fnm/nvm/Volta/mise/asdf），只要 node 落在 26 主版本即可——声明文件本身是工具无关的。
+- 选 Node 26 线的原因：Node 26 是现行 **LTS** 线，团队/生产默认的稳定选择。注意 **Node ≥ 25 已不再捆绑 corepack**（Node 24 是最后一版带的），所以 `pnpm` 不再由 corepack shim 提供，需在本机独立安装（如 `npm i -g pnpm@11`，或经 fnm/独立版本管理器装）。`packageManager` 字段仍声明 pnpm ≥ 11；pnpm ≥ 11 会在本机版本与 `packageManager` 不一致时自动按其下载运行，声明照旧生效，只是不再依赖 corepack 预热那句 `! Corepack is about to download …`。
+- 兜底两层：`engines.node`（`>=26 <27`）保证 node 不符时 `pnpm install` 直接失败；`make dev` / `make web` 在启动前端前校验 node 主版本并给出切换提示。CI（`setup-node` 的 `node-version-file: frontend/.nvmrc`）与本地读同一份声明，杜绝漂移。
 
 **dsh 版本注意**：统一启动器 `dsh` 的 npm `latest`（如 0.1.1-rc.2）**缺 `acp` profile 模板**，需 `@next`（≥ 0.1.2-rc.1）。安装：
 

@@ -152,7 +152,7 @@ jobs:
       # 钉的是"生产构建能过"，而不只是"类型能过"。
       - run: pnpm build
 
-      # 纯 node 单测（`node --test`，Node 24 自带 TS 类型剥离，无额外框架）：
+      # 纯 node 单测（`node --test`，Node 26 自带 TS 类型剥离，无额外框架）：
       # desktop-contract 钉前后端契约形状，console 钉界面组件行为（纯逻辑函数）。
       - run: pnpm test:contract
       - run: pnpm test:console

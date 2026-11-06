@@ -65,6 +65,6 @@
     `ProviderSvc` / `Prober` / `DeclaredSvc` / `ModelSvc` / `Host` / `ModelStore` 仍按**面**切开，
     一个控制器只认自己那片。
 
-- `frontend/`：pnpm workspace（`apps/web` = **入口 + 组装**（`main.tsx` 挂载 + vite 构建配置）；`packages/{console,ui,types,api,desktop-contract,tsconfig}`——**界面本身在 `packages/console`**，2026-10-11 P5 从 `apps/web/src` 搬过来，行为零变化：搬迁保留原目录结构，所以 `internal/archtest` 里禁 `packages/*` 反向引 `apps/*` 的那条从"挡路的墙"变成了"搬迁方向的保证"）。Node 看 `frontend/.nvmrc`（24.x，团队用 fnm）、pnpm 看 `frontend/package.json` 的 `packageManager`；`engines` + Makefile 守卫 node 主版本不符即失败。
+- `frontend/`：pnpm workspace（`apps/web` = **入口 + 组装**（`main.tsx` 挂载 + vite 构建配置）；`packages/{console,ui,types,api,desktop-contract,tsconfig}`——**界面本身在 `packages/console`**，2026-10-11 P5 从 `apps/web/src` 搬过来，行为零变化：搬迁保留原目录结构，所以 `internal/archtest` 里禁 `packages/*` 反向引 `apps/*` 的那条从"挡路的墙"变成了"搬迁方向的保证"）。Node 看 `frontend/.nvmrc`（26.x，团队用 fnm）、pnpm 看 `frontend/package.json` 的 `packageManager`；`engines` + Makefile 守卫 node 主版本不符即失败。
 - `docs/` 是**当前有效的对外/产品面文档**（2026-10-16 重建：`positioning` / `decisions` / `architecture` / `roadmap` / `unimplemented` / `acceptance-matrix` / `dsh-acp-adaptation` / `deployment`；2026-10-18 起另有 `agents/`——仓库根 `AGENTS.md` 的分册，见 [`docs/agents/README.md`](README.md)）。旧设计文档中仍有效的内容已抽出，历史整体留在 git 里；**外部产品的对照与逆向分析不进 `docs/`**，一律落 `.dsh/docs/`。`docs/**` 的相互引用由 `TestDocsReferencesResolve` 守卫（指向不存在的文件即红）。对外契约以 README「控制面接口摘要」与 `backend/internal/router/router.go` 为准。
 - `docs/assets/`：文档的**静态资源唯一收口**（图片/矢量图/后续其他静态文件），不散落在 `docs/` 根下；文档内用相对路径引用（`![alt](assets/xxx.svg)`）。
