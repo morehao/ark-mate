@@ -1,7 +1,7 @@
 ---
-version: 2.1
+version: 2.2
 name: ark-mate-frontend-design
-description: "ark-mate Web 问答控制台（frontend/apps/web）统一视觉语言。**精致冷白（Refined Cool White）**：近乎无色的冷白表面 + 极细 hairline 分层 + **克制的两档控件语言——主按钮品牌实心（靛蓝底 + 白字），次按钮白底可见描边**。强调色（靛蓝 #3d5afe）只出现在主操作、选中态、焦点环、链接与品牌点，不铺满页面；无卡片阴影（阴影仅留给 Modal / toast 浮层）；文字三级灰阶、字重字距讲究、全站 tabular-nums。列表优先用「行 + 细分割线」而不是卡片网格。代码事实源：packages/ui/src/theme.ts 的 tokens 对象（本文件与之一一对应，改动需同步两处）。"
+description: "ark-mate Web 问答控制台（frontend/apps/web）统一视觉语言。**精致冷白（Refined Cool White）**：近乎无色的冷白表面 + 极细 hairline 分层 + **克制的两档控件语言——主按钮品牌实心（靛蓝底 + 白字），次按钮白底可见描边**。**全站只有一个彩色：靛蓝 #3d5afe**（主操作 / 品牌 mark / 选中态 / 焦点环 / 链接），近黑只当正文文字色、不做色块；无卡片阴影（唯一例外：输入卡 composer 的极轻浮起），浮层/toast/抽屉才用阴影；文字三级灰阶、字重字距讲究、全站 tabular-nums。列表优先用「行 + 细分割线」而不是卡片网格。代码事实源：packages/ui/src/theme.ts 的 tokens 对象（本文件与之一一对应，改动需同步两处）。"
 
 colors:
   brand-primary: "#0a0a0a"          # 近黑：正文/标题最重的字色；也用于极少数"最高强调"场景
@@ -11,7 +11,6 @@ colors:
   accent-hover: "#2f4ae0"          # 主按钮 hover 底（压暗，白字对比度只升不降）
   accent-active: "#2639c4"         # 主按钮 active 底
   accent-soft: "#eef1ff"           # 强调色柔和底（选中 chip / 焦点晕）——只当底，不做主按钮填充
-  brand-gradient: "linear-gradient(135deg, #4f6ef7 0%, #7a5af8 55%, #a855f7 100%)"  # 品牌 logo 同款（= favicon.svg），不随中性色盘改
   surface-layout: "#fcfcfd"
   surface-card: "#ffffff"
   surface-soft-fill: "#f6f7f9"
@@ -32,6 +31,9 @@ colors:
   semantic-warning-bg: "#fffaeb"
   semantic-warning-border: "#fde9c4"
   semantic-error: "#d92d20"
+
+shadows:
+  composer: "0 12px 32px -22px rgba(15, 23, 42, 0.34), 0 0 0 0.5px rgba(15, 23, 42, 0.05)"  # 输入卡唯一例外；其余卡片无阴影
 
 typography:
   family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif"
@@ -55,6 +57,8 @@ spacing:
   nav-subitem-height: 30px
   mobile-bar-height: 52px
   transcript-max-width: 840px
+  page-max-width: 1600px
+  page-gutter: 40px                # padding-inline 上限：clamp(16px, 2.4vw, 40px)
 ---
 
 # ark-mate 前端 DESIGN.md
@@ -66,8 +70,10 @@ spacing:
 
 - **定位**：ark-mate Web 问答控制台（会话问答优先，Agent/Runtime 管理为次要入口）。
 - **风格**：**精致冷白（Refined Cool White）**——参考 Stripe / Linear 的克制高级感：近乎无色的冷白表面、极细 hairline 分层、讲究的字重与字距，把"高级"交给留白和层次而不是颜色。
-- **画布**：页面底 `surface-layout`（近白 `#fcfcfd`）；左栏 / 卡片 / 输入区落在白色表面 `surface-card`，以 `1px solid border-hairline`（`#eceef2`，比旧版更浅）分层、**无卡片阴影**（阴影仅 Modal / toast 浮层 / 移动端抽屉）。
+- **画布**：页面底 `surface-layout`（近白 `#fcfcfd`）；左栏 / 卡片 / 输入区落在白色表面 `surface-card`，以 `1px solid border-hairline`（`#eceef2`，比旧版更浅）分层、**无卡片阴影**（阴影仅 Modal / toast 浮层 / 移动端抽屉，**外加输入卡 `shadowComposer` 一处例外**——它是视线落点，不是内容容器）。
 - **交互态色 = accent**：全局 `colorPrimary = tokens.accent`（靛蓝）。输入框聚焦环、开关、勾选框、滑杆、分页/标签激活一律靛蓝；近黑 `tokens.primary` 只当正文与显式深色文字，**不当交互态色**。主按钮底色见 §3（品牌实心）。
+- **单一彩色（v2.2 关键纪律）**：全站**只有靛蓝一个彩色**。它承担：主操作实心底、品牌 mark、选中态、焦点环、链接、开关与语义强调标签。**近黑 `primary` 只当正文文字色**，不做按钮底、不做 logo 底、不做任何色块——冷白底上大块近黑会压视觉（2026-11-06 反馈）。因此**不再有第三个色相**：紫色品牌渐变已删除，`favicon.svg` 同步改单色 mark。
+- **品牌 mark**：圆角方形、底 `accent`、字 `onPrimary`，文字 `ark`（不是单个字母 `a`）。四处使用同一组件：左栏品牌行、起稿页品牌行、消息头、左栏 footer 身份行。
 - **强调色使用律（关键纪律）**：主操作按钮是**品牌实心**（底 `accent` `#3d5afe` + 白字，hover 压暗到 `accent-hover`），一眼是主操作；次操作是白底 + 可见描边（`border-strong`）+ 深字。2026-11-06 纠偏：**撤掉"浅靛蓝底 + 靛蓝字"的 tinted 主按钮**——那套在白卡上只有 1.1:1 的底，hover/active 时字底对比度还会跌破 WCAG AA，读起来像 Tag、像禁用；"浅底 + 饱和色字"是标签语法，不是按钮语法。靛蓝的其它出现面限于选中态 / 焦点环 / 链接 / 品牌点 / 状态强调标签，仍然不铺满页面。
 - **列表优先**：管理页用「行 + 细分割线」的列表形态（信息密度高、更克制），而不是卡片网格。行 hover 出浅底 + 右端动作；分割线用 `border-hairline`。
 - **问答正文**：用户消息为中性软灰气泡（`soft-fill`），assistant 正文为纯文字 + 流式光标；思考用左侧竖线弱化区；工具调用为白卡 hairline 卡片；系统/meta 行居中 mono 弱字。
@@ -135,12 +141,15 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 - 主操作按钮用**品牌实心**（底 `tokens.accent` + 字 `tokens.onPrimary`，经 `themeConfig.components.Button` 全局生效）；次按钮 / 图标按钮用白底 + 可见描边（`borderStrong`），hover 软底 + 抬边到 `borderHover`、字保持 `text`；危险按钮静息中性边 + 红字、hover 才染红。页面表面近白冷灰阶 + 白卡 + 极细 hairline。
 - 可点控件（输入框 / 按钮 / chip / 分段控件轨道）的边界与底色必须与所在表面拉得开：控件边用 `borderStrong`，不要用 hairline `border`；填充底用 `softFill` / `surfaceActive`，不要让控件靠"白的微妙差异"表达状态。
 - 数据列表优先用「行 + 细分隔线」（更高密度、更克制），而非卡片网格。
+- 品牌 mark 只用 `accent` 实心 + `onPrimary` 字（`ark` 三字），不要再引渐变或第二个品牌色。
+- 输入卡用 `radiusComposer` + `shadowComposer`；其他卡片仍禁止加阴影。
 
 ### Don't
 - 禁止在业务代码硬编码色值（包括 `rgba(...)` 品牌投影、antd 组件上的字面 hex）。
 - 禁止新增 css 文件、禁止在页面散落重复的 `<style>`。聊天的交互态 CSS（`:hover` / `::before` / `@keyframes` / `@media`）**唯一收口在 `packages/console/src/console.css.ts`**，由 app.tsx 注入一次（对齐 ark-iam「结构级微修正统一收口」的哲学；此文件是既含 hover 也含 keyframes 的“单点样式单”）。
 - 不要把聊天正文样式搬进 antd（bubble/think/tool 卡为控制台专属自绘组件，`Transcript.tsx`）。
 - 删除无引用 import，避免 `noUnusedLocals` 报错。
+- 不要给任何非浮层元素加阴影（唯一例外已在 §1 登记：输入卡）。
 
 ## 5. 已知差距（与 ark-iam 相同问题）
 

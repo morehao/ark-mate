@@ -188,10 +188,8 @@ export function UsagePage() {
       {/* —— 顶部总览四卡 —— */}
       {!err && data && (
         <div
+          className="fg-stats"
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-            gap: 1,
             background: tokens.border,
             borderBottom: `1px solid ${tokens.border}`,
           }}

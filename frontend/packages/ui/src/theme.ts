@@ -4,9 +4,9 @@ import type { ThemeConfig } from 'antd'
  * ark-mate 前端设计令牌（唯一事实源）。
  *
  * 设计方向：**精致冷白（Refined Cool White）**——近乎无色的冷白表面 + 极细 hairline 分层 +
- * 克制的控件层级。强调色（靛蓝）只出现在**主操作**、选中态、焦点环、链接与品牌点；
- * 按钮走主流两档语言：**主按钮 = 品牌实心 + 白字**（不再是浅底靛蓝字——那读起来像 Tag / 像禁用），
- * **次按钮 = 白底 + 可见描边 + 深字**。彩色出现面积仍然小。无投影（浮层除外）。
+ * 克制的控件层级。**全站只有一个彩色：靛蓝（accent）。** 它承担主操作（实心 + 白字）、
+ * 品牌 mark、选中态、焦点环与链接；近黑（primary）只当正文文字色，**不做任何色块**。
+ * 无卡片阴影——唯一例外是输入卡（composer）的极轻浮起，见 `shadowComposer`。
  * 改动请同步 frontend/DESIGN.md 的 front matter。
  */
 export const tokens = {
@@ -19,9 +19,8 @@ export const tokens = {
   accentActive: '#2639c4', // 主按钮 active
   accentSoft: '#eef1ff', // 强调色柔和底（选中 chip / 焦点晕）——只当底，不做主按钮填充
   primarySoft: '#f2f2f2', // 中性柔和底（历史名，指中性填充）
-  // 品牌渐变 = 与 favicon.svg 完全一致（靛蓝→紫）。这是**品牌资产**，
-  // 不随中性色盘/强调色调整；改它就会让应用内 logo 和网页图标对不上。
-  gradient: 'linear-gradient(135deg, #4f6ef7 0%, #7a5af8 55%, #a855f7 100%)',
+  // 品牌 mark 直接用 accent 实心 + onPrimary 字。2026-11-06 删除「靛蓝→紫」渐变：
+  // 同一产品里出现第三个色相（紫）与「单一彩色」规则冲突；favicon.svg 同步改单色。
 
   // 表面 Surface（近白冷灰阶）
   bg: '#fcfcfd', // 布局底（近白）
@@ -60,10 +59,17 @@ export const tokens = {
     "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
   fontMono: "ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace",
 
+  // 阴影：全站无卡片阴影，**唯一例外**是输入卡（它是视线落点，不是内容容器）
+  shadowComposer: '0 12px 32px -22px rgba(15, 23, 42, 0.34), 0 0 0 0.5px rgba(15, 23, 42, 0.05)',
+
+  // 布局：管理页内容容器上限（配合 padding-inline: clamp(16px, 2.4vw, 40px)）
+  pageMaxWidth: 1600,
+
   // 圆角（精致冷白：克制的小圆角，不外扩成大圆角）
   radiusSm: 7,
   radiusMd: 10,
   radiusLg: 12,
+  radiusComposer: 14, // 输入卡：比卡片大一档（它是"会话的桌面"，不是内容卡）
   radiusPill: 999, // 圆形按钮（+ / 发送键）与 pill 形态 chip
 } as const
 

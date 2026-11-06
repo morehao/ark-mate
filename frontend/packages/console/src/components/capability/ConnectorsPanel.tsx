@@ -71,7 +71,7 @@ export function ConnectorsPanel() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-            <AddCapabilityMenu kind="mcp" onPick={onAdd} label="新建" type="primary" showPlus={false} />
+            <AddCapabilityMenu kind="mcp" onPick={onAdd} label="新建" type="primary" />
           </>
         }
       />

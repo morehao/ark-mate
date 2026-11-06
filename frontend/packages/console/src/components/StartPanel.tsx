@@ -376,6 +376,8 @@ export function StartPanel() {
                   applyHint="first-round"
                   onAddFile={() => fileRef.current?.click()}
                 />
+                {/* v2.2：权限 chip 在工具条内、`+` 的右边（与 Composer 同一排布）。 */}
+                <PermissionChip disabled={sending} />
               </span>
 
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -421,7 +423,6 @@ export function StartPanel() {
               onChange={pickWorkspace}
               disabled={sending}
             />
-            <PermissionChip disabled={sending} />
           </div>
         </div>
 

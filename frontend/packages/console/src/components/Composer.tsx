@@ -357,6 +357,9 @@ export function Composer({
                   <PaperClipOutlined style={{ fontSize: 13 }} />
                 </button>
               )}
+              {/* v2.2：权限 chip 在工具条内、紧贴 `+` 的**右边**（参考实现的排布）。
+                  权限是"发送前必须看见的发送参数"，留在卡下方一行会被当成附件行的一部分。 */}
+              <PermissionChip disabled={busy && !canStop} />
               {busy && busyNote && (
                 <span
                   style={{
@@ -429,7 +432,6 @@ export function Composer({
               title={workspace.title}
             />
           )}
-          <PermissionChip disabled={busy && !canStop} />
         </div>
       </div>
     </div>

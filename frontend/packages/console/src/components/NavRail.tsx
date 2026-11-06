@@ -1,5 +1,5 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { DownOutlined, RightOutlined } from '@ant-design/icons'
+import { DownOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { useMate } from '../store'
 import {
@@ -129,10 +129,17 @@ export function NavRail() {
   return (
     <aside className={`fg-rail${drawerOpen ? ' fg-open' : ''}`} aria-label="主导航">
       <NavLink to="/sessions" className="fg-rail-brand" title="ark-mate 问答控制台" onClick={leave}>
-        ark<span style={{ color: tokens.primary }}>·</span>mate
+        {/* v2.2 品牌 mark：accent 实心 + 白字「ark」；文字区仍是 ark·mate 字标 */}
+        <span className="fg-rail-mark" aria-hidden="true">
+          ark
+        </span>
+        <span>
+          ark<span style={{ color: tokens.textPlaceholder }}>·</span>mate
+        </span>
       </NavLink>
 
-      {/* 新建会话：品牌下方常驻的全宽按钮（v14.1）。它是这一栏的**第一动作**——
+      {/* 新建会话：v2.2 起是**导航行**（32px / 圆角 10）而不是大色块 CTA——
+          参考实现里「新任务 / 新建任务」都是普通行；左栏只保留品牌 mark 一处色块。
           从任何页面点一下都回到新建面板；样式只在这个类里（console.css.ts）。 */}
       {/* `/sessions` 没有一级导航项了（问答入口已去重，只留这一颗新建按钮）：
           用 `fg-on` 补「你在哪」——否则这个页面上左栏一处选中态都没有。
@@ -143,7 +150,9 @@ export function NavRail() {
         aria-current={pathname === '/sessions' ? 'page' : undefined}
         onClick={openNew}
       >
-        {/* 2026-11-05 反馈：新建按钮前面不再带 `+`。 */}
+        <span className="fg-rail-new-icon" aria-hidden="true">
+          <PlusOutlined style={{ fontSize: 14 }} />
+        </span>
         <span>新建会话</span>
       </button>
 
