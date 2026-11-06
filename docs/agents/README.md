@@ -19,6 +19,7 @@
 | [`authorization.md`](authorization.md) | 变更授权（允许破坏性调整的边界） |
 | [`positioning.md`](positioning.md) | 外部形态参照实现（DSH）与本仓对应物 |
 | [`llm-capability.md`](llm-capability.md) | 内部模型调用接入约定：prompt 单点、必带 Purpose、agent 护栏、结构化/降级语义 |
+| [`identity.md`](identity.md) | 产品身份（模型自述）机制：文案唯一事实源、两层交付面、Spec/Fingerprint、装配时序、为什么不热更、守卫 |
 
 ## 维护约定
 

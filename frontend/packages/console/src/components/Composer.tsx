@@ -30,9 +30,12 @@ interface Props {
   imageSupported?: boolean
   autoFocus?: boolean
   /**
-   * 本会话的工作空间（只读展示，贴在输入卡**上沿左上角**的 chip）。工作空间创建时定稿、
-   * 之后不可变——它是底座 ACP session 的 cwd，也是原生权限 `workspace-write` 的沙箱边界，
-   * 所以这里没有"改目录"入口：要换目录就新开一个会话。`temporary` 为服务端权威标志（平台代建）。
+   * 本会话的工作空间（只读 chip）。工作空间创建时定稿、之后不可变——它是底座 ACP session 的 cwd，
+   * 也是原生权限 `workspace-write` 的沙箱边界，所以这里没有"改目录"入口：要换目录就新开一个会话。
+   *
+   * v22（2026-11-06 反馈）：**已有会话不再展示**这颗 chip——会话一经创建，工作空间就固定不动，
+   * 每次在输入框底下重复一行「默认」/目录名是常驻噪声；工作空间仍可在会话信息浮层（「所属空间」）
+   * 与新建面板里看到。`ChatPage` 因此不再传这个 prop（该场景恒为已有会话）。
    */
   workspace?: { path: string; temporary: boolean; isDefault: boolean; title?: string }
   /**
@@ -434,17 +437,24 @@ export function Composer({
         </div>
         {/* 卡下方一行（原型 §13）：工作区 chip + 权限 chip。
             2026-11-05 反馈：右下角那条「Enter 发送 · Shift+Enter 换行 ⇄」整条去掉——
-            它是常驻噪声；键位改为固定规则，只在「设置 · 通用 · 键盘操作」里只读展示。 */}
-        <div className="fg-composer-chips">
-          {workspace && (
+            它是常驻噪声；键位改为固定规则，只在「设置 · 通用 · 键盘操作」里只读展示。
+            2026-11-06：工作区 chip **不再渲染**（已有会话的工作空间已定稿，"默认"/目录名每次重复
+            是噪声；工作空间仍在会话信息浮层「所属空间」可见）。整行没有 chip 时不占位。 */}
+        {workspace && (
+          // 保留这半截以便未来"新建面板需要显示已选工作空间"时复用；当前 ChatPage 恒不传 workspace，
+          // 已有会话不再展示。若将来彻底不需要，可连同 `workspace` prop 一并删除。
+          <div className="fg-composer-chips">
             <WorkspaceChipStatic
               path={workspace.path}
               temporary={workspace.temporary}
               isDefault={workspace.isDefault}
               title={workspace.title}
             />
-          )}
-        </div>
+          </div>
+        )}
+        {/* AI 免责提示：常驻在输入卡下方一行，**不随轮次状态变化**（进行中/已完成/失败/取消都在）。
+            它是"这个助手生成的内容需要你核对"的长期说明，不是某一轮的脚注，所以钉在输入区、不跟着消息走。 */}
+        <p className="fg-ai-disclaimer">内容由 AI 生成，请核对关键信息后再采用</p>
       </div>
     </div>
   )

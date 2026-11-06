@@ -537,6 +537,14 @@ export interface MateState {
    */
   runtimeDiagnostics: RuntimeDiagnostics | null
   sessions: SessionSummary[]
+  /**
+   * 会话计数（未归档 / 已归档两态各一份）。
+   *
+   * `sessions` 只装**当前视图**那一态（`listSessions(archived)` 一次只回一种），
+   * 但左栏两个 tab 要同时标数（`会话 36 · 归档 2`），所以两态都得有。这份是只读展示数据，
+   * 由 `refreshSessions` 一并拉取；取不到时保持旧值（不清零——清零会把"取不到数"说成"没有会话"）。
+   */
+  sessionCounts: { active: number; archived: number }
   /** 工作空间登记（v14；左栏分组与选择器的事实源）。 */
   workspaces: WorkspaceListResp | null
   views: Record<string, SessionView>
@@ -711,6 +719,7 @@ export const initialState: MateState = {
   product: null,
   runtimeDiagnostics: null,
   sessions: [],
+  sessionCounts: { active: 0, archived: 0 },
   workspaces: null,
   views: {},
   activeId: null,
@@ -947,9 +956,21 @@ export const useMate = create<MateStore>((set, get) => {
       }
     },
     refreshSessions: async () => {
+      const archivedView = get().railMode === 'archived'
       try {
         // 按侧栏当前视图拉取：active=未归档；archived=已归档。
-        set({ sessions: await listSessions(get().railMode === 'archived') })
+        set({ sessions: await listSessions(archivedView) })
+      } catch (err) {
+        reportApiError(err)
+      }
+      try {
+        // 另一态只需条数（左栏两个 tab 各自标数）：拿另一态全量、只留长度，不进 `sessions`。
+        const other = await listSessions(!archivedView)
+        set({
+          sessionCounts: archivedView
+            ? { active: other.length, archived: get().sessions.length }
+            : { active: get().sessions.length, archived: other.length },
+        })
       } catch (err) {
         reportApiError(err)
       }

@@ -3,12 +3,10 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 /**
- * 刀 1 · StatusBar（全局底部状态条）——按 store 状态渲染的分支。
+ * 刀 1 · StatusBar —— 收窄为「只在真正出问题时才占位」的底条。
  *
- * 覆盖点：
- *   - wsState 三态文案（已连接 / 连接中 / 连接断开）；
- *   - 会话数概览（sessions 非空时"共 N 个会话"）；
- *   - 聊天页（pathname 属 chat）且运行失败时显示失败提示。
+ * 会话数量已挪进左栏 tab（`会话 / 归档`），连接状态已收进左栏 footer。
+ * 本组件现在只回答「助手最近一次运行失败了，为什么」；正常时**不渲染任何节点**。
  *
  * 依赖 mock：store(useMate) 按 selector 返回；react-router 用 MemoryRouter 提供 pathname。
  */
@@ -28,39 +26,32 @@ const renderAt = (path: string) =>
   )
 
 describe('StatusBar', () => {
-  it('wsState=open 显示"已连接"', () => {
-    storeState = { wsState: 'open', sessions: [], runtimeDiagnostics: null }
-    renderAt('/')
-    expect(screen.getByText('已连接')).toBeInTheDocument()
+  it('正常时（无运行失败）不渲染任何节点，把高度让还给内容区', () => {
+    storeState = { runtimeDiagnostics: null }
+    const { container } = renderAt('/sessions/s1')
+    expect(container).toBeEmptyDOMElement()
   })
 
-  it('wsState=connecting 显示"连接中…"', () => {
-    storeState = { wsState: 'connecting', sessions: [], runtimeDiagnostics: null }
-    renderAt('/')
-    expect(screen.getByText('连接中…')).toBeInTheDocument()
-  })
-
-  it('wsState=closed 显示"连接断开"', () => {
-    storeState = { wsState: 'closed', sessions: [], runtimeDiagnostics: null }
-    renderAt('/')
-    expect(screen.getByText(/连接断开/)).toBeInTheDocument()
-  })
-
-  it('会话非空时显示会话数', () => {
+  it('不再显示会话数量，也不再显示连接状态（这两样已迁往左栏）', () => {
     storeState = { wsState: 'open', sessions: [{ id: 'a' }, { id: 'b' }], runtimeDiagnostics: null }
-    renderAt('/')
-    expect(screen.getByText('共 2 个会话')).toBeInTheDocument()
+    const { container } = renderAt('/')
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByText('共 2 个会话')).not.toBeInTheDocument()
   })
 
-  it('聊天页且运行失败时显示失败提示', () => {
+  it('聊天页且运行失败时显示失败提示并带 code', () => {
     storeState = {
-      wsState: 'open',
-      sessions: [],
       runtimeDiagnostics: { last_error: { class: 'runtime', code: 'E42', details: 'x' } },
     }
     // `/sessions...` 属 chat 上下文（railContextOf），失败提示应出现并带 code。
     renderAt('/sessions/s1')
     const node = screen.getByText(/助手最近一次运行失败/)
     expect(node.textContent).toContain('E42')
+  })
+
+  it('非聊天页即使有失败也不占用底条', () => {
+    storeState = { runtimeDiagnostics: { last_error: { class: 'runtime', code: 'E42' } } }
+    const { container } = renderAt('/usage')
+    expect(container).toBeEmptyDOMElement()
   })
 })

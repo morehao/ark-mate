@@ -120,6 +120,7 @@ make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native /
   只显示产品名、核心版本与产品身份版本，**不显示执行引擎**（诊断页/日志才有那份事实）。
 - **诚实的边界**：身份是产品人格，不是让模型撒谎——用户问「你是什么模型/运行时」时它应如实回答并
   区分产品与执行层；首版不做用户改名/人格定制、不写历史 transcript、改身份需重启（约 150–250 tokens/请求）。
+- **机制详情**（文案事实源、`identity.Spec`/`Fingerprint`、两层交付面、装配时序、为什么不热更、守卫）见 [`docs/agents/identity.md`](docs/agents/identity.md)。
 
 ## 快速开始
 

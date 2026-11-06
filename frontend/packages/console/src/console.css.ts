@@ -299,6 +299,19 @@ export const consoleStyleSheet = `
     padding: 0 8px;
   }
   .fg-rail-footrow .fg-navitem { flex: 1; min-width: 0; }
+  /* 连接态（footer「设置」行右端）：正常只有一枚静息圆点；异常/过渡态才补一行小字。 */
+  .fg-wsdot {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-right: 2px;
+    font-family: ${tokens.fontMono};
+    font-size: 10px;
+    color: ${tokens.textSecondary};
+    white-space: nowrap;
+  }
+  .fg-wsdot-text { max-width: 84px; overflow: hidden; text-overflow: ellipsis; }
 
   /* 设置弹窗（一体式）：左列分节列表 + 右列内容，各自滚动；换节时弹窗高矮不变。 */
   .fg-setdlg {
@@ -669,6 +682,22 @@ export const consoleStyleSheet = `
     margin-top: 8px;
     padding: 0 2px;
     flex-wrap: wrap;
+  }
+  /* AI 免责提示：常驻输入卡下方一行弱字，不随轮次状态变化。 */
+  /* AI 免责提示：常驻输入卡下方一行弱字，不随轮次状态变化。左对齐到与 chip 行同一起点
+     （两处输入面 chip 行都是左起），避免在 StartPanel（chip 在左）下显得居中漂浮。 */
+  /* AI 免责提示：常驻输入卡下方一行弱字，不随轮次状态变化。只挂在对话页（输入卡满宽、居中），
+     所以整行居中——左对齐会贴着输入卡左边缘、看着像漏排的一行字。 */
+  .fg-ai-disclaimer {
+    margin: 6px 0 0;
+    padding: 0 2px;
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    line-height: 1.6;
+    letter-spacing: 0.02em;
+    color: ${tokens.textPlaceholder};
+    text-align: center;
+    user-select: none;
   }
 
   /* 通用 chip（工作区 / 权限）：pill 形态，走 token。 */
@@ -1362,7 +1391,6 @@ export const consoleStyleSheet = `
     border-radius: 2px;
     background: var(--fg-menu-on-color);
   }
-  .fg-rail-tab-n { margin-left: 4px; font-family: ${tokens.fontMono}; font-size: 10px; color: ${tokens.textPlaceholder}; }
   .fg-rail-tab:focus-visible { outline: 2px solid ${tokens.accent}; outline-offset: 2px; border-radius: 4px; }
 
   .fg-rail-sechead {
