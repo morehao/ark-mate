@@ -28,36 +28,34 @@ export function ExpertsPanel() {
   }
 
   return (
-    <PageContainer
-      title="专家"
-      description="不同场景的「专家」预设：擅长什么、用哪些技能与连接器。"
-      extra={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Input
-            size="small"
-            allowClear
-            prefix={<SearchOutlined style={{ color: tokens.textPlaceholder }} />}
-            style={{ width: 210 }}
-            placeholder="搜索专家"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          {/* 2026-11-05 反馈：新建入口只在页头这一颗，空态里不再重复一颗（同一页两个「新建」）。 */}
-          <Button type="primary" size="small" onClick={d.openNew}>
-            新建
-          </Button>
-        </div>
-      }
-    >
+    <PageContainer title="专家" description="不同场景的「专家」预设：擅长什么、用哪些技能与连接器。">
+      {/* 工具（搜索 + 新建）下移到内容区工具行右端，与「我的专家」同一条线；页头只留标题+说明。 */}
       <SectionHeader
         title="我的专家"
         hint="本机创建 · 启用后新会话可选；停用不影响历史会话。"
         count={d.experts.length}
         loading={d.loading}
         onRefresh={d.refresh}
+        tools={
+          <>
+            <Input
+              size="small"
+              allowClear
+              prefix={<SearchOutlined style={{ color: tokens.textPlaceholder }} />}
+              style={{ width: 200 }}
+              placeholder="搜索专家"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {/* 新建入口只此一颗（空态里不重复，避免同页两个「新建」）。 */}
+            <Button type="primary" size="small" onClick={d.openNew}>
+              新建
+            </Button>
+          </>
+        }
       />
 
-      <div style={{ padding: 16 }}>
+      <div style={{ padding: '6px 16px 16px' }}>
         {d.listError && (
           <Alert
             type="error"
@@ -74,13 +72,10 @@ export function ExpertsPanel() {
         )}
 
         {initialLoading ? (
-          <div style={galleryStyle}>
+          <div style={listStyle}>
             {Array.from({ length: 4 }).map((_, i) => (
-              <div
-                key={i}
-                style={{ border: `1px solid ${tokens.border}`, borderRadius: tokens.radiusMd, padding: 16, minHeight: 150 }}
-              >
-                <Skeleton active avatar paragraph={{ rows: 3 }} />
+              <div key={i} style={{ padding: '16px 4px', borderBottom: `1px solid ${tokens.border}` }}>
+                <Skeleton active avatar paragraph={{ rows: 1 }} title={{ width: '30%' }} />
               </div>
             ))}
           </div>
@@ -99,7 +94,7 @@ export function ExpertsPanel() {
         ) : visible.length === 0 ? (
           <CapabilityEmpty text={`没有找到匹配「${query}」的专家，试试其他关键词。`} />
         ) : (
-          <div style={galleryStyle}>
+          <div style={listStyle}>
             {visible.map((e) => (
               <ExpertCard
                 key={e.id}
@@ -142,11 +137,10 @@ export function ExpertsPanel() {
   )
 }
 
-const galleryStyle = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-  gap: 14,
-  alignItems: 'start',
+// 精致冷白：用行列表 + 细分割线（不用卡片网格）——更克制、信息密度更高。
+const listStyle = {
+  display: 'flex',
+  flexDirection: 'column',
 } as const
 
 function filterExperts(experts: Expert[], query: string): Expert[] {

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Dropdown, Input, Modal } from 'antd'
 import { FolderAddOutlined, FolderOpenOutlined, PlusOutlined } from '@ant-design/icons'
+import { tokens } from '@ark-mate/ui'
 import { toErrorMessage } from '@ark-mate/api'
 import { useMate } from '../store'
 import { directoryPickerKind, pickDirectoryNative } from '../directoryPicker'
@@ -157,14 +158,14 @@ export function AddWorkspaceButton() {
             status={nameError ? 'error' : undefined}
           />
           {/* 位置：落盘根由服务端下发，只在这里**如实显示**（不在前端拼路径）。 */}
-          <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--fg-text-secondary, #8c8c8c)', lineHeight: 1.7 }}>
+          <div style={{ marginTop: 8, fontSize: 11.5, color: tokens.textSecondary, lineHeight: 1.7 }}>
             位置：<code>{createRoot}</code>
           </div>
-          <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--fg-text-secondary, #8c8c8c)', lineHeight: 1.7 }}>
+          <div style={{ marginTop: 6, fontSize: 11.5, color: tokens.textSecondary, lineHeight: 1.7 }}>
             会在这个位置建一个同名文件夹并加入列表（一步完成）。同名目录已存在时会提示换个名字，不会复用已有目录。
           </div>
           {nameError && (
-            <div style={{ marginTop: 8, fontSize: 11.5, color: '#d4380d', lineHeight: 1.7 }}>{nameError}</div>
+            <div style={{ marginTop: 8, fontSize: 11.5, color: tokens.error, lineHeight: 1.7 }}>{nameError}</div>
           )}
         </div>
       </Modal>

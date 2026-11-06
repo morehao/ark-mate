@@ -3,6 +3,7 @@ import { Alert, Button, Input, Modal, Tag, Tooltip } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { transportLabel } from '../../console/capabilityView'
+import { CardToolbar } from '../CardToolbar'
 
 /** 定义编辑器的状态（hook 与面板共用的类型）。 */
 export interface CapabilityEditState { kind: 'skill' | 'mcp'; id: string; text: string; created: boolean }
@@ -12,54 +13,72 @@ export const TRANSPORT_COLOR: Record<string, string> = { stdio: 'default', sse: 
 
 export const mono: CSSProperties = { fontFamily: tokens.fontMono, fontSize: 12.5, color: tokens.text, overflowWrap: 'anywhere' }
 
+/**
+ * 内容区工具行（标题组 + 右端工具）。
+ *
+ * 左：`标题 + 计数 chip + 说明`（一个语义组）；右：`tools`（搜索/新建等页面工具）+ 刷新。
+ * 中间用 flex:1 的留白隔开——**模块名与工具分层**，不再把「标题 + 刷新」挤成一条。
+ * `tools` 可选：扩展三页（专家 / 技能 / 连接器）都把「搜索 + 新建」放这里。
+ * 结构与 `CardToolbar` 同源，保证与用量 / 定时任务 / 资料库的工具行完全一致。
+ */
 export function SectionHeader({
   title,
   hint,
   count,
   loading,
   onRefresh,
-  extra,
+  tools,
 }: {
   title: string
   hint: string
   count: number
   loading: boolean
   onRefresh: () => void
-  extra?: ReactNode
+  tools?: ReactNode
 }) {
   return (
-    <header
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '10px 16px',
-        borderBottom: `1px solid ${tokens.border}`,
-      }}
-    >
-      <b style={{ fontSize: 13.5, fontWeight: 600 }}>{title}</b>
-      <Tag style={{ marginInlineEnd: 0, fontSize: 11 }}>{count}</Tag>
-      {/* 左栏常驻后卡片头变窄：说明文字最多两行（全文给 hover 的 title），避免卡头被小字撑高 */}
-      <span
-        title={hint}
-        style={{
-          flex: 1,
-          minWidth: 0,
-          fontSize: 11.5,
-          color: tokens.textPlaceholder,
-          display: '-webkit-box',
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
-        }}
-      >
-        {hint}
-      </span>
-      {extra}
-      <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={onRefresh}>
-        刷新
-      </Button>
-    </header>
+    <CardToolbar
+      left={
+        <>
+          <b style={{ fontSize: 13.5, fontWeight: 600, flex: 'none' }}>{title}</b>
+          <Tag
+            style={{
+              marginInlineEnd: 0,
+              fontSize: 11,
+              fontVariantNumeric: 'tabular-nums',
+              background: tokens.softFill,
+              border: `1px solid ${tokens.border}`,
+              color: tokens.textSecondary,
+            }}
+          >
+            {count}
+          </Tag>
+          {/* 说明文字最多一行（全文给 hover 的 title），把空间让给右侧工具 */}
+          <span
+            title={hint}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 11.5,
+              color: tokens.textPlaceholder,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {hint}
+          </span>
+        </>
+      }
+      tools={
+        <>
+          {tools}
+          <Button size="small" style={{ flex: 'none' }} icon={<ReloadOutlined />} loading={loading} onClick={onRefresh}>
+            刷新
+          </Button>
+        </>
+      }
+    />
   )
 }
 
@@ -98,7 +117,7 @@ export function CapabilityRow({
         gap: 10,
         padding: '11px 16px',
         borderBottom: `1px solid ${tokens.border}`,
-        background: hover ? '#fbfcfe' : undefined,
+        background: hover ? tokens.bg : undefined,
         transition: 'background .12s ease',
       }}
     >

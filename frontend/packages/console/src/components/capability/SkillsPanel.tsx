@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Input, Popconfirm, Space, Switch, Tag, Tooltip } from 'antd'
+import { Button, Input, Popconfirm, Switch, Tag, Tooltip } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import type { Skill } from '@ark-mate/types'
@@ -31,30 +31,27 @@ export function SkillsPanel() {
   }
 
   return (
-    <PageContainer
-      title="技能"
-      description="让助手学会一门具体本事——读文档、做表格、写代码、出图。"
-      extra={
-        <Space size={8}>
-          <Input
-            size="small"
-            allowClear
-            prefix={<SearchOutlined style={{ color: tokens.textPlaceholder }} />}
-            style={{ width: 210 }}
-            placeholder="搜索技能"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <AddCapabilityMenu kind="skill" onPick={onAdd} label="新建" type="primary" showPlus={false} />
-        </Space>
-      }
-    >
+    <PageContainer title="技能" description="让助手学会一门具体本事——读文档、做表格、写代码、出图。">
       <SectionHeader
         title="我的技能"
         hint="启用后助手会在合适的对话里自动使用；停用只是暂不使用，技能本身会保留。"
         count={visible.length}
         loading={d.busy === 'skills'}
         onRefresh={() => d.refresh('skills')}
+        tools={
+          <>
+            <Input
+              size="small"
+              allowClear
+              prefix={<SearchOutlined style={{ color: tokens.textPlaceholder }} />}
+              style={{ width: 200 }}
+              placeholder="搜索技能"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <AddCapabilityMenu kind="skill" onPick={onAdd} label="新建" type="primary" showPlus={false} />
+          </>
+        }
       />
       <div style={{ maxHeight: 560, overflowY: 'auto' }}>
         {visible.length === 0 ? (

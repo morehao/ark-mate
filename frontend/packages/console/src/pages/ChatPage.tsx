@@ -470,7 +470,7 @@ export function ChatPage() {
               icon={<MoreOutlined />}
               title="会话操作"
               aria-label="会话操作"
-              style={{ borderRadius: 8, color: tokens.textSecondary }}
+              style={{ color: tokens.textSecondary }}
             />
           </Dropdown>
           <Button
@@ -480,7 +480,7 @@ export function ChatPage() {
             title="会话产物（可收录进资料库）"
             aria-label="会话产物"
             onClick={() => setDetailOpen(true)}
-            style={{ borderRadius: 8, color: tokens.textSecondary, fontSize: 12 }}
+            style={{ color: tokens.textSecondary, fontSize: 12 }}
           >
             产物{artifactCount > 0 ? ` ${artifactCount}` : ''}
           </Button>
@@ -491,7 +491,7 @@ export function ChatPage() {
             title="会话详情"
             aria-label="会话详情"
             onClick={() => setDetailOpen(true)}
-            style={{ borderRadius: 8, color: tokens.textSecondary }}
+            style={{ color: tokens.textSecondary }}
           />
           {pendingPerms > 0 && (
             <span
@@ -549,7 +549,7 @@ export function ChatPage() {
             </span>
           </span>
           {resendable && (
-            <Button size="small" onClick={() => lastUserText && void sendPrompt(lastUserText)} style={{ borderRadius: 8 }}>
+            <Button size="small" onClick={() => lastUserText && void sendPrompt(lastUserText)} >
               重发
             </Button>
           )}

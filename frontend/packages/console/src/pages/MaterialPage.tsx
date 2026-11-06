@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fmtDateTime } from '../console/time'
+import { CardToolbar } from '../components/CardToolbar'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Button,
@@ -51,13 +52,15 @@ import type { ArtifactMeta, MaterialNode, MaterialNodeDetail, MaterialNodeKind, 
 //
 // 本期范围：只做资料库、不做知识库——搜索框标「关键词搜索」，页面上**不出现**「智能/语义/知识库」。
 
+// 品类图标一律走中性灰（精致冷白的「强调色克制」）：层级由文字承担，
+// 不再给每种类型一种彩头（五色图标会把克制的表面打散）。
 const KIND_META: Record<MaterialNodeKind, { label: string; icon: React.ReactNode; color: string }> = {
   folder: { label: '文件夹', icon: <FolderOutlined />, color: tokens.textSecondary },
-  doc: { label: '文档', icon: <FileTextOutlined />, color: '#3b82f6' },
-  table: { label: '表格', icon: <TableOutlined />, color: '#10b981' },
-  link: { label: '网页剪藏', icon: <LinkOutlined />, color: '#8b5cf6' },
-  drive: { label: '文件', icon: <CloudUploadOutlined />, color: '#f59e0b' },
-  page: { label: '网页', icon: <Html5Outlined />, color: '#ec4899' },
+  doc: { label: '文档', icon: <FileTextOutlined />, color: tokens.textSecondary },
+  table: { label: '表格', icon: <TableOutlined />, color: tokens.textSecondary },
+  link: { label: '网页剪藏', icon: <LinkOutlined />, color: tokens.textSecondary },
+  drive: { label: '文件', icon: <CloudUploadOutlined />, color: tokens.textSecondary },
+  page: { label: '网页', icon: <Html5Outlined />, color: tokens.textSecondary },
 }
 
 interface Crumb {
@@ -254,11 +257,11 @@ export function MaterialPage() {
   )
 
   return (
-    <PageContainer
-      title="资料库"
-      description="存放文档、表格、网页剪藏、文件与页面；可按目录浏览、按关键词查找。"
-      extra={
-        <Space>
+    <PageContainer title="资料库" description="存放文档、表格、网页剪藏、文件与页面；可按目录浏览、按关键词查找。">
+      {/* 工具进内容区工具行（与扩展三页同一版式）：页头只留标题+描述。 */}
+      <CardToolbar
+        left={
+          /* 筛选（分类分段）放左、动作（搜索/新建/上传）放右：与扩展三页「左组右工具」同一节奏。 */
           <Segmented
             value={category}
             onChange={(v) => {
@@ -271,26 +274,31 @@ export function MaterialPage() {
               { label: '产物', value: 'artifact' },
             ]}
           />
-          <Input.Search
-            allowClear
-            placeholder="关键词搜索"
-            style={{ width: 240 }}
-            value={searchQ}
-            onChange={(e) => {
-              setSearchQ(e.target.value)
-              if (!e.target.value.trim()) setHits(null)
-            }}
-            onSearch={() => void doSearch()}
-          />
-          <Button onClick={newFolder}>新建文件夹</Button>
-          <AntUpload accept="*" showUploadList={false} beforeUpload={(f) => doUpload(f as File)}>
-            <Button type="primary" icon={<UploadOutlined />}>
-              上传
+        }
+        tools={
+          <>
+            <Input.Search
+              allowClear
+              placeholder="关键词搜索"
+              style={{ width: 220 }}
+              value={searchQ}
+              onChange={(e) => {
+                setSearchQ(e.target.value)
+                if (!e.target.value.trim()) setHits(null)
+              }}
+              onSearch={() => void doSearch()}
+            />
+            <Button size="small" onClick={newFolder}>
+              新建文件夹
             </Button>
-          </AntUpload>
-        </Space>
-      }
-    >
+            <AntUpload accept="*" showUploadList={false} beforeUpload={(f) => doUpload(f as File)}>
+              <Button size="small" type="primary" icon={<UploadOutlined />}>
+                上传
+              </Button>
+            </AntUpload>
+          </>
+        }
+      />
       <div style={{ padding: '10px 14px', borderBottom: `1px solid ${tokens.border}` }}>
         {hits !== null ? (
           <Space>

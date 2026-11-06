@@ -184,17 +184,7 @@ export function UsagePage() {
   )
 
   return (
-    <PageContainer
-      title="用量"
-      description="一屏总览会话与模型调用；会话用量看快照，模型调用看流水。"
-      extra={
-        <Space>
-          <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
-            刷新
-          </Button>
-        </Space>
-      }
-    >
+    <PageContainer title="用量" description="一屏总览会话与模型调用；会话用量看快照，模型调用看流水。">
       {/* —— 顶部总览四卡 —— */}
       {!err && data && (
         <div
@@ -255,11 +245,17 @@ export function UsagePage() {
             <span style={{ color: tokens.textPlaceholder, fontSize: 11.5 }}>（含当天）</span>
           </Space>
         )}
-        {data && (
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: tokens.textSecondary }}>
-            区间 {fmtDay(data.from)} ~ {data.to ? fmtDay(data.to) : '至今'}
-          </span>
-        )}
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          {data && (
+            <span style={{ fontSize: 12, color: tokens.textSecondary }}>
+              区间 {fmtDay(data.from)} ~ {data.to ? fmtDay(data.to) : '至今'}
+            </span>
+          )}
+          {/* 刷新并入过滤条右端（不再单开一行工具栏，避免左侧留空一整条）。 */}
+          <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
+            刷新
+          </Button>
+        </span>
       </div>
 
       {err && (

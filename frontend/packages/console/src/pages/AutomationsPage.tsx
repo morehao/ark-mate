@@ -40,6 +40,7 @@ import type { Automation, AutomationPreviewItem, AutomationRunRecord } from '@ar
 import { useNavigate } from 'react-router-dom'
 import { useMate } from '../store'
 import { WorkspacePicker } from '../components/WorkspacePicker'
+import { CardToolbar } from '../components/CardToolbar'
 import {
   KIND_OPTIONS,
   RUN_STATUS_META,
@@ -307,20 +308,40 @@ export function AutomationsPage() {
   }
 
   return (
-    <PageContainer
-      title="定时任务"
-      description="让助手按时间自动帮你做事：每天巡检、每周汇总、每月报告。"
-      extra={
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
-            刷新
-          </Button>
-          <Button type="primary" onClick={openCreate}>
-            新建
-          </Button>
-        </Space>
-      }
-    >
+    <PageContainer title="定时任务" description="让助手按时间自动帮你做事：每天巡检、每周汇总、每月报告。">
+      {/* 工具进内容区工具行（与扩展三页同一版式）：页头只留标题+描述。 */}
+      <CardToolbar
+        left={
+          /* 无「我的 X」小节标题时，左侧给一句任务计数当语义锚点，避免工具行左端整条留空。 */
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <b style={{ fontSize: 13.5, fontWeight: 600 }}>任务列表</b>
+            <span
+              style={{
+                fontSize: 11,
+                fontVariantNumeric: 'tabular-nums',
+                color: tokens.textSecondary,
+                background: tokens.softFill,
+                border: `1px solid ${tokens.border}`,
+                borderRadius: 20,
+                padding: '0 7px',
+                lineHeight: '18px',
+              }}
+            >
+              {rows.length}
+            </span>
+          </span>
+        }
+        tools={
+          <>
+            <Button size="small" icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
+              刷新
+            </Button>
+            <Button size="small" type="primary" onClick={openCreate}>
+              新建
+            </Button>
+          </>
+        }
+      />
       {/* 列表卡（原型 §F）：一行一个任务，任务名 + 状态 + 调度 + 下次/上次 + 动作。 */}
       {loading && rows.length === 0 ? (
         <div style={{ padding: 24, textAlign: 'center' }}>

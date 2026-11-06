@@ -123,7 +123,12 @@ export function App() {
               display: 'flex',
               alignItems: 'center',
               gap: 8,
-              padding: '6px 16px',
+              // 高度与行高钉成整数：否则 line-height:normal 会算出 31.84px 的横幅高，
+              // 余下 flex:1 内容区因此带小数，导致所有控件文字落在亚像素上发虚（全站）。
+              height: 32,
+              lineHeight: '20px',
+              padding: '0 16px',
+              boxSizing: 'border-box',
               fontSize: 12,
               background: tokens.warningBg,
               color: tokens.error,
@@ -142,7 +147,12 @@ export function App() {
               display: 'flex',
               alignItems: 'center',
               gap: 8,
-              padding: '6px 16px',
+              // 高度与行高钉成整数：否则 line-height:normal 会算出 31.84px 的横幅高，
+              // 余下 flex:1 内容区因此带小数，导致所有控件文字落在亚像素上发虚（全站）。
+              height: 32,
+              lineHeight: '20px',
+              padding: '0 16px',
+              boxSizing: 'border-box',
               fontSize: 12,
               background: tokens.warningBg,
               color: tokens.warning,

@@ -72,7 +72,9 @@ export const consoleStyleSheet = `
   }
 
   /* 新建会话：品牌下方的全宽按钮（v14.1，对齐 dsh 左栏的首屏动作）。
-     它比导航项高一档（38px / 更实的底 / 描边）：这是"开始一件事"，不是"切一个视图"。 */
+     它比导航项高一档（38px / 品牌实心 / 白字）：这是"开始一件事"，不是"切一个视图"。
+     2026-11-06 纠偏：旧版是 softFill 灰底 + hairline 边，在白侧栏上读起来像输入框/占位块；
+     改为**品牌实心主按钮**（与全站 primary 同一口径），是左栏唯一的高强调动作。 */
   .fg-rail-new {
     flex: none;
     display: flex;
@@ -80,10 +82,10 @@ export const consoleStyleSheet = `
     justify-content: center;
     height: 38px;
     margin: 2px 12px 12px;
-    border: 1px solid ${tokens.borderStrong};
+    border: 1px solid ${tokens.accent};
     border-radius: 10px;
-    background: ${tokens.softFill};
-    color: ${tokens.text};
+    background: ${tokens.accent};
+    color: ${tokens.onPrimary};
     font: inherit;
     font-size: 13.5px;
     font-weight: 600;
@@ -92,12 +94,20 @@ export const consoleStyleSheet = `
     transition: background 0.12s ease, border-color 0.12s ease;
   }
   .fg-rail-new:hover {
-    background: ${tokens.primarySoft};
-    border-color: ${tokens.primary};
+    background: ${tokens.accentHover};
+    border-color: ${tokens.accentHover};
+  }
+  .fg-rail-new:active { background: ${tokens.accentActive}; border-color: ${tokens.accentActive}; }
+  .fg-rail-new:focus-visible {
+    outline: 2px solid ${tokens.accent};
+    outline-offset: 2px;
   }
   /* /sessions 上没有一级导航项（问答入口已去重）：选中态落在新建按钮上。
-     与 .fg-navitem.fg-on 同一套语汇（底色 + 主色前缘），只是按钮自带边框，所以再点亮边框。 */
-  .fg-rail-new.fg-on { background: ${tokens.primarySoft}; border-color: ${tokens.primary}; }
+     「你在这」（/sessions 是新建面板）：不换色、只用一圈品牌柔光点名——
+     换深色会被读成"按下去了"，换浅底又会退回 Tag 语法。 */
+  .fg-rail-new.fg-on {
+    box-shadow: 0 0 0 3px ${tokens.accentSoft};
+  }
 
   /* 导航区：一级 32px / 二级 30px，条目间距 1px */
   .fg-nav-rail {
@@ -337,7 +347,7 @@ export const consoleStyleSheet = `
     align-items: center;
     gap: 6px;
     font-size: 12.5px;
-    color: #15803d;
+    color: ${tokens.success};
   }
   .fg-savedline::before { content: '✓'; font-size: 12px; }
 
@@ -370,7 +380,7 @@ export const consoleStyleSheet = `
     font-size: 11px;
     color: ${tokens.textSecondary};
   }
-  .fg-rowtag.fg-warn { border-color: ${tokens.warningBorder}; background: ${tokens.warningBg}; color: #b45309; }
+  .fg-rowtag.fg-warn { border-color: ${tokens.warningBorder}; background: ${tokens.warningBg}; color: ${tokens.warning}; }
   .fg-rowtag.fg-info { border-color: ${tokens.primary}; background: ${tokens.primarySoft}; color: ${tokens.primary}; }
   .fg-rowtag.fg-clickable { cursor: pointer; }
   .fg-rowtag.fg-clickable:hover { border-color: ${tokens.primary}; color: ${tokens.primary}; }
@@ -517,12 +527,13 @@ export const consoleStyleSheet = `
     width: 34px;
     height: 34px;
     flex: none;
-    border: 1px solid ${tokens.border};
+    border: 1px solid ${tokens.borderStrong};
     border-radius: 8px;
     background: ${tokens.surface};
     color: ${tokens.text};
     cursor: pointer;
   }
+  .fg-burger:hover { background: ${tokens.softFill}; border-color: ${tokens.borderHover}; }
   .fg-mobilebar { display: none; }
   .fg-scrim-mobile { display: none; }
 
@@ -581,8 +592,8 @@ export const consoleStyleSheet = `
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
   .fg-composer:focus-within {
-    border-color: ${tokens.borderStrong};
-    box-shadow: 0 0 0 3px ${tokens.primarySoft};
+    border-color: ${tokens.accent};
+    box-shadow: 0 0 0 3px ${tokens.accentSoft};
   }
 
   /* 输入卡下方一行（原型 §13）：工作区 chip / 权限 chip 靠左；发送键提示已撤掉（2026-11-05）。 */
@@ -633,21 +644,21 @@ export const consoleStyleSheet = `
     height: 28px;
     padding: 0 10px;
     gap: 6px;
-    border: 1px solid ${tokens.border};
+    border: 1px solid ${tokens.borderStrong};
     border-radius: 999px;
     background: ${tokens.surface};
     cursor: pointer;
     transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease, min-width 0.12s ease;
   }
   .fg-model-pill:hover {
-    border-color: ${tokens.borderStrong};
+    border-color: ${tokens.borderHover};
     background: ${tokens.softFill};
   }
   /* 聚焦/展开：静息态贴合文案（不长出一片空白），一旦交互就展开到可读可搜的宽度。 */
   .fg-model-pill:focus-within {
     min-width: 216px;
-    border-color: ${tokens.primary};
-    box-shadow: 0 0 0 3px ${tokens.primarySoft};
+    border-color: ${tokens.accent};
+    box-shadow: 0 0 0 3px ${tokens.accentSoft};
   }
   /* 清除按钮（allowClear 时的 ⊗）：antd 默认是 25% 黑，统一到三级灰阶。 */
   .fg-model-pill .ant-select-clear {
@@ -792,7 +803,7 @@ export const consoleStyleSheet = `
     max-width: 190px;
     height: 28px;
     padding: 0 10px;
-    border: 1px solid ${tokens.border};
+    border: 1px solid ${tokens.borderStrong};
     border-radius: 999px;
     background: ${tokens.surface};
     cursor: pointer;
@@ -802,7 +813,7 @@ export const consoleStyleSheet = `
     transition: border-color 0.12s ease, background 0.12s ease;
   }
   .fg-ws-pill:hover:not(:disabled) {
-    border-color: ${tokens.borderStrong};
+    border-color: ${tokens.borderHover};
     background: ${tokens.softFill};
   }
   .fg-ws-pill:disabled { cursor: default; opacity: 0.55; }
@@ -885,22 +896,22 @@ export const consoleStyleSheet = `
   .fg-cap-add {
     display: inline-flex; align-items: center; justify-content: center;
     width: 24px; height: 24px; padding: 0;
-    border: 1px solid ${tokens.border}; border-radius: 999px;
+    border: 1px solid ${tokens.borderStrong}; border-radius: 999px;
     background: ${tokens.surface}; color: ${tokens.textSecondary};
     cursor: pointer; transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
   }
-  .fg-cap-add:hover:not(:disabled) { border-color: ${tokens.borderStrong}; background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-cap-add:hover:not(:disabled) { border-color: ${tokens.borderHover}; background: ${tokens.softFill}; color: ${tokens.text}; }
   .fg-cap-add:disabled { cursor: default; opacity: 0.55; }
   /* chip 只在"声明过"的那一格出现：专家用名字首字当头图，技能/连接器带数量。 */
   .fg-cap-chip {
     display: inline-flex; align-items: center; gap: 5px;
     height: 24px; max-width: 200px; padding: 0 8px;
-    border: 1px solid ${tokens.border}; border-radius: 999px;
+    border: 1px solid ${tokens.borderStrong}; border-radius: 999px;
     background: ${tokens.surface}; color: ${tokens.textSecondary};
     cursor: pointer; font-size: 11.5px;
     transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
   }
-  .fg-cap-chip:hover:not(:disabled) { border-color: ${tokens.borderStrong}; background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-cap-chip:hover:not(:disabled) { border-color: ${tokens.borderHover}; background: ${tokens.softFill}; color: ${tokens.text}; }
   .fg-cap-chip:disabled { cursor: default; opacity: 0.55; }
   .fg-cap-chip-avatar {
     display: inline-flex; align-items: center; justify-content: center;
@@ -1476,7 +1487,7 @@ export const consoleStyleSheet = `
     color: ${tokens.textPlaceholder};
     margin-top: 3px;
   }
-  .fg-auto-act { display: flex; gap: 6px; flex: none; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .fg-auto-act { display: flex; gap: 8px; flex: none; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 
   /* 资料库节点卡行（原型 §E 的 .mat-row）：图标 + 名称/类型·大小 + 更新时间 + 删除。 */
   .fg-mat-list { display: flex; flex-direction: column; }
@@ -1557,17 +1568,18 @@ export const consoleStyleSheet = `
     place-items: center;
     border: 0;
     border-radius: 50%;
-    background: ${tokens.primary};
-    color: #ffffff;
+    background: ${tokens.accent};
+    color: ${tokens.onPrimary};
     font: inherit;
     cursor: pointer;
     transition: background 0.12s ease, color 0.12s ease;
   }
-  .fg-send-btn:hover:not(:disabled) { background: ${tokens.primaryHover}; }
-  .fg-send-btn:active:not(:disabled) { background: ${tokens.primaryActive}; }
+  .fg-send-btn:hover:not(:disabled) { background: ${tokens.accentHover}; }
+  .fg-send-btn:active:not(:disabled) { background: ${tokens.accentActive}; }
+  .fg-send-btn:focus-visible { outline: 2px solid ${tokens.accent}; outline-offset: 2px; }
   .fg-send-btn:disabled { cursor: default; opacity: 1; }
   .fg-send-btn:disabled:not(.fg-send-stop) { background: ${tokens.softFill}; color: ${tokens.textPlaceholder}; }
-  .fg-send-btn.fg-send-stop { background: ${tokens.error}; color: #ffffff; }
+  .fg-send-btn.fg-send-stop { background: ${tokens.error}; color: ${tokens.onPrimary}; }
   .fg-send-btn.fg-send-stop:hover:not(:disabled) { background: ${tokens.error}; filter: brightness(1.06); }
   .fg-send-btn.fg-send-wait { background: ${tokens.softFill}; }
   .fg-send-btn.fg-send-wait .fg-send-square { background: ${tokens.textPlaceholder}; }
@@ -1662,7 +1674,7 @@ export const consoleStyleSheet = `
     display: inline-grid;
     place-items: center;
     background: ${tokens.gradient};
-    color: #ffffff;
+    color: ${tokens.onPrimary};
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
   }
   .fg-agent-avatar svg {
@@ -2153,5 +2165,63 @@ export const consoleStyleSheet = `
     .fg-thought-body { transition: none; }
     .fg-thought-body { transform: none; }
   }
+
+  /* ——— 全站按钮口径（不只在工具行：行内「编辑 / 删除 / 上传」也走这套）———
+     ① antd 会给**两个中文字**的按钮强插 letter-spacing:0.34em 再用负 margin 补偿，
+        结果是「编 辑」「删 除」「新 建」被拉散。全站一律抹平。
+     ② 文字推独立合成层：flex 居中的半像素文字上屏前按整像素光栅，消除发虚。 */
+  .ant-btn.ant-btn-two-chinese-chars::first-letter,
+  .ant-btn.ant-btn-two-chinese-chars > *:not(.anticon) {
+    letter-spacing: normal;
+    margin-inline-end: 0;
+  }
+  .ant-btn > span { transform: translateZ(0); }
+
+  /* ——— 危险按钮（删除 / 撤销）：静息态不喊 ———
+     antd 的危险按钮天生是"红字 + 红边 + 红晕投影"，一排动作里最抢眼的那块颜色给了最该被谨慎点击的
+     那一颗；这里把它拉回中性边（与次按钮同族），只有 hover / active 才染红——危险靠颜色语义提示，
+     不靠常驻的红框。红晕投影已在 theme.ts 的 dangerShadow 里撤掉。 */
+  .ant-btn.ant-btn-dangerous.ant-btn-default:not(:disabled) {
+    border-color: ${tokens.borderStrong};
+    background: ${tokens.surface};
+    color: ${tokens.error};
+  }
+  .ant-btn.ant-btn-dangerous.ant-btn-default:not(:disabled):hover {
+    border-color: ${tokens.dangerBorder};
+    background: ${tokens.dangerSoft};
+    color: ${tokens.error};
+  }
+  .ant-btn.ant-btn-dangerous.ant-btn-default:not(:disabled):active {
+    border-color: ${tokens.error};
+    background: ${tokens.dangerSoft};
+    color: ${tokens.error};
+  }
+
+  /* 全站可见焦点环（键盘可达性）：antd 的默认 outline 偏细，这里统一成一档品牌环。 */
+  .ant-btn:focus-visible,
+  .fg-chip:focus-visible,
+  .fg-cap-add:focus-visible,
+  .fg-cap-chip:focus-visible,
+  .fg-model-pill:focus-visible,
+  .fg-ws-pill:focus-visible {
+    outline: 2px solid ${tokens.accent};
+    outline-offset: 2px;
+  }
+
+  /* ——— 工具行（SectionHeader.tools / CardToolbar）：控件等高、同族 ——— */
+  .fg-toolbar { display: inline-flex; align-items: center; gap: 8px; }
+  .fg-toolbar .ant-btn,
+  .fg-toolbar .ant-input-affix-wrapper,
+  .fg-toolbar .ant-input {
+    height: 32px;
+    border-radius: ${tokens.radiusSm}px;
+    box-sizing: border-box;
+  }
+  /* 图标按钮与文字按钮同宽高比，字重走真实档 600（560 无字形会合成发虚） */
+  .fg-toolbar .ant-btn { padding-inline: 13px; font-weight: 600; }
+  .fg-toolbar .ant-btn-icon-only { padding-inline: 0; width: 32px; }
+  .fg-toolbar .ant-btn .anticon { font-size: 14px; }
+  .fg-toolbar .ant-input-affix-wrapper .ant-input { height: auto; }
+  .fg-toolbar .ant-input { transform: translateZ(0); }
 
 `
