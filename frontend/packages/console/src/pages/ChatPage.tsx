@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Dropdown } from 'antd'
-import { InboxOutlined, InfoCircleOutlined, MoreOutlined } from '@ant-design/icons'
-import { sessionStatusMeta, tokens } from '@ark-mate/ui'
+import { InfoCircleOutlined, MoreOutlined, PicRightOutlined } from '@ant-design/icons'
+import { tokens } from '@ark-mate/ui'
 import { Ev, modelValues } from '@ark-mate/types'
 import type { AttachmentMeta } from '@ark-mate/types'
 import { listSessionArtifacts, sessionHistory, sessionRuns } from '@ark-mate/api'
 import { useMate } from '../store'
-import { SessionDetailDrawer } from '../components/SessionDetail'
+import { SessionDetailDrawer, SessionInfoPanel } from '../components/SessionDetail'
 import { Composer } from '../components/Composer'
 import { ConfirmArea } from '../components/ConfirmArea'
 import { QueuedInputs } from '../components/QueuedInputs'
@@ -27,6 +27,24 @@ import {
 import { runNarration } from '../console/runView'
 import { elapsedLabel } from '../console/time'
 import type { DeliveryChoice } from '../console/queueView'
+
+/** 会话信息面板默认收起的本地记忆键（`mate.web.*` 前缀与其它前端持久键一致）。 */
+const INFO_OPEN_KEY = 'mate.web.infoPanelOpen'
+
+/**
+ * 宽屏判定（≥1280）：与 `.fg-info-panel` 的 CSS 断点保持一致。
+ * 宽屏时「会话信息」作为可收起右栏常驻渲染；窄屏时切换按钮改为打开抽屉。
+ */
+function useWideLayout(): boolean {
+  const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 1280px)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1280px)')
+    const on = () => setWide(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return wide
+}
 
 /** 问答控制台主视图：会话侧栏 + 聊天（head / transcript / composer）+ 状态条。 */
 export function ChatPage() {
@@ -55,7 +73,15 @@ export function ChatPage() {
   const historyStart = useMate((s) => s.historyStart)
   // 会话级模型选择（原型 §12 模型 chip）：读运行时目录，落库走既有 PATCH /sessions/:id（updateSessionModel）。
   const modelCatalog = useMate((s) => s.modelCatalog)
+  const loadModelCatalog = useMate((s) => s.loadModelCatalog)
   const updateSessionModel = useMate((s) => s.updateSessionModel)
+  // 直达会话页（刷新 / 从列表点进 `/sessions/:id`）时目录可能还没拉过——`StartPanel` 会拉，但那条路
+  // 不经过这里，于是模型 chip 会在目录为空时退化成「裸 mdl_ id」。进页面补拉一次（幂等，已有缓存则命中）。
+  useEffect(() => {
+    if (!modelCatalog) void loadModelCatalog()
+    // 只在挂载时按当时是否已有目录判断一次：目录被置空（运行时下线）交给复核再拉，不在这里死循环。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lastParamRef = useRef<string | null | undefined>(undefined)
@@ -68,6 +94,25 @@ export function ChatPage() {
   // 「显示更早」前后的高度差补偿（保持视口停在原处）。
   const pendingAnchorRef = useRef<number | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  // 会话信息右栏（宽屏可收起，默认收起）。持久化到 localStorage，跨会话记忆开合偏好。
+  const [infoOpen, setInfoOpen] = useState(() => {
+    try {
+      return localStorage.getItem(INFO_OPEN_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggleInfo = () =>
+    setInfoOpen((cur) => {
+      const next = !cur
+      try {
+        localStorage.setItem(INFO_OPEN_KEY, next ? '1' : '0')
+      } catch {
+        /* 隐私模式等禁用存储时忽略，仅本会话内生效 */
+      }
+      return next
+    })
+  const wide = useWideLayout()
   // 搜索命中跳转（M3 ②）：已应用的锚点 key（防重复滚动）+ 高亮条目 id。
   // 滚动本身排在**高亮渲染之后**的 effect 里：命中的条目可能在被折叠的过程块里，
   // 要先让 `flashId` 把那块展开（DOM 里才有节点），否则只能滚到轮首。
@@ -473,49 +518,38 @@ export function ChatPage() {
               style={{ color: tokens.textSecondary }}
             />
           </Dropdown>
+          {/* 会话信息切换（合并原「产物」「会话详情」两颗按钮）：宽屏开合右栏、窄屏开抽屉。
+              收起态仍用角标提示「有待确认 / 有产物」，避免合并后丢掉这两个感知入口。 */}
           <Button
             size="small"
-            type="text"
-            icon={<InboxOutlined />}
-            title="会话产物（可收录进资料库）"
-            aria-label="会话产物"
-            onClick={() => setDetailOpen(true)}
+            type={infoOpen && wide ? 'default' : 'text'}
+            icon={<PicRightOutlined />}
+            title={wide ? (infoOpen ? '收起会话信息' : '展开会话信息') : '会话信息'}
+            aria-label="会话信息"
+            aria-pressed={wide ? infoOpen : undefined}
+            onClick={() => {
+              if (wide) {
+                toggleInfo()
+              } else {
+                setDetailOpen(true)
+              }
+            }}
             style={{ color: tokens.textSecondary, fontSize: 12 }}
           >
-            产物{artifactCount > 0 ? ` ${artifactCount}` : ''}
+            会话信息
+            {!infoOpen && (artifactCount > 0 || pendingPerms > 0) && (
+              <span
+                style={{
+                  marginLeft: 4,
+                  fontFamily: tokens.fontMono,
+                  fontSize: 10.5,
+                  color: pendingPerms > 0 ? tokens.warning : tokens.textSecondary,
+                }}
+              >
+                {pendingPerms > 0 ? `待确认 ${pendingPerms}` : artifactCount}
+              </span>
+            )}
           </Button>
-          <Button
-            size="small"
-            type="text"
-            icon={<InfoCircleOutlined />}
-            title="会话详情"
-            aria-label="会话详情"
-            onClick={() => setDetailOpen(true)}
-            style={{ color: tokens.textSecondary }}
-          />
-          {pendingPerms > 0 && (
-            <span
-              title={`${pendingPerms} 条待确认请求（权限/提问）`}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                border: `1px solid ${tokens.warning}`,
-                background: `${tokens.warning}14`,
-                color: tokens.warning,
-                borderRadius: 999,
-                padding: '2px 9px',
-                fontFamily: tokens.fontMono,
-                fontSize: 11,
-                fontWeight: 600,
-              }}
-            >
-              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                <path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
-              </svg>
-              待确认 {pendingPerms}
-            </span>
-          )}
           <span
             style={{
               display: 'inline-flex',
@@ -788,6 +822,8 @@ export function ChatPage() {
                     capabilitiesDisabled={foreignRuntime}
                     // 会话级模型 chip（原型 §12）：候选 = 运行时广告 ∩ 平台清单（modelValues 收窄）。
                     model={activeSum?.model ?? null}
+                    // 反查不到候选时用它兜底展示（`mdl_…` 原始 id 不上界面，同 SessionInfoPopover 口径）。
+                    modelLabel={activeSum?.model_name}
                     modelOptions={modelValues(modelCatalog ?? undefined)}
                     onModelChange={(v) => {
                       if (activeId) void updateSessionModel(activeId, v ?? undefined)
@@ -811,56 +847,16 @@ export function ChatPage() {
             </>
           )}
         </section>
-        {/* 宽屏会话信息栏（v2.2，≥1600 才显示；窄屏由 CSS 隐藏）。
-            只读展示会话事实：把宽屏两侧的空白变成"这轮对话是什么"的答案。 */}
-        <aside className="fg-chat-side" aria-label="会话信息">
-          {activeSum && (
-            <>
-              <div>
-                <div className="fg-chat-side-h">会话</div>
-                <div className="fg-chat-side-row">
-                  <span className="fg-chat-side-k">标题</span>
-                  <span className="fg-chat-side-v">{activeSum.title || '未命名会话'}</span>
-                </div>
-                <div className="fg-chat-side-row">
-                  <span className="fg-chat-side-k">id</span>
-                  <span className="fg-chat-side-v" style={{ fontFamily: tokens.fontMono, fontSize: 10.5 }}>
-                    {activeSum.id}
-                  </span>
-                </div>
-                <div className="fg-chat-side-row">
-                  <span className="fg-chat-side-k">状态</span>
-                  <span className="fg-chat-side-v">{sessionStatusMeta(activeSum.status).label}</span>
-                </div>
-              </div>
-              <div>
-                <div className="fg-chat-side-h">运行</div>
-                <div className="fg-chat-side-row">
-                  <span className="fg-chat-side-k">模型</span>
-                  {/* `model` 是平台行 id（mdl_…），对用户没意义：只显示服务端解析出的展示名，
-                      解析不到给一句人话（与 SessionInfoPopover 同口径）。 */}
-                  <span className="fg-chat-side-v">
-                    {activeSum.model ? activeSum.model_name || '已设置（模型清单里没有它）' : '跟随默认'}
-                  </span>
-                </div>
-                <div className="fg-chat-side-row">
-                  <span className="fg-chat-side-k">工作区</span>
-                  <span className="fg-chat-side-v">
-                    {activeSum.workspace_title || activeSum.cwd || '未绑定'}
-                  </span>
-                </div>
-                <div className="fg-chat-side-row">
-                  <span className="fg-chat-side-k">底座</span>
-                  <span className="fg-chat-side-v" style={{ fontFamily: tokens.fontMono, fontSize: 10.5 }}>
-                    {activeSum.runtime_id}
-                  </span>
-                </div>
-              </div>
-            </>
-          )}
-        </aside>
+        {/* 会话信息右栏（宽屏 ≥1280 且已展开时才渲染；默认收起 → 主列居中）。
+            内容 = SessionInfoPanel（与抽屉同源），不再是只读残缺副本。
+            新建会话（!activeId）时 infoOpen 无意义，此处也因无 activeId 不渲染。 */}
+        {activeId && wide && infoOpen && (
+          <aside className="fg-info-panel" aria-label="会话信息">
+            <SessionInfoPanel sessionId={activeId} />
+          </aside>
+        )}
       </div>
-      {activeId && (
+      {activeId && !wide && (
         <SessionDetailDrawer
           open={detailOpen}
           sessionId={activeId}

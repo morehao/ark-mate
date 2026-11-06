@@ -453,7 +453,10 @@ export function SessionPane({ onCreate }: Props) {
             data-sess-line="title"
             style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, paddingRight: 0 }}
           >
+            {/* 标题颜色**不在这里写**：默认灰 / hover 加深 / 当前行 accent 是菜单交互态，
+                统一收口在 console.css.ts 的 `--fg-menu-*` 与 `.fg-sess-title`（归档靠整行透明度变淡）。 */}
             <span
+              className="fg-sess-title"
               style={{
                 flex: 1,
                 minWidth: 0,
@@ -463,7 +466,6 @@ export function SessionPane({ onCreate }: Props) {
                 fontSize: 13.5,
                 fontWeight: 450,
                 letterSpacing: '-0.005em',
-                color: sm.archived ? tokens.textSecondary : tokens.text,
               }}
               title={titleFor(sm, view, undefined, 'plain')}
             >

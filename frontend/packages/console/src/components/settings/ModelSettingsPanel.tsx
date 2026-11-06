@@ -38,8 +38,11 @@ import {
   Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space,
 } from 'antd'
 import type { InputRef } from 'antd'
-import { ExperimentOutlined, PlusOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons'
+import {
+  DeleteOutlined, EditOutlined, ExperimentOutlined, PlusOutlined, ReloadOutlined, StarFilled, StarOutlined, SyncOutlined, UpOutlined,
+} from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
+import { IconAction } from '../capability/shared'
 import {
   createModel,
   createProvider,
@@ -898,17 +901,22 @@ export function ModelSettingsPanel() {
                     />
                     <span className="fg-rowactions">
                       <Button
-                        type="link" size="small" icon={<ExperimentOutlined />}
+                        size="small" icon={<ExperimentOutlined />}
                         onClick={() => void runProbe(row, false)}
                       >
                         自检
                       </Button>
-                      <Button size="small" onClick={() => (open ? closeProviderCard() : openProviderCard({ mode: 'edit', row }))}>
-                        {open ? '收起' : '编辑'}
-                      </Button>
-                      <Button type="text" size="small" danger onClick={() => setDeleteProviderRow(row)}>
-                        删除
-                      </Button>
+                      <IconAction
+                        icon={open ? <UpOutlined /> : <EditOutlined />}
+                        title={open ? '收起编辑' : '编辑'}
+                        onClick={() => (open ? closeProviderCard() : openProviderCard({ mode: 'edit', row }))}
+                      />
+                      <IconAction
+                        icon={<DeleteOutlined />}
+                        title="删除"
+                        danger
+                        onClick={() => setDeleteProviderRow(row)}
+                      />
                     </span>
                   </div>
                   {/* 开会话之前就能看见的问题清单（后端现算的派生值）。 */}
@@ -1121,22 +1129,29 @@ export function ModelSettingsPanel() {
                           {row.note ? <span className="fg-rowmeta">{row.note}</span> : null}
                           <span className="fg-rowactions">
                             {/* 设/取消默认：**这一行自己的按钮**（v28 起从页头下拉搬来）。
-                                默认行显示「取消默认」，其余行显示「设为默认」——两个方向都点得到，
+                                默认行显示实心星「取消默认」，其余行显示空心星「设为默认」——两个方向都点得到，
                                 所以"取消默认"不是一句做不到的话（服务端也只认这一条单一值）。 */}
                             <Button
                               size="small"
                               disabled={busy}
+                              className={isDefault ? 'fg-star-on' : undefined}
+                              icon={isDefault ? <StarFilled /> : <StarOutlined />}
                               aria-label={isDefault ? '取消默认模型' : '设为默认模型'}
                               onClick={() => void setDefaultModel(isDefault ? undefined : row.id)}
                             >
                               {isDefault ? '取消默认' : '设为默认'}
                             </Button>
-                            <Button size="small" onClick={() => (open ? closeModelCard() : openModelCard({ mode: 'edit', row }))}>
-                              {open ? '收起' : '编辑'}
-                            </Button>
-                            <Button type="text" size="small" danger onClick={() => setDeleteModelRow(row)}>
-                              删除
-                            </Button>
+                            <IconAction
+                              icon={open ? <UpOutlined /> : <EditOutlined />}
+                              title={open ? '收起编辑' : '编辑'}
+                              onClick={() => (open ? closeModelCard() : openModelCard({ mode: 'edit', row }))}
+                            />
+                            <IconAction
+                              icon={<DeleteOutlined />}
+                              title="删除"
+                              danger
+                              onClick={() => setDeleteModelRow(row)}
+                            />
                           </span>
                         </div>
                         {open && target !== null && (

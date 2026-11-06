@@ -23,6 +23,15 @@ interface ModelSelectProps {
   style?: CSSProperties
   /** value=null 时关闭态展示的默认文案（如「跟随默认」）。 */
   defaultLabel?: string
+  /**
+   * 受控值（平台模型行 id）**反查不到候选**时，关闭态展示的文案。
+   *
+   * 反查不到有两种成因：候选还没到（目录为空/慢），或那条模型行已不在收窄后的候选里
+   * （被删 / 换清单 / 运行时此刻没广告它）。两种情况都不该把 **`mdl_…` 原始 id** 摊给用户
+   * ——那是内部身份、对用户没意义。调用方把服务端解析好的展示名（`session.model_name`）喂进来，
+   * 拿不到再退一句人话（如「已设置（模型清单里没有它）」）。缺省 = 不兜底，保持旧的裸 id 行为。
+   */
+  valueLabel?: string
   /** 目录为空时的下拉说明（如登录引导，替代原「浏览全部」弹窗的空态提示）。 */
   emptyNote?: ReactNode
 }
@@ -101,6 +110,7 @@ export function ModelSelect({
   size = 'small',
   style,
   defaultLabel = '跟随默认',
+  valueLabel,
   emptyNote,
 }: ModelSelectProps) {
   // 分组键：底座未下发分组时统一落到空串组（antd 的 options 平铺 + OptGroup 混用需分开处理）。
@@ -123,6 +133,10 @@ export function ModelSelect({
   const valueOfModelID = new Map<string, string>()
   for (const [v, id] of modelIDByValue) valueOfModelID.set(id, v)
   const rawValue = value === null ? undefined : (valueOfModelID.get(value) ?? value)
+  // 反查不到候选（会话引用那条不在收窄后的候选里）：若调用方给了展示名，就补一条**只读合成项**
+  // 让 antd 按 `valueLabel` 渲染关闭态——而不是把 `mdl_…` 原始 id 摊给用户。
+  const unresolved = value !== null && !valueOfModelID.has(value)
+  const fallbackLabel = unresolved ? valueLabel : undefined
 
   const toOption = (v: ConfigOptionValue) => ({
     value: v.value,
@@ -141,6 +155,18 @@ export function ModelSelect({
   const options: SelectProps['options'] = grouped
     ? [...groups.entries()].map(([key, g]) => ({ label: g.name || key, options: g.items.map(toOption) }))
     : [...groups.values()].flatMap((g) => g.items.map(toOption))
+  // 反查不到候选且调用方给了展示名：补一条合成项（`value` = 原始平台 id 才能让 antd 匹配上关闭态），
+  // 只读不可选（平台没声明它 → 选了也白选）。这是"如实显示当前模型是哪个"，不是"编一个可选项"。
+  if (fallbackLabel) {
+    const synthetic = {
+      value,
+      label: fallbackLabel,
+      search: fallbackLabel.toLowerCase(),
+      disabled: true,
+      model: undefined as ConfigOptionValue | undefined,
+    }
+    options.unshift(synthetic)
+  }
 
   return (
     <Select

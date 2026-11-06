@@ -56,7 +56,7 @@ export function ExpertsPanel() {
         }
       />
 
-      <div style={{ padding: '6px 16px 16px' }}>
+      <div style={{ padding: '6px 0 0' }}>
         {d.listError && (
           <Alert
             type="error"
@@ -75,7 +75,7 @@ export function ExpertsPanel() {
         {initialLoading ? (
           <div style={listStyle}>
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} style={{ padding: '16px 4px', borderBottom: `1px solid ${tokens.border}` }}>
+              <div key={i} style={{ padding: '16px 16px', border: `1px solid ${tokens.border}`, borderRadius: tokens.radiusLg }}>
                 <Skeleton active avatar paragraph={{ rows: 1 }} title={{ width: '30%' }} />
               </div>
             ))}
@@ -95,7 +95,7 @@ export function ExpertsPanel() {
         ) : visible.length === 0 ? (
           <CapabilityEmpty text={`没有找到匹配「${query}」的专家，试试其他关键词。`} />
         ) : (
-          <div style={listStyle}>
+          <div style={gridStyle}>
             {visible.map((e) => (
               <ExpertCard
                 key={e.id}
@@ -138,10 +138,18 @@ export function ExpertsPanel() {
   )
 }
 
-// 精致冷白：用行列表 + 细分割线（不用卡片网格）——更克制、信息密度更高。
+// 精致冷白：卡片网格（`<div.padding>` 内由 .fg-cap-grid 控列宽；这里只兜住 padding）。
 const listStyle = {
   display: 'flex',
   flexDirection: 'column',
+  gap: 12,
+  padding: '18px 16px',
+} as const
+const gridStyle = {
+  display: 'grid',
+  gap: 14,
+  padding: '18px 16px',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
 } as const
 
 function filterExperts(experts: Expert[], query: string): Expert[] {

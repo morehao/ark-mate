@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Input, Popconfirm, Switch, Tag, Tooltip } from 'antd'
-import { SearchOutlined } from '@ant-design/icons'
+import { Input, Popconfirm, Switch, Tag, Tooltip } from 'antd'
+import { DeleteOutlined, EditOutlined, SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import type { Skill } from '@ark-mate/types'
 import { skillStatusView, skillWarningsView } from '../../console/capabilityView'
@@ -9,7 +9,7 @@ import { SkillChatCreateModal } from './SkillChatCreateModal'
 import { SkillDetailModal } from './SkillDetailModal'
 import { SkillEditorModal } from './SkillEditorModal'
 import { SkillUploadModal } from './SkillUploadModal'
-import { CapabilityEmpty, CapabilityRow, SectionHeader, StatusTag, smallTag } from './shared'
+import { CapabilityCard, CapabilityEmpty, IconAction, SectionHeader, StatusTag, smallTag } from './shared'
 import { useCapabilityData } from './useCapabilityData'
 
 /** 技能页：管理技能与启用状态；添加 = 通过对话创建 / 上传技能。 */
@@ -68,15 +68,28 @@ export function SkillsPanel() {
             }
           />
         ) : (
-          visible.map((s) => {
-            const warn = skillWarningsView(s.warnings)
-            const health = skillStatusView(s)
-            const enabled = s.enabled ?? true
-            return (
-              <CapabilityRow
-                key={s.id}
-                title={
-                  <>
+          <div style={gridStyle}>
+            {visible.map((s) => {
+              const warn = skillWarningsView(s.warnings)
+              const health = skillStatusView(s)
+              const enabled = s.enabled ?? true
+              const name = s.name || s.id
+              return (
+                <CapabilityCard
+                  key={s.id}
+                  dim={!enabled}
+                  avatar={<span style={{ fontSize: 18 }}>✦</span>}
+                  toggle={
+                    <Tooltip title={enabled ? '停用：助手暂不使用，可随时恢复' : '启用：助手会在合适的对话里自动使用'}>
+                      <Switch
+                        size="small"
+                        checked={enabled}
+                        loading={d.toggleBusy === s.id}
+                        onChange={(next) => void d.doToggleSkill(s, next)}
+                      />
+                    </Tooltip>
+                  }
+                  title={
                     <span
                       role="button"
                       tabIndex={0}
@@ -87,65 +100,53 @@ export function SkillsPanel() {
                           d.openDetail('skill', s.id)
                         }
                       }}
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: tokens.text,
-                        cursor: 'pointer',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        minWidth: 0,
-                      }}
+                      style={{ cursor: 'pointer' }}
                     >
-                      {s.name || s.id}
+                      {name}
                     </span>
-                    <span style={{ fontSize: 10.5, color: tokens.textPlaceholder }}>调用名 {s.id}</span>
-                    {warn && (
-                      <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{warn.hint}</span>}>
-                        <Tag color={warn.color} style={smallTag}>
-                          {warn.text}
-                        </Tag>
+                  }
+                  tags={
+                    <>
+                      <StatusTag label={health.label} tone={health.tone} hint={health.hint} />
+                      {warn && (
+                        <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{warn.hint}</span>}>
+                          <Tag color={warn.color} style={smallTag}>
+                            {warn.text}
+                          </Tag>
+                        </Tooltip>
+                      )}
+                    </>
+                  }
+                  description={s.description || '（无描述）'}
+                  meta={<span style={{ fontFamily: tokens.fontMono, fontSize: 10.5 }}>调用名 {s.id}</span>}
+                  actions={
+                    <>
+                      <Tooltip title="编辑">
+                        <IconAction icon={<EditOutlined />} title={`编辑 ${name}`} onClick={() => d.openSkillForm(s)} />
                       </Tooltip>
-                    )}
-                  </>
-                }
-                description={s.description || '（无描述）'}
-                meta={
-                  <>
-                    <StatusTag label={health.label} tone={health.tone} hint={health.hint} />
-                  </>
-                }
-                actions={
-                  <>
-                    <Button size="small" onClick={() => d.openSkillForm(s)}>
-                      编辑
-                    </Button>
-                    <Popconfirm
-                      title={`删除「${s.name || s.id}」？`}
-                      description="删除后不可恢复；已产生的副本会一并移除。"
-                      okText="删除"
-                      okButtonProps={{ danger: true }}
-                      cancelText="取消"
-                      onConfirm={() => void d.doDelete('skill', s.id)}
-                    >
-                      <Button size="small" danger loading={d.delBusy === s.id}>
-                        删除
-                      </Button>
-                    </Popconfirm>
-                    <Tooltip title={enabled ? '停用：助手暂不使用，可随时恢复' : '启用：助手会在合适的对话里自动使用'}>
-                      <Switch
-                        size="small"
-                        checked={enabled}
-                        loading={d.toggleBusy === s.id}
-                        onChange={(next) => void d.doToggleSkill(s, next)}
-                      />
-                    </Tooltip>
-                  </>
-                }
-              />
-            )
-          })
+                      <Popconfirm
+                        title={`删除「${name}」？`}
+                        description="删除后不可恢复；已产生的副本会一并移除。"
+                        okText="删除"
+                        okButtonProps={{ danger: true }}
+                        cancelText="取消"
+                        onConfirm={() => void d.doDelete('skill', s.id)}
+                      >
+                        <span>
+                          <IconAction
+                            icon={<DeleteOutlined />}
+                            title={`删除 ${name}`}
+                            danger
+                            disabled={d.delBusy === s.id}
+                          />
+                        </span>
+                      </Popconfirm>
+                    </>
+                  }
+                />
+              )
+            })}
+          </div>
         )}
       </div>
 
@@ -182,3 +183,11 @@ function filterSkills(skills: Skill[], query: string) {
     [s.name, s.id, s.description ?? ''].join(' ').toLowerCase().includes(q),
   )
 }
+
+// 卡片网格（与专家/连接器页同列宽；外层 maxHeight 滚动容器负责滚动）。
+const gridStyle = {
+  display: 'grid',
+  gap: 14,
+  padding: '18px 16px',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+} as const

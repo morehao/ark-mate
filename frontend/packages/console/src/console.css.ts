@@ -28,15 +28,38 @@ export const consoleStyleSheet = `
   .fg-anim-blink { animation: fg-blink 1.1s ease-in-out infinite; }
   .fg-anim-pulse { animation: fg-pulse 1.4s ease-in-out infinite; }
 
-  /* 会话列表项：hover / 选中（设计 §16：选中仅浅灰底，去掉主色左竖条，标题不加粗不改色） */
+  /* ——— 菜单项交互态：**全站只在这里定义一次** ———
+     2026-11-06 纠偏：左栏三处（导航项 / 新建会话 / 会话标题）此前各写各的——导航项是灰→近黑，
+     新建会话是近黑→近黑（只加粗），会话标题压根不变色，于是"哪一项被选中"只能靠底色，而底色
+     （softFill #f6f7f9）与左栏自身底色**逐像素相同**，屏幕上等于没有选中态。现在收敛成一套：
+       - 默认：文字 textSecondary（灰）、图标 textPlaceholder（更弱一档）；
+       - hover：文字 text、底 surfaceActive（比左栏底深一档，看得见）；
+       - 选中：文字/图标 accent（全站唯一的彩色，DESIGN.md 里"选中态"就归它）+ 底 selectedBg。
+     新增任何"可选中项"（导航行 / 列表行 / 设置分节 / 分组行…）**只引用这组变量**，不要再写字面色值——
+     这条就是"不要再出现好几处各不相同的选中态"的兜底（改一处 = 全站一致）。
+     注：这是模板字符串，注释里不能出现反引号。 */
+  :root {
+    --fg-menu-idle: ${tokens.textSecondary};
+    --fg-menu-idle-icon: ${tokens.textPlaceholder};
+    --fg-menu-hover-color: ${tokens.text};
+    --fg-menu-hover-bg: ${tokens.surfaceActive};
+    --fg-menu-on-color: ${tokens.accent};
+    --fg-menu-on-bg: ${tokens.selectedBg};
+  }
+
+  /* 会话列表项：hover / 选中走同一套菜单交互态（选中 = accent 标题 + selectedBg 底）。 */
   .fg-sess-item {
     position: relative;
     transition: background 0.12s ease;
   }
-  .fg-sess-item:hover { background: ${tokens.softFill}; }
+  .fg-sess-item:hover { background: var(--fg-menu-hover-bg); }
   .fg-sess-item.fg-on {
-    background: ${tokens.softFill};
+    background: var(--fg-menu-on-bg);
   }
+  /* 会话标题：颜色由交互态决定（组件只出结构，不再内联色值）。 */
+  .fg-sess-title { color: var(--fg-menu-idle); }
+  .fg-sess-item:hover .fg-sess-title { color: var(--fg-menu-hover-color); }
+  .fg-sess-item.fg-on .fg-sess-title { color: var(--fg-menu-on-color); }
   .fg-sess-item:disabled { opacity: 0.6; cursor: not-allowed; }
   .fg-sess-item:disabled:hover { background: transparent; }
 
@@ -105,7 +128,7 @@ export const consoleStyleSheet = `
     border: 0;
     border-radius: 10px;
     background: transparent;
-    color: ${tokens.text};
+    color: var(--fg-menu-idle);
     font: inherit;
     font-size: 13.5px;
     font-weight: 500;
@@ -115,18 +138,23 @@ export const consoleStyleSheet = `
     transition: background 0.12s ease, color 0.12s ease;
   }
   /* v2.2：新建是**导航行**不是色块 CTA（参考实现里「新任务 / 新建任务」都是普通行）。
-     左栏首屏因此只留一处色块：品牌 mark。 */
-  .fg-rail-new:hover { background: ${tokens.surfaceActive}; }
-  .fg-rail-new:active { background: ${tokens.surfaceActive}; }
+     左栏首屏因此只留一处色块：品牌 mark。
+     2026-11-06 再纠偏：它同时承载「/sessions」的「你在这」，所以文字/图标走**与其他菜单项同一套**
+     交互态（默认灰、选中 accent）——此前默认就是近黑 + 500 字重，比未选中的导航项重一档，
+     结果"没被选中却像是全栏唯一被选中的那一行"。 */
+  .fg-rail-new:hover {
+    background: var(--fg-menu-hover-bg);
+    color: var(--fg-menu-hover-color);
+  }
+  .fg-rail-new:active { background: var(--fg-menu-hover-bg); }
   .fg-rail-new:focus-visible {
     outline: 2px solid ${tokens.accent};
     outline-offset: 2px;
   }
-  /* /sessions 上它承载「你在这」：与导航项同一套选中语汇（底色 + 深字）。 */
+  /* /sessions 上它承载「你在这」：与导航项同一套选中语汇（accent 文字 + 选中底，不加粗）。 */
   .fg-rail-new.fg-on {
-    background: ${tokens.surfaceActive};
-    color: ${tokens.text};
-    font-weight: 600;
+    background: var(--fg-menu-on-bg);
+    color: var(--fg-menu-on-color);
   }
   .fg-rail-new .fg-rail-new-icon {
     width: 14px;
@@ -134,9 +162,10 @@ export const consoleStyleSheet = `
     flex: none;
     display: grid;
     place-items: center;
-    color: ${tokens.textSecondary};
+    color: var(--fg-menu-idle-icon);
   }
-  .fg-rail-new.fg-on .fg-rail-new-icon { color: ${tokens.text}; }
+  .fg-rail-new:hover .fg-rail-new-icon { color: var(--fg-menu-hover-color); }
+  .fg-rail-new.fg-on .fg-rail-new-icon { color: var(--fg-menu-on-color); }
 
   /* 导航区：一级 32px / 二级 30px，条目间距 1px */
   .fg-nav-rail {
@@ -162,16 +191,20 @@ export const consoleStyleSheet = `
     text-align: left;
     border-radius: 8px;
     font-size: 13px;
-    color: ${tokens.textSecondary};
+    color: var(--fg-menu-idle);
     text-decoration: none;
     cursor: pointer;
     user-select: none;
     transition: background 0.12s ease, color 0.12s ease;
   }
-  .fg-navitem:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
-  /* 选中态（设计 §16 / §17）：浅灰底 + 主色文字 + 主色图标，**不加粗**（与未选中同字重）。 */
-  .fg-navitem.fg-on { background: ${tokens.softFill}; color: ${tokens.primary}; }
-  /* 一级项图标：定宽 16 让所有文案左对齐；未选中比文案再弱一档，选中吃主色 */
+  .fg-navitem:hover {
+    background: var(--fg-menu-hover-bg);
+    color: var(--fg-menu-hover-color);
+  }
+  /* 选中态：与全站菜单项同一套（accent 文字/图标 + selectedBg 底），**不加粗**（与未选中同字重）。
+     放在左栏底色 softFill 上的旧写法（softFill 底 + 近黑字）与栏底逐像素相同 = 选中不可见。 */
+  .fg-navitem.fg-on { background: var(--fg-menu-on-bg); color: var(--fg-menu-on-color); }
+  /* 一级项图标：定宽 16 让所有文案左对齐；未选中比文案再弱一档，选中吃 accent */
   .fg-navitem-icon {
     flex: none;
     display: inline-flex;
@@ -179,10 +212,10 @@ export const consoleStyleSheet = `
     justify-content: center;
     width: 16px;
     font-size: 14.5px;
-    color: ${tokens.textPlaceholder};
+    color: var(--fg-menu-idle-icon);
   }
-  .fg-navitem:hover .fg-navitem-icon { color: ${tokens.textSecondary}; }
-  .fg-navitem.fg-on .fg-navitem-icon { color: ${tokens.primary}; }
+  .fg-navitem:hover .fg-navitem-icon { color: var(--fg-menu-hover-color); }
+  .fg-navitem.fg-on .fg-navitem-icon { color: var(--fg-menu-on-color); }
   .fg-navitem-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fg-navitem-count { flex: none; font-family: ${tokens.fontMono}; font-size: 11px; color: ${tokens.textSecondary}; }
 
@@ -199,9 +232,9 @@ export const consoleStyleSheet = `
     height: 24px;
     color: ${tokens.textPlaceholder};
   }
-  .fg-navgroup-row:hover .fg-navgroup-caret { color: ${tokens.textSecondary}; }
+  .fg-navgroup-row:hover .fg-navgroup-caret { color: var(--fg-menu-hover-color); }
 
-  /* 二级项：缩进 26px；命中态用主色文字 + 弱底 */
+  /* 二级项：缩进 26px；命中态与一级项同一套（accent 文字 + selectedBg 底） */
   .fg-navsub-list { display: flex; flex-direction: column; gap: 1px; }
   .fg-navsub {
     display: flex;
@@ -211,14 +244,14 @@ export const consoleStyleSheet = `
     padding: 0 10px 0 26px;
     border-radius: 8px;
     font-size: 12.5px;
-    color: ${tokens.textSecondary};
+    color: var(--fg-menu-idle);
     text-decoration: none;
     cursor: pointer;
     transition: background 0.12s ease, color 0.12s ease;
   }
-  .fg-navsub:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
-  /* 二级项选中：同主色文字 + 浅灰底，不加粗（设计 §17）。 */
-  .fg-navsub.fg-on { background: ${tokens.softFill}; color: ${tokens.primary}; }
+  .fg-navsub:hover { background: var(--fg-menu-hover-bg); color: var(--fg-menu-hover-color); }
+  /* 二级项选中：同一套菜单交互态，不加粗。 */
+  .fg-navsub.fg-on { background: var(--fg-menu-on-bg); color: var(--fg-menu-on-color); }
   .fg-navsub-label { flex: 1; min-width: 0; }
   /* pending（待开发）：可读但不可点，右挂「待开发」标签 */
   .fg-navsub.fg-pending { color: ${tokens.textPlaceholder}; cursor: default; }
@@ -293,11 +326,11 @@ export const consoleStyleSheet = `
     font: inherit;
     text-align: left;
     cursor: pointer;
-    color: ${tokens.textSecondary};
+    color: var(--fg-menu-idle);
     transition: background 0.12s ease, color 0.12s ease;
   }
-  .fg-setdlg-item:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
-  .fg-setdlg-item.fg-on { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-setdlg-item:hover { background: var(--fg-menu-hover-bg); color: var(--fg-menu-hover-color); }
+  .fg-setdlg-item.fg-on { background: var(--fg-menu-on-bg); color: var(--fg-menu-on-color); }
   .fg-setdlg-icon {
     flex: none;
     display: inline-flex;
@@ -305,13 +338,13 @@ export const consoleStyleSheet = `
     justify-content: center;
     width: 18px;
     font-size: 15px;
-    color: ${tokens.textPlaceholder};
+    color: var(--fg-menu-idle-icon);
   }
-  .fg-setdlg-item:hover .fg-setdlg-icon { color: ${tokens.textSecondary}; }
-  .fg-setdlg-item.fg-on .fg-setdlg-icon { color: ${tokens.primary}; }
+  .fg-setdlg-item:hover .fg-setdlg-icon { color: var(--fg-menu-hover-color); }
+  .fg-setdlg-item.fg-on .fg-setdlg-icon { color: var(--fg-menu-on-color); }
   .fg-setdlg-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
   .fg-setdlg-label { font-size: 13px; line-height: 1.4; }
-  .fg-setdlg-item.fg-on .fg-setdlg-label { font-weight: 600; }
+  /* 选中不再加粗：与导航项/会话行同一套"只变色 + 变色底"的语言（加粗会让同一栏里出现第三种强调）。 */
   .fg-setdlg-hint { font-size: 11px; line-height: 1.4; color: ${tokens.textPlaceholder}; }
   .fg-setdlg-body { flex: 1; min-width: 0; padding-left: 20px; overflow-y: auto; }
 
@@ -414,6 +447,9 @@ export const consoleStyleSheet = `
   .fg-rowtag.fg-clickable { cursor: pointer; }
   .fg-rowtag.fg-clickable:hover { border-color: ${tokens.primary}; color: ${tokens.primary}; }
   .fg-rowactions { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+  /* 「取消默认」行（已默认）：实心星 + 强调色描边，一眼看出这条是默认（与扩展页按钮同族） */
+  .fg-rowactions .ant-btn.fg-star-on { color: ${tokens.accent}; border-color: ${tokens.accent}; }
+  .fg-rowactions .ant-btn.fg-star-on:hover { color: ${tokens.accentHover}; border-color: ${tokens.accentHover}; background: ${tokens.accentSoft}; }
   .fg-rowproblems { margin: 0; font-size: 11.5px; line-height: 1.5; color: ${tokens.warning}; }
 
   /* 密钥状态点：绿 = 已配置、红 = 缺失。绝不回显密钥本身。 */
@@ -657,8 +693,8 @@ export const consoleStyleSheet = `
   .fg-chip-ico { display: inline-flex; align-items: center; font-size: 13px; color: ${tokens.textPlaceholder}; }
   .fg-chip-label { line-height: 1; }
   .fg-chip-chev { font-size: 10px; color: ${tokens.textPlaceholder}; }
-  .fg-chip.fg-on { color: ${tokens.primary}; }
-  .fg-chip.fg-on .fg-chip-ico { color: ${tokens.primary}; }
+  .fg-chip.fg-on { color: var(--fg-menu-on-color); }
+  .fg-chip.fg-on .fg-chip-ico { color: var(--fg-menu-on-color); }
   /* 权限 chip 菜单项：一行 + 说明副行。 */
   .fg-perm-opt { display: flex; flex-direction: column; gap: 1px; padding: 2px 0; }
   .fg-perm-opt-name { font-size: 13px; line-height: 1.4; }
@@ -749,7 +785,7 @@ export const consoleStyleSheet = `
     color: ${tokens.text};
   }
   /* 键盘高亮与鼠标悬停共用一个态：两边都能看出"Enter 会填入哪一条"。 */
-  .fg-cmd-item.fg-on { background: ${tokens.softFill}; }
+  .fg-cmd-item.fg-on { background: var(--fg-menu-on-bg); }
   .fg-cmd-name {
     flex: none;
     font-family: ${tokens.fontMono};
@@ -919,8 +955,8 @@ export const consoleStyleSheet = `
     color: ${tokens.primary};
   }
 
-  /* ——— 会话内改能力（M3-8）：输入区的 `+` 菜单与能力 chip ———
-     默认态只有一颗 `+`（没有任何 chip）：这是"这条会话没限制能力"的如实样子，不是省掉了一层。 */
+  /* ——— 会话内改能力（M3-8）：输入区的「+」菜单与能力 chip ———
+     默认态只有一颗「+」（没有任何 chip）：这是"这条会话没限制能力"的如实样子，不是省掉了一层。 */
   .fg-cap-bar { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
   .fg-cap-add {
     display: inline-flex; align-items: center; justify-content: center;
@@ -957,7 +993,7 @@ export const consoleStyleSheet = `
     font-family: ${tokens.fontMono}; font-size: 10.5px; color: ${tokens.textPlaceholder};
   }
   .fg-cap-chip-chev { font-size: 9px; color: ${tokens.textPlaceholder}; }
-  /* `+` 菜单（专家 / 技能 / 连接器）：一行一项 + 右侧 chevron，与工作空间弹层同一套语言。 */
+  /* 「+」菜单（专家 / 技能 / 连接器）：一行一项 + 右侧 chevron，与工作空间弹层同一套语言。 */
   .fg-cap-menu { display: flex; flex-direction: column; min-width: 200px; }
   .fg-cap-menu-item {
     display: flex; align-items: center; gap: 8px;
@@ -1175,9 +1211,9 @@ export const consoleStyleSheet = `
   .fg-ws-grow { flex: 1 1 auto; min-height: 0; }
   .fg-ws-divider { flex: none; width: 1px; background: ${tokens.border}; }
   .fg-ws-rowseat { display: flex; flex: none; }
-  /* 选中态：柔性底 + 主色开文件夹图标（与 hover 区分得开——hover 是灰底，选中是主色底）。 */
-  .fg-ws-rowsel, .fg-ws-rowsel:hover:not(:disabled) { background: ${tokens.selectedBg}; }
-  .fg-ws-icon-btn.fg-ws-open, .fg-ws-open { color: ${tokens.primary}; }
+  /* 选中态：selectedBg 底 + accent 开文件夹图标（与 hover 区分得开——hover 是 surfaceActive 灰底）。 */
+  .fg-ws-rowsel, .fg-ws-rowsel:hover:not(:disabled) { background: var(--fg-menu-on-bg); }
+  .fg-ws-icon-btn.fg-ws-open, .fg-ws-open { color: var(--fg-menu-on-color); }
   .fg-ws-item-chev { flex: none; font-size: 10px; color: ${tokens.textPlaceholder}; }
   .fg-ws-roots { display: flex; flex-direction: column; gap: 2px; flex: none; }
   .fg-ws-files { display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow-y: auto; flex: none; }
@@ -1265,42 +1301,21 @@ export const consoleStyleSheet = `
      **搜索展开时标题与动作两颗一起收起**，输入框占据整条区头。
      之所以要 overflow:hidden：收起靠的是 max-width 过渡而不是卸载 DOM，
      不裁掉溢出的话，宽度收缩期间图标会溢到右边压住列表。 */
-  /* 宽屏会话信息栏（v2.2，≥1600 才出现）。
-     1912 宽窗口下转录列只有 840，两侧各留 362 空白；把右侧空白做成「会话事实」，
-     比把正文拉到 1200 宽（行长失控）更合理。窄屏不渲染（display:none）。 */
-  .fg-chat-side { display: none; }
-  @media (min-width: 1600px) {
-    .fg-chat-side {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      width: 320px;
-      flex: none;
-      min-height: 0;
-      overflow-y: auto;
-      padding: 16px;
-      border-left: 1px solid ${tokens.border};
-      background: ${tokens.surface};
-    }
-  }
-  .fg-chat-side-h {
-    font-family: ${tokens.fontMono};
-    font-size: 10px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: ${tokens.textPlaceholder};
-  }
-  .fg-chat-side-row {
+  /* 会话信息右栏（v2.3，合并原只读宽栏与抽屉）：宽屏 ≥1280 才渲染（渲染与否还由
+     ChatPage 的 infoOpen 控制，默认收起 → 主列居中）。宽度 340，右侧贴边、左侧分隔线。
+     内容由 SessionInfoPanel 承载（与窄屏抽屉同源），不再是只读残缺副本。
+     窄屏（<1280）不渲染，改由切换按钮打开抽屉。 */
+  .fg-info-panel {
     display: flex;
-    gap: 8px;
-    padding: 6px 0;
-    border-top: 1px solid ${tokens.border};
-    font-size: 12px;
-    line-height: 19px;
+    flex-direction: column;
+    gap: 14px;
+    width: 340px;
+    flex: none;
+    min-height: 0;
+    overflow-y: auto;
+    border-left: 1px solid ${tokens.border};
+    background: ${tokens.surface};
   }
-  .fg-chat-side-row:first-of-type { border-top: 0; }
-  .fg-chat-side-k { flex: none; width: 62px; color: ${tokens.textPlaceholder}; font-family: ${tokens.fontMono}; font-size: 10.5px; }
-  .fg-chat-side-v { flex: 1; min-width: 0; color: ${tokens.text}; overflow-wrap: anywhere; }
 
   /* 用量页总览四卡（v2.2）：宽屏 4 列 → ≤1280 两列 → ≤760 单列。
      原来是写死的 repeat(4, minmax(0,1fr))，窄窗口上每格被压到看不清数字。 */
@@ -1327,15 +1342,16 @@ export const consoleStyleSheet = `
     padding: 0;
     border: 0;
     background: transparent;
-    color: ${tokens.textPlaceholder};
+    color: var(--fg-menu-idle);
     font: inherit;
     font-size: 13px;
     font-weight: 400;
     cursor: pointer;
     transition: color 0.12s ease;
   }
-  .fg-rail-tab:hover { color: ${tokens.textSecondary}; }
-  .fg-rail-tab.fg-on { color: ${tokens.text}; font-weight: 600; }
+  .fg-rail-tab:hover { color: var(--fg-menu-hover-color); }
+  /* 选中 = 同一套色（accent）；下划线是 tab 自己的形态，不另起一套颜色。 */
+  .fg-rail-tab.fg-on { color: var(--fg-menu-on-color); font-weight: 600; }
   .fg-rail-tab.fg-on::after {
     content: '';
     position: absolute;
@@ -1344,7 +1360,7 @@ export const consoleStyleSheet = `
     bottom: -1px;
     height: 2px;
     border-radius: 2px;
-    background: ${tokens.text};
+    background: var(--fg-menu-on-color);
   }
   .fg-rail-tab-n { margin-left: 4px; font-family: ${tokens.fontMono}; font-size: 10px; color: ${tokens.textPlaceholder}; }
   .fg-rail-tab:focus-visible { outline: 2px solid ${tokens.accent}; outline-offset: 2px; border-radius: 4px; }
@@ -1468,11 +1484,12 @@ export const consoleStyleSheet = `
     overflow: hidden;
     transition: background 0.12s ease;
   }
-  .fg-wsgroup-row:hover { background: ${tokens.softFill}; }
-  /* 展开态不再靠箭头：底色 + 组内会话行左缩进（需求 3）。
-     含当前会话的组用主色名——"你在哪"必须在未悬停时也看得见。 */
-  .fg-wsgroup-row.fg-open { background: ${tokens.softFill}; }
-  .fg-wsgroup-row.fg-current .fg-wsgroup-name { color: ${tokens.primary}; }
+  /* 分组行自身底色不再恒为 softFill：那与左栏底色逐像素相同，看不出"这是可点的组头"。
+     展开态 = surfaceActive 底（比栏底深一档）+ 组内会话行左缩进（需求 3）。 */
+  .fg-wsgroup-row.fg-open { background: var(--fg-menu-hover-bg); }
+  .fg-wsgroup-row:hover { background: var(--fg-menu-hover-bg); }
+  /* 含当前会话的组用 accent 名——"你在哪"必须在未悬停时也看得见（与菜单选中同一套色）。 */
+  .fg-wsgroup-row.fg-current .fg-wsgroup-name { color: var(--fg-menu-on-color); }
   .fg-wsgroup-body { padding-left: 10px; }
   /* 目录不可用时的警示图标：窄槽，不再承担方向指示。 */
   .fg-wsgroup-lead {
@@ -1489,15 +1506,15 @@ export const consoleStyleSheet = `
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .fg-wsgroup-name.fg-unnamed { font-style: italic; font-weight: 500; color: ${tokens.textSecondary}; }
+  .fg-wsgroup-name.fg-unnamed { font-weight: 500; color: ${tokens.textSecondary}; }
   .fg-wsgroup-warn { flex: none; color: ${tokens.warning}; font-size: 11.5px; }
   /* 组内配额：「展开其余 N 个会话」/「收起」——一行文字按钮，不做成大块空态。 */
   .fg-wsgroup-more {
     display: flex;
     align-items: center;
     gap: 5px;
-    width: calc(100% - 36px);
-    margin: 1px 8px 3px 28px;
+    width: calc(100% - 18px);
+    margin: 1px 8px 3px 10px;
     padding: 4px 8px;
     border: 0;
     background: transparent;
@@ -1559,48 +1576,8 @@ export const consoleStyleSheet = `
   .fg-sess-item:hover .fg-sess-status,
   .fg-sess-item.fg-on .fg-sess-status { opacity: 0; }
 
-  /* 定时任务列表卡行（原型 §F 的 .auto-row）：图标 + 主体 + 动作三列。 */
-  .fg-auto-row {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 14px;
-    border: 1px solid ${tokens.border};
-    border-radius: ${tokens.radiusMd};
-    background: ${tokens.surface};
-    transition: border-color 0.12s ease;
-  }
-  .fg-auto-row:hover { border-color: ${tokens.borderStrong}; }
-  .fg-auto-ico {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    flex: none;
-    display: grid;
-    place-items: center;
-    font-size: 18px;
-    background: ${tokens.primarySoft};
-    color: ${tokens.primary};
-  }
-  .fg-auto-main { flex: 1; min-width: 0; }
-  .fg-auto-name {
-    font-size: 14px;
-    font-weight: 650;
-    color: ${tokens.text};
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-  .fg-auto-name > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .fg-auto-sched { font-size: 12.5px; color: ${tokens.textSecondary}; margin-top: 2px; }
-  .fg-auto-next {
-    font-size: 11px;
-    font-family: ${tokens.fontMono};
-    color: ${tokens.textPlaceholder};
-    margin-top: 3px;
-  }
-  .fg-auto-act { display: flex; gap: 8px; flex: none; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  /* 定时任务列表：2026-11-06 起由「横卡行（.fg-auto-*）」改为与能力页同款卡片网格
+     （.fg-cap-grid / .fg-cap-card），旧 .fg-auto-* 类已随迁移删除。 */
 
   /* 资料库节点卡行（原型 §E 的 .mat-row）：图标 + 名称/类型·大小 + 更新时间 + 删除。 */
   .fg-mat-list { display: flex; flex-direction: column; }
@@ -1627,6 +1604,81 @@ export const consoleStyleSheet = `
   .fg-mat-name { font-size: 13.5px; font-weight: 600; color: ${tokens.text}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fg-mat-meta { font-size: 11.5px; color: ${tokens.textPlaceholder}; font-family: ${tokens.fontMono}; margin-top: 1px; }
   .fg-mat-when { flex: none; font-size: 11.5px; color: ${tokens.textPlaceholder}; font-family: ${tokens.fontMono}; white-space: nowrap; }
+
+  /* —— 能力卡片网格（专家 / 技能 / 连接器三页共用，2026-11-06 起由行列表改卡片式）——
+     单面白卡：头像块 + 名称/标签 → 描述 → hairline + 元信息/动作；hover 仅抬边+轻阴影，不上移。 */
+  .fg-cap-grid { display: grid; gap: 14px; padding: 18px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .fg-cap-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    background: ${tokens.surface};
+    border: 1px solid ${tokens.border};
+    border-radius: ${tokens.radiusLg}px;
+    transition: border-color 0.14s ease, box-shadow 0.14s ease;
+  }
+  .fg-cap-card:hover { border-color: ${tokens.borderStrong}; box-shadow: 0 6px 18px rgba(17, 24, 39, 0.06); }
+  .fg-cap-card.is-dim { opacity: 0.62; }
+  .fg-cap-top { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
+  .fg-cap-ava {
+    width: 38px;
+    height: 38px;
+    flex: none;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    background: ${tokens.softFill};
+    border: 1px solid ${tokens.border};
+    color: ${tokens.textSecondary};
+    font-size: 18px;
+  }
+  .fg-cap-nm { flex: 1; min-width: 0; }
+  .fg-cap-name { font-size: 14px; font-weight: 650; letter-spacing: -0.005em; color: ${tokens.text}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fg-cap-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+  .fg-cap-desc {
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: ${tokens.textSecondary};
+    min-height: 38px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .fg-cap-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 11px;
+    margin-top: auto;
+    border-top: 1px solid ${tokens.border};
+    font-size: 11px;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-cap-meta { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; overflow: hidden; }
+  .fg-cap-acts { display: flex; align-items: center; gap: 4px; flex: none; }
+  .fg-cap-sep { width: 1px; height: 9px; background: ${tokens.borderStrong}; flex: none; }
+
+  /* 危险操作图标按钮（全站统一「删除」外观）：静息即红字一眼可辨，hover 才染红底红边；
+     与次按钮同尺寸/圆角，不投影。用于能力卡片、资料库等行内删除位。 */
+  .fg-icon-btn {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: ${tokens.radiusSm}px;
+    color: ${tokens.textPlaceholder};
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .fg-icon-btn:hover { background: ${tokens.softFill}; color: ${tokens.text}; border-color: ${tokens.border}; }
+  .fg-icon-btn.fg-icon-danger { color: ${tokens.error}; }
+  .fg-icon-btn.fg-icon-danger:hover { background: ${tokens.dangerSoft}; color: ${tokens.error}; border-color: ${tokens.dangerBorder}; }
+  .fg-icon-btn:disabled { cursor: default; opacity: 0.5; }
 
   /* 会话信息浮层（悬停会话行弹出，设计 §13–§19）：白卡 + hairline + 阴影（浮层允许阴影）。
      内容四行：标题 / 所属空间 / 模型 / 更新时间（空行不渲染）。 */

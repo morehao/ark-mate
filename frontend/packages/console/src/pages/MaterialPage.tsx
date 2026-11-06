@@ -22,7 +22,6 @@ import {
   DeleteOutlined,
   FileTextOutlined,
   FolderOutlined,
-  HomeOutlined,
   LinkOutlined,
   TableOutlined,
   UploadOutlined,
@@ -30,6 +29,7 @@ import {
   CloudUploadOutlined,
 } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
+import { IconAction } from '../components/capability/shared'
 import {
   createMaterialNode,
   deleteMaterialNode,
@@ -213,9 +213,14 @@ export function MaterialPage() {
         <Popconfirm
           title="删除？"
           description={row.node_kind === 'folder' ? '文件夹将连同子节点一起删除' : '确认删除该节点？'}
+          okText="删除"
+          okButtonProps={{ danger: true }}
+          cancelText="取消"
           onConfirm={() => void doDelete(row.id)}
         >
-          <Button size="small" type="text" icon={<DeleteOutlined />} title="删除" />
+          <span>
+            <IconAction icon={<DeleteOutlined />} title="删除" danger />
+          </span>
         </Popconfirm>
       </div>
     )
@@ -239,20 +244,21 @@ export function MaterialPage() {
     { title: '片段', dataIndex: 'snippet', render: (v: string) => <span style={{ color: tokens.textSecondary }}>{v}</span> },
   ]
 
+  // 面包屑：根目录不再显示「🏠 资料库」那一行（与页面标题重复，2026-11-06 去掉）；
+  // 只有进入子文件夹后才出路径，首项用「全部」回根。
   const breadcrumb = useMemo(
-    () => (
-      <Space size={4} wrap>
-        <a onClick={() => gotoCrumb(-1)}>
-          <HomeOutlined /> 资料库
-        </a>
-        {stack.map((c, i) => (
-          <span key={c.id}>
-            <span style={{ color: tokens.textSecondary }}>/</span>{' '}
-            <a onClick={() => gotoCrumb(i)}>{c.title || '未命名'}</a>
-          </span>
-        ))}
-      </Space>
-    ),
+    () =>
+      stack.length === 0 ? null : (
+        <Space size={4} wrap>
+          <a onClick={() => gotoCrumb(-1)}>全部</a>
+          {stack.map((c, i) => (
+            <span key={c.id}>
+              <span style={{ color: tokens.textSecondary }}>/</span>{' '}
+              <a onClick={() => gotoCrumb(i)}>{c.title || '未命名'}</a>
+            </span>
+          ))}
+        </Space>
+      ),
     [stack],
   )
 
@@ -299,16 +305,19 @@ export function MaterialPage() {
           </>
         }
       />
-      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${tokens.border}` }}>
-        {hits !== null ? (
-          <Space>
-            <span style={{ color: tokens.textSecondary }}>搜索「{searchQ}」</span>
-            <a onClick={() => { setHits(null); setSearchQ('') }}>返回目录</a>
-          </Space>
-        ) : (
-          breadcrumb
-        )}
-      </div>
+      {/* 根目录不显示面包屑行（原来只有「🏠 资料库」一个重复节点）；搜索态或进入子目录时才出这一条。 */}
+      {(hits !== null || breadcrumb !== null) && (
+        <div style={{ padding: '10px 14px', borderBottom: `1px solid ${tokens.border}` }}>
+          {hits !== null ? (
+            <Space>
+              <span style={{ color: tokens.textSecondary }}>搜索「{searchQ}」</span>
+              <a onClick={() => { setHits(null); setSearchQ('') }}>返回目录</a>
+            </Space>
+          ) : (
+            breadcrumb
+          )}
+        </div>
+      )}
       <Spin spinning={loading}>
         {hits !== null ? (
           hits.length ? (
