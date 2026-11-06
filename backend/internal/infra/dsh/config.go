@@ -31,7 +31,8 @@ const (
 	PatchFlag = "--patch"
 	// dumpSchemaFlag dsh 的配置转储子命令。
 	//
-	// 判据落在 `--dump-config-schema` 上（**已对 0.2.1-rc.2 实测核对**）：只有它输出 JSON 并带
+	// 判据落在 `--dump-config-schema` 上（**已对 0.2.1-rc.2 实测核对；2026-11-06 在 0.2.2-rc.1 复测核对**）：
+	// 只有它输出 JSON 并带
 	// `x-cordis.{complete,diagnostics}`；`--dump-config` 输出的是 YAML、诊断只写 stderr，判据不好机器化。
 	// 代价：schema dump 会 import 各插件模块（可能初始化 profile）——所以 staging home 是必需的。
 	dumpSchemaFlag = "--dump-config-schema"
@@ -376,6 +377,12 @@ func (p *PatchArgs) applyLocked() (bool, error) {
 //
 //  3. **绝不能产出空文件 / 只有注释的文件 / 只有 `---` 的文件**——dsh 逐字说那会 `fails boot`。
 //     本函数在 `len(set.Models) == 0` 时由调用方短路（`revoke`），所以这里只会在"有内容"时被调用。
+//
+//  4. **图片限额字段成对出现且 quantum ≤ max**（0.2.2-rc.1 新增，写错是**拒启**不是静默）：
+//     `llm-pi-ai` 的 provider profile 增加了 `maxRequestImages`（默认 50）与
+//     `imageOffloadCountQuantum`（默认 `min(10, maxRequestImages)`）。本仓当前**不写这两个键**
+//     （走底座默认，安全）；若将来要显式调，注意两者必须成对写、且 `imageOffloadCountQuantum ≤
+//     maxRequestImages`——违反时 `resolveProfiles` 抛错 → dsh **拒启**。
 //
 // 输出是**手写的确定性 YAML**（不引第三方 YAML 库：本仓零新依赖，且键序必须可钉）。
 func buildPatch(set resource.Set) ([]byte, error) {
