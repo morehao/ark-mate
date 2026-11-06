@@ -209,6 +209,7 @@ skill 定义的 `runtimes[]` 候选集即可引用它；与内置 id 冲突、�
 （失败即无身份，不静默回退）；`user` 只走首轮块；`off` 都不交付。后两者会在启动时**主动撤回**已经装上的
 身份 overlay（删文件 + 摘启动参数）——只"不写"会让上一份继续生效，而界面上没有任何一行会说这件事。
 身份只影响模型的自述，不影响任何会话能否运行；交付失败只留一条诊断（`identity_patch_failed`），不拒绝启动。
+机制全貌（文案事实源、两层交付面、为什么不热更、守卫）见 [`agents/identity.md`](agents/identity.md)。
 
 `mcp_gateway`（`auto` 默认 | `off`）控制**远程 MCP 是否经平台侧网关**：`auto` 时远程传输
 （`sse`/`http`/`streamable_http`）的 MCP 由平台代连——底座只看见一条 stdio 条目

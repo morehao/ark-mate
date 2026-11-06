@@ -1,6 +1,6 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { DownOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons'
-import { tokens } from '@ark-mate/ui'
+import { Dot, tokens } from '@ark-mate/ui'
 import { useMate } from '../store'
 import {
   NAV_ENTRIES,
@@ -34,6 +34,18 @@ export function NavRail() {
   const setNavGroupExpanded = useMate((s) => s.setNavGroupExpanded)
 
   const openSettings = useMate((s) => s.openSettings)
+  const wsState = useMate((s) => s.wsState)
+
+  // 连接态：正常时只留一个绿点（常驻心跳，安静），异常/过渡态才补文字——异常本身就该被看见。
+  const wsMeta =
+    wsState === 'open'
+      ? { color: tokens.success, text: '已连接' }
+      : wsState === 'connecting'
+        ? { color: tokens.primary, text: '连接中…', pulse: true }
+        : wsState === 'closed'
+          ? { color: tokens.error, text: '断开（重连中）' }
+          : { color: tokens.textPlaceholder, text: '未连接' }
+  const wsAbnormal = wsState !== 'open'
 
   const pathname = location.pathname
 
@@ -180,6 +192,17 @@ export function NavRail() {
             <span className="fg-navitem-icon">{SETTINGS_MENU.icon}</span>
             <span className="fg-navitem-label">{SETTINGS_MENU.label}</span>
           </button>
+          {/* 连接态：收进左栏 footer「设置」这一行的右端（原来在窗口右下角的状态条里，
+              与左栏内容不同列、对不齐）。正常只有一个绿点，异常/过渡态才出文字。 */}
+          <span
+            className="fg-wsdot"
+            title={wsAbnormal ? wsMeta.text : '连接正常'}
+            aria-label={wsMeta.text}
+            role="status"
+          >
+            <Dot color={wsMeta.color} pulse={'pulse' in wsMeta && !!wsMeta.pulse} size={6} />
+            {wsAbnormal && <span className="fg-wsdot-text">{wsMeta.text}</span>}
+          </span>
         </div>
       </div>
     </aside>

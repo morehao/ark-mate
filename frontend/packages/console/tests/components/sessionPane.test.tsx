@@ -20,6 +20,7 @@ const state = {
   views: {},
   activeId: null,
   railMode: 'active',
+  sessionCounts: { active: 0, archived: 0 },
   workspaces: null,
   setDrawer: () => {},
   togglePin: () => {},
@@ -162,5 +163,17 @@ describe('SessionPane · 会话信息浮层', () => {
     expect(screen.queryByText('模型')).not.toBeInTheDocument()
     // 标题与更新时间仍在
     expect(screen.getByText('更新于')).toBeInTheDocument()
+  })
+})
+
+describe('SessionPane · 会话/归档 tab', () => {
+  it('tab 只显示名称、不再带会话数（会话 / 归档）', () => {
+    state.sessions = []
+    state.sessionCounts = { active: 36, archived: 2 }
+    const { container } = renderPane()
+    const tabs = container.querySelectorAll('.fg-rail-tab')
+    expect(tabs[0].textContent).toBe('会话')
+    expect(tabs[1].textContent).toBe('归档')
+    expect(container.querySelector('.fg-rail-tab-n')).toBeNull()
   })
 })

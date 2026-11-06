@@ -82,4 +82,15 @@ describe('Composer', () => {
     const ta = screen.getByRole('textbox') as HTMLTextAreaElement
     expect(ta.value).toBe('被取回的草稿')
   })
+
+  it('AI 免责提示常驻输入卡下方，且不随 busy 状态变化', () => {
+    const text = '内容由 AI 生成，请核对关键信息后再采用'
+    // 空闲态：应在。
+    const { unmount } = render(<Composer {...baseProps} />)
+    expect(screen.getByText(text)).toBeInTheDocument()
+    unmount()
+    // 进行中（busy）：仍在。
+    render(<Composer {...baseProps} busy />)
+    expect(screen.getByText(text)).toBeInTheDocument()
+  })
 })

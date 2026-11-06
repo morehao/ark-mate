@@ -54,7 +54,6 @@ export function ChatPage() {
 
   const runtime = useMate((s) => s.runtime)
   const sessions = useMate((s) => s.sessions)
-  const workspaces = useMate((s) => s.workspaces)
   const views = useMate((s) => s.views)
   const activeId = useMate((s) => s.activeId)
   const activate = useMate((s) => s.activate)
@@ -241,12 +240,6 @@ export function ChatPage() {
   // 视图可能是服务端快照的部分重放（该轮 user 气泡不在本地条目里），此时回退到历史事件取输入。
   const entries = view?.entries ?? []
   const lastEntry = entries[entries.length - 1]
-  // composer 常驻汇总行：取最近一轮（last_seq 最大）的真实用量（首令牌/总耗时/上下文/成本）。
-  const dockLine = (() => {
-    if (runsBySeq.size <= 0) return ''
-    const mostRecent = [...runsBySeq.entries()].sort((a, b) => b[0] - a[0])[0][1]
-    return fmtRunDockLine(mostRecent.info)
-  })()
   const hasErrTail = !!(!busy && lastEntry && lastEntry.kind === 'system' && lastEntry.tone === 'err')
   const retryLocalText = (() => {
     if (!hasErrTail) return null
@@ -783,21 +776,8 @@ export function ChatPage() {
                     busy={busy}
                     canStop={canStop}
                     onStop={() => void cancel()}
-                    workspace={
-                      activeSum?.cwd
-                        ? {
-                            path: activeSum.cwd,
-                            temporary: !!activeSum.workspace_temporary,
-                            // 「默认工作空间」是**登记事实**（id 对默认 id），不是 temporary：
-                            // v14 起登记过的默认工作空间 temporary=false。
-                            isDefault:
-                              !!activeSum.workspace_id && activeSum.workspace_id === workspaces?.default_id,
-                            // 服务端给的展示名（默认工作空间是「默认工作空间」散文口径）；
-                            // chip 自己按 isDefault 映射成「默认」。
-                            title: activeSum.workspace_title,
-                          }
-                        : undefined
-                    }
+                    // 已有会话不再展示工作空间 chip（工作空间创建即定稿，重复一行是噪声；
+                    // 仍可在会话信息浮层「所属空间」看到）。原先这里按 activeSum.cwd 拼 workspace 传下去。
                     busyNote={
                       // v21：原来还缀着底座名（`run 进行中 · dsh`）——底座信息不进对话框页面，
                       // 底栏只讲用户能感知的状态。
@@ -829,19 +809,6 @@ export function ChatPage() {
                       if (activeId) void updateSessionModel(activeId, v ?? undefined)
                     }}
                   />
-                  {dockLine && (
-                    <div
-                      style={{
-                        padding: '4px 20px 6px',
-                        fontSize: 11,
-                        fontFamily: tokens.fontMono,
-                        color: tokens.textPlaceholder,
-                        textAlign: 'right',
-                      }}
-                    >
-                      {dockLine}
-                    </div>
-                  )}
                 </>
               )}
             </>
