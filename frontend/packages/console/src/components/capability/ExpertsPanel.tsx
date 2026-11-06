@@ -30,7 +30,7 @@ export function ExpertsPanel() {
   return (
     <PageContainer
       title="专家"
-      description="每位专家是一组推荐能力 + 一段角色设定。点卡片编辑；角色设定会在对话开始时自动生效，不显示在对话里。"
+      description="不同场景的「专家」预设：擅长什么、用哪些技能与连接器。"
       extra={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Input

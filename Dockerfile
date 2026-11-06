@@ -16,7 +16,7 @@
 #
 # 受限网络（镜像站 / Go 代理 / npm 镜像）用 build-arg 覆盖，示例见 docs/deployment.md §4：
 #   docker build -t ark-mate:local \
-#     --build-arg NODE_IMAGE=docker.m.daocloud.io/library/node:24-bookworm \
+#     --build-arg NODE_IMAGE=docker.m.daocloud.io/library/node:26-bookworm \
 #     --build-arg GO_IMAGE=docker.m.daocloud.io/library/golang:1.26-bookworm \
 #     --build-arg RUNTIME_IMAGE=docker.m.daocloud.io/library/debian:bookworm-slim \
 #     --build-arg GO_PROXY=https://goproxy.cn,direct .
@@ -34,7 +34,7 @@
 # `runtime_unavailable`。用户面（REST / 控制台）改不了它——换底座要重新构建。选中的 id 若不存在，
 # 核心启动即失败（fail-closed，不给"能启动但没底座"的进程）。
 
-ARG NODE_IMAGE=node:24-bookworm
+ARG NODE_IMAGE=node:26-bookworm
 ARG GO_IMAGE=golang:1.26-bookworm
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 ARG NPM_REGISTRY=https://registry.npmjs.org

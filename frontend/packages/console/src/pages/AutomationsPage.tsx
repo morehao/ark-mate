@@ -309,12 +309,7 @@ export function AutomationsPage() {
   return (
     <PageContainer
       title="定时任务"
-      description={
-        <span>
-          任务到点会自动新建一条会话，并发送你设定的话；运行史
-          <b>包含没跑成的那些</b>（重复、上一次还在跑、触发失败）。停用或错过的时间会在下次启动时按规则处理。
-        </span>
-      }
+      description="让助手按时间自动帮你做事：每天巡检、每周汇总、每月报告。"
       extra={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>

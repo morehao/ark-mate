@@ -55,7 +55,7 @@ export function ConnectorsPanel() {
   return (
     <PageContainer
       title="连接器"
-      description="管理连接器，连接后可以使用它提供的工具、资源与提示词。"
+      description="把外部服务和数据接到助手身边，例如邮箱、网盘、日历。"
       extra={
         <Space size={8}>
           <Input

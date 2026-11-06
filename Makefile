@@ -85,17 +85,17 @@ NODE_VERSION       := $(shell sed 's/^v//' $(NODE_VERSION_FILE) 2>/dev/null)
 NODE_VERSION_MAJOR := $(word 1,$(subst ., ,$(NODE_VERSION)))
 
 # —— Node 主版本自动兜底（2026-11-06）——
-# 背景：`require-node` 只校验 PATH 上 `node -v` 的主版本是不是 24.x，但**不假设**用户用哪个
-# 版本管理器（fnm / nvm / volta / mise / asdf / 系统装……都行，README「前端工具链约定」的口径：
-# 只要 node 落在 24 主版本即可）。问题是：人明明装了 24，但默认 shell 解析到别的版本（比如
-# 默认 26），于是 make 一上来就红。**不绑定 fnm**：这里按「常见版本管理器的安装布局」去探测本机
-# 已经装好的某个 v24.x 的可执行文件，命中就把它的 bin 目录前置到 PATH；一个都没命中就维持原样，
+# 背景：`require-node` 只校验 PATH 上 `node -v` 的主版本是不是「.nvmrc 声明的主版本」，但**不假设**
+# 用户用哪个版本管理器（fnm / nvm / volta / mise / asdf / 系统装……都行，README「前端工具链约定」的
+# 口径：只要 node 落在该主版本即可）。问题是：人明明装了该版本，但默认 shell 解析到别的版本，
+# 于是 make 一上来就红。**不绑定 fnm**：这里按「常见版本管理器的安装布局」去探测本机已经装好的
+# 某个 v$(NODE_VERSION_MAJOR).x 的可执行文件，命中就把它的 bin 目录前置到 PATH；一个都没命中就维持原样，
 # 由 `require-node` 照常报错（响亮失败，不静默）。
 #
 # 探测顺序（先命中的赢）：fnm → nvm → volta → mise → asdf（只认各管理器自己的版本目录，
-# **不**扫 /usr/local/bin 之类共享目录——那里的 node 未必是 24）。每项都要求「目录存在 +
-# 目录下真有可执行 node」才算命中（只看主版本号目录，如 .../v24.x/bin/node）。
-NODE24_DIRS := \
+# **不**扫 /usr/local/bin 之类共享目录——那里的 node 未必是目标主版本）。每项都要求「目录存在 +
+# 目录下真有可执行 node」才算命中（只看主版本号目录，如 .../v$(NODE_VERSION_MAJOR).x/bin/node）。
+NODE_MGR_DIRS := \
 	$(wildcard $(HOME)/.local/share/fnm/node-versions/v$(NODE_VERSION_MAJOR).*/installation/bin) \
 	$(wildcard $(HOME)/.fnm/node-versions/v$(NODE_VERSION_MAJOR).*/installation/bin) \
 	$(wildcard $(HOME)/.nvm/versions/node/v$(NODE_VERSION_MAJOR).*/bin) \
@@ -104,9 +104,9 @@ NODE24_DIRS := \
 	$(wildcard $(HOME)/.asdf/installs/nodejs/$(NODE_VERSION_MAJOR).*/bin)
 # 在候选里挑第一个「真的含可执行 node」的 bin 目录（Make 的 $(wildcard) 只证明目录存在，不证明
 # 里面有 node；这一步交给 shell 判，避免把空目录前置进 PATH 造成假命中）。
-NODE_AUTO_BIN := $(shell for d in $(NODE24_DIRS); do if [ -x "$$d/node" ]; then echo "$$d"; break; fi; done)
+NODE_AUTO_BIN := $(shell for d in $(NODE_MGR_DIRS); do if [ -x "$$d/node" ]; then echo "$$d"; break; fi; done)
 
-# 只有当**当前** node 主版本不符、且**探测到了** 24 的 bin 目录时，才自动把该目录前置到 PATH：
+# 只有当**当前** node 主版本不符、且**探测到了**目标主版本的 bin 目录时，才自动把该目录前置到 PATH：
 #   - 当前已符合 → 不动（保留用户自己的选择，不强行改写）
 #   - 当前不符且没探测到 → 不动（交给 require-node 报错）
 #   - 当前不符但有探测结果 → export PATH，18 个使用 require-node 的 recipe 一行都不用改。
@@ -196,7 +196,7 @@ endef
 
 # 运行前守卫（单行 shell，供 dev/web 作为独立 recipe 行调用）。
 # 走到报错这一步，意味着「当前 node 主版本不符，且上面的自动探测也没在本机找到 $(NODE_VERSION_MAJOR).x」。
-# 所以这里不假设你用哪个版本管理器：只提示「切到 24」，并列出各家常见命令作参考，不写死 fnm。
+# 所以这里不假设你用哪个版本管理器：只提示「切到目标主版本」，并列出各家常见命令作参考，不写死 fnm。
 define require-node
 	@cur=$$(node -v 2>/dev/null | sed 's/^v//'); if [ "$${cur%%.*}" != "$(NODE_VERSION_MAJOR)" ]; then echo "==> Node 版本不符：frontend/.nvmrc 要求 Node $(NODE_VERSION_MAJOR).x（$(NODE_VERSION)），当前 $${cur:-未安装}"; echo "    本机未探测到 $(NODE_VERSION_MAJOR).x 的安装，请切到该主版本（任选你的版本管理器）："; echo "      fnm use $(NODE_VERSION_MAJOR)      | nvm install $(NODE_VERSION_MAJOR) && nvm use $(NODE_VERSION_MAJOR)"; echo "      volta install node@$(NODE_VERSION_MAJOR) | mise use node@$(NODE_VERSION_MAJOR)      | asdf install nodejs latest && asdf local nodejs latest"; exit 1; fi
 endef
@@ -549,11 +549,11 @@ clean:
 #   make image                                    —— 最小镜像（只含 mate 本体）
 #   IMAGE_TAG=runtimes make image/run             —— 起容器（数据落具名卷，端口只绑回环）
 # 受限网络（镜像站 / Go 代理 / npm 镜像）直接覆盖下面的变量，例如：
-#   make image NODE_IMAGE=docker.m.daocloud.io/library/node:24-bookworm \
+#   make image NODE_IMAGE=docker.m.daocloud.io/library/node:26-bookworm \
 #              GO_IMAGE=docker.m.daocloud.io/library/golang:1.26-bookworm \
 #              RUNTIME_IMAGE=docker.m.daocloud.io/library/debian:bookworm-slim \
 #              GO_PROXY=https://goproxy.cn,direct
-NODE_IMAGE       ?= node:24-bookworm
+NODE_IMAGE       ?= node:26-bookworm
 GO_IMAGE         ?= golang:1.26-bookworm
 RUNTIME_IMAGE    ?= debian:bookworm-slim
 NPM_REGISTRY     ?= https://registry.npmjs.org
