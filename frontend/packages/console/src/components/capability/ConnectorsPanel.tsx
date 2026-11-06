@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Input, Popconfirm, Space, Switch, Tag, Tooltip } from 'antd'
+import { Button, Input, Popconfirm, Switch, Tag, Tooltip } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import { mcpConnState, mcpRowDescription } from '../../console/capabilityView'
@@ -53,30 +53,27 @@ export function ConnectorsPanel() {
   }
 
   return (
-    <PageContainer
-      title="连接器"
-      description="把外部服务和数据接到助手身边，例如邮箱、网盘、日历。"
-      extra={
-        <Space size={8}>
-          <Input
-            size="small"
-            allowClear
-            prefix={<SearchOutlined style={{ color: tokens.textPlaceholder }} />}
-            style={{ width: 210 }}
-            placeholder="搜索连接器 / 工具"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <AddCapabilityMenu kind="mcp" onPick={onAdd} label="新建" type="primary" showPlus={false} />
-        </Space>
-      }
-    >
+    <PageContainer title="连接器" description="把外部服务和数据接到助手身边，例如邮箱、网盘、日历。">
       <SectionHeader
         title="我的连接器"
         hint="连接方式、密钥与最近一次同步结果；工具与资源在详情里查看，密钥只显示名称。删除连接器会一并移除它的工具。"
         count={visible.length}
         loading={d.busy === 'mcps'}
         onRefresh={() => d.refresh('mcps')}
+        tools={
+          <>
+            <Input
+              size="small"
+              allowClear
+              prefix={<SearchOutlined style={{ color: tokens.textPlaceholder }} />}
+              style={{ width: 200 }}
+              placeholder="搜索连接器 / 工具"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <AddCapabilityMenu kind="mcp" onPick={onAdd} label="新建" type="primary" showPlus={false} />
+          </>
+        }
       />
       <div style={{ maxHeight: 560, overflowY: 'auto' }}>
         {visible.length === 0 ? (

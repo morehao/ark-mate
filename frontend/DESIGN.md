@@ -1,29 +1,31 @@
 ---
-version: 1.0
+version: 2.0
 name: ark-mate-frontend-design
-description: "ark-mate Web 问答控制台（frontend/apps/web）统一视觉语言。以 ark-mate-console.html 原型为基准的 modern-minimal 浅色应用壳（Linear / Vercel 语感），纪律对齐 ark-iam DESIGN：靛蓝 #4f6ef7 是唯一强调色，仅用于主按钮 / 链接 / 选中态 / 品牌点；页面表面一律中性灰阶；卡片与内容区用冷调 hairline 边框分层、不使用卡片阴影（阴影仅留给 Modal / toast 浮层）；文字为三级灰阶并全站开启 tabular-nums。代码事实源：packages/ui/src/theme.ts 的 tokens 对象（本文件与之一一对应，改动需同步两处）。"
+description: "ark-mate Web 问答控制台（frontend/apps/web）统一视觉语言。**精致冷白（Refined Cool White）**：近乎无色的冷白表面 + 极细 hairline 分层 + **浅靛蓝 tinted 主按钮（浅底 + 靛蓝字，轻量不砸黑砖）**。强调色（靛蓝 #3d5afe）克制使用：主按钮用柔和底 + 靛蓝字，另只出现在选中态 / 焦点环 / 链接 / 品牌点与状态点，不铺满页面；无卡片阴影（阴影仅留给 Modal / toast 浮层）；文字三级灰阶、字重字距讲究、全站 tabular-nums。列表优先用「行 + 细分割线」而不是卡片网格。代码事实源：packages/ui/src/theme.ts 的 tokens 对象（本文件与之一一对应，改动需同步两处）。"
 
 colors:
-  brand-primary: "#4f6ef7"
-  brand-primary-hover: "#6b86ff"
-  brand-primary-active: "#3a55d6"
-  brand-primary-soft: "rgba(79, 110, 247, 0.12)"
-  brand-gradient: "linear-gradient(135deg, #4f6ef7 0%, #7a5af8 55%, #a855f7 100%)"
-  surface-layout: "#f7f8fa"
+  brand-primary: "#0a0a0a"          # 近黑：正文/标题最重的字色；也用于极少数"最高强调"场景
+  brand-primary-hover: "#000000"
+  brand-primary-active: "#0a0a0a"
+  accent: "#3d5afe"                # 强调色：主按钮（tinted 底/字）、选中态 / 焦点环 / 链接 / 品牌点
+  accent-soft: "#eef1ff"           # 强调色柔和底（主按钮底色 / 选中 chip / 焦点晕）
+  brand-gradient: "linear-gradient(135deg, #4f6ef7 0%, #7a5af8 55%, #a855f7 100%)"  # 品牌 logo 同款（= favicon.svg），不随中性色盘改
+  surface-layout: "#fcfcfd"
   surface-card: "#ffffff"
-  surface-soft-fill: "#f1f3f5"
-  surface-selected-bg: "rgba(79, 110, 247, 0.10)"
+  surface-soft-fill: "#f6f7f9"
+  surface-selected-bg: "#f2f4ff"
   surface-code: "#fafafa"
-  border-hairline: "#e6e9ef"
-  border-strong: "#d3d8e0"
-  text-primary: "#1f2430"
-  text-secondary: "#56637a"
-  text-placeholder: "#94a3b8"
-  semantic-success: "#22c55e"
-  semantic-warning: "#f59e0b"
-  semantic-warning-bg: "#fffbe6"
-  semantic-warning-border: "#ffe58f"
-  semantic-error: "#ef4444"
+  border-hairline: "#eceef2"
+  border-strong: "#e1e4ea"
+  on-primary: "#ffffff"                 # 实心底上的前景色（主按钮/危险按钮/强调底文字）
+  text-primary: "#111827"
+  text-secondary: "#6b7280"
+  text-placeholder: "#9aa1ac"
+  semantic-success: "#12b76a"
+  semantic-warning: "#b54708"
+  semantic-warning-bg: "#fffaeb"
+  semantic-warning-border: "#fde9c4"
+  semantic-error: "#d92d20"
 
 typography:
   family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif"
@@ -32,10 +34,10 @@ typography:
   chat-message: 15px
 
 rounded:
-  control: 8px
-  card: 12px
-  option: 13px
-  composer: 16px
+  control: 7px
+  card: 10px
+  option: 12px
+  composer: 14px
   pill: 999px
 
 spacing:
@@ -57,11 +59,13 @@ spacing:
 ## 1. 视觉主题总览
 
 - **定位**：ark-mate Web 问答控制台（会话问答优先，Agent/Runtime 管理为次要入口）。
-- **基准**：`ark-mate-console.html`（~/Downloads 下的高保真原型，不入库；仅作设计基准）——modern-minimal 浅色应用壳（Linear / Vercel 语感）。
-- **画布**：页面底 `surface-layout`（冷白）；左栏 / 卡片 / 输入区落在白色表面 `surface-card`，以 `1px solid border-hairline` hairline 分层、**无卡片阴影**（阴影仅 Modal / toast 浮层 / 移动端抽屉）。
-- **品牌**：靛蓝 `#4f6ef7` 是唯一强调色（主按钮 / 链接 / 选中态 / 焦点环 / 品牌点「ark·mate」的 ·）；会话选中态与 agent 选项卡用半透明 `primary-soft` / `selected-bg` 柔和底，主色不铺满页面。
+- **风格**：**精致冷白（Refined Cool White）**——参考 Stripe / Linear 的克制高级感：近乎无色的冷白表面、极细 hairline 分层、讲究的字重与字距，把"高级"交给留白和层次而不是颜色。
+- **画布**：页面底 `surface-layout`（近白 `#fcfcfd`）；左栏 / 卡片 / 输入区落在白色表面 `surface-card`，以 `1px solid border-hairline`（`#eceef2`，比旧版更浅）分层、**无卡片阴影**（阴影仅 Modal / toast 浮层 / 移动端抽屉）。
+- **交互态色 = accent**：全局 `colorPrimary = tokens.accent`（靛蓝）。输入框聚焦环、开关、勾选框、滑杆、分页/标签激活一律靛蓝；近黑 `tokens.primary` 只当正文与显式深色文字，**不当交互态色**。主按钮底色见 §3（tinted）。
+- **强调色使用律（关键纪律）**：主操作按钮是**浅靛蓝 tinted**（底 `accent-soft` `#eef1ff` + 字 `accent` `#3d5afe`，见 §3 按钮规格），轻量、成"主"而不抢戏——不用近黑实心（一块黑砖太硬）、也不用饱和靛蓝实心（太重）；靛蓝的其它出现面限于选中态 / 焦点环 / 链接 / 品牌点 / 状态强调标签。彩色不铺满页面——这是本风格与旧版（靛蓝实心主按钮）最大的区别。
+- **列表优先**：管理页用「行 + 细分割线」的列表形态（信息密度高、更克制），而不是卡片网格。行 hover 出浅底 + 右端动作；分割线用 `border-hairline`。
 - **问答正文**：用户消息为中性软灰气泡（`soft-fill`），assistant 正文为纯文字 + 流式光标；思考用左侧竖线弱化区；工具调用为白卡 hairline 卡片；系统/meta 行居中 mono 弱字。
-- 全站 `tabular-nums`（由 `@ark-mate/ui` AppShell 根容器开启），seq / 计数等数字等宽。
+- 全站 `tabular-nums`（由 `@ark-mate/ui` AppShell 根容器开启），seq / 计数 / 技能数等数字等宽。
 
 ## 2. 布局骨架
 
@@ -94,6 +98,8 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 
 ## 3. 组件规格
 
+- **按钮（Button）已在全局统一**：两字中文按钮的字距由 antd 强插 `0.34em` 导致「编 辑」「删 除」被拉散，已在 `console.css.ts` **全站**抹平（不只工具行）；按钮文字一律推独立合成层按整像素光栅（消发虚）；字重走真实档 600；small 控件高度 `controlHeightSM=28`、常规 `controlHeight=32`。
+- **按钮（Button）**：主按钮 = **tinted**（浅靛蓝底 `accent-soft` + 靛蓝字 `accent`，`font-weight:560`，无阴影），经 `themeConfig.components.Button`（`colorPrimary=accentSoft` / `primaryColor=accent` / `primaryShadow:none`）全局生效——轻量、有品牌感、不像黑砖。默认/图标按钮（如「刷新」）= 白底 1px `borderStrong` 细边、字 `textSecondary`，hover 抬边到 `textPlaceholder` + 字转 `text`、active 底 `softFill`。圆角统一 `radiusSm`（7px），高度随 size（small=32）。工具行内主按钮与图标按钮保持同一描边/圆角家族。
 - **会话条目**：单行——标题（省略号，title 全名）+ 置顶钉 + 右端「状态点 + 日期」；hover / 当前行时右端整格淡出让位给 `⋯`（位置不跳），状态词进 title 与会话信息浮层。状态点六态各一色：运行中（`primary` + 呼吸）、待授权（`warning` 实心）、失败（`error`）、已完成（`success`）、已取消（`textPlaceholder` 灰——作废不是失败）、已中断（`warning` **空心环**——可重发 ≠ 正在等你）。日期口径 `MM-DD`（跨年 `YYYY-MM-DD`），中性灰、等宽数字。
 - **消息条目**：role 标签 mono 10 大写弱字（user / assistant / assistant · thinking / assistant · tool）；用户气泡右对齐 `14px 14px 4px 14px`；工具卡 header `tool_call · <name>` mono + 状态行（ok 绿勾 / running 脉冲点 / failed 红）。
 - **Composer**：白卡 16px 圆角 hairline 边 + focus-within 靛蓝 ring（3px `primary-soft`）；textarea 自动增高 ≤180px；底部一行只有工作区 / 权限 chip + 主色发送按钮（流式期间显示「单飞 run 门控」+ 忙碌态）。**不再有常驻发送键提示**（2026-11-05 反馈）：键位固定 Enter 发送 / Shift+Enter 换行（⌘/Ctrl+Enter 也可发送），只在「设置 · 通用 · 键盘操作」里**只读展示**，不提供切换。
@@ -103,7 +109,10 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 - **左栏导航（NavRail）**：条目只在 `packages/console/src/console/navView.tsx` 定义（含 order 与图标），交互态（hover / 选中 / 展开）只在 `console.css.ts` 的 `.fg-rail*` / `.fg-nav*` 类。组的展开态是 `navExpanded[组] ?? 当前路由是否命中该组`：会话页不展开「扩展」（把左栏高度让给会话列表，1440×800 下会话列表可视 ≈7 条），命中扩展二级页时自动展开以露出当前二级项；用户显式收起过的组不再自动展开。**组没有落地页**（2026-11-05 去掉「扩展总览」）：组行整行只切换展开，箭头的视觉与点击面合一；旧 `/extensions`、`/capabilities` 落到 `/extensions/skills`。一级叶子 32px、二级 30px（缩进 26px）；**一级项带 16px 图标**（图标与条目同源在 `navView.tsx`，未选中 `textPlaceholder`、hover `textSecondary`、选中 `primary`），**二级项不给图标**（缩进子项挂图标会把层级读平）；选中 = `soft-fill` 底 + 主色（二级）；未实现的项（`pending`）**可读不可点**，右侧挂 mono「待开发」标签并给 hover 说明——不留占位页、不注册路由。主导航只放内容入口（问答 / 扩展 / 用量 / 定时任务），**「设置」不是路由入口**（它是左栏 footer 的菜单，见下一条）；会话区恒常驻所以 footer 自然在栏底，`margin-top: auto` 只是兜底。**footer 那一行只有「设置」**（令牌自 2026-10-10 起收进设置菜单，见下一条）。
 - **底部状态条（StatusBar）**：**常驻每个页面**（挂在 app.tsx 右列末尾，不在 ChatPage 里），30px + top hairline；左侧 mono 10.5 是 eventbus 水位（`已 attach <id>` / `未 attach 会话（共 N 个）`），右侧最靠边常驻 WS 连接态（`Dot` + `WS 已连接 / 连接中… / 断开（自动重连中…） / 未连接`），中间的会话语义提示（`问答会话绑定唯一 Agent · 切换 Agent = 新建会话`）只在问答页出现。WS 状态只此一处，左栏不重复。
 - **设置（左栏一个按钮 + 一体式弹窗）**：设置是**同一配置面下的若干动作**，不是并列的内容面——所以它既不是路由页，也不进左栏主导航，更不再有"左栏二级菜单 → 每节一个小弹窗"的两跳：左栏左下「设置」（`.fg-rail-footrow` 里唯一一项，`fg-navitem` 同一套 hover/选中底、与主导航图标同一条竖线）**点一下直接开弹窗**。弹窗（`SettingsDialog`，`centered` + `destroyOnHidden` + `footer={null}`，宽 1120、高 `min(64vh, 640px)`）自己分两列：左列 `.fg-setdlg-nav` 是分节列表（208px，图标 18px + label 13px + hint 11px 两行，命中态 = soft-fill 底 + 主色图标 + 600 字重），右列 `.fg-setdlg-body` 是当前节内容（各节自己出 `.fg-setsec` = 顶部说明 + 右侧动作 + `.fg-setsec-card` 白卡），两列各自滚动、**换节时弹窗高矮不变**；≤920px 分节列表横过来当顶条。**不换页、不改 URL**：从任何页面都能就地改设置、分节之间一步切换；旧深链接（`/settings`、`/settings/agents`、`/agents`）由 `SettingsDeepLink` 打开弹窗对应分节后落回问答页。现有四节：**通用**（工作区目录白名单）、**模型**（供应商 / 模型清单 / 默认模型 / 生效结论）、**命令规则**（哪些命令可直接执行 / 必须确认 / 禁止）、**关于**（产品名 / 核心版本 / 产品身份）。新增一节只改 `console/settingsView.tsx` + `SettingsDialog` 里的一行渲染。理由与 workdsh 一致
-- **管理页**：`PageContainer`（标题/描述/右上操作 + 白卡行列表），行间 hairline 分隔，ID 用 mono。
+- **管理页（PageContainer + CardToolbar / SectionHeader 工具行）**：`PageContainer` 只出「标题 + 描述 + 白卡外壳」——**页头不带工具**；搜索 / 新建 / 筛选等页面工具下移到白卡顶部的 `SectionHeader` 工具行：左侧是「模块名 + 计数 chip + 说明」的一个语义组，右侧 `spacer` 撑开留白后放 `tools`（搜索/新建）再跟「刷新」。**模块名与工具分层、同一条基线对齐**，不再把"标题 + 刷新"挤成一条细线（这是 v2.0 的版式纠偏）。列表用行 + hairline 分隔，行 hover 出浅底 + 右端动作；ID 与小号码用 mono + tabular-nums。工具行统一收口在两个组件、同一套 `.fg-toolbar` 尺寸：
+  - `capability/shared.tsx` 的 **`SectionHeader`**：有「我的 X」小节的页面（专家 / 技能 / 连接器）——左侧标题组 + 右侧搜索/新建/刷新；
+  - `components/CardToolbar.tsx` 的 **`CardToolbar`**：没有小节标题的页面（用量 / 定时任务 / 资料库）——左侧放筛选（时间范围 / 分类分段）或计数标签，右侧放动作。**不要给这种页面单独开一条只有按钮的工具栏**（左侧会整条留空）。
+  两个组件结构同源，视觉一定一致。`PageContainer` 的 `extra`（页头右上）从此不再承载页面工具。
 
 ## 4. Do's and Don'ts
 
@@ -111,7 +120,8 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 - 改设计值：先改 `packages/ui/src/theme.ts` 的 `tokens`，再同步本文件 front matter（两处一致）。
 - 引用颜色一律 `tokens.*`（`import { tokens } from '@ark-mate/ui'`）或 antd `theme.useToken()`。
 - 状态/语义展示用 `@ark-mate/ui` 的 `sessionStatusMeta / agentStateMeta / Dot / Pill`。
-- 主色仅用于主操作 / 链接 / 选中态 / 焦点；页面表面中性灰阶 + 白卡 + hairline。
+- 主操作按钮用**浅靛蓝 tinted**（底 `tokens.accentSoft` + 字 `tokens.accent`，经 `themeConfig.components.Button` 全局生效）；icon/默认按钮用白底极细边（`borderStrong`），hover 抬边到 `textPlaceholder`、字转 `text`。禁用近黑实心 / 饱和实心主按钮。页面表面近白冷灰阶 + 白卡 + 极细 hairline。
+- 数据列表优先用「行 + 细分隔线」（更高密度、更克制），而非卡片网格。
 
 ### Don't
 - 禁止在业务代码硬编码色值（包括 `rgba(...)` 品牌投影、antd 组件上的字面 hex）。

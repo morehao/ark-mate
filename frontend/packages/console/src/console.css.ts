@@ -337,7 +337,7 @@ export const consoleStyleSheet = `
     align-items: center;
     gap: 6px;
     font-size: 12.5px;
-    color: #15803d;
+    color: ${tokens.success};
   }
   .fg-savedline::before { content: '✓'; font-size: 12px; }
 
@@ -370,7 +370,7 @@ export const consoleStyleSheet = `
     font-size: 11px;
     color: ${tokens.textSecondary};
   }
-  .fg-rowtag.fg-warn { border-color: ${tokens.warningBorder}; background: ${tokens.warningBg}; color: #b45309; }
+  .fg-rowtag.fg-warn { border-color: ${tokens.warningBorder}; background: ${tokens.warningBg}; color: ${tokens.warning}; }
   .fg-rowtag.fg-info { border-color: ${tokens.primary}; background: ${tokens.primarySoft}; color: ${tokens.primary}; }
   .fg-rowtag.fg-clickable { cursor: pointer; }
   .fg-rowtag.fg-clickable:hover { border-color: ${tokens.primary}; color: ${tokens.primary}; }
@@ -1558,7 +1558,7 @@ export const consoleStyleSheet = `
     border: 0;
     border-radius: 50%;
     background: ${tokens.primary};
-    color: #ffffff;
+    color: ${tokens.onPrimary};
     font: inherit;
     cursor: pointer;
     transition: background 0.12s ease, color 0.12s ease;
@@ -1567,7 +1567,7 @@ export const consoleStyleSheet = `
   .fg-send-btn:active:not(:disabled) { background: ${tokens.primaryActive}; }
   .fg-send-btn:disabled { cursor: default; opacity: 1; }
   .fg-send-btn:disabled:not(.fg-send-stop) { background: ${tokens.softFill}; color: ${tokens.textPlaceholder}; }
-  .fg-send-btn.fg-send-stop { background: ${tokens.error}; color: #ffffff; }
+  .fg-send-btn.fg-send-stop { background: ${tokens.error}; color: ${tokens.onPrimary}; }
   .fg-send-btn.fg-send-stop:hover:not(:disabled) { background: ${tokens.error}; filter: brightness(1.06); }
   .fg-send-btn.fg-send-wait { background: ${tokens.softFill}; }
   .fg-send-btn.fg-send-wait .fg-send-square { background: ${tokens.textPlaceholder}; }
@@ -1662,7 +1662,7 @@ export const consoleStyleSheet = `
     display: inline-grid;
     place-items: center;
     background: ${tokens.gradient};
-    color: #ffffff;
+    color: ${tokens.onPrimary};
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
   }
   .fg-agent-avatar svg {
@@ -2153,5 +2153,32 @@ export const consoleStyleSheet = `
     .fg-thought-body { transition: none; }
     .fg-thought-body { transform: none; }
   }
+
+  /* ——— 全站按钮口径（不只在工具行：行内「编辑 / 删除 / 上传」也走这套）———
+     ① antd 会给**两个中文字**的按钮强插 letter-spacing:0.34em 再用负 margin 补偿，
+        结果是「编 辑」「删 除」「新 建」被拉散。全站一律抹平。
+     ② 文字推独立合成层：flex 居中的半像素文字上屏前按整像素光栅，消除发虚。 */
+  .ant-btn.ant-btn-two-chinese-chars::first-letter,
+  .ant-btn.ant-btn-two-chinese-chars > *:not(.anticon) {
+    letter-spacing: normal;
+    margin-inline-end: 0;
+  }
+  .ant-btn > span { transform: translateZ(0); }
+
+  /* ——— 工具行（SectionHeader.tools / CardToolbar）：控件等高、同族 ——— */
+  .fg-toolbar { display: inline-flex; align-items: center; gap: 8px; }
+  .fg-toolbar .ant-btn,
+  .fg-toolbar .ant-input-affix-wrapper,
+  .fg-toolbar .ant-input {
+    height: 32px;
+    border-radius: ${tokens.radiusSm}px;
+    box-sizing: border-box;
+  }
+  /* 图标按钮与文字按钮同宽高比，字重走真实档 600（560 无字形会合成发虚） */
+  .fg-toolbar .ant-btn { padding-inline: 13px; font-weight: 600; }
+  .fg-toolbar .ant-btn-icon-only { padding-inline: 0; width: 32px; }
+  .fg-toolbar .ant-btn .anticon { font-size: 14px; }
+  .fg-toolbar .ant-input-affix-wrapper .ant-input { height: auto; }
+  .fg-toolbar .ant-input { transform: translateZ(0); }
 
 `

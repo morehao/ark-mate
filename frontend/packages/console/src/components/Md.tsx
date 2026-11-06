@@ -296,7 +296,7 @@ export function Md({ text }: { text: string }) {
                         borderRadius: 4,
                         border: `1.5px solid ${it.checked ? tokens.success : tokens.borderStrong}`,
                         background: it.checked ? tokens.success : 'transparent',
-                        color: '#fff',
+                        color: tokens.onPrimary,
                         fontSize: 9,
                       }}
                     >

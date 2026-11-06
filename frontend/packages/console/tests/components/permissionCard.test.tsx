@@ -11,6 +11,7 @@ vi.mock('../../src/store', () => ({
   useMate: (sel: (s: { respondPermission: () => void }) => unknown) => sel({ respondPermission: () => {} }),
 }))
 
+import { tokens } from '@ark-mate/ui'
 import { PermissionCard } from '../../src/components/Transcript'
 
 const entry = {
@@ -26,13 +27,18 @@ const entry = {
 
 describe('PermissionCard 视觉', () => {
   it('黄底 warning-bg + warning-border 描边', () => {
+    // 断言口径取 token 事实源（不写死 hex）：换调色板时本用例自动跟随，不误报。
+    const hexToRgb = (hex: string) => {
+      const n = hex.replace('#', '')
+      const [r, g, b] = [0, 2, 4].map((i) => parseInt(n.slice(i, i + 2), 16))
+      return `rgb(${r}, ${g}, ${b})`
+    }
     const { container } = render(<PermissionCard e={entry} />)
-    // 卡片本体：background #fffbe6、border #ffe58f
     const card = Array.from(container.querySelectorAll('div')).find(
-      (d) => d.style.background === 'rgb(255, 251, 230)',
+      (d) => d.style.background === hexToRgb(tokens.warningBg),
     )
     expect(card).toBeTruthy()
-    expect(card!.style.border).toContain('rgb(255, 229, 143)')
+    expect(card!.style.border).toContain(hexToRgb(tokens.warningBorder))
     // 标题可见
     expect(screen.getByText('运行命令 rm -rf build')).toBeInTheDocument()
   })

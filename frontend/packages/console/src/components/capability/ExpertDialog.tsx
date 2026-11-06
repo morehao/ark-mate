@@ -213,7 +213,7 @@ export function ExpertDialog(props: DialogProps) {
             <div
               style={{
                 fontSize: 11,
-                color: '#ad6800',
+                color: tokens.warning,
                 background: tokens.warningBg,
                 border: `1px solid ${tokens.warningBorder}`,
                 borderRadius: tokens.radiusSm,
@@ -347,7 +347,7 @@ export function ExpertDialog(props: DialogProps) {
                 style={{
                   marginTop: 8,
                   fontSize: 11,
-                  color: '#ad6800',
+                  color: tokens.warning,
                   background: tokens.warningBg,
                   border: `1px solid ${tokens.warningBorder}`,
                   borderRadius: tokens.radiusSm,

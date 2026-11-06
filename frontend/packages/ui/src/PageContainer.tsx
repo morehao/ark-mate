@@ -22,9 +22,11 @@ export function PageContainer({ title, description, extra, children }: Props) {
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 18, fontWeight: 650, letterSpacing: '-0.01em', lineHeight: 1.3 }}>{title}</div>
+          {/* 行高用整数字面值：`lineHeight:1.3×18=23.4px` 这类小数会层层传给子元素，
+              使内容区起点落在半像素、控件文字发虚（全站亚像素根因之一）。 */}
+          <div style={{ fontSize: 18, fontWeight: 650, letterSpacing: '-0.01em', lineHeight: '24px' }}>{title}</div>
           {description != null && (
-            <div style={{ marginTop: 4, fontSize: 13, color: tokens.textSecondary, lineHeight: 1.6 }}>{description}</div>
+            <div style={{ marginTop: 6, fontSize: 13, color: tokens.textSecondary, lineHeight: '21px' }}>{description}</div>
           )}
         </div>
         {extra != null && (
