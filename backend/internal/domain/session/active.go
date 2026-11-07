@@ -294,6 +294,7 @@ type Run struct {
 	// 以及日志/事件里指认具体某轮——不做投递判据（那一轮必然先结束）。
 	id        string
 	done      chan struct{}
+	doneOnce  sync.Once
 	cancel    context.CancelFunc
 	cancelReq bool // 用户主动 cancel（区别于父 ctx 超时/外部取消）
 	// intentional 本轮所属连接是被**我方主动拆除**的（daemon 停机），
@@ -320,8 +321,8 @@ func (t *Run) Cancel() { t.cancel() }
 // Done 本轮收尾信号。
 func (t *Run) Done() <-chan struct{} { return t.done }
 
-// CloseDone 宣告收尾（只许单写者调用）。
-func (t *Run) CloseDone() { close(t.done) }
+// CloseDone 宣告收尾（幂等；多路径收尾时重复调用安全——panic 兜底与正常路径都会到达这里）。
+func (t *Run) CloseDone() { t.doneOnce.Do(func() { close(t.done) }) }
 
 // RequestCancel 记下「用户主动取消」（执行侧的收尾据此走 cancelled 分支）。
 //

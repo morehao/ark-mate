@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -118,16 +119,16 @@ type RunnerDeps struct {
 
 // Runner 会话轮次的运行期状态机：受理、事件出口、排队投递、收尾。
 type Runner struct {
-	plane       *Plane
-	handles     *Handles
-	acquire     func(ctx context.Context, sessionID string) (*ActiveSession, error)
-	busy        BusyTracker
-	diagnostics DiagnosticsSink
-	catalog     ConfigOptionsSink
-	toolMemory  ToolMemory
-	toolFailed  ToolFailureClassifier
-	interacts   InteractionCanceller
-	extractor   ArtifactExtractor
+	plane         *Plane
+	handles       *Handles
+	acquire       func(ctx context.Context, sessionID string) (*ActiveSession, error)
+	busy          BusyTracker
+	diagnostics   DiagnosticsSink
+	catalog       ConfigOptionsSink
+	toolMemory    ToolMemory
+	toolFailed    ToolFailureClassifier
+	interacts     InteractionCanceller
+	extractor     ArtifactExtractor
 	deliverQueued func(ctx context.Context, sessionID, text string, attachments []string) error
 
 	// toolWriteMu/toolWrites 是「在途工具调用的写文件线索」：in_progress 帧的 rawInput 带路径
@@ -385,6 +386,32 @@ func attachmentIDs(metas []AttachmentMeta) []string {
 }
 
 func (r *Runner) executeRun(as *ActiveSession, t *Run, parts []protocol.PromptPart) {
+	// panic 兜底：本函数是 `go r.executeRun(...)` 起的常驻 goroutine，其 panic 不会被 gin.Recovery
+	// 覆盖，会直接杀掉整个 daemon（桌面形态下丢掉当前所有会话与在途轮次）。更要命的是：正常收尾
+	// 里 `as.busy=false` 与 `t.CloseDone()` 都在函数尾部，一旦中途 panic，这两件事都不会发生——
+	// 会话将永久停在 busy、done 永不关闭，此后每个 prompt 都返回 run_in_progress（用户侧表现为
+	// "这个会话彻底卡死"）。
+	//
+	// 因此在这里 defer 一个 recover：把"本轮失败"如实收口（MarkSession failed + run.error），
+	// 并保证 busy 释放、run 清空、done 关闭这三件收尾一定发生。
+	defer func() {
+		if rec := recover(); rec != nil {
+			as.mu.Lock()
+			client := as.client
+			as.busy = false
+			as.run = nil
+			as.mu.Unlock()
+			r.busy.Unmark(client, as.ID)
+			r.CloseRunStatus(as.ID, t.id)
+			r.plane.MarkSession(as.ID, SessionStatusFailed)
+			r.PublishError(as.ID, t.id, fmt.Errorf("run 执行 panic: %v", rec), client)
+			// CloseDone 已改成幂等（sync.Once）：panic 落在正常收尾之后（如 DeliverQueued）时，
+			// 这里重复调用安全，不会二次 close 再 panic。
+			t.CloseDone()
+			glog.Errorw(context.Background(), "run 执行 panic（已兜底收尾：置 failed、释放 busy、关闭 done）",
+				"session", as.ID, "run", t.id, "panic", rec, "stack", string(debug.Stack()))
+		}
+	}()
 	var (
 		stop  string
 		usage objusage.TokenUsage

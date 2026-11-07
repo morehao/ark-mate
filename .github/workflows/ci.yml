@@ -61,8 +61,37 @@ jobs:
       - name: go build
         run: go build ./...
 
+      # gofmt -l 非空即失败：gofmt 能自动修的可读性问题不该进仓。
+      # 判据口径与 `gofmt -l` 一致（gofmt 自带，不依赖第三方工具链）。
+      - name: gofmt
+        run: |
+          set -euo pipefail
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未 gofmt（请 gofmt -w）："
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: go vet
         run: go vet ./...
+
+      # golangci-lint（2026-11-07 立）：拦 thelper 等 gofmt / go vet 覆盖不到的机械规范。
+      # golangci-lint v2.x 才支持 go 1.26（本仓 go.mod 是 1.26.1），故用 action v8（兼容 golangci-lint ≥v2.1.0）+ pin v2.15。
+      # 配置见 backend/.golangci.yml（只启用 govet / thelper / gofmt 三项，存量已 0 issue）。
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.15
+          working-directory: backend
+          args: --timeout=5m
+
+      # govulncheck（2026-11-07 立）：依赖树已知 CVE 的判据。
+      # 首观察期（R 同 test-cover 的口径）：先 continue-on-error 观察 1–2 周，
+      # 确认现网依赖不常红后，去掉 continue-on-error 转为硬门禁。
+      - name: govulncheck
+        continue-on-error: true
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
       # 架构判据单独一步：它失败时的语义是"分层被破坏"，与普通单测失败不是一回事，
       # 分开跑能让红的那一步直接说明问题（判据条数以 docs/agents/guards.md 的「共 N 条」为准）。
@@ -113,6 +142,38 @@ jobs:
           fi
           echo "分片 ${SHARD}/${SHARDS}: $n / $total 个包"
           go test -count=1 $pkgs
+
+  # 数据竞争只在 -race 下可见，而普通 `go test` 分片里从不带 -race（会显著拖慢）。
+  # 这里单跑并发面（与 `make test-race` 同一组包）：会话编排 / 会话用例 / 连接池拨号 / 事件总线 / 会话运行时。
+  # 代价：这一片不做包序分片（并发包数量固定且都在同一台 runner），失败语义 = "并发面有竞争"。
+  backend-race:
+    name: 后端 · 数据竞争（-race）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # -race 判据要求 cgo（`go: -race requires cgo`），故本 job 必须 CGO_ENABLED=1
+      # （与其它 job 的 CGO_ENABLED=0 相反：它们验证"纯 Go 可编可测"，本 job 只跑竞争检测）。
+      # 仍是纯 Go 的 SQLite（ncruces/go-sqlite3），cgo 只用于 race 运行时，不引入 C 版驱动。
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: go test -race（并发面）
+        run: |
+          set -euo pipefail
+          pkgs="./internal/domain/session/ ./internal/service/svcsession/ ./internal/drivers/runtimeconn/ ./internal/core/eventbus/ ./internal/sessionruntime/"
+          echo "race 面: $pkgs"
+          go test -race -count=1 $pkgs
 
   frontend:
     name: 前端 · typecheck / 构建 / 单测

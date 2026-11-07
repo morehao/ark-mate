@@ -729,7 +729,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 - 重启恢复：kill daemon 后以同一 `MATE_DB` 重启，`GET /conversations` 仍列出该会话（标题保留）。
 - 裸跑 `mate serve`（不带 `--addr`）→ `lsof -nP -iTCP -sTCP:LISTEN` 实测 `127.0.0.1:10001`
   （仅回环；此前默认 `:8099` 会绑所有网卡，已按安全要求收窄）。
-- 自动守卫：`go test -race ./...` 全绿；`TestReadmeRoutesMatchRouter` 校验 README 引用的 29 条
+- 自动守卫：`make test-race`（并发面 `-race`）全绿、CI `backend-race` job 全绿；`TestReadmeRoutesMatchRouter` 校验 README 引用的 29 条
   路由全部命中注册表（反向注入错误路径会红）。
 - systemd 单元：**未执行**（macOS 无 systemd）——仅 Python INI 解析校验语法与关键指令齐备
   （3 个 section、6 条 `Environment=`、`ExecStart` 绝对路径、`MATE_ADDR` 收在本机；**v20 后该单元另有 `MATE_HOME`**，故"6 条"是当时快照）。上线前请在

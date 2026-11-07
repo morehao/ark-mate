@@ -309,7 +309,7 @@ func (h *wsCtr) attach(st *connState, f wsClientFrame) {
 	// 水位 -1 表示该聚合从未淘汰过；v21 之前这里是 `low > 0`，而 0 现在是个合法位次
 	// （淘汰掉会话第 0 条同样意味着"不可续传"），用 0 当"没淘汰"会静默漏判。
 	if low := h.bus.EvictedThrough(f.AggID); low >= 0 && since < low {
-		h.send(st, wsServerFrame{Type: "snapshot", AggID: f.AggID, EventSeq: h.bus.LastSeq(f.AggID), State: json.RawMessage(`{}`)})
+		h.sendBlocking(st, wsServerFrame{Type: "snapshot", AggID: f.AggID, EventSeq: h.bus.LastSeq(f.AggID), State: json.RawMessage(`{}`)})
 		return
 	}
 	// 历史回放是**一段可宣布的区间**（ADR-13）：`replay_begin` / `replay_end` 两帧把它夹起来，
@@ -319,19 +319,27 @@ func (h *wsCtr) attach(st *connState, f wsClientFrame) {
 	// （`TestReplayFramesBracketHistory` 反过来钉这一条——把 `replay_begin` 塞进 `events.go`
 	// 会让它红）。理由是它们描述的是**这次连接正在做什么**，不是会话身上发生过什么：同一次
 	// 回放换成两个客户端就是两段不同的区间，写进事件日志等于把"谁的连接"也记进了历史。
-	h.send(st, wsServerFrame{Type: "replay_begin", AggID: f.AggID, EventSeq: since})
+	//
+	// 回放帧一律走 sendBlocking（不丢帧）：`replay_end` 的位次是前端的续传游标，一旦推进到
+	// 从未投递的 seq 就会永久丢失那段历史（见 sendBlocking 注释）。连接中途关闭则不再回放。
+	if !h.sendBlocking(st, wsServerFrame{Type: "replay_begin", AggID: f.AggID, EventSeq: since}) {
+		return
+	}
 	evs := h.bus.EventsAfter(f.AggID, since)
+	// delivered 记录"最后真正入队的 seq"。没有事件可回放时沿用聚合水位（与旧语义一致：
+	// 客户端据此把游标推到当前水位）；有事件时由循环推进到真实送达的最高 seq。
+	delivered := h.bus.LastSeq(f.AggID)
 	for i := range evs {
 		evt := evs[i]
-		h.send(st, wsServerFrame{Type: "event", AggID: f.AggID, EventSeq: evt.Seq, Event: &evt})
+		if !h.sendBlocking(st, wsServerFrame{Type: "event", AggID: f.AggID, EventSeq: evt.Seq, Event: &evt}) {
+			return
+		}
+		delivered = evt.Seq
 	}
-	// 结束帧带**回放到的位次**（没有事件可回放时就是该聚合的水位）：前端拿它做两件事——
-	// 结束加载态、把续传游标推到"我确实看完了这里"。
-	end := h.bus.LastSeq(f.AggID)
-	if n := len(evs); n > 0 {
-		end = evs[n-1].Seq
-	}
-	h.send(st, wsServerFrame{Type: "replay_end", AggID: f.AggID, EventSeq: end})
+	// 结束帧带**实际回放到的位次**（没有事件可回放时就是请求起点/该聚合水位）：前端拿它做两件事——
+	// 结束加载态、把续传游标推到"我确实看完了这里"。sendBlocking 保证事件都已入队，delivered
+	// 即真实送达的最高 seq，不再出现"宣告的位次 > 实际送达"的静默缺口。
+	h.sendBlocking(st, wsServerFrame{Type: "replay_end", AggID: f.AggID, EventSeq: delivered})
 }
 
 func (h *wsCtr) detach(st *connState, aggID string) {
@@ -424,11 +432,30 @@ func (h *wsCtr) pingLoop(st *connState) {
 }
 
 // send 非阻塞入队（队列满视为消费者过慢，丢帧由 attach 续传/快照兜底）。
+// 只用于"丢了还能靠续传补回来"的实时增量帧（livePump）。
 func (h *wsCtr) send(st *connState, f wsServerFrame) {
 	select {
 	case st.write <- f:
 	default:
 		glog.Debugw(st.ctx, "ws write queue full, dropping frame", "type", f.Type)
+	}
+}
+
+// sendBlocking 阻塞入队，直到帧真正进入写队列或连接关闭（返回 false）。
+//
+// 为什么回放必须用它：回放的 `replay_end` 会把前端的续传游标推到"我确实看完了这里"的位次
+// （见 handleAttach 的 end 计算）。若回放中途用非阻塞 send 静默丢帧，而 replay_end 仍推进到
+// 从未投递的 seq，那段历史就永久缺失——既不会收到 gap 帧（gap 只由 livePump 的实时通道产生），
+// 用户也得不到任何可恢复信号。因此回放帧（snapshot / replay_begin / event / replay_end）一律走
+// 阻塞入队：宁可等慢消费者，也不静默丢历史。
+//
+// 阻塞的上界由 st.closed 兜住：连接关闭时立刻返回，不会永久卡住回放 goroutine。
+func (h *wsCtr) sendBlocking(st *connState, f wsServerFrame) bool {
+	select {
+	case <-st.closed:
+		return false
+	case st.write <- f:
+		return true
 	}
 }
 

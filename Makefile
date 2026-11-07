@@ -531,9 +531,12 @@ test:
 test-cover:
 	cd backend && go test -coverprofile=cover.out ./... && go tool cover -func=cover.out | tail -1
 
-# test-race：两处"只在 -race 下才看得见"的读面（会话快照 / 执行面键），收尾与改动它们时跑。
+# test-race：并发面（会话编排 / 会话用例 / 连接池拨号 / 事件总线 / 会话运行时）的数据竞争判据。
+# 这些包里的读面与 goroutine 生命周期"只在 -race 下才看得见"问题，改动它们时必跑。
+# 历史：目标曾写 ./internal/runtimeconn/ 与 ./internal/manager/，两包已分别搬进
+# internal/drivers/runtimeconn 与 internal/domain/session（v19 起），旧目标一跑即报 directory not found。
 test-race:
-	cd backend && go test -race ./internal/domain/session/ ./internal/service/svcsession/ ./internal/runtimeconn/ ./internal/manager/
+	cd backend && go test -race ./internal/domain/session/ ./internal/service/svcsession/ ./internal/drivers/runtimeconn/ ./internal/core/eventbus/ ./internal/sessionruntime/
 
 clean:
 	rm -rf $(FRONTEND_ROOT)/apps/web/dist

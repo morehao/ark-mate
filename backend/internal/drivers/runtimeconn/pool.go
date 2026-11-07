@@ -1,6 +1,7 @@
 package runtimeconn
 
 import (
+	"context"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 	"sort"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— P4a 正文第五十四刀：连接池落执行面 ———
@@ -69,11 +71,17 @@ type Pool struct {
 	conns           map[string]*Conn
 	generationLimit int
 	reapStop        func() // 空闲回收 goroutine 的停止函数（CloseAll 调用）
+
+	// dialLocks 每缓存键一把锁，把「查 → 拨 → 登记」这整段串行到键级（见 Dial 的 why）。
+	// 只保护拨号临界区、不进 mu 之下（mu 保护连接表本身）。键数有限（等于并发中的不同连接键），
+	// 且 Dial 结束后不删——删会与 Wait 竞态，留着占几个指针可忽略。
+	dialLocksMu sync.Mutex
+	dialLocks   map[string]*sync.Mutex
 }
 
 // NewPool 造一个连接池（绑定执行面：进程状态与子进程注册表都在那边）。
 func NewPool(bind *Plane) *Pool {
-	return &Pool{bind: bind, conns: make(map[string]*Conn)}
+	return &Pool{bind: bind, conns: make(map[string]*Conn), dialLocks: make(map[string]*sync.Mutex)}
 }
 
 // SetProviderEnvSource 装配期登记子进程 env 的来源（nil = 不注入、基础键无 env 维度）。
@@ -140,6 +148,20 @@ func (pl *Pool) Get(key string) *Conn {
 	return pl.conns[key]
 }
 
+// keyLock 取（或惰性创建）某个缓存键的拨号锁并加锁，返回解锁函数。
+// 只用于串行同键的「查 → 拨 → 登记」（见 Dial），不进 pl.mu 之下，避免锁序问题。
+func (pl *Pool) keyLock(key string) func() {
+	pl.dialLocksMu.Lock()
+	lk := pl.dialLocks[key]
+	if lk == nil {
+		lk = &sync.Mutex{}
+		pl.dialLocks[key] = lk
+	}
+	pl.dialLocksMu.Unlock()
+	lk.Lock()
+	return lk.Unlock
+}
+
 // Len 连接池条数（**持池锁**读）。诊断与测试用；裸读连接表在 `-race` 下就是数据竞争。
 func (pl *Pool) Len() int {
 	pl.mu.Lock()
@@ -158,8 +180,22 @@ func (pl *Pool) Add(c *Conn) {
 	}
 	pl.registerProc(c)
 	pl.mu.Lock()
+	// 防御：正常情况下 Dial 的键级锁保证同键只会登记一次；这里若仍撞到已存在的同键连接，
+	// 绝不静默覆盖（覆盖会让旧连接成为池外孤儿、子进程无人回收）。先把旧的摘下来，登记后
+	// 在锁外 Close 它——保证「表里永远是这个 key 的最新连接，且旧的一个都不漏关」。
+	displaced := pl.conns[c.Key]
 	pl.conns[c.Key] = c
 	pl.mu.Unlock()
+	if displaced != nil && displaced != c {
+		glog.Warnw(context.Background(), "runtimeconn: Add 覆盖同键连接，拆除被替换者",
+			"key", c.Key, "runtime", c.Spec.ID)
+		// 主动拆除被替换者（与 CloseAll 同源：先置原因再 Drop + Close，避免写成失败态/孤儿）。
+		displaced.Intentional.Store(true)
+		pl.Drop(displaced)
+		if displaced.Client != nil {
+			_ = displaced.Client.Close()
+		}
+	}
 	if pl.bind != nil {
 		pl.bind.SetState(session.AgentStateRunning)
 	}
