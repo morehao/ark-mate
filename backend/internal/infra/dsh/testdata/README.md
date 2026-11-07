@@ -30,10 +30,15 @@
 | --- | --- | --- | --- |
 | ① | `apiKeyEnv` 由 `<TYPE>_API_KEY` 换成逐供应商引用名 `MATE_<ID规范化>_<哈希8>_API_KEY` | v11 的 `envKeyOf(type)` 在逐 route 循环里求值，而 `providers` 表对 `type` 无唯一约束 → 两个同 type 的供应商共用一把密钥 → 至少一条 route 用错密钥。`MATE_` 命名空间同时避免被用户 shell 里的同名变量静默遮蔽 | ADR-16、设计 §实测事实 附带发现 2/3 |
 
-**未迁移字段（刻意不在夹具里，由用例单独登记）**：v11 的 `projections.<runtime>.compat` 会写成
-`compat: {…}`，而 v12 的 `resource.Provider` 没有这个字段（设计 §载体差异把它登记进「未迁移字段」
-清单）。`golden_test.go` 的 `TestGoldenDshCompatHasNoV12Exit` 证明"拿掉那一行之后两份产出逐字节
-相同"——于是这是被点名、被机器看见的一处差异，而不是混进 A 部分的静默差异。
+**B 部分新增 B4（v40）：`compat.supportsDeveloperRole` 重新接回**。背景：dsh 的 `openai-completions`
+默认发新式 `developer` 系统角色，而 OpenAI 兼容代理只认旧式 `system` → 422 拒收、会话起不来
+（2026-11-08 实测 `llm.yygu.cn`）。修复靠 provider 级 `compat.supportsDeveloperRole:false` 让 dsh 退发
+`system`。**注意 dsh 0.2.2 的键是布尔 `supportsDeveloperRole`**（不是 v11 早期夹具里那个字符串
+`systemRole`——后者会被 dsh 配置校验拒绝："no wire protocol declares"）。平台侧字段是
+`resource.Provider.SupportsDeveloperRole`；adapter 对 openai-completions 默认下发 `false`。
+B4 由 `rewriteDshV11ToV24` 的 `insertGoldenProviderCompat` 机械重现，判据是
+`TestGoldenDshCompatHasV12Exit`（v11 基线无 compat，经 B4 插入后 == v12 逐字节；且 v12 确实带 compat）。
+因此 v12 夹具现在**带** `compat: {"supportsDeveloperRole":false}` 行，它不再是「未迁移字段」。
 `api` 这一项**不进 B**：v11 从 `projections.<runtime>.api` 取值、v12 固定为 `openai-completions`，
 夹具两边的值本来就相同（协议本期只有 openai 一种），所以它落在 A 部分的逐字节范围里。
 

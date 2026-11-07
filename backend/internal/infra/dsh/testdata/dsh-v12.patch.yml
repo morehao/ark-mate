@@ -10,6 +10,7 @@
       "mate-alpha-gw":
         displayName: "内网网关 Alpha"
         api: "openai-completions"
+        compat: {"supportsDeveloperRole":false}
         apiKeyEnv: "MATE_ALPHA_GW_255CB31F_API_KEY"
         baseURL: "https://alpha.example.com/v1"
         models:
@@ -25,6 +26,7 @@
       "mate-beta.gw":
         displayName: "备用网关"
         api: "openai-completions"
+        compat: {"supportsDeveloperRole":false}
         apiKeyEnv: "MATE_BETA_GW_39E72D68_API_KEY"
         baseURL: "https://beta.example.com/openai/v1"
         models:
@@ -39,6 +41,7 @@
       "mate-zeta":
         displayName: "Zeta 直连"
         api: "openai-completions"
+        compat: {"supportsDeveloperRole":false}
         apiKeyEnv: "MATE_ZETA_5CC10D91_API_KEY"
         baseURL: "https://zeta.example.com/v1"
         models:

@@ -384,6 +384,25 @@ func (p *PatchArgs) applyLocked() (bool, error) {
 //     （走底座默认，安全）；若将来要显式调，注意两者必须成对写、且 `imageOffloadCountQuantum ≤
 //     maxRequestImages`——违反时 `resolveProfiles` 抛错 → dsh **拒启**。
 //
+// compatDeveloperRole 返回该供应商要下发的 `compat.supportsDeveloperRole`（nil = 不下发）。
+//
+// dsh 0.2.2 的 compat 键是布尔 `supportsDeveloperRole`（**不是**旧夹具里那个字符串 `systemRole`，
+// 后者会被配置校验拒绝："no wire protocol declares"）。`false` = 告知 dsh 本上游不认新式
+// `developer` → 退发旧式 `system`，正是 OpenAI 兼容代理被 422 拒收的正解（2026-11-08 实测 `llm.yygu.cn`）。
+//
+// 显式声明优先；空则对 openai-completions 兜底 `false`（兼容优先）——兜底放在 adapter 里，是为了
+// "即使上游资源层忘了填，也不会把 developer 打给对方"。
+func compatDeveloperRole(p resource.Provider) *bool {
+	if p.SupportsDeveloperRole != nil {
+		return p.SupportsDeveloperRole
+	}
+	if p.Protocol == resource.ProtocolOpenAI {
+		f := false
+		return &f
+	}
+	return nil
+}
+
 // 输出是**手写的确定性 YAML**（不引第三方 YAML 库：本仓零新依赖，且键序必须可钉）。
 func buildPatch(set resource.Set) ([]byte, error) {
 	var b []byte
@@ -435,6 +454,13 @@ func buildPatch(set resource.Set) ([]byte, error) {
 			b = append(b, fmt.Sprintf("      %s:\n        displayName: %s\n", yamlQuote(route), yamlQuote(displayNameOf(p, route)))...)
 			// `api` 由 adapter 内置（ADR-3：协议只支持 openai，不再让用户为它付一个自由串的代价）。
 			b = append(b, fmt.Sprintf("        api: %s\n", yamlQuote(apiOpenAICompletions))...)
+			// `compat: {supportsDeveloperRole: <bool>}`：developer 角色兼容开关（v40，修 422 developer 回归）。
+			// OpenAI 兼容代理普遍只认旧式 `system`，dsh 的 openai-completions 默认发新式
+			// `developer` 会被 422 拒收——故下发 `compat.supportsDeveloperRole:false` 让它退发
+			// `system`。⚠ dsh 0.2.2 的键是布尔 `supportsDeveloperRole`（不是旧版字符串 `systemRole`）。
+			if dr := compatDeveloperRole(p); dr != nil {
+				b = append(b, fmt.Sprintf("        compat: {\"supportsDeveloperRole\":%t}\n", *dr)...)
+			}
 			// `apiKeyEnv` 是**凭据引用名**（逐供应商派生，ADR-16），配置文件里**绝不出现密钥值**——
 			// 这是走官方推荐路径：配置只带引用，值住在凭据提供方。
 			if p.Ref != "" {

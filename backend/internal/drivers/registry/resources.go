@@ -313,6 +313,11 @@ func (r *Resources) buildSet(ctx context.Context, spec runtime.Spec) (resource.S
 		set.Providers = append(set.Providers, resource.Provider{
 			ID: d.ID, Name: d.Name, Protocol: resource.Protocol(d.Protocol),
 			BaseURL: d.BaseURL, Ref: ref,
+			// developer 角色支持：OpenAI 兼容代理生态普遍只认旧式 `system`（新式 `developer` 会被
+			// 422 拒收，见 resource.Provider.SupportsDeveloperRole 注释）。这里对所有 openai 协议
+			// 供应商默认 `false`——兼容优先、下发 `compat.supportsDeveloperRole:false`；将来若要
+			// 逐供应商开放，再从此处读取持久化字段。
+			SupportsDeveloperRole: defaultSupportsDeveloperRole(d.Protocol),
 		})
 		if pd := byProvider[pid]; len(pd) > 0 {
 			rows := append([]resource.Model(nil), pd...)
@@ -542,6 +547,20 @@ func capacitySentinel(v *int64) string {
 		return "-"
 	}
 	return strconv.FormatInt(*v, 10)
+}
+
+// defaultSupportsDeveloperRole 供应商是否支持 OpenAI `developer` 系统角色（见
+// resource.Provider.SupportsDeveloperRole）。
+//
+// 本期只有 openai 一种协议，统一默认 `false`：OpenAI 兼容代理/gateway 普遍只认旧式
+// `system/user/assistant/tool`，新式 `developer` 会被 422 拒收（2026-11-08 实测 `llm.yygu.cn`）。
+// 兼容优先——把"新式 developer"当作需显式开启的少数派。未知协议返回 nil（不下发、交给 adapter 默认）。
+func defaultSupportsDeveloperRole(protocol string) *bool {
+	if resource.Protocol(protocol) == resource.ProtocolOpenAI {
+		f := false
+		return &f
+	}
+	return nil
 }
 
 // declaredDefaultModelID 读**单一**默认模型（未设 → ""）。
