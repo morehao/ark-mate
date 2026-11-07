@@ -74,8 +74,9 @@ test.describe('前端首屏与导航', () => {
       await expect(rail.getByText(label, { exact: true }).first()).toBeVisible()
     }
     await expect(rail).toContainText('扩展')
-    // 底部状态条常驻（无连接也渲染 wsState 文案；WS 被挡 → "连接断开"）
-    await expect(page.getByText(/未连接|连接中|连接断开/).first()).toBeVisible()
+    // 底部状态条常驻（无连接也渲染 wsState 文案）。WS 被 abort，可能停在初始「未连接」、
+    // 过渡「连接中…」，或进入 closed「断开（重连中）」——三者都可能出现（时序），全部纳入断言。
+    await expect(page.getByText(/未连接|连接中|已连接|断开/).first()).toBeVisible()
   })
 
   test('导航到扩展 · 专家页并渲染清单', async ({ page }) => {
