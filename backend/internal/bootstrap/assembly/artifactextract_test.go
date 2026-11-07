@@ -120,8 +120,8 @@ func TestArtifactExtractor_WriteEndToEnd(t *testing.T) {
 	if a.Origin != "tool_write" || a.Kind != "file" || a.Title != "hello.txt" {
 		t.Errorf("产物元数据不符: origin=%q kind=%q title=%q", a.Origin, a.Kind, a.Title)
 	}
-	if a.UploadID == "" {
-		t.Errorf("file 类产物应有 upload_id（快照已进 filestore）")
+	if a.FileID == "" {
+		t.Errorf("file 类产物应有 file_id（快照已进 filestore）")
 	}
 	if a.SizeBytes != int64(len("hello artifact")) {
 		t.Errorf("size=%d 期望 %d", a.SizeBytes, len("hello artifact"))

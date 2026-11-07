@@ -43,7 +43,7 @@ export interface MaterialNodeDetail {
   table_id?: string
   schema?: string
   rows?: string
-  drive_upload_id?: string
+  file_id?: string
   source_url?: string
   size_bytes: number
   /** 分类维度（v34）：material | artifact。 */
@@ -63,7 +63,7 @@ export interface CreateMaterialNodeReq {
   schema?: string
   source_url?: string
   /** drive 种类：`POST /files` 返回的 file_id（P0′ 收口后建 drive 节点走两步式）。 */
-  drive_upload_id?: string
+  file_id?: string
   space_id?: string
 }
 

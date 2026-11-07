@@ -1,11 +1,12 @@
-import { FileOutlined, CloseOutlined } from '@ant-design/icons'
-import { Modal } from 'antd'
+import { useEffect, useState } from 'react'
+import { FileOutlined, CloseOutlined, FileImageOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import type { AttachmentMeta } from '@ark-mate/types'
-import { attachmentContentUrl } from '@ark-mate/api'
+import { fetchFileUrl } from '@ark-mate/api'
+import { usePreview } from './preview/PreviewProvider'
 
 interface Props {
-  /** 附件元数据（id/name/mime_type/size_bytes/kind）。 */
+  /** 附件元数据（id/name/mime_type/size_bytes/kind/file_id）。 */
   attachment: AttachmentMeta
   /** 可选：移除按钮（仅**待发** chip 有；气泡里的已发 chip 不传）。 */
   onRemove?: () => void
@@ -19,32 +20,36 @@ function humanSize(n: number): string {
 }
 
 /**
- * AttachmentChip 一个附件 chip（v32）：图标 + 文件名 + 大小；图片点开看大图，文档点开预览；
- * 待发的 chip 带「移除 ×」。颜色/间距全走 token（不硬编码色值）。
+ * AttachmentChip 一个附件 chip（v32）：图标 + 文件名 + 大小；点击经统一预览壳打开
+ * （图片走居中大图、文档走右侧侧栏）。待发的 chip 带「移除 ×」。
+ * 字节取数一律经 file_id + 签名通路的预览层，不再直拼 content URL。
+ * 颜色/间距全走 token（不硬编码色值）。
  */
 export function AttachmentChip({ attachment, onRemove }: Props) {
+  const { openPreview } = usePreview()
   const isImage = attachment.kind === 'image'
-  const href = attachmentContentUrl(attachment.id)
-  const open = () => {
-    if (isImage) {
-      Modal.info({
-        title: attachment.name,
-        icon: null,
-        width: 720,
-        content: (
-          <img
-            src={href}
-            alt={attachment.name}
-            style={{ maxWidth: '100%', maxHeight: '60vh', display: 'block', margin: '0 auto' }}
-          />
-        ),
-        okText: '关闭',
+
+  // 图片 chip 的缩略图：按 file_id 取一次签名 url（失败静默回落到图标）。
+  const [thumbUrl, setThumbUrl] = useState<string>('')
+  useEffect(() => {
+    if (!isImage || !attachment.file_id) return
+    let cancelled = false
+    fetchFileUrl(attachment.file_id)
+      .then((u) => {
+        if (!cancelled) setThumbUrl(u)
       })
-    } else {
-      // 文档：新标签打开字节流（inline，浏览器据 Content-Type 决定渲染/下载）。
-      window.open(href, '_blank', 'noopener,noreferrer')
+      .catch(() => {
+        /* 缩略图失败不影响点击预览 */
+      })
+    return () => {
+      cancelled = true
     }
+  }, [isImage, attachment.file_id])
+
+  const open = () => {
+    openPreview({ file_id: attachment.file_id, name: attachment.name, size_bytes: attachment.size_bytes })
   }
+
   return (
     <span
       className="fg-att-chip"
@@ -62,8 +67,10 @@ export function AttachmentChip({ attachment, onRemove }: Props) {
         verticalAlign: 'middle',
       }}
     >
-      {isImage ? (
-        <img src={href} alt="" style={{ width: 18, height: 18, borderRadius: 3, objectFit: 'cover' }} />
+      {isImage && thumbUrl ? (
+        <img src={thumbUrl} alt="" style={{ width: 18, height: 18, borderRadius: 3, objectFit: 'cover' }} />
+      ) : isImage ? (
+        <FileImageOutlined style={{ color: tokens.textSecondary }} />
       ) : (
         <FileOutlined style={{ color: tokens.textSecondary }} />
       )}

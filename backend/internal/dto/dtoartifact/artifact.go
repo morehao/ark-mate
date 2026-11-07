@@ -43,7 +43,7 @@ type ArtifactResp struct {
 	Path          string `json:"path,omitempty"`
 	MimeType      string `json:"mime_type,omitempty"`
 	SizeBytes     int64  `json:"size_bytes"`
-	UploadID      string `json:"upload_id,omitempty"`
+	FileID        string `json:"file_id,omitempty"`
 	ContentText   string `json:"content_text,omitempty"`
 	ContentSha256 string `json:"content_sha256,omitempty"`
 	Dirty         bool   `json:"dirty"`

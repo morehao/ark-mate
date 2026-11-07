@@ -221,7 +221,7 @@ internal/persistence/model（实体定义）被上面三者依赖，自身不依
 | 资源 | `/providers` · `/providers/:id/probe` · `/models` · `/models/catalog` · `/models/sync` |
 | 空间 | `/workspaces` · `…/browse` · `…/files`（列目录内容，非上传）· `…/pick-directory` |
 | 上传（全局唯一收字节面）| `/files`（ginupload：`POST` 按 `content_hash` 内容寻址去重 + `check-exist` / `:id` / `presign-url` / `redirect` / `serve` / `multipart` 分片） |
-| 附件 | `/attachments`（`POST` 只收 JSON `{file_id}` 建索引 / `DELETE` / `GET`）· `/attachments/:id/content` |
+| 附件 | `/attachments`（`POST` 只收 JSON `{file_id}` 建索引 / `DELETE` / `GET`；字节预览/下载走 `/files/:id/presign-url` + `/objects`） |
 | 产物溯源 | `/artifacts`（`POST` 只建索引不收流）· `/artifacts/:id` · `/sessions/:id/artifacts`（v34）|
 | 资料库 | `/library` · `/materials/nodes`（`?category=` 分栏）· `/materials/nodes/:id` · `/materials/import-artifact`（产物收录，v34）|
 | 任务与运维 | `/automations` · `…/preview` · `…/runs`· `/usage/summary` · `/search/messages` · `/runtime/diagnostics` · `/meta` · `/health` |

@@ -205,7 +205,7 @@ func toResp(a model.ArtifactEntity) *dtoartifact.ArtifactResp {
 		Path:          a.Path,
 		MimeType:      a.MimeType,
 		SizeBytes:     a.SizeBytes,
-		UploadID:      a.UploadID,
+		FileID:        a.UploadID,
 		ContentText:   a.ContentText,
 		ContentSha256: a.ContentSha256,
 		Dirty:         a.Dirty != 0,

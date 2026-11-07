@@ -50,7 +50,7 @@ export const uploadMaterialFile = async (file: File, parentId?: string): Promise
     node_kind: 'drive',
     title: up.name || file.name,
     parent_id: parentId,
-    drive_upload_id: up.file_id,
+    file_id: up.file_id,
   })
 }
 

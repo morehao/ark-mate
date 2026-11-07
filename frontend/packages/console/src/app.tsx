@@ -16,6 +16,7 @@ import { ConnectorsPage } from './pages/extensions/ConnectorsPage'
 import { ExpertsPage } from './pages/extensions/ExpertsPage'
 import { UsagePage } from './pages/UsagePage'
 import { MaterialPage } from './pages/MaterialPage'
+import { PreviewProvider } from './components/preview/PreviewProvider'
 
 /** 全局 toast 的层级。
  *
@@ -84,6 +85,7 @@ export function App() {
   const location = useLocation()
 
   return (
+    <PreviewProvider>
     <div
       style={{
         height: '100dvh',
@@ -270,5 +272,6 @@ export function App() {
         </div>
       )}
     </div>
+    </PreviewProvider>
   )
 }

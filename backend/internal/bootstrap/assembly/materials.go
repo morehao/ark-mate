@@ -105,7 +105,7 @@ func (r materialArtifactReader) ArtifactRef(ctx context.Context, id string) (svc
 	return svcmaterial.ArtifactRef{
 		ID: a.ID, SessionID: a.SessionID, RunID: a.RunID, Kind: a.Kind,
 		Title: a.Title, MimeType: a.MimeType, SizeBytes: a.SizeBytes,
-		UploadID: a.UploadID, Path: a.Path, ContentText: a.ContentText,
+		UploadID: a.FileID, Path: a.Path, ContentText: a.ContentText,
 	}, true, nil
 }
 
@@ -207,6 +207,8 @@ func buildMaterialHandler(cfg config.Config, st *store.Store) (mcp.Handler, erro
 	blobs, err := attachmentstore.New(st.DB(), attachmentstore.Options{
 		BaseDir:        filepath.Join(cfg.HomeDir, "attachments"),
 		MaxUploadBytes: cfg.AttachmentMaxBytes,
+		SignSecret:     cfg.SignSecret,
+		BaseURL:        cfg.PublicBaseURL,
 	})
 	if err != nil {
 		return nil, err

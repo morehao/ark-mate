@@ -59,8 +59,15 @@ vi.mock('@ark-mate/api', () => ({
 }))
 
 import { SessionInfoPanel, SessionDetailDrawer } from '../../src/components/SessionDetail'
+import { PreviewProvider } from '../../src/components/preview/PreviewProvider'
 
-const renderRouter = (ui: React.ReactNode) => render(<MemoryRouter>{ui}</MemoryRouter>)
+// SessionInfoPanel 的产物行接入预览（usePreview）后，渲染必须处在 PreviewProvider 内。
+const renderRouter = (ui: React.ReactNode) =>
+  render(
+    <MemoryRouter>
+      <PreviewProvider>{ui}</PreviewProvider>
+    </MemoryRouter>,
+  )
 
 describe('会话信息面合并', () => {
   beforeEach(() => {

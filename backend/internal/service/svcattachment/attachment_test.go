@@ -192,27 +192,6 @@ func TestRegisterFakeImageLargeRejected(t *testing.T) {
 	}
 }
 
-func TestContentRoundTrip(t *testing.T) {
-	svc, _, _ := newSvc()
-	payload := []byte("attachment binary payload \x00\x01\x02")
-	resp, err := svc.Upload(context.Background(), "a.bin", "", "application/octet-stream", bytes.NewReader(payload))
-	if err != nil {
-		t.Fatalf("上传失败：%v", err)
-	}
-	rc, ct, err := svc.OpenContent(context.Background(), resp.ID)
-	if err != nil {
-		t.Fatalf("回读失败：%v", err)
-	}
-	defer rc.Close()
-	got, _ := io.ReadAll(rc)
-	if !bytes.Equal(got, payload) {
-		t.Fatalf("回读字节与上传不一致")
-	}
-	if ct != "application/octet-stream" {
-		t.Fatalf("Content-Type 应 application/octet-stream，got %q", ct)
-	}
-}
-
 func TestDeletePendingAndLinked(t *testing.T) {
 	svc, st, _ := newSvc()
 	resp, err := svc.Upload(context.Background(), "a.txt", "", "text/plain", strings.NewReader("x"))

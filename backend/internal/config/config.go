@@ -206,6 +206,17 @@ type Config struct {
 	//   off  = 不注入平台内置 server（回到"用户自己注册 MCP"的老路）。
 	// auto 而非 on：这条路径改变了每个会话看到的工具面，出问题时必须有能不改代码退回去的开关。
 	PlatformMcp string
+	// PublicBaseURL 对外公共访问基础 URL（本地驱动拼预签名 URL 用；MATE_PUBLIC_BASE_URL 覆盖，
+	// 默认 `http://`+Addr+`/v1/mate/objects`，即 `http://127.0.0.1:10001/v1/mate/objects`）。
+	//
+	// 它由 Addr 派生，故必须在 Addr 定值之后计算（见 materialize）；显式给值时原样采用。
+	// 前端预览/下载只经签名通路（presign-url + /objects），这个 URL 就是签名指向的公共前缀。
+	PublicBaseURL string
+	// SignSecret 本地驱动预签名 URL 的 HMAC-SHA256 密钥（MATE_SIGN_SECRET 覆盖）。
+	//
+	// 默认单机常量 "ark-mate-local-presign"：本机单操作员零配置即可用。**多用户 / 对外提供服务
+	// 时须改为每机随机生成并持久化到 MATE_HOME（0600 权限）**——共用常量等于任何人都能伪造签名 URL。
+	SignSecret string
 	// IdentityMode 产品身份的交付模式（`MATE_IDENTITY_MODE` 覆盖，默认 auto）。
 	//
 	// 四个取值的语义见 `internal/core/identity.Mode`（auto=系统提示+首轮兜底 / system=只系统提示 /
@@ -336,6 +347,8 @@ const (
 	DefaultAttachmentPendingTTL = 24 * time.Hour
 	// DefaultAttachmentSweep 孤儿清扫 tick 间隔（MATE_ATTACHMENT_SWEEP 覆盖；0 = 关闭清扫）。
 	DefaultAttachmentSweep = time.Hour
+	// DefaultSignSecret 本地驱动预签名默认密钥（单机零配置用；多用户/对外须改，见 Config.SignSecret）。
+	DefaultSignSecret = "ark-mate-local-presign"
 )
 
 // Default 返回默认配置（不含依赖家目录的派生路径，派生值在解析阶段补齐）。
@@ -390,6 +403,8 @@ var knownKeys = map[string]string{
 	"reap_grace":                 "MATE_REAP_GRACE",
 	"allowed_origins":            "MATE_ALLOWED_ORIGINS",
 	"web_dir":                    "MATE_WEB_DIR",
+	"public_base_url":            "MATE_PUBLIC_BASE_URL",
+	"sign_secret":                "MATE_SIGN_SECRET",
 	"mcp_auto_probe":             "MATE_MCP_AUTO_PROBE",
 	"mcp_gateway":                "MATE_MCP_GATEWAY",
 	"platform_mcp":               "MATE_PLATFORM_MCP",
@@ -1030,6 +1045,19 @@ func materialize(r *resolver) (Config, error) {
 		}
 	} else if c.DBPath != "" {
 		c.ProcRegistryPath = filepath.Join(filepath.Dir(c.DBPath), "processes.json")
+	}
+
+	// 预签名公共基础 URL / 密钥（文档预览 P0）：PublicBaseURL 由 Addr 派生，故必须在上面
+	// Addr 定值之后再算；显式给值时原样采用（不覆写已设置的值）。
+	if v, ok := r.get("public_base_url"); ok {
+		c.PublicBaseURL = strings.TrimSpace(v)
+	} else {
+		c.PublicBaseURL = "http://" + c.Addr + "/v1/mate/objects"
+	}
+	if v, ok := r.get("sign_secret"); ok {
+		c.SignSecret = strings.TrimSpace(v)
+	} else {
+		c.SignSecret = DefaultSignSecret
 	}
 	return c, nil
 }

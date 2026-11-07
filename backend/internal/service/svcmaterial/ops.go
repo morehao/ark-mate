@@ -90,19 +90,19 @@ func (s *materialSvc) GetNode(ctx context.Context, id string) (*dtomaterial.Node
 // detail 把实体折成详情响应（按 kind 补载体）。
 func (s *materialSvc) detail(ctx context.Context, n model.LibraryNodeEntity) (*dtomaterial.NodeDetailResp, error) {
 	resp := &dtomaterial.NodeDetailResp{
-		ID:            n.ID,
-		ParentID:      n.ParentID,
-		NodeKind:      n.NodeKind,
-		Title:         n.Title,
-		Body:          n.Body,
-		TableID:       n.TableID,
-		DriveUploadID: n.DriveUploadID,
-		SourceURL:     n.SourceURL,
-		SizeBytes:     n.SizeBytes,
-		Category:      n.Category,
-		ProvenanceID:  n.ProvenanceID,
-		CreatedAt:     objtime.Milli(n.CreatedAt),
-		UpdatedAt:     objtime.Milli(n.UpdatedAt),
+		ID:           n.ID,
+		ParentID:     n.ParentID,
+		NodeKind:     n.NodeKind,
+		Title:        n.Title,
+		Body:         n.Body,
+		TableID:      n.TableID,
+		FileID:       n.DriveUploadID,
+		SourceURL:    n.SourceURL,
+		SizeBytes:    n.SizeBytes,
+		Category:     n.Category,
+		ProvenanceID: n.ProvenanceID,
+		CreatedAt:    objtime.Milli(n.CreatedAt),
+		UpdatedAt:    objtime.Milli(n.UpdatedAt),
 	}
 	if material.NodeKind(n.NodeKind) == material.KindTable && s.st != nil {
 		if t, ok, err := s.st.LibraryTableByNode(ctx, n.ID); err != nil {
@@ -135,7 +135,7 @@ func (s *materialSvc) CreateNode(ctx context.Context, req dtomaterial.CreateNode
 		return nil, code.Errorf(code.InvalidParam, "参数错误: title 不能为空")
 	}
 	// 载体一致性（domain 判决）：drive 要求 drive_upload_id 非空、body 空。
-	carrier := material.Carrier{Body: req.Body, TableID: tableIDFor(kind, req.Schema), SourceURL: req.SourceURL, DriveUploadID: req.DriveUploadID}
+	carrier := material.Carrier{Body: req.Body, TableID: tableIDFor(kind, req.Schema), SourceURL: req.SourceURL, DriveUploadID: req.FileID}
 	if err := material.ValidateCarrier(kind, carrier); err != nil {
 		return nil, code.Errorf(code.InvalidRequest, "material_node_kind_mismatch: 节点种类与载体不匹配")
 	}
@@ -147,7 +147,7 @@ func (s *materialSvc) CreateNode(ctx context.Context, req dtomaterial.CreateNode
 		Title:         strings.TrimSpace(req.Title),
 		Body:          req.Body,
 		SourceURL:     req.SourceURL,
-		DriveUploadID: req.DriveUploadID,
+		DriveUploadID: req.FileID,
 		Category:      model.LibraryNodeCategoryMaterial, // 用户自建资料
 	}
 	if kind == material.KindTable {

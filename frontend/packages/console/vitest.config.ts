@@ -17,7 +17,13 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     // 组件测试与纯逻辑测试分目录，避免 vitest 误收 node:test 的用例（反之亦然）。
-    include: ['tests/components/**/*.test.tsx', 'tests/components/**/*.test.ts'],
+    // preview/__tests__：FE-P3 的 V6 单测就近放在组件目录下（与实现同目录），一并纳入。
+    include: [
+      'tests/components/**/*.test.tsx',
+      'tests/components/**/*.test.ts',
+      'src/components/preview/__tests__/**/*.test.tsx',
+      'src/components/preview/__tests__/**/*.test.ts',
+    ],
     setupFiles: ['./tests/components/setup.ts'],
     css: false,
   },

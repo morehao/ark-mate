@@ -28,6 +28,7 @@ import {
 import { useMate } from '../store'
 import { pinnedCapabilitiesView } from '../console/capabilityView'
 import { ModelSelect } from './ModelSelect'
+import { usePreview } from './preview/PreviewProvider'
 import { shortId } from '../console/util'
 import { copyText } from '../console/clipboard'
 import { summarizeRun, type FailedRun, type RunSummary } from '../console/runSummary'
@@ -94,6 +95,8 @@ export function SessionInfoPanel({
   const [artLoading, setArtLoading] = useState(false)
   const [importingId, setImportingId] = useState<string | null>(null)
   const [importedNodes, setImportedNodes] = useState<Record<string, string>>({})
+  // 统一预览壳：点击产物标题打开（file_id 缺失时无法预览，标题置灰不可点）。
+  const { openPreview } = usePreview()
 
   const load = useCallback(async () => {
     if (!sessionId) return
@@ -686,20 +689,36 @@ export function SessionInfoPanel({
                       >
                         <InboxOutlined style={{ flex: 'none', color: tokens.textSecondary, fontSize: 13 }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div
-                            title={a.path || a.title}
+                          {/* 产物标题可点 → 统一预览壳；file_id 缺失时置灰禁用（§8 沉默清单，不报错）。 */}
+                          <button
+                            type="button"
+                            disabled={!a.file_id}
+                            onClick={() => {
+                              if (!a.file_id) return
+                              openPreview({ file_id: a.file_id, name: a.title, size_bytes: a.size_bytes })
+                            }}
+                            title={a.file_id ? `预览 ${a.title}` : a.path || a.title}
                             style={{
+                              display: 'block',
+                              maxWidth: '100%',
+                              margin: 0,
+                              padding: 0,
+                              border: 0,
+                              background: 'transparent',
+                              textAlign: 'left',
+                              font: 'inherit',
                               fontSize: 12.5,
                               fontWeight: 600,
                               lineHeight: 1.4,
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
-                              color: tokens.text,
+                              color: a.file_id ? tokens.text : tokens.textPlaceholder,
+                              cursor: a.file_id ? 'pointer' : 'default',
                             }}
                           >
                             {a.title}
-                          </div>
+                          </button>
                           <div
                             style={{
                               marginTop: 2,

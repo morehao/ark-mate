@@ -35,7 +35,7 @@ type ListNodesResp struct {
 // 按 kind 只填对应字段（其余为空串），与 domain/material 的「一列一义」一致：
 //   - doc/page/link：Body 有值（link 另有 SourceURL）；
 //   - table：TableID 有值（另附 schema）；
-//   - drive：DriveUploadID 有值（另附 DownloadPath 给本地只读绝对路径）。
+//   - drive：FileID 有值（另附 DownloadPath 给本地只读绝对路径）。
 type NodeDetailResp struct {
 	ID       string `json:"id"`
 	ParentID string `json:"parent_id"`
@@ -47,10 +47,10 @@ type NodeDetailResp struct {
 	Schema string `json:"schema,omitempty"`
 	// Rows 仅 table 种类：行数据 JSON 数组原样透出。
 	Rows string `json:"rows,omitempty"`
-	// DriveUploadID 仅 drive 种类：附件链路的 core_file_upload.id（内部指针，一般前端用不到）。
-	DriveUploadID string `json:"drive_upload_id,omitempty"`
-	SourceURL     string `json:"source_url,omitempty"`
-	SizeBytes     int64  `json:"size_bytes"`
+	// FileID 仅 drive 种类：附件链路的 core_file_upload.id（前端预览/下载走签名通路要用它）。
+	FileID    string `json:"file_id,omitempty"`
+	SourceURL string `json:"source_url,omitempty"`
+	SizeBytes int64  `json:"size_bytes"`
 	// Category 分类维度（v34）：material（用户自建）| artifact（会话产物收录）。
 	Category string `json:"category,omitempty"`
 	// ProvenanceID 引用的产物主键（v34）：→ artifacts.id（artifact 类别时非空）。
@@ -61,7 +61,7 @@ type NodeDetailResp struct {
 
 // CreateNodeReq `POST /materials/nodes` 的请求体（建 folder/doc/table/link/page/drive）。
 //
-// drive 走「P0′ 收口后的两步式」：先 `POST /files` 拿 file_id，再传 `drive_upload_id`。
+// drive 走「P0′ 收口后的两步式」：先 `POST /files` 拿 file_id，再传 `file_id`。
 type CreateNodeReq struct {
 	ParentID  string `json:"parent_id"`
 	NodeKind  string `json:"node_kind"` // folder|doc|table|link|page|drive
@@ -69,8 +69,8 @@ type CreateNodeReq struct {
 	Body      string `json:"body"`       // doc/page/link
 	Schema    string `json:"schema"`     // table: 字段定义 JSON
 	SourceURL string `json:"source_url"` // link
-	// DriveUploadID 仅 drive 种类：`POST /files` 返回的 file_id（= core_file_upload.id）。
-	DriveUploadID string `json:"drive_upload_id"`
+	// FileID 仅 drive 种类：`POST /files` 返回的 file_id（= core_file_upload.id）。
+	FileID string `json:"file_id"`
 	// SpaceID 可选；本期只支持默认个人空间，非默认值 → 40501 space_not_supported。
 	SpaceID string `json:"space_id"`
 }
