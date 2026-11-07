@@ -153,7 +153,10 @@ jobs:
       run:
         working-directory: backend
     env:
-      CGO_ENABLED: "0"
+      # -race 判据要求 cgo（`go: -race requires cgo`），故本 job 必须 CGO_ENABLED=1
+      # （与其它 job 的 CGO_ENABLED=0 相反：它们验证"纯 Go 可编可测"，本 job 只跑竞争检测）。
+      # 仍是纯 Go 的 SQLite（ncruces/go-sqlite3），cgo 只用于 race 运行时，不引入 C 版驱动。
+      CGO_ENABLED: "1"
     steps:
       - uses: actions/checkout@v4
         with:
