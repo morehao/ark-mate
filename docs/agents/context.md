@@ -81,20 +81,20 @@ golib `biz/gcontext` 把租户作用域做成**随 `context.Context` 传递的�
 - `gincontext.AsyncContext(c)`：异步路径，**不持有 `*gin.Context`**；
 - `gincontext.SetTenantScope(c, scope)`：写请求上下文（规范存储）+ 投影 gin Keys。
 
-## 与 ark-iam 的差异（不要照抄它的写法）
+## 与一个姊妹项目的差异（不要照抄它的写法）
 
-ark-iam 走的是"service 收 `*gin.Context` + 开 `ContextWithFallback`"（`backend/apps/*/cmd/main.go` 各一行）。它之所以**还能跑**，是因为租户隔离层 `pkg/dbclient` 做了载体断言兜底、且身份有两层载体。这属于用兜底掩盖理由二的隐患，不是可复用经验：
+该姊妹项目走的是"service 收 `*gin.Context` + 开 `ContextWithFallback`"（`backend/apps/*/cmd/main.go` 各一行）。它之所以**还能跑**，是因为租户隔离层 `pkg/dbclient` 做了载体断言兜底、且身份有两层载体。这属于用兜底掩盖理由二的隐患，不是可复用经验：
 
-| | ark-mate（本仓） | ark-iam |
+| | ark-mate（本仓） | 对照姊妹项目 |
 | --- | --- | --- |
 | handler 传什么 | `c.Request.Context()` | `c` |
 | service 签名 | `context.Context` | `*gin.Context` |
 | `ContextWithFallback` | **不得打开** | 15 处打开 |
 | 数据竞争面 | 无（纯 ctx） | 靠 `dbclient` 兜底 |
 
-## 姊妹项目 ark-trip 的独立佐证（同一结论的另一种落法）
+## 另一个姊妹项目的独立佐证（同一结论的另一种落法）
 
-`ark-trip` 选了"业务层传 `*gin.Context`"，但它**独立撞到了同一条竞争**，并在 gorm 插件层补了一个归一化器（`backend/pkg/dbclient/request_context.go`）。它的注释把机制写得很准：
+该项目选了"业务层传 `*gin.Context`"，但它**独立撞到了同一条竞争**，并在 gorm 插件层补了一个归一化器（`backend/pkg/dbclient/request_context.go`）。它的注释把机制写得很准：
 
 > - 不开开关就直传给 `database/sql`：拿到的是**降级 context** —— `Done()`/`Err()` 恒 nil（查询不随请求取消），typed-key 取值一律读不到；
 > - 开了开关再直传：`database/sql` 的 `Rows.awaitDone` 会在 handler 返回之后调用 `ctx.Err()`，与 gin 复用同一个 `*gin.Context` 时 `ServeHTTP` 写 `c.Request` 构成数据竞争（`go test -race` 稳定复现）。
@@ -102,9 +102,9 @@ ark-iam 走的是"service 收 `*gin.Context` + 开 `ContextWithFallback`"（`bac
 
 它的实现是在 gorm 的 `create/query/update/delete/row/raw` 六个 processor 之前，把 `db.Statement.Context` 里的 `*gin.Context` 换回 `gc.Request.Context()`。
 
-**这恰好印证了本分册的结论**：不论前端（handler）写什么，最终喂给 `database/sql` 的必须是纯 `context.Context`。ark-mate 的做法是**在源头不产生**这个坏值（handler 直接传纯 ctx），ark-trip 的做法是**在汇合点清洗**它（gorm 插件归一化）。前者少一层机制，且 `redis`/HTTP 客户端这类非 gorm 消费者也不会漏（ark-trip 的注释里自己承认"不覆盖非 GORM 的 ctx 消费者"）。
+**这恰好印证了本分册的结论**：不论前端（handler）写什么，最终喂给 `database/sql` 的必须是纯 `context.Context`。ark-mate 的做法是**在源头不产生**这个坏值（handler 直接传纯 ctx），该项目的做法是**在汇合点清洗**它（gorm 插件归一化）。前者少一层机制，且 `redis`/HTTP 客户端这类非 gorm 消费者也不会漏（该项目注释里自己承认"不覆盖非 GORM 的 ctx 消费者"）。
 
-> 若将来本仓出现必须接收 `*gin.Context` 的第三方回调（例如库只认 gin 类型），可以借鉴 ark-trip 的归一化器；但**不要**把它当成"允许 handler 传 `c`"的理由——那会让每个非 gorm 的 ctx 消费者都需要自己的兜底。
+> 若将来本仓出现必须接收 `*gin.Context` 的第三方回调（例如库只认 gin 类型），可以借鉴该项目的归一化器；但**不要**把它当成"允许 handler 传 `c`"的理由——那会让每个非 gorm 的 ctx 消费者都需要自己的兜底。
 
 ## 事故记录
 
