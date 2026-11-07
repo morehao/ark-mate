@@ -71,6 +71,7 @@ func TestUpgradeProbeIdentityPatchDump(t *testing.T) {
 }
 
 func runDumpProbe(t *testing.T, label string, gen func() ([]byte, error)) {
+	t.Helper()
 	if os.Getenv("DSH_UPGRADE_PROBE") != "1" {
 		t.Skip("升级探针默认跳过：设 DSH_UPGRADE_PROBE=1 显式运行")
 	}

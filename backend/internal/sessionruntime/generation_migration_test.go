@@ -44,7 +44,7 @@ type genRig struct {
 	runtme string // agent 声明的 runtime id（= 注册表里的 spec id）
 }
 
-func newGenRig(t *testing.T) *genRig { return newGenRigOn(t, "stub") }
+func newGenRig(t *testing.T) *genRig { t.Helper(); return newGenRigOn(t, "stub") }
 
 // newGenRigOn 指定 spec/agent 的 runtime id。
 //

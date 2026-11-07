@@ -76,6 +76,15 @@ func (pl *Pool) Dial(ctx context.Context, spec runtime.Spec, opt DialOptions) (*
 	// 不进键的表现是"后建的会话悄悄跑在先进那个进程的模式里"。
 	keys := pl.KeyFor(spec, opt.Fingerprint, opt.NativeMode)
 
+	// 同键串行化（singleflight）：把「查 → 拨 → 登记」整段放进键级锁，避免 check-then-act。
+	// 为什么必须有：connect 是秒级的 spawn+握手。两个并发请求（自动化触发 + 用户手发、
+	// 或恢复与新建撞车）若都 miss Get，会各起一个子进程；后登记的 Add 覆盖 map 项，先者就成为
+	// 池外孤儿——ReapIdle / CloseAll / GenerationKeysFor 全看不见它（表现为孤儿 runtime 进程、
+	// 代际上限少算一条，且无任何报错）。键级锁让第二个请求等待第一个把手握+登记做完，
+	// 醒来直接命中 Get 复用，绝不会拨第二条。
+	unlock := pl.keyLock(keys.Key)
+	defer unlock()
+
 	if rc := pl.Get(keys.Key); rc != nil {
 		if rc.Client == nil {
 			return rc, nil // 测试桩：没有句柄可验活，按登记事实返回

@@ -1,0 +1,39 @@
+# golangci-lint 配置（2026-11-07 立）—— 只启用「判据稳定、误报低、可自动定位」的 linter 子集。
+#
+# 定位：CI 里与 gofmt -l / go vet 互补的那一层。**不追全量启用**：本项目已用 ~200 条
+# archtest 守卫钉分层与词汇，golangci-lint 只补「go fmt/vet 覆盖不到的机械规范」——
+# 特别是 thelper（测试 helper 漏 t.Helper 会让失败行号指向 helper 内部，而非真正调用点）。
+#
+# 口径：只拦「存量已干净、且目标明确」的几类。unused / ineffassign 等当前存量有告警
+# （历史死代码），不在本次 P0/P1 范围内，故不启用——避免引入一条一开始就红的门禁。
+# 后续若要纳入，先跑一轮存量、修完再写进 enabled。
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # default: none —— 只跑下面显式列的，避免 golangci-lint 版本升级时默认集变化导致判据漂移。
+  default: none
+  enable:
+    - govet        # go vet（更细；保留以免本地只跑 go build 时漏掉）
+    - thelper      # 测试 helper 必须调 t.Helper()（本配置的重点）
+  settings:
+    thelper:
+      # 只做「命名 helper 缺 t.Helper()」的判据（test.begin/first 关闭）。
+      # 为什么不用 begin/first：它们会把表驱动用例里 `mutate func(t *testing.T, ...)` 这类
+      # **字段闭包**（是测试体、不是 helper）误判为缺 t.Helper——本项目大量测试用这种形状
+      # （doctor_readmodels_test.go、provenance_test.go 等），开启后是持续噪音而非有效判据。
+      # 关掉后仍能拦「`func foo(t *testing.T)` 命名 helper 忘了 t.Helper()」这一最常见漏法
+      # （本次已据此修好升级探针/生成夹具/自动化引擎三处 helper）。
+      test:
+        begin: false
+        first: false
+  exclusions:
+    paths:
+      - "internal/persistence/store/migrate_v.*\\.go"
+
+formatters:
+  # gofmt 在 CI 里另有独立一步（gofmt -l），这里再挂一次，保证本地 `golangci-lint run` 与 CI 一致。
+  enable:
+    - gofmt

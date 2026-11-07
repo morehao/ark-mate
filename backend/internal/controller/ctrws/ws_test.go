@@ -417,3 +417,65 @@ func TestReplayFramesBracketReplay(t *testing.T) {
 		t.Fatalf("增量续传的 begin 帧应带请求起点 %d：%+v", pre1.Seq, begin)
 	}
 }
+
+// TestReplayDeliversEveryEventPastWriteQueue 回归：回放帧不得静默丢帧。
+//
+// 背景：send 是非阻塞入队（队列 256，满则 drop），而 replay_end 的位次会被前端当作续传游标。
+// 若回放中途丢帧、replay_end 却推进到从未投递的 seq，那段历史就永久缺失且无 gap 信号。
+// 本用例发布 N=600（> 队列 256）条事件后 attach，用**慢读**逐帧读取，断言：
+//   - 收到的事件 seq 恰好是 [1..N] 连续无缺（没有任何一条被丢）；
+//   - replay_end.event_seq == N（宣告的位次与实际送达一致）。
+//
+// 慢读是刻意的：它让写队列几乎必然达到 256 上限（消费速度 < 生产速度），从而触发"非阻塞丢失"
+// 这条路径；修复后（回放走 sendBlocking）生产端会等待消费而不是丢帧。
+func TestReplayDeliversEveryEventPastWriteQueue(t *testing.T) {
+	const n = 600 // > 写队列容量 256，且 < bus 历史上限 65536
+
+	bus := eventbus.New()
+	var lastSeq int64
+	for i := 1; i <= n; i++ {
+		// PublishAt 用显式 seq（1..n），让断言不必依赖 bus 每聚合的起始位次。
+		lastSeq = bus.PublishAt("s1", int64(i), testEventID, "session.user_message", int64(i), map[string]any{"i": i}).Seq
+	}
+
+	conn := startWS(t, bus)
+	wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1"})
+
+	// 逐帧读，每读一帧后短暂停顿，压低消费速度以撑满写队列。
+	seen := make(map[int64]bool, n)
+	var replayEnd int64 = -1000
+	deadline := time.Now().Add(30 * time.Second)
+	for replayEnd == -1000 { // 读到 replay_end 为止（它包住全部事件）
+		if time.Now().After(deadline) {
+			t.Fatalf("超时：只收到 %d/%d 条事件（回放丢帧？）", len(seen), n)
+		}
+		var f frame
+		if err := json.Unmarshal(wsReadRaw(t, conn), &f); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		switch f.Type {
+		case "event":
+			if f.Event == nil {
+				t.Fatalf("event 帧缺 event 体：%+v", f)
+			}
+			seen[f.Event.Seq] = true
+		case "replay_end":
+			replayEnd = f.EventSeq
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	if len(seen) != n {
+		t.Fatalf("收到 %d 条事件，期望 %d 条（有丢帧）", len(seen), n)
+	}
+
+	// 连续无缺：seq 1..n 每条都在。
+	for s := int64(1); s <= int64(n); s++ {
+		if !seen[s] {
+			t.Fatalf("事件 seq %d 缺失：回放静默丢帧（写队列 256，共 %d 条）", s, n)
+		}
+	}
+	if replayEnd != lastSeq {
+		t.Fatalf("replay_end.event_seq 应为最后送达的 %d，got %d", lastSeq, replayEnd)
+	}
+}
