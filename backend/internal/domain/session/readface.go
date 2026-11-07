@@ -210,6 +210,7 @@ func (pl *Plane) ToSessionRespOf(r *SessionRec) SessionItem {
 		Cwd:                r.Cwd,
 		WorkspaceTemporary: r.WorkspaceTemporary,
 		Origin:             r.Origin,
+		NativeMode:         r.NativeMode,
 		CreatedAt:          objtime.Milli(r.CreatedAt),
 		UpdatedAt:          objtime.Milli(r.UpdatedAt),
 	}

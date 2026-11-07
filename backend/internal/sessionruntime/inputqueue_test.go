@@ -467,7 +467,7 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 	svc1 := NewService(runtime.NewRegistry(), nil)
 	svc1.EnableStore(st)
 	svc1.sessionPlane.RegisterSession(&session.SessionRec{ID: "c1", Generation: 1})
-	queued, err := svc1.sessionPlane.EnqueueInput(context.Background(), "c1", "重启前的排队", session.DeliveryAfterRun, "run-x", 1)
+	queued, err := svc1.sessionPlane.EnqueueInput(context.Background(), "c1", "重启前的排队", session.DeliveryAfterRun, "run-x", 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -549,7 +549,7 @@ func TestQueuedInputThreeActions(t *testing.T) {
 	// 三条排队输入（store 分配会话内位次）。
 	var ids []string
 	for _, text := range []string{"一", "二", "三"} {
-		in, err := svc.sessionPlane.EnqueueInput(ctx, id, text, session.DeliveryAfterRun, "", 0)
+		in, err := svc.sessionPlane.EnqueueInput(ctx, id, text, session.DeliveryAfterRun, "", 0, nil)
 		if err != nil {
 			t.Fatalf("EnqueueInput: %v", err)
 		}

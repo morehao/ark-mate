@@ -110,6 +110,10 @@ type RunnerDeps struct {
 	Interactions InteractionCanceller
 	// Extractor 产物自动抽取端口（nil = 不抽取；工具完成时旁路触发，不影响会话）。
 	Extractor ArtifactExtractor
+	// DeliverQueuedFn 投递队首时**带附件重建本轮**的端口（v4 P2）：解析附件 id → parts 需要
+	// 附件解析器，而解析器在编排层（domain 不 import 附件链路）。nil = 退化为纯文本投递
+	// （旧行为；无附件的队项本就走这条）。有附件时必须走它，否则排队会丢附件。
+	DeliverQueuedFn func(ctx context.Context, sessionID, text string, attachments []string) error
 }
 
 // Runner 会话轮次的运行期状态机：受理、事件出口、排队投递、收尾。
@@ -124,6 +128,7 @@ type Runner struct {
 	toolFailed  ToolFailureClassifier
 	interacts   InteractionCanceller
 	extractor   ArtifactExtractor
+	deliverQueued func(ctx context.Context, sessionID, text string, attachments []string) error
 
 	// toolWriteMu/toolWrites 是「在途工具调用的写文件线索」：in_progress 帧的 rawInput 带路径
 	// （终态帧不带，见 R1 探针），故在 tool_call 帧缓存、终态帧取出后清掉。仅承接 write/edit 线索时用
@@ -155,6 +160,7 @@ func NewRunner(d RunnerDeps) *Runner {
 		diagnostics: d.Diagnostics, catalog: d.Catalog, toolMemory: d.ToolMemory,
 		toolFailed: d.ToolFailures, interacts: d.Interactions,
 		extractor:     d.Extractor,
+		deliverQueued: d.DeliverQueuedFn,
 		usage:         make(map[string]objusage.UsageInfo),
 		tokenUsage:    make(map[string]objusage.TokenUsage),
 		settleTimeout: AgentSettleTimeout,
@@ -181,7 +187,7 @@ func (r *Runner) SetSettleTimeout(d time.Duration) {
 // 会话无活句柄（进程刚起、或连接已断）时按需重建：持久层有记录 → 由 Acquire 走
 // native resume / handoff memo（ADR-4：执行可丢弃、会话平台拥有）；无记录才 session_not_found。
 func (r *Runner) Prompt(ctx context.Context, sessionID, text string) (int64, error) {
-	return r.PromptParts(ctx, sessionID, text, nil, nil)
+	return r.PromptParts(ctx, sessionID, text, nil, nil, "")
 }
 
 // PromptParts 同 Prompt，但额外携带内容块 parts（v32 附件链路：text + image）与附件元数据
@@ -190,12 +196,12 @@ func (r *Runner) Prompt(ctx context.Context, sessionID, text string) (int64, err
 // text 仍是**用户原文**（进事件/落库/开轮行）；parts 是**发给底座的**内容块（text 段的文本
 // 会再叠上首轮前缀，image 段带字节）。parts 为空时按 TextParts(text) 兜底（行为与旧 Prompt 一致）；
 // attachMeta 为空时 user_message 载荷不含 attachments 键（与无附件行为逐字一致）。
-func (r *Runner) PromptParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart, attachMeta []AttachmentMeta) (int64, error) {
+func (r *Runner) PromptParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart, attachMeta []AttachmentMeta, skillContract string) (int64, error) {
 	as, err := r.acquire(ctx, sessionID)
 	if err != nil {
 		return 0, err
 	}
-	t, prefix, err := as.BeginRun(ctx)
+	t, prefix, err := as.BeginRun(ctx, skillContract)
 	if err != nil {
 		return 0, err
 	}
@@ -252,7 +258,7 @@ func (r *Runner) PromptParts(ctx context.Context, sessionID, text string, parts 
 //     「本函数还没入队」之间留一个窗口，那一项将永远不被投递。入队后再复查一次空闲，
 //     闭合「取消前旧轮已自然结束」的另一半窗口（认领是条件更新，两边都跑也只会投一次）。
 func (r *Runner) PromptWithDelivery(ctx context.Context, sessionID, text, delivery string) (PromptOutcome, error) {
-	return r.PromptWithDeliveryParts(ctx, sessionID, text, nil, nil, delivery)
+	return r.PromptWithDeliveryParts(ctx, sessionID, text, nil, nil, delivery, "")
 }
 
 // PromptWithDeliveryParts 同 PromptWithDelivery，但额外携带内容块 parts（v32 附件链路）。
@@ -260,13 +266,13 @@ func (r *Runner) PromptWithDelivery(ctx context.Context, sessionID, text, delive
 // 带 image 的 parts **只走立即执行的两条路径**（空闲 / reject）；会排队的路径（after_run /
 // interrupt_then_prompt 且会话忙）**显式拒绝**带 image 的附件（fail-closed，不静默丢图）——
 // 队列只存文本，把图灌进去等于丢附件。
-func (r *Runner) PromptWithDeliveryParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart, attachMeta []AttachmentMeta, delivery string) (PromptOutcome, error) {
+func (r *Runner) PromptWithDeliveryParts(ctx context.Context, sessionID, text string, parts []protocol.PromptPart, attachMeta []AttachmentMeta, delivery string, skillContract string) (PromptOutcome, error) {
 	mode, err := NormalizeDelivery(delivery)
 	if err != nil {
 		return PromptOutcome{}, err
 	}
 	if mode == DeliveryReject {
-		seq, err := r.PromptParts(ctx, sessionID, text, parts, attachMeta)
+		seq, err := r.PromptParts(ctx, sessionID, text, parts, attachMeta, skillContract)
 		return PromptOutcome{EventSeq: seq}, err
 	}
 	as, err := r.acquire(ctx, sessionID)
@@ -277,22 +283,36 @@ func (r *Runner) PromptWithDeliveryParts(ctx context.Context, sessionID, text st
 	runID := as.RunID()
 	if !busy {
 		// 空闲：直接执行（与 reject 路径同语义——没有「等的那一轮」，不该留下队列行）。
-		seq, err := r.PromptParts(ctx, sessionID, text, parts, attachMeta)
+		seq, err := r.PromptParts(ctx, sessionID, text, parts, attachMeta, skillContract)
 		return PromptOutcome{EventSeq: seq}, err
 	}
-	// 忙 → 要入队，但队列只存文本：带 image 的附件在这里显式拒绝（不静默丢图）。
-	if hasImagePart(parts) {
+	// 忙 → 入队。附件（v4 P2）随队项落库（存 id，投递时经 DeliverQueuedFn 重建）。但若本次带着
+	// 附件而**投递端口未装配**（无法在投递时重建 parts），则显式拒绝而不是静默丢附件——fail-closed。
+	attIDs := attachmentIDs(attachMeta)
+	if len(attIDs) > 0 && r.deliverQueued == nil {
 		return PromptOutcome{}, failure.NewError(failure.ClassRequest, "attachment_queue_unsupported",
-			"会话正忙时暂不支持排队携带图片附件，请等本轮结束后再发", nil)
+			"会话正忙时暂不支持排队携带附件，请等本轮结束后再发", nil)
 	}
-	q, err := r.plane.EnqueueInput(ctx, sessionID, text, mode, runID, r.plane.SessionGeneration(sessionID))
+	// 技能契约不随队列行持久化（`inputs` 表无 skill 列），排队会把技能丢掉——
+	// 显式拒绝而不是静默降级，避免"我选了技能、排队后却没生效"的错觉。
+	if skillContract != "" {
+		return PromptOutcome{}, failure.NewError(failure.ClassRequest, "skill_queue_unsupported",
+			"会话正忙时技能暂不能排队携带，请等本轮结束后再发，或用「打断并发送」", nil)
+	}
+	q, err := r.plane.EnqueueInput(ctx, sessionID, text, mode, runID, r.plane.SessionGeneration(sessionID), attIDs)
 	if err != nil {
 		return PromptOutcome{}, err
 	}
-	evt := r.plane.Publish(BusInputQueued, sessionID, map[string]any{
-		"session_id": sessionID, "runtime": as.Runtime, "input_id": q.ID, "text": q.Text,
-		"delivery": q.Delivery, "target_run_id": q.TargetRunID, "generation": q.Generation,
-	})
+	evt := r.plane.Publish(BusInputQueued, sessionID, func() map[string]any {
+		payload := map[string]any{
+			"session_id": sessionID, "runtime": as.Runtime, "input_id": q.ID, "text": q.Text,
+			"delivery": q.Delivery, "target_run_id": q.TargetRunID, "generation": q.Generation,
+		}
+		if len(q.Attachments) > 0 {
+			payload["attachments"] = q.Attachments
+		}
+		return payload
+	}())
 	if mode == DeliveryInterruptThenPrompt {
 		if cerr := r.CancelRun(ctx, sessionID); cerr != nil {
 			// 取消失败（会话/连接已变）：入队项留着没有意义——就地撤下，避免留下一条
@@ -350,14 +370,18 @@ func composeDeliverParts(parts []protocol.PromptPart, composedText string) []pro
 	return out
 }
 
-// hasImagePart 判断内容块里有没有 image（队列只存文本，带图要显式拒绝）。
-func hasImagePart(parts []protocol.PromptPart) bool {
-	for _, p := range parts {
-		if p.Kind == protocol.PromptPartImage {
-			return true
+// attachmentIDs 从附件元数据里取 id 列表（供队项落库与投递重建用；保序）。
+func attachmentIDs(metas []AttachmentMeta) []string {
+	if len(metas) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(metas))
+	for _, m := range metas {
+		if m.ID != "" {
+			ids = append(ids, m.ID)
 		}
 	}
-	return false
+	return ids
 }
 
 func (r *Runner) executeRun(as *ActiveSession, t *Run, parts []protocol.PromptPart) {
@@ -460,7 +484,16 @@ func (r *Runner) DeliverQueued(as *ActiveSession) {
 	}
 	// 先启动新一轮、再发布 delivered：反过来（先发 delivered 再 Prompt）一旦启动失败，
 	// 前端会看到队列项凭空消失而其文本从未作为 user_message 出现过。
-	if _, err := r.Prompt(context.Background(), as.ID, q.Text); err != nil {
+	//
+	// v4 P2：队项带附件时经 DeliverQueuedFn 重建 parts 投递（解析附件需要编排层的解析器）；
+	// 否则走纯文本 Prompt（无附件的旧路径）。两条路都先起轮、失败即发 cancelled。
+	var derr error
+	if len(q.Attachments) > 0 && r.deliverQueued != nil {
+		derr = r.deliverQueued(context.Background(), as.ID, q.Text, q.Attachments)
+	} else {
+		_, derr = r.Prompt(context.Background(), as.ID, q.Text)
+	}
+	if err := derr; err != nil {
 		glog.Warnw(context.Background(), "排队输入投递失败", "session", as.ID, "input_id", q.ID, "err", err)
 		r.plane.Publish(BusInputCancelled, as.ID, map[string]any{
 			"session_id": as.ID, "runtime": as.Runtime, "input_id": q.ID,

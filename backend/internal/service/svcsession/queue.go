@@ -31,6 +31,10 @@ type QueueSvc interface {
 	// PopForEdit 取回草稿并作废（动作③）：返回正文，并发一条
 	// `input_cancelled{reason: user_edit}`（离队是可回放的事实）。
 	PopForEdit(ctx context.Context, id, inputID string) (string, error)
+
+	// EditQueuedInput 行内编辑一条尚未投递的输入（v4）：改正文与附件，**不出队**，发
+	// `session.input_updated` 让各端队列就地替换。队项不存在/已投递 → 40401（编辑要求队项确实还在）。
+	EditQueuedInput(ctx context.Context, id, inputID, text string, attachments []string) error
 }
 
 // QueuedDelivery 「让队首立刻成为一轮」的窄端口（会话轮次投递是那一面的事，本用不拥有它）。
@@ -129,4 +133,35 @@ func (q *Queue) PopForEdit(ctx context.Context, id, inputID string) (string, err
 		return "", code.FromError(err)
 	}
 	return text, nil
+}
+
+// EditQueuedInput 行内编辑一条待投递输入（v4）。改完**不出队**，发 `session.input_updated`
+// 让各端队列就地替换正文/附件——与撤下（离队）是两条不同的事实。
+//
+// 找不到 / 已投递 / 已作废 → 40401（queued_input_not_found，与 move 同一口径）：编辑要求队项
+// 确实还在，假的"编辑成功"会让界面去改一条它以为还在的队项。
+func (q *Queue) EditQueuedInput(ctx context.Context, id, inputID, text string, attachments []string) error {
+	if err := requireParams(id, inputID); err != nil {
+		return err
+	}
+	ok, err := q.plane.EditQueuedInput(ctx, id, inputID, text, attachments)
+	if err != nil {
+		return code.FromError(err)
+	}
+	if !ok {
+		return code.FromError(failure.NewError(failure.ClassRequest, "queued_input_not_found",
+			"该排队输入已不在队列里（可能已投递或已作废）", nil))
+	}
+	runtimeID := ""
+	if rec := q.plane.Rec(id); rec != nil {
+		runtimeID = rec.RuntimeID
+	}
+	payload := map[string]any{
+		"session_id": id, "runtime": runtimeID, "input_id": inputID, "text": text,
+	}
+	if len(attachments) > 0 {
+		payload["attachments"] = attachments
+	}
+	q.plane.Publish(session.BusInputUpdated, id, payload)
+	return nil
 }

@@ -35,12 +35,16 @@ type SessionCtr interface {
 	Cancel(c *gin.Context)
 	QueuedInputs(c *gin.Context)
 	DeleteQueuedInput(c *gin.Context)
+	// EditQueuedInput 行内编辑一条待投递输入（v4）。
+	EditQueuedInput(c *gin.Context)
 	// 队列三动作（ADR-10）：重排 / 立即发送 / 取出编辑。
 	MoveQueuedInput(c *gin.Context)
 	SendNowQueuedInput(c *gin.Context)
 	PopQueuedInput(c *gin.Context)
 	History(c *gin.Context)
 	Runs(c *gin.Context)
+	// ComposerSkills 列出 composer `/` 技能选择器可选的内置技能（v4 P1；无副作用只读）。
+	ComposerSkills(c *gin.Context)
 }
 
 var _ SessionCtr = (*sessionCtr)(nil)
@@ -296,6 +300,11 @@ func (h *sessionCtr) QueuedInputs(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
+// ComposerSkills 列出 composer `/` 技能选择器可选的内置技能（v4 P1；无副作用、无会话态）。
+func (h *sessionCtr) ComposerSkills(c *gin.Context) {
+	gincontext.Success(c, svcsession.ComposerSkills())
+}
+
 // DeleteQueuedInput 撤下一条尚未投递的排队输入（§6；已投递/已作废不可撤，幂等）。
 func (h *sessionCtr) DeleteQueuedInput(c *gin.Context) {
 	id, inputID := c.Param("id"), c.Param("input_id")
@@ -305,6 +314,20 @@ func (h *sessionCtr) DeleteQueuedInput(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, gin.H{"id": id, "input_id": inputID, "deleted": ok})
+}
+
+// EditQueuedInput 行内编辑一条待投递输入（v4）：改正文/附件，不出队，回重排后的当前队列。
+func (h *sessionCtr) EditQueuedInput(c *gin.Context) {
+	var req dtosession.QueuedInputEditReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	if err := h.queue.EditQueuedInput(c.Request.Context(), c.Param("id"), c.Param("input_id"), req.Text, req.Attachments); err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	h.QueuedInputs(c)
 }
 
 // MoveQueuedInput 重排一条待投递输入（ADR-10 动作①；DOM insertBefore 语义）。

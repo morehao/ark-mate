@@ -6,6 +6,7 @@ import {
   moveQueuedInput as apiMoveQueuedInput,
   sendQueuedInputNow as apiSendQueuedInputNow,
   popQueuedInput as apiPopQueuedInput,
+  editQueuedInput as apiEditQueuedInput,
   sessionHistory,
   createSession,
   createWorkspace as apiCreateWorkspace,
@@ -20,6 +21,7 @@ import {
   relocateWorkspace as apiRelocateWorkspace,
   patchSessionCapabilities,
   promptSession,
+  listComposerSkills,
   resolveElicitation,
   resolvePermission,
   getMeta,
@@ -31,6 +33,7 @@ import type {
   AttachmentMeta,
   BusEvent,
   CommandInfo,
+  ComposerSkill,
   ElicitationFormSchema,
   PermissionOption,
   ConfigOption,
@@ -468,6 +471,14 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
         queueSeq: v.queueSeq + 1,
         lastSeq,
       }
+    case Ev.InputUpdated:
+      // v4 行内编辑：就地替换该队项的正文/附件，不出队、不补提示（是用户自己的编辑动作）。
+      return {
+        ...v,
+        queue: transitionQueue(v.queue, e).queue,
+        queueSeq: v.queueSeq + 1,
+        lastSeq,
+      }
     case Ev.InputCancelled: {
       // 离队但没投出去（用户撤下 / 投递失败 / 重启作废）：文本从此不会出现在正文里，
       // 所以必须在流里留一条带原因与出路的系统提示——「我排的那句话去哪了」得有答案。
@@ -588,6 +599,8 @@ export interface MateState {
    * v19 起这条读面**无参**（原来要带 `?agent=<id>`，而底座只有一个）。
    */
   modelCatalog: ModelCatalogResp | null
+  /** composer `/` 技能选择器的内置技能目录（v4；`GET /composer/skills`，只读一次装载）。 */
+  composerSkills: ComposerSkill[]
 }
 
 export interface PermissionDecision {
@@ -663,6 +676,8 @@ export interface MateActions {
   ) => Promise<string | undefined>
   /** 拉取模型目录（来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
   loadModelCatalog: () => Promise<void>
+  /** 装载 composer `/` 技能选择器的内置技能目录（v4；失败 → 空目录，不阻塞输入）。 */
+  loadComposerSkills: () => Promise<void>
   /** 会话级模型变更（经运行时 set_config_option 立即生效；运行时拒绝 → 报错且不改元数据）。 */
   updateSessionModel: (id: string, model?: string) => Promise<void>
   /**
@@ -673,11 +688,13 @@ export interface MateActions {
    */
   updateSessionCapabilities: (id: string, patch: SessionCapabilitiesPatch) => Promise<void>
   /** 发送一轮 prompt；`delivery` 仅在会话正忙时有意义（§6 排队/插话）。 */
-  sendPrompt: (text: string, delivery?: DeliveryChoice, attachments?: AttachmentMeta[]) => Promise<void>
+  sendPrompt: (text: string, delivery?: DeliveryChoice, attachments?: AttachmentMeta[], skill?: string) => Promise<void>
   /** §6：撤下一条尚未投递的排队输入（收敛以 input_cancelled 事件为准）。 */
   cancelQueuedInput: (inputId: string) => Promise<void>
   /** ADR-10 动作①：重排一条队项（`beforeId` 缺省 = 追加到末尾）。 */
   moveQueuedInput: (inputId: string, beforeId?: string) => Promise<void>
+  /** v4 行内编辑：改一条队项的正文/附件（不出队；收敛以 input_updated 事件为准）。 */
+  editQueuedInput: (inputId: string, text: string, attachments?: string[]) => Promise<void>
   /** ADR-10 动作②：让这一条**成为下一轮**（忙时排到队首，空闲时立刻投递）。 */
   sendQueuedInputNow: (inputId: string) => Promise<void>
   /** ADR-10 动作③：取回草稿并作废（正文回填到待发送文案）。 */
@@ -737,6 +754,7 @@ export const initialState: MateState = {
   railMode: 'active',
   historyStart: {},
   modelCatalog: null,
+  composerSkills: [],
 }
 
 /** C2：服务端「加载更早」每页条数。 */
@@ -1184,6 +1202,16 @@ export const useMate = create<MateStore>((set, get) => {
       }
     },
 
+    loadComposerSkills: async () => {
+      try {
+        const resp = await listComposerSkills()
+        set({ composerSkills: resp.items ?? [] })
+      } catch {
+        // 取不到内置技能 = 技能选择器降级为空（`/` 不出候选，输入不受影响），不 toast 打扰。
+        set({ composerSkills: [] })
+      }
+    },
+
     updateSessionModel: async (id, model) => {
       try {
         await updateSession(id, { model })
@@ -1204,7 +1232,7 @@ export const useMate = create<MateStore>((set, get) => {
       }
     },
 
-    sendPrompt: async (text, delivery, attachments) => {
+    sendPrompt: async (text, delivery, attachments, skill) => {
       const id = get().activeId
       if (!id) return
       // 忙时是否放行取决于投递模式（§6）：排队/插话是允许的，缺省/reject 仍然是「防重入拒绝」。
@@ -1223,7 +1251,13 @@ export const useMate = create<MateStore>((set, get) => {
         }
         ensureTransport().connect()
         const attIds = attachments && attachments.length > 0 ? attachments.map((a) => a.id) : undefined
-        const body = delivery ? { prompt: text, delivery, attachments: attIds } : { prompt: text, attachments: attIds }
+        const base: { prompt: string; delivery?: DeliveryChoice; attachments?: string[]; skill?: string } = {
+          prompt: text,
+          attachments: attIds,
+        }
+        if (delivery) base.delivery = delivery
+        if (skill) base.skill = skill
+        const body = base
         const resp = await promptSession(id, body)
         if (resp.queued) {
           // 队项由 input_queued 事件建项（不靠这里乐观插入）：事件才是队列的唯一事实。
@@ -1264,6 +1298,23 @@ export const useMate = create<MateStore>((set, get) => {
         const items = await apiMoveQueuedInput(id, inputId, beforeId)
         // 服务端回**重排后的完整队列**：本地顺序以它为准（不自己算"我插到第几位"——
         // 客户端的序号与服务端的 `inputs.seq` 是两套东西，自己算迟早分叉）。
+        set((s) => {
+          const view = s.views[id]
+          if (!view) return {}
+          return { views: { ...s.views, [id]: { ...view, queue: items.map(queuedFromResp) } } }
+        })
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    editQueuedInput: async (inputId, text, attachments) => {
+      const id = get().activeId
+      if (!id) return
+      try {
+        // 服务端回**当前完整队列**（就地替换后的权威读面）：本地以它为准，不自己拼。
+        // 收敛仍以 `session.input_updated` 事件为准，这里只是让界面立即跟上。
+        const items = await apiEditQueuedInput(id, inputId, { text, attachments })
         set((s) => {
           const view = s.views[id]
           if (!view) return {}

@@ -179,7 +179,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 		if perr != nil {
 			return nil, code.FromError(perr)
 		}
-		seq, err := s.orch.PromptParts(runCtx, res.SessionID, req.Prompt, parts, meta)
+		seq, err := s.orch.PromptParts(runCtx, res.SessionID, req.Prompt, parts, meta, "")
 		if err != nil {
 			return nil, code.FromError(err)
 		}
@@ -213,12 +213,17 @@ func (s *Service) PromptSession(ctx context.Context, id string, req dtosession.P
 	if _, err := session.NormalizeDelivery(req.Delivery); err != nil {
 		return nil, code.FromError(err)
 	}
+	// 技能（v4 P1）：先解析成注入契约块（未知 id → invalid_skill，不静默回落），再受理投递。
+	skillContract, serr := skillContractOf(req.Skill)
+	if serr != nil {
+		return nil, code.FromError(serr)
+	}
 	// 附件（v32）：先解析/门禁（零副作用），再受理投递。任一附件不合 → 整条 prompt 拒收。
 	parts, meta, perr := s.buildPromptParts(context.WithoutCancel(ctx), id, req.Prompt, req.Attachments)
 	if perr != nil {
 		return nil, code.FromError(perr)
 	}
-	out, err := s.orch.PromptWithDeliveryParts(context.WithoutCancel(ctx), id, req.Prompt, parts, meta, req.Delivery)
+	out, err := s.orch.PromptWithDeliveryParts(context.WithoutCancel(ctx), id, req.Prompt, parts, meta, req.Delivery, skillContract)
 	if err != nil {
 		return nil, code.FromError(err)
 	}
@@ -232,6 +237,17 @@ func (s *Service) PromptSession(ctx context.Context, id string, req dtosession.P
 		ID: id, Status: session.SessionStatusInProgress, EventSeq: out.EventSeq,
 		Queued: out.Queued, InputID: out.InputID,
 	}, nil
+}
+
+// skillContractOf 把技能 id 解析成本轮注入契约块（v4 P1）。
+// 空 id → 空契约（无技能）。未知 id → `invalid_skill` 显式报错（不静默回落：用户意图不能被猜掉）。
+func skillContractOf(skillID string) (string, error) {
+	contract, err := session.SkillContract(skillID)
+	if err != nil {
+		return "", failure.NewError(failure.ClassRequest, "invalid_skill",
+			"未知技能："+skillID+"；技能面见 GET /skills", nil)
+	}
+	return contract, nil
 }
 
 // CancelRun 取消会话进行中的 run（无 run 时幂等 no-op）。

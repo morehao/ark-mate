@@ -78,9 +78,13 @@ const (
 	// ElicitationActionPending 超时但**仍可回答**的那一档（见上方 `action` 取值说明）。
 	ElicitationActionPending = "pending"
 	// BusInputQueued §6：会话正忙，用户输入已入队等待投递（delivery=after_run|interrupt_then_prompt）。
-	// payload = {session_id, input_id, text, delivery, target_run_id, generation}。
-	// 前端据此在输入区上方渲染队列；收敛靠 input_delivered / input_cancelled。
+	// payload = {session_id, input_id, text, delivery, target_run_id, generation, attachments?}。
+	// 前端据此在输入区上方渲染队列；收敛靠 input_delivered / input_cancelled / input_updated。
 	BusInputQueued = "session.input_queued"
+	// BusInputUpdated §6（v4）：排队输入的正文/附件被**行内编辑**（payload = {session_id,
+	// input_id, text, attachments?}）。队项**不出队、不改顺序**——与 cancelled（离队）是两条不同的
+	// 事实。前端收此事件就地替换该队列行的文本/附件。
+	BusInputUpdated = "session.input_updated"
 	// BusInputDelivered §6：排队输入已作为新一轮投递出去（payload = {session_id,
 	// input_id, delivery, reason(run_finished)}）。其后紧跟该轮的 session.user_message。
 	BusInputDelivered = "session.input_delivered"

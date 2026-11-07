@@ -169,6 +169,23 @@
   },
   {
     "method": "GET",
+    "path": "/v1/mate/composer/skills",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "items"
+    ]
+  },
+  {
+    "method": "GET",
     "path": "/v1/mate/command-policy",
     "status": 200,
     "code": 0,
@@ -1126,6 +1143,20 @@
     "status": 200,
     "code": 40401,
     "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PATCH",
+    "path": "/v1/mate/sessions/nope/inputs/i1",
+    "status": 200,
+    "code": 40000,
+    "msg": "参数错误: Key: 'QueuedInputEditReq.Text' Error:Field validation for 'Text' failed on the 'required' tag",
     "envelope": [
       "code",
       "data",

@@ -1,5 +1,6 @@
 import { Ev } from '@ark-mate/types'
 import type { BusEvent, QueuedInput, QueuedInputResp } from '@ark-mate/types'
+import { applyInputUpdated, readAttachments } from './queueUpdate'
 
 // ——— §6 busy input 队列视图模型（纯函数，便于 Node 侧校验） ———
 //
@@ -85,24 +86,35 @@ export interface QueueTransition {
 
 /** transitionQueue：出队事件顺带交出被移除的队项（文本只存在于投影里，事件载荷不带文本）。 */
 export function transitionQueue(queue: QueuedInput[], e: BusEvent): QueueTransition {
-  if (e.type !== Ev.InputQueued && e.type !== Ev.InputDelivered && e.type !== Ev.InputCancelled) {
+  if (
+    e.type !== Ev.InputQueued &&
+    e.type !== Ev.InputDelivered &&
+    e.type !== Ev.InputCancelled &&
+    e.type !== Ev.InputUpdated
+  ) {
     return { queue, removed: null }
   }
   const p = e.payload ?? {}
   const inputId = p.input_id === undefined || p.input_id === null ? '' : String(p.input_id)
   if (!inputId) return { queue, removed: null }
 
-  if (e.type !== Ev.InputQueued) {
-    const removed = queue.find((q) => q.inputId === inputId) ?? null
-    if (!removed) return { queue, removed: null }
-    return { queue: queue.filter((q) => q.inputId !== inputId), removed }
+  if (e.type === Ev.InputQueued) {
+    return { queue: applyQueuedEvent(queue, e, inputId), removed: null }
   }
-  return { queue: applyQueuedEvent(queue, e, inputId), removed: null }
+  if (e.type === Ev.InputUpdated) {
+    // 行内编辑：就地替换该队项的正文/附件，**不出队、不改顺序**（逻辑在 queueUpdate.applyInputUpdated）。
+    return { queue: applyInputUpdated(queue, inputId, String(p.text ?? ''), readAttachments(p.attachments)), removed: null }
+  }
+  // delivered / cancelled → 出队并交出被移除项（文本只存在于投影里，事件载荷不带文本）。
+  const removed = queue.find((q) => q.inputId === inputId) ?? null
+  if (!removed) return { queue, removed: null }
+  return { queue: queue.filter((q) => q.inputId !== inputId), removed }
 }
 
 /** 服务端当前态（GET /inputs）→ 队列视图（冷挂载重建用）。 */
 export function queuedFromResp(r: QueuedInputResp): QueuedInput {
   const q: QueuedInput = { inputId: r.input_id, text: r.text, delivery: r.delivery }
+  if (r.attachments && r.attachments.length > 0) q.attachments = r.attachments
   if (r.target_run_id) q.targetRunId = r.target_run_id
   if (typeof r.generation === 'number') q.generation = r.generation
   return q
@@ -128,6 +140,8 @@ function applyQueuedEvent(queue: QueuedInput[], e: BusEvent, inputId: string): Q
     delivery: String(p.delivery ?? ''),
     seq: e.seq,
   }
+  const atts = readAttachments(p.attachments)
+  if (atts && atts.length > 0) next.attachments = atts
   if (p.target_run_id !== undefined && p.target_run_id !== null && String(p.target_run_id) !== '') {
     next.targetRunId = String(p.target_run_id)
   }

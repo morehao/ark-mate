@@ -143,6 +143,20 @@ func (s *Store) ReorderQueuedInputs(ctx context.Context, sessionID string, ids [
 	})
 }
 
+// EditQueuedInput 改一条仍待投递输入的正文与附件（v4 行内编辑；只对 queued 行生效）。
+//
+// 条件更新 `WHERE status = queued`：已投递/已作废是台账行，改它等于篡改历史；返回 false 让
+// 调用方据实报"队项不在队列里"，而不是假装改成功（假成功会让界面去改本地顺序）。
+func (s *Store) EditQueuedInput(ctx context.Context, sessionID, id, text, attachments string) (bool, error) {
+	res := s.inputs.DB(ctx).Model(&model.InputEntity{}).
+		Where("session_id = ? AND id = ? AND status = ?", sessionID, id, model.InputStatusQueued).
+		Updates(map[string]any{"text": text, "attachments": attachments})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
 // DeleteQueuedInput 删除一条待投递输入（仅 queued；返回是否删除）。
 func (s *Store) DeleteQueuedInput(ctx context.Context, sessionID, id string) (bool, error) {
 	res := s.inputs.DB(ctx).Where("session_id = ? AND id = ? AND status = ?",

@@ -55,12 +55,14 @@ import type {
   ProviderPatch,
   ProviderProbeResp,
   QueuedInputResp,
+  QueuedInputEditReq,
   ResolveElicitationReq,
   ResolveElicitationResp,
   ResolvePermissionReq,
   ResolvePermissionResp,
   CommandPolicyResp,
   CommandPolicyRule,
+  ComposerSkill,
   RevokeMemoryReq,
   RuntimeDiagnostics,
   Skill,
@@ -255,6 +257,10 @@ export const createSession = (req: CreateSessionReq): Promise<CreateSessionResp>
 export const promptSession = (id: string, req: PromptReq): Promise<SessionPromptResp> =>
   http.post<SessionPromptResp>(`/mate/sessions/${encodeURIComponent(id)}/prompt`, req)
 
+/** composer `/` 技能选择器的内置技能目录（v4；无会话态只读）。 */
+export const listComposerSkills = (): Promise<{ items: ComposerSkill[] }> =>
+  http.get<{ items: ComposerSkill[] }>('/mate/composer/skills')
+
 export const cancelSession = (id: string): Promise<CancelSessionResp> =>
   http.post<CancelSessionResp>(`/mate/sessions/${encodeURIComponent(id)}/cancel`)
 
@@ -356,6 +362,20 @@ export const popQueuedInput = (sessionId: string, inputId: string): Promise<{ te
   http.post<{ text: string }>(
     `/mate/sessions/${encodeURIComponent(sessionId)}/inputs/${encodeURIComponent(inputId)}/pop`,
     {},
+  )
+
+/**
+ * v4 行内编辑一条待投递输入：改正文/附件，**不出队**（区别于撤下 = 离队）。
+ * 返回服务端重排后的当前队列（就地替换的权威读面）。
+ */
+export const editQueuedInput = (
+  sessionId: string,
+  inputId: string,
+  req: QueuedInputEditReq,
+): Promise<QueuedInputResp[]> =>
+  http.patch<QueuedInputResp[]>(
+    `/mate/sessions/${encodeURIComponent(sessionId)}/inputs/${encodeURIComponent(inputId)}`,
+    req,
   )
 
 /**

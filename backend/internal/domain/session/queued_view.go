@@ -7,6 +7,7 @@ type QueuedInputItem struct {
 	ID          string
 	Text        string
 	Delivery    string
+	Attachments []string
 	TargetRunID string
 	Generation  int64
 	CreatedAt   int64

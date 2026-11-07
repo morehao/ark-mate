@@ -1135,7 +1135,7 @@ func TestPromptAndCancel(t *testing.T) {
 	// 事件出口也要接上：撤下排队输入时那一条 `session.input_cancelled` 要能被观察
 	// （域平面未注入总线时事件静默丢弃，只在纯列表/单测场景出现）。
 	deps.plane.SetBus(deps.bus)
-	queued, err := deps.plane.EnqueueInput(context.Background(), "s1", "排队一", "after_run", "t1", 3)
+	queued, err := deps.plane.EnqueueInput(context.Background(), "s1", "排队一", "after_run", "t1", 3, nil)
 	if err != nil {
 		t.Fatalf("入队夹具失败: %v", err)
 	}
@@ -1190,6 +1190,41 @@ func TestPromptAndCancel(t *testing.T) {
 	if qdata[0].InputID != queued.ID || qdata[0].Text != "排队一" ||
 		qdata[0].Delivery != "after_run" || qdata[0].TargetRunID != "t1" || qdata[0].Generation != 3 {
 		t.Fatalf("排队列表字段不符: %+v（期望来自域入队的那一行 %s）", qdata[0], queued.ID)
+	}
+
+	// v4 P2 行内编辑：PATCH 改正文+附件 → 回重排后的当前队列（就地替换、不出队），并发 input_updated。
+	env, _ = do(t, r, "PATCH", "/v1/mate/sessions/s1/inputs/"+queued.ID, `{"text":"排队一（改）","attachments":["att_a"]}`)
+	if env.Code != 0 {
+		t.Fatalf("行内编辑应成功: %+v", env)
+	}
+	var eupd []struct {
+		InputID     string   `json:"input_id"`
+		Text        string   `json:"text"`
+		Attachments []string `json:"attachments"`
+	}
+	if err := json.Unmarshal(env.Data, &eupd); err != nil || len(eupd) != 1 ||
+		eupd[0].Text != "排队一（改）" || len(eupd[0].Attachments) != 1 || eupd[0].Attachments[0] != "att_a" {
+		t.Fatalf("编辑后队列回读不符: %s", env.Data)
+	}
+	updated := false
+	for _, ev := range deps.bus.EventsAfter("s1", -1) {
+		if ev.Type != session.BusInputUpdated {
+			continue
+		}
+		if pp, _ := ev.Payload.(map[string]any); pp["input_id"] == queued.ID && pp["text"] == "排队一（改）" {
+			updated = true
+		}
+	}
+	if !updated {
+		t.Fatalf("行内编辑必须发 session.input_updated（input_id=%s）: %+v", queued.ID, deps.bus.EventsAfter("s1", -1))
+	}
+	// 编辑缺 text → 40000（binding required）。
+	if env, _ := do(t, r, "PATCH", "/v1/mate/sessions/s1/inputs/"+queued.ID, `{}`); env.Code != 40000 {
+		t.Fatalf("编辑缺 text 应 40000: %+v", env)
+	}
+	// 编辑不存在的队项 → 40401（队项确实还在才可编辑）。
+	if env, _ := do(t, r, "PATCH", "/v1/mate/sessions/s1/inputs/inp_nope", `{"text":"x"}`); env.Code != 40401 {
+		t.Fatalf("编辑不存在队项应 40401: %+v", env)
 	}
 
 	// §6 撤下排队输入（P4a 正文第四十二刀起走用例层）：撤的是**刚入队那一行**，并且必须真的
@@ -1609,6 +1644,32 @@ func TestCapabilityRoutes(t *testing.T) {
 	}
 	if tools[0].McpServer != "fs" || tools[0].Source != "builtin" {
 		t.Fatalf("工具来源/归属未投影: %+v", tools[0])
+	}
+}
+
+// TestComposerSkillsRoute GET /composer/skills（v4 P1）：列出 composer `/` 技能选择器的内置技能。
+// 它是包级只读（无会话态、无校验），断言信封 data.items 里含 plan-first 即可。
+func TestComposerSkillsRoute(t *testing.T) {
+	r := newRestEngine(stubDeps(t, &stubSvc{}))
+	env, status := do(t, r, "GET", "/v1/mate/composer/skills", "")
+	if status != 200 || env.Code != 0 {
+		t.Fatalf("GET composer/skills 失败 status=%d env=%d", status, env.Code)
+	}
+	var resp dtosession.ComposerSkillsResp
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("composer/skills data 解析: %v (%s)", err, env.Data)
+	}
+	found := false
+	for _, s := range resp.Items {
+		if s.ID == "plan-first" {
+			found = true
+			if s.Name == "" || s.Desc == "" {
+				t.Fatalf("plan-first 的 name/desc 不应为空: %+v", s)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("composer/skills 应含 plan-first: %s", env.Data)
 	}
 }
 

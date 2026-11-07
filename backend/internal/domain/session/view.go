@@ -30,6 +30,9 @@ type SessionItem struct {
 
 	Origin       string
 	Capabilities *SessionCapabilities
+	// NativeMode 会话钉住的原生权限模式（v29；'' = 不注入，跟随工作空间默认）。
+	// 读面回显它，界面据此显示真实档位而不是硬编码"默认权限"（设计 §3.3 P0）。
+	NativeMode string
 }
 
 // SessionCapabilities 会话的能力选定回显（`nil` 指针 = 该 kind 未声明，与 `[]` 语义相反）。

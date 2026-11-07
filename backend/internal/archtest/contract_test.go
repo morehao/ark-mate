@@ -36,6 +36,7 @@ var frozenEventTypes = []string{
 	"session.elicitation_request",
 	"session.elicitation_resolved",
 	"session.input_queued",
+	"session.input_updated",
 	"session.input_delivered",
 	"session.input_cancelled",
 	"session.runtime",

@@ -80,6 +80,12 @@ export interface SessionSummary {
    * 面板据此给会话打标并可跳回任务页。
    */
   origin?: string
+  /**
+   * 会话钉住的原生权限模式（v29）：`read-only` / `workspace-write` / `danger-full-access`；
+   * 空/缺省 = 跟随工作空间默认。只读回显——当前接入方式（D11）会话内不可切，
+   * 权限 chip 据此显示真实档位（设计 §3.3 P0）。
+   */
+  native_mode?: string
   created_at: UnixMillis // Unix 毫秒
   updated_at: UnixMillis
 }
@@ -462,6 +468,15 @@ export interface PromptReq {
   delivery?: DeliveryMode
   /** 本轮携带的附件 id 列表（`att_…`；v32 附件链路）。 */
   attachments?: string[]
+  /** 本轮一次性技能 id（v4 `/` 技能选择器；如 `plan-first`）。空/缺省 = 无技能。 */
+  skill?: string
+}
+
+/** ComposerSkill 一条可供 composer `/` 选择器选择的内置技能（`GET /composer/skills` 的元素）。 */
+export interface ComposerSkill {
+  id: string
+  name: string
+  desc: string
 }
 
 /**
@@ -501,9 +516,17 @@ export interface QueuedInputResp {
   text: string
   /** after_run | interrupt_then_prompt */
   delivery: string
+  /** 本轮携带的附件 id 列表（v4 P2）。 */
+  attachments?: string[]
   target_run_id?: string
   generation?: number
   created_at?: UnixMillis
+}
+
+/** v4 行内编辑排队输入的请求体（PATCH /sessions/:id/inputs/:input_id）。 */
+export interface QueuedInputEditReq {
+  text: string
+  attachments?: string[]
 }
 
 /** §6 撤下排队输入的响应（DELETE /sessions/:id/inputs/:input_id）。 */
