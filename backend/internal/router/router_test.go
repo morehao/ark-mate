@@ -266,15 +266,18 @@ func repoFile(t *testing.T, name string) string {
 	return ""
 }
 
-// TestReadmeRoutesMatchRouter 文档一致性守卫：README「控制面接口摘要」与真实路由表**双向**一致。
+// TestReadmeRoutesMatchRouter 文档一致性守卫：控制面契约文档（docs/contract.md）与真实路由表**双向**一致。
 //
-//   - README → router：README 里出现的每条 `/v1/mate` 路由（表格与正文反引号内）都必须真实注册。
-//     抓得住改名/删除（P0 把 /sessions 改名为 /sessions 后曾长期漂移），也连带锁住 README
+// 历史：本守卫原读 `README.md` 的「控制面接口摘要」；2026-11 契约段迁出到 `docs/contract.md`
+// （README 只留索引），读取面随之改为该文档，判据不变。
+//
+//   - 文档 → router：文档里出现的每条 `/v1/mate` 路由（表格与正文反引号内）都必须真实注册。
+//     抓得住改名/删除（P0 把 /sessions 改名为 /sessions 后曾长期漂移），也连带锁住文档
 //     不再引用历史名。
-//   - router → README：每条注册的 `/v1/mate` 路由都必须在 README 出现。**这一向曾经缺失**，
+//   - router → 文档：每条注册的 `/v1/mate` 路由都必须在文档出现。**这一向曾经缺失**，
 //     后果是新增端点可以不带文档静默进主干（只有改名才红）。
 //
-// 两个方向都指向同一条约定：README 的接口摘要是路由契约，改路由与改文档必须同一次提交。
+// 两个方向都指向同一条约定：控制面契约文档的接口摘要是路由契约，改路由与改文档必须同一次提交。
 func TestReadmeRoutesMatchRouter(t *testing.T) {
 	engine := newEngine(t)
 	registered := map[string]string{} // "METHOD /path" → 路径
@@ -288,9 +291,9 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 		t.Fatal("未取到任何 /v1/mate 路由（装配异常）")
 	}
 
-	readme, err := os.ReadFile(repoFile(t, "README.md"))
+	readme, err := os.ReadFile(repoFile(t, filepath.Join("docs", "contract.md")))
 	if err != nil {
-		t.Fatalf("读 README: %v", err)
+		t.Fatalf("读 docs/contract.md: %v", err)
 	}
 	// 抓取反引号内的路径片段：`/xxx` 或以 ` ` 分隔的多路径（如 `/skills` · `/mcps`）。
 	re := regexp.MustCompile("`(/[A-Za-z0-9_\\-/:.]*)`")
@@ -331,23 +334,23 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("README 引用了未注册路由 %s（已注册：%d 条）", p, len(registered))
+			t.Errorf("docs/contract.md 引用了未注册路由 %s（已注册：%d 条）", p, len(registered))
 		}
 	}
 	if len(seen) < 20 {
-		t.Fatalf("README 路由提取过少（%d），守卫失效", len(seen))
+		t.Fatalf("docs/contract.md 路由提取过少（%d），守卫失效", len(seen))
 	}
 	// 反向：`/agents*` 是 **v19 之前的历史名**（agent 概念整个并入 runtime），不得再出现在
 	// README 的路由语境里——与 `conversation` 同形：历史名留在文档里会让下一个人以为它还在册。
 	if strings.Contains(string(readme), "`/agents") {
-		t.Error("README 仍含历史路由 /agents*（v19 起 agent 面并入 runtime）")
+		t.Error("docs/contract.md 仍含历史路由 /agents*（v19 起 agent 面并入 runtime）")
 	}
 	// 反向：`conversation` 是 **v15 之前的历史名**，不得再出现在 README 的路由语境里。
 	//
 	// 方向在 2026-10-11 的 v15 改名里翻转：此前正名是 /conversations、历史名是 /sessions，
 	// 现在正好相反。留成"两边都不许出现"会让改名永远无法落地。
 	if strings.Contains(string(readme), "/conversations/") || strings.Contains(string(readme), "`/conversations`") {
-		t.Error("README 仍含历史路由 /conversations（v15 起正名为 /sessions）")
+		t.Error("docs/contract.md 仍含历史路由 /conversations（v15 起正名为 /sessions）")
 	}
 	// 反向（router → README）：每条注册的 /v1/mate 路由都必须在 README 出现。
 	//
@@ -362,10 +365,10 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 	}
 	if len(undocumented) > 0 {
 		sort.Strings(undocumented)
-		t.Errorf("注册了未写进 README 的路由 %d 条——README「控制面接口摘要」是本项目的路由契约，新增端点必须同表补齐：\n  %s",
+		t.Errorf("注册了未写进 docs/contract.md 的路由 %d 条——该文档的控制面接口摘要是本项目的路由契约，新增端点必须同表补齐：\n  %s",
 			len(undocumented), strings.Join(undocumented, "\n  "))
 	}
-	t.Logf("README 路由 %d 条全部命中注册表（注册 %d 条）", len(seen), len(registered))
+	t.Logf("docs/contract.md 路由 %d 条全部命中注册表（注册 %d 条）", len(seen), len(registered))
 }
 
 // TestWorkspaceRoutes 走真实装配（sessionruntime.Service）验证工作空间只读面：

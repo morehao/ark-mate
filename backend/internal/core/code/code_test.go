@@ -128,15 +128,16 @@ func TestRegistrySelfConsistent(t *testing.T) {
 	}
 }
 
-// TestReadmeCodesMatchRegistry README「业务错误码」表必须与 internal/core/code 一致。
+// TestReadmeCodesMatchRegistry 控制面契约文档（docs/contract.md）「业务错误码」表必须与 internal/core/code 一致。
 //
-// 与 TestReadmeRoutesMatchRouter 同一个思路：对外契约写在 README 里，代码是事实源，
+// 历史：本守卫原读 `README.md` 的错误码表；2026-11 契约段迁出到 `docs/contract.md`，读取面随之改为该文档，
+// 判据不变。与 TestReadmeRoutesMatchRouter 同一个思路：对外契约写在该文档里，代码是事实源，
 // 两边靠测试钉住。加码忘记写文档、或者文档里留着已删的码，都会在这里红。
 func TestReadmeCodesMatchRegistry(t *testing.T) {
 	root := repoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(root, "README.md"))
+	raw, err := os.ReadFile(filepath.Join(root, "docs", "contract.md"))
 	if err != nil {
-		t.Fatalf("读 README: %v", err)
+		t.Fatalf("读 docs/contract.md: %v", err)
 	}
 	section := codeTableSection(t, string(raw))
 
@@ -154,26 +155,26 @@ func TestReadmeCodesMatchRegistry(t *testing.T) {
 		doc[n] = true
 	}
 	if len(doc) == 0 {
-		t.Fatal("README 未解析到任何错误码（表格格式变了？）")
+		t.Fatal("docs/contract.md 未解析到任何错误码（表格格式变了？）")
 	}
 
 	reg := map[int]bool{}
 	for _, c := range code.Codes() {
 		reg[c] = true
 		if !doc[c] {
-			t.Errorf("码 %d（%s）已在 internal/core/code 声明但 README 未记录", c, code.Message(c))
+			t.Errorf("码 %d（%s）已在 internal/core/code 声明但 docs/contract.md 未记录", c, code.Message(c))
 		}
 	}
 	for c := range doc {
 		if !reg[c] {
-			t.Errorf("README 记录了口令码 %d，但 internal/core/code 里没有", c)
+			t.Errorf("docs/contract.md 记录了口令码 %d，但 internal/core/code 里没有", c)
 		}
 	}
 }
 
 // TestFrontendBizCodesMatchRegistry 前端 BizCode 常量表必须与 internal/core/code 双向一致。
 //
-// 第三个同步点：码同时写在 internal/core/code（事实源）、README（文档）、前端 response.ts（消费方）。
+// 第三个同步点：码同时写在 internal/core/code（事实源）、docs/contract.md（文档）、前端 response.ts（消费方）。
 // 前两者由 TestReadmeCodesMatchRegistry 钉住，前端此前只靠人工——而人工同步正是漂移的
 // 温床（前端原先只有 Success/Unauthorized 两个，其余 7 个码只能靠魔数比较）。
 // 用 Go 读 TypeScript 源码是刻意的：不引入前端测试框架，却让"改码忘记同步前端"当场变红。
@@ -228,7 +229,7 @@ func TestFrontendBizCodesMatchRegistry(t *testing.T) {
 	}
 }
 
-// codeTableSection 截取 README「### 业务错误码」到下一个二级/三级标题之间的正文。
+// codeTableSection 截取 docs/contract.md「### 业务错误码」到下一个二级/三级标题之间的正文。
 func codeTableSection(t *testing.T, readme string) string {
 	t.Helper()
 	lines := strings.Split(readme, "\n")
@@ -240,7 +241,7 @@ func codeTableSection(t *testing.T, readme string) string {
 		}
 	}
 	if start < 0 {
-		t.Fatal("README 缺少「### 业务错误码」小节")
+		t.Fatal("docs/contract.md 缺少「### 业务错误码」小节")
 	}
 	for j := start + 1; j < len(lines); j++ {
 		if strings.HasPrefix(lines[j], "## ") || strings.HasPrefix(lines[j], "### ") {
