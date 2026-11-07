@@ -35,7 +35,9 @@ ACP 全 agent 必支持）。平台在 `sessionruntime/platform_mcp.go` 的 `app
 ## 3. 工具集
 
 工具名 = **域前缀 + `_` + 动作**。聚合器按**首个下划线前的段**分派（`expert_set_enabled` 的域是
-`expert`，不是 `expert_set`）。新增域必须选一个**不含下划线**的前缀。
+`expert`，不是 `expert_set`；`library_list_nodes` 的域是 `library`）。新增域必须选一个**不含下划线**的前缀。
+
+当前三域：`automation_*`（定时任务，6）+ `expert_*`（专家，6）+ `library_*`（资料库，4），共 16 个工具。
 
 ### 3.1 `automation_*`（定时任务）
 
@@ -71,6 +73,19 @@ ACP 全 agent 必支持）。平台在 `sessionruntime/platform_mcp.go` 的 `app
 > **专家 ≠ 运行时 agent**：专家是**数据**（命名的会话级能力预设），不是 agent 实体。它真正的
 > 作用在建会话时被解析成技能/MCP/模型 + 角色设定。因此 `expert_create` 成功**不会**让当前会话
 > 变成该专家——工具 description 要求模型明确告知用户"下次新建会话可选它"。
+
+### 3.3 `library_*`（资料库）
+
+| 工具 | 语义 |
+|---|---|
+| `library_list_nodes` | 列出资料库目录下一层子节点（`parent_id` 可选） |
+| `library_node_info` | 读一个节点的信息与载体（drive 节点给 `drive_path` 本地只读路径） |
+| `library_upload` | 把本地文件上传为节点（`path` 须在工作区/可信目录内） |
+| `library_import_artifact` | 把会话产物引用式收录为节点（幂等） |
+
+资料库是**执行期工具**（agent 干活时读写文件/产物），与"创建定义"不同性质，但同样属于"平台
+提供给模型的工具面"——因此与 expert/automation **同在一个 `mate-platform` server 下**，靠 `library_`
+前缀区分（对齐底座把 fs/bash/schedule 等不同性质工具平铺在一个工具面的做法）。
 
 ## 4. 错误码
 
