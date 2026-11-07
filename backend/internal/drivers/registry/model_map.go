@@ -18,7 +18,7 @@ func modelResps(vs []domprovider.ModelItem) []dtomodel.ModelResp {
 			SupportsReasoning: v.SupportsReasoning,
 			ReasoningEfforts:  append([]string{}, v.ReasoningEfforts...),
 			DefaultEffort:     v.DefaultEffort,
-			Revision: v.Revision, UpdatedAt: v.UpdatedAt,
+			Revision:          v.Revision, UpdatedAt: v.UpdatedAt,
 		})
 	}
 	return out
