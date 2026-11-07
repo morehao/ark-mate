@@ -331,11 +331,31 @@ const clickJS = (page, expr) =>
   page.evaluate(`const el = ${expr}; if (!el) return false; el.click(); return true`)
 
 /** 在含指定名称的那一「行」里点指定按钮（多行时避免点到第一条）。
- *  2026-11-05 原型重设计：定时任务列表由 `<Table>` 改为卡行（`.fg-auto-row`），
- *  所以行选择器优先 `.fg-auto-row`，保留 `tr.ant-table-row` 兜底（老结构/其它表格页）。 */
+ *  行容器随交互改造换过几次：最早的 `<Table>`（`tr.ant-table-row`）→ 卡行（`.fg-auto-row`）；
+ *  2026-11-07 实测定时任务已改为 `CapabilityCard` 网格（`<article class="fg-cap-card">`，名字在
+ *  `.fg-cap-name`）。三种都收，命中哪个用哪个，免得每换一次结构这条工具就静默失效。
+ *  行内动作自 #101 后是 `IconAction`（图标按钮，文字在 `aria-label`/`title`、innerText 为空），
+ *  所以既按文本（去空白，antd 会插空格）也按无障碍名匹配。 */
 const rowBtnClick = (name, label) =>
-  // 按钮文本比对前先去掉所有空白：antd 会给两个汉字的按钮插空格（innerText 是「运 行 史」）。
-  `return (() => { const norm = (s) => (s||'').replace(/\\s/g, ''); const rows = [...document.querySelectorAll('.fg-auto-row, .ant-table-tbody tr.ant-table-row')]; const tr = rows.find(t => (t.innerText||'').includes(${JSON.stringify(name)})); if(!tr) return false; const b=[...tr.querySelectorAll('button')].find(b=>norm(b.innerText)===${JSON.stringify(label)}); if(!b) return false; b.click(); return true })()`
+  `return (() => { const norm = (s) => (s||'').replace(/\\s/g, ''); const want = norm(${JSON.stringify(label)}); const rows = [...document.querySelectorAll('.fg-cap-card, .fg-auto-row, .ant-table-tbody tr.ant-table-row')]; const tr = rows.find(t => (t.innerText||'').includes(${JSON.stringify(name)})); if(!tr) return false; const b=[...tr.querySelectorAll('button')].find(b => norm(b.innerText) === want || norm(b.getAttribute('aria-label')) === want || norm(b.getAttribute('title')) === want); if(!b) return false; b.click(); return true })()`
+
+/**
+ * 按**无障碍名**（`aria-label` / `title`）找行内图标按钮的 JS 表达式（忽略空白）。
+ *
+ * 为什么不能按 `innerText` 找：行内动作自 #101 起统一走 `IconAction`——它渲染的是
+ * `<button title=… aria-label=…>{icon}</button>`，**文字在 `title`/`aria-label` 里、`innerText` 是空**。
+ * 老脚本按 `innerText === '编辑'` 找，永远点不中（表现是"等编辑卡展开"超时，看不出原因）。
+ * 用无障碍名找，既对上图标化后的现状，也比文本更稳（不依赖有没有可见文字）。
+ *
+ * `scopeExpr` 给定时只在该元素（如某条行卡 `.fg-rowcard`）内找；不给则全文档找。
+ */
+function iconActionExpr(label, scopeExpr = 'document') {
+  return `(() => {
+    const scope = ${scopeExpr};
+    return scope ? [...scope.querySelectorAll('button')].find(b =>
+      ((b.getAttribute('aria-label') || '').replace(/\\s+/g,'') === ${JSON.stringify(label)}) ||
+      ((b.getAttribute('title') || '').replace(/\\s+/g,'') === ${JSON.stringify(label)})) : null })()`
+}
 
 /**
  * 等编辑卡**收起**（= 这张卡的写面已返回、表单已卸载）。
@@ -807,17 +827,19 @@ async function scenarioCapability(browser) {
     d.runtime_id === RUNTIME && legacyIdKeys.length === 0,
     `runtime_id=${d.runtime_id} runtime=${d.runtime}（期望 ${RUNTIME}）；多出的身份键=${legacyIdKeys.join(',') || '无'}`)
 
-  // 界面侧：会话详情「能力」行
-  const openDetail = await page.click(`[...document.querySelectorAll('button')].find(b => (b.getAttribute('aria-label')||b.getAttribute('title')||'') === '会话详情')`, { optional: true })
+  // 界面侧：会话信息面（#101 起「产物 / 会话详情」两颗按钮合并为一颗「会话信息」开关：
+  // 宽屏开合右侧可收起面板 `SessionInfoPanel`，窄屏开抽屉 `SessionDetailDrawer`——两者内容同源，
+  // 都落进 body 文本，所以统一读 `page.text()`。旧脚本找的「详情」按钮已不存在。）
+  const openDetail = await page.click(`[...document.querySelectorAll('button')].find(b => (b.getAttribute('aria-label')||'') === '会话信息')`, { optional: true })
   if (openDetail) {
     await sleep(900)
-    await page.shot('08-session-detail')
-    const drawer = await page.text()
-    const capLine = drawer.split('\n').find((l) => l.includes('技能')) ?? ''
-    check('会话详情抽屉的「能力」行回显选定 skill', drawer.includes('能力') && drawer.includes(SKILLS.applicable), capLine.slice(0, 160))
-    check('会话详情抽屉回显钉住的指纹前缀', typeof fp === 'string' && drawer.includes(fp.slice(0, 8)), `抽屉含 ${String(fp).slice(0, 8)}=${drawer.includes(String(fp).slice(0, 8))}`)
+    await page.shot('08-session-info')
+    const panel = await page.text()
+    const capLine = panel.split('\n').find((l) => l.includes('能力')) ?? ''
+    check('会话信息面板的「能力」行回显选定 skill', panel.includes('能力') && panel.includes(SKILLS.applicable), capLine.slice(0, 160))
+    check('会话信息面板回显钉住的指纹前缀', typeof fp === 'string' && panel.includes(fp.slice(0, 8)), `面板含 ${String(fp).slice(0, 8)}=${panel.includes(String(fp).slice(0, 8))}`)
   } else {
-    check('会话详情抽屉可打开（「详情」按钮）', false, '没找到「详情」按钮，选择器需按实际界面调整')
+    check('会话信息面板可打开（「会话信息」开关）', false, '没找到 aria-label=会话信息 的按钮，选择器需按实际界面调整')
   }
   return { page, convId }
 }
@@ -834,7 +856,18 @@ async function scenarioAutomation(browser) {
   const empty = await page.text()
   check('自动化页可打开且有空态说明', /定时任务|自动化/.test(empty) && !/Application error/i.test(empty), empty.split('\n').slice(0, 4).join(' | ').slice(0, 160))
 
-  await page.click(byText('button', '新建'))
+  // 精确点「自动化页」自己的新建按钮。别用 byText('button','新建')：那是 includes 匹配，
+  // 会先命中左栏的「新建会话」（DOM 中更靠前）——点了它只会新建一个会话，编辑器永远打不开
+  // （表现是"等编辑器打开"超时，看不出原因）。空态时按钮文案是「新建定时任务」，非空态是「新建」，
+  // 两种都收，且在自动化的主区（非左栏）内找。
+  await page.click(`(() => {
+    const main = document.querySelector('main') || document.body;
+    const btns = [...main.querySelectorAll('button')].filter(b => {
+      const t = (b.innerText||'').replace(/\\s+/g,'');
+      return t === '新建定时任务' || t === '新建';
+    });
+    return btns[0] || null;
+  })()`)
   // 用页面文本判定，不用 antd 的类名（v6 改过类名：Tooltip 的容器就不是 .ant-tooltip 了）
   await page.waitFor(textExpr('任务标识（创建后不可改）'), { label: '编辑器打开' })
   await sleep(500)
@@ -1390,9 +1423,9 @@ async function scenarioSettingsModel(browser) {
     // React 树之外）。新建时"写进去的值"与 `initialValues` 恰好一致，会把这条链路的毛病盖住；
     // 只有**编辑**才真的依赖"打开时同步写值"那一段（2026-10-11 的三次实测都栽在这上面，
     // 症状是编辑卡整个是空的，于是"改备注"要么什么都不发生、要么按空表单把声明改掉）。
-    const editProvBtnExpr = `(() => {
-      const li = ${probeRowExpr};
-      return li ? [...li.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '编辑') : null })()`
+    // 行内「编辑」自 #101 起是图标按钮（IconAction：文字在 aria-label/title，innerText 为空），
+    // 按无障碍名找，不再按文本找。
+    const editProvBtnExpr = iconActionExpr('编辑', probeRowExpr)
     await waitEditorGone(page, '供应商新建卡收起')
     await clickJS(page, editProvBtnExpr)
     await page.waitFor(`return !!document.querySelector('.fg-editor input#id')`, { label: '供应商编辑卡展开', timeout: 8000 })
@@ -1520,8 +1553,9 @@ async function scenarioSettingsModel(browser) {
     const editRowExprFor = (upstream) => `(() => {
       const li = [...document.querySelectorAll('.fg-model-panel section[aria-label="模型"] .fg-rowcard')]
         .find(x => (x.innerText||'').includes(${JSON.stringify(upstream)}));
-      return li ? [...li.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '编辑') : null })()`
-    const editRowExpr = editRowExprFor(modelID)
+      return li || null })()`
+    // 行内「编辑」自 #101 起是图标按钮（IconAction），按无障碍名找。
+    const editRowExpr = iconActionExpr('编辑', editRowExprFor(modelID))
     await waitEditorGone(page, '模型新建卡收起')
     await clickJS(page, editRowExpr)
     await page.waitFor(`return !!(${cardExpr('model')})`, { label: '编辑模型卡片展开', timeout: 8000 })
@@ -1590,7 +1624,7 @@ async function scenarioSettingsModel(browser) {
       created2?.max_input_tokens === null && created2?.max_output_tokens === null,
       JSON.stringify({ in: created2?.max_input_tokens, out: created2?.max_output_tokens }))
 
-    await clickJS(page, editRowExprFor(modelID2))
+    await clickJS(page, iconActionExpr('编辑', editRowExprFor(modelID2)))
     await page.waitFor(`return !!(${cardExpr('model')})`, { label: '编辑模型卡片展开（容量那两条）', timeout: 8000 })
     await sleep(300)
     await page.type(modelCardField('max_input_tokens'), String(CAP_IN))
