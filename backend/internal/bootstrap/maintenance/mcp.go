@@ -28,6 +28,8 @@ func MCP(args []string) {
 		materialMcp(args[1:])
 	case "automation":
 		automationMcp(args[1:])
+	case "platform":
+		platformMcp(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "未知的 mcp 动作 %q\n\n%s", args[0], mcpUsage)
 		os.Exit(2)
@@ -49,6 +51,9 @@ const mcpUsage = `mcp 用法：
   mate mcp automation
       定时任务 MCP stdio 服务端（automation_create / update / list / get / delete / preview；
       schedule 五选一、无 cron；delivery 缺省 session）。详见 mate mcp automation -h
+  mate mcp platform
+      平台能力 MCP stdio 服务端（聚合两域：automation_* 定时任务 + expert_* 专家定义；
+      会话默认注入的是这一条）。详见 mate mcp platform -h
 `
 
 // mcpBridge `mate mcp bridge`：平台侧 MCP stdio 网关的进程入口。
