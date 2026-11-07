@@ -26,17 +26,20 @@ import (
 )
 
 // 平台内置 MCP server 的 id / 展示名（稳定；测试与指纹都认它）。
+//
+// `mate-platform` 聚合了 automation + expert 两域（一个进程、一条注入）；`mate-material` 仍是
+// 独立条目（资料库域尚未并入 platform，见 docs/plans 的分期）。
 const (
-	PlatformMcpAutomationID   = "platform-automation"
-	PlatformMcpAutomationName = "mate-automation"
-	PlatformMcpMaterialID     = "platform-material"
-	PlatformMcpMaterialName   = "mate-material"
+	PlatformMcpPlatformID   = "platform"
+	PlatformMcpPlatformName = "mate-platform"
+	PlatformMcpMaterialID   = "platform-material"
+	PlatformMcpMaterialName = "mate-material"
 )
 
 // platformMcpServers 构造平台内置 MCP server 定义（stdio；Command = 本进程可执行文件）。
 //
-// 返回顺序稳定（automation 在前），保证注入与指纹确定性。取不到自身可执行文件路径 → 返回 nil
-// （宁可少两个工具，也不注入指向空命令的条目——那会毁掉整条会话的 session/new）。
+// 返回顺序稳定（platform 在前），保证注入与指纹确定性。取不到自身可执行文件路径 → 返回 nil
+// （宁可少几个工具，也不注入指向空命令的条目——那会毁掉整条会话的 session/new）。
 func (s *Service) platformMcpServers() []capability.McpServer {
 	exe, err := os.Executable()
 	if err != nil {
@@ -44,7 +47,7 @@ func (s *Service) platformMcpServers() []capability.McpServer {
 		return nil
 	}
 	return []capability.McpServer{
-		{ID: PlatformMcpAutomationID, Name: PlatformMcpAutomationName, Transport: capability.TransportStdio, Command: exe, Args: []string{"mcp", "automation"}},
+		{ID: PlatformMcpPlatformID, Name: PlatformMcpPlatformName, Transport: capability.TransportStdio, Command: exe, Args: []string{"mcp", "platform"}},
 		{ID: PlatformMcpMaterialID, Name: PlatformMcpMaterialName, Transport: capability.TransportStdio, Command: exe, Args: []string{"mcp", "material"}},
 	}
 }

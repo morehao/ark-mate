@@ -38,18 +38,18 @@ func TestPlatformMcpInjectedByDefault(t *testing.T) {
 		gotNames = append(gotNames, m.Name)
 	}
 	joined := strings.Join(gotNames, ",")
-	if !strings.Contains(joined, PlatformMcpAutomationName) || !strings.Contains(joined, PlatformMcpMaterialName) {
+	if !strings.Contains(joined, PlatformMcpPlatformName) || !strings.Contains(joined, PlatformMcpMaterialName) {
 		t.Fatalf("默认应注入两条平台内置 server（%s/%s），got %v",
-			PlatformMcpAutomationName, PlatformMcpMaterialName, gotNames)
+			PlatformMcpPlatformName, PlatformMcpMaterialName, gotNames)
 	}
-	// 命令应为平台自身可执行文件，参数是 mcp automation / mcp material。
+	// 命令应为平台自身可执行文件，参数是 mcp platform / mcp material。
 	for _, m := range got {
-		if m.Name == PlatformMcpAutomationName {
+		if m.Name == PlatformMcpPlatformName {
 			if !strings.HasSuffix(m.Command, "/") && m.Command == "" {
 				t.Fatalf("平台内置命令不能为空: %+v", m)
 			}
-			if strings.Join(m.Args, " ") != "mcp automation" {
-				t.Fatalf("automation 参数应为 'mcp automation'，got %v", m.Args)
+			if strings.Join(m.Args, " ") != "mcp platform" {
+				t.Fatalf("platform 参数应为 'mcp platform'，got %v", m.Args)
 			}
 		}
 		if m.Name == PlatformMcpMaterialName && strings.Join(m.Args, " ") != "mcp material" {
@@ -62,7 +62,7 @@ func TestPlatformMcpToggleOff(t *testing.T) {
 	svc := platformSvc(t, false)
 	got := svc.McpServersFor("stub", &session.CapabilitySelection{})
 	for _, m := range got {
-		if m.Name == PlatformMcpAutomationName || m.Name == PlatformMcpMaterialName {
+		if m.Name == PlatformMcpPlatformName || m.Name == PlatformMcpMaterialName {
 			t.Fatalf("开关 off 时不该注入平台内置 server，got %+v", m)
 		}
 	}
@@ -81,7 +81,7 @@ func TestPlatformMcpRemoteEndpointSkipped(t *testing.T) {
 	svc := platformSvc(t, true)
 	got := svc.McpServersFor("remote", &session.CapabilitySelection{})
 	for _, m := range got {
-		if m.Name == PlatformMcpAutomationName || m.Name == PlatformMcpMaterialName {
+		if m.Name == PlatformMcpPlatformName || m.Name == PlatformMcpMaterialName {
 			t.Fatalf("远程端点（本机无该可执行文件）不该注入平台内置 stdio server，got %+v", m)
 		}
 	}
@@ -97,13 +97,13 @@ func TestPlatformMcpWhitelistStillInjects(t *testing.T) {
 	}
 	only := []string{"fs"}
 	got := svc.McpServersFor("stub", &session.CapabilitySelection{Mcps: &only})
-	var hasAuto bool
+	var hasPlatform bool
 	for _, m := range got {
-		if m.Name == PlatformMcpAutomationName {
-			hasAuto = true
+		if m.Name == PlatformMcpPlatformName {
+			hasPlatform = true
 		}
 	}
-	if !hasAuto {
+	if !hasPlatform {
 		t.Fatalf("钉白名单时平台内置仍应注入，got %+v", got)
 	}
 }
