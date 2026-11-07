@@ -47,7 +47,7 @@ describe('Composer', () => {
     const ta = screen.getByRole('textbox') as HTMLTextAreaElement
     await user.type(ta, '你好世界')
     await user.click(screen.getByRole('button', { name: '发送' }))
-    expect(baseProps.onSend).toHaveBeenCalledWith('你好世界', undefined, undefined)
+    expect(baseProps.onSend).toHaveBeenCalledWith('你好世界', undefined, undefined, undefined)
     expect(ta.value).toBe('')
   })
 
@@ -56,7 +56,7 @@ describe('Composer', () => {
     render(<Composer {...baseProps} />)
     const ta = screen.getByRole('textbox')
     await user.type(ta, '快捷键发送{Enter}')
-    expect(baseProps.onSend).toHaveBeenCalledWith('快捷键发送', undefined, undefined)
+    expect(baseProps.onSend).toHaveBeenCalledWith('快捷键发送', undefined, undefined, undefined)
   })
 
   it('Shift+Enter 换行，不触发发送', async () => {
@@ -87,7 +87,7 @@ describe('Composer', () => {
     const btn = screen.getByRole('button', { name: '排队发送' })
     await user.click(btn)
     expect(onStop).not.toHaveBeenCalled()
-    expect(baseProps.onSend).toHaveBeenCalledWith('插一句', 'after_run', undefined)
+    expect(baseProps.onSend).toHaveBeenCalledWith('插一句', 'after_run', undefined, undefined)
   })
 
   it('忙 + 草稿非空 → 出现投递 pill；忙 + 空 → 不出现', async () => {
