@@ -769,6 +769,23 @@ export const consoleStyleSheet = `
   .fg-perm-opt-name { font-size: 13px; line-height: 1.4; }
   .fg-perm-opt-desc { font-size: 11.5px; color: ${tokens.textPlaceholder}; line-height: 1.4; }
 
+  /* 权限 chip 锁定态（v4 · D11 会话内不可切）：无下拉箭头、hover 只给软底不换成"可选"语气。
+     终局底座暴露运行期切换后，同一槽位去掉 fg-chip-locked、加回 chevron + 菜单即可（布局零迁移）。 */
+  .fg-chip-locked { cursor: help; }
+  .fg-chip-locked .fg-chip-ico { color: ${tokens.textPlaceholder}; }
+  /* 权限解释弹层（点开是解释，不是菜单）：三档说明 + 底部说明 + 新建入口。 */
+  .fg-perm-pop { width: 300px; display: flex; flex-direction: column; gap: 10px; }
+  .fg-perm-pop-title { font-size: 12.5px; font-weight: 600; color: ${tokens.text}; }
+  .fg-perm-pop-list { display: flex; flex-direction: column; gap: 8px; }
+  .fg-perm-pop-row { display: flex; flex-direction: column; gap: 2px; }
+  .fg-perm-pop-row-head { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: ${tokens.text}; }
+  .fg-perm-pop-row-desc { font-size: 11.5px; color: ${tokens.textPlaceholder}; line-height: 1.45; }
+  .fg-perm-pop-row.fg-perm-current .fg-perm-pop-row-head { color: var(--fg-menu-on-color); font-weight: 600; }
+  .fg-perm-pop-risk { color: ${tokens.warning ?? tokens.text}; }
+  .fg-perm-pop-foot { font-size: 11.5px; color: ${tokens.textPlaceholder}; line-height: 1.5; border-top: 1px solid ${tokens.border}; padding-top: 8px; }
+  .fg-perm-pop-link { color: var(--fg-menu-on-color); cursor: pointer; text-decoration: none; }
+  .fg-perm-pop-link:hover { text-decoration: underline; }
+
   /* 投递 pill（忙 + 有草稿才出现）：无框轻量、贴文案；hover 出软底 + 边（对比旧 antd Select 的表单框）。
      它只决定"这条怎么投"，不是常驻控件——空草稿时不占位。 */
   .fg-delivery-pill {
@@ -796,6 +813,34 @@ export const consoleStyleSheet = `
   .fg-delivery-opt { display: flex; flex-direction: column; gap: 1px; padding: 2px 0; }
   .fg-delivery-opt-name { font-size: 13px; line-height: 1.4; }
   .fg-delivery-opt-desc { font-size: 11.5px; color: ${tokens.textPlaceholder}; line-height: 1.4; }
+
+  /* v4 一次性技能 chip：选中斜杠技能后出现在输入卡内、正上方一行，发送即消费（可点 × 取消）。 */
+  .fg-skill-chip-row { display: flex; align-items: center; gap: 6px; }
+  .fg-skill-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: ${tokens.radiusPill}px;
+    background: ${tokens.softFill};
+    color: var(--fg-menu-on-color);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .fg-skill-chip-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: ${tokens.textPlaceholder};
+    cursor: pointer;
+  }
+  .fg-skill-chip-clear:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
 
   /* 模型选择器关闭态：药丸（不落表单框感）——hairline 边 + 全圆角 + mono 小字，
      与同一行的「在项目中工作」弱字、圆形发送钮同一语言；hover 抬边+软底，聚焦出靛蓝环。 */

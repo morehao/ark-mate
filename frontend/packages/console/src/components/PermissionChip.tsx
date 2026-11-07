@@ -1,96 +1,112 @@
-import { useState } from 'react'
-import { CheckOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
-import { Dropdown } from 'antd'
-import type { MenuProps } from 'antd'
-import { useMate } from '../store'
-
-/** 两态：默认权限 / 每次都问（设计 §19.1——**去掉"完全放行"**）。 */
-type PermMode = 'default' | 'always'
+import { Popover } from 'antd'
+import { LockOutlined, UnlockOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import { isDanger, PERM_ROWS, permLabel } from '../console/permissionView'
 
 /**
- * 输入区的「权限」chip（原型 §2 面 B / 设计 §19.1）。
+ * 输入区的「权限」chip（v4 · 设计 §3.3 P0 / §3.4 / §3.5）。
  *
- * ## 口径（重要）
- * 后端有**两层**权限，别混：
- *   ① 命令门禁 `command-policy`（`allow|prompt|forbidden`，按命令前缀规则，`types/commandPolicy.ts`）——
- *      在「设置 · 命令规则」里；
- *   ② 会话级 `PermissionOption`（`allow_once/allow_always/reject_once/reject_always`，针对单次工具调用
- *      + 会话记忆，`types/session.ts`）——**这里这个 chip 说的是它**。
+ * ## 口径（重要，和旧版完全不同）
+ * 旧版是两态假菜单（默认权限 / 每次都问）+ `useState`，点完只改显示、零接口零落库，
+ * 且「每次都问」在 DSH 里根本不存在——选择即动画，不改变任何执行行为。**已删。**
  *
- * ## 范围（已定稿：纯展示 + 提示，不接数据不落库）
- * 后端**没有**"每次都问"这个全局开关（也没有只在 UI 层就能安全切换的写接口），所以本 chip：
- *   - 只在前端本地记住当前选择（`useState`），会话内切一下只改**显示**并给一句提示；
- *   - **不**读 `GET /sessions/:id` 的权限记忆、**不**调用任何写接口、**不**改协议；
- *   - 默认显示「默认权限」。
- * 真正持久化"记住 always"仍走既有的会话级权限记忆（`POST /permission` 的 `always` + 撤销入口），
- * 这件 chip 只是给用户一个"我现在的权限姿态"的呈现与说明，绝不是命令规则的开关。
+ * 新版（D11 事实驱动）：
+ *   - 权限来自会话**创建时钉住**的原生模式（`sessions.native_mode`，只读回显）；
+ *   - 当前接入方式下（`dsh-acp` 不暴露运行期切换面）**会话内不可切**，所以 chip 是
+ *     **锁定态**：锁图标、无下拉箭头、不可选；
+ *   - 点开是**解释**（三档说明 + 当前档高亮 + 「会话内暂不可切换」+ 新建会话入口），
+ *     不是假菜单、不做假切换；
+ *   - 终局：底座在 ACP 暴露运行期切换后，**同一槽位**去掉锁、加回菜单即可（布局零迁移）。
+ *
+ * ## 范围
+ * 纯展示 + 解释。**不**调用任何写接口、**不**改协议、**不**读会话级权限记忆
+ * （那块走既有的 `POST /permission` 与「设置 · 命令规则」，与本 chip 无关）。
  */
-export function PermissionChip({ disabled }: { disabled?: boolean }) {
-  const showToast = useMate((s) => s.showToast)
-  const [mode, setMode] = useState<PermMode>('default')
+export function PermissionChip({
+  nativeMode,
+  disabled,
+  onCreateSession,
+}: {
+  /** 会话钉住的原生权限模式（`sessions.native_mode`；空/缺省 = 跟随默认）。 */
+  nativeMode?: string | null
+  disabled?: boolean
+  /** 「新建会话时可选」入口：跳/打开新建会话面板（可选，缺省只显示文案）。 */
+  onCreateSession?: () => void
+}) {
+  const label = permLabel(nativeMode)
+  const danger = isDanger(nativeMode)
+  const Icon = danger ? UnlockOutlined : nativeMode ? SafetyCertificateOutlined : LockOutlined
 
-  const items: MenuProps['items'] = [
-    {
-      type: 'group',
-      label: '本会话权限',
-      children: [
-        {
-          key: 'default',
-          icon: mode === 'default' ? <CheckOutlined /> : undefined,
-          label: (
-            <span className="fg-perm-opt">
-              <span className="fg-perm-opt-name">默认权限</span>
-              <span className="fg-perm-opt-desc">按平台的命令规则执行，敏感操作再问你</span>
-            </span>
-          ),
-        },
-        {
-          key: 'always',
-          icon: mode === 'always' ? <CheckOutlined /> : undefined,
-          label: (
-            <span className="fg-perm-opt">
-              <span className="fg-perm-opt-name">每次都问</span>
-              <span className="fg-perm-opt-desc">本会话所有工具调用都先征求你同意</span>
-            </span>
-          ),
-        },
-      ],
-    },
-  ]
+  const content = (
+    <div className="fg-perm-pop">
+      <div className="fg-perm-pop-title">本会话权限</div>
+      <div className="fg-perm-pop-list">
+        {PERM_ROWS.map((row) => {
+          const current = (nativeMode ?? '') === row.mode
+          return (
+            <div key={row.mode || 'default'} className={`fg-perm-pop-row${current ? ' fg-perm-current' : ''}`}>
+              <div className="fg-perm-pop-row-head">
+                {row.name}
+                {row.risk && <span className="fg-perm-pop-risk">·风险</span>}
+                {current && <span aria-hidden="true">·当前</span>}
+              </div>
+              <div className="fg-perm-pop-row-desc">{row.desc}</div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="fg-perm-pop-foot">
+        当前接入方式下会话内暂不可切换。
+        {onCreateSession ? (
+          <>
+            {' '}
+            <a
+              className="fg-perm-pop-link"
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.preventDefault()
+                onCreateSession()
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onCreateSession()
+                }
+              }}
+            >
+              新建会话时可选
+            </a>
+            。
+          </>
+        ) : (
+          ' 新建会话时可选。'
+        )}
+        底座开放运行期切换后这里会变成可选项。
+      </div>
+    </div>
+  )
 
   return (
-    <Dropdown
+    <Popover
       trigger={['click']}
       placement="bottomLeft"
+      content={content}
       disabled={disabled}
-      menu={{
-        items,
-        selectable: true,
-        selectedKeys: [mode],
-        onClick: ({ key }) => {
-          const next = key as PermMode
-          if (next === mode) return
-          setMode(next)
-          // 只改显示 + 提示（零接口、零落库）；持久化"记住 always"走会话级权限记忆，不在这里。
-          showToast(next === 'always' ? '本会话将每次都问' : '已恢复默认权限', 'success')
-        },
-      }}
+      overlayStyle={{ maxWidth: 320 }}
     >
       <button
         type="button"
-        className={`fg-chip fg-perm-chip${mode === 'always' ? ' fg-on' : ''}`}
-        title="本会话权限（仅展示；命令规则在「设置 · 命令规则」）"
-        aria-label="本会话权限"
+        className={`fg-chip fg-chip-locked${danger ? ' fg-on' : ''}`}
+        title="本会话权限：当前接入方式下会话内暂不可切换，点开查看说明"
+        aria-label={`本会话权限：${label}（锁定）`}
+        aria-haspopup="dialog"
         disabled={disabled}
       >
         <span className="fg-chip-ico">
-          {mode === 'default' ? <CheckOutlined /> : <SafetyCertificateOutlined />}
+          <Icon />
         </span>
-        <span className="fg-chip-label">{mode === 'always' ? '每次都问' : '默认权限'}</span>
-        <span className="fg-chip-chev" aria-hidden="true">
-          ▾
-        </span>
+        <span className="fg-chip-label">{label}</span>
       </button>
-    </Dropdown>
+    </Popover>
   )
 }

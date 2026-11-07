@@ -47,6 +47,8 @@ type Store interface {
 	CreateInput(ctx context.Context, in model.InputEntity) error
 	ClaimQueuedInput(ctx context.Context, id string, at time.Time) (bool, error)
 	DeleteQueuedInput(ctx context.Context, sessionID, id string) (bool, error)
+	// EditQueuedInput 改一条仍待投递输入的正文与附件（只对 queued 行生效；false = 不在了/已投递）。
+	EditQueuedInput(ctx context.Context, sessionID, id, text, attachments string) (bool, error)
 	HeadQueuedInput(ctx context.Context, sessionID string) (*model.InputEntity, error)
 	ListQueuedInputs(ctx context.Context, sessionID string) ([]model.InputEntity, error)
 	ListAllQueuedInputs(ctx context.Context) ([]model.InputEntity, error)

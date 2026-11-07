@@ -24,6 +24,7 @@ export const Ev = {
   // §6 busy input 队列：会话正忙时用户输入入队 / 投递 / 撤下。队列视图只认这三条事件
   // （queued 建项、delivered|cancelled 收敛），不做本地推断。
   InputQueued: 'session.input_queued',
+  InputUpdated: 'session.input_updated',
   InputDelivered: 'session.input_delivered',
   InputCancelled: 'session.input_cancelled',
   // 运行时主动推送的会话配置项全量更新（ACP session/config_option_update，如 dsh 在 provider
@@ -142,6 +143,8 @@ export interface QueuedInput {
   text: string
   /** after_run | interrupt_then_prompt（入队时不会出现 reject：那是「不排队、直接报错」）。 */
   delivery: string
+  /** 本轮携带的附件 id 列表（v4 P2；忙时排队不再丢附件）。 */
+  attachments?: string[]
   /** 入队时正在执行的那一轮（审计用；服务端投递判据是 generation）。 */
   targetRunId?: string
   /** 入队时会话执行代际：服务端投递前比对，不等即作废（旧队项绝不灌进重建后的上下文）。 */

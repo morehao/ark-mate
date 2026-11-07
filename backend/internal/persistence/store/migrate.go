@@ -796,6 +796,10 @@ var schemaMigrations = []migration{
 	// v37 的版本步本体在 `migrate_v37.go`（新增 `llm_calls` 表：内部模型调用流水，一次调用一行，
 	// session_id/run_id 可空——理由写在该文件头）。
 	migrationV37,
+
+	// v38 的版本步本体在 `migrate_v38.go`（`inputs` 加 `attachments` 列：忙时排队携带附件 id，
+	// 修掉"排队丢附件"的静默丢失——理由写在该文件头）。
+	migrationV38,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

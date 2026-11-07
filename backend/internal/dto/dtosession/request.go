@@ -51,6 +51,10 @@ type PromptReq struct {
 	// Attachments 本轮携带的附件 id 列表（`att_…`；v32 附件链路）。P2 只收不用；
 	// P3/P4 起由 sessionruntime 经 AttachmentResolver 解析为 image part / handle 文本。
 	Attachments []string `json:"attachments,omitempty"`
+	// Skill 本轮一次性技能 id（v4 `/` 技能选择器；如 `plan-first`）。空 = 无技能。
+	// 只接受内置技能白名单，非法值显式报 invalid_skill（不静默回落）。
+	// 技能契约以隐藏前缀注入本轮 prompt（不进事件/transcript），**仅本轮生效**，一次性消费。
+	Skill string `json:"skill,omitempty"`
 }
 
 // SessionCreateReq 新建会话请求体。

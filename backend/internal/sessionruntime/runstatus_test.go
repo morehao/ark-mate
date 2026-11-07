@@ -83,7 +83,7 @@ func TestRunStatusFromEventSink(t *testing.T) {
 	// P3 双 id：底层事件只带原生 session id，得先有映射（与 TestEventSinkMapping 同一套夹具）。
 	orch.handles.BindProvider("native-1", "s1")
 	as := session.NewActiveSession(session.HandleParams{ID: "s1", Runtime: "rtx"})
-	run, _, err := as.BeginRun(context.Background())
+	run, _, err := as.BeginRun(context.Background(), "")
 	if err != nil {
 		t.Fatalf("开轮: %v", err)
 	}

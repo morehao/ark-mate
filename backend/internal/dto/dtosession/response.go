@@ -74,6 +74,10 @@ type SessionResp struct {
 	// 回显的意义：用户要能看见"这个会话当初钉的是哪一套"，而不是靠推断。
 	// 指纹是不透明摘要（算法保证密钥值不进指纹），透出去只是为了让"是不是同一套"可判。
 	Capabilities *SessionCapabilitiesResp `json:"capabilities,omitempty"`
+	// NativeMode 会话钉住的原生权限模式（v29）：`read-only` / `workspace-write` /
+	// `danger-full-access`；空 = 跟随工作空间默认。只读回显——本轮（D11）会话内不可切，
+	// 界面据此显示真实档位（设计 §3.3 P0）。空值 omitempty 缺键，老客户端零影响。
+	NativeMode string `json:"native_mode,omitempty"`
 }
 
 // SessionCapabilitiesResp 会话能力选定的对外表示。
@@ -193,6 +197,20 @@ type QueuedInputMoveReq struct {
 	BeforeID string `json:"before_id,omitempty"`
 }
 
+// ComposerSkillResp 一条可供 composer `/` 选择器选择的内置技能（v4 P1）。
+// 与「能力数据面」的 `GET /skills`（技能定义目录）是**两回事**：这里是平台内置的、
+// 一次性注入的协作技能（如 `plan-first`），无定义文件、无物化、不进指纹。
+type ComposerSkillResp struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Desc string `json:"desc"`
+}
+
+// ComposerSkillsResp `GET /composer/skills` 的响应：内置技能目录（顺序即展示顺序）。
+type ComposerSkillsResp struct {
+	Items []ComposerSkillResp `json:"items"`
+}
+
 // QueuedInputResp 一条待投递的排队输入（§6）。
 //
 // 与事件的关系：`session.input_queued` 是它**曾经入队**的事实，本读模型是它**此刻还在队里**
@@ -202,11 +220,20 @@ type QueuedInputResp struct {
 	ID       string `json:"input_id"`
 	Text     string `json:"text"`
 	Delivery string `json:"delivery"` // after_run | interrupt_then_prompt
+	// Attachments 本轮携带的附件 id 列表（v4 P2；忙时排队不再丢附件）。
+	Attachments []string `json:"attachments,omitempty"`
 	// TargetRunID 入队时正在执行的那一轮（审计：用户排在哪一轮后面）。
 	TargetRunID string `json:"target_run_id,omitempty"`
 	// Generation 入队时会话执行代际（服务端投递前比对，不等即作废）。
 	Generation int64 `json:"generation,omitempty"`
 	CreatedAt  int64 `json:"created_at,omitempty"` // Unix 毫秒（0 = 缺省）
+}
+
+// QueuedInputEditReq `PATCH /sessions/:id/inputs/:input_id` 的请求体（v4 行内编辑）。
+// 空 text 视为不合法（编辑必须有正文）；attachments 缺省 = 不携带附件（用空数组表示清空）。
+type QueuedInputEditReq struct {
+	Text        string   `json:"text" binding:"required"`
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // SessionHistoryResp 会话历史分页响应（事件按 seq 升序）。

@@ -62,6 +62,7 @@ export function ChatPage() {
   const cancelQueuedInput = useMate((s) => s.cancelQueuedInput)
   const moveQueuedInput = useMate((s) => s.moveQueuedInput)
   const sendQueuedInputNow = useMate((s) => s.sendQueuedInputNow)
+  const editQueuedInput = useMate((s) => s.editQueuedInput)
   const popQueuedInput = useMate((s) => s.popQueuedInput)
   const cancel = useMate((s) => s.cancel)
   const archiveSession = useMate((s) => s.archiveSession)
@@ -74,10 +75,14 @@ export function ChatPage() {
   const modelCatalog = useMate((s) => s.modelCatalog)
   const loadModelCatalog = useMate((s) => s.loadModelCatalog)
   const updateSessionModel = useMate((s) => s.updateSessionModel)
+  // v4 composer `/` 技能选择器：内置技能目录（一次装载；失败降级为空，不阻塞输入）。
+  const composerSkills = useMate((s) => s.composerSkills)
+  const loadComposerSkills = useMate((s) => s.loadComposerSkills)
   // 直达会话页（刷新 / 从列表点进 `/sessions/:id`）时目录可能还没拉过——`StartPanel` 会拉，但那条路
   // 不经过这里，于是模型 chip 会在目录为空时退化成「裸 mdl_ id」。进页面补拉一次（幂等，已有缓存则命中）。
   useEffect(() => {
     if (!modelCatalog) void loadModelCatalog()
+    if (composerSkills.length === 0) void loadComposerSkills()
     // 只在挂载时按当时是否已有目录判断一次：目录被置空（运行时下线）交给复核再拉，不在这里死循环。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -396,9 +401,9 @@ export function ChatPage() {
     setFoldOpen({})
   }, [activeId])
 
-  const onSend = (text: string, delivery?: DeliveryChoice, attachments?: AttachmentMeta[]) => {
+  const onSend = (text: string, delivery?: DeliveryChoice, attachments?: AttachmentMeta[], skill?: string) => {
     if (!activeId) return
-    void sendPrompt(text, delivery, attachments)
+    void sendPrompt(text, delivery, attachments, skill)
   }
 
   // 新建会话：清空当前选中（无会话选中时问答区本身就是新建面板）→ 回到 /sessions。
@@ -764,6 +769,7 @@ export function ChatPage() {
                     }}
                     onMove={(inputId, beforeId) => void moveQueuedInput(inputId, beforeId)}
                     onSendNow={(inputId) => void sendQueuedInputNow(inputId)}
+                    onEdit={(inputId, text, attachments) => void editQueuedInput(inputId, text, attachments)}
                     onPop={(inputId) => {
                       // 取出编辑：正文回到输入框（**不**立刻发出去——用户是拿去改的）。
                       void popQueuedInput(inputId).then((text) => {
@@ -803,6 +809,10 @@ export function ChatPage() {
                     onModelChange={(v) => {
                       if (activeId) void updateSessionModel(activeId, v ?? undefined)
                     }}
+                    // v4 权限 chip（D11）：只读回显会话钉住的原生权限模式，会话内不可切。
+                    skills={composerSkills}
+                    nativeMode={activeSum?.native_mode}
+                    onCreateSessionFromPerm={openNew}
                   />
                 </>
               )}

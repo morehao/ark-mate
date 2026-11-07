@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Dropdown } from 'antd'
 import type { MenuProps } from 'antd'
-import { ArrowUpOutlined, PaperClipOutlined } from '@ant-design/icons'
+import { ArrowUpOutlined, CloseOutlined, PaperClipOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import type { AttachmentMeta, CommandInfo, ConfigOptionValue, SessionCapabilities } from '@ark-mate/types'
+import type { AttachmentMeta, CommandInfo, ComposerSkill, ConfigOptionValue, SessionCapabilities } from '@ark-mate/types'
 import { shouldSendKey } from '../console/sendKey'
 import { DELIVERY_HINT, DELIVERY_LABEL, type DeliveryChoice } from '../console/queueView'
 import { applyCommandHint, commandHintQuery, matchCommands, moveHintIndex } from '../console/commandHints'
+import { matchSkills, skillHintQuery } from '../console/skillHints'
 import { useAttachmentDraft } from '../console/useAttachmentDraft'
 import { WorkspaceChipStatic } from './WorkspacePicker'
 import { ComposerCapabilities } from './ComposerCapabilities'
@@ -23,7 +24,7 @@ interface Props {
   busyNote?: string
   placeholder?: string
   /** 空闲时的发送；忙时按所选投递模式发送（§6）。v32：可携带待发附件。 */
-  onSend: (text: string, delivery?: DeliveryChoice, attachments?: AttachmentMeta[]) => void
+  onSend: (text: string, delivery?: DeliveryChoice, attachments?: AttachmentMeta[], skill?: string) => void
   /**
    * 当前会话模型是否支持图片输入（v32 门禁；`undefined` = 未知 → 不拦，交给服务端判）。
    * 为 `false` 时，选图片附件会置灰/提示（发送前拦），避免发出去被服务端 40001 model_no_image_input。
@@ -81,6 +82,12 @@ interface Props {
   modelLabel?: string
   modelOptions?: ConfigOptionValue[]
   onModelChange?: (value: string | null) => void
+  /** composer `/` 技能选择器的内置技能目录（v4；`GET /composer/skills`）。空 = `/` 不出技能候选。 */
+  skills?: ComposerSkill[]
+  /** 会话钉住的原生权限模式（`sessions.native_mode`；v4 权限 chip 只读回显，D11 会话内不可切）。 */
+  nativeMode?: string | null
+  /** 权限 chip「新建会话时可选」入口（缺省只显示文案，不跳转）。 */
+  onCreateSessionFromPerm?: () => void
 }
 
 /**
@@ -115,6 +122,9 @@ export function Composer({
   modelLabel,
   modelOptions,
   onModelChange,
+  skills,
+  nativeMode,
+  onCreateSessionFromPerm,
 }: Props) {
   const [draft, setDraft] = useState('')
   // 「取出编辑」塞回来的草稿：只在 nonce 变化时生效一次（同一条再取一次也要能生效，故用计数）。
@@ -131,6 +141,8 @@ export function Composer({
   // 候选高亮下标；`hintOff` 记录用户按 Esc 主动关掉弹层（继续打字即恢复）。
   const [hintIndex, setHintIndex] = useState(0)
   const [hintOff, setHintOff] = useState(false)
+  // v4 一次性技能：选中后显示 chip，发送时随 prompt 带出并清空（一次性消费，下一条恢复默认）。
+  const [selectedSkill, setSelectedSkill] = useState<ComposerSkill | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
 
   // ——— 附件（v32）———：待发附件 chip 的本地态（刷新不保留；pending 由服务端 TTL 收）。
@@ -174,6 +186,25 @@ export function Composer({
     taRef.current?.focus()
   }
 
+  // v4 技能选择器：草稿以 `/` 开头且未进参数区时，按前缀筛内置技能。命令候先（ADR-17），
+  // 命令为空（dsh 常态）时由技能接管同一个 `/` 弹层；两者语义不同，不混列。
+  const skillHints = useMemo(() => {
+    if (hintOff) return []
+    const q = skillHintQuery(draft)
+    if (q === null) return []
+    return matchSkills(skills, q)
+  }, [draft, skills, hintOff])
+  // 技能弹层只在「命令候选为空」时接管 `/`（避免命令与技能两条流同时弹）。
+  const skillOpen = skillHints.length > 0 && hints.length === 0
+  const skillAt = skillOpen ? Math.min(hintIndex, skillHints.length - 1) : 0
+  const acceptSkill = (sk: ComposerSkill) => {
+    setSelectedSkill(sk)
+    setDraft('') // 清掉 `/` 前缀：技能已成为一次性 chip，正文由用户继续写
+    setHintIndex(0)
+    setHintOff(false)
+    taRef.current?.focus()
+  }
+
   // 投递下拉菜单（忙 + 草稿非空时那颗 pill 的弹出项）。默认排队；打断是带代价的少数动作，附副说明。
   const deliveryItems: MenuProps['items'] = (['after_run', 'interrupt_then_prompt'] as DeliveryChoice[]).map(
     (d) => ({
@@ -202,14 +233,39 @@ export function Composer({
     if (empty || uploading) return
     const text = draft.trim()
     const atts = pendingAtts
+    const skillId = selectedSkill?.id
     setDraft('')
     setHintIndex(0)
+    setSelectedSkill(null) // 一次性消费：发送即清，下一条恢复默认
     clear()
-    onSend(text, busy ? delivery : undefined, atts.length > 0 ? atts : undefined)
+    onSend(text, busy ? delivery : undefined, atts.length > 0 ? atts : undefined, skillId)
     taRef.current?.focus()
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 技能弹层（v4）：与命令弹层同一套键位语义，但选中即设一次性 chip 并清空 `/`。
+    if (skillOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setHintIndex((i) => moveHintIndex(i, 1, skillHints.length))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setHintIndex((i) => moveHintIndex(i, -1, skillHints.length))
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        acceptSkill(skillHints[skillAt])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setHintOff(true)
+        return
+      }
+    }
     // 弹层打开时先吃掉这几个键：Enter 是"填入选中的命令"，不是"发送"——
     // 否则用户刚敲完 `/rev` 就被把半截命令发出去了。Esc 关掉弹层后 Enter 恢复发送。
     if (hintOpen) {
@@ -307,6 +363,50 @@ export function Composer({
                 <AttachmentChip key={a.id} attachment={a} onRemove={() => removeAtt(a.id)} />
               ))}
               {uploading && <span style={{ fontSize: 12, color: tokens.textSecondary }}>上传中…</span>}
+            </div>
+          )}
+          {/* v4 一次性技能 chip：选中 `/` 技能后出现在这里，发送即消费，可点 × 取消。 */}
+          {selectedSkill && (
+            <div className="fg-skill-chip-row" role="status">
+              <span className="fg-skill-chip">
+                <ThunderboltOutlined style={{ fontSize: 11 }} />
+                <span>{selectedSkill.name}</span>
+              </span>
+              <button
+                type="button"
+                className="fg-skill-chip-clear"
+                aria-label="取消技能"
+                title="取消技能"
+                onClick={() => setSelectedSkill(null)}
+              >
+                <CloseOutlined style={{ fontSize: 10 }} />
+              </button>
+            </div>
+          )}
+          {skillOpen && (
+            // 技能选择器（v4 `/`）：命令候选为空时接管 `/` 弹层。与命令弹层同款样式。
+            <div className="fg-cmd-pop" role="listbox" aria-label="可用技能">
+              <div className="fg-cmd-list">
+                {skillHints.map((sk, i) => (
+                  <button
+                    key={sk.id}
+                    type="button"
+                    role="option"
+                    aria-selected={i === skillAt}
+                    className={i === skillAt ? 'fg-cmd-item fg-on' : 'fg-cmd-item'}
+                    title={sk.desc}
+                    onMouseEnter={() => setHintIndex(i)}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      acceptSkill(sk)
+                    }}
+                  >
+                    <span className="fg-cmd-name">{sk.name}</span>
+                    {sk.desc && <span className="fg-cmd-desc">{sk.desc}</span>}
+                  </button>
+                ))}
+              </div>
+              <div className="fg-cmd-foot">↑↓ 选择 · Enter 填入 · Esc 关闭 —— 技能本轮流式生效，发送后消费</div>
             </div>
           )}
           {hintOpen && (
@@ -412,7 +512,11 @@ export function Composer({
               )}
               {/* v2.2：权限 chip 在工具条内、紧贴 `+` 的**右边**（参考实现的排布）。
                   权限是"发送前必须看见的发送参数"，留在卡下方一行会被当成附件行的一部分。 */}
-              <PermissionChip disabled={busy && !canStop} />
+              <PermissionChip
+                nativeMode={nativeMode}
+                onCreateSession={onCreateSessionFromPerm}
+                disabled={busy && !canStop}
+              />
               {/* 投递 pill：只在"忙 + 草稿非空"时出现——即用户正在给下一轮准备内容时，
                   才问"这条怎么投"；空输入时不占位（这正是原先挤在控件行里的「run 进行中 + 排队下拉」被收掉的形态）。
                   等待态（等授权/等回答）不给投递选择：那时本来就发不出去，文案交给卡上方 banner。 */}

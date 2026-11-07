@@ -334,7 +334,7 @@ func (r *genRig) seedModelRow(t *testing.T, providerID, model string, isDefault 
 // 实现细节；搬进 `domain/session` 之后，状态的唯一写口就是 BeginRun/FinishRun。
 func setBusy(as *session.ActiveSession, busy bool) {
 	if busy {
-		_, _, _ = as.BeginRun(context.Background())
+		_, _, _ = as.BeginRun(context.Background(), "")
 		return
 	}
 	as.FinishRun()

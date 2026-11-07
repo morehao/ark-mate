@@ -117,3 +117,46 @@ func TestInputQueueSchemaAndClaim(t *testing.T) {
 		t.Fatalf("作废后待投递集合应为空: %v/%v", left, err)
 	}
 }
+
+// TestEditQueuedInputPersistsAttachments v38：inputs.attachments 列 + EditQueuedInput 就地更新
+// （正文/附件），只对 queued 行生效，已投递/不存在一律 false。
+func TestEditQueuedInputPersistsAttachments(t *testing.T) {
+	st := openTestDB(t)
+	ctx := ctxT()
+	seedSession(t, st, "c1")
+
+	if err := st.CreateInput(ctx, model.InputEntity{
+		ID: "i1", SessionID: "c1", Text: "原正文", Delivery: model.InputDeliveryAfterRun,
+		Status: model.InputStatusQueued, CreatedAt: time.Now().UTC(), Attachments: "",
+	}); err != nil {
+		t.Fatalf("建输入失败: %v", err)
+	}
+
+	// 找不到 → false。
+	if ok, err := st.EditQueuedInput(ctx, "c1", "nope", "x", ""); err != nil || ok {
+		t.Fatalf("未知项应 false/nil: ok=%v err=%v", ok, err)
+	}
+
+	// 命中 queued → true，且附件列落库可回读。
+	if ok, err := st.EditQueuedInput(ctx, "c1", "i1", "改后正文", `["att_a","att_b"]`); err != nil || !ok {
+		t.Fatalf("编辑 queued 应成功: ok=%v err=%v", ok, err)
+	}
+	head, err := st.HeadQueuedInput(ctx, "c1")
+	if err != nil || head == nil {
+		t.Fatalf("取队首失败: %v", err)
+	}
+	if head.Text != "改后正文" {
+		t.Fatalf("正文未落库: %q", head.Text)
+	}
+	if head.Attachments != `["att_a","att_b"]` {
+		t.Fatalf("附件未落库: %q", head.Attachments)
+	}
+
+	// 认领为已投递后再编辑 → false（台账行不可改）。
+	if ok, err := st.ClaimQueuedInput(ctx, "i1", time.Now().UTC()); err != nil || !ok {
+		t.Fatalf("认领应成功: ok=%v err=%v", ok, err)
+	}
+	if ok, err := st.EditQueuedInput(ctx, "c1", "i1", "再改", ""); err != nil || ok {
+		t.Fatalf("已投递项编辑应 false/nil: ok=%v err=%v", ok, err)
+	}
+}

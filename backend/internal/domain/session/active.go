@@ -196,22 +196,32 @@ type RunPrefix struct {
 	// ExpertRole 专家角色设定块（P1；空 = 无专家人格）。与 identity 一起同属"隐藏 user-context"，
 	// 由平台在**发送给底座前**拼进首条 prompt，不进事件/transcript。
 	ExpertRole string
+	// SkillContract 本轮一次性技能契约块（v4 P1；空 = 本轮无技能）。排在 expertRole 之后、
+	// memo 之前：技能是操作约束，要在"角色覆盖"之后、历史摘要之前生效（design §2.5 同款纪律）。
+	// 只对**带技能的那一轮**注入（一次性的载体是"仅本轮拼"，不靠清状态）。
+	SkillContract string
 	// Memo bounded handoff memo（空 = 无历史摘要）。
 	Memo string
 }
 
-// Empty 三个面都为空（调用方可据此跳过拼接）。
-func (p RunPrefix) Empty() bool { return p.Identity == "" && p.ExpertRole == "" && p.Memo == "" }
+// Empty 四个面都为空（调用方可据此跳过拼接）。
+func (p RunPrefix) Empty() bool {
+	return p.Identity == "" && p.ExpertRole == "" && p.SkillContract == "" && p.Memo == ""
+}
 
-// Compose 把前缀按 **identity → expertRole → memo → 用户原文** 的顺序拼成实际发给底座的文本。
+// Compose 把前缀按 **identity → expertRole → skillContract → memo → 用户原文** 的顺序拼成实际发给底座的文本。
 //
 // 顺序理由：identity 是产品级稳定身份，先立规矩；expertRole 是 `Role Override`，语义上要**压过**
-// 产品身份（WorkBuddy 的专家模式即如此），所以排在 identity 之后；memo 是可能含旧自述的历史摘要，
-// 排在最后（离用户原文最近）。反过来会把"角色覆盖"落到产品身份之前或之后错误的一侧。
+// 产品身份（WorkBuddy 的专家模式即如此），所以排在 identity 之后；skillContract 是本轮操作约束，
+// 跟在角色覆盖之后、历史摘要之前生效；memo 是可能含旧自述的历史摘要，排在最后（离用户原文最近）。
+// 反过来会把"角色覆盖/技能约束"落到错误的一侧。
 func (p RunPrefix) Compose(text string) string {
-	// 三次都是"往前面插"，所以**后插的在前**：memo → expertRole → identity。
+	// 四次都是"往前面插"，所以**后插的在前**：memo → skillContract → expertRole → identity。
 	if p.Memo != "" {
 		text = p.Memo + "\n\n" + text
+	}
+	if p.SkillContract != "" {
+		text = p.SkillContract + "\n\n" + text
 	}
 	if p.ExpertRole != "" {
 		text = p.ExpertRole + "\n\n" + text
@@ -224,10 +234,13 @@ func (p RunPrefix) Compose(text string) string {
 
 // BeginRun 开一轮：忙时返回 run_in_progress；成功时把身份块与 memo 一次性取走。
 //
+// skillContract 是本轮一次性技能契约块（v4 P1；空 = 本轮无技能）：它**不**存进句柄——每轮由
+// 调用方按用户的 `/` 技能选择传入，只对这一轮生效（下次没传就是空），这正是"一次性消费"的载体。
+//
 // 返回的前缀只给调用方拼进**首条 prompt**（事件里的 user_message 保持用户原文，不含前缀）。
 // 「一次性」是刻意的：身份每个**执行上下文**声明一次（不是每轮一次）——每轮重复会让
 // 系统提示之外又多出一份每轮 token 成本，而它想解决的问题（锚定产品身份）首轮就解决了。
-func (as *ActiveSession) BeginRun(ctx context.Context) (*Run, RunPrefix, error) {
+func (as *ActiveSession) BeginRun(ctx context.Context, skillContract string) (*Run, RunPrefix, error) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	if as.busy {
@@ -239,7 +252,7 @@ func (as *ActiveSession) BeginRun(ctx context.Context) (*Run, RunPrefix, error) 
 	if expertRole == "" && as.expertPersona != nil {
 		expertRole = as.expertPersona()
 	}
-	prefix := RunPrefix{Identity: as.identity, ExpertRole: expertRole, Memo: as.memo}
+	prefix := RunPrefix{Identity: as.identity, ExpertRole: expertRole, SkillContract: skillContract, Memo: as.memo}
 	as.identity, as.expertRole, as.memo, as.expertPersona = "", "", "", nil
 	tctx, cancel := context.WithCancel(ctx)
 	t := &Run{id: objid.New(objid.Run), done: make(chan struct{}), cancel: cancel, ctx: tctx}

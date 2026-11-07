@@ -123,6 +123,15 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		ToolMemory:   o.tools,
 		ToolFailures: reg,
 		Interactions: runnerInteractions{perm: o.perm, elic: o.elic},
+		// v4 P2：排队项带附件投递时，经编排层解析附件 id → parts 再起轮（domain 不 import 附件链路）。
+		DeliverQueuedFn: func(ctx context.Context, sessionID, text string, attachments []string) error {
+			parts, meta, err := svc.buildPromptParts(context.WithoutCancel(ctx), sessionID, text, attachments)
+			if err != nil {
+				return err
+			}
+			_, err = o.PromptParts(context.WithoutCancel(ctx), sessionID, text, parts, meta, "")
+			return err
+		},
 	})
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
 	// （session.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。

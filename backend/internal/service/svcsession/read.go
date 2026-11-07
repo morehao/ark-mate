@@ -47,7 +47,7 @@ func (s *readSvc) QueuedInputs(ctx context.Context, id string) ([]dtosession.Que
 	out := make([]dtosession.QueuedInputResp, 0, len(items))
 	for _, q := range items {
 		out = append(out, dtosession.QueuedInputResp{
-			ID: q.ID, Text: q.Text, Delivery: q.Delivery,
+			ID: q.ID, Text: q.Text, Delivery: q.Delivery, Attachments: q.Attachments,
 			TargetRunID: q.TargetRunID, Generation: q.Generation, CreatedAt: q.CreatedAt,
 		})
 	}

@@ -18,6 +18,11 @@ type InputEntity struct {
 	SessionID string `gorm:"column:session_id;not null"`
 	// Text 用户原文（投递时原样作为 prompt 发出）。
 	Text string `gorm:"column:text;not null"`
+	// Attachments 本轮携带的附件 id 列表（JSON 数组，如 `["att_a","att_b"]`；空串 = 无附件）。
+	//
+	// v38 起落库：忙时带附件排队若只存 text 会在入队时丢附件——投递时也无从还原。存的是
+	// **附件 id 引用**（`att_…`），字节在附件链路（filestore）里，投递时由既有解析路径读回。
+	Attachments string `gorm:"column:attachments;not null;default:''"`
 	// Delivery 投递模式。取值见 InputDeliveryAfterRun / InputDeliveryInterruptThenPrompt
 	// （入队路径不会写 reject：reject 是「不排队，直接报错」）。
 	Delivery string `gorm:"column:delivery;not null"`

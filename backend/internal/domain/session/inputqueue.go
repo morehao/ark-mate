@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"strings"
@@ -68,6 +69,7 @@ type QueuedInput struct {
 	SessionID   string    `json:"session_id"`
 	Text        string    `json:"text"`
 	Delivery    string    `json:"delivery"`
+	Attachments []string  `json:"attachments,omitempty"`
 	TargetRunID string    `json:"target_run_id,omitempty"`
 	Generation  int64     `json:"generation"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -81,14 +83,14 @@ type PromptOutcome struct {
 }
 
 // EnqueueInput 入队一条待投递输入。
-func (pl *Plane) EnqueueInput(ctx context.Context, convID, text, delivery, targetRun string, generation int64) (QueuedInput, error) {
+func (pl *Plane) EnqueueInput(ctx context.Context, convID, text, delivery, targetRun string, generation int64, attachments []string) (QueuedInput, error) {
 	in := QueuedInput{
-		ID: objid.New(objid.Input), SessionID: convID, Text: text, Delivery: delivery,
+		ID: objid.New(objid.Input), SessionID: convID, Text: text, Delivery: delivery, Attachments: attachments,
 		TargetRunID: targetRun, Generation: generation, CreatedAt: time.Now().UTC(),
 	}
 	if pl.st != nil {
 		row := model.InputEntity{
-			ID: in.ID, SessionID: convID, Text: text, Delivery: delivery,
+			ID: in.ID, SessionID: convID, Text: text, Delivery: delivery, Attachments: encodeAttachments(attachments),
 			TargetRunID: targetRun, Generation: generation,
 			Status: model.InputStatusQueued, CreatedAt: in.CreatedAt,
 		}
@@ -134,7 +136,7 @@ func (pl *Plane) ListQueuedInputs(ctx context.Context, id string) ([]QueuedInput
 	out := make([]QueuedInputItem, 0, len(queue))
 	for _, q := range queue {
 		out = append(out, QueuedInputItem{
-			ID: q.ID, Text: q.Text, Delivery: q.Delivery,
+			ID: q.ID, Text: q.Text, Delivery: q.Delivery, Attachments: q.Attachments,
 			TargetRunID: q.TargetRunID, Generation: q.Generation,
 			CreatedAt: objtime.Milli(q.CreatedAt),
 		})
@@ -206,6 +208,29 @@ func (pl *Plane) DeleteQueuedInput(ctx context.Context, convID, inputID string) 
 	for i, in := range list {
 		if in.ID == inputID {
 			pl.inputs[convID] = append(list[:i:i], list[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// EditQueuedInput 改一条待投递输入的正文与附件（v4 行内编辑；仅 queued 可改）。
+//
+// 与撤下/取出编辑不同：正文与附件改完**队项仍在队列原位**（不出队），由用例层发
+// `session.input_updated` 让各端就地替换。归属由 session_id + input_id 双条件钉住。
+// 返回 false = 该队项已不在待投递（已投递/已作废/不存在）——由用例层据实报 40401，不假装成功。
+func (pl *Plane) EditQueuedInput(ctx context.Context, convID, inputID, text string, attachments []string) (bool, error) {
+	if pl.st != nil {
+		return pl.st.EditQueuedInput(ctx, convID, inputID, text, encodeAttachments(attachments))
+	}
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	list := pl.inputs[convID]
+	for i, in := range list {
+		if in.ID == inputID {
+			in.Text = text
+			in.Attachments = attachments
+			list[i] = in
 			return true, nil
 		}
 	}
@@ -374,6 +399,32 @@ func (pl *Plane) StaleQueuedInputsOnRestore(ctx context.Context) {
 func queuedFromStore(r model.InputEntity) QueuedInput {
 	return QueuedInput{
 		ID: r.ID, SessionID: r.SessionID, Text: r.Text, Delivery: r.Delivery,
+		Attachments: decodeAttachments(r.Attachments),
 		TargetRunID: r.TargetRunID, Generation: r.Generation, CreatedAt: r.CreatedAt,
 	}
+}
+
+// encodeAttachments 把附件 id 列表序列化成 DB 列（空 → 空串 = 无附件）。
+func encodeAttachments(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(ids)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// decodeAttachments 反序列化 DB 列（空串/坏值 → nil，不因偶发脏值拖垮读面）。
+func decodeAttachments(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(s), &ids); err != nil {
+		return nil
+	}
+	return ids
 }

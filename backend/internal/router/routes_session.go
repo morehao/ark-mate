@@ -16,6 +16,9 @@ func registerSession(v1 *gin.RouterGroup, ctr ctrsession.SessionCtr, search ctrs
 
 	v1.GET("/sessions", ctr.List)
 	v1.GET("/sessions/search", ctr.Search)
+	// v4 P1：composer `/` 技能选择器的内置技能目录（平台内置、一次性注入的协作技能，
+	// 与「能力数据面」的 `GET /skills`（技能定义目录）是两回事）。
+	v1.GET("/composer/skills", ctr.ComposerSkills)
 	// M3 ②：跨会话消息级检索（锚点 = seq）与批量导出（markdown|text|json）。
 	v1.GET("/search/messages", search.Messages)
 	v1.POST("/sessions/export", export.Sessions)
@@ -33,6 +36,8 @@ func registerSession(v1 *gin.RouterGroup, ctr ctrsession.SessionCtr, search ctrs
 	// §6 busy input 队列：列出待投递项（冷挂载重建）+ 撤下一条（投递走 POST prompt 的 delivery）。
 	v1.GET("/sessions/:id/inputs", ctr.QueuedInputs)
 	v1.DELETE("/sessions/:id/inputs/:input_id", ctr.DeleteQueuedInput)
+	// v4 行内编辑：改正文/附件，不出队（区别于上面「撤下」= 离队）。
+	v1.PATCH("/sessions/:id/inputs/:input_id", ctr.EditQueuedInput)
 	// 队列三动作（ADR-10）：重排 / 立即发送 / 取出编辑。
 	//
 	// 三条都是**参数路径下的固定字面量**，与上面那条 DELETE 同级——它们必须留在
