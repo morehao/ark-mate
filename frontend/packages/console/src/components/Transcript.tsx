@@ -19,6 +19,7 @@ import { tokens } from '@ark-mate/ui'
 import type { ElicitationFieldSchema, PermissionOption, StreamEntry } from '@ark-mate/types'
 import { useMate, type PermissionDecision } from '../store'
 import { copyText } from '../console/clipboard'
+import { getFlowPrefs, useFlowPrefs } from '../console/flowPrefs'
 import { AttachmentChip } from './AttachmentChip'
 import { parseMsg } from '../console/message'
 import { runStatRows, type RunUsageInfo } from '../console/usageView'
@@ -755,6 +756,11 @@ function ToolDetailBody({ detail }: { detail: ToolDetail }) {
   }
 
   if (detail.kind === 'diff') {
+    // 显示文件修改过程（设置 · 对话）：关闭时只留一行摘要，不展开逐行 diff。
+    if (!getFlowPrefs().showFileChanges) {
+      const files = detail.diff ? detail.diff.length : 0
+      return <div className="fg-tool-note">已修改文件（{files} 行改动，已按设置收起；可在「设置 · 对话」开启展示）</div>
+    }
     return (
       <>
         <div className="fg-tool-detail-kicker">改动</div>
@@ -1271,6 +1277,9 @@ export function TurnView({
     !!turn.completion ||
     turn.anchors.length > 0
   const copyTextValue = collectTurnText(turn)
+  // 对话过程展示方式（设置 · 对话）：详细 = 过程折叠默认展开；简洁 = 默认收起（可手动点开）。
+  // 只影响 completed / 过程消息 两类折叠的**默认开合**，不改变内容本身。
+  const detailed = useFlowPrefs().toolDisplay === 'detailed'
   return (
     <section
       className={`fg-turn${turn.live ? ' fg-turn-live' : ''}`}
@@ -1296,6 +1305,7 @@ export function TurnView({
             <Fold
               title={turn.completed.title}
               variant="completed"
+              defaultOpen={detailed}
               autoOpen={blocksContain(turn.completed.before, flashId)}
               onSettled={onSettled}
             >
@@ -1320,9 +1330,10 @@ export function TurnView({
                   entryId={anchor.id}
                 />
                 {gap && gap.blocks.length > 0 && (
-                  <Fold
+                   <Fold
                     title="过程消息"
                     variant="process"
+                    defaultOpen={detailed}
                     autoOpen={blocksContain(gap.blocks, flashId)}
                     onSettled={onSettled}
                   >
@@ -1339,9 +1350,10 @@ export function TurnView({
             )
           })}
           {turn.completed.after.length > 0 && (
-            <Fold
+             <Fold
               title="过程消息"
               variant="process"
+              defaultOpen={detailed}
               autoOpen={blocksContain(turn.completed.after, flashId)}
               onSettled={onSettled}
             >

@@ -178,7 +178,7 @@ export function foldThoughts(entries: StreamEntry[], streaming: boolean): Array<
 }
 
 
-// ——— 对话流：工具语义化 + 整轮折叠（对齐 WorkBuddy 的过程流形状） ———
+// ——— 对话：工具语义化 + 整轮折叠（对齐 WorkBuddy 的过程流形状） ———
 
 /**
  * 工具图标/语义只在这里派生，组件不各自写一套 `switch title`。

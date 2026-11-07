@@ -17,7 +17,6 @@ import (
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
 	"github.com/morehao/ark-mate/internal/core/resource"
 	productidentity "github.com/morehao/ark-mate/internal/domain/identity"
-	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/drivers/mechanism"
 	doctorfacts "github.com/morehao/ark-mate/internal/drivers/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
@@ -81,16 +80,11 @@ type assembly struct {
 	services    Services
 	controllers router.Controllers
 	engine      http.Handler
-
-	// cmdRules 命令门禁规则（加载期已校验）。装配期**先读**（坏文件拒绝启动），
-	// 编排器造出来之后再交给裁决点——早一步交给一个还不存在的编排器等于把规则丢掉。
-	cmdRules []interaction.PrefixRule
 }
 
 // steps 声明启动序列（顺序即语义；关闭按它的逆序执行）。
 func (as *assembly) steps() []registry.Step {
 	return []registry.Step{
-		{Name: "命令门禁", Phase: registry.PhasePlatform, Critical: true, Start: as.startCommandPolicy},
 		{Name: "旧定义目录导入", Phase: registry.PhasePlatform, Timeout: 10 * time.Second, Start: as.startLegacyProviderImport},
 		{Name: "凭据面", Phase: registry.PhasePlatform, Timeout: 10 * time.Second, Start: as.startCredentials},
 		// 产品身份（部署级常量）：必须在**任何连接被拉起之前**把系统提示面装进启动参数。
@@ -142,23 +136,6 @@ func (as *assembly) reapTimeout() time.Duration {
 		return as.cfg.ReapGrace + 30*time.Second
 	}
 	return 30 * time.Second
-}
-
-// startCommandPolicy 命令门禁（A2）：规则文件默认 `<MATE_HOME>/command_policy.json`，
-// 文件不存在 = 未启用；**文件存在但 JSON/规则非法 = 拒绝启动**（坏文件不能被当成"没有规则"
-// ——那会让门禁静默退回"全部问人"，而用户以为自己配了规则）。
-func (as *assembly) startCommandPolicy(ctx context.Context) error {
-	cfg := as.cfg
-	rules, err := interaction.LoadCommandPolicyFile(cfg.CommandPolicyPath)
-	if err != nil {
-		return fmt.Errorf("命令门禁规则加载失败（拒绝启动；移除或修复 %s 后重试）: %w", cfg.CommandPolicyPath, err)
-	}
-	if len(rules) == 0 {
-		return nil
-	}
-	as.cmdRules = rules
-	glog.Infow(ctx, "命令门禁已启用", "rules", len(rules), "path", cfg.CommandPolicyPath)
-	return nil
 }
 
 // startLegacyProviderImport v19 的目录改名一次性导入（`agents/providers.json` →
@@ -402,12 +379,6 @@ func (as *assembly) startDefaultWorkspace(ctx context.Context) error {
 // startOrchestrator 构造编排器并回挂到 Service。
 func (as *assembly) startOrchestrator(ctx context.Context) error {
 	as.orch = sessionruntime.NewOrchestrator(as.svc, as.reg)
-	// 命令门禁规则在**加载期**就读完了（坏文件拒绝启动），这里交给裁决点。
-	// 改造前 `Service.SetCommandPolicy` 在编排器还不存在时静默丢掉这批规则——那是"门禁
-	// 有实现、没接线"的另一种形态；现在交接点只有一个。
-	if len(as.cmdRules) > 0 {
-		as.orch.SetCommandPolicy(as.cmdRules)
-	}
 	// 附件目录**不**下发 `SessionOptions.AdditionalDirectories`（v32 附件链路，2026-11-02 实测更正）：
 	// 读可达性探针（.dsh/docs/notes/2026-11-02-attachment-read-reachability-notes.md）实测表明
 	// 模型用 read 能直接读到 `<MATE_HOME>/attachments` 下的绝对路径（无需提权、无白名单）——附件

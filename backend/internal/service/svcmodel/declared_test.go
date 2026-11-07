@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"strings"
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/drivers/registry"
@@ -69,6 +70,11 @@ func (h *stubHost) ModelRow(ctx context.Context, id string) (*dtomodel.ModelResp
 		ID: row.ID, ProviderID: row.ProviderID, Model: row.Model, Name: row.Name, Note: row.Note,
 		Revision:        row.Revision,
 		InputModalities: resource.ModalitiesFromColumn(row.InputModalities),
+		MaxInputTokens:  row.MaxInputTokens, MaxOutputTokens: row.MaxOutputTokens,
+		// 思考能力（v39）：响应断言要看到真列值，故补这三项映射。
+		SupportsReasoning: row.SupportsReasoning,
+		ReasoningEfforts:  resource.ReasoningEffortsFromColumn(row.ReasoningEfforts),
+		DefaultEffort:     row.DefaultEffort,
 	}, true, nil
 }
 
@@ -323,5 +329,86 @@ func TestDeclaredResponseCarriesRowAndSyncNote(t *testing.T) {
 	}
 	if resp.Effect == nil || resp.Effect.Note != "已同步：下一次新会话生效" {
 		t.Fatalf("同步失败/成功的说明应挂到生效回执上: %+v", resp.Effect)
+	}
+}
+
+// TestNormalizeReasoning 覆盖思考能力声明的四条不变量（v39）：乱序去重 / 开思考无档拒绝 /
+// 未知档拒绝 / 默认档不在档位拒绝 / 关思考清空。
+func TestNormalizeReasoning(t *testing.T) {
+	// 乱序去重 → 规范序（从低到高）。
+	supports, col, def, err := normalizeReasoning(true,
+		[]string{"high", "low", "medium", "low"}, "medium")
+	if err != nil {
+		t.Fatalf("合法声明不该报错: %v", err)
+	}
+	if !supports || col != "low,medium,high" || def != "medium" {
+		t.Fatalf("乱序档位应归一成规范序 low,medium,high，实际 supports=%v col=%q def=%q", supports, col, def)
+	}
+
+	// 开思考但无档位 → 拒绝（底座"offers no level beyond off"会拒空）。
+	if _, _, _, err := normalizeReasoning(true, nil, ""); errCode(err) != "invalid_param" {
+		t.Fatalf("开思考无档位应被拒，got %q（%v）", errCode(err), err)
+	}
+
+	// 未知档 → 拒绝并列出合法取值。
+	if _, _, _, err := normalizeReasoning(true, []string{"ultra"}, ""); errCode(err) != "invalid_param" {
+		t.Fatalf("未知档应被拒，got %q（%v）", errCode(err), err)
+	}
+
+	// 默认档不在已选档位里 → 拒绝。
+	if _, _, _, err := normalizeReasoning(true, []string{"low", "high"}, "medium"); errCode(err) != "invalid_param" {
+		t.Fatalf("默认档不在档位集合里应被拒，got %q（%v）", errCode(err), err)
+	}
+
+	// 默认档空 = 自动，合法。
+	if _, _, def, err := normalizeReasoning(true, []string{"low", "high"}, ""); err != nil || def != "" {
+		t.Fatalf("默认档留空应通过且落空串，got def=%q err=%v", def, err)
+	}
+
+	// 关思考 → 档位与默认档一律清空（即便调用方传了残留值）。
+	supports, col, def, err = normalizeReasoning(false, []string{"low", "high"}, "high")
+	if err != nil {
+		t.Fatalf("关思考不该报错（残留值应被忽略）: %v", err)
+	}
+	if supports || col != "" || def != "" {
+		t.Fatalf("关思考应清空全部，实际 supports=%v col=%q def=%q", supports, col, def)
+	}
+}
+
+// TestUpdateModelReasoningRoundTrip 思考能力经写面落库再读回：create 带档位 → 读回规范序；
+// patch 只改默认档 → 其余保持；patch 关思考 → 清空档位与默认档。
+func TestUpdateModelReasoningRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	r := newDeclaredRig(t)
+	r.createProvider(t, "p1")
+	created, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{
+		ProviderID: "p1", Model: "m1",
+		SupportsReasoning: ptr(true),
+		ReasoningEfforts:  &[]string{"high", "low", "medium"},
+		DefaultEffort:     ptr("medium"),
+	})
+	if err != nil {
+		t.Fatalf("建思考模型: %v", err)
+	}
+	if !created.SupportsReasoning || strings.Join(created.ReasoningEfforts, ",") != "low,medium,high" || created.DefaultEffort != "medium" {
+		t.Fatalf("思考能力应规范序读回，实际 %+v", created)
+	}
+
+	// 只改默认档到 high → 其余保持。
+	got, err := r.svc.UpdateModel(ctx, created.ID, dtomodel.ModelPatchReq{DefaultEffort: ptr("high")})
+	if err != nil {
+		t.Fatalf("改默认档: %v", err)
+	}
+	if !got.SupportsReasoning || strings.Join(got.ReasoningEfforts, ",") != "low,medium,high" || got.DefaultEffort != "high" {
+		t.Fatalf("只改默认档后档位应保持、默认档变 high，实际 %+v", got)
+	}
+
+	// 关思考 → 清空档位与默认档。
+	got, err = r.svc.UpdateModel(ctx, created.ID, dtomodel.ModelPatchReq{SupportsReasoning: ptr(false)})
+	if err != nil {
+		t.Fatalf("关思考: %v", err)
+	}
+	if got.SupportsReasoning || len(got.ReasoningEfforts) != 0 || got.DefaultEffort != "" {
+		t.Fatalf("关思考应清空档位与默认档，实际 %+v", got)
 	}
 }

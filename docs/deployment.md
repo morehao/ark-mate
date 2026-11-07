@@ -135,7 +135,6 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 | `MATE_TRANSCRIPTS` | `~/.ark-mate/transcripts` | wire transcript 目录 |
 | `MATE_PROVIDERS` | `~/.ark-mate/providers` | provider 档案的**导入/导出目录**（权威在 DB 的 `providers` 表；只在 sqlite 模式当载体，memory 模式下文件仍是事实源）；v19 起它只装 `providers.json` 一件事（旧目录名 `agents/` 里的那份会被启动时**一次性导入**并 WARN，旧文件不删）。v20 的凭据镜像落在 `<MATE_HOME>/credentials.json`（默认 `~/.ark-mate/credentials.json`），**没有配套的环境变量覆盖项** |
 | `MATE_CAPABILITIES` | `~/.ark-mate/capabilities` | 能力定义目录：memory 模式是装载源，sqlite 模式是**导入/导出目录**（定义在 DB 里） |
-| `MATE_COMMAND_POLICY` | `~/.ark-mate/command_policy.json` | 命令门禁规则文件（A2，见 §2.3.3）。**文件不存在 = 未启用**；存在但 JSON/规则非法 = **拒绝启动**；空 / `off` / `disable` / `none` = 关闭 |
 | `MATE_AUTOMATIONS` | `~/.ark-mate/automations` | 自动化定义目录：memory 模式是装载源（`<id>.json`，定义与运行态 overlay 同文件，手工可读），sqlite 模式是**导入/导出目录**（定义与运行态在 DB 的 `automations` 表里） |
 | `MATE_AUTOMATION_TICK` | `30s` | 调度循环 tick 间隔；**`0` = 关闭整个 automation 调度**（维护窗口用，不是"最快跑"） |
 | `MATE_PROJECTION_DIRS` | 空 | 投影根覆盖：`runtime:kind=dir` 逗号列表（`config.json` 可写 JSON 数组），键如 `dsh:skill`（`<id>` = 在册的那个底座 id；旧写法 `deepseekharness:skill` 会被归一，见下）；值是**绝对**目录。空 = 用 adapter 声明的默认根。只覆盖根，Layout/Format 仍由 runtime 声明。旧键 `MATE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已改名：仍报错，但报错含新键与等价写法 |
@@ -241,48 +240,6 @@ systemd 场景可直接用同一目录：`EnvironmentFile=-%h/.ark-mate/config/e
 平台**不做鉴权**：面向单用户、默认只绑回环。没有 `MATE_TOKEN`、没有分面凭据、没有 `--auth-stdin`；
 `/health`、REST 与事件流一律开放（仅受 Host/Origin 矩阵约束）。`mate config` 也不再打印任何令牌。
 要对外提供服务，请在**反向代理层**自行加鉴权（Basic / OAuth / mTLS 等），不要把裸核心直接暴露到公网。
-
-### 2.3.3 命令门禁（A2）
-
-门禁在**权限请求的裁决点**上运行：先按 `toolCallId` 回查同一次工具调用的入参，取出
-`{"command": "..."}`，再按规则表裁决。规则文件默认 `<MATE_HOME>/command_policy.json`
-（`MATE_COMMAND_POLICY` 可改）。**文件不存在 = 不启用**，行为与没有这条门禁逐字相同；
-**文件存在但 JSON/规则非法 = 拒绝启动**（坏文件不能被当成"没有规则"）。
-
-```json
-{
-  "rules": [
-    {
-      "name": "deny rm",
-      "pattern": [["rm"]],
-      "decision": "forbidden",
-      "match_samples": [["rm", "-rf", "/tmp/x"]],
-      "not_match_samples": [["git", "status"]]
-    },
-    {
-      "name": "allow git status",
-      "pattern": [["git"], ["status"]],
-      "decision": "allow",
-      "match_samples": [["git", "status"]]
-    }
-  ]
-}
-```
-
-语义（每一条都有判据）：
-
-- **有序**：第一条命中的规则说了算；`pattern` 是**前缀 token 模式**，每个位置可写一组备选
-  （`[["git","hg"],["status"]]`）；`host_executable` 列出的绝对路径额外允许按 basename 回退
-  （`["/bin/bash"]` 能匹配 `bash`）。
-- `decision`：`allow`（直接放行，不问人）/ `prompt`（走既有审批）/ `forbidden`（直接拒绝，连审批都不给）。
-- `match_samples` / `not_match_samples` 在**加载期**求值：样例不通过的规则**整表拒绝**——
-  一条写错的前缀规则在运行时的表现是"该拦的没拦"或"该放的全拦"，两种都不报错。
-- **只对简单命令自动裁决**：命令里出现引号、转义、变量、管道、`;`/`&&`、重定向、子 shell、
-  通配符、换行等任一字符 → 判为复杂命令，**一律 prompt**。拿空白切分去匹配
-  `echo a; rm -rf /` 会得到错误的 token，那正是"以为门禁看过了"的来源。
-- **顺序**：`forbidden` 先于会话级记忆——用户说过"这类工具始终允许"，也不能放行规则里
-  明确禁止的命令；`allow` 直接放行，`prompt`/未命中才回到记忆与人工审批。
-- **编辑面**：设置 · 命令规则（`GET /command-policy` / `PUT /command-policy`）。保存**先校验再原子落盘**并立即生效；`match_samples` / `not_match_samples` 仍只能手写文件（面板原样保留，不提供编辑）。
 
 ### 2.4 底座前置条件
 

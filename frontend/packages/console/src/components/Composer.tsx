@@ -6,6 +6,7 @@ import { tokens } from '@ark-mate/ui'
 import type { AttachmentMeta, CommandInfo, ComposerSkill, ConfigOptionValue, SessionCapabilities } from '@ark-mate/types'
 import { shouldSendKey } from '../console/sendKey'
 import { DELIVERY_HINT, DELIVERY_LABEL, type DeliveryChoice } from '../console/queueView'
+import { getFlowPrefs } from '../console/flowPrefs'
 import { applyCommandHint, commandHintQuery, matchCommands, moveHintIndex } from '../console/commandHints'
 import { matchSkills, skillHintQuery } from '../console/skillHints'
 import { useAttachmentDraft } from '../console/useAttachmentDraft'
@@ -136,8 +137,12 @@ export function Composer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [injectDraft?.nonce])
   // 发送键固定 Enter 发送 / Shift + Enter 换行（sendKey.ts 单一规则），组件不再持有档位状态。
-  // 投递模式是「这次怎么送」的选择，默认排队——打断当前轮是有代价的动作，不该是默认值。
-  const [delivery, setDelivery] = useState<DeliveryChoice>('after_run')
+  // 投递模式是「这次怎么送」的选择，默认读设置 · 对话的「队列发送方式」偏好：
+  // 立即发送 → interrupt_then_prompt（插入当前对话），否则排队 after_run。
+  // 每条消息仍可在发送前用下拉临时改（设置只决定初值）。
+  const [delivery, setDelivery] = useState<DeliveryChoice>(() =>
+    getFlowPrefs().queueSend === 'immediate' ? 'interrupt_then_prompt' : 'after_run',
+  )
   // 候选高亮下标；`hintOff` 记录用户按 Esc 主动关掉弹层（继续打字即恢复）。
   const [hintIndex, setHintIndex] = useState(0)
   const [hintOff, setHintOff] = useState(false)

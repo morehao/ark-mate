@@ -50,6 +50,66 @@ const (
 // ValidModalities 合法模态集合（写面校验用：非法取值报 40501 并列出合法取值）。
 var ValidModalities = map[string]bool{ModalityText: true, ModalityImage: true}
 
+// 思考强度档位取值（对齐 OpenAI `reasoning_effort` 合法值与底座 dsh 的 `THINKING_LEVELS`）。
+//
+// 取值集刻意逐项列举：底座 `reasoningEfforts` 的 keys 就是这六个档（外加 `off`，`off` 表示
+// 不启用思考、派生时省略 `reasoning_effort` 字段，不是可声明档位，故不在此列）。
+// 顺序 = 从低到高，是**规范序**：落库逗号串与下发 dsh 的映射都按它排，保证"同输入同字节"。
+const (
+	EffortMinimal = "minimal"
+	EffortLow     = "low"
+	EffortMedium  = "medium"
+	EffortHigh    = "high"
+	EffortXHigh   = "xhigh"
+	EffortMax     = "max"
+)
+
+// ReasoningEffortLevels 合法思考强度档位（规范序，从低到高）。写面据此校验。
+var ReasoningEffortLevels = []string{EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax}
+
+// ValidReasoningEffort 判断一个档位名是否为合法思考强度。
+func ValidReasoningEffort(v string) bool {
+	for _, l := range ReasoningEffortLevels {
+		if l == v {
+			return true
+		}
+	}
+	return false
+}
+
+// NormalizeReasoningEfforts 把用户给的档位列表归一成**规范序**（按 ReasoningEffortLevels 排序、去重、丢弃非法值）。
+//
+// 形状照 NormalizeModalities：下游"同输入同字节"依赖规范序，用户勾选顺序不该改变产物。
+// 未知档位在此被静默丢弃只是"归一"的副产物——真正的写面校验在 svcmodel.normalizeReasoning 里显式报错。
+func NormalizeReasoningEfforts(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	for _, v := range in {
+		seen[strings.TrimSpace(v)] = true
+	}
+	out := make([]string, 0, len(ReasoningEffortLevels))
+	for _, l := range ReasoningEffortLevels {
+		if seen[l] {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// ReasoningEffortsFromColumn 把落库形态（逗号分隔档位串）折成规范序数组。
+//
+// 空列 = 未声明档位（含"关思考"和"以旧数据写入无档位"两种来源），返回空数组。
+func ReasoningEffortsFromColumn(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return []string{}
+	}
+	return NormalizeReasoningEfforts(strings.Split(v, ","))
+}
+
+// ReasoningEffortsToColumn 把档位数组折成落库形态（逗号分隔、规范序）。
+func ReasoningEffortsToColumn(in []string) string {
+	return strings.Join(NormalizeReasoningEfforts(in), ",")
+}
+
 // NormalizeModalities 把用户给的模态列表归一成**规范序**（**恒含 `text`**、按 `text,image` 排列、去重）。
 //
 // 两条不变量：① 两态取值只有 `text` 与 `text,image`（ADR-12），所以"只勾 image"也是
@@ -137,6 +197,21 @@ type Model struct {
 	// 映射只住在 adapter 里（A9 的精神）。
 	MaxInputTokens  *int64
 	MaxOutputTokens *int64
+	// SupportsReasoning 是否声明为**思考模型**（v39）。true 时底座会开启 reasoning 交互。
+	//
+	// 诚实口径：这是平台**用户声明**而不是平台探测——底座没有"这模型能不能思考"的可信来源，
+	// 由用户勾选决定是否按思考模型下发（见 reverse-design §6）。
+	SupportsReasoning bool
+	// ReasoningEfforts 该模型**声明支持的思考强度档位**（规范序，取值见 ReasoningEffortLevels）。
+	//
+	// 空 = 未声明档位。On/off 两态语义：SupportsReasoning=true 且本列非空 → 落 dsh 的
+	// `reasoningEfforts:{level:level}`；空档位在写面被拒（开思考至少一个档位）。
+	ReasoningEfforts []string
+	// DefaultEffort 默认思考强度（空 = 自动，由请求层默认）。
+	//
+	// 落 dsh profile 级 `reasoning:<level>`，但**仅当同供应商所有思考模型默认档一致且非空**时写
+	// （混合默认档无法用一个 profile 值表达，见 infra/dsh/config.go 的 unanimousDefaultEffort）。
+	DefaultEffort string
 }
 
 // Set 某个 runtime 该拿到的**一整份**清单（整份替换语义，不是增量）。

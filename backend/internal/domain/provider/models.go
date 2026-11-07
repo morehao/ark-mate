@@ -200,7 +200,11 @@ func modelRespFromRow(row *model.ModelEntity) ModelItem {
 		InputModalities: resource.ModalitiesFromColumn(row.InputModalities),
 		// 容量原样透出（nil = null = 未声明）：界面据此如实标"容量由环境兜底（不是平台声明）"。
 		MaxInputTokens: row.MaxInputTokens, MaxOutputTokens: row.MaxOutputTokens,
-		Revision: row.Revision,
+		// 思考能力（v39）纯列投影：档位串折成规范序数组透出。
+		SupportsReasoning: row.SupportsReasoning,
+		ReasoningEfforts:  resource.ReasoningEffortsFromColumn(row.ReasoningEfforts),
+		DefaultEffort:     row.DefaultEffort,
+		Revision:          row.Revision,
 	}
 	if !row.UpdatedAt.IsZero() {
 		out.UpdatedAt = objtime.Milli(row.UpdatedAt)

@@ -186,38 +186,6 @@
   },
   {
     "method": "GET",
-    "path": "/v1/mate/command-policy",
-    "status": 200,
-    "code": 0,
-    "msg": "success",
-    "envelope": [
-      "code",
-      "data",
-      "msg",
-      "requestID"
-    ],
-    "data_kind": "object",
-    "data_keys": [
-      "enabled",
-      "rules"
-    ]
-  },
-  {
-    "method": "PUT",
-    "path": "/v1/mate/command-policy",
-    "status": 200,
-    "code": 40001,
-    "msg": "命令门禁未配置（MATE_COMMAND_POLICY 为空）[command_policy_disabled]",
-    "envelope": [
-      "code",
-      "data",
-      "msg",
-      "requestID"
-    ],
-    "data_kind": "object"
-  },
-  {
-    "method": "GET",
     "path": "/v1/mate/library",
     "status": 200,
     "code": 0,

@@ -10,7 +10,7 @@ import (
 // 为什么需要它（2026-10-17 从底座源码 `packages/acp/acp/src/index.ts` 确认）：
 // dsh 的 `session/request_permission` 只发 `{toolCallId}`，**title/kind/rawInput 全空**；
 // 命令行在同 id 的 `session/tool_call` 更新里（`rawInput: {"command": "...", ...}`）。
-// 权限请求到达时按 id 回查，命令门禁才拿得到"这条 bash 到底要跑什么"。
+// 权限请求到达时按 id 回查，才能拿到"这条 bash 到底要跑什么"。
 //
 // 生命周期：`tool_call` 写入；`tool_call_update` 带 input 时刷新；终态（completed/failed）
 // 即删除。上限 `MaxRememberedToolCalls`，超出按插入序淘汰——它是**短期**记忆，不是审计日志

@@ -137,6 +137,21 @@ export interface ModelRow {
   max_input_tokens: number | null
   /** 单次输出上限（**平台声明**；`null` = 未声明）。语义同 `max_input_tokens`。 */
   max_output_tokens: number | null
+  /**
+   * 是否声明为**思考模型**（v39）。true 时前端在行卡上打「思考」徽标、下发时开启 reasoning。
+   *
+   * 无 `?`：`false` 是明确事实（不思考），与"旧服务没这个字段"必须可分——理由同容量列。
+   */
+  supports_reasoning: boolean
+  /**
+   * 声明支持的**思考强度档位**（v39，规范序）。
+   *
+   * 取值 = OpenAI `reasoning_effort` 合法值 ∩ dsh `THINKING_LEVELS`：
+   * `minimal` | `low` | `medium` | `high` | `xhigh` | `max`。空数组 = 未声明档位。
+   */
+  reasoning_efforts: string[]
+  /** 默认思考强度（空 = 自动，由请求层默认）；下发为 profile 级 `reasoning`。 */
+  default_effort?: string
   /** 写面乐观锁计数（每次成功提交 +1）；**不是内容版本**（内容指纹在审计里）。 */
   revision: number
   updated_at?: UnixMillis
@@ -224,6 +239,12 @@ export interface ModelCreateReq {
   note?: string
   /** 输入模态：`['text']`（默认）| `['text','image']`；非法取值会被 40501 拒。 */
   input_modalities?: string[]
+  /** 思考能力（v39）：是否思考模型。省略 = 不思考。 */
+  supports_reasoning?: boolean
+  /** 声明支持的思考强度档位（v39）；开思考时至少要一个，否则被 40501 拒。 */
+  reasoning_efforts?: string[]
+  /** 默认思考强度（v39，须 ∈ 已选档位或省略 = 自动）。 */
+  default_effort?: string
   /** true = 把这条设为**唯一**默认模型。 */
   is_default?: boolean
 }
@@ -246,6 +267,16 @@ export interface ModelPatchReq {
    */
   max_input_tokens?: number
   max_output_tokens?: number
+  /**
+   * 思考能力（v39），**三态**（同容量列）：
+   *
+   *  - `supports_reasoning` 省略 = 不改；true/false = 设为是否思考（false 时清空档位与默认档）；
+   *  - `reasoning_efforts` 省略 = 不改；数组（可空）= 覆盖档位集合；
+   *  - `default_effort` 省略 = 不改；`''` = 清成「自动」；非空 = 设为该档。
+   */
+  supports_reasoning?: boolean
+  reasoning_efforts?: string[]
+  default_effort?: string
   /** true = 设为唯一默认；false = 取消默认（幂等）。 */
   is_default?: boolean
 }

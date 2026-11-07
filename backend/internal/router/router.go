@@ -20,7 +20,6 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
 	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
 	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
-	"github.com/morehao/ark-mate/internal/controller/ctrcommandpolicy"
 	"github.com/morehao/ark-mate/internal/controller/ctrexport"
 	"github.com/morehao/ark-mate/internal/controller/ctrlibrary"
 	"github.com/morehao/ark-mate/internal/controller/ctrmaterial"
@@ -45,20 +44,19 @@ const AppName = "mate"
 //
 // 每个字段都是某一领域控制器的**接口**（`ctr<领域>` 包内声明）；路由层不认识任何实现。
 type Controllers struct {
-	Session       ctrsession.SessionCtr
-	Search        ctrsearch.SearchCtr
-	Export        ctrexport.ExportCtr
-	Workspace     ctrworkspace.WorkspaceCtr
-	CommandPolicy ctrcommandpolicy.CommandPolicyCtr
-	Runtime       ctrruntime.RuntimeCtr
-	Model         ctrmodel.ModelCtr
-	Provider      ctrmodel.ProviderCtr
-	Capability    ctrcapability.CapabilityCtr
-	Automation    ctrautomation.AutomationCtr
-	Library       ctrlibrary.LibraryCtr
-	Usage         ctrusage.UsageCtr
-	System        ctrsystem.SystemCtr
-	WS            ctrws.WSCtr
+	Session    ctrsession.SessionCtr
+	Search     ctrsearch.SearchCtr
+	Export     ctrexport.ExportCtr
+	Workspace  ctrworkspace.WorkspaceCtr
+	Runtime    ctrruntime.RuntimeCtr
+	Model      ctrmodel.ModelCtr
+	Provider   ctrmodel.ProviderCtr
+	Capability ctrcapability.CapabilityCtr
+	Automation ctrautomation.AutomationCtr
+	Library    ctrlibrary.LibraryCtr
+	Usage      ctrusage.UsageCtr
+	System     ctrsystem.SystemCtr
+	WS         ctrws.WSCtr
 	// Attachment 附件面上传/回读/预览（v32）。
 	Attachment ctrattachment.AttachmentCtr
 	// Material 资料库目录树 + 上传 + 关键词检索（v33）。
@@ -153,7 +151,6 @@ func New(d Deps) *gin.Engine {
 
 	registerWorkspace(rest, ctrls.Workspace)
 	registerAttachment(rest, ctrls.Attachment)
-	registerCommandPolicy(rest, ctrls.CommandPolicy)
 	registerSession(rest, ctrls.Session, ctrls.Search, ctrls.Export)
 	registerRuntime(rest, ctrls.Provider, ctrls.Model, ctrls.Runtime)
 	registerCapability(rest, ctrls.Capability)

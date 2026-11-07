@@ -19,6 +19,10 @@ type ModelColumns struct {
 	// 指针而不是 int64：nil 与 0 在这条链路上是**两件事**（0 不是合法容量，见 ModelEntity 的注释）。
 	MaxInputTokens  *int64
 	MaxOutputTokens *int64
+	// SupportsReasoning / ReasoningEfforts / DefaultEffort 思考能力声明（v39）。
+	SupportsReasoning bool
+	ReasoningEfforts  string
+	DefaultEffort     string
 }
 
 // ModelContent 是模型行里**可变的内容列**（身份列 `provider_id`/`model` 不在其中——
@@ -32,4 +36,8 @@ type ModelContent struct {
 	InputModalities string
 	MaxInputTokens  *int64
 	MaxOutputTokens *int64
+	// SupportsReasoning / ReasoningEfforts / DefaultEffort 思考能力声明（v39）；本层只写库。
+	SupportsReasoning bool
+	ReasoningEfforts  string
+	DefaultEffort     string
 }

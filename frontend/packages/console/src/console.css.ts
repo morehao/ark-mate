@@ -442,23 +442,34 @@ export const consoleStyleSheet = `
   .fg-rowid { font-family: ${tokens.fontMono}; font-size: 11px; color: ${tokens.textPlaceholder}; }
   .fg-modelid { font-family: ${tokens.fontMono}; font-size: 12.5px; }
   .fg-rowmeta { font-size: 11.5px; color: ${tokens.textPlaceholder}; }
+  /* 行内标签（模型/供应商行：文本+图片、默认、思考、容量说明…）——统一一套 pill 语言：
+       - 高度对齐同一行右侧的 antd small 按钮（controlHeightSM = 28px）：此前写死 19px，
+         与「设为默认/取消默认」按钮 (28px) 落差明显，被反馈"高度不一致"。
+       - 圆角走 radiusPill（与面板里的 chip / 药丸同族），不再用 6px 裸值——那个圆角只属于标签，
+         在冷白克制风格里显得突兀。
+       - 静息 = 中性弱标签：borderStrong 细边 + 透明底 + 次级灰字（控件边该比 hairline 深一档；
+         它本身就是可点控件时更是如此）。只有**真状态强调**（fg-info：默认/思考/已声明图片）
+         才上靛蓝软底；其余如「容量由环境兜底」保持中性，不再一排都刷成同色，读起来才不像按钮。 */
   .fg-rowtag {
     flex: none;
+    box-sizing: border-box;
     display: inline-flex;
     align-items: center;
-    height: 19px;
-    padding: 0 6px;
-    border: 1px solid ${tokens.border};
-    border-radius: 6px;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid ${tokens.borderStrong};
+    border-radius: ${tokens.radiusPill}px;
     background: transparent;
     font: inherit;
-    font-size: 11px;
+    font-size: 11.5px;
+    line-height: 1;
+    white-space: nowrap;
     color: ${tokens.textSecondary};
   }
   .fg-rowtag.fg-warn { border-color: ${tokens.warningBorder}; background: ${tokens.warningBg}; color: ${tokens.warning}; }
-  .fg-rowtag.fg-info { border-color: ${tokens.primary}; background: ${tokens.primarySoft}; color: ${tokens.primary}; }
-  .fg-rowtag.fg-clickable { cursor: pointer; }
-  .fg-rowtag.fg-clickable:hover { border-color: ${tokens.primary}; color: ${tokens.primary}; }
+  .fg-rowtag.fg-info { border-color: transparent; background: ${tokens.accentSoft}; color: ${tokens.accent}; }
+  .fg-rowtag.fg-clickable { cursor: pointer; transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease; }
+  .fg-rowtag.fg-clickable:hover { border-color: ${tokens.borderHover}; color: ${tokens.text}; }
   .fg-rowactions { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
   /* 「取消默认」行（已默认）：实心星 + 强调色描边，一眼看出这条是默认（与扩展页按钮同族） */
   .fg-rowactions .ant-btn.fg-star-on { color: ${tokens.accent}; border-color: ${tokens.accent}; }
@@ -1924,7 +1935,7 @@ export const consoleStyleSheet = `
     }
   }
 
-  /* ── 对话流：身份头 / 过程行 / 工具行 / 整轮折叠 ───────────────── */
+  /* ── 对话：身份头 / 过程行 / 工具行 / 整轮折叠 ───────────────── */
 
   .fg-turn {
     padding: 16px 0;

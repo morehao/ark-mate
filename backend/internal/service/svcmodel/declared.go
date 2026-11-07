@@ -103,11 +103,17 @@ func (m *Declared) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq)
 	if err != nil {
 		return nil, err
 	}
+	supportsReasoning, effortsCol, defaultEffort, err := normalizeReasoning(
+		derefBool(req.SupportsReasoning), derefStringSlice(req.ReasoningEfforts), derefString(req.DefaultEffort))
+	if err != nil {
+		return nil, err
+	}
 	id := objid.New(objid.Model)
 	ok, err := m.st.CreateModelDefinition(ctx, model.ModelColumns{
 		ID: id, ProviderID: req.ProviderID, Model: strings.TrimSpace(req.Model),
 		Name: derefString(req.Name), Note: derefString(req.Note), InputModalities: modalities,
 		MaxInputTokens: maxIn, MaxOutputTokens: maxOut,
+		SupportsReasoning: supportsReasoning, ReasoningEfforts: effortsCol, DefaultEffort: defaultEffort,
 	}, defn.DefinitionWriteActor)
 	if err != nil {
 		return nil, err
@@ -158,6 +164,9 @@ func (m *Declared) UpdateModel(ctx context.Context, id string, patch dtomodel.Mo
 		InputModalities: resource.ModalitiesToColumn(resource.ModalitiesFromColumn(row.InputModalities)),
 		// 容量是**解析后的最终值**：省略 = 保持原值；0 = 清除（nil）；≥1 = 声明。
 		MaxInputTokens: row.MaxInputTokens, MaxOutputTokens: row.MaxOutputTokens,
+		// 思考能力基线：省略的键保持原值；关思考 = 清空档位与默认档（见下方 reasoningDirty 分支）。
+		SupportsReasoning: row.SupportsReasoning,
+		ReasoningEfforts:  row.ReasoningEfforts, DefaultEffort: row.DefaultEffort,
 	}
 	if patch.Name != nil {
 		content.Name = *patch.Name
@@ -186,8 +195,30 @@ func (m *Declared) UpdateModel(ctx context.Context, id string, patch dtomodel.Mo
 		}
 		content.MaxOutputTokens = v
 	}
+	// 思考能力：三个键任一出现即重算整组（三者耦合——关思考要清档位、默认档须∈档位，
+	// 只改一个键时另两个按基线回填）。normalizeReasoning 负责这组不变量。
+	reasoningDirty := patch.SupportsReasoning != nil || patch.ReasoningEfforts != nil || patch.DefaultEffort != nil
+	if reasoningDirty {
+		supports := content.SupportsReasoning
+		if patch.SupportsReasoning != nil {
+			supports = *patch.SupportsReasoning
+		}
+		efforts := resource.ReasoningEffortsFromColumn(content.ReasoningEfforts)
+		if patch.ReasoningEfforts != nil {
+			efforts = *patch.ReasoningEfforts
+		}
+		defEffort := content.DefaultEffort
+		if patch.DefaultEffort != nil {
+			defEffort = *patch.DefaultEffort
+		}
+		normSupports, normEfforts, normDefault, err := normalizeReasoning(supports, efforts, defEffort)
+		if err != nil {
+			return nil, err
+		}
+		content.SupportsReasoning, content.ReasoningEfforts, content.DefaultEffort = normSupports, normEfforts, normDefault
+	}
 	if patch.Name != nil || patch.Note != nil || patch.InputModalities != nil ||
-		patch.MaxInputTokens != nil || patch.MaxOutputTokens != nil {
+		patch.MaxInputTokens != nil || patch.MaxOutputTokens != nil || reasoningDirty {
 		ok, err := m.st.UpdateModelDefinition(ctx, id, content, row.Revision, defn.DefinitionWriteActor)
 		if err != nil {
 			return nil, err
@@ -329,6 +360,54 @@ func normalizeInputModalities(in *[]string) (string, error) {
 	return resource.ModalitiesToColumn(*in), nil
 }
 
+// normalizeReasoning 校验并归一思考能力声明（v39），返回 (supports, 落库档位串, 默认档)。
+//
+// 不变量（与底座 dsh 的 reasoningEfforts 语义对齐，见 reverse-design §6/§7）：
+//
+//	① 关思考（supports=false）→ 清空档位与默认档（关思考时不残留"幽灵档位"）。
+//	② 开思考时**至少要一个合法档位**：底座 schema "offers no level beyond off" 会拒绝空档位
+//	   （否则等于"声明思考却没有任何强度可发"）。
+//	③ 档位必须合法（取值见 resource.ReasoningEffortLevels）；未知档 → 40501 并列出合法取值。
+//	④ 默认档须为空（自动）或 ∈ 已选档位集合。
+//
+// 档位归一成规范序（resource.NormalizeReasoningEfforts），保证"同输入同字节"。
+func normalizeReasoning(supports bool, efforts []string, def string) (bool, string, string, error) {
+	if !supports {
+		// 关思考：档位与默认档一律清空（不信任调用方传入的残留）。
+		return false, "", "", nil
+	}
+	// 校验每个档位合法（在归一去重前做，才能对非法值报错而不是被静默丢弃）。
+	for _, e := range efforts {
+		if !resource.ValidReasoningEffort(strings.TrimSpace(e)) {
+			return false, "", "", failure.NewError(failure.ClassRequest, "invalid_param",
+				fmt.Sprintf("不支持的思考强度 %q：合法取值是 %s",
+					e, strings.Join(resource.ReasoningEffortLevels, " / ")), nil)
+		}
+	}
+	normalized := resource.NormalizeReasoningEfforts(efforts)
+	if len(normalized) == 0 {
+		return false, "", "", failure.NewError(failure.ClassRequest, "invalid_param",
+			"开启思考模式时至少要声明一个思考强度（否则等于声明了思考却没有任何档位可下发）", nil)
+	}
+	defCleaned := strings.TrimSpace(def)
+	if defCleaned != "" {
+		// 默认档必须落在已选档位集合里（省略/空 = 自动，由请求层默认）。
+		inSet := false
+		for _, e := range normalized {
+			if e == defCleaned {
+				inSet = true
+				break
+			}
+		}
+		if !inSet {
+			return false, "", "", failure.NewError(failure.ClassRequest, "invalid_param",
+				fmt.Sprintf("默认思考强度 %q 必须是已选档位之一（%s），或留空走自动",
+					def, strings.Join(normalized, " / ")), nil)
+		}
+	}
+	return true, resource.ReasoningEffortsToColumn(normalized), defCleaned, nil
+}
+
 func modelExistsErr(providerID, modelID string) error {
 	return failure.NewError(failure.ClassLimit, "model_exists",
 		fmt.Sprintf("供应商 %q 下已经声明过模型 %q：同一条模型在同一个供应商下只能有一行",
@@ -350,6 +429,14 @@ func derefString(p *string) string {
 func derefBool(p *bool) bool {
 	if p == nil {
 		return false
+	}
+	return *p
+}
+
+// derefStringSlice 解引用可选字符串切片（nil → nil）。
+func derefStringSlice(p *[]string) []string {
+	if p == nil {
+		return nil
 	}
 	return *p
 }

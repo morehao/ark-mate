@@ -47,7 +47,6 @@ import (
 	goruntime "github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
-	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
@@ -600,8 +599,7 @@ func (f restFixture) services() assembly.Services {
 		Usage:              svcusage.New(f.plane),
 		Export:             svcsystem.New(svcsystem.NewSource(nilSafeSourceFacts(f.store), f.plane, bus)),
 
-		Workspace:     svcworkspace.New(f.wsPlane, workspace.NewPicker()),
-		CommandPolicy: svccommandpolicy.New("", func([]interaction.PrefixRule) {}),
+		Workspace: svcworkspace.New(f.wsPlane, workspace.NewPicker()),
 
 		Runtime:       svcruntime.New(f.execution),
 		Model:         f.svc,

@@ -93,10 +93,6 @@ type Config struct {
 	// CapabilityDir 能力数据面目录（P1：skills|mcp|tools/*.json → Skill/MCP/Tool 目录；
 	// MATE_CAPABILITIES 覆盖，默认 ~/.ark-mate/capabilities；空 = 不启用文件数据面）。
 	CapabilityDir string
-	// CommandPolicyPath 命令门禁规则文件（A2；MATE_COMMAND_POLICY 覆盖，默认
-	// ~/.ark-mate/command_policy.json；空 = 关闭门禁）。文件不存在 = 未启用；文件存在但
-	// JSON/规则非法 = **启动失败**（坏文件不能被当成"没有规则"）。
-	CommandPolicyPath string
 	// AutomationDir 自动化定义目录（M4：<id>.json → Automation 注册表；MATE_AUTOMATIONS 覆盖，
 	// 默认 ~/.ark-mate/automations；空 = 不启用文件数据面，写面显式报 automation_dir_unset）。
 	AutomationDir string
@@ -373,7 +369,6 @@ var knownKeys = map[string]string{
 	"store":                      "MATE_STORE",
 	"providers":                  "MATE_PROVIDERS",
 	"capabilities":               "MATE_CAPABILITIES",
-	"command_policy":             "MATE_COMMAND_POLICY",
 	"automations":                "MATE_AUTOMATIONS",
 	"automation_tick":            "MATE_AUTOMATION_TICK",
 	"asset_watch":                "MATE_ASSET_WATCH",
@@ -993,18 +988,6 @@ func materialize(r *resolver) (Config, error) {
 		c.CapabilityDir = v
 	} else {
 		c.CapabilityDir = filepath.Join(home, "capabilities")
-	}
-	// command_policy：显式设置优先（off/disable/none/空 = 关闭门禁）；未设置时派生自数据目录。
-	// 文件**不存在**时不报错（未启用），存在但非法由加载方 fail-closed。
-	if v, ok := r.get("command_policy"); ok {
-		switch strings.ToLower(strings.TrimSpace(v)) {
-		case "off", "disable", "disabled", "none", "":
-			c.CommandPolicyPath = ""
-		default:
-			c.CommandPolicyPath = v
-		}
-	} else {
-		c.CommandPolicyPath = filepath.Join(home, "command_policy.json")
 	}
 	if v, ok := r.get("automations"); ok {
 		c.AutomationDir = v
