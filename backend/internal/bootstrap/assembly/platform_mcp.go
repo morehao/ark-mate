@@ -51,9 +51,18 @@ func PlatformMCPHandler(cfg config.Config) (mcp.Handler, func() error, error) {
 	// svccapability 的六个专家方法只解引用 experts；skills/mcp/tools/catalog 传 nil 不影响专家域。
 	capSvc := svccapability.NewCapability(nil, nil, expertPlane, nil, nil)
 
+	// —— 资料库域（library_*）——
+	// 与 `mate mcp material` 共用同一套装配（buildMaterialHandler），只是并进同一个工具面。
+	libraryHandler, err := buildMaterialHandler(cfg, st)
+	if err != nil {
+		_ = st.Close()
+		return nil, nil, err
+	}
+
 	handler, err := platformmcp.New(map[string]mcp.Handler{
 		"automation": automationmcp.New(autoSvc),
 		"expert":     capabilitymcp.New(capSvc),
+		"library":    libraryHandler,
 	})
 	if err != nil {
 		_ = st.Close()

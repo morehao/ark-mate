@@ -9,7 +9,7 @@ import (
 
 // TestMcpPlatformCLI `mate mcp platform` 的进程级用例（与 mcp_automation_test 同款）：
 //   - stdin 送 initialize / tools/list → stdout 逐行是 JSON-RPC 帧（C10 纯度）；
-//   - tools/list 返回**恰十二个工具**：automation_* 六个 + expert_* 六个（聚合器把两域合起来）；
+//   - tools/list 返回**恰十六个工具**：automation_* 六个 + expert_* 六个 + library_* 四个（三域聚合）；
 //   - schema 里**不含 cron**（ADR v35 对 schedule 的约束仍成立）；
 //   - expert schema 带 4096 字节上限与 id 正则（与 ValidateExpert 同口径）；
 //   - stdin EOF → 进程 0 退出。
@@ -79,6 +79,7 @@ func TestMcpPlatformCLI(t *testing.T) {
 		"automation_get", "automation_delete", "automation_preview",
 		"expert_create", "expert_update", "expert_list",
 		"expert_get", "expert_delete", "expert_set_enabled",
+		"library_list_nodes", "library_node_info", "library_upload", "library_import_artifact",
 	}
 	for _, n := range want {
 		if _, ok := toolNames[n]; !ok {

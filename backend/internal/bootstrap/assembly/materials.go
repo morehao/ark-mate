@@ -188,17 +188,28 @@ func MaterialMCPHandler(cfg config.Config) (mcp.Handler, func() error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := attachmentstore.Migrate(st.DB()); err != nil {
+	h, err := buildMaterialHandler(cfg, st)
+	if err != nil {
 		_ = st.Close()
 		return nil, nil, err
+	}
+	return h, func() error { return st.Close() }, nil
+}
+
+// buildMaterialHandler 在**已打开的 store** 上构造资料库 MCP Handler（不负责关库）。
+//
+// 抽出来供两处复用：`mate mcp material`（独立 server）与 `mate mcp platform`（platform 的
+// `library_*` 域）。二者共用同一套装配，避免"资料库工具面有两份初始化、各写一半"。
+func buildMaterialHandler(cfg config.Config, st *store.Store) (mcp.Handler, error) {
+	if err := attachmentstore.Migrate(st.DB()); err != nil {
+		return nil, err
 	}
 	blobs, err := attachmentstore.New(st.DB(), attachmentstore.Options{
 		BaseDir:        filepath.Join(cfg.HomeDir, "attachments"),
 		MaxUploadBytes: cfg.AttachmentMaxBytes,
 	})
 	if err != nil {
-		_ = st.Close()
-		return nil, nil, err
+		return nil, err
 	}
 	attachSvc := svcattachment.New(st, assemblyBlobStore{st: blobs}, svcattachment.Limits{MaxBytes: cfg.AttachmentMaxBytes})
 	// 产物读取窄端口：library_import_artifact 要读 artifacts 行（与 REST 面同一套用例，不另写口径）。
@@ -206,7 +217,7 @@ func MaterialMCPHandler(cfg config.Config) (mcp.Handler, func() error, error) {
 	artSvc := svcartifact.New(st, artifactFileMeta{blobs: blobs}, nil)
 	svc := svcmaterial.New(st, assemblyUploadAdapter{attach: attachSvc}, materialBlobReader{rows: st, blobs: blobs},
 		pagePublisher{root: cfg.HomeDir}, materialArtifactReader{art: artSvc})
-	return materialmcp.New(svc), func() error { return st.Close() }, nil
+	return materialmcp.New(svc), nil
 }
 
 // assemblyBlobStore 把 *attachmentstore.Store 适配成 svcattachment.BlobStore（翻译 filestore 类型）。

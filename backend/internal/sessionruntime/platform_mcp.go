@@ -27,13 +27,12 @@ import (
 
 // 平台内置 MCP server 的 id / 展示名（稳定；测试与指纹都认它）。
 //
-// `mate-platform` 聚合了 automation + expert 两域（一个进程、一条注入）；`mate-material` 仍是
-// 独立条目（资料库域尚未并入 platform，见 docs/plans 的分期）。
+// `mate-platform` 聚合了三域（一个进程、一条注入）：automation_*（定时任务）+ expert_*（专家定义）
+// + library_*（资料库）。`mate mcp material` / `mate mcp automation` 子命令仍保留为独立入口
+// （调试/兼容），但**默认只注入 `mate-platform` 这一条**。
 const (
 	PlatformMcpPlatformID   = "platform"
 	PlatformMcpPlatformName = "mate-platform"
-	PlatformMcpMaterialID   = "platform-material"
-	PlatformMcpMaterialName = "mate-material"
 )
 
 // platformMcpServers 构造平台内置 MCP server 定义（stdio；Command = 本进程可执行文件）。
@@ -48,7 +47,6 @@ func (s *Service) platformMcpServers() []capability.McpServer {
 	}
 	return []capability.McpServer{
 		{ID: PlatformMcpPlatformID, Name: PlatformMcpPlatformName, Transport: capability.TransportStdio, Command: exe, Args: []string{"mcp", "platform"}},
-		{ID: PlatformMcpMaterialID, Name: PlatformMcpMaterialName, Transport: capability.TransportStdio, Command: exe, Args: []string{"mcp", "material"}},
 	}
 }
 

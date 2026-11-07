@@ -38,23 +38,28 @@ func TestPlatformMcpInjectedByDefault(t *testing.T) {
 		gotNames = append(gotNames, m.Name)
 	}
 	joined := strings.Join(gotNames, ",")
-	if !strings.Contains(joined, PlatformMcpPlatformName) || !strings.Contains(joined, PlatformMcpMaterialName) {
-		t.Fatalf("默认应注入两条平台内置 server（%s/%s），got %v",
-			PlatformMcpPlatformName, PlatformMcpMaterialName, gotNames)
+	if !strings.Contains(joined, PlatformMcpPlatformName) {
+		t.Fatalf("默认应注入平台内置 server（%s），got %v", PlatformMcpPlatformName, gotNames)
 	}
-	// 命令应为平台自身可执行文件，参数是 mcp platform / mcp material。
+	// 合并后平台内置只有一条 mate-platform（automation/expert/library 都并进同一条）。
+	// 注意 got 里还有网关条目 mate-gateway，这里只数平台内置。
+	var platformCount int
 	for _, m := range got {
 		if m.Name == PlatformMcpPlatformName {
-			if !strings.HasSuffix(m.Command, "/") && m.Command == "" {
+			platformCount++
+			if m.Command == "" {
 				t.Fatalf("平台内置命令不能为空: %+v", m)
 			}
 			if strings.Join(m.Args, " ") != "mcp platform" {
 				t.Fatalf("platform 参数应为 'mcp platform'，got %v", m.Args)
 			}
 		}
-		if m.Name == PlatformMcpMaterialName && strings.Join(m.Args, " ") != "mcp material" {
-			t.Fatalf("material 参数应为 'mcp material'，got %v", m.Args)
+		if m.Name == "mate-material" || m.Name == "mate-automation" {
+			t.Fatalf("合并后不该再有独立的 material/automation 注入条目，got %q", m.Name)
 		}
+	}
+	if platformCount != 1 {
+		t.Fatalf("应恰注入一条 mate-platform，got %d 条: %v", platformCount, gotNames)
 	}
 }
 
@@ -62,7 +67,7 @@ func TestPlatformMcpToggleOff(t *testing.T) {
 	svc := platformSvc(t, false)
 	got := svc.McpServersFor("stub", &session.CapabilitySelection{})
 	for _, m := range got {
-		if m.Name == PlatformMcpPlatformName || m.Name == PlatformMcpMaterialName {
+		if m.Name == PlatformMcpPlatformName {
 			t.Fatalf("开关 off 时不该注入平台内置 server，got %+v", m)
 		}
 	}
@@ -81,7 +86,7 @@ func TestPlatformMcpRemoteEndpointSkipped(t *testing.T) {
 	svc := platformSvc(t, true)
 	got := svc.McpServersFor("remote", &session.CapabilitySelection{})
 	for _, m := range got {
-		if m.Name == PlatformMcpPlatformName || m.Name == PlatformMcpMaterialName {
+		if m.Name == PlatformMcpPlatformName {
 			t.Fatalf("远程端点（本机无该可执行文件）不该注入平台内置 stdio server，got %+v", m)
 		}
 	}
