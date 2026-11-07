@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Alert, Button, Input, Skeleton } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { MessageOutlined, PlusOutlined } from '@ant-design/icons'
 import { SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import type { Expert } from '@ark-mate/types'
@@ -8,12 +8,14 @@ import { expertModelShort, missingExpertRefs } from '../../console/expertView'
 import { CapabilityEmpty, SectionHeader } from './shared'
 import { ExpertCard } from './ExpertCard'
 import { ExpertDialog } from './ExpertDialog'
+import { ExpertChatCreateModal } from './ExpertChatCreateModal'
 import { useExpertData } from './useExpertData'
 
 /** 专家管理页：卡片画廊 + 居中弹窗编辑器，管理本机专家定义（列表/创建/编辑/启停/删除 + 角色设定）。 */
 export function ExpertsPanel() {
   const d = useExpertData()
   const [query, setQuery] = useState('')
+  const [chatOpen, setChatOpen] = useState(false)
 
   const knownSkills = useMemo(() => new Set(d.options.skills.map((o) => o.id)), [d.options.skills])
   const knownMcps = useMemo(() => new Set(d.options.mcps.map((o) => o.id)), [d.options.mcps])
@@ -48,6 +50,9 @@ export function ExpertsPanel() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
+            <Button size="small" icon={<MessageOutlined />} onClick={() => setChatOpen(true)}>
+              通过对话创建
+            </Button>
             {/* 新建入口只此一颗（空态里不重复，避免同页两个「新建」）。 */}
             <Button type="primary" size="small" icon={<PlusOutlined />} onClick={d.openNew}>
               新建
@@ -87,7 +92,7 @@ export function ExpertsPanel() {
               text={
                 <>
                   <div style={{ fontSize: 14, color: tokens.textSecondary, marginBottom: 4 }}>还没有专家</div>
-                  <div>专家是一组推荐能力，不会限制你手动选择。</div>
+                  <div>专家是一组推荐能力，不会限制你手动选择。可以「通过对话创建」，或点「新建」逐项填写。</div>
                 </>
               }
             />
@@ -134,6 +139,7 @@ export function ExpertsPanel() {
           if (id) await d.remove(id)
         }}
       />
+      <ExpertChatCreateModal open={chatOpen} onClose={() => setChatOpen(false)} />
     </PageContainer>
   )
 }
