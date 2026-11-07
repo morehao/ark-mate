@@ -57,6 +57,12 @@ type ModelEntity struct {
 	MaxInputTokens *int64 `gorm:"column:max_input_tokens"`
 	// MaxOutputTokens 单次输出上限（平台声明；nil = 未声明）。语义同 MaxInputTokens。
 	MaxOutputTokens *int64 `gorm:"column:max_output_tokens"`
+	// SupportsReasoning 是否声明为思考模型（v39）。落 dsh 时开启 reasoning 交互。
+	SupportsReasoning bool `gorm:"column:supports_reasoning;not null;default:false"`
+	// ReasoningEfforts 声明支持的思考强度档位（逗号分隔规范序，如 `low,medium,high`；空 = 未声明）。
+	ReasoningEfforts string `gorm:"column:reasoning_efforts;not null;default:''"`
+	// DefaultEffort 默认思考强度（空 = 自动，由请求层默认）。
+	DefaultEffort string `gorm:"column:default_effort;not null;default:''"`
 	// Revision 写面 CAS 判据（同 SkillEntity.Revision）。
 	Revision int64 `gorm:"column:revision;not null"`
 	// CreatedAt 创建时刻（RFC3339Nano(UTC)；存量行是 `updated_at` 近似值，见 ProviderEntity.CreatedAt）。

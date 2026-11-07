@@ -70,11 +70,9 @@ func contractCases() []contractCase {
 		{"GET", "/v1/mate/automations/nope/runs", ""},
 		{"POST", "/v1/mate/automations/preview", "{}"},
 
-		// ——— capability / command-policy ———
+		// ——— capability ———
 		{"GET", "/v1/mate/capabilities", ""},
 		{"GET", "/v1/mate/composer/skills", ""},
-		{"GET", "/v1/mate/command-policy", ""},
-		{"PUT", "/v1/mate/command-policy", "{}"},
 
 		// ——— library ———
 		{"GET", "/v1/mate/library", ""},

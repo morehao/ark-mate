@@ -524,6 +524,10 @@ func (r *Resources) declaredModels(ctx context.Context) ([]resource.Model, error
 			// 容量（v25）：指针原样透传——nil 与"声明了一个数"是两件事，这里不做任何归一，
 			// 由 adapter 决定"非空才写"。
 			MaxInputTokens: rows[i].MaxInputTokens, MaxOutputTokens: rows[i].MaxOutputTokens,
+			// 思考能力（v39）：纯列投影，档位串折成规范序数组透传给 adapter。
+			SupportsReasoning: rows[i].SupportsReasoning,
+			ReasoningEfforts:  resource.ReasoningEffortsFromColumn(rows[i].ReasoningEfforts),
+			DefaultEffort:     rows[i].DefaultEffort,
 		})
 	}
 	return out, nil

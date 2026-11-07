@@ -134,7 +134,7 @@
 
 - 再加 **1 条时间口径守卫**（`wire_time_test.go` 的 `TestDTOInstantFieldsAreUnixMillis`，2026-11-05）：`internal/dto/*/*.go` 里字段名以 `At`/`Since` 结尾或叫 `TS`/`Ts` 的必须是 `int64`/`*int64`；非时间的同名键（目前只有 `dtomodel/model_list.go:EffectiveAt`，枚举）逐条登记并双向检查。它挡的是"新加一个 `_at` 字段顺手写 string"——编译与所有既有测试都绿，只是响应里从此有两种时间格式。fail-closed：扫不到 DTO 文件、或一条时刻字段都没命中即失败。反证：把 `SessionResp.CreatedAt` 改回 `string` → 红；把 `EffectiveAt` 的类型改成非 string → 红（登记理由失效）。口径见 [`time.md`](time.md)。
 
-**共 199 条**——加守卫时记得同步这句话。
+**共 196 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 

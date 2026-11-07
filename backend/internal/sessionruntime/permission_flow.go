@@ -10,8 +10,6 @@ import (
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
 
-	"github.com/morehao/golib/glog"
-
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/object/objtime"
@@ -32,24 +30,6 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req protocol.Permi
 	if sid == "" {
 		sid = req.SessionID // 兜底回落原生（理论上不应出现；保留事件不丢）
 	}
-	// 命令门禁（A2）**排在会话级记忆之前**：规则说 forbidden 的命令，不能被"这类工具始终允许"
-	// 的旧记忆放行；allow 的则直接放行（不再问人）。判据见 command_gate.go 的 doc。
-	//
-	// 权限请求只带 toolCallId（dsh 的 wire 形状），命令行在同 id 的 tool_call 更新里——按 id 回查
-	// （`tool_calls.go`）。查不到就只用请求自带的字段：门禁取不到 command 时不再参与。
-	tool := req.ToolCall
-	if cached, ok := o.tools.Get(req.ToolCall.ID); ok {
-		tool = cached
-	}
-	if d, rule, decided := o.commandGateDecision(tool, req.Options); decided {
-		if d.Allowed {
-			glog.Infow(ctx, "命令门禁放行了一次工具调用", "session", sid, "call", tool.ID, "rule", rule)
-		} else {
-			glog.Warnw(ctx, "命令门禁拒绝了一次工具调用", "session", sid, "call", tool.ID, "rule", rule)
-		}
-		return d
-	}
-
 	// v19 起没有 per-agent 默认权限策略这一层（agent 面删除）：裁决只剩**会话级记忆**
 	// （用户"始终允许"过的）与会话级征询。`session.permission_policy` 事件常量仍冻结在
 	// events.go（对外契约），但已经没有生产者。
@@ -344,43 +324,4 @@ func lateAnswerText(question string, content map[string]any) string {
 		b.WriteString(fmt.Sprintf("%v", content[k]))
 	}
 	return b.String()
-}
-
-// commandGateDecision 把一次权限请求交给命令门禁。
-//
-// decided=false 表示**交回既有流程**（prompt / 非 shell 命令 / 未配置规则）；true 表示门禁已经
-// 给出终局（allow / forbidden），调用方直接返回它，不再走记忆与人工审批。
-func (o *Orchestrator) commandGateDecision(tool protocol.ToolCallInfo, opts []protocol.PermissionOption) (protocol.PermissionDecision, string, bool) {
-	d, rule, isShell := interaction.GateCommand(o.commandPolicy, tool.Input)
-	if !isShell {
-		return protocol.PermissionDecision{}, "", false
-	}
-	switch d {
-	case interaction.CommandForbidden:
-		return protocol.PermissionDecision{Rejected: true, OptionID: permissionOptionID(opts, false)}, rule, true
-	case interaction.CommandAllow:
-		return protocol.PermissionDecision{Allowed: true, OptionID: permissionOptionID(opts, true)}, rule, true
-	default:
-		return protocol.PermissionDecision{}, rule, false
-	}
-}
-
-// permissionOptionID 选一个放行/拒绝选项：优先 `_once`（最小授权），其次同类任一；没有 → 空串
-// （ACP 层按 EffectivePermissionOutcome 兜底：放行选第一个，拒绝落回 cancelled）。
-func permissionOptionID(opts []protocol.PermissionOption, allow bool) string {
-	prefix, once := "reject", "reject_once"
-	if allow {
-		prefix, once = "allow", "allow_once"
-	}
-	for _, o := range opts {
-		if o.Kind == once {
-			return o.OptionID
-		}
-	}
-	for _, o := range opts {
-		if strings.HasPrefix(o.Kind, prefix) {
-			return o.OptionID
-		}
-	}
-	return ""
 }

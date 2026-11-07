@@ -185,9 +185,10 @@ func TestCapabilityDefinitionColumnsFrozen(t *testing.T) {
 		// 四张定义载体表，两者判据分工不同：那张表说的是"哪些列可以有"，这里说的是"不许再加列"）。
 		// v20 起多一列 `key`（明文密钥进库）；v24 把 `model_id` 改名 `model`；v25 补两个容量列
 		// （可空、无 DEFAULT，`ALTER TABLE ADD COLUMN` **追加在末尾**——这条判据比的是**物理列序**，
-		// 所以两个容量列排在时间列之后，不按"逻辑分组"提前）。
+		// 所以两个容量列排在时间列之后，不按"逻辑分组"提前）。v39 再补三个思考能力列，
+		// 同样 ALTER 追加在末尾，故白名单也按末尾追加。
 		model.TableNameProvider: {"id", "name", "protocol", "base_url", "note", "revision", "created_at", "updated_at", "key"},
-		model.TableNameModel:    {"id", "provider_id", "model", "name", "note", "input_modalities", "revision", "created_at", "updated_at", "max_input_tokens", "max_output_tokens"},
+		model.TableNameModel:    {"id", "provider_id", "model", "name", "note", "input_modalities", "revision", "created_at", "updated_at", "max_input_tokens", "max_output_tokens", "supports_reasoning", "reasoning_efforts", "default_effort"},
 	}
 	for table, wantCols := range want {
 		rows, err := s.db.Raw(`PRAGMA table_info(` + table + `)`).Rows()

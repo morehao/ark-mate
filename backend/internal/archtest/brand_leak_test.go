@@ -10,7 +10,7 @@ package archtest
 // 本轮（2026-11-04「思考过程/会话输出里仍有 dsh」）修到两处具体出口：
 //
 //	① `store.ts` 的 `SessionResumed` 系统条目：原先把 `payload.runtime` 拼成
-//	   「会话已恢复（原生会话续接） · dsh」推进对话流——那是渲染在问答面板里的**用户文案**；
+//	   「会话已恢复（原生会话续接） · dsh」推进对话——那是渲染在问答面板里的**用户文案**；
 //	② `usageView.ts` 的 `usageRows`：行标签原先是 `runtime_id || key`，`runtime_id` 就是
 //	   `dsh`（用量页是用户可见面）。
 //
@@ -68,11 +68,11 @@ func TestSessionResumeNoticeHasNoRuntimeId(t *testing.T) {
 		block = block[:len("case Ev.SessionResumed:")+next]
 	}
 
-	// 这条系统条目是**进对话流的用户文案**：里面不得读取 `payload.runtime`，也不得把某个
+	// 这条系统条目是**进对话的用户文案**：里面不得读取 `payload.runtime`，也不得把某个
 	// runtime 变量拼进 text。两种情况都判红——判据落在"这条文案会不会带上底座 id"上。
 	for _, banned := range []string{"payload?.runtime", "payload.runtime", "· ${runtime}", "· ${r}"} {
 		if strings.Contains(block, banned) {
-			t.Fatalf("store.ts 的 SessionResumed 系统条目里仍有 %q：这是渲染在对话流里的**用户文案**，"+
+			t.Fatalf("store.ts 的 SessionResumed 系统条目里仍有 %q：这是渲染在对话里的**用户文案**，"+
 				"底座 id（如 dsh）属于执行事实、不是用户概念——恢复原因本身已说清发生了什么。"+
 				"（同一族病见 titleFor 的 plain 口径、AboutPanel 守卫）", banned)
 		}

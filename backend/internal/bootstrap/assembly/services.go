@@ -4,7 +4,6 @@ import (
 	"github.com/morehao/ark-mate/internal/config"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	corellm "github.com/morehao/ark-mate/internal/core/llm"
-	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/infra/attachmentstore"
@@ -14,7 +13,6 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svcattachment"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
-	"github.com/morehao/ark-mate/internal/service/svccommandpolicy"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/internal/service/svcmaterial"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
@@ -48,8 +46,7 @@ type Services struct {
 	Export             svcsystem.SystemSvc
 
 	// ——— 交付与设置 ———
-	Workspace     svcworkspace.WorkspaceSvc
-	CommandPolicy svccommandpolicy.PolicySvc
+	Workspace svcworkspace.WorkspaceSvc
 
 	// ——— 底座 / 模型 / 供应商 ———
 	Runtime       svcruntime.RuntimeSvc
@@ -147,8 +144,7 @@ func (f Facts) BuildServices() Services {
 		Usage:              svcusage.New(plane),
 		Export:             svcsystem.New(svcsystem.NewSource(sourceFactsReader(as.Store), plane, as.Bus)),
 
-		Workspace:     svcworkspace.New(as.Planes.Workspaces, as.Planes.Picker),
-		CommandPolicy: svccommandpolicy.New(as.Cfg.CommandPolicyPath, f.orchestratorApply()),
+		Workspace: svcworkspace.New(as.Planes.Workspaces, as.Planes.Picker),
 
 		Runtime:       svcruntime.New(as.Execution),
 		Model:         modelFace,
@@ -175,17 +171,6 @@ func (f Facts) BuildServices() Services {
 
 		LLM: buildLLMGateway(f),
 	}
-}
-
-// orchestratorApply 命令门禁的"立即生效"回调。
-//
-// 编排器在 `用例与控制器` 之前就已构造（步骤「编排器」在前），这里是显式判空而不是
-// "反正一定有"：装配顺序若被改动，nil 会变成一次静默的规则丢弃。
-func (f Facts) orchestratorApply() func([]interaction.PrefixRule) {
-	if f.Orchestrator == nil {
-		return func([]interaction.PrefixRule) {}
-	}
-	return f.Orchestrator.SetCommandPolicy
 }
 
 // metaSource 诊断面的值来源（未注入时给一份空来源，而不是 nil 函数）。

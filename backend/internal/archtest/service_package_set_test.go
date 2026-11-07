@@ -29,7 +29,6 @@ import (
 //	svccapability 能力定义
 //	svcautomation 自动化
 //	svclibrary    库读面
-//	svccommandpolicy 命令门禁读写（O20 编辑面；规则表在域、裁决在执行面，本包只管读/校验/落盘/生效）
 //	svcsystem     系统面（`svcexport` 并入）
 //
 // 三种失效都**不会让别的测试变红**：
@@ -45,7 +44,7 @@ import (
 // v3.1 §3.2.1 起控制器不得 import `internal/domain`，于是"纯读模型"也必须有一层窄端口：
 // `svcsearch` / `svcusage` 从会话域取出，`svcworkspace` 从工作空间域取出，`svcstream` 包住事件总线。
 var servicePackageSet = []string{
-	"svcartifact", "svcattachment", "svcautomation", "svccapability", "svccommandpolicy", "svclibrary",
+	"svcartifact", "svcattachment", "svcautomation", "svccapability", "svclibrary",
 	"svcmaterial", "svcmodel", "svcruntime", "svcsearch", "svcsession", "svcstream",
 	"svcsystem", "svcusage", "svcworkspace",
 }

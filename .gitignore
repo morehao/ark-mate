@@ -49,6 +49,9 @@ frontend/**/*.tsbuildinfo
 # 历史在 docs/，不在此处；仓库根 AGENTS.md 不在 .dsh/ 下，不受影响。
 .dsh/
 
+# IM 会话归档（本机 agent 运行时落盘，属本地专有数据，不入库）
+.dsh-im/
+
 # corepack 在本仓的本地缓存（沙箱下无写 ~/.cache 权限）
 .corepack/
 

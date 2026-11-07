@@ -5,7 +5,6 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
 	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
 	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
-	"github.com/morehao/ark-mate/internal/controller/ctrcommandpolicy"
 	"github.com/morehao/ark-mate/internal/controller/ctrexport"
 	"github.com/morehao/ark-mate/internal/controller/ctrlibrary"
 	"github.com/morehao/ark-mate/internal/controller/ctrmaterial"
@@ -43,18 +42,17 @@ func (s Services) BuildControllers(origin *middleware.OriginPolicy, hostFacts fu
 	return router.Controllers{
 		Session: ctrsession.NewSessionCtr(s.Session, s.SessionHistory, s.SessionDetail,
 			s.SessionInteraction, s.SessionQueue, s.SessionMeta, s.SessionRead, s.SessionCapability),
-		Search:        ctrsearch.NewSearchCtr(s.Search),
-		Export:        ctrexport.NewExportCtr(s.Export),
-		Workspace:     ctrworkspace.NewWorkspaceCtr(s.Workspace),
-		CommandPolicy: ctrcommandpolicy.NewCommandPolicyCtr(s.CommandPolicy),
-		Runtime:       ctrruntime.NewRuntimeCtr(s.Runtime),
-		Model:         ctrmodel.NewModelCtr(s.Model, s.ModelDeclared),
-		Provider:      ctrmodel.NewProviderCtr(s.Provider, s.ProviderProbe),
-		Capability:    ctrcapability.NewCapabilityCtr(s.Capability),
-		Automation:    ctrautomation.NewAutomationCtr(s.Automation),
-		Library:       ctrlibrary.NewLibraryCtr(s.Library),
-		Usage:         ctrusage.NewUsageCtr(s.Usage),
-		System:        ctrsystem.NewSystemCtr(s.Meta, s.Capabilities, hostFacts),
+		Search:     ctrsearch.NewSearchCtr(s.Search),
+		Export:     ctrexport.NewExportCtr(s.Export),
+		Workspace:  ctrworkspace.NewWorkspaceCtr(s.Workspace),
+		Runtime:    ctrruntime.NewRuntimeCtr(s.Runtime),
+		Model:      ctrmodel.NewModelCtr(s.Model, s.ModelDeclared),
+		Provider:   ctrmodel.NewProviderCtr(s.Provider, s.ProviderProbe),
+		Capability: ctrcapability.NewCapabilityCtr(s.Capability),
+		Automation: ctrautomation.NewAutomationCtr(s.Automation),
+		Library:    ctrlibrary.NewLibraryCtr(s.Library),
+		Usage:      ctrusage.NewUsageCtr(s.Usage),
+		System:     ctrsystem.NewSystemCtr(s.Meta, s.Capabilities, hostFacts),
 		WS: ctrws.NewWSCtr(s.Stream, ctrws.Options{
 			OriginCheck: origin.CheckFunc(),
 		}),

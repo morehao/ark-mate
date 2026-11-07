@@ -2,7 +2,7 @@ import { Modal } from 'antd'
 import { SETTINGS_MENU, SETTINGS_SECTIONS, settingsSectionOf } from '../../console/settingsView'
 import { useMate } from '../../store'
 import { AboutPanel } from './AboutPanel'
-import { CommandPolicyPanel } from './CommandPolicyPanel'
+import { FlowSettingsPanel } from './FlowSettingsPanel'
 import { GeneralSettingsPanel } from './GeneralSettingsPanel'
 import { ModelSettingsPanel } from './ModelSettingsPanel'
 
@@ -58,8 +58,8 @@ export function SettingsDialog() {
 
         <div className="fg-setdlg-body">
           {active?.id === 'general' && <GeneralSettingsPanel />}
-          {active?.id === 'command' && <CommandPolicyPanel />}
           {active?.id === 'model' && <ModelSettingsPanel />}
+          {active?.id === 'flow' && <FlowSettingsPanel />}
           {active?.id === 'about' && <AboutPanel />}
         </div>
       </div>

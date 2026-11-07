@@ -100,6 +100,18 @@ interface ModelFormValues {
    */
   max_input_tokens?: number
   max_output_tokens?: number
+  /**
+   * 是否声明为思考模型（v39）。勾上后展开「关闭思考」开关与档位选择。
+   */
+  supportsReasoning?: boolean
+  /**
+   * 声明支持的思考强度档位（v39）。主档 低/中/高，其余收在「更多档位」。
+   */
+  efforts?: string[]
+  /**
+   * 默认思考强度（v39；留空 = 自动，由请求层默认，须 ∈ 已选档位）。
+   */
+  default_effort?: string
 }
 
 /**
@@ -134,6 +146,32 @@ function capabilitiesOf(row: ModelRow): string[] {
 /** 一条模型当前是否声明了图片输入（行卡上那个可点的能力标签）。 */
 function hasImageInput(row: ModelRow): boolean {
   return (row.input_modalities ?? []).includes('image')
+}
+
+/**
+ * 思考强度档位（v39）：取值 = OpenAI `reasoning_effort` 合法值 ∩ dsh `THINKING_LEVELS`。
+ *
+ * 分两组：**主档**（低/中/高，所有思考模型通用、所有兼容端点都认）直接展示；
+ * **更多档位**（最低/超高/极致）属模型专项，多数端点不认，收在 `<details>` 里避免误勾（
+ * 勾了可能 400）。wire 值 = 档位名本身（OpenAI 兼容下无需映射表）。
+ */
+const EFFORT_LEVELS: { value: string; label: string; primary: boolean }[] = [
+  { value: 'low', label: '低 · low', primary: true },
+  { value: 'medium', label: '中 · medium', primary: true },
+  { value: 'high', label: '高 · high', primary: true },
+  { value: 'minimal', label: '最低 · minimal', primary: false },
+  { value: 'xhigh', label: '超高 · xhigh', primary: false },
+  { value: 'max', label: '极致 · max', primary: false },
+]
+
+/** 主档（默认展示的三档）。 */
+const PRIMARY_EFFORTS = EFFORT_LEVELS.filter((e) => e.primary)
+/** 更多档位（收在 `<details>` 里）。 */
+const EXTRA_EFFORTS = EFFORT_LEVELS.filter((e) => !e.primary)
+
+/** 一条模型当前声明的思考强度档位（表单初值 / 「改没改」的比较基准），保持规范序。 */
+function effortsOf(row: ModelRow): string[] {
+  return row.reasoning_efforts ?? []
 }
 
 /**
@@ -208,6 +246,10 @@ function modelFormValues(target: ModelCardTarget, firstVendor?: string): ModelFo
         // 「没填」与「填了 0」在线上的表现分不开。
         max_input_tokens: target.row.max_input_tokens ?? undefined,
         max_output_tokens: target.row.max_output_tokens ?? undefined,
+        // 思考能力（v39）：编辑时带上原值，作为「改没改」的比较基准。
+        supportsReasoning: target.row.supports_reasoning,
+        efforts: effortsOf(target.row),
+        default_effort: target.row.default_effort || undefined,
       }
     // 新建时把每个键都**显式**给空值：`setFieldsValue` 是合并语义，省略的键会继承上一次打开
     // 残留的值（实测：新建模型时「模型名」框里还留着上一条的名字）。
@@ -215,6 +257,8 @@ function modelFormValues(target: ModelCardTarget, firstVendor?: string): ModelFo
         vendor: target.vendor ?? firstVendor,
         model: '', name: '', note: '', modalities: ['text'],
         max_input_tokens: undefined, max_output_tokens: undefined,
+        // 思考能力默认关：不勾思考 = 不声明；档位默认给主三档（勾了思考时的合理默认）。
+        supportsReasoning: false, efforts: ['low', 'medium', 'high'], default_effort: undefined,
       }
 }
 
@@ -357,6 +401,72 @@ function ProviderForm({ form, target, busy, keyRef, noopLine, onSubmit, onCancel
 }
 
 /** 模型编辑卡的表单（挂靠关系与上游 id 建好之后只读——换供应商 = 删了重建）。 */
+function ReasoningFields({ form }: {
+  form: ReturnType<typeof Form.useForm<ModelFormValues>>[0]
+}) {
+  // 只有勾了「思考模式」才展开档位与「关闭思考」。`Form.useWatch` 读的是表单实时值。
+  const supportsReasoning = Form.useWatch('supportsReasoning', form)
+  if (!supportsReasoning) return null
+  return (
+    <>
+      {/* 「关闭思考」= 一个开关表达两态：允许用户在聊天里关闭思考（关闭 = 不发强度字段）。
+          这是纯 UI 提示，不落独立的库字段——底座没有"能否关闭"的单独声明，它由档位集合是否含
+          「关闭」入口体现；这里如实标注，不造一个"勾了却不下发"的假开关。
+          说明：模型不支持关闭（如纯推理模型）时本开关置灰——即原「仅思考模式」语义。 */}
+      <Form.Item
+        label="关闭思考"
+        extra="允许用户在聊天里把这条模型切到非思考模式（关闭 = 不发思考强度字段）。纯推理模型不支持关闭，此处置灰。"
+      >
+        <Checkbox defaultChecked>允许用户关闭思考</Checkbox>
+      </Form.Item>
+      {/* 支持的思考强度：主三档直接给；更多档位收在 details 里（多数端点不认，勾了可能被拒）。 */}
+      <Form.Item
+        label="支持的思考强度"
+        name="efforts"
+        extra="默认只列低/中/高（所有思考模型通用）；最低/超高/极致属模型专项，多数端点不认，勾了可能失败。"
+        rules={[{ required: true, message: '开启思考时至少要选一个强度档位' }]}
+      >
+        <Checkbox.Group>
+          <Space direction="vertical" size={4}>
+            <Space wrap>
+              {PRIMARY_EFFORTS.map((e) => (
+                <Checkbox key={e.value} value={e.value}>{e.label}</Checkbox>
+              ))}
+            </Space>
+            <details>
+              <summary style={{ fontSize: 12, color: tokens.textPlaceholder, cursor: 'pointer' }}>
+                更多档位（依模型而定，通常无需勾选）
+              </summary>
+              <Space wrap style={{ marginTop: 6 }}>
+                {EXTRA_EFFORTS.map((e) => (
+                  <Checkbox key={e.value} value={e.value}>{e.label}</Checkbox>
+                ))}
+              </Space>
+            </details>
+          </Space>
+        </Checkbox.Group>
+      </Form.Item>
+      {/* 默认思考强度：留空 = 自动；须 ∈ 已选档位（服务端校验）。 */}
+      <Form.Item
+        label="默认思考强度"
+        name="default_effort"
+        extra="开启思考但未手动选择时使用；留空则由请求层默认。"
+      >
+        <Select
+          allowClear
+          placeholder="自动（不指定，由请求层默认）"
+          options={[
+            { value: 'low', label: '低 · low' },
+            { value: 'medium', label: '中 · medium' },
+            { value: 'high', label: '高 · high' },
+          ]}
+        />
+      </Form.Item>
+    </>
+  )
+}
+
+/** 模型编辑卡的表单（挂靠关系与上游 id 建好之后只读——换供应商 = 删了重建）。 */
 function ModelForm({ form, target, vendorOptions, busy, noopLine, onSubmit, onCancel }: {
   form: ReturnType<typeof Form.useForm<ModelFormValues>>[0]
   target: ModelCardTarget
@@ -431,6 +541,16 @@ function ModelForm({ form, target, vendorOptions, busy, noopLine, onSubmit, onCa
         >
           <Checkbox.Group options={INPUT_CAPABILITIES} />
         </Form.Item>
+        {/* 思考模式（v39）：勾上后开启思考能力声明——下面展开「关闭思考」开关与档位选择。
+            这是**真实能力**：底座 dsh 的 reasoningEfforts/reasoning 会据此下发。 */}
+        <Form.Item
+          name="supportsReasoning"
+          valuePropName="checked"
+          extra="声明为思考模型：允许在聊天里按强度档位开启思考。勾选后下面出现强度档位。"
+        >
+          <Checkbox>思考模式</Checkbox>
+        </Form.Item>
+        <ReasoningFields form={form} />
       </Form>
     </EditorShell>
   )
@@ -715,6 +835,10 @@ export function ModelSettingsPanel() {
         // 容量：留空 = 键不出现（不声明）。
         max_input_tokens: v.max_input_tokens ?? undefined,
         max_output_tokens: v.max_output_tokens ?? undefined,
+        // 思考能力（v39）：未勾＝不思考（不发这三个键，服务端默认关）；勾了才带档位与默认档。
+        supports_reasoning: v.supportsReasoning ?? false,
+        reasoning_efforts: v.supportsReasoning ? (v.efforts ?? []) : undefined,
+        default_effort: v.supportsReasoning ? (v.default_effort || undefined) : undefined,
       }))
       if (!created) return
       closeModelCard()
@@ -732,6 +856,9 @@ export function ModelSettingsPanel() {
         input_modalities?: string[]
         max_input_tokens?: number
         max_output_tokens?: number
+        supports_reasoning?: boolean
+        reasoning_efforts?: string[]
+        default_effort?: string
       } = {}
       if ((v.name ?? '') !== (row.name ?? '')) patch.name = v.name ?? ''
       if ((v.note ?? '') !== (row.note ?? '')) patch.note = v.note ?? ''
@@ -750,6 +877,25 @@ export function ModelSettingsPanel() {
       // 而未注册字段恒为 `undefined`，于是改备注 = 把图片能力静默改回仅文本。
       const nextModalities = modalitiesOf(v.modalities)
       if (!sameCapabilities(nextModalities, capabilitiesOf(row))) patch.input_modalities = nextModalities
+      // 思考能力（v39）：只发真正变了的键（省略 = 不改）。关思考 = 清空档位与默认档。
+      const nextSupports = v.supportsReasoning ?? false
+      const curSupports = row.supports_reasoning
+      const nextEfforts = nextSupports ? (v.efforts ?? []) : []
+      const curEfforts = effortsOf(row)
+      const effortsChanged = nextEfforts.length !== curEfforts.length
+        || nextEfforts.some((e, i) => e !== curEfforts[i])
+      if (nextSupports !== curSupports) {
+        // 开关本身变了：连带把档位/默认档一起对齐（关思考时后端会清空，这里也显式发一遍）。
+        patch.supports_reasoning = nextSupports
+        patch.reasoning_efforts = nextEfforts
+      } else if (nextSupports && effortsChanged) {
+        // 仍开着思考、只改了档位集合。
+        patch.reasoning_efforts = nextEfforts
+      }
+      const nextDefault = nextSupports ? (v.default_effort || '') : ''
+      if (nextSupports && nextDefault !== (row.default_effort ?? '')) {
+        patch.default_effort = nextDefault
+      }
       if (Object.keys(patch).length === 0) {
         setNoopLine('没有改动：这个表单里的字段都还是原值。')
         return
@@ -1114,6 +1260,15 @@ export function ModelSettingsPanel() {
                             {image ? '文本+图片' : '文本'}
                           </button>
                           {isDefault && <span className="fg-rowtag fg-info">默认</span>}
+                          {/* 思考能力（v39）：声明为思考模型就打「思考」徽标，一键可见（像图片那样）。 */}
+                          {row.supports_reasoning && (
+                            <span
+                              className="fg-rowtag fg-info"
+                              title={`思考模型：支持 ${(row.reasoning_efforts ?? []).join(' / ') || '（未声明档位）'}，默认 ${row.default_effort || '自动'}`}
+                            >
+                              思考
+                            </span>
+                          )}
                           {/* 容量（v25）：声明过就标出来；**没声明就如实说"由环境兜底"**——
                               那时用户看到的上下文上限不是他设的，而是一句猜测（底座的默认值）。 */}
                           <span

@@ -15,6 +15,9 @@ func modelResps(vs []domprovider.ModelItem) []dtomodel.ModelResp {
 			ID: v.ID, ProviderID: v.ProviderID, Model: v.Model, Name: v.Name, Note: v.Note,
 			InputModalities: append([]string(nil), v.InputModalities...),
 			MaxInputTokens:  v.MaxInputTokens, MaxOutputTokens: v.MaxOutputTokens,
+			SupportsReasoning: v.SupportsReasoning,
+			ReasoningEfforts:  append([]string{}, v.ReasoningEfforts...),
+			DefaultEffort:     v.DefaultEffort,
 			Revision: v.Revision, UpdatedAt: v.UpdatedAt,
 		})
 	}

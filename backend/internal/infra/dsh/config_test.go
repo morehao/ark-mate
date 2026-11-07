@@ -269,6 +269,107 @@ func TestBuildPatchDeliversCapacityOnlyWhenDeclared(t *testing.T) {
 	}
 }
 
+// TestBuildPatchDeliversReasoningOnlyWhenDeclared v39：思考能力是**平台声明**——声明为思考模型且有
+// 档位时才写 `reasoningEfforts:{档位→wire值}` 与 profile 级 `reasoning:<默认档>`，否则一个字段都不写
+// （让底座/端点默认生效，而不是由平台塞假值）。
+//
+// 四条判据，各自对应一种静默退化：
+//
+//	① 声明思考的模型下出现 `reasoningEfforts:` 块，逐档 `low: "low"` 等（wire 值 = 档位名）；
+//	② 该供应商所有思考模型默认档一致且非空 → 写 profile 级 `reasoning: "<level>"`；
+//	③ 未声明思考的模型下一行都没有（`reasoningEfforts: {}` 在底座眼里等于"没档位"，与"没写"同效，
+//	   且会破坏旧夹具的逐字节等价——所以必须整块不写）；
+//	④ 产物里不得出现内核的列名（`supports_reasoning`/`reasoning_efforts`/`default_effort`）。
+func TestBuildPatchDeliversReasoningOnlyWhenDeclared(t *testing.T) {
+	b, err := buildPatch(resource.Set{
+		Runtime: ID,
+		Providers: []resource.Provider{
+			{ID: "gw", Name: "网关", Protocol: resource.ProtocolOpenAI, BaseURL: "https://gw.example.com/v1"},
+		},
+		Models: []resource.Model{
+			{ID: "m1", ProviderID: "gw", Model: "think", Name: "思考模型",
+				InputModalities:   []string{resource.ModalityText},
+				SupportsReasoning: true,
+				ReasoningEfforts:  []string{resource.EffortHigh, resource.EffortLow, resource.EffortMedium},
+				DefaultEffort:     resource.EffortMedium},
+			{ID: "m2", ProviderID: "gw", Model: "plain", Name: "普通模型",
+				InputModalities: []string{resource.ModalityText}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+
+	// ① 思考模型的 reasoningEfforts 块（档位规范序：low/medium/high，wire 值 = 档位名）。
+	wantBlock := "          - id: \"think\"\n" +
+		"            name: \"思考模型\"\n" +
+		"            input: [text]\n" +
+		"            reasoningEfforts:\n" +
+		"              low: \"low\"\n" +
+		"              medium: \"medium\"\n" +
+		"              high: \"high\"\n"
+	if !strings.Contains(got, wantBlock) {
+		t.Fatalf("声明过的思考能力没有按底座字段名交付：\nwant:\n%s\ngot:\n%s", wantBlock, got)
+	}
+
+	// ② profile 级 reasoning（默认档一致 → 写）。
+	if !strings.Contains(got, "        reasoning: \"medium\"\n") {
+		t.Fatalf("默认档一致时应写 profile 级 reasoning，实际：\n%s", got)
+	}
+
+	// ③ 普通模型：一个思考字段都没有。
+	plainBlock := "          - id: \"plain\"\n" +
+		"            name: \"普通模型\"\n" +
+		"            input: [text]\n"
+	if !strings.Contains(got, plainBlock) {
+		t.Fatalf("未声明思考的模型必须**不下发**该字段：\nwant:\n%s\ngot:\n%s", plainBlock, got)
+	}
+	// reasoningEfforts / reasoning 各恰好出现一次（只有声明过的那条模型 / 那一个 profile）。
+	if c := strings.Count(got, "reasoningEfforts:"); c != 1 {
+		t.Fatalf("`reasoningEfforts:` 应恰好出现 1 次，实际 %d 次：\n%s", c, got)
+	}
+	if c := strings.Count(got, "        reasoning: "); c != 1 {
+		t.Fatalf("profile 级 `reasoning:` 应恰好出现 1 次，实际 %d 次：\n%s", c, got)
+	}
+
+	// ④ 内核列名不得出现在产物里。
+	for _, banned := range []string{"supports_reasoning", "reasoning_efforts", "default_effort"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("产物里出现了内核的列名 %q——交付必须用底座的字段名", banned)
+		}
+	}
+}
+
+// TestBuildPatchReasoningProfileSkippedWhenDefaultsDiffer：同供应商下思考模型默认档不一致/有空的，
+// profile 级 `reasoning` 一律不写（一个 route 值无法无歧义表达混合默认档）。
+func TestBuildPatchReasoningProfileSkippedWhenDefaultsDiffer(t *testing.T) {
+	b, err := buildPatch(resource.Set{
+		Runtime: ID,
+		Providers: []resource.Provider{
+			{ID: "gw", Name: "网关", Protocol: resource.ProtocolOpenAI, BaseURL: "https://gw.example.com/v1"},
+		},
+		Models: []resource.Model{
+			{ID: "m1", ProviderID: "gw", Model: "a", Name: "A",
+				InputModalities: []string{resource.ModalityText}, SupportsReasoning: true,
+				ReasoningEfforts: []string{resource.EffortLow, resource.EffortHigh}, DefaultEffort: resource.EffortHigh},
+			{ID: "m2", ProviderID: "gw", Model: "b", Name: "B",
+				InputModalities: []string{resource.ModalityText}, SupportsReasoning: true,
+				ReasoningEfforts: []string{resource.EffortLow, resource.EffortHigh}, DefaultEffort: resource.EffortLow},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "        reasoning: ") {
+		t.Fatalf("混合默认档时不得写 profile 级 reasoning：\n%s", string(b))
+	}
+	// 但每模型的 reasoningEfforts 仍在。
+	if c := strings.Count(string(b), "reasoningEfforts:"); c != 2 {
+		t.Fatalf("两个思考模型的 reasoningEfforts 都应交付，实际 %d 次：\n%s", c, string(b))
+	}
+}
+
 // TestDshRouteKeyAgreesBetweenPatchAndModelValue 守卫③（**动态那半**）：配置里声明的路由键与
 // ACP 模型值的第一段必须**逐字同源**。
 //

@@ -63,6 +63,10 @@ type ModelItem struct {
 	InputModalities []string
 	MaxInputTokens  *int64
 	MaxOutputTokens *int64
-	Revision        int64
-	UpdatedAt       int64
+	// SupportsReasoning / ReasoningEfforts / DefaultEffort 思考能力声明（v39，纯列投影透传）。
+	SupportsReasoning bool
+	ReasoningEfforts  []string
+	DefaultEffort     string
+	Revision          int64
+	UpdatedAt         int64
 }

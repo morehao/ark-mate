@@ -60,8 +60,6 @@ import type {
   ResolveElicitationResp,
   ResolvePermissionReq,
   ResolvePermissionResp,
-  CommandPolicyResp,
-  CommandPolicyRule,
   ComposerSkill,
   RevokeMemoryReq,
   RuntimeDiagnostics,
@@ -732,19 +730,3 @@ export const deleteWorkspace = (id: string): Promise<WorkspaceDeleteResp> =>
 /** 重排：`beforeId` 缺省 = 追加到尾部；返回**完整**顺序（客户端据此对齐本地顺序）。 */
 export const moveWorkspace = (id: string, beforeId?: string): Promise<WorkspaceMoveResp> =>
   http.post<WorkspaceMoveResp>(`/mate/workspaces/${encodeURIComponent(id)}/move`, { before_id: beforeId })
-
-/**
- * 命令门禁（A2）：读当前规则（`GET /command-policy`）。
- * `enabled=false` 表示规则文件未配置（写面会回 40001），界面据它转只读。
- */
-export const getCommandPolicy = (): Promise<CommandPolicyResp> =>
-  http.get<CommandPolicyResp>('/mate/command-policy')
-
-/**
- * 全量替换命令门禁规则（`PUT /command-policy`）。
- *
- * 服务端**先校验再落盘**：一条规则的样板断言不通过 → 整表拒绝（40001 `command_policy_invalid`），
- * 盘上的旧规则保持原样。成功后立即生效（不需要重启）。
- */
-export const updateCommandPolicy = (rules: CommandPolicyRule[]): Promise<CommandPolicyResp> =>
-  http.put<CommandPolicyResp>('/mate/command-policy', { rules })

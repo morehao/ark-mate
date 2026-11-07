@@ -800,6 +800,10 @@ var schemaMigrations = []migration{
 	// v38 的版本步本体在 `migrate_v38.go`（`inputs` 加 `attachments` 列：忙时排队携带附件 id，
 	// 修掉"排队丢附件"的静默丢失——理由写在该文件头）。
 	migrationV38,
+
+	// v39 的版本步本体在 `migrate_v39.go`（models 补 `supports_reasoning`/`reasoning_efforts`/
+	// `default_effort` 三列：思考能力声明，落 dsh 的 reasoningEfforts/reasoning——理由写在该文件头）。
+	migrationV39,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

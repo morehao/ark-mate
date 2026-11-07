@@ -443,6 +443,15 @@ func buildPatch(set resource.Set) ([]byte, error) {
 			if p.BaseURL != "" {
 				b = append(b, fmt.Sprintf("        baseURL: %s\n", yamlQuote(p.BaseURL))...)
 			}
+			// profile 级默认思考强度（v39）：`reasoning: "<level>"`。
+			//
+			// 为什么"仅当同供应商所有思考模型默认档一致且非空才写"：`reasoning` 是**逐 route**
+			// 的单一值，而默认档是**逐模型**的；一个 route 下若某模型的默认档为空（自动）而另一个是
+			// `high`，就无法用一个 route 值同时表达——此时**不写**（让每个模型走底座/端点默认），
+			// 而不是随便挑一个假装全体一致（宁缺毋假）。
+			if def := unanimousDefaultEffort(models, p.ID); def != "" {
+				b = append(b, fmt.Sprintf("        reasoning: %s\n", yamlQuote(def))...)
+			}
 			b = append(b, []byte("        models:\n")...)
 			for _, m := range models {
 				if m.ProviderID != p.ID {
@@ -480,10 +489,53 @@ func buildPatch(set resource.Set) ([]byte, error) {
 					modalities = []string{resource.ModalityText}
 				}
 				b = append(b, fmt.Sprintf("            input: [%s]\n", strings.Join(modalities, ", "))...)
+				// 思考能力（v39）：仅当声明为思考模型且至少一个档位时，写 `reasoningEfforts:{档位→wire值}`。
+				//
+				// 诚实口径（reverse-design §6/§7）：OpenAI 兼容下档位名本身即 wire 值，故
+				// `low: "low"`——这是**真实下发**（底座据此开启 reasoning 并生成 thinkingLevelMap），
+				// 不是"能勾但无效果"。未声明思考的模型**完全不写**这行，旧夹具字节因此不变。
+				if m.SupportsReasoning && len(m.ReasoningEfforts) > 0 {
+					b = append(b, []byte("            reasoningEfforts:\n")...)
+					// 档位按规范序（从低到高）输出：端口契约已经归一，这里再排一次让"顺序"不依赖
+					// 调用方记性，且逐字节 golden 稳定（用户勾选顺序不该改变产物）。
+					for _, lvl := range resource.NormalizeReasoningEfforts(m.ReasoningEfforts) {
+						b = append(b, fmt.Sprintf("              %s: %s\n", lvl, yamlQuote(lvl))...)
+					}
+				}
 			}
 		}
 	}
 	return b, nil
+}
+
+// unanimousDefaultEffort 返回供应商 p 下所有**思考模型**的**一致**默认思考强度；不一致或任一为空
+// 则返回空串（= 不写 profile 级 `reasoning`）。
+//
+// 语义见调用点：profile 级 `reasoning` 是逐 route 的单一值，只有在同 route 所有思考模型默认档都相同
+// 且非空时才可无歧义地表达；否则宁可不写（让每模型走默认），也不挑一个假装一致。
+//
+// 只看 `SupportsReasoning && len(ReasoningEfforts)>0` 的模型：非思考模型不参与（它们的默认档无意义）。
+// 若该供应商下**没有**思考模型，返回空串（不写）。
+func unanimousDefaultEffort(models []resource.Model, providerID string) string {
+	def := ""
+	have := false
+	for _, m := range models {
+		if m.ProviderID != providerID || !m.SupportsReasoning || len(m.ReasoningEfforts) == 0 {
+			continue
+		}
+		if m.DefaultEffort == "" {
+			// 有思考模型默认档为空（自动）→ 无法与其它模型统一，不写。
+			return ""
+		}
+		if !have {
+			def, have = m.DefaultEffort, true
+			continue
+		}
+		if m.DefaultEffort != def {
+			return ""
+		}
+	}
+	return def
 }
 
 // sortedModels 把模型按 `(ProviderID, Model)` 排序后返回。

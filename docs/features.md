@@ -133,16 +133,12 @@ Agent 执行中需要人拍板时，平台把请求变成可交互的卡片：
 > 机制：provider/model 身份收口、凭据四层回落、目录派生算法见 [`architecture.md`](./architecture.md) §5.4、
 > §7 与 [`decisions.md`](./decisions.md) 的 v24–v27。
 
-## 10. 命令门禁
-
-`GET/PUT /command-policy` 持有规则表，只对简单命令自动裁决、复杂命令一律 prompt 询问；保存先校验再原子落盘并热生效。
-
-## 11. 用量统计
+## 10. 用量统计
 
 `GET /usage/summary` 按日期聚合轮次 / 时长 / 上下文 / 成本，支持近 7/30 天与自定义区间；用量页展示。
 需要 sqlite 持久层（memory 模式返回 `40501`）。另有 `llm` 块汇总内部模型调用的 token 明细。
 
-## 12. 实时事件流与数据管理
+## 11. 实时事件流与数据管理
 
 - **唯一实时出口** `WS /v1/mate/ws/events`：attach/detach/ping、按会话过滤、`since_seq` 游标续传、历史缓冲
   超限快照回退、慢订阅发 `gap` 帧、心跳与断线重连。
@@ -152,7 +148,7 @@ Agent 执行中需要人拍板时，平台把请求变成可交互的卡片：
 > 机制：事件类型契约（26 类，冻结）、WS 帧格式、transcript 与读模型见 [`architecture.md`](./architecture.md)
 > §6.2 与 README 契约摘要的 WS 段。
 
-## 13. 桌面形态与产品身份
+## 12. 桌面形态与产品身份
 
 - **交付形态**：桌面（macOS / Windows，随包运行时，用户机器不需要 Go / Node / 预装底座）是主线；浏览器入口
   是开发形态；容器 / 自建二进制是维护态。详见 [`positioning.md`](./positioning.md)。

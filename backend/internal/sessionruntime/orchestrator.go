@@ -50,10 +50,6 @@ type Orchestrator struct {
 	// 代际重开与模型应用都在域里；编排侧只提供拨号、模型解析与 MCP 注入三个事实。
 	life *session.Lifecycle
 
-	// commandPolicy 命令门禁规则表（A2；`domain/interaction/command_policy.go`）。
-	// 空 = 未启用：`GateCommand` 返回 isShell=false，行为与改前逐字相同。
-	commandPolicy []interaction.PrefixRule
-
 	// tools 按 toolCallId 记住工具调用详情（P4a 第六十一刀起归 `domain/session`）：
 	// dsh 的权限请求只带 toolCallId，命令行在同 id 的 tool_call 更新里。
 	tools *session.ToolCallMemory
@@ -218,10 +214,6 @@ func (o *Orchestrator) SetArtifactExtractor(ex session.ArtifactExtractor) {
 //
 // 生产装配不调用它；测试用它把窗口压到毫秒级，避免每个取消用例都等满 10s。
 func (o *Orchestrator) SetSettleTimeout(d time.Duration) { o.runner.SetSettleTimeout(d) }
-
-// SetCommandPolicy 装配期登记命令门禁规则（nil = 未启用）。规则表由 app 从
-// `<MATE_HOME>/command_policy.json` 加载并**加载期校验**；这里只持有，不再校验。
-func (o *Orchestrator) SetCommandPolicy(rules []interaction.PrefixRule) { o.commandPolicy = rules }
 
 // SetHandoffMaxChars 设置 bounded handoff memo 字符预算（0 = 关闭 memo 兜底）。见 ensureSession。
 func (o *Orchestrator) SetHandoffMaxChars(n int) { o.life.SetHandoffMaxChars(n) }

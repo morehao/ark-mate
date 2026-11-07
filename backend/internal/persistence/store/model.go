@@ -42,9 +42,21 @@ func modelRowDigest(cols model.ModelColumns) string {
 	return rowDigest(map[string]string{
 		"id": cols.ID, "provider_id": cols.ProviderID, "model": cols.Model,
 		"name": cols.Name, "note": cols.Note, "input_modalities": cols.InputModalities,
-		"max_input_tokens":  capacityDigest(cols.MaxInputTokens),
-		"max_output_tokens": capacityDigest(cols.MaxOutputTokens),
+		"max_input_tokens":   capacityDigest(cols.MaxInputTokens),
+		"max_output_tokens":  capacityDigest(cols.MaxOutputTokens),
+		"supports_reasoning": boolDigest(cols.SupportsReasoning),
+		"reasoning_efforts":  cols.ReasoningEfforts,
+		"default_effort":     cols.DefaultEffort,
 	})
+}
+
+// boolDigest bool 的摘要形态（`1` / `0`）：思考能力（v39）进摘要——它是**内容**，改了它交付
+// 字节就变（与容量同理）。用 `1/0` 与 SQLite 落库形态一致，避免 `true/false` 与 `1/0` 两种串混记。
+func boolDigest(v bool) string {
+	if v {
+		return "1"
+	}
+	return "0"
 }
 
 // capacityDigest 容量的摘要形态（nil = 空串；有值 = 十进制）。
@@ -71,7 +83,9 @@ func (s *Store) CreateModelDefinition(ctx context.Context, cols model.ModelColum
 				ID: cols.ID, ProviderID: cols.ProviderID, Model: cols.Model,
 				Name: cols.Name, Note: cols.Note, InputModalities: cols.InputModalities,
 				MaxInputTokens: cols.MaxInputTokens, MaxOutputTokens: cols.MaxOutputTokens,
-				Revision: 1, CreatedAt: now, UpdatedAt: now,
+				SupportsReasoning: cols.SupportsReasoning, ReasoningEfforts: cols.ReasoningEfforts,
+				DefaultEffort: cols.DefaultEffort,
+				Revision:      1, CreatedAt: now, UpdatedAt: now,
 			})
 		})
 }
@@ -83,8 +97,11 @@ func (s *Store) CreateModelDefinition(ctx context.Context, cols model.ModelColum
 func (s *Store) UpdateModelDefinition(ctx context.Context, id string, content model.ModelContent, expectedRev int64, actor string) (bool, error) {
 	digest := rowDigest(map[string]string{
 		"id": id, "name": content.Name, "note": content.Note, "input_modalities": content.InputModalities,
-		"max_input_tokens":  capacityDigest(content.MaxInputTokens),
-		"max_output_tokens": capacityDigest(content.MaxOutputTokens),
+		"max_input_tokens":   capacityDigest(content.MaxInputTokens),
+		"max_output_tokens":  capacityDigest(content.MaxOutputTokens),
+		"supports_reasoning": boolDigest(content.SupportsReasoning),
+		"reasoning_efforts":  content.ReasoningEfforts,
+		"default_effort":     content.DefaultEffort,
 	})
 	return s.commitDefinitionChange(ctx, model.DefinitionKindModel, id, actor,
 		model.DefinitionActionUpdate, digest, expectedRev,
@@ -92,6 +109,8 @@ func (s *Store) UpdateModelDefinition(ctx context.Context, id string, content mo
 			return s.models.WithTx(tx).UpdateColumnsCAS(ctx, id, map[string]any{
 				"name": content.Name, "note": content.Note, "input_modalities": content.InputModalities,
 				"max_input_tokens": content.MaxInputTokens, "max_output_tokens": content.MaxOutputTokens,
+				"supports_reasoning": content.SupportsReasoning, "reasoning_efforts": content.ReasoningEfforts,
+				"default_effort": content.DefaultEffort,
 			}, expectedRev, now)
 		})
 }

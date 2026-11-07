@@ -31,6 +31,13 @@ type ModelResp struct {
 	// 兜底（不是平台声明）"，而省略键会让"未声明"与"这台服务版本旧、根本没这个字段"长得一样。
 	MaxInputTokens  *int64 `json:"max_input_tokens"`
 	MaxOutputTokens *int64 `json:"max_output_tokens"`
+	// SupportsReasoning / ReasoningEfforts / DefaultEffort 思考能力声明（v39）。
+	//
+	// SupportsReasoning 无 `omitempty`：`false` 是明确事实（不思考），与"这台服务版本旧、没这个
+	// 字段"必须可分——理由同容量列。ReasoningEfforts 空数组 = 未声明档位。
+	SupportsReasoning bool     `json:"supports_reasoning"`
+	ReasoningEfforts  []string `json:"reasoning_efforts"`
+	DefaultEffort     string   `json:"default_effort,omitempty"`
 	// Revision 写面乐观锁计数（每次成功提交 +1）；**不是内容版本**——同一内容写两次它照样前进，
 	// 而"那一版到底是什么"的内容指纹在审计 digest 里（ADR-13）。
 	Revision int64 `json:"revision"`
@@ -72,6 +79,12 @@ type ModelCreateReq struct {
 	// 取值必须 ≥ 1（0 不是合法容量）；非法取值 → 40501。
 	MaxInputTokens  *int64 `json:"max_input_tokens"`
 	MaxOutputTokens *int64 `json:"max_output_tokens"`
+	// SupportsReasoning / ReasoningEfforts / DefaultEffort 思考能力声明（v39）。
+	// SupportsReasoning nil = 默认不思考；ReasoningEfforts nil = 空（开思考时至少要一个档位）；
+	// DefaultEffort nil = 自动。
+	SupportsReasoning *bool     `json:"supports_reasoning"`
+	ReasoningEfforts  *[]string `json:"reasoning_efforts"`
+	DefaultEffort     *string   `json:"default_effort"`
 	// IsDefault true = 把这条设为**唯一**默认模型（写进 meta 的单一值，ADR-21）。
 	IsDefault *bool `json:"is_default"`
 	// Runtime 仅为**显式拒收**而存在（A2）。它不是资源字段，任何非 nil 取值都报 40001。
@@ -95,7 +108,15 @@ type ModelPatchReq struct {
 	// 为什么不用 `null`：encoding/json 里 `null` 与"键缺失"都落成 nil，两者分不开。
 	MaxInputTokens  *int64 `json:"max_input_tokens"`
 	MaxOutputTokens *int64 `json:"max_output_tokens"`
-	IsDefault       *bool  `json:"is_default"`
+	// SupportsReasoning / ReasoningEfforts / DefaultEffort 思考能力声明（v39），**三态**（同容量列）：
+	//
+	//	SupportsReasoning 省略=nil 不改；true/false = 设为是否思考（false 时写面清空档位与默认档）
+	//	ReasoningEfforts  省略=nil 不改；[]string（可为空数组）= 覆盖档位集合
+	//	DefaultEffort     省略=nil 不改；"" = 清成"自动"；非空 = 设为该档
+	SupportsReasoning *bool     `json:"supports_reasoning"`
+	ReasoningEfforts  *[]string `json:"reasoning_efforts"`
+	DefaultEffort     *string   `json:"default_effort"`
+	IsDefault         *bool     `json:"is_default"`
 	// Runtime 见 ModelCreateReq：显式拒收（A2）。
 	Runtime *string `json:"runtime"`
 }

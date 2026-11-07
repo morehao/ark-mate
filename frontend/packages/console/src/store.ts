@@ -277,7 +277,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       // generation（M3-6）：会话在轮次边界迁到了新的能力代际（定义被改过）。
       // 与"进程重启后原生续接"必须分开说——用户改完定义最关心的正是"到底生效了没有"。
       //
-      // **不把底座 id（`payload.runtime`，如 `dsh`）拼进这行**：这是**进对话流的用户可见文案**
+      // **不把底座 id（`payload.runtime`，如 `dsh`）拼进这行**：这是**进对话的用户可见文案**
       // （`tone:'info'` 的系统条目会渲染在问答面板里），而底座是执行事实、不是用户概念——
       // 与「新会话 · dsh / assistant · thinking」同一类泄漏（见 `titleFor` 的 `plain` 口径、
       // `TestAboutPanelShowsProductWithoutEngineWords`）。恢复原因本身已经说清发生了什么，

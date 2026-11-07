@@ -19,7 +19,7 @@ import { isDanger, PERM_ROWS, permLabel } from '../console/permissionView'
  *
  * ## 范围
  * 纯展示 + 解释。**不**调用任何写接口、**不**改协议、**不**读会话级权限记忆
- * （那块走既有的 `POST /permission` 与「设置 · 命令规则」，与本 chip 无关）。
+ * （那块走既有的 `POST /permission`，与本 chip 无关）。
  */
 export function PermissionChip({
   nativeMode,
