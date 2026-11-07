@@ -57,11 +57,11 @@ func New(svc Service) *Handler { return &Handler{svc: svc} }
 
 // 工具描述（会给模型看）。
 const (
-	descCreate = "创建一条定时任务。参数：name（必填，≤120 字，别从 prompt 派生）、prompt（到点要发给模型的话）、" +
-		"schedule（五选一：once{at} / interval{every_seconds≥60} / daily{timezone,hour,minute} / weekly{timezone,hour,minute,days_of_week} / monthly{timezone,hour,minute,day 1-31}）、" +
-		"target（delivery=session(默认，投递回指定会话，需 session_id) 或 new_session(需 cwd 绝对路径)）。" +
+	descCreate = "创建一条定时任务。参数：id（必填，小写字母数字连字符，如 water-reminder，别从 name 派生）、name（必填，≤120 字）、" +
+		"schedule（五选一：once{timezone,at} / interval{timezone,every_seconds≥60} / daily{timezone,hour,minute} / weekly{timezone,hour,minute,days_of_week} / monthly{timezone,hour,minute,day 1-31}）、" +
+		"target（必填：prompt=到点要发给模型的话**必须放在 target 里**；delivery=session(默认，投递回指定会话，需 session_id) 或 new_session(需 cwd 绝对路径)）。" +
 		"**用自然语言和用户确认时间，绝不把规则串给用户看**。用户说\"在这个会话/在这里/提醒我\"→delivery=session 且 session_id=当前会话；说\"单独跑/别打扰我\"→new_session。"
-	descUpdate = "增量更新一条定时任务（只改传入的键，未传的保留）。参数：id（必填）、以及要改的 name/prompt/schedule/target/enabled/state。" +
+	descUpdate = "增量更新一条定时任务（只改传入的键，未传的保留）。参数：id（必填）、以及要改的 name/schedule/target/enabled/state（prompt 在 target.prompt 里改）。" +
 		"**用自然语言确认，不暴露规则串**。"
 	descList    = "列出全部定时任务（含装载失败带 error 的那些）。返回 [{id,name,enabled,state,schedule,target,next_due_at,last_status,error}]；next_due_at 是 Unix 毫秒时间戳，schedule.at 仍是 RFC3339。"
 	descGet     = "取一条定时任务详情 + 最近运行史摘要。参数：id（必填）。返回 {automation, runs}。"
@@ -101,9 +101,9 @@ func targetSchema() json.RawMessage {
 
 // ListTools 返回六个工具。
 func (h *Handler) ListTools(ctx context.Context) ([]protocol.McpTool, error) {
-	createSchema := fmt.Sprintf(`{"type":"object","properties":{"id":{"type":"string","description":"任务 id（小写字母数字连字符）"},"name":{"type":"string","maxLength":120},"prompt":{"type":"string"},"schedule":%s,"target":%s,"enabled":{"type":"boolean"}},"required":["name","schedule","target"],"additionalProperties":false}`,
+	createSchema := fmt.Sprintf(`{"type":"object","properties":{"id":{"type":"string","pattern":"^[a-z0-9]+([-_][a-z0-9]+)*$","description":"任务 id（小写字母数字，连字符/下划线分段，创建后不可改）"},"name":{"type":"string","minLength":1,"maxLength":120},"schedule":%s,"target":%s,"enabled":{"type":"boolean"}},"required":["id","name","schedule","target"],"additionalProperties":false}`,
 		scheduleSchema(), targetSchema())
-	updateSchema := fmt.Sprintf(`{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string","maxLength":120},"prompt":{"type":"string"},"schedule":%s,"target":%s,"enabled":{"type":"boolean"},"state":{"type":"string"}},"required":["id"],"additionalProperties":false}`,
+	updateSchema := fmt.Sprintf(`{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string","minLength":1,"maxLength":120},"schedule":%s,"target":%s,"enabled":{"type":"boolean"},"state":{"type":"string"}},"required":["id"],"additionalProperties":false}`,
 		scheduleSchema(), targetSchema())
 	return []protocol.McpTool{
 		{Name: ToolCreate, Description: descCreate, InputSchema: json.RawMessage(createSchema)},

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render as rtlRender, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 
 /**
  * 刀 1 · ExpertsPanel（扩展 · 专家）——列表渲染与搜索分支。
@@ -16,8 +17,10 @@ import userEvent from '@testing-library/user-event'
  */
 
 const toast = vi.fn()
+const setPendingPrompt = vi.fn()
 vi.mock('../../src/store', () => ({
-  useMate: (selector: (s: { showToast: typeof toast }) => unknown) => selector({ showToast: toast }),
+  useMate: (selector: (s: { showToast: typeof toast; setPendingPrompt: typeof setPendingPrompt }) => unknown) =>
+    selector({ showToast: toast, setPendingPrompt }),
 }))
 
 const listExperts = vi.fn()
@@ -39,6 +42,10 @@ vi.mock('@ark-mate/api', () => ({
 }))
 
 import { ExpertsPanel } from '../../src/components/capability/ExpertsPanel'
+
+// ExpertsPanel 内含「通过对话创建」子组件（用 useNavigate + store.setPendingPrompt），
+// 故渲染需 Router 上下文。render 统一包一层 MemoryRouter。
+const render = (ui: React.ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>)
 
 const expert = (id: string, name: string, over: Record<string, unknown> = {}) => ({
   id,
