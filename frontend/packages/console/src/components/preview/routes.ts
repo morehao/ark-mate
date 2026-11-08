@@ -26,6 +26,12 @@ export interface PreviewBodyProps {
   content: string | Uint8Array | { url: string }
   /** 原始字节大小（给状态页展示）。 */
   sizeBytes?: number
+  /**
+   * mate 体系 file_id（= core_file_upload.id），由 PreviewProvider 注入。
+   * renderer 模式的渲染器（如 Office 先经服务端转 PDF）需要它作转换入参——
+   * content 里的 { url } 是存储 key 签名链接，无法可靠还原 file_id。
+   */
+  fileId?: string
 }
 
 /** 一条渲染器定义。 */
@@ -99,7 +105,7 @@ export function isBinaryPath(defs: readonly PreviewDefinition[], path: string): 
 const CODE_EXTS = [
   'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'go', 'py', 'rb', 'rs', 'java', 'kt', 'c', 'cc', 'cpp', 'h', 'hpp',
   'cs', 'php', 'swift', 'dart', 'lua', 'sh', 'bash', 'zsh', 'sql', 'json', 'jsonl', 'yaml', 'yml', 'toml',
-  'ini', 'xml', 'css', 'scss', 'less', 'html', 'htm', 'log', 'env', 'dockerfile',
+  'ini', 'xml', 'css', 'scss', 'less', 'log', 'env', 'dockerfile',
 ] as const
 
 export const BUILTIN_PREVIEWS: readonly PreviewDefinition[] = [
@@ -133,6 +139,17 @@ export const BUILTIN_PREVIEWS: readonly PreviewDefinition[] = [
     body: lazy(() => import('./renderers/MarkdownRenderer')),
   },
   {
+    // HTML 页面：按 bytes-complete 取整块字节，交给 HtmlRenderer 用受控 sandboxed iframe
+    // 真正「渲染页面」。——注意 html/htm 已从 CODE_EXTS 移除，否则会被 code 先命中显示源码。
+    id: 'html',
+    extensions: ['html', 'htm'],
+    priority: 'builtin',
+    loading: 'bytes-complete',
+    shape: 'drawer',
+    title: () => 'HTML',
+    body: lazy(() => import('./renderers/HtmlRenderer')),
+  },
+  {
     id: 'code',
     extensions: CODE_EXTS,
     priority: 'builtin',
@@ -151,10 +168,19 @@ export const BUILTIN_PREVIEWS: readonly PreviewDefinition[] = [
     title: () => '图片',
     body: lazy(() => import('./renderers/ImageRenderer')),
   },
-  // 二期：Word/PPT 走 office→pdf，复用 pdf body（不改核心分发，仅追加一条）：
-  // { id:'office', extensions:['doc','docx','ppt','pptx'], binaryExtensions:['doc','docx','ppt','pptx'],
-  //   priority:'builtin', loading:'renderer', shape:'drawer', title:()=>'Office',
-  //   body: lazy(() => import('./renderers/OfficeRenderer')) },
+  // Word/PPT：服务端经 libreoffice-kit 转 PDF，再由 OfficeRenderer 复用 PdfRenderer 渲染。
+  // loading='renderer'：Provider 只给签名 url（此处其实用不上），真正的转换由 OfficeRenderer
+  // 用 fileId 调 POST /files/:id/convert-pdf 完成——故 fileId 必须由 Provider 注入（见 PreviewProvider）。
+  {
+    id: 'office',
+    extensions: ['doc', 'docx', 'ppt', 'pptx'],
+    binaryExtensions: ['doc', 'docx', 'ppt', 'pptx'],
+    priority: 'builtin',
+    loading: 'renderer',
+    shape: 'drawer',
+    title: () => 'Office',
+    body: lazy(() => import('./renderers/OfficeRenderer')),
+  },
 ]
 
 /** 纯文本兜底：无任何定义命中时用它（等价 dsh 的 fallback）。 */

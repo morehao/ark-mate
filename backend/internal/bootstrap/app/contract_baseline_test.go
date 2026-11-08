@@ -204,6 +204,10 @@ var contractExcluded = map[string]string{
 	// 且结果（选中/取消/无宿主）由宿主的桌面环境决定——它是宿主交互能力，不是数据契约。
 	"POST /v1/mate/workspaces/pick-directory": "抬宿主原生目录选择器，结果依赖宿主 UI",
 	"GET /v1/mate/materials/nodes/:id/view":   "回 page 的 text/html 正文，不是 JSON 信封",
+	// office 预览转 PDF：成功时直接回 `application/pdf` 字节流（不是 JSON 信封）；且需要
+	// 随包 libreoffice-kit payload + 已落 filestore 的真实 docx/pptx 字节，无法在基线里确定性采样。
+	// 失败分支（40501 降级 / 40401）由 svcattachment 的用例覆盖。
+	"POST /v1/mate/files/:id/convert-pdf": "回 PDF 字节流（非 JSON 信封），依赖随包 office payload 与真实字节",
 }
 
 // contractNoRouteCases 刻意不命中任何注册路由的采样：它们测的是 NoRoute 兜底的信封形状。

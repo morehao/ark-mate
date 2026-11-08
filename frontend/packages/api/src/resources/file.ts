@@ -5,7 +5,7 @@
 // 服务端不经业务接口直出内容；唯一吐字节的是 ginupload 的签名对象端点（presign-url → objects）。
 // 依赖：现有 http（baseURL '/v1'，Envelope 解包）。
 // ─────────────────────────────────────────────────────────────────────────────
-import { http } from '../request'
+import { http, HttpError } from '../request'
 
 /** `POST /files/:id/presign-url` 的响应（ginupload presignURLResponse）。 */
 export interface PresignResp {
@@ -135,4 +135,53 @@ export async function fetchFileText(fileId: string): Promise<string> {
 /** 取签名 url 字符串（renderer 自取 / 图片直接作 src 时用）。 */
 export async function fetchFileUrl(fileId: string): Promise<string> {
   return (await filePresignUrl(fileId)).url
+}
+
+/**
+ * 把某 file_id 的 Office 文档（docx/pptx…）在**服务端**转成 PDF，返回 PDF 整块字节。
+ *
+ * 为什么要这一步：docx/pptx 是 ZIP 二进制，前端若按文本/字节直接渲染必然乱码。服务端用随包
+ * libreoffice-kit 转成 PDF 后，前端复用现有 `PdfRenderer` 渲染即可。
+ *
+ * 端点：`POST /v1/mate/files/:id/convert-pdf?name=<文件名>`（见 docs/contract.md）。
+ * 成功时**直接返回 `application/pdf` 字节流**（不是 JSON 信封）；失败时返回 JSON 信封
+ * （`{code,msg}`，HTTP 200）——两种情况都要区分：先按 content-type 判定，非 PDF 再解析信封抛
+ * `HttpError`（code 透传，如 40501 office_preview_unsupported / 40401 attachment_not_found /
+ * 50001 office_preview_failed），供上层给出可读提示。
+ *
+ * @param fileId mate 体系 file_id（= core_file_upload.id）；本函数前置校验。
+ * @param name   原始文件名（可选）：仅用于服务端推导输出后缀，缺省不影响转换。
+ */
+export async function fetchFilePdf(fileId: string, name?: string): Promise<Uint8Array> {
+  assertFileId(fileId)
+  // baseURL 是 '/v1'（见 request.ts），控制面路由挂在 `/v1/mate` 下——必须带 `/mate` 段，
+  // 否则会拼成 `/v1/files/...` 命中误路由守卫（与 filePresignUrl 同款坑）。
+  const qs = name ? `?name=${encodeURIComponent(name)}` : ''
+  const url = `/v1/mate/files/${encodeURIComponent(fileId)}/convert-pdf${qs}`
+
+  let res: Response
+  try {
+    res = await fetch(url, { method: 'POST' })
+  } catch (err) {
+    throw new Error(`office 转 PDF 请求失败（网络错误）：${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  const contentType = res.headers.get('content-type') || ''
+  if (res.ok && contentType.includes('application/pdf')) {
+    return new Uint8Array(await res.arrayBuffer())
+  }
+
+  // 失败态：后端一律回 HTTP 200 + JSON 信封（code!=0）。解析它拿到 code/msg 透传。
+  let code = -1
+  let msg = `office 转 PDF 失败（HTTP ${res.status}）`
+  try {
+    // 后端把错误也写进信封，这里按 JSON 解析（content-type 可能是 application/json 或 text/plain）。
+    const text = await res.text()
+    const env = JSON.parse(text) as { code?: number; msg?: string }
+    if (typeof env.code === 'number') code = env.code
+    if (env.msg) msg = env.msg
+  } catch {
+    // 解析不了就沿用兜底文案。
+  }
+  throw new HttpError(code, msg)
 }

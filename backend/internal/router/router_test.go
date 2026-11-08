@@ -313,6 +313,9 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 			!strings.HasPrefix(p, "/meta") &&
 			!strings.HasPrefix(p, "/capabilities") &&
 			!strings.HasPrefix(p, "/attachments") &&
+			// `/files/...` 一族由 golib ginupload 挂载（memory 模式测试引擎不挂它，故不在此提取），
+			// **唯独** convert-pdf 是本仓自注册、必须被本守卫双向上锁的 `/files` 子路由。
+			!strings.HasPrefix(p, "/files/:id/convert-pdf") &&
 			!strings.HasPrefix(p, "/materials") &&
 			!strings.HasPrefix(p, "/artifacts") &&
 			!strings.HasPrefix(p, "/ws/") {

@@ -219,6 +219,32 @@ func resolveOfficeCLI(officeSkills string) string {
 	return cli
 }
 
+// ResolveOfficeCLI 是 resolveOfficeCLI 的**导出版**：由 office skills assets 目录推导随包
+// libreoffice-kit 的 cli.js 绝对路径，供「预览时把 office 转 PDF」的服务端转换复用同一处解析
+// （不再复制一份推导逻辑，避免升级 dsh 时两处漂移）。解析不到（文件不在场）时返回空串。
+func ResolveOfficeCLI(officeSkills string) string {
+	osDir := strings.TrimSpace(officeSkills)
+	if osDir == "" {
+		return ""
+	}
+	return resolveOfficeCLI(osDir)
+}
+
+// ResolveOfficeNode 由 primary-runtime 载荷目录推导随包 node 可执行文件绝对路径，供服务端调用
+// libreoffice-kit CLI 用（与 mate-acp 覆写层里 `DSH_BUNDLED_OFFICE_NODE` 的推导口径一致：
+// `<primaryRuntime>/dependencies/node/bin/node`）。文件不在场时返回空串。
+func ResolveOfficeNode(primaryRuntime string) string {
+	pr := strings.TrimSpace(primaryRuntime)
+	if pr == "" {
+		return ""
+	}
+	node := filepath.Join(pr, "dependencies", "node", "bin", "node")
+	if fi, err := os.Stat(node); err != nil || fi.IsDir() {
+		return ""
+	}
+	return node
+}
+
 // BundledEnv 由 ark-mate **自有**的两处随包资产目录派生 4 个 KEY=VALUE，供注入 dsh 启动环境——
 // mate-acp 覆写层的 `!!js` 门控与 config 的 getter 读它们。
 //

@@ -31,7 +31,7 @@ export const META_PATH = '/v1/mate/meta'
  * `connect-src` 只放行自身与回环 WS（事件流直连核心，设计 §7.2）。
  */
 export const CSP_POLICY =
-  "default-src 'self'; connect-src 'self' ws://127.0.0.1:*; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+  "default-src 'self'; connect-src 'self' ws://127.0.0.1:*; img-src 'self' data: blob:; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 
 /** WS 首帧 `attach` 的截止时限：连接建立后超时未 attach → 服务端主动关闭（1008）。 */
 export const STREAM_ATTACH_DEADLINE_MS = 5000

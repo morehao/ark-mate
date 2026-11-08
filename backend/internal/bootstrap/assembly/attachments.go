@@ -3,10 +3,14 @@ package assembly
 import (
 	"context"
 	"io"
+	"os"
+	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/infra/attachmentstore"
+	"github.com/morehao/ark-mate/internal/infra/dsh"
+	"github.com/morehao/ark-mate/internal/infra/officeconv"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/service/svcattachment"
@@ -94,9 +98,20 @@ func (a attachmentBlobAdapter) DeleteFile(ctx context.Context, uploadID string) 
 	return a.st.DeleteFile(ctx, uploadID)
 }
 
+// ReadPath 返回 blob 的本地只读绝对路径（office 转 PDF 需要给外部进程传文件路径）。
+func (a attachmentBlobAdapter) ReadPath(ctx context.Context, uploadID string) (string, error) {
+	if a.st == nil {
+		return "", errAttachmentsUnsupported()
+	}
+	return a.st.ReadPath(ctx, uploadID)
+}
+
 // buildAttachmentSvc 构造附件用例。AttachStore 为 nil（memory 模式）时交 nil-safe 适配器；
 // AttachmentStore 端口在 memory 模式同样没有实现——用一个 nil-safe 的 wrapper 包住 *store.Store，
 // 若为 nil 则插入/读取即 40501。
+//
+// Office→PDF 转换器（officeconv）随包 payload 由它自己解析；解析不到时 Available()=false，
+// ConvertToPDF 返回明确降级码（office_preview_unsupported），不影响其它附件能力。
 func (f Facts) buildAttachmentSvc() svcattachment.AttachmentSvc {
 	limits := svcattachment.Limits{MaxBytes: f.Cfg.AttachmentMaxBytes}
 	var rowStore svcattachment.AttachmentStore
@@ -105,7 +120,28 @@ func (f Facts) buildAttachmentSvc() svcattachment.AttachmentSvc {
 	} else {
 		rowStore = unsupportedAttachmentStore{}
 	}
-	return svcattachment.New(rowStore, attachmentBlobAdapter{st: f.AttachStore}, limits)
+	return svcattachment.New(rowStore, attachmentBlobAdapter{st: f.AttachStore}, newOfficeConverter(), limits)
+}
+
+// newOfficeConverter 构造 office→PDF 转换器：node/cli 路径优先取 env（MATE_OFFICE_NODE/CLI），
+// 否则由随包 payload（dsh.ResolveBundledDirs 派生的 primary-runtime 与 office skills assets）解析。
+//
+// 路径解析放在**装配根**而非 officeconv 内：archtest 只许 assembly import infra/dsh，
+// officeconv 不认识 dsh（它只认两条绝对路径）。解析不到时转换器 Available()=false，
+// 附件 ConvertToPDF 会返回明确降级码 office_preview_unsupported。
+func newOfficeConverter() svcattachment.OfficeConverter {
+	node := strings.TrimSpace(os.Getenv("MATE_OFFICE_NODE"))
+	cli := strings.TrimSpace(os.Getenv("MATE_OFFICE_CLI"))
+	if node == "" || cli == "" {
+		primaryRuntime, officeSkills := dsh.ResolveBundledDirs()
+		if node == "" {
+			node = dsh.ResolveOfficeNode(primaryRuntime)
+		}
+		if cli == "" {
+			cli = dsh.ResolveOfficeCLI(officeSkills)
+		}
+	}
+	return officeconv.NewForPaths(node, cli)
 }
 
 // unsupportedAttachmentStore memory 模式下的空实现（调用即 40501）。

@@ -17,4 +17,8 @@ func registerAttachment(v1 *gin.RouterGroup, ctr ctrattachment.AttachmentCtr) {
 	v1.POST("/attachments", ctr.Register)
 	v1.GET("/attachments/:id", ctr.Get)
 	v1.DELETE("/attachments/:id", ctr.Delete)
+	// office 预览：把已落 filestore 的 docx/pptx 在服务端转成 PDF 字节流（前端复用 PdfRenderer）。
+	// 路径刻意挂在 `/files/:id/...` 下（与 ginupload 的 presign-url 同形、同一 `/files` 资源面），
+	// 但**收字节仍在 ginupload**、本端点只读已有 blob 转格式，不破坏「全局唯一收字节面」。
+	v1.POST("/files/:id/convert-pdf", ctr.ConvertPDF)
 }

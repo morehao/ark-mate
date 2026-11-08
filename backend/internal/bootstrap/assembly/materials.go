@@ -213,7 +213,7 @@ func buildMaterialHandler(cfg config.Config, st *store.Store) (mcp.Handler, erro
 	if err != nil {
 		return nil, err
 	}
-	attachSvc := svcattachment.New(st, assemblyBlobStore{st: blobs}, svcattachment.Limits{MaxBytes: cfg.AttachmentMaxBytes})
+	attachSvc := svcattachment.New(st, assemblyBlobStore{st: blobs}, newOfficeConverter(), svcattachment.Limits{MaxBytes: cfg.AttachmentMaxBytes})
 	// 产物读取窄端口：library_import_artifact 要读 artifacts 行（与 REST 面同一套用例，不另写口径）。
 	// dirty 不传：工具面只读产物元数据做收录，不触发「工作区文件是否改动」的惰性重算。
 	artSvc := svcartifact.New(st, artifactFileMeta{blobs: blobs}, nil)
@@ -257,6 +257,11 @@ func (a assemblyBlobStore) GetFile(ctx context.Context, uploadID string) (svcatt
 
 func (a assemblyBlobStore) DeleteFile(ctx context.Context, uploadID string) error {
 	return a.st.DeleteFile(ctx, uploadID)
+}
+
+// ReadPath 返回 blob 的本地只读绝对路径（office 转 PDF 需要给外部进程传文件路径）。
+func (a assemblyBlobStore) ReadPath(ctx context.Context, uploadID string) (string, error) {
+	return a.st.ReadPath(ctx, uploadID)
 }
 
 // assemblyUploadAdapter 把 svcattachment 的上传投影成 svcmaterial.UploadedAttachment

@@ -102,7 +102,7 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
           onClose={close}
         >
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--text2,#6b7280)' }}>正在加载渲染器…</div>}>
-            <open.def.body fileName={open.file.name} content={open.content} sizeBytes={open.file.size_bytes} />
+            <open.def.body fileName={open.file.name} content={open.content} sizeBytes={open.file.size_bytes} fileId={open.file.file_id} />
           </Suspense>
         </PreviewShell>
       )}

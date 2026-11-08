@@ -11,7 +11,7 @@ import "github.com/gin-gonic/gin"
 //
 // 纪律：不列任何外域（无在线字体 / CDN / 遥测）、`script-src` 不含 `unsafe-eval`、
 // `connect-src` 只放行自身与回环 WS（事件流直连核心，设计 §7.2）。
-const ContentSecurityPolicy = "default-src 'self'; connect-src 'self' ws://127.0.0.1:*; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+const ContentSecurityPolicy = "default-src 'self'; connect-src 'self' ws://127.0.0.1:*; img-src 'self' data: blob:; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 
 // setDocumentCSP 给文档类响应加 CSP 头。
 //

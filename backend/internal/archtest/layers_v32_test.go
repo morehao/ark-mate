@@ -144,6 +144,9 @@ var v32Layers = map[string]v32Layer{
 	"internal/infra/installed": {layer: 5, name: "infra/installed", sameLayer: true},
 	// 附件字节存储：golib filestore + local 驱动的薄适配层（v32）。L5 与其它 infra 件同层。
 	"internal/infra/attachmentstore": {layer: 5, name: "infra/attachmentstore", sameLayer: true},
+	// office→PDF 转换器：调用随包 libreoffice-kit CLI 把 docx/pptx 转 PDF（预览复用 PdfRenderer）。
+	// 只做「进程调用 + 临时文件编排」，不 import dsh（路径由装配根解析后经 NewForPaths 交进来）。L5 同层。
+	"internal/infra/officeconv": {layer: 5, name: "infra/officeconv", sameLayer: true},
 	// 产物自动抽取（P2）：从工具事件旁路识别 write/edit 落文件、把相对路径安全解析到 cwd 内。
 	// 纯函数（不 spawn、不读写盘、不 import 底座），只 import 内圈 protocol/domain 值；L5 与其它 infra 件同层。
 	"internal/infra/workartifact": {layer: 5, name: "infra/workartifact", sameLayer: true},
