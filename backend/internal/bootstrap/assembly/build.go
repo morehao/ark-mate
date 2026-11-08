@@ -4,10 +4,6 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/morehao/ark-mate/internal/config"
@@ -15,7 +11,6 @@ import (
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/dto/dtosystem"
-	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/ark-mate/internal/sessionruntime"
@@ -116,37 +111,9 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 		glog.Infow(ctx, "serve: 已注入 runtime 配置隔离环境", "home", config.DisplayHome(cfg.HomeDir), "runtimes", ids)
 	}
 
-	// dsh office/依赖内置能力（方案 A）：平台自建持久 profile `mate-acp`（基于 acp 模板 + office 覆写层），
-	// 并把随包 runtime 根派生成 DSH_PRIMARY_RUNTIME / DSH_BUNDLED_OFFICE_* 注入该底座启动环境。
-	//  - profile 落点由 homeDir 拼（<MATE_HOME>/runtime/dsh/profiles/mate-acp），与 DSH_HOME 隔离声明一致；
-	//  - 只对**选中且承载能力面**的底座做（远程端点不拉进程）。
-	// 失败只记 WARN、不拒绝启动：缺 office 能力时 agent 退回自带工具链，不该让整个应用起不来。
-	if spec, ok := reg.Get(runtime.SelectedRuntime()); ok {
-		// profile 落点由 homeDir 拼（<MATE_HOME>/runtime/dsh/profiles/mate-acp），与 DSH_HOME 隔离声明一致。
-		// 只在**本机拉子进程**的底座上做：远程端点不读 Launch.Env、也不该被塞 env。
-		if runtime.LaunchesLocally(spec) {
-			if written, perr := dsh.ProvisionProfile(cfg.HomeDir); perr != nil {
-				glog.Warnw(ctx, "serve: 初始化 mate-acp profile 失败（office 能力可能不可用）", "err", perr)
-			} else {
-				glog.Infow(ctx, "serve: mate-acp profile 就绪", "dir", config.DisplayHome(dsh.ProfileDir(cfg.HomeDir)), "files_written", written)
-			}
-			if root := dshBundledRuntimeRoot(cfg); root != "" {
-				id := runtime.SelectedRuntime()
-				for _, kv := range dsh.BundledEnv(root) {
-					eq := strings.IndexByte(kv, '=')
-					if eq < 0 {
-						continue
-					}
-					if err := reg.SetLaunchEnv(id, kv[:eq], kv[eq+1:]); err != nil {
-						glog.Warnw(ctx, "serve: 注入 dsh office 随包 env 失败", "key", kv[:eq], "err", err)
-					}
-				}
-				glog.Infow(ctx, "serve: 已注入 dsh office 随包 env", "runtime", id, "bundled_root", config.DisplayHome(root))
-			} else {
-				glog.Warnw(ctx, "serve: 未找到 dsh 随包 runtime 根，office 能力将不可用（可用 MATE_DSH_BUNDLED_RUNTIME 指定）")
-			}
-		}
-	}
+	// 拉底座前的统一准备：落盘 mate-acp profile + 注入 office 随包 env（详见 prepare_runtime.go）。
+	// 抽成公共函数是因为 `mate demo` 等控制面命令也拉底座，必须在**每一处**拉底座前都跑。
+	PrepareRuntimeEnv(ctx, reg, cfg.HomeDir)
 
 	as := &assembly{
 		cfg:     cfg,
@@ -184,41 +151,4 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 	}
 	res.stop = func() { as.lifecycle.Stop(context.Background()) }
 	return res, nil
-}
-
-// dshBundledRuntimeRoot 返回 dsh 随包 runtime 根（`Resources/runtime`），供注入 office 能力 env。
-//
-// 取值优先级（逐级回退，任一命中即返回）：
-//  1. `MATE_DSH_BUNDLED_RUNTIME`（显式覆盖，最高优先）；
-//  2. 由 PATH 里 dsh 可执行位置反推——**必须 EvalSymlinks**：dev 态 dsh 常是 `.cache/dev-bin/dsh`
-//     shim（`exec /usr/local/bin/dsh`）或 `/usr/local/bin/dsh` 软链，`LookPath` 拿到的是 shim/软链
-//     本身，不 follow 就会把根算错（实测坑：直接 Dir 三层得到 `…/.cache`，`base!=runtime` → 空）。
-//     跟随软链后指向 `<root>/runtime/cli/bin/dsh`，`<root>/runtime` 即答案；
-//  3. 已知安装位置 `/Applications/DeepSeek Harness.app/Contents/Resources/runtime`（macOS 打包态兜底）。
-//
-// 全部落空（如 npx / 裸 npm 装的 dsh、或非 macOS）→ 返回空，调用方跳过注入（保持"无 office 能力"。
-// 现状，绝不注入一个错路径让底座 ENOENT）。
-func dshBundledRuntimeRoot(cfg config.Config) string {
-	if v := strings.TrimSpace(os.Getenv("MATE_DSH_BUNDLED_RUNTIME")); v != "" {
-		return v
-	}
-	// 由 `dsh` 命令解析出的绝对路径（跟随软链）反推 Resources/runtime 根。
-	if p, err := exec.LookPath(dsh.Command); err == nil && p != "" {
-		if real, rerr := filepath.EvalSymlinks(p); rerr == nil && real != "" {
-			p = real
-		}
-		// 期望布局：<root>/runtime/cli/bin/dsh
-		bin := filepath.Dir(p)    // .../cli/bin
-		cli := filepath.Dir(bin)  // .../cli
-		root := filepath.Dir(cli) // .../runtime
-		if filepath.Base(root) == "runtime" {
-			return root
-		}
-	}
-	// 打包态兜底：macOS 上随包 runtime 的已知绝对位置。
-	const macRuntime = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime"
-	if fi, err := os.Stat(filepath.Join(macRuntime, "primary-runtime", "runtime.json")); err == nil && !fi.IsDir() {
-		return macRuntime
-	}
-	return ""
 }

@@ -4,15 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/morehao/ark-mate/internal/config"
 )
 
 // TestDshBundledRuntimeRootEnvOverride 显式 MATE_DSH_BUNDLED_RUNTIME 优先。
 func TestDshBundledRuntimeRootEnvOverride(t *testing.T) {
 	want := filepath.Join(t.TempDir(), "runtime")
 	t.Setenv("MATE_DSH_BUNDLED_RUNTIME", want)
-	if got := dshBundledRuntimeRoot(config.Config{}); got != want {
+	if got := dshBundledRuntimeRoot(""); got != want {
 		t.Fatalf("显式 env 应原样返回 %q，得到 %q", want, got)
 	}
 }
@@ -24,7 +22,7 @@ func TestDshBundledRuntimeRootFallbackWhenUnresolvable(t *testing.T) {
 	decoy := t.TempDir()
 	t.Setenv("PATH", decoy) // 空目录：LookPath("dsh") 必失败
 	t.Setenv("MATE_DSH_BUNDLED_RUNTIME", "")
-	got := dshBundledRuntimeRoot(config.Config{})
+	got := dshBundledRuntimeRoot("")
 	if got == "" {
 		return // 合法：本机没装、反推不出 → 跳过注入
 	}
@@ -52,7 +50,7 @@ func TestDshBundledRuntimeRootFromPath(t *testing.T) {
 	if real, err := filepath.EvalSymlinks(want); err == nil {
 		want = real
 	}
-	if got := dshBundledRuntimeRoot(config.Config{}); got != want {
+	if got := dshBundledRuntimeRoot(""); got != want {
 		t.Fatalf("反推应得 %q，得到 %q", want, got)
 	}
 }
