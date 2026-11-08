@@ -16,7 +16,7 @@ import {
   ToolOutlined,
 } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import type { ElicitationFieldSchema, PermissionOption, StreamEntry } from '@ark-mate/types'
+import type { ArtifactMeta, ElicitationFieldSchema, PermissionOption, StreamEntry } from '@ark-mate/types'
 import { useMate, type PermissionDecision } from '../store'
 import { copyText } from '../console/clipboard'
 import { getFlowPrefs, useFlowPrefs } from '../console/flowPrefs'
@@ -36,6 +36,7 @@ import {
 } from '../console/transcriptView'
 import { Md } from './Md'
 import { ThoughtFoldView } from './ThoughtFoldView'
+import { TurnArtifacts } from './TurnArtifacts'
 
 const roleLabel: CSSProperties = {
   fontFamily: tokens.fontMono,
@@ -1257,6 +1258,7 @@ export function TurnView({
   stopReason,
   flashId,
   indexOf,
+  artifacts,
 }: {
   turn: TurnModel
   elapsed?: string
@@ -1269,6 +1271,8 @@ export function TurnView({
   stopReason?: string
   flashId?: string | null
   indexOf?: (id: string) => number
+  /** 本轮产物（回答末尾就近可点预览）。为空/未传则不渲染产物区。 */
+  artifacts?: ArtifactMeta[]
 }) {
   const hasAgent =
     turn.live ||
@@ -1400,6 +1404,7 @@ export function TurnView({
           {showCaret && <span className="fg-turn-footer-caret" aria-hidden="true" />}
         </div>
       )}
+      {artifacts && artifacts.length > 0 && <TurnArtifacts artifacts={artifacts} />}
       {usageText && (
         <TurnUsage usageText={usageText} info={runInfo} stopReason={stopReason} />
       )}

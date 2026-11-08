@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Tooltip } from 'antd'
 import { DownOutlined, InfoCircleOutlined, PicRightOutlined, RightOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { Ev, modelValues } from '@ark-mate/types'
-import type { AttachmentMeta } from '@ark-mate/types'
+import type { ArtifactMeta, AttachmentMeta } from '@ark-mate/types'
 import { listSessionArtifacts, sessionHistory, sessionRuns } from '@ark-mate/api'
 import { useMate } from '../store'
 import { SessionDetailDrawer, SessionInfoPanel } from '../components/SessionDetail'
@@ -151,21 +151,27 @@ export function ChatPage() {
   const streaming = view?.streaming ?? false
   const hydrating = view?.hydrating ?? false
 
-  // 会话产物计数（v35）：只用于头栏入口的角标。轮次结束时重拉一次——工具写出的文件是在 run
-  // 过程中登记的；不等 run 收尾就拉会永远慢一拍。
+  // 会话产物（v35 + 回答末尾产物区）：头栏角标用计数，同时保留整份列表供「回答末尾就近预览」。
+  // 轮次结束时重拉一次——工具写出的文件是在 run 过程中登记的；不等 run 收尾就拉会永远慢一拍。
   const [artifactCount, setArtifactCount] = useState(0)
+  const [sessionArtifacts, setSessionArtifacts] = useState<ArtifactMeta[]>([])
   useEffect(() => {
     if (!activeId) {
       setArtifactCount(0)
+      setSessionArtifacts([])
       return
     }
     let alive = true
     void listSessionArtifacts(activeId)
       .then((r) => {
-        if (alive) setArtifactCount(r.total ?? 0)
+        if (!alive) return
+        setArtifactCount(r.total ?? 0)
+        setSessionArtifacts(r.artifacts ?? [])
       })
       .catch(() => {
-        if (alive) setArtifactCount(0)
+        if (!alive) return
+        setArtifactCount(0)
+        setSessionArtifacts([])
       })
     return () => {
       alive = false
@@ -385,6 +391,32 @@ export function ChatPage() {
     durationForSeq: (seq) => (seq != null ? runsBySeq.get(seq)?.info.durationMS : undefined),
     indexOfId: (id) => entryIndex.get(id) ?? 0,
   })
+  // 本轮产物 → 回答末尾（就近可点预览）。归属口径：产物 `tool_call_id` 命中某轮里工具条目的
+  // `toolId` 即归该轮；归不上的（upload/inline/无工具来源）落到**最后一轮**尾部，避免丢失。
+  const artifactsByTurn = useMemo(() => {
+    const m = new Map<string, ArtifactMeta[]>()
+    if (sessionArtifacts.length === 0) return m
+    const entryById = new Map((view?.entries ?? []).map((e) => [e.id, e]))
+    // tool_call_id → turnId
+    const toolToTurn = new Map<string, string>()
+    for (const row of rows) {
+      if (row.kind !== 'turn') continue
+      for (const eid of row.entryIds) {
+        const e = entryById.get(eid)
+        if (e?.toolId) toolToTurn.set(e.toolId, row.id)
+      }
+    }
+    const turns = rows.filter((r): r is Extract<typeof r, { kind: 'turn' }> => r.kind === 'turn')
+    const lastTurnId = turns.length > 0 ? turns[turns.length - 1].id : undefined
+    for (const a of sessionArtifacts) {
+      const tId = (a.tool_call_id && toolToTurn.get(a.tool_call_id)) || lastTurnId
+      if (!tId) continue
+      const list = m.get(tId) ?? []
+      list.push(a)
+      m.set(tId, list)
+    }
+    return m
+  }, [sessionArtifacts, rows, view?.entries])
   const settleScroll = () => {
     const el = scrollRef.current
     if (!el) return
@@ -629,6 +661,8 @@ export function ChatPage() {
                 <div
                   style={{
                     maxWidth: 840,
+                    width: '100%',
+                    minWidth: 0,
                     margin: '0 auto',
                     padding: '8px 24px 12px',
                     display: 'flex',
@@ -693,6 +727,7 @@ export function ChatPage() {
                               style={{
                                 display: 'flex',
                                 flexDirection: 'column',
+                                minWidth: 0,
                                 borderRadius: 12,
                                 transition: 'box-shadow .35s ease',
                                 boxShadow: flash ? `0 0 0 2px ${tokens.primary}` : 'none',
@@ -710,6 +745,7 @@ export function ChatPage() {
                                 stopReason={row.stopReason}
                                 flashId={flashEntryId}
                                 indexOf={(id) => entryIndex.get(id) ?? 0}
+                                artifacts={artifactsByTurn.get(row.id)}
                               />
                             </div>
                           )
@@ -723,6 +759,7 @@ export function ChatPage() {
                             style={{
                               display: 'flex',
                               flexDirection: 'column',
+                              minWidth: 0,
                               borderRadius: 12,
                               transition: 'box-shadow .35s ease',
                               boxShadow: flashEntryId === entry.id ? `0 0 0 2px ${tokens.primary}` : 'none',
