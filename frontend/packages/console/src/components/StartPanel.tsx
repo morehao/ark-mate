@@ -63,11 +63,22 @@ export function StartPanel() {
   const createAndRun = useMate((s) => s.createAndRun)
   const modelCatalog = useMate((s) => s.modelCatalog)
   const loadModelCatalog = useMate((s) => s.loadModelCatalog)
+  const defaultModelId = useMate((s) => s.defaultModelId)
+  const loadDefaultModel = useMate((s) => s.loadDefaultModel)
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   // 初值只认**形状合法**的本地记忆（`readStoredModel`：形状不对的当场丢弃，不等目录）。
   const [model, setModel] = useState<string | null>(readStoredModel)
+  // 用户是否**显式选过**模型（含下拉里选、清空）。显式选过之后不再回落到默认模型——
+  // 与下面 workspace 的 `workspacePicked` 同一条纪律：默认值只负责"开局预选"，
+  // 一旦用户表态就不该被默认值顶回，否则看起来像"我的选择没生效"。
+  // 初值 true 当且仅当本地有合法记忆（有记忆说明上次选了；这次沿用，不该被默认值覆盖）。
+  const [modelPicked, setModelPicked] = useState(() => model !== null)
+  const pickModel = (next: string | null) => {
+    setModelPicked(true)
+    setModel(next)
+  }
   // 工作空间选择（v14）：`null` = 未指定（会话落在**默认工作空间**）；否则是选中的登记 id
   // （v14.3 起这里只剩 id：选择面删掉「输入路径」后，前端不再产生裸绝对路径这种值）。
   //
@@ -171,10 +182,11 @@ export function StartPanel() {
       : ''
 
   // 拉取模型目录（v19 起这条读面无参：取样对象就是构建期固定的那个底座，
-  // 后端按运行时会话/缓存/resume 取样）。
+  // 后端按运行时会话/缓存/resume 取样）。顺带拉一次**平台默认模型 id**——新建页要拿它做预选兜底。
   useEffect(() => {
     void loadModelCatalog()
-  }, [loadModelCatalog])
+    void loadDefaultModel()
+  }, [loadModelCatalog, loadDefaultModel])
 
   // 本地记住的模型的自愈分两层，**形状那一层不许等目录**：
   //
@@ -201,6 +213,31 @@ export function StartPanel() {
       localStorage.removeItem(LAST_MODEL_KEY)
     }
   }, [model, advertised])
+
+  // 默认模型回选（修：设置里设了默认模型，新建页不预选）。
+  //
+  // 规则：**仅当** `model === null`（无本地记忆，或被上面那条自愈 effect 清空）**且**用户没显式
+  // 选过（`modelPicked` 为 false）**且**目录已到（`advertised` 非空，否则"默认模型在不在候选里"
+  // 无法判断，等目录到齐再说）时，若默认模型 id 出现在**可选候选**里（`modelOptions` 里有某候选
+  // `model_id === defaultModelId`）则 `setModel(defaultModelId)`。
+  //
+  // 三条纪律：
+  //  ① 校验落点取**收窄后的候选** `modelOptions`（= 广告 ∩ 平台清单），不是 `advertised`：
+  //     默认模型若"广告了但平台没声明过"（`model_id` 为空/不在清单）就**不预选**——往模型
+  //     状态里塞一个发出去必被 40401 拒的值，与本地记忆自愈要防的死锁是同一类错误；
+  //  ② 与上面自愈 effect 的时序：两者都读取同一份 `advertised`。自愈只在 model 非空时动手，
+  //     这里只在 model 为空时动手，**互斥**——不会出现"刚填上又被清"的来回抖动；
+  //     `defaultModelId` 可能晚到（GET /models 与 GET /models/catalog 两次异步各自返回），
+  //     所以依赖里带上它，晚到时本 effect 会重跑补选；
+  //  ③ 不覆盖用户显式选择（`modelPicked`）。
+  useEffect(() => {
+    if (modelPicked) return
+    if (model !== null) return
+    if (!defaultModelId) return
+    if (advertised.length === 0) return
+    if (!modelOptions.some((v) => v.model_id === defaultModelId)) return
+    setModel(defaultModelId)
+  }, [modelPicked, model, defaultModelId, advertised, modelOptions])
 
   // 选中的登记项**不在这里校验**目录是否存在：它的目录状态由 `GET /workspaces` 的 `dir_status`
   // 下发，选择器已经据此禁用了不可用的那一行（拿 id 去 `browse` 是问错了接口）。
@@ -389,7 +426,7 @@ export function StartPanel() {
                 <ModelSelect
                   values={modelOptions}
                   value={model}
-                  onChange={(v) => setModel(v)}
+                  onChange={(v) => pickModel(v)}
                   allowClear
                   size="small"
                   placeholder={modelOptions.length === 0 ? '模型 · 暂无可选' : '模型 · 跟随默认'}
