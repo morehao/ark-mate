@@ -23,6 +23,14 @@ describe('describeSchedule', () => {
     const s = describeSchedule({ kind: 'monthly', timezone: 'Asia/Shanghai', hour: 9, minute: 0, day: 15 })
     assert.match(s, /每月 15 日 09:00/)
   })
+  it('rrule 取 FREQ 摘要', () => {
+    const s = describeSchedule({ kind: 'rrule', timezone: '', rrule: 'DTSTART:20260101T090000Z\nRRULE:FREQ=MONTHLY;BYDAY=2WE' })
+    assert.match(s, /每月/)
+    assert.match(s, /BYDAY=2WE/)
+  })
+  it('rrule 未填写给提示', () => {
+    assert.match(describeSchedule({ kind: 'rrule', timezone: '', rrule: '' }), /未填写/)
+  })
 })
 
 describe('scheduleFromForm', () => {
@@ -36,6 +44,14 @@ describe('scheduleFromForm', () => {
     const out = scheduleFromForm({ kind: 'monthly', timezone: 'UTC', hour: 9, minute: 0, day: 99 })
     assert.equal(out.day, 31)
     assert.equal(out.every_seconds, null)
+  })
+  it('rrule 原样透传、不写 timezone、清掉其它字段', () => {
+    const expr = 'DTSTART:20260101T090000Z\nRRULE:FREQ=DAILY'
+    const out = scheduleFromForm({ kind: 'rrule', timezone: 'Asia/Shanghai', rrule: expr })
+    assert.equal(out.rrule, expr)
+    assert.equal(out.timezone, undefined) // 自带时区，不写 timezone
+    assert.equal(out.hour, null)
+    assert.equal(out.at, null)
   })
 })
 

@@ -28,6 +28,10 @@ const WallFormat = "2006-01-02 15:04 MST"
 
 // NextAfter 严格晚于 t 的下一次到期。`ok=false` 表示**没有下一次**（`once` 已过或已跑完）。
 func (s Schedule) NextAfter(t time.Time) (Occurrence, bool, error) {
+	// rrule 的时区来自 DTSTART 自带，不需要（也不读）schedule.timezone，先于 Location 分派。
+	if s.Kind == KindRRule {
+		return rruleNextAfter(s.RRule, t)
+	}
 	loc, err := s.Location()
 	if err != nil {
 		return Occurrence{}, false, err
@@ -64,6 +68,10 @@ func (s Schedule) intervalAfter(t time.Time) (Occurrence, bool, error) {
 // LatestAtOrBefore 不晚于 t 的**最近一次**到期。停机跨了多个 occurrence 时，这里给出的是
 // 最后一次（ADR-9：只补最近一次，更早的积压不重放）。
 func (s Schedule) LatestAtOrBefore(t time.Time) (Occurrence, bool, error) {
+	// rrule 的时区来自 DTSTART 自带，先于 Location 分派。
+	if s.Kind == KindRRule {
+		return rruleLatestAtOrBefore(s.RRule, t)
+	}
 	loc, err := s.Location()
 	if err != nil {
 		return Occurrence{}, false, err

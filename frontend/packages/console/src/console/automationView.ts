@@ -22,6 +22,7 @@ export const KIND_OPTIONS: { label: string; value: AutomationScheduleKind }[] = 
   { label: '每天（daily）', value: 'daily' },
   { label: '每周（weekly）', value: 'weekly' },
   { label: '每月（monthly）', value: 'monthly' },
+  { label: '重复规则（rrule）', value: 'rrule' },
 ]
 
 /** 0=周日，与 Go `time.Weekday` / 后端 `days_of_week` 对齐。 */
@@ -84,6 +85,8 @@ export function describeSchedule(s: AutomationSchedule): string {
       return `每周 ${weekdayText(s.days_of_week)} ${hhmm(s.hour, s.minute)}（${tz}）`
     case 'monthly':
       return `每月 ${s.day ?? 1} 日 ${hhmm(s.hour, s.minute)}（${tz}）`
+    case 'rrule':
+      return s.rrule ? `重复规则 · ${rruleSummary(s.rrule)}` : '重复规则 · 未填写'
     default:
       return `每天 ${hhmm(s.hour, s.minute)}（${tz}）`
   }
@@ -95,6 +98,31 @@ export function everySecondsText(sec?: number): string {
   if (n % 3600 === 0) return `${n / 3600} 小时`
   if (n % 60 === 0) return `${n / 60} 分钟`
   return `${n} 秒`
+}
+
+/** rrule 文本 → 一句摘要（列表主行用）：取 RRULE 行、突出 FREQ，剩余作为补充。 */
+export function rruleSummary(rrule?: string): string {
+  if (!rrule) return '未填写'
+  const rule = rrule
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l.startsWith('RRULE:'))
+  if (!rule) return '缺少 RRULE 行'
+  const body = rule.slice('RRULE:'.length)
+  const parts = body.split(';').filter(Boolean)
+  const freq = parts.find((p) => p.startsWith('FREQ='))?.slice('FREQ='.length)
+  const rest = parts.filter((p) => !p.startsWith('FREQ='))
+  const head = freq ? FREQ_LABEL[freq] ?? freq : body
+  return rest.length > 0 ? `${head}（${rest.join(';')}）` : head
+}
+
+const FREQ_LABEL: Record<string, string> = {
+  MINUTELY: '每分',
+  HOURLY: '每小时',
+  DAILY: '每天',
+  WEEKLY: '每周',
+  MONTHLY: '每月',
+  YEARLY: '每年',
 }
 
 /** 状态标（颜色取自主题 token 的语义名，渲染侧再取色）。 */
@@ -173,11 +201,15 @@ export interface ScheduleFormValues {
   every_seconds?: number
   /** monthly：每月第几日（1–31）。 */
   day?: number
+  /** rrule：两行文本 `DTSTART…\nRRULE:…`（时区取自 DTSTART）。 */
+  rrule?: string
 }
 
 /** 表单值 → schedule 对象（含 null 删键）。`once_at` 按**所选时区**解释成绝对时刻。 */
 export function scheduleFromForm(v: ScheduleFormValues): Record<string, unknown> {
-  const out: Record<string, unknown> = { kind: v.kind, timezone: v.timezone }
+  const out: Record<string, unknown> = { kind: v.kind }
+  // rrule 自带时区（DTSTART 内），不强制 timezone；其余五态需要 timezone。
+  if (v.kind !== 'rrule') out.timezone = v.timezone
   switch (v.kind) {
     case 'once':
       out.at = v.once_at ? zonedToRFC3339(v.once_at, v.timezone) : null
@@ -186,6 +218,7 @@ export function scheduleFromForm(v: ScheduleFormValues): Record<string, unknown>
       out.days_of_week = null
       out.every_seconds = null
       out.day = null
+      out.rrule = null
       break
     case 'interval':
       out.at = null
@@ -195,6 +228,17 @@ export function scheduleFromForm(v: ScheduleFormValues): Record<string, unknown>
       // 后端约束 ≥60；表单侧兜底到 60（不是 0），避免造出必然被拒的请求。
       out.every_seconds = Math.max(60, v.every_seconds ?? 3600)
       out.day = null
+      out.rrule = null
+      break
+    case 'rrule':
+      out.at = null
+      out.hour = null
+      out.minute = null
+      out.days_of_week = null
+      out.every_seconds = null
+      out.day = null
+      // 权威文本原样透传（后端不规范化；空串交给后端报 invalid_schedule）。
+      out.rrule = (v.rrule ?? '').trim()
       break
     case 'weekly':
       out.at = null
@@ -203,6 +247,7 @@ export function scheduleFromForm(v: ScheduleFormValues): Record<string, unknown>
       out.days_of_week = [...(v.days_of_week ?? [])].sort((a, b) => a - b)
       out.every_seconds = null
       out.day = null
+      out.rrule = null
       break
     case 'monthly':
       out.at = null
@@ -212,6 +257,7 @@ export function scheduleFromForm(v: ScheduleFormValues): Record<string, unknown>
       out.every_seconds = null
       // 1–31；越界兜底到 1，避免造出必然被拒的请求。
       out.day = Math.min(31, Math.max(1, v.day ?? 1))
+      out.rrule = null
       break
     default:
       out.at = null
@@ -220,6 +266,7 @@ export function scheduleFromForm(v: ScheduleFormValues): Record<string, unknown>
       out.days_of_week = null
       out.every_seconds = null
       out.day = null
+      out.rrule = null
   }
   return out
 }
@@ -326,6 +373,7 @@ export function formFromAutomation(a: Automation): ScheduleFormValues & {
     days_of_week: a.schedule.days_of_week ?? [],
     every_seconds: a.schedule.every_seconds ?? 3600,
     day: a.schedule.day ?? 1,
+    rrule: a.schedule.rrule ?? '',
     cwd: a.target.cwd,
     model: a.target.model,
     prompt: a.target.prompt,

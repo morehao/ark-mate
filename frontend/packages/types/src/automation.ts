@@ -6,19 +6,21 @@ import type { UnixMillis } from './time'
 // 前 6 个字段是**用户写的**（写面收起 `id`/`name`/`enabled`/`schedule`/`target`/`max_run_duration`），
 // 其余是**平台写回的运行事实**（写面拒收，见 PUT /automations/:id）。
 
-export type AutomationScheduleKind = 'once' | 'interval' | 'daily' | 'weekly' | 'monthly'
+export type AutomationScheduleKind = 'once' | 'interval' | 'daily' | 'weekly' | 'monthly' | 'rrule'
 
 /**
- * 调度表达式。五态共用 `timezone`（显式 IANA 名，不猜本地时区），
+ * 调度表达式。共用 `timezone`（显式 IANA 名，不猜本地时区），
  * `once` 用 `at`，`interval` 用 `every_seconds`，`daily` 用 `hour`/`minute`，
- * `weekly` 用 `hour`/`minute` + `days_of_week`，`monthly` 用 `hour`/`minute` + `day`。
+ * `weekly` 用 `hour`/`minute` + `days_of_week`，`monthly` 用 `hour`/`minute` + `day`，
+ * `rrule` 用 `rrule`（两行文本，**时区由 DTSTART 自带、不读 `timezone`**）。
  *
- * **没有 cron**（ADR v35）：只填语义字段，不产语法串。
+ * **没有 cron**（ADR v35/v36）：rrule 是 RFC 5545 受限子集，比 cron 方言更不易写歪。
  *
  * `days_of_week` 是 **0=周日** 的整数集合（与 Go `time.Weekday` 对齐）；
  * 服务端容忍重复/乱序并在装载时归一后**回写文件**。
  * `every_seconds` ≥ 60（interval，纯加时长、与 DST 无关）。
  * `day` 1–31（monthly，当月无此日则跳过）。
+ * `rrule` 形如 `DTSTART:20260101T090000Z\nRRULE:FREQ=DAILY`（权威文本，不规范化）。
  */
 export interface AutomationSchedule {
   kind: AutomationScheduleKind
@@ -32,6 +34,8 @@ export interface AutomationSchedule {
   every_seconds?: number
   /** kind=monthly：每月第几日（1–31，当月无此日则跳过）。 */
   day?: number
+  /** kind=rrule：两行文本 `DTSTART…\nRRULE:…`（RFC 5545 受限子集；时区取自 DTSTART）。 */
+  rrule?: string
 }
 
 /**

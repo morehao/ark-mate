@@ -657,3 +657,67 @@ func TestAutomationDeliverySessionEndToEnd(t *testing.T) {
 		t.Fatalf("last_session_id 应记目标会话，got %v", got["last_session_id"])
 	}
 }
+
+// TestAutomationRRuleCreateAndRun 端到端（WP-B rrule）：
+// 用 DTO 写面建一条 rrule 自动化（时区由 DTSTART 自带）→ 定义落盘 → 手动触发
+// （走既有 RunAutomationNow → 认领 → 建会话 → automation.run 事件）。验证 rrule 全程走既有路径，
+// 没有新开并发/状态/事件。
+func TestAutomationRRuleCreateAndRun(t *testing.T) {
+	r := newSchedRig(t)
+	sub := r.bus.SubscribeAfter(nil)
+	defer r.bus.Unsubscribe(sub)
+
+	// DTSTART 用 UTC（Z），每月第 2 个周三 —— 覆盖 BYDAY 序数这条最典型的 rrule 表达力。
+	expr := "DTSTART:20260101T090000Z\nRRULE:FREQ=MONTHLY;BYDAY=2WE"
+	resp, err := autoSvc(r.svc).CreateAutomation(context.Background(), rawReq(t, map[string]any{
+		"id": "rr", "name": "rrule 巡检", "enabled": true,
+		"schedule": map[string]any{"kind": "rrule", "rrule": expr},
+		"target":   map[string]any{"cwd": r.cwd, "prompt": "跑一遍", "delivery": "new_session"},
+	}))
+	if err != nil {
+		t.Fatalf("建 rrule 自动化应成功: %v", err)
+	}
+	if resp.Schedule.Kind != "rrule" || resp.Schedule.RRule != expr {
+		t.Fatalf("回执应原样回带 rrule（权威文本不规范化）: %+v", resp.Schedule)
+	}
+	// 下次到期应落在"第 2 个周三"，即某个 UTC 周三 09:00。
+	if resp.NextDueAt == 0 {
+		t.Fatal("rrule 应算出 next_due")
+	}
+	if wd := time.UnixMilli(resp.NextDueAt).UTC().Weekday(); wd != time.Wednesday {
+		t.Fatalf("2WE 的 next_due 应是周三，got %s", wd)
+	}
+
+	// 手动触发一次：claimed + 建会话。
+	out, err := autoSvc(r.svc).RunAutomationNow(context.Background(), "rr")
+	if err != nil || out.Status != "claimed" || out.SessionID == "" || out.Trigger != "manual" {
+		t.Fatalf("rrule 手动触发应 claimed 且带会话: %+v %v", out, err)
+	}
+	if convs := r.sessionsOf(t, "rr"); len(convs) != 1 {
+		t.Fatalf("应恰好建 1 个会话，got %d", len(convs))
+	}
+	// automation.run 事件发出（不新增事件类型，仍是既有 BusAutomationRun）。
+	sawEvent := false
+	deadline := time.After(2 * time.Second)
+	for !sawEvent {
+		select {
+		case e := <-sub.C:
+			if e.Type == session.BusAutomationRun && e.AggregID == automationcore.Origin("rr") {
+				sawEvent = true
+			}
+		case <-deadline:
+			t.Fatal("未收到 automation.run 事件")
+		}
+	}
+	// 非法 rrule 在写面被拒（invalid_schedule / definition_invalid），零字节落盘。
+	if _, err := autoSvc(r.svc).CreateAutomation(context.Background(), rawReq(t, map[string]any{
+		"id": "bad", "name": "坏 rrule", "enabled": true,
+		"schedule": map[string]any{"kind": "rrule", "rrule": "DTSTART:20260101T090000Z\nRRULE:FREQ=SECONDLY"},
+		"target":   map[string]any{"cwd": r.cwd, "prompt": "x", "delivery": "new_session"},
+	})); err == nil {
+		t.Fatal("SECONDLY 应被写面拒绝")
+	}
+	if _, ok := r.svc.Planes().Automation.AutomationByID("bad"); ok {
+		t.Fatal("被拒的坏定义不该进注册表")
+	}
+}
