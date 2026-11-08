@@ -68,6 +68,8 @@
 
 **Skill 投影**：`~/.agents/skills/<id>/SKILL.md`（带 frontmatter），已端到端实测（`Tested: true`）。
 
+> **资源初始化单独成册**：底座随包载荷（dsh 载荷 + `primary-runtime`）、`mate-acp` profile 覆写层（office 三件套 / present / deliverable-file-references）、4 个 office env 注入，以及「升 dsh 版本时要同步的锚点清单」见 [`agents/dsh-resources.md`](agents/dsh-resources.md)。本文件不重复这套资源口径。
+
 ## 4. 原生凭据
 
 平台写**底座的原生凭据文档** `<MATE_HOME>/runtime/dsh/.credentials.yaml`，换来**热生效**。
