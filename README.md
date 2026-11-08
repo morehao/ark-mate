@@ -133,6 +133,7 @@ docker compose up -d --build # 等价 compose 路径（变量见 .env.example）
 | [`docs/unimplemented.md`](docs/unimplemented.md) | 未实现能力与降级清单（**唯一汇总口径**） | 判断能力边界 / 降级事实 |
 | [`docs/acceptance-matrix.md`](docs/acceptance-matrix.md) | 桌面与浏览器的一致性验收矩阵（差异清单 + 靶） | 加桌面能力 / 改验收 |
 | [`docs/dsh-acp-adaptation.md`](docs/dsh-acp-adaptation.md) | 内置底座 dsh 的适配事实（启动形态、能力基线、隔离） | 改 dsh 适配 / 排查握手 |
+| [`docs/office-capability.md`](docs/office-capability.md) | office 能力为什么和 DSH 桌面端不一样、根因（profile 装配 + 运行时）与修法（mate-acp + 自带 primary-runtime） | 搞不懂「同一句输入为什么两套环境差很远」/ 排查文档生成能力 |
 | [`docs/deployment.md`](docs/deployment.md) | 部署与运维（二进制 + 外挂 dist、systemd、容器、环境变量全表、备份、排障） | 部署 / 上线 / 排障 |
 | [`docs/expert-management.md`](docs/expert-management.md) | 专家管理页的产品与交互设计 | 改专家页 |
 | [`docs/platform-capability-protocol.md`](docs/platform-capability-protocol.md) | 平台能力 MCP 工具面契约（automation / expert / library 三域） | 接平台内置 MCP 工具 |
