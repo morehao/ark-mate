@@ -8,12 +8,16 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@ark-mate/types": "workspace:*",
     "axios": "^1.20.0"
   },
   "devDependencies": {
     "@ark-mate/tsconfig": "workspace:*",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
   }
 }

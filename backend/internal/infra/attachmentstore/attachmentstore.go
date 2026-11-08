@@ -73,6 +73,11 @@ func New(db *gorm.DB, opts Options) (*Store, error) {
 	fs, err := filestore.New(db, st, bucket,
 		filestore.WithoutAutoMigrate(),
 		filestore.WithMaxUploadBytes(opts.MaxUploadBytes),
+		// SignSecret 必须与 local driver 同值：**生成**预签名 URL 走 driver（local.PresignGetObject
+		// 用 driver.signSecret），**校验**走 filestore（handlePresignedGet 用 fs.SignSecret()）。
+		// 两处不同值 → GET /objects 必然 "invalid presigned token"（403）。此前只给了 driver、漏了
+		// filestore，导致签发出来的 URL 自己都消费不了（文档预览取不到字节）。
+		filestore.WithSignSecret(opts.SignSecret),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("attachmentstore.New: build filestore: %w", err)

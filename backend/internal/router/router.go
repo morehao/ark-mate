@@ -168,6 +168,13 @@ func New(d Deps) *gin.Engine {
 		ginupload.Register(rest, d.FileStore)
 	}
 
+	// presign 误路由守卫：签名字节通路只挂在核心 origin（`/v1/mate/files/:id/presign-url`）。前端预览
+	// 若把请求打到别的宿主，路径会退化成 `/v1/files/...` / `/files/...`（未命中任何路由）——这里把它
+	// 从误导人的 404 改成明确的 405 + 信封，指向"改用核心 origin"。挂在注册之后、引擎级（见实现注释：
+	// v1 组中间件跑不到 NoRoute，只有引擎级 Use 能进 NoRoute 链；已注册路由的链在注册时已快照，
+	// 不含守卫，命中请求零改动）。
+	guardPresignMisroute(r, rest)
+
 	MountWeb(r, d.Web)
 	// 开发期资产重建通知（P6-A）：**开关与注册点必须同处**（archtest 有静态守卫钉这条）——
 	// 分开放就会出现"开关忘了接"的形态：配置写着开了，路由却没挂，页面永远不刷新且无人报错。
