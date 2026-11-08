@@ -19,7 +19,7 @@
 | --- | --- |
 | 命令 | `dsh`（统一启动器，npm 分发；ACP server 是它的一个 **profile**，不是独立 bin） |
 | 参数 | `--profile acp`（平台按需追加 `--patch <绝对路径>`，见 §5） |
-| 分发 | 随包载荷 pin **`0.2.1-rc.2`**（`frontend/apps/desktop/release.json` 的 `payloads[]`）；未安装时可 `npx` |
+| 分发 | 随包载荷 pin **`0.2.2-rc.1`**（`frontend/apps/desktop/release.json` 的 `payloads[]`）；未安装时可 `npx` |
 | 版本要求 | 必须是**含 `acp` profile 模板**的版本——模板首用会从内置模板初始化到 `$DSH_HOME/profiles/` |
 | 鉴权 | `authMethods` 为空 ⇒ authenticate 立即成功，平台不触发 agent 鉴权分支 |
 | stdio 纪律 | stdout **只**承载 NDJSON ACP 帧，诊断走 stderr；stdin EOF / 连接关闭 / SIGINT / SIGTERM 都触发有界关闭 |
@@ -76,7 +76,7 @@
 | --- | --- |
 | 引用名模板 | `MATE_%s_API_KEY`（`MATE_` 前缀是平台命名空间，读写都按它识别） |
 | 环境回落 | **关闭**（`FallbackEnv: false`）——见下「env 赢」 |
-| 实测版本 | `0.2.1-rc.2`（H6 探针 7/7 PASS，2026-10-18） |
+| 实测版本 | `0.2.2-rc.1`（H6 探针 7/7 PASS，2026-10-18） |
 
 官方文档写明的文档形态（平台只依赖它，不猜）：`version: 1` + `refs:`（按**环境变量名**存密钥值）
 + `records:`（各插件自己的凭据）。

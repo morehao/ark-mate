@@ -147,28 +147,53 @@ var BundledRuntimeEnvKeys = []string{
 	"DSH_BUNDLED_OFFICE_NODE",
 }
 
+// resolveOfficeCLI 由 office skills assets 目录推导随包 libreoffice-kit 的 cli.js 绝对路径。
+//
+// 目录布局（见 ResolveBundledDirs 里 officeSkills = <dsh载荷>/node_modules/@deepseek-ai/dsh-skill-office/assets）：
+//
+//	officeSkills                        = <载荷>/node_modules/@deepseek-ai/dsh-skill-office/assets
+//	filepath.Dir(officeSkills)          = .../dsh-skill-office
+//	filepath.Dir ×2                     = .../@deepseek-ai
+//	filepath.Dir ×3                     = .../node_modules
+//	=> <载荷>/node_modules/@deepseek-ai/libreoffice-kit/lib/cli.js
+//
+// dsh 的 skill-office 插件用 statSync(cli).isFile() 校验该值，**必须是文件**（目录会让 isFile() 为
+// false 而抛错，导致 office-render/office-recalculate/office-export-pdf 三个 skill 加载失败）。
+// 解析不到（文件不在场）时返回空串：由 BundledEnv 显式置空 = 显式关闭 office CLI（语义正确，不误抛错），
+// office skills 本身仍可加载（assetRoot 照旧指向 skills 目录）。
+func resolveOfficeCLI(officeSkills string) string {
+	nmDir := filepath.Dir(filepath.Dir(filepath.Dir(officeSkills))) // .../node_modules
+	cli := filepath.Join(nmDir, "@deepseek-ai", "libreoffice-kit", "lib", "cli.js")
+	if fi, err := os.Stat(cli); err != nil || fi.IsDir() {
+		return ""
+	}
+	return cli
+}
+
 // BundledEnv 由 ark-mate **自有**的两处随包资产目录派生 4 个 KEY=VALUE，供注入 dsh 启动环境——
 // mate-acp 覆写层的 `!!js` 门控与 config 的 getter 读它们。
 //
 //   - primaryRuntime：ark-mate 自带的 primary-runtime 载荷目录（含 `runtime.json` 与 `dependencies/`，
 //     内 bundled Python/Node），对应 `DSH_PRIMARY_RUNTIME`；
 //   - officeSkills：ark-mate 自带 payload 里的 `@deepseek-ai/dsh-skill-office/assets` 目录（含 office
-//     七个 skill 的 SKILL.md），对应 `DSH_BUNDLED_OFFICE_SKILLS` / `DSH_BUNDLED_OFFICE_CLI`；
+//     七个 skill 的 SKILL.md），对应 `DSH_BUNDLED_OFFICE_SKILLS`；
+//   - `DSH_BUNDLED_OFFICE_CLI` 由 officeSkills 同级 @deepseek-ai 下的 libreoffice-kit cli.js 推导
+//     （必须是**文件**，见 resolveOfficeCLI）；解析不到 → 显式置空串（关闭 office CLI）；
 //   - `DSH_BUNDLED_OFFICE_NODE` 从 primaryRuntime 下的 node 推导。
 //
 // **绝不从 DSH 桌面端取**：两个目录都必须由 ark-mate 自己的 payload 提供；任一为空 → 返回 nil
 // （覆写层门控顺带把 office 关掉 = 如实降级，不借用外部桌面应用）。
 func BundledEnv(primaryRuntime, officeSkills string) []string {
 	pr := strings.TrimSpace(primaryRuntime)
-	os := strings.TrimSpace(officeSkills)
-	if pr == "" || os == "" {
+	osDir := strings.TrimSpace(officeSkills)
+	if pr == "" || osDir == "" {
 		return nil
 	}
 	node := filepath.Join(pr, "dependencies", "node", "bin", "node")
 	return []string{
 		"DSH_PRIMARY_RUNTIME=" + pr,
-		"DSH_BUNDLED_OFFICE_SKILLS=" + os,
-		"DSH_BUNDLED_OFFICE_CLI=" + os,
+		"DSH_BUNDLED_OFFICE_SKILLS=" + osDir,
+		"DSH_BUNDLED_OFFICE_CLI=" + resolveOfficeCLI(osDir),
 		"DSH_BUNDLED_OFFICE_NODE=" + node,
 	}
 }

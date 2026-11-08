@@ -251,13 +251,13 @@ desktop/payloads:
 	@# ark-mate 自带的 primary-runtime 载荷（bundled Python/Node + Office 库）——让 ark-mate
 	@# **不依赖 DSH 桌面端**也具备 dsh 的 office/依赖能力。复用 DSH 的 prepare.ts（已 vendor）。
 	@# 产物落 resources/payloads/primary-runtime；升 dsh 版本时同步 scripts/primary-runtime/lock.json。
-	cd $(FRONTEND_ROOT)/apps/desktop && node --experimental-strip-types --no-warnings scripts/prepare-primary-runtime.mjs \
+	MATE_VERSION=$(DESKTOP_VERSION) cd $(FRONTEND_ROOT)/apps/desktop && node --experimental-strip-types --no-warnings scripts/prepare-primary-runtime.mjs \
 		$(if $(PR_TARGET),--target $(PR_TARGET),)
 
 .PHONY: desktop/primary-runtime
 desktop/primary-runtime:
 	$(require-node)
-	cd $(FRONTEND_ROOT)/apps/desktop && node --experimental-strip-types --no-warnings scripts/prepare-primary-runtime.mjs \
+	MATE_VERSION=$(DESKTOP_VERSION) cd $(FRONTEND_ROOT)/apps/desktop && node --experimental-strip-types --no-warnings scripts/prepare-primary-runtime.mjs \
 		$(if $(PR_TARGET),--target $(PR_TARGET),) $(if $(SKIP_SMOKE),--skip-smoke,)
 
 # 合规生成物（M4-5，设计 §11）：`resources/compliance/{THIRD-PARTY-NOTICES.txt,sbom.cdx.json}`。
