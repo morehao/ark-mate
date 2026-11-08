@@ -5,11 +5,22 @@
 // 表驱动单测里被逐条钉死。定义装载与落盘在 `internal/domain/automation` 与用例层，
 // 会话创建与事件发布在 `internal/sessionruntime`。
 //
-// 时间契约（ADR-3，v35 修订）：`once` / `daily` / `weekly` / `interval` / `monthly` + **IANA 时区**，
-// **不引 cron**。v35 主动放弃 cron：cron 的真实成本在方言/规范化/DST 的组合爆炸，"每月第 2 个周三"
-// 这类长尾用自然语言近似或告知暂不支持；`interval`（每 N 秒，N≥60，纯加时长、DST 无关）与
-// `monthly`（每月某日，当月无此日跳过）覆盖"每两小时/每月 1 号"等高频诉求。
-// 表达力换来的三条好处：无依赖、错误消息可读、"本地墙钟"这套语义能写清楚。
+// 时间契约（ADR-3，v36 修订）：`once` / `daily` / `weekly` / `interval` / `monthly` / `rrule`
+// + **IANA 时区**，**仍不引 cron**。
+//
+// v35 主动放弃 cron 的原取舍依旧成立：cron 的真实成本在方言/规范化/DST 的组合爆炸，"每月第 2 个
+// 周三"这类长尾用自然语言近似或告知暂不支持；`interval`（每 N 秒，N≥60，纯加时长、DST 无关）与
+// `monthly`（每月某日，当月无此日跳过）覆盖"每两小时/每月 1 号"等高频诉求。表达力换来的三条好处：
+// 无依赖、错误消息可读、"本地墙钟"这套语义能写清楚。
+//
+// v36 定向反转（只在最小范围补表达力，**不引 cron**）：为与 dsh 桌面端能力对齐，新增受限 `rrule`
+// （RFC 5545 的受限子集，见 recur.go）。之所以选 rrule 而不是 cron：rrule 是"标准文本"（`FREQ=MONTHLY;BYDAY=2WE`
+// 直接表达"每月第 2 个周三"），比 cron 方言更不易写歪，能覆盖 cron 的绝大多数真实场景，从而**避开**
+// ADR-3 警告的"cron 方言/规范化/DST 组合爆炸"维护黑洞。ADR-3 的可靠性取舍精神原样保留：
+//   - **拒绝而非降级**：不支持的宏/名称/多 BYSECOND/超候选上限一律报 `invalid_schedule`，不做隐式降级；
+//   - **存权威表达式不规范化**：rrule 保留原 DTSTART 时区与文本，绝不改写成别的形态；
+//   - **DST 边界照抄 dsh**：不存在的本地 DTSTART 拒绝、后续不存在跳过、重叠取较早。
+// rrule 只在"算下一次"这一步接入（NextAfter/LatestAtOrBefore），认领/追赶仍走既有 NextDue 路径。
 package automation
 
 import (
@@ -19,13 +30,15 @@ import (
 	"time"
 )
 
-// 调度种类。**只有这五种**（ADR-3，v35 增 interval/monthly）：不引 cron 表达式。
+// 调度种类。**这六种**（ADR-3，v35 增 interval/monthly，v36 增 rrule）：仍不引 cron 表达式，
+// rrule 是 RFC 5545 的受限子集（见 recur.go 与 types.go 顶部 ADR-3 注释）。
 const (
 	KindOnce     = "once"
 	KindDaily    = "daily"
 	KindWeekly   = "weekly"
 	KindInterval = "interval" // 每 EverySeconds 秒触发一次（≥60，DST 无关）
 	KindMonthly  = "monthly"  // 每月 Day 日（1–31）的本地墙钟点；当月无此日则跳过
+	KindRRule    = "rrule"    // DTSTART + RRULE 两行，权威文本（不规范化），时区取自 DTSTART
 )
 
 // 触发来源（事件载荷 `trigger`）。
@@ -48,6 +61,10 @@ type Schedule struct {
 	DaysOfWeek   []int      `json:"days_of_week,omitempty"`  // kind=weekly，0=周日（与 time.Weekday 对齐）
 	EverySeconds *int       `json:"every_seconds,omitempty"` // kind=interval，≥60
 	Day          *int       `json:"day,omitempty"`           // kind=monthly，1–31（当月无此日跳过）
+	// RRule kind=rrule 的权威表达式：两行 `<DTSTART>...\n<RRULE:...>`（RFC 5545 受限子集）。
+	// **原样保存、不规范化**（ADR-3 v36）：时区由 DTSTART 自带（UTC `Z` 或 `TZID=IANA`），
+	// 不读 Schedule.Timezone。空字符串表示未设置。
+	RRule string `json:"rrule,omitempty"`
 }
 
 // Target 一次触发要建什么样的会话。
@@ -223,18 +240,28 @@ func (a *Automation) RunDuration() (time.Duration, error) {
 // 前端要能按码把它们指到对应字段，而不是显示一句笼统的"参数错误"。
 func (s Schedule) Validate() error {
 	switch s.Kind {
-	case KindOnce, KindDaily, KindWeekly, KindInterval, KindMonthly:
+	case KindOnce, KindDaily, KindWeekly, KindInterval, KindMonthly, KindRRule:
 	default:
 		return failure.NewError(failure.ClassRequest, "invalid_schedule",
-			"schedule.kind 必须是 once | daily | weekly | interval | monthly，得到 "+s.Kind, nil)
+			"schedule.kind 必须是 once | daily | weekly | interval | monthly | rrule，得到 "+s.Kind, nil)
 	}
-	if _, err := s.Location(); err != nil {
-		return err
+	// rrule 的时区从 DTSTART 行自带（UTC Z 或 TZID=IANA），不需要 schedule.timezone；
+	// 其余五种必须解析 Location。把 rrule 排除在 Location 检查外，避免强迫用户为一个
+	// 自带时区的表达式再填一个 timezone（那会是第二个事实源）。
+	if s.Kind != KindRRule {
+		if _, err := s.Location(); err != nil {
+			return err
+		}
 	}
 	switch s.Kind {
 	case KindOnce:
 		if s.At == nil || s.At.IsZero() {
 			return failure.NewError(failure.ClassRequest, "invalid_schedule", "once 需要 schedule.at（绝对时刻）", nil)
+		}
+	case KindRRule:
+		// 语法 + 边界 + 必须有可表示的未来时点（validateRRule 内部逐条拒绝，不做隐式降级）。
+		if err := validateRRule(s.RRule); err != nil {
+			return err
 		}
 	case KindInterval:
 		// interval 是纯时长（从上次触发/创建时刻起加 N 秒），与墙钟、DST 无关；不需要 hour/minute。

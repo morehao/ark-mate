@@ -40,6 +40,11 @@ func TestProvisionProfileWritesFiles(t *testing.T) {
 		"@deepseek-ai/dsh-tool-present",
 		"id: deliverable-file-references",
 		"@deepseek-ai/dsh-deliverable-file-references",
+		// time-context / tool-ask-user：standard preset 独有、acp 基座无（WP-A 补入，无 disabled 门控）。
+		"id: time-context",
+		"@deepseek-ai/dsh-time-context",
+		"id: tool-ask-user",
+		"@deepseek-ai/dsh-tool-ask-user",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("cordis.patch.yml 缺 %q", want)
@@ -83,8 +88,11 @@ func TestProvisionedProfileHasOfficeInDsh(t *testing.T) {
 	if !strings.Contains(s, "id: acp-app-startup") || !strings.Contains(s, "id: acp\n") {
 		t.Errorf("ACP 传输未进组合（被换了？）")
 	}
-	// office 三件套要在且 enabled（条目往下 220 字符内不应有 disabled: true）。
-	for _, id := range []string{"id: workspace-dependencies", "id: skill-office", "id: office-to-pdf"} {
+	// office 三件套 + time-context/tool-ask-user 要在且 enabled（条目往下 220 字符内不应有 disabled: true）。
+	for _, id := range []string{
+		"id: workspace-dependencies", "id: skill-office", "id: office-to-pdf",
+		"id: time-context", "id: tool-ask-user",
+	} {
 		idx := strings.Index(s, id)
 		if idx < 0 {
 			t.Fatalf("dump 里没有 %q（office 未进组合）", id)

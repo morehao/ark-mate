@@ -74,12 +74,26 @@ autoInstallPeers: false
 //     侧按 rawInput.files 逐个登记（见 infra/workartifact + assembly/artifactextract）。
 //   - deliverable-file-references：给模型注入文件链接/交付物提示词（systemPrompt 段）。
 //
-// 升级 dsh 时：与 `packages/bundle/sdk-app/cordis.patch.yml` 那段对齐（字段改了要同步）。
+// 另补 standard preset 独有的两项「上层面工具」（acp 路径无 preset，base 也没有；ark-mate 桌面端
+// 能力要与 dsh 桌面端对齐）：
+//   - time-context：每步往模型可见历史追加带来源的时钟读数（当前时间/浏览器时区/经过时长），解决
+//     "今天几号/本周哪天/几天后"这类相对时间的瞎猜。inject `['agents','sessionProjections']` 均由
+//     dsh-base 提供（base/cordis.patch.yml 的 dsh-agent、dsh-session-projection）。
+//   - tool-ask-user：给模型 `ask_user_question` 工具主动结构化提问（单选/多选/补充）。它是平台
+//     elicitation 卡片通道的模型侧入口；inject `['tools','userQuestions']`——`tools` 与
+//     `userQuestions`（`ctx.userQuestions` seam，@deepseek-ai/dsh-user-questions）均由 dsh-base 提供
+//     （base/cordis.patch.yml 的 dsh-tools、dsh-user-questions）。缺该工具则平台 elicitation 卡片永远不弹。
+//   这两项不依赖随包 env，故与 present/deliverable 一样**不加 disabled 门控**。
+//
+// 升级 dsh 时：office block + present/deliverable 与 `packages/bundle/sdk-app/cordis.patch.yml` 对齐；
+// time-context / tool-ask-user 与 `packages/bundle/web-app/presets/standard.patch.yml` 对齐（字段改了要同步）。
 const profilePatchYML = `# ark-mate 生成并维护的 dsh profile 覆写层（平台自有；经 --profile mate-acp 生效）。
 # 作用：在 acp 组合（dsh-base + dsh-acp-app）上补 office / workspace-dependencies 内置能力，
-#       并补 present / deliverable-file-references（sdk-app 有、acp 基座无）。
-# 来源：逐字搬自 dsh 0.2.2-rc.1 的 packages/bundle/sdk-app/cordis.patch.yml（office block + present 两条）。
-# 归属标记：本文件只有平台会写。升级 dsh 时与该 bundle 对齐。
+#       并补 present / deliverable-file-references（sdk-app 有、acp 基座无），
+#       以及 time-context / tool-ask-user（standard preset 独有、acp 基座无）。
+# 来源：office block + present/deliverable 逐字搬自 dsh 0.2.2-rc.1 的 packages/bundle/sdk-app/cordis.patch.yml；
+#       time-context / tool-ask-user 取自 packages/bundle/web-app/presets/standard.patch.yml。
+# 归属标记：本文件只有平台会写。升级 dsh 时与上述 bundle/preset 对齐。
 - insert:
     - id: workspace-dependencies
       name: '@deepseek-ai/dsh-tool-workspace-dependencies'
@@ -104,6 +118,14 @@ const profilePatchYML = `# ark-mate 生成并维护的 dsh profile 覆写层（�
 
     - id: deliverable-file-references
       name: '@deepseek-ai/dsh-deliverable-file-references'
+
+    # time-context / tool-ask-user：standard preset 独有的上层面工具（acp 无 preset、base 也没有）。
+    # 两项 inject 依赖均由 dsh-base 满足，不依赖随包 env，故不加 disabled 门控（同 present/deliverable）。
+    - id: time-context
+      name: '@deepseek-ai/dsh-time-context'
+
+    - id: tool-ask-user
+      name: '@deepseek-ai/dsh-tool-ask-user'
 `
 
 // profileFiles 是 mate-acp profile 的四份静态文件（逐字与 dsh 模板生成物一致 + 覆写层）。

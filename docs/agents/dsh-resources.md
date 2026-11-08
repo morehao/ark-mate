@@ -8,7 +8,7 @@
 
 ## 0. 一句话结论
 
-dsh 官方把「能力」切在 **profile 模板 × bundle 的 patch** 上：`acp` 模板只挂 `dsh-base + dsh-acp-app`（**只有 ACP 传输，没有 office、没有任何文件交付插件**），而要「生成 office 文件 + 交付给用户」的全部资源都在 **`sdk-app` / `web-app`** 这两个 bundle 里。ark-mate 跑的是 ACP 传输，所以它**自建 `mate-acp` profile**（基座 = acp 模板），再用 `cordis.patch.yml` 覆写层把 office 三件套 + `present` + `deliverable-file-references` 声明式补回来；office 所需的 Python/Node/pnpm 运行时**不在 dsh 载荷目录内**（dsh 官方同样把它放在独立的 `primary-runtime` 载荷里，并非只有 ark-mate 要），ark-mate 只是**自随一份逐字节相同**的 `primary-runtime`，经 4 个 `DSH_BUNDLED_OFFICE_*`/`DSH_PRIMARY_RUNTIME` env 注入。**「要不要 Python」两边一样，「Python 从哪来、怎么送到运行时前面」两边不同。**
+dsh 官方把「能力」切在 **profile 模板 × bundle 的 patch** 上：`acp` 模板只挂 `dsh-base + dsh-acp-app`（**只有 ACP 传输，没有 office、没有任何文件交付插件**），而要「生成 office 文件 + 交付给用户」的全部资源都在 **`sdk-app` / `web-app`** 这两个 bundle 里。ark-mate 跑的是 ACP 传输，所以它**自建 `mate-acp` profile**（基座 = acp 模板），再用 `cordis.patch.yml` 覆写层把 office 三件套 + `present` + `deliverable-file-references` + `time-context` + `tool-ask-user` 声明式补回来；office 所需的 Python/Node/pnpm 运行时**不在 dsh 载荷目录内**（dsh 官方同样把它放在独立的 `primary-runtime` 载荷里，并非只有 ark-mate 要），ark-mate 只是**自随一份逐字节相同**的 `primary-runtime`，经 4 个 `DSH_BUNDLED_OFFICE_*`/`DSH_PRIMARY_RUNTIME` env 注入。**「要不要 Python」两边一样，「Python 从哪来、怎么送到运行时前面」两边不同。**
 
 ## 1. 两套初始化范式总览
 
@@ -37,7 +37,9 @@ dsh 官方把「能力」切在 **profile 模板 × bundle 的 patch** 上：`ac
 | `workspace` | `sdk-app:54-55`、`web-app:87-88` | ❌ 未补 | P1：present 的 cwd 路径基准（见 §5） |
 | `file-reference-local` | `sdk-app:73-74`、`web-app:93-94` | ❌ 未补 | P1/P2：`@file` 补全；取决于 ACP 是否暴露该交互面 |
 | `connection` / `file-upload` | `sdk-app:48-49` / `51-52` | ❌ 未补 | P2/不相关：ACP 已有传输；上传走平台 attachmentstore |
-| `schedule` / `tool-schedule` / `time-context` / `tool-ask-user` | `sdk-app:57,61,64,67` | ❌ 未补 | 不相关：平台有自建 automation / 时间口径 / 交互面 |
+| `time-context` | `web-app/presets/standard.patch.yml`（sdk-app:61） | ✅ 覆写层 `profile.go`（WP-A） | 时间上下文（当前时间/时区/经过时长）；inject `['agents','sessionProjections']` 均由 base 满足 |
+| `tool-ask-user`（`ask_user_question`） | `web-app/presets/standard.patch.yml`（sdk-app:64） | ✅ 覆写层 `profile.go`（WP-A） | 模型侧结构化提问；平台 elicitation 卡片通道入口；inject `['tools','userQuestions']` 均由 base 满足（`ctx.userQuestions` = base 的 `dsh-user-questions`） |
+| `schedule` / `tool-schedule` | `sdk-app:57,67` | ❌ 未补 | 不相关：平台有自建 automation（两套事实源冲突，见缺口笔记 §6，故刻意不补） |
 
 > 说明：`web-app` 里的 `dsh-client-ui-*`（`web-app/cordis.patch.yml` 大量）是 Web 前端渲染层，ark-mate 桌面 ACP 不渲染 dsh Web 前端，**全部不相关**，不列。
 
@@ -82,7 +84,7 @@ dsh 官方把「能力」切在 **profile 模板 × bundle 的 patch** 上：`ac
 - **四份文件**（`profile.go:110-121` 装配）：
   - `package.json`：`dsh.profile.bundles = [dsh-base, dsh-acp-app]`（`profile.go:32-44`）。
   - `cordis.yml`：空 entry 列表 `[]`（树靠 bundles + patch 组合）。
-  - `cordis.patch.yml`：**覆写层**（`profile.go:78-108`）—— office 三件套 + present + deliverable-file-references。
+  - `cordis.patch.yml`：**覆写层**（`profile.go:78-108`）—— office 三件套 + present + deliverable-file-references + time-context + tool-ask-user。
   - `pnpm-workspace.yaml`：`packages: [.]`、`nodeLinker: hoisted`、`autoInstallPeers: false`。
 
 ### 3.5 平台侧其它初始化 / 投影（与 dsh 加载相关的落点）
@@ -101,7 +103,7 @@ dsh 官方把「能力」切在 **profile 模板 × bundle 的 patch** 上：`ac
 
 | # | 锚点文件（ark-mate 侧） | 对应 dsh 上游来源 | 核对内容 |
 | --- | --- | --- | --- |
-| A1 | `backend/internal/infra/dsh/profile.go` 的 `profilePatchYML`（`:78-108`） | `packages/bundle/sdk-app/cordis.patch.yml` 的 office block（`:31-44`）+ present/deliverable（`:70-77`）；`office-to-pdf` 来自 `web-app/cordis.patch.yml:283-284` | insert 的 id / name / `disabled: !!js` 门控 / config getter 是否逐字一致；上游改了字段要同步 |
+| A1 | `backend/internal/infra/dsh/profile.go` 的 `profilePatchYML`（`:78-108`） | `packages/bundle/sdk-app/cordis.patch.yml` 的 office block（`:31-44`）+ present/deliverable（`:70-77`）；`office-to-pdf` 来自 `web-app/cordis.patch.yml:283-284`；`time-context` / `tool-ask-user` 来自 `web-app/presets/standard.patch.yml` | insert 的 id / name / `disabled: !!js` 门控 / config getter 是否逐字一致；`time-context` / `tool-ask-user` 的 name 与 inject 依赖是否仍由 base 满足；上游改了字段要同步 |
 | A2 | `backend/internal/infra/dsh/profile.go` 的 `BundledRuntimeEnvKeys`（`:158-164`）与 `BundledEnv`（`:202-227`） | `python/sdk-runtime/runtime-bootstrap.mjs:60-110` | 4 个 env key 名是否仍是上游读的那几个；`DSH_BUNDLED_OFFICE_CLI` 是否仍须指 `lib/libreoffice-kit/.../cli.js` 文件 |
 | A3 | `frontend/apps/desktop/scripts/primary-runtime/lock.json` | dsh `scripts/primary-runtime/lock.json`（同 tag） | `nodeVersion`/`pythonVersion`/`pythonRelease`/`pythonPackages`/`targets`/`wheels` 逐项，最好重新 md5 比对 |
 | A4 | `frontend/apps/desktop/scripts/primary-runtime/prepare.ts` | dsh `scripts/primary-runtime/prepare.ts` | 本地那 2 处改动（import 相对化、系统 unzip）是否仍成立；上游新增字段是否需带上 |

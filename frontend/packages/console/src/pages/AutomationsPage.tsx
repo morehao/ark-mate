@@ -166,6 +166,7 @@ export function AutomationsPage() {
         days_of_week: [],
         every_seconds: 3600,
         day: 1,
+        rrule: '',
         enabled: true,
         cwd: '',
         prompt: '',
@@ -450,14 +451,35 @@ export function AutomationsPage() {
                   }}
                 />
               </Form.Item>
-              <Form.Item name="timezone" noStyle rules={[{ required: true, message: '时区必须显式指定' }]}>
-                <Select
-                  showSearch
-                  style={{ width: 260 }}
-                  options={TIMEZONES.map((tz) => ({ label: tz, value: tz }))}
-                  placeholder="IANA 时区（如 Asia/Shanghai）"
-                />
-              </Form.Item>
+              {kind !== 'rrule' && (
+                <Form.Item name="timezone" noStyle rules={[{ required: true, message: '时区必须显式指定' }]}>
+                  <Select
+                    showSearch
+                    style={{ width: 260 }}
+                    options={TIMEZONES.map((tz) => ({ label: tz, value: tz }))}
+                    placeholder="IANA 时区（如 Asia/Shanghai）"
+                  />
+                </Form.Item>
+              )}
+              {kind === 'rrule' && (
+                <Form.Item
+                  name="rrule"
+                  noStyle
+                  rules={[{ required: true, message: '填写 DTSTART 与 RRULE 两行' }]}
+                >
+                  <Input.TextArea
+                    rows={3}
+                    style={{ width: '100%', fontFamily: 'ui-monospace, Menlo, monospace' }}
+                    placeholder={'DTSTART:20260101T090000Z\nRRULE:FREQ=MONTHLY;BYDAY=2WE'}
+                  />
+                </Form.Item>
+              )}
+              {kind === 'rrule' && (
+                <span style={{ fontSize: 12, color: tokens.textSecondary }}>
+                  两行文本：先 DTSTART（时区由它自带，UTC Z 或 TZID=Asia/Shanghai），再 RRULE
+                  （受限 RFC 5545，如 FREQ=DAILY / FREQ=MONTHLY;BYDAY=2WE；不支持 SECONDLY）。时区取自 DTSTART，不再单独选。
+                </span>
+              )}
               {kind === 'once' && (
                 <Form.Item name="once_at" noStyle rules={[{ required: true, message: '选一个时刻' }]}>
                   <Input type="datetime-local" style={{ width: 220 }} />
@@ -687,6 +709,8 @@ const FIELD_LABEL: Record<string, string> = {
   hour: '时',
   minute: '分',
   days_of_week: '每周的哪几天',
+  day: '每月第几日',
+  rrule: '重复规则（DTSTART + RRULE）',
   cwd: '工作空间',
   model: '模型',
   prompt: '任务内容',
