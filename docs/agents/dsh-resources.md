@@ -8,7 +8,7 @@
 
 ## 0. 一句话结论
 
-dsh 官方把「能力」切在 **profile 模板 × bundle 的 patch** 上：`acp` 模板只挂 `dsh-base + dsh-acp-app`（**只有 ACP 传输，没有 office、没有任何文件交付插件**），而要「生成 office 文件 + 交付给用户」的全部资源都在 **`sdk-app` / `web-app`** 这两个 bundle 里。ark-mate 跑的是 ACP 传输，所以它**自建 `mate-acp` profile**（基座 = acp 模板），再用 `cordis.patch.yml` 覆写层把 office 三件套 + `present` + `deliverable-file-references` 声明式补回来；office 所需的 Python/Node/pnpm 运行时**不来自 dsh 载荷**，而是 ark-mate 自己随包的 `primary-runtime` 载荷，经 4 个 `DSH_BUNDLED_OFFICE_*`/`DSH_PRIMARY_RUNTIME` env 注入。
+dsh 官方把「能力」切在 **profile 模板 × bundle 的 patch** 上：`acp` 模板只挂 `dsh-base + dsh-acp-app`（**只有 ACP 传输，没有 office、没有任何文件交付插件**），而要「生成 office 文件 + 交付给用户」的全部资源都在 **`sdk-app` / `web-app`** 这两个 bundle 里。ark-mate 跑的是 ACP 传输，所以它**自建 `mate-acp` profile**（基座 = acp 模板），再用 `cordis.patch.yml` 覆写层把 office 三件套 + `present` + `deliverable-file-references` 声明式补回来；office 所需的 Python/Node/pnpm 运行时**不在 dsh 载荷目录内**（dsh 官方同样把它放在独立的 `primary-runtime` 载荷里，并非只有 ark-mate 要），ark-mate 只是**自随一份逐字节相同**的 `primary-runtime`，经 4 个 `DSH_BUNDLED_OFFICE_*`/`DSH_PRIMARY_RUNTIME` env 注入。**「要不要 Python」两边一样，「Python 从哪来、怎么送到运行时前面」两边不同。**
 
 ## 1. 两套初始化范式总览
 
@@ -17,7 +17,7 @@ dsh 官方把「能力」切在 **profile 模板 × bundle 的 patch** 上：`ac
 | 组合单元 | **profile 模板** `acp` / `web` / `headless` / `sdk` / `sdk-minimal`（`packages/util/official-bundles/src/bundles.ts:10-26`） | 自建持久 profile **`mate-acp`**（`backend/internal/infra/dsh/profile.go:28`），bundles 取 acp 模板同款 `[dsh-base, dsh-acp-app]`（`profile.go:36-44`） |
 | 能力面来源 | bundle 的 `cordis.patch.yml`（`dsh-base` 535 行核心管线 + 各 app bundle 追加） | dsh-base（acp 已含）+ 自己的 `cordis.patch.yml` 覆写层（`profile.go:78-108`） |
 | office 能力 | 在 `sdk-app` / `web-app` 里（见 §2） | 覆写层逐字搬 office block（`profile.go:78-108`） |
-| office 运行时（Python/Node/libreoffice） | runtime-bootstrap 在进程启动前 set `DSH_PRIMARY_RUNTIME`/`DSH_BUNDLED_OFFICE_*`/`DSH_OFFICE_SIDECAR`（`python/sdk-runtime/runtime-bootstrap.mjs:60-110`） | **自有 `primary-runtime` 载荷**，`BundledEnv` 派生 4 个 env 经 `reg.SetLaunchEnv` 注入（`profile.go:202-227`、`backend/internal/bootstrap/assembly/prepare_runtime.go:41-59`） |
+| office 运行时（Python/Node/libreoffice） | 同样来自 `primary-runtime` 载荷（含 Python），由 runtime-bootstrap 在进程启动前 set `DSH_PRIMARY_RUNTIME`/`DSH_BUNDLED_OFFICE_*`（或改走不带 Python 的 `DSH_OFFICE_SIDECAR`）（`python/sdk-runtime/runtime-bootstrap.mjs:60-110`） | **自随一份逐字节相同的 `primary-runtime` 载荷**，`BundledEnv` 派生 4 个 env 经 `reg.SetLaunchEnv` 注入（`profile.go:202-227`、`backend/internal/bootstrap/assembly/prepare_runtime.go:41-59`） |
 | 资源随包布局 | `<Resources>/runtime/` = `primary-runtime/` + `office-skills/` + `bin/node` + `cli/` + `versions.json`（`apps/desktop/scripts/prepare-runtime.ts:36-76`）；dsh 载荷在 `payloads/dsh/<ver>/` | dsh 载荷随包（`resources/payloads/dsh/0.2.2-rc.1/`，`release.json:10-13` pin）；`primary-runtime` 由 `make desktop/payloads` 装配（设计口径见 §4） |
 | 交付声明（present） | `sdk-app:70-71`（`web-app` 亦挂） | 已补入覆写层（`profile.go:102-103`） |
 | 交付提示词 | `deliverable-file-references`（`sdk-app:76-77`、`web-app:351-352`） | 已补入覆写层（`profile.go:105-106`） |
@@ -43,19 +43,25 @@ dsh 官方把「能力」切在 **profile 模板 × bundle 的 patch** 上：`ac
 
 ## 3. 逐资源初始化动作 × 落点 × env × 来源
 
-### 3.1 dsh 载荷（随包，非 Python）
+### 3.1 dsh 载荷（不含 Python；Python 另在 primary-runtime，见 §3.2）
 
 - **是什么**：`@deepseek-ai/*` 插件集 + 随包 `npm` + `libreoffice-kit(+platform)` + office 七件套资产，**不含 Python**。
 - **ark-mate 落点**：`frontend/apps/desktop/resources/payloads/dsh/0.2.2-rc.1/`（`payload.json` 记 `version=0.2.2-rc.1`、`files=25746`、`bytes=453274083`）；由 `release.json:10-13` 的 `payloads[]` pin 版本。
 - **入口**：`node_modules/@deepseek-ai/dsh/lib/bin.js`（`payload.json` 的 `entry`）；平台侧经 `MATE_DSH_ENTRY` 指到它（`profile.go:228-266` 上溯推导 office-skills / primary-runtime）。
 - **来源**：dsh `python/sdk-runtime/runtime-bootstrap.mjs`、`apps/desktop/scripts/prepare-runtime.ts`。ark-mate 侧 `frontend/apps/desktop/scripts/prepare-primary-runtime.mjs`（装配入口）。
 
-### 3.2 primary-runtime（Python + Node + pnpm + office-skills）——ark-mate 自有
+### 3.2 primary-runtime（Python + Node + pnpm + office-skills）——ark-mate 自随，内容与官方相同
+
+> **先澄清「谁需要 Python」**：Python 是 **office 生成能力**的依赖，不是 dsh 底座的依赖。DSH 官方要 office 的那套 bundle（`sdk-app`/`web-app`）**同样需要 Python**，它的 `primary-runtime` 载荷里就带 Python 3.12.14；ark-mate 因为主动给 `acp` 基座补了 office 能力，所以同样继承这条依赖。**两边「要不要 Python」一致，差异只在「从哪来、怎么送进运行时」**：dsh 走 runtime-bootstrap 包壳在启动前 set env，ark-mate 在本进程里用 `BundledEnv` 派生注入。**不需要 Python 的例外**：`DSH_OFFICE_SIDECAR` 布局只带 standalone node + libreoffice-kit（供只渲染/转换、不跑 Python 脚本的场景）。
 
 - **是什么**：python-build-standalone **Python 3.12.14**（`pythonRelease=20260901`）+ 独立 **Node 24.21.0** + pnpm + 13 个随包 Python 库，以及从 `dsh-skill-office/assets` 拷来的 `office-skills/`。
 - **13 个库**（`frontend/apps/desktop/scripts/primary-runtime/lock.json` `pythonPackages`）：numpy 2.3.5、pandas 3.0.1、python-dateutil 2.9.0.post0、six 1.17.0、tzdata 2025.2、python-docx 1.2.0、python-pptx 1.0.2、openpyxl 3.1.5、Pillow 12.3.0、lxml 6.1.3、XlsxWriter 3.2.9、typing_extensions 4.16.0、et_xmlfile 2.0.0。
 - **与官方一致性**：`lock.json` 与 dsh checkout 的 `scripts/primary-runtime/lock.json` **字节相同**（md5 一致，逐项 `nodeVersion`/`pythonVersion`/`pythonRelease`/`pythonPackages`/`targets`/`wheels` 全同）。`prepare.ts` 相对官方只有 2 处本地改动（import 路径相对化、wheel 解包改用系统 `unzip` 规避 Node 26 的 `extract-zip` promise 不 resolve bug），**不改变产物**；装配入口 `prepare-primary-runtime.mjs` 因 `import.meta.main` 是 Bun/Deno 专有而自写（Node 直跑 prepare.ts CLI 分支会静默 exit 13）。
-- **落盘状态**：`resources/payloads/` 当前只有 `dsh/`，**`primary-runtime/` 未落盘**（需 `make desktop/payloads` 装配）；但真机 `dsh --profile mate-acp --dump-config` 已验证三件套 + present/deliverable + ACP 全在场（装配后状态）。无 primary-runtime 时 `BundledEnv` 返回 nil → office env 不注入 → 覆写层门控如实关闭 office（agent 退回自带工具链，不误开）。
+- **落盘状态（两个主体、两个阶段，别混读）**：
+  - *当前这份 checkout 的磁盘*：`resources/payloads/` 只有 `dsh/`，**`primary-runtime/` 未落盘**（需 `make desktop/payloads` 装配）。
+  - *装配好 primary-runtime 的真机*：`dsh --profile mate-acp --dump-config` 已验证三件套 + present/deliverable + ACP 全在场。
+  - 两者不矛盾：前者是「还没装配」，后者是「装配后」。
+- **降级语义**：无 primary-runtime 时 `BundledEnv` 返回 nil → office env 不注入 → 覆写层门控如实关闭 office（agent 退回自带工具链，不误开、不拒启）。
 - **来源**：`frontend/apps/desktop/scripts/primary-runtime/{lock.json,prepare.ts,smoke.py,prune-python-tests.ts,npm-platform.ts}`、`frontend/apps/desktop/scripts/prepare-primary-runtime.mjs`。
 
 ### 3.3 env 注入（4 个随包 office runtime env）
