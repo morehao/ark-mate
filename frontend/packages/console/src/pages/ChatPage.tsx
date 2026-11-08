@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Button, Dropdown } from 'antd'
-import { InfoCircleOutlined, MoreOutlined, PicRightOutlined } from '@ant-design/icons'
+import { Button, Tooltip } from 'antd'
+import { DownOutlined, InfoCircleOutlined, PicRightOutlined, RightOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { Ev, modelValues } from '@ark-mate/types'
 import type { AttachmentMeta } from '@ark-mate/types'
@@ -65,8 +65,6 @@ export function ChatPage() {
   const editQueuedInput = useMate((s) => s.editQueuedInput)
   const popQueuedInput = useMate((s) => s.popQueuedInput)
   const cancel = useMate((s) => s.cancel)
-  const archiveSession = useMate((s) => s.archiveSession)
-  const showToast = useMate((s) => s.showToast)
   const anchorSeq = useMate((s) => s.anchorSeq)
   const clearAnchor = useMate((s) => s.clearAnchor)
   const loadOlder = useMate((s) => s.loadOlder)
@@ -413,25 +411,6 @@ export function ChatPage() {
     if (paramId) navigate('/sessions')
   }
 
-  // 软清空：归档当前会话（数据保留，可在「归档」视图恢复）→ 清空选中，问答区落回新建面板。
-  const softClear = async () => {
-    if (!activeId) return
-    try {
-      await archiveSession(activeId, true)
-      showToast('当前会话已归档，可随时从「归档」恢复', 'success')
-      openNew()
-    } catch {
-      /* archiveSession 内部已 toast 错误 */
-    }
-  }
-
-  const headMenu = {
-    items: [{ key: 'soft-clear', label: '归档并新建会话', title: '保留数据到归档，问答区回到新建面板' }],
-    onClick: (info: { key: string }) => {
-      if (info.key === 'soft-clear') void softClear()
-    },
-  }
-
   const renderChatHead = () => {
     if (!activeId) return null
     // 旁白优先：`narration.label` 就是"这一刻在干什么"（服务端铸造的过程状态）。
@@ -506,48 +485,7 @@ export function ChatPage() {
           )}
         </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flex: 'none' }}>
-          <Dropdown menu={headMenu} trigger={['click']} placement="bottomRight">
-            <Button
-              size="small"
-              type="text"
-              icon={<MoreOutlined />}
-              title="会话操作"
-              aria-label="会话操作"
-              style={{ color: tokens.textSecondary }}
-            />
-          </Dropdown>
-          {/* 会话信息切换（合并原「产物」「会话详情」两颗按钮）：宽屏开合右栏、窄屏开抽屉。
-              收起态仍用角标提示「有待确认 / 有产物」，避免合并后丢掉这两个感知入口。 */}
-          <Button
-            size="small"
-            type={infoOpen && wide ? 'default' : 'text'}
-            icon={<PicRightOutlined />}
-            title={wide ? (infoOpen ? '收起会话信息' : '展开会话信息') : '会话信息'}
-            aria-label="会话信息"
-            aria-pressed={wide ? infoOpen : undefined}
-            onClick={() => {
-              if (wide) {
-                toggleInfo()
-              } else {
-                setDetailOpen(true)
-              }
-            }}
-            style={{ color: tokens.textSecondary, fontSize: 12 }}
-          >
-            会话信息
-            {!infoOpen && (artifactCount > 0 || pendingPerms > 0) && (
-              <span
-                style={{
-                  marginLeft: 4,
-                  fontFamily: tokens.fontMono,
-                  fontSize: 10.5,
-                  color: pendingPerms > 0 ? tokens.warning : tokens.textSecondary,
-                }}
-              >
-                {pendingPerms > 0 ? `待确认 ${pendingPerms}` : artifactCount}
-              </span>
-            )}
-          </Button>
+          {/* 会话状态（先于「会话信息」）：状态是被动信息、靠内；动作按钮靠外。 */}
           <span
             style={{
               display: 'inline-flex',
@@ -580,6 +518,51 @@ export function ChatPage() {
               {metaText}
             </span>
           </span>
+          {/* 会话信息切换（合并原「产物」「会话详情」两颗按钮）：宽屏开合右栏、窄屏开抽屉。
+              收起态仍用角标提示「有待确认 / 有产物」，避免合并后丢掉这两个感知入口。
+              可点击性（第 3 点）：宽屏时在文字尾部挂一枚方向 chevron（收起 ▸ / 展开 ▾），
+              配 aria-expanded + Tooltip，明确「这里可展开/收起」。 */}
+          <Tooltip
+            title={wide ? (infoOpen ? '收起会话信息' : '展开会话信息') : '打开会话信息'}
+            mouseEnterDelay={0.4}
+          >
+            <Button
+              size="small"
+              type={infoOpen && wide ? 'default' : 'text'}
+              icon={<PicRightOutlined />}
+              title={wide ? (infoOpen ? '收起会话信息' : '展开会话信息') : '会话信息'}
+              aria-label="会话信息"
+              aria-expanded={wide ? infoOpen : undefined}
+              aria-pressed={wide ? infoOpen : undefined}
+              onClick={() => {
+                if (wide) {
+                  toggleInfo()
+                } else {
+                  setDetailOpen(true)
+                }
+              }}
+              style={{ color: tokens.textSecondary, fontSize: 12, cursor: 'pointer' }}
+            >
+              会话信息
+              {!infoOpen && (artifactCount > 0 || pendingPerms > 0) && (
+                <span
+                  style={{
+                    marginLeft: 4,
+                    fontFamily: tokens.fontMono,
+                    fontSize: 10.5,
+                    color: pendingPerms > 0 ? tokens.warning : tokens.textSecondary,
+                  }}
+                >
+                  {pendingPerms > 0 ? `待确认 ${pendingPerms}` : artifactCount}
+                </span>
+              )}
+              {wide && (
+                <span className="fg-info-chevron" aria-hidden="true">
+                  {infoOpen ? <DownOutlined style={{ fontSize: 10 }} /> : <RightOutlined style={{ fontSize: 10 }} />}
+                </span>
+              )}
+            </Button>
+          </Tooltip>
           {resendable && (
             <Button size="small" onClick={() => lastUserText && void sendPrompt(lastUserText)} >
               重发
@@ -639,7 +622,10 @@ export function ChatPage() {
           ) : (
             <>
               {renderChatHead()}
-              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', minHeight: 0, scrollBehavior: 'smooth' }}>
+              {/* 转录滚动容器：显式 overflow-x: clip。只设 overflow-y 时浏览器会把 overflow-x 算成 auto，
+                  任何一个未被内部自滚兜住的宽子元素都会让整条转录冒横向滚动条；clip 只裁切、不产生滚动条，
+                  也不像 hidden 那样创建滚动容器（避免影响 sticky/定位）。宽内容本身由各自组件内部横滚承担。 */}
+              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', overflowX: 'clip', minHeight: 0, scrollBehavior: 'smooth' }}>
                 <div
                   style={{
                     maxWidth: 840,
