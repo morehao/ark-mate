@@ -13,14 +13,19 @@ const ID = "dsh"
 const Name = "dsh"
 
 // Version 是展示用启动形态。
-const Version = "dsh --profile acp"
+const Version = "dsh --profile mate-acp"
 
 // Command：统一启动器 `dsh`（@deepseek-ai/dsh，npm 分发，bin=dsh）。
 // 未安装时可经 `npx @deepseek-ai/dsh --profile acp` 启动；profile 首用自动初始化。
 const Command = "dsh"
 
-// Args：--profile acp 选择 ACP profile；其余参数（--patch 覆盖等）留待上层按需追加。
-var Args = []string{"--profile", "acp"}
+// Args：--profile 选择 ACP profile。用的是平台自建的 `mate-acp`（见 profile.go）——它基于 acp
+// 模板，但在自有 patch 层里补上了 office / workspace-dependencies 内置能力（acp 裸模板不含）。
+// 其余参数（--patch 覆盖等）留待上层按需追加。
+//
+// 为什么不自建 profile 就叫 acp：`acp` 是 dsh 的**随包模板名**，app-boot 首用会按模板初始化；
+// 平台要用自己的组合，就得是另一个 profile 名，才能有自己的、可写的 cordis.patch.yml 层。
+var Args = []string{"--profile", ProfileName}
 
 // Caps 是静态能力基线声明（真实值以 ACP initialize 探测为准）：
 // initialize 广告 sessionCapabilities { close, list, resume }（无 load/fork）、

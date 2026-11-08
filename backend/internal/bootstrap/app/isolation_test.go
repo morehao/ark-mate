@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,8 +89,26 @@ func TestInitPinsBuildRuntime(t *testing.T) {
 		}
 	}
 	spec, _ := a.Result().Runtime.Get("dsh")
-	if want := runtime.IsolationEnvFor(dsh.Spec(), home); !reflect.DeepEqual(spec.Launch.Env, want) {
-		t.Fatalf("dsh 的隔离环境未接上:\n got %v\nwant %v", spec.Launch.Env, want)
+	// 隔离 env（DSH_HOME/npm_*）必须接上；此外本机 dsh 还会带上 office 随包 env（DSH_PRIMARY_RUNTIME 等）。
+	// 用"隔离 env 是子集"判定，避免把 office env 误当噪音；同时断言 office env 确实注入了。
+	want := runtime.IsolationEnvFor(dsh.Spec(), home)
+	envSet := map[string]bool{}
+	for _, kv := range spec.Launch.Env {
+		envSet[kv] = true
+	}
+	for _, kv := range want {
+		if !envSet[kv] {
+			t.Fatalf("dsh 隔离环境缺失 %q；现有 %v", kv, spec.Launch.Env)
+		}
+	}
+	hasOffice := false
+	for _, kv := range spec.Launch.Env {
+		if strings.HasPrefix(kv, "DSH_PRIMARY_RUNTIME=") {
+			hasOffice = true
+		}
+	}
+	if !hasOffice {
+		t.Fatalf("本机 dsh 应注入 office 随包 env（DSH_PRIMARY_RUNTIME），现有 %v", spec.Launch.Env)
 	}
 	if got := a.Meta().Home; got != home {
 		t.Fatalf("/meta 的 home 不符: got %q want %q", got, home)
