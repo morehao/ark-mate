@@ -94,6 +94,31 @@ test.describe('会话信息面 · 宽屏（1920）', () => {
     await expect(page.locator('aside[aria-label="会话信息"]')).toHaveCount(0)
     await shot(page, 'collapsed-again-1920')
   })
+
+  test('头部：无会话操作(⋮)按钮；状态在会话信息左侧；会话信息 aria-expanded 随开关变化', async ({ page }) => {
+    await page.goto('/sessions/s1')
+    // 第 1 点：三点菜单与归档入口已移除
+    await expect(page.getByRole('button', { name: '会话操作' })).toHaveCount(0)
+    await expect(page.getByText('归档并新建会话')).toHaveCount(0)
+
+    const infoBtn = page.getByRole('button', { name: '会话信息' })
+    // 第 3 点：宽屏收起态 aria-expanded=false
+    await expect(infoBtn).toHaveAttribute('aria-expanded', 'false')
+
+    // 第 2 点：状态（已完成）在「会话信息」按钮左侧（boundingBox.x 更小）
+    const status = page.getByText('已完成', { exact: true }).first()
+    const statusBox = await status.boundingBox()
+    const infoBox = await infoBtn.boundingBox()
+    expect(statusBox).not.toBeNull()
+    expect(infoBox).not.toBeNull()
+    expect(statusBox!.x).toBeLessThan(infoBox!.x)
+
+    // 展开后 aria-expanded=true，再收起回 false
+    await infoBtn.click()
+    await expect(infoBtn).toHaveAttribute('aria-expanded', 'true')
+    await infoBtn.click()
+    await expect(infoBtn).toHaveAttribute('aria-expanded', 'false')
+  })
 })
 
 test.describe('会话信息面 · 窄屏（1100）', () => {

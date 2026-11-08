@@ -57,7 +57,7 @@ export function useAttachmentDraft(imageSupported?: boolean): AttachmentDraft {
         }
         setPendingAtts((prev) => [
           ...prev,
-          { id: att.id, name: att.name, mime_type: att.mime_type, size_bytes: att.size_bytes, kind: att.kind },
+          { id: att.id, name: att.name, mime_type: att.mime_type, size_bytes: att.size_bytes, kind: att.kind, file_id: att.file_id },
         ])
       } catch (err) {
         void antdMessage.error(`上传 ${f.name} 失败：${err instanceof Error ? err.message : String(err)}`)

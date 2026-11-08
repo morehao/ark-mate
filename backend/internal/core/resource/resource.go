@@ -166,6 +166,22 @@ type Provider struct {
 	// 而 `providers` 表对 `type` 无唯一约束 → 两个同 type 的供应商共用一把密钥 → 至少一条
 	// route 用错密钥发请求（ADR-16）。
 	Ref string
+	// SupportsDeveloperRole 上游是否支持 OpenAI 的 `developer` 系统角色（v40；nil = 未声明）。
+	//
+	// OpenAI 近版在 Completions 里把系统消息的角色从 `system` 扩成 `developer`，而当下大量
+	// OpenAI **兼容代理/gateway**（如本仓实测的 `llm.yygu.cn`）仍只认旧式
+	// `system/user/assistant/tool`，收到 `developer` 直接 422。dsh 的 `openai-completions`
+	// 走新式默认，于是这类端点全部起不来。
+	//
+	// 语义（指向 dsh 的 `providers.<route>.compat.supportsDeveloperRole`，类型 boolean|null）：
+	//   - nil：不下发，交给 dsh 默认（新式，可能发 `developer`）；
+	//   - false：显式告知"本上游不认 developer" → dsh 发旧式 `system`（兼容代理的正解）；
+	//   - true：显式告知"支持 developer"。
+	//
+	// **注意**：dsh 0.2.2 的 compat 键是 `supportsDeveloperRole`（布尔），**不是**旧版
+	// 夹具里那个 `systemRole`（字符串）——后者在 0.2.2 会被配置校验拒绝（"no wire protocol
+	// declares"）。见 `TestGoldenDshCompatHasV12Exit`。
+	SupportsDeveloperRole *bool
 }
 
 // Model 应用层的模型声明。**没有 runtime 字段**：底座维度由同步层投影。

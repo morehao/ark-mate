@@ -32,8 +32,9 @@ import (
 // 文件名保留 `dsh-v12.patch.yml`：它命名的是**等价性序列**（"v11 基线 → 当前形态"），不是当前
 // 版本号——B2 于 v13 加入时就沿用了这个名字，B3 同样。
 //
-// 另外两处**未迁移字段**（`compat` 与模型的 `extra`）在本期没有出口，夹具因此刻意不带它们；
-// 它们由 `TestGoldenDshCompatHasNoV12Exit` 单独**机器登记**，不混进 A 部分。
+// 模型的 `extra` 是**未迁移字段**（v12 没有出口），夹具刻意不带它。`compat`（developer 角色兼容
+// 开关 `supportsDeveloperRole`）曾是未迁移字段，v40 已作为 B4 重新接回（见
+// `insertGoldenProviderCompat` 与 `TestGoldenDshCompatHasV12Exit`）——现由 B 部分机械重现、进 A 部分比对。
 
 var updateGolden = flag.Bool("update", false, "重新生成 golden 文件（评审时人工过一遍 diff）")
 
@@ -274,32 +275,34 @@ func TestGoldenDshBPartPresent(t *testing.T) {
 	}
 }
 
-// TestGoldenDshCompatHasNoV12Exit 记录一处**未迁移字段**：v11 会把 `projections.<runtime>.compat`
-// 序列化成 `compat: {…}`，而 v12 的 `resource.Provider` 没有这个字段（设计 §载体差异把它登记进
-// 「未迁移字段」清单）。
+// TestGoldenDshCompatHasV12Exit 记录 compat 字段的**重新引入**（v40，开发者角色兼容开关）：
 //
-// 这里不是等价性判据，而是**如实登记**：拿掉那一行之后，两份产出逐字节相同——于是"compat 消失"
-// 是一件被点名、被机器看见的事，而不是混进 A 部分的静默差异。
-func TestGoldenDshCompatHasNoV12Exit(t *testing.T) {
-	models, providers := v11FixtureInputs(map[string]map[string]any{"alpha-gw": {"systemRole": "system"}})
+// 历史与回归：dsh 0.2.2 的 `openai-completions` 默认发新式 `developer` 系统角色，而 OpenAI 兼容代理
+// 只认旧式 `system` → 422 拒收、会话起不来（2026-11-08 实测 `llm.yygu.cn`）。修复靠下发
+// `providers.<route>.compat.supportsDeveloperRole:false`（⚠ dsh 0.2.2 的 compat 键是布尔
+// `supportsDeveloperRole`，**不是**旧夹具里那个字符串 `systemRole`——后者会被配置校验拒绝）。
+// 平台侧字段：`resource.Provider.SupportsDeveloperRole`。
+//
+// 判据：v11 基线（无 compat）经 B 部分改写（含 B4 插 `supportsDeveloperRole:false`）→ 与 v12 逐字节
+// 相同；且 v12 输出确实带该 compat —— 证明 compat 是 B4（有出口、被机器覆盖），不是静默差异。
+func TestGoldenDshCompatHasV12Exit(t *testing.T) {
+	models, providers := v11FixtureInputs(nil) // v11 基线刻意不带 compat
 	v11Bytes, err := buildV11DshPatchYAML(models, providers)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(v11Bytes), `        compat: {"systemRole":"system"}`+"\n") {
-		t.Fatalf("v11 应当把 compat 原样写成 YAML flow mapping，实际：\n%s", v11Bytes)
+	if strings.Contains(string(v11Bytes), "compat:") {
+		t.Fatalf("v11 基线不应带 compat（B4 会插入），实际：\n%s", v11Bytes)
 	}
 	v12Bytes, err := buildPatch(goldenSet())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(v12Bytes), "compat:") {
-		t.Error("v12 的输出里出现了 compat——本期它没有出口（§载体差异）")
+	if !strings.Contains(string(v12Bytes), `        compat: {"supportsDeveloperRole":false}`+"\n") {
+		t.Errorf("v12 的输出里应出现 compat.supportsDeveloperRole=false（v40 重新引入），实际：\n%s", v12Bytes)
 	}
-	// 把 v11 的那一行删掉，再按 B 部分改写 → 应与 v12 逐字节相同。
-	stripped := dropYAMLLine(t, string(v11Bytes), "compat:")
-	if got, want := rewriteDshV11ToV24(t, stripped), string(v12Bytes); got != want {
-		t.Errorf("compat 是本例唯一的差异，其余字节必须相同：\n%s", firstDiff(want, got))
+	if got, want := rewriteDshV11ToV24(t, string(v11Bytes)), string(v12Bytes); got != want {
+		t.Errorf("compat 由 B4 机械重现，其余字节必须相同：\n%s", firstDiff(want, got))
 	}
 }
 
@@ -442,7 +445,11 @@ func rewriteDshV11ToV24(t *testing.T, old string) string {
 	// B2：给**每个**模型条目补一行 `input: [...]`（v11 没有这个字段，所以它只能"插入"）。
 	// 插入位置 = 该条目的末尾（下一个 `          - id: ` 之前，或文件末尾）——与 adapter
 	// 把 `input` 写在 `name` 之后一致。
-	return rewriteGoldenRouteKeys(t, insertGoldenModelInputs(t, strings.Join(lines, "\n")))
+	withInputs := insertGoldenModelInputs(t, strings.Join(lines, "\n"))
+	// B4（v40）：每个 provider 在 `api:` 行之后补一行 `compat: {"supportsDeveloperRole":false}`
+	// （v11 夹具不带 compat；adapter 现对 openai-completions 默认下发该开关——退发旧式 system 角色）。
+	withCompat := insertGoldenProviderCompat(t, withInputs)
+	return rewriteGoldenRouteKeys(t, withCompat)
 }
 
 // rewriteGoldenRouteKeys 是 B3 的机械改写：① 路由键（`providers.<k>` 的键与 `- id: acp` 的
@@ -530,6 +537,27 @@ func insertGoldenModelInputs(t *testing.T, text string) string {
 		out = append(out, ln)
 	}
 	flush()
+	return strings.Join(out, "\n")
+}
+
+// insertGoldenProviderCompat 是 B4（v40）的机械改写：在每个 `        api: "openai-completions"`
+// 行**之后**插入一行 `        compat: {"supportsDeveloperRole":false}`（缩进对齐 adapter：api 之后、
+// apiKeyEnv 之前）。v11 夹具不带 compat，故这是"插入"。
+func insertGoldenProviderCompat(t *testing.T, text string) string {
+	t.Helper()
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines)+len(goldenFixtureProviders))
+	inserted := 0
+	for _, ln := range lines {
+		out = append(out, ln)
+		if ln == `        api: "openai-completions"` {
+			out = append(out, `        compat: {"supportsDeveloperRole":false}`)
+			inserted++
+		}
+	}
+	if inserted != len(goldenFixtureProviders) {
+		t.Fatalf("B4：应给 %d 个 provider 各插一行 compat，实际插入 %d 行", len(goldenFixtureProviders), inserted)
+	}
 	return strings.Join(out, "\n")
 }
 

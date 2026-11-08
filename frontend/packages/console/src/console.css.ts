@@ -1466,9 +1466,23 @@ export const consoleStyleSheet = `
     flex: none;
     min-height: 0;
     overflow-y: auto;
+    /* 只设 overflow-y 时 overflow-x 会被算成 auto：面板内任一宽子元素都会让右栏冒横向滚动条。
+       显式 clip 兜底；面板内的长文本/路径各自 ellipsis / overflow-wrap 断行，不靠外层横滚。 */
+    overflow-x: clip;
     border-left: 1px solid ${tokens.border};
     background: ${tokens.surface};
   }
+
+  /* 顶部「会话信息」按钮尾部方向 chevron（收起 ▸ / 展开 ▾）：可展开暗示。
+     与按钮文字同色系，按钮 hover 时略加深，强化「可点」。 */
+  .fg-info-chevron {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 4px;
+    color: ${tokens.textPlaceholder};
+    transition: color 0.16s ease;
+  }
+  .ant-btn:hover .fg-info-chevron { color: ${tokens.textSecondary}; }
 
   /* 用量页总览四卡（v2.2）：宽屏 4 列 → ≤1280 两列 → ≤760 单列。
      原来是写死的 repeat(4, minmax(0,1fr))，窄窗口上每格被压到看不清数字。 */

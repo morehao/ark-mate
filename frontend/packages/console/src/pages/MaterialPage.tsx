@@ -30,6 +30,7 @@ import {
 } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import { IconAction } from '../components/capability/shared'
+import { usePreview } from '../components/preview/PreviewProvider'
 import {
   createMaterialNode,
   deleteMaterialNode,
@@ -352,6 +353,8 @@ function NodeDetailDrawer(props: {
 }) {
   const { detail, open, onClose, onChanged } = props
   const navigate = useNavigate()
+  // 统一预览壳：drive 节点按 file_id 打开（渲染器按文件名后缀自动分派）。
+  const { openPreview } = usePreview()
   const [rows, setRows] = useState<string>('')
   const [editTitle, setEditTitle] = useState('')
   // 会话产物回跳（v35）：产物节点详情要能回到产出它的会话（provenance_id → artifacts.session_id）。
@@ -468,7 +471,19 @@ function NodeDetailDrawer(props: {
         )}
 
         {detail.node_kind === 'drive' && (
-          <Typography.Text type="secondary">文件已存于资料库，可在「资料库」目录中通过 Agent 读取，或经附件接口下载。</Typography.Text>
+          <Space direction="vertical" size={8}>
+            <Button
+              type="primary"
+              disabled={!detail.file_id}
+              onClick={() => {
+                if (!detail.file_id) return
+                openPreview({ file_id: detail.file_id, name: detail.title, size_bytes: detail.size_bytes })
+              }}
+            >
+              预览
+            </Button>
+            <Typography.Text type="secondary">文件已存于资料库，可在「资料库」目录中通过 Agent 读取，或经附件接口下载。</Typography.Text>
+          </Space>
         )}
       </Space>
     </Modal>

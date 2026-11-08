@@ -3,21 +3,17 @@
 package ctrattachment
 
 import (
-	"io"
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/service/svcattachment"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
-// AttachmentCtr 附件面控制器四端点。
+// AttachmentCtr 附件面控制器三端点。
 type AttachmentCtr interface {
 	Register(c *gin.Context)
 	Delete(c *gin.Context)
 	Get(c *gin.Context)
-	Content(c *gin.Context)
 }
 
 var _ AttachmentCtr = (*attachmentCtr)(nil)
@@ -77,24 +73,4 @@ func (h *attachmentCtr) Get(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, resp)
-}
-
-// Content `GET /attachments/:id/content`（字节流：预览用；Content-Type 取探测后的 MIME，inline）。
-//
-// 只有本机回环可访问（受既有 Host/Origin 矩阵约束，由 middleware 承担）。
-func (h *attachmentCtr) Content(c *gin.Context) {
-	id := c.Param("id")
-	rc, contentType, err := h.svc.OpenContent(c.Request.Context(), id)
-	if err != nil {
-		gincontext.Fail(c, code.FromError(err))
-		return
-	}
-	defer func() { _ = rc.Close() }()
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-	c.Header("Content-Type", contentType)
-	c.Header("Content-Disposition", "inline")
-	c.Status(http.StatusOK)
-	_, _ = io.Copy(c.Writer, rc)
 }

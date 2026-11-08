@@ -204,6 +204,8 @@ func (as *assembly) startStore(ctx context.Context) error {
 		attachStore, err := attachmentstore.New(opened.DB(), attachmentstore.Options{
 			BaseDir:        filepath.Join(cfg.HomeDir, "attachments"),
 			MaxUploadBytes: cfg.AttachmentMaxBytes,
+			SignSecret:     cfg.SignSecret,
+			BaseURL:        cfg.PublicBaseURL,
 		})
 		if err != nil {
 			return fatalErr("serve: 构造附件存储: %v", err)

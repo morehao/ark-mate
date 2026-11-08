@@ -490,6 +490,7 @@ export interface AttachmentMeta {
   size_bytes: number
   /** image | document */
   kind: string
+  file_id: string
 }
 
 /** Attachment 附件回读响应（`POST/GET /attachments` 的 data）。 */

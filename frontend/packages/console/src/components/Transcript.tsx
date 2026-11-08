@@ -1466,9 +1466,13 @@ export function EntryView({
           <div
             style={{
               display: 'flex',
+              // 错误文案（如 422 整段 JSON）可能很长：允许换行，否则同行里的用量会被挤成
+              // 一字一行的竖排窄条（2026-11-08 实见「总耗时 55.4ms」在极右竖向堆叠）。
+              flexWrap: 'wrap',
               alignItems: 'center',
               justifyContent: 'center',
               gap: 7,
+              maxWidth: '100%',
               fontFamily: tokens.fontMono,
               fontSize: 10.5,
               color: toneColor[tone],
@@ -1477,7 +1481,7 @@ export function EntryView({
             }}
           >
             {systemIcon[tone]}
-            <span>
+            <span style={{ minWidth: 0, maxWidth: '100%' }}>
               {e.text}
               {endSuffix}
             </span>
@@ -1526,6 +1530,9 @@ export function EntryView({
                     display: 'inline-flex',
                     gap: 7,
                     alignItems: 'center',
+                    // 永不压缩、整行展示：避免与长错误文案同排时被挤成竖排窄条。
+                    flexShrink: 0,
+                    whiteSpace: 'nowrap',
                     cursor: runInfo ? 'help' : 'default',
                   }}
                 >

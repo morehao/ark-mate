@@ -45,6 +45,10 @@ type Options struct {
 	BaseDir string
 	// MaxUploadBytes 单文件上限（防呆/防灌盘；<=0 表示不限，由调用方按配置给）。
 	MaxUploadBytes int64
+	// SignSecret 本地驱动预签名 HMAC-SHA256 密钥（空 = 预签名操作返回 ErrNotSupported）。
+	SignSecret string
+	// BaseURL 对外公共访问基础 URL（本地驱动拼预签名 URL 用；空 = 预签名报 ErrInvalidConfig）。
+	BaseURL string
 }
 
 // New 构造附件字节存储。构造期**不建表**（`WithoutAutoMigrate`）：`core_file*` 的 DDL 由启动期
@@ -58,7 +62,11 @@ func New(db *gorm.DB, opts Options) (*Store, error) {
 	if opts.BaseDir == "" {
 		return nil, fmt.Errorf("attachmentstore.New: BaseDir is required")
 	}
-	st, err := storage.New(storage.DriverLocal, storage.Config{BaseDir: filepath.Clean(opts.BaseDir)})
+	st, err := storage.New(storage.DriverLocal, storage.Config{
+		BaseDir:    filepath.Clean(opts.BaseDir),
+		SignSecret: opts.SignSecret,
+		BaseURL:    opts.BaseURL,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("attachmentstore.New: build local driver: %w", err)
 	}

@@ -25,7 +25,7 @@ export interface ArtifactMeta {
   mime_type?: string
   size_bytes: number
   /** file 类产物的字节句柄（= 上传面 `POST /files` 的 file_id）。 */
-  upload_id?: string
+  file_id?: string
   content_text?: string
   content_sha256?: string
   /** 工作区原文件与生成时快照不一致（被改动/删除）。详情读面惰性计算，列表页返回存量。 */

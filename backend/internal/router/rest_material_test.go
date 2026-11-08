@@ -259,16 +259,16 @@ func TestMaterialUpload(t *testing.T) {
 		t.Fatalf("files code=%d body=%s", fileEnv.Code, w.Body.String())
 	}
 
-	// 第二步：POST /materials/nodes {node_kind:drive, drive_upload_id:file_id}。
-	body := `{"node_kind":"drive","title":"notes.txt","drive_upload_id":"` + fileEnv.Data.FileID + `"}`
+	// 第二步：POST /materials/nodes {node_kind:drive, file_id:file_id}。
+	body := `{"node_kind":"drive","title":"notes.txt","file_id":"` + fileEnv.Data.FileID + `"}`
 	_, code, data := matCall(t, e, "POST", "/v1/mate/materials/nodes", body)
 	if code != 0 {
 		t.Fatalf("建 drive 节点 code=%d body=%s", code, string(data))
 	}
 	var node dtomaterial.NodeDetailResp
 	_ = json.Unmarshal(data, &node)
-	if node.NodeKind != "drive" || node.DriveUploadID == "" {
-		t.Fatalf("两步式应落 drive 节点且带 drive_upload_id: %+v", node)
+	if node.NodeKind != "drive" || node.FileID == "" {
+		t.Fatalf("两步式应落 drive 节点且带 file_id: %+v", node)
 	}
 }
 

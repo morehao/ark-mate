@@ -518,10 +518,6 @@ export const uploadAttachment = async (file: File): Promise<Attachment> => {
 export const deleteAttachment = (id: string): Promise<{ deleted: boolean }> =>
   http.delete<{ deleted: boolean }>(`/mate/attachments/${encodeURIComponent(id)}`)
 
-/** 附件字节流 URL（预览用；img src / 点击打开）。相对 `/v1` 前缀，与 api 同源。 */
-export const attachmentContentUrl = (id: string): string =>
-  `/v1/mate/attachments/${encodeURIComponent(id)}/content`
-
 /** M2 写面：新建一个 MCP server 定义（闸门比 skill 多：transport/绝对路径/引用词法…）。 */
 export const createMcpServer = (body: CapabilityWriteBody): Promise<McpWriteResp> =>
   http.post<McpWriteResp>('/mate/mcps', body)

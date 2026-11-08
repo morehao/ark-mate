@@ -116,7 +116,7 @@ func TestUnknownToolReturnsErrToolNotFound(t *testing.T) {
 func TestNodeInfoDrivePath(t *testing.T) {
 	h := New(&fakeSvc{
 		detail: map[string]*dtomaterial.NodeDetailResp{
-			"libnd_x": {ID: "libnd_x", NodeKind: "drive", Title: "报告.pdf", DriveUploadID: "att_1"},
+			"libnd_x": {ID: "libnd_x", NodeKind: "drive", Title: "报告.pdf", FileID: "att_1"},
 		},
 		drivePth: map[string]string{"libnd_x": "/tmp/attachments/report.pdf"},
 	})

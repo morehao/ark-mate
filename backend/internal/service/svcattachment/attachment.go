@@ -1,5 +1,5 @@
 // Package svcattachment 承载附件面的用例：上传（multipart → 类型探测 → 落字节 + 落业务索引行）、
-// 回读元数据、字节流回读（预览）、撤下待挂附件。
+// 回读元数据、撤下待挂附件。字节回读/预览走签名通路（presign-url + /objects），不经本包。
 //
 // 两条硬边界（设计 §3.1 / §4.3）：
 //   - 字节落盘/去重归 golib filestore（经 BlobStore 端口），本包不碰磁盘布局；
@@ -81,8 +81,6 @@ type AttachmentSvc interface {
 	Delete(ctx context.Context, id string) (*dtoattachment.AttachmentDeleteResp, error)
 	// Get 回读元数据。
 	Get(ctx context.Context, id string) (*dtoattachment.AttachmentResp, error)
-	// OpenContent 回读字节流（预览）。
-	OpenContent(ctx context.Context, id string) (io.ReadCloser, string, error)
 }
 
 type attachmentSvc struct {
@@ -266,27 +264,12 @@ func (s *attachmentSvc) Get(ctx context.Context, id string) (*dtoattachment.Atta
 	return toResp(entity), nil
 }
 
-// OpenContent 回读字节流（预览）。返回 (流, Content-Type, err)。
-func (s *attachmentSvc) OpenContent(ctx context.Context, id string) (io.ReadCloser, string, error) {
-	entity, ok, err := s.st.AttachmentByID(ctx, id)
-	if err != nil {
-		return nil, "", code.Errorf(code.Internal, "读取附件失败: %v", err)
-	}
-	if !ok {
-		return nil, "", code.Errorf(code.NotFound, "attachment_not_found: 附件不存在")
-	}
-	rc, _, err := s.blobs.Open(ctx, entity.UploadID)
-	if err != nil {
-		return nil, "", code.Errorf(code.NotFound, "attachment_not_found: 附件字节不可读: %v", err)
-	}
-	return rc, entity.MimeType, nil
-}
-
 // toResp 实体 → 对外响应。
 func toResp(e model.AttachmentEntity) *dtoattachment.AttachmentResp {
 	return &dtoattachment.AttachmentResp{
 		ID:        e.ID,
 		Name:      e.Name,
+		FileID:    e.UploadID,
 		MimeType:  e.MimeType,
 		SizeBytes: e.SizeBytes,
 		Sha256:    e.Sha256,
