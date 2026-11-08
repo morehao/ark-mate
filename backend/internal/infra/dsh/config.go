@@ -446,9 +446,15 @@ func buildPatch(set resource.Set) ([]byte, error) {
 		}
 		sort.Strings(routes)
 		models := sortedModels(set.Models)
+		// `- id: llm-pi-ai` 这一条**只写一次**：dsh 的 `--patch` 语义是「除 `id` 外的键**整体替换**
+		// 目标 entry 的 `config`（不与已有合并）」。若逐 route 各写一条 `- id: llm-pi-ai`，第二条起
+		// 会整段覆盖前一条的 `providers`，最终只剩最后一个 route；而 `- id: acp` 的 `provider:`
+		// 可能指向被丢弃的 route → dsh `session/new` 返回 -32603 `no adapter registered for provider X`
+		// → 平台建会话 50001 Internal error。故所有 route 合并进**同一个** `providers:` 块，路由键
+		// 仍按 `routes` 的升序依次排列。
+		b = append(b, []byte("- id: llm-pi-ai\n  config:\n    providers:\n")...)
 		for _, route := range routes {
 			p := byRoute[route]
-			b = append(b, []byte("- id: llm-pi-ai\n  config:\n    providers:\n")...)
 			// `displayName` 取**供应商展示名**（空则回落平台 id）——v24 之前这里写的是路由键，
 			// 于是用户给供应商起的名字在交付面上**不可见**（底座界面一律显示路由键）。
 			b = append(b, fmt.Sprintf("      %s:\n        displayName: %s\n", yamlQuote(route), yamlQuote(displayNameOf(p, route)))...)

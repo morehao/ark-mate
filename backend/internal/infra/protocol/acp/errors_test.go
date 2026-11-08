@@ -110,6 +110,43 @@ func TestClassifyWrappedRequestError(t *testing.T) {
 	}
 }
 
+// TestClassifySurfacesRequestErrorDetails 回归：-32603 的 `message` 通常是无信息量的
+// "Internal error"，真正死因在 `data.details` 里（实测 dsh session/new：`no adapter registered
+// for provider "mate-magpie"`）。丢掉它用户只看到 `50001 Internal error`——正是本次建会话失败的观感。
+//
+// 三条判据：① details 被拼进文案；② 有 details 时不再是裸 "Internal error"；
+// ③ 无 data 时逐字保持旧行为（只回 message），不劣化既有路径。
+func TestClassifySurfacesRequestErrorDetails(t *testing.T) {
+	re := &acpsdk.RequestError{
+		Code:    -32603,
+		Message: "Internal error",
+		Data:    map[string]any{"details": `no adapter registered for provider "mate-magpie"`},
+	}
+	ae := Classify(re)
+	if !strings.Contains(ae.Details, `no adapter registered for provider "mate-magpie"`) {
+		t.Fatalf("data.details 未被拼进文案: %q", ae.Details)
+	}
+	if ae.Details == "Internal error" {
+		t.Fatalf("有 details 时不该只剩裸通用文案: %q", ae.Details)
+	}
+	if !strings.Contains(ae.Details, "Internal error") {
+		t.Fatalf("协议 message 应保留在最前: %q", ae.Details)
+	}
+
+	// 无 data：逐字保持旧行为。
+	bare := Classify(&acpsdk.RequestError{Code: -32603, Message: "Internal error"})
+	if bare.Details != "Internal error" {
+		t.Fatalf("无 data 时应逐字等于 message，got %q", bare.Details)
+	}
+
+	// 非约定形状的 data：用紧凑 JSON 兜底，且不为空。
+	odd := Classify(&acpsdk.RequestError{Code: -32603, Message: "Internal error",
+		Data: map[string]any{"code": "E_X"}})
+	if !strings.Contains(odd.Details, "E_X") {
+		t.Fatalf("非约定 data 应 JSON 兜底带出信息: %q", odd.Details)
+	}
+}
+
 // TestTailLinesRedactsSecrets stderr 尾巴的唯一出口即脱敏闸门：
 // 子进程把 key 打进 stderr（如底座启动日志回显 env）时，诊断/事件/错误三处消费者都拿到脱敏后的行。
 func TestTailLinesRedactsSecrets(t *testing.T) {

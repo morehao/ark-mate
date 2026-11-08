@@ -20,9 +20,6 @@
           - id: "gpt-4o-mini"
             name: "小模型·中文"
             input: [text, image]
-- id: llm-pi-ai
-  config:
-    providers:
       "mate-beta.gw":
         displayName: "备用网关"
         api: "openai-completions"
@@ -35,9 +32,6 @@
           - id: "qwen:7b"
             name: "qwen #7b"
             input: [text]
-- id: llm-pi-ai
-  config:
-    providers:
       "mate-zeta":
         displayName: "Zeta 直连"
         api: "openai-completions"
