@@ -73,6 +73,8 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     loadContent(def, file.file_id)
       .then((content) => setOpen({ def, file, content }))
+      // 失败态上下文不吞：error.message 原样透传给预览壳（可能已含实际请求 URL/origin，
+      // 由 @ark-mate/api 的 fetchFile* 拼入），展示层再做 URL 识别，便于定位打到了哪个端口。
       .catch((e) => setError(e instanceof Error ? e.message : '加载失败'))
       .finally(() => setLoading(false))
   }, [])
