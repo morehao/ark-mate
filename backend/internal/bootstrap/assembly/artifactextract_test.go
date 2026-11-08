@@ -16,6 +16,21 @@ import (
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
+// 产物抽取口径：**只认 present**（与 dsh 语义对齐）。write/edit 写出的文件是「产出」而非
+// 「交付物」，不再登记为产物、也不再自动收录进资料库。本文件用 present 驱动全部登记链路。
+
+// presentInfo 造一条 present 工具事件（files 用给定路径）。
+func presentInfo(id string, paths ...string) protocol.ToolCallInfo {
+	files := make([]any, 0, len(paths))
+	for _, p := range paths {
+		files = append(files, map[string]any{"path": p})
+	}
+	return protocol.ToolCallInfo{
+		ID: id, Title: "present", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"files": files},
+	}
+}
+
 // newExtractRig 造一个真库 + 真附件字节存储 + 真 artifactSvc 的抽取器装置（进程内集成）。
 func newExtractRig(t *testing.T) (*artifactExtractor, string, func(ctx context.Context) (int, error)) {
 	t.Helper()
@@ -96,20 +111,16 @@ func waitArtifactCount(t *testing.T, count func(ctx context.Context) (int, error
 	}
 }
 
-// TestArtifactExtractor_WriteEndToEnd：write 工具 → 工作区文件 → filestore 快照 → artifacts 行。
-func TestArtifactExtractor_WriteEndToEnd(t *testing.T) {
+// TestArtifactExtractor_PresentEndToEnd：present 声明 → 工作区文件 → filestore 快照 → artifacts 行。
+func TestArtifactExtractor_PresentEndToEnd(t *testing.T) {
 	x, _, count := newExtractRig(t)
 	cwd := t.TempDir()
 	seedSessionWithCwd(t, x.st, "ses1", cwd)
-	// 造工作区文件（模拟 dsh write 工具写出的内容）。
+	// 造工作区文件（模拟 present 声明的成品内容）。
 	if err := os.WriteFile(filepath.Join(cwd, "hello.txt"), []byte("hello artifact"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	info := protocol.ToolCallInfo{
-		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
-		Input: map[string]any{"file_path": "hello.txt", "content": "hello artifact"},
-	}
-	x.ExtractToolWrite(context.Background(), "ses1", "run1", info)
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", presentInfo("tc1", "hello.txt"))
 	waitArtifactCount(t, count, 1)
 
 	resp, err := x.artifact.ListBySession(context.Background(), "ses1")
@@ -117,7 +128,7 @@ func TestArtifactExtractor_WriteEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := resp.Artifacts[0]
-	if a.Origin != "tool_write" || a.Kind != "file" || a.Title != "hello.txt" {
+	if a.Origin != "tool_present" || a.Kind != "file" || a.Title != "hello.txt" {
 		t.Errorf("产物元数据不符: origin=%q kind=%q title=%q", a.Origin, a.Kind, a.Title)
 	}
 	if a.FileID == "" {
@@ -132,10 +143,55 @@ func TestArtifactExtractor_WriteEndToEnd(t *testing.T) {
 	assertAutoImported(t, x, a.ID)
 }
 
-// TestArtifactExtractor_AbsolutePathInsideCwd（2026-11-04 真机回归）：dsh 的 write 给的是
-// **绝对路径**（本次真会话 10/10 次都是）。旧判据把绝对路径当「非产物」静默丢弃，导致 P2 上线后
-// 一条产物都没登记过——这个用例用真会话里的形状（绝对路径 + 中文名）钉住修复。
-func TestArtifactExtractor_AbsolutePathInsideCwd(t *testing.T) {
+// TestArtifactExtractor_WriteEditNotRegistered 钉住核心修复：write/edit 写出的文件**不再**登记为
+// 产物、**不再**自动进资料库（过程脚本 gen.py 等不会被当成品）。
+func TestArtifactExtractor_WriteEditNotRegistered(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	// 模拟模型先写中间脚本（write），再 edit。
+	script := filepath.Join(cwd, "gen.py")
+	if err := os.WriteFile(script, []byte("print('build pptx')"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "gen.py", "content": "print('build pptx')"},
+	})
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
+		ID: "tc2", Title: "edit", Status: protocol.ToolStatusCompleted,
+		Input: map[string]any{"file_path": "gen.py", "old_string": "a", "new_string": "b"},
+	})
+	time.Sleep(120 * time.Millisecond)
+	if n, _ := count(context.Background()); n != 0 {
+		t.Fatalf("write/edit 不应登记为产物，实际 %d 行", n)
+	}
+	// 资料库也不应有任何自动收录节点。
+	resp, err := x.material.ListNodesByCategory(context.Background(), "", "artifact", 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Nodes) != 0 {
+		t.Fatalf("write/edit 不应自动进资料库，实际 %d 个节点", len(resp.Nodes))
+	}
+}
+
+// TestArtifactExtractor_PresentMultiFile：present 一次声明多文件，逐个登记。
+func TestArtifactExtractor_PresentMultiFile(t *testing.T) {
+	x, _, count := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	for _, n := range []string{"report.pptx", "data.xlsx"} {
+		if err := os.WriteFile(filepath.Join(cwd, n), []byte(n), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", presentInfo("tc1", "report.pptx", "data.xlsx"))
+	waitArtifactCount(t, count, 2)
+}
+
+// TestArtifactExtractor_PresentAbsolutePathInsideCwd（真机回归）：present 给的是绝对路径。
+func TestArtifactExtractor_PresentAbsolutePathInsideCwd(t *testing.T) {
 	x, _, count := newExtractRig(t)
 	cwd := t.TempDir()
 	seedSessionWithCwd(t, x.st, "ses1", cwd)
@@ -144,10 +200,8 @@ func TestArtifactExtractor_AbsolutePathInsideCwd(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, name), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
-		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
-		Input: map[string]any{"file_path": filepath.Join(cwd, name), "content": body},
-	})
+	x.ExtractToolWrite(context.Background(), "ses1", "run1",
+		presentInfo("tc1", filepath.Join(cwd, name)))
 	waitArtifactCount(t, count, 1)
 
 	resp, err := x.artifact.ListBySession(context.Background(), "ses1")
@@ -165,22 +219,18 @@ func TestArtifactExtractor_AbsolutePathInsideCwd(t *testing.T) {
 	if a.SizeBytes != int64(len(body)) {
 		t.Errorf("size=%d 期望 %d", a.SizeBytes, len(body))
 	}
-	// dirty 可判：未改动 → false。
 	got, err := x.artifact.Get(context.Background(), a.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Dirty {
-		t.Errorf("未改动不应 dirty（绝对路径产物的 path 应能回定位）")
+		t.Errorf("未改动不应 dirty")
 	}
 	assertAutoImported(t, x, a.ID)
 }
 
-// TestArtifactExtractor_AbsoluteOutsideCwdSkipped：绝对路径落在工作区外 → 跳过（WARN），不建行。
-//
-// 边界口径：产物只快照**会话工作区**内的文件；`/tmp/...` 这类工作区外的写入不是工作区产物
-// （dirty 也无法用 sessions.cwd 回定位），保守跳过并留 WARN，而不是登记一条 path 不可解析的行。
-func TestArtifactExtractor_AbsoluteOutsideCwdSkipped(t *testing.T) {
+// TestArtifactExtractor_PresentAbsoluteOutsideCwdSkipped：present 绝对路径落在工作区外 → 跳过。
+func TestArtifactExtractor_PresentAbsoluteOutsideCwdSkipped(t *testing.T) {
 	x, _, count := newExtractRig(t)
 	cwd := t.TempDir()
 	seedSessionWithCwd(t, x.st, "ses1", cwd)
@@ -188,18 +238,15 @@ func TestArtifactExtractor_AbsoluteOutsideCwdSkipped(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
-		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
-		Input: map[string]any{"file_path": outside},
-	})
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", presentInfo("tc1", outside))
 	time.Sleep(80 * time.Millisecond)
 	if n, _ := count(context.Background()); n != 0 {
 		t.Fatalf("工作区外的绝对路径不应建产物行，实际 %d", n)
 	}
 }
 
-// TestArtifactExtractor_NotWriteSkipped：非 write/edit 工具不产生产物。
-func TestArtifactExtractor_NotWriteSkipped(t *testing.T) {
+// TestArtifactExtractor_NonPresentSkipped：非 present 工具不产生产物。
+func TestArtifactExtractor_NonPresentSkipped(t *testing.T) {
 	x, _, count := newExtractRig(t)
 	cwd := t.TempDir()
 	seedSessionWithCwd(t, x.st, "ses1", cwd)
@@ -214,47 +261,38 @@ func TestArtifactExtractor_NotWriteSkipped(t *testing.T) {
 	}
 }
 
-// TestArtifactExtractor_EscapeSkipped：路径越界（../）不产生产物。
-func TestArtifactExtractor_EscapeSkipped(t *testing.T) {
+// TestArtifactExtractor_PresentEscapeSkipped：路径越界（../）不产生产物。
+func TestArtifactExtractor_PresentEscapeSkipped(t *testing.T) {
 	x, _, count := newExtractRig(t)
 	cwd := t.TempDir()
 	seedSessionWithCwd(t, x.st, "ses1", cwd)
-	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
-		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
-		Input: map[string]any{"file_path": "../../etc/passwd"},
-	})
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", presentInfo("tc1", "../../etc/passwd"))
 	time.Sleep(80 * time.Millisecond)
 	if n, _ := count(context.Background()); n != 0 {
 		t.Fatalf("越界路径不应产生产物，实际 %d", n)
 	}
 }
 
-// TestArtifactExtractor_TooLargeSkipped：超阈值跳过不建行（R2 已拍板）。
-func TestArtifactExtractor_TooLargeSkipped(t *testing.T) {
+// TestArtifactExtractor_PresentTooLargeSkipped：超阈值跳过不建行（R2 已拍板）。
+func TestArtifactExtractor_PresentTooLargeSkipped(t *testing.T) {
 	x, _, count := newExtractRig(t)
 	x.maxBytes = 8 // 把阈值调到很小
 	cwd := t.TempDir()
 	seedSessionWithCwd(t, x.st, "ses1", cwd)
 	_ = os.WriteFile(filepath.Join(cwd, "big.txt"), []byte("this is longer than 8 bytes"), 0o644)
-	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
-		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
-		Input: map[string]any{"file_path": "big.txt"},
-	})
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", presentInfo("tc1", "big.txt"))
 	time.Sleep(80 * time.Millisecond)
 	if n, _ := count(context.Background()); n != 0 {
 		t.Fatalf("超阈值文件不应建产物行，实际 %d", n)
 	}
 }
 
-// TestArtifactExtractor_MissingFileSkipped：工作区文件不存在（已被删）不建行。
-func TestArtifactExtractor_MissingFileSkipped(t *testing.T) {
+// TestArtifactExtractor_PresentMissingFileSkipped：present 声明的文件不存在（已被删）不建行。
+func TestArtifactExtractor_PresentMissingFileSkipped(t *testing.T) {
 	x, _, count := newExtractRig(t)
 	cwd := t.TempDir()
 	seedSessionWithCwd(t, x.st, "ses1", cwd)
-	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
-		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
-		Input: map[string]any{"file_path": "ghost.txt"},
-	})
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", presentInfo("tc1", "ghost.txt"))
 	time.Sleep(80 * time.Millisecond)
 	if n, _ := count(context.Background()); n != 0 {
 		t.Fatalf("文件不存在不应建产物行，实际 %d", n)
@@ -271,10 +309,7 @@ func TestArtifactDirty_LazyOnGet(t *testing.T) {
 	if err := os.WriteFile(p, []byte("v1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
-		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
-		Input: map[string]any{"file_path": "a.txt"},
-	})
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", presentInfo("tc1", "a.txt"))
 	waitArtifactCount(t, count, 1)
 	// 取产物 id
 	list, _ := x.artifact.ListBySession(context.Background(), "ses1")
@@ -325,10 +360,7 @@ func TestArtifactDirty_FileDeleted(t *testing.T) {
 	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
-		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
-		Input: map[string]any{"file_path": "gone.txt"},
-	})
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", presentInfo("tc1", "gone.txt"))
 	waitArtifactCount(t, count, 1)
 	list, _ := x.artifact.ListBySession(context.Background(), "ses1")
 	id := list.Artifacts[0].ID
@@ -350,10 +382,7 @@ func TestArtifactDirty_ListPageDoesNotCompute(t *testing.T) {
 	if err := os.WriteFile(p, []byte("orig"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
-		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
-		Input: map[string]any{"file_path": "b.txt"},
-	})
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", presentInfo("tc1", "b.txt"))
 	waitArtifactCount(t, count, 1)
 	// 改工作区文件（若列表页算 dirty 就会变 true）
 	if err := os.WriteFile(p, []byte("changed"), 0o644); err != nil {
@@ -377,10 +406,7 @@ func TestArtifactSnapshotBeforeAsync(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 同步调用（内部：同步读字节 → 异步落盘）。
-	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
-		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
-		Input: map[string]any{"file_path": "race.txt"},
-	})
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", presentInfo("tc1", "race.txt"))
 	// 返回后立刻覆盖工作区文件（模拟 dsh 下一步写同名文件）。
 	if err := os.WriteFile(p, []byte("LATER-CONTENT-LONGER-THAN-BEFORE"), 0o644); err != nil {
 		t.Fatal(err)
@@ -399,8 +425,8 @@ func TestArtifactSnapshotBeforeAsync(t *testing.T) {
 	}
 }
 
-// TestArtifactExtractor_AutoImportReusesNodePerPath：同一文件 write 后再 edit，产物两行，
-// 资料库只留**一个**节点且载体指向最新快照（一文件一节点，避免同名节点堆积）。
+// TestArtifactExtractor_AutoImportReusesNodePerPath：同一文件在不同轮次 present 两次（如先粗稿、
+// 后定稿），产物两行，资料库只留**一个**节点且载体指向最新快照（一文件一节点，避免同名节点堆积）。
 func TestArtifactExtractor_AutoImportReusesNodePerPath(t *testing.T) {
 	x, _, count := newExtractRig(t)
 	cwd := t.TempDir()
@@ -409,20 +435,14 @@ func TestArtifactExtractor_AutoImportReusesNodePerPath(t *testing.T) {
 	if err := os.WriteFile(p, []byte("v1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
-		ID: "tc1", Title: "write", Status: protocol.ToolStatusCompleted,
-		Input: map[string]any{"file_path": "note.md"},
-	})
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", presentInfo("tc1", "note.md"))
 	waitArtifactCount(t, count, 1)
 
-	// 同一文件再 edit 一次：产物多一行，节点不增加。
+	// 同一文件再 present 一次（新内容）：产物多一行，节点不增加。
 	if err := os.WriteFile(p, []byte("v2-longer"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	x.ExtractToolWrite(context.Background(), "ses1", "run1", protocol.ToolCallInfo{
-		ID: "tc2", Title: "edit", Status: protocol.ToolStatusCompleted,
-		Input: map[string]any{"file_path": "note.md"},
-	})
+	x.ExtractToolWrite(context.Background(), "ses1", "run1", presentInfo("tc2", "note.md"))
 	waitArtifactCount(t, count, 2)
 
 	list, err := x.artifact.ListBySession(context.Background(), "ses1")
@@ -430,7 +450,7 @@ func TestArtifactExtractor_AutoImportReusesNodePerPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(list.Artifacts) != 2 {
-		t.Fatalf("产物应两行（每次写各一行），实际 %d", len(list.Artifacts))
+		t.Fatalf("产物应两行（每次 present 各一行），实际 %d", len(list.Artifacts))
 	}
 	latest := list.Artifacts[0].ID // created_at 降序
 	waitLibraryProvenance(t, x, latest)
