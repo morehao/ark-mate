@@ -2135,11 +2135,14 @@ export const consoleStyleSheet = `
   .fg-fold-completed > .fg-fold-head .fg-fold-chevron { opacity: 1; }
   .fg-fold-body {
     display: grid;
+    /* 必须显式给单列 minmax(0,1fr)：只写 grid-template-rows 时隐式列按 auto=min-content 解析，
+       长命令等不可断内容会把整条折叠体撑到内容宽度、顶宽外层 → 转录冒横向滚动条。 */
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 0fr;
     transition: grid-template-rows 0.28s cubic-bezier(0.33, 1, 0.68, 1);
   }
   .fg-fold.fg-open > .fg-fold-body { grid-template-rows: 1fr; }
-  .fg-fold-inner { min-height: 0; overflow: hidden; }
+  .fg-fold-inner { min-width: 0; min-height: 0; overflow: hidden; }
   .fg-fold.fg-open > .fg-fold-body > .fg-fold-inner { overflow: visible; min-height: auto; }
   .fg-fold-completed > .fg-fold-body > .fg-fold-inner,
   .fg-fold-process > .fg-fold-body > .fg-fold-inner,
@@ -2232,11 +2235,13 @@ export const consoleStyleSheet = `
   .fg-tool.fg-open .fg-tool-arrow { opacity: 1; transform: rotate(0deg); }
   .fg-tool-body {
     display: grid;
+    /* 同 .fg-fold-body：显式 minmax(0,1fr) 单列，避免隐式 auto 列被长内容撑宽。 */
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 0fr;
     transition: grid-template-rows 0.28s cubic-bezier(0.33, 1, 0.68, 1);
   }
   .fg-tool.fg-open .fg-tool-body { grid-template-rows: 1fr; }
-  .fg-tool-body-inner { min-height: 0; overflow: hidden; }
+  .fg-tool-body-inner { min-width: 0; min-height: 0; overflow: hidden; }
   .fg-tool.fg-open .fg-tool-body > .fg-tool-body-inner { min-height: auto; overflow: visible; }
   .fg-tool-detail {
     background: ${tokens.softFill};
