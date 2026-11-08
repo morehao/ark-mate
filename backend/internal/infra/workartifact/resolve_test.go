@@ -10,82 +10,29 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/artifact"
 )
 
-// TestResolveToolWrite_WritesAndEdits 是 R1 探针记录的真实形状（write/edit 两种）的正例。
-func TestResolveToolWrite_WritesAndEdits(t *testing.T) {
-	cases := []struct {
-		name       string
-		info       protocol.ToolCallInfo
-		wantOK     bool
-		wantPath   string
-		wantOrigin artifact.Origin
-	}{
-		{
-			name: "write 带 file_path+content（R1 实测形状）",
-			info: protocol.ToolCallInfo{ID: "c1", Title: "write", Status: "completed",
-				Input: map[string]any{"file_path": "r1_probe.txt", "content": "alpha\nbeta\n"}},
-			wantOK: true, wantPath: "r1_probe.txt", wantOrigin: artifact.OriginToolWrite,
-		},
-		{
-			name: "edit 带 file_path+old/new_string（R1 实测形状）",
-			info: protocol.ToolCallInfo{ID: "c2", Title: "edit", Status: "completed",
-				Input: map[string]any{"file_path": "sub/dir/a.go", "old_string": "x", "new_string": "y"}},
-			wantOK: true, wantPath: "sub/dir/a.go", wantOrigin: artifact.OriginToolEdit,
-		},
-		{
-			name: "相对路径带 ../ 归一（Clean，不在这里判越界）",
-			info: protocol.ToolCallInfo{ID: "c3", Title: "write",
-				Input: map[string]any{"file_path": "./a/../b.txt"}},
-			wantOK: true, wantPath: "b.txt", wantOrigin: artifact.OriginToolWrite,
-		},
-		{
-			// 真机 2026-11-04 的形状：模型给的是**绝对路径**（10/10 次 write/edit 都是），
-			// 旧判据在这里 return false，产物从未登记成功过。绝对与否交给 SafeRelPath 判越界。
-			name: "write 绝对路径 + 中文名（真机形状）",
-			info: protocol.ToolCallInfo{ID: "c4", Title: "write",
-				Input: map[string]any{"file_path": "/Users/u/.ark-mate/workspaces/default/杭州天气-2026-11-04.md"}},
-			wantOK:     true,
-			wantPath:   "/Users/u/.ark-mate/workspaces/default/杭州天气-2026-11-04.md",
-			wantOrigin: artifact.OriginToolWrite,
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, ok := ResolveToolWrite(c.info)
-			if ok != c.wantOK {
-				t.Fatalf("ok=%v 期望 %v", ok, c.wantOK)
-			}
-			if !ok {
-				return
-			}
-			if got.Path != c.wantPath {
-				t.Errorf("Path=%q 期望 %q", got.Path, c.wantPath)
-			}
-			if got.Origin != c.wantOrigin {
-				t.Errorf("Origin=%q 期望 %q", got.Origin, c.wantOrigin)
-			}
-		})
-	}
-}
-
-// TestResolveToolWrite_NotExtractable 覆盖「不该抽」的所有形状：非白名单 title、缺 file_path、
-// 形状不符。（绝对路径**不在此列**——它是真机常态，见上一条正例。）
-func TestResolveToolWrite_NotExtractable(t *testing.T) {
+// TestResolveToolPresent_WriteEditNotPresented 钉住「只认 present」的语义：
+// write/edit 写出的文件是「产出（produced）」而非「交付物」，ResolveToolPresent 对它一律返回
+// ok=false。这正是修复「过程脚本被当产物登记进资料库」的核心判据——即便 write 明确落了 file_path，
+// 也不再被识别为可抽取产物。
+func TestResolveToolPresent_WriteEditNotPresented(t *testing.T) {
 	cases := []struct {
 		name string
 		info protocol.ToolCallInfo
 	}{
-		{"title=read（非落文件）", protocol.ToolCallInfo{Title: "read", Input: map[string]any{"file_path": "a"}}},
-		{"title=bash", protocol.ToolCallInfo{Title: "bash", Input: map[string]any{"command": "ls"}}},
+		{"write 带 file_path+content（曾是产物，现已不抽）", protocol.ToolCallInfo{ID: "c1", Title: "write", Status: "completed",
+			Input: map[string]any{"file_path": "gen.py", "content": "print(1)"}}},
+		{"edit 带 file_path+old/new_string", protocol.ToolCallInfo{ID: "c2", Title: "edit", Status: "completed",
+			Input: map[string]any{"file_path": "sub/dir/a.go", "old_string": "x", "new_string": "y"}}},
+		{"write 绝对路径（真机常见）", protocol.ToolCallInfo{ID: "c3", Title: "write",
+			Input: map[string]any{"file_path": "/Users/u/ws/gen.py"}}},
+		{"read（非落文件）", protocol.ToolCallInfo{Title: "read", Input: map[string]any{"file_path": "a"}}},
+		{"bash", protocol.ToolCallInfo{Title: "bash", Input: map[string]any{"command": "ls"}}},
 		{"title 空", protocol.ToolCallInfo{Title: "", Input: map[string]any{"file_path": "a"}}},
-		{"title=write 但 rawInput 无 file_path", protocol.ToolCallInfo{Title: "write", Input: map[string]any{"content": "x"}}},
-		{"title=write 但 Input 为 nil", protocol.ToolCallInfo{Title: "write", Input: nil}},
-		{"title=write 但 Input 非 map（形状不符）", protocol.ToolCallInfo{Title: "write", Input: "raw-string"}},
-		{"file_path 非字符串", protocol.ToolCallInfo{Title: "write", Input: map[string]any{"file_path": 123}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got, ok := ResolveToolWrite(c.info); ok {
-				t.Fatalf("不应抽取，却得到 %+v", got)
+			if got, ok := ResolveToolPresent(c.info); ok {
+				t.Fatalf("write/edit 等非 present 不应被识别为交付物，却得到 %+v", got)
 			}
 		})
 	}

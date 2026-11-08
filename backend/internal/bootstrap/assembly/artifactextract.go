@@ -26,8 +26,13 @@ import (
 // defaultMaxSnapshotBytes 默认快照上限 32 MiB（方案 §4 已拍板 R2：超阈值**跳过不登记** + WARN）。
 const defaultMaxSnapshotBytes int64 = 32 << 20
 
-// artifactExtractor 实现 session.ArtifactExtractor：从一次工具事件里旁路抽取「write/edit 写出的
-// 工作区文件」为一条 artifacts 产物（file 类，字节快照进 filestore）。
+// artifactExtractor 实现 session.ArtifactExtractor：从一次工具事件里旁路抽取「`present` 声明的
+// 最终交付物」为一条 artifacts 产物（file 类，字节快照进 filestore）。
+//
+// **只认 present（与 dsh 语义对齐）**：dsh 里 `write`/`edit` 只是「写文件动作」，其产出（produced）
+// dsh 仅用于解析正文行内引用，**从不当作交付物**；`present` 才是模型「显式声明这是成品」的唯一动作
+// （见 dsh `packages/deliverables/tool-present`）。早先平台把每次 write/edit 落文件都登记为产物并
+// 自动收录进资料库，导致 `gen.py` 之类过程脚本与成品一起进了「本轮产物」和资料库。修正后只认 present。
 //
 // **严格两段式（方案 §2.5 C5）**：
 //   - 同步段（在 ExtractToolWrite 返回前完成）：解析路径 → 读工作区文件字节进内存 buffer；
@@ -59,34 +64,24 @@ func newArtifactExtractor(st *store.Store, attach *attachmentstore.Store, art sv
 
 // ExtractToolWrite 见接口注释。任何失败仅 WARN（C4）。
 //
-// 覆盖两类来源：present（一次可多文件）优先，再回落到 write/edit（一次一个）。
-//   - present：office 等经 Python exec 产出的成品文件靠它登记（平台不认 write/edit 那条写动作）；
-//   - write/edit：模型直接用写文件工具落的文件。
+// **只处理 present**：present 一次可声明多文件（office 等经 Python exec 产出的成品靠它显式声明）。
+// write/edit 写出的文件是「产出（produced）」而非「交付物」，dsh 自身也只把它用于正文行内引用，
+// 不当作产物——平台同样不再登记（否则中间脚本会污染「本轮产物」与资料库）。
 func (x *artifactExtractor) ExtractToolWrite(ctx context.Context, sessionID, runID string, info protocol.ToolCallInfo) {
-	// ① 识别。present 一次可声明多文件 → 先走 present；否则试 write/edit；都不是 → 静默跳过。
-	if rp, ok := workartifact.ResolveToolPresent(info); ok {
-		sess, ok, err := x.st.GetSession(ctx, sessionID)
-		if err != nil || !ok {
-			glog.Warnw(ctx, "产物抽取（present）：会话不存在，跳过", "session", sessionID, "err", err)
-			return
-		}
-		for _, p := range rp.Paths {
-			// 每个文件独立捕获/落盘；单个失败不影响其余文件（WARN 由 captureOne 内部记）。
-			x.captureOne(ctx, sess.Cwd, sessionID, runID, info.ID, p, rp.Origin)
-		}
-		return
-	}
-
-	rw, ok := workartifact.ResolveToolWrite(info)
+	rp, ok := workartifact.ResolveToolPresent(info)
 	if !ok {
+		// 不是 present：write/edit 等一律不登记（产出 ≠ 交付物）。
 		return
 	}
 	sess, ok, err := x.st.GetSession(ctx, sessionID)
 	if err != nil || !ok {
-		glog.Warnw(ctx, "产物抽取：会话不存在，跳过", "session", sessionID, "err", err)
+		glog.Warnw(ctx, "产物抽取（present）：会话不存在，跳过", "session", sessionID, "err", err)
 		return
 	}
-	x.captureOne(ctx, sess.Cwd, sessionID, runID, info.ID, rw.Path, rw.Origin)
+	for _, p := range rp.Paths {
+		// 每个文件独立捕获/落盘；单个失败不影响其余文件（WARN 由 captureOne 内部记）。
+		x.captureOne(ctx, sess.Cwd, sessionID, runID, info.ID, p, rp.Origin)
+	}
 }
 
 // captureOne 对一个「工具声明/写出的路径」做：解析 cwd 内绝对路径 → 越界校验 → 普通文件/阈值检查 →
