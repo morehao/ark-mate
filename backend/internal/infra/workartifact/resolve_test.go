@@ -91,6 +91,138 @@ func TestResolveToolWrite_NotExtractable(t *testing.T) {
 	}
 }
 
+// TestResolveToolPresent 覆盖 present 抽取的识别（多形态 files：字符串数组 / 对象数组 / path / file_path）。
+func TestResolveToolPresent(t *testing.T) {
+	cases := []struct {
+		name      string
+		info      protocol.ToolCallInfo
+		wantOK    bool
+		wantPaths []string
+	}{
+		{
+			// 官方 schema 形状：files 是对象数组，元素带 path（+ 可选 description）。
+			name: "对象数组（官方 schema：{path,description}）",
+			info: protocol.ToolCallInfo{ID: "p1", Title: "present",
+				Input: map[string]any{"files": []any{
+					map[string]any{"path": "out/report.pptx", "description": "季度报告幻灯片"},
+					map[string]any{"path": "out/data.xlsx"},
+				}}},
+			wantOK: true, wantPaths: []string{"out/report.pptx", "out/data.xlsx"},
+		},
+		{
+			// 字符串数组形态：files 直接是 []string。
+			name: "字符串数组（[]string）",
+			info: protocol.ToolCallInfo{ID: "p2", Title: "present",
+				Input: map[string]any{"files": []string{"a.docx", "sub/b.pdf"}}},
+			wantOK: true, wantPaths: []string{"a.docx", "sub/b.pdf"},
+		},
+		{
+			// []any 里混字符串元素。
+			name: "[]any 混字符串元素",
+			info: protocol.ToolCallInfo{ID: "p3", Title: "present",
+				Input: map[string]any{"files": []any{"x.pptx", map[string]any{"path": "y.docx"}}}},
+			wantOK: true, wantPaths: []string{"x.pptx", "y.docx"},
+		},
+		{
+			// 绝对路径原样保留（越界判定不在这里，交 SafeRelPath；与 write/edit 一致）。
+			name: "绝对路径 + 相对路径混排 + Clean 归一",
+			info: protocol.ToolCallInfo{ID: "p4", Title: "present",
+				Input: map[string]any{"files": []any{
+					map[string]any{"path": "/Users/u/ws/杭州天气.pptx"},
+					map[string]any{"path": "./a/../b.docx"},
+				}}},
+			wantOK: true, wantPaths: []string{"/Users/u/ws/杭州天气.pptx", "b.docx"},
+		},
+		{
+			// 对 file_path 键名的兜底兼容（write/edit 同款键名）。
+			name: "对象元素用 file_path 键（兜底兼容）",
+			info: protocol.ToolCallInfo{ID: "p5", Title: "present",
+				Input: map[string]any{"files": []any{
+					map[string]any{"file_path": "c.pptx"},
+				}}},
+			wantOK: true, wantPaths: []string{"c.pptx"},
+		},
+		{
+			// 空白项剔除；剩下有效路径仍抽。
+			name: "含空白项 → 剔除后仍抽",
+			info: protocol.ToolCallInfo{ID: "p6", Title: "present",
+				Input: map[string]any{"files": []string{"  ", "ok.pptx", "\t"}}},
+			wantOK: true, wantPaths: []string{"ok.pptx"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := ResolveToolPresent(c.info)
+			if ok != c.wantOK {
+				t.Fatalf("ok=%v 期望 %v", ok, c.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if got.Origin != artifact.OriginToolPresent {
+				t.Errorf("Origin=%q 期望 %q", got.Origin, artifact.OriginToolPresent)
+			}
+			if len(got.Paths) != len(c.wantPaths) {
+				t.Fatalf("Paths=%v 期望 %v", got.Paths, c.wantPaths)
+			}
+			for i := range c.wantPaths {
+				if got.Paths[i] != c.wantPaths[i] {
+					t.Errorf("Paths[%d]=%q 期望 %q", i, got.Paths[i], c.wantPaths[i])
+				}
+			}
+		})
+	}
+}
+
+// TestResolveToolPresent_NotExtractable 覆盖 present 不该抽的形状（title 非 present / 无 files / 空 / 形状不符）。
+func TestResolveToolPresent_NotExtractable(t *testing.T) {
+	cases := []struct {
+		name string
+		info protocol.ToolCallInfo
+	}{
+		{"title 非 present（write）", protocol.ToolCallInfo{Title: "write", Input: map[string]any{"files": []string{"a"}}}},
+		{"title 空", protocol.ToolCallInfo{Title: "", Input: map[string]any{"files": []string{"a"}}}},
+		{"present 但无 files 键", protocol.ToolCallInfo{Title: "present", Input: map[string]any{"other": 1}}},
+		{"present 但 Input 为 nil", protocol.ToolCallInfo{Title: "present", Input: nil}},
+		{"present 但 Input 非 map", protocol.ToolCallInfo{Title: "present", Input: "raw"}},
+		{"files 为空数组", protocol.ToolCallInfo{Title: "present", Input: map[string]any{"files": []any{}}}},
+		{"files 全空白", protocol.ToolCallInfo{Title: "present", Input: map[string]any{"files": []string{"  ", ""}}}},
+		{"files 元素形状认不出", protocol.ToolCallInfo{Title: "present", Input: map[string]any{"files": []any{123, map[string]any{"other": "x"}}}}},
+		{"files 类型不对（数字）", protocol.ToolCallInfo{Title: "present", Input: map[string]any{"files": 42}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got, ok := ResolveToolPresent(c.info); ok {
+				t.Fatalf("不应抽取，却得到 %+v", got)
+			}
+		})
+	}
+}
+
+// TestResolveToolPresent_RejectsOutsideWorkspace 验证 present 声明的越界路径在 SafeRelPath 处被拒
+// （解析层不做越界，端到端口径与 write/edit 一致）。
+func TestResolveToolPresent_RejectsOutsideWorkspace(t *testing.T) {
+	cwd := t.TempDir()
+	info := protocol.ToolCallInfo{Title: "present", Input: map[string]any{
+		"files": []any{
+			map[string]any{"path": "inside.pptx"},   // 相对 → cwd 内（接受）
+			map[string]any{"path": "../escape.txt"}, // 越界 → 拒
+		},
+	}}
+	got, ok := ResolveToolPresent(info)
+	if !ok {
+		t.Fatal("应识别为 present")
+	}
+	if _, rel, err := SafeRelPath(cwd, got.Paths[0]); err != nil || rel != "inside.pptx" {
+		t.Fatalf("cwd 内相对路径应接受：rel=%q err=%v", rel, err)
+	}
+	if _, _, err := SafeRelPath(cwd, got.Paths[1]); err == nil {
+		t.Fatal("越界 ../ 应被 SafeRelPath 拒绝")
+	} else {
+		assertPathReason(t, err, "path_escape")
+	}
+}
+
 // TestSafeRelPath 覆盖路径安全解析：相对/绝对、越界 `../`、符号链接逃逸、cwd 非绝对、非文件。
 func TestSafeRelPath(t *testing.T) {
 	cwd := t.TempDir() // 绝对路径

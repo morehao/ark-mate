@@ -9,7 +9,7 @@ import type { UnixMillis } from './time'
 export type ArtifactKind = 'file' | 'text' | 'table' | 'link'
 
 /** 产物来源（`artifacts.origin`）。 */
-export type ArtifactOrigin = 'tool_write' | 'tool_edit' | 'upload' | 'inline' | 'manual'
+export type ArtifactOrigin = 'tool_write' | 'tool_edit' | 'tool_present' | 'upload' | 'inline' | 'manual'
 
 /** `GET /sessions/:id/artifacts` 的元素（也用于 `GET /artifacts/:id`）。 */
 export interface ArtifactMeta {

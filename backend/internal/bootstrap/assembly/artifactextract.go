@@ -58,21 +58,46 @@ func newArtifactExtractor(st *store.Store, attach *attachmentstore.Store, art sv
 }
 
 // ExtractToolWrite 见接口注释。任何失败仅 WARN（C4）。
+//
+// 覆盖两类来源：present（一次可多文件）优先，再回落到 write/edit（一次一个）。
+//   - present：office 等经 Python exec 产出的成品文件靠它登记（平台不认 write/edit 那条写动作）；
+//   - write/edit：模型直接用写文件工具落的文件。
 func (x *artifactExtractor) ExtractToolWrite(ctx context.Context, sessionID, runID string, info protocol.ToolCallInfo) {
-	// ① 识别（title 白名单 + rawInput.file_path）。不是 write/edit 落文件 → 静默跳过。
+	// ① 识别。present 一次可声明多文件 → 先走 present；否则试 write/edit；都不是 → 静默跳过。
+	if rp, ok := workartifact.ResolveToolPresent(info); ok {
+		sess, ok, err := x.st.GetSession(ctx, sessionID)
+		if err != nil || !ok {
+			glog.Warnw(ctx, "产物抽取（present）：会话不存在，跳过", "session", sessionID, "err", err)
+			return
+		}
+		for _, p := range rp.Paths {
+			// 每个文件独立捕获/落盘；单个失败不影响其余文件（WARN 由 captureOne 内部记）。
+			x.captureOne(ctx, sess.Cwd, sessionID, runID, info.ID, p, rp.Origin)
+		}
+		return
+	}
+
 	rw, ok := workartifact.ResolveToolWrite(info)
 	if !ok {
 		return
 	}
-	// ② 解析 cwd（会话工作目录）→ 绝对路径 + 越界校验。cwd 拿不到/路径越界 → WARN 跳过。
 	sess, ok, err := x.st.GetSession(ctx, sessionID)
 	if err != nil || !ok {
 		glog.Warnw(ctx, "产物抽取：会话不存在，跳过", "session", sessionID, "err", err)
 		return
 	}
-	abs, rel, err := workartifact.SafeRelPath(sess.Cwd, rw.Path)
+	x.captureOne(ctx, sess.Cwd, sessionID, runID, info.ID, rw.Path, rw.Origin)
+}
+
+// captureOne 对一个「工具声明/写出的路径」做：解析 cwd 内绝对路径 → 越界校验 → 普通文件/阈值检查 →
+// 同步读字节进内存 → 异步落盘登记。任何失败仅 WARN/跳过（C4），绝不 panic 上抛（外层另有 recover）。
+//
+// 单文件与 present 多文件共用这一份逻辑：present 对每个文件各调一次，互不影响。
+func (x *artifactExtractor) captureOne(ctx context.Context, cwd, sessionID, runID, toolCallID, rawPath string, origin artifact.Origin) {
+	// ② 解析 cwd（会话工作目录）→ 绝对路径 + 越界校验。cwd 拿不到/路径越界 → WARN 跳过。
+	abs, rel, err := workartifact.SafeRelPath(cwd, rawPath)
 	if err != nil {
-		glog.Warnw(ctx, "产物抽取：路径解析失败，跳过", "session", sessionID, "path", rw.Path, "err", err)
+		glog.Warnw(ctx, "产物抽取：路径解析失败，跳过", "session", sessionID, "path", rawPath, "err", err)
 		return
 	}
 	// ③ 只认普通文件（不抽目录/符号链接）。
@@ -96,8 +121,7 @@ func (x *artifactExtractor) ExtractToolWrite(ctx context.Context, sessionID, run
 	// ⑥ 异步落盘：算哈希 → filestore → artifacts 行。此后与工作区/dsh 完全解耦。
 	title := filepath.Base(abs)
 	mime := "" // 不探测类型（产物表不强猜 mime；如需可按扩展名补，后续再评估）
-	origin := string(rw.Origin)
-	go x.persist(sessionID, runID, info.ID, title, rel, mime, origin, buf)
+	go x.persist(sessionID, runID, toolCallID, title, rel, mime, string(origin), buf)
 }
 
 // persist 异步段：算 sha256 → 上传 filestore → 建 artifacts 行。失败仅 WARN（C4）。

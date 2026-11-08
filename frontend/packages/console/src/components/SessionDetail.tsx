@@ -44,6 +44,7 @@ function fmtBytes(n: number): string {
 const ORIGIN_LABEL: Record<string, string> = {
   tool_write: '工具写入',
   tool_edit: '工具编辑',
+  tool_present: '交付声明',
   upload: '上传',
   inline: '内联',
   manual: '手动登记',

@@ -60,17 +60,26 @@ nodeLinker: hoisted
 autoInstallPeers: false
 `
 
-// profilePatchYML mate-acp 的覆写层：把 sdk-app 里那段 office insert block 原样搬来。
+// profilePatchYML mate-acp 的覆写层：把 sdk-app 里那段 office insert block 原样搬来，
+// 并补上 sdk-app 里同样挂着的 present / deliverable-file-references（acp 基座缺、ark-mate 也要）。
 //
 // 三条 `disabled: !!js ...` 门控**逐字照抄官方**（不改成 disabled:false）：平台在 build.go 里
 // 保证 `DSH_PRIMARY_RUNTIME`/`DSH_BUNDLED_OFFICE_*` env 就位，门控自然为 enabled；保留官方语义可
 // 在 env 缺失时如实降级（skill-office 检查 cli、workspace-dependencies 检查 runtime）而非硬开。
 //
+// present / deliverable-file-references 在 sdk-app 里**都没有 inject / config**（全用插件自身默认），
+// 也**没有 env 门控**（一直启用）：ark-mate 逐字照抄这两个 name，不额外加 disabled。
+//   - present：模型产出文件后声明交付物（dsh 侧 `present` 工具），是「office 用 Python exec 写文件、
+//     平台只认 write/edit 而漏抽 .pptx/.docx/... 拿不到成品」这条 P0 链的收口——present 上报后平台
+//     侧按 rawInput.files 逐个登记（见 infra/workartifact + assembly/artifactextract）。
+//   - deliverable-file-references：给模型注入文件链接/交付物提示词（systemPrompt 段）。
+//
 // 升级 dsh 时：与 `packages/bundle/sdk-app/cordis.patch.yml` 那段对齐（字段改了要同步）。
 const profilePatchYML = `# ark-mate 生成并维护的 dsh profile 覆写层（平台自有；经 --profile mate-acp 生效）。
-# 作用：在 acp 组合（dsh-base + dsh-acp-app）上补 office / workspace-dependencies 内置能力。
-# 来源：逐字搬自 dsh 0.2.2-rc.1 的 packages/bundle/sdk-app/cordis.patch.yml（office block）。
-# 归属标记：本文件只有平台会写。升级 dsh 时与该 bundle 的 office block 对齐。
+# 作用：在 acp 组合（dsh-base + dsh-acp-app）上补 office / workspace-dependencies 内置能力，
+#       并补 present / deliverable-file-references（sdk-app 有、acp 基座无）。
+# 来源：逐字搬自 dsh 0.2.2-rc.1 的 packages/bundle/sdk-app/cordis.patch.yml（office block + present 两条）。
+# 归属标记：本文件只有平台会写。升级 dsh 时与该 bundle 对齐。
 - insert:
     - id: workspace-dependencies
       name: '@deepseek-ai/dsh-tool-workspace-dependencies'
@@ -88,6 +97,13 @@ const profilePatchYML = `# ark-mate 生成并维护的 dsh profile 覆写层（�
 
     - id: office-to-pdf
       name: '@deepseek-ai/dsh-office-to-pdf'
+
+    # present / deliverable-file-references：照 sdk-app 原样（无 inject / config / env 门控，一直启用）。
+    - id: present
+      name: '@deepseek-ai/dsh-tool-present'
+
+    - id: deliverable-file-references
+      name: '@deepseek-ai/dsh-deliverable-file-references'
 `
 
 // profileFiles 是 mate-acp profile 的四份静态文件（逐字与 dsh 模板生成物一致 + 覆写层）。

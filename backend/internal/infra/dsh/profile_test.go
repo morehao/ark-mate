@@ -35,6 +35,11 @@ func TestProvisionProfileWritesFiles(t *testing.T) {
 		"@deepseek-ai/dsh-skill-office",
 		"@deepseek-ai/dsh-office-to-pdf",
 		"DSH_PRIMARY_RUNTIME",
+		// present / deliverable-file-references：照 sdk-app 原样补进 office block（一直启用）。
+		"id: present",
+		"@deepseek-ai/dsh-tool-present",
+		"id: deliverable-file-references",
+		"@deepseek-ai/dsh-deliverable-file-references",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("cordis.patch.yml 缺 %q", want)
