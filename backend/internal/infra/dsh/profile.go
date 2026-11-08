@@ -147,29 +147,80 @@ var BundledRuntimeEnvKeys = []string{
 	"DSH_BUNDLED_OFFICE_NODE",
 }
 
-// BundledEnv 由「随包 runtime 根」（即 dsh 的 `Resources/runtime`）派生 4 个 KEY=VALUE，供注入
-// 该底座的启动环境——mate-acp 覆写层的 `!!js` 门控与 config 的 getter 读它们。
+// BundledEnv 由 ark-mate **自有**的两处随包资产目录派生 4 个 KEY=VALUE，供注入 dsh 启动环境——
+// mate-acp 覆写层的 `!!js` 门控与 config 的 getter 读它们。
 //
-// 约定目录布局（与 DeepSeek Harness 随包一致）：
+//   - primaryRuntime：ark-mate 自带的 primary-runtime 载荷目录（含 `runtime.json` 与 `dependencies/`，
+//     内 bundled Python/Node），对应 `DSH_PRIMARY_RUNTIME`；
+//   - officeSkills：ark-mate 自带 payload 里的 `@deepseek-ai/dsh-skill-office/assets` 目录（含 office
+//     七个 skill 的 SKILL.md），对应 `DSH_BUNDLED_OFFICE_SKILLS` / `DSH_BUNDLED_OFFICE_CLI`；
+//   - `DSH_BUNDLED_OFFICE_NODE` 从 primaryRuntime 下的 node 推导。
 //
-//	<runtimeRoot>/primary-runtime                              —— DSH_PRIMARY_RUNTIME
-//	<runtimeRoot>/office-skills                               —— DSH_BUNDLED_OFFICE_SKILLS
-//	<runtimeRoot>/office-skills                               —— DSH_BUNDLED_OFFICE_CLI（office CLI 资产根）
-//	<runtimeRoot>/primary-runtime/dependencies/node/bin/node   —— DSH_BUNDLED_OFFICE_NODE
-//
-// runtimeRoot 为空 → 返回 nil（调用方据此跳过注入，覆盖层门控随之把 office 关掉=如实降级）。
-func BundledEnv(runtimeRoot string) []string {
-	root := strings.TrimSpace(runtimeRoot)
-	if root == "" {
+// **绝不从 DSH 桌面端取**：两个目录都必须由 ark-mate 自己的 payload 提供；任一为空 → 返回 nil
+// （覆写层门控顺带把 office 关掉 = 如实降级，不借用外部桌面应用）。
+func BundledEnv(primaryRuntime, officeSkills string) []string {
+	pr := strings.TrimSpace(primaryRuntime)
+	os := strings.TrimSpace(officeSkills)
+	if pr == "" || os == "" {
 		return nil
 	}
-	primary := filepath.Join(root, "primary-runtime")
-	officeSkills := filepath.Join(root, "office-skills")
-	node := filepath.Join(primary, "dependencies", "node", "bin", "node")
+	node := filepath.Join(pr, "dependencies", "node", "bin", "node")
 	return []string{
-		"DSH_PRIMARY_RUNTIME=" + primary,
-		"DSH_BUNDLED_OFFICE_SKILLS=" + officeSkills,
-		"DSH_BUNDLED_OFFICE_CLI=" + officeSkills,
+		"DSH_PRIMARY_RUNTIME=" + pr,
+		"DSH_BUNDLED_OFFICE_SKILLS=" + os,
+		"DSH_BUNDLED_OFFICE_CLI=" + os,
 		"DSH_BUNDLED_OFFICE_NODE=" + node,
 	}
+}
+
+// ResolveBundledDirs 解析 ark-mate **自有**的两处随包资产目录（primary-runtime 与 office skill assets）。
+//
+// 来源优先级（全部限定在 ark-mate 自己的安装面，**绝不回落到 DSH 桌面端**）：
+//  1. 显式 env：`MATE_DSH_BUNDLED_RUNTIME`（primary-runtime 目录）、`MATE_DSH_BUNDLED_OFFICE_SKILLS`
+//     （office skills 目录）——给运维/测试精确指定；
+//  2. 由 `MATE_DSH_ENTRY`（Electron 壳传给核心的 dsh 载荷入口 `<payloads>/dsh/<ver>/node_modules/
+//     @deepseek-ai/dsh/lib/bin.js`）推导：
+//     - office skills = 同级 `@deepseek-ai/dsh-skill-office/assets`（在 dsh 载荷里，ark-mate 自带）；
+//     - primary-runtime = `<payloads>/primary-runtime/<ver>/`（ark-mate 自带的独立载荷）。
+//
+// 任一目录解析不到（且没有显式 env）→ 该目录返回空；BundledEnv 会据此跳过注入（office 关闭）。
+func ResolveBundledDirs() (primaryRuntime, officeSkills string) {
+	primaryRuntime = strings.TrimSpace(os.Getenv("MATE_DSH_BUNDLED_RUNTIME"))
+	officeSkills = strings.TrimSpace(os.Getenv("MATE_DSH_BUNDLED_OFFICE_SKILLS"))
+	entry := strings.TrimSpace(os.Getenv("MATE_DSH_ENTRY"))
+	if entry == "" {
+		return primaryRuntime, officeSkills
+	}
+	// entry = <payloads>/dsh/<ver>/node_modules/@deepseek-ai/dsh/lib/bin.js
+	dshPkgDir := filepath.Dir(filepath.Dir(entry)) // .../@deepseek-ai/dsh
+	aiDir := filepath.Dir(dshPkgDir)               // .../@deepseek-ai
+	if officeSkills == "" {
+		officeSkills = filepath.Join(aiDir, "dsh-skill-office", "assets")
+	}
+	if primaryRuntime == "" {
+		// <payloads>/dsh/<ver>/node_modules/@deepseek-ai/dsh → 上溯到 <payloads>/dsh/<ver> → <payloads>
+		dshPayloadVer := filepath.Dir(filepath.Dir(aiDir)) // .../@deepseek-ai/dsh → skip: aiDir is @deepseek-ai
+		_ = dshPayloadVer
+		// 从 entry 找到 `.../payloads/dsh/<ver>/`：node_modules/@deepseek-ai/dsh/lib/bin.js
+		// 向上: lib → dsh → @deepseek-ai → node_modules → <ver> → dsh → payloads
+		p := entry
+		for i := 0; i < 6; i++ {
+			p = filepath.Dir(p)
+		}
+		// p 现在是 <payloads>/dsh
+		payloadsRoot := filepath.Dir(p)
+		primaryRuntime = filepath.Join(payloadsRoot, "primary-runtime")
+	}
+	// 校验存在性：不存在则清空，避免注入错路径（底座会 ENOENT）。
+	if primaryRuntime != "" {
+		if fi, err := os.Stat(filepath.Join(primaryRuntime, "runtime.json")); err != nil || fi.IsDir() {
+			primaryRuntime = ""
+		}
+	}
+	if officeSkills != "" {
+		if fi, err := os.Stat(filepath.Join(officeSkills, "office-docx", "SKILL.md")); err != nil || fi.IsDir() {
+			officeSkills = ""
+		}
+	}
+	return primaryRuntime, officeSkills
 }
