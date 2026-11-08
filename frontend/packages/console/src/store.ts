@@ -14,6 +14,7 @@ import {
   deleteWorkspace as apiDeleteWorkspace,
   listSessions,
   listModelCatalog,
+  listModels,
   listQueuedInputs,
   listWorkspaces,
   moveWorkspace as apiMoveWorkspace,
@@ -41,6 +42,7 @@ import type {
   SessionSummary,
   ModelCatalogResp,
   ModelRef,
+  ModelsResp,
   QueuedInput,
   SessionCapabilitiesPatch,
   RunPhase,
@@ -599,6 +601,15 @@ export interface MateState {
    * v19 起这条读面**无参**（原来要带 `?agent=<id>`，而底座只有一个）。
    */
   modelCatalog: ModelCatalogResp | null
+  /**
+   * 平台**唯一默认模型**的平台模型行 id（`GET /models` 的 `default_model`；空串 / null = 未设）。
+   *
+   * 它与 `modelCatalog` 是**两个读面**：`modelCatalog` 是运行时目录（广告了哪些、会话能选什么），
+   * 而这个是「设置 · 模型」里用户指定、由平台落库的**全局默认**——新建会话页拿不到设置页的局部
+   * state，只能从这里读，才能在无本地记忆时回落到默认模型。由 `loadDefaultModel` 装载
+   * （新建会话页在拉目录时一并调用），失败保持 null（= 不做默认回选，不阻塞建会话）。
+   */
+  defaultModelId: string | null
   /** composer `/` 技能选择器的内置技能目录（v4；`GET /composer/skills`，只读一次装载）。 */
   composerSkills: ComposerSkill[]
 }
@@ -676,6 +687,13 @@ export interface MateActions {
   ) => Promise<string | undefined>
   /** 拉取模型目录（来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
   loadModelCatalog: () => Promise<void>
+  /**
+   * 拉取平台唯一默认模型 id（`GET /models` 的 `default_model`，落进 `defaultModelId`）。
+   *
+   * 失败静默保持 null：默认模型只是"新建会话页的预选兜底"，取不到就不预选，不该 toast 打扰，
+   * 更不该阻塞建会话（不指定模型即跟随运行时默认）。
+   */
+  loadDefaultModel: () => Promise<void>
   /** 装载 composer `/` 技能选择器的内置技能目录（v4；失败 → 空目录，不阻塞输入）。 */
   loadComposerSkills: () => Promise<void>
   /** 会话级模型变更（经运行时 set_config_option 立即生效；运行时拒绝 → 报错且不改元数据）。 */
@@ -754,6 +772,7 @@ export const initialState: MateState = {
   railMode: 'active',
   historyStart: {},
   modelCatalog: null,
+  defaultModelId: null,
   composerSkills: [],
 }
 
@@ -1199,6 +1218,18 @@ export const useMate = create<MateStore>((set, get) => {
         // 不阻塞建会话（不指定模型即跟随运行时默认）。
         set({ modelCatalog: null })
         showToast(toErrorMessage(err))
+      }
+    },
+
+    loadDefaultModel: async () => {
+      try {
+        // `GET /models` 是平台清单面，`default_model` 是其中唯一默认模型的平台行 id（空串 = 未设）。
+        // 只取这一个字段落进 store；清单本身不在这里缓存（设置页另有自己的读面）。
+        const resp: ModelsResp = await listModels()
+        set({ defaultModelId: resp.default_model || null })
+      } catch {
+        // 取不到默认模型 = 不做默认回选（静默，不 toast、不阻塞建会话）。
+        set({ defaultModelId: null })
       }
     },
 

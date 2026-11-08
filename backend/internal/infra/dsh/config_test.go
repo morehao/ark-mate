@@ -389,6 +389,13 @@ func TestDshRouteKeyAgreesBetweenPatchAndModelValue(t *testing.T) {
 	if len(keys) == 0 {
 		t.Fatal("patch 里一个 `providers.<k>` 键都没解析到（fail-closed：判据自身失效）")
 	}
+	// 回归：`- id: llm-pi-ai` 必须**恰好出现 1 次**。dsh 的 `--patch` 是「除 id 外整体替换」语义，
+	// 多条 `- id: llm-pi-ai` 会让后者覆盖前者的 `providers`，最终只剩最后一个 route →
+	// `- id: acp` 的 `provider:` 指向被丢弃的 route → `session/new` -32603 / 平台建会话 50001。
+	// goldenSet 有 3 个 provider，正是多 provider 折叠成单条的场景。
+	if c := strings.Count(string(b), "- id: llm-pi-ai"); c != 1 {
+		t.Fatalf("`- id: llm-pi-ai` 应恰好出现 1 次（所有 provider 合并进同一个 providers 块），实际 %d 次：\n%s", c, string(b))
+	}
 	if len(keys) != len(set.Providers) {
 		t.Fatalf("patch 里的路由键数（%d）与声明的供应商数（%d）不等", len(keys), len(set.Providers))
 	}

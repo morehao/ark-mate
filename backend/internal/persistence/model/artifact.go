@@ -24,11 +24,12 @@ const (
 
 // 产出来源（origin）：怎么来的。与 kind 正交（kind 说载体，origin 说来源）。
 const (
-	ArtifactOriginToolWrite = "tool_write"
-	ArtifactOriginToolEdit  = "tool_edit"
-	ArtifactOriginUpload    = "upload"
-	ArtifactOriginInline    = "inline"
-	ArtifactOriginManual    = "manual"
+	ArtifactOriginToolWrite   = "tool_write"
+	ArtifactOriginToolEdit    = "tool_edit"
+	ArtifactOriginToolPresent = "tool_present" // dsh present 工具声明的交付物（一次可多文件）
+	ArtifactOriginUpload      = "upload"
+	ArtifactOriginInline      = "inline"
+	ArtifactOriginManual      = "manual"
 )
 
 // ArtifactEntity 是 artifacts 表的一行（产物溯源登记）。

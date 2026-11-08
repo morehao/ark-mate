@@ -2,9 +2,11 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -97,22 +99,29 @@ func Classify(err error) *Error {
 		return ae
 	}
 	// SDK 的 JSON-RPC 错误响应。
+	//
+	// 几乎所有分支都把 `data.details` 拼进文案：JSON-RPC 的 `message` 常常是**无信息量的通用词**
+	// （-32603 固定就是 "Internal error"），真正的原因在 `data.details` 里（实测：dsh 的
+	// `session/new` 失败时 `message:"Internal error"` 但 `data.details:"no adapter registered
+	// for provider \"mate-magpie\""`）。丢掉它，用户只看到 `50001 Internal error`，排障得去翻核心
+	// 日志——这正是本次建会话失败被误报成"Internal error"的观感根源。脱敏由 `code.Error` 统一兜。
 	var re *acpsdk.RequestError
 	if errors.As(err, &re) {
+		msg := requestErrorDetail(re)
 		switch re.Code {
 		case -32601: // method not found
-			return NewError(ClassUnsupported, "method_not_found", re.Message, err)
+			return NewError(ClassUnsupported, "method_not_found", msg, err)
 		case -32602:
-			return NewError(ClassRequest, "invalid_params", re.Message, err)
+			return NewError(ClassRequest, "invalid_params", msg, err)
 		case -32600:
-			return NewError(ClassRequest, "invalid_request", re.Message, err)
+			return NewError(ClassRequest, "invalid_request", msg, err)
 		case -32000, -32099: // protocol 保留段（ACP 自定义）按 service 处理
-			return NewError(ClassService, "protocol_error", re.Message, err)
+			return NewError(ClassService, "protocol_error", msg, err)
 		default:
 			if re.Code >= 0 { // 业务错误码段：runtime 自定义
-				return NewError(ClassService, fmt.Sprintf("runtime_error_%d", re.Code), re.Message, err)
+				return NewError(ClassService, fmt.Sprintf("runtime_error_%d", re.Code), msg, err)
 			}
-			return NewError(ClassUnknown, "jsonrpc_error", re.Message, err)
+			return NewError(ClassUnknown, "jsonrpc_error", msg, err)
 		}
 	}
 	// acpsdk.Error 是协议载荷结构体（无 Error() 方法），不作为 error 链目标；其内容已含于 RequestError。
@@ -128,4 +137,42 @@ func Classify(err error) *Error {
 		return NewError(ClassConnection, "timeout", "操作超时", err)
 	}
 	return NewError(ClassUnknown, "unknown", err.Error(), err)
+}
+
+// requestErrorDetail 把 JSON-RPC 错误的 `message` 与 `data.details` 合成一句话给用户看。
+//
+// 取舍：`message` 保留在最前（它是稳定可读的协议词，如 "Internal error" / "Invalid params"），
+// 后面接 `data.details`——有它就拼上（这是真正的死因），没有就回落到 `data` 的紧凑 JSON。
+// 若 data 也取不出可读值，就只回 message（与原行为逐字相同，不劣化旧路径）。
+//
+// 只认 `data` 里的 `details` 字符串字段：那是 ACP 生态里约定的自由文本位（dsh 实测如此），
+// 其余形状的 data 用 JSON 兜底。**不在这里脱敏**——该错误最终会经 `code.FromError` → `code.Error`
+// 的统一脱敏闸门；本函数产出的串也可能随 `run.error` 进事件，那条出口另有脱敏。
+func requestErrorDetail(re *acpsdk.RequestError) string {
+	msg := re.Message
+	if re == nil || re.Data == nil {
+		return msg
+	}
+	detail := ""
+	if m, ok := re.Data.(map[string]any); ok {
+		if s, ok := m["details"].(string); ok {
+			detail = strings.TrimSpace(s)
+		}
+	}
+	if detail == "" {
+		// 没有约定字段 → 用紧凑 JSON 兜底（可能含结构信息，聊胜于无）。
+		if b, err := json.Marshal(re.Data); err == nil {
+			s := strings.TrimSpace(string(b))
+			if s != "" && s != "{}" && s != "null" {
+				detail = s
+			}
+		}
+	}
+	if detail == "" {
+		return msg
+	}
+	if msg == "" {
+		return detail
+	}
+	return msg + "：" + detail
 }

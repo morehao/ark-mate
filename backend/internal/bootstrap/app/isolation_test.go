@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 
@@ -89,8 +88,19 @@ func TestInitPinsBuildRuntime(t *testing.T) {
 		}
 	}
 	spec, _ := a.Result().Runtime.Get("dsh")
-	if want := runtime.IsolationEnvFor(dsh.Spec(), home); !reflect.DeepEqual(spec.Launch.Env, want) {
-		t.Fatalf("dsh 的隔离环境未接上:\n got %v\nwant %v", spec.Launch.Env, want)
+	// 隔离 env（DSH_HOME/npm_*）必须接上。用"隔离 env 是子集"判定。
+	// 注意：office 随包 env（DSH_PRIMARY_RUNTIME 等）现在**只来自 ark-mate 自有 payload**
+	// （MATE_DSH_ENTRY 推导或显式 MATE_DSH_BUNDLED_*）；本测试环境无该 payload → office env 不注入
+	// 是**正确**行为（不再借用 DSH 桌面端）。故这里只断言隔离 env，不断言 office env。
+	want := runtime.IsolationEnvFor(dsh.Spec(), home)
+	envSet := map[string]bool{}
+	for _, kv := range spec.Launch.Env {
+		envSet[kv] = true
+	}
+	for _, kv := range want {
+		if !envSet[kv] {
+			t.Fatalf("dsh 隔离环境缺失 %q；现有 %v", kv, spec.Launch.Env)
+		}
 	}
 	if got := a.Meta().Home; got != home {
 		t.Fatalf("/meta 的 home 不符: got %q want %q", got, home)

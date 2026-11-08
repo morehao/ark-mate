@@ -449,7 +449,54 @@ func rewriteDshV11ToV24(t *testing.T, old string) string {
 	// B4（v40）：每个 provider 在 `api:` 行之后补一行 `compat: {"supportsDeveloperRole":false}`
 	// （v11 夹具不带 compat；adapter 现对 openai-completions 默认下发该开关——退发旧式 system 角色）。
 	withCompat := insertGoldenProviderCompat(t, withInputs)
-	return rewriteGoldenRouteKeys(t, withCompat)
+	// B5（本修复）：把 v11 里**逐 route 各一条** `- id: llm-pi-ai` 折叠成**同一条** `providers:`
+	// 块（dsh `--patch` 是整体替换，多条会互相覆盖，只剩最后一个 route → acp.provider 指向被丢弃
+	// 的 route → `session/new` -32603 / 平台 50001）。见 `mergeGoldenLlmProviderBlocks`。
+	merged := mergeGoldenLlmProviderBlocks(t, withCompat)
+	return rewriteGoldenRouteKeys(t, merged)
+}
+
+// mergeGoldenLlmProviderBlocks 是 B5 的机械改写：把字符串里**多条** `- id: llm-pi-ai` 折叠为一条。
+//
+// v11 的产出是「每条 route 一组三行头 `- id: llm-pi-ai` / `  config:` / `    providers:` + 该
+// route 的 `      "<k>":` 块」。折叠后只保留**第一组**头三行，其余组的头三行删除，其后的 provider
+// 块（缩进 6 起）原样拼接到同一个 `providers:` 下——因为各块缩进本就一致，拼接即等价于合并。
+//
+// 反证：不折叠 → A 部分比对（rewritten == v12）红，因为 v12 现在是单条目。
+func mergeGoldenLlmProviderBlocks(t *testing.T, text string) string {
+	t.Helper()
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	seen := 0     // 已遇到的 `- id: llm-pi-ai` 条目数
+	skip := false // 当前是否正处在"被丢弃的第 2+ 条目的头三行"里
+	for _, ln := range lines {
+		if ln == "- id: llm-pi-ai" {
+			seen++
+			if seen > 1 {
+				skip = true
+				continue
+			}
+			out = append(out, ln)
+			continue
+		}
+		if skip {
+			// 紧跟被丢弃 `- id: llm-pi-ai` 的 `  config:` / `    providers:` 一并丢弃；
+			// 到 provider 块（缩进 6 的 `      "<k>":`）即停止跳过，恢复正常输出。
+			if ln == "  config:" || ln == "    providers:" {
+				continue
+			}
+			skip = false
+		}
+		out = append(out, ln)
+	}
+	if seen == 0 {
+		t.Fatalf("v11 产出里没有 `- id: llm-pi-ai`，B5 折叠无对象（判据空转）")
+	}
+	if seen < 2 {
+		// 夹具就是单条也无所谓，但这条用例的价值在于覆盖"多条折叠"，这里要求夹具确实是多条。
+		t.Fatalf("v11 产出里只有 %d 条 `- id: llm-pi-ai`——B5 折叠没被真正覆盖", seen)
+	}
+	return strings.Join(out, "\n")
 }
 
 // rewriteGoldenRouteKeys 是 B3 的机械改写：① 路由键（`providers.<k>` 的键与 `- id: acp` 的

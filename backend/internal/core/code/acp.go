@@ -97,8 +97,12 @@ func fromACP(err error) (gerror.Error, bool) {
 		// SDK 把"底座进程没了"裹成 JSON-RPC -32603 的通用文案（字面量 `Internal error`，
 		// 见 acp-go-sdk errors.go）。这句话单独摆给用户没有信息量，而尾巴里有——换掉它。
 		// 若将来 SDK 换了文案，这里只是不再替换（退回它自己的话），不会出错。
-		if msg == "Internal error" {
-			msg = "底座未完成 ACP 握手就断开"
+		//
+		// 用前缀匹配而不是全等：`failure.Classify` 会把 `data.details` 拼在 message 之后
+		// （`Internal error：{...}`），此时那句通用词仍是消息的**开头**，照样该被替换，而后面的
+		// 结构化细节要保留（它可能是真因）。替换只换掉开头那句，保留 `：<details>` 尾巴。
+		if strings.HasPrefix(msg, "Internal error") {
+			msg = "底座未完成 ACP 握手就断开" + strings.TrimPrefix(msg, "Internal error")
 		}
 		msg += "；" + s
 	}

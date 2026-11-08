@@ -44,13 +44,17 @@ type Origin string
 const (
 	OriginToolWrite Origin = "tool_write"
 	OriginToolEdit  Origin = "tool_edit"
-	OriginUpload    Origin = "upload"
-	OriginInline    Origin = "inline"
-	OriginManual    Origin = "manual"
+	// OriginToolPresent dsh `present` 工具声明的交付物（一次可声明多文件）。
+	// 与 tool_write/tool_edit 区分：present 是模型「显式声明这是成品」，不是文件写入动作本身；
+	// office 等经 Python 脚本产出的文件（平台不认 write/edit）靠它登记，见 infra/workartifact。
+	OriginToolPresent Origin = "tool_present"
+	OriginUpload      Origin = "upload"
+	OriginInline      Origin = "inline"
+	OriginManual      Origin = "manual"
 )
 
 // AllOrigins 合法来源集合。
-var AllOrigins = []Origin{OriginToolWrite, OriginToolEdit, OriginUpload, OriginInline, OriginManual}
+var AllOrigins = []Origin{OriginToolWrite, OriginToolEdit, OriginToolPresent, OriginUpload, OriginInline, OriginManual}
 
 // IsValidOrigin 判断一个来源是否在封闭集合内。
 func IsValidOrigin(o Origin) bool {

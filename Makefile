@@ -248,6 +248,17 @@ desktop/payloads:
 	$(require-node)
 	cd $(FRONTEND_ROOT)/apps/desktop && node scripts/prepare-runtime.mjs \
 		$(if $(PLATFORM),--platform $(PLATFORM),) $(if $(ARCH),--arch $(ARCH),)
+	@# ark-mate 自带的 primary-runtime 载荷（bundled Python/Node + Office 库）——让 ark-mate
+	@# **不依赖 DSH 桌面端**也具备 dsh 的 office/依赖能力。复用 DSH 的 prepare.ts（已 vendor）。
+	@# 产物落 resources/payloads/primary-runtime；升 dsh 版本时同步 scripts/primary-runtime/lock.json。
+	MATE_VERSION=$(DESKTOP_VERSION) cd $(FRONTEND_ROOT)/apps/desktop && node --experimental-strip-types --no-warnings scripts/prepare-primary-runtime.mjs \
+		$(if $(PR_TARGET),--target $(PR_TARGET),)
+
+.PHONY: desktop/primary-runtime
+desktop/primary-runtime:
+	$(require-node)
+	MATE_VERSION=$(DESKTOP_VERSION) cd $(FRONTEND_ROOT)/apps/desktop && node --experimental-strip-types --no-warnings scripts/prepare-primary-runtime.mjs \
+		$(if $(PR_TARGET),--target $(PR_TARGET),) $(if $(SKIP_SMOKE),--skip-smoke,)
 
 # 合规生成物（M4-5，设计 §11）：`resources/compliance/{THIRD-PARTY-NOTICES.txt,sbom.cdx.json}`。
 # 从 release.json + 载荷清单（payload.json）+ 随包依赖树 + 锁文件生成；两个文件都是**生成物**
@@ -507,7 +518,7 @@ dev: dev/runtime-bin
 	  MATE_DEV_WEB_DIR=$(WEB_DIR) MATE_DEV_CORE_DIR=$(CURDIR)/backend \
 	  MATE_DEV_CORE_LDFLAG_ARGS='$(CORE_LDFLAG_ARGS)' MATE_DEV_RUNTIME=$(RUNTIME) \
 	  MATE_DEV_RUNTIME_BIN='$(RUNTIME_BIN_ABS)' MATE_DEV_RUNTIME_BIN_SOURCE='$(RUNTIME_BIN_SOURCE)' \
-	  MATE_DEV_PAYLOADS_ROOT=$(CURDIR)/$(PAYLOADS_ROOT) \
+	  MATE_DEV_PAYLOADS_ROOT=$(CURDIR)/$(PAYLOADS_ROOT) MATE_DEV_BIN_DIR=$(DEV_BIN_DIR) \
 	  exec node scripts/dev-loop.mjs
 
 # 全仓只有这一个构建配置：不带任何构建标签，不依赖前端产物（核心从不自带资产）。

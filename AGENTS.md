@@ -24,6 +24,7 @@
 | [`docs/agents/positioning.md`](docs/agents/positioning.md) | 外部形态参照实现（DSH）与本仓对应物 | 定交付形态、宿主能力边界 |
 | [`docs/agents/llm-capability.md`](docs/agents/llm-capability.md) | 内部模型调用接入：决策清单（何时该用/不该用、Stateful vs Stateless、结构化/Strict）+ 接入约定（prompt 单点、必带 Purpose、agent 护栏） | 要用模型做某功能前先判断要不要接入、业务接入 `llm.Gateway`、新增 LLM 用途 |
 | [`docs/agents/identity.md`](docs/agents/identity.md) | 产品身份（模型自述）机制：文案唯一事实源、两层交付面、Spec/Fingerprint、装配时序、为什么不热更、守卫 | 改身份文案 / patch / `MATE_IDENTITY_MODE` / 身份守卫 |
+| [`docs/agents/dsh-resources.md`](docs/agents/dsh-resources.md) | dsh 资源初始化：桌面端 profile 模板×bundle vs ark-mate `mate-acp` 覆写层、office 三件套/present/deliverable、primary-runtime 与 4 个 env 注入，附升 dsh 版本的锚点同步清单 | 改 `mate-acp` 覆写层 / `primary-runtime` 装配 / office env、升 dsh 载荷版本 |
 
 分册的总目录与维护约定见 [`docs/agents/README.md`](docs/agents/README.md)。
 

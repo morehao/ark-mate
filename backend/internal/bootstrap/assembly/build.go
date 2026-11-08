@@ -111,6 +111,10 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 		glog.Infow(ctx, "serve: 已注入 runtime 配置隔离环境", "home", config.DisplayHome(cfg.HomeDir), "runtimes", ids)
 	}
 
+	// 拉底座前的统一准备：落盘 mate-acp profile + 注入 office 随包 env（详见 prepare_runtime.go）。
+	// 抽成公共函数是因为 `mate demo` 等控制面命令也拉底座，必须在**每一处**拉底座前都跑。
+	PrepareRuntimeEnv(ctx, reg, cfg.HomeDir)
+
 	as := &assembly{
 		cfg:     cfg,
 		sources: sources,
