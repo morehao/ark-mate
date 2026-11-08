@@ -137,7 +137,18 @@ func ProvisionProfile(homeDir string) (int, error) {
 	if home == "" {
 		return 0, fmt.Errorf("provision mate-acp profile: homeDir 为空")
 	}
-	dir := ProfileDir(home)
+	return provisionProfileAtDshHome(filepath.Join(home, "runtime", "dsh"))
+}
+
+// provisionProfileAtDshHome 把 mate-acp 四份文件写到 `<dshHome>/profiles/mate-acp`。
+//
+// 与 ProvisionProfile 的区别只在「根」：ProvisionProfile 的根是 MATE_HOME（DSH_HOME 由
+// `<MATE_HOME>/runtime/dsh` 拼出）；本函数直接吃 DSH_HOME。抽出来是为了让**底座级校验门**
+// 能把同一份 profile 预置到它自己的 staging `DSH_HOME`（见 config.go 的 validate）——校验门在
+// 全新临时 DSH_HOME 上跑，若那里没有 mate-acp profile，dsh 会以「profile 不存在」拒启（exit 1），
+// 于是每份候选都被误判为「无法校验」。这是 mate-acp（非内置模板名）引入后必须配套的一步。
+func provisionProfileAtDshHome(dshHome string) (int, error) {
+	dir := filepath.Join(dshHome, "profiles", ProfileName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return 0, fmt.Errorf("创建 mate-acp profile 目录失败（%s）：%w", dir, err)
 	}

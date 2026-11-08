@@ -685,6 +685,15 @@ func (s *syncer) validate(ctx context.Context, candidate []byte) error {
 	if err := os.WriteFile(cand, candidate, 0o600); err != nil {
 		return err
 	}
+	// 校验门在**全新 staging DSH_HOME**（`<staging>/dsh`）上跑 `--profile mate-acp`。mate-acp 是平台
+	// 自建、**非** dsh 内置模板名，dsh 的 app-boot 不会也不该自动从模板初始化它——staging home 里若
+	// 没有这份 profile，dsh 直接以 `profile "mate-acp" does not exist` 拒启（exit 1），本门就会把
+	// **每一份**候选都误判成「无法校验」（这正是 2026-11-08 真机冒烟抓到的缺陷：用 acp 内置模板时
+	// staging 会自动初始化，换成自建 mate-acp 后漏了这一步）。所以在跑 dump 前，把与活跃 home 同源的
+	// mate-acp profile 预置进 staging 的 DSH_HOME，让校验门面对与真实运行一致的组合。
+	if _, err := provisionProfileAtDshHome(filepath.Join(staging, "dsh")); err != nil {
+		return fmt.Errorf("向 staging DSH_HOME 预置 mate-acp profile 失败：%w", err)
+	}
 	// 用**本 adapter 自己的**启动形态（adapter 拥有 Command/Args 的知识），交给 `--patch` 与 dump。
 	args := append([]string{}, Args...)
 	args = append(args, PatchFlag, cand, dumpSchemaFlag)
