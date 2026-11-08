@@ -32,7 +32,7 @@
  * **不要与 `pnpm build` / `make web` 并行**：它们与阶段 2 写同一棵 `dist/`。
  */
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -54,6 +54,8 @@ const RUNTIME_BIN = (process.env.MATE_DEV_RUNTIME_BIN ?? '').trim()
 const RUNTIME_BIN_SOURCE = (process.env.MATE_DEV_RUNTIME_BIN_SOURCE ?? '').trim()
 /** 随包运行时载荷的根（`resources/payloads/<name>/<ver>/`），只读。 */
 const PAYLOADS_ROOT = process.env.MATE_DEV_PAYLOADS_ROOT ?? join(FRONTEND_ROOT, 'apps', 'desktop', 'resources', 'payloads')
+/** dev 态转发 shim 的落点（与 Makefile 的 `DEV_BIN_DIR` 同源：`.cache/dev-bin/`，已 gitignore）。 */
+const DEV_BIN_DIR = process.env.MATE_DEV_BIN_DIR ?? join(FRONTEND_ROOT, '..', '.cache', 'dev-bin')
 
 /** 健康检查与收尾的时间预算（与 Makefile 原先的 300×0.3s 一致）。 */
 const HEALTH_ATTEMPTS = Number(process.env.MATE_DEV_HEALTH_ATTEMPTS ?? 300)
@@ -94,21 +96,29 @@ function resolveRuntimeHit() {
   const bundled = bundledPayloadVersions(RUNTIME)
   const base = { name: RUNTIME, bundled }
 
-  if (RUNTIME_BIN === '') {
+  if (runtimeBinding.source === 'path') {
     return { ...base, source: 'path', version: 'unknown', digest: 'unknown', origin: 'PATH 上解析' }
   }
 
-  // 覆盖**一定会生效**（2026-10-12 起）：转发 shim 按**构建期固定的 runtime** 命名（Makefile 的
-  // dev/runtime-bin 生成 `<DEV_BIN_DIR>/$(RUNTIME)`），而核心正是按那个写死的名字走 PATH 解析，
-  // 所以这里不再存在"填了但没人调用"那一态。
-  //
-  // 此前 shim 名写死某个具体底座名，固定成另一个的构建上这个覆盖是个**死文件**，于是这里得
-  // 绕开来报（报成 `path` + 横幅补一句"不会生效"）——那套分流（`inert`）随根因修复整体删除。现在
-  // `/meta.payloads[]` 报 `runtime-env` **就是**核心实际拉的那份，不存在"回显骗人"。
+  if (runtimeBinding.source === 'bundled') {
+    // 未指定 RUNTIME_BIN → 回落随包默认：`source: bundled`（与桌面壳同一取值），版本可证明。
+    const dir = join(PAYLOADS_ROOT, RUNTIME, runtimeBinding.bundledVersion)
+    const m = readPayloadManifest(dir)
+    return {
+      ...base,
+      source: 'bundled',
+      version: m?.version ?? runtimeBinding.bundledVersion,
+      digest: m?.digest ?? 'unknown',
+      origin: `${runtimeBinding.entryRel} [随包默认（未指定 RUNTIME_BIN）]`,
+    }
+  }
+
+  // explicit：显式覆盖。覆盖**一定会生效**（2026-10-12 起）：转发 shim 按**构建期固定的 runtime** 命名，
+  // 而核心正是按那个写死的名字走 PATH 解析，所以 `/meta.payloads[]` 报 `runtime-env` **就是**核心实际拉的那份。
   const sourceTxt = RUNTIME_BIN_SOURCE === '' ? '显式覆盖' : `显式覆盖 [${RUNTIME_BIN_SOURCE}]`
 
   // 路径落在随包载荷里 → 版本是**可证明的**（读那份清单，不猜、不执行）
-  const abs = resolve(RUNTIME_BIN)
+  const abs = resolve(runtimeBinding.explicitBin)
   for (const v of bundled) {
     const dir = join(PAYLOADS_ROOT, RUNTIME, v)
     if (abs === dir || abs.startsWith(dir + sep)) {
@@ -118,11 +128,11 @@ function resolveRuntimeHit() {
         source: 'runtime-env',
         version: m?.version ?? v,
         digest: m?.digest ?? 'unknown',
-        origin: `${RUNTIME_BIN} [${sourceTxt}]`,
+        origin: `${runtimeBinding.explicitBin} [${sourceTxt}]`,
       }
     }
   }
-  return { ...base, source: 'runtime-env', version: 'external', digest: 'unknown', origin: `${RUNTIME_BIN} [${sourceTxt}]` }
+  return { ...base, source: 'runtime-env', version: 'external', digest: 'unknown', origin: `${runtimeBinding.explicitBin} [${sourceTxt}]` }
 }
 
 /** 读一份载荷清单（`payload.json`）；缺了或不是合法 JSON 都返回 null（调用方如实报未知）。 */
@@ -160,6 +170,72 @@ function packagedBinHint(hit) {
   return entry ? `${base}/${entry}` : `${base}/<入口见该版本 payload.json 的 entry>`
 }
 
+/**
+ * dev 态的**默认**底座解析：`RUNTIME_BIN` 未显式指定时，回落成随包载荷里那一份（`payload.json.entry`），
+ * 从而消除「核心按写死的名字走 PATH → 命中本机装的那份」这条默认路径。
+ *
+ * 语义与 `apps/desktop/src/payload.ts` 对齐（**只取随包载荷，绝不探测 PATH**）：显式覆盖 > 随包默认。
+ * 返回：
+ *   - `null`：没有可用的随包载荷（应维持旧行为：PATH 上解析，由 `resolveRuntimeHit` 报 `path`）；
+ *   - `{ entryAbs, version, isJs }`：随包入口的绝对路径；`isJs` 表示它是 `.js` 入口，要用 node 转发。
+ */
+function resolveBundledDefault() {
+  const versions = bundledPayloadVersions(RUNTIME)
+  if (versions.length === 0) return null
+  const version = versions[versions.length - 1] // 与壳一致：多版本取排序最大的那份
+  const dir = join(PAYLOADS_ROOT, RUNTIME, version)
+  const entryRel = readPayloadManifest(dir)?.entry
+  if (!entryRel) return null
+  const entryAbs = join(dir, entryRel)
+  if (!existsSync(entryAbs)) return null
+  return { entryAbs, version, isJs: entryAbs.endsWith('.js') }
+}
+
+/**
+ * 把「随包默认」落成可执行转发：生成 `<DEV_BIN_DIR>/<RUNTIME>` shim 并把该目录前置到本进程 PATH，
+ * 于是核心（及由其 `exec.LookPath` 拉起的底座）命中的就是随包那份。返回注入给核心的 `MATE_DSH_ENTRY`。
+ *
+ * - **JS 入口**（dsh 的 `node_modules/@deepseek-ai/dsh/lib/bin.js` 带 `#!/usr/bin/env node` shebang）：
+ *   shim 里优先用随包 primary-runtime 的 node 跑它（`<payloads>/primary-runtime/dependencies/node/bin/node`），
+ *   这样整条链不依赖 PATH 上的 node；找不到随包 node 时才回落到 `env node`（仍不碰本机 dsh）。
+ * - **原生入口**：直接 exec。
+ *
+ * 只写 `.cache/dev-bin/<RUNTIME>`（gitignore），不改用户环境、不探测 PATH。
+ */
+function installBundledShim(def) {
+  mkdirSync(DEV_BIN_DIR, { recursive: true })
+  let execLine
+  if (def.isJs) {
+    const bundledNode = join(PAYLOADS_ROOT, 'primary-runtime', 'dependencies', 'node', 'bin', 'node')
+    const nodeBin = existsSync(bundledNode) ? bundledNode : null
+    execLine = nodeBin
+      ? `exec "${nodeBin}" "${def.entryAbs}" "$@"`
+      : `exec env node "${def.entryAbs}" "$@"`
+  } else {
+    execLine = `exec "${def.entryAbs}" "$@"`
+  }
+  const shim = join(DEV_BIN_DIR, RUNTIME)
+  writeFileSync(
+    shim,
+    `#!/bin/sh\n# 生成物（dev-loop.mjs）——不要手改：RUNTIME_BIN 未指定时指向随包载荷，由 make dev 重建。\n${execLine}\n`,
+    { mode: 0o755 },
+  )
+  // 前置到本进程 PATH：所有 launch/runOnce 子进程 `env: process.env` 因此都带上它。
+  const parts = (process.env.PATH ?? '').split(':').filter(Boolean)
+  if (parts[0] !== DEV_BIN_DIR) process.env.PATH = [DEV_BIN_DIR, ...parts].join(':')
+  // 给核心派生 office 随包 env（ResolveBundledDirs 读它推导 officeSkills + primary-runtime）
+  process.env.MATE_DSH_ENTRY = def.entryAbs
+  return def.entryAbs
+}
+
+/**
+ * 命中事实的「取值来源」三态，供 `resolveRuntimeHit` 用：
+ *   - `explicit`：显式给了 RUNTIME_BIN（命令行 / 环境变量 / .env）；
+ *   - `bundled`：未指定 → 回落随包默认（本函数新引入的语义）；
+ *   - `path`：未指定且无随包载荷 → 旧行为（PATH 上解析）。
+ */
+const runtimeBinding = { explicitBin: RUNTIME_BIN, source: 'path', bundledVersion: null, entryRel: null }
+
 /** 把命中事实打成横幅（含「与随包是否同代」），返回同一份值的 `--payloads` 形状。 */
 function reportRuntimeHit(hit) {
   if (hit === null) return null
@@ -170,7 +246,10 @@ function reportRuntimeHit(hit) {
   log(`   命中  ${hit.origin}；版本 ${hit.version}`)
   log(`         ${bundledTxt}`)
 
-  if (hit.source === 'path') {
+  if (hit.source === 'bundled') {
+    log('   ✅  未指定 RUNTIME_BIN → **默认命中随包载荷**（与交付同一代）；' +
+      'office 随包 env 经 MATE_DSH_ENTRY 派生注入，全程不读本机 dsh。')
+  } else if (hit.source === 'path') {
     log('   ℹ️  跑的是 **PATH 上本机安装的那份**，与随包是否同代**无从判定**——本仓刻意不探测' +
       '（底座连 `--version` 都写自己的 home）。')
     // 显式覆盖口是**可用的**（转发 shim 名随构建期 runtime，见 Makefile 的 dev/runtime-bin）。
@@ -350,6 +429,27 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 log('==> 开发循环  唯一资产路径：vite build --watch 改写产物，核心服务同一份产物')
 log(`   产物  ${WEB_DIR}`)
 log(`   打开  ${APP_URL}   （不要另起 vite dev server：apps/web/vite.config.ts 会在 serve 上直接报错）`)
+
+// —— 底座取值（B：默认随包，不再默认走 PATH 上本机那份）——
+// 只有**做真实 serve**时才需要底座；`--no-serve` 只跑 watcher，不该因写 shim / 注入 MATE_DSH_ENTRY 而扰动。
+if (options.serve && RUNTIME !== '') {
+  if (runtimeBinding.explicitBin !== '') {
+    // 显式覆盖优先：Makefile 的 dev/runtime-bin 已按 RUNTIME_BIN 生成同名 shim 并前置 PATH，这里不重复。
+    runtimeBinding.source = 'explicit'
+  } else {
+    const def = resolveBundledDefault()
+    if (def !== null) {
+      installBundledShim(def)
+      runtimeBinding.source = 'bundled'
+      runtimeBinding.bundledVersion = def.version
+      runtimeBinding.entryRel = `frontend/apps/desktop/resources/payloads/${RUNTIME}/${def.version}/${readPayloadManifest(join(PAYLOADS_ROOT, RUNTIME, def.version))?.entry}`
+    } else {
+      // 仓库里没有该 runtime 的随包载荷 → 维持旧行为（PATH 上解析），并在横幅里如实提示怎么装载荷。
+      runtimeBinding.source = 'path'
+    }
+  }
+}
+
 const runtimeHit = reportRuntimeHit(resolveRuntimeHit())
 
 if (options.build) {
