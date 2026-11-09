@@ -129,35 +129,13 @@ const profilePatchYML = `# ark-mate 生成并维护的 dsh profile 覆写层（�
 `
 
 // profileFiles 是 mate-acp profile 的四份静态文件（逐字与 dsh 模板生成物一致 + 覆写层）。
-//
-// scratchRoots 非空时，在 cordis.patch.yml 末尾追加一条 `- id: sandbox-policy` 覆写，把平台托管的
-// 过程产物根（`.scratch`）并入 `additionalWritableRoots`——这样 `workspace-write` 沙箱也允许模型
-// 往会话 cwd 之外的 scratch 根写（二期候选 B）。为空时不追加（校验门 staging / 单测的形态）。
-func profileFiles(scratchRoots ...string) map[string]string {
-	patch := profilePatchYML
-	if len(scratchRoots) > 0 && strings.TrimSpace(scratchRoots[0]) != "" {
-		patch += sandboxWritableRootsPatch(strings.TrimSpace(scratchRoots[0]))
-	}
+func profileFiles() map[string]string {
 	return map[string]string{
 		"package.json":        profilePackageJSON,
 		"cordis.yml":          profileCordisYML,
-		"cordis.patch.yml":    patch,
+		"cordis.patch.yml":    profilePatchYML,
 		"pnpm-workspace.yaml": profilePnpmWorkspaceYML,
 	}
-}
-
-// sandboxWritableRootsPatch 生成把某个 scratch 根并入 `workspace-write` 可写根的 patch 片段。
-//
-// 依据 dsh `@deepseek-ai/dsh-sandbox-policy` 的 `Config.additionalWritableRoots`（静态部署配置，
-// 只接受绝对路径；执行侧要求目录真实存在、非符号链接）。用**字面绝对路径**（不做 `!!js` 求值）：
-// 平台自有 profile 每次启动按当前配置重生成，路径确定、可审计。实测 dsh 0.2.2-rc.1 `--dump-config`
-// 接受该覆写（见 profile_test 的端到端用例）。
-func sandboxWritableRootsPatch(scratchRoot string) string {
-	return "\n    # 二期：把平台托管的过程产物根并入 workspace-write 可写根（见 internal/core/scratch）。\n" +
-		"- id: sandbox-policy\n" +
-		"  config:\n" +
-		"    additionalWritableRoots:\n" +
-		"      - " + scratchRoot + "\n"
 }
 
 // ProfileDir 返回 mate-acp profile 的落点：`<DSH_HOME>/profiles/mate-acp`。
@@ -176,12 +154,12 @@ func ProfileDir(homeDir string) string {
 //
 // 返回实际写了几个文件（诊断/日志用）。任何 IO 失败都返回错误，由调用方决定是否致命——按项目约定
 // "缺能力不该拒绝启动"，调用方通常只记 WARN。
-func ProvisionProfile(homeDir string, scratchRoots ...string) (int, error) {
+func ProvisionProfile(homeDir string) (int, error) {
 	home := strings.TrimSpace(homeDir)
 	if home == "" {
 		return 0, fmt.Errorf("provision mate-acp profile: homeDir 为空")
 	}
-	return provisionProfileAtDshHome(filepath.Join(home, "runtime", "dsh"), scratchRoots...)
+	return provisionProfileAtDshHome(filepath.Join(home, "runtime", "dsh"))
 }
 
 // provisionProfileAtDshHome 把 mate-acp 四份文件写到 `<dshHome>/profiles/mate-acp`。
@@ -191,13 +169,13 @@ func ProvisionProfile(homeDir string, scratchRoots ...string) (int, error) {
 // 能把同一份 profile 预置到它自己的 staging `DSH_HOME`（见 config.go 的 validate）——校验门在
 // 全新临时 DSH_HOME 上跑，若那里没有 mate-acp profile，dsh 会以「profile 不存在」拒启（exit 1），
 // 于是每份候选都被误判为「无法校验」。这是 mate-acp（非内置模板名）引入后必须配套的一步。
-func provisionProfileAtDshHome(dshHome string, scratchRoots ...string) (int, error) {
+func provisionProfileAtDshHome(dshHome string) (int, error) {
 	dir := filepath.Join(dshHome, "profiles", ProfileName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return 0, fmt.Errorf("创建 mate-acp profile 目录失败（%s）：%w", dir, err)
 	}
 	written := 0
-	for name, content := range profileFiles(scratchRoots...) {
+	for name, content := range profileFiles() {
 		path := filepath.Join(dir, name)
 		changed, err := writeIfChanged(path, []byte(content))
 		if err != nil {

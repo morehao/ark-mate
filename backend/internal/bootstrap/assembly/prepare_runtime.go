@@ -2,11 +2,9 @@ package assembly
 
 import (
 	"context"
-	"os"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/core/scratch"
 	"github.com/morehao/ark-mate/internal/infra/dsh"
 	"github.com/morehao/ark-mate/internal/runtime"
 	"github.com/morehao/golib/glog"
@@ -27,7 +25,7 @@ import (
 //
 // 只对**本机拉子进程**且**构建期选中的就是 dsh**的底座做：远程端点不读 Launch.Env，别碰。
 // 失败不返回错误——缺 office 能力是降级（agent 退回自带工具链），不该让启动失败；调用方按需记日志。
-func PrepareRuntimeEnv(ctx context.Context, reg *runtime.Registry, homeDir, workspaceDir string) {
+func PrepareRuntimeEnv(ctx context.Context, reg *runtime.Registry, homeDir string) {
 	if reg == nil || runtime.SelectedRuntime() != dsh.ID {
 		return
 	}
@@ -35,18 +33,7 @@ func PrepareRuntimeEnv(ctx context.Context, reg *runtime.Registry, homeDir, work
 	if !ok || !runtime.LaunchesLocally(spec) {
 		return
 	}
-	// 二期：平台托管的过程产物根 `<workspaceDir>/.scratch`。先把它建出来（真实目录、非符号链接），
-	// 再把它的绝对路径并入 dsh sandbox-policy 的 additionalWritableRoots，让 workspace-write 允许模型
-	// 往会话 cwd 之外的 scratch 写。workspaceDir 为空（代建关闭）时不做（退回一期 cwd 内 .scratch）。
-	scratchRoot := ""
-	if ws := strings.TrimSpace(workspaceDir); ws != "" {
-		scratchRoot = scratch.RootFor(ws) // <workspaceDir>/.scratch
-		if err := os.MkdirAll(scratchRoot, 0o700); err != nil {
-			glog.Warnw(ctx, "serve: 建过程产物根（scratch）失败，退回 cwd 内 .scratch（不阻塞启动）", "path", scratchRoot, "err", err)
-			scratchRoot = ""
-		}
-	}
-	if written, err := dsh.ProvisionProfile(homeDir, scratchRoot); err != nil {
+	if written, err := dsh.ProvisionProfile(homeDir); err != nil {
 		glog.Warnw(ctx, "serve: 初始化 mate-acp profile 失败（office 能力可能不可用）", "err", err)
 	} else {
 		glog.Infow(ctx, "serve: mate-acp profile 就绪", "dir", config.DisplayHome(dsh.ProfileDir(homeDir)), "files_written", written)

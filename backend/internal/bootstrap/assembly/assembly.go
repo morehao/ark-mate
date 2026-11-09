@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/config"
-	"github.com/morehao/ark-mate/internal/core/scratch"
 	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
@@ -384,13 +383,7 @@ func (as *assembly) startDefaultWorkspace(ctx context.Context) error {
 
 // startOrchestrator 构造编排器并回挂到 Service。
 func (as *assembly) startOrchestrator(ctx context.Context) error {
-	// 过程产物根：`<MATE_WORKSPACE_DIR>/.scratch`（二期候选 B）。WorkspaceDir 为空（代建关闭）→ 传空，
-	// 编排器退回 cwd 内 `.scratch`（一期语义）。该目录已由 PrepareRuntimeEnv 建好并并入沙箱可写根。
-	scratchRoot := ""
-	if ws := strings.TrimSpace(as.cfg.WorkspaceDir); ws != "" {
-		scratchRoot = scratch.RootFor(ws)
-	}
-	as.orch = sessionruntime.NewOrchestrator(as.svc, as.reg, scratchRoot)
+	as.orch = sessionruntime.NewOrchestrator(as.svc, as.reg)
 	// 附件目录**不**下发 `SessionOptions.AdditionalDirectories`（v32 附件链路，2026-11-02 实测更正）：
 	// 读可达性探针（.dsh/docs/notes/2026-11-02-attachment-read-reachability-notes.md）实测表明
 	// 模型用 read 能直接读到 `<MATE_HOME>/attachments` 下的绝对路径（无需提权、无白名单）——附件

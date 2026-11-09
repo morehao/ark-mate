@@ -52,31 +52,3 @@ func TestCwdScratchEmptyNoop(t *testing.T) {
 		t.Fatalf("含分隔符 sid Clean 应 no-op: %v", err)
 	}
 }
-
-func TestCwdScratchPlatformRoot(t *testing.T) {
-	// 二期：root 非空 → 落在 <root>/<sid>（在 cwd 之外），与 cwd 无关。
-	root := filepath.Join(t.TempDir(), ".scratch")
-	cwd := t.TempDir()
-	sid := "ses_root01"
-	s := cwdScratch{root: root}
-
-	if p := s.sessionDir(cwd, sid); p != filepath.Join(root, sid) {
-		t.Fatalf("平台根模式下 sessionDir=%q，期望 %q", p, filepath.Join(root, sid))
-	}
-	if err := s.Ensure(cwd, sid); err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
-	if fi, err := os.Stat(filepath.Join(root, sid)); err != nil || !fi.IsDir() {
-		t.Fatalf("应建在平台根下: %v", err)
-	}
-	// cwd 内不应出现 .scratch。
-	if _, err := os.Stat(filepath.Join(cwd, ".scratch")); !os.IsNotExist(err) {
-		t.Fatal("平台根模式下 cwd 内不应有 .scratch")
-	}
-	if err := s.Clean(cwd, sid); err != nil {
-		t.Fatalf("Clean: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, sid)); !os.IsNotExist(err) {
-		t.Fatal("Clean 后平台根下该会话目录应被删")
-	}
-}
