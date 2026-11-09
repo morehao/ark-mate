@@ -3,9 +3,25 @@
 > **读者**：第一天接手本仓的人。本文只描述**当前有效**的结构事实，不记录设计过程、不写历史沿革。
 > 纪律条文、目录边界与全部机器判据的权威表述在仓库根 **`AGENTS.md`** 及其分册 **`docs/agents/`**（纪律正文见 `docs/agents/layout.md`，机器判据清单见 `docs/agents/guards.md`）；两者的分工见第 10 节。
 >
-> **最后对齐：2026-11-03**（对齐提交 `23185743` 及之前的当前实现；schema 35 / 23 表 / 194 条守卫 / 平台不做鉴权）。代码与本文冲突时**以代码为准**——本文是地图，不是契约。
+> 状态：已批准 ｜ 作者：mate 内核维护者 ｜ 评审人：架构评审（新读者视角 / 图与论证 lens） ｜ 拍板人：技术负责人 ｜ 最后更新：2026-11-09
+>
+> **对齐基线**：对齐提交 `5d921727` 及之后的当前实现（schema 39 / 24 表 / 27 事件类 / 平台不做鉴权；守卫条数以 [`docs/agents/guards.md`](agents/guards.md) 为唯一维护处，本文不写死以免漂移）。代码与本文冲突时**以代码为准**——本文是地图，不是契约。本文只描述结构事实与不变量，**设计取舍与备选对比见 [`decisions.md`](decisions.md)**，不在此重复（故不含备选对比章节与决策追溯表）。
 
-![ark-mate 架构总览（代码核实：分层 + 进程拓扑 + 数据面）](assets/architecture-overview-20261103.svg)
+本文配 5 张代码核实的图（2026-11-09 重画），每张只讲一件事（总览图置于文档顶部统领 §1/§3/§4，其余嵌在对应章节）：
+
+| 图 | 讲什么 | 落在哪节 |
+| --- | --- | --- |
+| [架构总览](assets/architecture-overview-20261109.svg) | 两层结构 + 运行期进程拓扑（L0–L9 折叠为一个内核节点，分层明细见 §4.1） | 文档顶部，统领 §1 / §3 / §4 |
+| [会话执行时序](#62-实时通道只有一个ws)（Mermaid） | 一条提问从进入核心到 `run.ended` 的完整时序（含权限/超时/取消/断线、流式） | §6 |
+| [数据模型 ERD](#5-数据模型)（Mermaid） | 24 张表的主键/外键关系与连线（孤立表无跨表外键，省略连线） | §5 |
+| [能力指纹与代际生命周期](assets/capability-fingerprint-lifecycle-20261109.svg) | 连接键/代际键、子进程共享、扩缩权生效边界 | §7.4 |
+| [产物溯源与自动抽取数据流](assets/artifact-provenance-dataflow-20261109.svg) | 字节走 filestore、artifacts 只建索引、抽到即收录 | §7.6 |
+
+下图把全仓的骨架一次摊开：**上面是两层结构（用户/桌面壳 · 控制面 · console），中间是运行期进程拓扑（核心 spawn 底座 ACP 子进程、再 spawn MCP 子进程，字节统一落 filestore、数据落单文件 SQLite），底部那个折叠节点是 L0–L9 分层带（"只能向内 import"——逐层明细与三条规则见 §4.1）**。它是本文的门面图，读 §1/§3/§4 时对着看：
+
+![ark-mate 架构总览（两层 + 进程拓扑 + L0–L9 折叠为内核节点）](assets/architecture-overview-20261109.svg)
+
+> **该看什么**：稳态交付态 = 桌面壳 → 核心 → ACP 子进程这条实线链；**边界与代价**：开发态的两种加载方式（`make dev` 托管 dist / 桌面壳服务 dist）在图上不区分、只画了一条 `loadURL`，区别见 §2；L0–L9 只作一个折叠节点呈现，**图的重点在进程与数据落点，不在分层明细**——分层判据以 §4.1 的 `v32Layers` 为准。
 
 ---
 
@@ -32,7 +48,7 @@ ark-mate 自上而下分两层，两层职责并列成立：
 | 形态 | 入口 | 状态 | 说明 |
 | --- | --- | --- | --- |
 | **桌面** | `make desktop/dev` · `make desktop/accept` · `make desktop/dist` | **主线** | Electron 壳 + 随包载荷（用户机器不需要 Go / Node / 预装底座） |
-| **浏览器入口** | `make dev` → `http://127.0.0.1:10001` | **开发形态** | 唯一的重建循环：改 UI 走它。服务的就是 `apps/web/dist` 那一份产物 |
+| **浏览器入口** | `make dev` → `http://127.0.0.1:10001`（开发**固定**端口；桌面态为 `127.0.0.1:0` 动态端口，见 §3.1） | **开发形态** | 唯一的重建循环：改 UI 走它。服务的就是 `apps/web/dist` 那一份产物 |
 | **容器 / 自建二进制 + 外挂 dist** | `make image` · `make server` | **维护态** | 保留可用、继续被测试、可修缺陷；不加新功能、不进主线排期 |
 
 两条结构性事实：
@@ -95,6 +111,21 @@ Electron 主进程（桌面态）
 
 链是**显式、不探测**的：显式配置覆盖 > 随包载荷 > `PATH`。桌面分发一定存在随包载荷，于是永远落不到 `PATH`；开发态与容器通常落到 `PATH`。命中哪一级必须写进启动日志与 `/meta`。**任何 `which` / `command -v` 式探测都是被守卫拦下的**——探测会让「机器上恰好装过这个底座」静默顶掉随包那份。
 
+### 3.6 进程内装配时序（顺序即语义）
+
+启动不是一段散文，而是一条**分阶段、有 critical 标记、关闭按逆序**的步骤序列（`bootstrap/assembly/assembly.go` 的 `steps()`，每个元素是 `registry.Step{Name, Phase, Critical, Timeout, Start, Stop}`）。顺序**有语义**，不要随意调换；排障"为什么起不来 / 某个面为什么还没就绪"先看这张表。
+
+| 阶段 | 关键步骤（摘） | critical？ |
+| --- | --- | --- |
+| `PhasePlatform` | 旧定义目录导入 · **凭据面** · **产品身份** | 身份非 critical（失败退回首轮块、只 WARN）；凭据面必须先于任何 runtime 同步 |
+| `PhasePersistence` | **持久层打开** · 旧密钥搬运 · 持久层接线 · 启动导入 · 会话恢复 | 持久层打开 **critical**（失败即拒启，不给半开的库） |
+| `PhaseDomain` | 工作空间策略 · 默认工作空间 · **编排器** · 子进程注册表 · **定义装载** · 权限记忆恢复 | 工作空间策略 / 默认工作空间 / 编排器 / 定义装载 **critical** |
+| `PhaseSettings` | 编排参数 · MCP 网关开关 · 原生权限开关 | 非 critical |
+| `PhaseBackground` | 空闲回收 · 自动化调度 · 附件孤儿清扫 | 非 critical（带 Stop，关闭时逆向收） |
+| `PhaseDelivery` | **用例与控制器** · **前端资产** · 资产重建通知 · **监听绑定** · **路由** | 用例控制器 / 前端资产 / 监听绑定 / 路由 **critical** |
+
+三条读法：**① critical 失败 = 进程拒启**（宁可起不来，不带着缺口跑），非 critical 失败降级为 WARN/诊断；**② 关闭按启动逆序**执行各 `Stop`；**③ 「面」的先后是语义的**——凭据面早于 runtime 同步、身份早于任何连接拉起、监听绑定早于路由对外。完整失败语义见 §10 的「失败语义总纲」。
+
 ## 4. 后端分层与依赖方向
 
 ### 4.1 层带（L0–L9，v3.2 终局表）
@@ -111,7 +142,7 @@ Electron 主进程（桌面态）
 | **L2** | `domain/*` | 业务规则与状态。**出边为零**：不 import dto、store、mechanism、infra |
 | **L3** | `dto/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份） |
 | **L4** | `service/svc<领域>` | 用例层：接口 + 实现 + 构造函数；校验、错误码、响应装配 |
-| **L5** | `persistence/{store,dao}` `infra/{credentials,dbclient,procreg,dsh,host,installed}` `infra/protocol/{acp,mcp}` | 持久与基础设施（`host` = 宿主短命进程，`installed` = 本机可执行性探测；`protocol/*` = 协议绑定——内圈只认 `core/protocol` 平台值，翻译只在连接边界与装配面） |
+| **L5** | `persistence/{store,dao}` `infra/{credentials,dbclient,procreg,dsh,host,installed,attachmentstore,materialmcp}` `infra/protocol/{acp,mcp}` | 持久与基础设施（`host` = 宿主短命进程，`installed` = 本机可执行性探测，`attachmentstore` = 附件字节端口，`materialmcp` = 资料库 MCP 工具面；`protocol/*` = 协议绑定——内圈只认 `core/protocol` 平台值，翻译只在连接边界与装配面） |
 | **L6** | `drivers/{gateway,mechanism,registry,runtimeconn,transfer}` `config` | 驱动侧：机制、注册表、连接面、存量定义导入导出编排 |
 | **L7** | `sessionruntime` | 会话编排（Service / Orchestrator / 权限） |
 | **L8** | `controller/ctr<领域>` `middleware` | 入站适配（参数解析与响应 / Host-Origin 来源判定） |
@@ -147,6 +178,12 @@ internal/persistence/model（实体定义）被上面三者依赖，自身不依
 跨聚合的事务（如"删工作空间 + 释放会话归属"）**不在仓储里**：策略属于领域，所以领域通过
 `Atomically` 在自己的规则里编排，仓储只提供事务开合与三个窄操作（`store/workspace_tx.go`）。
 
+**持久层并发模型（硬不变量，改任何写路径前必须先知道）：** 单文件 SQLite + 纯 Go 驱动（`CGO_ENABLED=0`）+ **连接池 `MaxOpenConns = 1`**（`infra/dbclient/gorm.go`，注释明写"SQLite 单写者，单连接即天然串行化所有事务"）。由此三条推论，不要违反：
+
+1. **全库单写者、事务天然串行**——写路径**不必**自己加锁去要串行（加了是多余，还可能和连接池单连接互锁）；也**不要**假设写操作会并发。
+2. **取号与写事件必须同事务**：`events.seq` 的稠密位次由 `event_sequence` 计数行在**同一个单写者事务**内分配并写回（§5.3），把分配与落库拆到两处就会漏号/重号。
+3. **读模型可重建**（`messages` 等纯投影，`mate doctor --rebuild-read-models` 是唯一显式写动作）；它落库时同样走这条单写者通道，不存在"后台并发刷投影"的第二条写路。
+
 ### 4.3 只有一个代码层
 
 `backend/pkg` 已全量并入 `internal/`（v3.1 §3.1.12）：不再有"可复用基础设施 vs 应用专属"的目录分界，
@@ -157,23 +194,158 @@ internal/persistence/model（实体定义）被上面三者依赖，自身不依
 
 ### 5.1 载体与代数
 
-持久层是单文件 SQLite（纯 Go 驱动，`CGO_ENABLED=0`），自管迁移（`schema_migrations`）。**当前 schema 代数 = `latestSchemaVersion()` = 34**（取 `migrate.go` 的 `schemaMigrations` 数组最后一项；v21 以后的版本步各由一个 `migrate_v*.go` 出 `migration` 字面量，v33 是资料库目录树三表、v34 是产物溯源 `artifacts` 表 + `library_nodes` 两列），判断代数一律看这个函数，不照抄决策号。库版本高于本二进制时**拒绝启动**；「就地改写既有数据」的迁移执行前会先把库文件复制进 `<数据目录>/backups/`（目录 0700、文件 0600）。
+持久层是单文件 SQLite（纯 Go 驱动，`CGO_ENABLED=0`），自管迁移（`schema_migrations`）。**当前 schema 代数 = `latestSchemaVersion()` = 39**（取 `migrate.go` 的 `schemaMigrations` 数组最后一项；v21 以后的版本步各由一个 `migrate_v*.go` 出 `migration` 字面量。近期版本步：v33 资料库目录树三表、v34 产物溯源 `artifacts` 表 + `library_nodes` 两列、v35 `artifacts.path`、v36 `runs.token_usage_json`、v37 `llm_calls` 表、v38 `inputs.attachments`、v39 `models` 思考能力三列），判断代数一律看这个函数，不照抄决策号。库版本高于本二进制时**拒绝启动**；「就地改写既有数据」的迁移执行前会先把库文件复制进 `<数据目录>/backups/`（目录 0700、文件 0600）。
 
+分两张看（只列主键 PK / 外键 FK / 唯一键 UK，连出表间引用）。
+
+**① 会话与执行核心**：一条会话向下带出轮次、事件、消息、排队输入、权限记忆、产物与模型调用；会话引用一个模型和工作空间。
+
+```mermaid
+erDiagram
+    sessions ||--o{ runs : "会话含轮次"
+    sessions ||--o{ events : "事件事实行"
+    sessions ||--o{ messages : "读模型投影"
+    sessions ||--o{ inputs : "排队输入"
+    sessions ||--o{ permission_memories : "权限记忆"
+    sessions ||--o{ artifacts : "产物"
+    sessions ||--o{ llm_calls : "模型调用流水"
+    sessions }o--|| models : "model_id"
+    sessions }o--|| workspaces : "workspace"
+    runs ||--o{ llm_calls : "run_id"
+
+    sessions {
+        text id PK
+        text model_id FK
+        text workspace_id FK
+    }
+    runs {
+        text id PK
+        text session_id FK
+        int first_seq UK
+    }
+    events {
+        text id PK
+        text session_id FK
+        int seq
+    }
+    event_sequence {
+        text session_id PK
+        int seq PK
+    }
+    messages {
+        text id PK
+        text session_id FK
+    }
+    inputs {
+        text id PK
+        text session_id FK
+    }
+    permission_memories {
+        text id PK
+        text session_id FK
+    }
+    llm_calls {
+        text id PK
+        text session_id FK
+        text run_id FK
+    }
+    artifacts {
+        text id PK
+        text session_id FK
+    }
+    models {
+        text id PK
+        text provider_id FK
+    }
+    workspaces {
+        text id PK
+    }
+```
+
+**② 能力、资源与资料库**：供应商带出模型，MCP 服务器带出密钥；产物收录进资料库节点，节点再挂附件与表格。
+
+```mermaid
+erDiagram
+    providers ||--o{ models : "provider_id"
+    mcp_servers ||--o{ mcp_secrets : "密钥引用"
+    artifacts ||--o{ library_nodes : "provenance_id"
+    library_nodes ||--o{ library_attachments : "node_id"
+    library_nodes ||--o{ library_tables : "node_id"
+
+    providers {
+        text id PK
+    }
+    models {
+        text id PK
+        text provider_id FK
+    }
+    skills {
+        text id PK
+    }
+    mcp_servers {
+        text id PK
+    }
+    mcp_secrets {
+        text ref PK
+        int revision
+    }
+    automations {
+        text id PK
+    }
+    experts {
+        text id PK
+    }
+    definition_revisions {
+        text id PK
+        text kind
+    }
+    artifacts {
+        text id PK
+        text session_id FK
+    }
+    library_nodes {
+        text id PK
+        text category
+        text provenance_id FK
+    }
+    library_attachments {
+        text node_id FK
+    }
+    library_tables {
+        text node_id FK
+    }
+    attachments {
+        text id PK
+    }
+    meta {
+        text key PK
+    }
+    schema_migrations {
+        int version PK
+    }
+```
+
+
+
+>
+
+> **两图的画法**：只连出**有外键 / 唯一键关系**的表间引用；孤立表（`skills` / `automations` / `experts` / `meta` / `definition_revisions` 等）无跨表外键，故不画连线——**有无连线不代表重要程度**，全部 24 张表的分组清单见 §5.2。`event_sequence` 的主键是 `session_id`（每会话一行计数器，§5.3），与 `events` 是逻辑配套而非外键。
+>
 > **决策编号与 schema 编号是两个独立系列，数值不一一对应。**判断「数据模型到哪一代」一律看 `latestSchemaVersion()`，不要照抄决策号；两者的对照表见 [`decisions.md`](./decisions.md) 的「编号说明」。
 
 持久层有两种模式：`MATE_STORE=sqlite|memory|auto`。**定义类数据的载体按模式分叉**——sqlite 模式下 DB 表是事实源（目录降级为导入/导出目录），memory 模式下文件是唯一载体。读模型（`messages` 等投影表）**一律可重建**，`mate doctor --rebuild-read-models` 是这条命令唯一的显式写动作。
 
 ### 5.2 表与实体
 
-23 张表，一表一文件（`internal/persistence/model/<域>.go`），结构体一律 `<域词>Entity` / `<域词>EntityList`，表名常量 `TableName<域词>` 随实体文件走：
+24 张表，一表一文件（`internal/persistence/model/<域>.go`），结构体一律 `<域词>Entity` / `<域词>EntityList`，表名常量 `TableName<域词>` 随实体文件走：
 
 | 分组 | 表 |
 | --- | --- |
 | 会话与执行 | `sessions` · `runs` · `messages` · `events` · `event_sequence` · `inputs` |
 | 交互与记忆 | `permission_memories` |
 | 能力定义 | `skills` · `mcp_servers` · `mcp_secrets` · `automations` · `experts` |
-| 资源与凭据 | `providers` · `models` |
-| 附件与资料库 | `attachments` · `artifacts`（v34 产物溯源，引用非复制）· `library_nodes` · `library_attachments` · `library_tables` |
+| 资源与凭据 | `providers` · `models` · `llm_calls`（v37 内部模型网关流水，可累加） |
+| 附件与资料库 | `attachments` · `artifacts`（v34 产物溯源 + v35 `path`，引用非复制）· `library_nodes` · `library_attachments` · `library_tables` |
 | 空间与系统 | `workspaces` · `definition_revisions` · `meta` · `schema_migrations` |
 
 ### 5.3 身份与位次（两件不同的事）
@@ -228,11 +400,57 @@ internal/persistence/model（实体定义）被上面三者依赖，自身不依
 
 ### 6.2 实时通道只有一个：WS
 
-`/v1/mate/ws/events` 是**唯一**的实时出口，没有第二个通道。契约要点：
+`/v1/mate/ws/events` 是**唯一**的实时出口，没有第二个通道。一条提问的完整时序（含工具调用、权限/提问的双向回执、流式回传）见下图；执行与推理在底座，平台只做转发、落库、广播与决策回执：
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant FE as 前端 console
+    participant Core as 核心 入站/用例
+    participant Orch as sessionruntime
+    participant ACP as ACP 底座子进程
+    participant MCP as MCP server
+
+    FE->>Core: POST /sessions/:id/prompt
+    Core->>Orch: StartRun（校验 / 错误码）
+    Orch->>ACP: Prompt（stream）<br/>按连接键/代际键选暖进程
+    ACP->>MCP: tool_call（stdio）
+    MCP-->>ACP: tool_result
+    ACP-->>Orch: permission_request / elicitation_request
+    Orch->>Core: 落库 + 转 WS 事件
+    Core-->>FE: WS permission_request
+    alt 用户回执
+        FE->>Core: POST …/permission
+        Core->>Orch: 回执决策
+        Orch->>ACP: 允许 / 拒绝 回底座
+    else 超时（平台自动拒绝）
+        Note over Orch: 挂起项超时 → 平台侧自动拒绝，不依赖前端时钟
+    end
+    Note over Orch,ACP: 任一端终局都发收敛事件 permission_resolved
+    ACP-->>Orch: 正文 / 思考 / 工具流（NDJSON）
+    Orch->>Core: 逐条落 events（seq 会话内稠密）
+    Core-->>FE: WS session.message…
+    alt 正常完成
+        ACP-->>Orch: PromptResponse（usage）
+        Orch->>Core: run.ended + token 明细落库
+        Core-->>FE: WS run.ended
+    else 取消 / 底座出错
+        FE->>Core: POST …/cancel（或底座报错）
+        Core->>Orch: 取消 / 失败
+        Orch->>Core: run.cancelled / run.error 落库
+        Core-->>FE: WS run.cancelled / run.error
+    end
+    opt WS 断线（慢订阅丢帧）
+        Core-->>FE: WS gap 帧（带水位）
+        FE->>Core: 重挂 + since_seq 增量续传（超限走快照回退）
+    end
+```
+
+契约要点：
 
 - `attach` / `detach` / `ping` 帧；订阅按会话聚合过滤；`since_seq` 游标续传（`>= 0` 增量、省略或负数走全量回放）；历史缓冲超限时**快照回退**；慢订阅丢帧时发 `gap` 帧，客户端按水位立即重挂续传。
 - **不挂鉴权**：平台不做鉴权（决策 v34），WS 与 REST 一样只受 Host/Origin 矩阵约束——**来源判定在控制器里做**（Accept 之前，Origin 的 host 必须等于请求 Host，`ctrws/ws.go`），与 REST 共用同一个 policy 对象；没有「首帧带凭据 / 超时关门」这套（随令牌体系一起移除）。
-- 事件类型是**冻结的对外契约**，当前 26 类：`session.*` 20 类（`created` / `resumed` / `user_message` / `message` / `thought` / `tool_call` / `tool_update` / `usage` / `permission` / `permission_policy` / `permission_request` / `permission_resolved` / `elicitation_request` / `elicitation_resolved` / `input_queued` / `input_delivered` / `input_cancelled` / `runtime` / `config_options` / `commands`）、`run.*` 5 类（`started` / `status` / `ended` / `error` / `cancelled`）、`automation.run` 1 类。清单由守卫冻结（`archtest/contract_test.go` 的 `frozenEventTypes` ↔ 原生常量 ↔ 前端 `Ev` 三处同源）。
+- 事件类型是**冻结的对外契约**，当前 27 类：`session.*` 21 类（`created` / `resumed` / `user_message` / `message` / `thought` / `tool_call` / `tool_update` / `usage` / `permission` / `permission_policy` / `permission_request` / `permission_resolved` / `elicitation_request` / `elicitation_resolved` / `input_queued` / `input_updated` / `input_delivered` / `input_cancelled` / `runtime` / `config_options` / `commands`）、`run.*` 5 类（`started` / `status` / `ended` / `error` / `cancelled`）、`automation.run` 1 类。清单由守卫冻结（`archtest/contract_test.go` 的 `frozenEventTypes` ↔ 原生常量 ↔ 前端 `Ev` 三处同源）。
 - **任何挂起项一旦终局就发布收敛事件**（权限、提问、排队输入都是），前端以服务端事件为唯一事实，不依赖前端时钟、不做本地推断。
 
 ### 6.3 错误码与鉴权
@@ -257,6 +475,25 @@ internal/persistence/model（实体定义）被上面三者依赖，自身不依
 
 ### 7.3 MCP
 
+MCP 分**内置**与**用户注册**两类。用户注册的走下面的明文/密钥、网关代连；内置的是平台自带的几条 stdio server，默认注入会话。
+
+**7.3.1 内置 MCP（平台自带）**
+
+平台把若干能力以 MCP server 形式自带并注入会话，模型在会话里直接能用，用户不必手动注册：
+
+| server / 子命令 | 内容 | 怎么用 |
+| --- | --- | --- |
+| `mate-platform`（`mate mcp platform`，**默认唯一注入的一条**） | 聚合三域共 16 个工具：`automation_*`（定时任务 6）+ `expert_*`（专家 6）+ `library_*`（资料库 4） | 会话自动注入（stdio，Command = 本进程可执行文件） |
+| `mate mcp material` | 资料库文件级工具 + 产物收录（`library_*` 单独一条） | 独立入口，调试/兼容；与 platform 共用同一套装配 |
+| `mate mcp automation` | 定时任务工具（`automation_*` 单独一条） | 独立入口，调试/兼容 |
+| `mate mcp bridge --runtime <id>` | 远程 MCP 网关：代连用户注册的远程 server，把它拼成一条 stdio 条目给底座 | 远程 MCP 经它注入（见下） |
+
+注入的三条边界（`sessionruntime/platform_mcp.go`）：**只用本进程可执行文件**（`os.Executable()`，不依赖 PATH，与网关同款配方）；**只注入本机启动的 runtime**（远程 ACP 端点没有本机可执行文件，注入会反复拉起失败，故跳过）；**注入面与指纹共用**（这些 server 进 `plan.Direct`，`McpServersFor` 与 `CapabilityFactsFor` 看到同一份，不会「指纹说没变、注入却多了」）。门槛：`MATE_PLATFORM_MCP=off` / 会话钉 `[]` / 未注册或远程 runtime / 取不到可执行文件，任一即不注入；**会话钉非空白名单不挡平台内置**（它们是产品默认能力，不是用户可选集）。缺省路径指纹恒为空 → 新会话立即有工具、老会话重启后才换代际。
+
+> 契约（工具 schema、语义、错误码、幂等/CAS、「什么算符合本协议」）的唯一口径在 [`docs/platform-capability-protocol.md`](platform-capability-protocol.md)：**任何 runtime 只要 (a) 说 ACP、(b) 支持 stdio MCP server 注入，就自动获得这套工具**；给协议加能力域只需往聚合器 `domains` map 加一项，不改 adapter。
+
+**7.3.2 用户注册的 MCP**
+
 - **明文与密钥分开**：`env` / `headers` 是明文（可读回键名、可 diff），`secret_env` / `secret_headers` 的值**只能是引用**。读模型只回键名，连引用都不回；「绑了但解析不了」作为半配置摆到列表上，绝不静默塞空凭证。
 - **远程 MCP 经平台侧网关代连**（`mate mcp bridge --runtime <id>`）：底座侧只注入**一条恒定**的 stdio 条目，网关进程自己读库、解引用、连远端、把工具面拼给底座。收益是结构性的——底座的配置面不再随「有几台远程 server / URL 改没改 / 密钥换没换」变化，于是**增删改远程 MCP 不再换代际**，密钥本体也不进入底座可见面。
 - 工具命名是 `<serverID>__<toolName>`；跨 server 撞名时**fail-closed 整组丢弃**（保留「第一个」会让调用静默落到另一台 server 上）。
@@ -264,27 +501,155 @@ internal/persistence/model（实体定义）被上面三者依赖，自身不依
 
 ### 7.4 能力指纹与代际
 
-能力集是**进程级**的（ACP 没有「给活会话换能力」的通道），所以每套能力各自一个底座子进程，**同指纹共享**：
+**先说为什么要这套机制。** 一个会话能用的能力（启用哪些 skill、挂了哪些 MCP、用哪个模型），在底座进程**启动那一刻就固定了**——ACP 协议没有「给一个正在跑的会话临时换能力」的通道。所以要改能力，只能**起一个新的底座进程**。于是平台的难题是：
 
-- **连接键** = runtime id + 影响线程行为的 env 组签名；**代际键** = 连接键 + 能力指纹 + 平台生成的模型配置指纹。三者必须都在键里——缺一项就会出现「暖进程继续用旧清单，而界面显示已保存」。
-- **指纹输入只有一个决定点**（`internal/domain/session/capability_fingerprint.go`），算法在 `internal/runtime`。三条边界：密钥值绝不进指纹（只用键名与引用名）；正文摘要复用物化 sidecar 的同一算法；**只纳入真正会生效的东西**（禁用的 skill、不投给该 runtime 的 skill、该底座不支持的传输的 MCP 都不进）。
-- **生效边界只有一条规则：下一个轮次**，但四个方向处置不同——扩权/改内容下一轮迁移过去；**缩权立刻生效且失败不回退**（宁可带码拒发这一轮，也不用已被收回的权限面继续跑）；忙则顺延；纯内容变化迁移失败可回退旧代际继续跑。
-- 同一配置下代际有上限，达限时先淘汰「无会话引用且空闲」的代际，仍超限则要求复用现有能力集——**绝不静默复用错误的能力集**（猜细了是安全 bug）。
-- 会话可钉住能力**子集**（`capabilities` 逐 kind 三态：键缺失 = 未声明、`[]` = 一个都不要、非空 = 白名单且**覆盖**而非求交）。
+- 用户改了能力（加个 skill、关个 MCP），怎么让改动生效、又不把无关的会话全打断？
+- 几百个会话，总不能一人一个底座进程（内存扛不住）；能力配置完全相同的会话，应该**共用一个进程**。
+
+「能力指纹 + 代际」就是解决这两件事的：**把一套能力配置算成一个指纹；指纹相同的会话共用同一个底座进程（同一"代际"），指纹一变就换到新进程。**
+
+**两个键（决定"哪些会话能共用进程"）：**
+
+| 键 | 组成 | 作用 |
+| --- | --- | --- |
+| **连接键** | runtime id + 会影响线程行为的 env 签名 | 决定「底座进程能不能复用」——同连接键才可能共享 |
+| **代际键** | 连接键 + **能力指纹** + 模型配置指纹 | 决定「是同一个能力代际吗」——三者全同才算同一代，可共用 |
+
+两个键都要有：只用连接键，会漏掉「能力改了但进程没换」（暖进程还用旧清单，界面却显示已保存）；只用代际键，又会把本可共享的会话拆开。
+
+**能力指纹怎么算**（`internal/domain/session/capability_fingerprint.go` 是唯一决定点，算法在 `internal/runtime`）：
+
+- 只把**真正会生效的东西**算进去——禁用的 skill、不投给这个 runtime 的 skill、这个底座不支持的传输方式的 MCP，都不进指纹（否则「改了但不生效」也会误判成新代际）。
+- **密钥值绝不进指纹**，只用键名和引用名（防止密钥泄露进可比的哈希，也防止换密钥值误触发换代）。skill 正文摘要复用物化时的同一套算法。
+
+**改了能力，什么时候生效？只有一条规则：下一个轮次。** 但四种情况的处置不同：
+
+| 你做的改动 | 处理 |
+| --- | --- |
+| **扩权 / 改内容**（加能力、改 skill 正文） | 下一轮迁移到新代际；纯内容变化迁移失败可回退旧代际继续跑 |
+| **缩权**（收回已给的能力） | **立刻生效，且失败不回退**——宁可这一轮带错误码拒发，也不用已经被收回的权限面继续跑（安全优先） |
+| **会话正忙**（有在途 run） | 顺延，等这一轮跑完再生效，不打断 |
+| （任何情况下）**代际达上限** | 先淘汰「没有会话引用且空闲」的代际；仍超限就要求复用现有能力集——**绝不静默复用错误的能力集**（猜细了是安全 bug） |
+
+**会话还能只用一部分能力。** 除了"全套能力"，一个会话可以钉住一个**子集**（`capabilities` 逐 kind 三态）：键缺失 = 没声明（用全套）；`[]` = 一个都不要；非空 = 白名单，且是**覆盖**而非与默认求交。
+
+下图把上面这套画成一张生命周期图（两级键、子进程共享、四个方向的生效处置）：
+
+![能力指纹与代际生命周期](assets/capability-fingerprint-lifecycle-20261109.svg)
+
+> **该看什么**：连接键决定"能不能共用进程"、代际键决定"是不是同一代"；看四个方向的生效处置（扩权可回退 / 缩权不回退 / 会话忙顺延 / 达上限先淘汰空闲代际）。**边界与代价**：指纹只算"真正会生效"的项、密钥值绝不进指纹；这些取舍换来"改了能力下一个轮次生效、又不打断无关会话"，代价是换代际时旧进程要等空闲 run 结束才回收。
 
 ### 7.5 权限
 
 平台有**拦截面**（会话级权限记忆落库、可列可撤、超时自动拒绝、任何终局都发收敛事件）与**原生权限投影**（`NativePermissionAdapter`，内核只做「模式 → 取端口 → 转发」，动作取值与工具键一概不归一——那是各底座自己的词表）。原生权限 mode 的取值在内核 wire 常量与 adapter 侧必须**逐字一致**（守卫钉住；分叉时 adapter 会落进 default 只写描述、不落日志，表现为「我设了没反应」）。
 
-### 7.6 附件、产物、资料库、专家（近期新增的数据面）
+### 7.6 附件、产物、资料库、专家
 
-这几块都是「平台做数据与配置管理、执行归底座（或纯本地存储）」的同一条定位下的延伸：
+这几块都是「平台做数据与配置管理、执行归底座（或纯本地存储）」的同一条定位下的延伸。产物从产生到收录进资料库的数据流见下图（字节统一走 filestore，artifacts 只建索引，抽到即收录）：
 
-- **统一收字节面 `/files`（产物溯源 P0′）**：收字节只走 golib `ginupload.Register` 的 `POST /files`（内容寻址去重，`content_hash` 由上传方算）；业务模块**只建索引**、引用 `file_id`，不再各自收 multipart——守卫 A-5（收 multipart 写端点仅 `ctrcapability` 白名单）/ A-6（字节唯一落点 filestore）钉住。
-- **附件（v32）**：新会话页可上传图片/文档。`POST /attachments` 收口后**只收 JSON `{file_id}` 建索引**；小图直投为 image 块，文档/大图下沉为 **handle 文本** + 只读目录白名单（`session.user_message.attachments` 载荷）。字节落盘去重复用 golib `filestore`（`attachments` 表存平台行 `att_…` 指向 upload_id，不是 blob）；`AttachmentResolver` 是把平台附件投影成底座可消费 PromptPart 的**端口**（`sessionruntime/attachment_parts.go`）。孤儿附件有清扫 ticker。
-- **产物溯源（v34/v35）**：`artifacts` 表登记「哪会话 / 哪轮 / 哪个工具」产生了哪个产物（`kind ∈ file/text/table/link`，`origin`），**只建索引不存字节**（字节复用 filestore 的 `upload_id`）。`POST /artifacts` 登记、`GET /sessions/:id/artifacts` 列、`POST /materials/import-artifact` 把产物**收录进资料库**（引用而非复制，`provenance_id` 指回 `art_…`）。**自动抽取（v35）**旁路消费 dsh write/edit 的终态工具事件，把工作区文件快照进 filestore 再登记一行；路径**相对/绝对都认**（真机模型几乎总给绝对路径），绝对路径必须落在 `sessions.cwd` 内，越界只 WARN 跳过。**抽取成功即自动收录**（2026-11-04 产品拍板）：直接建 `category='artifact'` 节点（引用而非复制）；同一会话/同一工作区路径只留**一个**节点、载体跟最新快照（改同一个文件不会叠出多份）。会话详情「产物」区仍保留「存进资料库」补收（历史产物 / 自动收录失败），MCP 亦有 `library_import_artifact`；产物节点可回跳来源会话。`domain/artifact` 是叶子域（不 import `material`，守卫 A-1）；artifact 域/`materialmcp` 零语义检索标识符（守卫 A-4）。
-- **资料库（v33）**：给用户一棵本地可寻址的目录树（space → node，`node_kind ∈ folder/doc/table/link/drive/page`），走 `library_nodes` / `library_attachments` / `library_tables` 三表；v34 起 `library_nodes` 带 `category`（material|artifact）与 `provenance_id`，`GET /materials/nodes?category=` 分「资料 / 产物」栏。drive 节点走两步式上传（先 `POST /files` 拿 `file_id` 再传 `drive_upload_id`，`POST /materials/upload` 已删）。**「找」只做结构浏览 + 关键词子串匹配**（`LIKE` `title`/`body`），**不含**语义向量检索/RAG（知识库另立项，守卫 `TestMaterialHasNoSemanticSearch` 把这条拍板变成机器判据，见 `unimplemented.md` C37）。资料库的 MCP 工具面 `mate mcp material` 已交付（`library_list_nodes` / `library_node_info` / `library_upload` / `library_import_artifact`），可被任意 MCP 客户端拉起。
-- **专家（expert）**：`experts` 表 + `/experts` 六接口 + 前端管理页（卡片画廊 + 居中弹窗）；专家定义含名称/描述/头像/推荐模型/推荐技能/MCP/标签/角色设定 `instructions`。**会话发起时可选用专家**，人格在首轮注入（`sessionruntime`）；`instructions` 用 textarea + 字节计数 + 只读注入预览 + 保存期校验。
+![产物溯源与自动抽取数据流](assets/artifact-provenance-dataflow-20261109.svg)
+
+> **该看什么**：字节从头到尾只走 filestore（唯一落点），`artifacts` / `library_nodes` 只存**索引与引用**（`upload_id` / `provenance_id`），不复制字节。**边界与代价**：自动抽取只做"写/编辑工具终态 → 快照进 filestore → 建 `category='artifact'` 节点"，同一路径只留最新一份；资料库的"找"只有结构浏览 + 关键词子串匹配、**不含**语义 RAG，越界路径只 WARN 跳过。
+
+#### 7.6.1 统一收字节面 `/files`
+
+收字节只走 golib `ginupload.Register` 的 `POST /files`（内容寻址去重，`content_hash` 由上传方算）；业务模块**只建索引**、引用 `file_id`，不再各自收 multipart——守卫 A-5（收 multipart 写端点仅 `ctrcapability` 白名单）/ A-6（字节唯一落点 filestore）钉住。这是全平台**唯一**收字节的口子。
+
+#### 7.6.2 附件（v32）
+
+新会话页可上传图片/文档。`POST /attachments` 收口后**只收 JSON `{file_id}` 建索引**；小图直投为 image 块，文档/大图下沉为 **handle 文本** + 只读目录白名单（`session.user_message.attachments` 载荷）。字节落盘去重复用 golib `filestore`（`attachments` 表存平台行 `att_…` 指向 upload_id，不是 blob）；`AttachmentResolver` 是把平台附件投影成底座可消费 PromptPart 的**端口**（`sessionruntime/attachment_parts.go`）。孤儿附件有清扫 ticker。
+
+#### 7.6.3 产物溯源（v34/v35）
+
+`artifacts` 表登记「哪会话 / 哪轮 / 哪个工具」产生了哪个产物（`kind ∈ file/text/table/link`，`origin`），**只建索引不存字节**（字节复用 filestore 的 `upload_id`）。`POST /artifacts` 登记、`GET /sessions/:id/artifacts` 列、`POST /materials/import-artifact` 把产物**收录进资料库**（引用而非复制，`provenance_id` 指回 `art_…`）。**自动抽取（v35）**旁路消费 dsh write/edit 的终态工具事件，把工作区文件快照进 filestore 再登记一行；路径**相对/绝对都认**（真机模型几乎总给绝对路径），绝对路径必须落在 `sessions.cwd` 内，越界只 WARN 跳过。**抽取成功即自动收录**（2026-11-04 产品拍板）：直接建 `category='artifact'` 节点（引用而非复制）；同一会话/同一工作区路径只留**一个**节点、载体跟最新快照（改同一个文件不会叠出多份）。会话详情「产物」区仍保留「存进资料库」补收（历史产物 / 自动收录失败），MCP 亦有 `library_import_artifact`；产物节点可回跳来源会话。`domain/artifact` 是叶子域（不 import `material`，守卫 A-1）；artifact 域/`materialmcp` 零语义检索标识符（守卫 A-4）。
+
+#### 7.6.4 资料库（v33）
+
+给用户一棵本地可寻址的目录树（space → node，`node_kind ∈ folder/doc/table/link/drive/page`），走 `library_nodes` / `library_attachments` / `library_tables` 三表；v34 起 `library_nodes` 带 `category`（material|artifact）与 `provenance_id`，`GET /materials/nodes?category=` 分「资料 / 产物」栏。drive 节点走两步式上传（先 `POST /files` 拿 `file_id` 再传 `drive_upload_id`，`POST /materials/upload` 已删）。**「找」只做结构浏览 + 关键词子串匹配**（`LIKE` `title`/`body`），**不含**语义向量检索/RAG（知识库另立项，守卫 `TestMaterialHasNoSemanticSearch` 把这条拍板变成机器判据，见 `unimplemented.md` C37）。资料库的 MCP 工具面 `mate mcp material` 已交付（`library_list_nodes` / `library_node_info` / `library_upload` / `library_import_artifact`），可被任意 MCP 客户端拉起。
+
+#### 7.6.5 专家（expert）
+
+`experts` 表 + `/experts` 六接口 + 前端管理页（卡片画廊 + 居中弹窗）；专家定义含名称/描述/头像/推荐模型/推荐技能/MCP/标签/角色设定 `instructions`。**会话发起时可选用专家**，人格在首轮注入（`sessionruntime`）；`instructions` 用 textarea + 字节计数 + 只读注入预览 + 保存期校验。
+
+
+
+### 7.7 dsh 资源初始化与能力扩展
+
+ark-mate 跑的是 ACP 传输，底座自身需要一个「profile + 资源」才能在启动时把能力面装配起来。这一节讲**启动时初始化了哪些运行时资源**、**office 为什么需要额外运行时**、以及**想扩展能力时该改哪里**。
+
+**7.7.1 启动时初始化什么（`mate-acp` 这套）**
+
+dsh 官方把能力切在 **profile 模板 × bundle 的 patch** 上：`acp` 模板只挂 `dsh-base + dsh-acp-app`（**只有 ACP 传输**，没有 office、没有文件交付插件）。ark-mate 自建持久 profile **`mate-acp`**（基座 = acp 模板），再用 `cordis.patch.yml` 覆写层把 office 三件套 + `present` + `deliverable-file-references` + `time-context` + `tool-ask-user` 声明式补回来。启动前由 `prepare_runtime.go` 幂等准备：
+
+| 初始化物 | 落点 / 内容 | 谁做 |
+| --- | --- | --- |
+| **profile 四文件** | `<DSH_HOME>/profiles/mate-acp/`：`package.json`（bundles=[dsh-base, dsh-acp-app]）· `cordis.yml`（空树）· `cordis.patch.yml`（覆写层）· `pnpm-workspace.yaml` | `ProvisionProfile`（`infra/dsh/profile.go`，幂等 writeIfChanged） |
+| **dsh 载荷** | `resources/payloads/dsh/<ver>/`（`@deepseek-ai/*` 插件集 + 随包 npm + libreoffice-kit + office 七件套资产，**不含 Python**） | 随包，`release.json` pin 版本；入口 `bin.js` |
+| **primary-runtime 载荷** | Python 3.12.14 + 独立 Node + pnpm + 13 个 Python 库（numpy/pandas/python-docx/…）+ `office-skills/` | 随包**逐字节同官方**；`make desktop/payloads` 装配 |
+| **4 个 office env** | `DSH_PRIMARY_RUNTIME` / `DSH_BUNDLED_OFFICE_SKILLS` / `DSH_BUNDLED_OFFICE_CLI`（须指到 cli.js 文件）/ `DSH_BUNDLED_OFFICE_NODE` | `BundledEnv` 派生 → `PrepareRuntimeEnv` 在**每处真拉底座前**经 `SetLaunchEnv` 注入 |
+| **skill 投影** | `${HOME}/.agents/skills/<id>/SKILL.md`（最低优先 rank 500） | `adapter.go`；物化在 `core/capability` |
+| **原生凭据 / 模型 overlay / 身份 overlay** | `<$DSH_HOME>/.credentials.yaml`(0600) · `mate-models.patch.yml` · `mate-identity.patch.yml`（后两者经 `--patch` 递入） | `adapter.go` / `identity.go` |
+
+隔离纪律：`DSH_HOME = <MATE_HOME>/runtime/dsh`，平台拉起的底座只读写这一份，绝不碰用户自己安装的 dsh（见 §3.4）。
+
+**7.7.2 office 为什么要单独一份 primary-runtime（不要理解成「ark-mate 才需要 Python」）**
+
+Python 是 **office 生成能力**的依赖，不是 dsh 底座的依赖。DSH 官方要 office 的那套 bundle（`sdk-app`/`web-app`）**同样需要 Python**，其 `primary-runtime` 载荷里就带 Python 3.12.14。ark-mate 因为主动给 `acp` 基座补了 office 能力，所以同样继承这条依赖——**两边「要不要 Python」一致，差异只在「从哪来、怎么送进运行时」**：dsh 走 runtime-bootstrap 包壳在启动前 set env，ark-mate 在本进程里用 `BundledEnv` 派生注入。
+
+**降级语义**：没有 primary-runtime（未装配/未随包）时 `BundledEnv` 返回 nil → office env 不注入 → 覆写层门控（`disabled: !!js`）如实关闭 office（agent 退回自带工具链），并打 WARN。这是**设计内降级，不是缺陷**：不误开、不拒启。
+
+**7.7.3 想给 ark-mate 加能力，改哪里（三条路，按代价从低到高）**
+
+1. **加一个「能力域」到内置 MCP**（最常见，零 adapter 改动）。若新能力是「模型在会话里用结构化工具调用平台已有的数据/操作」（如新建类专家、新建定时任务），做法是往 `mate mcp platform` 聚合器的 `domains` map 加一项（一个**不含下划线**的域前缀 + 该域 `mcp.Handler`），装配在 `bootstrap/assembly/platform_mcp.go`。**不需要改任何 adapter**，所有说 ACP + 支持 stdio MCP 注入的 runtime 自动获得。契约见 [`platform-capability-protocol.md`](platform-capability-protocol.md)。
+2. **加一个 Skill / MCP 定义**（用户数据面，不碰代码）。把 skill 包或 MCP server 定义登记进库、物化投放即可（§7.1/§7.2），执行仍归底座。
+3. **改 `mate-acp` 覆写层，补一个 dsh 插件**（当新能力必须是底座侧的插件/工具，比如某个 dsh 原生插件）。做法是在 `infra/dsh/profile.go` 的 `profilePatchYML` 里按上游 bundle 的 patch 逐字 `insert` 该插件的 `id`/`name`/`disabled: !!js` 门控/config getter，再按需派生 env。**代价**：这条从此绑到 dsh 上游的具体 bundle（如 `office-to-pdf` 是从 `web-app` 借来的传递依赖），升 dsh 版本要同步锚点（见 §7.7.4）。接**新底座**（非扩展 dsh）不属于此路——那是新建 `internal/infra/<id>/` 实现 `runtime.Adapter` + 装配根加一行（见 §1「接边有界」）。
+
+**7.7.4 升 dsh 版本时要同步的锚点**
+
+升级随包 dsh 载荷时逐一核对：A1 `profile.go` 的 `profilePatchYML` ↔ 上游 `sdk-app`/`web-app` 的 office block 是否逐字一致（`office-to-pdf` 单独确认为何仍借自 `web-app`）；A2 `BundledEnv` 的 4 个 env key 是否仍是上游读的那几个；A3 `primary-runtime/lock.json` 与上游同 tag 逐项（最好 md5）；A4 `prepare.ts` 本地 2 处改动是否仍成立；A5 装配入口 `skillSource` 指向；A6 `adapter.go` 的隔离/投影/凭据/overlay 契约；A7 `prepare_runtime.go` 的初始化时机是否覆盖所有本机 spawn 路径。验证口径：`go test ./internal/archtest/` + 真机 `dsh --profile mate-acp --dump-config` 确认 office 三件套 / present / deliverable-file-references / ACP 全在（`x-cordis.complete=true`、诊断为空）。
+
+### 7.8 模型配置 overlay 与产品身份（两个 `--patch` 交付面）
+
+ark-mate 不改 dsh 源码/fork，两个「让底座按平台口径说话」的能力都走 dsh 的官方配置扩展点 `--patch <绝对路径>`：平台生成**自己的** overlay 文件、作为 CLI 启动参数递入。为什么是平台自己的文件而不是 dsh 的 home patch：归属干净（只有平台写它）、**可撤销**（坏了去掉参数即回出厂配置）、层序最高（bundle → profile → home → CLI）。
+
+| 交付面 | 生成物 | 内容 | 生效粒度 | 失败半径 | 事实源 |
+| --- | --- | --- | --- | --- | --- |
+| **模型清单** | `<DSH_HOME>/mate-models.patch.yml` | 把平台 `models` 表投影成 dsh 认的 provider/model 声明（含派生路由键） | 每次拉起 | 写坏 → 会话选模型起不来 | `infra/dsh/config.go`（`resource.Syncer`） |
+| **产品身份** | `<DSH_HOME>/mate-identity.patch.yml` | `- id: system-prompt` + `includeHarnessIdentity: false`（去掉底座固定开场白）+ `personaPrefix`（ark-mate 身份段） | 每轮（系统提示） | 写坏 → 底座**拒启**；但身份**非 critical**，交付失败只留 WARN + 诊断 `identity_patch_failed`，不阻塞启动 | `infra/dsh/identity.go` + `domain/identity/identity.go` |
+
+**模型 overlay 的关键约束**：dsh 在 ACP 的 `modelValue()` 上要的是 `["<provider>","<model>"]` 这段**它自己的词表**；第一段是**派生路由键**（v25 起带平台保留前缀），不是平台 id 本身——`set_config_option` 拿这个值去找路由，而路由在 patch 里以派生键声明，两处必须逐字同源，否则「所有选了模型的会话立刻起不来」（守卫 `TestDshRouteKeyAgreesBetweenPatchAndModelValue` 钉住）。写盘前过两级校验门：静态（schema dump 字段核对）+ 底座级（`--dump-config-schema`，staging home）。`api` 协议（当前只 `openai-completions`）由 adapter 固定，不进用户表单。
+
+**产品身份的两层交付面**（为什么两个面分开放）：
+
+- **主路径**：`mate-identity.patch.yml`，每轮生效，写坏会让底座拒启——这是「模型自述」的主来源。
+- **回退面**：会话首个 prompt 前注入 `<product_identity>` 块（`userContext`），每个执行上下文一次；失败半径只让 prompt 变长。`session.user_message` 事件与 transcript **仍是用户原文**，块前缀不进历史；新建 / 原生恢复 / handoff / 代际迁移都会重新锚定。
+
+**身份是部署级常量，不热更**（这是设计边界，不是待办）：一个构建产物对应一个产品身份，不做用户改名/人格定制。想「不重启换身份」做不到——`--patch` 是启动参数、`acp` profile 的 `hmr` 恒关、ACP 协议不暴露任何 persona/system-prompt 方法。dsh 进程内其实可热改系统提示（以插件形式跑进 dsh 进程），但那是 ACP 外挂客户端够不到的，改成内嵌插件等于推翻「多底座、底座零改动」定位。改任何身份文案都要 `Version +1`，文案不得含底座名/模板花括号/路径（守卫钉住）。
+
+> 身份值对象是 `core/identity` 的 `Spec{Version, Name, DisplayName, Tagline, SystemPrompt, UserContext}`（纯值，不认识任何底座）；`Mode`（`auto|system|user|off`，由 `MATE_IDENTITY_MODE` 解析，非法值报错不静默回落）把模式作用到 Spec 得到本模式该交付的两个面；`Spec.Fingerprint()` 由文案 + 版本算（不由产物算），重复交付同一 Spec 收敛。判断「身份是否启用」要用 `Spec.Enabled()`（任一字段非空）而不是 `Fingerprint()==""`（零值也返回非空 hex）。模型清单的投影机制与此同构，只是产物换成 provider/model 声明、失败半径换成「会话选模型起不来」。
+
+### 7.9 内部模型网关（`internal/core/llm`）
+
+平台原本只有一条调模型的路——经 ACP 会话 `Prompt`（会话 × 轮次）。凡「不创建用户会话」的**旁路调用**（摘要、判别、抽取、标题、向量化、改写…）在结构里没有落点、也不进用量统计。`internal/core/llm` 把「调模型」收口成一个引擎内的网关：业务只依赖 `Gateway` 接口（纯值 + 契约，放 L1），不关心底层执行器。
+
+**三条不变量**（设计地基）：
+
+1. **调用即流水**：任何一次模型请求，无论有没有会话，都产出一条 `LLMCall`。会话调用 = `SessionID != ""` 那批，旁路调用 = `""` 那批——`SessionID` 可空是**明确设计**（表达「计量不与会话绑定」）。
+2. **网关是唯一咽喉**：选 provider/model、重试、超时、限流、脱敏、计量全在网关内，调用方没有机会漏记账，成败都记一条。
+3. **快照 ≠ 流水**：`llm.TokenUsage` 是**单次/单轮累加型明细**（可相加，落 `runs.token_usage_json`），而 `objusage.UsageInfo` 是**上下文窗口快照**（同会话后到覆盖先到，不可相加）。两个类型、两张表、两套口径，不得互相替代。
+
+**两个执行器**（按 `Purpose` 的默认 policy 选，一般不用手写 `Prefer`）：
+
+| 执行器 | 是什么 | 适合 | 结构化输出 |
+| --- | --- | --- | --- |
+| `ExecutorStateless` | HTTP 直连 provider | 高频纯文本（标题/摘要/改写/embed） | **只有它**保证 `Result.Structured`（`response_format`） |
+| `ExecutorStateful` | 内部复用/池化 ACP 会话 | 需要工具 / 多轮 agent 能力（agent_turn / summary） | 不产出结构化；**必须带护栏** |
+
+**接入约定**（业务侧加新用途时）：先问「一定要模型做吗」（纯规则能解决就别接）；要模型且是平台内部发起的旁路调用 → 走 `Gateway`，不自己直连 provider（否则重试/超时/记账/脱敏各写一份必然漂移）；用户主对话 → 走会话（`PurposeAgentTurn`）。三条硬约定：prompt 只写在一处（功能包 `prompts.go`）；`Request.Purpose` 必填且用已有 `Purpose*` 常量；`PurposeAgentTurn` 必须显式设 `MaxSteps` + `Timeout`（默认零值会被 `ErrUnboundedAgentTurn` 拒绝，防内部会话跑飞）。
+
+**失败语义**：默认（`Strict=false`）失败以 `Result.Outcome=Failed` 表达、不抛错（旁路不阻塞主流程）；`Strict=true` 失败返回 error（失败必须显式拒绝/中止的场景，如风控判别）。
+
+> 这份网关的边界也解释了用量统计的两套口径：会话轮次的 token 明细（`runs.token_usage_json`）与旁路调用的流水（`llm_calls` 表）都记，但前者附带在轮次上、后者是独立行（`SessionID` 可空）。详见 §5、§5.1。
 
 ## 8. 前端与桌面
 
@@ -318,15 +683,15 @@ CSP 是**双源逐字一致**的（前端契约 ↔ 核心路由层），`webPre
 backend/
 ├── cmd/mate/                 进程入口（只做参数分发与返回码）
 ├── internal/
-│   ├── bootstrap/            组合根与生命周期（装配顺序有语义，不要随意调换）
+│   ├── bootstrap/            组合根与生命周期（装配顺序有语义，步骤表见 §3.6）
 │   │   ├── app/              app 装配 + 启停（只消费 assembly.BuildResult）
 │   │   ├── assembly/         装配根：用例实例与控制器都在这里造（交窄端口、现判 nil）
 │   │   ├── cli/ · cliops/    子命令分发（serve 常驻）与命令行输出
 │   │   └── maintenance/      子命令实现（migrate / doctor / transcripts / mcp / config / demo / automation / capability / provider）
 │   ├── router/               唯一传输层装配点；按领域分 routes_*.go；资产管理（web*.go）
 │   ├── middleware/           入站横切：Host/Origin 来源判定（平台不做鉴权）
-│   ├── controller/ctr<域>/   入站适配（16 个：session / capability / model / workspace / automation / attachment / artifact / library / material / commandpolicy / export / search / usage / runtime / system / ws）
-│   ├── service/svc<域>/      用例层（接口 + 实现 + 构造函数；15 个；svc 之间零互 import）
+│   ├── controller/ctr<域>/   入站适配（15 个：session / capability / model / workspace / automation / attachment / artifact / library / material / export / search / usage / runtime / system / ws）
+│   ├── service/svc<域>/      用例层（接口 + 实现 + 构造函数；14 个；svc 之间零互 import）
 │   ├── sessionruntime/       会话编排（L7：Service / Orchestrator / 权限 / 附件 PromptPart 投影）
 │   ├── domain/<域>/          领域平面（session / workspace / provider / skill / mcp / automation / interaction / identity / expert / material / artifact）
 │   ├── dto/dto<域>/          请求/响应 DTO（两侧共用，自身不依赖应用层）
@@ -387,3 +752,18 @@ cd backend && go test ./internal/archtest/
 - **变更授权**与运行配置要点。
 
 新增一处结构或一条纪律时，做法是固定的：**先读 `AGENTS.md` 索引指向的对应分册，再决定这条纪律需不需要一条守卫**。如果它落在本文档描述的任何一条边界上，答案通常都是「需要」。
+
+### 10.1 失败语义总纲（fail-closed 的落法）
+
+全仓的错误处理取向是 **fail-closed**：拿不准就拒绝/降级，绝不"能跑但带着缺口静默跑"。散落在各节的降级点收敛成下面这一张表——**判定任何一处失败"该拒启 / 该降级 / 该显式拒码"先看这张表再去看对应小节**：
+
+| 失败类型 | 行为 | 代表 | 出处 |
+| --- | --- | --- | --- |
+| **critical 装配步骤失败** | **拒启**（进程起不来） | 持久层打开、编排器、定义装载、用例控制器、前端资产、监听绑定、路由 | §3.6 |
+| **非 critical 装配步骤失败** | **WARN + 诊断**，继续启动 | 产品身份 overlay 写坏（退回首轮 `<product_identity>` 块）、旧定义导入 | §3.6 / §7.8 |
+| **能力装配 fail-closed** | 未注册选中的 runtime → **启动失败**；不建"能启动但没底座"的进程 | `runtime.ProductRegistry` | §3.2 |
+| **可选载荷缺失** | **设计内降级**，不误开、不拒启 | 无 primary-runtime → office env 不注入、覆写层门控关闭 office（打 WARN） | §7.7.2 |
+| **契约/入参非法** | **显式拒绝 + 业务错误码**（不透传裸 error、不静默回落默认） | 带被撤选择键的写请求 `40001`、模型对不上平台清单 `40401`、`MATE_IDENTITY_MODE` 非法值报错 | §1 / §6.3 / §7.8 |
+| **能力迁移失败** | 扩权/改内容：可回退旧代际；**缩权：失败不回退，宁可拒发带错误码**（安全优先） | 代际迁移 | §7.4 |
+
+一句话记法：**能起不起来的缺口一律拒启（critical），产品体验类缺口降级 WARN（identity/office），用户输入类缺口显式拒码（40001/40401），收回权限类缺口永不回退（安全优先）。**
