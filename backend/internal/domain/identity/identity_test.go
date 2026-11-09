@@ -72,6 +72,11 @@ func TestPersonaSuffixCarriesDeliveryDirective(t *testing.T) {
 	if !strings.Contains(spec.PersonaSuffix, "全部") {
 		t.Fatalf("PersonaSuffix 未强调「全部」成品：%q", spec.PersonaSuffix)
 	}
+	// 交付目录卫生：成品 present 后必须清理过程性脚本/缓存/中间目录，否则跨会话复用陈旧脚本会
+	// 绕过校验链（见 ses_01M6ZKC9... 复盘：残留 build/ 诱使模型跳过 office 子 skill）。
+	if !strings.Contains(spec.PersonaSuffix, "清理") {
+		t.Fatalf("PersonaSuffix 未要求清理过程性产物：%q", spec.PersonaSuffix)
+	}
 	if !strings.Contains(spec.PersonaSuffix, "不要向用户复述") {
 		t.Fatalf("PersonaSuffix 缺少「不要复述指令」的收口：%q", spec.PersonaSuffix)
 	}

@@ -43,11 +43,13 @@ dsh 官方把「能力」切在 **profile 模板 × bundle 的 patch** 上：`ac
 
 > 说明：`web-app` 里的 `dsh-client-ui-*`（`web-app/cordis.patch.yml` 大量）是 Web 前端渲染层，ark-mate 桌面 ACP 不渲染 dsh Web 前端，**全部不相关**，不列。
 
-### 2.1 交付物「全部 present」口径（personaSuffix 覆盖）
+### 2.1 交付口径：全部 present + 交付目录清理（personaSuffix 覆盖）
 
-**问题**：`present` 工具自身的描述写死了「Usually the 1-2 most important deliverables; at most 4 per call.」（`@deepseek-ai/dsh-tool-present/lib/index.js`）。这句在**插件内部硬编码**，没有 config 面能改（只有 `maxFiles`，默认 8，且只影响硬上限的报错阈值，不影响模型读到的文案）。于是模型一次生成多格式成品时，常只挑 4 个 present，其余只写盘不入库——平台侧 `workartifact` 又**只认 present**（见 [`resolve.go`](../../backend/internal/infra/workartifact/resolve.go)），结果卡片与「产物」都只覆盖被 present 的那几个。
+**问题一（声明不全）**：`present` 工具自身的描述写死了「Usually the 1-2 most important deliverables; at most 4 per call.」（`@deepseek-ai/dsh-tool-present/lib/index.js`）。这句在**插件内部硬编码**，没有 config 面能改（只有 `maxFiles`，默认 8，且只影响硬上限的报错阈值，不影响模型读到的文案）。于是模型一次生成多格式成品时，常只挑 4 个 present，其余只写盘不入库——平台侧 `workartifact` 又**只认 present**（见 [`resolve.go`](../../backend/internal/infra/workartifact/resolve.go)），结果卡片与「产物」都只覆盖被 present 的那几个。
 
-**做法**：`deliverable-file-references`（一方指导）里没有「只挑 1-2 个」的约束，且排在系统提示较前位置。平台用 `system-prompt` 的 **`personaSuffix`** 键（部署级**后置段**，排在一方指导之后，能压过前面的默认口径）追加一条统一约束：**本轮所有面向用户的成品都要 present，脚本/中间文件不要 present**。文案唯一事实源在 [`internal/domain/identity/identity.go`](../../backend/internal/domain/identity/identity.go) 的 `personaSuffix`，经 [`dsh/identity.go`](../../backend/internal/infra/dsh/identity.go) 的 `buildIdentityPatch` 写成 `personaSuffix: |-`（为空时**不写该键**）。这样**不动 dsh 插件源码、不改 `present` config**，只借 dsh 官方 `system-prompt` 配置面，载荷仍逐字节与上游一致。
+**问题二（过程产物污染工作区）**：office 各子 skill（`office-docx` 等，逐字与上游一致、不可改）明确要求「**Keep source scripts, intermediate files, and final documents in the task workspace**」——构建脚本、中间产物会和成品一起留在交付目录。同一 `default` 工作区被后续会话复用时，模型会把上一次残留的 `build/*.py` 当现成捷径直接改数重跑，**绕过 office 子 skill 的校验链**（`office-recalculate`/`office-render`）。复盘见会话 `ses_01M6ZKC9ZKN5X5427HZPTDEZB1`：只加载了 `office` 路由与 `office-export-pdf`，没走 `office-docx/pptx/xlsx`，正是捡了残留 `build/`。
+
+**做法**：`deliverable-file-references`（一方指导）里没有这两条约束，且排在系统提示较前位置。平台用 `system-prompt` 的 **`personaSuffix`** 键（部署级**后置段**，排在一方指导之后，能压过前面的默认口径）追加统一约束：**① 本轮所有面向用户的成品都要 present（一次可到 8 个），脚本/中间文件不要 present；② 成品 present 完毕后清理交付目录里的临时脚本、缓存与中间渲染目录，只留成品**（避免下次会话复用陈旧脚本跳过校验）。文案唯一事实源在 [`internal/domain/identity/identity.go`](../../backend/internal/domain/identity/identity.go) 的 `personaSuffix`，经 [`dsh/identity.go`](../../backend/internal/infra/dsh/identity.go) 的 `buildIdentityPatch` 写成 `personaSuffix: |-`（为空时**不写该键**）。这样**不动 dsh 插件源码、不改 `present` config**，只借 dsh 官方 `system-prompt` 配置面，载荷仍逐字节与上游一致。
 
 **升级锚点**：`personaSuffix` 是 dsh `@deepseek-ai/dsh-system-prompt` 的 `Config` 正式字段（`lib/types/index.d.ts` 的 `Config.personaSuffix`）。升级 dsh 时确认该键仍在 schema；`upgrade_probe` 的 `--dump-config-schema` 会因未知键而报错，从而在升级时暴露。
 
