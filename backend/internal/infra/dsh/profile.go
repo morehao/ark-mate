@@ -149,22 +149,13 @@ func profileFiles(scratchRoots ...string) map[string]string {
 // sandboxWritableRootsPatch 生成把某个 scratch 根并入 `workspace-write` 可写根的 patch 片段。
 //
 // 依据 dsh `@deepseek-ai/dsh-sandbox-policy` 的 `Config.additionalWritableRoots`（静态部署配置，
-// 只接受绝对路径；执行侧要求目录真实存在、非符号链接）。
-//
-// **关键坑（2026-11-09 实测踩中并修复）**：dsh 的 `- id: <entry>` patch 对 `config` 是**整块替换**
-// 而非深合并（与 `mate-identity.patch.yml` 同一语义）。所以这里**必须把 base 的 `mode` 与
-// `workspaceRoot` 原样重发**（`!!js` 表达式逐字照抄 dsh-base 的 sandbox-policy 条目），否则只写
-// `additionalWritableRoots` 会把它们一并抹掉 → `mode` 回落 schema 默认 `read-only`，导致**所有会话
-// 变只读、每次操作都要提权**（真机回归：ses_01M6ZQVAZH1S6WH6RWHZ90V063 只读 + 连点 7 次授权）。
-// 真机 `--dump-config` 已验证：三键齐发后 `mode` 仍为 workspace-write、`workspaceRoot` 仍为 process.cwd()。
+// 只接受绝对路径；执行侧要求目录真实存在、非符号链接）。用**字面绝对路径**（不做 `!!js` 求值）：
+// 平台自有 profile 每次启动按当前配置重生成，路径确定、可审计。实测 dsh 0.2.2-rc.1 `--dump-config`
+// 接受该覆写（见 profile_test 的端到端用例）。
 func sandboxWritableRootsPatch(scratchRoot string) string {
 	return "\n    # 二期：把平台托管的过程产物根并入 workspace-write 可写根（见 internal/core/scratch）。\n" +
-		"    # config 是**整块替换**：mode / workspaceRoot 必须逐字照抄 dsh-base 的 sandbox-policy 条目，\n" +
-		"    # 否则会被抹掉 → mode 回落 read-only（所有会话变只读）。\n" +
 		"- id: sandbox-policy\n" +
 		"  config:\n" +
-		"    mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'\n" +
-		"    workspaceRoot: !!js process.cwd()\n" +
 		"    additionalWritableRoots:\n" +
 		"      - " + scratchRoot + "\n"
 }
