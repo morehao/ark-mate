@@ -75,6 +75,14 @@ func TestProfileEmitsSandboxWritableRoot(t *testing.T) {
 		!strings.Contains(withRoot, "- /home/u/workspaces/.scratch") {
 		t.Fatalf("附加的可写根不符：\n%s", withRoot)
 	}
+	// 回归护栏（2026-11-09 踩过）：config 是整块替换，必须把 mode/workspaceRoot 原样重发，
+	// 否则 mode 回落 read-only、所有会话变只读。这里钉住两键必须在场。
+	if !strings.Contains(withRoot, "mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'") {
+		t.Fatal("sandbox-policy 覆写丢了 mode：会让默认模式回落 read-only")
+	}
+	if !strings.Contains(withRoot, "workspaceRoot: !!js process.cwd()") {
+		t.Fatal("sandbox-policy 覆写丢了 workspaceRoot")
+	}
 	without := profileFiles()["cordis.patch.yml"]
 	if strings.Contains(without, "sandbox-policy") {
 		t.Fatal("不传 scratch 根时不应出现 sandbox-policy 覆写")
