@@ -19,10 +19,10 @@ import { useSyncExternalStore } from 'react'
  * 统一用 `flow` / `toolDisplay` / `queueSend`。
  */
 
-export type ToolDisplay = 'compact' | 'detailed'
-export type QueueSend = 'queue' | 'immediate'
+type ToolDisplay = 'compact' | 'detailed'
+type QueueSend = 'queue' | 'immediate'
 
-export interface FlowPrefs {
+interface FlowPrefs {
   toolDisplay: ToolDisplay
   queueSend: QueueSend
   showFileChanges: boolean

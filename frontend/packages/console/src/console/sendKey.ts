@@ -5,7 +5,7 @@
  * 开关与设置里那句说明都被用户判定为噪声。现在只有一套规则，也不再读写 localStorage；
  * 旧版留下的 `mate.sendKey` 值不再被读取，老用户自然回到 Enter 发送。
  */
-export interface SendKeyEvt {
+interface SendKeyEvt {
   key: string
   shiftKey: boolean
   metaKey: boolean

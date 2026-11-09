@@ -20,9 +20,9 @@ export const EXPERT_MAX_TAGS = 8
 /** 单个标签字符上限（对齐后端 `MaxExpertTagRunes`）。 */
 export const EXPERT_MAX_TAG_CHARS = 20
 /** 技能/MCP 每类引用上限（对齐后端 `MaxExpertRefs`）。 */
-export const EXPERT_MAX_REFS = 50
+const EXPERT_MAX_REFS = 50
 /** id 词法（对齐后端 `skillIDRE`）：小写字母/数字，连字符分段，≤64。 */
-export const EXPERT_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const EXPERT_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 /** 内置头像键（对齐后端 `ValidExpertAvatars`）。 */
 export const EXPERT_AVATARS = ['spark', 'chart', 'code', 'pen', 'search', 'briefcase'] as const
 export type ExpertAvatar = (typeof EXPERT_AVATARS)[number]
@@ -33,7 +33,7 @@ export type ExpertAvatar = (typeof EXPERT_AVATARS)[number]
  * 这些标记会被首轮当作**隐藏上下文注入**，含逃逸风险，因此后端一律拒。前端就地列出命中项并禁用保存，
  * 但真正落库前的拒绝仍以服务端为准。
  */
-export const EXPERT_DANGEROUS_MARKERS = ['</system-reminder>', '<!--', '-->', '{{', '}}', '\x00'] as const
+const EXPERT_DANGEROUS_MARKERS = ['</system-reminder>', '<!--', '-->', '{{', '}}', '\x00'] as const
 
 /** 引用选择器的一个候选项（技能 / MCP / 模型通用）。 */
 export interface ExpertRefOption {

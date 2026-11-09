@@ -25,15 +25,6 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// fileExists 判断路径存在（doctor 与状态面用）。
-func fileExists(p string) bool {
-	if p == "" {
-		return false
-	}
-	_, err := os.Stat(filepath.Clean(p))
-	return err == nil
-}
-
 // ——— 供应商（v12）：**一个 OpenAI 兼容端点 + 一把密钥** ———
 //
 // 档案存于 <ProviderDir>/providers.json（memory 载体）或 `providers` 表（sqlite 载体）。

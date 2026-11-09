@@ -12,13 +12,11 @@ package svcmaterial
 import (
 	"context"
 	"io"
-	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
 	"github.com/morehao/ark-mate/internal/core/object/objtime"
 
-	"github.com/morehao/ark-mate/internal/domain/material"
 	"github.com/morehao/ark-mate/internal/dto/dtomaterial"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 )
@@ -180,23 +178,6 @@ func spaceOf(spaceID string) (string, error) {
 		return defaultSpace, nil
 	}
 	return "", code.Errorf(code.NotSupported, "space_not_supported: 本期只支持默认个人空间，不支持空间 %q", spaceID)
-}
-
-// extKind 按文件扩展名映射节点种类（语义在服务端，前端不传 kind）。
-//
-// md→doc、csv→table、html/htm→page、其余→drive。空/未知扩展名 → drive。
-func extKind(name string) material.NodeKind {
-	lower := strings.ToLower(name)
-	switch {
-	case strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".markdown"):
-		return material.KindDoc
-	case strings.HasSuffix(lower, ".csv"):
-		return material.KindTable
-	case strings.HasSuffix(lower, ".html") || strings.HasSuffix(lower, ".htm"):
-		return material.KindPage
-	default:
-		return material.KindDrive
-	}
 }
 
 // nodeToResp 把实体折成列表项。

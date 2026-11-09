@@ -8,7 +8,7 @@ import (
 
 // ——— P3a-2「连接键 / 代际键归属」守卫 ———
 //
-// `connKey` / `generationKey`（以及 `shortGenerationKeys` / `connCauseLabel` / `dedupeStrings`）
+// `connKey` / `generationKey`（以及 `shortGenerationKeys` / `connCauseLabel`）
 // 是**纯函数**，已落 `internal/drivers/runtimeconn`（P3a-2 第三刀）。
 //
 // 它们决定"哪些会话共享一个暖进程"，是执行面最要紧的一条判据。两份实现的后果**不是报错**，
@@ -17,7 +17,7 @@ import (
 //
 // 判据两段，fail-closed：
 //
-//	① `runtimeconn` 必须真的有那五个导出入口（改名 = 守卫失锚）；
+//	① `runtimeconn` 必须真的有那四个导出入口（改名 = 守卫失锚）；
 //	② manager 侧不得再出现派生**本体**的痕迹（拼接形态、长度前缀、末段切分）。
 //
 // 反证（实跑）：把 `generationKey` 的长度前缀拼装搬回 `manager/connection.go` → 红。
@@ -44,7 +44,6 @@ func TestConnectionKeysLiveInRuntimeconn(t *testing.T) {
 		"func GenerationKey(connKey, fingerprint, configDigest string) string",
 		"func ShortGenerationKeys(keys []string) []string",
 		"func ConnCauseLabel(intentional bool) string",
-		"func DedupeStrings(in []string) []string",
 	} {
 		if !strings.Contains(src, a) {
 			t.Errorf("internal/drivers/runtimeconn/keys.go 里找不到 %q：连接键/代际键的派生被改名或搬走了？"+

@@ -17,7 +17,7 @@ import { writeErrorText } from '../../console/capabilityView'
 import type { ExpertRefOption } from '../../console/expertView'
 
 /** 弹窗里引用选择器的候选（技能 / MCP / 模型）。清单取不到时留空并允许留空保存。 */
-export interface ExpertOptions {
+interface ExpertOptions {
   skills: ExpertRefOption[]
   mcps: ExpertRefOption[]
   models: ExpertRefOption[]

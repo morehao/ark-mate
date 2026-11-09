@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -209,13 +208,4 @@ func (pl *Plane) removeProviderDefinition(ctx context.Context, id string, expect
 		return true, nil, pl.persistProvidersFile()
 	}
 	return pl.st.DeleteProviderDefinitionIfUnreferenced(ctx, id, expectedRev, defn.DefinitionWriteActor)
-}
-
-// providerFileExists `<ProviderDir>/providers.json` 是否存在（doctor 与迁移提示用）。
-func providerFileExists(dir string) bool {
-	if dir == "" {
-		return false
-	}
-	_, err := os.Stat(filepath.Join(dir, ProvidersFileName))
-	return err == nil
 }

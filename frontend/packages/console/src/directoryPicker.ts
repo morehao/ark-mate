@@ -22,13 +22,13 @@ import { pickDirectoryHost } from '@ark-mate/api'
 import { declaredFacts } from './capabilityFacts'
 
 /** 本次交互走哪一套选目录实现（与 dsh 的 `DirectoryPickerBackendKind` 同义）。 */
-export type DirectoryPickerKind = 'native' | 'browse'
+type DirectoryPickerKind = 'native' | 'browse'
 
 /** 一次选定：路径 / 用户取消。取消**不是**错误，调用方据此静默收手。 */
-export type DirectoryPickOutcome = { path: string } | { cancelled: true }
+type DirectoryPickOutcome = { path: string } | { cancelled: true }
 
 /** 解析判定的输入事实（只有一项：服务端声明的"宿主能不能抬系统面板"）。 */
-export interface DirectoryPickerFacts {
+interface DirectoryPickerFacts {
   /** 宿主原生选择器是否可用（`/capabilities` 的 `native-dialog.available`）。 */
   nativeDialog: boolean
 }
@@ -38,7 +38,7 @@ export interface DirectoryPickerFacts {
  * @param facts - 采样到的宿主事实。
  * @returns 要使用的实现。
  */
-export function resolveDirectoryPicker(facts: DirectoryPickerFacts): DirectoryPickerKind {
+function resolveDirectoryPicker(facts: DirectoryPickerFacts): DirectoryPickerKind {
   return facts.nativeDialog ? 'native' : 'browse'
 }
 

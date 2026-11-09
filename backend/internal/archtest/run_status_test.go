@@ -29,8 +29,6 @@ func TestRunStatusIsSingleSource(t *testing.T) {
 		"func RunStatusPayload(",
 		"func (pl *Plane) PublishRunStatus(",
 		"func (pl *Plane) PublishRunInterrupted(",
-		"func IsRunStatus(",
-		"func RunStatusValues()",
 	} {
 		if !strings.Contains(mint, anchor) {
 			t.Fatalf("%s 里找不到 %q：`run.status` 的铸造/取值集/校验都该在这一处（fail-closed，"+

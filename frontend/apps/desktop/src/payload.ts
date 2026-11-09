@@ -18,7 +18,7 @@
  *
  * ## 为什么不做 PATH 探测（连"顺便找一下"都不做）
  *
- * 本文件与 `node-runtime.ts` 由 archtest 守卫静态扫描，禁止出现 `which` / `command -v` / `LookPath`
+ * 本文件由 archtest 守卫静态扫描，禁止出现 `which` / `command -v` / `LookPath`
  * 这类探测（M3-4 的第 6 条新守卫）。探测一旦存在，迟早会有人在"载荷没装好"时被它救一次，
  * 于是那条路径就成了默认路径——正是上面那段要避免的。
  */

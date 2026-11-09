@@ -30,12 +30,8 @@ export function deliveryLabel(delivery: string): string {
   return DELIVERY_LABEL[delivery] ?? delivery
 }
 
-export function deliveryHint(delivery: string): string {
-  return DELIVERY_HINT[delivery] ?? ''
-}
-
 /** 离队原因 → 文案（服务端 ReasonUserCancel / ReasonDeliverFail / ReasonStale）。 */
-export function cancelReasonLabel(reason: string): string {
+function cancelReasonLabel(reason: string): string {
   switch (reason) {
     case 'user_cancel':
       return '已撤下'
@@ -79,7 +75,7 @@ export function cancelTone(reason: string): 'err' | 'cancel' | 'info' {
 }
 
 /** 一次队列事件的结果：新队列 + 被移除的队项（未移除 → null；用于写系统提示）。 */
-export interface QueueTransition {
+interface QueueTransition {
   queue: QueuedInput[]
   removed: QueuedInput | null
 }
@@ -118,17 +114,6 @@ export function queuedFromResp(r: QueuedInputResp): QueuedInput {
   if (r.target_run_id) q.targetRunId = r.target_run_id
   if (typeof r.generation === 'number') q.generation = r.generation
   return q
-}
-
-/**
- * 队列归并（纯函数）：queued 建项、delivered/cancelled 出队，其余事件原样透传。
- *
- * 幂等：同一 input_id 重复入队（重连重放）只按最新载荷更新，不叠加成两条；
- * 出队事件对不存在的 id 是 no-op——**队项可能先于本页建立**（入队发生在别的标签页/刷新前），
- * 这不值得报错，队列本来就只是投影。
- */
-export function applyQueue(queue: QueuedInput[], e: BusEvent): QueuedInput[] {
-  return transitionQueue(queue, e).queue
 }
 
 /** applyQueuedEvent：入队/重放（同 id 覆盖而不叠加）。 */

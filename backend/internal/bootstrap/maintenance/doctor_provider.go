@@ -441,14 +441,6 @@ func checkRuntimeModelDiff(rt doctorfacts.ProviderRuntimeFacts) doctorCheck {
 	return doctorCheck{name, doctorOK, detail + "：清单里的条目都出现在运行时目录里（底座自带目录的条目平台不管）"}
 }
 
-// shortDigest 摘要太长，报告里只留前 12 位（完整值在 `mate doctor --json` 的 facts 里）。
-func shortDigest(d string) string {
-	if len(d) <= 12 {
-		return d
-	}
-	return d[:12] + "…"
-}
-
 // noteSuffix 把 note 拼成一句可读的后缀（空则不拼）。
 //
 // **只取第一句、并截断**：runtime 的 Note 里常常是整段实测记录（dsh 那条有近 300 字），

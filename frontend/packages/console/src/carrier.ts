@@ -24,7 +24,7 @@ export type StreamConfig = {
  * 同步探测桌面载体。形状不对**当场抛错**，而不是让页面拿着半个对象跑（preload 已经自检过一次，
  * 这里是第二道，覆盖"契约升级了但壳没跟上"的混搭场景）。
  */
-export function desktopCarrier(): MateDesktop | null {
+function desktopCarrier(): MateDesktop | null {
   const raw = (globalThis as Record<string, unknown>)[DESKTOP_NAMESPACE]
   if (raw === undefined) return null
   return assertMateDesktop(raw)

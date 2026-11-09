@@ -26,7 +26,6 @@ import (
 // desktopPayloadFiles 是本守卫的扫描对象（相对仓库根）。
 var desktopPayloadFiles = []string{
 	"frontend/apps/desktop/src/payload.ts",
-	"frontend/apps/desktop/src/node-runtime.ts",
 }
 
 // forbiddenProbe 一条禁止出现的探测写法。

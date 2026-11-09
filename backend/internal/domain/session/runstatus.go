@@ -68,13 +68,6 @@ var runStatusValues = []string{
 	RunStatusIdle,
 }
 
-// RunStatusValues 返回 10 个活体过程状态（**副本**：调用方改不动本包的取值集）。
-func RunStatusValues() []string {
-	out := make([]string, len(runStatusValues))
-	copy(out, runStatusValues)
-	return out
-}
-
 // IsLiveRunStatus 判断 v 是否为 10 个活体过程状态之一（恢复收口用的 `interrupted` **不算**）。
 func IsLiveRunStatus(v string) bool {
 	for _, s := range runStatusValues {
@@ -83,14 +76,6 @@ func IsLiveRunStatus(v string) bool {
 		}
 	}
 	return false
-}
-
-// IsRunStatus 判断 v 是否为合法的 `run.status` 取值（= 10 态 ∪ {interrupted}）。
-//
-// 与 `IsLiveRunStatus` 分开是刻意的：写库/回放校验要接受恢复收口那一支，而**实时**发射点只该
-// 产生活体状态（`PublishRunStatus` 用的就是 `IsLiveRunStatus`）。
-func IsRunStatus(v string) bool {
-	return v == RunStatusInterrupted || IsLiveRunStatus(v)
 }
 
 // RunStatusOpts `run.status` 载荷的可选段（零值 = 只发状态）。

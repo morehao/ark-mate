@@ -27,7 +27,7 @@
  */
 
 /** 端点路径（必须与核心 `router.AssetWatchPath` 逐字一致）。 */
-export const ASSET_WATCH_PATH = '/dev/assets/events'
+const ASSET_WATCH_PATH = '/dev/assets/events'
 
 /** SSE 事件名（必须与核心 `writeSSE` 的事件名一致）。 */
 const REBUILT_EVENT = 'rebuilt'

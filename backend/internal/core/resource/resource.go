@@ -280,18 +280,6 @@ const (
 	ChannelNone = "none"
 )
 
-// EffectiveEffect 把生效时刻折算成「保守值」排序（越大越晚）。
-//
-// 用户面的 `effective_at` 只能取所有 runtime 里**最晚**的那个（ADR-22：页面不得出现底座名，
-// 所以不能逐底座说各自的时机）。代价已拍板接受：改密钥在 dsh 上一轮就生效，页面会说
-// 「下次启动应用生效」——保守而非欺骗（实际行为只会比承诺更快）。
-func EffectiveEffect(a, b string) string {
-	if EffectRank(b) > EffectRank(a) {
-		return b
-	}
-	return a
-}
-
 // EffectRank 生效时刻的保守序（未知取值按最晚处理——宁可多说一句"要等"，不可少说）。
 func EffectRank(e string) int {
 	switch e {

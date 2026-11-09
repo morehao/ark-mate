@@ -22,7 +22,7 @@ import {
   type ExpertRefOption,
 } from '../../console/expertView'
 
-export interface ExpertDialogOptions {
+interface ExpertDialogOptions {
   skills: ExpertRefOption[]
   mcps: ExpertRefOption[]
   models: ExpertRefOption[]

@@ -1,7 +1,7 @@
 // 状态页：类型不支持预览（FE-P3：含下载出口）。
 import { tokens } from '@ark-mate/ui'
 
-export interface UnsupportedStateProps {
+interface UnsupportedStateProps {
   fileName: string
   /** 下载出口：有则展示"下载"按钮（不支持预览仍可下载）。 */
   onDownload?: () => void

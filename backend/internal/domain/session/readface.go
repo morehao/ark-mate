@@ -148,16 +148,6 @@ func (pl *Plane) fillModelDisplay(items []SessionItem) {
 	}
 }
 
-// sessionRespLocked 返回单会话的轻量表示（**调用方必须持 `pl.mu`**）。
-//
-// 刻意不导出：锁在包里、调用方拿不到，"须持锁调用"这种约定只对包内有效。跨包读面走
-// `SessionSnapshot`——它自己取锁。这条是 2026-10-17 修的：此前它叫 `SessionResp` 且导出，
-// 而 `svcsession` 的两个调用点都不持锁（对 map 的裸读，`-race` 可复现）。
-func (pl *Plane) sessionRespLocked(id string) SessionItem {
-	r := pl.sessions[id]
-	return pl.ToSessionRespOf(r)
-}
-
 // SessionSnapshot 一次取锁返回单会话的读面：轻量表示 + 过程状态 + 存在性。
 //
 // 为什么一次取锁而不是三个方法各取一次：详情页要的是**同一时刻**的"这条会话 + 它这一轮在

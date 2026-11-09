@@ -4,7 +4,7 @@
  * 握手不带凭据：连接建立后必须在 `STREAM_ATTACH_DEADLINE_MS` 内把这一帧发出去；未按时发出
  * 由服务端主动关闭（1008）。
  */
-export type StreamAttachFrame = {
+type StreamAttachFrame = {
   action: 'attach'
 }
 

@@ -26,7 +26,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -394,12 +393,3 @@ func stringsJoin(in []string) string {
 	return out
 }
 
-// sortedEnvKeys 诊断用：只回键名（值可能是密钥）。
-func sortedEnvKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}

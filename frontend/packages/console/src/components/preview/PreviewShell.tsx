@@ -17,7 +17,7 @@ import type { Shape } from './routes'
 import { LoadingState } from './states/LoadingState'
 import { ErrorState } from './states/ErrorState'
 
-export interface PreviewShellProps {
+interface PreviewShellProps {
   shape: Shape
   title: string
   fileName: string

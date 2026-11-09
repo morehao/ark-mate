@@ -13,9 +13,9 @@
 import type { RunPhase } from '@ark-mate/types'
 
 /** 旁白的气质：'run' 在跑（可停）/ 'wait' 在等人（**不可**停）/ 'idle' 收口 / 'interrupted' 可重发。 */
-export type RunTone = 'run' | 'wait' | 'idle' | 'interrupted'
+type RunTone = 'run' | 'wait' | 'idle' | 'interrupted'
 
-export interface RunNarration {
+interface RunNarration {
   tone: RunTone
   /** 头栏/侧栏显示的那句话（空串 = 这一档不需要旁白）。 */
   label: string

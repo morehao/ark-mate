@@ -1003,8 +1003,8 @@ async function scenarioAutomation(browser) {
   check('自动化触发的会话跑到终态（等标的前提）', st !== 'timeout', `status=${st}`)
   await page.shot('16-automation-session')
 
-  // 来源标：v21（#55）把会话头/侧栏那枚「由定时任务 <id> 触发」的 title 徽标撤掉了（`isAutomationOrigin`
-  // 这组 helper 仍在，但已无组件渲染），所以**不再在界面上找它**——真契约是 API 的 `origin`。
+  // 来源标：v21（#55）把会话头/侧栏那枚「由定时任务 <id> 触发」的 title 徽标撤掉了，
+  // 相关 helper 已随之删除，所以**不再在界面上找它**——真契约是 API 的 `origin`。
   // 这里只留 API 交叉验证：这条会话的 origin 就是 `automation:<id>`（来源可回溯）。
   const convDetail = await api('GET', `/sessions/${autoConv}`)
   check('会话 origin 落在 automation:ui-verify-daily', (convDetail.json.data?.origin ?? '') === `automation:${AUTO_ID}`, `origin=${convDetail.json.data?.origin}`)

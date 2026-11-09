@@ -74,7 +74,7 @@ import {
   type DeliveryChoice,
 } from './console/queueView'
 
-export type WsState = 'idle' | 'connecting' | 'open' | 'closed'
+type WsState = 'idle' | 'connecting' | 'open' | 'closed'
 
 export interface SessionView {
   entries: StreamEntry[]
@@ -162,7 +162,7 @@ const nextId = (): string => `e${++uid}`
 // 终态事件：到达后服务端会话不再 busy，触发一次会话列表刷新，让「服务端忙水位」状态收敛。
 const TERMINAL_TYPES = new Set<string>([Ev.RunEnded, Ev.RunError, Ev.RunCancelled])
 
-export function applyEvent(v: SessionView, e: BusEvent): SessionView {
+function applyEvent(v: SessionView, e: BusEvent): SessionView {
   // seq 幂等去重：事件只前进不回退（§4.5「按 seq 去重」）。快照/重放为开区间、服务端不重发，
   // 此守卫兜底重复 attach / 竞态下的重复投递，避免重连把同一段文本再拼一遍。
   if (e.seq <= v.lastSeq) return v
@@ -525,7 +525,7 @@ interface Toast {
   tone: ToastTone
 }
 
-export interface MateState {
+interface MateState {
   /**
    * 构建期固定的底座身份（`GET /meta` 的 `runtime{}`；null = 还没取到）。
    *
@@ -621,13 +621,13 @@ export interface PermissionDecision {
   label: string
 }
 
-export interface ElicitationDecision {
+interface ElicitationDecision {
   action: 'accept' | 'decline' | 'cancel'
   content?: Record<string, unknown>
   label: string
 }
 
-export interface MateActions {
+interface MateActions {
   boot: () => void
   /** 拉一次装配事实（`GET /meta`）与底座诊断快照（`GET /runtime/diagnostics`）。 */
   loadMeta: () => Promise<void>
@@ -747,9 +747,9 @@ export interface MateActions {
   applyFrame: (f: WsServerFrame) => void
 }
 
-export type MateStore = MateState & MateActions
+type MateStore = MateState & MateActions
 
-export const initialState: MateState = {
+const initialState: MateState = {
   runtime: null,
   product: null,
   runtimeDiagnostics: null,

@@ -19,9 +19,9 @@ import type { SessionSummary } from '@ark-mate/types'
  * 为什么取消/中断不再"不显示"：不给点等于让它们跟「已完成」长得一样（都只剩日期），
  * 而这两件事对用户的意义完全不同（作废 vs 可以重来）。颜色只表达**事实**，不表达"好坏"。
  */
-export type SessionBadgeKind = 'run' | 'wait' | 'fail' | 'done' | 'cancel' | 'interrupt'
+type SessionBadgeKind = 'run' | 'wait' | 'fail' | 'done' | 'cancel' | 'interrupt'
 
-export interface SessionBadge {
+interface SessionBadge {
   readonly kind: SessionBadgeKind
   readonly label: string
 }
@@ -65,7 +65,7 @@ export function sessionBadge(summary: Pick<SessionSummary, 'status' | 'run'>): S
 /** 一页渲染的会话条数（超出的以「显示更早」增量展开）。 */
 export const RAIL_PAGE = 40
 
-export interface RailPage {
+interface RailPage {
   /** 本次渲染的会话（顺序沿用原列表：置顶/日期分组由调用方继续处理）。 */
   visible: SessionSummary[]
   /** 尚未渲染的条数（0 = 已全部展开）。 */
@@ -104,7 +104,7 @@ export function pageSessions(
  */
 export const GROUP_IDLE_LIMIT = 5
 
-export interface GroupQuota {
+interface GroupQuota {
   /** 本次渲染的会话（原顺序不变：置顶在前、其余按时间，由调用方保证）。 */
   rows: SessionSummary[]
   /** 被收起的条数（0 = 全都在）。 */
@@ -141,16 +141,4 @@ export function quotaSessions(
   return { rows, hidden: all.length - rows.length }
 }
 
-/**
- * 把一条绝对路径缩成**末两级**（`/a/b/c/d` → `…/c/d`），末尾对齐用户认得出的那一段。
- *
- * 为什么不做"中间省略"（`/a/…/c/d`）：目录名在两端的概率一样高，而末两级几乎总是全部有用
- * 信息所在（项目名 + 子目录）。只有一级时原样返回，**空串/根路径**也原样返回——那两种情况下
- * "缩写"只会得到一个比原文更含糊的东西。
- */
-export function shortenPath(path: string): string {
-  if (!path || path === '/' || path === '.') return path
-  const parts = path.split('/').filter(Boolean)
-  if (parts.length <= 2) return path
-  return `…/${parts.slice(-2).join('/')}`
-}
+
