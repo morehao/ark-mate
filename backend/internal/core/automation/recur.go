@@ -32,12 +32,12 @@ import (
 
 // 上限常量（照抄 dsh）。
 const (
-	maxRRuleCount          = 1000
-	maxPeriodCandidates    = 10080 // 一周的每一分钟
-	maxSetPositions        = 31
-	minRRuleYear           = 100
-	maxRRuleYear           = 9999
-	maxRRuleSearchOccurs   = 100000 // 单次扫描枚举的硬上限（防病态规则无限扫）
+	maxRRuleCount        = 1000
+	maxPeriodCandidates  = 10080 // 一周的每一分钟
+	maxSetPositions      = 31
+	minRRuleYear         = 100
+	maxRRuleYear         = 9999
+	maxRRuleSearchOccurs = 100000 // 单次扫描枚举的硬上限（防病态规则无限扫）
 )
 
 var rruleWeekdays = []string{"MO", "TU", "WE", "TH", "FR", "SA", "SU"} // 0=周一
