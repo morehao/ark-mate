@@ -1963,7 +1963,8 @@ export const consoleStyleSheet = `
 
   .fg-turn-user {
     display: flex;
-    justify-content: flex-end;
+    flex-direction: column;
+    align-items: flex-end;
     padding-bottom: 8px;
     position: relative;
   }
@@ -1981,9 +1982,9 @@ export const consoleStyleSheet = `
     min-width: 0;
   }
   .fg-user-actions {
-    position: absolute;
-    right: 0;
-    top: -24px;
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 2px;
     opacity: 0;
     transition: opacity 0.14s ease;
   }
@@ -2041,8 +2042,13 @@ export const consoleStyleSheet = `
     line-height: 1.75;
     margin-bottom: 12px;
   }
+  .fg-turn-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 2px;
+    min-height: 0;
+  }
   .fg-turn-copy {
-    margin-left: auto;
     opacity: 0;
     transition: opacity 0.14s ease;
   }

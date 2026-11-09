@@ -663,6 +663,7 @@ function UserMessage({ e, index }: { e: StreamEntry; index?: number }) {
         )}
         {text.trim() && <RichText text={text} />}
       </div>
+      {/* 复制按钮落在气泡右下方（hover 显示），不再浮在气泡右上角外侧。 */}
       <div className="fg-user-actions">
         <MsgCopy text={text} />
       </div>
@@ -1298,7 +1299,6 @@ export function TurnView({
             ark<span className="fg-agent-dot">·</span>mate
           </span>
           <span className="fg-agent-ai">AI</span>
-          <TurnCopy text={copyTextValue} />
         </div>
       )}
       {turn.live && elapsed && <div className="fg-agent-status">已处理 {elapsed}</div>}
@@ -1396,6 +1396,13 @@ export function TurnView({
             </div>
           )}
         </>
+      )}
+
+      {/* 整轮复制的按钮落在本轮回复内容末尾右下方（hover 显示），而不是身份行右上角。 */}
+      {hasAgent && (
+        <div className="fg-turn-actions">
+          <TurnCopy text={copyTextValue} />
+        </div>
       )}
 
       {turn.live && stage && (
