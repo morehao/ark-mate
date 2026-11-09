@@ -1,7 +1,6 @@
 package svcusage
 
 import (
-	"encoding/json"
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"strings"
@@ -25,12 +24,4 @@ func rejectRemovedUsageDimension(q dtousage.UsageQueryReq) error {
 	return failure.NewError(failure.ClassRequest, "agent_selection_removed",
 		"[agent_selection_removed] 用量面没有按底座筛选这个维度：底座由构建期固定（本机为 "+
 			runtime.SelectedRuntime()+"），`agent_id` 已下线；要按时间看用 group_by=day", nil)
-}
-
-// JSONNullish 该原始 JSON 是否"没带"（空 / null）。
-//
-// 导出是因为会话写面（仍在 manager）也用它判"这个已下线的键带没带"——实现只有这一处。
-func JSONNullish(raw json.RawMessage) bool {
-	trimmed := strings.TrimSpace(string(raw))
-	return trimmed == "" || trimmed == "null"
 }

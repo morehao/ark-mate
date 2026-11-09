@@ -47,11 +47,6 @@ type mcpInjectionPlan struct {
 	Remote []capability.McpServer
 }
 
-// empty 报告计划里一台 server 都没有（含网关条目）。
-func (p mcpInjectionPlan) empty() bool {
-	return len(p.Direct) == 0 && p.Gateway == nil
-}
-
 // planMcpInjection 算出该 runtime 的 MCP 注入计划（唯一实现：注入面与指纹共用）。
 //
 // 在 core 计划之上**追加平台内置 MCP server**（automation / material 的工具面）：

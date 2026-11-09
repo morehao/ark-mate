@@ -81,17 +81,3 @@ func ConnCauseLabel(intentional bool) string {
 	}
 	return "unexpected"
 }
-
-// DedupeStrings 保序去重（连接键的 env 组拼装与诊断都用；纯函数）。
-func DedupeStrings(in []string) []string {
-	seen := make(map[string]bool, len(in))
-	out := make([]string, 0, len(in))
-	for _, v := range in {
-		if seen[v] {
-			continue
-		}
-		seen[v] = true
-		out = append(out, v)
-	}
-	return out
-}

@@ -39,16 +39,6 @@ import (
 // 命中思考文本）。两处必须同时改，守卫 G5 钉住这一点。
 var messageRowSourceTypes = []string{BusUserMessage, BusMessage}
 
-// isMessageRowSourceType 判断某个事件类型是否在投影白名单里。
-func isMessageRowSourceType(t string) bool {
-	for _, s := range messageRowSourceTypes {
-		if s == t {
-			return true
-		}
-	}
-	return false
-}
-
 type msgRowBuilder struct {
 	role      string
 	msgID     string

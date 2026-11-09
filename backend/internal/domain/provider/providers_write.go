@@ -405,17 +405,3 @@ func isDuplicateDefinition(err error) bool {
 	ae, ok := failure.As(err)
 	return ok && ae.Code == "definition_changed"
 }
-
-// cloneAnyMap 浅拷贝一个 map[string]any（值都是 JSON 标量/数组/对象，写面不会原地修改它们）。
-//
-// 保留它：**文件载体**与导入路径仍在处理自由 JSON（那是 v11 的落盘形状，v13 不动它）。
-func cloneAnyMap(in map[string]any) map[string]any {
-	if in == nil {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(in)+4)
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}

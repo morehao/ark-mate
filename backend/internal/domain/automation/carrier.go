@@ -150,17 +150,6 @@ func (pl *Plane) deleteAutomationDefinition(ctx context.Context, id string) (boo
 
 // ——— 定义 ⇄ 行/文件的形态转换 ———
 
-// automationRuntimeOf 把强类型定义的运行态抽成列结构（**不含** `state`：它属于定义，见 P-10）。
-func automationRuntimeOf(def automation.Automation) model.AutomationRuntimeState {
-	return model.AutomationRuntimeState{
-		LastFiredAt:         LastFiredText(def.LastFiredAt),
-		LastStatus:          def.LastStatus,
-		LastReason:          def.LastReason,
-		LastSessionID:       def.LastSessionID,
-		ConsecutiveFailures: int64(def.ConsecutiveFailures),
-	}
-}
-
 // LastFiredText 认领游标的文本形态（**唯一格式**：UTC + RFC3339Nano）。
 //
 // 它是 CAS 的比较值，两处写法必须逐字节一致——所以只有这一个函数负责格式化。

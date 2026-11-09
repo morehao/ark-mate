@@ -1,8 +1,6 @@
 package acp
 
 import (
-	"context"
-
 	acpsdk "github.com/coder/acp-go-sdk"
 )
 
@@ -55,24 +53,6 @@ func toPermissionOptions(opts []acpsdk.PermissionOption) []PermissionOption {
 		})
 	}
 	return out
-}
-
-// hasPermissionOption 判断 opts 是否含指定 option_id。
-func hasPermissionOption(opts []acpsdk.PermissionOption, oid string) bool {
-	if oid == "" {
-		return false
-	}
-	for _, o := range opts {
-		if string(o.OptionId) == oid {
-			return true
-		}
-	}
-	return false
-}
-
-// denyPermission 无条件拒绝（零值决策 → Cancelled）。
-func denyPermission(context.Context, PermissionRequest) PermissionDecision {
-	return PermissionDecision{}
 }
 
 // stringPtrValue 解引用 *T 为 string（T 底层为 string；nil → 空串）。
