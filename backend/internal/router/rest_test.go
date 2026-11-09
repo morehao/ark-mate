@@ -476,6 +476,9 @@ func (s *stubSvc) CancelElicitations(sessionID string) {
 	s.cancelledElicSession = sessionID
 }
 
+// CleanScratch 归档时清理过程产物目录：替身 no-op（不落盘）。
+func (s *stubSvc) CleanScratch(_ context.Context, _, _ string) {}
+
 func (s *stubSvc) CreateSession(_ context.Context, req dtosession.SessionCreateReq) (*dtosession.SessionCreateResp, error) {
 	s.createCalled = true
 	s.createReq = req

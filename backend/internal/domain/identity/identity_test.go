@@ -80,6 +80,11 @@ func TestPersonaSuffixCarriesDeliveryDirective(t *testing.T) {
 	if !strings.Contains(spec.PersonaSuffix, "临时") {
 		t.Fatalf("PersonaSuffix 未要求把过程产物放到临时区（落点优先，而非只靠事后清理）：%q", spec.PersonaSuffix)
 	}
+	// 点名平台约定的过程产物目录 `.scratch/`（与 internal/core/scratch 同源），让「放对地方」成为
+	// 模型最省事的选择。
+	if !strings.Contains(spec.PersonaSuffix, ".scratch") {
+		t.Fatalf("PersonaSuffix 未点名 .scratch 过程产物目录：%q", spec.PersonaSuffix)
+	}
 	if !strings.Contains(spec.PersonaSuffix, "不要向用户复述") {
 		t.Fatalf("PersonaSuffix 缺少「不要复述指令」的收口：%q", spec.PersonaSuffix)
 	}

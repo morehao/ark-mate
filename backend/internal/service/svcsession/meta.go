@@ -48,6 +48,10 @@ type MetaDeps interface {
 	// 用户会一直等一个不会来的答复。它**不返回错误**：作废是尽力而为的收尾，失败只告警
 	// （真实原因已经在服务端日志里，拦住归档反而更糟）。
 	CancelElicitations(sessionID string)
+
+	// CleanScratch 会话**归档**时清理它的过程产物目录（`<cwd>/.scratch/<id>/`）。失败只告警、
+	// 不阻断归档（与 CancelElicitations 同一条收尾纪律）。cwd 为空或目录不存在 → no-op。
+	CleanScratch(ctx context.Context, cwd, sessionID string)
 }
 
 // Meta 元数据写面用例。依赖事实：会话域平面（就地改 + 回读投影）+ 上面那三份。
@@ -72,6 +76,7 @@ var _ MetaSvc = (*Meta)(nil)
 //	   静默偏差）。解析要走库，所以它必须在①的持锁区**之外**（持锁读库会偶发死锁）。
 func (m *Meta) UpdateSession(ctx context.Context, id string, patch dtosession.SessionPatch) (*dtosession.SessionResp, error) {
 	var sessionRuntime string
+	var sessionCwd string
 	if !m.plane.Mutate(id, func(r *session.SessionRec) {
 		if patch.Title != nil {
 			r.Title = *patch.Title
@@ -83,6 +88,7 @@ func (m *Meta) UpdateSession(ctx context.Context, id string, patch dtosession.Se
 			r.Archived = *patch.Archived
 		}
 		sessionRuntime = r.RuntimeID
+		sessionCwd = r.Cwd
 		r.UpdatedAt = time.Now().UTC()
 	}) {
 		return nil, sessionNotFoundErr(id)
@@ -91,6 +97,9 @@ func (m *Meta) UpdateSession(ctx context.Context, id string, patch dtosession.Se
 	// 归档 ⇒ 挂起提问随之作废（先收口再落库：反过来的话，库里已经是归档态而卡片还挂着）。
 	if patch.Archived != nil && *patch.Archived {
 		m.deps.CancelElicitations(id)
+		// 归档 ⇒ 清理该会话的过程产物目录（`.scratch/<id>`）。只动平台约定的 scratch 子树，
+		// 绝不碰交付目录里的用户文件。cwd 为空则 no-op（历史行仍应有 cwd）。
+		m.deps.CleanScratch(ctx, sessionCwd, id)
 	}
 
 	appliedModelID := patch.Model

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/morehao/ark-mate/internal/core/protocol"
+	"github.com/morehao/ark-mate/internal/core/scratch"
 	"github.com/morehao/ark-mate/internal/domain/artifact"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtoartifact"
@@ -93,6 +94,12 @@ func (x *artifactExtractor) captureOne(ctx context.Context, cwd, sessionID, runI
 	abs, rel, err := workartifact.SafeRelPath(cwd, rawPath)
 	if err != nil {
 		glog.Warnw(ctx, "产物抽取：路径解析失败，跳过", "session", sessionID, "path", rawPath, "err", err)
+		return
+	}
+	// ②' 过程产物目录（`.scratch/`）里的文件永不登记：即便模型把 scratch 内的脚本/中间文件 present，
+	// 也拒绝收进产物库/资料库（过程文件 ≠ 交付物；见 internal/core/scratch 的设计）。
+	if scratch.IsScratchRelPath(rel) {
+		glog.Warnw(ctx, "产物抽取：present 指向过程产物目录（.scratch），拒绝登记", "session", sessionID, "path", rel)
 		return
 	}
 	// ③ 只认普通文件（不抽目录/符号链接）。
