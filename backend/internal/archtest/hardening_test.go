@@ -212,7 +212,10 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 
 	// a. 解析：纯函数，唯一判据是服务端声明。
 	picker := readSrc("directoryPicker.ts")
-	if !regexp.MustCompile(`(?s)export function resolveDirectoryPicker\(facts: DirectoryPickerFacts\): DirectoryPickerKind \{\s*return facts\.nativeDialog \? 'native' : 'browse'`).MatchString(picker) {
+	// 2026-11-09：`resolveDirectoryPicker` 已被 #120 的「过度导出清理」收回为**模块私有**
+	// （不再 `export`，仅本文件 directoryPickerKind() 内部调用）。守卫的本意是钉住「解析是纯函数、
+	// 唯一判据是 facts.nativeDialog」——故正则去掉 `export ` 前缀，其余判据不变。
+	if !regexp.MustCompile(`(?s)function resolveDirectoryPicker\(facts: DirectoryPickerFacts\): DirectoryPickerKind \{\s*return facts\.nativeDialog \? 'native' : 'browse'`).MatchString(picker) {
 		t.Error("resolveDirectoryPicker 必须是纯函数 `facts.nativeDialog ? 'native' : 'browse'`（解析不到即失败）")
 	}
 	for _, forbidden := range []string{"navigator.userAgent", "window.electron", "__MATE_DESKTOP__", "process.platform"} {
