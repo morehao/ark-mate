@@ -21,6 +21,11 @@ func TestFingerprintTracksCopy(t *testing.T) {
 	if versioned.Fingerprint() == base.Fingerprint() {
 		t.Fatal("改了身份版本，指纹却没变")
 	}
+	suffixed := base
+	suffixed.PersonaSuffix = "交付口径。"
+	if suffixed.Fingerprint() == base.Fingerprint() {
+		t.Fatal("改了后置段，指纹却没变")
+	}
 }
 
 // TestSpecFaceFlags 两个面各自的判据（装配层据此决定"这次有没有东西可交付"）。

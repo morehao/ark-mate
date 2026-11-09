@@ -19,7 +19,6 @@ package dsh
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -71,12 +70,14 @@ var Identity = IdentityDeclaration{
 	TestedOnVersion: "0.2.2-rc.1",
 	Note: "一次性 probe（2026-10-18，dsh 0.2.1-rc.2，临时 DSH_HOME + `--patch` + `--dump-config-schema`；" +
 		"**2026-11-06 在 0.2.2-rc.1 复测 PASS**：`- id: system-prompt` + `includeHarnessIdentity:false` + `personaPrefix` " +
-		"两键仍被 schema 接受，dump 退出码 0、`x-cordis.complete=true`、诊断为空）：" +
+		"两键仍被 schema 接受，dump 退出码 0、`x-cordis.complete=true`、诊断为空；" +
+		"**2026-11-09 再加 `personaSuffix` 三键复测 PASS**（`TestUpgradeProbeIdentityPatchDump`，exit=0 complete=true diagnostics=[]）：" +
+		"`personaSuffix` 是 `@deepseek-ai/dsh-system-prompt` 的 `Config` 正式字段，schema 接受）：" +
 		"① `- id: system-prompt` 是**已注册条目**（dsh-base 的 cordis.patch.yml 有它，ACP bundle 也用它覆盖 personaPrefix）；" +
-		"② `includeHarnessIdentity: false` + `personaPrefix` 两个键被 schema 接受，dump 退出码 0、`x-cordis.complete=true`、诊断为空；" +
+		"② `includeHarnessIdentity: false` + `personaPrefix` + `personaSuffix` 三个键被 schema 接受，dump 退出码 0、`x-cordis.complete=true`、诊断为空；" +
 		"③ 未知 `{{...}}` 变量在**首轮组装**时才抛错（不是启动时）——所以静态校验必须在落盘前拦掉 `{{`/`}}`，否则表现为每次会话都失败；" +
 		"④ 空/只有注释的 patch 会让底座拒启（与模型清单同一条坑），所以撤回必须是「删文件 + 摘参数」；" +
-		"⑤ 启动期**不跑** dump（用户已拍板）：这个文件只有两个键、且目标条目在 pin 版本上已验证。",
+		"⑤ 启动期**不跑** dump（用户已拍板）：这个文件只有三个静态键、且目标条目在 pin 版本上已验证。",
 }
 
 // IdentityOptions 造一个身份交付实现所需的**已解析落点**。
@@ -197,6 +198,18 @@ func (a *identityAdapter) revoke() (resource.Outcome, error) {
 	}, nil
 }
 
+// writeYAMLBlock 把一段多行文本按 YAML `|-` 块标量写进 b（空行原样输出，非空行缩进 6 空格）。
+// 与原先内联的循环等价，抽出来是为了 personaPrefix 与 personaSuffix 两段共用一份缩进口径。
+func writeYAMLBlock(b *bytes.Buffer, text string) {
+	for _, line := range strings.Split(text, "\n") {
+		if line == "" {
+			b.WriteString("\n")
+			continue
+		}
+		b.WriteString("      " + line + "\n")
+	}
+}
+
 // buildIdentityPatch 生成身份 overlay 的字节（确定性的手写 YAML，不引第三方 YAML 库）。
 //
 // 形态来自 dsh 自己的 patch 语法：
@@ -204,9 +217,11 @@ func (a *identityAdapter) revoke() (resource.Outcome, error) {
 //   - id: <entry>      —— 目标是已存在的条目（不存在时 dsh 只 WARN 跳过，退出码仍是 0）
 //     config:          —— **整行替换**该条目的 config，不与该行原值合并
 //
-// 所以这里**只写两个键**：`includeHarnessIdentity: false`（去掉固定开场白）与 `personaPrefix`
-// （产品身份段）。刻意不写 `includeRuntimeContext`（默认 true，cwd 等必需上下文要保留）、
-// 也不写 `toolOrder` / `complete`——那些是底座自己的行为，平台没有理由替它决定。
+// 所以这里写**三个键**：`includeHarnessIdentity: false`（去掉固定开场白）、`personaPrefix`
+// （产品身份段，前置于一方指导）与 `personaSuffix`（部署级后置段，排在一方指导之后，用于覆盖
+// 底座内置交付口径）。`personaSuffix` 为空时**不写该键**（交给底座默认空串）。刻意不写
+// `includeRuntimeContext`（默认 true，cwd 等必需上下文要保留）、也不写 `toolOrder` / `complete`
+// ——那些是底座自己的行为，平台没有理由替它决定。
 func buildIdentityPatch(spec pkgidentity.Spec) ([]byte, error) {
 	if err := validateIdentity(spec); err != nil {
 		return nil, err
@@ -219,12 +234,10 @@ func buildIdentityPatch(spec pkgidentity.Spec) ([]byte, error) {
 	b.WriteString("  config:\n")
 	b.WriteString("    includeHarnessIdentity: false\n")
 	b.WriteString("    personaPrefix: |-\n")
-	for _, line := range strings.Split(spec.SystemPrompt, "\n") {
-		if line == "" {
-			b.WriteString("\n")
-			continue
-		}
-		b.WriteString("      " + line + "\n")
+	writeYAMLBlock(&b, spec.SystemPrompt)
+	if strings.TrimSpace(spec.PersonaSuffix) != "" {
+		b.WriteString("    personaSuffix: |-\n")
+		writeYAMLBlock(&b, spec.PersonaSuffix)
 	}
 	data := b.Bytes()
 	if len(data) > MaxIdentityPatchBytes {
@@ -246,20 +259,40 @@ func buildIdentityPatch(spec pkgidentity.Spec) ([]byte, error) {
 //   - 不含 `!!js`：YAML 显式标签能构造出「看起来是字符串、实际是可执行片段」的值，静态文案
 //     没有理由出现它。
 func validateIdentity(spec pkgidentity.Spec) error {
-	text := spec.SystemPrompt
+	if err := validatePromptText("身份正文", spec.SystemPrompt); err != nil {
+		return err
+	}
+	if strings.TrimSpace(spec.PersonaSuffix) != "" {
+		if err := validatePromptText("交付口径后置段", spec.PersonaSuffix); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validatePromptText 校验一段会被写进系统提示的文案（SystemPrompt 与 PersonaSuffix 共用）。
+//
+// 判据集合：
+//   - 正文非空；
+//   - 不含 `{{` / `}}`：底座的 persona 会走模板插值，未知变量在**首轮组装**时抛错；
+//   - 不含 `{%` / `%}`：同上，模板标签；
+//   - 不含 NUL：YAML 块标量里的 NUL 会让解析器在读到它时失败；
+//   - 不含 `!!js`：YAML 显式标签能构造出「看起来是字符串、实际是可执行片段」的值，静态文案
+//     没有理由出现它。
+func validatePromptText(label, text string) error {
 	if strings.TrimSpace(text) == "" {
-		return fmt.Errorf("身份正文为空")
+		return fmt.Errorf("%s 为空", label)
 	}
 	// 两组花括号都要拦：`{{x}}` 是插值、`{% x %}` 是标签。底座的 persona 走模板渲染，
 	// 未知变量/标签在**首轮组装**时才抛错——那时用户已经点了发送，只会看到一条莫名的失败。
 	if pkgidentity.HasTemplateBraces(text) || strings.Contains(text, "{%") || strings.Contains(text, "%}") {
-		return errors.New("身份正文含模板标记（`{{`/`}}` 或 `{%`/`%}`）：底座的 persona 是模板，未解析项会在首轮组装时抛错")
+		return fmt.Errorf("%s 含模板标记（`{{`/`}}` 或 `{%%`/`%%}`）：底座的 persona 是模板，未解析项会在首轮组装时抛错", label)
 	}
 	if strings.ContainsRune(text, 0) {
-		return fmt.Errorf("身份正文含 NUL 字节")
+		return fmt.Errorf("%s 含 NUL 字节", label)
 	}
 	if strings.Contains(text, "!!js") {
-		return fmt.Errorf("身份正文含 YAML 显式标签 `!!js`")
+		return fmt.Errorf("%s 含 YAML 显式标签 `!!js`", label)
 	}
 	return nil
 }
