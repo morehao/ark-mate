@@ -1,5 +1,5 @@
 /** 消息富文本段落：普通文本 / 围栏代码块（```lang … ```）。 */
-export interface MsgPart {
+interface MsgPart {
   kind: 'text' | 'code'
   text: string
   lang?: string

@@ -19,7 +19,7 @@ import { PreviewShell } from './PreviewShell'
 import { isPreviewV2Enabled } from './flags'
 
 /** 打开预览所需的文件信息（各模块只需提供 file_id + 展示字段）。 */
-export interface PreviewFile {
+interface PreviewFile {
   /** 字节句柄（= ginupload file_id）；各模块返回体已带。 */
   file_id: string
   name: string

@@ -59,12 +59,12 @@ export function localTimezone(): string {
 const pad = (n: number): string => String(n).padStart(2, '0')
 
 /** `HH:MM`（缺省 09:00）。 */
-export function hhmm(hour?: number, minute?: number): string {
+function hhmm(hour?: number, minute?: number): string {
   return `${pad(hour ?? 9)}:${pad(minute ?? 0)}`
 }
 
 /** 星期集合 → "周一、周三"（空 → "未选"；后端要求至少一天）。 */
-export function weekdayText(days?: number[]): string {
+function weekdayText(days?: number[]): string {
   if (!days || days.length === 0) return '未选'
   return [...days]
     .sort((a, b) => a - b)
@@ -100,7 +100,7 @@ export function everySecondsText(sec?: number): string {
 }
 
 /** rrule 文本 → 一句摘要（列表主行用）：取 RRULE 行、突出 FREQ，剩余作为补充。 */
-export function rruleSummary(rrule?: string): string {
+function rruleSummary(rrule?: string): string {
   if (!rrule) return '未填写'
   const rule = rrule
     .split('\n')
@@ -143,7 +143,7 @@ export const RUN_STATUS_META: Record<
   skipped: { label: '未跑成', tone: 'danger' },
 }
 
-export const TRIGGER_LABEL: Record<string, string> = {
+const TRIGGER_LABEL: Record<string, string> = {
   scheduled: '按时',
   recovery: '停机补跑',
   manual: '手动',
@@ -260,7 +260,7 @@ export function scheduleFromForm(v: ScheduleFormValues): Record<string, unknown>
  * 做法：先当成 UTC 得到一个瞬时，再用 `Intl` 反查该时区在那一刻的墙钟偏移，两次修正。
  * 比引一个日期库便宜，且 DST 的"不存在/重复"由服务端的 `shiftPastWall` 兜底（预览会显形）。
  */
-export function zonedToRFC3339(local: string, timezone: string): string | null {
+function zonedToRFC3339(local: string, timezone: string): string | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(local)
   if (!m) return null
   const [, y, mo, d, h, mi] = m
@@ -306,7 +306,7 @@ function tzOffsetMs(at: Date, timezone: string): number {
 /** RFC3339 → `YYYY-MM-DDTHH:MM`（按给定/浏览器时区，回填表单）。
  *
  * 入参是 `schedule.at`——**用户可编辑的定义载体**，不是接口时间戳口径（见 `console/time.ts` 的例外）。 */
-export function toLocalInput(iso: string | undefined, timezone: string): string | undefined {
+function toLocalInput(iso: string | undefined, timezone: string): string | undefined {
   if (!iso) return undefined
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return undefined

@@ -14,9 +14,9 @@ import type { StreamConfig } from '../carrier'
  */
 
 /** 无任何服务端帧（含 pong）超过该时长视为 stalled（须 > ping 周期 25s 且留裕量）。 */
-export const STALL_MS = 70_000
+const STALL_MS = 70_000
 /** 保险丝巡检周期。 */
-export const STALL_CHECK_MS = 5_000
+const STALL_CHECK_MS = 5_000
 
 export class WsTransport {
   /**

@@ -13,10 +13,10 @@
 import { getCapabilities } from '@ark-mate/api'
 
 /** 声明里被依赖的能力 id（与前端契约的 `CapabilityId` 一一对应）。 */
-export const NATIVE_DIALOG_CAPABILITY = 'native-dialog'
+const NATIVE_DIALOG_CAPABILITY = 'native-dialog'
 
 /** 采样到的宿主/入口事实。 */
-export interface CapabilityFacts {
+interface CapabilityFacts {
   /** 宿主能不能抬起系统目录面板（`native-dialog.available`）。 */
   readonly nativeDialog: boolean
   /** 本次会话来自桌面壳（`entries.desktop`，由壳的 `X-Mate-Carrier` 头带出）。 */

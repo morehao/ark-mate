@@ -62,7 +62,7 @@ export function expertSwitchPatch(expert: string | null): SessionCapabilitiesPat
 }
 
 /** 输入区要显示的一个 chip（`count` 只有技能/MCP 才有意义）。 */
-export interface CapabilityChip {
+interface CapabilityChip {
   kind: 'expert' | 'skills' | 'mcps'
   label: string
   /** 专家 chip 的头像字（名字首字）；技能/MCP 不用。 */

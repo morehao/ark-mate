@@ -55,10 +55,10 @@ import { type CapabilityEditState } from './shared'
  * 编辑只提交变化键（`capabilityView.ts` 的 patch 纯函数给出），成功后重新拉投影、
  * 不用本地乐观状态覆盖服务端。原文 JSON 仍保留为「高级」入口（未知键/精确 null/[] 的出路）。
  */
-export type CapScope = 'skills' | 'connectors'
+type CapScope = 'skills' | 'connectors'
 
 /** 详情弹窗的目标与当前 tab（tab 的取值由两个面板各自解释）。 */
-export interface CapabilityDetailState {
+interface CapabilityDetailState {
   kind: 'skill' | 'mcp'
   id: string
   tab: string

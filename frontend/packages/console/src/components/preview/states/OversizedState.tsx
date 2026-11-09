@@ -1,7 +1,7 @@
 // 状态页：文件超出大小上限（FE-P3：含下载出口）。
 import { tokens } from '@ark-mate/ui'
 
-export interface OversizedStateProps {
+interface OversizedStateProps {
   fileName: string
   sizeBytes?: number
   /** 超过的分类上限（字节，用于展示）。 */

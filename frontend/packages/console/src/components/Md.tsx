@@ -345,7 +345,7 @@ export function Md({ text }: { text: string }) {
 }
 
 /** 渲染样式：行内码。 */
-export const inlineCodeStyle: CSSProperties = {
+const inlineCodeStyle: CSSProperties = {
   fontFamily: tokens.fontMono,
   fontSize: '0.86em',
   background: tokens.codeBg,

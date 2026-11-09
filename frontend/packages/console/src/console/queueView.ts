@@ -31,7 +31,7 @@ export function deliveryLabel(delivery: string): string {
 }
 
 /** 离队原因 → 文案（服务端 ReasonUserCancel / ReasonDeliverFail / ReasonStale）。 */
-export function cancelReasonLabel(reason: string): string {
+function cancelReasonLabel(reason: string): string {
   switch (reason) {
     case 'user_cancel':
       return '已撤下'
@@ -75,7 +75,7 @@ export function cancelTone(reason: string): 'err' | 'cancel' | 'info' {
 }
 
 /** 一次队列事件的结果：新队列 + 被移除的队项（未移除 → null；用于写系统提示）。 */
-export interface QueueTransition {
+interface QueueTransition {
   queue: QueuedInput[]
   removed: QueuedInput | null
 }

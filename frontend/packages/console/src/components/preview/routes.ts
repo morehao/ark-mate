@@ -10,7 +10,7 @@
 import { lazy, type ComponentType } from 'react'
 
 /** 内容如何被读取（与渲染解耦；由 PreviewProvider 依据它去 fetch 签名 url）。 */
-export type LoadMode =
+type LoadMode =
   | 'text-pages' // 分页读文本（Markdown / 代码 / 纯文本）
   | 'bytes-complete' // 整块字节（PDF / 表格 / 图片）
   | 'renderer' // 渲染器自行取数据（如 Office 先转 PDF）
@@ -108,7 +108,7 @@ const CODE_EXTS = [
   'ini', 'xml', 'css', 'scss', 'less', 'log', 'env', 'dockerfile',
 ] as const
 
-export const BUILTIN_PREVIEWS: readonly PreviewDefinition[] = [
+const BUILTIN_PREVIEWS: readonly PreviewDefinition[] = [
   {
     id: 'pdf',
     extensions: ['pdf'],

@@ -44,7 +44,7 @@ function writeCollapsed(v: Record<string, boolean>): void {
  * @param sessions 该分组下的会话（已按 pane 的口径过滤/排序/分页）
  * @param archived 是否处于归档视图（分组内的空态文案不同）
  */
-export type GroupBodyRenderer = (sessions: SessionSummary[], archived: boolean) => ReactNode
+type GroupBodyRenderer = (sessions: SessionSummary[], archived: boolean) => ReactNode
 
 interface Props {
   /** 当前视图（active/archived）：归档视图同样按工作空间分组（归档不该换一套信息架构）。 */

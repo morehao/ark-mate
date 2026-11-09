@@ -19,9 +19,9 @@ import type { SessionSummary } from '@ark-mate/types'
  * 为什么取消/中断不再"不显示"：不给点等于让它们跟「已完成」长得一样（都只剩日期），
  * 而这两件事对用户的意义完全不同（作废 vs 可以重来）。颜色只表达**事实**，不表达"好坏"。
  */
-export type SessionBadgeKind = 'run' | 'wait' | 'fail' | 'done' | 'cancel' | 'interrupt'
+type SessionBadgeKind = 'run' | 'wait' | 'fail' | 'done' | 'cancel' | 'interrupt'
 
-export interface SessionBadge {
+interface SessionBadge {
   readonly kind: SessionBadgeKind
   readonly label: string
 }
@@ -65,7 +65,7 @@ export function sessionBadge(summary: Pick<SessionSummary, 'status' | 'run'>): S
 /** 一页渲染的会话条数（超出的以「显示更早」增量展开）。 */
 export const RAIL_PAGE = 40
 
-export interface RailPage {
+interface RailPage {
   /** 本次渲染的会话（顺序沿用原列表：置顶/日期分组由调用方继续处理）。 */
   visible: SessionSummary[]
   /** 尚未渲染的条数（0 = 已全部展开）。 */
@@ -104,7 +104,7 @@ export function pageSessions(
  */
 export const GROUP_IDLE_LIMIT = 5
 
-export interface GroupQuota {
+interface GroupQuota {
   /** 本次渲染的会话（原顺序不变：置顶在前、其余按时间，由调用方保证）。 */
   rows: SessionSummary[]
   /** 被收起的条数（0 = 全都在）。 */

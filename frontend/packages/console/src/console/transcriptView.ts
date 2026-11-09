@@ -5,7 +5,7 @@ import type { StreamEntry } from '@ark-mate/types'
 /** 首屏渲染的条目数（更早的按需展开，避免长会话一次性挂满 DOM）。 */
 export const TRANSCRIPT_WINDOW = 200
 
-export interface EntryWindow<T> {
+interface EntryWindow<T> {
   /** 本次渲染的条目（恒为尾部窗口：事件只追加在末尾）。 */
   visible: T[]
   /** 被折叠的较早条目数（0 = 全量渲染）。 */
@@ -20,7 +20,7 @@ export function windowEntries<T>(entries: T[], limit: number = TRANSCRIPT_WINDOW
   return { visible: entries.slice(entries.length - size), hidden: entries.length - size }
 }
 
-export interface ScrollMetrics {
+interface ScrollMetrics {
   scrollTop: number
   scrollHeight: number
   clientHeight: number
@@ -75,7 +75,7 @@ export function prependOlder(
 }
 
 /** 流式状态行：阶段词 + 是否要那颗内联光标（正文还没出现时才给）。 */
-export interface TurnStatus {
+interface TurnStatus {
   /** 状态行文案；空串 = 这一档不显示状态行。 */
   stage: string
   /** 正文尚未出现时，在阶段词后面挂一颗内联闪烁光标。 */
@@ -187,7 +187,7 @@ export function foldThoughts(entries: StreamEntry[], streaming: boolean): Array<
  * `resolveStatus` 一样：把"读文件"说成"执行命令"不会报错，只会让用户在错误的层级找东西。
  */
 export type ToolIconName = 'read' | 'edit' | 'command' | 'search' | 'folder' | 'research' | 'delete' | 'other'
-export type ToolGroupName = 'read' | 'search' | 'modify' | 'command' | 'research' | 'other'
+type ToolGroupName = 'read' | 'search' | 'modify' | 'command' | 'research' | 'other'
 
 export interface ToolView {
   icon: ToolIconName
@@ -207,7 +207,7 @@ export interface ToolView {
   bizCode?: string
 }
 
-export interface ToolSummary {
+interface ToolSummary {
   text: string
   icon: ToolIconName
   running: boolean
@@ -227,7 +227,7 @@ export type ProcessBlock =
       summary: ToolSummary
     }
 
-export interface CompletedBlocks {
+interface CompletedBlocks {
   title: string
   before: ProcessBlock[]
   /** 每两个正文锚点之间的隐藏过程；`anchor` 是它前面那个锚点。 */
@@ -258,9 +258,9 @@ export interface TurnModel {
   stopReason?: string
 }
 
-export type TranscriptRow = TurnModel | { kind: 'entry'; entry: StreamEntry }
+type TranscriptRow = TurnModel | { kind: 'entry'; entry: StreamEntry }
 
-export interface BuildTurnOptions {
+interface BuildTurnOptions {
   streaming: boolean
   durationForSeq?: (seq: number | undefined) => number | undefined
   indexOfId?: (id: string) => number
@@ -581,15 +581,15 @@ export function mergeToolUpdate(entry: StreamEntry, patch: ToolUpdatePatch): Str
 
 // ——— 工具详情：按类别渲染（数据只取事件里已有的 input/output，缺什么就如实说什么） ———
 
-export type ToolDetailKind = 'read' | 'diff' | 'command' | 'search' | 'summary'
+type ToolDetailKind = 'read' | 'diff' | 'command' | 'search' | 'summary'
 
-export interface ToolDetailLine {
+interface ToolDetailLine {
   /** 行号；只有调用参数给了起始行时才编号（不猜第 1 行）。 */
   no?: number
   text: string
 }
 
-export interface ToolDiffLine {
+interface ToolDiffLine {
   kind: 'add' | 'del' | 'context' | 'meta'
   text: string
 }
@@ -895,7 +895,7 @@ export function toolDetail(entry: StreamEntry, view?: ToolView): ToolDetail | nu
   return null
 }
 
-export interface ProcessOptions {
+interface ProcessOptions {
   running: boolean
   /** 从这个下标起才允许把连续项收成摘要；流式早期（正文之前）逐条显示。 */
   foldFrom?: number

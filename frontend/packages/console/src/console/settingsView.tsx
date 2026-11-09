@@ -15,7 +15,7 @@
 import type { ReactNode } from 'react'
 import { ApiOutlined, InfoCircleOutlined, PartitionOutlined, SettingOutlined } from '@ant-design/icons'
 
-export interface SettingsSection {
+interface SettingsSection {
   readonly id: string
   readonly label: string
   /** 一句话说明这一节管什么（弹窗左栏第二行）。 */

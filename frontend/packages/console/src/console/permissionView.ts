@@ -9,7 +9,7 @@
 //   workspace-write       → 工作区内修改
 //   danger-full-access    → 完全权限（危险档，带风险标记）
 
-export type NativePermMode = '' | 'read-only' | 'workspace-write' | 'danger-full-access'
+type NativePermMode = '' | 'read-only' | 'workspace-write' | 'danger-full-access'
 
 /** 原生权限档 → chip 短标签。未知值原样回落（不吞、不猜）。 */
 export function permLabel(mode: string | null | undefined): string {
@@ -30,7 +30,7 @@ export function permLabel(mode: string | null | undefined): string {
 }
 
 /** 三档 + 默认的完整说明（解释弹层用，顺序即展示顺序）。 */
-export interface PermRow {
+interface PermRow {
   mode: NativePermMode
   name: string
   desc: string

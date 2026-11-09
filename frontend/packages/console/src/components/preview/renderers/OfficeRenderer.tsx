@@ -25,7 +25,7 @@ import PdfRenderer from './PdfRenderer'
  * `fileId` 若 Lead 尚未加进 PreviewBodyProps，本组件用交叉类型自身声明即可编译；一旦它在
  * PreviewBodyProps 上落地，交叉类型自动收窄为其子集，无需再改。
  */
-export type OfficeRendererProps = PreviewBodyProps & {
+type OfficeRendererProps = PreviewBodyProps & {
   /** mate 体系 file_id（= core_file_upload.id）——convert-pdf 的入参。 */
   fileId?: string
 }

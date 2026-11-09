@@ -103,7 +103,7 @@ export function skillWarningsView(warnings?: SkillWarning[]): SkillWarningsView 
 }
 
 /** 物化状态 → 展示元数据（颜色/短标签/含义）。取值见后端 skillMaterializationState。 */
-export const MATERIALIZATION_META: Record<string, { color: string; label: string; hint: string }> = {
+const MATERIALIZATION_META: Record<string, { color: string; label: string; hint: string }> = {
   in_sync: { color: 'green', label: '一致', hint: '磁盘产物摘要与注册表一致' },
   missing: { color: 'red', label: '缺失', hint: '应有产物但磁盘上没有（重校会补）' },
   tampered: { color: 'red', label: '已改动', hint: '磁盘内容与记录摘要不符（重校会覆盖回平台版本）' },
@@ -130,7 +130,7 @@ export function probeSummary(res: McpProbeResult): string {
 // ——— M2 Library 视图模型（只读聚合；纯函数） ———
 
 /** 逐 runtime 可达性标签（颜色 + 短文案 + tooltip 里那句人话原因）。 */
-export function libraryStatusView(status: string): { color: string; text: string } {
+function libraryStatusView(status: string): { color: string; text: string } {
   switch (status) {
     case 'projected':
       return { color: 'green', text: '可用' }
@@ -331,9 +331,9 @@ export function transportLongLabel(transport: string): string {
 }
 
 /** MCP 派生状态（**只用已有字段**，不新增后端状态列；顺序即优先级）。 */
-export type McpConnStateKey = 'disabled' | 'error' | 'needs_setup' | 'pending' | 'connected'
+type McpConnStateKey = 'disabled' | 'error' | 'needs_setup' | 'pending' | 'connected'
 
-export interface McpConnStateView {
+interface McpConnStateView {
   key: McpConnStateKey
   label: string
   color: string
@@ -645,7 +645,7 @@ export interface McpJsonServer {
   body: CapabilityWriteBody
 }
 
-export interface McpJsonParseResult {
+interface McpJsonParseResult {
   servers: McpJsonServer[]
   /** 整份文档级错误（不是 JSON 对象 / 没有可导入条目）。 */
   errors: string[]

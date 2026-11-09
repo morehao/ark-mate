@@ -17,7 +17,7 @@ export function fmtDuration(ms: number): string {
 }
 
 /** 多币种哨兵（后端 store.CostCurrencyMixed）：桶内出现多种币种时 amount 置零、币种为此值。 */
-export const COST_CURRENCY_MIXED = 'MIXED'
+const COST_CURRENCY_MIXED = 'MIXED'
 
 /** 币种符号：`USD`/空 → `$`；其他 → `币种 ` 前缀（与后端「空币种归一 USD」口径一致）。 */
 function costSymbol(currency?: string): string {
@@ -93,7 +93,7 @@ export function usageRows(summary: UsageSummary | null): UsageRow[] {
 }
 
 /** 上下文占用文案；无上报 → `—`。 */
-export function fmtRunUsage(run: RunUsage | null | undefined): string {
+function fmtRunUsage(run: RunUsage | null | undefined): string {
   if (!run || (!run.used && !run.size)) return '—'
   return `上下文 ${fmtContext(run.used, run.size)}`
 }
@@ -103,13 +103,13 @@ export function fmtRunUsage(run: RunUsage | null | undefined): string {
  * 说明：used 是上下文窗口占用快照（会话累计）。Δ>0 表示上下文增长；压缩后可能 Δ≤0，
  * 因此这一差值**不是**「本轮消耗 token」，只是「上下文占用变化」——展示时如实标注。
  */
-export function runUsageDelta(curr: RunUsage | null | undefined, prev?: RunUsage | null | undefined): number | null {
+function runUsageDelta(curr: RunUsage | null | undefined, prev?: RunUsage | null | undefined): number | null {
   if (!curr || !prev || !curr.used || !prev.used) return null
   return curr.used - prev.used
 }
 
 /** 增量文案：`Δ +3.2k` / `Δ −1.0k` / `Δ 0`；无对比 → ''。 */
-export function fmtRunUsageDelta(curr: RunUsage | null | undefined, prev?: RunUsage | null | undefined): string {
+function fmtRunUsageDelta(curr: RunUsage | null | undefined, prev?: RunUsage | null | undefined): string {
   const d = runUsageDelta(curr, prev)
   if (d == null) return ''
   const sign = d > 0 ? '+' : ''
@@ -149,7 +149,7 @@ export interface RunUsageInfo {
  * "行没写终态时间"的老数据。两种都不该显示成 0ms 的"瞬时轮"——调用方（`toRunUsageInfo`）
  * 在无可展示数据时返回 null，让这一轮根本不进展示行。
  */
-export function runDurationMS(run: SessionRun): number {
+function runDurationMS(run: SessionRun): number {
   if (!run?.started_at) return 0
   const s = run.started_at
   const e = run.ended_at ?? 0
@@ -177,7 +177,7 @@ export function toRunUsageInfo(run: SessionRun | null | undefined): RunUsageInfo
 }
 
 /** popover 里的统计行（header/“——” 占位；全部真实数据）。 */
-export interface RunStatRow {
+interface RunStatRow {
   label: string
   value: string
 }

@@ -14,7 +14,7 @@ import { uploadAttachment } from '@ark-mate/api'
  *
  * 刷新不保留：`pendingAtts` 只在内存；未链接的 pending 由服务端 TTL 与孤儿清扫收。
  */
-export interface AttachmentDraft {
+interface AttachmentDraft {
   /** 已上传、等待随消息发出的附件元数据。 */
   pendingAtts: AttachmentMeta[]
   /** 有文件正在上传（期间应禁发送/禁再点回形针）。 */
