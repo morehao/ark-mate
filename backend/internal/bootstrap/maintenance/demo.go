@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/bootstrap/assembly"
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/core/scratch"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 
@@ -51,9 +53,13 @@ func Demo(args []string) {
 	reg.ApplyIsolationEnv(cfg.HomeDir)
 	// 拉底座前的统一准备（与 serve 同一套）：落盘 mate-acp profile + 注入 office 随包 env。
 	// 不调它的话 demo 拉不到 mate-acp profile（实测：profile "mate-acp" does not exist）。
-	assembly.PrepareRuntimeEnv(context.Background(), reg, cfg.HomeDir)
+	assembly.PrepareRuntimeEnv(context.Background(), reg, cfg.HomeDir, cfg.WorkspaceDir)
 	svc.SessionPlane().SetTranscriptDir(cfg.TranscriptDir) // demo 会话也落 transcript（wire 事实源）
-	orch := sessionruntime.NewOrchestrator(svc, reg)
+	scratchRoot := ""
+	if ws := strings.TrimSpace(cfg.WorkspaceDir); ws != "" {
+		scratchRoot = scratch.RootFor(ws)
+	}
+	orch := sessionruntime.NewOrchestrator(svc, reg, scratchRoot)
 	orch.SetAllowAll(*allowAll)
 	orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	orch.SetElicitationTimeout(cfg.ElicitationTimeout)

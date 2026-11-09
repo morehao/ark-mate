@@ -41,6 +41,19 @@ func RootFor(cwd string) string {
 	return filepath.Join(cwd, DirName)
 }
 
+// PathUnder 返回平台托管 scratch 根 base 下某会话的子目录：`<base>/<sessionID>`。
+//
+// 二期候选 B 用：base = `<MATE_WORKSPACE_DIR>/.scratch`（平台私有根，在会话 cwd 之外）。
+// base 或 sessionID 为空、或 sessionID 非单段 → 返回空串（不臆造路径，防注入）。
+func PathUnder(base, sessionID string) string {
+	base = strings.TrimSpace(base)
+	sessionID = strings.TrimSpace(sessionID)
+	if base == "" || sessionID == "" || !isSingleSegment(sessionID) {
+		return ""
+	}
+	return filepath.Join(base, sessionID)
+}
+
 // IsScratchRelPath 判断「相对会话 cwd 的展示路径」是否落在 `.scratch/` 子树内。
 //
 // rel 是 `SafeRelPath` 产出的相对路径（如 `.scratch/<sid>/x.py`）；首段为 `.scratch` 即视为过程产物。

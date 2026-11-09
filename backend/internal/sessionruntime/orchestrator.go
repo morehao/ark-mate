@@ -73,7 +73,14 @@ type RunResult struct {
 }
 
 // NewOrchestrator 构造编排器并回挂到 Service（Service 负责 bus/存储/REST 方法）。
-func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
+//
+// scratchRoot 是平台托管的过程产物根（`<MATE_WORKSPACE_DIR>/.scratch`）；空 = 退回 cwd 内 `.scratch`
+// （一期语义 / 代建关闭）。非空时每会话的过程产物落 `<scratchRoot>/<session_id>/`（二期候选 B）。
+func NewOrchestrator(svc *Service, reg *runtime.Registry, scratchRoots ...string) *Orchestrator {
+	scratchRoot := ""
+	if len(scratchRoots) > 0 {
+		scratchRoot = scratchRoots[0]
+	}
 	o := &Orchestrator{
 		svc:      svc,
 		reg:      reg,
@@ -108,7 +115,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		SetRuntimeState:  svc.runtimePlane.SetState,
 		ApplyReason:      provider.ModelApplyReason,
 		Identity:         identityOf,
-		Scratch:          cwdScratch{},
+		Scratch:          cwdScratch{root: scratchRoot},
 	})
 	o.runner = session.NewRunner(session.RunnerDeps{
 		Plane:        svc.sessionPlane,

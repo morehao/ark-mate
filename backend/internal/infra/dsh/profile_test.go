@@ -64,6 +64,23 @@ func TestProvisionProfileEmptyHome(t *testing.T) {
 	}
 }
 
+// TestProfileEmitsSandboxWritableRoot 二期：传入 scratch 根时，覆写层追加 sandbox-policy 的
+// additionalWritableRoots 覆写（字面绝对路径）；不传时不追加。
+func TestProfileEmitsSandboxWritableRoot(t *testing.T) {
+	withRoot := profileFiles("/home/u/workspaces/.scratch")["cordis.patch.yml"]
+	if !strings.Contains(withRoot, "id: sandbox-policy") {
+		t.Fatal("传 scratch 根时应追加 sandbox-policy 覆写")
+	}
+	if !strings.Contains(withRoot, "additionalWritableRoots:") ||
+		!strings.Contains(withRoot, "- /home/u/workspaces/.scratch") {
+		t.Fatalf("附加的可写根不符：\n%s", withRoot)
+	}
+	without := profileFiles()["cordis.patch.yml"]
+	if strings.Contains(without, "sandbox-policy") {
+		t.Fatal("不传 scratch 根时不应出现 sandbox-policy 覆写")
+	}
+}
+
 // TestProvisionedProfileHasOfficeInDsh 端到端：provision 出来的 mate-acp 交给真实 dsh --dump-config，
 // 断言 office 三件套进组合且 enabled、且 ACP 传输仍在。dsh 不在 PATH 时跳过。
 func TestProvisionedProfileHasOfficeInDsh(t *testing.T) {

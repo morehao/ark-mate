@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/scratch"
 	"github.com/morehao/golib/glog"
@@ -34,21 +35,34 @@ func (as *assembly) startScratchOrphanCleanup(ctx context.Context) error {
 			cwds[cwd] = true
 		}
 	}
+	// 二期：平台托管根 `<WorkspaceDir>/.scratch`（各会话子目录都在这里）。
+	if ws := strings.TrimSpace(as.cfg.WorkspaceDir); ws != "" {
+		if root := scratch.RootFor(ws); root != "" {
+			as.cleanOrphansUnderRoot(ctx, root, live)
+		}
+	}
+	// 一期兜底：会话 cwd 内的 `.scratch`（代建关闭/旧残留形态）。
 	for cwd := range cwds {
 		as.cleanOrphanScratchUnder(ctx, cwd, live)
 	}
 	return nil
 }
 
-// cleanOrphanScratchUnder 扫描某个 cwd 下的 `.scratch/*`，删掉「名字不在 live 集合」的子目录。
+// cleanOrphanScratchUnder 扫描某个 cwd 下的 `.scratch/*`（一期兜底形态），删掉「名字不在 live 集合」的子目录。
 func (as *assembly) cleanOrphanScratchUnder(ctx context.Context, cwd string, live map[string]bool) {
-	root := scratch.RootFor(cwd)
+	if root := scratch.RootFor(cwd); root != "" {
+		as.cleanOrphansUnderRoot(ctx, root, live)
+	}
+}
+
+// cleanOrphansUnderRoot 扫描某个 scratch 根下逐会话子目录，删掉「名字不在 live 集合」的孤儿。
+func (as *assembly) cleanOrphansUnderRoot(ctx context.Context, root string, live map[string]bool) {
 	if root == "" {
 		return
 	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return // 没有 .scratch 目录是常态（os.IsNotExist 也走这里），静默
+		return // 没有 scratch 根是常态（os.IsNotExist 也走这里），静默
 	}
 	var ids []string
 	for _, e := range entries {
