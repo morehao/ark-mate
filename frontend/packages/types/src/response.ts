@@ -36,14 +36,6 @@ export const BizCode = {
   BadGateway: 50201,
 } as const
 
-export type BizCodeValue = (typeof BizCode)[keyof typeof BizCode]
-
-/** 归一后的请求错误（api 层抛出，code < 0 表示网络/解析层错误）。 */
-export interface HttpErrorShape {
-  code: number
-  msg: string
-}
-
 /** `POST /workspaces/pick-directory` 响应：宿主原生选择器的结果。 */
 export interface WorkspacePickResp {
   /** 用户选定的绝对路径（取消时缺省）。 */

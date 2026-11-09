@@ -121,15 +121,6 @@ export interface WorkspaceListResp {
   create_root?: string
 }
 
-/** `POST /workspaces` 请求体（登记一个已存在的目录）。 */
-export interface WorkspaceCreateReq {
-  path: string
-  /** 展示名（可选；空 = 未命名）。**不是身份**：改名不改 id、不改路径。 */
-  title?: string
-  /** true = 路径已登记时报错（40901）；缺省 = get-or-create 返回既有那一行。 */
-  strict?: boolean
-}
-
 /** `DELETE /workspaces/:id` 响应。 */
 export interface WorkspaceDeleteResp {
   id: string

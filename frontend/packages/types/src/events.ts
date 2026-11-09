@@ -55,8 +55,6 @@ export const Ev = {
   AutomationRun: 'automation.run',
 } as const
 
-export type EvType = (typeof Ev)[keyof typeof Ev]
-
 /**
  * `run.status` 的取值（ADR-7：按本仓的 ACP 观测面收窄到 10 个**活体**状态）。
  *

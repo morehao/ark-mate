@@ -16,14 +16,3 @@ export function isPreviewV2Enabled(): boolean {
     return true
   }
 }
-
-/** 设置预览 V2 开关（调试/灰度用；'off' 关闭，其它值或清除恢复默认开启）。 */
-export function setPreviewV2Enabled(enabled: boolean): void {
-  if (typeof localStorage === 'undefined') return
-  try {
-    if (enabled) localStorage.removeItem(PREVIEW_V2_KEY)
-    else localStorage.setItem(PREVIEW_V2_KEY, 'off')
-  } catch {
-    // 忽略：存不了就按默认（开启）走
-  }
-}

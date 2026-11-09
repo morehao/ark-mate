@@ -21,7 +21,6 @@ import type {
   CreateSessionReq,
   Attachment,
   CreateSessionResp,
-  ElicitationResp,
   ExportResp,
   McpDeleteResp,
   McpProbeResult,
@@ -47,7 +46,6 @@ import type {
   ModelRow,
   ModelSyncResp,
   ModelsResp,
-  PermissionResp,
   PromptReq,
   Provider,
   ProviderCreateReq,
@@ -87,10 +85,6 @@ import type {
 
 /** 列出全部 automation（**含装载失败的那些**：坏定义带 `error` 出现在列表里，不静默消失）。 */
 export const listAutomations = (): Promise<Automation[]> => http.get<Automation[]>('/mate/automations')
-
-/** 取一条（不存在 → 40401）。 */
-export const getAutomation = (id: string): Promise<Automation> =>
-  http.get<Automation>(`/mate/automations/${encodeURIComponent(id)}`)
 
 /** 新建定义（`id` 必填 = 文件名；已存在 → 40901，绝不覆盖）。 */
 export const createAutomation = (body: AutomationWriteBody): Promise<Automation> =>
@@ -262,10 +256,6 @@ export const listComposerSkills = (): Promise<{ items: ComposerSkill[] }> =>
 export const cancelSession = (id: string): Promise<CancelSessionResp> =>
   http.post<CancelSessionResp>(`/mate/sessions/${encodeURIComponent(id)}/cancel`)
 
-/** 列出会话的挂起权限请求。 */
-export const listPendingPermissions = (id: string): Promise<PermissionResp[]> =>
-  http.get<PermissionResp[]>(`/mate/sessions/${encodeURIComponent(id)}/permissions`)
-
 /** 对挂起权限请求决策（allow/reject × once/always）。 */
 export const resolvePermission = (id: string, req: ResolvePermissionReq): Promise<ResolvePermissionResp> =>
   http.post<ResolvePermissionResp>(`/mate/sessions/${encodeURIComponent(id)}/permission`, req)
@@ -276,10 +266,6 @@ export const revokeMemory = (id: string, req: RevokeMemoryReq = {}): Promise<{ t
     `/mate/sessions/${encodeURIComponent(id)}/permissions/memories/revoke`,
     req,
   )
-
-/** 列出会话的挂起结构化提问（elicitation 表单/URL 卡）。 */
-export const listPendingElicitations = (id: string): Promise<ElicitationResp[]> =>
-  http.get<ElicitationResp[]>(`/mate/sessions/${encodeURIComponent(id)}/elicitations`)
 
 /** 对挂起结构化提问决策（accept/decline/cancel；accept 可带 content）。 */
 export const resolveElicitation = (id: string, req: ResolveElicitationReq): Promise<ResolveElicitationResp> =>
@@ -513,10 +499,6 @@ export const uploadAttachment = async (file: File): Promise<Attachment> => {
   const up = await uploadFile(file)
   return registerAttachment(up.file_id, file.name)
 }
-
-/** 撤下待挂附件（幂等；linked 不可撤 → 40901）。 */
-export const deleteAttachment = (id: string): Promise<{ deleted: boolean }> =>
-  http.delete<{ deleted: boolean }>(`/mate/attachments/${encodeURIComponent(id)}`)
 
 /** M2 写面：新建一个 MCP server 定义（闸门比 skill 多：transport/绝对路径/引用词法…）。 */
 export const createMcpServer = (body: CapabilityWriteBody): Promise<McpWriteResp> =>

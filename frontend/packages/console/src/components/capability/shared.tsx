@@ -8,9 +8,6 @@ import { CardToolbar } from '../CardToolbar'
 /** 定义编辑器的状态（hook 与面板共用的类型）。 */
 export interface CapabilityEditState { kind: 'skill' | 'mcp'; id: string; text: string; created: boolean }
 
-export const SOURCE_COLOR: Record<string, string> = { builtin: 'blue', mcp: 'green', observed: 'gold' }
-export const TRANSPORT_COLOR: Record<string, string> = { stdio: 'default', sse: 'blue', http: 'green', streamable_http: 'purple' }
-
 export const mono: CSSProperties = { fontFamily: tokens.fontMono, fontSize: 12.5, color: tokens.text, overflowWrap: 'anywhere' }
 
 /**

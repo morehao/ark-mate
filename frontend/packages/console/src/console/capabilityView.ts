@@ -6,11 +6,8 @@ import type {
   McpProbeResult,
   McpServer,
   Skill,
-  SkillMaterializationResp,
-  SkillMaterializationState,
   UnixMillis,
   SkillWarning,
-  Tool,
 } from '@ark-mate/types'
 
 // ——— 能力卡视图模型（P2 §8.1/§5.2；纯函数，便于单测/Node 侧校验） ———
@@ -89,7 +86,7 @@ export function mcpRows(servers: McpServer[], library: LibraryItem[] = []): McpR
 // 而且判据从"按某个 agent 裁剪"变成了"每个候选底座各一条"，比原来更细。
 
 /** 装载期扫描告警（§13.2 S1）：critical 已拒载，这里只会是 warning/info。 */
-export interface SkillWarningsView {
+interface SkillWarningsView {
   color: string
   text: string
   /** tooltip 文案（逐条规则 + 说明）。 */
@@ -123,38 +120,11 @@ export function materializationMeta(status: string): { color: string; label: str
   return MATERIALIZATION_META[status] ?? { color: 'default', label: status || '未知', hint: '未知状态（可能后端版本更新）' }
 }
 
-/** 体检结果 → 一行摘要（弹窗顶部）。 */
-export function materializationSummary(res: SkillMaterializationResp): string {
-  if (res.states.length === 0) {
-    return res.notes && res.notes.length > 0 ? res.notes.join('；') : '本进程没登记物化目标（未配置底座投影落点）'
-  }
-  const counts = new Map<string, number>()
-  for (const s of res.states) counts.set(s.status, (counts.get(s.status) ?? 0) + 1)
-  const parts = [...counts.entries()].map(([st, n]) => `${materializationMeta(st).label} ${n}`)
-  return `${res.states.length} 个物化目标：${parts.join(' / ')}`
-}
-
-/**
- * 状态行是否需要人工关注（红/黄＝值得看一眼；一致/用户自有/不适用/未实测＝正常）。
- *
- * `not_configured` 计入：它不是「正常的没配」而是「配了解析不出来」，产物与目标路径都没有。
- * `untested` 不计入：产物是写了的，它的含义是"我们对这条链的把握程度"，不是故障。
- */
-export function materializationNeedsAttention(s: SkillMaterializationState): boolean {
-  return s.status === 'missing' || s.status === 'tampered' || s.status === 'stale' || s.status === 'not_configured'
-}
-
 /** 探测结果 → 一行可读摘要（toast / 状态行）。 */
 export function probeSummary(res: McpProbeResult): string {
   const ver = res.server_name ? `${res.server_name}${res.server_version ? ` ${res.server_version}` : ''} · ` : ''
   const skipped = res.skipped > 0 ? `，跳过 ${res.skipped}` : ''
   return `${ver}新增 ${res.added} / 移除 ${res.removed}${skipped}，当前 ${res.tool_count} 个工具`
-}
-
-/** 工具来源标签：mcp 条目带归属 server（便于判断「哪个 server 带来的」）。 */
-export function toolSourceLabel(t: Tool): string {
-  if (t.source === 'mcp' && t.mcp_server) return `mcp · ${t.mcp_server}`
-  return t.source
 }
 
 // ——— M2 Library 视图模型（只读聚合；纯函数） ———

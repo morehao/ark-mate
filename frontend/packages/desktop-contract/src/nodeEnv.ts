@@ -23,7 +23,7 @@ export const NODE_ENV_VARS = {
   nodeExecutable: 'MATE_NODE_EXECUTABLE',
 } as const
 
-export type NodeModeEnvironmentInput = {
+type NodeModeEnvironmentInput = {
   /** Electron 自身可执行文件的绝对路径（`process.execPath`）。 */
   executable: string
   /** 私有 bin 目录；`undefined` = 本次不前置 PATH（只切 Node 模式）。 */

@@ -11,7 +11,7 @@
 import { APP_ORIGIN, type MateDesktop } from './index.ts'
 
 /** `location` 的最小投影：只取判定需要的两个字段（`URL` 与 `Location` 都满足）。 */
-export type CarrierLocation = { protocol: string; hostname: string }
+type CarrierLocation = { protocol: string; hostname: string }
 
 /**
  * 是否桌面载体的**主框架**。

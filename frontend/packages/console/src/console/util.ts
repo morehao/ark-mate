@@ -1,4 +1,4 @@
-import type { SessionSummary, StreamEntry } from '@ark-mate/types'
+import type { SessionSummary } from '@ark-mate/types'
 import type { SessionView } from '../store'
 
 /**
@@ -32,10 +32,6 @@ export function titleFor(
     return `新会话 · ${shortId(sm.id)}`
   }
   return '新会话'
-}
-
-export function findUserText(entries: StreamEntry[] | undefined): string | undefined {
-  return entries?.find((e) => e.kind === 'user')?.text
 }
 
 /**

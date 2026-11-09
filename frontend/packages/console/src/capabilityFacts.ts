@@ -32,11 +32,6 @@ export function declaredFacts(): CapabilityFacts {
   return facts
 }
 
-/** 本次会话是不是桌面壳。 */
-export function isDesktopEntry(): boolean {
-  return facts.desktopEntry
-}
-
 /**
  * 读一次服务端能力声明并缓存。
  *

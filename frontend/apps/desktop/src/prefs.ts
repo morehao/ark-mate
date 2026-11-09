@@ -6,7 +6,7 @@
  * 避免"写一半断电"留下损坏的 JSON 让下次启动读不出来。
  */
 import { app } from 'electron'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 export type Prefs = {
@@ -44,9 +44,4 @@ export function writePrefs(patch: Prefs): Prefs {
     console.warn(`[shell] 写偏好失败（不影响本次运行）：${String(e)}`)
   }
   return next
-}
-
-/** 偏好文件是否存在（诊断用）。 */
-export function prefsExist(): boolean {
-  return existsSync(prefsFile())
 }

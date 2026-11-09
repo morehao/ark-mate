@@ -141,16 +141,4 @@ export function quotaSessions(
   return { rows, hidden: all.length - rows.length }
 }
 
-/**
- * 把一条绝对路径缩成**末两级**（`/a/b/c/d` → `…/c/d`），末尾对齐用户认得出的那一段。
- *
- * 为什么不做"中间省略"（`/a/…/c/d`）：目录名在两端的概率一样高，而末两级几乎总是全部有用
- * 信息所在（项目名 + 子目录）。只有一级时原样返回，**空串/根路径**也原样返回——那两种情况下
- * "缩写"只会得到一个比原文更含糊的东西。
- */
-export function shortenPath(path: string): string {
-  if (!path || path === '/' || path === '.') return path
-  const parts = path.split('/').filter(Boolean)
-  if (parts.length <= 2) return path
-  return `…/${parts.slice(-2).join('/')}`
-}
+

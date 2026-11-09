@@ -1,6 +1,5 @@
 import type {
   Automation,
-  AutomationPreviewItem,
   AutomationRunRecord,
   AutomationRunStatus,
   AutomationSchedule,
@@ -159,28 +158,12 @@ export function lastRunText(a: Automation): string {
   return `${meta.label}${when}${a.last_reason ? ` · ${a.last_reason}` : ''}`
 }
 
-/** `automation:<id>` → 是否由定时任务触发（会话打标用）。 */
-export function isAutomationOrigin(origin?: string): boolean {
-  return !!origin && origin.startsWith('automation:')
-}
-
-/** `automation:daily` → `daily`（打标文案用）。 */
-export function automationIDFromOrigin(origin?: string): string {
-  if (origin === undefined || !origin.startsWith('automation:')) return ''
-  return origin.slice('automation:'.length)
-}
-
 /** 运行史时间轴的一行文案（状态 + 计划时刻 + 触发方式 + 原因）。 */
 export function runLine(r: AutomationRunRecord): string {
   const parts = [RUN_STATUS_META[r.status].label, `计划 ${fmtShortDateTime(r.scheduled_for)}`]
   if (r.trigger) parts.push(TRIGGER_LABEL[r.trigger] ?? r.trigger)
   if (r.reason) parts.push(r.reason)
   return parts.join(' · ')
-}
-
-/** 预览项文案：墙钟（人看的）+ UTC（机器看的）。 */
-export function previewLine(o: AutomationPreviewItem): string {
-  return `${o.wall}（${o.timezone}） · ${fmtShortDateTime(o.at)}`
 }
 
 /**
