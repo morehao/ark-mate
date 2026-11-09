@@ -11,11 +11,14 @@
 //     而非 upload id，**无法**可靠还原 fileId —— 此时落明确的失败态，提示需要 fileId，
 //     而不是把 ZIP 二进制当 PDF 硬渲染。
 //
-// 加载 / 失败态：转 PDF 是一次服务端进程调用（可能几百毫秒），期间显示「正在转换…」；
+// 加载 / 失败态：转 PDF 是一次服务端进程调用（可能几百毫秒），期间显示「转圈 + 文档渲染中…」的
+// 轻量 loading（与 DSH 桌面端 office 预览的 LoadingIndicator 同形态，不是一段居中文字）；
 // 失败（payload 缺失 40501 / 文件不存在 40401 / 转换失败 50001）原样展示后端 msg。
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useRef, useState } from 'react'
+import { Spin } from 'antd'
 import { fetchFilePdf } from '@ark-mate/api'
+import { tokens } from '@ark-mate/ui'
 import type { PreviewBodyProps } from '../routes'
 import PdfRenderer from './PdfRenderer'
 
@@ -102,7 +105,26 @@ export default function OfficeRenderer({ content, fileName, fileId }: OfficeRend
   }, [resolvedFileId, fileName, content])
 
   if (loading) {
-    return <CenterNote>正在把 {fileName} 转换为 PDF…</CenterNote>
+    // 轻量 loading：转圈 + 「文档渲染中…」，对齐 DSH 桌面端 office 预览的观感
+    // （圆点/转圈 + 短标签），而不是一段居中的「正在把 xxx 转换为 PDF…」文字。
+    return (
+      <div
+        role="status"
+        aria-label="文档渲染中"
+        style={{
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 10,
+          color: tokens.textSecondary,
+          fontSize: 13,
+        }}
+      >
+        <Spin size="small" />
+        <span>文档渲染中…</span>
+      </div>
+    )
   }
   if (error) {
     return <CenterNote error>{error}</CenterNote>
