@@ -38,6 +38,20 @@ type BlobStore interface {
 	// GetFile 按 upload_id 取元数据（供 Register 从已落字节建索引，不重读字节）。
 	GetFile(ctx context.Context, uploadID string) (BlobDetail, error)
 	DeleteFile(ctx context.Context, uploadID string) error
+	// ReadPath 返回某 upload blob 在本地磁盘上的只读绝对路径（office 转 PDF 等需要给外部进程
+	// 传文件路径的场景用）。远程底座不可用时由实现返回错误。
+	ReadPath(ctx context.Context, uploadID string) (string, error)
+}
+
+// OfficeConverter 把磁盘上的 Office 文档转成 PDF 字节的窄端口（实现在 internal/infra/officeconv）。
+//
+// 通过端口隔离：用例层不认识 node/libreoffice-kit 的进程细节。Available() 供用例层在转换前
+// 判定能力是否就位（随包 payload 缺失 → 返回明确降级码，而不是发起注定失败的转换）。
+type OfficeConverter interface {
+	// Available 转换器是否可用（node 与 libreoffice-kit cli 都已解析到）。
+	Available() bool
+	// ConvertFile 把磁盘上 inputPath 的文档转成 PDF，返回 PDF 字节。
+	ConvertFile(ctx context.Context, inputPath, name string) ([]byte, error)
 }
 
 // BlobUploadRequest 写字节的入参（与 svcattachment 解耦 filestore 的具体类型）。
@@ -81,20 +95,28 @@ type AttachmentSvc interface {
 	Delete(ctx context.Context, id string) (*dtoattachment.AttachmentDeleteResp, error)
 	// Get 回读元数据。
 	Get(ctx context.Context, id string) (*dtoattachment.AttachmentResp, error)
+	// ConvertToPDF 把某 file_id（= core_file_upload.id）的 Office 文档在服务端转成 PDF 字节。
+	//
+	// 供前端预览复用现有 PdfRenderer：docx/pptx 是 ZIP 二进制，前端直接按文本渲染会乱码。
+	// 转换器不可用（随包 payload 缺失）→ 明确降级码（office_preview_unsupported）；转换失败 →
+	// 上游失败码；file_id 不存在 → attachment_not_found。
+	ConvertToPDF(ctx context.Context, fileID, name string) ([]byte, error)
 }
 
 type attachmentSvc struct {
-	st     AttachmentStore
-	blobs  BlobStore
-	limits Limits
+	st        AttachmentStore
+	blobs     BlobStore
+	converter OfficeConverter
+	limits    Limits
 }
 
 // New 构造附件用例。st / blobs 由装配根交下来（sqlite 模式才有；memory 模式为 nil）。
-func New(st AttachmentStore, blobs BlobStore, limits Limits) AttachmentSvc {
+// converter 为 Office→PDF 转换器（nil = 预览转换不可用，ConvertToPDF 返回降级码）。
+func New(st AttachmentStore, blobs BlobStore, converter OfficeConverter, limits Limits) AttachmentSvc {
 	if limits.MaxBytes <= 0 {
 		limits.MaxBytes = 20 << 20
 	}
-	return &attachmentSvc{st: st, blobs: blobs, limits: limits}
+	return &attachmentSvc{st: st, blobs: blobs, converter: converter, limits: limits}
 }
 
 // image MIME 白名单（这四个是 dsh image block 与 promptCapabilities.image 共同支持的集合）。
@@ -262,6 +284,41 @@ func (s *attachmentSvc) Get(ctx context.Context, id string) (*dtoattachment.Atta
 		return nil, code.Errorf(code.NotFound, "attachment_not_found: 附件不存在")
 	}
 	return toResp(entity), nil
+}
+
+// ConvertToPDF 把某 file_id 的 Office 文档转成 PDF 字节（预览复用 PdfRenderer）。
+//
+// 顺序（fail-closed）：转换器不可用 → 明确降级码（office_preview_unsupported，40501）；取 blob 只读
+// 磁盘路径（不存在/不可读 → attachment_not_found）；调转换器（失败 → 上游失败码 50001）。
+func (s *attachmentSvc) ConvertToPDF(ctx context.Context, fileID, name string) ([]byte, error) {
+	if strings.TrimSpace(fileID) == "" {
+		return nil, code.Errorf(code.InvalidParam, "参数错误: file_id 不能为空")
+	}
+	if s.converter == nil || !s.converter.Available() {
+		return nil, errOfficePreviewUnsupported()
+	}
+	detail, err := s.blobs.GetFile(ctx, fileID)
+	if err != nil {
+		return nil, code.Errorf(code.NotFound, "attachment_not_found: 文件 %s 不存在或不可读: %v", fileID, err)
+	}
+	path, err := s.blobs.ReadPath(ctx, fileID)
+	if err != nil {
+		return nil, code.Errorf(code.NotFound, "attachment_not_found: 文件 %s 字节路径不可解析: %v", fileID, err)
+	}
+	if strings.TrimSpace(name) == "" {
+		name = detail.Name
+	}
+	pdf, err := s.converter.ConvertFile(ctx, path, name)
+	if err != nil {
+		return nil, code.Errorf(code.UpstreamFailed, "office_preview_failed: Office 转 PDF 失败: %v", err)
+	}
+	return pdf, nil
+}
+
+// errOfficePreviewUnsupported office 预览转换不可用（随包 payload 缺失，明确降级而非 500）。
+func errOfficePreviewUnsupported() error {
+	return code.Errorf(code.NotSupported,
+		"office_preview_unsupported: 当前未随包提供 office 转 PDF 能力（node / libreoffice-kit 缺失），暂不支持 docx/pptx 预览")
 }
 
 // toResp 实体 → 对外响应。

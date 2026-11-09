@@ -37,11 +37,12 @@ func (f *fakeStore) DeleteAttachmentRow(_ context.Context, id string) error {
 type fakeBlob struct {
 	data   map[string][]byte
 	mime   map[string]string
+	path   map[string]string // ReadPath 用：uploadID → 磁盘路径（测试里给假的即可）
 	nextID int
 }
 
 func newFakeBlob() *fakeBlob {
-	return &fakeBlob{data: map[string][]byte{}, mime: map[string]string{}}
+	return &fakeBlob{data: map[string][]byte{}, mime: map[string]string{}, path: map[string]string{}}
 }
 
 func (f *fakeBlob) UploadAndRecord(_ context.Context, req BlobUploadRequest) (BlobDetail, error) {
@@ -74,6 +75,14 @@ func (f *fakeBlob) DeleteFile(_ context.Context, uploadID string) error {
 	return nil
 }
 
+// ReadPath 测试用：按 uploadID 返回预置的假路径（未预置则回落到 id 本身）。
+func (f *fakeBlob) ReadPath(_ context.Context, uploadID string) (string, error) {
+	if p, ok := f.path[uploadID]; ok {
+		return p, nil
+	}
+	return "/fake/blob/" + uploadID, nil
+}
+
 func codeOf(t *testing.T, err error) int {
 	t.Helper()
 	var ge gerror.Error
@@ -88,7 +97,7 @@ var pngMagic = []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0}
 
 func newSvc() (AttachmentSvc, *fakeStore, *fakeBlob) {
 	st, bl := newFakeStore(), newFakeBlob()
-	return New(st, bl, Limits{MaxBytes: 20 << 20}), st, bl
+	return New(st, bl, nil, Limits{MaxBytes: 20 << 20}), st, bl
 }
 
 func TestUploadPNGKindImage(t *testing.T) {
@@ -121,7 +130,7 @@ func TestUploadTxtKindDocument(t *testing.T) {
 
 func TestUploadTooLarge(t *testing.T) {
 	st, bl := newFakeStore(), newFakeBlob()
-	svc := New(st, bl, Limits{MaxBytes: 4})
+	svc := New(st, bl, nil, Limits{MaxBytes: 4})
 	_, err := svc.Upload(context.Background(), "a.txt", "", "text/plain", strings.NewReader("way too large content"))
 	if err == nil || codeOf(t, err) != 40001 {
 		t.Fatalf("超上限应 40001，got %v", err)
@@ -216,5 +225,103 @@ func TestDeletePendingAndLinked(t *testing.T) {
 	_, err = svc.Delete(context.Background(), resp2.ID)
 	if err == nil || codeOf(t, err) != 40901 || !strings.Contains(err.Error(), "attachment_linked") {
 		t.Fatalf("删 linked 应 40901 attachment_linked，got %v", err)
+	}
+}
+
+// ——— ConvertToPDF（office 预览转 PDF）———
+
+// fakeConverter 可控的 OfficeConverter。
+type fakeConverter struct {
+	available bool
+	pdf       []byte
+	err       error
+	gotPath   string
+	gotName   string
+}
+
+func (f *fakeConverter) Available() bool { return f.available }
+func (f *fakeConverter) ConvertFile(_ context.Context, inputPath, name string) ([]byte, error) {
+	f.gotPath, f.gotName = inputPath, name
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.pdf, nil
+}
+
+// 预置一条已落字节的 document 上传（返回其 uploadID）。
+func seedDoc(t *testing.T, bl *fakeBlob) string {
+	t.Helper()
+	detail, err := bl.UploadAndRecord(context.Background(), BlobUploadRequest{
+		ContentHash: "h", Name: "xian-weather.docx", Size: 4, MimeType: "application/octet-stream",
+		Reader: strings.NewReader("DOCX"),
+	})
+	if err != nil {
+		t.Fatalf("预置字节失败：%v", err)
+	}
+	return detail.FileUploadID
+}
+
+func TestConvertToPDFSuccess(t *testing.T) {
+	st, bl := newFakeStore(), newFakeBlob()
+	conv := &fakeConverter{available: true, pdf: []byte("%PDF-1.7 fake")}
+	svc := New(st, bl, conv, Limits{MaxBytes: 20 << 20})
+	id := seedDoc(t, bl)
+
+	pdf, err := svc.ConvertToPDF(context.Background(), id, "xian-weather.docx")
+	if err != nil {
+		t.Fatalf("转换应成功：%v", err)
+	}
+	if string(pdf) != "%PDF-1.7 fake" {
+		t.Fatalf("应返回转换器产出的 PDF 字节，got %q", pdf)
+	}
+	if conv.gotName != "xian-weather.docx" {
+		t.Fatalf("应把文件名传给转换器（推导后缀），got %q", conv.gotName)
+	}
+}
+
+func TestConvertToPDFUnavailableDowngrades(t *testing.T) {
+	st, bl := newFakeStore(), newFakeBlob()
+	// 转换器「已构造但不可用」（随包 payload 缺失）→ 明确降级码 40501，而非 500。
+	conv := &fakeConverter{available: false}
+	svc := New(st, bl, conv, Limits{MaxBytes: 20 << 20})
+	id := seedDoc(t, bl)
+
+	_, err := svc.ConvertToPDF(context.Background(), id, "x.docx")
+	if err == nil || codeOf(t, err) != 40501 {
+		t.Fatalf("转换器不可用应 40501，got %v", err)
+	}
+	if !strings.Contains(err.Error(), "office_preview_unsupported") {
+		t.Fatalf("文案应含 office_preview_unsupported：%v", err)
+	}
+}
+
+func TestConvertToPDFNilConverterDowngrades(t *testing.T) {
+	st, bl := newFakeStore(), newFakeBlob()
+	svc := New(st, bl, nil, Limits{MaxBytes: 20 << 20})
+	id := seedDoc(t, bl)
+	_, err := svc.ConvertToPDF(context.Background(), id, "x.docx")
+	if err == nil || codeOf(t, err) != 40501 {
+		t.Fatalf("converter=nil 应 40501，got %v", err)
+	}
+}
+
+func TestConvertToPDFNotFound(t *testing.T) {
+	st, bl := newFakeStore(), newFakeBlob()
+	conv := &fakeConverter{available: true, pdf: []byte("%PDF-1.7")}
+	svc := New(st, bl, conv, Limits{MaxBytes: 20 << 20})
+	_, err := svc.ConvertToPDF(context.Background(), "nope", "x.docx")
+	if err == nil || codeOf(t, err) != 40401 || !strings.Contains(err.Error(), "attachment_not_found") {
+		t.Fatalf("文件不存在应 40401 attachment_not_found，got %v", err)
+	}
+}
+
+func TestConvertToPDFConvertErrorUpstream(t *testing.T) {
+	st, bl := newFakeStore(), newFakeBlob()
+	conv := &fakeConverter{available: true, err: errors.New("boom")}
+	svc := New(st, bl, conv, Limits{MaxBytes: 20 << 20})
+	id := seedDoc(t, bl)
+	_, err := svc.ConvertToPDF(context.Background(), id, "x.docx")
+	if err == nil || codeOf(t, err) != 50001 || !strings.Contains(err.Error(), "office_preview_failed") {
+		t.Fatalf("转换失败应 50001 office_preview_failed，got %v", err)
 	}
 }

@@ -124,8 +124,12 @@ function CodeTable({ lines }: { lines: Line[] }) {
               </td>
               <td
                 style={{ paddingInline: '14px 16px', verticalAlign: 'top', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-                // shiki 产出的受控 token HTML（已对 <、>、& 转义，无用户内容注入风险）。
-                dangerouslySetInnerHTML={{ __html: line.html || '&nbsp;' }}
+                // 有高亮 HTML 时直出 shiki 受控 token HTML（已 <、>、& 转义）；无高亮（纯文本兜底）
+                // 时直接渲染文本——之前写成 `line.html || '&nbsp;'` 会让纯文本行全部变空白（2026-11-09 实机
+                // 发现 .py/.json 预览一片空白），这里改为兜底渲染 line.text（同样转义）。
+                {...(line.html
+                  ? { dangerouslySetInnerHTML: { __html: line.html } }
+                  : { children: line.text })}
               />
             </tr>
           ))}

@@ -20,6 +20,7 @@
 //   - **拒绝而非降级**：不支持的宏/名称/多 BYSECOND/超候选上限一律报 `invalid_schedule`，不做隐式降级；
 //   - **存权威表达式不规范化**：rrule 保留原 DTSTART 时区与文本，绝不改写成别的形态；
 //   - **DST 边界照抄 dsh**：不存在的本地 DTSTART 拒绝、后续不存在跳过、重叠取较早。
+//
 // rrule 只在"算下一次"这一步接入（NextAfter/LatestAtOrBefore），认领/追赶仍走既有 NextDue 路径。
 package automation
 

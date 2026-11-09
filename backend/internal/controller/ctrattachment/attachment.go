@@ -3,6 +3,8 @@
 package ctrattachment
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/service/svcattachment"
@@ -14,6 +16,8 @@ type AttachmentCtr interface {
 	Register(c *gin.Context)
 	Delete(c *gin.Context)
 	Get(c *gin.Context)
+	// ConvertPDF `POST /files/:id/convert-pdf`：把某 file_id 的 office 文档转成 PDF 字节流返回。
+	ConvertPDF(c *gin.Context)
 }
 
 var _ AttachmentCtr = (*attachmentCtr)(nil)
@@ -73,4 +77,24 @@ func (h *attachmentCtr) Get(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, resp)
+}
+
+// ConvertPDF `POST /files/:id/convert-pdf`：把某 file_id（= core_file_upload.id）的 office 文档在
+// 服务端转成 PDF，**直接以 `application/pdf` 字节流返回**（不是 JSON 信封——调用方要的是 PDF 字节，
+// 前端拿去喂 PdfRenderer）。
+//
+// 可选 query `?name=` 给原始文件名（用于推导输出后缀；缺省按上传记录名）。
+// 失败一律走**信封**（HTTP 200 + code!=0）：转换器不可用 → 40501 office_preview_unsupported；
+// 文件不存在 → 40401 attachment_not_found；转换失败 → 50001 office_preview_failed。
+func (h *attachmentCtr) ConvertPDF(c *gin.Context) {
+	fileID := c.Param("id")
+	name := c.Query("name")
+	pdf, err := h.svc.ConvertToPDF(c.Request.Context(), fileID, name)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	// 直接吐字节：Content-Disposition inline 便于浏览器内联展示；不设缓存（每次可能即时转换）。
+	c.Header("Content-Disposition", "inline; filename=\"preview.pdf\"")
+	c.Data(http.StatusOK, "application/pdf", pdf)
 }

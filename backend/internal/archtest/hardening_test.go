@@ -114,8 +114,10 @@ func TestRendererHardeningBaseline(t *testing.T) {
 		}
 		// 纪律条款单独再钉一次：外域的"漏写"有时看起来无害（比如为了字体加个 CDN），
 		// 但 R3 的判据是"除模型 API 与用户触发的 MCP 拉取外零出站"。
-		if strings.Contains(want, "unsafe-eval") {
-			t.Error("CSP 不得放开 unsafe-eval（前端产物不得依赖 eval）")
+		// unsafe-eval：只禁止 JS 的 'unsafe-eval'（放行 eval/Function，废掉脚本沙箱）；
+		// 允许 shiki（Oniguruma）所需的 'wasm-unsafe-eval'（仅放行 wasm 编译，不放行 JS eval）。
+		if strings.Contains(strings.ReplaceAll(want, "'wasm-unsafe-eval'", ""), "unsafe-eval") {
+			t.Error("CSP 不得放开 JS unsafe-eval（前端产物不得依赖 eval；仅允许 wasm-unsafe-eval）")
 		}
 		// 逐个列出策略里的 URL，凡不是回环的一律拒绝（Go 的 RE2 没有负向前瞻，直接枚举比对）。
 		for _, u := range regexp.MustCompile(`(?:https?|wss?)://[^\s;]*`).FindAllString(want, -1) {

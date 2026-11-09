@@ -5,7 +5,7 @@
 //   - dsh 把「文件」分成三个正交概念（见 dsh `packages/deliverables/tool-present` 与
 //     `packages/client/ui-deliverables/src/client/turn-deliverables.ts`）：
 //     · produced —— 任意 write/edit/str_replace_editor 成功写出的文件；dsh 只拿它解析正文里的
-//       行内代码引用（让文件名可点开），**从不当作交付物、从不进任何库**；
+//     行内代码引用（让文件名可点开），**从不当作交付物、从不进任何库**；
 //     · presented —— 模型显式调用 `present` 声明的文件，**这是唯一的"最终交付物"面**；
 //     · changes —— git diff 摘要。
 //   - 因此「写文件动作本身（write/edit）」不等于「产出物」。早先平台把每次 write/edit 落文件
