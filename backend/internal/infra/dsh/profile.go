@@ -83,7 +83,7 @@ autoInstallPeers: false
 //     elicitation 卡片通道的模型侧入口；inject `['tools','userQuestions']`——`tools` 与
 //     `userQuestions`（`ctx.userQuestions` seam，@deepseek-ai/dsh-user-questions）均由 dsh-base 提供
 //     （base/cordis.patch.yml 的 dsh-tools、dsh-user-questions）。缺该工具则平台 elicitation 卡片永远不弹。
-//   这两项不依赖随包 env，故与 present/deliverable 一样**不加 disabled 门控**。
+//     这两项不依赖随包 env，故与 present/deliverable 一样**不加 disabled 门控**。
 //
 // 升级 dsh 时：office block + present/deliverable 与 `packages/bundle/sdk-app/cordis.patch.yml` 对齐；
 // time-context / tool-ask-user 与 `packages/bundle/web-app/presets/standard.patch.yml` 对齐（字段改了要同步）。

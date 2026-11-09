@@ -18,8 +18,9 @@ import (
 )
 
 // TestConvertPDFEndpoint 端到端：真引擎（真 filestore + 真附件字节存储）里
-//   ① POST /files 上传一份真实 docx → file_id；
-//   ② POST /files/:id/convert-pdf → 直接回 `application/pdf` 且字节以 `%PDF-` 开头。
+//
+//	① POST /files 上传一份真实 docx → file_id；
+//	② POST /files/:id/convert-pdf → 直接回 `application/pdf` 且字节以 `%PDF-` 开头。
 //
 // 依赖随包 libreoffice-kit payload（node + cli）。payload 缺失时 Skip——本用例的意义是在能力就位的
 // 机器上**实跑反证整条链**（handler → service → 真 CLI），不把 payload 变成测试硬依赖。

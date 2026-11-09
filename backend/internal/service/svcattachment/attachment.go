@@ -104,10 +104,10 @@ type AttachmentSvc interface {
 }
 
 type attachmentSvc struct {
-	st       AttachmentStore
-	blobs    BlobStore
+	st        AttachmentStore
+	blobs     BlobStore
 	converter OfficeConverter
-	limits   Limits
+	limits    Limits
 }
 
 // New 构造附件用例。st / blobs 由装配根交下来（sqlite 模式才有；memory 模式为 nil）。
