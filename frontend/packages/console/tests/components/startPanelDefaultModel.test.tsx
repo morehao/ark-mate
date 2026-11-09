@@ -67,6 +67,13 @@ import { StartPanel } from '../../src/components/StartPanel'
 
 const LAST_MODEL_KEY = 'mate.web.lastModel'
 
+// 平台模型行 id 必须是**合法形状**：`mdl_` + 26 位 Crockford Base32（见 @ark-mate/types 的
+// PLATFORM_MODEL_ID_PATTERN）。这里若用 `mdl_A`/`mdl_B` 这种短 id，StartPanel 的「本地记忆自愈」
+// effect 会因 isPlatformModelID 判否而 setModel(null)，与「默认模型预选」effect 的 setModel(默认)
+// 互相打架 → 无限渲染、vitest 卡死不退出（2026-11-09 定位到的 CI 挂起根因）。故用合法 26 位 id。
+const MODEL_A = 'mdl_000000000000000000000000AA'
+const MODEL_B = 'mdl_000000000000000000000000BB'
+
 // 目录：广告两条候选，都带平台行 id（= 都能选）。
 const catalog: ModelCatalogResp = {
   source: 'session',
@@ -74,8 +81,8 @@ const catalog: ModelCatalogResp = {
     {
       category: 'model',
       values: [
-        { value: '["p","a"]', name: '模型 A', model_id: 'mdl_A' },
-        { value: '["p","b"]', name: '模型 B', model_id: 'mdl_B' },
+        { value: '["p","a"]', name: '模型 A', model_id: MODEL_A },
+        { value: '["p","b"]', name: '模型 B', model_id: MODEL_B },
       ] as ConfigOptionValue[],
     },
   ],
@@ -92,15 +99,15 @@ beforeEach(() => {
 
 describe('StartPanel · 默认模型预选', () => {
   it('(a) 无本地记忆 + 默认在候选 → 预选默认模型', () => {
-    resetState({ modelCatalog: catalog, defaultModelId: 'mdl_B' })
+    resetState({ modelCatalog: catalog, defaultModelId: MODEL_B })
     render(<StartPanel />)
     // 关闭态展示默认模型的名字（真 ModelSelect 按候选反查 name）。
     expect(screen.getByText('模型 B')).toBeInTheDocument()
   })
 
   it('(b) 有本地合法记忆 → 沿用记忆，不被默认覆盖', () => {
-    localStorage.setItem(LAST_MODEL_KEY, 'mdl_A')
-    resetState({ modelCatalog: catalog, defaultModelId: 'mdl_B' })
+    localStorage.setItem(LAST_MODEL_KEY, MODEL_A)
+    resetState({ modelCatalog: catalog, defaultModelId: MODEL_B })
     render(<StartPanel />)
     expect(screen.getByText('模型 A')).toBeInTheDocument()
     expect(screen.queryByText('模型 B')).toBeNull()
@@ -119,13 +126,14 @@ describe('StartPanel · 默认模型预选', () => {
     } as unknown as ModelCatalogResp
     resetState({ modelCatalog: badCatalog, defaultModelId: 'mdl_missing' })
     render(<StartPanel />)
-    // 没被预选 → 关闭态显示占位文案「跟随默认」，且不出现任何模型名。
+    // 没被预选 → 不出现任何模型名。该目录里**没有可选候选**（唯一那条 model_id 为空 = 平台没声明），
+    // 故选择器关闭态显示的是空态占位「模型 · 暂无可选」（不是「跟随默认」——后者是"有候选但未选"）。
     expect(screen.queryByText('未声明模型')).toBeNull()
-    expect(screen.getByText('模型 · 跟随默认')).toBeInTheDocument()
+    expect(screen.getByText('模型 · 暂无可选')).toBeInTheDocument()
   })
 
   it('(c2) 默认模型 id 不在任何候选里 → 不预选', () => {
-    resetState({ modelCatalog: catalog, defaultModelId: 'mdl_orphan' })
+    resetState({ modelCatalog: catalog, defaultModelId: 'mdl_000000000000000000000000CC' })
     render(<StartPanel />)
     expect(screen.getByText('模型 · 跟随默认')).toBeInTheDocument()
   })
