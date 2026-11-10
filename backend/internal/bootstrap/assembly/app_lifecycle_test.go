@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoapp"
 	"github.com/morehao/ark-mate/internal/infra/apphost"
@@ -303,4 +304,107 @@ func (a mcpHandlerAdapter) ListTools() ([]apptool.ToolDesc, error) {
 }
 func (a mcpHandlerAdapter) InvokeTool(name string, args []byte) ([]byte, bool, error) {
 	return a.runner.InvokeTool(name, args)
+}
+
+// TestInstallEnableStartsHost 回归：install 时 enable=true（新建定义）必须**真正拉起运行期 host** 并到 active。
+//
+// 真起 mate serve 验证暴露的第二个 bug：InstallApp 用 `cur.Enabled != req.Enable` 决定是否驱动运行期，
+// 但新建定义经 gorm `default:1` 读回 enabled=true，于是 install.enable=true 时 true!=true=false → 跳过
+// SetAppEnabled → host 从未被拉起，install 返回 enabled=true 但 state 停在 pending（无 host 子进程）。
+// 本测试用 lifecycleSpawn(t) 真子进程断言：install(enable=true) 后 state=active 且持有 ready 的 host。
+func TestInstallEnableStartsHost(t *testing.T) {
+	ctx := context.Background()
+	appsRoot := t.TempDir()
+	srcRoot := t.TempDir()
+	pkgDir := writeSamplePack(t, srcRoot)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatalf("打开测试库失败：%v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	lc := newAppLifecycle(appsRoot, lifecycleSpawn(t))
+	t.Cleanup(lc.closeAll)
+	svc := svcapp.NewApp(appStore(st), svcapp.WithRuntimePort(lc), svcapp.WithAppsRoot(appsRoot))
+
+	// install 时直接 enable=true。
+	inst, err := svc.InstallApp(ctx, dtoapp.AppInstallReq{Dir: pkgDir, Enable: true})
+	if err != nil {
+		t.Fatalf("install(enable=true) 失败：%v", err)
+	}
+	if !inst.Installed || !inst.Enabled {
+		t.Fatalf("install 结果应为 installed 且 enabled，got %+v", inst)
+	}
+	// 关键：state 必须 active（不是 pending），且真持有 ready 的 host 子进程。
+	got, err := svc.GetApp(ctx, "myapp")
+	if err != nil {
+		t.Fatalf("GetApp 失败：%v", err)
+	}
+	if got.State != svcapp.AppStateActive {
+		t.Fatalf("install(enable=true) 后 state 应 active（并真正起了 host），got %q why=%q", got.State, got.Why)
+	}
+	h := lc.hosts["myapp"]
+	if h == nil || h.State() != apphost.StateReady {
+		t.Fatalf("install(enable=true) 后应持有 ready 的 host，got host=%v", h)
+	}
+}
+
+// TestEnableAppSurvivesRequestCtxCancel 回归：enable 的入参 ctx（=HTTP 请求 ctx）被 cancel 后，
+// 长驻 app-host 子进程**必须存活**、Host 保持 active——因为 host 绑的是进程级 baseCtx 而非请求 ctx。
+//
+// 真起 mate serve 验证暴露的 bug：EnableApp 曾把入参 ctx 传给 h.Start → ExecSpawn 的 exec.CommandContext
+// 绑请求 ctx → handler 返回、请求 ctx cancel 时 host 子进程被杀 → enable 立刻 state=failed。
+// 本测试用 lifecycleSpawn(t)（真子进程 helper host）复现：若回退到「绑入参 ctx」，cancel 后 host 会变 failed。
+func TestEnableAppSurvivesRequestCtxCancel(t *testing.T) {
+	srcRoot := t.TempDir()
+	_ = writeSamplePack(t, srcRoot)                   // 造 <srcRoot>/myapp/
+	lc := newAppLifecycle(srcRoot, lifecycleSpawn(t)) // 直接以 srcRoot 为 appsRoot，findPackage 能扫到 myapp
+	t.Cleanup(lc.closeAll)
+
+	ref := svcapp.AppRuntimeRef{ID: "myapp", ImplIDs: []string{"myapp.sync"}}
+
+	// 模拟一次 HTTP 请求：用可 cancel 的 ctx 调 EnableApp，成功后 cancel（= handler 返回）。
+	reqCtx, cancel := context.WithCancel(context.Background())
+	if err := lc.EnableApp(reqCtx, ref); err != nil {
+		cancel()
+		t.Fatalf("EnableApp 失败：%v", err)
+	}
+	h := lc.hosts["myapp"]
+	if h == nil {
+		cancel()
+		t.Fatal("enable 后应持有 host")
+	}
+	if h.State() != apphost.StateReady {
+		cancel()
+		t.Fatalf("enable 后 host 应 ready，got %v", h.State())
+	}
+	// 关键：cancel 请求 ctx（模拟 handler 返回），host 必须**不受影响**。
+	cancel()
+	// 给 supervise 一个窗口观测子进程是否被误杀。
+	time.Sleep(400 * time.Millisecond)
+	if st := h.State(); st != apphost.StateReady {
+		t.Fatalf("请求 ctx cancel 后 host 必须仍 ready（绑 baseCtx），got %v reason=%q", st, h.Reason())
+	}
+	// 经 Host 的工具面仍可列可调（真链路未断）。
+	runner := apphost.NewImplRunner(h)
+	specs, err := runner.ListTools()
+	if err != nil {
+		t.Fatalf("cancel 后 ListTools 失败：%v", err)
+	}
+	found := false
+	for _, s := range specs {
+		if s.Name == "myapp_echo" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("cancel 后工具面应仍含 myapp_echo，got %+v", specs)
+	}
+
+	// 收尾：closeAll 应能干净关掉（baseCtx cancel + Close）。
+	lc.closeAll()
+	if st := h.State(); st == apphost.StateReady {
+		t.Fatalf("closeAll 后 host 不该还是 ready，got %v", st)
+	}
 }

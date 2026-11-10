@@ -183,12 +183,14 @@ func (s *appSvc) InstallApp(ctx context.Context, req dtoapp.AppInstallReq) (*dto
 	}
 
 	// 同步定义行：若既有定义不存在，用清单派生一个最小 App 定义（id/name/api_version），使 app 立即可见可启用。
+	created := false
 	if _, ok, gerr := s.store.GetAppDefinition(ctx, id); gerr != nil {
 		return nil, gerr
 	} else if !ok {
 		if err := s.ensurePackDefinition(ctx, id, id, found.Manifest); err != nil {
 			return nil, err
 		}
+		created = true
 	}
 
 	resp := &dtoapp.AppInstallResp{ID: id, Dir: dstDir, Installed: true}
@@ -196,8 +198,13 @@ func (s *appSvc) InstallApp(ctx context.Context, req dtoapp.AppInstallReq) (*dto
 	// 注意：新建定义走 CreateCAS + gorm `default:1`，零值 enabled=0 在 INSERT 时被 gorm 省略而落成默认 1，
 	// 故 **显式** SetAppEnabled(false) 用 map 更新把它真正写成 0（这就是为什么这里要再走一次写面，
 	// 而不是只依赖新建时的 row.Enabled=0）。
+	//
+	// 关键（真起 serve 验证暴露的第二个 bug）：**新建定义时不能信 cur.Enabled**——gorm default:1 会让
+	// 新建行读回 enabled=true，导致 `cur.Enabled != req.Enable`（install.enable=true 时 true!=true）为 false，
+	// 于是跳过 SetAppEnabled → **运行期 host 从未被拉起**，install 返回 enabled=true 但 state 停在 pending。
+	// 因此新建定义（created）时无条件按 req.Enable 驱动一次；覆盖安装（非新建）才用 cur.Enabled 比对避免无谓起停。
 	if cur, ok2 := s.GetApp(ctx, id); ok2 == nil && cur != nil {
-		if cur.Enabled != req.Enable {
+		if created || cur.Enabled != req.Enable {
 			tog, terr := s.SetAppEnabled(ctx, id, req.Enable)
 			if terr != nil {
 				return nil, terr
