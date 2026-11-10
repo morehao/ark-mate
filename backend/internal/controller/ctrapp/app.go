@@ -22,17 +22,25 @@ type AppCtr interface {
 	SetAppEnabled(c *gin.Context)
 	InstallApp(c *gin.Context)
 	UninstallApp(c *gin.Context)
+	// 应用市场（M-A3）。
+	ListMarket(c *gin.Context)
+	RefreshMarket(c *gin.Context)
+	UpgradeApp(c *gin.Context)
 }
 
 var _ AppCtr = (*appCtr)(nil)
 
-// appCtr 是实现：只持用例接口。
+// appCtr 是实现：持用例接口 + 市场清单窄端口（可为 nil，表示未装配市场能力）。
 type appCtr struct {
-	svc svcapp.AppSvc
+	svc    svcapp.AppSvc
+	market MarketSource
 }
 
-// NewAppCtr 构造 AppCtr：只收**已构造的用例**（装配根建一次）。
-func NewAppCtr(svc svcapp.AppSvc) AppCtr { return &appCtr{svc: svc} }
+// NewAppCtr 构造 AppCtr：只收**已构造的用例**与市场清单窄端口（装配根建一次）。
+// market 可为 nil（未装配市场能力：ListMarket 回空数组、RefreshMarket no-op）。
+func NewAppCtr(svc svcapp.AppSvc, market MarketSource) AppCtr {
+	return &appCtr{svc: svc, market: market}
+}
 
 // ListApps 列出全部应用（含禁用；列表不返回 settings_schema 正文，只带 has_page 派生位）。
 func (h *appCtr) ListApps(c *gin.Context) {

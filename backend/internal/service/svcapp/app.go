@@ -54,6 +54,10 @@ type AppSvc interface {
 	InstallApp(ctx context.Context, req dtoapp.AppInstallReq) (*dtoapp.AppInstallResp, error)
 	// UninstallApp 卸载应用：先停运行期（dispose+停 host）+ 清包目录，再删定义（幂等）。
 	UninstallApp(ctx context.Context, id string) (*dtoapp.AppUninstallResp, error)
+	// MarketApps 把市场清单条目与本地装态合并，派生 installed/enabled/updatable/installable/state
+	// （应用市场 M-A2，GET /apps/market 的出参）。入参是跨层 DTO（不 import infra 的 appmarket），
+	// 由装配根/控制器做 appmarket.Listing → dtoapp.MarketListing 转换。
+	MarketApps(ctx context.Context, listings []dtoapp.MarketListing) ([]dtoapp.MarketAppResp, error)
 }
 
 // appSvc 是 AppSvc 的实现：只持持久化端口（+ 可选运行期生命周期端口，WP-C6）。
@@ -63,6 +67,9 @@ type appSvc struct {
 	runtime AppRuntimePort
 	// appsRootOverride 本地应用根目录覆盖（测试用 t.TempDir；空 = apppkg.DefaultAppsDir）。
 	appsRootOverride string
+	// sourceRoots 应用来源根（绝对路径集合；市场清单 dir 条目在此之内才 installable）。装配根注入
+	// （MATE_APP_SOURCE_ROOTS + 默认发行根 apps/）；空 = 不做来源根解析（installable 恒 false）。
+	sourceRoots []string
 }
 
 // Option 构造选项。
@@ -73,6 +80,11 @@ func WithRuntimePort(p AppRuntimePort) Option { return func(s *appSvc) { s.runti
 
 // WithAppsRoot 覆盖本地应用根目录（测试用；生产走 apppkg.DefaultAppsDir）。
 func WithAppsRoot(dir string) Option { return func(s *appSvc) { s.appsRootOverride = dir } }
+
+// WithSourceRoots 注入应用来源根（市场清单 dir 条目解析根；装配根 M-A7 注入）。空 = 不解析来源根。
+func WithSourceRoots(roots []string) Option {
+	return func(s *appSvc) { s.sourceRoots = append([]string(nil), roots...) }
+}
 
 // NewApp 构造应用定义用例（装配根建一次，控制器只收接口）。
 // 可选注入运行期生命周期端口（WP-C6）；不传则纯 A+Slot 行为（state 恒 off、install/uninstall 拒绝）。

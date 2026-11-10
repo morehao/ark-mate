@@ -2,10 +2,12 @@ package assembly
 
 import (
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/controller/ctrapp"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	corellm "github.com/morehao/ark-mate/internal/core/llm"
 	"github.com/morehao/ark-mate/internal/drivers/registry"
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
+	"github.com/morehao/ark-mate/internal/infra/appmarket"
 	"github.com/morehao/ark-mate/internal/infra/attachmentstore"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
@@ -59,7 +61,9 @@ type Services struct {
 	// ——— 能力 / 自动化 / Library ———
 	Capability svccapability.CapabilitySvc
 	// App 应用定义面（一期 A+Slot，`/apps` 六接口）。
-	App        svcapp.AppSvc
+	App svcapp.AppSvc
+	// Market 应用市场清单读取器（M-A3）。
+	Market     ctrapp.MarketSource
 	Automation svcautomation.AutomationSvc
 	Library    svclibrary.LibrarySvc
 
@@ -101,22 +105,29 @@ type Facts struct {
 	AttachStore *attachmentstore.Store
 	// AppLifecycle 运行期应用包生命周期端口（WP-C6；nil = 纯 A+Slot，不接运行期能力）。
 	AppLifecycle svcapp.AppRuntimePort
+	// AppMarket 应用市场清单读取器（M-A3；nil = 无市场，控制器回空数组）。
+	AppMarket *appmarket.Market
+	// AppSourceRoots 应用来源根（M-A7：市场 dir 条目解析根 + installable 判定用）。
+	AppSourceRoots []string
 }
 
 // facts 把装配根的可变状态折成构造用例所需的事实。
 func (as *assembly) facts() Facts {
+	roots := resolveAppSourceRoots()
 	return Facts{
-		Cfg:          as.cfg,
-		Store:        as.st,
-		Planes:       as.planes,
-		Session:      as.svc,
-		Orchestrator: as.orch,
-		Bus:          as.bus,
-		Runtime:      as.reg,
-		Execution:    as.rconn,
-		MetaSource:   as.metaSource,
-		AttachStore:  as.attachStore,
-		AppLifecycle: asAppRuntimePort(as.appLifecycle),
+		Cfg:            as.cfg,
+		Store:          as.st,
+		Planes:         as.planes,
+		Session:        as.svc,
+		Orchestrator:   as.orch,
+		Bus:            as.bus,
+		Runtime:        as.reg,
+		Execution:      as.rconn,
+		MetaSource:     as.metaSource,
+		AttachStore:    as.attachStore,
+		AppLifecycle:   asAppRuntimePort(as.appLifecycle),
+		AppMarket:      as.appMarket(roots),
+		AppSourceRoots: roots,
 	}
 }
 
@@ -164,7 +175,8 @@ func (f Facts) BuildServices() Services {
 			svccapability.NewServers(as.Planes.Capabilities, as.Planes.Mcp, as.Planes.McpSecrets),
 		),
 		// WP-C6：注入运行期生命周期端口（as.appLifecycle 由「应用生命周期」步骤构造；nil 则纯 A+Slot）。
-		App:        svcapp.NewApp(appStore(as.Store), appRuntimeOptionF(f.AppLifecycle)...),
+		App:        svcapp.NewApp(appStore(as.Store), append(appRuntimeOptionF(f.AppLifecycle), svcapp.WithSourceRoots(f.AppSourceRoots))...),
+		Market:     appMarketSourceAdapter(f.AppMarket),
 		Automation: svcautomation.New(as.Planes.Automation),
 		Library: svclibrary.NewLibrary(as.Planes.Capabilities, as.Planes.Skills, as.Runtime,
 			as.Planes.McpSecrets, as.Planes.McpGatewayEnabled),

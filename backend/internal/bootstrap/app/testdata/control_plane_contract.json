@@ -314,6 +314,52 @@
   },
   {
     "method": "GET",
+    "path": "/v1/mate/apps/market",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "array",
+    "data_len": 3
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/apps/market/refresh",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object",
+    "data_keys": [
+      "refreshed"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/apps/nope/upgrade",
+    "status": 200,
+    "code": 40501,
+    "msg": "更新能力接线中（应用包更新走 C8 版本治理链路，本期未接线）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
     "path": "/v1/mate/materials/nodes",
     "status": 200,
     "code": 40501,

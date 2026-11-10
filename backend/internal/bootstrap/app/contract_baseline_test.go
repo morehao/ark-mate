@@ -87,6 +87,10 @@ func contractCases() []contractCase {
 		// 二期 C 生命周期（WP-C6）：install（装包）/ uninstall（卸载）。memory 模式下多回 JSON 信封错误码。
 		{"POST", "/v1/mate/apps/install", "{}"},
 		{"DELETE", "/v1/mate/apps/nope/uninstall", ""},
+		// 应用市场（M-A3）：市场清单 / 刷新 / 更新（接线中明确 40501，仍 JSON 信封）。
+		{"GET", "/v1/mate/apps/market", ""},
+		{"POST", "/v1/mate/apps/market/refresh", "{}"},
+		{"POST", "/v1/mate/apps/nope/upgrade", "{}"},
 
 		// ——— materials 资料库（v33；memory 模式下多回 40501 material_unavailable，仍是 JSON 信封） ———
 		{"GET", "/v1/mate/materials/nodes", ""},
