@@ -5,6 +5,8 @@
  *   1. **存在性探测，不嗅探**：桌面态的判据是 `globalThis[DESKTOP_NAMESPACE]` 在不在
  *      （preload 先于页面脚本执行，所以**不需要 boot 门**——这一点刻意不照搬参照实现的
  *      注入表/门：我们的产物是封闭静态包，没有运行期插件装载）；禁止 UA 嗅探、禁止读
+ *      ——「封闭静态包」是 L 段口径；二期 C（运行期装卸，决策 v37）在受控范围内豁免此红线：
+ *      应用代码走独立子进程 `mate app-host` + 沙箱 iframe，**不**进本主窗脚本、不动态 import 陌生模块。
  *      `window.electron`、禁止编译期分支（设计 §10.1）。
  *   2. **global 名字与帧形状只在契约包**：本文件从 `@ark-mate/desktop-contract` 取 `DESKTOP_NAMESPACE`
  *      与 `assertMateDesktop`，业务代码里不得再出现字符串字面量 `'__MATE_DESKTOP__'`。
