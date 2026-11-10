@@ -24,6 +24,7 @@ type AutomationView struct {
 	LastSessionID       string
 	LastStatus          string
 	LastReason          string
+	LastReasonKind      string
 	ConsecutiveFailures int
 	Error               string
 	RecentRuns          []automation.RunRecord
