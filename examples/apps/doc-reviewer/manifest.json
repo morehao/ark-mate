@@ -1,0 +1,28 @@
+{
+  "id": "doc-reviewer",
+  "version": "1.0.0",
+  "api_version": "^1",
+  "requires": {
+    "min_core_version": "1.0.0"
+  },
+  "provides": {
+    "impls": [
+      { "impl_id": "docreview.scan", "kind": "slot" }
+    ],
+    "tools": [
+      {
+        "domain": "docreview",
+        "tools": ["scan", "summarize"]
+      }
+    ],
+    "page": {
+      "nav_label": "文档审阅",
+      "route": "/apps/doc-reviewer"
+    }
+  },
+  "permissions": ["file:domain"],
+  "entrypoint": "entrypoint.sh",
+  "integrity": {
+    "sha256": "988814bcccc462a4a0f70039f7a9aed877638c7f26cc8da3bd25d994e6fd7bb3"
+  }
+}
