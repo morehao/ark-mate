@@ -285,6 +285,34 @@
     "data_kind": "object"
   },
   {
+    "method": "POST",
+    "path": "/v1/mate/apps/install",
+    "status": 200,
+    "code": 40001,
+    "msg": "本进程未接运行期应用能力（无法安装应用包）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/mate/apps/nope/uninstall",
+    "status": 200,
+    "code": 40001,
+    "msg": "本进程未接运行期应用能力（无法卸载应用包）",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
     "method": "GET",
     "path": "/v1/mate/materials/nodes",
     "status": 200,

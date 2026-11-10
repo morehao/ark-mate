@@ -101,6 +101,8 @@ REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`co
 | PUT | `/apps/:id` | 覆盖写应用定义：只改 body 里出现的键（未出现的保留、`null` 删键），路径 id 与 body id 不一致 → 40000；以 `definition_revisions.seq` 为当前版本做 CAS（`apps` 无 revision 列），不中 → 40901 `definition_changed`（绝不 last-write-wins）；不存在 → 40401 `app_not_found` |
 | DELETE | `/apps/:id` | 删应用定义（幂等：不存在 → `deleted:false` 且 code=0）：解绑 `app_members`（按设计 §5.2，默认不动成员定义、只解除归属） |
 | PATCH | `/apps/:id` | `{enabled}` 启停应用：禁用只影响新选择，不影响已建会话；不存在 → 40401 `app_not_found` |
+| POST | `/apps/install` | **安装应用包（二期 C WP-C6）**：body `{dir, enable}`，`dir` = 本地来源包目录（含 `manifest.json`）。复用 `apppkg` 分发校验：清单合法性 + 完整性 sha256 + min core version 门槛，全过才原子拷到 `<MATE_APPS_DIR>/<id>/`（覆盖安装）；`enable=true` 时装完即启用（起隔离 host + apply slot）。未接运行期能力 → 40001 `app_runtime_unavailable`；包不合法/被篡改/版本不兼容 → 40001 `app_invalid` 且不落地 |
+| DELETE | `/apps/:id/uninstall` | **卸载应用（WP-C6）**：先停运行期（disposeSlot RPC 精确撤销 + 停 host，回退「无此 app」默认态）→ 清本地包目录 → 删定义行；幂等（不存在 → `uninstalled:false`）。返回 `{uninstalled, pack_removed, definition_deleted}` |
 | GET | `/skills` · `/mcps` · `/tools` | 能力数据面目录（Skill/MCP/Tool；MCP 含探测状态与 `tool_count`、`enabled`/`scope`；skill 含 `enabled` 与正文扫描 `warnings`） |
 | POST | `/skills` | 新建 skill 定义（body = skill 定义，`id` 必填）：**先过注册闸门**（正文扫描、`runtimes` 去重、**id 词法**）→ 通过才提交给载体（memory = 原子替换文件、sqlite = 事务插行 + 变更审计，未知键一律保留）→ 最后才更新内存；id 已存在 → 40901 `skill_exists`，闸门拒绝 → 40001 `definition_invalid` 且**零写入**（草稿从未提交，无需回滚）。**id 词法是底座契约，不是平台审美**：须匹配 `^[a-z0-9]+(-[a-z0-9]+)*$` 且 ≤64 位——dsh 的 `dsh-skill` 对 skill 文件 frontmatter 的 `name` 强制这一条，不合规只打一条 warn 就**静默丢弃整条**，而平台物化正是把 id 原样写成 `name`，于是放行不合规 id 等于造出「物化体检报 `in_sync`、底座永远读不到」的 skill（2026-10-08 实测确认）；物化层同规则再拦一道（导出 API 被直接调用也不放行）。MCP/tool 的 id 规则不受此波及 |
 | POST | `/skills/import` | **技能包导入（D1）**：`multipart/form-data`，字段 `file=<id>.zip`（≤20 MiB）。包内**只允许 `SKILL.md`**（根目录或唯一一层包装目录；`__MACOSX/`、`.DS_Store` 这类打包元数据忽略，额外的脚本/资源直接拒绝——「导入成功但附件没落盘」是静默丢失）。`SKILL.md` 必须有 YAML front matter：`name`（规范化后就是定义 id，须能折成 `^[a-z0-9]+(-[a-z0-9]+)*$`）、`description`（必填），可选 `title` 作展示名。解析/校验失败 → 40001 `definition_invalid` 且**零字节落盘**；同名 id → 40901 `skill_exists`（**不覆盖**）；正文 critical → 40001 且零写入。**写面不新开一条路**：解析结果折成与 `POST /skills` 相同的请求体后调用同一条 `WriteSkill`，所以「上传」与「手填」经过的闸门逐条相同 |
@@ -173,6 +175,8 @@ REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`co
 | **应用定义**（`/apps`）id 已被占用 | `40901` | `app_exists` | 换 id，或改它用 `PUT /apps/:id`（**绝不覆盖**） |
 | **应用定义**（`/apps`）定义被拒（词法/上限不过，或 `entities[].kind`/`slots[].impl_id` 不在白名单在册） | `40001` | `app_invalid` | 改定义内容重试；**被拒的定义零写入** |
 | **应用定义**（`GET/PUT/PATCH/DELETE /apps/:id`）目标不存在 | `40401` | `app_not_found` | 刷新应用列表后重选 |
+| **应用包安装**（`POST /apps/install`）未接运行期能力 | `40001` | `app_runtime_unavailable` | 本进程未启用运行期应用能力（需 C 期装配）；纯 A+Slot 部署不支持装包 |
+| **应用包卸载**（`DELETE /apps/:id/uninstall`）清理包目录失败 | `50201` | `app_uninstall_failed` | 检查本地应用目录权限/占用后重试（先停运行期已尽量保证） |
 
 **写面的载体按持久层模式分叉（M6-3）**：`MATE_STORE=sqlite` 时能力定义的事实源是 DB——
 `skills`/`mcp_servers` 两张表**就是定义本身**（`id` + 完整 `body` + `revision`），写面走

@@ -10,7 +10,8 @@ import { BrowserRouter } from 'react-router-dom'
 import { AppShell } from '@ark-mate/ui'
 import { listApps } from '@ark-mate/api'
 import { loadCapabilityFacts } from './capabilityFacts'
-import { applyAppPagesFromApps, clearAppPages } from './console/appRegistry'
+import { applyAppPagesFromApps, clearAppPages, resolveAppPages } from './console/appRegistry'
+import { deriveRuntimeAppPages, setRuntimeAppPages } from './console/runtimeAppPages'
 import { watchDevAssets } from './transport/assetWatch'
 import { renderVersionMismatch, runVersionGate } from './versionGate'
 
@@ -26,13 +27,24 @@ async function loadAppPages(): Promise<void> {
     const apps = await listApps()
     clearAppPages()
     applyAppPagesFromApps(apps)
+    // 二期 C：把带 page + frame_token 的 app 派生为**运行期沙箱页**，与内置路由做冲突检测
+    // （fail-closed 让位 + 告警）。必须先跑完 A+Slot 的 applyAppPagesFromApps——内置路由集
+    // 取自它的 resolveAppPages()。运行期页写入独立注册表，App 挂载时被 navView/app.tsx 读取。
+    const builtinRoutes = resolveAppPages().map((def) => def.route)
+    const { pages, dropped } = deriveRuntimeAppPages(apps, builtinRoutes)
+    for (const d of dropped) {
+      // 「让位 + 告警」：冲突/缺 token 的运行期页被丢弃时留可观测痕迹（不静默吞掉）。
+      console.warn(`[runtimeAppPages] 放弃运行期页 ${d.appId}（${d.route}）：${d.reason}`)
+    }
+    setRuntimeAppPages(pages)
   } catch (err) {
     // 失败不阻断：内置页照常，动态 app 页缺失即可（不把整个界面挂掉）。
     console.warn('[appRegistry] 读取 /apps 失败，动态应用页本次不补登：', err)
   }
 }
 
-export async function bootstrap(opts: { webBuildId: string }): Promise<void> {  const root = document.getElementById('root')
+export async function bootstrap(opts: { webBuildId: string }): Promise<void> {
+  const root = document.getElementById('root')
   if (!root) throw new Error('缺少 #root 挂载点')
 
   const gate = await runVersionGate(opts.webBuildId)

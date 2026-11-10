@@ -65,6 +65,9 @@ func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySele
 	// stdio 条目。与平台内置**并列且互不影响**：默认零注入、绝不改 platformMcpServers 的恒注入逻辑。
 	// 两者都进 plan.Direct ⇒ 注入面（McpServersFor）与指纹（CapabilityFactsFor）共用同一份。
 	s.appendAppMcpServers(&plan, runtimeID, sel)
+	// WP-C4：运行期包工具走**同一条 app 侧独立通道的并列分支**——按会话 app scope 追加运行期包的
+	// stdio 适配条目（装配根解算"连已起 host / 起 host 适配"）。默认零注入、绝不改 platformMcpServers。
+	s.appendRuntimeAppMcpServers(&plan, runtimeID, sel)
 	return plan
 }
 

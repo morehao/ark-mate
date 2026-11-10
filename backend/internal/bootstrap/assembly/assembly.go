@@ -25,6 +25,7 @@ import (
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/router"
 
+	"github.com/morehao/ark-mate/internal/infra/apphost"
 	"github.com/morehao/ark-mate/internal/infra/attachmentstore"
 	"github.com/morehao/ark-mate/internal/infra/procreg"
 	"github.com/morehao/ark-mate/internal/persistence/store"
@@ -84,6 +85,14 @@ type assembly struct {
 	// appSlotDispose 本次启动 app slot Reconcile 产出的**逆序撤销栈**（WP6）：进程关闭时执行。
 	// nil = 未 reconcile 或无 slot（Dispose 空操作）。
 	appSlotDispose func()
+
+	// appHosts 本次启动为运行期应用包拉起的隔离子进程 Host（WP-C5）：进程关闭时逆序关闭。
+	// 每包一个（崩溃隔离彻底）；空 = 无运行期包。
+	appHosts []*apphost.Host
+
+	// appLifecycle 运行期应用包的生命周期管理器（WP-C6）：承载 install/enable/disable/uninstall 的
+	// 运行期起停 + RuntimeAppToolScope 解算。nil = 未启动该步（纯 A+Slot 部署或缺运行期能力）。
+	appLifecycle *appLifecycle
 }
 
 // steps 声明启动序列（顺序即语义；关闭按它的逆序执行）。
@@ -118,6 +127,13 @@ func (as *assembly) steps() []registry.Step {
 		{
 			Name: "App Slot 运行时", Phase: registry.PhaseDomain,
 			Start: as.startAppSlots, Stop: as.stopAppSlots, StopTimeout: 10 * time.Second,
+		},
+		// 应用生命周期管理器（WP-C6）：构造运行期包的生命周期端口 + RuntimeAppToolScope。
+		// 非 critical（构造只做内存装配，不起 host；host 在 enable 时按需起）。须在「用例与控制器」前，
+		// 因为 svcapp 构造时要注入该端口（services.go）。
+		{
+			Name: "应用生命周期", Phase: registry.PhaseDomain,
+			Start: as.startAppLifecycle, Stop: as.stopAppLifecycle, StopTimeout: 10 * time.Second,
 		},
 		{Name: "权限记忆恢复", Phase: registry.PhaseDomain, Timeout: 30 * time.Second, Start: as.startPermissionMemories},
 		{Name: "编排参数", Phase: registry.PhaseSettings, Start: as.startRuntimeSettings},

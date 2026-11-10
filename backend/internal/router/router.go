@@ -92,6 +92,13 @@ type Deps struct {
 	// 与 WS 控制器的握手判定（见 registerStream）。
 	Origin *middleware.OriginPolicy
 
+	// AppPages 是二期 C 运行期应用**沙箱页**静态端点（`/_app/<token>/`）的装配配置（WP-C7）。
+	//
+	// nil = 端点不挂（交付期未接线时的默认态，与 AssetWatch 同款「有值才挂」范式）。非 nil 时
+	// 在 `MountWeb` 的 NoRoute（SPA 回落）**之前**挂上，让 iframe 能取到包内的应用页产物。
+	// 见 internal/router/routes_app_page.go 的安全边界注释。
+	AppPages *AppPageAssets
+
 	// FileStore 是 golib filestore 实例，供 `ginupload.Register` 挂**全局唯一的上传面** `/files`
 	// （产物溯源 P0′：收字节收口，见设计 §3.4）。nil = 不挂（memory 模式无持久层）。
 	//
@@ -178,6 +185,11 @@ func New(d Deps) *gin.Engine {
 	// v1 组中间件跑不到 NoRoute，只有引擎级 Use 能进 NoRoute 链；已注册路由的链在注册时已快照，
 	// 不含守卫，命中请求零改动）。
 	guardPresignMisroute(r, rest)
+
+	// 二期 C（WP-C7）：运行期应用沙箱页静态端点 `/_app/<token>/…`。必须挂在 `MountWeb` 的 NoRoute
+	// （SPA 回落）**之前**——否则 `/_app/…` 会被 SPA 回落成主窗 HTML，iframe 拿到的不是应用页。
+	// d.AppPages 为 nil（未接线）时本函数直接返回，不挂任何路由。
+	mountAppPageAssets(r, d.AppPages)
 
 	MountWeb(r, d.Web)
 	// 开发期资产重建通知（P6-A）：**开关与注册点必须同处**（archtest 有静态守卫钉这条）——

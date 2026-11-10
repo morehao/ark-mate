@@ -99,6 +99,8 @@ type Facts struct {
 	MetaSource func() svcsystem.MetaSource
 	// AttachStore 附件字节存储（v32）；nil = memory 模式（无库无字节存储），附件面 40501/不可用。
 	AttachStore *attachmentstore.Store
+	// AppLifecycle 运行期应用包生命周期端口（WP-C6；nil = 纯 A+Slot，不接运行期能力）。
+	AppLifecycle svcapp.AppRuntimePort
 }
 
 // facts 把装配根的可变状态折成构造用例所需的事实。
@@ -114,6 +116,7 @@ func (as *assembly) facts() Facts {
 		Execution:    as.rconn,
 		MetaSource:   as.metaSource,
 		AttachStore:  as.attachStore,
+		AppLifecycle: asAppRuntimePort(as.appLifecycle),
 	}
 }
 
@@ -160,7 +163,8 @@ func (f Facts) BuildServices() Services {
 			svccapability.NewTools(as.Planes.Capabilities),
 			svccapability.NewServers(as.Planes.Capabilities, as.Planes.Mcp, as.Planes.McpSecrets),
 		),
-		App:        svcapp.NewApp(appStore(as.Store)),
+		// WP-C6：注入运行期生命周期端口（as.appLifecycle 由「应用生命周期」步骤构造；nil 则纯 A+Slot）。
+		App:        svcapp.NewApp(appStore(as.Store), appRuntimeOptionF(f.AppLifecycle)...),
 		Automation: svcautomation.New(as.Planes.Automation),
 		Library: svclibrary.NewLibrary(as.Planes.Capabilities, as.Planes.Skills, as.Runtime,
 			as.Planes.McpSecrets, as.Planes.McpGatewayEnabled),

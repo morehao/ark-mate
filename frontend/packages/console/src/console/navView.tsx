@@ -10,6 +10,7 @@
  */
 import type { ReactNode } from 'react'
 import { EXTENSIONS_GROUP, resolveAppPages } from './appRegistry'
+import { getRuntimeAppPages } from './runtimeAppPages'
 
 export interface NavLeaf {
   readonly id: string
@@ -71,8 +72,14 @@ function buildNavEntries(): readonly NavEntry[] {
 
   const entries: NavEntry[] = [...leaves]
   // 「扩展」组：仅当有二级项时出现（空组没有意义）。组元数据固定取自 EXTENSIONS_GROUP。
-  const extChildren = groupChildren.get('extensions')
-  if (extChildren && extChildren.length > 0) {
+  // 二期 C（WP-C7）：运行期沙箱应用页作为「扩展」组的二级项并入（与内置页并列），
+  // 它们**不**来自 A+Slot 的编译期 `resolveAppPages()`，而是独立运行期注册表
+  // （`runtimeAppPages`），渲染走沙箱 iframe（见 app.tsx / SandboxAppFrame）。
+  const extChildren = [...(groupChildren.get('extensions') ?? [])]
+  for (const rp of getRuntimeAppPages()) {
+    extChildren.push({ id: `runtime:${rp.appId}`, label: rp.navLabel, to: rp.route, order: rp.order })
+  }
+  if (extChildren.length > 0) {
     entries.push({
       id: EXTENSIONS_GROUP.id,
       label: EXTENSIONS_GROUP.label,
