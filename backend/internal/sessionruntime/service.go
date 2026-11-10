@@ -48,6 +48,11 @@ type Service struct {
 	// app 工具走独立注入通道（设计 §5.3a），本层只问它"这些 app 绑了哪些可注入域"，
 	// 据此拼一条独立的 `mate mcp app --apps=...` stdio 条目——**绝不并进 platformMcpServers**。
 	appToolScope AppToolScope
+
+	// runtimeAppToolScope 运行期包工具面解算端口（WP-C4；nil = 无运行期包工具）。
+	// 与 appToolScope 并列、**只管运行期包 app**：这些 app 的工具住在 C3 隔离 host 里，二进制无 handler，
+	// 由装配根解算成 stdio 适配条目。同样只往 app 侧追加，**绝不改 platformMcpServers**。
+	runtimeAppToolScope RuntimeAppToolScope
 }
 
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。

@@ -27,6 +27,8 @@ type testRouterOpts struct {
 	web        router.AssetInfo
 	assetWatch *router.AssetWatcher
 	origin     *middleware.OriginPolicy
+	// appPages 二期 C 沙箱页静态端点（nil = 不挂，与生产默认一致）。
+	appPages *router.AppPageAssets
 	// metaSource 覆盖诊断面的值来源；nil 时用"资产已接上"的默认值。
 	metaSource func() svcsystem.MetaSource
 	// 复用一个已装配好的会话面（调用方要先设策略/凭据时传它）。
@@ -94,6 +96,7 @@ func testRouterDeps(t *testing.T, o testRouterOpts) router.Deps {
 		Web:         o.web,
 		AssetWatch:  o.assetWatch,
 		Origin:      o.origin,
+		AppPages:    o.appPages,
 	}
 }
 

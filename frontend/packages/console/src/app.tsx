@@ -9,6 +9,8 @@ import { StatusBar } from './components/StatusBar'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { NAV_ENTRIES, activeChildOf, isEntryActive, isGroup } from './console/navView'
 import { resolveAppPages } from './console/appRegistry'
+import { getRuntimeAppPages } from './console/runtimeAppPages'
+import { SandboxAppFrame } from './components/SandboxAppFrame'
 import { useMate } from './store'
 import { ChatPage } from './pages/ChatPage'
 import { PreviewProvider } from './components/preview/PreviewProvider'
@@ -198,6 +200,21 @@ export function App() {
                   />
                 )
               })}
+            {/* 二期 C（WP-C7）：运行期应用页走**独立沙箱 iframe 路由**（`SandboxAppFrame`），
+                **不**经上面 A+Slot 的编译期组件映射——页面代码来自运行期包，必须隔离在
+                `sandbox="allow-scripts"` + `connect-src 'none'` 的 iframe 里，主窗只经受限
+                postMessage 桥通讯。运行期页与内置路由的冲突已在 derive 阶段 fail-closed 让位。 */}
+            {getRuntimeAppPages().map((rp) => (
+              <Route
+                key={`runtime:${rp.appId}`}
+                path={rp.route}
+                element={
+                  <Manage>
+                    <SandboxAppFrame page={rp} permissions={rp.permissions} />
+                  </Manage>
+                }
+              />
+            ))}
             {/* 设置已不是页面（左栏 footer 菜单 → 居中弹窗）。旧深链接仍然可用：
                 打开对应分节弹窗，然后落回问答页（弹窗是覆盖层，需要底下有个页面）。 */}
             <Route path="/settings" element={<SettingsDeepLink section="general" />} />

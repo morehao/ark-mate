@@ -1,0 +1,31 @@
+{
+  "id": "minimal-app",
+  "version": "1.0.0",
+  "api_version": "^1",
+  "requires": {
+    "min_core_version": "1.0.0"
+  },
+  "provides": {
+    "impls": [
+      {
+        "impl_id": "minimal.sync",
+        "kind": "slot"
+      }
+    ],
+    "tools": [
+      {
+        "domain": "minimal",
+        "tools": ["echo", "ping"]
+      }
+    ],
+    "page": {
+      "nav_label": "最小样例",
+      "route": "/apps/minimal-app"
+    }
+  },
+  "permissions": ["read:usage"],
+  "entrypoint": "entrypoint.sh",
+  "integrity": {
+    "sha256": "988814bcccc462a4a0f70039f7a9aed877638c7f26cc8da3bd25d994e6fd7bb3"
+  }
+}

@@ -30,6 +30,8 @@ func MCP(args []string) {
 		automationMcp(args[1:])
 	case "platform":
 		platformMcp(args[1:])
+	case "app":
+		appMcp(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "未知的 mcp 动作 %q\n\n%s", args[0], mcpUsage)
 		os.Exit(2)

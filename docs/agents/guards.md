@@ -136,7 +136,9 @@
 
 - 再加 **3 条 App Slot 运行时守卫**（`appslot_guard_test.go`，2026-11-09 App 体系一期 A+Slot，设计 §5.4 / §6 R1 / G6）：`TestAppSlotImplWhitelisted`（app 定义的 `slots[].impl_id`/`entities[].kind` 必须编译期在册——行为钉：喂一个引用**未登记** impl_id 的 app，断言该 slot FAILED 且未被 apply，正向断言在册 impl 能 applied；挡「Slot 退化成数据驱动的服务定位图」）、`TestAppSlotDisposeOnOff`（app 停用 → OnDispose **逆序**撤销、幂等；行为钉：两 impl 依赖链，撤销顺序 == apply 逆序；把 disposeAll 改正序 → 红；挡 G6「关不干净」）、`TestAppSlotStaysAtLeaf`（静态扫 `internal/core/appslot` 生产源码 import，禁 `internal/service/`·`controller`·`router`·`persistence`·`domain`；挡 R1「Slot 绕过 service 层拿实现」，层表只看方向不看角色故既有守卫不挡）。三条 fail-closed（扫不到源码即失败，防目录改名空转）。反证均实跑确认红、复原后绿。
 
-**共 199 条**——加守卫时记得同步这句话。
+- 再加 **2 条运行期 impl 隔离守卫**（`apphost_isolation_test.go`，2026-11-10 二期 C WP-C5，设计 §17.2 / 决策 v37 安全基线）：`TestRuntimeImplOnlyViaHost`（运行期 impl 只能经 `app-host` 子进程执行——行为钉：给一个只在 RuntimeSource 在册、但 `SourceImplResolver` **不给** exec 的 impl 喂 `ReconcileWithResolver`，断言该 slot FAILED，证明「内核拿不到运行期 impl 的可执行函数」；静态钉：`core/appslot`·`core/apppkg` 生产源码不得 import `internal/infra/apphost`，堵反向依赖执行层。挡「内核同进程直调运行期包代码」）、`TestUntrustedCodeNeverInProc`（`internal/**` 生产源码里 `os/exec`/`plugin` 的导入只允许出现在隔离侧/已知底座适配白名单——`infra/apphost`（拉起自己的 mate app-host 子进程）·`infra/host`·`infra/installed`·`infra/dsh`·`infra/protocol`·`infra/officeconv`·`bootstrap/maintenance`（app-host 子命令入口）；挡「内核进程起第三方进程/加载 plugin」，那会让隔离失效且既有测试全绿）。两条 fail-closed（扫不到源码即失败）。反证（实跑）：在 `core/appslot` 加一行 `import "os/exec"` → 第二条红；复原后绿。
+
+**共 201 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 

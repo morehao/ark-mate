@@ -167,6 +167,10 @@ var v32Layers = map[string]v32Layer{
 	// 供 `mate mcp app --apps=...` 拉起（与 platformmcp 同套前缀分派/fail-closed，不并进平台 server）。
 	// 只做路由聚合、不碰业务，L5 与其它 infra 件同层。
 	"internal/infra/apptool": {layer: 5, name: "infra/apptool", sameLayer: true},
+	// 隔离 host 子进程管理（二期 C WP-C3，2026-11-10）：父进程侧拉起/监督 `mate app-host` 子进程、
+	// JSON-lines RPC、crash 隔离与重启退避；`hostkit` 子包是子进程侧 serve 循环 SDK（同层前缀）。
+	// 它是"跟外面（独立进程）说话"的实现面，L5 与其它 infra 件同层。
+	"internal/infra/apphost": {layer: 5, name: "infra/apphost", sameLayer: true},
 	// 内部模型调用的执行器实现（OpenAI 兼容 HTTP 直连）。契约/值在 L1 `core/llm`，本包只做
 	// "与外面说话"，是 L5 与其它 infra 件同层的实现面。
 	"internal/infra/llm": {layer: 5, name: "infra/llm", sameLayer: true},

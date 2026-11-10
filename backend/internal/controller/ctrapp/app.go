@@ -20,6 +20,8 @@ type AppCtr interface {
 	UpdateApp(c *gin.Context)
 	DeleteApp(c *gin.Context)
 	SetAppEnabled(c *gin.Context)
+	InstallApp(c *gin.Context)
+	UninstallApp(c *gin.Context)
 }
 
 var _ AppCtr = (*appCtr)(nil)
@@ -102,6 +104,34 @@ func (h *appCtr) SetAppEnabled(c *gin.Context) {
 		return
 	}
 	resp, err := h.svc.SetAppEnabled(c.Request.Context(), c.Param("id"), req.Enabled)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// InstallApp 从本地来源目录安装一个应用包（POST /apps/install）。
+//
+// body: {dir, enable}。装包复用 apppkg 校验（清单/完整性/min core version），enable=true 时装完即启用。
+// 未接运行期能力 → app_runtime_unavailable；包不合法/被篡改/版本不兼容 → app_invalid。
+func (h *appCtr) InstallApp(c *gin.Context) {
+	var req dtoapp.AppInstallReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.InstallApp(c.Request.Context(), req)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// UninstallApp 卸载一个应用（DELETE /apps/:id/uninstall）：先停运行期（dispose+停 host）+ 清包目录，再删定义。幂等。
+func (h *appCtr) UninstallApp(c *gin.Context) {
+	resp, err := h.svc.UninstallApp(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

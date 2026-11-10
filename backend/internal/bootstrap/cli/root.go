@@ -36,6 +36,7 @@ const usageText = `mate — ark-mate 控制面 daemon
   mate provider export         把 SQLite 里的供应商档案写回 providers.json（回退旧二进制的唯一回灌路径）
   mate mcp bridge --runtime <id>
                                 平台侧 MCP stdio 网关（底座经 ACP 拉起；远程 MCP 经它代理）
+  mate app-host --pkg=<dir>    运行期应用包的隔离子进程入口（父进程经 stdin/stdout JSON-lines 与之交谈）
   mate doctor [flags]          只读体检：资产来源与摘要、随包载荷清单与全量复算、数据目录可写性、端口占用
   mate --version [--json]      打印核心版本与 API 契约版本（--json 供机器读）
 
@@ -119,6 +120,8 @@ func Run(args []string) int {
 		maintenance.Provider(args[1:])
 	case "mcp":
 		maintenance.MCP(args[1:])
+	case "app-host":
+		maintenance.AppHost(args[1:])
 	case "doctor":
 		maintenance.Doctor(args[1:])
 	case "-h", "--help", "help":

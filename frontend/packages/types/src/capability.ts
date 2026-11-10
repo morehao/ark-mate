@@ -433,4 +433,11 @@ export interface App {
   /** Unix 毫秒（`objtime.Milli`；前端 `new Date(ms)` 零换算）。 */
   created_at: number
   updated_at: number
+  /**
+   * 二期 C：运行期应用页的访问 token（后端按包 spec 签发，供沙箱 iframe 拉 `/_app/<token>/`）。
+   * 本 WP（C7）后端接口尚未回填，属 **C6 接线点**；缺失时该 app 的沙箱页不登记（fail-closed）。
+   */
+  frame_token?: string
+  /** 二期 C：清单声明的 permissions（决定沙箱 postMessage 桥放行哪些读；缺省=不放行）。 */
+  permissions?: string[]
 }

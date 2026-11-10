@@ -42,7 +42,13 @@ type AppResp struct {
 	// SettingsSchema 应用级配置（仅详情返回；列表为空 → omitempty 不出现）。
 	SettingsSchema string `json:"settings_schema,omitempty"`
 	APIVersion     string `json:"api_version,omitempty"`
-	Enabled        bool   `json:"enabled"`
+	// Enabled 是否启用。
+	Enabled bool `json:"enabled"`
+	// State 派生生命周期状态（WP-C6，设计 §11）：off/pending/active/failed/disposed。
+	// 由「有无本地包 + enabled + 运行期 host 实时态」派生，非新落库列。
+	State string `json:"state"`
+	// Why state 的人话原因（failed/pending 时非空，如「子进程崩溃：exit status 3」）。
+	Why string `json:"why,omitempty"`
 	// HasPage 是否声明了前端页面入口（列表用它标记）。
 	HasPage bool `json:"has_page"`
 	// Revision 写面当前版本（= 最新审计 seq；0 = 从未写过的旧值）。
@@ -100,4 +106,28 @@ type AppToggleResp struct {
 	ID       string `json:"id"`
 	Enabled  bool   `json:"enabled"`
 	Revision int64  `json:"revision"`
+}
+
+// AppInstallReq 安装一个本地应用包（POST /apps/install）。dir = 来源包目录（含 manifest.json 的包根）；
+// enable=true 时装完立即启用（起 host + apply slot）。
+type AppInstallReq struct {
+	Dir    string `json:"dir"`
+	Enable bool   `json:"enable"`
+}
+
+// AppInstallResp 安装结果。
+type AppInstallResp struct {
+	ID        string `json:"id"`
+	Dir       string `json:"dir"`
+	Installed bool   `json:"installed"`
+	Enabled   bool   `json:"enabled,omitempty"`
+	Revision  int64  `json:"revision,omitempty"`
+}
+
+// AppUninstallResp 卸载结果（先停运行期 + 清包目录，再删定义）。
+type AppUninstallResp struct {
+	ID                string `json:"id"`
+	Uninstalled       bool   `json:"uninstalled"`
+	PackRemoved       bool   `json:"pack_removed"`
+	DefinitionDeleted bool   `json:"definition_deleted"`
 }

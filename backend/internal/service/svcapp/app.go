@@ -20,6 +20,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/dto/dtoapp"
 	"github.com/morehao/ark-mate/internal/persistence/model"
+	"github.com/morehao/golib/glog"
 )
 
 // Store 是应用定义的持久化窄端口（由装配侧用 `*store.Store` 适配）。
@@ -49,15 +50,42 @@ type AppSvc interface {
 	DeleteApp(ctx context.Context, id string) (*dtoapp.AppDeleteResp, error)
 	// SetAppEnabled 启停一条 app（禁用只影响新选择，不影响已建会话）。
 	SetAppEnabled(ctx context.Context, id string, enabled bool) (*dtoapp.AppToggleResp, error)
+	// InstallApp 从来源目录安装应用包到本地应用目录（可选立即启用）。未接运行期能力 → app_runtime_unavailable。
+	InstallApp(ctx context.Context, req dtoapp.AppInstallReq) (*dtoapp.AppInstallResp, error)
+	// UninstallApp 卸载应用：先停运行期（dispose+停 host）+ 清包目录，再删定义（幂等）。
+	UninstallApp(ctx context.Context, id string) (*dtoapp.AppUninstallResp, error)
 }
 
-// appSvc 是 AppSvc 的实现：只持持久化端口。
+// appSvc 是 AppSvc 的实现：只持持久化端口（+ 可选运行期生命周期端口，WP-C6）。
 type appSvc struct {
 	store Store
+	// runtime 运行期包生命周期窄端口（WP-C6；nil = 无运行期能力，纯 A+Slot 部署）。
+	runtime AppRuntimePort
+	// appsRootOverride 本地应用根目录覆盖（测试用 t.TempDir；空 = apppkg.DefaultAppsDir）。
+	appsRootOverride string
 }
 
+// Option 构造选项。
+type Option func(*appSvc)
+
+// WithRuntimePort 注入运行期包生命周期端口（装配根在 host/profile 就绪后接线）。
+func WithRuntimePort(p AppRuntimePort) Option { return func(s *appSvc) { s.runtime = p } }
+
+// WithAppsRoot 覆盖本地应用根目录（测试用；生产走 apppkg.DefaultAppsDir）。
+func WithAppsRoot(dir string) Option { return func(s *appSvc) { s.appsRootOverride = dir } }
+
 // NewApp 构造应用定义用例（装配根建一次，控制器只收接口）。
-func NewApp(store Store) AppSvc { return &appSvc{store: store} }
+// 可选注入运行期生命周期端口（WP-C6）；不传则纯 A+Slot 行为（state 恒 off、install/uninstall 拒绝）。
+func NewApp(store Store, opts ...Option) AppSvc {
+	s := &appSvc{store: store}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// runtimeWired 报告本进程是否接了运行期应用能力。
+func (s *appSvc) runtimeWired() bool { return s.runtime != nil }
 
 // Locator 应用定义给人看的定位串（DB 载体，无文件路径）。
 func Locator(id string) string { return "db:app/" + id }
@@ -184,11 +212,18 @@ func (s *appSvc) DeleteApp(ctx context.Context, id string) (*dtoapp.AppDeleteRes
 }
 
 // SetAppEnabled 启停一条 app。
+//
+// WP-C6：翻 DB 布尔之后，若本进程接了运行期能力，还要驱动运行期生命周期——
+//   - 启用 → 起该 app 的隔离 Host + apply slot（回退「有此 app」态）；
+//   - 停用 → dispose slot + 停 Host（回退「无此 app」默认态，设计 §5.5「关得干净」）。
+//
+// 顺序：先翻 DB（用户意图先落库，失败可重试），再驱动运行期。运行期起停失败**不回滚** DB 布尔——
+// 用户想要的是「启用」，失败是运行期事实，由 GetApp 的 state=failed + why 如实呈现（不静默假装成功）。
 func (s *appSvc) SetAppEnabled(ctx context.Context, id string, enabled bool) (*dtoapp.AppToggleResp, error) {
 	if s.store == nil {
 		return nil, definition.ErrCapabilityUnavailable()
 	}
-	_, ok, err := s.store.GetAppDefinition(ctx, id)
+	row, ok, err := s.store.GetAppDefinition(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -209,6 +244,23 @@ func (s *appSvc) SetAppEnabled(ctx context.Context, id string, enabled bool) (*d
 	newRev, err := s.store.AppRevision(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	// 驱动运行期（已落库；运行期失败只影响 state=failed，不回滚布尔）。
+	if s.runtime != nil {
+		app, aerr := rowToApp(row)
+		if aerr == nil {
+			ref := runtimeRefOf(app)
+			if enabled {
+				if e := s.runtime.EnableApp(ctx, ref); e != nil {
+					glog.Warnw(ctx, "app 启用时运行期起 host 失败（state=failed，不回滚 enabled 布尔）",
+						"app", id, "err", e)
+				}
+			} else {
+				if e := s.runtime.DisableApp(ctx, ref); e != nil {
+					glog.Warnw(ctx, "app 停用时运行期撤销失败（记日志，继续）", "app", id, "err", e)
+				}
+			}
+		}
 	}
 	return &dtoapp.AppToggleResp{ID: id, Enabled: enabled, Revision: newRev}, nil
 }
@@ -397,7 +449,10 @@ func (s *appSvc) appRespFromRow(ctx context.Context, row *model.AppEntity, withS
 	if err != nil {
 		return nil, err
 	}
-	return appToResp(app, row, rev, withSettings), nil
+	resp := appToResp(app, row, rev, withSettings)
+	// WP-C6：派生生命周期 state+why（设计 §11 可观测）。纯 A+Slot 部署（runtime 未接）恒 off。
+	resp.State, resp.Why = s.stateOfApp(ctx, app, app.IsEnabled())
+	return resp, nil
 }
 
 // appToResp 强类型 App + 行（拿时间列）→ dtoapp.AppResp。
