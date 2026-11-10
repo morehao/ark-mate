@@ -41,6 +41,8 @@ ark-mate 自上而下分两层，两层职责并列成立：
 - **能力不重造**。skill 执行、MCP 工具调用、推理循环一律复用底座原生实现；平台只做这些能力对应的**数据与配置管理**。
 - **无跨 agent 协作**。一次会话/一次运行只绑定一个 runtime，不存在委托、子 agent、并行协作。
 
+> **二期 C 的范围豁免（决策 v37，2026-11-10）**：上表「单机单操作员 / 平台不做鉴权」与「无运行期加载陌生代码（封闭静态包）」三条是 **L 段口径**。二期 C「运行期装卸」（§7.10）在**受控范围内**豁免它们——本机单操作员 + 本地受信目录装包、运行期代码**只在隔离子进程**执行、前端走**沙箱 iframe**、清单哈希校验 + 受限桥为硬前提；完整多租户 / 公网市场 / 鉴权仍不做（留 roadmap C 段）。v3/v9/v34 正文不改，v37 是叠加的例外登记（见 `docs/decisions.md`）。
+
 **接边有界**：内置适配只有 `dsh` 一个。但 adapter 层是完整的——接一个新底座 = 新建 `backend/internal/infra/<id>/`（实现 `runtime.Adapter`：`Spec()` + `RegisterPorts()`）+ 装配根加一行 + 挂**五张端口表**实现（`resource.Syncer` / `runtime.NativePermissionAdapter` / `runtime.ModelValueAdapter` / 工具失败归类 / 产品身份），**不需要改框架内核**。内核里不得出现任何内置适配 id 的特判（守卫钉住）。
 
 ## 2. 交付形态三态
@@ -63,8 +65,10 @@ CLI 子命令（`mate`，无默认子命令）：
 ```
 serve · demo · migrate · transcripts prune · config
 capability {migrate,import,export} · automation {import,export} · provider {import,export}
-mcp bridge --runtime <id> · doctor · --version [--json]
+mcp bridge --runtime <id> · mcp app --apps=<ids> · app-host --pkg=<dir> · doctor · --version [--json]
 ```
+
+（`app-host` 是运行期应用包的隔离子进程入口、`mcp app` 是运行期 app 工具面的 stdio 桥，见 §7.10；用户面不直接调用，由装配根/会话注入在内部拉起。）
 
 其中 `mate doctor` 是**只读体检**（资产目录与逐文件摘要、随包载荷清单与全量复算、数据目录可写性、端口占用、不在册底座的存量体检、读模型漂移），「无法校验」记警告、事实与声明不符才退出 1。
 
@@ -486,6 +490,7 @@ MCP 分**内置**与**用户注册**两类。用户注册的走下面的明文/�
 | `mate-platform`（`mate mcp platform`，**默认唯一注入的一条**） | 聚合四域共 22 个工具：`automation_*`（定时任务 6）+ `expert_*`（专家 6）+ `library_*`（资料库 4）+ `app_*`（应用定义管理面 6） | 会话自动注入（stdio，Command = 本进程可执行文件） |
 | `mate mcp material` | 资料库文件级工具 + 产物收录（`library_*` 单独一条） | 独立入口，调试/兼容；与 platform 共用同一套装配 |
 | `mate mcp automation` | 定时任务工具（`automation_*` 单独一条） | 独立入口，调试/兼容 |
+| `mate mcp app --apps=<ids>` | 运行期应用包的工具面（按 app id 装载包、每包起隔离 host、按域聚合），供会话按 app scope 独立注入 | 独立注入通道（**不进 `mate-platform`**，见 §7.10） |
 | `mate mcp bridge --runtime <id>` | 远程 MCP 网关：代连用户注册的远程 server，把它拼成一条 stdio 条目给底座 | 远程 MCP 经它注入（见下） |
 
 注入的三条边界（`sessionruntime/platform_mcp.go`）：**只用本进程可执行文件**（`os.Executable()`，不依赖 PATH，与网关同款配方）；**只注入本机启动的 runtime**（远程 ACP 端点没有本机可执行文件，注入会反复拉起失败，故跳过）；**注入面与指纹共用**（这些 server 进 `plan.Direct`，`McpServersFor` 与 `CapabilityFactsFor` 看到同一份，不会「指纹说没变、注入却多了」）。门槛：`MATE_PLATFORM_MCP=off` / 会话钉 `[]` / 未注册或远程 runtime / 取不到可执行文件，任一即不注入；**会话钉非空白名单不挡平台内置**（它们是产品默认能力，不是用户可选集）。缺省路径指纹恒为空 → 新会话立即有工具、老会话重启后才换代际。
@@ -655,6 +660,47 @@ ark-mate 不改 dsh 源码/fork，两个「让底座按平台口径说话」的�
 
 > 这份网关的边界也解释了用量统计的两套口径：会话轮次的 token 明细（`runs.token_usage_json`）与旁路调用的流水（`llm_calls` 表）都记，但前者附带在轮次上、后者是独立行（`SessionID` 可空）。详见 §5、§5.1。
 
+### 7.10 应用体系：扩展点契约与「插件」（一期 A+Slot + 二期 C 运行期装卸）
+
+「应用（App）」是**一条定义 + 在固定扩展点各登记一项**：新业务不改内核机制，只把「成员 / 实体 / 工具域 / Slot / 页面 / 能力 scope / 归属 / 版本门」往契约点上登记。分两期落地，**共享同一套契约**——一期 A+Slot 把契约立对（impl 编入二进制），二期 C 只把「impl 从哪来」扩为「运行期包」。**不追求第三方市场生态**：这是「让同一套底座长出不同业务形态」的工程手段，不是独立商业生态（定位见 `docs/positioning.md`）。
+
+App 是**一等 `DefinitionKind`**（`app`，与 skill/mcp/expert/automation/provider/model 同族，落 `definition_revisions` 审计），但**不向底座交付**（不物化/不注入，`objdelivery` 不纳它——平台内组合定义，非底座交付物）。
+
+**两期分工（契约继承）**：
+
+| | 一期 A+Slot（已落地） | 二期 C 运行期装卸（已落地） |
+| --- | --- | --- |
+| impl 来源 | **编译期** `appslot.RegisterImpl`（白名单在二进制里） | **运行期包清单**（`core/apppkg` manifest 的 `provides.impls`）∪ 编译期，**双来源并存** |
+| 应用代码在哪 | 与内核同进程（Go，经 code review + 守卫） | **独立子进程** `mate app-host`（陌生代码，绝不进内核） |
+| 前端页面 | 编译期注册表（组件编译期在包里） | **沙箱 iframe**（页面代码来自包，受限桥） |
+| 分发 | 随二进制发版 | 本地应用目录 + 清单 + 哈希 + 版本门槛 |
+
+**数据模型（定义表 + 归属关联表）**：`apps`（一条 app 一行，类型化多列：`name/description/tags_json/entities_json/tool_domains_json/slots_json/page_json/settings_schema_json/api_version/enabled` + 毫秒时间列）+ `app_members`（app 与成员定义的多对多**归属**：`app_id/member_kind/member_id/owned`，`member_kind` 只认 expert/automation/skill/mcp/entity；`tool_domains` 随 apps 行落库、**不是**成员；`owned` 区分「拥有（随 app 删）」/「引用（默认，只解除归属）」，默认引用）。写面以 `definition_revisions.seq` 为 CAS 判据（`apps` 表无 revision 列），成员行整组重建同事务。
+
+**扩展点契约（`internal/core/appslot`）——本设计的题眼**：
+
+| 契约点 | 形态 | 约束 |
+| --- | --- | --- |
+| Slot（应用自己的后端行为） | `Impl func(Ctx) error` + `RegisterImpl` / `KnownImpls` | `impl_id` 必须是**在册白名单**（编译期表 ∪ 已装包清单），**绝不**「据字符串查/装一个实现」——否则 Slot 退化成数据驱动的服务定位图（守卫 `TestAppSlotImplWhitelisted`） |
+| 工具域（对模型可调用的逻辑） | `mcp.Handler`，按 `domain` 前缀分派 | app 工具走**逐 app 独立注入通道**，**绝不挂** `mate-platform`（平台内置是「会话白名单不挡」的产品默认，挂上去就永远收不窄、单 app 停用也无效） |
+| 页面 | `page{nav_label, route, component}` | 一期编译期组件映射；二期运行期沙箱 iframe |
+| 能力 scope | `CapabilitySelection.Apps`（三态） | app **只缩小**默认面、不越过会话三态；越权 0 例外 |
+| 归属 | `app_members` | 反向查「这个成员属于哪个 app」+ 引用完整性 |
+| 版本门 | `api_version` caret | 核心升级不兼容 → 应用被明确标「不兼容」而非神秘崩溃 |
+
+**生命周期（`appslot.Reconcile`）**：按 `slots[].impl_id` 查在册表 → **依赖拓扑排序** → apply → **失败隔离**（单 slot panic/返错只它 FAILED，其它照跑）→ **`OnDispose` 逆序撤销**。运行期 impl 的 apply/dispose 经 host RPC，与编译期 impl 在**同一条逆序撤销栈**里协奏：「关即回退默认」对两种来源一致成立（G6）。空 app 集合 = 全默认、不报错。
+
+**二期 C 的隔离与安全基线（决策 v37 在受控范围内豁免「封闭静态包/单操作员/不做鉴权」三条红线，以这套基线为前提）**：
+
+- **执行隔离（`internal/infra/apphost`）**：运行期代码只在 `mate app-host --pkg=<dir>` **隔离子进程**里跑（每包一进程，崩溃不波及其他/内核），父进程经 **stdin/stdout JSON-lines RPC**（`handshake/listImpls/listTools/invokeTool/applySlot/disposeSlot/health/shutdown`）驱动；单次 RPC 超时 + 响应 8MiB 上限熔断 + 指数退避重启。**内核进程绝不直接执行包内代码**（守卫 `TestUntrustedCodeNeverInProc` / `TestRuntimeImplOnlyViaHost`）。
+- **清单与校验（`internal/core/apppkg`）**：应用包 = `manifest.json`（`id/version/api_version/requires/provides/permissions/entrypoint/integrity`）+ entrypoint + 资源，装进本地应用目录（`MATE_APPS_DIR` 或 `~/.dsh/mate/apps`）；**sha256 完整性校验** + **min core version 门槛**（核心版本源 `internal/version.Version`），不符 → 该包 FAILED 不装载（失败隔离、明示原因）。id/api_version 校验复用 `capability.ValidateApp` 同源口径。**签名链/远端市场明确不做**（单机单操作员不建远端市场）。
+- **前端沙箱（`console/runtimeAppPages` + `SandboxAppFrame`）**：运行期应用页用 `iframe sandbox="allow-scripts"`（无 same-origin / top-navigation）加载，文件从后端 `/_app/<token>/`（token = HMAC 常量时间校验）服务；只经 **受限 `postMessage` 桥**通讯——主窗只认自己 frame 的 `ev.source`，桥只暴露清单 `permissions` 声明过的读、其余 fail-closed、限流；页面自身 `connect-src 'none'`。与内置路由冲突 → fail-closed 让位 + 告警。
+- **生命周期（`service/svcapp` + 装配层 `app_lifecycle`）**：install（装包+校验）→ enable（起 host + apply）→ disable（`disposeSlot` 精确撤销 + 停 host，工具面归零）→ uninstall（清目录）；状态 `off/pending/active/failed/disposed` 由「有无包 + enabled + host 实时态」派生（不落库，避免双事实源）。**层边界**：`svcapp`（L4）不 import `apphost`（L5），起停 host 经窄端口 `AppRuntimePort` 委托给装配层（L-top）。
+
+**装配点（静态登记，不改内核）**：新增一个**只加工具域**的 app = `core/capability` 校验 + `apps` 落库即可；携带**新后端行为**的 app = 一期在 `appslot` 编入 impl，或二期把一个包放进本地应用目录。装配根在启停时把「编译期 `KnownImpls` ∪ 运行期包清单」合成来源喂 `Reconcile`，并按会话 `Apps` scope 决定注入哪些 app 工具（`appendAppMcpServers` / `appendRuntimeAppMcpServers`，进 `plan.Direct`，注入面与指纹共用）。平台内置 `mate-platform` 恒注入逻辑**一字不改**——app 工具走独立通道。
+
+> 契约细节（manifest 字段、工具 schema、宿主 RPC 帧、错误码、完整性）：[`docs/app-package-protocol.md`](app-package-protocol.md)；`app_*` 管理面 6 工具见 [`docs/platform-capability-protocol.md`](platform-capability-protocol.md)。决策登记：应用体系立项、二期 C 红线豁免见 `docs/decisions.md`（v37）。设计全文与执行计划在 `.dsh/docs/`（不入库）。
+
 ## 8. 前端与桌面
 
 ### 8.1 包结构与依赖方向
@@ -691,21 +737,21 @@ backend/
 │   │   ├── app/              app 装配 + 启停（只消费 assembly.BuildResult）
 │   │   ├── assembly/         装配根：用例实例与控制器都在这里造（交窄端口、现判 nil）
 │   │   ├── cli/ · cliops/    子命令分发（serve 常驻）与命令行输出
-│   │   └── maintenance/      子命令实现（migrate / doctor / transcripts / mcp / config / demo / automation / capability / provider）
+│   │   └── maintenance/      子命令实现（migrate / doctor / transcripts / mcp / app-host / config / demo / automation / capability / provider）
 │   ├── router/               唯一传输层装配点；按领域分 routes_*.go；资产管理（web*.go）
 │   ├── middleware/           入站横切：Host/Origin 来源判定（平台不做鉴权）
-│   ├── controller/ctr<域>/   入站适配（15 个：session / capability / model / workspace / automation / attachment / artifact / library / material / export / search / usage / runtime / system / ws）
-│   ├── service/svc<域>/      用例层（接口 + 实现 + 构造函数；14 个；svc 之间零互 import）
+│   ├── controller/ctr<域>/   入站适配（16 个：session / capability / model / workspace / automation / attachment / artifact / library / material / app / export / search / usage / runtime / system / ws）
+│   ├── service/svc<域>/      用例层（接口 + 实现 + 构造函数；15 个；svc 之间零互 import）
 │   ├── sessionruntime/       会话编排（L7：Service / Orchestrator / 权限 / 附件 PromptPart 投影）
 │   ├── domain/<域>/          领域平面（session / workspace / provider / skill / mcp / automation / interaction / identity / expert / material / artifact）
 │   ├── dto/dto<域>/          请求/响应 DTO（两侧共用，自身不依赖应用层）
-│   ├── core/                 值对象与平台值（L1）：object/*（含 objid id 铸造 + rt_ 壳）· code · capability · automation · identity · resource · redact · credential（供应商密钥引用）· definition · eventbus · failure · protocol · scratch（会话过程产物目录 .scratch 约定的纯判定/路径构造）
+│   ├── core/                 值对象与平台值（L1）：object/*（含 objid id 铸造 + rt_ 壳）· code · capability（含 App 定义 + ValidateApp）· appslot（应用扩展点契约 + Reconcile）· apppkg（应用包清单/校验/分发）· automation · identity · resource · redact · credential（供应商密钥引用）· definition · eventbus · failure · protocol · scratch（会话过程产物目录 .scratch 约定的纯判定/路径构造）
 │   ├── persistence/          持久层（实体 + 访问面 + 业务面，同一只管带）
 │   │   ├── model/            持久层实体（一表一文件 + enum/serializer/time/query）
 │   │   ├── dao/              列词汇（Cond）+ gormdao 泛型方法 + 机械原语
 │   │   └── store/            持久层业务面（排序/筛选/聚合 + 跨表事务 + 读模型 + 自管迁移 migrate_v*.go）
 │   ├── drivers/              驱动侧（L6）：mechanism（定义装载/凭据/doctor）· registry（适配装配点）· runtimeconn（连接池/拨号/代际/诊断）· gateway（远程 MCP 平台侧 stdio 网关）· transfer（存量定义导入导出编排）
-│   ├── infra/                基础设施（L5）：protocol/{acp,mcp}（协议绑定）· dsh（唯一 adapter）· credentials · dbclient · procreg · logging · host（宿主短命进程）· installed · attachmentstore · materialmcp
+│   ├── infra/                基础设施（L5）：protocol/{acp,mcp}（协议绑定）· dsh（唯一 adapter）· apphost（运行期应用包隔离子进程 + JSON-lines RPC）· apptool（app 工具面聚合）· appmcp（app 管理面 MCP）· credentials · dbclient · procreg · logging · host（宿主短命进程）· installed · attachmentstore · materialmcp
 │   ├── runtime/              adapter 注册表（Spec + Adapter 接口 + 隔离投影 + build 期固定；**不得 import 任何 adapter**）
 │   ├── config/               进程配置包
 │   ├── version/              版本常量
