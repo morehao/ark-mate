@@ -33,12 +33,13 @@ import {
   deleteAutomation,
   listAutomationRuns,
   listAutomations,
+  listSessions,
   previewAutomation,
   runAutomationNow,
   toErrorMessage,
   updateAutomation,
 } from '@ark-mate/api'
-import type { Automation, AutomationPreviewItem, AutomationRunRecord } from '@ark-mate/types'
+import type { Automation, AutomationPreviewItem, AutomationRunRecord, SessionSummary } from '@ark-mate/types'
 import { useNavigate } from 'react-router-dom'
 import { useMate } from '../store'
 import { WorkspacePicker } from '../components/WorkspacePicker'
@@ -99,7 +100,7 @@ export function AutomationsPage() {
   const [rows, setRows] = useState<Automation[]>([])
   const [loading, setLoading] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
-  const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; a: Automation } | null>(null)
+  const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; a: Automation; fixTarget?: boolean } | null>(null)
   const [runs, setRuns] = useState<{ id: string; records: AutomationRunRecord[]; limit: number } | null>(null)
   const [preview, setPreview] = useState<{ items: AutomationPreviewItem[]; warnings: string[] } | null>(null)
   const [previewErr, setPreviewErr] = useState<string | null>(null)
@@ -107,6 +108,8 @@ export function AutomationsPage() {
   // 受控的 kind/timezone（Segmented 与预览都要立刻反映，不等 Form 提交）
   const [kind, setKind] = useState<FormValues['kind']>('daily')
   const [delivery, setDelivery] = useState<'session' | 'new_session'>('session')
+  // 现存会话列表：用于「目标会话」下拉（只允许选现存会话，从源头上避免绑到会消失的 id）。
+  const [sessionOptions, setSessionOptions] = useState<SessionSummary[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -120,6 +123,13 @@ export function AutomationsPage() {
 
   useEffect(() => {
     void load()
+    // 现存会话列表：只在挂载时取一次（不足以覆盖"期间新建了会话"，但配合「保存前由服务端校验」
+    // 已足够；真要最新，用户点刷新/重开抽屉时列表本身会重取）。
+    void listSessions(false)
+      .then((list) => setSessionOptions(list))
+      .catch(() => {
+        /* 列表取不到不阻断页面；目标会话下拉此时为空，仍可保存其它字段（session 目标需重选时由服务端校验兜底）。 */
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -155,9 +165,27 @@ export function AutomationsPage() {
     setEditor({ mode: 'edit', a })
   }
 
+  // 一键修复「目标会话已不存在」：打开编辑抽屉并预置为「新建会话」。
+  // 这是纯播报/提醒类任务最常见的修复动作（对应 DSH 的 new target）；用户也可在抽屉里改回
+  // 「投递到会话」重新选一个现存会话。
+  const openFixToNewSession = (a: Automation): void => {
+    setKind(a.schedule.kind)
+    setDelivery('new_session')
+    setPreview(null)
+    setPreviewErr(null)
+    setEditor({ mode: 'edit', a, fixTarget: true })
+  }
+
   // 内容每次关闭都销毁、每次打开都重新挂载，所以 `initialValues` 每开一次都会重新生效。
   const editorInitialValues: Partial<FormValues> = editor?.mode === 'edit'
-    ? formFromAutomation(editor.a)
+    ? (() => {
+        const base = formFromAutomation(editor.a)
+        if (!editor.fixTarget) return base
+        // 修复「目标会话已不存在」：预置为新建会话，cwd 尽量给一个可用的默认值
+        // （原定义 cwd，否则现存会话里第一个有 cwd 的），用户可在抽屉里改。
+        const fallbackCwd = editor.a.target.cwd || sessionOptions.find((s) => s.cwd)?.cwd || ''
+        return { ...base, delivery: 'new_session' as const, session_id: undefined, cwd: fallbackCwd }
+      })()
     : {
         kind: 'daily',
         timezone: localTimezone(),
@@ -268,6 +296,13 @@ export function AutomationsPage() {
                 </Tag>
               </Tooltip>
             )}
+            {isTargetMissing(a) && (
+              <Tooltip title="投递到的会话已不存在。点右侧按钮一键改为「新建会话」，或编辑里重选目标会话。">
+                <Tag color="warning" style={{ marginInlineEnd: 0, fontSize: 10.5, lineHeight: '17px', padding: '0 7px', borderRadius: 5 }}>
+                  目标会话失效
+                </Tag>
+              </Tooltip>
+            )}
           </>
         }
         toggle={
@@ -297,6 +332,16 @@ export function AutomationsPage() {
         }
         actions={
           <>
+            {isTargetMissing(a) && (
+              <Tooltip title="改为「新建会话」：每次触发新建会话，不再依赖某个长期会话">
+                <IconAction
+                  icon={<ReloadOutlined />}
+                  title="改为新建会话"
+                  disabled={busyId === a.id}
+                  onClick={() => openFixToNewSession(a)}
+                />
+              </Tooltip>
+            )}
             <Tooltip title="立即运行一次">
               <IconAction
                 icon={<PlayCircleOutlined />}
@@ -564,23 +609,46 @@ export function AutomationsPage() {
           </Form.Item>
 
           {/* 投递模式（ADR v35）：缺省 session（投递回既有会话，共享历史）；new_session 新建会话。 */}
-          <Form.Item name="delivery" label="投递方式">
+          <Form.Item
+            name="delivery"
+            label="投递方式"
+            extra="投递到会话：共享该会话历史，需该会话一直存在（适合接着上次的对话）；新建会话：每次独立跑，适合纯播报/提醒类任务。"
+          >
             <Segmented
               options={[
                 { label: '投递到会话', value: 'session' },
-                { label: '新建会话', value: 'new_session' },
+                { label: '新建会话（推荐给提醒/播报）', value: 'new_session' },
               ]}
               onChange={(v) => setDelivery(v as 'session' | 'new_session')}
             />
           </Form.Item>
+          {editor?.mode === 'edit' && editor.fixTarget && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message="已预置为「新建会话」"
+              description="原目标会话已不存在，无法投递。保存后每次触发都会新建会话独立运行；如需共享历史，可改回「投递到会话」并重新选一个现存会话。"
+            />
+          )}
           {delivery === 'session' ? (
             <Form.Item
               name="session_id"
               label="目标会话"
-              extra="投递到这个会话里（共享它的历史）；留空或不存在会报错。"
-              rules={[{ required: true, message: '请填一个目标会话 id' }]}
+              extra="投递到这个会话里（共享它的历史）。只能从现存会话中选；会话必须一直存在，否则触发会失败——纯播报/提醒类任务建议改用「新建会话」。"
+              rules={[{ required: true, message: '请选择一个目标会话' }]}
             >
-              <Input placeholder="sess_…（从会话列表复制 id）" />
+              <Select
+                showSearch
+                allowClear
+                placeholder="选择一个现存会话"
+                optionFilterProp="label"
+                options={sessionOptions.map((s) => ({
+                  value: s.id,
+                  label: `${s.title || s.id}`,
+                }))}
+                notFoundContent="没有可选的现存会话"
+              />
             </Form.Item>
           ) : (
             <Form.Item
@@ -697,6 +765,11 @@ function CwdPicker({
 
 function isNeedsAttention(a: Automation): boolean {
   return a.state === 'needs_attention' || (a.consecutive_failures ?? 0) > 0
+}
+
+/** 目标会话已不存在（巡检/触发失败都会带这个原因码）。 */
+function isTargetMissing(a: Automation): boolean {
+  return a.last_reason_kind === 'target_session_missing'
 }
 
 /** Form.Item 字段名 → 界面标签：出错时只说人话，别把字段名直接甩给用户。 */

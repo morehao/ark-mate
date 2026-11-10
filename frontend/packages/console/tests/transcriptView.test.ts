@@ -140,6 +140,42 @@ describe('整轮折叠', () => {
     assert.ok(turn.blocks.length > 0)
   })
 
+  it('服务端说在跑（runActive）但本端没发请求时，最后一轮仍按 live 渲染、不挂「已完成」', () => {
+    // 复现：定时任务手动触发/投递是**服务端发起**的运行，本端 `streaming` 恒为 false，
+    // 头栏（读 run.status）说「正在执行 Bash」，正文却因只看 streaming 把这一轮当已结束。
+    // 这一轮还没收到终态（无 system tone:ok），只有一个正在跑的工具。
+    const runningTurn = (): StreamEntry[] => [
+      base('user', 'u', { text: '用天气查询技能查一下北京今天和未来几天的天气……' }),
+      base('tool', 't', { title: 'Bash', toolKind: 'execute', status: 'running', input: { command: 'weather-query' } }),
+    ]
+    const folded = foldThoughts(runningTurn(), false)
+    const rows = buildTurnRows(folded, {
+      streaming: false,
+      runActive: true,
+      indexOfId: (id) => runningTurn().findIndex((entry) => entry.id === id),
+    })
+    assert.equal(rows.length, 1)
+    const turn = rows[0] as TurnModel
+    assert.equal(turn.live, true)
+    // 关键：不再挂「已完成」灰框，也不把过程折进 completed。
+    assert.equal(turn.completed, undefined)
+    assert.ok(turn.blocks.length > 0)
+  })
+
+  it('runActive 但最后一轮已收到终态（endSeq 已定）时，不把已完成的轮倒灌成未完成', () => {
+    // 会话整体还在忙（可能是下一次运行），但这一轮已经拿到 system tone:ok 的终态：它是真的完成了。
+    const folded = foldThoughts(entries(), false) // 末尾自带 system tone:ok（seq 9）
+    const rows = buildTurnRows(folded, {
+      streaming: false,
+      runActive: true,
+      durationForSeq: (seq) => (seq === 9 ? 65000 : undefined),
+      indexOfId: (id) => entries().findIndex((entry) => entry.id === id),
+    })
+    const turn = rows[0] as TurnModel
+    assert.equal(turn.live, false)
+    assert.equal(turn.completed?.title, '已完成 1m 5s')
+  })
+
   it('多段正文只保留「最长 + 最后」，中间段进入过程', () => {
     const folded = foldThoughts([
       base('user', 'u4', { text: '多段' }),

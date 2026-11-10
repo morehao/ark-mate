@@ -386,8 +386,14 @@ export function ChatPage() {
   const windowBase = Math.max(0, (view?.entries.length ?? 0) - entryWindow.visible.length)
   const entryIndex = new Map(entryWindow.visible.map((e, i) => [e.id, windowBase + i]))
   // 轮级视图：identity 头 / 过程流 / 整轮折叠都从这一层派生；窗口与搜索下标仍按原条目。
+  //
+  // `runActive` 用 `narration.busy`（**服务端**说这一轮在跑，来自 `run.status` / REST 快照），
+  // 而不是 `busy = streaming || narration.busy`：`streaming` 已单独作为 `streaming` 传入，
+  // 这里只需补上"服务端发起、本端没发请求"那一种忙——否则定时任务手动触发/投递的轮次会在正文里
+  // 被误判成已结束，挂出「已完成」灰框（头栏却显示「正在执行 Bash」）。
   const rows = buildTurnRows(folded, {
     streaming,
+    runActive: narration.busy,
     durationForSeq: (seq) => (seq != null ? runsBySeq.get(seq)?.info.durationMS : undefined),
     indexOfId: (id) => entryIndex.get(id) ?? 0,
   })

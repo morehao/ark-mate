@@ -262,6 +262,19 @@ type TranscriptRow = TurnModel | { kind: 'entry'; entry: StreamEntry }
 
 interface BuildTurnOptions {
   streaming: boolean
+  /**
+   * 服务端说这个会话**当前有一轮在跑**（`run.status` 是忙态，见 `runNarration.busy`）。
+   *
+   * 为什么需要它、而不复用 `streaming`：`streaming` 只表示"用户在本端输入框发出的那条请求还在途"
+   * （唯一置 true 的地方是 `sendPrompt` 的乐观置忙，见 store.ts）。但定时任务手动触发 / 定时触发
+   * 走的都是**服务端发起**的运行（`automation.RunOnce` → `CreateHostSession` / `DeliverHostSession`），
+   * 本端从没调过 `sendPrompt`，`streaming` 一直是 false。于是头栏（读 `run.status`，`narration.busy`）
+   * 说"正在执行 Bash"，正文（只认 `streaming`）却把这一轮按"已结束"渲染，直接挂出「已完成」灰框
+   * ——两处事实打架。这里把"服务端说在跑"也作为最后一轮 live 的判据，让两边对齐。
+   *
+   * 只影响 transcript 的渲染；`streaming` 仍只管本端发送态（输入框禁用、滚动跟随等），不混用。
+   */
+  runActive?: boolean
   durationForSeq?: (seq: number | undefined) => number | undefined
   indexOfId?: (id: string) => number
 }
@@ -1170,7 +1183,16 @@ export function buildTurnRows(items: Array<StreamEntry | ThoughtFold>, opts: Bui
   const last = turns[turns.length - 1]
   for (const turn of turns) {
     const source = pending.get(turn)
-    if (source) finalizeTurn(turn, source, !!opts.streaming && turn === last, opts)
+    if (!source) continue
+    // 最后一轮 live 的两条来源：本端正在发（`streaming`），或服务端说这一轮还在跑（`runActive`）。
+    //   - `streaming`：本端请求在途，天然就是"最后一轮"，无需看 `endSeq`（这一轮还没收到终态）。
+    //   - `runActive`：服务端发起（定时触发/投递）或冷挂载回放时本端 `streaming` 恒为 false。此时
+    //     **只有当这一轮还没被终态事件收口（`endSeq == null`）才算 live**：已经拿到终态的轮是
+    //     真的完成了，不能被"会话整体还在忙（可能是下一次运行）"倒灌成未完成。
+    const isLast = turn === last
+    const streamingLive = !!opts.streaming && isLast
+    const runLive = !!opts.runActive && isLast && source.endSeq == null
+    finalizeTurn(turn, source, streamingLive || runLive, opts)
   }
   return rows
 }
