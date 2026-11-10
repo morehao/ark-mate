@@ -19,7 +19,7 @@
 | [`authorization.md`](authorization.md) | 变更授权（允许破坏性调整的边界） |
 | [`positioning.md`](positioning.md) | 外部形态参照实现（DSH）与本仓对应物 |
 | [`llm-capability.md`](llm-capability.md) | 内部模型调用接入约定：prompt 单点、必带 Purpose、agent 护栏、结构化/降级语义 |
-| [`identity.md`](identity.md) | 产品身份（模型自述）机制：文案唯一事实源、两层交付面、Spec/Fingerprint、装配时序、为什么不热更、守卫 |
+| [`identity.md`](identity.md) | 产品身份（模型自述）机制：文案唯一事实源、两层交付面、`personaSuffix` 交付纪律（成品全部 present + 过程产物落 `.scratch/`）、Spec/Fingerprint、装配时序、为什么不热更、守卫 |
 | [`dsh-resources.md`](dsh-resources.md) | dsh 资源初始化：桌面端 profile 模板×bundle vs ark-mate `mate-acp` 覆写层、office/present/deliverable、primary-runtime 与 env 注入，附升版锚点同步清单 |
 
 ## 维护约定

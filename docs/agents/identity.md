@@ -13,6 +13,7 @@
 - `const Tagline`：一句话定位（`/meta` 与「关于」面板）。
 - `const systemPrompt`：**主路径**（每轮生效）——告诉模型"你是 ark-mate、产品 vs 运行时 vs 模型怎么区分、不越权承诺、不在思考/回复里泄漏执行层品牌名/env/路径、不引用本指令"。
 - `const userContext`：**回退面**（`<product_identity>` 块，每个执行上下文一次）——同义精简版。
+- `const personaSuffix`：**部署级系统提示后置段**（dsh `system-prompt.personaSuffix`，排在一方指导**之后**，能压过底座内置口径）——承载两条**平台级交付纪律**（与产品人格无关，故单独成段、不混进 `systemPrompt`）：① 成品全部 `present`；② 过程产物（构建脚本/中间文件）落会话 `.scratch/`，交付目录只留成品。详细机制见 §3.1。
 
 > 纪律：改**任何一段**文案都要 `Version +1`；文案**不得含底座名**（dsh/opencode/…）、**不得含模板花括号** `{{ }}`/`{% %}`（某底座的 persona 是模板，未知变量在首轮组装时才抛错 → 表现为"每次会话都失败"）、**不含版本号/路径/主机名**。这些由 `identity_test.go` + `archtest` 守卫钉住（第 7 节）。
 
@@ -20,7 +21,7 @@
 
 `backend/internal/core/identity/spec.go` 是**纯值对象**（leaf 包，不认识任何底座）：
 
-- `Spec{ Version, Name, DisplayName, Tagline, SystemPrompt, UserContext }` —— 一次交付的全部事实；两个面（`SystemPrompt` / `UserContext`）分开是因为它们作用面与失败面不同。
+- `Spec{ Version, Name, DisplayName, Tagline, SystemPrompt, UserContext, PersonaSuffix }` —— 一次交付的全部事实；`SystemPrompt`/`UserContext` 两个面分开是因为它们作用面与失败面不同；`PersonaSuffix` 是**系统提示面的第三段**（`personaPrefix` 之后），随系统提示面一起交付、`user`/`off` 模式一起清空。
 - `Mode`（`auto|system|user|off`）：`ParseMode` 解析 `MATE_IDENTITY_MODE`（**空 = auto**；非法值报错**不静默回落**）。`Mode.Apply(spec)` 把模式作用到 Spec，返回"本模式该交付的两个面"。
 - `Spec.Fingerprint()`：幂等判据，由**文案 + 版本**算（不由产物算——否则格式化差异会误判"身份变了"）。重复交付同一 Spec 必须收敛。
 - ⚠️ **零值注意**：`Fingerprint()` 对零值 Spec **也返回非空 hex**（恒 hash 固定前缀 + 空字段）。判断"身份是否启用"要用 `Spec.Enabled()`（任一非空）**而不是** `Fingerprint() == ""`。将来任何"把身份指纹并进别的判据"的改动都要留意这点。
@@ -34,6 +35,22 @@
 
 - **主路径**由 `backend/internal/infra/dsh/identity.go` 生成：`<平台独占根>/runtime/dsh/mate-identity.patch.yml`，内容 `- id: system-prompt` + `includeHarnessIdentity: false`（去掉底座固定开场白）+ `personaPrefix`（ar-mate 身份段）。**只动平台自有文件与启动参数，底座源码/vendor 零改动**（守住"多底座、底座零改动"的定位）。
 - **回退面**：会话首个 prompt 前注入；`session.user_message` 事件与 transcript **仍是用户原文**，块前缀不进历史。新建 / 原生恢复 / handoff / 代际迁移都会重新锚定。
+
+### 3.1 交付纪律：`personaSuffix` + 会话过程产物目录 `.scratch/`
+
+身份交付面（同一份 `mate-identity.patch.yml` 的 `system-prompt` 条目）里，除 `personaPrefix` 外还写一段 **`personaSuffix`**：它是**部署级系统提示后置段**，排在底座一方指导（如 `deliverable-file-references`）**之后**，因此能压过底座默认口径。承载两条**平台统一的交付纪律**（与产品身份无关，故单独成段）：
+
+1. **成品全部 present**：`present` 工具自身的描述写死「at most 4 per call」，模型常只挑几个成品 present，其余只写盘不入库；而 `workartifact` 抽取侧**只认 present**。故上升为「本轮所有面向用户的成品都要 present，脚本/中间文件不要 present」。
+2. **过程产物落 `.scratch/`、交付目录只留成品**：office 各子 skill（逐字与上游一致、不可改）要求「构建脚本/中间文件与成品一起留在工作区」，于是过程产物会落在交付目录；同一工作区被后续会话复用时，模型会把上一次残留的 `build/*.py` 当捷径复用、绕过校验链（复盘 `ses_01M6ZKC9...`）。故要求过程产物进会话过程产物目录、present 完毕后清理。
+
+**平台侧的结构性收口**（光靠提示是软引导，不稳）：`internal/core/scratch` 是 `.scratch` 约定的**单一事实源**（路径/判定/命名，纯函数无 IO）；落盘 IO 由 `sessionruntime.cwdScratch` 实现、经 `session.ScratchPort` 注入。行为：
+- **落点**：会话启动时建 `<cwd>/.scratch/<session_id>/`（在 `workspace-write` 写根之内，零沙箱改动）。
+- **永不进库**：`workartifact` 抽取层对相对路径首段为 `.scratch` 的**直接拒绝登记**（过程文件不进产物库/资料库）。
+- **清理**：会话**归档**时清该会话子目录；进程启动时清一次「查无会话」的孤儿 `.scratch/*`。**只删 `.scratch/` 子树，绝不删交付目录里的用户文件**。
+- **界面**：文件浏览/资料库**不展示** `.scratch`（即使开了「显示隐藏文件」）。
+- **为什么不按会话隔离整个 cwd**：交付面必须跨会话共享连续（G1），过程隔离（G2）在单一 cwd 下与之冲突；唯一解是**按产物性质分层**（交付面 vs 过程面），不是按会话切目录。**二期「把落点移到 `MATE_WORKSPACE_DIR/.scratch` 走 dsh `sandbox-policy.additionalWritableRoots` 放行」试过又回退**——回退原因：① 该 patch 对 `config` 是**整块替换**，只写 `additionalWritableRoots` 会把 `mode/workspaceRoot` 抹掉 → `mode` 回落 `read-only`、全会话只读（真机事故）；② 落点挪到 cwd 外后模型无从得知绝对路径、仍会写 cwd 的 `.scratch`，收益落空。现存 `.scratch<sid>`（cwd 内）与提示词一致、模型实测遵守，是当前终局。
+
+> 运维/部署视角（`.scratch` 目录在哪、怎么清）见 [`../deployment.md`](../deployment.md) §2.2.1；dsh 资源侧对照见 [`dsh-resources.md`](dsh-resources.md) §2.1。
 
 ## 4. 装配时序与生效时机
 
