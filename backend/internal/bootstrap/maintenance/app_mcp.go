@@ -244,8 +244,12 @@ func declaredDomains(m *apppkg.Manifest) []string {
 
 // emptyAggregator 造一个"空工具面"的聚合器（一个稳定占位域，工具集为空），使握手成功。
 // 不直接用 NewAggregator(nil)（其拒空）；用一个恒空 handler 的域满足其"至少一个域"约束。
+//
+// 注意：占位域名**不能含下划线**——platformmcp.New 把域名当工具名第一段，拒绝含 `_` 的前缀
+// （历史 bug：这里曾用 "_empty"，New 直接报错返回 nil，导致空工具面构造失败、`mate mcp app` 在
+// 无包/包起不来时**直接退出而非空握手**，进而让 dsh 建会话报 "mcp-client initial connection failed"）。
 func emptyAggregator() *apptool.Aggregator {
-	agg, _ := apptool.NewAggregator(map[string]mcp.Handler{"_empty": emptyDomainHandler{}})
+	agg, _ := apptool.NewAggregator(map[string]mcp.Handler{"noop": emptyDomainHandler{}})
 	return agg
 }
 

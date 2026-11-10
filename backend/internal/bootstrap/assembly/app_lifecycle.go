@@ -257,6 +257,13 @@ func (l *appLifecycle) RuntimeAppServers(appIDs []string) []capability.McpServer
 		Transport: capability.TransportStdio,
 		Command:   exe,
 		Args:      []string{"mcp", "app", "--apps=" + strings.Join(ids, ",")},
+		// 显式带上 MATE_APPS_DIR：桥是**底座（dsh）经 ACP 拉起**的独立子进程，其 env 来自底座而非本
+		// 内核进程；若底座没继承本进程的 MATE_APPS_DIR，桥会回落到 ~/.dsh/mate/apps 找不到包 →
+		// 工具面为空（真起 serve + 真模型验证暴露：不注入该项时建会话报 mcp-client 连不上/空工具面）。
+		// 这里把判据里那份 appsRoot 原样传下去，保证桥定位到**同一个**应用目录。
+		Env: map[string]string{
+			apppkg.AppsDirEnv: l.appsRoot,
+		},
 	}}
 }
 

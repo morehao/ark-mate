@@ -105,6 +105,11 @@ func loadPackageHandlers(pkgDir string) (hostkit.Handlers, error) {
 			toolSpecs = append(toolSpecs, apphost.ToolSpec{
 				Name:        full,
 				Description: "由应用包 " + m.ID + " 提供（工具域 " + td.Domain + "）",
+				// 必须给一个合法的空对象 inputSchema：dsh 0.2.2 的 mcp-client 在「工具同步」阶段
+				// 要求每个 tool 带 inputSchema，缺失会把整个 server 判为同步失败（真起 serve + 真模型
+				// 验证暴露：manifest 驱动工具缺 inputSchema → 建带 app 的会话报 mcp-client 同步失败）。
+				// 清单驱动包无参数声明，这里给 `{"type":"object","properties":{}}` 表示"任意对象入参"。
+				InputSchema: apphost.RawResult(`{"type":"object","properties":{}}`),
 			})
 		}
 	}

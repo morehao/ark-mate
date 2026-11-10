@@ -102,8 +102,20 @@ func (h *runtimeDomainHandler) CallTool(_ context.Context, name string, args jso
 	}
 	res := protocol.McpCallResult{IsError: isError}
 	if len(content) > 0 {
-		// host 返回的 content 已是「MCP 风格 content 数组或任意 JSON 原文」，透传（与 apphost 契约一致）。
-		res.Content = append(res.Content, json.RawMessage(content))
+		// host 返回的 content 按 apphost 契约可以是「MCP 风格 content 数组（[ {type,text}, ... ]）或任意
+		// JSON 原文」。McpCallResult.Content 的每个元素必须是**一个 content block 对象**，所以这里要把
+		// 数组**摊平**成逐块 append，绝不能再把整段数组当作单个元素塞进去——那会得到
+		// `content:[[{...}]]`（数组套数组），dsh 的 mcp-client 在结果 schema 校验时直接判
+		// `invalid_union: expected object, received array` → 工具调用失败（真起 serve + 真模型调用
+		// demo_ping 暴露的 bug）。
+		var blocks []json.RawMessage
+		if uerr := json.Unmarshal(content, &blocks); uerr == nil {
+			// content 是数组：逐块摊平（每块应是一个对象 block）。
+			res.Content = append(res.Content, blocks...)
+		} else {
+			// content 不是数组：当作单个 block 原文透传（与旧契约兼容：单片对象/任意 JSON）。
+			res.Content = append(res.Content, json.RawMessage(content))
+		}
 	}
 	return res, nil
 }
