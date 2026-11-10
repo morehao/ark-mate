@@ -143,6 +143,32 @@ func TestArtifactExtractor_PresentEndToEnd(t *testing.T) {
 	assertAutoImported(t, x, a.ID)
 }
 
+// TestArtifactExtractor_ScratchExcluded：present 指向过程产物目录（`.scratch/`）的文件**不登记**，
+// 也不进资料库——即便模型误把 scratch 内脚本/中间文件 present。过程文件 ≠ 交付物。
+func TestArtifactExtractor_ScratchExcluded(t *testing.T) {
+	x, _, _ := newExtractRig(t)
+	cwd := t.TempDir()
+	seedSessionWithCwd(t, x.st, "ses1", cwd)
+	scratchDir := filepath.Join(cwd, ".scratch", "ses1")
+	if err := os.MkdirAll(scratchDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scratchDir, "build.py"), []byte("print(1)"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	x.ExtractToolWrite(context.Background(), "ses1", "run1",
+		presentInfo("tc1", filepath.Join(".scratch", "ses1", "build.py")))
+
+	time.Sleep(50 * time.Millisecond) // 给异步落盘窗口，确认**零**产物
+	resp, err := x.artifact.ListBySession(context.Background(), "ses1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Artifacts) != 0 {
+		t.Fatalf("scratch 内文件不应登记为产物，得到 %d 条", len(resp.Artifacts))
+	}
+}
+
 // TestArtifactExtractor_WriteEditNotRegistered 钉住核心修复：write/edit 写出的文件**不再**登记为
 // 产物、**不再**自动进资料库（过程脚本 gen.py 等不会被当成品）。
 func TestArtifactExtractor_WriteEditNotRegistered(t *testing.T) {

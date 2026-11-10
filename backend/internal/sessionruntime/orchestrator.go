@@ -108,6 +108,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		SetRuntimeState:  svc.runtimePlane.SetState,
 		ApplyReason:      provider.ModelApplyReason,
 		Identity:         identityOf,
+		Scratch:          cwdScratch{},
 	})
 	o.runner = session.NewRunner(session.RunnerDeps{
 		Plane:        svc.sessionPlane,

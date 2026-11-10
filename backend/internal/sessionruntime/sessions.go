@@ -273,6 +273,16 @@ func (s *Service) CancelElicitations(sessionID string) {
 	s.orch.CancelElicitations(sessionID)
 }
 
+// CleanScratch 归档时清理会话的过程产物目录（`<cwd>/.scratch/<id>/`，见 internal/core/scratch）。
+//
+// 缺能力只告警不阻断：它是归档的**尽力而为收尾**，与 CancelElicitations 同一纪律；cwd 为空或目录
+// 不存在时 no-op。只删平台约定的 scratch 子树，绝不触碰交付目录里的用户文件。
+func (s *Service) CleanScratch(ctx context.Context, cwd, sessionID string) {
+	if err := (cwdScratch{}).Clean(cwd, sessionID); err != nil {
+		glog.Warnw(ctx, "归档：清理过程产物目录（scratch）失败（不阻断归档）", "session", sessionID, "cwd", cwd, "err", err)
+	}
+}
+
 // ——— 已下线键的**显式拒绝** ———
 //
 // 纪律（与 `rejectRuntimeSelection`/`rejectDerivedDefaultModel`/`rejectRuntimeHintInPatch` 同源）：

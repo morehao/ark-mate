@@ -20,7 +20,7 @@ dsh 官方把「能力」切在 **profile 模板 × bundle 的 patch** 上：`ac
 | office 运行时（Python/Node/libreoffice） | 同样来自 `primary-runtime` 载荷（含 Python），由 runtime-bootstrap 在进程启动前 set `DSH_PRIMARY_RUNTIME`/`DSH_BUNDLED_OFFICE_*`（或改走不带 Python 的 `DSH_OFFICE_SIDECAR`）（`python/sdk-runtime/runtime-bootstrap.mjs:60-110`） | **自随一份逐字节相同的 `primary-runtime` 载荷**，`BundledEnv` 派生 4 个 env 经 `reg.SetLaunchEnv` 注入（`profile.go:202-227`、`backend/internal/bootstrap/assembly/prepare_runtime.go:41-59`） |
 | 资源随包布局 | `<Resources>/runtime/` = `primary-runtime/` + `office-skills/` + `bin/node` + `cli/` + `versions.json`（`apps/desktop/scripts/prepare-runtime.ts:36-76`）；dsh 载荷在 `payloads/dsh/<ver>/` | dsh 载荷随包（`resources/payloads/dsh/0.2.2-rc.1/`，`release.json:10-13` pin）；`primary-runtime` 由 `make desktop/payloads` 装配（设计口径见 §4） |
 | 交付声明（present） | `sdk-app:70-71`（`web-app` 亦挂） | 已补入覆写层（`profile.go:102-103`） |
-| 交付提示词 | `deliverable-file-references`（`sdk-app:76-77`、`web-app:351-352`） | 已补入覆写层（`profile.go:105-106`） |
+| 交付提示词 | `deliverable-file-references`（`sdk-app:76-77`、`web-app:351-352`） | 已补入覆写层（`profile.go:105-106`）；另经身份 overlay 的 `personaSuffix` 追加一条「成品全部 present」的部署级口径（见 §2.1） |
 | skill 发现根 | `config.agentsHome ?? $DSH_AGENTS_HOME ?? ~/.agents`（`packages/util/home-paths/src/index.ts:142-193`） | 投影到 `${HOME}/.agents/skills`，**刻意不注入 `DSH_AGENTS_HOME`**（`backend/internal/infra/dsh/adapter.go:51-58`；理由见 `dsh-acp-adaptation.md` §3） |
 
 ## 2. 能力面逐项对照（profile / bundle 层）
@@ -42,6 +42,18 @@ dsh 官方把「能力」切在 **profile 模板 × bundle 的 patch** 上：`ac
 | `schedule` / `tool-schedule` | `sdk-app:57,67` | ❌ 未补 | 不相关：平台有自建 automation（两套事实源冲突，见缺口笔记 §6，故刻意不补） |
 
 > 说明：`web-app` 里的 `dsh-client-ui-*`（`web-app/cordis.patch.yml` 大量）是 Web 前端渲染层，ark-mate 桌面 ACP 不渲染 dsh Web 前端，**全部不相关**，不列。
+
+### 2.1 交付口径：全部 present + 过程产物落临时区（personaSuffix 覆盖）
+
+**问题一（声明不全）**：`present` 工具自身的描述写死了「Usually the 1-2 most important deliverables; at most 4 per call.」（`@deepseek-ai/dsh-tool-present/lib/index.js`）。这句在**插件内部硬编码**，没有 config 面能改（只有 `maxFiles`，默认 8，且只影响硬上限的报错阈值，不影响模型读到的文案）。于是模型一次生成多格式成品时，常只挑 4 个 present，其余只写盘不入库——平台侧 `workartifact` 又**只认 present**（见 [`resolve.go`](../../backend/internal/infra/workartifact/resolve.go)），结果卡片与「产物」都只覆盖被 present 的那几个。
+
+**问题二（过程产物污染工作区）**：office 各子 skill（`office-docx` 等，逐字与上游一致、不可改）明确要求「**Keep source scripts, intermediate files, and final documents in the task workspace**」——构建脚本、中间产物会和成品一起留在交付目录。同一 `default` 工作区被后续会话复用时，模型会把上一次残留的 `build/*.py` 当现成捷径直接改数重跑，**绕过 office 子 skill 的校验链**（`office-recalculate`/`office-render`）。复盘见会话 `ses_01M6ZKC9ZKN5X5427HZPTDEZB1`：只加载了 `office` 路由与 `office-export-pdf`，没走 `office-docx/pptx/xlsx`，正是捡了残留 `build/`。
+
+**做法**：`deliverable-file-references`（一方指导）里没有这两条约束，且排在系统提示较前位置。平台用 `system-prompt` 的 **`personaSuffix`** 键（部署级**后置段**，排在一方指导之后，能压过前面的默认口径）追加统一约束：**① 本轮所有面向用户的成品都要 present（一次可到 8 个），脚本/中间文件不要 present；② 过程产物「落点优先」——构建脚本与中间文件放会话的过程产物目录 `<cwd>/.scratch/`（或系统临时目录），交付目录只留成品；若已落在交付目录，present 完毕后清理掉**。以「落点为主、清理为辅」（借官方 dsh 的「scratch 归 temp」世界观：过程产物不进交付目录，就从源头避免被下一会话捡到）。**平台侧另做了结构性收口**：`internal/core/scratch` 定义 `.scratch/<session_id>/` 约定——会话启动建目录、归档/启动孤儿清理、抽取层对 `.scratch/` 前缀拒绝登记（过程文件永不进资料库）、界面隐藏该目录（平台侧设计机制见 [`identity.md`](identity.md) §3.1）。文案唯一事实源在 [`internal/domain/identity/identity.go`](../../backend/internal/domain/identity/identity.go) 的 `personaSuffix`，经 [`dsh/identity.go`](../../backend/internal/infra/dsh/identity.go) 的 `buildIdentityPatch` 写成 `personaSuffix: |-`（为空时**不写该键**）。这样**不动 dsh 插件源码、不改 `present` config**，只借 dsh 官方 `system-prompt` 配置面，载荷仍逐字节与上游一致。
+
+> 备注（官方 dsh 对照）：官方 dsh 桌面端**并不清理**工作区里的 build 脚本（无 turn/会话收尾清理机制；同一 Workspace 的会话共享 cwd），它的诱因更弱是因为①默认工作区是专用干净目录、②把「scratch 放 /tmp」当模型约定、③`present` 可引用 workspace 外文件——即「落点分层」而非「事后清理」。所以本条优先学它的「落点」，清理只作兜底。
+
+**升级锚点**：`personaSuffix` 是 dsh `@deepseek-ai/dsh-system-prompt` 的 `Config` 正式字段（`lib/types/index.d.ts` 的 `Config.personaSuffix`）。升级 dsh 时确认该键仍在 schema；`upgrade_probe` 的 `--dump-config-schema` 会因未知键而报错，从而在升级时暴露。
 
 ## 3. 逐资源初始化动作 × 落点 × env × 来源
 

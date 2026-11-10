@@ -138,7 +138,7 @@ Electron 主进程（桌面态）
 | 层 | 谁 | 一句话 |
 | --- | --- | --- |
 | **L0** | `persistence/model` | 表行形状。零依赖，被所有持久侧与部分领域引用 |
-| **L1** | `core/{object/*,redact,identity,resource,credential,eventbus,code,failure,automation,definition,capability}` `version` `runtime` `core/protocol` `infra/logging` | 值对象与平台值，**本带允许互链**（平台载荷、错误码与失败分类折算、值类型复用）。`infra/logging` 是唯一的例外条目：日志是横切关注点（每层都要能拿 logger） |
+| **L1** | `core/{object/*,redact,identity,resource,credential,eventbus,code,failure,automation,definition,capability,scratch}` `version` `runtime` `core/protocol` `infra/logging` | 值对象与平台值，**本带允许互链**（平台载荷、错误码与失败分类折算、值类型复用）。`infra/logging` 是唯一的例外条目：日志是横切关注点（每层都要能拿 logger） |
 | **L2** | `domain/*` | 业务规则与状态。**出边为零**：不 import dto、store、mechanism、infra |
 | **L3** | `dto/dto<领域>` | 对外契约（控制器、用例层、CLI、WS 共用同一份） |
 | **L4** | `service/svc<领域>` | 用例层：接口 + 实现 + 构造函数；校验、错误码、响应装配 |
@@ -563,6 +563,8 @@ MCP 分**内置**与**用户注册**两类。用户注册的走下面的明文/�
 
 `artifacts` 表登记「哪会话 / 哪轮 / 哪个工具」产生了哪个产物（`kind ∈ file/text/table/link`，`origin`），**只建索引不存字节**（字节复用 filestore 的 `upload_id`）。`POST /artifacts` 登记、`GET /sessions/:id/artifacts` 列、`POST /materials/import-artifact` 把产物**收录进资料库**（引用而非复制，`provenance_id` 指回 `art_…`）。**自动抽取（v35）**旁路消费 dsh write/edit 的终态工具事件，把工作区文件快照进 filestore 再登记一行；路径**相对/绝对都认**（真机模型几乎总给绝对路径），绝对路径必须落在 `sessions.cwd` 内，越界只 WARN 跳过。**抽取成功即自动收录**（2026-11-04 产品拍板）：直接建 `category='artifact'` 节点（引用而非复制）；同一会话/同一工作区路径只留**一个**节点、载体跟最新快照（改同一个文件不会叠出多份）。会话详情「产物」区仍保留「存进资料库」补收（历史产物 / 自动收录失败），MCP 亦有 `library_import_artifact`；产物节点可回跳来源会话。`domain/artifact` 是叶子域（不 import `material`，守卫 A-1）；artifact 域/`materialmcp` 零语义检索标识符（守卫 A-4）。
 
+**过程产物不进产物库**：抽取层对「相对路径首段为 `.scratch`」的文件**直接拒绝登记**（不论是否被 `present`）——`.scratch/<session_id>/` 是会话过程产物目录（构建脚本/中间文件），属**过程面**而非交付物。这套「交付面 ⟂ 过程面」的分层与 `.scratch` 的建目录/归档清理/界面隐藏见 §7.8（`personaSuffix` 那段）与分册 [`identity.md`](agents/identity.md) §3.1；约定单一事实源是 `core/scratch`。
+
 #### 7.6.4 资料库（v33）
 
 给用户一棵本地可寻址的目录树（space → node，`node_kind ∈ folder/doc/table/link/drive/page`），走 `library_nodes` / `library_attachments` / `library_tables` 三表；v34 起 `library_nodes` 带 `category`（material|artifact）与 `provenance_id`，`GET /materials/nodes?category=` 分「资料 / 产物」栏。drive 节点走两步式上传（先 `POST /files` 拿 `file_id` 再传 `drive_upload_id`，`POST /materials/upload` 已删）。**「找」只做结构浏览 + 关键词子串匹配**（`LIKE` `title`/`body`），**不含**语义向量检索/RAG（知识库另立项，守卫 `TestMaterialHasNoSemanticSearch` 把这条拍板变成机器判据，见 `unimplemented.md` C37）。资料库的 MCP 工具面 `mate mcp material` 已交付（`library_list_nodes` / `library_node_info` / `library_upload` / `library_import_artifact`），可被任意 MCP 客户端拉起。
@@ -615,7 +617,7 @@ ark-mate 不改 dsh 源码/fork，两个「让底座按平台口径说话」的�
 | 交付面 | 生成物 | 内容 | 生效粒度 | 失败半径 | 事实源 |
 | --- | --- | --- | --- | --- | --- |
 | **模型清单** | `<DSH_HOME>/mate-models.patch.yml` | 把平台 `models` 表投影成 dsh 认的 provider/model 声明（含派生路由键） | 每次拉起 | 写坏 → 会话选模型起不来 | `infra/dsh/config.go`（`resource.Syncer`） |
-| **产品身份** | `<DSH_HOME>/mate-identity.patch.yml` | `- id: system-prompt` + `includeHarnessIdentity: false`（去掉底座固定开场白）+ `personaPrefix`（ark-mate 身份段） | 每轮（系统提示） | 写坏 → 底座**拒启**；但身份**非 critical**，交付失败只留 WARN + 诊断 `identity_patch_failed`，不阻塞启动 | `infra/dsh/identity.go` + `domain/identity/identity.go` |
+| **产品身份** | `<DSH_HOME>/mate-identity.patch.yml` | `- id: system-prompt` + `includeHarnessIdentity: false`（去掉底座固定开场白）+ `personaPrefix`（ark-mate 身份段）+ `personaSuffix`（部署级交付纪律后置段，见下） | 每轮（系统提示） | 写坏 → 底座**拒启**；但身份**非 critical**，交付失败只留 WARN + 诊断 `identity_patch_failed`，不阻塞启动 | `infra/dsh/identity.go` + `domain/identity/identity.go` |
 
 **模型 overlay 的关键约束**：dsh 在 ACP 的 `modelValue()` 上要的是 `["<provider>","<model>"]` 这段**它自己的词表**；第一段是**派生路由键**（v25 起带平台保留前缀），不是平台 id 本身——`set_config_option` 拿这个值去找路由，而路由在 patch 里以派生键声明，两处必须逐字同源，否则「所有选了模型的会话立刻起不来」（守卫 `TestDshRouteKeyAgreesBetweenPatchAndModelValue` 钉住）。写盘前过两级校验门：静态（schema dump 字段核对）+ 底座级（`--dump-config-schema`，staging home）。`api` 协议（当前只 `openai-completions`）由 adapter 固定，不进用户表单。
 
@@ -624,9 +626,11 @@ ark-mate 不改 dsh 源码/fork，两个「让底座按平台口径说话」的�
 - **主路径**：`mate-identity.patch.yml`，每轮生效，写坏会让底座拒启——这是「模型自述」的主来源。
 - **回退面**：会话首个 prompt 前注入 `<product_identity>` 块（`userContext`），每个执行上下文一次；失败半径只让 prompt 变长。`session.user_message` 事件与 transcript **仍是用户原文**，块前缀不进历史；新建 / 原生恢复 / handoff / 代际迁移都会重新锚定。
 
+**`personaSuffix`：部署级交付纪律后置段。** 身份 patch 的 `system-prompt.config` 除 `personaPrefix` 外还写一段 `personaSuffix`（排在底座一方指导**之后**、能压过底座默认口径），承载两条与产品人格无关、纯**交付行为**的纪律：① 成品全部 `present`（`present` 工具描述写死「至多 4 个」，而抽取侧只认 present）；② 过程产物（构建脚本/中间文件）落会话 `.scratch/`、不进交付目录。第②条的平台落地是一个独立的**过程产物面**（见 §7.6.3 抽取排除 + §9.1 的 `core/scratch`）：目标是「交付面（会话 cwd，跨会话共享延续）⟂ 过程面（`.scratch/<session_id>/`，临时可弃）」按**产物性质分层**——不是按会话隔离 cwd（那会破坏跨会话共享）。两条纪律的成因、边界、二期为何回退（sandbox-policy 整块替换踩坑 → 全只读）见分册 [`identity.md`](agents/identity.md) §3.1。
+
 **身份是部署级常量，不热更**（这是设计边界，不是待办）：一个构建产物对应一个产品身份，不做用户改名/人格定制。想「不重启换身份」做不到——`--patch` 是启动参数、`acp` profile 的 `hmr` 恒关、ACP 协议不暴露任何 persona/system-prompt 方法。dsh 进程内其实可热改系统提示（以插件形式跑进 dsh 进程），但那是 ACP 外挂客户端够不到的，改成内嵌插件等于推翻「多底座、底座零改动」定位。改任何身份文案都要 `Version +1`，文案不得含底座名/模板花括号/路径（守卫钉住）。
 
-> 身份值对象是 `core/identity` 的 `Spec{Version, Name, DisplayName, Tagline, SystemPrompt, UserContext}`（纯值，不认识任何底座）；`Mode`（`auto|system|user|off`，由 `MATE_IDENTITY_MODE` 解析，非法值报错不静默回落）把模式作用到 Spec 得到本模式该交付的两个面；`Spec.Fingerprint()` 由文案 + 版本算（不由产物算），重复交付同一 Spec 收敛。判断「身份是否启用」要用 `Spec.Enabled()`（任一字段非空）而不是 `Fingerprint()==""`（零值也返回非空 hex）。模型清单的投影机制与此同构，只是产物换成 provider/model 声明、失败半径换成「会话选模型起不来」。
+> 身份值对象是 `core/identity` 的 `Spec{Version, Name, DisplayName, Tagline, SystemPrompt, UserContext, PersonaSuffix}`（纯值，不认识任何底座）；`Mode`（`auto|system|user|off`，由 `MATE_IDENTITY_MODE` 解析，非法值报错不静默回落）把模式作用到 Spec 得到本模式该交付的两个面（`PersonaSuffix` 随系统提示面一起交付、`user`/`off` 一起清空）；`Spec.Fingerprint()` 由文案 + 版本算（不由产物算），重复交付同一 Spec 收敛。判断「身份是否启用」要用 `Spec.Enabled()`（任一字段非空）而不是 `Fingerprint()==""`（零值也返回非空 hex）。模型清单的投影机制与此同构，只是产物换成 provider/model 声明、失败半径换成「会话选模型起不来」。
 
 ### 7.9 内部模型网关（`internal/core/llm`）
 
@@ -695,7 +699,7 @@ backend/
 │   ├── sessionruntime/       会话编排（L7：Service / Orchestrator / 权限 / 附件 PromptPart 投影）
 │   ├── domain/<域>/          领域平面（session / workspace / provider / skill / mcp / automation / interaction / identity / expert / material / artifact）
 │   ├── dto/dto<域>/          请求/响应 DTO（两侧共用，自身不依赖应用层）
-│   ├── core/                 值对象与平台值（L1）：object/*（含 objid id 铸造 + rt_ 壳）· code · capability · automation · identity · resource · redact · credential（供应商密钥引用）· definition · eventbus · failure · protocol
+│   ├── core/                 值对象与平台值（L1）：object/*（含 objid id 铸造 + rt_ 壳）· code · capability · automation · identity · resource · redact · credential（供应商密钥引用）· definition · eventbus · failure · protocol · scratch（会话过程产物目录 .scratch 约定的纯判定/路径构造）
 │   ├── persistence/          持久层（实体 + 访问面 + 业务面，同一只管带）
 │   │   ├── model/            持久层实体（一表一文件 + enum/serializer/time/query）
 │   │   ├── dao/              列词汇（Cond）+ gormdao 泛型方法 + 机械原语

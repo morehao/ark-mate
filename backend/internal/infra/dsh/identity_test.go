@@ -23,12 +23,13 @@ import (
 // identityFixture 一份固定身份（不含任何真实底座名：这个包的测试也不该依赖产品文案）。
 func identityFixture() pkgidentity.Spec {
 	return pkgidentity.Spec{
-		Version:      "v1",
-		Name:         "ark-mate",
-		DisplayName:  "ark-mate",
-		Tagline:      "个人 Agent 助手",
-		SystemPrompt: "你是 ark-mate。\n\n第二段。",
-		UserContext:  "<product_identity>身份</product_identity>",
+		Version:       "v1",
+		Name:          "ark-mate",
+		DisplayName:   "ark-mate",
+		Tagline:       "个人 Agent 助手",
+		SystemPrompt:  "你是 ark-mate。\n\n第二段。",
+		UserContext:   "<product_identity>身份</product_identity>",
+		PersonaSuffix: "交付口径：本轮成品全部 present。",
 	}
 }
 
@@ -79,6 +80,43 @@ func TestBuildIdentityPatchRejectsDangerousCopy(t *testing.T) {
 		if _, err := buildIdentityPatch(spec); err == nil {
 			t.Fatalf("%s：非法正文应被拒绝", name)
 		}
+		// 后置段与正文共用同一套危险文案判据：把同一批拷贝挪到 PersonaSuffix 上必须同样被拒。
+		// 例外是「空正文」——后置段为空是合法语义（表示不写该键），故跳过。
+		if name == "空正文" {
+			continue
+		}
+		spec2 := identityFixture()
+		spec2.PersonaSuffix = copy
+		if _, err := buildIdentityPatch(spec2); err == nil {
+			t.Fatalf("%s：PersonaSuffix 非法文案应被拒绝", name)
+		}
+	}
+}
+
+// TestPersonaSuffixEmittedOnlyWhenSet 后置段为空时不写该键（交给底座默认空串）；
+// 非空时以 `personaSuffix: |-` 块标量出现，且排在 personaPrefix 之后。
+func TestPersonaSuffixEmittedOnlyWhenSet(t *testing.T) {
+	spec := identityFixture()
+	spec.PersonaSuffix = ""
+	data, err := buildIdentityPatch(spec)
+	if err != nil {
+		t.Fatalf("生成 patch: %v", err)
+	}
+	if strings.Contains(string(data), "personaSuffix:") {
+		t.Fatalf("PersonaSuffix 为空时不应写该键：\n%s", data)
+	}
+
+	spec2 := identityFixture()
+	spec2.PersonaSuffix = "后置段内容。"
+	data2, err := buildIdentityPatch(spec2)
+	if err != nil {
+		t.Fatalf("生成 patch: %v", err)
+	}
+	if !strings.Contains(string(data2), "    personaSuffix: |-\n      后置段内容。\n") {
+		t.Fatalf("PersonaSuffix 非空时应以块标量写出：\n%s", data2)
+	}
+	if strings.Index(string(data2), "personaSuffix:") < strings.Index(string(data2), "personaPrefix:") {
+		t.Fatalf("personaSuffix 必须排在 personaPrefix 之后：\n%s", data2)
 	}
 }
 
@@ -141,9 +179,10 @@ func TestRevokeDeletesFileAndArg(t *testing.T) {
 	}
 	path := filepath.Join(root, IdentityPatchFilename)
 
-	// `user` 模式：SystemPrompt 被清空（首轮块仍在）。
+	// `user` 模式：系统提示面被清空（SystemPrompt 与 PersonaSuffix 都清；首轮块仍在）。
 	spec := identityFixture()
 	spec.SystemPrompt = ""
+	spec.PersonaSuffix = ""
 	out, err := a.DeliverIdentity(context.Background(), spec)
 	if err != nil {
 		t.Fatalf("撤回: %v", err)

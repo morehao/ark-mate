@@ -15,6 +15,11 @@ import {
 import { browseWorkspaces, createWorkspaceDir, toErrorMessage, workspaceFiles } from '@ark-mate/api'
 import type { WorkspaceBrowseResp, WorkspaceEntry, WorkspaceFileEntry } from '@ark-mate/types'
 
+// SCRATCH_DIR_NAME 过程产物目录名（与后端 internal/core/scratch.DirName 一致）。它是平台的内部约定区
+// （构建脚本/缓存），不是用户内容——即便开了「显示隐藏文件」也不展示，避免误当交付物。
+const SCRATCH_DIR_NAME = '.scratch'
+const isScratchEntry = (e: { name: string }) => e.name === SCRATCH_DIR_NAME
+
 interface Props {
   /** 起始目录（缺省 = 服务端首个工作区根，未配白名单时 = 服务进程家目录）。 */
   start?: string
@@ -274,9 +279,9 @@ export function DirectoryBrowser({
     }
   }
 
-  const entries = (listing?.entries ?? []).filter((e) => showHidden || !e.hidden)
+  const entries = (listing?.entries ?? []).filter((e) => (showHidden || !e.hidden) && !isScratchEntry(e))
   const childEntries = (child?.entries ?? [])
-    .filter((e) => showHidden || !e.hidden)
+    .filter((e) => (showHidden || !e.hidden) && !isScratchEntry(e))
     // 右栏是"选中项的 children"，左栏已经列过的是**当前层**——两者内容相同（乐观填充那一瞬），
     // 但语义不同，不去重（去掉会让右栏在响应回来前是空的，而它正是"下一步能去哪"的预览）。
     .filter((e) => e.path !== selected?.path)

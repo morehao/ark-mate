@@ -39,7 +39,7 @@ func TestRenderNamesTheProduct(t *testing.T) {
 
 func TestPromptsCarryNoRuntimeNames(t *testing.T) {
 	spec := Render()
-	lowered := strings.ToLower(spec.SystemPrompt + "\n" + spec.UserContext)
+	lowered := strings.ToLower(spec.SystemPrompt + "\n" + spec.UserContext + "\n" + spec.PersonaSuffix)
 	for _, w := range runtimeWords {
 		if strings.Contains(lowered, w) {
 			t.Fatalf("身份文案里出现了执行引擎名 %q：身份是产品人格，不是运行时的别名", w)
@@ -49,13 +49,48 @@ func TestPromptsCarryNoRuntimeNames(t *testing.T) {
 
 func TestPromptsCarryNoTemplateMarkers(t *testing.T) {
 	spec := Render()
-	for name, text := range map[string]string{"systemPrompt": spec.SystemPrompt, "userContext": spec.UserContext} {
+	for name, text := range map[string]string{"systemPrompt": spec.SystemPrompt, "userContext": spec.UserContext, "personaSuffix": spec.PersonaSuffix} {
 		if pkgidentity.HasTemplateBraces(text) {
 			t.Fatalf("%s 含模板花括号：底座的 persona 是模板，未知变量在首轮组装时才抛错", name)
 		}
 		if strings.Contains(text, "{%") || strings.Contains(text, "%}") {
 			t.Fatalf("%s 含模板标签（{%% / %%}）", name)
 		}
+	}
+}
+
+// TestPersonaSuffixCarriesDeliveryDirective 后置段必须承载「全部 present」这条交付口径，
+// 且带「不要复述」的收口（防止模型把这段指令原文回吐给用户）。它是覆盖底座默认口径的唯一手段。
+func TestPersonaSuffixCarriesDeliveryDirective(t *testing.T) {
+	spec := Render()
+	if strings.TrimSpace(spec.PersonaSuffix) == "" {
+		t.Fatal("PersonaSuffix 为空：就失去了覆盖「只 present 1-2 个」默认口径的手段")
+	}
+	if !strings.Contains(spec.PersonaSuffix, "present") {
+		t.Fatalf("PersonaSuffix 未提到 present：%q", spec.PersonaSuffix)
+	}
+	if !strings.Contains(spec.PersonaSuffix, "全部") {
+		t.Fatalf("PersonaSuffix 未强调「全部」成品：%q", spec.PersonaSuffix)
+	}
+	// 交付目录卫生：以「落点为主、清理为辅」——构建脚本/中间文件放临时区，别留在交付目录；
+	// 若已落在交付目录则 present 后清理。策略来源见 ses_01M6ZKC9... 复盘。
+	if !strings.Contains(spec.PersonaSuffix, "清理") {
+		t.Fatalf("PersonaSuffix 未要求清理过程性产物：%q", spec.PersonaSuffix)
+	}
+	if !strings.Contains(spec.PersonaSuffix, "临时") {
+		t.Fatalf("PersonaSuffix 未要求把过程产物放到临时区（落点优先，而非只靠事后清理）：%q", spec.PersonaSuffix)
+	}
+	// 点名平台约定的过程产物目录 `.scratch/`（与 internal/core/scratch 同源），让「放对地方」成为
+	// 模型最省事的选择。
+	if !strings.Contains(spec.PersonaSuffix, ".scratch") {
+		t.Fatalf("PersonaSuffix 未点名 .scratch 过程产物目录：%q", spec.PersonaSuffix)
+	}
+	if !strings.Contains(spec.PersonaSuffix, "不要向用户复述") {
+		t.Fatalf("PersonaSuffix 缺少「不要复述指令」的收口：%q", spec.PersonaSuffix)
+	}
+	// 预算：后置段每轮进系统提示，同样受长度约束（防止悄悄写长）。
+	if n := utf8.RuneCountInString(spec.PersonaSuffix); n > 400 {
+		t.Fatalf("PersonaSuffix %d 个字符，超出预算（<=400）", n)
 	}
 }
 

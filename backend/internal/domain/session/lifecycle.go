@@ -123,6 +123,19 @@ type LifecycleDeps struct {
 	//
 	// nil = 本部署不声明身份（`off`；也是绝大多数测试的形态）。
 	Identity func() pkgidentity.Spec
+	// Scratch 过程产物目录的落盘端口（建目录 / 清理）。nil = 不启用 scratch（测试/关闭态）。
+	//
+	// 见 internal/core/scratch：交付面 = cwd（共享持久），过程面 = `<cwd>/.scratch/<sid>/`（临时可弃）。
+	// 建目录失败**不阻断启动**（WARN），与「缺能力不拒绝启动」一致。实现由装配层提供（含 IO）。
+	Scratch ScratchPort
+}
+
+// ScratchPort 过程产物目录的落盘端口（IO 由装配层实现，domain 只依赖此接口）。
+type ScratchPort interface {
+	// Ensure 幂等创建某会话的 scratch 目录（`<cwd>/.scratch/<sid>/`）。失败仅 WARN，不阻断。
+	Ensure(cwd, sessionID string) error
+	// Clean 删除某会话的 scratch 目录（不存在 → no-op）。仅供归档/删除时调用。
+	Clean(cwd, sessionID string) error
 }
 
 // Lifecycle 会话的启动/恢复/换句柄。
@@ -141,6 +154,7 @@ type Lifecycle struct {
 	setState         func(state string)
 	applyReason      func(err error) string
 	identity         func() pkgidentity.Spec
+	scratch          ScratchPort
 
 	handoffMaxChars int
 }
@@ -154,6 +168,7 @@ func NewLifecycle(d LifecycleDeps) *Lifecycle {
 		mcpServers:       d.McpServers, catalog: d.Catalog, diagnostics: d.Diagnostics,
 		setState: d.SetRuntimeState, applyReason: d.ApplyReason,
 		identity:        d.Identity,
+		scratch:         d.Scratch,
 		handoffMaxChars: DefaultHandoffMaxChars,
 	}
 }
@@ -221,6 +236,14 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 	convID := opt.SessionID
 	if convID == "" {
 		convID = objid.New(objid.Session)
+	}
+	// 过程产物目录（`<cwd>/.scratch/<id>/`）：先于 session/new 建好，让模型从第一步就有「过程产物往
+	// 这里放」的落点，过程脚本就不会落在交付目录里（下一会话也就看不到、不会误复用）。失败仅 WARN，
+	// **不阻断建会话**（与「缺能力不拒绝启动」一致）。
+	if l.scratch != nil {
+		if err := l.scratch.Ensure(cwd, convID); err != nil {
+			glog.Warnw(ctx, "建过程产物目录（scratch）失败，不影响建会话", "session", convID, "cwd", cwd, "err", err)
+		}
 	}
 	// P2 MCP 注入：平台注册表 MCP 子集按「会话选定 > 全量」+ runtime 传输能力过滤后
 	// 随 session/new 下发。**必须传 opt.Selection**：指纹就是按它算出来的，注入若用别的口径，

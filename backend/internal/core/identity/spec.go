@@ -43,15 +43,28 @@ type Spec struct {
 	SystemPrompt string
 	// UserContext 首轮注入的 `<product_identity>` 块（每个执行上下文一次；空 = 不使用该面）。
 	UserContext string
+	// PersonaSuffix 部署级系统提示**后置段**（dsh `system-prompt` 的 `personaSuffix`；空 = 不写该键）。
+	//
+	// 与 SystemPrompt（映射到前置于一方指导的 `personaPrefix`）区别：这段排在**一方指导之后**，
+	// 因此能覆盖底座内置提示（例如 deliverable-file-references 里「只 present 1-2 个最重要的」
+	// 这类默认口径）。它承载的是**平台对模型交付行为的统一约束**，与产品身份无关，故单独成字段，
+	// 不混进 SystemPrompt。同样不得含 `{{` / `}}`（模板在首轮组装时抛错）。
+	//
+	// 它是系统提示面的一部分：`system` 模式交付它，`user`/`off` 模式必须一并清空（连同撤回 patch）。
+	PersonaSuffix string
 }
 
 // Enabled 两个面是否至少有一个有内容。都为空 = 该部署不声明产品身份（`off` 模式）。
 func (s Spec) Enabled() bool {
-	return strings.TrimSpace(s.SystemPrompt) != "" || strings.TrimSpace(s.UserContext) != ""
+	return strings.TrimSpace(s.SystemPrompt) != "" ||
+		strings.TrimSpace(s.PersonaSuffix) != "" ||
+		strings.TrimSpace(s.UserContext) != ""
 }
 
-// UsesSystemPrompt 是否交付系统提示面。
-func (s Spec) UsesSystemPrompt() bool { return strings.TrimSpace(s.SystemPrompt) != "" }
+// UsesSystemPrompt 是否交付系统提示面（含 personaPrefix 与 personaSuffix 两段）。
+func (s Spec) UsesSystemPrompt() bool {
+	return strings.TrimSpace(s.SystemPrompt) != "" || strings.TrimSpace(s.PersonaSuffix) != ""
+}
 
 // UsesUserContext 是否交付首轮块面。
 func (s Spec) UsesUserContext() bool { return strings.TrimSpace(s.UserContext) != "" }
@@ -67,7 +80,7 @@ func (s Spec) UsesUserContext() bool { return strings.TrimSpace(s.UserContext) !
 func (s Spec) Fingerprint() string {
 	h := sha256.New()
 	for _, part := range []string{
-		"identity/v1", s.Version, s.Name, s.DisplayName, s.Tagline, s.SystemPrompt, s.UserContext,
+		"identity/v1", s.Version, s.Name, s.DisplayName, s.Tagline, s.SystemPrompt, s.UserContext, s.PersonaSuffix,
 	} {
 		fmt.Fprintf(h, "%s\x00", part)
 	}
@@ -144,9 +157,9 @@ func (m Mode) Apply(s Spec) Spec {
 	case ModeSystem:
 		s.UserContext = ""
 	case ModeUser:
-		s.SystemPrompt = ""
+		s.SystemPrompt, s.PersonaSuffix = "", ""
 	case ModeOff:
-		s.SystemPrompt, s.UserContext = "", ""
+		s.SystemPrompt, s.PersonaSuffix, s.UserContext = "", "", ""
 	}
 	return s
 }

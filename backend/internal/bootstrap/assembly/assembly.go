@@ -98,6 +98,9 @@ func (as *assembly) steps() []registry.Step {
 		{Name: "持久层接线", Phase: registry.PhasePersistence, Timeout: 2 * time.Minute, Start: as.startStoreWiring},
 		{Name: "启动导入", Phase: registry.PhasePersistence, Timeout: 2 * time.Minute, Start: as.startImports},
 		{Name: "会话恢复", Phase: registry.PhasePersistence, Timeout: 2 * time.Minute, Start: as.startRestore},
+		// 过程产物孤儿目录清理（非 critical）：删掉 `<cwd>/.scratch/` 下查无会话的残留；
+		// 只动平台约定的 scratch 子树，绝不碰交付目录里的用户文件。失败仅 WARN。
+		{Name: "scratch 孤儿清理", Phase: registry.PhasePersistence, Timeout: 30 * time.Second, Start: as.startScratchOrphanCleanup},
 		{Name: "工作空间策略", Phase: registry.PhaseDomain, Critical: true, Start: as.startWorkspacePolicy},
 		{Name: "默认工作空间", Phase: registry.PhaseDomain, Critical: true, Start: as.startDefaultWorkspace},
 		{

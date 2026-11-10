@@ -23,7 +23,7 @@
 | [`docs/agents/authorization.md`](docs/agents/authorization.md) | 变更授权（允许破坏性调整的边界与仍强制的例外） | 决定要不要留兼容层 |
 | [`docs/agents/positioning.md`](docs/agents/positioning.md) | 外部形态参照实现（DSH）与本仓对应物 | 定交付形态、宿主能力边界 |
 | [`docs/agents/llm-capability.md`](docs/agents/llm-capability.md) | 内部模型调用接入：决策清单（何时该用/不该用、Stateful vs Stateless、结构化/Strict）+ 接入约定（prompt 单点、必带 Purpose、agent 护栏） | 要用模型做某功能前先判断要不要接入、业务接入 `llm.Gateway`、新增 LLM 用途 |
-| [`docs/agents/identity.md`](docs/agents/identity.md) | 产品身份（模型自述）机制：文案唯一事实源、两层交付面、Spec/Fingerprint、装配时序、为什么不热更、守卫 | 改身份文案 / patch / `MATE_IDENTITY_MODE` / 身份守卫 |
+| [`docs/agents/identity.md`](docs/agents/identity.md) | 产品身份（模型自述）机制：文案唯一事实源、两层交付面、`personaSuffix` 交付纪律（成品全部 present + 过程产物落 `.scratch/`）、Spec/Fingerprint、装配时序、为什么不热更、守卫 | 改身份文案 / `personaSuffix` / patch / `MATE_IDENTITY_MODE` / 身份或 `.scratch` 守卫 |
 | [`docs/agents/dsh-resources.md`](docs/agents/dsh-resources.md) | dsh 资源初始化：桌面端 profile 模板×bundle vs ark-mate `mate-acp` 覆写层、office 三件套/present/deliverable、primary-runtime 与 4 个 env 注入，附升 dsh 版本的锚点同步清单 | 改 `mate-acp` 覆写层 / `primary-runtime` 装配 / office env、升 dsh 载荷版本 |
 
 分册的总目录与维护约定见 [`docs/agents/README.md`](docs/agents/README.md)。
@@ -40,6 +40,7 @@
 - **请求上下文**：handler 往下游传 ctx 一律 `c.Request.Context()`；service 及内层签名一律 `ctx context.Context`（零 `*gin.Context`）；**不得打开 `engine.ContextWithFallback`**（会让 `database/sql` 等长期持有池化的 `*gin.Context`，`-race` 下必然竞争）。见 [`docs/agents/context.md`](docs/agents/context.md)。
 - **改路由 / 事件 type / 数据 schema 必须同一次提交同步**：`docs/contract.md` 路由表（`TestReadmeRoutesMatchRouter` 双向比对）、`internal/domain/session/events.go`、`internal/persistence/model` 实体与 `internal/persistence/store` 迁移（三处手工一致）。
 - **交付形态**：桌面是主线（`make desktop/*`），浏览器入口（`make dev`）只是开发形态；底座由构建期固定（默认 `dsh`），用户面**没有**选择入口，被撤掉的选择键在各写面**显式拒绝**而不是静默丢弃。见 [`docs/agents/build-and-runtime.md`](docs/agents/build-and-runtime.md)。
+- **过程产物落会话 `.scratch/`、不进交付目录**：模型/工具的构建脚本、中间文件必须落会话过程产物目录 `<cwd>/.scratch/<session_id>/`，交付目录只留成品；`.scratch/` 里的文件**永不进产物库**（`workartifact` 抽取层对 `.scratch` 前缀拒绝登记），会话归档/启动孤儿时清理，界面不展示。约定单一事实源 = `internal/core/scratch`（`sessionruntime.cwdScratch` 落盘）。**改抽取/会话归档/文件浏览时留意别把过程产物放进交付面**。见 [`docs/agents/identity.md`](docs/agents/identity.md) §3.1。
 - **语言**：代码注释与 commit message 用简体中文；commit 用 conventional 前缀（`feat`/`fix`/`refactor` + 中文 scope）。
 
 ## 维护约定

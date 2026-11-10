@@ -72,6 +72,15 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 
 会话工作空间 = 该会话的 ACP `cwd`，**创建时定稿、之后不可变**（要换目录就新开会话）。
 
+> **过程产物目录 `.scratch/`（平台约定）**：会话启动时，平台在该会话 `cwd` 下建
+> `<cwd>/.scratch/<session_id>/`，并在系统提示（部署级后置段）里点名它是「构建脚本/中间产物」的
+> 落点——过程产物进这里、不进交付目录，下一会话就看不到、不会误复用（设计机制见 [`docs/agents/identity.md`](agents/identity.md) §3.1）。运维口径：
+> - **它只装过程产物**（脚本/缓存/中间渲染目录），**永不进产物库/资料库**（抽取层对 `.scratch/` 前缀直接拒绝登记）。
+> - **清理**：会话**归档**时清掉该会话的 `.scratch/<id>/`；进程启动时清一次「查无会话」的孤儿 `.scratch/*`。
+> - **只删 `.scratch/` 子树，绝不删交付目录里的用户文件**（平台只对自己创建的约定区行使删除权）。
+> - 文件浏览/资料库界面**不展示** `.scratch`（即使开了「显示隐藏文件」）。
+> - `internal/core/scratch` 是路径/判定/命名的唯一事实源；落盘 IO 在装配层（`sessionruntime.cwdScratch`）。
+
 - **默认行为（v14 变更）**：`POST /conversations` 不带 `cwd`/`workspace_id` → 会话落在
   **默认工作空间**（`<MATE_WORKSPACE_DIR>/default`，一条落库的登记），响应回
   `workspace_temporary=true`。**不会**回落 serve 进程的工作目录——那会让所有会话共用
