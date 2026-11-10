@@ -166,17 +166,36 @@ func DerefIDs(in *[]string) string {
 	return fmt.Sprintf("%v", *in)
 }
 
-// SkillIDs 取 skill 选定的 id 集（nil 安全；供 Library/输入卡回显）。
-func (c *CapabilitySelection) SkillIDs() []string { return DerefList(c.Skills) }
+// SkillIDs 取 skill 选定的 id 集（**nil 接收者安全**；供 Library/输入卡回显）。
+//
+// 注意 `c` 本身可能为 nil：会话没声明 `capabilities` 时 `opt.Selection` 就是 nil，注入链会拿 nil
+// 调这些取值器（`capability_selection.go` 曾因此 nil deref panic——真起 serve + 真模型建无 capabilities
+// 的会话暴露的 bug）。故 receiver 也要判 nil，而不只是字段 nil。
+func (c *CapabilitySelection) SkillIDs() []string {
+	if c == nil {
+		return nil
+	}
+	return DerefList(c.Skills)
+}
 
-// McpIDs 同 SkillIDs（MCP 侧）。
-func (c *CapabilitySelection) McpIDs() []string { return DerefList(c.Mcps) }
+// McpIDs 同 SkillIDs（MCP 侧；nil 接收者安全）。
+func (c *CapabilitySelection) McpIDs() []string {
+	if c == nil {
+		return nil
+	}
+	return DerefList(c.Mcps)
+}
 
-// AppIDs 取启用的 app id 集（nil 安全；nil=未声明→nil，`[]`=明确不要→空切片）。
+// AppIDs 取启用的 app id 集（nil 接收者安全；nil=未声明→nil，`[]`=明确不要→空切片）。
 //
 // sessionruntime 的 app 工具注入通道用它读会话 app scope（§5.5）：nil/空都表示"无 app 工具"，
 // 但两者措辞不同，注入侧对二者**都**必须零注入（默认零是硬要求）。
-func (c *CapabilitySelection) AppIDs() []string { return DerefList(c.Apps) }
+func (c *CapabilitySelection) AppIDs() []string {
+	if c == nil {
+		return nil
+	}
+	return DerefList(c.Apps)
+}
 
 // DerefList 把 `*[]string` 解成**副本**切片（nil → nil）。
 //

@@ -213,3 +213,22 @@ func TestAppsEmptyAndAppIDs(t *testing.T) {
 		t.Fatalf("apps 白名单 → AppIDs 应返回两项，got %v", got)
 	}
 }
+
+// TestIDGettersNilReceiverSafe 回归：`c` 本身为 nil 时 AppIDs/McpIDs/SkillIDs 不得 panic，返回 nil。
+//
+// 真起 serve + 真模型建「不带 capabilities」的会话暴露的 bug：会话没声明 capabilities 时
+// opt.Selection 是 nil，注入链拿 nil 调 sel.AppIDs() → nil deref panic（session/new 变 500）。
+// Empty() 一直是 receiver-safe 的，但三个 ID 取值器此前只判字段 nil、没判 receiver nil。
+func TestIDGettersNilReceiverSafe(t *testing.T) {
+	var c *CapabilitySelection
+	// 直接调用必须不 panic 且返回 nil。
+	if got := c.AppIDs(); got != nil {
+		t.Fatalf("nil receiver AppIDs 应返回 nil，got %v", got)
+	}
+	if got := c.McpIDs(); got != nil {
+		t.Fatalf("nil receiver McpIDs 应返回 nil，got %v", got)
+	}
+	if got := c.SkillIDs(); got != nil {
+		t.Fatalf("nil receiver SkillIDs 应返回 nil，got %v", got)
+	}
+}

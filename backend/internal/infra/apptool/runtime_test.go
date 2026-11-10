@@ -216,3 +216,41 @@ func keysOf[V any](m map[string]V) []string {
 	}
 	return out
 }
+
+// arrayContentHost 返回「MCP 风格 content 数组」（[ {type,text} ]），复现 app-host 的实际返回形状。
+type arrayContentHost struct{ tools []ToolDesc }
+
+func (h *arrayContentHost) ListTools() ([]ToolDesc, error) { return h.tools, nil }
+func (h *arrayContentHost) InvokeTool(name string, args []byte) ([]byte, bool, error) {
+	blocks, _ := json.Marshal([]map[string]any{{"type": "text", "text": "host:" + name}})
+	return blocks, false, nil
+}
+
+// TestCallToolFlattensContentArray 回归：host 返回 content 数组时，McpCallResult.Content 必须摊平成
+// 逐个 block 对象（content:[{...}]），不能把整个数组塞成一个元素（content:[[{...}]]）。
+//
+// 真起 serve + 真模型调用 demo_ping 暴露的 bug：旧实现 `res.Content = append(res.Content, content)` 把
+// 整段数组当单块 → wire 成 content:[[{type,text}]] → dsh mcp-client 结果 schema 校验
+// `invalid_union: expected object, received array` → 工具调用失败。修复后应摊平成对象 block。
+func TestCallToolFlattensContentArray(t *testing.T) {
+	host := &arrayContentHost{tools: []ToolDesc{{Name: "foo_ping", InputSchema: json.RawMessage(`{}`)}}}
+	hs, err := ResolveRuntimeDomains("pkg-a", host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := hs.Handlers["foo"].CallTool(context.Background(), "foo_ping", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("CallTool 失败：%v", err)
+	}
+	if len(res.Content) != 1 {
+		t.Fatalf("应摊平成 1 个 content block，got %d：%v", len(res.Content), res.Content)
+	}
+	// 每个元素必须是一个对象（能被 unmarshal 成 map），而不是数组。
+	var block map[string]any
+	if err := json.Unmarshal(res.Content[0], &block); err != nil {
+		t.Fatalf("content[0] 应是对象 block，却无法解析成 map（说明还是数组套数组）：%v / raw=%s", err, res.Content[0])
+	}
+	if block["type"] != "text" {
+		t.Fatalf("content[0].type 应 text，got %v", block["type"])
+	}
+}

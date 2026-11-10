@@ -63,6 +63,12 @@ type appLifecycle struct {
 	spawn apphost.SpawnFunc
 	// coreVersion 核心版本（安装 min core version 门槛用；空 = 不设本层门槛，由 apppkg 兜底）。
 	coreVersion string
+	// baseCtx/baseCancel 宿主**进程级**生命周期上下文：长驻 app-host 子进程必须绑它，
+	// **不能绑单次 HTTP 请求 ctx**——否则 handler 一返回、请求 ctx 被 cancel，exec.CommandContext
+	// 就把 host 子进程杀掉，enable 立刻变 state=failed（真起 mate serve 验证暴露的 bug）。
+	// 只有 closeAll（进程关闭）才调 baseCancel，届时统一收掉所有 host。
+	baseCtx    context.Context
+	baseCancel context.CancelFunc
 }
 
 // newAppLifecycle 构造生命周期管理器。spawn=nil → 生产 ExecSpawn。
@@ -70,12 +76,15 @@ func newAppLifecycle(appsRoot string, spawn apphost.SpawnFunc) *appLifecycle {
 	if spawn == nil {
 		spawn = apphost.ExecSpawn()
 	}
+	baseCtx, baseCancel := context.WithCancel(context.Background())
 	return &appLifecycle{
 		hosts:       map[string]*apphost.Host{},
 		enabled:     map[string]bool{},
 		appsRoot:    appsRoot,
 		spawn:       spawn,
 		coreVersion: apppkg.CurrentCoreVersion(),
+		baseCtx:     baseCtx,
+		baseCancel:  baseCancel,
 	}
 }
 
@@ -117,7 +126,11 @@ func (l *appLifecycle) EnableApp(ctx context.Context, ref svcapp.AppRuntimeRef) 
 		APIVersion: pkg.Manifest.APIVersion,
 		Spawn:      l.spawn,
 	})
-	if err := h.Start(ctx); err != nil {
+	// 关键：用**进程级 baseCtx** 起 host，绝不能用入参 ctx（= HTTP 请求 ctx）。
+	// 入参 ctx 在 handler 返回后会被 net/http cancel，而 ExecSpawn 用 exec.CommandContext 拉子进程——
+	// 一旦绑请求 ctx，host 会在 enable 请求返回瞬间被杀，state 立刻变 failed。
+	// baseCtx 只在 closeAll（进程关闭）时取消。入参 ctx 仍用于下面 slot apply 的观测/日志。
+	if err := h.Start(l.baseCtx); err != nil {
 		_ = h.Close()
 		return err
 	}
@@ -244,6 +257,13 @@ func (l *appLifecycle) RuntimeAppServers(appIDs []string) []capability.McpServer
 		Transport: capability.TransportStdio,
 		Command:   exe,
 		Args:      []string{"mcp", "app", "--apps=" + strings.Join(ids, ",")},
+		// 显式带上 MATE_APPS_DIR：桥是**底座（dsh）经 ACP 拉起**的独立子进程，其 env 来自底座而非本
+		// 内核进程；若底座没继承本进程的 MATE_APPS_DIR，桥会回落到 ~/.dsh/mate/apps 找不到包 →
+		// 工具面为空（真起 serve + 真模型验证暴露：不注入该项时建会话报 mcp-client 连不上/空工具面）。
+		// 这里把判据里那份 appsRoot 原样传下去，保证桥定位到**同一个**应用目录。
+		Env: map[string]string{
+			apppkg.AppsDirEnv: l.appsRoot,
+		},
 	}}
 }
 
@@ -351,6 +371,11 @@ func (l *appLifecycle) closeAll() {
 	l.hosts = map[string]*apphost.Host{}
 	l.enabled = map[string]bool{}
 	l.mu.Unlock()
+	// 取消进程级 baseCtx：host 子进程绑的是它，cancel 会连带让 exec.CommandContext 收掉子进程；
+	// 下面再显式 Close 一次（幂等，双保险）。
+	if l.baseCancel != nil {
+		l.baseCancel()
+	}
 	for _, h := range hosts {
 		_ = h.Close()
 	}
