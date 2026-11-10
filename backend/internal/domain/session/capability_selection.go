@@ -36,14 +36,26 @@ type CapabilitySelection struct {
 	// 专家 id 与 persona **不进指纹**（指纹职责是"这套能力是否需要另一个进程"；专家只影响默认值，
 	// P1 的 instructions 是首轮提示词文本，不改变进程能力）。因此改专家名字/描述不换代际。
 	Expert *string `json:"expert,omitempty"`
+	// Apps 会话启用的 app id 白名单（三态与 Skills/Mcps 同构：nil=未声明→无 app 工具、
+	// `[]`=明确不要任何 app 工具、非空=只启用这些 app 的业务工具面）。
+	//
+	// 与 Skills/Mcps/Expert 不同，Apps 是**唯一来源**的 app 工具面：会话没声明（nil）就**零 app 工具**
+	// （设计 §5.5 表"app 工具（新增）"行；平台注入恒化、业务工具必须独立注入且默认零）。它也是
+	// **越权红线**的守点——app 只能缩小/提供默认，不能借 Apps 把会话能力扩张到 session 白名单之外。
+	//
+	// **进代际指纹**（与 Skills/Mcps 同侧，不进指纹的反例是 Expert）：app 工具面是逐会话独立注入的
+	// stdio server（`mate mcp app --apps=a,b`，见 sessionruntime `appendAppMcpServers`），它直接改变
+	// 进程的 mcpServers⇒"这套能力是否需要另一个进程/是否多了工具"确实变了，必须换代际。
+	// 复用平台内置 server 的同一判据（`platform_mcp.go` 注释③：注入面与指纹共用同一份 plan.Direct）。
+	Apps *[]string `json:"apps,omitempty"`
 }
 
 // NewCapabilitySelection 构造一个"声明了但什么都不限制"的选定（= `capabilities: {}`）。
 func NewCapabilitySelection() *CapabilitySelection { return &CapabilitySelection{} }
 
-// Empty 该选定是否什么都没限制（三个 kind 都未声明）。
+// Empty 该选定是否什么都没限制（四个 kind 都未声明）。
 func (c *CapabilitySelection) Empty() bool {
-	return c == nil || (c.Skills == nil && c.Mcps == nil && c.Expert == nil)
+	return c == nil || (c.Skills == nil && c.Mcps == nil && c.Expert == nil && c.Apps == nil)
 }
 
 // normalized 返回**规范化副本**：去空串、去重、升序。
@@ -58,6 +70,7 @@ func (c *CapabilitySelection) normalized() *CapabilitySelection {
 		Skills: NormalizeIDs(c.Skills),
 		Mcps:   NormalizeIDs(c.Mcps),
 		Expert: normalizeExpertID(c.Expert),
+		Apps:   NormalizeIDs(c.Apps),
 	}
 }
 
@@ -134,7 +147,7 @@ func (c *CapabilitySelection) String() string {
 	if c == nil {
 		return "(未声明能力选择)"
 	}
-	return fmt.Sprintf("skills=%v mcps=%v expert=%s", DerefIDs(c.Skills), DerefIDs(c.Mcps), DerefExpert(c.Expert))
+	return fmt.Sprintf("skills=%v mcps=%v expert=%s apps=%v", DerefIDs(c.Skills), DerefIDs(c.Mcps), DerefExpert(c.Expert), DerefIDs(c.Apps))
 }
 
 // DerefExpert nil 安全的专家 id 回显（nil = "<未声明>"）。
@@ -158,6 +171,12 @@ func (c *CapabilitySelection) SkillIDs() []string { return DerefList(c.Skills) }
 
 // McpIDs 同 SkillIDs（MCP 侧）。
 func (c *CapabilitySelection) McpIDs() []string { return DerefList(c.Mcps) }
+
+// AppIDs 取启用的 app id 集（nil 安全；nil=未声明→nil，`[]`=明确不要→空切片）。
+//
+// sessionruntime 的 app 工具注入通道用它读会话 app scope（§5.5）：nil/空都表示"无 app 工具"，
+// 但两者措辞不同，注入侧对二者**都**必须零注入（默认零是硬要求）。
+func (c *CapabilitySelection) AppIDs() []string { return DerefList(c.Apps) }
 
 // DerefList 把 `*[]string` 解成**副本**切片（nil → nil）。
 //
@@ -198,6 +217,7 @@ type CapabilityPatch struct {
 	Skills OptionalIDs
 	Mcps   OptionalIDs
 	Expert OptionalString
+	Apps   OptionalIDs
 }
 
 // ApplyCapabilityPatch 把补丁合并到当前选定上，返回**新对象**（不改入参，current 可为 nil）。
@@ -207,7 +227,7 @@ type CapabilityPatch struct {
 func ApplyCapabilityPatch(current *CapabilitySelection, p CapabilityPatch) *CapabilitySelection {
 	out := &CapabilitySelection{}
 	if current != nil {
-		out.Skills, out.Mcps, out.Expert = current.Skills, current.Mcps, current.Expert
+		out.Skills, out.Mcps, out.Expert, out.Apps = current.Skills, current.Mcps, current.Expert, current.Apps
 	}
 	if p.Skills.Set {
 		out.Skills = cloneIDs(p.Skills.Value)
@@ -217,6 +237,9 @@ func ApplyCapabilityPatch(current *CapabilitySelection, p CapabilityPatch) *Capa
 	}
 	if p.Expert.Set {
 		out.Expert = cloneString(p.Expert.Value)
+	}
+	if p.Apps.Set {
+		out.Apps = cloneIDs(p.Apps.Value)
 	}
 	return out.normalized()
 }
@@ -273,7 +296,7 @@ func (pl *Plane) SessionCapabilitiesRespOf(rec *SessionRec) *SessionCapabilities
 	// 逐 kind 原样回显：**缺键 = 未声明该 kind**（回落上一层），`[]` = 明确一个都不要。
 	// 不做"未声明就补空数组"的归一——那会把两个语义相反的状态画成同一个样子，
 	// 用户看到 `skills: []` 会以为"这个会话没有技能"，实际是"投给它的全部技能"。
-	var skills, mcps *[]string
+	var skills, mcps, apps *[]string
 	if sel.Skills != nil {
 		v := DerefList(sel.Skills)
 		skills = &v
@@ -281,6 +304,10 @@ func (pl *Plane) SessionCapabilitiesRespOf(rec *SessionRec) *SessionCapabilities
 	if sel.Mcps != nil {
 		v := DerefList(sel.Mcps)
 		mcps = &v
+	}
+	if sel.Apps != nil {
+		v := DerefList(sel.Apps)
+		apps = &v
 	}
 	var expert *string
 	expertMissing := false
@@ -294,5 +321,5 @@ func (pl *Plane) SessionCapabilitiesRespOf(rec *SessionRec) *SessionCapabilities
 			}
 		}
 	}
-	return &SessionCapabilities{Skills: skills, Mcps: mcps, Expert: expert, ExpertMissing: expertMissing, Fingerprint: rec.Fingerprint}
+	return &SessionCapabilities{Skills: skills, Mcps: mcps, Apps: apps, Expert: expert, ExpertMissing: expertMissing, Fingerprint: rec.Fingerprint}
 }

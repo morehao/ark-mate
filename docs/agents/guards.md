@@ -134,7 +134,9 @@
 
 - 再加 **1 条时间口径守卫**（`wire_time_test.go` 的 `TestDTOInstantFieldsAreUnixMillis`，2026-11-05）：`internal/dto/*/*.go` 里字段名以 `At`/`Since` 结尾或叫 `TS`/`Ts` 的必须是 `int64`/`*int64`；非时间的同名键（目前只有 `dtomodel/model_list.go:EffectiveAt`，枚举）逐条登记并双向检查。它挡的是"新加一个 `_at` 字段顺手写 string"——编译与所有既有测试都绿，只是响应里从此有两种时间格式。fail-closed：扫不到 DTO 文件、或一条时刻字段都没命中即失败。反证：把 `SessionResp.CreatedAt` 改回 `string` → 红；把 `EffectiveAt` 的类型改成非 string → 红（登记理由失效）。口径见 [`time.md`](time.md)。
 
-**共 196 条**——加守卫时记得同步这句话。
+- 再加 **3 条 App Slot 运行时守卫**（`appslot_guard_test.go`，2026-11-09 App 体系一期 A+Slot，设计 §5.4 / §6 R1 / G6）：`TestAppSlotImplWhitelisted`（app 定义的 `slots[].impl_id`/`entities[].kind` 必须编译期在册——行为钉：喂一个引用**未登记** impl_id 的 app，断言该 slot FAILED 且未被 apply，正向断言在册 impl 能 applied；挡「Slot 退化成数据驱动的服务定位图」）、`TestAppSlotDisposeOnOff`（app 停用 → OnDispose **逆序**撤销、幂等；行为钉：两 impl 依赖链，撤销顺序 == apply 逆序；把 disposeAll 改正序 → 红；挡 G6「关不干净」）、`TestAppSlotStaysAtLeaf`（静态扫 `internal/core/appslot` 生产源码 import，禁 `internal/service/`·`controller`·`router`·`persistence`·`domain`；挡 R1「Slot 绕过 service 层拿实现」，层表只看方向不看角色故既有守卫不挡）。三条 fail-closed（扫不到源码即失败，防目录改名空转）。反证均实跑确认红、复原后绿。
+
+**共 199 条**——加守卫时记得同步这句话。
 
 ## 测试约定
 

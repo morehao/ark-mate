@@ -43,6 +43,11 @@ type Service struct {
 	// attachments 附件解析端口（v32；nil = memory 模式）。G3：携带附件 id 必须经它解析，
 	// 本层**不**直接用 dao。由装配根经 SetAttachmentResolver 交下来。
 	attachments session.AttachmentResolver
+
+	// appToolScope app 业务工具域解析端口（WP5；nil = 无 app 工具）。
+	// app 工具走独立注入通道（设计 §5.3a），本层只问它"这些 app 绑了哪些可注入域"，
+	// 据此拼一条独立的 `mate mcp app --apps=...` stdio 条目——**绝不并进 platformMcpServers**。
+	appToolScope AppToolScope
 }
 
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。

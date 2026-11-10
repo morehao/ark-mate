@@ -77,6 +77,14 @@ func contractCases() []contractCase {
 		// ——— library ———
 		{"GET", "/v1/mate/library", ""},
 
+		// ——— app 应用定义（一期 A+Slot；memory 模式下写面多回 40501，仍是 JSON 信封） ———
+		{"GET", "/v1/mate/apps", ""},
+		{"POST", "/v1/mate/apps", "{}"},
+		{"GET", "/v1/mate/apps/nope", ""},
+		{"PUT", "/v1/mate/apps/nope", "{}"},
+		{"DELETE", "/v1/mate/apps/nope", ""},
+		{"PATCH", "/v1/mate/apps/nope", "{}"},
+
 		// ——— materials 资料库（v33；memory 模式下多回 40501 material_unavailable，仍是 JSON 信封） ———
 		{"GET", "/v1/mate/materials/nodes", ""},
 		{"GET", "/v1/mate/materials/nodes/nope", ""},

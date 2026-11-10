@@ -80,6 +80,10 @@ type assembly struct {
 	services    Services
 	controllers router.Controllers
 	engine      http.Handler
+
+	// appSlotDispose 本次启动 app slot Reconcile 产出的**逆序撤销栈**（WP6）：进程关闭时执行。
+	// nil = 未 reconcile 或无 slot（Dispose 空操作）。
+	appSlotDispose func()
 }
 
 // steps 声明启动序列（顺序即语义；关闭按它的逆序执行）。
@@ -109,6 +113,12 @@ func (as *assembly) steps() []registry.Step {
 		},
 		{Name: "子进程注册表", Phase: registry.PhaseDomain, Timeout: as.reapTimeout(), Start: as.startProcRegistry},
 		{Name: "定义装载", Phase: registry.PhaseDomain, Critical: true, Timeout: 2 * time.Minute, Start: as.startDefinitions},
+		// App Slot 运行时（WP6）：定义装载后把启用 app 的 slots Reconcile（依赖排序+失败隔离），
+		// 得到逆序撤销栈。非 critical（单 slot 失败已在 Reconcile 内隔离，不阻塞启动）。
+		{
+			Name: "App Slot 运行时", Phase: registry.PhaseDomain,
+			Start: as.startAppSlots, Stop: as.stopAppSlots, StopTimeout: 10 * time.Second,
+		},
 		{Name: "权限记忆恢复", Phase: registry.PhaseDomain, Timeout: 30 * time.Second, Start: as.startPermissionMemories},
 		{Name: "编排参数", Phase: registry.PhaseSettings, Start: as.startRuntimeSettings},
 		{Name: "MCP 网关开关", Phase: registry.PhaseSettings, Start: as.startMcpGateway},

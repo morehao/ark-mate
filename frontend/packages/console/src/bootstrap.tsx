@@ -8,13 +8,31 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { AppShell } from '@ark-mate/ui'
-import { App } from './app'
+import { listApps } from '@ark-mate/api'
 import { loadCapabilityFacts } from './capabilityFacts'
+import { applyAppPagesFromApps, clearAppPages } from './console/appRegistry'
 import { watchDevAssets } from './transport/assetWatch'
 import { renderVersionMismatch, runVersionGate } from './versionGate'
 
-export async function bootstrap(opts: { webBuildId: string }): Promise<void> {
-  const root = document.getElementById('root')
+/**
+ * 从 `/apps` 读应用定义，把带 `page` 的 app 补登进统一注册表（`console/appRegistry.ts`）。
+ *
+ * 纪律（设计 §2.2「封闭静态包」）：只登记页面**元数据**（route/nav/组件名），渲染按组件名
+ * 查编译期组件映射表——绝不按接口字符串动态 import。拉不到 /apps 不抛（只少 app 页）。
+ * 先清旧动态页再补，避免热重载/重拉时累积幽灵入口（内置页不受影响）。
+ */
+async function loadAppPages(): Promise<void> {
+  try {
+    const apps = await listApps()
+    clearAppPages()
+    applyAppPagesFromApps(apps)
+  } catch (err) {
+    // 失败不阻断：内置页照常，动态 app 页缺失即可（不把整个界面挂掉）。
+    console.warn('[appRegistry] 读取 /apps 失败，动态应用页本次不补登：', err)
+  }
+}
+
+export async function bootstrap(opts: { webBuildId: string }): Promise<void> {  const root = document.getElementById('root')
   if (!root) throw new Error('缺少 #root 挂载点')
 
   const gate = await runVersionGate(opts.webBuildId)
@@ -34,6 +52,15 @@ export async function bootstrap(opts: { webBuildId: string }): Promise<void> {
   //   （本机浏览器本该用系统面板却开了应用内对话框）。
   // 失败不阻断：拉不到就按 UNKNOWN 走（原生面板不可用 → 应用内浏览）。
   await loadCapabilityFacts()
+
+  // 应用页面入口：从 /apps 读带 page 的 app，把**页面元数据**补登进统一注册表。
+  // 必须在 `import('./app')` **之前**完成——`appRegistry` 与 `navView` 的 `NAV_ENTRIES`
+  // 在模块加载时即从注册表派生，晚于加载补登的页不会出现在左栏/路由里。
+  // 失败不阻断：拉不到 /apps 就只少 app 页，内置页照常（界面不该因为一份列表而少一块）。
+  await loadAppPages()
+
+  // 注册表补登完成后再动态引入应用树（含 navView / app.tsx 的派生），保证同源派生拿到最终页集。
+  const { App } = await import('./app')
 
   createRoot(root).render(
     <StrictMode>

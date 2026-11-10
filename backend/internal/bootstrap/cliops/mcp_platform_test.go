@@ -9,7 +9,7 @@ import (
 
 // TestMcpPlatformCLI `mate mcp platform` 的进程级用例（与 mcp_automation_test 同款）：
 //   - stdin 送 initialize / tools/list → stdout 逐行是 JSON-RPC 帧（C10 纯度）；
-//   - tools/list 返回**恰十六个工具**：automation_* 六个 + expert_* 六个 + library_* 四个（三域聚合）；
+//   - tools/list 返回**恰二十二个工具**：automation_* 六个 + expert_* 六个 + library_* 四个 + app_* 六个（四域聚合）；
 //   - schema 里**不含 cron**（ADR v35 对 schedule 的约束仍成立）；
 //   - expert schema 带 4096 字节上限与 id 正则（与 ValidateExpert 同口径）；
 //   - stdin EOF → 进程 0 退出。
@@ -80,6 +80,9 @@ func TestMcpPlatformCLI(t *testing.T) {
 		"expert_create", "expert_update", "expert_list",
 		"expert_get", "expert_delete", "expert_set_enabled",
 		"library_list_nodes", "library_node_info", "library_upload", "library_import_artifact",
+		// app 管理面（2026-11-09 App 体系一期，设计 §6 G3 的一次性 16→22）：
+		// 6 个**管理面**工具进 platform 域、恒注入；app 的**业务**工具独立注入，不在此列。
+		"app_create", "app_update", "app_list", "app_get", "app_delete", "app_set_enabled",
 	}
 	for _, n := range want {
 		if _, ok := toolNames[n]; !ok {
@@ -95,6 +98,14 @@ func TestMcpPlatformCLI(t *testing.T) {
 	for _, needle := range []string{`^[a-z0-9]+(-[a-z0-9]+)*$`, `"maxLength":4096`, `"pattern":"^mdl_"`} {
 		if !strings.Contains(createSchema, needle) {
 			t.Fatalf("expert_create schema 缺少 %q\n%s", needle, createSchema)
+		}
+	}
+
+	// app_create schema 的关键约束（与 capability.ValidateApp 同口径：id 正则 + api_version caret）。
+	appCreateSchema := string(toolNames["app_create"])
+	for _, needle := range []string{`^[a-z0-9]+(-[a-z0-9]+)*$`, `"maxLength":64`, `"pattern":"^\\^\\d+(?:\\.\\d+)?$"`} {
+		if !strings.Contains(appCreateSchema, needle) {
+			t.Fatalf("app_create schema 缺少 %q\n%s", needle, appCreateSchema)
 		}
 	}
 }

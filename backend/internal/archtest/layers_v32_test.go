@@ -157,9 +157,16 @@ var v32Layers = map[string]v32Layer{
 	// 专家 MCP 工具面（2026-11-07）：把 svccapability 的专家写面暴露成 MCP Handler（不 import 用例层，
 	// 只认自声明窄端口）。L5 与其它 infra 件同层。
 	"internal/infra/capabilitymcp": {layer: 5, name: "infra/capabilitymcp", sameLayer: true},
+	// app 管理面 MCP 工具面（2026-11-09 App 体系一期）：把 svcapp 的 app 定义写面暴露成 MCP Handler
+	// （不 import 用例层，只认自声明窄端口 Service）。进 platform 域（与 expert 同构），恒注入。
+	"internal/infra/appmcp": {layer: 5, name: "infra/appmcp", sameLayer: true},
 	// 平台能力 MCP 聚合器（2026-11-07）：按域前缀把 automation_* / expert_* 合到一个工具面，
 	// 供 `mate mcp platform` 拉起。只做路由聚合、不碰业务。L5 同层。
 	"internal/infra/platformmcp": {layer: 5, name: "infra/platformmcp", sameLayer: true},
+	// app 业务工具面聚合器（WP5，2026-11-09）：把各 app 的工具域按前缀聚合成独立工具面，
+	// 供 `mate mcp app --apps=...` 拉起（与 platformmcp 同套前缀分派/fail-closed，不并进平台 server）。
+	// 只做路由聚合、不碰业务，L5 与其它 infra 件同层。
+	"internal/infra/apptool": {layer: 5, name: "infra/apptool", sameLayer: true},
 	// 内部模型调用的执行器实现（OpenAI 兼容 HTTP 直连）。契约/值在 L1 `core/llm`，本包只做
 	// "与外面说话"，是 L5 与其它 infra 件同层的实现面。
 	"internal/infra/llm": {layer: 5, name: "infra/llm", sameLayer: true},

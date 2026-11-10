@@ -16,6 +16,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/controller/ctrapp"
 	"github.com/morehao/ark-mate/internal/controller/ctrartifact"
 	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
 	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
@@ -52,6 +53,8 @@ type Controllers struct {
 	Model      ctrmodel.ModelCtr
 	Provider   ctrmodel.ProviderCtr
 	Capability ctrcapability.CapabilityCtr
+	// App 应用定义面（一期 A+Slot，`/apps` 六接口）。
+	App        ctrapp.AppCtr
 	Automation ctrautomation.AutomationCtr
 	Library    ctrlibrary.LibraryCtr
 	Usage      ctrusage.UsageCtr
@@ -154,6 +157,7 @@ func New(d Deps) *gin.Engine {
 	registerSession(rest, ctrls.Session, ctrls.Search, ctrls.Export)
 	registerRuntime(rest, ctrls.Provider, ctrls.Model, ctrls.Runtime)
 	registerCapability(rest, ctrls.Capability)
+	registerApps(rest, ctrls.App)
 	registerAutomation(rest, ctrls.Automation)
 	registerLibrary(rest, ctrls.Library)
 	registerMaterial(rest, ctrls.Material)

@@ -8,14 +8,9 @@ import { NavRail } from './components/NavRail'
 import { StatusBar } from './components/StatusBar'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { NAV_ENTRIES, activeChildOf, isEntryActive, isGroup } from './console/navView'
+import { resolveAppPages } from './console/appRegistry'
 import { useMate } from './store'
 import { ChatPage } from './pages/ChatPage'
-import { AutomationsPage } from './pages/AutomationsPage'
-import { SkillsPage } from './pages/extensions/SkillsPage'
-import { ConnectorsPage } from './pages/extensions/ConnectorsPage'
-import { ExpertsPage } from './pages/extensions/ExpertsPage'
-import { UsagePage } from './pages/UsagePage'
-import { MaterialPage } from './pages/MaterialPage'
 import { PreviewProvider } from './components/preview/PreviewProvider'
 
 /** 全局 toast 的层级。
@@ -181,54 +176,24 @@ export function App() {
                 书签/深链接不会静默落到问答页。 */}
             <Route path="/capabilities" element={<Navigate to="/extensions/skills" replace />} />
             <Route path="/extensions" element={<Navigate to="/extensions/skills" replace />} />
-            <Route
-              path="/extensions/skills"
-              element={
-                <Manage>
-                  <SkillsPage />
-                </Manage>
-              }
-            />
-            <Route
-              path="/extensions/experts"
-              element={
-                <Manage>
-                  <ExpertsPage />
-                </Manage>
-              }
-            />
-            <Route
-              path="/extensions/connectors"
-              element={
-                <Manage>
-                  <ConnectorsPage />
-                </Manage>
-              }
-            />
-            <Route
-              path="/usage"
-              element={
-                <Manage>
-                  <UsagePage />
-                </Manage>
-              }
-            />
-            <Route
-              path="/automations"
-              element={
-                <Manage>
-                  <AutomationsPage />
-                </Manage>
-              }
-            />
-            <Route
-              path="/materials"
-              element={
-                <Manage>
-                  <MaterialPage />
-                </Manage>
-              }
-            />
+            {/* 页面路由**由注册表同源生成**（console/appRegistry.ts）：新增内置页/动态 app 页
+                只在注册表登记，这里不再手写 `<Route>`。每页统一套 `Manage` 内容容器。 */}
+            {resolveAppPages()
+              .filter((def) => def.nav !== null || def.priority === 'app')
+              .map((def) => {
+                const Page = def.component
+                return (
+                  <Route
+                    key={def.id}
+                    path={def.route}
+                    element={
+                      <Manage>
+                        <Page />
+                      </Manage>
+                    }
+                  />
+                )
+              })}
             {/* 设置已不是页面（左栏 footer 菜单 → 居中弹窗）。旧深链接仍然可用：
                 打开对应分节弹窗，然后落回问答页（弹窗是覆盖层，需要底下有个页面）。 */}
             <Route path="/settings" element={<SettingsDeepLink section="general" />} />

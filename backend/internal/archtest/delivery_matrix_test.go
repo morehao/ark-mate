@@ -27,6 +27,10 @@ import (
 // 读出全部 kind，逐个断言 `objdelivery.For` 查得到声明；并断言**未知 kind 必须返回 false**，
 // 把这个查询本身也钉死（一条永远返回 true 的假实现不能蒙混过去）。
 //
+// **例外（v40）**：`DefinitionKindApp` 不纳入断言集。app 属**平台内的组合定义**，不向底座交付
+// （不物化/不注入），只影响平台内默认值计算——设计 §6 G5 已一次性定它不进交付矩阵。排除落在
+// `missingDeliveryKinds` 里（按常量名排除），负例仍用合成的未声明 kind 自证守卫有牙齿。
+//
 // 故意的红：往 `internal/core/object/objdelivery` 的表里删掉任意一个 kind 的声明 →
 // `TestDeliveryMatrixCoversKinds` 必须红（`missingDeliveryKinds` 的负例分支就是它的自证）。
 
@@ -98,6 +102,17 @@ func missingDeliveryKinds(kinds map[string]string) []string {
 	sort.Strings(names)
 	var out []string
 	for _, name := range names {
+		// **排除 `DefinitionKindApp`**（应用定义，v40）：app 属**平台内的组合定义**，不是底座交付物——
+		// 它不物化、不注入底座，只影响平台内的默认值计算（专家是「建会话时的默认值来源」，性质不同，
+		// 仍走 `session_inject`；app 连这一条都没有）。设计 §6 G5 已一次性定：`app` **不纳入**交付矩阵，
+		// `objdelivery.Kinds()` 不返回 `app`。
+		//
+		// 这里按**常量名**排除（而非按取值 "app" 硬编码）——enum 里改取值时排除依旧生效，不会静默失准。
+		// 若哪天 app 真的需要向底座交付东西，这条排除就该删掉并给 objdelivery 补一条声明；在那之前，
+		// 不加排除会让本守卫因 app 无声明而红（这正是它今天要挡的那类「口径没同步」）。
+		if name == "DefinitionKindApp" {
+			continue
+		}
 		kind := kinds[name]
 		d, ok := objdelivery.For(kind)
 		if !ok {

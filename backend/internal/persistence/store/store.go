@@ -76,6 +76,12 @@ type Store struct {
 	experts            *dao.ExpertDao
 	definitionRevision *dao.DefinitionRevisionDao
 
+	// 应用定义（一期 A+Slot，v40）：类型化多列 apps 本体 + app_members 归属关联表。
+	// 与上面那组"body + revision"窄列定义表不同——apps 无 revision 列，CAS 以 definition_revisions.seq
+	// 为准（见 dao/app.go 与 store/app.go）。
+	apps       *dao.AppDao
+	appMembers *dao.AppMemberDao
+
 	// 设置 · 模型（v11）：供应商凭据 + 平台模型清单。
 	providers *dao.ProviderDao
 	models    *dao.ModelDao
@@ -141,6 +147,9 @@ func New(db *gorm.DB) *Store {
 		automations:        dao.NewAutomationDao(getDB),
 		experts:            dao.NewExpertDao(getDB),
 		definitionRevision: dao.NewDefinitionRevisionDao(getDB),
+
+		apps:       dao.NewAppDao(getDB),
+		appMembers: dao.NewAppMemberDao(getDB),
 
 		providers:  dao.NewProviderDao(getDB),
 		models:     dao.NewModelDao(getDB),

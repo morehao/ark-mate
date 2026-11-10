@@ -132,6 +132,9 @@ type CapabilitiesReq struct {
 	//
 	// 用指针区分"没出现这个键"与"出现且为空串"——与 Skills/Mcps 的三态同构。
 	Expert *string `json:"expert,omitempty"`
+	// Apps 会话启用的 app id 白名单（三态：键缺失=未声明→无 app 工具、`[]`=明确不要、非空=启用）。
+	// 与 Skills/Mcps 同构；是 app 业务工具独立注入通道的唯一来源（设计 §5.5）。
+	Apps *[]string `json:"apps,omitempty"`
 }
 
 // HistoryQuery 会话历史分页参数（GET /sessions/:id/history）。

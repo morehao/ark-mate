@@ -63,6 +63,10 @@ func PlatformMCPHandler(cfg config.Config) (mcp.Handler, func() error, error) {
 		"automation": automationmcp.New(autoSvc),
 		"expert":     capabilitymcp.New(capSvc),
 		"library":    libraryHandler,
+		// app 管理面（2026-11-09 App 体系一期）：与 expert 域同性质的管理工具（app_create 等 6 个），
+		// 进 platform 域、恒注入。app 携带的**业务**工具走独立注入通道（WP5），不进本域。
+		// svcapp.AppSvc 与 appmcp.Service 签名相同，直接用 svcapp.NewApp(st) 适配（见 app_mcp.go）。
+		"app": newAppServiceHandler(st),
 	})
 	if err != nil {
 		_ = st.Close()
