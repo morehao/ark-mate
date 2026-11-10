@@ -127,6 +127,13 @@ func loadOne(pkgDir string) (*Package, string) {
 	return &Package{Manifest: m, Dir: pkgDir, EntrypointPath: epPath}, ""
 }
 
+// WithinDir 报告 target 是否在 dir 之内（按 filepath.Clean + Rel 判定，防 `..` 上跳）。
+//
+// 导出供 `internal/infra/appmarket` 复用来源根防越界校验（市场清单的 `source.dir` 必须落在允许
+// 来源根内，防止清单指向 `/etc` 这类系统路径被当包装载）；语义与包内 `withinDir` 完全一致，内部
+// 直接转发，不复制逻辑，避免两套判定口径漂移。
+func WithinDir(dir, target string) bool { return withinDir(dir, target) }
+
 // withinDir 报告 target 是否在 dir 之内（按 filepath.Clean + Rel 判定，防 `..` 上跳）。
 func withinDir(dir, target string) bool {
 	dirClean := filepath.Clean(dir)

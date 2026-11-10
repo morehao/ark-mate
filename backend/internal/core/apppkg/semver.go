@@ -57,6 +57,21 @@ func parseSemanticVersion(s string) (semanticVersion, error) {
 	return semanticVersion{major: nums[0], minor: nums[1], patch: nums[2]}, nil
 }
 
+// CompareVersions 比较两个语义化版本串（`v?major(.minor(.patch)?)?`，忽略预发布/构建后缀），
+// 复用本包的排序口径，供 `svcapp` 的市场 updatable/installable 判定复用（不另写一套比较）。
+// 返回 a<b → -1、a==b → 0、a>b → +1；任一无法解析 → error（调用方 fail-closed 降级为「未知」）。
+func CompareVersions(a, b string) (int, error) {
+	va, err := parseSemanticVersion(a)
+	if err != nil {
+		return 0, fmt.Errorf("apppkg: 解析版本 %q 失败: %w", a, err)
+	}
+	vb, err := parseSemanticVersion(b)
+	if err != nil {
+		return 0, fmt.Errorf("apppkg: 解析版本 %q 失败: %w", b, err)
+	}
+	return compareSemanticVersion(va, vb), nil
+}
+
 // compareSemanticVersion 返回 a 相对 b 的顺序：a<b → -1，a==b → 0，a>b → +1。
 func compareSemanticVersion(a, b semanticVersion) int {
 	if a.major != b.major {
