@@ -20,6 +20,7 @@ var notFoundCodes = map[string]bool{
 	"mcp_not_found":        true,
 	"skill_not_found":      true,
 	"expert_not_found":     true,
+	"app_not_found":        true,
 	"provider_not_found":   true,
 	"automation_not_found": true,
 	// 队列三动作（ADR-10）：重排 / 立即发送 / 取出编辑 打到一个**已不在队列里**的队项。

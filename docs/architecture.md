@@ -483,7 +483,7 @@ MCP 分**内置**与**用户注册**两类。用户注册的走下面的明文/�
 
 | server / 子命令 | 内容 | 怎么用 |
 | --- | --- | --- |
-| `mate-platform`（`mate mcp platform`，**默认唯一注入的一条**） | 聚合三域共 16 个工具：`automation_*`（定时任务 6）+ `expert_*`（专家 6）+ `library_*`（资料库 4） | 会话自动注入（stdio，Command = 本进程可执行文件） |
+| `mate-platform`（`mate mcp platform`，**默认唯一注入的一条**） | 聚合四域共 22 个工具：`automation_*`（定时任务 6）+ `expert_*`（专家 6）+ `library_*`（资料库 4）+ `app_*`（应用定义管理面 6） | 会话自动注入（stdio，Command = 本进程可执行文件） |
 | `mate mcp material` | 资料库文件级工具 + 产物收录（`library_*` 单独一条） | 独立入口，调试/兼容；与 platform 共用同一套装配 |
 | `mate mcp automation` | 定时任务工具（`automation_*` 单独一条） | 独立入口，调试/兼容 |
 | `mate mcp bridge --runtime <id>` | 远程 MCP 网关：代连用户注册的远程 server，把它拼成一条 stdio 条目给底座 | 远程 MCP 经它注入（见下） |

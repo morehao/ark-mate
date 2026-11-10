@@ -9,12 +9,7 @@
  * 例外：「设置」不是路由入口（它是左栏 footer 的菜单 + 居中弹窗），定义在 `console/settingsView.tsx`。
  */
 import type { ReactNode } from 'react'
-import {
-  AppstoreOutlined,
-  BarChartOutlined,
-  ClockCircleOutlined,
-  FolderOpenOutlined,
-} from '@ant-design/icons'
+import { EXTENSIONS_GROUP, resolveAppPages } from './appRegistry'
 
 export interface NavLeaf {
   readonly id: string
@@ -42,22 +37,60 @@ export interface NavGroup {
 
 export type NavEntry = NavLeaf | NavGroup
 
-export const NAV_ENTRIES: readonly NavEntry[] = [
-  {
-    id: 'extensions',
-    label: '扩展',
-    order: 20,
-    icon: <AppstoreOutlined />,
-    children: [
-      { id: 'experts', label: '专家', to: '/extensions/experts', order: 21 },
-      { id: 'skills', label: '技能', to: '/extensions/skills', order: 22 },
-      { id: 'connectors', label: '连接器', to: '/extensions/connectors', order: 23 },
-    ],
-  },
-  { id: 'materials', label: '资料库', to: '/materials', order: 30, icon: <FolderOpenOutlined /> },
-  { id: 'automations', label: '定时任务', to: '/automations', order: 40, icon: <ClockCircleOutlined /> },
-  { id: 'usage', label: '用量', to: '/usage', order: 50, icon: <BarChartOutlined /> },
-]
+/**
+ * 从统一注册表（`console/appRegistry.ts`）**派生**左栏条目。
+ *
+ * 本文件不再手写 `to` / `label` / 图标的字面量——新增页面只在注册表登记一条，
+ * `NAV_ENTRIES` 与 `app.tsx` 的 `<Route>` 自动跟随（同源）。派生的规则：
+ *   - `nav` 为空的页（纯路由页）不进左栏；
+ *   - `nav.group` = `extensions` 的二级项聚成「扩展」组（组元数据取自 `EXTENSIONS_GROUP`）；
+ *   - 其余 `nav` 为顶层一级项，图标取 `nav.icon`；
+ *   - 同级按 `nav.order` 升序（`resolveAppPages` 已排好，这里只做分桶）。
+ */
+function buildNavEntries(): readonly NavEntry[] {
+  const leaves: NavLeaf[] = []
+  const groupChildren = new Map<string, NavLeaf[]>()
+
+  for (const def of resolveAppPages()) {
+    if (!def.nav) continue
+    const leaf: NavLeaf = {
+      id: def.id,
+      label: def.nav.label,
+      to: def.route,
+      order: def.nav.order,
+      icon: def.nav.group ? undefined : def.nav.icon,
+    }
+    if (def.nav.group) {
+      const bucket = groupChildren.get(def.nav.group) ?? []
+      bucket.push(leaf)
+      groupChildren.set(def.nav.group, bucket)
+    } else {
+      leaves.push(leaf)
+    }
+  }
+
+  const entries: NavEntry[] = [...leaves]
+  // 「扩展」组：仅当有二级项时出现（空组没有意义）。组元数据固定取自 EXTENSIONS_GROUP。
+  const extChildren = groupChildren.get('extensions')
+  if (extChildren && extChildren.length > 0) {
+    entries.push({
+      id: EXTENSIONS_GROUP.id,
+      label: EXTENSIONS_GROUP.label,
+      order: EXTENSIONS_GROUP.order,
+      icon: EXTENSIONS_GROUP.icon,
+      children: [...extChildren].sort((a, b) => a.order - b.order),
+    })
+  }
+
+  return entries.sort((a, b) => a.order - b.order)
+}
+
+/**
+ * 左栏导航条目（唯一事实源，**由注册表派生**）。模块加载时算一次；
+ * 动态 app 页补登后如需刷新左栏，由消费方重新 import 本模块取最新值（当前 app 页
+ * 在 bootstrap 期一次性补登，先于挂载，故此处取值即为最终态）。
+ */
+export const NAV_ENTRIES: readonly NavEntry[] = buildNavEntries()
 export function isGroup(entry: NavEntry): entry is NavGroup {
   return 'children' in entry
 }

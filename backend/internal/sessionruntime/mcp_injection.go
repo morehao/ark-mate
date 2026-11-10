@@ -61,6 +61,10 @@ type mcpInjectionPlan struct {
 func (s *Service) planMcpInjection(runtimeID string, sel *session.CapabilitySelection) mcpInjectionPlan {
 	plan := s.planMcpInjectionCore(runtimeID, sel)
 	s.appendPlatformMcpServers(&plan, runtimeID, sel)
+	// WP5：app 业务工具走**独立注入通道**（设计 §5.3a）——按会话 app scope 追加一条 `mate mcp app`
+	// stdio 条目。与平台内置**并列且互不影响**：默认零注入、绝不改 platformMcpServers 的恒注入逻辑。
+	// 两者都进 plan.Direct ⇒ 注入面（McpServersFor）与指纹（CapabilityFactsFor）共用同一份。
+	s.appendAppMcpServers(&plan, runtimeID, sel)
 	return plan
 }
 

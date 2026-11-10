@@ -9,6 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/attachmentstore"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/runtime"
+	"github.com/morehao/ark-mate/internal/service/svcapp"
 	"github.com/morehao/ark-mate/internal/service/svcartifact"
 	"github.com/morehao/ark-mate/internal/service/svcattachment"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
@@ -57,6 +58,8 @@ type Services struct {
 
 	// ——— 能力 / 自动化 / Library ———
 	Capability svccapability.CapabilitySvc
+	// App 应用定义面（一期 A+Slot，`/apps` 六接口）。
+	App        svcapp.AppSvc
 	Automation svcautomation.AutomationSvc
 	Library    svclibrary.LibrarySvc
 
@@ -157,6 +160,7 @@ func (f Facts) BuildServices() Services {
 			svccapability.NewTools(as.Planes.Capabilities),
 			svccapability.NewServers(as.Planes.Capabilities, as.Planes.Mcp, as.Planes.McpSecrets),
 		),
+		App:        svcapp.NewApp(appStore(as.Store)),
 		Automation: svcautomation.New(as.Planes.Automation),
 		Library: svclibrary.NewLibrary(as.Planes.Capabilities, as.Planes.Skills, as.Runtime,
 			as.Planes.McpSecrets, as.Planes.McpGatewayEnabled),
@@ -200,6 +204,17 @@ func sourceFactsReader(st *store.Store) svcsystem.SourceFactsReader {
 }
 
 func modelStore(st *store.Store) svcmodel.ModelStore {
+	if st == nil {
+		return nil
+	}
+	return st
+}
+
+// appStore 把 `*store.Store` 当 `svcapp.Store` 交出去（v3.1 P4 端口转换）。
+//
+// 必须现判 nil：typed-nil（`var st *store.Store = nil` 装进接口）在接口里**不是 nil**，
+// svcapp 里那句 `if s.store == nil { 返回不可用 }` 会失效——memory 模式下会变成一次对 nil 的方法调用。
+func appStore(st *store.Store) svcapp.Store {
 	if st == nil {
 		return nil
 	}

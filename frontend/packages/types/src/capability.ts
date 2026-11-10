@@ -390,3 +390,47 @@ export interface ExpertToggleResp {
   id: string
   enabled: boolean
 }
+
+// ——— 应用定义面（一期 A+Slot；GET/POST/PUT/DELETE/PATCH /apps）———
+//
+// 应用是**平台内的组合/归属定义**（成员 + 工具域 + 页面入口 + 启停），不等于专家那种
+// 会话级预设：一个 app 拥有成员、带前端页面、可整体启停。形状见
+// backend/internal/dto/dtoapp/app.go::AppResp。
+
+/** 应用定义的前端页面入口（`page` 字段；仅声明了页面的 app 有）。 */
+export interface AppPage {
+  nav_label: string
+  route: string
+  component: string
+}
+
+/** 应用定义（列表与详情读面；列表抹掉 settings_schema 正文，用 has_page 标有无页面）。 */
+export interface App {
+  id: string
+  name: string
+  description?: string
+  avatar?: string
+  tags?: string[]
+  members?: {
+    experts?: string[]
+    automations?: string[]
+    skills?: string[]
+    mcps?: string[]
+  }
+  entities?: Array<{ kind: string; table?: string; id_prefix?: string }>
+  tool_domains?: string[]
+  slots?: Array<{ impl_id: string }>
+  /** 前端页面入口（列表项不返回全量，用 has_page 判定；详情返回）。 */
+  page?: AppPage
+  /** 应用级配置（仅详情返回）。 */
+  settings_schema?: string
+  api_version?: string
+  enabled: boolean
+  /** 是否声明了前端页面入口（列表标记；不回 page 全量）。 */
+  has_page: boolean
+  /** 写面当前版本（= 最新审计 seq；0 = 从未写过的旧值）。 */
+  revision: number
+  /** Unix 毫秒（`objtime.Milli`；前端 `new Date(ms)` 零换算）。 */
+  created_at: number
+  updated_at: number
+}

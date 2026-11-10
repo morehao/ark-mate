@@ -804,6 +804,10 @@ var schemaMigrations = []migration{
 	// v39 的版本步本体在 `migrate_v39.go`（models 补 `supports_reasoning`/`reasoning_efforts`/
 	// `default_effort` 三列：思考能力声明，落 dsh 的 reasoningEfforts/reasoning——理由写在该文件头）。
 	migrationV39,
+
+	// v40 本体在 migrate_v40.go（应用体系：新增 `apps` + `app_members` 两表——App 定义 + 成员归属，
+	// 理由写在该文件头）。
+	migrationV40,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

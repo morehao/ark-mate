@@ -37,7 +37,7 @@ ACP 全 agent 必支持）。平台在 `sessionruntime/platform_mcp.go` 的 `app
 工具名 = **域前缀 + `_` + 动作**。聚合器按**首个下划线前的段**分派（`expert_set_enabled` 的域是
 `expert`，不是 `expert_set`；`library_list_nodes` 的域是 `library`）。新增域必须选一个**不含下划线**的前缀。
 
-当前三域：`automation_*`（定时任务，6）+ `expert_*`（专家，6）+ `library_*`（资料库，4），共 16 个工具。
+当前四域：`automation_*`（定时任务，6）+ `expert_*`（专家，6）+ `library_*`（资料库，4）+ `app_*`（应用定义，6），共 22 个工具。
 
 ### 3.1 `automation_*`（定时任务）
 
@@ -87,6 +87,30 @@ ACP 全 agent 必支持）。平台在 `sessionruntime/platform_mcp.go` 的 `app
 提供给模型的工具面"——因此与 expert/automation **同在一个 `mate-platform` server 下**，靠 `library_`
 前缀区分（对齐底座把 fs/bash/schedule 等不同性质工具平铺在一个工具面的做法）。
 
+### 3.4 `app_*`（应用定义，管理面）
+
+| 工具 | 语义 |
+|---|---|
+| `app_create` | 新建应用（组合既有专家/自动化/技能/MCP，可选声明实体/工具域/slot/页面/settings/api_version） |
+| `app_update` | 增量改（`id` 不可改：要换 id 就删掉重建） |
+| `app_list` | 列表（含禁用；**不含 `settings_schema` 正文**，只有 `has_page` 标记） |
+| `app_get` | 详情（含 `settings_schema` 全文与 `page`） |
+| `app_delete` | 删除（幂等） |
+| `app_set_enabled` | 启用/禁用（禁用只影响新会话/新注入，不删定义、不影响历史会话） |
+
+应用字段与 `capability.ValidateApp`（`backend/internal/core/capability/app.go`）**同口径**：
+`id` 正则 `^[a-z0-9]+(-[a-z0-9]+)*$` ≤64、`name` 1–40、`description` ≤120、`avatar` 枚举
+`spark|chart|code|pen|search|briefcase`、`tags` ≤8 每个 ≤20、`members{experts,automations,skills,mcps}`
+每类 ≤50、`entities` ≤16（`kind` 词法 `^[a-z][a-z0-9_]*$`，须在 `appslot.KnownEntities` 在册）、
+`tool_domains` ≤16（**单段小写字母数字、不含下划线**——前缀分派要求）、`slots` ≤16（`impl_id` 须在
+`appslot.KnownImpls` 在册）、`page{nav_label,route,component}` 三字段齐备且 `route` 以 `/` 开头、
+`api_version` 为 caret 范围（如 `^1`），服务端是唯一闸门（`40001 app_invalid`）。
+
+> **管理面 ≠ 业务面（务必分清）**：上面 6 个是**管理面**工具（管"定义"），与 `expert_*` 同性质，
+> 进 `platform` 域、**恒注入**（任何会话都该能建/改应用定义）。而某个 app **携带的业务工具**
+> （如 `appfoo_query`）走**逐 app 独立注入**通道（`infra/apptool` + `sessionruntime.appendAppMcpServers`），
+> **绝不**进 `platform` 域——否则对所有会话恒定注入、session 白名单收不窄、单 app 停用无效。
+
 ## 4. 错误码
 
 服务端是唯一闸门，工具把服务端错误**透传成 `isError` 结果**（模型看得到原因，会话不炸），
@@ -95,10 +119,12 @@ ACP 全 agent 必支持）。平台在 `sessionruntime/platform_mcp.go` 的 `app
 | 码 | 含义 | 典型触发 |
 |---|---|---|
 | `40001 definition_invalid` | 定义被拒 | id 非法 / name 超长 / `instructions` 超字节或含危险标记 |
+| `40001 app_invalid` | 应用定义被拒 | id 非法 / 上限超 / `entities[].kind` 不在册 / `slots[].impl_id` 不在册 / 危险标记 |
 | `40001 invalid_param` | 参数非法 | 写面 body 结构错、id 与路径不一致 |
 | `40901 expert_exists` | 新建时 id 已存在 | `expert_create` 撞已有 id（**绝不覆盖**） |
+| `40901 app_exists` | 新建时 id 已存在 | `app_create` 撞已有 id（**绝不覆盖**） |
 | `40901 definition_changed` | CAS 失败 | 并发写抢先（绝不 last-write-wins） |
-| `40401` | 目标不存在 | `expert_update` 未命中（平台不顺便新建） |
+| `40401` | 目标不存在 | `expert_update` / `app_update` 未命中（平台不顺便新建） |
 | `automation_exists` / `delivery_*` | 定时任务侧 | 见 `docs/agents/error-codes.md` 与自动化设计 |
 
 协议层错误（工具名不存在 / 已停用）走 MCP 的 `-32602`（`mcp.ErrToolNotFound`），与"工具跑了但

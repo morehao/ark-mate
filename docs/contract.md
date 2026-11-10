@@ -95,6 +95,12 @@ REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`co
 | PUT | `/experts/:id` | 覆盖写专家定义：只改 body 里出现的键（未出现的保留、`null` 删键、未知键保留），路径 id 与 body id 不一致 → 40000；行 `revision` CAS 冲突 → 40901 `definition_changed` |
 | DELETE | `/experts/:id` | 删专家定义（幂等：不存在 → `deleted:false` 且 code=0）；已建会话按创建时物化的技能/MCP 快照继续生效，不受影响 |
 | PATCH | `/experts/:id` | `{enabled}` 启停专家：禁用只影响新选择，不影响已建会话 |
+| GET | `/apps` | **应用定义（一期 A+Slot）**列表：`id`/`name`/`description`/`avatar`/`tags`/`members`/`entities`/`tool_domains`/`slots`/`page`/`api_version`/`enabled`/`has_page`（派生）/`revision`/`created_at`/`updated_at`（后两者 Unix 毫秒）；按 `id` 升序，含禁用（UI 标灰）；**不返回 settings_schema 正文** |
+| GET | `/apps/:id` | 应用详情：额外返回 `settings_schema` 全量；不存在 → 40401 `app_not_found` |
+| POST | `/apps` | 新建应用定义（body = 应用定义，`id` 必填，`^[a-z0-9]+(-[a-z0-9]+)*$`、≤64）：先 `capability.ValidateApp`（name 1–40、description ≤120、tags ≤8×≤20、avatar 枚举、members 去重升序每类 ≤50、entities/slots/tool_domains 词法与上限、api_version caret、page 三字段齐备）→ 再**白名单在册判断**（`entities[].kind ∈ appslot.KnownEntities`、`slots[].impl_id ∈ appslot.KnownImpls`）→ 事务写 `apps` 行 + 重建 `app_members`（members 四类 + entity）+ 一条 `definition_revisions`(kind=app)；id 已存在 → 40901 `app_exists`，校验/白名单拒绝 → 40001 `app_invalid` 且零写入 |
+| PUT | `/apps/:id` | 覆盖写应用定义：只改 body 里出现的键（未出现的保留、`null` 删键），路径 id 与 body id 不一致 → 40000；以 `definition_revisions.seq` 为当前版本做 CAS（`apps` 无 revision 列），不中 → 40901 `definition_changed`（绝不 last-write-wins）；不存在 → 40401 `app_not_found` |
+| DELETE | `/apps/:id` | 删应用定义（幂等：不存在 → `deleted:false` 且 code=0）：解绑 `app_members`（按设计 §5.2，默认不动成员定义、只解除归属） |
+| PATCH | `/apps/:id` | `{enabled}` 启停应用：禁用只影响新选择，不影响已建会话；不存在 → 40401 `app_not_found` |
 | GET | `/skills` · `/mcps` · `/tools` | 能力数据面目录（Skill/MCP/Tool；MCP 含探测状态与 `tool_count`、`enabled`/`scope`；skill 含 `enabled` 与正文扫描 `warnings`） |
 | POST | `/skills` | 新建 skill 定义（body = skill 定义，`id` 必填）：**先过注册闸门**（正文扫描、`runtimes` 去重、**id 词法**）→ 通过才提交给载体（memory = 原子替换文件、sqlite = 事务插行 + 变更审计，未知键一律保留）→ 最后才更新内存；id 已存在 → 40901 `skill_exists`，闸门拒绝 → 40001 `definition_invalid` 且**零写入**（草稿从未提交，无需回滚）。**id 词法是底座契约，不是平台审美**：须匹配 `^[a-z0-9]+(-[a-z0-9]+)*$` 且 ≤64 位——dsh 的 `dsh-skill` 对 skill 文件 frontmatter 的 `name` 强制这一条，不合规只打一条 warn 就**静默丢弃整条**，而平台物化正是把 id 原样写成 `name`，于是放行不合规 id 等于造出「物化体检报 `in_sync`、底座永远读不到」的 skill（2026-10-08 实测确认）；物化层同规则再拦一道（导出 API 被直接调用也不放行）。MCP/tool 的 id 规则不受此波及 |
 | POST | `/skills/import` | **技能包导入（D1）**：`multipart/form-data`，字段 `file=<id>.zip`（≤20 MiB）。包内**只允许 `SKILL.md`**（根目录或唯一一层包装目录；`__MACOSX/`、`.DS_Store` 这类打包元数据忽略，额外的脚本/资源直接拒绝——「导入成功但附件没落盘」是静默丢失）。`SKILL.md` 必须有 YAML front matter：`name`（规范化后就是定义 id，须能折成 `^[a-z0-9]+(-[a-z0-9]+)*$`）、`description`（必填），可选 `title` 作展示名。解析/校验失败 → 40001 `definition_invalid` 且**零字节落盘**；同名 id → 40901 `skill_exists`（**不覆盖**）；正文 critical → 40001 且零写入。**写面不新开一条路**：解析结果折成与 `POST /skills` 相同的请求体后调用同一条 `WriteSkill`，所以「上传」与「手填」经过的闸门逐条相同 |
@@ -164,6 +170,9 @@ REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`co
 | 专家已被禁用（建会话引用） | `40001` | `expert_disabled` | 到「扩展 · 专家」启用，或换一个 |
 | id 已被占用 / 读写窗口内被外部改动 | `40901` | `*_exists` · `definition_changed` | 换 id 或刷新后重试（**平台绝不 last-write-wins**） |
 | 未配置能力目录（**仅 memory 模式**） | `40001` | `capability_dir_unset` | 设 `MATE_CAPABILITIES`；不静默"内存生效"（sqlite 模式的定义在 DB 里，写面不需要目录） |
+| **应用定义**（`/apps`）id 已被占用 | `40901` | `app_exists` | 换 id，或改它用 `PUT /apps/:id`（**绝不覆盖**） |
+| **应用定义**（`/apps`）定义被拒（词法/上限不过，或 `entities[].kind`/`slots[].impl_id` 不在白名单在册） | `40001` | `app_invalid` | 改定义内容重试；**被拒的定义零写入** |
+| **应用定义**（`GET/PUT/PATCH/DELETE /apps/:id`）目标不存在 | `40401` | `app_not_found` | 刷新应用列表后重选 |
 
 **写面的载体按持久层模式分叉（M6-3）**：`MATE_STORE=sqlite` 时能力定义的事实源是 DB——
 `skills`/`mcp_servers` 两张表**就是定义本身**（`id` + 完整 `body` + `revision`），写面走

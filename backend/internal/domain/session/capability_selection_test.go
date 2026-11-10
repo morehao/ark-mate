@@ -130,3 +130,86 @@ func TestMarshalCapabilitySelectionKeepsDeclaredEmpty(t *testing.T) {
 		t.Fatalf("{} 读回应是「声明了但不限制」，got %+v", parsed)
 	}
 }
+
+// ——— WP5：Apps 维度（app 业务工具独立注入通道的唯一来源）———
+//
+// Apps 三态与 Skills/Mcps 同构，但语义更硬：nil=未声明→无 app 工具、`[]`=明确不要、非空=启用这些 app。
+// 它进 `capability_json` 列（落库）与代际指纹——三态在序列化往返后必须逐字保持（否则"明确不要"会被
+// 悄悄抹成"未声明"，反过来"未声明"会被写成空集），这是"默认零注入"能不能守住的前提。
+
+// TestAppsPatchTriState 补丁对 Apps 三态（不改 / 回未声明 / 空集 / 白名单）。
+func TestAppsPatchTriState(t *testing.T) {
+	current := &CapabilitySelection{Apps: ids("b", "a")}
+
+	// 空补丁不动 Apps（但保留并规范化）。
+	same := ApplyCapabilityPatch(current, CapabilityPatch{})
+	if same.Apps == nil || len(*same.Apps) != 2 {
+		t.Fatalf("空补丁应保留 apps，got %+v", same.Apps)
+	}
+
+	// null → 回未声明。
+	cleared := ApplyCapabilityPatch(current, CapabilityPatch{Apps: OptionalIDs{Set: true, Value: nil}})
+	if cleared.Apps != nil {
+		t.Fatalf("apps null 应回未声明，got %+v", cleared.Apps)
+	}
+
+	// [] → 明确不要（非 nil 空集）。
+	empty := ApplyCapabilityPatch(current, CapabilityPatch{Apps: OptionalIDs{Set: true, Value: ids()}})
+	if empty.Apps == nil || len(*empty.Apps) != 0 {
+		t.Fatalf("apps [] 应保留成非 nil 空集，got %+v", empty.Apps)
+	}
+
+	// 白名单规范化（去空/去重/升序）。
+	list := ApplyCapabilityPatch(current, CapabilityPatch{Apps: OptionalIDs{Set: true, Value: ids("b", " ", "a", "b")}})
+	if got := *list.Apps; len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("apps 白名单应规范化，got %v", got)
+	}
+}
+
+// TestAppsMarshalParseRoundTrip 三态经 capability_json 往返逐字保持。
+func TestAppsMarshalParseRoundTrip(t *testing.T) {
+	// 未声明（nil）：整体未声明 → 空串。
+	if got := MarshalCapabilitySelection(&CapabilitySelection{}); got != "{}" {
+		t.Fatalf("无 apps 的声明选定应为 {}，got %q", got)
+	}
+
+	// 非空白名单：往返后 Apps 与顺序（规范化升序）保持。
+	raw := MarshalCapabilitySelection(&CapabilitySelection{Apps: ids("gamma", "alpha")})
+	back := ParseCapabilitySelection(raw)
+	if back == nil || back.Apps == nil {
+		t.Fatalf("apps 白名单往返丢失，raw=%q got=%+v", raw, back)
+	}
+	if got := *back.Apps; len(got) != 2 || got[0] != "alpha" || got[1] != "gamma" {
+		t.Fatalf("apps 白名单应规范化升序往返，got %v", got)
+	}
+
+	// 空集（[]）：必须往返成**非 nil 空集**，不能塌成 nil（"明确不要" ⇄ "未声明" 是两个代际）。
+	rawEmpty := MarshalCapabilitySelection(&CapabilitySelection{Apps: ids()})
+	backEmpty := ParseCapabilitySelection(rawEmpty)
+	if backEmpty == nil || backEmpty.Apps == nil || len(*backEmpty.Apps) != 0 {
+		t.Fatalf("apps [] 往返后应仍是非 nil 空集，raw=%q got=%+v", rawEmpty, backEmpty)
+	}
+}
+
+// TestAppsEmptyAndAppIDs Empty 把 Apps 计入；AppIDs 三态 nil-safe。
+func TestAppsEmptyAndAppIDs(t *testing.T) {
+	if (&CapabilitySelection{Apps: ids()}).Empty() {
+		t.Fatal("声明了 apps（哪怕空集）就不算 Empty")
+	}
+	if (&CapabilitySelection{Apps: ids("x")}).Empty() {
+		t.Fatal("带 apps 白名单不算 Empty")
+	}
+	if (&CapabilitySelection{}).Empty() != true {
+		t.Fatal("四 kind 全未声明才算 Empty")
+	}
+
+	if got := (&CapabilitySelection{}).AppIDs(); got != nil {
+		t.Fatalf("apps nil → AppIDs 应返回 nil，got %v", got)
+	}
+	if got := (&CapabilitySelection{Apps: ids()}).AppIDs(); got == nil || len(got) != 0 {
+		t.Fatalf("apps [] → AppIDs 应返回非 nil 空切片，got %v", got)
+	}
+	if got := (&CapabilitySelection{Apps: ids("a", "b")}).AppIDs(); len(got) != 2 {
+		t.Fatalf("apps 白名单 → AppIDs 应返回两项，got %v", got)
+	}
+}

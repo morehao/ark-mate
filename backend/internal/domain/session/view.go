@@ -39,6 +39,8 @@ type SessionItem struct {
 type SessionCapabilities struct {
 	Skills *[]string
 	Mcps   *[]string
+	// Apps 会话启用的 app id 白名单（§5.5；nil = 未声明 → 无 app 工具，`[]` = 明确不要，非空 = 启用）。
+	Apps *[]string
 	// Expert 会话钉住的专家 id（nil = 未声明；`""` = 明确不用；非空 = id）。
 	Expert *string
 	// ExpertMissing 专家定义已删除（能力仍按创建时物化的列表生效）。

@@ -201,6 +201,91 @@
   },
   {
     "method": "GET",
+    "path": "/v1/mate/apps",
+    "status": 200,
+    "code": 0,
+    "msg": "success",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "array",
+    "data_len": 0
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/apps",
+    "status": 200,
+    "code": 50201,
+    "msg": "能力数据面未装配",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mate/apps/nope",
+    "status": 200,
+    "code": 50201,
+    "msg": "能力数据面未装配",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PUT",
+    "path": "/v1/mate/apps/nope",
+    "status": 200,
+    "code": 50201,
+    "msg": "能力数据面未装配",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/mate/apps/nope",
+    "status": 200,
+    "code": 50201,
+    "msg": "能力数据面未装配",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "PATCH",
+    "path": "/v1/mate/apps/nope",
+    "status": 200,
+    "code": 50201,
+    "msg": "能力数据面未装配",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
     "path": "/v1/mate/materials/nodes",
     "status": 200,
     "code": 40501,

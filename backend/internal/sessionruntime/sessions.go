@@ -29,7 +29,7 @@ func capabilitySelectionFromReq(req *dtosession.CapabilitiesReq) *session.Capabi
 		return nil
 	}
 	// P3c：选定值对象与规范化都在 `domain/session`（`NormalizeIDs` 是那条规则的唯一实现）。
-	return &session.CapabilitySelection{Skills: session.NormalizeIDs(req.Skills), Mcps: session.NormalizeIDs(req.Mcps), Expert: req.Expert}
+	return &session.CapabilitySelection{Skills: session.NormalizeIDs(req.Skills), Mcps: session.NormalizeIDs(req.Mcps), Expert: req.Expert, Apps: session.NormalizeIDs(req.Apps)}
 }
 
 // CreateSession 在 agent 对应 runtime 上建立会话，若携带 prompt 则同步发起首轮

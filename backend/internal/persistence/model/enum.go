@@ -122,6 +122,12 @@ const (
 	DefinitionKindProvider = "provider"
 	// DefinitionKindModel 定义种类：平台模型清单条目（设置 · 模型；definition_revisions.kind）。
 	DefinitionKindModel = "model"
+	// DefinitionKindApp 定义种类：app（应用定义；v40；definition_revisions.kind）。
+	//
+	// 与 skill/mcp/expert 一样属「用户可编辑定义」族（本族口径见上）。但 app 是**平台内的组合定义**：
+	// 它不向底座交付任何东西（不物化/不注入），只影响平台内的默认值计算，因此**不进交付矩阵**
+	// （`internal/archtest/delivery_matrix_test.go` 显式把它从「每种 kind 必须有交付声明」的取样里排除）。
+	DefinitionKindApp = "app"
 
 	// DefinitionActionCreate 新建定义。
 	DefinitionActionCreate = "create"

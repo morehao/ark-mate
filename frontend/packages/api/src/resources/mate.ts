@@ -1,6 +1,7 @@
 import type { Capabilities } from '@ark-mate/desktop-contract'
 import { http } from '../request'
 import type {
+  App,
   Automation,
   AutomationDeleteResp,
   AutomationPreviewResp,
@@ -403,6 +404,16 @@ export const deleteExpert = (id: string): Promise<ExpertDeleteResp> =>
 /** 启停专家。 */
 export const setExpertEnabled = (id: string, enabled: boolean): Promise<ExpertToggleResp> =>
   http.patch<ExpertToggleResp>(`/mate/experts/${encodeURIComponent(id)}`, { enabled })
+
+/**
+ * 列出全部应用定义（含禁用；每项带派生 `has_page`，带 `page` 的 app 会回 `page` 全量，
+ * 前端据此把页面入口补登进统一注册表 `console/appRegistry.ts`）。
+ */
+export const listApps = (): Promise<App[]> => http.get<App[]>('/mate/apps')
+
+/** 读单个应用定义详情（含 settings_schema / page 全量）。 */
+export const getApp = (id: string): Promise<App> =>
+  http.get<App>(`/mate/apps/${encodeURIComponent(id)}`)
 
 export const listTools = (): Promise<Tool[]> => http.get<Tool[]>('/mate/tools')
 

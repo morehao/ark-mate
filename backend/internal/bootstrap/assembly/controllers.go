@@ -1,6 +1,7 @@
 package assembly
 
 import (
+	"github.com/morehao/ark-mate/internal/controller/ctrapp"
 	"github.com/morehao/ark-mate/internal/controller/ctrartifact"
 	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
 	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
@@ -49,6 +50,7 @@ func (s Services) BuildControllers(origin *middleware.OriginPolicy, hostFacts fu
 		Model:      ctrmodel.NewModelCtr(s.Model, s.ModelDeclared),
 		Provider:   ctrmodel.NewProviderCtr(s.Provider, s.ProviderProbe),
 		Capability: ctrcapability.NewCapabilityCtr(s.Capability),
+		App:        ctrapp.NewAppCtr(s.App),
 		Automation: ctrautomation.NewAutomationCtr(s.Automation),
 		Library:    ctrlibrary.NewLibraryCtr(s.Library),
 		Usage:      ctrusage.NewUsageCtr(s.Usage),
