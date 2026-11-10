@@ -1,5 +1,5 @@
 // 应用壳（console.html .app）：左栏（导航 + 会话区 + 状态）+ WS reconnecting 横幅 + 路由区 + 全局 toast。
-import { useEffect, type ReactNode } from 'react'
+import { Suspense, useEffect, type ReactNode } from 'react'
 import { MenuOutlined } from '@ant-design/icons'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { tokens } from '@ark-mate/ui'
@@ -188,7 +188,11 @@ export function App() {
                     path={def.route}
                     element={
                       <Manage>
-                        <Page />
+                        <Suspense
+                          fallback={<div style={{ padding: 24, color: 'var(--text2,#6b7280)' }}>正在加载页面…</div>}
+                        >
+                          <Page />
+                        </Suspense>
                       </Manage>
                     }
                   />

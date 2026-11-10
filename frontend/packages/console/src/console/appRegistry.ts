@@ -7,9 +7,12 @@
 //
 // 两级注册（Lead 裁决，设计 §2.2「封闭静态包」+ §5.6 前端统一注册表）：
 //
-//   1. **内置静态**：构建期在本文件用 `registerAppPage(...)` 登记内置页。组件是
-//      **编译期 import 进来的**（`BUILTIN_PAGE_COMPONENTS` 静态映射），随产物一起编译，
-//      符合「一份 UI 产物 / 无运行期装载陌生代码」的红线。
+//   1. **内置静态**：构建期在本文件用 `registerAppPage(...)` 登记内置页。组件由
+//      **编译期写死的 `React.lazy(() => import('../pages/...'))` 工厂**加载，import 路径
+//      在编译期固化、随产物一起打包，仍符合「一份 UI 产物 / 无运行期装载陌生代码」的红线。
+//      ⚠ lazy 不只是省首包：它**打断了静态依赖** `appRegistry → UsagePage/AutomationsPage
+//      → store → navView → appRegistry` 的循环 import（WP7 回归：静态 import 时 navView 模块
+//      eval 到 appRegistry 尚未初始化，`registry.values()` 抛 undefined，App 整体不挂载）。
 //   2. **从 /apps 动态补**：运行期从 `GET /v1/mate/apps` 读到带 `page`
 //      （`{nav_label, route, component}`）的 app 后，**只登记页面元数据**
 //      （route / nav 文案 / 组件**名**）。渲染时按组件名到**编译期组件映射表**
@@ -23,7 +26,7 @@
 // `BUILTIN_APP_PAGES` 注册一条；`navView.tsx` 的 `NAV_ENTRIES` 与 `app.tsx` 的 `<Route>`
 // 自动跟随，不再手改。
 // ─────────────────────────────────────────────────────────────────────────────
-import { createElement, type ComponentType, type ReactNode } from 'react'
+import { createElement, lazy, type ComponentType, type ReactNode } from 'react'
 import {
   AppstoreOutlined,
   BarChartOutlined,
@@ -40,6 +43,11 @@ import {
  *
  * 表用 `Record<string, ComponentType>`（宽类型）：页面组件各自的 props 由壳统一注入
  * （内置页现均为无参组件；动态 app 页组件同样约定为无参、自取数据）。
+ *
+ * **懒加载**：值均为 `React.lazy(() => import(...))`。工厂的 import 路径**编译期写死**，
+ * 接口仍只能命中本表的键，构造不出新组件——这与静态 import 是同一条「封闭静态包」红线；
+ * 差别只是模块加载实际发生在**首次渲染该页**时，从而打断 `appRegistry ↔ navView` 的循环 import。
+ * 渲染 lazy 组件需要 `<Suspense>` 边界（`app.tsx` 的 `<Route>` 处已包裹）。
  */
 export type AppPageComponent = ComponentType<Record<string, never>>
 
@@ -52,7 +60,9 @@ export type AppPageGroup = 'extensions'
  * - `route`：落地路由（`/extensions/experts` 等），`<Route path>` 与左栏 `to` 同源；
  * - `nav`：左栏呈现（文案 / 排序 / 可选图标）。为 `null` 表示**不挂左栏**（纯路由页，
  *   如已并入问答区的 `/sessions`——本表不收它，此处仅类型上留口）；
- * - `component`：渲染组件（编译期到底的实体组件，不用懒加载工厂——这些页本就在主包里）；
+ * - `component`：渲染组件。内置页为 `React.lazy` 工厂（渲染期才加载，打断 `appRegistry ↔
+ *   navView` 初始化环）；动态 app 页复用 `BUILTIN_PAGE_COMPONENTS` 里的同名 lazy 组件。
+ *   对外契约不变：仍是可渲染的 `ComponentType`（壳侧用 `<Suspense>` 兜加载态）。
  * - `priority`：同名 route 冲突时的取舍。`builtin` 胜 `app`，与 preview 的
  *   `builtin > extension` 同义（内置页锁死，动态 app 不能抢占内置路由）。
  */
@@ -63,7 +73,7 @@ export interface AppPageDefinition {
   readonly route: string
   /** 左栏呈现；`null` = 不挂左栏（纯路由页）。 */
   readonly nav: AppPageNav | null
-  /** 渲染组件（编译期实体组件）。 */
+  /** 渲染组件（可渲染组件；内置页为 lazy，需外层 Suspense）。 */
   readonly component: AppPageComponent
   /** 冲突取舍优先级。 */
   readonly priority: 'builtin' | 'app'
@@ -83,22 +93,27 @@ export interface AppPageNav {
 
 // ── 编译期组件映射表（唯一允许的动态组件来源）──────────────────────────────────
 //
-// 内置页组件在此**静态 import**（构建期入包）。动态 app 页要渲染，其 `page.component`
-// 必须是下表的键之一——接口只选「已编译的组件名」，构造不出新组件。
-import { ExpertsPage } from '../pages/extensions/ExpertsPage'
-import { SkillsPage } from '../pages/extensions/SkillsPage'
-import { ConnectorsPage } from '../pages/extensions/ConnectorsPage'
-import { UsagePage } from '../pages/UsagePage'
-import { AutomationsPage } from '../pages/AutomationsPage'
-import { MaterialPage } from '../pages/MaterialPage'
+// 内置页组件在此**懒加载**（`React.lazy` + 编译期写死的 `import()` 路径）。动态 app 页要
+// 渲染，其 `page.component` 必须是下表的键之一——接口只选「已编译的组件名」，构造不出新组件
+// （懒加载工厂的路径也是编译期常量，不是按接口字符串动态拼的，符合「封闭静态包」安全边界）。
+//
+// 为什么用 `React.lazy` 而非静态 import：页组件（如 UsagePage/AutomationsPage）会 import
+// `store.ts`，而 `store.ts` import 了 `navView.tsx`；若此处静态 import 页组件，会形成
+// `navView → appRegistry → UsagePage → store → navView` 的**模块初始化环**——navView 顶层
+// `NAV_ENTRIES = buildNavEntries()` 执行时 appRegistry 尚未初始化完，`registry` 还是
+// undefined，`registry.values()` 崩溃、整棵 App 挂不上。懒加载把「页组件」推迟到渲染期才
+// import，模块初始化期 appRegistry 不再静态拉入页组件，环断开。渲染侧由 app.tsx 的
+// `<Suspense>` 兜底（参照 PreviewProvider 的 lazy 口径）。
+const lazyPage = (loader: () => Promise<{ default: ComponentType<any> }>) =>
+  lazy(loader) as unknown as AppPageComponent
 
 export const BUILTIN_PAGE_COMPONENTS: Readonly<Record<string, AppPageComponent>> = {
-  ExpertsPage: ExpertsPage as unknown as AppPageComponent,
-  SkillsPage: SkillsPage as unknown as AppPageComponent,
-  ConnectorsPage: ConnectorsPage as unknown as AppPageComponent,
-  UsagePage: UsagePage as unknown as AppPageComponent,
-  AutomationsPage: AutomationsPage as unknown as AppPageComponent,
-  MaterialPage: MaterialPage as unknown as AppPageComponent,
+  ExpertsPage: lazyPage(() => import('../pages/extensions/ExpertsPage').then((m) => ({ default: m.ExpertsPage }))),
+  SkillsPage: lazyPage(() => import('../pages/extensions/SkillsPage').then((m) => ({ default: m.SkillsPage }))),
+  ConnectorsPage: lazyPage(() => import('../pages/extensions/ConnectorsPage').then((m) => ({ default: m.ConnectorsPage }))),
+  UsagePage: lazyPage(() => import('../pages/UsagePage').then((m) => ({ default: m.UsagePage }))),
+  AutomationsPage: lazyPage(() => import('../pages/AutomationsPage').then((m) => ({ default: m.AutomationsPage }))),
+  MaterialPage: lazyPage(() => import('../pages/MaterialPage').then((m) => ({ default: m.MaterialPage }))),
 }
 
 // ── 内置页注册（构建期静态；顺序即 `NAV_ENTRIES` 内同级排序的兜底）────────────────
