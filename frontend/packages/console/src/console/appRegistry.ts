@@ -30,7 +30,7 @@ import { createElement, lazy, type ComponentType, type ReactNode } from 'react'
 import {
   AppstoreOutlined,
   BarChartOutlined,
-  BoxPlotOutlined,
+  AppstoreAddOutlined,
   ClockCircleOutlined,
   FolderOpenOutlined,
 } from '@ant-design/icons'
@@ -192,13 +192,13 @@ export const EXTENSIONS_GROUP = {
 } as const
 
 // 「应用」组的组长元数据（同上：组只承载图标/文案/排序，不是页面入口）。
-// 与「扩展」组并列独立成一级组；图标刻意用 `BoxPlotOutlined` 与扩展组的 `AppstoreOutlined`
-// 区分（几何方块散布 vs 九宫格，视觉差异大，避免两组图标太像）。
+// 与「扩展」组并列独立成一级组；图标用 `AppstoreAddOutlined`（九宫格 + 加号，寓意"应用中心/管理应用"），
+// 与扩展组的 `AppstoreOutlined`（纯九宫格）靠加号角标区分。
 export const APPS_GROUP = {
   id: 'apps',
   label: '应用',
   order: 26,
-  icon: createElement(BoxPlotOutlined),
+  icon: createElement(AppstoreAddOutlined),
 } as const
 
 // ── 注册表本体 ────────────────────────────────────────────────────────────────
