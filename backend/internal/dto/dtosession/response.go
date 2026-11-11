@@ -328,3 +328,15 @@ type ElicitationResp struct {
 	URL         string         `json:"url,omitempty"`
 	TimeoutAt   int64          `json:"timeout_at"` // Unix 毫秒
 }
+
+// ElicitationOutcomeResp 是**外部 source 提问**（AskElicitation）的决策结果。
+//
+// 与 ElicitationResolveReq 的方向相反：那条是「用户前端决策 → 回传服务端」，这条是「answerer
+// 桥接发起提问 → 阻塞等到用户决策后的结果」。answerer 插件据此把答案回填给 dsh 的 userQuestions。
+//
+// Action 语义与内部一致：accept（携带 Content）/ decline / cancel（超时或取消——注意 ADR-11：
+// 超时对底座回 cancel，但卡片转 pending 仍可答，那是 Resume 路径，不影响本阻塞返回值）。
+type ElicitationOutcomeResp struct {
+	Action  string         `json:"action"` // accept | decline | cancel
+	Content map[string]any `json:"content,omitempty"`
+}

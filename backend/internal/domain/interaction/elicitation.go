@@ -214,7 +214,19 @@ func (m *ElicitationManager) PendingItems(sessionID string) []ElicitationItem {
 	return out
 }
 
+// RegisterAndWait 注册一条结构化提问并阻塞等待决策。
+//
+// 断开语义由 `req.Timed` 区分：
+//   - **非限时**（ACP elicitation/create 与阻塞式 answerer `ask`）：调用方与**这一轮**同生共死
+//     ——客户端断开（那一轮没了）就等于取消，挂起项删除、卡片消失。
+//   - **限时**（answerer `askTimed`，`req.Timed=true`）：调用方断开**不等于**用户不想答——askTimed
+//     在它自己的计时器到期时会主动中止桥接（底座拿到 pending、让模型先继续），此时挂起项必须
+//     留在平台上、转成 `late`（卡片保留、无期限可答），迟到回答走 `ResolveLate` → **作为新一轮**
+//     进去。这与超时那一支（`case <-timer.C`）落到的状态完全一致，只是触发源不同——
+//     ADR-11 的同一处语义，两种触发。
 func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID string, req protocol.ElicitationRequest, publish func(ElicitationItem)) protocol.ElicitationOutcome {
+	// 限时问答：断开按「超时转 pending」处置（见上层注释与下面的 ctx.Done 分支）。
+	keepOnDisconnect := req.Timed
 	id := genElicitationID()
 	scopeSource := req.ScopeSource
 	if scopeSource == "" {
@@ -268,7 +280,16 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID stri
 		d, reason = r.outcome, r.reason
 	case <-ctx.Done():
 		d = protocol.ElicitationOutcome{Action: "cancel"} // 取消
-		reason = reasonCancel
+		if keepOnDisconnect {
+			// 限时问答：桥接断开 = 底座那边这一轮已经放了（拿到 pending 让模型先继续），
+			// **不**等于用户不想答。落到与超时那一支相同的 pending 态（卡片保留可答）。
+			glog.Warnw(ctx, "elicitation: 限时问答桥接断开，转 pending（卡片保留可回答）",
+				"session", sessionID, "id", id)
+			eventAction, reason = actionPending, reasonTimeout
+			pendingLate = true
+		} else {
+			reason = reasonCancel
+		}
 	case <-timer.C:
 		// **超时不等于取消**（ADR-11，对齐参照产品的 open|continued|settled 状态机）：
 		// 30 分钟无人回答只说明"现在没人看着"，不说明"用户不想答"。今天这一支铸的是 `cancel`，

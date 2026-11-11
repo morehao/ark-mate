@@ -30,6 +30,7 @@ type SessionCtr interface {
 	ResolvePermission(c *gin.Context)
 	Elicitations(c *gin.Context)
 	ResolveElicitation(c *gin.Context)
+	AskElicitation(c *gin.Context)
 	Create(c *gin.Context)
 	Prompt(c *gin.Context)
 	Cancel(c *gin.Context)
@@ -254,6 +255,25 @@ func (h *sessionCtr) ResolveElicitation(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, gin.H{"elicitation_id": req.ElicitationID, "action": req.Action})
+}
+
+// AskElicitation 发起一次外部 source 结构化提问并阻塞等待用户决策（answerer 桥接入口）。
+//
+// 该请求会**挂起直到用户决策/超时/取消**：服务端发布 session.elicitation_request（前端弹卡），
+// 用户提交/放弃经 POST /sessions/:id/elicitation 回传后，本次请求才返回 accept/decline/cancel。
+// answerer 插件据此把答案回填给 dsh 的 userQuestions 瀑布（见设计文档 §5）。
+func (h *sessionCtr) AskElicitation(c *gin.Context) {
+	var req dtosession.ElicitationAskReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.interaction.AskElicitation(c.Request.Context(), c.Param("id"), req)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
 }
 
 // Create 建立会话（agent_id + 可选首轮 prompt）。

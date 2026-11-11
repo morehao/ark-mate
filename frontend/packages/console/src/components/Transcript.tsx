@@ -250,10 +250,11 @@ function toolFailReasonLabel(reason: string): string {
 export function ElicitationCard({ e }: { e: StreamEntry }) {
   const respond = useMate((s) => s.respondElicitation)
   const resolved = e.resolved ?? false
-  const busy = useMate((s) => {
-    const v = s.activeId ? s.views[s.activeId] : undefined
-    return v?.streaming ?? false
-  })
+  // **不要**用 `streaming`（整轮是否在跑）来禁用卡片按钮：elicitation 卡本身就是「流式轮次
+  // 中途弹出、等用户作答」的，这一轮在跑正是它的常态——把按钮绑 `streaming` 等于「要作答时永远点不动」
+  // （实测：选项卡弹出后提交/拒绝/取消全灰）。重复提交用卡片**自己的** `submitting` 防抖，
+  // 已决（resolved）由渲染层兜住（已决渲染摘要、不再出现按钮）。
+  const [submitting, setSubmitting] = useState(false)
 
   const form = e.mode === 'url'
     ? null
@@ -342,19 +343,22 @@ export function ElicitationCard({ e }: { e: StreamEntry }) {
 
   const submit = () => {
     const content = validate()
-    if (!e.elicitationId) return
+    if (!e.elicitationId || submitting) return
     if (form && content === null) return // 校验失败，错误已置位
     setError(null)
+    setSubmitting(true)
     void respond(e.elicitationId, { action: 'accept', content: content ?? {}, label: '已提交' })
   }
   const decline = () => {
-    if (!e.elicitationId) return
+    if (!e.elicitationId || submitting) return
     setError(null)
+    setSubmitting(true)
     void respond(e.elicitationId, { action: 'decline', label: '已拒绝' })
   }
   const cancel = () => {
-    if (!e.elicitationId) return
+    if (!e.elicitationId || submitting) return
     setError(null)
+    setSubmitting(true)
     void respond(e.elicitationId, { action: 'cancel', label: '已取消' })
   }
 
@@ -418,13 +422,13 @@ export function ElicitationCard({ e }: { e: StreamEntry }) {
               <span style={{ fontSize: 11.5, color: tokens.error }}>{error}</span>
             )}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <Button size="small" type="primary" disabled={busy} onClick={submit} style={{ margin: 0 }}>
+              <Button size="small" type="primary" disabled={submitting} onClick={submit} style={{ margin: 0 }}>
                 提交
               </Button>
-              <Button size="small" danger disabled={busy} onClick={decline} style={{ margin: 0 }}>
+              <Button size="small" danger disabled={submitting} onClick={decline} style={{ margin: 0 }}>
                 拒绝提供
               </Button>
-              <Button size="small" disabled={busy} onClick={cancel} style={{ margin: 0 }}>
+              <Button size="small" disabled={submitting} onClick={cancel} style={{ margin: 0 }}>
                 取消
               </Button>
             </div>
@@ -440,13 +444,13 @@ export function ElicitationCard({ e }: { e: StreamEntry }) {
               <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>完成外部操作后回到这里告知助手（URL 模式演示）。</span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <Button size="small" type="primary" disabled={busy} onClick={submit} style={{ margin: 0 }}>
+              <Button size="small" type="primary" disabled={submitting} onClick={submit} style={{ margin: 0 }}>
                 我已完成
               </Button>
-              <Button size="small" danger disabled={busy} onClick={decline} style={{ margin: 0 }}>
+              <Button size="small" danger disabled={submitting} onClick={decline} style={{ margin: 0 }}>
                 拒绝
               </Button>
-              <Button size="small" disabled={busy} onClick={cancel} style={{ margin: 0 }}>
+              <Button size="small" disabled={submitting} onClick={cancel} style={{ margin: 0 }}>
                 取消
               </Button>
             </div>

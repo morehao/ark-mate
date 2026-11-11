@@ -228,8 +228,13 @@ export function ChatPage() {
   // 两处都缺 = 服务端没说过任何过程状态 → **什么都不说**，不当作忙（宁可少显示，不猜）。
   const run = (activeId ? views[activeId]?.run : undefined) ?? activeSum?.run
   const narration = runNarration(run)
-  const busy = streaming || narration.busy
-  const canStop = streaming || narration.canStop
+  // **有未决交互卡（权限确认 / 结构化提问）时视为「等你处理」，而不是「在跑、可继续输入」**：
+  // 这一刻的正确交互是「先在那张卡上作答」，composer 不该显示「可直接输入/排队、Enter 可打断」
+  // ——那会让人以为能并行打字，和卡片互斥相悖（实测：选项卡弹出、输入框仍显示"可直接输入"）。
+  // 用待决卡条数兜底，不单靠 `run.status`（它可能因事件/快照时序短暂落后于「卡已弹出」这一事实）。
+  const waitingOnCard = pendingPerms > 0
+  const busy = streaming || narration.busy || waitingOnCard
+  const canStop = !waitingOnCard && (streaming || narration.canStop)
   const runStartedAt = activeId ? views[activeId]?.runStartedAt : undefined
   useEffect(() => {
     if (!busy || !runStartedAt) return
@@ -816,7 +821,7 @@ export function ChatPage() {
                     // 只传**等待态**文案（等授权/等回答）：它由 Composer 渲染在卡上方一行（.fg-wait-banner）。
                     // 进行中的"在跑"不再由一句「run 进行中」旁白表达——那已由卡片品牌描边（.fg-running）承担，
                     // 且真实阶段（如「正在执行 Bash」）在 ChatHead 的 metaText 里已经在说（见上方 metaText）。
-                    busyNote={narration.tone === 'wait' ? narration.label : undefined}
+                    busyNote={waitingOnCard ? '请先在上方卡片作答' : narration.tone === 'wait' ? narration.label : undefined}
                     placeholder={busy ? '正在回复…' : '向助手提问…（Enter 发送）'}
                     onSend={onSend}
                     // 命令发现面（ADR-17）：底座自报的斜杠命令，undefined = 该底座不提供发现面

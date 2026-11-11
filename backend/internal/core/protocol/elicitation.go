@@ -38,6 +38,13 @@ type ElicitationRequest struct {
 	Schema      *ElicitationSchema // Mode=form
 	URL         string             // Mode=url
 	URLID       string             // Mode=url：协议侧 elicitationId（透传）
+	// Timed 限时问答标记（answerer 桥接的 `askTimed` / `ask_user_question` timed 模式）。
+	//
+	// 为真时，`ElicitationManager.RegisterAndWait` 把「调用方断开」当作「平台侧转 pending、
+	// 卡片保留可回答」而不是取消：底座在它自己的计时器到期时会中止这一路桥接、拿到 pending
+	// 让模型先继续，用户随后仍可作答，回答作为**新一轮**进入（ADR-11）。非限时（ACP
+	// elicitation/create、阻塞式 answerer ask）为假，断开 = 取消。
+	Timed bool
 }
 
 // ElicitationOutcome 是宿主对一次结构化提问的决策。

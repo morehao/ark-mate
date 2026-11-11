@@ -1265,6 +1265,20 @@
     "data_kind": "object"
   },
   {
+    "method": "POST",
+    "path": "/v1/mate/sessions/nope/elicitations/ask",
+    "status": 200,
+    "code": 40401,
+    "msg": "未知会话 \"nope\"",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
     "method": "GET",
     "path": "/v1/mate/sessions/nope/inputs",
     "status": 200,

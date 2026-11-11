@@ -1,0 +1,14 @@
+{
+  "name": "@ark-mate/dsh-answerer",
+  "version": "0.1.0",
+  "description": "Ark-Mate answerer: bridges dsh userQuestions (ask_user_question) to the Ark-Mate platform elicitation card channel.",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  }
+}
