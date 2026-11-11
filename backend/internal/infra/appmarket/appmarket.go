@@ -58,6 +58,12 @@ type Listing struct {
 	MinCoreVersion string `json:"min_core_version,omitempty"`
 	// Tags 标签（≤8 个，每个 ≤20 字）；可选。
 	Tags []string `json:"tags,omitempty"`
+	// Tagline 一句话能力句（v42，≤40 字）：市场卡片「装前预览」用；空则前端回退 summary.zh。
+	Tagline string `json:"tagline,omitempty"`
+	// Examples 可直接发送的示例话术（v42，≤6 条、每条 ≤100 字）。
+	Examples []string `json:"examples,omitempty"`
+	// UsageGuide 「怎么用」正文（v42，≤600 字）。
+	UsageGuide string `json:"usage_guide,omitempty"`
 }
 
 // Summary 是多语言的一句话摘要（至少 zh）。
@@ -91,6 +97,11 @@ const (
 	MaxListingTags         = 8
 	MaxListingTagRunes     = 20
 	MaxListingVersionRunes = 64
+	// 使用说明（v42，与 capability/apppkg 同量级）。
+	MaxListingTaglineRunes = 40
+	MaxListingExamples     = 6
+	MaxListingExampleRunes = 100
+	MaxListingUsageRunes   = 600
 	maxListingIDLen        = 64
 )
 
@@ -182,6 +193,35 @@ func (l *Listing) validate(sourceRoots []string) error {
 
 	l.Homepage = strings.TrimSpace(l.Homepage)
 	l.MinCoreVersion = strings.TrimSpace(l.MinCoreVersion)
+
+	// 使用说明（v42）：与 capability/apppkg 同一套上限。
+	l.Tagline = strings.TrimSpace(l.Tagline)
+	if r := []rune(l.Tagline); len(r) > MaxListingTaglineRunes {
+		return fmt.Errorf("appmarket %q: tagline 超过 %d 字", l.ID, MaxListingTaglineRunes)
+	}
+	if len(l.Examples) > MaxListingExamples {
+		return fmt.Errorf("appmarket %q: examples 最多 %d 条（当前 %d）", l.ID, MaxListingExamples, len(l.Examples))
+	}
+	examples := make([]string, 0, len(l.Examples))
+	for _, ex := range l.Examples {
+		ex = strings.TrimSpace(ex)
+		if ex == "" {
+			continue
+		}
+		if r := []rune(ex); len(r) > MaxListingExampleRunes {
+			return fmt.Errorf("appmarket %q: 单条示例超过 %d 字", l.ID, MaxListingExampleRunes)
+		}
+		examples = append(examples, ex)
+	}
+	if len(examples) == 0 {
+		l.Examples = nil
+	} else {
+		l.Examples = examples
+	}
+	l.UsageGuide = strings.TrimSpace(l.UsageGuide)
+	if r := []rune(l.UsageGuide); len(r) > MaxListingUsageRunes {
+		return fmt.Errorf("appmarket %q: usage_guide 超过 %d 字", l.ID, MaxListingUsageRunes)
+	}
 
 	if err := l.validateSource(sourceRoots); err != nil {
 		return err

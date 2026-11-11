@@ -22,6 +22,9 @@ type MarketListing struct {
 	Source         MarketSource  `json:"source"`
 	MinCoreVersion string        `json:"min_core_version,omitempty"`
 	Tags           []string      `json:"tags,omitempty"`
+	Tagline        string        `json:"tagline,omitempty"`
+	Examples       []string      `json:"examples,omitempty"`
+	UsageGuide     string        `json:"usage_guide,omitempty"`
 }
 
 // MarketSummary 是一句话摘要（中/英）。
@@ -53,6 +56,9 @@ type MarketAppResp struct {
 	Homepage string        `json:"homepage,omitempty"`
 	Tags     []string      `json:"tags,omitempty"`
 	Source   MarketSource  `json:"source"`
+	Tagline  string        `json:"tagline,omitempty"`
+	Examples []string      `json:"examples,omitempty"`
+	UsageGuide string      `json:"usage_guide,omitempty"`
 
 	Installed   bool   `json:"installed"`
 	Enabled     bool   `json:"enabled"`

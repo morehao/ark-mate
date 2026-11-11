@@ -50,6 +50,9 @@ func (s appMarketSource) List(ctx context.Context) ([]dtoapp.MarketListing, erro
 			Source:         dtoapp.MarketSource{Type: l.Source.Type, Dir: l.Source.Dir},
 			MinCoreVersion: l.MinCoreVersion,
 			Tags:           append([]string(nil), l.Tags...),
+			Tagline:        l.Tagline,
+			Examples:       append([]string(nil), l.Examples...),
+			UsageGuide:     l.UsageGuide,
 		})
 	}
 	return out, nil

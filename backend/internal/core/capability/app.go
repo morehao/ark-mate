@@ -28,6 +28,12 @@ type App struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	// Tagline 一句话「对它说什么」的能力句（列表/详情主文案；≤40 字）。空 = 前端回退到 description。
+	Tagline string `json:"tagline,omitempty"`
+	// Examples 可直接发送的示例话术（≤6 条、每条 ≤100 字）：教用户「怎么开口」，前端一键填进输入框。
+	Examples []string `json:"examples,omitempty"`
+	// UsageGuide 「怎么用」正文（≤600 字）：适用场景 / 需要提供什么 / 产出 / 边界。给人看的用法，不是模型指令。
+	UsageGuide string `json:"usage_guide,omitempty"`
 	// Avatar 内置图标键（与 expert 同款：spark|chart|code|pen|search|briefcase）；不接受 URL。
 	Avatar string   `json:"avatar,omitempty"`
 	Tags   []string `json:"tags,omitempty"`
@@ -94,6 +100,11 @@ const (
 	MaxAppTags             = 8
 	MaxAppTagRunes         = 20
 	MaxAppIDLen            = 64
+	// 使用说明三字段（v42）：tagline 一句话能力句；examples 可直接发送的示例话术；usage_guide 用法正文。
+	MaxAppTaglineRunes     = 40
+	MaxAppExamples         = 6
+	MaxAppExampleRunes     = 100
+	MaxAppUsageGuideRunes  = 600
 	// MaxAppMembersPerKind 每类成员引用的上限（防失控巨链，R2）。
 	MaxAppMembersPerKind = 50
 	MaxAppEntities       = 16
@@ -146,6 +157,34 @@ func ValidateApp(a *App) error {
 	a.Name = name
 	if n := utf8.RuneCountInString(a.Description); n > MaxAppDescriptionRunes {
 		return fmt.Errorf("capability app %q: description 超过 %d 字符（当前 %d）", a.ID, MaxAppDescriptionRunes, n)
+	}
+	// 使用说明（v42）：tagline / examples / usage_guide——让用户知道「怎么用自然语言驱动」。
+	a.Tagline = strings.TrimSpace(a.Tagline)
+	if n := utf8.RuneCountInString(a.Tagline); n > MaxAppTaglineRunes {
+		return fmt.Errorf("capability app %q: tagline 超过 %d 字符（当前 %d）", a.ID, MaxAppTaglineRunes, n)
+	}
+	if len(a.Examples) > MaxAppExamples {
+		return fmt.Errorf("capability app %q: examples 最多 %d 条（当前 %d）", a.ID, MaxAppExamples, len(a.Examples))
+	}
+	examples := make([]string, 0, len(a.Examples))
+	for i, ex := range a.Examples {
+		ex = strings.TrimSpace(ex)
+		if ex == "" {
+			continue
+		}
+		if n := utf8.RuneCountInString(ex); n > MaxAppExampleRunes {
+			return fmt.Errorf("capability app %q: examples[%d] 超过 %d 字符（当前 %d）", a.ID, i, MaxAppExampleRunes, n)
+		}
+		examples = append(examples, ex)
+	}
+	if len(examples) == 0 {
+		a.Examples = nil
+	} else {
+		a.Examples = examples
+	}
+	a.UsageGuide = strings.TrimSpace(a.UsageGuide)
+	if n := utf8.RuneCountInString(a.UsageGuide); n > MaxAppUsageGuideRunes {
+		return fmt.Errorf("capability app %q: usage_guide 超过 %d 字符（当前 %d）", a.ID, MaxAppUsageGuideRunes, n)
 	}
 	if a.Avatar != "" && !ValidExpertAvatars[a.Avatar] {
 		return fmt.Errorf("capability app %q: avatar %q 非法（合法：spark|chart|code|pen|search|briefcase）", a.ID, a.Avatar)

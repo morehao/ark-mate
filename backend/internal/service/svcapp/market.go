@@ -54,6 +54,10 @@ func (s *appSvc) deriveMarketApp(ctx context.Context, l *dtoapp.MarketListing) (
 		Tags:     cloneStrings(l.Tags),
 		Source:   dtoapp.MarketSource{Type: l.Source.Type, Dir: l.Source.Dir},
 	}
+	// 使用说明（v42）：清单自带的三字段透传；若清单没写而本地定义有，优先用定义里的（更贴近实际）。
+	resp.Tagline = l.Tagline
+	resp.Examples = append([]string(nil), l.Examples...)
+	resp.UsageGuide = l.UsageGuide
 
 	// 本地已装事实：运行期包目录 or apps 定义表。
 	hasPack := s.runtime != nil && s.runtime.HasPack(l.ID)
@@ -71,6 +75,18 @@ func (s *appSvc) deriveMarketApp(ctx context.Context, l *dtoapp.MarketListing) (
 			}
 			defApp = app
 			defEnabled = app.IsEnabled()
+		}
+	}
+	// 使用说明兜底：清单没写而本地定义有 → 用定义里的（更贴近实际装的东西）。
+	if defApp != nil {
+		if resp.Tagline == "" {
+			resp.Tagline = defApp.Tagline
+		}
+		if len(resp.Examples) == 0 {
+			resp.Examples = cloneStrings(defApp.Examples)
+		}
+		if resp.UsageGuide == "" {
+			resp.UsageGuide = defApp.UsageGuide
 		}
 	}
 	installed := hasPack || defApp != nil

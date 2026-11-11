@@ -408,6 +408,10 @@ func encodeApp(app *capability.App) (*model.AppEntity, model.AppMemberEntityList
 	if err != nil {
 		return nil, nil, err
 	}
+	examplesJSON, err := marshalJSONArray(app.Examples)
+	if err != nil {
+		return nil, nil, err
+	}
 	pageJSON := ""
 	if app.Page != nil {
 		b, perr := json.Marshal(app.Page)
@@ -424,6 +428,9 @@ func encodeApp(app *capability.App) (*model.AppEntity, model.AppMemberEntityList
 		ID:                 app.ID,
 		Name:               app.Name,
 		Description:        app.Description,
+		Tagline:            app.Tagline,
+		ExamplesJSON:       examplesJSON,
+		UsageGuide:         app.UsageGuide,
 		Avatar:             app.Avatar,
 		TagsJSON:           tagsJSON,
 		EntitiesJSON:       entitiesJSON,
@@ -484,6 +491,9 @@ func appToResp(app *capability.App, row *model.AppEntity, rev int64, withSetting
 		ID:          app.ID,
 		Name:        app.Name,
 		Description: app.Description,
+		Tagline:     app.Tagline,
+		Examples:    cloneStrings(app.Examples),
+		UsageGuide:  app.UsageGuide,
 		Avatar:      app.Avatar,
 		Tags:        cloneStrings(app.Tags),
 		Members: dtoapp.AppMembersResp{
@@ -525,6 +535,8 @@ func rowToApp(row *model.AppEntity) (*capability.App, error) {
 		ID:             row.ID,
 		Name:           row.Name,
 		Description:    row.Description,
+		Tagline:        row.Tagline,
+		UsageGuide:     row.UsageGuide,
 		Avatar:         row.Avatar,
 		SettingsSchema: row.SettingsSchemaJSON,
 		APIVersion:     row.APIVersion,
@@ -532,6 +544,9 @@ func rowToApp(row *model.AppEntity) (*capability.App, error) {
 	en := row.Enabled != 0
 	app.Enabled = &en
 	if err := unmarshalJSONField(row.TagsJSON, &app.Tags); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSONField(row.ExamplesJSON, &app.Examples); err != nil {
 		return nil, err
 	}
 	if err := unmarshalJSONField(row.EntitiesJSON, &app.Entities); err != nil {
@@ -578,6 +593,15 @@ func rowToDoc(row *model.AppEntity) (map[string]json.RawMessage, error) {
 	}
 	if app.Description != "" {
 		_ = set(doc, "description", app.Description)
+	}
+	if app.Tagline != "" {
+		_ = set(doc, "tagline", app.Tagline)
+	}
+	if len(app.Examples) > 0 {
+		_ = set(doc, "examples", app.Examples)
+	}
+	if app.UsageGuide != "" {
+		_ = set(doc, "usage_guide", app.UsageGuide)
 	}
 	if app.Avatar != "" {
 		_ = set(doc, "avatar", app.Avatar)

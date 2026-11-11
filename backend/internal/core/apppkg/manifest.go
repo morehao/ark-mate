@@ -51,6 +51,12 @@ type Manifest struct {
 	Requires *ManifestRequires `json:"requires,omitempty"`
 	// Provides 声明这个包提供什么（impl / 工具域 / 可选页面）。
 	Provides ManifestProvides `json:"provides"`
+	// Tagline 一句话能力句（≤40 字），随包装进应用定义的「怎么用」区；空 = 不提供。
+	Tagline string `json:"tagline,omitempty"`
+	// Examples 可直接发送的示例话术（≤6 条、每条 ≤100 字）。
+	Examples []string `json:"examples,omitempty"`
+	// UsageGuide 「怎么用」正文（≤600 字）：适用场景 / 需要提供什么 / 产出 / 边界。
+	UsageGuide string `json:"usage_guide,omitempty"`
 	// Permissions 声明这个包「需要读的能力」白名单枚举（读用量/providers 摘要、网络域、文件域…）。
 	// 见 Permission；未知项一律拒绝。
 	Permissions []Permission `json:"permissions,omitempty"`
@@ -164,6 +170,11 @@ const (
 	MaxManifestIDLen        = 64
 	MaxManifestVersionRunes = 64
 	MaxManifestEntrypoint   = 512
+	// 使用说明（与 capability 同量级；超出即拒绝）。
+	MaxManifestTaglineRunes = 40
+	MaxManifestExamples     = 6
+	MaxManifestExampleRunes = 100
+	MaxManifestUsageRunes   = 600
 )
 
 // ParseManifest 从 JSON 字节解析清单并校验（解析 + Validate 一步到位）。
@@ -249,6 +260,43 @@ func (m *Manifest) Validate() error {
 		return err
 	}
 
+	// 使用说明：tagline / examples / usage_guide——与 capability.ValidateApp 同口径的长度/条数上限。
+	if err := m.validateUsage(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateUsage 校验使用说明三字段（与 capability.App 同一套上限，超出即拒绝）。
+func (m *Manifest) validateUsage() error {
+	m.Tagline = strings.TrimSpace(m.Tagline)
+	if r := []rune(m.Tagline); len(r) > MaxManifestTaglineRunes {
+		return fmt.Errorf("apppkg %q: tagline 超过 %d 字符（当前 %d）", m.ID, MaxManifestTaglineRunes, len(r))
+	}
+	if len(m.Examples) > MaxManifestExamples {
+		return fmt.Errorf("apppkg %q: examples 最多 %d 条（当前 %d）", m.ID, MaxManifestExamples, len(m.Examples))
+	}
+	examples := make([]string, 0, len(m.Examples))
+	for i, ex := range m.Examples {
+		ex = strings.TrimSpace(ex)
+		if ex == "" {
+			continue
+		}
+		if r := []rune(ex); len(r) > MaxManifestExampleRunes {
+			return fmt.Errorf("apppkg %q: examples[%d] 超过 %d 字符（当前 %d）", m.ID, i, MaxManifestExampleRunes, len(r))
+		}
+		examples = append(examples, ex)
+	}
+	if len(examples) == 0 {
+		m.Examples = nil
+	} else {
+		m.Examples = examples
+	}
+	m.UsageGuide = strings.TrimSpace(m.UsageGuide)
+	if r := []rune(m.UsageGuide); len(r) > MaxManifestUsageRunes {
+		return fmt.Errorf("apppkg %q: usage_guide 超过 %d 字符（当前 %d）", m.ID, MaxManifestUsageRunes, len(r))
+	}
 	return nil
 }
 

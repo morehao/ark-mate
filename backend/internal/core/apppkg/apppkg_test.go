@@ -109,6 +109,15 @@ func TestParseManifestRejects(t *testing.T) {
 		{"page route 非法", func(o map[string]any) {
 			o["provides"] = map[string]any{"page": map[string]any{"nav_label": "X", "route": "no-slash"}}
 		}, "route"},
+		{"tagline 超长", func(o map[string]any) { o["tagline"] = strings.Repeat("字", MaxManifestTaglineRunes+1) }, "tagline"},
+		{"examples 超条数", func(o map[string]any) {
+			ex := make([]string, MaxManifestExamples+1)
+			for i := range ex {
+				ex[i] = "x"
+			}
+			o["examples"] = ex
+		}, "examples"},
+		{"usage_guide 超长", func(o map[string]any) { o["usage_guide"] = strings.Repeat("字", MaxManifestUsageRunes+1) }, "usage_guide"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -283,5 +292,29 @@ func TestWithinDirExported(t *testing.T) {
 	}
 	if WithinDir(dir, "/source/root/../etc") {
 		t.Error("上跳到兄弟目录应判越界")
+	}
+}
+
+// TestParseManifestUsageFields 覆盖 v42 使用说明三字段的解析与规范化。
+func TestParseManifestUsageFields(t *testing.T) {
+	sha := strings.Repeat("a", 64)
+	obj := map[string]any{}
+	_ = json.Unmarshal(validManifestJSON(t, "run.sh", sha), &obj)
+	obj["tagline"] = "  一句话能力句  "
+	obj["examples"] = []string{"  示例一  ", "", "示例二"}
+	obj["usage_guide"] = "  适用场景：xx  "
+	raw, _ := json.Marshal(obj)
+	m, err := ParseManifest(raw)
+	if err != nil {
+		t.Fatalf("合法使用说明不应被拒：%v", err)
+	}
+	if m.Tagline != "一句话能力句" {
+		t.Fatalf("tagline 应去空白，得到 %q", m.Tagline)
+	}
+	if len(m.Examples) != 2 || m.Examples[0] != "示例一" {
+		t.Fatalf("examples 应去空白并剔除空条，得到 %#v", m.Examples)
+	}
+	if m.UsageGuide != "适用场景：xx" {
+		t.Fatalf("usage_guide 应去空白，得到 %q", m.UsageGuide)
 	}
 }

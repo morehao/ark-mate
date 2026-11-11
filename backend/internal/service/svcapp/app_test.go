@@ -246,3 +246,65 @@ func TestAppSourceSelfOnCreateAndPreservedOnUpdate(t *testing.T) {
 		t.Fatalf("PUT 应改 name，实得 %q", got2.Name)
 	}
 }
+
+// TestAppUsageFieldsRoundTrip 覆盖 v42 使用说明三字段（tagline/examples/usage_guide）的写—读—更新往返。
+func TestAppUsageFieldsRoundTrip(t *testing.T) {
+	svc, _ := newSvc(t)
+	ctx := context.Background()
+
+	if _, err := svc.WriteApp(ctx, "", req(map[string]string{
+		"id":          `"usage-app"`,
+		"name":        `"使用说明应用"`,
+		"tagline":     `"一句话说清怎么用"`,
+		"examples":    `["示例一：生成简报","示例二：汇总上周"]`,
+		"usage_guide": `"适用场景：早报；需要提供：主题；产出：简报。"`,
+	}), true); err != nil {
+		t.Fatalf("新建失败：%v", err)
+	}
+
+	got, err := svc.GetApp(ctx, "usage-app")
+	if err != nil {
+		t.Fatalf("详情失败：%v", err)
+	}
+	if got.Tagline != "一句话说清怎么用" {
+		t.Fatalf("tagline 未回带：%q", got.Tagline)
+	}
+	if len(got.Examples) != 2 || got.Examples[1] != "示例二：汇总上周" {
+		t.Fatalf("examples 未回带：%#v", got.Examples)
+	}
+	if got.UsageGuide != "适用场景：早报；需要提供：主题；产出：简报。" {
+		t.Fatalf("usage_guide 未回带：%q", got.UsageGuide)
+	}
+
+	// 列表读面也应带三字段（它们不是 settings_schema，不因 withSettings=false 被抹掉）。
+	list, err := svc.ListApps(ctx)
+	if err != nil {
+		t.Fatalf("列表失败：%v", err)
+	}
+	var found *dtoapp.AppResp
+	for i := range list {
+		if list[i].ID == "usage-app" {
+			found = &list[i]
+		}
+	}
+	if found == nil || found.Tagline != "一句话说清怎么用" || len(found.Examples) != 2 {
+		t.Fatalf("列表读面缺使用说明：%+v", found)
+	}
+
+	// 更新：只改 tagline，其它保留（未传的键保留）。
+	if _, err := svc.WriteApp(ctx, "usage-app", req(map[string]string{
+		"tagline": `"改过的一句话"`,
+	}), false); err != nil {
+		t.Fatalf("更新失败：%v", err)
+	}
+	got2, err := svc.GetApp(ctx, "usage-app")
+	if err != nil {
+		t.Fatalf("更新后详情失败：%v", err)
+	}
+	if got2.Tagline != "改过的一句话" {
+		t.Fatalf("tagline 应已更新：%q", got2.Tagline)
+	}
+	if len(got2.Examples) != 2 {
+		t.Fatalf("未传的 examples 应保留：%#v", got2.Examples)
+	}
+}
