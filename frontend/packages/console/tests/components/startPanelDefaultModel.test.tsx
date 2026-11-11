@@ -59,9 +59,15 @@ vi.mock('../../src/components/WorkspacePicker', () => ({
 vi.mock('../../src/components/CapabilityBar', () => ({
   CapabilityBar: () => null,
 }))
-vi.mock('../../src/components/PermissionChip', () => ({
-  PermissionChip: () => null,
-}))
+vi.mock('../../src/components/PermissionPicker', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/components/PermissionPicker')>()
+  return {
+    ...actual,
+    // 与本 bug 无关的重子组件 → 空桩（权限选择/确认各自有独立用例）。
+    PermissionPicker: () => null,
+    RiskConfirmation: () => null,
+  }
+})
 
 import { StartPanel } from '../../src/components/StartPanel'
 

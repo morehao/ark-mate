@@ -41,6 +41,7 @@ func TestCreateSessionWithExpertMaterializes(t *testing.T) {
 	})
 
 	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Cwd:          t.TempDir(),
 		Capabilities: &dtosession.CapabilitiesReq{Expert: ptrOf("data-analyst")},
 	})
@@ -94,6 +95,7 @@ func TestCreateSessionExplicitEmptyBeatsExpertRecommendation(t *testing.T) {
 	})
 
 	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Cwd: t.TempDir(),
 		Capabilities: &dtosession.CapabilitiesReq{
 			Expert: ptrOf("rec3"),
@@ -126,6 +128,7 @@ func TestCreateSessionExpertSkipsUnreachableRecommendation(t *testing.T) {
 	})
 
 	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Cwd:          t.TempDir(),
 		Capabilities: &dtosession.CapabilitiesReq{Expert: ptrOf("mixed")},
 	})
@@ -151,6 +154,7 @@ func TestCreateSessionRejectsUnknownOrDisabledExpert(t *testing.T) {
 	registerExpert(t, svc, capability.Expert{ID: "off", Name: "禁用专家", Enabled: boolPtr(false)})
 
 	_, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Cwd: t.TempDir(), Capabilities: &dtosession.CapabilitiesReq{Expert: ptrOf("ghost")},
 	})
 	if err == nil || numericCode(err) != 40401 || !strings.Contains(err.Error(), "未知 expert") {
@@ -158,6 +162,7 @@ func TestCreateSessionRejectsUnknownOrDisabledExpert(t *testing.T) {
 	}
 
 	_, err = svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Cwd: t.TempDir(), Capabilities: &dtosession.CapabilitiesReq{Expert: ptrOf("off")},
 	})
 	if err == nil || numericCode(err) != 40001 || !strings.Contains(err.Error(), "已被禁用") {
@@ -175,6 +180,7 @@ func TestCreateSessionExpertSnapshotDoesNotDrift(t *testing.T) {
 	registerExpert(t, svc, capability.Expert{ID: "snap", Name: "快照专家", Skills: []string{"ok-skill"}})
 
 	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Cwd: t.TempDir(), Capabilities: &dtosession.CapabilitiesReq{Expert: ptrOf("snap")},
 	})
 	if err != nil {
@@ -219,7 +225,7 @@ func TestWorkspaceDefaultExpertBoundary(t *testing.T) {
 	registerExpert(t, svc, capability.Expert{ID: "data-analyst", Name: "默认专家", Skills: []string{"ok-skill"}})
 
 	// capabilities 缺省 → 工作空间默认带入专家。
-	withDefault, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{})
+	withDefault, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{PermissionMode: "workspace-write"})
 	if err != nil {
 		t.Fatalf("缺省能力应能建会话: %v", err)
 	}
@@ -230,6 +236,7 @@ func TestWorkspaceDefaultExpertBoundary(t *testing.T) {
 
 	// capabilities:{} → 声明了但什么都不限制，**不吃**工作空间默认专家。
 	declared, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Capabilities: &dtosession.CapabilitiesReq{},
 	})
 	if err != nil {
@@ -273,6 +280,7 @@ func TestCreateSessionExpertMissingAfterDelete(t *testing.T) {
 	registerExpert(t, svc, capability.Expert{ID: "gone", Name: "会被删", Skills: []string{"ok-skill"}})
 
 	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Cwd: t.TempDir(), Capabilities: &dtosession.CapabilitiesReq{Expert: ptrOf("gone")},
 	})
 	if err != nil {

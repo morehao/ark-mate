@@ -129,6 +129,11 @@ type WorkspaceResp struct {
 	DirStatus string `json:"dir_status"`
 	// Sessions 该工作空间名下的会话数（含归档）。
 	Sessions int `json:"sessions"`
+	// DefaultPermissionMode 该工作空间新建会话时的默认权限模式（v33；空 = 未设默认）。
+	// 前端据此在新建面板做"预选初值"；服务端不在建会话时回落它（permission_mode 必传）。
+	DefaultPermissionMode string `json:"default_permission_mode,omitempty"`
+	// DefaultCapabilityJSON 默认能力选定原始 JSON（v33；空 = 未设默认）。前端预选用。
+	DefaultCapabilityJSON string `json:"default_capability,omitempty"`
 	// LastUsedAt 该工作空间下最新会话的 updated_at（Unix 毫秒；0 = 从未用过）。
 	LastUsedAt int64 `json:"last_used_at,omitempty"`
 	// CreatedAt / UpdatedAt 登记时刻与最后一次改写时刻（Unix 毫秒）。

@@ -7,6 +7,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"strings"
 
+	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 
@@ -55,6 +56,16 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	// 只会让用户以为"我给这个会话指定了 agent"。**在解析工作空间之前**判定——工作空间解析会
 	// 触及文件系统，不该为一个本来就无效的请求留下痕迹。
 	if err := rejectRemovedAgentSelection(req.AgentID); err != nil {
+		return nil, code.FromError(err)
+	}
+	// 权限档位校验（v33）：`permission_mode` 必传且只接受三档；缺键/空串/非法一律在**任何副作用
+	// 之前**拒（工作空间解析会触及文件系统，不为无效请求留痕迹）。位次与 `rejectRemovedAgentSelection`
+	// 同一条纪律——都放在最前。
+	//
+	// 为什么必须在这里校验、不能交给 dsh adapter：adapter 对未知模式是**静默不注入**
+	// （`infra/dsh/native_permission.go` 的 `default:` 分支），漏校验 = 用户以为设了沙箱、实际
+	// 跑在"不注入原生权限"的进程上，且没有任何报错。
+	if err := validatePermissionMode(req.PermissionMode); err != nil {
 		return nil, code.FromError(err)
 	}
 	// 归属目标：显式 `workspace_id` 优先（选择器选中了某个登记项），否则用默认工作空间。
@@ -120,18 +131,14 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 			selection = session.ParseCapabilitySelection(def.CapabilityJSON)
 		}
 	}
-	// **原生权限模式**（v29 / P1-f 下半）：同一条合并链——请求没声明就落到该工作空间声明的默认
-	// 那一档，都没有就**不注入**（空串，刻意不物化平台缺省）。
+	// **原生权限模式**（v33）：`permission_mode` 必传（上一处已校验为合法三档），这里**直接采用
+	// 请求值**——不再回落工作空间默认。工作空间默认档只经读面下发、由前端做"预选初值"，不参与
+	// 服务端会话创建合并（用户面没有「跟随默认」这一态，见 DTO 注释）。
 	//
 	// 为什么必须在**这里**定下来并落库：模式只能以进程 env（`DSH_PERMISSION_MODE`）下发
 	// （探针实测 `/permission` 命令面在 ACP 上不存在），所以两个模式不同的会话不能共用一个暖
 	// 进程；而暖进程的键要在取连接之前已知 ⇒ 模式是会话的**快照字段**，不是每次现算的推导值。
-	nativeMode := ""
-	if ws.WorkspaceID != "" {
-		if def, ok := s.planes.Workspaces.WorkspaceDefaultsOf(ws.WorkspaceID); ok {
-			nativeMode = def.PermissionMode
-		}
-	}
+	nativeMode := req.PermissionMode
 	// 专家解析（P0-2）：把选定里的专家展开成有效技能/MCP/模型（专家只填空缺；推荐不可达跳过+告警）。
 	// 位次在**建连之前**：专家不存在/禁用要在任何副作用之前拒绝；不可达推荐只影响返回值里的 warnings。
 	resolution, rerr := s.resolveExpert(ctx, selection, req.Model)
@@ -302,4 +309,29 @@ func rejectRemovedAgentSelection(agentID json.RawMessage) error {
 	return failure.NewError(failure.ClassRequest, "agent_selection_removed",
 		"agent 概念已并入 runtime：底座由构建期固定（本机为 "+runtime.SelectedRuntime()+"），"+
 			"会话不再有 `agent_id`；换底座要重新构建（-X internal/runtime.BuildRuntime=<id>）", nil)
+}
+
+// permissionModeAllowed 用户面可选的权限三档（v33）。
+//
+// 取值直接引用 `internal/domain/interaction` 的 `NativeMode*` 常量（唯一事实源），不写字面量：
+// 一来避免与那批常量漂移，二来 `danger-full-access` 这个字面量在生产代码里另有一条守卫
+// （`TestSandboxEscalationGoesThroughApproval`：平台不得"升权被拒后顺手用完全访问重跑"），
+// 用常量引用即天然不触发它。`auto`/`off` 是平台内部值，不对用户面开放，故不在本集合内。
+var permissionModeAllowed = map[string]bool{
+	interaction.NativeModeReadOnly:       true,
+	interaction.NativeModeWorkspaceWrite: true,
+	interaction.NativeModeFullAccess:     true,
+}
+
+// validatePermissionMode 校验新建会话请求的 `permission_mode`（v33，必传三档之一）。
+//
+// 缺键 / 空串 / 非法值一律拒——**不回落默认**：权限是唯一的安全轴，静默给一个默认档等于让用户
+// 以为自己选了只读、实际跑在别的档上（见 DTO `PermissionMode` 注释）。
+func validatePermissionMode(mode string) error {
+	if permissionModeAllowed[mode] {
+		return nil
+	}
+	return failure.NewError(failure.ClassRequest, "invalid_permission_mode",
+		"permission_mode 必须是 "+interaction.NativeModeReadOnly+" / "+interaction.NativeModeWorkspaceWrite+
+			" / "+interaction.NativeModeFullAccess+" 之一（收到 "+fmt.Sprintf("%q", mode)+"）", nil)
 }

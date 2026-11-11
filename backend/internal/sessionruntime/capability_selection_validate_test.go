@@ -195,6 +195,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	}
 
 	_, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Capabilities: &dtosession.CapabilitiesReq{Skills: ptrOf([]string{"ghost"})},
 	})
 	if err == nil {
@@ -225,6 +226,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 
 	// 可达的选定则一切照常。
 	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Capabilities: &dtosession.CapabilitiesReq{Mcps: ptrOf([]string{"fs"})},
 	})
 	if err != nil {
@@ -270,7 +272,7 @@ func TestCreateSessionDefaultPathUnchanged(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	svc.EnableStore(st)
-	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{Cwd: t.TempDir()})
+	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{PermissionMode: "workspace-write", Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -316,12 +318,13 @@ func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 	ctx := context.Background()
 
 	declared, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Cwd: t.TempDir(), Capabilities: &dtosession.CapabilitiesReq{},
 	})
 	if err != nil {
 		t.Fatalf("空选定应能建会话: %v", err)
 	}
-	plain, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{Cwd: t.TempDir()})
+	plain, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{PermissionMode: "workspace-write", Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,6 +364,7 @@ func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 
 	// `{skills:[],mcps:[]}` = 明确一个都不要 → 回显两个空数组，且是**另一个代际**。
 	none, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Cwd:          t.TempDir(),
 		Capabilities: &dtosession.CapabilitiesReq{Skills: ptrOf([]string{}), Mcps: ptrOf([]string{})},
 	})

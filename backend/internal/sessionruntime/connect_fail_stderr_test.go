@@ -85,7 +85,7 @@ func TestConnectFailurePicksCauseLineOverTail(t *testing.T) {
 	t.Cleanup(orch.Close)
 
 	_, err := svc.CreateSession(context.Background(),
-		dtosession.SessionCreateReq{Cwd: t.TempDir()})
+		dtosession.SessionCreateReq{PermissionMode: "workspace-write", Cwd: t.TempDir()})
 	if err == nil {
 		t.Fatal("底座起不来时建会话必须失败")
 	}
@@ -123,7 +123,7 @@ func TestConnectFailureSurfacesStderrTail(t *testing.T) {
 	t.Cleanup(orch.Close)
 
 	_, err := svc.CreateSession(context.Background(),
-		dtosession.SessionCreateReq{Cwd: t.TempDir()})
+		dtosession.SessionCreateReq{PermissionMode: "workspace-write", Cwd: t.TempDir()})
 	if err == nil {
 		t.Fatal("底座起不来时建会话必须失败")
 	}

@@ -43,6 +43,11 @@ type WorkspaceItem struct {
 	DirStatus  string
 	Sessions   int
 	LastUsedAt int64
+	// DefaultPermissionMode 该工作空间新建会话时的默认权限模式（v33；空 = 未设默认）。
+	// 只经读面下发、由前端做"预选初值"，服务端不在建会话时回落它。
+	DefaultPermissionMode string
+	// DefaultCapabilityJSON 默认能力选定原始 JSON（v33；空 = 未设默认）。前端预选用。
+	DefaultCapabilityJSON string
 
 	CreatedAt int64
 

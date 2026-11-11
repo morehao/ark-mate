@@ -734,6 +734,27 @@ export const renameWorkspace = (id: string, title: string): Promise<Workspace> =
   http.patch<Workspace>(`/mate/workspaces/${encodeURIComponent(id)}`, { title })
 
 /**
+ * 改工作空间的**默认权限 / 默认能力**（读面见 `Workspace.default_permission_mode` /
+ * `default_capability`）。
+ *
+ * 后端是**补丁语义**：只带你要改的键——传了才动，没传的键原样保留。因此这里把 patch 里
+ * **未定义（undefined）** 的键过滤掉，`undefined` 视为「不改」；`null` 与空串按后端语义
+ * （null = 不改该字段、空串 = 清掉）原样透传，不在前端另造三态。
+ *
+ * 与 `renameWorkspace` / `relocateWorkspace` 是**同一端点不同键**：那两条发 `{title}` / `{path}`，
+ * 这条发 `{default_permission_mode?, default_capability?}`——各自独立，别合并。
+ */
+export const patchWorkspaceDefaults = (
+  id: string,
+  patch: { default_permission_mode?: string | null; default_capability?: string | null },
+): Promise<Workspace> => {
+  const body: Record<string, string | null> = {}
+  if (patch.default_permission_mode !== undefined) body.default_permission_mode = patch.default_permission_mode
+  if (patch.default_capability !== undefined) body.default_capability = patch.default_capability
+  return http.patch<Workspace>(`/mate/workspaces/${encodeURIComponent(id)}`, body)
+}
+
+/**
  * **改登记路径**（W4）：把这条工作空间指向另一个目录。
  *
  * **id 不变、既有会话一个字节都不动**——它们的 `cwd` 是执行事实（ACP cwd + 沙箱边界），

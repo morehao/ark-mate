@@ -227,7 +227,7 @@ func TestCancelWaitsForPromptSettlement(t *testing.T) {
 // 的判据：把它错报成 40401 会让用户去查一个并不存在的资源。
 func TestServiceRESTErrors(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{Prompt: "hi"})
+	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{PermissionMode: "workspace-write", Prompt: "hi"})
 	if numericCode(err) != 40001 {
 		t.Fatalf("缺工作空间应 40001，got %d（%v）", numericCode(err), err)
 	}

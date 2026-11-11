@@ -90,6 +90,15 @@ export interface Workspace {
   sessions: number
   /** 最近使用时间（Unix 毫秒；缺省 = 从未用过）。 */
   last_used_at?: UnixMillis
+  /**
+   * 工作空间**默认权限档**（三档之一；空/缺省 = 未设默认）。
+   *
+   * 只用于新建面板**预选初值**——不上 wire、服务端也不据此回落建会话；没设默认时前端预选
+   * `'workspace-write'`。改它不回溯改已有会话（那是 `sessions.native_mode` 的快照事实）。
+   */
+  default_permission_mode?: string
+  /** 工作空间**默认能力**（能力选定的 JSON 串；空/缺省 = 未设默认）。同样只做预选初值。 */
+  default_capability?: string
   created_at: UnixMillis
   updated_at: UnixMillis
 }

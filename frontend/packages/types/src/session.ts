@@ -437,6 +437,19 @@ export interface CreateSessionReq {
   /** 会话级模型 id（空 = 底座默认；下发通道由该底座自己声明）。 */
   model?: string
   /**
+   * 会话钉住的原生权限模式（**必传**）。
+   *
+   * 合法值**仅三档**：
+   *   - `'read-only'`         仅可查看
+   *   - `'workspace-write'`   工作区内修改
+   *   - `'danger-full-access'` 完全权限（危险档，新建时须二次确认）
+   *
+   * 缺键 / 空串 / 任何其它值 → 服务端 `40001 invalid_permission_mode`（零副作用）。
+   * 用户面**没有**「跟随默认」态：新建面板永远预选并提交一个具体档位，
+   * 工作空间默认只用于前端预选初值、不上 wire 参与后端合并。
+   */
+  permission_mode: 'read-only' | 'workspace-write' | 'danger-full-access'
+  /**
    * 能力选定（M3）：只传**用户真的限制了的** kind。缺键 = 该 kind 不限制；
    * `[]` = 一个都不要；非空 = 白名单。服务端据此算代际指纹并把选定钉进会话。
    * 不可达的 id 会被拒（40001 `capability_not_applicable`，msg 里逐条给原因）。

@@ -234,6 +234,7 @@ func TestCreateSessionWorkspaceRejectedBeforeRuntime(t *testing.T) {
 	mustWorkspacePolicy(t, svc, t.TempDir(), nil)
 
 	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Cwd: "relative/not-absolute",
 	})
 	if code := gerrCode(t, err); code != 40001 {
@@ -241,6 +242,7 @@ func TestCreateSessionWorkspaceRejectedBeforeRuntime(t *testing.T) {
 	}
 
 	_, err = svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Cwd: filepath.Join(t.TempDir(), "nope"),
 	})
 	if code := gerrCode(t, err); code != 40001 {
@@ -252,6 +254,7 @@ func TestCreateSessionWorkspaceRejectedBeforeRuntime(t *testing.T) {
 		t.Fatalf("write: %v", werr)
 	}
 	_, err = svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 		Cwd: f,
 	})
 	if code := gerrCode(t, err); code != 40001 {
@@ -265,7 +268,7 @@ func TestCreateSessionWorkspaceRequiredWhenDisabled(t *testing.T) {
 	svc := workspaceTestSvc(t)
 	mustWorkspacePolicy(t, svc, "", nil)
 
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{})
+	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{PermissionMode: "workspace-write"})
 	if code := gerrCode(t, err); code != 40001 {
 		t.Fatalf("代建关闭应 40001，got %d: %v", code, err)
 	}
@@ -291,7 +294,7 @@ func TestCreateSessionFailureLeavesNoPerSessionDir(t *testing.T) {
 	}
 
 	// echo spec 无启动命令 → acquire 失败。
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{})
+	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{PermissionMode: "workspace-write"})
 	if err == nil {
 		t.Fatal("无命令的 runtime 应建会话失败")
 	}

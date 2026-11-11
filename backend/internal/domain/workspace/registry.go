@@ -94,14 +94,16 @@ func (pl *Plane) WorkspaceRegistry() (*WorkspaceList, error) {
 	}
 	for _, r := range rows {
 		resp := WorkspaceItem{
-			ID:        r.ID,
-			Path:      r.Path,
-			Title:     r.Title,
-			IsDefault: r.IsDefault,
-			ListOrder: r.ListOrder,
-			DirStatus: dirStatusOf(r.Path),
-			CreatedAt: objtime.Milli(r.CreatedAt),
-			UpdatedAt: objtime.Milli(r.UpdatedAt),
+			ID:                    r.ID,
+			Path:                  r.Path,
+			Title:                 r.Title,
+			IsDefault:             r.IsDefault,
+			ListOrder:             r.ListOrder,
+			DirStatus:             dirStatusOf(r.Path),
+			DefaultPermissionMode: r.DefaultPermissionMode,
+			DefaultCapabilityJSON: r.DefaultCapabilityJSON,
+			CreatedAt:             objtime.Milli(r.CreatedAt),
+			UpdatedAt:             objtime.Milli(r.UpdatedAt),
 		}
 		resp.Sessions = int(counts[r.ID])
 		resp.LastUsedAt = lastUsedMilli[r.ID]
@@ -487,14 +489,16 @@ func (pl *Plane) provisionMemoryDefaultWorkspace(dir string) error {
 // `workspace_view.go` 的 `workspaceUsage` 同一条注释）。
 func (pl *Plane) workspaceRespForMemDefault(def model.WorkspaceEntity) WorkspaceItem {
 	resp := WorkspaceItem{
-		ID:        def.ID,
-		Path:      def.Path,
-		Title:     def.Title,
-		IsDefault: true,
-		ListOrder: def.ListOrder,
-		DirStatus: dirStatusOf(def.Path),
-		CreatedAt: objtime.Milli(def.CreatedAt),
-		UpdatedAt: objtime.Milli(def.UpdatedAt),
+		ID:                    def.ID,
+		Path:                  def.Path,
+		Title:                 def.Title,
+		IsDefault:             true,
+		ListOrder:             def.ListOrder,
+		DirStatus:             dirStatusOf(def.Path),
+		DefaultPermissionMode: def.DefaultPermissionMode,
+		DefaultCapabilityJSON: def.DefaultCapabilityJSON,
+		CreatedAt:             objtime.Milli(def.CreatedAt),
+		UpdatedAt:             objtime.Milli(def.UpdatedAt),
 	}
 	for _, rec := range pl.sessionViews() {
 		if rec.WorkspaceID == def.ID || rec.WorkspaceID == "" {
