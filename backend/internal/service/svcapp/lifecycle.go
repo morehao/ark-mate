@@ -244,6 +244,9 @@ func (s *appSvc) ensurePackDefinition(ctx context.Context, id, name string, m *a
 	if err != nil {
 		return err
 	}
+	// 市场下载 / 装包建的定义来源恒为「市场」（v41）。本函数只在定义尚不存在时被调用
+	// （覆盖安装已存在定义时走的是 SetAppEnabled，不经此处），故不会改掉既有来源。
+	row.Source = AppSourceMarket
 	if _, err := s.store.UpsertAppDefinition(ctx, id, row, members, 0, true, "app-install"); err != nil {
 		return err
 	}

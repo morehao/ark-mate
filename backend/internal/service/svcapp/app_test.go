@@ -211,3 +211,38 @@ func TestAppCASConflict(t *testing.T) {
 		t.Fatal("以过时 rev 写入应 CAS 不中（applied=false），但成功了")
 	}
 }
+
+// TestAppSourceSelfOnCreateAndPreservedOnUpdate v41：POST /apps 新建 → source=self；
+// PUT /apps/:id 覆盖写**不改** source（来源身份一经落定不可被写面覆盖改掉）。
+func TestAppSourceSelfOnCreateAndPreservedOnUpdate(t *testing.T) {
+	svc, st := newSvc(t)
+	ctx := context.Background()
+
+	if _, err := svc.WriteApp(ctx, "", req(map[string]string{"id": `"src-app"`, "name": `"A"`}), true); err != nil {
+		t.Fatalf("新建失败：%v", err)
+	}
+	// 新建后 source=self（读面）。
+	got, err := svc.GetApp(ctx, "src-app")
+	if err != nil {
+		t.Fatalf("详情失败：%v", err)
+	}
+	if got.Source != svcapp.AppSourceSelf {
+		t.Fatalf("新建 app 的 source 应为 %q，实得 %q", svcapp.AppSourceSelf, got.Source)
+	}
+
+	// 把行内 source 篡改成 market（模拟"从市场来的定义被 PUT 覆盖"场景），再走 PUT：
+	// 覆盖写不得把 source 改回 self，也不得改动它。
+	if err := st.DB().Exec(`UPDATE apps SET source='market' WHERE id='src-app'`).Error; err != nil {
+		t.Fatalf("篡改 source: %v", err)
+	}
+	if _, err := svc.WriteApp(ctx, "src-app", req(map[string]string{"name": `"改名"`}), false); err != nil {
+		t.Fatalf("覆盖写失败：%v", err)
+	}
+	got2, _ := svc.GetApp(ctx, "src-app")
+	if got2.Source != svcapp.AppSourceMarket {
+		t.Fatalf("PUT 不应改 source（应仍为 market），实得 %q", got2.Source)
+	}
+	if got2.Name != "改名" {
+		t.Fatalf("PUT 应改 name，实得 %q", got2.Name)
+	}
+}

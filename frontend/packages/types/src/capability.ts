@@ -435,6 +435,11 @@ export interface App {
   why?: string
   /** 是否声明了前端页面入口（列表标记；不回 page 全量）。 */
   has_page: boolean
+  /**
+   * 应用来源（2026-11-11）：`self` = 自建（含对话创建）/ `market` = 市场下载 / 装包。
+   * 后端落库列 `apps.source`。可选：旧响应可能不带该字段（前端容错，缺省不显示来源标签）。
+   */
+  source?: 'self' | 'market'
   /** 写面当前版本（= 最新审计 seq；0 = 从未写过的旧值）。 */
   revision: number
   /** Unix 毫秒（`objtime.Milli`；前端 `new Date(ms)` 零换算）。 */

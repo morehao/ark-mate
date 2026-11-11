@@ -179,6 +179,9 @@ func (s *appSvc) WriteApp(ctx context.Context, pathID string, req dtoapp.AppWrit
 	if err != nil {
 		return nil, err
 	}
+	// 写面（POST /apps + PUT /apps/:id）产出的定义来源恒为「自建」（v41）。update 路径下
+	// UpdateFields 的 Select 不含 source，故这里的赋值只在 create 时真正落库；PUT 不会改来源。
+	row.Source = AppSourceSelf
 	applied, err := s.store.UpsertAppDefinition(ctx, app.ID, row, members, expectedRev, create, definition.DefinitionWriteActor)
 	if err != nil {
 		return nil, err
@@ -278,6 +281,14 @@ func (s *appSvc) SetAppEnabled(ctx context.Context, id string, enabled bool) (*d
 }
 
 // ——— 内部：构建 / 编解码 / 白名单 ———
+
+// 应用来源枚举（apps.source，v41）。落库值，属持久元数据，不进 `capability.App` 定义本体。
+const (
+	// AppSourceSelf 自建（POST /apps 新建，含对话创建）。
+	AppSourceSelf = "self"
+	// AppSourceMarket 市场下载 / 装包（InstallApp → ensurePackDefinition 新建定义）。
+	AppSourceMarket = "market"
+)
 
 // buildApp 把写面原文对象合并进既有定义（覆盖写）或从零构建（新建），解成强类型 App。
 //
@@ -485,9 +496,11 @@ func appToResp(app *capability.App, row *model.AppEntity, rev int64, withSetting
 		APIVersion:  app.APIVersion,
 		Enabled:     app.IsEnabled(),
 		HasPage:     app.Page != nil,
-		Revision:    rev,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
+		// Source 来源（v41）：从行直接读回（不经 capability.App——它是定义本体，不含持久元数据）。
+		Source:    row.Source,
+		Revision:  rev,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
 	}
 	for _, e := range app.Entities {
 		resp.Entities = append(resp.Entities, dtoapp.AppEntityResp{Kind: e.Kind, Table: e.Table, IDPrefix: e.IDPrefix})

@@ -152,6 +152,7 @@ function MyAppCard({
       description={app.description || (app.has_page ? '（无描述）' : '（无描述 · 无独立页面）')}
       meta={
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          {appSourcePill(app.source)}
           <span style={{ fontFamily: tokens.fontMono, fontSize: 10.5 }}>{app.id}</span>
           {app.has_page && <span style={tagChipStyle}>有页面</span>}
         </span>
@@ -281,3 +282,24 @@ const tagChipStyle = {
   padding: '1px 7px',
   lineHeight: '16px',
 } as const
+
+// 「市场」来源标签的强调 pill 样式（靛蓝柔和底 + accent 字；全站唯一彩色 accent，克制使用）。
+const marketPillStyle = {
+  fontSize: 10.5,
+  color: tokens.accent,
+  background: tokens.accentSoft,
+  border: `1px solid ${tokens.accentSoft}`,
+  borderRadius: 5,
+  padding: '1px 7px',
+  lineHeight: '16px',
+} as const
+
+/**
+ * 应用来源标签：`self` → 「自建」（中性 pill，同 tagChipStyle）；`market` → 「市场」（强调 pill）。
+ * `source` 缺省（undefined，旧响应）时不显示任何标签（前端容错）。
+ */
+function appSourcePill(source: AppType['source']) {
+  if (source === 'market') return <span style={marketPillStyle}>市场</span>
+  if (source === 'self') return <span style={tagChipStyle}>自建</span>
+  return null
+}

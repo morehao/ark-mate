@@ -49,6 +49,9 @@ type AppResp struct {
 	State string `json:"state"`
 	// Why state 的人话原因（failed/pending 时非空，如「子进程崩溃：exit status 3」）。
 	Why string `json:"why,omitempty"`
+	// Source 应用来源（v41 落库）：`self`=自建（含对话创建）/ `market`=市场下载 / 装包。
+	// 持久元数据，读面从 apps.source 列直接读回；PUT body 不含它、更新不改它。
+	Source string `json:"source"`
 	// HasPage 是否声明了前端页面入口（列表用它标记）。
 	HasPage bool `json:"has_page"`
 	// Revision 写面当前版本（= 最新审计 seq；0 = 从未写过的旧值）。

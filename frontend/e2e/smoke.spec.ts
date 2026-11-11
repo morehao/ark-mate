@@ -76,6 +76,19 @@ async function mockBackend(page: Page) {
           enabled: true,
           state: 'active',
           has_page: false,
+          source: 'self',
+          revision: 1,
+          created_at: 0,
+          updated_at: 0,
+        },
+        {
+          id: 'market-app',
+          name: '市场应用',
+          description: '一个从市场装的应用',
+          enabled: true,
+          state: 'active',
+          has_page: false,
+          source: 'market',
           revision: 1,
           created_at: 0,
           updated_at: 0,
@@ -201,6 +214,9 @@ test.describe('前端首屏与导航', () => {
     await expect(page.getByPlaceholder('搜索应用')).toBeVisible()
     await expect(page.getByText('演示应用')).toBeVisible()
     await expect(page.locator('.fg-cap-grid')).toBeVisible()
+    // 来源标签：self → 「自建」、market → 「市场」（mock 各一条）。
+    await expect(page.getByText('自建', { exact: true })).toBeVisible()
+    await expect(page.getByText('市场', { exact: true })).toBeVisible()
   })
 
   // 旧路径 redirect：/extensions/market|my-apps → /apps/market|my-apps。

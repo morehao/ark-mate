@@ -46,6 +46,9 @@ func (d *AppDao) CreateCAS(ctx context.Context, row *model.AppEntity) (bool, err
 // **不做 revision 判据**：`apps` 没有 revision 列，乐观锁在 store 事务内以 `definition_revisions.seq`
 // 复核（CALLER 责任）。这里只用 id 定位——条件更新在这类"按 id 覆盖 + 外部版本仲裁"的表上
 // 是正确分层：谁能写由上层的事务决定，本层只负责写。
+//
+// **Select 列表不含 `source`**：更新**不改来源**（v41，自建/市场身份一经落定不可被 PUT 覆盖改掉）。
+// `CreateCAS` 是整行插入，新行的 source 由 svc 赋值后随插入落地。
 func (d *AppDao) UpdateFields(ctx context.Context, row *model.AppEntity) (bool, error) {
 	res := d.DB(ctx).Model(&model.AppEntity{}).
 		Where("id = ?", row.ID).
