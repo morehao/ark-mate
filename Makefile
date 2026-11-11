@@ -20,7 +20,7 @@
 # `--web-dir` / `MATE_WEB_DIR` 指过去——桌面壳指包内那份、容器指镜像内那份、`make dev` 指工作区那份。
 # （2026-10-10 起 `//go:embed` 与 `-tags release` 已删除，详见 `.dsh/docs/notes/2026-10-10-embed-removal-notes.md`。）
 
-.PHONY: dev dev/runtime-bin web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist desktop/run desktop/dist-run verify/asset-parity verify/ui-product verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test clean image image/runtimes image/run
+.PHONY: dev dev/runtime-bin dev/answerer web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist desktop/run desktop/dist-run verify/asset-parity verify/ui-product verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 # 桌面随包核心的落点（apps/desktop/resources/ 已 gitignore；M4-1 的 electron-builder 从这里取）。
@@ -498,6 +498,18 @@ dev/runtime-bin:
 	  chmod +x $(DEV_BIN_DIR)/$(RUNTIME); \
 	fi
 
+# dev 态把 answerer 插件资产对齐到 payloads（纯静态拷贝，幂等、秒级、**不碰 Electron**）。
+#
+# 为什么需要它：`desktop/payloads` 尾部有一段把 answerer 拷进 `resources/payloads/ark-mate-answerer/`，
+# 但 dev **不跑** `desktop/payloads`（那条会跑 prepare-runtime.mjs、`require('electron')` 拿 Node ABI，
+# 在只跑 web 的机器上会触发 Electron 二进制下载）。缺了这段拷贝，payloads 里就没有 answerer，
+# 平台 `ResolveAnswererPlugin()` 解析不到 → profile 不写 answerer 条目 → dsh 回退 NO_PROVIDER，
+# `ask_user_question` 弹不出卡（实测）。补这一段，dev 与交付态在「answerer 在位」这件事上一致。
+dev/answerer:
+	@mkdir -p $(PAYLOADS_ROOT)/ark-mate-answerer
+	@cp -R $(FRONTEND_ROOT)/apps/desktop/assets/ark-mate-answerer/. $(PAYLOADS_ROOT)/ark-mate-answerer/
+	@test -f $(PAYLOADS_ROOT)/ark-mate-answerer/lib/index.js || (echo "answerer 插件拷贝失败：缺 lib/index.js" && exit 1)
+
 # 后端开发起服（mate 无默认子命令，需显式 serve）
 server: web-assets dev/runtime-bin
 	@echo "==> 底座  $(RUNTIME) [构建期固定；改它要重新构建]"
@@ -536,7 +548,19 @@ DEV_CORE_LDFLAG_ARGS = $(strip $(if $(DEV_CORE_VERSION),-X github.com/morehao/ar
 # 放在这里而非 target-specific，是为了让 `dev:` 只保留唯一的声明行 `dev: dev/runtime-bin`
 # （archtest 用 targetHeader 取 dev 目标首行的假设依赖这一点）。
 MATE_APP_SOURCE_ROOTS_DEV ?= $(CURDIR)/examples
-dev: dev/runtime-bin
+# dev 态要「和交付相似」，指的是核心去拉 payloads 里那份 dsh（dev-loop 用 MATE_DSH_ENTRY 指过去），
+# 而**不是**把整条 `desktop/payloads` 的装配拖进来——那条会跑 prepare-runtime.mjs，它会 `require('electron')`
+# 拿 Electron 的 Node ABI 做随包原生依赖的交叉校验（服务 release.json/engines），在纯 web dev 的机器上
+# 表现为「Downloading Electron binary...」——几十 MB、而且 web 端根本用不到 Electron。
+#
+# 真正的缺口只有一处：**answerer 插件是随包资产，靠 `desktop/payloads` 尾部那段静态拷贝才进 payloads；
+# dev 不跑它，payloads 里就没有 ark-mate-answerer → 平台解析不到 → dsh 回退 NO_PROVIDER（结构化提问
+# 静默降级，实测 ask_user_question 弹不出卡）**。所以这里只补一个**轻量、幂等、不碰 Electron**的静态拷贝
+# 目标（纯 cp，秒级），把 answerer 资产对齐到位；主载荷（dsh/primary-runtime/office-skills）仍由你现有
+# 流程（`make desktop/payloads` 或其产物）提供，不在 dev 里重复装配。
+#
+# 声明行仍**只保留这一条 `dev:`** 且仍含 `dev/runtime-bin`（archtest dev_parity 依赖这两个事实）。
+dev: dev/runtime-bin dev/answerer
 	$(require-node)
 	@echo "==> 后端  go run ./cmd/mate serve  (默认 127.0.0.1:10001, store=$(MATE_STORE), runtime=$(RUNTIME), core_version=$(if $(DEV_CORE_VERSION),$(DEV_CORE_VERSION),dev))"
 	@echo "==> 应用市场来源根  $(MATE_APP_SOURCE_ROOTS_DEV)"
