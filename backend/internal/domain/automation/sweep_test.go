@@ -20,11 +20,11 @@ type fakeHost struct {
 }
 
 func (h fakeHost) CreateSession(context.Context, HostSessionReq) (string, error) { return "", nil }
-func (h fakeHost) DeliverSession(context.Context, HostDeliverReq) error           { return nil }
-func (h fakeHost) CancelRun(context.Context, string) error                        { return nil }
-func (h fakeHost) SessionRunning(string) bool                                     { return false }
-func (h fakeHost) SessionExists(id string) bool                                   { return h.existing[id] }
-func (h fakeHost) EmitRun(context.Context, string, int64, map[string]any)         {}
+func (h fakeHost) DeliverSession(context.Context, HostDeliverReq) error          { return nil }
+func (h fakeHost) CancelRun(context.Context, string) error                       { return nil }
+func (h fakeHost) SessionRunning(string) bool                                    { return false }
+func (h fakeHost) SessionExists(id string) bool                                  { return h.existing[id] }
+func (h fakeHost) EmitRun(context.Context, string, int64, map[string]any)        {}
 
 // fakeFiles SaveOverlay 用：Write 成功即可（memory 载体路径）。
 type fakeFiles struct{}
@@ -32,9 +32,9 @@ type fakeFiles struct{}
 func (fakeFiles) Open(string, string, string, map[string]any) (DefinitionDraft, error) {
 	return nil, nil
 }
-func (fakeFiles) Save(DefinitionDraft) error                     { return nil }
+func (fakeFiles) Save(DefinitionDraft) error                         { return nil }
 func (fakeFiles) Write(string, string, string, map[string]any) error { return nil }
-func (fakeFiles) Remove(string, string, string) (bool, error)    { return false, nil }
+func (fakeFiles) Remove(string, string, string) (bool, error)        { return false, nil }
 
 // seededPlane 造一个带 temp 目录与假文件载体的 Plane（SaveOverlay 需要 dir 非空）。
 func seededPlane(t *testing.T, host Host) *Plane {
