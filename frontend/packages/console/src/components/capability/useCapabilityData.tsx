@@ -464,5 +464,3 @@ export function useCapabilityData(scope: CapScope) {
     showToast,
   }
 }
-
-export type CapabilityData = ReturnType<typeof useCapabilityData>

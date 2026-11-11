@@ -6,7 +6,6 @@ import type {
   MaterialListResp,
   MaterialNodeDetail,
   MaterialPublishResp,
-  MaterialRowsResp,
   MaterialSearchResp,
   PatchMaterialNodeReq,
 } from '@ark-mate/types'
@@ -73,14 +72,6 @@ export const searchMaterial = (q: string, params: { limit?: number; offset?: num
   if (params.offset != null) qs.set('offset', String(params.offset))
   return http.get<MaterialSearchResp>(`/mate/materials/search?${qs.toString()}`)
 }
-
-/** 取表格行（schema + rows）。 */
-export const getMaterialRows = (id: string): Promise<MaterialRowsResp> =>
-  http.get<MaterialRowsResp>(`/mate/materials/nodes/${encodeURIComponent(id)}/rows`)
-
-/** 整表替换表格行（rows 为 JSON 数组字符串）。 */
-export const setMaterialRows = (id: string, rows: string): Promise<MaterialRowsResp> =>
-  http.put<MaterialRowsResp>(`/mate/materials/nodes/${encodeURIComponent(id)}/rows`, { rows })
 
 /** 发布 page（落盘 + 本地查看路径）。 */
 export const publishMaterialPage = (id: string): Promise<MaterialPublishResp> =>

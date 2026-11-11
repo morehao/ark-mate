@@ -207,5 +207,3 @@ export function useExpertData() {
     remove,
   }
 }
-
-export type ExpertData = ReturnType<typeof useExpertData>

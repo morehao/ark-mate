@@ -32,11 +32,6 @@ function desktopCarrier(): MateDesktop | null {
   return assertMateDesktop(raw)
 }
 
-/** 是否运行在桌面窗口里（供 UI 决定要不要显示"在浏览器中打开"之类的入口）。 */
-export function isDesktopCarrier(): boolean {
-  return desktopCarrier() !== null
-}
-
 /**
  * 解析事件流配置。
  *
