@@ -11,6 +11,7 @@ import {
   FolderOutlined,
   MoreOutlined,
   PlusOutlined,
+  SettingOutlined,
   WarningOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
@@ -422,6 +423,7 @@ export function WorkspaceManageMenu({
   onMoveUp,
   onMoveDown,
   onRename,
+  onDefaults,
   onDelete,
   onOpenChange,
 }: {
@@ -432,6 +434,8 @@ export function WorkspaceManageMenu({
   onMoveDown: () => void
   /** 重命名由调用方接管（要开一个对话框，见 `WorkspaceGroupPane`）。 */
   onRename: () => void
+  /** 「默认设置…」：打开默认权限 / 默认能力设置 Modal（调用方接管）。 */
+  onDefaults: () => void
   onDelete: () => void
   /**
    * 菜单开合上报。调用方据此给所在行挂 `fg-menu-open`：鼠标移进浮层后行不再 hover，
@@ -441,6 +445,7 @@ export function WorkspaceManageMenu({
 }) {
   const items: MenuProps['items'] = [
     { key: 'rename', label: '重命名', icon: <EditOutlined /> },
+    { key: 'defaults', label: '默认设置…', icon: <SettingOutlined /> },
     { type: 'divider' },
     { key: 'up', label: '上移', icon: <ArrowUpOutlined />, disabled: !canMoveUp },
     { key: 'down', label: '下移', icon: <ArrowDownOutlined />, disabled: !canMoveDown },
@@ -459,6 +464,7 @@ export function WorkspaceManageMenu({
     if (key === 'up') onMoveUp()
     else if (key === 'down') onMoveDown()
     else if (key === 'rename') onRename()
+    else if (key === 'defaults') onDefaults()
     else if (key === 'delete') onDelete()
   }
   return (

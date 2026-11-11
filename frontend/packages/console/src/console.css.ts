@@ -775,10 +775,24 @@ export const consoleStyleSheet = `
   .fg-chip-chev { font-size: 10px; color: ${tokens.textPlaceholder}; }
   .fg-chip.fg-on { color: var(--fg-menu-on-color); }
   .fg-chip.fg-on .fg-chip-ico { color: var(--fg-menu-on-color); }
-  /* 权限 chip 菜单项：一行 + 说明副行。 */
-  .fg-perm-opt { display: flex; flex-direction: column; gap: 1px; padding: 2px 0; }
+  /* 可写的三档权限选择器（新建面板 / 工作空间默认设置）：与锁定态 chip 同槽位，但可下拉。 */
+  .fg-perm-picker { cursor: pointer; }
+  .fg-perm-picker .fg-chip-chev { display: inline-flex; align-items: center; }
+  /* 权限 chip 菜单项：图标 + 文字列（一行标题 + 说明副行）。图标与文字自排，间距/对齐由这里定。 */
+  .fg-perm-opt { display: flex; align-items: flex-start; gap: 10px; padding: 4px 2px; }
+  .fg-perm-opt-ico {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 18px;
+    margin-top: 1px;
+    font-size: 14px;
+    color: ${tokens.textSecondary};
+  }
+  .fg-perm-opt-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .fg-perm-opt-name { font-size: 13px; line-height: 1.4; }
-  .fg-perm-opt-desc { font-size: 11.5px; color: ${tokens.textPlaceholder}; line-height: 1.4; }
+  .fg-perm-opt-desc { font-size: 11.5px; color: ${tokens.textPlaceholder}; line-height: 1.45; }
 
   /* 权限 chip 锁定态（v4 · D11 会话内不可切）：无下拉箭头、hover 只给软底不换成"可选"语气。
      终局底座暴露运行期切换后，同一槽位去掉 fg-chip-locked、加回 chevron + 菜单即可（布局零迁移）。 */

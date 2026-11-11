@@ -353,7 +353,7 @@ func TestSessionHistoryClamp(t *testing.T) {
 func TestCreateSessionWithoutOrchestrator(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "x", Name: "X"})
 	svc := NewService(reg, eventbus.New()) // 无 orch
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{Prompt: "hi"})
+	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{PermissionMode: "workspace-write", Prompt: "hi"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 50201 {
 		t.Fatalf("期望 50201，got %v", err)

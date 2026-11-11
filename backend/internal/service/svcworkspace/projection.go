@@ -12,16 +12,18 @@ import (
 
 func workspaceResp(v workspace.WorkspaceItem) dtoworkspace.WorkspaceResp {
 	return dtoworkspace.WorkspaceResp{
-		ID:         v.ID,
-		Path:       v.Path,
-		Title:      v.Title,
-		IsDefault:  v.IsDefault,
-		ListOrder:  v.ListOrder,
-		DirStatus:  v.DirStatus,
-		Sessions:   v.Sessions,
-		LastUsedAt: v.LastUsedAt,
-		CreatedAt:  v.CreatedAt,
-		UpdatedAt:  v.UpdatedAt,
+		ID:                    v.ID,
+		Path:                  v.Path,
+		Title:                 v.Title,
+		IsDefault:             v.IsDefault,
+		ListOrder:             v.ListOrder,
+		DirStatus:             v.DirStatus,
+		Sessions:              v.Sessions,
+		DefaultPermissionMode: v.DefaultPermissionMode,
+		DefaultCapabilityJSON: v.DefaultCapabilityJSON,
+		LastUsedAt:            v.LastUsedAt,
+		CreatedAt:             v.CreatedAt,
+		UpdatedAt:             v.UpdatedAt,
 	}
 }
 

@@ -97,6 +97,15 @@ type SessionCreateReq struct {
 	// Attachments 首轮携带的附件 id 列表（`att_…`；v32）。P2 只收不用；P3/P4 起消费。
 	// 与 PromptReq.Attachments 同一个词。
 	Attachments []string `json:"attachments,omitempty"`
+	// PermissionMode 会话钉住的原生权限模式（v33；**必传**）。
+	//
+	// 合法值仅三档：`read-only` / `workspace-write` / `danger-full-access`。缺键、空串或任何
+	// 其它取值 → `40001 invalid_permission_mode`（`CreateSession` 内、任何副作用之前拒）。
+	//
+	// 为什么**必传、且没有「跟随默认」这一态**：权限是唯一的安全轴，静默回落默认档等于让用户
+	// 以为自己选了只读、实际跑在默认（可能是完全权限）的进程上。所以要求用户面每次都明确表态；
+	// 工作空间默认档只在前端做**预选初值**，不参与后端合并（服务端直接采用本字段的值）。
+	PermissionMode string `json:"permission_mode"`
 	// Origin 会话来源，**内部字段**（`json:"-"`，不从 wire 读）：'' = 人工，'automation:<id>' = 该
 	// automation 触发。不让客户端自称自动化产物——它会给会话列表打标、也是
 	// `GET /automations/:id/runs` 的快速路径，能自称就意味着能伪造别人的运行史。

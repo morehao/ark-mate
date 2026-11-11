@@ -14,6 +14,7 @@ import { GROUP_IDLE_LIMIT, quotaSessions } from '../console/railView'
 import { WorkspaceManageMenu, workspaceLabel } from './WorkspacePicker'
 import { DirectoryBrowser } from './DirectoryBrowser'
 import { AddWorkspaceButton } from './AddWorkspaceButton'
+import { WorkspaceDefaultsModal } from './WorkspaceDefaultsModal'
 import { directoryPickerKind, pickDirectoryNative } from '../directoryPicker'
 
 /** 折叠态的前端本地持久键（**不进 db**：它是"这台机器的视图偏好"，不是跨设备的事实）。 */
@@ -115,6 +116,8 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
   // 不改变列表的布局与高度。
   const [renaming, setRenaming] = useState<Workspace | null>(null)
   const [draft, setDraft] = useState('')
+  // 「默认设置…」Modal 的目标工作空间（非空 = 开着）。
+  const [defaultsFor, setDefaultsFor] = useState<Workspace | null>(null)
   // 组内配额是否已展开（浏览器本地的视图偏好，不进 db，与折叠态同一口径）。
   const [quotaOpen, setQuotaOpen] = useState<Record<string, boolean>>({})
   // 哪一行的 `⋯` 菜单开着：菜单打开时鼠标往往已经移到浮层上、行不再 hover，
@@ -239,6 +242,7 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
                     void moveWorkspace(ws.id, after)
                   }}
                   onRename={() => startRename(ws)}
+                  onDefaults={() => setDefaultsFor(ws)}
                   onDelete={() => setPendingDelete(ws)}
                   onOpenChange={(o) => setMenuOpenID(o ? ws.id : null)}
                 />
@@ -334,6 +338,9 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
           </div>
         )}
       </Modal>
+
+      {/* 默认设置 Modal（design §6.4）：默认权限 + 默认能力。 */}
+      <WorkspaceDefaultsModal workspace={defaultsFor} onClose={() => setDefaultsFor(null)} />
 
       {/* 删除登记：措辞对齐 dsh 的「删除工作区」，但**保留边界必须写在确认框里**——
           菜单项只有一个词的位置，说不清"删的是登记不是数据"，没人敢点。 */}

@@ -9,7 +9,7 @@ import { ModelSelect } from './ModelSelect'
 import { WorkspacePicker, type WorkspaceChoice } from './WorkspacePicker'
 import { mostRecentlyUsedWorkspaceId } from '../console/workspaceView'
 import { CapabilityBar } from './CapabilityBar'
-import { PermissionChip } from './PermissionChip'
+import { PermissionPicker, RiskConfirmation, isPermMode, type PermMode } from './PermissionPicker'
 import { AttachmentChip } from './AttachmentChip'
 import { useAttachmentDraft } from '../console/useAttachmentDraft'
 import { FOLLOW_DEFAULT, selectionPayload, type CapabilityChoice } from '../console/capabilityView'
@@ -129,6 +129,40 @@ export function StartPanel() {
     setWorkspace({ id })
   }, [workspaces, workspacePicked])
 
+  // ——— 权限档（新建时可选三档，design §6.3）———
+  //
+  // 口径：
+  //   - **没有「跟随默认」**：永远是一个具体档；初值 = 该工作空间 `default_permission_mode`，
+  //     工作空间没设默认（或档位不合法）→ 预选 `workspace-write`（dsh 自身默认）；
+  //   - 用户显式选过（`permissionPicked`）后，换工作空间不再回写初值——同 workspace/model 的纪律：
+  //     默认值只负责"开局预选"，用户一表态就不该被顶回。
+  //   - 选 danger 不立即生效（在 PermissionPicker 内二次确认）；且**即使预选到 danger，
+  //     发送前仍须对 danger 显式确认一次**（决策 D4）：`dangerAcked` 记录"本次已确认过 danger"。
+  const [permissionMode, setPermissionMode] = useState<PermMode>('workspace-write')
+  const [permissionPicked, setPermissionPicked] = useState(false)
+  // 发送前若当前档是 danger 且本次尚未确认 → 弹这个确认框（复用的是发送流程里的 gate，不是 Picker 内的选择确认）。
+  const [sendDangerGate, setSendDangerGate] = useState(false)
+  const [sendDangerAcked, setSendDangerAcked] = useState(false)
+  // 本次已确认过 danger 吗（确认过之后再次发送不再拦；切回非 danger 档会重置为 false）。
+  const [dangerAcked, setDangerAcked] = useState(false)
+
+  const pickPermission = (mode: PermMode) => {
+    setPermissionPicked(true)
+    setPermissionMode(mode)
+    // 切到非 danger 档 → 之前那次 danger 确认作废（下次再选 danger 要重新确认）。
+    if (mode !== 'danger-full-access') setDangerAcked(false)
+  }
+
+  // 工作空间默认档 → 预选初值（仅在用户未显式选过时）。workspaces 晚到也会重跑补选。
+  useEffect(() => {
+    if (permissionPicked) return
+    const current = workspace.id
+      ? workspaces?.items.find((w) => w.id === workspace.id)
+      : undefined
+    const def = current?.default_permission_mode
+    setPermissionMode(isPermMode(def) ? def : 'workspace-write')
+  }, [workspace.id, workspaces, permissionPicked])
+
   // 能力选定（M3）：缺省 = 两个 kind 都不限制（请求体里不加 capabilities 键，逐字节等同旧行为）。
   //
   // 与工作空间相反，这个选择**保留上一次的**：它不是沙箱边界，而更像"这次任务的工具箱"——
@@ -246,12 +280,28 @@ export function StartPanel() {
 
   const send = async () => {
     if (!canSend) return
+    // 出口再判一次**形状**（纵深防御：状态只该由上面两条路写进来，但那两条路都不该是
+    // "不合法值能发出去"的唯一保证）。形状不对 → 一个字都不带，回到「跟随默认」——
+    // 平台只接受自己声明过的模型，带一个形状不对的值只会换来一次 40401。
+    // 注意：这段形状闸门必须**留在 `send` 体内**——后端 archtest
+    // `TestLocalModelMemoryIsShapeGated` 扫描 `const send = async () => {…}` 体，
+    // 要求直接出现 `isPlatformModelID(model)`。故在门禁之前先算好 `picked`。
+    const picked = isPlatformModelID(model) ? model : null
+    // 决策 D4：当前档是 danger 且本次尚未确认过 → 不直接发，先弹一次显式确认。
+    // （预选到 danger 也算"未确认"——默认值是便利，不是授权；danger 授权必须每次由用户明确表达。）
+    if (permissionMode === 'danger-full-access' && !dangerAcked) {
+      setSendDangerAcked(false)
+      setSendDangerGate(true)
+      return
+    }
+    await doSend(picked)
+  }
+
+  // 真正的发送（含 danger 确认后的续发）。`picked` 由 `send` 传进来（形状闸门在 send 体内）。
+  const doSend = async (picked: string | null) => {
+    if (!canSend) return
     setSending(true)
     try {
-      // 出口再判一次**形状**（纵深防御：状态只该由上面两条路写进来，但那两条路都不该是
-      // "不合法值能发出去"的唯一保证）。形状不对 → 一个字都不带，回到「跟随默认」——
-      // 平台只接受自己声明过的模型，带一个形状不对的值只会换来一次 40401。
-      const picked = isPlatformModelID(model) ? model : null
       const atts = pendingAtts
       const id = await createAndRun(
         draft.trim(),
@@ -262,6 +312,8 @@ export function StartPanel() {
         selectionPayload(capabilities),
         // 首轮附件（v32）：附件 id 随 `POST /sessions` 一起提交，由后端解析成 image 块/handle。
         atts.length > 0 ? atts : undefined,
+        // 权限档（必传三档之一）：把当前档位永久带进 `POST /sessions`。
+        permissionMode,
       )
       if (picked) localStorage.setItem(LAST_MODEL_KEY, picked)
       // 附件已随首轮受理：清掉待发 chip（发送失败则抛出到 finally 前，pending 原样保留）。
@@ -413,8 +465,8 @@ export function StartPanel() {
                   applyHint="first-round"
                   onAddFile={() => fileRef.current?.click()}
                 />
-                {/* v2.2：权限 chip 在工具条内、`+` 的右边（与 Composer 同一排布）。 */}
-                <PermissionChip disabled={sending} />
+                {/* 权限选择器（三档，替换旧的锁定态 chip）：新建时可逐会话选；选 danger 走二次确认。 */}
+                <PermissionPicker value={permissionMode} onChange={pickPermission} disabled={sending} />
               </span>
 
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -490,6 +542,24 @@ export function StartPanel() {
           ))}
         </div>
       </div>
+
+      {/* 发送前 danger 显式确认（决策 D4）：预选到 / 切到 danger 后，发送这一刻仍须勾选确认一次。 */}
+      <RiskConfirmation
+        open={sendDangerGate}
+        acknowledged={sendDangerAcked}
+        onAcknowledgedChange={setSendDangerAcked}
+        onCancel={() => {
+          setSendDangerAcked(false)
+          setSendDangerGate(false)
+        }}
+        onConfirm={() => {
+          setSendDangerAcked(false)
+          setSendDangerGate(false)
+          setDangerAcked(true)
+          // 确认后即续发（用户点的是发送，被这一步拦下）。形状闸门在 send 体内，这里重算一份。
+          void doSend(isPlatformModelID(model) ? model : null)
+        }}
+      />
     </div>
   )
 }

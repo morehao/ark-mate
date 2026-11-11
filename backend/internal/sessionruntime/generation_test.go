@@ -134,6 +134,7 @@ func TestWarmProcessSharingWithoutCapabilitySelection(t *testing.T) {
 	mk := func() string {
 		t.Helper()
 		resp, err := r.Svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		PermissionMode: "workspace-write",
 			Cwd: cwd,
 		})
 		if err != nil {

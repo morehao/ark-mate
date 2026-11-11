@@ -611,7 +611,7 @@ func TestAutomationMaxRunDurationWatchdog(t *testing.T) {
 func TestAutomationDeliverySessionEndToEnd(t *testing.T) {
 	r := newSchedRig(t)
 	// 1) 建一个真实的"原会话"（idle）。
-	target, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{Cwd: r.cwd})
+	target, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{PermissionMode: "workspace-write", Cwd: r.cwd})
 	if err != nil {
 		t.Fatalf("建目标会话: %v", err)
 	}

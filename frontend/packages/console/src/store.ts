@@ -20,6 +20,7 @@ import {
   moveWorkspace as apiMoveWorkspace,
   renameWorkspace as apiRenameWorkspace,
   relocateWorkspace as apiRelocateWorkspace,
+  patchWorkspaceDefaults as apiPatchWorkspaceDefaults,
   patchSessionCapabilities,
   promptSession,
   listComposerSkills,
@@ -656,6 +657,14 @@ interface MateActions {
    * （它们的 `cwd` 是执行事实，跟着搬等于把历史指到别处）。
    */
   relocateWorkspace: (id: string, path: string) => Promise<void>
+  /**
+   * 改工作空间的**默认权限 / 默认能力**（补丁语义：只改传入的键）。成功后刷新登记表，
+   * 让 `Workspace.default_permission_mode` / `default_capability` 的读面回显在下次预选时生效。
+   */
+  patchWorkspaceDefaults: (
+    id: string,
+    patch: { default_permission_mode?: string | null; default_capability?: string | null },
+  ) => Promise<void>
   /** 删除登记（**不删目录、不删会话**）；其会话回到默认工作空间，页面随之刷新。 */
   deleteWorkspace: (id: string) => Promise<void>
   /** 重排（beforeId 缺省 = 追加到尾部）。 */
@@ -684,6 +693,7 @@ interface MateActions {
     workspaceId?: string | null,
     capabilities?: { expert?: string; skills?: string[]; mcps?: string[]; apps?: string[] },
     attachments?: AttachmentMeta[],
+    permissionMode?: 'read-only' | 'workspace-write' | 'danger-full-access',
   ) => Promise<string | undefined>
   /** 拉取模型目录（来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
   loadModelCatalog: () => Promise<void>
@@ -1054,6 +1064,14 @@ export const useMate = create<MateStore>((set, get) => {
       showToast(`已把工作空间「${ws.title || ws.path}」指向新目录`, 'success')
     },
 
+    patchWorkspaceDefaults: async (id, patch) => {
+      // 失败**不吞**：让调用方（设置 Modal）就地显示服务端文案，Modal 保持打开、用户可重试。
+      await apiPatchWorkspaceDefaults(id, patch)
+      // 刷新而不是本地改：读面回显（default_permission_mode / default_capability）以服务端为准，
+      // 下次新建面板据此预选初值。
+      await get().loadWorkspaces()
+    },
+
     renameWorkspace: async (id, title) => {
       try {
         await apiRenameWorkspace(id, title)
@@ -1160,13 +1178,16 @@ export const useMate = create<MateStore>((set, get) => {
 
     clearAnchor: () => set({ anchorSeq: null }),
 
-    createAndRun: async (prompt, model, workspaceId, capabilities, attachments) => {
+    createAndRun: async (prompt, model, workspaceId, capabilities, attachments, permissionMode) => {
       try {
         const resp = await createSession({
           prompt,
           model: model?.modelID,
           // **不外发空串**：缺省才是「落在默认工作空间」语义（后端把空/缺省当作未指定）。
           workspace_id: workspaceId ?? undefined,
+          // 权限档（必传三档之一）：新建面板永远提交一个具体档位。缺省兜底 `workspace-write`
+          //（dsh 自身默认）——正常路径由面板显式传入，这里只是不给服务端一个非法空值。
+          permission_mode: permissionMode ?? 'workspace-write',
           // 能力选定：调用方（输入卡）已在"两个 kind 都没限制"时不传，这里不再判一次
           // ——缺省路径必须与 M3 之前逐字节相同，判据只留一处。传了就钉住代际；
           // 不可达的 id 由服务端拒（40001，msg 里逐条给原因）。

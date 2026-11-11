@@ -2,9 +2,11 @@ package sessionruntime
 
 import (
 	"context"
+	"strings"
 
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/domain/automation"
+	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/persistence/model"
@@ -30,11 +32,29 @@ func (s *Service) CreateHostSession(ctx context.Context, req automation.HostSess
 		Cwd:    req.Cwd,
 		Model:  req.Model,
 		Origin: req.Origin,
+		// v33：`permission_mode` 必传。自动化没有"用户当场选档"这一步，取**目标工作空间的默认档**
+		// （与用户面"预选初值"同源）；该 cwd 未登记或未设默认 → 退回 `workspace-write`（dsh 自身
+		// 默认）。刻意**不**默认给完全权限——无人值守的会话不该拿最高授权。
+		PermissionMode: s.defaultPermissionModeForCwd(ctx, req.Cwd),
 	})
 	if err != nil {
 		return "", err
 	}
 	return resp.ID, nil
+}
+
+// defaultPermissionModeForCwd 自动化建会话时用的权限档：目标 cwd 所属工作空间的默认档，
+// 未登记/未设默认 → `workspace-write`。判据与用户面预选同源（`WorkspaceDefaultsOf`），
+// 只是没有前端那一层"用户可改"的交互。
+func (s *Service) defaultPermissionModeForCwd(ctx context.Context, cwd string) string {
+	if strings.TrimSpace(cwd) != "" {
+		if id := s.planes.Workspaces.WorkspaceIDByPath(ctx, cwd); id != "" {
+			if def, ok := s.planes.Workspaces.WorkspaceDefaultsOf(id); ok && def.PermissionMode != "" {
+				return def.PermissionMode
+			}
+		}
+	}
+	return interaction.NativeModeWorkspaceWrite
 }
 
 // CancelHostRun 实现 `automation.Host`。
