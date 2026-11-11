@@ -2580,4 +2580,97 @@ export const consoleStyleSheet = `
   .fg-toolbar .ant-input-affix-wrapper .ant-input { height: auto; }
   .fg-toolbar .ant-input { transform: translateZ(0); }
 
+  /* ——— 任务清单卡 / 计划卡（对话流 todo_write / exit_plan_mode 派生投影）———
+     todo：进度头（完成/总数 + 细进度条）+ 可展开勾选清单；plan：markdown 正文 + 审批占位按钮。
+     全部沿用 tokens，无硬编码色值。 */
+
+  .fg-todo-card { border: 1px solid ${tokens.border}; border-radius: 11px; background: ${tokens.surface}; overflow: hidden; }
+  .fg-todo-head { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 13px; border: 0; background: transparent; font-size: 12.5px; line-height: 1.6; color: ${tokens.textSecondary}; text-align: left; cursor: pointer; font-family: inherit; }
+  .fg-todo-head:hover { background: ${tokens.softFill}; }
+  .fg-todo-ico { width: 15px; height: 15px; flex: none; display: grid; place-items: center; color: ${tokens.textPlaceholder}; font-size: 14px; }
+  .fg-todo-title { color: ${tokens.text}; font-weight: 550; font-size: 13px; }
+  .fg-todo-count { color: ${tokens.textPlaceholder}; font-variant-numeric: tabular-nums; }
+  .fg-todo-bar { flex: 1; height: 4px; min-width: 60px; max-width: 180px; margin: 0 4px 0 6px; border-radius: 99px; background: ${tokens.softFill}; overflow: hidden; }
+  .fg-todo-bar-fill { display: block; height: 100%; border-radius: 99px; background: ${tokens.accent}; transition: width .3s ease; }
+  .fg-todo-chev { margin-left: auto; color: ${tokens.textPlaceholder}; font-size: 12px; transition: transform .2s ease; }
+  .fg-todo-card.fg-open .fg-todo-chev { transform: rotate(180deg); }
+  .fg-todo-list { display: flex; flex-direction: column; }
+  .fg-todo-item { display: flex; align-items: flex-start; gap: 10px; padding: 7px 13px; font-size: 12.5px; line-height: 1.55; border-top: 1px solid ${tokens.border}; color: ${tokens.textSecondary}; }
+  .fg-todo-mark { width: 15px; height: 15px; flex: none; margin-top: 1px; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid ${tokens.borderStrong}; font-size: 9px; }
+  .fg-todo-mark.completed { background: ${tokens.success}; border-color: ${tokens.success}; color: ${tokens.onPrimary}; }
+  .fg-todo-mark.in_progress { border-color: ${tokens.accent}; background: ${tokens.accentSoft}; }
+  .fg-todo-mark.in_progress::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: ${tokens.accent}; animation: fg-todo-pulse 1.6s ease-in-out infinite; }
+  .fg-todo-txt { min-width: 0; }
+  .fg-todo-item.completed .fg-todo-txt { color: ${tokens.textPlaceholder}; text-decoration: line-through; text-decoration-color: ${tokens.borderStrong}; }
+  .fg-todo-item.in_progress .fg-todo-txt { color: ${tokens.text}; font-weight: 500; }
+  @keyframes fg-todo-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+  .fg-plan-card { border: 1px solid ${tokens.border}; border-radius: 11px; background: ${tokens.surface}; overflow: hidden; }
+  .fg-plan-head { display: flex; align-items: center; gap: 9px; padding: 10px 13px; font-size: 12.5px; color: ${tokens.textSecondary}; border-bottom: 1px solid ${tokens.border}; }
+  .fg-plan-ico { width: 15px; height: 15px; flex: none; display: grid; place-items: center; color: ${tokens.textPlaceholder}; font-size: 14px; }
+  .fg-plan-title { color: ${tokens.text}; font-weight: 550; font-size: 13px; }
+  .fg-plan-badge { margin-left: auto; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: ${tokens.warningBg}; color: ${tokens.warning}; border: 1px solid ${tokens.warningBorder}; }
+  .fg-plan-badge.approved { background: ${tokens.softFill}; color: ${tokens.success}; border-color: ${tokens.border}; }
+  .fg-plan-body { padding: 12px 15px; font-size: 13px; line-height: 1.68; color: ${tokens.text}; }
+  .fg-plan-foot { display: flex; align-items: center; gap: 8px; padding: 10px 13px; border-top: 1px solid ${tokens.border}; background: ${tokens.softFill}; flex-wrap: wrap; }
+  .fg-plan-feedback { flex: 1 1 160px; min-width: 120px; }
+  .fg-plan-muted { font-size: 11.5px; color: ${tokens.textPlaceholder}; margin-left: 2px; }
+
+  /* ——— 物化体检 popover（MaterializationPopover，WP-B1；前缀 fg-matck- = material-check，
+     独立于材料库的 fg-mat-*）。加载/错误态复用既有 .fg-cap-loading，外层复用 .fg-cap-pop。 ——— */
+
+  /* 入口：技能行行尾的「体检」图标钮，克制成行内小图标，别撑高行。 */
+  .fg-matck-entry {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; padding: 0; margin-left: 4px;
+    border: 1px solid transparent; border-radius: 6px;
+    background: transparent; cursor: pointer; color: ${tokens.textPlaceholder};
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .fg-matck-entry:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-matck-entry:focus-visible { outline: 2px solid ${tokens.primary}; outline-offset: 1px; }
+
+  /* 弹层：叠在 .fg-cap-pop 之上，宽度略窄、可滚动。 */
+  .fg-matck-pop { width: 340px; max-height: 420px; overflow-y: auto; }
+  .fg-matck-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+    padding: 2px 8px 6px;
+  }
+  .fg-matck-title { font-size: 12.5px; font-weight: 600; color: ${tokens.text}; }
+  .fg-matck-flag { flex: none; font-family: ${tokens.fontMono}; font-size: 10.5px; color: ${tokens.textPlaceholder}; }
+
+  /* 逐目标列表。 */
+  .fg-matck-list { display: flex; flex-direction: column; gap: 6px; }
+  .fg-matck-row {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 6px 8px; border: 1px solid ${tokens.border}; border-radius: 8px;
+    background: ${tokens.surface};
+  }
+  .fg-matck-row-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .fg-matck-target {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: ${tokens.fontMono}; font-size: 11.5px; color: ${tokens.text};
+  }
+  .fg-matck-tag { flex: none; margin: 0; }
+  /* dir：等宽小字，路径可截断。 */
+  .fg-matck-dir {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: ${tokens.fontMono}; font-size: 10.5px; color: ${tokens.textPlaceholder};
+  }
+  .fg-matck-hint { font-size: 11px; line-height: 1.5; color: ${tokens.textSecondary}; }
+  .fg-matck-detail {
+    font-size: 11px; line-height: 1.5; color: ${tokens.textSecondary};
+    padding: 2px 6px; border-radius: 6px; background: ${tokens.codeBg};
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .fg-matck-time { font-family: ${tokens.fontMono}; font-size: 10px; color: ${tokens.textPlaceholder}; }
+
+  /* 空态 / notes。 */
+  .fg-matck-empty { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; }
+  .fg-matck-notes { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; border-top: 1px dashed ${tokens.border}; margin-top: 4px; }
+  .fg-matck-note-line { font-size: 11px; line-height: 1.5; color: ${tokens.textSecondary}; }
+
+  /* 脚注（只读纪律 + 加载/错误态复用 .fg-cap-loading，无需另写）。 */
+  .fg-matck-foot { margin-top: 2px; }
+
 `
