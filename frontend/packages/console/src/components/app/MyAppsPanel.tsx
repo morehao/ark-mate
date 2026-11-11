@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { App as AntApp, Button, Input, Modal, Popconfirm, Switch, Tooltip } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import type { App as AppType } from '@ark-mate/types'
 import { listApps, setAppEnabled, uninstallApp } from '@ark-mate/api'
+import { useMate } from '../../store'
 import { CapabilityEmpty, DetailGrid, SectionHeader, StatusTag } from '../capability/shared'
 import { AppCard } from './AppCard'
 import { appIconNode } from './appIcons'
@@ -17,6 +19,8 @@ import { appIconNode } from './appIcons'
  */
 export function MyAppsPanel() {
   const { message } = AntApp.useApp()
+  const navigate = useNavigate()
+  const createAndRun = useMate((s) => s.createAndRun)
   const [apps, setApps] = useState<AppType[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -76,6 +80,20 @@ export function MyAppsPanel() {
 
   const visible = useMemo(() => filterApps(apps, query), [apps, query])
 
+  // 「在新会话里用这个应用」（P2）：开一条带 `capabilities.apps:[id]` 的新会话并跳过去。
+  //
+  // v1 边界（设计 §6.2）：只带 apps（注入该应用的工具域），**不**把成员专家自动塞进会话
+  // （成员专家是另一条正交通道，硬塞会让「带的是什么」说不清）。`POST /sessions` 的 prompt 必填
+  // （它即首轮），所以这里给一句简短引导语让会话有起点，而不是造一个 API 不支持的"纯空会话"。
+  const launch = useCallback(
+    async (app: AppType) => {
+      const label = app.name || app.id
+      const id = await createAndRun(`使用应用「${label}」`, undefined, undefined, { apps: [app.id] })
+      if (id) navigate(`/sessions/${id}`)
+    },
+    [createAndRun, navigate],
+  )
+
   return (
     <PageContainer
       title="我的应用"
@@ -120,7 +138,12 @@ export function MyAppsPanel() {
         )}
       </div>
 
-      <AppDetailModal app={detail} onClose={() => setDetail(null)} onUninstall={(a) => void remove(a)} />
+      <AppDetailModal
+        app={detail}
+        onClose={() => setDetail(null)}
+        onUninstall={(a) => void remove(a)}
+        onLaunch={(a) => void launch(a)}
+      />
     </PageContainer>
   )
 }
@@ -190,10 +213,12 @@ function AppDetailModal({
   app,
   onClose,
   onUninstall,
+  onLaunch,
 }: {
   app: AppType | null
   onClose: () => void
   onUninstall: (app: AppType) => void
+  onLaunch: (app: AppType) => void
 }) {
   const badge = app ? appStateView(app) : null
   const items = app
@@ -209,6 +234,15 @@ function AppDetailModal({
       ]
     : []
 
+  // 「在新会话里用这个应用」：仅对**已启用**的应用可用（停用/启动失败时禁用并给原因）——
+  // 与「我的应用」启停语义一致：停用只是暂不使用，此时开新会话也带不上它的工具。
+  const launchable = app?.enabled === true
+  const launchTitle = !app
+    ? ''
+    : app.enabled
+      ? '开一条带上这个应用业务工具的新会话'
+      : '应用未启用：先在列表里启用，再在新会话里使用它'
+
   return (
     <Modal
       open={app !== null}
@@ -219,6 +253,18 @@ function AppDetailModal({
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button onClick={onClose}>关闭</Button>
+          <Tooltip title={launchTitle}>
+            <Button
+              type="primary"
+              disabled={!launchable}
+              onClick={() => {
+                if (app) onLaunch(app)
+                onClose()
+              }}
+            >
+              在新会话里用这个应用
+            </Button>
+          </Tooltip>
           <Button
             danger
             onClick={() => {
@@ -232,6 +278,11 @@ function AppDetailModal({
       }
     >
       <DetailGrid items={items} />
+      {app && app.enabled && app.members?.experts && app.members.experts.length > 0 && (
+        <div style={{ marginTop: 10, fontSize: 12, color: tokens.textSecondary }}>
+          该应用推荐专家：{app.members.experts.join('、')}（可在会话内手动选择；V1 不会自动带上）
+        </div>
+      )}
     </Modal>
   )
 }

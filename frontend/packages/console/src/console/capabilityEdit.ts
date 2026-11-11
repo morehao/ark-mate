@@ -9,28 +9,31 @@ import type { CapabilityChoice } from './capabilityView'
 // 这里只回答两个问题：**读面怎么折成三态**、**某一格改动要发什么补丁**。两者分开写是因为
 // 服务端的补丁语义是「键缺失 = 不改这一格」——整体替换会让"只换技能"顺手把专家清掉。
 
-/** 读面（会话快照的 `capabilities`）→ 三态选择。整个对象缺失 = 三格都未声明。 */
+/** 读面（会话快照的 `capabilities`）→ 三态选择。整个对象缺失 = 各格都未声明。 */
 export function choiceFromCapabilities(caps?: SessionCapabilities | null): CapabilityChoice {
-  if (!caps) return { expert: null, skills: null, mcps: null }
+  if (!caps) return { expert: null, skills: null, mcps: null, apps: null }
   return {
     // `undefined`（键缺失）与 `null` 同义；`''` 必须原样保留（明确不用专家）。
     expert: caps.expert === undefined ? null : caps.expert,
     skills: caps.skills === undefined ? null : caps.skills,
     mcps: caps.mcps === undefined ? null : caps.mcps,
+    apps: caps.apps === undefined ? null : caps.apps,
   }
 }
 
 /**
- * 技能/MCP 的勾选变化 → **只带这一格**的补丁。
+ * 技能/MCP/应用的勾选变化 → **只带这一格**的补丁。
  *
  * `next === null` 是「跟随默认」（回未声明），`[]` 是「一个都不要」——两者在服务端是两个
  * 代际，所以这里不合并、不省略。
  */
 export function selectionPatchFor(
-  kind: 'skills' | 'mcps',
+  kind: 'skills' | 'mcps' | 'apps',
   next: string[] | null,
 ): SessionCapabilitiesPatch {
-  return kind === 'skills' ? { skills: next } : { mcps: next }
+  if (kind === 'skills') return { skills: next }
+  if (kind === 'mcps') return { mcps: next }
+  return { apps: next }
 }
 
 /**
@@ -47,6 +50,7 @@ export function mergeCapabilityPatch(
     expert: 'expert' in patch ? (patch.expert ?? null) : current.expert,
     skills: 'skills' in patch ? (patch.skills ?? null) : current.skills,
     mcps: 'mcps' in patch ? (patch.mcps ?? null) : current.mcps,
+    apps: 'apps' in patch ? (patch.apps ?? null) : current.apps,
   }
 }
 
@@ -61,11 +65,11 @@ export function expertSwitchPatch(expert: string | null): SessionCapabilitiesPat
   return { expert, skills: null, mcps: null }
 }
 
-/** 输入区要显示的一个 chip（`count` 只有技能/MCP 才有意义）。 */
+/** 输入区要显示的一个 chip（`count` 只有技能/MCP/应用才有意义）。 */
 interface CapabilityChip {
-  kind: 'expert' | 'skills' | 'mcps'
+  kind: 'expert' | 'skills' | 'mcps' | 'apps'
   label: string
-  /** 专家 chip 的头像字（名字首字）；技能/MCP 不用。 */
+  /** 专家 chip 的头像字（名字首字）；技能/MCP/应用不用。 */
   avatar?: string
   count?: number
   title: string
@@ -112,6 +116,17 @@ export function capabilityChips(choice: CapabilityChoice, expertName?: string): 
         choice.mcps.length === 0
           ? '连接器：一个都不要 · 点击更改'
           : `连接器：只注入这 ${choice.mcps.length} 个 · 点击更改`,
+    })
+  }
+  if (choice.apps !== null) {
+    out.push({
+      kind: 'apps',
+      label: '应用',
+      count: choice.apps.length,
+      title:
+        choice.apps.length === 0
+          ? '应用：这个会话不用任何应用 · 点击更改'
+          : `应用：启用这 ${choice.apps.length} 个（注入它们的业务工具）· 点击更改`,
     })
   }
   return out

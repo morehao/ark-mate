@@ -28,7 +28,7 @@ func capabilitiesDTO(v *session.SessionCapabilities) *dtosession.SessionCapabili
 		return nil
 	}
 	return &dtosession.SessionCapabilitiesResp{
-		Skills: v.Skills, Mcps: v.Mcps, Expert: v.Expert, ExpertMissing: v.ExpertMissing, Fingerprint: v.Fingerprint,
+		Skills: v.Skills, Mcps: v.Mcps, Apps: v.Apps, Expert: v.Expert, ExpertMissing: v.ExpertMissing, Fingerprint: v.Fingerprint,
 	}
 }
 

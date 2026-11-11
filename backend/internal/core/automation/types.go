@@ -136,14 +136,14 @@ type Automation struct {
 	// LastFiredAt 最近一次**认领**的 occurrence，不论结果（ADR-10 的推进点，也是
 	// "这个 occurrence 是否已经触发过"的唯一判据）。名字沿用"fired"而不是"claimed"：
 	// 定义文件里对用户而言它读作"上次是什么时候跑的"，而 skipped/overlap 也是"跑过一趟"。
-	LastFiredAt         *time.Time `json:"last_fired_at,omitempty"`
-	LastSessionID       string     `json:"last_session_id,omitempty"`
-	LastStatus          string     `json:"last_status,omitempty"` // completed | failed | interrupted | skipped
-	LastReason          string     `json:"last_reason,omitempty"` // 最近一次没跑成/失败的原因（人话）
+	LastFiredAt   *time.Time `json:"last_fired_at,omitempty"`
+	LastSessionID string     `json:"last_session_id,omitempty"`
+	LastStatus    string     `json:"last_status,omitempty"` // completed | failed | interrupted | skipped
+	LastReason    string     `json:"last_reason,omitempty"` // 最近一次没跑成/失败的原因（人话）
 	// LastReasonKind 最近一次失败的原因码（机器读；见 ReasonKind* 常量）。与 LastReason 正交：
 	// 前者给前端判"该给哪种修复按钮"，后者给人看。常态为空。
-	LastReasonKind      string     `json:"last_reason_kind,omitempty"`
-	ConsecutiveFailures int        `json:"consecutive_failures,omitempty"`
+	LastReasonKind      string `json:"last_reason_kind,omitempty"`
+	ConsecutiveFailures int    `json:"consecutive_failures,omitempty"`
 	// RecentRuns 最近若干次触发的留痕（最新在前，最多 RecentRunsMax 条）。
 	//
 	// 与 `Last*` 有意的冗余：`Last*` 是"一眼看最近一次"的字段（面板列表直接用），

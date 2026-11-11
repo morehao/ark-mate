@@ -209,6 +209,10 @@ func createCapabilitiesResp(sel *session.CapabilitySelection, warns []dtosession
 		v := append([]string(nil), (*sel.Mcps)...)
 		resp.Mcps = &v
 	}
+	if sel.Apps != nil {
+		v := append([]string(nil), (*sel.Apps)...)
+		resp.Apps = &v
+	}
 	if sel.Expert != nil {
 		v := *sel.Expert
 		resp.Expert = &v

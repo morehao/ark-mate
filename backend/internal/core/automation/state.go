@@ -81,7 +81,7 @@ type RunRecord struct {
 	Status       string    `json:"status"`
 	Reason       string    `json:"reason,omitempty"`
 	// ReasonKind 失败原因码（机器读；见 ReasonKind* 常量）。空 = 无稳定原因码（如瞬时失败/未分类）。
-	ReasonKind   string    `json:"reason_kind,omitempty"`
+	ReasonKind string `json:"reason_kind,omitempty"`
 	// SessionID 本次产生的会话（`claimed` 之外为空）。
 	SessionID string `json:"session_id,omitempty"`
 	// Trigger scheduled | recovery | manual。

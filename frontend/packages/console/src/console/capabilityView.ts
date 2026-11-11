@@ -185,21 +185,27 @@ export interface CapabilityChoice {
   expert: string | null
   skills: string[] | null
   mcps: string[] | null
+  /** null = 未声明（→ 无 app 工具）；[] = 明确一个都不要；非空 = 启用的 app 白名单。 */
+  apps: string[] | null
 }
 
 /** 未声明（跟随默认）的选定。 */
-export const FOLLOW_DEFAULT: CapabilityChoice = { expert: null, skills: null, mcps: null }
+export const FOLLOW_DEFAULT: CapabilityChoice = { expert: null, skills: null, mcps: null, apps: null }
 
-/** 选定 → 请求体片段；三个面都未声明时返回 undefined（键都不出现）。 */
+/** 选定 → 请求体片段；四个面都未声明时返回 undefined（键都不出现）。 */
 export function selectionPayload(
   choice: CapabilityChoice,
-): { expert?: string; skills?: string[]; mcps?: string[] } | undefined {
-  const out: { expert?: string; skills?: string[]; mcps?: string[] } = {}
+): { expert?: string; skills?: string[]; mcps?: string[]; apps?: string[] } | undefined {
+  const out: { expert?: string; skills?: string[]; mcps?: string[]; apps?: string[] } = {}
   // expert === '' 是**明确不用专家**，必须带空串（与"缺键"语义相反）。
   if (choice.expert !== null) out.expert = choice.expert
   if (choice.skills !== null) out.skills = choice.skills
   if (choice.mcps !== null) out.mcps = choice.mcps
-  return out.expert === undefined && out.skills === undefined && out.mcps === undefined ? undefined : out
+  // apps 用 `!= null` 兜住 undefined（旧调用方构造的 choice 可能没这个字段）：undefined 与 null 都视为未声明。
+  if (choice.apps != null) out.apps = choice.apps
+  return out.expert === undefined && out.skills === undefined && out.mcps === undefined && out.apps === undefined
+    ? undefined
+    : out
 }
 
 /**

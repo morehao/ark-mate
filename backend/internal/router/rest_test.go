@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1151,6 +1152,61 @@ func TestUpdateCapabilitiesRoute(t *testing.T) {
 	// ③ 未知会话 → 40401（与其余会话写面同一出口）。
 	if env, _ := do(t, r, "PATCH", "/v1/mate/sessions/nope/capabilities", `{"mcps":null}`); env.Code != 40401 {
 		t.Fatalf("未知会话应 40401: %+v", env)
+	}
+}
+
+// TestUpdateCapabilitiesAppsRoute PATCH /sessions/:id/capabilities 的 `apps` 三态（WP：会话级选用应用）。
+//
+// 判据：apps 与 skills/mcps 三态同构——键缺失不改、`null`=回未声明、`[]`=明确一个都不要、非空=白名单；
+// 且 apps 落进 `sessions.capability_json`（app 业务工具面的唯一来源）。未知/停用 app 不在这里报错
+// （注入侧自然收窄，与 POST /sessions 同口径），所以只钉「写面如实落库 + 读面如实回显」。
+func TestUpdateCapabilitiesAppsRoute(t *testing.T) {
+	svc := &stubSvc{}
+	deps := stubDeps(t, svc)
+	deps.plane.RegisterSession(&session.SessionRec{
+		ID: "s1", RuntimeID: "rtx", Status: "completed", CapabilityJSON: `{"skills":["a"]}`,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
+	r := newRestEngine(deps)
+
+	// ① 只设 apps（白名单）：skills 没出现在补丁里必须原样保留，apps 落库并回显。
+	env, code := do(t, r, "PATCH", "/v1/mate/sessions/s1/capabilities", `{"apps":["weather-query"]}`)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("信封不符: http=%d env=%+v", code, env)
+	}
+	var resp dtosession.SessionResp
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("data 解析: %v", err)
+	}
+	if resp.Capabilities == nil || resp.Capabilities.Apps == nil || len(*resp.Capabilities.Apps) != 1 || (*resp.Capabilities.Apps)[0] != "weather-query" {
+		t.Fatalf("回执应回显 apps 白名单: %+v", resp.Capabilities)
+	}
+	if resp.Capabilities.Skills == nil || len(*resp.Capabilities.Skills) != 1 || (*resp.Capabilities.Skills)[0] != "a" {
+		t.Fatalf("没在补丁里出现的 skills 不该被动到: %+v", resp.Capabilities.Skills)
+	}
+	if got := deps.plane.Rec("s1").CapabilityJSON; !jsonEqualUnordered(t, got, `{"apps":["weather-query"],"skills":["a"]}`) {
+		t.Fatalf("记录里的选定明细不符: %q", got)
+	}
+
+	// ② apps 改成"一个都不要"（[] 与 null 语义相反：[] 是明确不要、要落库）。
+	env, _ = do(t, r, "PATCH", "/v1/mate/sessions/s1/capabilities", `{"apps":[]}`)
+	if env.Code != 0 {
+		t.Fatalf("清空 apps 应成功: %+v", env)
+	}
+	_ = json.Unmarshal(env.Data, &resp)
+	if resp.Capabilities.Apps == nil || len(*resp.Capabilities.Apps) != 0 {
+		t.Fatalf("回执应回显「apps 一个都不要」: %+v", resp.Capabilities)
+	}
+
+	// ③ apps 形状不对（给字符串）→ 40001，且记录停在原处。
+	svc.capabilityJSON = ""
+	before := deps.plane.Rec("s1").CapabilityJSON
+	env, _ = do(t, r, "PATCH", "/v1/mate/sessions/s1/capabilities", `{"apps":"oops"}`)
+	if env.Code != 40001 {
+		t.Fatalf("apps 形状不对应 40001: %+v", env)
+	}
+	if got := deps.plane.Rec("s1").CapabilityJSON; got != before || svc.capabilityJSON != "" {
+		t.Fatalf("被拒的请求不得改记录/落库: rec=%q stored=%q", got, svc.capabilityJSON)
 	}
 }
 
@@ -2404,4 +2460,17 @@ func nilSafeModelStore(st *store.Store) svcmodel.ModelStore {
 		return nil
 	}
 	return st
+}
+
+// jsonEqualUnordered 判两段 JSON 语义相等（键顺序无关；值是 []string/标量）。
+func jsonEqualUnordered(t *testing.T, a, b string) bool {
+	t.Helper()
+	var va, vb any
+	if err := json.Unmarshal([]byte(a), &va); err != nil {
+		t.Fatalf("jsonEqualUnordered 解析 a 失败: %v (%q)", err, a)
+	}
+	if err := json.Unmarshal([]byte(b), &vb); err != nil {
+		t.Fatalf("jsonEqualUnordered 解析 b 失败: %v (%q)", err, b)
+	}
+	return reflect.DeepEqual(va, vb)
 }
