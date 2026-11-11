@@ -4,7 +4,8 @@ import { SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import type { MarketApp } from '@ark-mate/types'
 import { installApp, listMarket, refreshMarket, setAppEnabled, uninstallApp, upgradeApp } from '@ark-mate/api'
-import { CapabilityCard, CapabilityEmpty, SectionHeader, StatusTag } from '../capability/shared'
+import { CapabilityEmpty, SectionHeader, StatusTag } from '../capability/shared'
+import { AppCard } from './AppCard'
 import { appIconNode } from './appIcons'
 
 /**
@@ -146,18 +147,12 @@ function MarketCard({
   const health = marketHealthView(app)
   const remoteOnly = !app.installable && !app.installed
   return (
-    <CapabilityCard
+    <AppCard
       dim={remoteOnly}
-      avatar={appIconNode(app.icon)}
-      title={
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-          {app.name}
-          <span style={{ fontSize: 10.5, color: tokens.textPlaceholder, fontFamily: tokens.fontMono, fontWeight: 400 }}>
-            v{app.version}
-          </span>
-        </span>
-      }
-      tags={<StatusTag label={health.label} tone={health.tone} hint={health.hint} />}
+      icon={appIconNode(app.icon)}
+      name={app.name}
+      version={app.version}
+      statusTag={<StatusTag label={health.label} tone={health.tone} hint={health.hint} />}
       description={app.summary?.zh || '（无摘要）'}
       meta={
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>

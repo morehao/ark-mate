@@ -14,7 +14,7 @@ import {
 
 // 二期 C · WP-C7 纯逻辑判据：运行期页派生 + 冲突检测 + 受限 postMessage 桥白名单/来源/限流。
 
-const builtin = ['/extensions/skills', '/extensions/experts', '/extensions/connectors', '/usage', '/materials', '/automations']
+const builtin = ['/extensions/skills', '/extensions/experts', '/extensions/connectors', '/apps/market', '/apps/my-apps', '/usage', '/materials', '/automations']
 
 function app(id: string, over: Partial<AppsListItem> = {}): AppsListItem {
   return {

@@ -3,5 +3,7 @@
 > 从仓库根 `AGENTS.md` 拆出（2026-10-18）——本文件是分册后的唯一事实源；`AGENTS.md` 只保留入口与硬约束。
 > 默认允许破坏性调整；仍强制的例外写在下面。
 
-- **允许破坏性调整**：删除/重命名既有对外形态（兼容别名如 `/permissions/always`、历史路径）、改造本地持久数据（SQLite schema、transcript 格式、providers 档案）与大范围重构（包边界、装配路径）均被允许，**不要求保留过渡性兼容层**。
-- 例外（仍强制）：改路由须同步 `docs/contract.md` 接口摘要（`TestReadmeRoutesMatchRouter` 守卫保持绿）；改事件 type / 数据 schema 须同步 `domain/session/events.go`、`internal/persistence/model` 实体与 `internal/persistence/store` 迁移内核（三处手工一致）；改动后测试与前端 typecheck 保持通过。
+- **设计优先，不拿「改动更小」当选型理由**：判断一次改动该做多大，第一依据是「设计是否合理、是否符合本仓规范、是否符合主流产品实践」，而不是「怎样改动量最小、兼容面最小」。当达到合理设计需要一并调整相邻的页面路由、后端 API、数据形状、命名时，**应把这些调整纳入同一次变更**。**靠给旧结构打补丁才能落地的变更，说明设计本身要先修**——不要为了少动几处而保留将就的中间态或留半截兼容层。
+- **允许破坏性 / 大范围调整**：删除、重命名、迁移、重构（包边界、装配路径）、跨模块 / 跨层 / 跨前后端改动，乃至推翻旧实现，均**被允许**，是默认选项（例外见下条）。删除/重命名既有对外形态（兼容别名如 `/permissions/always`、历史路径）、改造本地持久数据（SQLite schema、transcript 格式、providers 档案）都属此列——**不做无谓的兼容层和过渡旧分支**；只需保证改完是自洽、规范、通过守卫与测试的终态。
+- **不追求最小 diff**：评审看的是**设计正确性与边界是否干净**，而不是改了多少行。判断一次变更好坏不要以 diff 大小论利害（这也是上面「设计优先」在评审侧的同一件事）。
+- 例外（仍强制）：改路由须同步 `docs/contract.md` 接口摘要（`TestReadmeRoutesMatchRouter` 守卫保持绿）；改事件 type / 数据 schema 须同步 `domain/session/events.go`、`internal/persistence/model` 实体与 `internal/persistence/store` 迁移内核（三处手工一致）；改动后测试与前端 typecheck 保持通过。**数据 schema 的破坏性调整虽被允许，但「重建库」不是常规手段**——v15 的一次性重建是例外、不构成先例，日常一律走「有序追加 + 数据搬运」的迁移，就地改写既有数据前先按 `docs/agents/build-and-runtime.md` 把库复制进 `backups/`；确需破坏性重建须 owner 单独拍板。

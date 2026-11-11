@@ -420,13 +420,13 @@ export const getApp = (id: string): Promise<App> =>
   http.get<App>(`/mate/apps/${encodeURIComponent(id)}`)
 
 /**
- * 应用市场清单（GET /apps/market）：每条带派生的装态
+ * 应用市场清单（GET /market）：每条带派生的装态
  * （installed/enabled/updatable/installable/state，由后端 store+appsRoot 算出，不落库）。
  */
-export const listMarket = (): Promise<MarketApp[]> => http.get<MarketApp[]>('/mate/apps/market')
+export const listMarket = (): Promise<MarketApp[]> => http.get<MarketApp[]>('/mate/market')
 
-/** 强制刷新市场缓存（POST /apps/market/refresh）：下次 listMarket 会重拉远端。 */
-export const refreshMarket = (): Promise<void> => http.post<void>('/mate/apps/market/refresh')
+/** 强制刷新市场缓存（POST /market/refresh）：下次 listMarket 会重拉远端。 */
+export const refreshMarket = (): Promise<void> => http.post<void>('/mate/market/refresh')
 
 /**
  * 从本地来源目录安装一个应用包（POST /apps/install）。

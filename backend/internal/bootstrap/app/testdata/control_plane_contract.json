@@ -314,7 +314,7 @@
   },
   {
     "method": "GET",
-    "path": "/v1/mate/apps/market",
+    "path": "/v1/mate/market",
     "status": 200,
     "code": 0,
     "msg": "success",
@@ -329,7 +329,7 @@
   },
   {
     "method": "POST",
-    "path": "/v1/mate/apps/market/refresh",
+    "path": "/v1/mate/market/refresh",
     "status": 200,
     "code": 0,
     "msg": "success",

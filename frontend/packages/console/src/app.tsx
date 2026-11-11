@@ -178,6 +178,9 @@ export function App() {
                 书签/深链接不会静默落到问答页。 */}
             <Route path="/capabilities" element={<Navigate to="/extensions/skills" replace />} />
             <Route path="/extensions" element={<Navigate to="/extensions/skills" replace />} />
+            {/* 应用页从「扩展」组拆出独立成「应用」组：旧路径 redirect 到新路径，书签/深链接不静默丢失。 */}
+            <Route path="/extensions/market" element={<Navigate to="/apps/market" replace />} />
+            <Route path="/extensions/my-apps" element={<Navigate to="/apps/my-apps" replace />} />
             {/* 页面路由**由注册表同源生成**（console/appRegistry.ts）：新增内置页/动态 app 页
                 只在注册表登记，这里不再手写 `<Route>`。每页统一套 `Manage` 内容容器。 */}
             {resolveAppPages()

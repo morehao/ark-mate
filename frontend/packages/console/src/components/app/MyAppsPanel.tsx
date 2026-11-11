@@ -5,6 +5,7 @@ import { PageContainer, tokens } from '@ark-mate/ui'
 import type { App as AppType } from '@ark-mate/types'
 import { listApps, setAppEnabled, uninstallApp } from '@ark-mate/api'
 import { CapabilityEmpty, DetailGrid, SectionHeader, StatusTag } from '../capability/shared'
+import { AppCard } from './AppCard'
 import { appIconNode } from './appIcons'
 
 /**
@@ -12,6 +13,7 @@ import { appIconNode } from './appIcons'
  *
  * 这补的是 §0.1 的缺口——前端过去只把「带 page 的 app」补登进导航，无 page 的 app 在界面上
  * 哪儿都不显示；本页消费 GET /apps（含 state/why/enabled/has_page），让所有 app 定义可见可控。
+ * 2026-11-11 由列表行改为卡片网格（与市场页同用 `AppCard`）。
  */
 export function MyAppsPanel() {
   const { message } = AntApp.useApp()
@@ -103,16 +105,18 @@ export function MyAppsPanel() {
         ) : visible.length === 0 ? (
           <CapabilityEmpty text={apps.length === 0 ? '还没有应用。可以在对话里创建，或到应用市场安装。' : `没有找到匹配「${query}」的应用。`} />
         ) : (
-          visible.map((a) => (
-            <AppRow
-              key={a.id}
-              app={a}
-              busy={busy === a.id}
-              onToggle={(next) => void toggle(a, next)}
-              onDetail={() => setDetail(a)}
-              onUninstall={() => void remove(a)}
-            />
-          ))
+          <div className="fg-cap-grid">
+            {visible.map((a) => (
+              <MyAppCard
+                key={a.id}
+                app={a}
+                busy={busy === a.id}
+                onToggle={(next) => void toggle(a, next)}
+                onDetail={() => setDetail(a)}
+                onUninstall={() => void remove(a)}
+              />
+            ))}
+          </div>
         )}
       </div>
 
@@ -121,8 +125,12 @@ export function MyAppsPanel() {
   )
 }
 
-/** 一行应用：图标 · 名称+id · 描述 → state 徽标 · Switch · 详情 · 卸载。 */
-function AppRow({
+/**
+ * 一张「我的应用」卡片（复用 `AppCard`）：图标 · 名称+id · 描述 → 状态徽标，
+ * 底栏动作 = 启用开关（Switch/setAppEnabled）+ 详情（DetailGrid 弹层）+ 卸载（Popconfirm）。
+ * 点卡片主体同样打开详情。
+ */
+function MyAppCard({
   app,
   busy,
   onToggle,
@@ -137,62 +145,42 @@ function AppRow({
 }) {
   const badge = appStateView(app)
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-        padding: '12px 16px',
-        borderBottom: `1px solid ${tokens.border}`,
-      }}
-    >
-      <span style={iconBoxStyle}>{appIconNode(app.avatar)}</span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-          {app.name || app.id}
-          <span style={{ fontSize: 11, color: tokens.textPlaceholder, fontFamily: tokens.fontMono, fontWeight: 400 }}>
-            {app.id}
-          </span>
-        </div>
-        <div
-          title={app.description}
-          style={{
-            fontSize: 12,
-            color: tokens.textSecondary,
-            marginTop: 2,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {app.description || (app.has_page ? '（无描述）' : '（无描述 · 无独立页面）')}
-        </div>
-      </div>
-      <div style={{ flex: 'none', width: 130 }}>
-        <StatusTag label={badge.label} tone={badge.tone} hint={badge.hint} />
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 'none' }}>
-        <Tooltip title={app.enabled ? '停用：助手暂不使用，可随时恢复' : '启用：助手会在合适的对话里使用'}>
-          <Switch size="small" checked={app.enabled} loading={busy} onChange={onToggle} />
-        </Tooltip>
-        <Button size="small" type="text" onClick={onDetail}>
-          详情
-        </Button>
-        <Popconfirm
-          title={`卸载「${app.name || app.id}」？`}
-          description="卸载会先停运行期、清包目录，再删除应用定义，不可恢复。"
-          okText="卸载"
-          okButtonProps={{ danger: true }}
-          cancelText="取消"
-          onConfirm={onUninstall}
-          disabled={busy}
-        >
-          <Button size="small" type="text" danger loading={busy}>
-            卸载
+    <AppCard
+      icon={appIconNode(app.avatar)}
+      name={app.name || app.id}
+      statusTag={<StatusTag label={badge.label} tone={badge.tone} hint={badge.hint} />}
+      description={app.description || (app.has_page ? '（无描述）' : '（无描述 · 无独立页面）')}
+      meta={
+        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontFamily: tokens.fontMono, fontSize: 10.5 }}>{app.id}</span>
+          {app.has_page && <span style={tagChipStyle}>有页面</span>}
+        </span>
+      }
+      onOpenDetail={onDetail}
+      actions={
+        <>
+          <Tooltip title={app.enabled ? '停用：助手暂不使用，可随时恢复' : '启用：助手会在合适的对话里使用'}>
+            <Switch size="small" checked={app.enabled} loading={busy} onChange={onToggle} />
+          </Tooltip>
+          <Button size="small" type="text" onClick={onDetail}>
+            详情
           </Button>
-        </Popconfirm>
-      </div>
-    </div>
+          <Popconfirm
+            title={`卸载「${app.name || app.id}」？`}
+            description="卸载会先停运行期、清包目录，再删除应用定义，不可恢复。"
+            okText="卸载"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+            onConfirm={onUninstall}
+            disabled={busy}
+          >
+            <Button size="small" type="text" danger loading={busy}>
+              卸载
+            </Button>
+          </Popconfirm>
+        </>
+      }
+    />
   )
 }
 
@@ -284,16 +272,12 @@ function filterApps(apps: AppType[], query: string): AppType[] {
   return apps.filter((a) => [a.name, a.id, a.description ?? '', ...(a.tags ?? [])].join(' ').toLowerCase().includes(q))
 }
 
-const iconBoxStyle = {
-  width: 34,
-  height: 34,
-  borderRadius: 8,
-  flex: 'none',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  fontSize: 16,
-  background: tokens.accentSoft,
-  color: tokens.accent,
-  border: '1px solid #e2e7ff',
+const tagChipStyle = {
+  fontSize: 10.5,
+  color: tokens.textSecondary,
+  background: tokens.softFill,
+  border: `1px solid ${tokens.border}`,
+  borderRadius: 5,
+  padding: '1px 7px',
+  lineHeight: '16px',
 } as const
