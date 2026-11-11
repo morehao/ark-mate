@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { App as AntApp, Button, Input, Modal, Popconfirm, Switch, Tooltip } from 'antd'
+import { App as AntApp, Input, Switch, Tooltip } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import type { App as AppType } from '@ark-mate/types'
 import { listApps, setAppEnabled, uninstallApp } from '@ark-mate/api'
 import { useMate } from '../../store'
-import { CapabilityEmpty, DetailGrid, SectionHeader, StatusTag } from '../capability/shared'
+import { CapabilityEmpty, SectionHeader, StatusTag } from '../capability/shared'
 import { AppCard } from './AppCard'
 import { appIconNode } from './appIcons'
+import { AppUsageModal, appTaglineOf, type AppUsageTarget } from './AppUsageModal'
 
 /**
  * 我的应用：列出**全部** app 定义（含通过对话创建、无独立页面的应用），可启停 / 看详情 / 卸载。
@@ -27,7 +28,7 @@ export function MyAppsPanel() {
   const [query, setQuery] = useState('')
   // 正在启停/卸载的 app id（按钮/Switch loading）。
   const [busy, setBusy] = useState<string | null>(null)
-  // 当前展开详情的 app（null=关闭）。
+  // 当前打开「使用说明」弹层的 app（null=关闭）。
   const [detail, setDetail] = useState<AppType | null>(null)
 
   const load = useCallback(async () => {
@@ -86,9 +87,10 @@ export function MyAppsPanel() {
   // （成员专家是另一条正交通道，硬塞会让「带的是什么」说不清）。`POST /sessions` 的 prompt 必填
   // （它即首轮），所以这里给一句简短引导语让会话有起点，而不是造一个 API 不支持的"纯空会话"。
   const launch = useCallback(
-    async (app: AppType) => {
+    async (app: AppType, prompt?: string) => {
       const label = app.name || app.id
-      const id = await createAndRun(`使用应用「${label}」`, undefined, undefined, { apps: [app.id] })
+      const text = (prompt && prompt.trim()) || `使用应用「${label}」`
+      const id = await createAndRun(text, undefined, undefined, { apps: [app.id] })
       if (id) navigate(`/sessions/${id}`)
     },
     [createAndRun, navigate],
@@ -97,7 +99,7 @@ export function MyAppsPanel() {
   return (
     <PageContainer
       title="我的应用"
-      description="所有应用定义，包括通过对话创建、没有独立页面的应用。可启停、查看详情、卸载。"
+      description="所有应用，包括通过对话创建、没有独立页面的。点「查看用法」看它能做什么、怎么开口，可直接点示例话术开始。"
     >
       <SectionHeader
         title="全部应用"
@@ -131,18 +133,24 @@ export function MyAppsPanel() {
                 busy={busy === a.id}
                 onToggle={(next) => void toggle(a, next)}
                 onDetail={() => setDetail(a)}
-                onUninstall={() => void remove(a)}
               />
             ))}
           </div>
         )}
       </div>
 
-      <AppDetailModal
-        app={detail}
+      <AppUsageModal
+        open={detail !== null}
+        target={detail ? ({ kind: 'mine', app: detail } satisfies AppUsageTarget) : null}
         onClose={() => setDetail(null)}
-        onUninstall={(a) => void remove(a)}
-        onLaunch={(a) => void launch(a)}
+        onUninstall={(a) => {
+          void remove(a)
+          setDetail(null)
+        }}
+        onLaunch={(a, prompt) => {
+          void launch(a, prompt)
+          setDetail(null)
+        }}
       />
     </PageContainer>
   )
@@ -150,7 +158,7 @@ export function MyAppsPanel() {
 
 /**
  * 一张「我的应用」卡片（复用 `AppCard`）：图标 · 名称+id · 描述 → 状态徽标，
- * 底栏动作 = 启用开关（Switch/setAppEnabled）+ 详情（DetailGrid 弹层）+ 卸载（Popconfirm）。
+ * 底栏动作 = 「查看用法 →」（打开 AppUsageModal）+ 右端启停开关；卸载收在弹层里。
  * 点卡片主体同样打开详情。
  */
 function MyAppCard({
@@ -158,13 +166,11 @@ function MyAppCard({
   busy,
   onToggle,
   onDetail,
-  onUninstall,
 }: {
   app: AppType
   busy: boolean
   onToggle: (next: boolean) => void
   onDetail: () => void
-  onUninstall: () => void
 }) {
   const badge = appStateView(app)
   return (
@@ -172,118 +178,19 @@ function MyAppCard({
       icon={appIconNode(app.avatar)}
       name={app.name || app.id}
       statusTag={<StatusTag label={badge.label} tone={badge.tone} hint={badge.hint} />}
-      description={app.description || (app.has_page ? '（无描述）' : '（无描述 · 无独立页面）')}
+      description={appTaglineOf(app)}
       meta={
-        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          {appSourcePill(app.source)}
-          <span style={{ fontFamily: tokens.fontMono, fontSize: 10.5 }}>{app.id}</span>
-          {app.has_page && <span style={tagChipStyle}>有页面</span>}
-        </span>
+        <button type="button" className="app-usage-link" style={usageLinkStyle} onClick={onDetail}>
+          查看用法 <span aria-hidden>→</span>
+        </button>
       }
       onOpenDetail={onDetail}
       actions={
-        <>
-          <Tooltip title={app.enabled ? '停用：助手暂不使用，可随时恢复' : '启用：助手会在合适的对话里使用'}>
-            <Switch size="small" checked={app.enabled} loading={busy} onChange={onToggle} />
-          </Tooltip>
-          <Button size="small" type="text" onClick={onDetail}>
-            详情
-          </Button>
-          <Popconfirm
-            title={`卸载「${app.name || app.id}」？`}
-            description="卸载会先停运行期、清包目录，再删除应用定义，不可恢复。"
-            okText="卸载"
-            okButtonProps={{ danger: true }}
-            cancelText="取消"
-            onConfirm={onUninstall}
-            disabled={busy}
-          >
-            <Button size="small" type="text" danger loading={busy}>
-              卸载
-            </Button>
-          </Popconfirm>
-        </>
+        <Tooltip title={app.enabled ? '停用：助手暂不使用，可随时恢复' : '启用：助手会在合适的对话里使用'}>
+          <Switch size="small" checked={app.enabled} loading={busy} onChange={onToggle} />
+        </Tooltip>
       }
     />
-  )
-}
-
-/** 详情弹窗：复用 DetailGrid（描述/头像/标签/页面入口/工具域/成员/状态）。 */
-function AppDetailModal({
-  app,
-  onClose,
-  onUninstall,
-  onLaunch,
-}: {
-  app: AppType | null
-  onClose: () => void
-  onUninstall: (app: AppType) => void
-  onLaunch: (app: AppType) => void
-}) {
-  const badge = app ? appStateView(app) : null
-  const items = app
-    ? [
-        { label: '描述', value: app.description || '（无）' },
-        { label: '头像', value: app.avatar || '（默认）' },
-        { label: '标签', value: app.tags?.length ? app.tags.join('、') : '（无）' },
-        { label: '页面入口', value: app.has_page ? app.page?.route || '有' : '无' },
-        { label: '工具域', value: app.tool_domains?.length ? app.tool_domains.join('、') : '（无）' },
-        { label: '成员', value: membersSummary(app) },
-        { label: '状态', value: <StatusTag label={badge!.label} tone={badge!.tone} hint={badge!.hint} /> },
-        { label: '版本', value: app.revision != null ? `rev ${app.revision}` : '（无）' },
-      ]
-    : []
-
-  // 「在新会话里用这个应用」：仅对**已启用**的应用可用（停用/启动失败时禁用并给原因）——
-  // 与「我的应用」启停语义一致：停用只是暂不使用，此时开新会话也带不上它的工具。
-  const launchable = app?.enabled === true
-  const launchTitle = !app
-    ? ''
-    : app.enabled
-      ? '开一条带上这个应用业务工具的新会话'
-      : '应用未启用：先在列表里启用，再在新会话里使用它'
-
-  return (
-    <Modal
-      open={app !== null}
-      title={app ? `${app.name || app.id} · ${app.id}` : ''}
-      onCancel={onClose}
-      destroyOnClose
-      width={560}
-      footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button onClick={onClose}>关闭</Button>
-          <Tooltip title={launchTitle}>
-            <Button
-              type="primary"
-              disabled={!launchable}
-              onClick={() => {
-                if (app) onLaunch(app)
-                onClose()
-              }}
-            >
-              在新会话里用这个应用
-            </Button>
-          </Tooltip>
-          <Button
-            danger
-            onClick={() => {
-              if (app) onUninstall(app)
-              onClose()
-            }}
-          >
-            卸载
-          </Button>
-        </div>
-      }
-    >
-      <DetailGrid items={items} />
-      {app && app.enabled && app.members?.experts && app.members.experts.length > 0 && (
-        <div style={{ marginTop: 10, fontSize: 12, color: tokens.textSecondary }}>
-          该应用推荐专家：{app.members.experts.join('、')}（可在会话内手动选择；V1 不会自动带上）
-        </div>
-      )}
-    </Modal>
   )
 }
 
@@ -307,50 +214,19 @@ function appStateView(app: AppType): { label: string; tone: 'muted' | 'success' 
   }
 }
 
-function membersSummary(app: AppType): string {
-  const m = app.members
-  if (!m) return '未引用'
-  const parts: string[] = []
-  if (m.experts?.length) parts.push(`专家 ${m.experts.length}`)
-  if (m.automations?.length) parts.push(`定时 ${m.automations.length}`)
-  if (m.skills?.length) parts.push(`技能 ${m.skills.length}`)
-  if (m.mcps?.length) parts.push(`连接器 ${m.mcps.length}`)
-  return parts.length ? parts.join('、') : '未引用'
-}
-
 function filterApps(apps: AppType[], query: string): AppType[] {
   const q = query.trim().toLowerCase()
   if (!q) return apps
   return apps.filter((a) => [a.name, a.id, a.description ?? '', ...(a.tags ?? [])].join(' ').toLowerCase().includes(q))
 }
 
-const tagChipStyle = {
-  fontSize: 10.5,
-  color: tokens.textSecondary,
-  background: tokens.softFill,
-  border: `1px solid ${tokens.border}`,
-  borderRadius: 5,
-  padding: '1px 7px',
-  lineHeight: '16px',
-} as const
-
-// 「市场」来源标签的强调 pill 样式（靛蓝柔和底 + accent 字；全站唯一彩色 accent，克制使用）。
-const marketPillStyle = {
-  fontSize: 10.5,
+/** 卡片左下角「查看用法 →」链接样式（克制：accent 字，无底色）。 */
+const usageLinkStyle = {
+  border: 'none',
+  background: 'transparent',
+  padding: 0,
+  cursor: 'pointer',
   color: tokens.accent,
-  background: tokens.accentSoft,
-  border: `1px solid ${tokens.accentSoft}`,
-  borderRadius: 5,
-  padding: '1px 7px',
-  lineHeight: '16px',
+  fontSize: 12,
+  fontFamily: 'inherit',
 } as const
-
-/**
- * 应用来源标签：`self` → 「自建」（中性 pill，同 tagChipStyle）；`market` → 「市场」（强调 pill）。
- * `source` 缺省（undefined，旧响应）时不显示任何标签（前端容错）。
- */
-function appSourcePill(source: AppType['source']) {
-  if (source === 'market') return <span style={marketPillStyle}>市场</span>
-  if (source === 'self') return <span style={tagChipStyle}>自建</span>
-  return null
-}

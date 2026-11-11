@@ -236,6 +236,10 @@ func (s *appSvc) ensurePackDefinition(ctx context.Context, id, name string, m *a
 		if m.APIVersion != "" {
 			app.APIVersion = m.APIVersion
 		}
+		// 使用说明随包装进定义（v42）：让装进来的应用也自带「怎么开口」。
+		app.Tagline = m.Tagline
+		app.Examples = append([]string(nil), m.Examples...)
+		app.UsageGuide = m.UsageGuide
 	}
 	if err := capability.ValidateApp(app); err != nil {
 		return invalidErr(id, err)

@@ -61,11 +61,11 @@ func New(svc Service) *Handler { return &Handler{svc: svc} }
 // 工具描述（会给模型看）。
 const (
 	descCreate = "创建一个应用（组合型/实体型：把既有专家/自动化/技能/MCP 组合起来，可选声明实体、工具域、页面）。参数：id（必填，小写字母数字连字符，如 daily-digest，**不要从 name 直接派生**）、name（必填，1-40 字）、" +
-		"description（≤120 字）、avatar（spark|chart|code|pen|search|briefcase）、tags（≤8 个，每个 ≤20 字）、members{experts,automations,skills,mcps}（各 ≤50，引用既有 id）、" +
+		"description（≤120 字）、tagline（≤40 字的一句话「对它说什么」，列表主文案）、examples（≤6 条可直接发送的示例话术，每条 ≤100 字）、usage_guide（≤600 字：适用场景/需要提供什么/产出/边界）、avatar（spark|chart|code|pen|search|briefcase）、tags（≤8 个，每个 ≤20 字）、members{experts,automations,skills,mcps}（各 ≤50，引用既有 id）、" +
 		"entities[{kind}]（≤16，kind 须平台在册）、tool_domains（≤16，单段小写字母数字、不含下划线）、slots[{impl_id}]（≤16，impl_id 须平台在册）、page{nav_label,route,component}、settings_schema、api_version（caret，如 ^1）、enabled（默认 true）。" +
-		"**先用自然语言和用户确认应用名/用途/组合哪些能力再建**。"
-	descUpdate = "增量更新一个应用（只改传入的键，未传的保留；null 删键）。参数：id（必填，不可改——要换 id 就删掉重建），以及要改的 name/description/avatar/tags/members/entities/tool_domains/slots/page/settings_schema/api_version/enabled。**用自然语言确认，不暴露 JSON 细节**。"
-	descList   = "列出全部应用（含已禁用的）。返回 [{id,name,description,avatar,tags,members,entities,tool_domains,slots,api_version,enabled,has_page}]；**不含 settings_schema 正文**（要看正文用 app_get）。"
+		"**先用自然语言和用户确认应用名/用途/组合哪些能力再建**；并主动和用户确认 2-3 句「用户会怎么对它说话」的示例话术，写进 examples——这是用户日后唯一的使用入口。"
+	descUpdate = "增量更新一个应用（只改传入的键，未传的保留；null 删键）。参数：id（必填，不可改——要换 id 就删掉重建），以及要改的 name/description/tagline/examples/usage_guide/avatar/tags/members/entities/tool_domains/slots/page/settings_schema/api_version/enabled。**用自然语言确认，不暴露 JSON 细节**。"
+	descList   = "列出全部应用（含已禁用的）。返回 [{id,name,description,tagline,examples,usage_guide,avatar,tags,members,entities,tool_domains,slots,api_version,enabled,has_page}]；**不含 settings_schema 正文**（要看正文用 app_get）。"
 	descGet    = "取一个应用详情（含 settings_schema 全文与 page）。参数：id（必填）。"
 	descDelete = "删除一个应用（幂等：不存在 → deleted=false 且无错）。参数：id（必填）。**删前先用 app_get 把要删的应用复述给用户确认**——删除不可撤销。"
 	descToggle = "启用/禁用一个应用。参数：id（必填）、enabled（必填）。**禁用只影响新会话/新注入，不删除定义、不影响历史会话**。"
@@ -89,6 +89,9 @@ func appSchema(withID bool) string {
     %s
     "name":{"type":"string","minLength":1,"maxLength":40},
     "description":{"type":"string","maxLength":120},
+    "tagline":{"type":"string","maxLength":40,"description":"一句话「对它说什么」的能力句，列表主文案"},
+    "examples":{"type":"array","items":{"type":"string","maxLength":100},"maxItems":6,"description":"可直接发送的示例话术，教用户怎么开口"},
+    "usage_guide":{"type":"string","maxLength":600,"description":"怎么用正文：适用场景/需要提供什么/产出/边界"},
     "avatar":{"type":"string","enum":["spark","chart","code","pen","search","briefcase"]},
     "tags":{"type":"array","items":{"type":"string","maxLength":20},"maxItems":8},
     "members":{"type":"object","properties":{

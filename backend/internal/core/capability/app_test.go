@@ -149,3 +149,44 @@ func TestValidateAppDoesNotCheckWhitelist(t *testing.T) {
 		t.Fatalf("域层不应校验 impl_id 在册（那是 WP3 的职责），得到错误：%v", err)
 	}
 }
+
+// TestValidateAppUsageFields 覆盖 v42 使用说明三字段（tagline/examples/usage_guide）的校验与规范化。
+func TestValidateAppUsageFields(t *testing.T) {
+	// 正例：三字段都在上限内 → 通过，且 examples 去空白、空条被剔除。
+	a := validApp()
+	a.Tagline = "  每天早上把关注的资讯整理成简报  "
+	a.Examples = []string{"  生成今天的简报  ", "", "  汇总上周收藏的文章 "}
+	a.UsageGuide = "  适用场景：早报；需要提供：主题关键词；产出：markdown 简报。"
+	if err := ValidateApp(a); err != nil {
+		t.Fatalf("合法使用说明不应被拒：%v", err)
+	}
+	if a.Tagline != "每天早上把关注的资讯整理成简报" {
+		t.Fatalf("tagline 应去首尾空白，得到 %q", a.Tagline)
+	}
+	if len(a.Examples) != 2 || a.Examples[0] != "生成今天的简报" {
+		t.Fatalf("examples 应去空白并剔除空条，得到 %#v", a.Examples)
+	}
+
+	// 反例：超长 / 超条数。
+	cases := []struct {
+		name string
+		mut  func(*App)
+	}{
+		{"tagline 超长", func(a *App) { a.Tagline = strings.Repeat("字", MaxAppTaglineRunes+1) }},
+		{"examples 超条数", func(a *App) {
+			a.Examples = make([]string, MaxAppExamples+1)
+			for i := range a.Examples {
+				a.Examples[i] = "x"
+			}
+		}},
+		{"单条示例超长", func(a *App) { a.Examples = []string{strings.Repeat("字", MaxAppExampleRunes+1)} }},
+		{"usage_guide 超长", func(a *App) { a.UsageGuide = strings.Repeat("字", MaxAppUsageGuideRunes+1) }},
+	}
+	for _, c := range cases {
+		a := validApp()
+		c.mut(a)
+		if err := ValidateApp(a); err == nil {
+			t.Fatalf("%s 应被拒", c.name)
+		}
+	}
+}

@@ -812,6 +812,10 @@ var schemaMigrations = []migration{
 	// v41 本体在 migrate_v41.go（应用来源落库：`apps` 补 `source` 列，self=自建 / market=市场下载——
 	// 来源是持久元数据、落库而非派生，理由写在该文件头）。
 	migrationV41,
+
+	// v42 本体在 migrate_v42.go（应用使用说明落库：`apps` 补 `tagline`/`examples_json`/`usage_guide`
+	// 三列，承载「这个应用怎么用自然语言驱动」的产品面——理由写在该文件头）。
+	migrationV42,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

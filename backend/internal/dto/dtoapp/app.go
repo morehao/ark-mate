@@ -30,7 +30,13 @@ type AppResp struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
-	Avatar      string   `json:"avatar,omitempty"`
+	// Tagline 一句话能力句（v42，≤40 字）；空 = 前端回退到 description。
+	Tagline string `json:"tagline,omitempty"`
+	// Examples 可直接发送的示例话术（v42，≤6 条、每条 ≤100 字）。
+	Examples []string `json:"examples,omitempty"`
+	// UsageGuide 「怎么用」正文（v42，≤600 字）：适用场景 / 需要提供什么 / 产出 / 边界。
+	UsageGuide string   `json:"usage_guide,omitempty"`
+	Avatar     string   `json:"avatar,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	// Members 组合/归属：app 引用的既有成员定义 id。
 	Members AppMembersResp `json:"members,omitempty"`

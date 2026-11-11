@@ -7,6 +7,7 @@ import { installApp, listMarket, refreshMarket, setAppEnabled, uninstallApp, upg
 import { CapabilityEmpty, SectionHeader, StatusTag } from '../capability/shared'
 import { AppCard } from './AppCard'
 import { appIconNode } from './appIcons'
+import { AppUsageModal, type AppUsageTarget } from './AppUsageModal'
 
 /**
  * 应用市场：浏览可安装的应用包（来自内置清单/可换源 registry），一键装/卸/启用/更新。
@@ -26,6 +27,8 @@ export function AppMarketPanel() {
   const [query, setQuery] = useState('')
   // 正在操作的 app id（按钮 loading；同一时刻只允许一个动作）。
   const [busy, setBusy] = useState<string | null>(null)
+  // 当前打开「查看用法」弹层的市场条目（null=关闭）。
+  const [detail, setDetail] = useState<MarketApp | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -75,7 +78,7 @@ export function AppMarketPanel() {
   return (
     <PageContainer
       title="应用市场"
-      description="浏览可安装的应用——把一个业务场景（专家、定时任务、技能、工具）打包成一个整体，一键装进来。"
+      description="浏览可安装的应用——把一个业务场景（专家、定时任务、技能、工具）打包成一个整体。装之前可以先点「查看用法」，知道它怎么用。"
     >
       <SectionHeader
         title="可安装的应用"
@@ -108,6 +111,7 @@ export function AppMarketPanel() {
                 key={a.id}
                 app={a}
                 busy={busy === a.id}
+                onDetail={() => setDetail(a)}
                 onInstall={() => {
                   const dir = a.source.dir ?? ''
                   if (!dir) {
@@ -124,14 +128,55 @@ export function AppMarketPanel() {
           </div>
         )}
       </div>
+
+      <AppUsageModal
+        open={detail !== null}
+        target={detail ? ({ kind: 'market', app: detail } satisfies AppUsageTarget) : null}
+        onClose={() => setDetail(null)}
+        marketAction={
+          detail
+            ? marketDetailAction(detail, (fn, ok) => {
+                void run(detail.id, fn, ok)
+                setDetail(null)
+              })
+            : undefined
+        }
+      />
     </PageContainer>
   )
+}
+
+/** 「查看用法」弹层底栏的动作：按装态给出「安装 / 启用 / 更新」，不可装则置灰。 */
+function marketDetailAction(
+  app: MarketApp,
+  runInModal: (fn: () => Promise<void>, ok: string) => void,
+): { label: string; disabled?: boolean; reason?: string; run: () => void } {
+  if (!app.installable && !app.installed) {
+    return { label: '需远程分发', disabled: true, reason: '该应用需从远端下载（C8 签名链），暂不可装', run: () => {} }
+  }
+  if (app.updatable) {
+    return { label: '更新', run: () => runInModal(() => upgradeApp(app.id).then(() => undefined), `已更新「${app.name}」`) }
+  }
+  if (!app.installed) {
+    const dir = app.source.dir ?? ''
+    return {
+      label: '安装',
+      disabled: !dir,
+      reason: '该应用缺少来源目录，无法安装',
+      run: () => runInModal(() => installApp(dir, false).then(() => undefined), `已安装「${app.name}」`),
+    }
+  }
+  if (!app.enabled) {
+    return { label: '启用', run: () => runInModal(() => setAppEnabled(app.id, true).then(() => undefined), `已启用「${app.name}」`) }
+  }
+  return { label: '已启用', disabled: true, reason: '该应用已启用，在新会话里即可使用', run: () => {} }
 }
 
 /** 单张市场卡片：图标·名称·版本·id·摘要·标签 + 底栏状态与动作按钮（态机）。 */
 function MarketCard({
   app,
   busy,
+  onDetail,
   onInstall,
   onEnable,
   onUpgrade,
@@ -139,6 +184,7 @@ function MarketCard({
 }: {
   app: MarketApp
   busy: boolean
+  onDetail: () => void
   onInstall: () => void
   onEnable: () => void
   onUpgrade: () => void
@@ -153,17 +199,13 @@ function MarketCard({
       name={app.name}
       version={app.version}
       statusTag={<StatusTag label={health.label} tone={health.tone} hint={health.hint} />}
-      description={app.summary?.zh || '（无摘要）'}
+      description={(app.tagline && app.tagline.trim()) || app.summary?.zh || '（无摘要）'}
       meta={
-        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontFamily: tokens.fontMono, fontSize: 10.5 }}>{app.id}</span>
-          {app.tags?.map((t) => (
-            <span key={t} style={tagChipStyle}>
-              {t}
-            </span>
-          ))}
-        </span>
+        <button type="button" style={usageLinkStyle} onClick={onDetail}>
+          查看用法 <span aria-hidden>→</span>
+        </button>
       }
+      onOpenDetail={onDetail}
       actions={
         <MarketActions
           app={app}
@@ -285,12 +327,13 @@ const gridStyle = {
   gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
 } as const
 
-const tagChipStyle = {
-  fontSize: 10.5,
-  color: tokens.textSecondary,
-  background: tokens.softFill,
-  border: `1px solid ${tokens.border}`,
-  borderRadius: 5,
-  padding: '1px 7px',
-  lineHeight: '16px',
+/** 卡片左下角「查看用法 →」链接样式（与我的应用一致）。 */
+const usageLinkStyle = {
+  border: 'none',
+  background: 'transparent',
+  padding: 0,
+  cursor: 'pointer',
+  color: tokens.accent,
+  fontSize: 12,
+  fontFamily: 'inherit',
 } as const

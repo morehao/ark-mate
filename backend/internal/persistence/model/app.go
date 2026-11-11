@@ -39,6 +39,12 @@ type AppEntity struct {
 	Name string `gorm:"column:name;not null"`
 	// Description 描述（≤120 字符，空 → ''）。
 	Description string `gorm:"column:description;not null;default:''"`
+	// Tagline 一句话能力句（v42，≤40 字符，空 → ''）。
+	Tagline string `gorm:"column:tagline;not null;default:''"`
+	// ExamplesJSON 示例话术数组的 JSON 文本（v42，默认 '[]'）。
+	ExamplesJSON string `gorm:"column:examples_json;not null;default:'[]'"`
+	// UsageGuide 用法正文（v42，≤600 字符，空 → ''）。
+	UsageGuide string `gorm:"column:usage_guide;not null;default:''"`
 	// Avatar 内置图标键（空 → ''）。
 	Avatar string `gorm:"column:avatar;not null;default:''"`
 	// TagsJSON 标签数组的 JSON 文本（默认 '[]'）。

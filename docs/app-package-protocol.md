@@ -26,7 +26,7 @@
 | 概念 | 描述什么 | 在哪 | 落库? |
 | --- | --- | --- | --- |
 | `capability.App`（应用定义） | 一个应用**引用/启用**什么：`members` / `entities` / `tool_domains` / `slots` / `page` / `api_version` | `backend/internal/core/capability/app.go` | 是（`apps` + `app_members`） |
-| `apppkg.Manifest`（包清单） | 一个包**提供**什么：`provides{impls,tools,page}` / `permissions` / `entrypoint` / `integrity` / `requires` | `backend/internal/core/apppkg/manifest.go` | 否（随包分发） |
+| `apppkg.Manifest`（包清单） | 一个包**提供**什么：`provides{impls,tools,page}` / `permissions` / `entrypoint` / `integrity` / `requires` / 使用说明（`tagline`/`examples`/`usage_guide`，v42） | `backend/internal/core/apppkg/manifest.go` | 否（随包分发） |
 
 二者靠**同一套 id 词法**、同一个 `id` 值关联（包 id = 应用定义 id），但字段**不互相镜像**：清单不重复
 App 的 `members`/`entities`，App 也不重复清单的 `provides`/`permissions`/`entrypoint`。装配期（C2 起）
@@ -61,6 +61,9 @@ App 的 `members`/`entities`，App 也不重复清单的 `provides`/`permissions
 | `provides.impls[]` | `{impl_id, kind}` | 否 | 包提供的后端实现。`impl_id` 词法允许 `foo.bar` 分段；`kind` 小写字母/数字/下划线。 |
 | `provides.tools[]` | `{domain, tools[]}` | 否 | 包提供的工具域。`domain` **单段、不含下划线**（前缀分派要求）；`tools[]` 为工具名。 |
 | `provides.page` | `{nav_label, route}` | 否 | 可选前端页面。`route` 以 `/` 开头、段内小写字母/数字/连字符。 |
+| `tagline` | string | 否 | 一句话「对它说什么」（≤40 字），随包装进应用定义的「怎么用」区（v42）。 |
+| `examples[]` | string[] | 否 | 可直接发送的示例话术（≤6 条、每条 ≤100 字，空条剔除），教用户怎么开口（v42）。 |
+| `usage_guide` | string | 否 | 「怎么用」正文（≤600 字）：适用场景 / 需要提供什么 / 产出 / 边界（v42）。 |
 | `permissions[]` | string[] | 否 | 能力白名单枚举，见 §5。 |
 | `entrypoint` | string | 是 | 入口脚本，**相对包根**，不含上跳（`..`）/绝对路径。 |
 | `integrity.sha256` | string | 是 | 入口文件内容的 sha256（64 位小写十六进制）。见 §6。 |

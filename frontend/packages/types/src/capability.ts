@@ -409,6 +409,12 @@ export interface App {
   id: string
   name: string
   description?: string
+  /** 一句话能力句（v42，≤40 字）：列表/详情主文案，教用户「怎么开口」。空 = 回退 description。 */
+  tagline?: string
+  /** 可直接发送的示例话术（v42，≤6 条）：前端一键填进输入框。 */
+  examples?: string[]
+  /** 「怎么用」正文（v42，≤600 字）：适用场景 / 需要提供什么 / 产出 / 边界。 */
+  usage_guide?: string
   avatar?: string
   tags?: string[]
   members?: {
@@ -474,6 +480,12 @@ export interface MarketApp {
   /** 内置图标键（前端静态映射；非 URL）。 */
   icon?: string
   summary: { zh: string; en?: string }
+  /** 一句话能力句（v42，随包分发）：市场卡片「装前预览」用；空则回退 summary.zh。 */
+  tagline?: string
+  /** 可直接发送的示例话术（v42）。 */
+  examples?: string[]
+  /** 「怎么用」正文（v42）。 */
+  usage_guide?: string
   version: string
   homepage?: string
   tags?: string[]

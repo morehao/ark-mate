@@ -52,7 +52,8 @@ func (d *AppDao) CreateCAS(ctx context.Context, row *model.AppEntity) (bool, err
 func (d *AppDao) UpdateFields(ctx context.Context, row *model.AppEntity) (bool, error) {
 	res := d.DB(ctx).Model(&model.AppEntity{}).
 		Where("id = ?", row.ID).
-		Select("name", "description", "avatar", "tags_json", "entities_json", "tool_domains_json",
+		Select("name", "description", "tagline", "examples_json", "usage_guide",
+			"avatar", "tags_json", "entities_json", "tool_domains_json",
 			"slots_json", "page_json", "settings_schema_json", "api_version", "enabled", "updated_at").
 		Updates(row)
 	if res.Error != nil {
