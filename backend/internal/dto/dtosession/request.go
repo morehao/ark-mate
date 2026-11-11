@@ -177,3 +177,38 @@ type ElicitationResolveReq struct {
 	// （把新回答塞进旧轮 / 把正在等的那条当迟到处理）。
 	Late bool `json:"late,omitempty"`
 }
+
+// ElicitationAskReq 是**外部 source** 发起结构化提问的请求体（answerer 桥接入口）。
+//
+// 语义与 ACP elicitation/create 一致（mode=form|url），但归属会话来自 URL 路径（`/sessions/:id/...`），
+// 由调用方显式给出——这就是设计文档 §8.4 的「answerer 显式携带 session」，绕开 D1 推断。
+//
+// 该接口是**阻塞**的：服务端挂起提问、发布 session.elicitation_request（前端弹卡），直到用户
+// 决策/超时/取消才返回。answerer 插件正是靠这个阻塞语义把答案回填给 dsh 的 userQuestions 瀑布。
+type ElicitationAskReq struct {
+	Mode    string                    `json:"mode" binding:"required"`    // form | url
+	Message string                    `json:"message" binding:"required"` // 提问正文（前端卡片标题/说明）
+	Schema  *ElicitationSchemaPayload `json:"schema,omitempty"`           // mode=form：表单 JSON Schema
+	URL     string                    `json:"url,omitempty"`              // mode=url
+	// RuntimeSessionID 底座原生的会话 id（带 `rt_` 壳）。answerer 插件在 dsh 进程内只能拿到这个，
+	// 平台据此反查出平台会话 uuid（`Plane.ByRuntimeSessionID`）。**与 URL 路径的 :id 二选一**：
+	// 路径给了平台会话 id 时以路径为准；路径是 `-`（占位）或为空时用本字段反查。
+	//
+	// 这一层映射刻意留在平台侧（不在 JS 插件里）：dsh 进程不认识平台会话 uuid，让插件做映射等于
+	// 把平台的簿记逻辑抄一份到 dsh 里——两处迟早漂移。
+	RuntimeSessionID string `json:"runtime_session_id,omitempty"`
+	// Timed 标记这是一次**限时**提问（dsh `ask_user_question` 的 timed 模式 → `askTimed`）。
+	//
+	// 为真时，平台把「answerer 桥接的连接断开」当作「超时转 pending、卡片保留可回答」而不是取消：
+	// 底座在它自己的计时器到期时会中止这一路桥接、拿到 pending 让模型先继续；用户随后作答会作为
+	// **新一轮**用户消息进入（ADR-11，同 ACP elicitation 超时那一支的语义）。缺省 false = 阻塞式。
+	Timed bool `json:"timed,omitempty"`
+}
+
+// ElicitationSchemaPayload 表单模式的结构化 schema（与 protocol.ElicitationSchema 对齐的对外形态）。
+type ElicitationSchemaPayload struct {
+	Title       string         `json:"title,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Properties  map[string]any `json:"properties,omitempty"`
+	Required    []string       `json:"required,omitempty"`
+}

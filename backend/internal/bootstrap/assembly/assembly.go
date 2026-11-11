@@ -78,9 +78,12 @@ type assembly struct {
 	ln          net.Listener
 	origin      *middleware.OriginPolicy
 	assetWatch  *router.AssetWatcher
-	services    Services
-	controllers router.Controllers
-	engine      http.Handler
+	// answererToken 是注入给 dsh 的 answerer 令牌（`PrepareRuntimeEnv` 生成并注入 dsh env，
+	// 同一份值交到这里供 `/elicitations/ask` 的服务端强校验）。未启用时为空串（中间件 no-op）。
+	answererToken string
+	services      Services
+	controllers   router.Controllers
+	engine        http.Handler
 
 	// appSlotDispose 本次启动 app slot Reconcile 产出的**逆序撤销栈**（WP6）：进程关闭时执行。
 	// nil = 未 reconcile 或无 slot（Dispose 空操作）。
@@ -617,11 +620,12 @@ func (as *assembly) startRouter(ctx context.Context) error {
 		fileStore = as.attachStore.FileStore()
 	}
 	as.engine = router.New(router.Deps{
-		Controllers: as.controllers,
-		Web:         as.assets,
-		AssetWatch:  as.assetWatch,
-		Origin:      as.origin,
-		FileStore:   fileStore,
+		Controllers:   as.controllers,
+		Web:           as.assets,
+		AssetWatch:    as.assetWatch,
+		Origin:        as.origin,
+		FileStore:     fileStore,
+		AnswererToken: as.answererToken,
 	})
 	return nil
 }

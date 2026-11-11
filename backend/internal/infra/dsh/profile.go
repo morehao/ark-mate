@@ -1,10 +1,13 @@
 package dsh
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ——— 自建 ACP profile：mate-acp ———
@@ -128,14 +131,123 @@ const profilePatchYML = `# ark-mate 生成并维护的 dsh profile 覆写层（�
       name: '@deepseek-ai/dsh-tool-ask-user'
 `
 
+// answererPatchEntry 生成 answerer 插件的 patch 条目（追加在覆写层末尾）。
+//
+// 为什么 `name` 用**绝对路径**而不是包名：profile 目录没有 node_modules，loader 的 ESM 解析器
+// 锚在 profile 的 package scope 上，按包名会解析不到 ark-mate 自带的插件；而绝对路径
+// （`file://` URL 或绝对文件路径）被 `import.meta.resolve` 原样接受，绕过 node_modules。
+// 这与「answerer 作为 ark-mate 自有资产、不改 dsh 载荷」的定稿（设计 §8.2）一致。
+//
+// 门控：`disabled: !!js` 沿用同一套 env 判定（沿用 office 已证的写法）——插件路径为空或
+// 端点未注入时如实关闭，dsh 自然回到 NO_PROVIDER（不误开、不拒启）。路径与端点都由平台在
+// 拉起底座前经 `ProvisionProfile` + `PrepareRuntimeEnv` 注入/写入。
+func answererPatchEntry(pluginPath string) string {
+	if strings.TrimSpace(pluginPath) == "" {
+		// 路径未解析到：不写条目（与 office 的「缺资产如实关闭」同口径——少一个能力，不毁会话）。
+		return ""
+	}
+	// YAML 单引号转义：路径里的单引号加倍。Windows 反斜杠在单引号标量里不需要转义。
+	quoted := "'" + strings.ReplaceAll(pluginPath, "'", "''") + "'"
+	return `
+    # answerer：把 dsh ask_user_question 的 userQuestions 请求桥接到平台 elicitation 卡片通道
+    # （answerer 桥接；设计 2026-11-11-ask-user-answerer-bridge-design.md）。name 用绝对路径
+    # 绕过 profile 无 node_modules 的解析问题；端点/令牌经 env 注入，缺任一则 disabled。
+    - id: ark-mate-answerer
+      name: ` + quoted + `
+      disabled: !!js "!process.env.MATE_ANSWERER_ENDPOINT"
+`
+}
+
+// buildProfilePatchYML 拼出完整覆写层：静态块 + 动态 answerer 条目。
+func buildProfilePatchYML(pluginPath string) string {
+	return profilePatchYML + answererPatchEntry(pluginPath)
+}
+
 // profileFiles 是 mate-acp profile 的四份静态文件（逐字与 dsh 模板生成物一致 + 覆写层）。
-func profileFiles() map[string]string {
+func profileFiles(pluginPath string) map[string]string {
 	return map[string]string{
 		"package.json":        profilePackageJSON,
 		"cordis.yml":          profileCordisYML,
-		"cordis.patch.yml":    profilePatchYML,
+		"cordis.patch.yml":    buildProfilePatchYML(pluginPath),
 		"pnpm-workspace.yaml": profilePnpmWorkspaceYML,
 	}
+}
+
+// AnswererEnvKeys answerer 桥接插件读取的环境变量（注入 dsh Launch.Env）。
+var AnswererEnvKeys = []string{
+	"MATE_ANSWERER_ENDPOINT",
+	"MATE_ANSWERER_TOKEN",
+	"MATE_ANSWERER_PLUGIN",
+}
+
+// AnswererEnv 由平台自身监听端点与 answerer 插件路径派生 3 个 KEY=VALUE，供注入 dsh 启动环境：
+//   - MATE_ANSWERER_ENDPOINT：平台回环 base URL（answerer 插件 POST /v1/mate/sessions/-/elicitations/ask）；
+//   - MATE_ANSWERER_TOKEN：每进程随机令牌（平台侧校验；缺则插件拒绝桥接，如实失败）；
+//   - MATE_ANSWERER_PLUGIN：插件入口绝对路径（同时供 ProvisionProfile 写进覆写层 answerer 条目）。
+//
+// 插件路径解析不到 → 返回 nil（不注入，覆写层 disabled，dsh 自然 NO_PROVIDER，不误开）。
+// 端点为空（如测试/无地址场景）→ 也返回 nil（answerer 如实关闭，不误开）。
+func AnswererEnv(selfEndpoint string) []string {
+	env, _ := AnswererEnvWithToken(selfEndpoint)
+	return env
+}
+
+// AnswererEnvWithToken 同 AnswererEnv，但额外把生成的令牌原样返回，供**服务端保存并比对**。
+//
+// 令牌此前只活在注入给 dsh 的 env 里，平台自己没留副本，于是服务端做不了强校验；这里把
+// 「注入的那一份」与「服务端保存的那一份」收成同一处生成（同一次 AnswererEnv 调用产出的
+// 唯一值），杜绝"两边各生成一个、永远对不上"的静默失效。返回的 token 在未启用时为空串。
+func AnswererEnvWithToken(selfEndpoint string) (env []string, token string) {
+	ep := strings.TrimSpace(selfEndpoint)
+	plugin := ResolveAnswererPlugin()
+	if ep == "" || plugin == "" {
+		return nil, ""
+	}
+	token = genAnswererToken()
+	return []string{
+		"MATE_ANSWERER_ENDPOINT=" + ep,
+		"MATE_ANSWERER_TOKEN=" + token,
+		"MATE_ANSWERER_PLUGIN=" + plugin,
+	}, token
+}
+
+// genAnswererToken 生成每进程一次性令牌（16 字节 hex）。仅本机回环、进程生命周期内有效，
+// 是 OriginPolicy 之外的一层 defense-in-depth。
+func genAnswererToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// 极罕见：随机源失败时退回时间派生（仍本机、仍短生命周期），绝不返回空串（空串=不校验）。
+		return fmt.Sprintf("t-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+// 优先 `MATE_ANSWERER_PLUGIN`（桌面壳随包资产路径，生产路径）；否则由 `MATE_DSH_ENTRY` 上溯到
+// payloads 根下 `ark-mate-answerer/lib/index.js`（给自装配/测试用）。都不成立返回空串 →
+// profile 不写 answerer 条目（如实关闭，不误开）。校验文件存在。
+func ResolveAnswererPlugin() string {
+	if p := strings.TrimSpace(os.Getenv("MATE_ANSWERER_PLUGIN")); p != "" {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+		return ""
+	}
+	entry := strings.TrimSpace(os.Getenv("MATE_DSH_ENTRY"))
+	if entry == "" {
+		return ""
+	}
+	// entry = <payloads>/dsh/<ver>/node_modules/@deepseek-ai/dsh/lib/bin.js
+	// 上溯 6 层到 <payloads>/dsh → 上一级 <payloads>，追问 ark-mate-answerer/lib/index.js。
+	p := entry
+	for i := 0; i < 6; i++ {
+		p = filepath.Dir(p)
+	}
+	payloadsRoot := filepath.Dir(p)
+	candidate := filepath.Join(payloadsRoot, "ark-mate-answerer", "lib", "index.js")
+	if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+		return candidate
+	}
+	return ""
 }
 
 // ProfileDir 返回 mate-acp profile 的落点：`<DSH_HOME>/profiles/mate-acp`。
@@ -175,7 +287,8 @@ func provisionProfileAtDshHome(dshHome string) (int, error) {
 		return 0, fmt.Errorf("创建 mate-acp profile 目录失败（%s）：%w", dir, err)
 	}
 	written := 0
-	for name, content := range profileFiles() {
+	pluginPath := ResolveAnswererPlugin()
+	for name, content := range profileFiles(pluginPath) {
 		path := filepath.Join(dir, name)
 		changed, err := writeIfChanged(path, []byte(content))
 		if err != nil {

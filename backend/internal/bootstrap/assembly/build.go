@@ -113,15 +113,17 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 
 	// 拉底座前的统一准备：落盘 mate-acp profile + 注入 office 随包 env（详见 prepare_runtime.go）。
 	// 抽成公共函数是因为 `mate demo` 等控制面命令也拉底座，必须在**每一处**拉底座前都跑。
-	PrepareRuntimeEnv(ctx, reg, cfg.HomeDir)
+	// 返回值是 answerer 令牌：同一份值既注入 dsh env、又交给路由层做 `/elicitations/ask` 强校验。
+	answererToken := PrepareRuntimeEnv(ctx, reg, cfg.HomeDir, "http://"+cfg.Addr)
 
 	as := &assembly{
-		cfg:     cfg,
-		sources: sources,
-		opts:    o,
-		mode:    cfg.ResolvedStoreMode(),
-		reg:     reg,
-		bus:     eventbus.New(),
+		cfg:           cfg,
+		sources:       sources,
+		opts:          o,
+		mode:          cfg.ResolvedStoreMode(),
+		reg:           reg,
+		bus:           eventbus.New(),
+		answererToken: answererToken,
 	}
 	// 执行面由**装配层**造，同一个实例同时交给 Service（记账）与 API 面（读面）——
 	// 两个平面各自记账会让"诊断说 stopped、连接却活着"立刻发生。

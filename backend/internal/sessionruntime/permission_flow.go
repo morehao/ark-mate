@@ -213,6 +213,48 @@ func (o *Orchestrator) PendingElicitations(sessionID string) []interaction.Elici
 	return o.elic.PendingItems(sessionID)
 }
 
+// AskElicitation 处理一次**外部 source**（answerer 桥接 / 非 ACP 底座）发起、需阻塞等待用户
+// 决策的结构化提问：转成内部 ElicitationRequest 后走与 ACP elicitation **同一套**挂起/事件/决策链。
+//
+// 与 `requestElicitation`（ACP elicitation/create 的入口）的分界：那条的请求来自底座读循环，
+// 归属要 `resolveElicitationScope` 推断（D1）；本条的 `sessionID` 由**调用方显式给出**（answerer
+// 插件从 tool-call 上下文拿到），因此 scope_source 直接是 `wire`——不推断、不歧义。
+//
+// 这正是设计文档 `2026-11-11-ask-user-answerer-bridge-design.md` §8.4 的落点：answerer 路径
+// 绕开 D1。返回值是内部 ElicitationOutcome（accept/decline/cancel + content），由适配器翻译成
+// 对外 DTO。超时/取消语义完全复用 `RegisterAndWait`（ADR-11：超时转 pending，卡片保留可答）。
+//
+// 空 sessionID 直接拒绝：外部提问必须有确定归属，否则宁可失败也不要挂到错误会话（与 D1 的
+// 「不猜测」同一立场）。
+func (o *Orchestrator) AskElicitation(ctx context.Context, sessionID string, req protocol.ElicitationRequest) (protocol.ElicitationOutcome, error) {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return protocol.ElicitationOutcome{}, failure.NewError(failure.ClassRequest,
+			"elicitation_scope_required", "外部结构化提问必须指定归属会话", nil)
+	}
+	// 显式归属：ScopeWire（调用方从 tool-call 上下文给出，无需推断）。
+	req.SessionID = sid
+	req.ScopeSource = protocol.ScopeWire
+	publish := func(it interaction.ElicitationItem) {
+		o.runner.RunStatusFor(sid, session.RunStatusWaitingForUser, session.RunStatusOpts{WaitingFor: "elicitation"})
+		payload := map[string]any{
+			"session_id":     sid,
+			"scope_source":   it.ScopeSource,
+			"elicitation_id": it.ID,
+			"mode":           it.Mode,
+			"message":        it.Message,
+			"timeout_at":     objtime.Milli(it.TimeoutAt),
+		}
+		if it.Mode == "form" {
+			payload["schema"] = it.Schema
+		} else {
+			payload["url"] = it.URL
+		}
+		o.svc.sessionPlane.Publish(session.BusElicitationRequest, sid, payload)
+	}
+	return o.elic.RegisterAndWait(ctx, sid, req, publish), nil
+}
+
 // ResolveElicitation 按 elicitation_id 投递决策（accept/decline/cancel；accept 可带 content）。
 // sessionID 是决策发起方会话：C3 起做 scope 校验，只有归属会话能决策（跨会话 → not found）。
 // `late=true` 走另一条路（ADR-11）：那条提问已经超时转 pending，那一轮的 ACP 调用早已拿到

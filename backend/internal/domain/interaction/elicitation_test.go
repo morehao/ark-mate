@@ -333,3 +333,110 @@ func TestElicitationResolveLateRejectsEarly(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestElicitationTimedDisconnectBecomesPending 限时问答（`req.Timed=true`）里「调用方断开」
+// 落到与「超时」相同的 pending 态，**不是**取消：卡片保留、可回答、`ResolveLate` 能答掉。
+//
+// 与 TestElicitationTimeoutBecomesPending 的区别只在**触发源**：那条是平台计时器到期，这条是
+// 桥接断开（answerer `askTimed` 在底座自己的计时器到期时中止 HTTP，底座拿 pending 让模型先继续）。
+// 二者必须落到同一个「仍可回答」的状态机位置，否则限时问答一晃神就把整轮作废。
+func TestElicitationTimedDisconnectBecomesPending(t *testing.T) {
+	m := NewElicitationManager(5 * time.Second) // 远大于下面的 ctx，断开而不是计时器先到
+	type ev struct{ action, reason string }
+	events := make(chan ev, 2)
+	m.SetOnResolved(func(_, _, action, reason string) { events <- ev{action, reason} })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var got protocol.ElicitationOutcome
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		got = m.RegisterAndWait(ctx, "s1", protocol.ElicitationRequest{
+			SessionID: "s1", Mode: "form", Message: "用哪个库？", Timed: true,
+		}, nil)
+	}()
+
+	// 等登记上，然后**断开**（模拟底座计时器到期中止桥接）。
+	deadline := time.After(2 * time.Second)
+	for len(m.PendingItems("s1")) != 1 {
+		select {
+		case <-deadline:
+			t.Fatal("挂起项没有登记上来")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	wg.Wait()
+
+	// ① 回给调用方：cancel（与超时那一支一致——底座那一轮必须有人应答）。
+	if got.Action != "cancel" {
+		t.Fatalf("限时断开回给调用方的 action 应为 cancel，got %q", got.Action)
+	}
+	// ② 事件：pending + timeout（卡片保留，不是取消）。
+	select {
+	case e := <-events:
+		if e.action != "pending" || e.reason != "timeout" {
+			t.Fatalf("限时断开事件应为 {pending, timeout}，got %+v", e)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("限时断开必须发一条 session.elicitation_resolved")
+	}
+	// ③ 挂起项还在、且不再有超时时刻（"仍可回答"的物理前提）。
+	items := m.PendingItems("s1")
+	if len(items) != 1 {
+		t.Fatalf("限时断开后挂起项应保留（卡片可回答），got %d 条", len(items))
+	}
+	if !items[0].TimeoutAt.IsZero() {
+		t.Fatalf("限时断开后 `timeout_at` 应清空，got %v", items[0].TimeoutAt)
+	}
+	// ④ 迟到回答能答掉并回正文（调用方拿它拼新一轮）。
+	msg, found, mismatch := m.ResolveLate("s1", items[0].ID)
+	if !found || mismatch {
+		t.Fatalf("限时断开后应能迟到作答: found=%v mismatch=%v", found, mismatch)
+	}
+	if msg != "用哪个库？" {
+		t.Fatalf("ResolveLate 应回问题正文，got %q", msg)
+	}
+}
+
+// TestElicitationBlockingDisconnectCancels 对照：**非限时**（阻塞式）断开仍是取消——
+// 挂起项被删除、不发 pending。这条钉住"限时/非限时两条断开语义不串"。
+func TestElicitationBlockingDisconnectCancels(t *testing.T) {
+	m := NewElicitationManager(5 * time.Second)
+	type ev struct{ action, reason string }
+	events := make(chan ev, 2)
+	m.SetOnResolved(func(_, _, action, reason string) { events <- ev{action, reason} })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = m.RegisterAndWait(ctx, "s1", protocol.ElicitationRequest{
+			SessionID: "s1", Mode: "form", Message: "还在等", // Timed 缺省 false
+		}, nil)
+	}()
+	deadline := time.After(2 * time.Second)
+	for len(m.PendingItems("s1")) != 1 {
+		select {
+		case <-deadline:
+			t.Fatal("挂起项没有登记上来")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	wg.Wait()
+
+	select {
+	case e := <-events:
+		if e.action != "cancel" {
+			t.Fatalf("阻塞式断开的收口 action 应为 cancel（不是 pending），got %+v", e)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("阻塞式断开必须发一条 session.elicitation_resolved")
+	}
+	if n := len(m.PendingItems("s1")); n != 0 {
+		t.Fatalf("阻塞式断开应删除挂起项，got %d 条", n)
+	}
+}

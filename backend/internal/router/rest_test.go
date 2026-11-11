@@ -1,6 +1,7 @@
 package router_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,7 @@ import (
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objid"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/expert"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
@@ -41,6 +43,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
+	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/router"
@@ -135,6 +138,14 @@ type stubSvc struct {
 	resolvedElicLate     bool
 	cancelledElicSession string
 	resolveElicErr       error
+	// AskElicitation（外部 source 提问）桩记账。
+	askElicCalled  bool
+	askElicSession string
+	askElicMode    string
+	askElicMessage string
+	askElicErr     error
+	askElicAction  string
+	askElicContent map[string]any
 
 	skills []dtocapability.SkillResp // P1 能力数据面桩
 	// §13.4 S4 启停桩
@@ -469,6 +480,24 @@ func (s *stubSvc) ResolveElicitation(sessionID, elicitationID, action string, co
 	s.resolvedElicContent = content
 	s.resolvedElicLate = late
 	return true, s.resolveElicErr
+}
+
+// AskElicitation 外部 source 提问桩：记账并回预置的 action/content。
+func (s *stubSvc) AskElicitation(_ context.Context, sessionID, runtimeSessionID string, req protocol.ElicitationRequest) (protocol.ElicitationOutcome, error) {
+	s.askElicCalled = true
+	// 平台会话 id 优先；为空时记 runtime 原生 id（模拟投递口解析后的归属）。
+	if sessionID != "" {
+		s.askElicSession = sessionID
+	} else {
+		s.askElicSession = runtimeSessionID
+	}
+	s.askElicMode = req.Mode
+	s.askElicMessage = req.Message
+	action := s.askElicAction
+	if action == "" {
+		action = "accept"
+	}
+	return protocol.ElicitationOutcome{Action: action, Content: s.askElicContent}, s.askElicErr
 }
 
 // CancelElicitations 归档时作废挂起提问（ADR-11）：替身只记账。
@@ -1544,6 +1573,130 @@ func TestResolveElicitationBadBody(t *testing.T) {
 	env, _ = do(t, r, "POST", "/v1/mate/sessions/s1/elicitation", `{"elicitation_id":"el-abc"}`)
 	if env.Code != 40000 {
 		t.Fatalf("缺 action 应 40000: %+v", env)
+	}
+}
+
+// TestAskElicitation POST /sessions/:id/elicitations/ask 外部 source 提问透传（answerer 桥接）。
+//
+// response 是**阻塞式**的结果（accept/decline/cancel + content），服务端把 DTO 折成内部
+// protocol.ElicitationRequest 交给投递口；这里钉住 mode/message 透传与结果回填形态。
+func TestAskElicitation(t *testing.T) {
+	svc := &stubSvc{askElicAction: "accept", askElicContent: map[string]any{"env": "prod"}}
+	deps := stubDeps(t, svc)
+	deps.plane.RegisterSession(&session.SessionRec{ID: "s1"})
+	r := newRestEngine(deps)
+	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/elicitations/ask",
+		`{"mode":"form","message":"请选择环境","schema":{"type":"object","properties":{"env":{"type":"string"}}}}`)
+	if env.Code != 0 {
+		t.Fatalf("信封不符: %+v", env)
+	}
+	var out dtosession.ElicitationOutcomeResp
+	if err := json.Unmarshal(env.Data, &out); err != nil || out.Action != "accept" || out.Content["env"] != "prod" {
+		t.Fatalf("ask 结果不符: %s", env.Data)
+	}
+	if !svc.askElicCalled || svc.askElicSession != "s1" || svc.askElicMode != "form" || svc.askElicMessage != "请选择环境" {
+		t.Fatalf("ask 透传不符: %+v", svc)
+	}
+	// decline 也应如实回填。
+	svc.askElicAction = "decline"
+	svc.askElicContent = nil
+	env, _ = do(t, r, "POST", "/v1/mate/sessions/s1/elicitations/ask", `{"mode":"form","message":"q"}`)
+	var outDecline dtosession.ElicitationOutcomeResp
+	if env.Code != 0 || json.Unmarshal(env.Data, &outDecline) != nil || outDecline.Action != "decline" {
+		t.Fatalf("decline 回填不符: %+v", env)
+	}
+	// 未知会话 → 40401（用例层存在性判据）。
+	if env, _ := do(t, r, "POST", "/v1/mate/sessions/nope/elicitations/ask",
+		`{"mode":"form","message":"q"}`); env.Code != 40401 {
+		t.Fatalf("未知会话应 40401: %+v", env)
+	}
+}
+
+// TestAskElicitationBadBody 缺 mode/message → code 40000。
+func TestAskElicitationBadBody(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(stubDeps(t, svc))
+	if env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/elicitations/ask", `{"message":"q"}`); env.Code != 40000 {
+		t.Fatalf("缺 mode 应 40000: %+v", env)
+	}
+	if env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/elicitations/ask", `{"mode":"form"}`); env.Code != 40000 {
+		t.Fatalf("缺 message 应 40000: %+v", env)
+	}
+}
+
+// TestAskElicitationByRuntimeSession path 用 `-` 占位 + body 带 runtime_session_id 时，用例层
+// 把它**原样透传**给投递口（native→platform 的 rt_ 壳反查在 sessionruntime 适配器里做，见
+// service/svcsession 层不碰壳的约定与 archtest id_shape 守卫）。这里钉的是「透传」这一步。
+func TestAskElicitationByRuntimeSession(t *testing.T) {
+	svc := &stubSvc{askElicAction: "accept", askElicContent: map[string]any{"env": "dev"}}
+	deps := stubDeps(t, svc)
+	deps.plane.RegisterSession(&session.SessionRec{ID: "ses_rt", RuntimeSessionID: "rt_native-1", Cwd: "/tmp"})
+	r := newRestEngine(deps)
+	env, _ := do(t, r, "POST", "/v1/mate/sessions/-/elicitations/ask",
+		`{"mode":"form","message":"q","runtime_session_id":"rt_native-1"}`)
+	if env.Code != 0 {
+		t.Fatalf("信封不符: %+v", env)
+	}
+	if !svc.askElicCalled || svc.askElicSession != "rt_native-1" {
+		t.Fatalf("runtime_session_id 应原样透传给投递口，实际 %+v", svc.askElicSession)
+	}
+}
+
+// TestAskElicitationPathSession path 给真实平台会话 id（非 `-`）时，用例先校验存在性即透传该 id。
+func TestAskElicitationPathSession(t *testing.T) {
+	svc := &stubSvc{askElicAction: "accept"}
+	deps := stubDeps(t, svc)
+	deps.plane.RegisterSession(&session.SessionRec{ID: "ses_a", Cwd: "/tmp"})
+	r := newRestEngine(deps)
+	if env, _ := do(t, r, "POST", "/v1/mate/sessions/ses_a/elicitations/ask",
+		`{"mode":"form","message":"q"}`); env.Code != 0 {
+		t.Fatalf("信封不符: %+v", env)
+	}
+	if svc.askElicSession != "ses_a" {
+		t.Fatalf("应透传路径会话 ses_a，实际 %+v", svc.askElicSession)
+	}
+	// 未知平台会话 id → 40401（不猜测）。
+	if env, _ := do(t, r, "POST", "/v1/mate/sessions/nope/elicitations/ask",
+		`{"mode":"form","message":"q"}`); env.Code != 40401 {
+		t.Fatalf("未知会话应 40401: %+v", env)
+	}
+}
+
+// TestAskElicitationTokenRequired `/elicitations/ask` 配了 answerer 令牌后：缺头/错值 → 401，
+// 对值放行。这条钉的是路由层真的把 `middleware.AnswererToken` 挂在**这一条**路由上（而不是挂在别处、
+// 或装配处忘了把令牌送进 Deps）——「有实现没接线」是这一族最典型的静默失效。
+func TestAskElicitationTokenRequired(t *testing.T) {
+	svc := &stubSvc{askElicAction: "accept"}
+	deps := stubDeps(t, svc)
+	deps.plane.RegisterSession(&session.SessionRec{ID: "ses_a", Cwd: "/tmp"})
+	rd := deps.deps()
+	rd.AnswererToken = "s3cret"
+	r := router.New(rd)
+
+	req := func(token string) int {
+		body := `{"mode":"form","message":"q"}`
+		rq := httptest.NewRequest("POST", "/v1/mate/sessions/ses_a/elicitations/ask", bytes.NewReader([]byte(body)))
+		rq.Host = "127.0.0.1:10001"
+		rq.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			rq.Header.Set(middleware.AnswererTokenHeader, token)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, rq)
+		return w.Code
+	}
+
+	if code := req(""); code != 401 {
+		t.Fatalf("缺令牌头应 401，got %d", code)
+	}
+	if code := req("wrong"); code != 401 {
+		t.Fatalf("错令牌应 401，got %d", code)
+	}
+	if code := req("s3cret"); code != 200 {
+		t.Fatalf("对令牌应放行 200，got %d", code)
+	}
+	if !svc.askElicCalled {
+		t.Fatal("对令牌放行后应到达用例层的 AskElicitation（桩未记账）")
 	}
 }
 

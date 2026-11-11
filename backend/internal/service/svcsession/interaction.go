@@ -6,6 +6,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
@@ -26,6 +27,13 @@ type InteractionSvc interface {
 	// 而是作为**新一轮**的用户消息进去。
 	ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any, late bool) error
 
+	// AskElicitation 发起一次**外部 source** 的结构化提问并阻塞等待用户决策（answerer 桥接入口，
+	// 见 infra/dsh 的 answerer 插件与设计文档 2026-11-11-ask-user-answerer-bridge-design.md）。
+	//
+	// 与 ACP elicitation 走同一套挂起/事件/决策链，区别只在归属由调用方**显式**给出（ScopeWire），
+	// 不经 D1 推断。返回 accept/decline/cancel + content。
+	AskElicitation(ctx context.Context, id string, req dtosession.ElicitationAskReq) (*dtosession.ElicitationOutcomeResp, error)
+
 	// RevokeMemory 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。
 	RevokeMemory(ctx context.Context, id, title, kind string) error
 }
@@ -45,6 +53,12 @@ type InteractionDelivery interface {
 
 	// ResolveElicitation 投递结构化提问决策（accept/decline/cancel）；`late` = 回答已超时转 pending 的那条。
 	ResolveElicitation(sessionID, elicitationID, action string, content map[string]any, late bool) (bool, error)
+
+	// AskElicitation 发起一次**外部 source** 结构化提问并阻塞等用户决策（answerer 桥接）。
+	// 归属：`sessionID`（URL 路径的平台会话 id）或 `runtimeSessionID`（底座原生 id，answerer 插件给）
+	// 二选一；后者由投递口按 `rt_` 壳反查成平台会话（壳的包装只允许在 §4.5.3 的边界函数里做，
+	// 故 native→platform 的解析在 sessionruntime 适配器里、走已白名单的 platformSessionIDForProvider）。
+	AskElicitation(ctx context.Context, sessionID, runtimeSessionID string, req protocol.ElicitationRequest) (protocol.ElicitationOutcome, error)
 
 	// RevokeMemory 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。
 	RevokeMemory(sessionID, title, kind string) (bool, error)
@@ -111,6 +125,45 @@ func (h *Interaction) ResolveElicitation(_ context.Context, id, elicitationID, a
 			fmt.Sprintf("结构化提问 %q 不存在或已过期", elicitationID), nil))
 	}
 	return nil
+}
+
+// AskElicitation 发起一次**外部 source** 结构化提问并阻塞等待用户决策（answerer 桥接入口）。
+//
+// 与 ResolveElicitation 的方向相反：那条是「前端决策 → 回传」，这条是「发起提问 → 阻塞拿结果」。
+// 校验会话存在性 -> 交给投递口（Orchestrator.AskElicitation，复用挂起/事件/决策链）-> 折叠成 DTO。
+// 归属由 URL 的会话 id 显式给出（ScopeWire），不经 D1 推断。
+func (h *Interaction) AskElicitation(ctx context.Context, id string, req dtosession.ElicitationAskReq) (*dtosession.ElicitationOutcomeResp, error) {
+	// 归属解析：URL 路径的平台会话 id 与 body 的 runtime_session_id 二选一。
+	//   - 路径给了真实平台会话 id（HasSession）→ 用它；
+	//   - 路径空/`-`（answerer 插件占位）→ 用 runtime_session_id 交给投递口解析（native→platform
+	//     的 `rt_` 壳反查在 sessionruntime 适配器里做，符合 §4.5.3「壳只在边界函数包装」）。
+	sid := id
+	if sid == "-" {
+		sid = ""
+	}
+	if sid != "" && !h.plane.HasSession(sid) {
+		return nil, sessionNotFoundErr(sid)
+	}
+	// DTO -> 内部协议请求。schema 只在 form 模式有意义（url 模式带 URL）。
+	preq := protocol.ElicitationRequest{
+		Mode:    req.Mode,
+		Message: req.Message,
+		URL:     req.URL,
+		Timed:   req.Timed,
+	}
+	if req.Schema != nil {
+		preq.Schema = &protocol.ElicitationSchema{
+			Title:       req.Schema.Title,
+			Description: req.Schema.Description,
+			Properties:  req.Schema.Properties,
+			Required:    req.Schema.Required,
+		}
+	}
+	out, err := h.deliver.AskElicitation(ctx, sid, req.RuntimeSessionID, preq)
+	if err != nil {
+		return nil, code.FromError(err)
+	}
+	return &dtosession.ElicitationOutcomeResp{Action: out.Action, Content: out.Content}, nil
 }
 
 // RevokeMemory 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。
