@@ -358,9 +358,12 @@ function numberField(record: Record<string, unknown> | undefined, keys: string[]
 }
 
 function groupOf(title: string, kind: string): ToolGroupName {
+  const name = title.trim().toLowerCase()
+  // todo_write 含 write、exit_plan_mode 属计划态：二者都不是文件读写/命令，提前归 other，
+  // 免得被下面的通用正则误归进 modify 等组（详情由 toolDetail 顶部单独拦截）。
+  if (name === 'todo_write' || name === 'todowrite' || name === 'exit_plan_mode') return 'other'
   const byKind = TOOL_GROUP_BY_KIND[kind.trim().toLowerCase()]
   if (byKind) return byKind
-  const name = title.trim().toLowerCase()
   if (/(read|view|cat|open|get_file|read_file)/.test(name)) return 'read'
   // 列目录也是「看文件」的一种：把它归进 read，详情才能按文件预览渲染。
   if (/(list_files|list_dir|listdir|read_dir|readdir|\bls\b|\blist\b|\bdir\b|\btree\b)/.test(name)) return 'read'
@@ -594,7 +597,7 @@ export function mergeToolUpdate(entry: StreamEntry, patch: ToolUpdatePatch): Str
 
 // ——— 工具详情：按类别渲染（数据只取事件里已有的 input/output，缺什么就如实说什么） ———
 
-type ToolDetailKind = 'read' | 'diff' | 'command' | 'search' | 'summary'
+type ToolDetailKind = 'read' | 'diff' | 'command' | 'search' | 'summary' | 'todo' | 'plan'
 
 interface ToolDetailLine {
   /** 行号；只有调用参数给了起始行时才编号（不猜第 1 行）。 */
@@ -640,8 +643,20 @@ export interface ToolDetail {
   results?: string[]
   /** 结果摘要（edit/write 没有 diff 数据时）。 */
   summary?: string
+  /** 任务清单（todo_write 的入参 todos）。 */
+  todos?: ToolDetailTodo[]
+  /** 计划 markdown 正文（exit_plan_mode 的计划文本）。 */
+  planMD?: string
+  /** 计划是否已被批准（exit_plan_mode 结果里的 approved；未定则缺省）。 */
+  approved?: boolean
   /** 数据不足的如实说明（例如「结果不可用（底座未上报）」）。 */
   notes: string[]
+}
+
+/** 任务清单单项：内容 + 三态状态（与契约对齐）。 */
+export interface ToolDetailTodo {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
 }
 
 const DIFF_KEYS = ['diff', 'patch', 'unified_diff', 'unifiedDiff']
@@ -797,6 +812,61 @@ const MAX_PREVIEW_LINES = 200
 const MAX_DIFF_LINES = 400
 const MAX_RESULTS = 50
 
+const TODO_STATUSES = new Set<ToolDetailTodo['status']>(['pending', 'in_progress', 'completed'])
+const PLAN_BODY_KEYS = ['plan', 'content', 'markdown', 'text']
+
+/**
+ * `todo_write` 的入参 → 任务清单投影。
+ *
+ * 规矩：trim、去空、按内容去重；status 不认识的归 `pending` 并推一条 `notes`（不静默丢项）。
+ * 一项都解析不出就返回 `null`，让上层回落通用卡。
+ */
+function todoWriteDetail(input: Record<string, unknown> | undefined, notes: string[]): ToolDetail | null {
+  if (!input) return null
+  const raw = input.todos
+  if (!Array.isArray(raw)) return null
+  const todos: ToolDetailTodo[] = []
+  const seen = new Set<string>()
+  let invalidStatus = 0
+  for (const item of raw) {
+    const record = recordOf(item)
+    const content = (pickText(record, ['content', 'text', 'title', 'task']) ?? '').trim()
+    if (!content) continue
+    if (seen.has(content)) continue
+    seen.add(content)
+    const rawStatus = (pickText(record, ['status']) ?? '').trim().toLowerCase()
+    let status: ToolDetailTodo['status'] = 'pending'
+    if (TODO_STATUSES.has(rawStatus as ToolDetailTodo['status'])) {
+      status = rawStatus as ToolDetailTodo['status']
+    } else if (rawStatus) {
+      invalidStatus += 1
+    }
+    todos.push({ content, status })
+  }
+  if (todos.length === 0) return null
+  if (invalidStatus > 0) notes.push(`${invalidStatus} 项状态无法识别，已按待办展示`)
+  return { kind: 'todo', todos, notes }
+}
+
+/**
+ * `exit_plan_mode` 的入参 → 计划卡投影。
+ *
+ * 计划正文取 `<plan|content|markdown|text>` 多键容错（字段名未 100% 确认）；
+ * `approved` 从结果里透传，缺省即未定（不猜）。正文取不到就返回 `null`。
+ */
+function exitPlanDetail(input: Record<string, unknown> | undefined, output: unknown, notes: string[]): ToolDetail | null {
+  const planMD = pickText(input, PLAN_BODY_KEYS)
+  if (!planMD) return null
+  const detail: ToolDetail = { kind: 'plan', planMD, notes }
+  const outRecord = recordOf(output)
+  if (outRecord) {
+    const approved = outRecord.approved
+    if (typeof approved === 'boolean') detail.approved = approved
+  }
+  return detail
+}
+
+
 /**
  * 单条工具 → 详情视图。返回 `null` 表示"没有可渲染的类别数据"，调用方退回原始入参/结果的纯文本。
  *
@@ -813,6 +883,16 @@ export function toolDetail(entry: StreamEntry, view?: ToolView): ToolDetail | nu
   const text = outputText(output)
   const notes: string[] = []
   if (output === undefined || output === null) notes.push('结果不可用（未上报）')
+
+  // todo_write / exit_plan_mode 走独立投影：按标题识别，在通用 group 分支之前拦截。
+  // 解析不出就 return null，调用方回落通用卡（降级，不拿标题补一个看起来合理的值）。
+  const name = (entry.title ?? '').trim().toLowerCase()
+  if (name === 'todo_write' || name === 'todowrite') {
+    return todoWriteDetail(input, notes)
+  }
+  if (name === 'exit_plan_mode') {
+    return exitPlanDetail(input, output, notes)
+  }
 
   if (tool.group === 'read') {
     const path = pickText(input, PATH_KEYS)
