@@ -102,6 +102,8 @@ export interface SessionSummary {
 export interface SessionCapabilities {
   skills?: string[]
   mcps?: string[]
+  /** 会话启用的 app id 白名单（缺键 = 未声明 → 无 app 工具；`[]` = 明确不要；非空 = 白名单）。 */
+  apps?: string[]
   /** 钉住的专家 id（缺键 = 未声明；`""` = 明确不用；非空 = 专家 id）。 */
   expert?: string
   /** 专家定义已被删除（能力仍按创建时物化的列表生效）。 */
@@ -277,6 +279,7 @@ export interface SessionPatch {
 export interface SessionCapabilitiesPatch {
   skills?: string[] | null
   mcps?: string[] | null
+  apps?: string[] | null
   expert?: string | null
 }
 
@@ -438,7 +441,7 @@ export interface CreateSessionReq {
    * `[]` = 一个都不要；非空 = 白名单。服务端据此算代际指纹并把选定钉进会话。
    * 不可达的 id 会被拒（40001 `capability_not_applicable`，msg 里逐条给原因）。
    */
-  capabilities?: { expert?: string; skills?: string[]; mcps?: string[] }
+  capabilities?: { expert?: string; skills?: string[]; mcps?: string[]; apps?: string[] }
   /** 首轮携带的附件 id 列表（`att_…`；v32）。 */
   attachments?: string[]
 }

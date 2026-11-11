@@ -95,6 +95,9 @@ type SessionResp struct {
 type SessionCapabilitiesResp struct {
 	Skills *[]string `json:"skills,omitempty"`
 	Mcps   *[]string `json:"mcps,omitempty"`
+	// Apps 会话启用的 app id 白名单（nil = 未声明 → 无 app 工具；`[]` = 明确不要；非空 = 白名单）。
+	// 与 Skills/Mcps 同构的 `omitempty`：未声明表现为键缺失。
+	Apps *[]string `json:"apps,omitempty"`
 	// Expert 会话钉住的专家 id（nil = 未声明；`""` = 明确不用；非空 = id）。
 	Expert *string `json:"expert,omitempty"`
 	// ExpertMissing 专家定义已被删除（能力仍按创建时物化的列表生效）——读面据此显示「专家已删除」。

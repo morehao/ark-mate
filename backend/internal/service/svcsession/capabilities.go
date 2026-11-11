@@ -131,6 +131,9 @@ func capabilityPatchOf(p dtosession.SessionCapabilitiesPatch) (session.Capabilit
 	if out.Expert, err = optionalStringOf(p.Expert, "expert"); err != nil {
 		return session.CapabilityPatch{}, err
 	}
+	if out.Apps, err = optionalIDsOf(p.Apps, "apps"); err != nil {
+		return session.CapabilityPatch{}, err
+	}
 	return out, nil
 }
 

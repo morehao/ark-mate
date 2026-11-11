@@ -18,16 +18,17 @@ import {
 
 describe('choiceFromCapabilities', () => {
   it('整个对象缺失 = 三格都未声明', () => {
-    assert.deepEqual(choiceFromCapabilities(null), { expert: null, skills: null, mcps: null })
-    assert.deepEqual(choiceFromCapabilities(undefined), { expert: null, skills: null, mcps: null })
+    assert.deepEqual(choiceFromCapabilities(null), { expert: null, skills: null, mcps: null, apps: null })
+    assert.deepEqual(choiceFromCapabilities(undefined), { expert: null, skills: null, mcps: null, apps: null })
   })
 
   it('缺键与 null 同义；空数组与空串原样保留', () => {
-    assert.deepEqual(choiceFromCapabilities({}), { expert: null, skills: null, mcps: null })
+    assert.deepEqual(choiceFromCapabilities({}), { expert: null, skills: null, mcps: null, apps: null })
     assert.deepEqual(choiceFromCapabilities({ skills: [], expert: '' }), {
       expert: '',
       skills: [],
       mcps: null,
+      apps: null,
     })
   })
 
@@ -36,6 +37,7 @@ describe('choiceFromCapabilities', () => {
       expert: 'x',
       skills: ['b', 'a'],
       mcps: ['m'],
+      apps: null,
     })
   })
 })
@@ -50,6 +52,14 @@ describe('selectionPatchFor', () => {
     assert.deepEqual(selectionPatchFor('skills', null), { skills: null })
     assert.notDeepEqual(selectionPatchFor('skills', null), { skills: [] })
   })
+
+  it('应用这一格同构：白名单 / 空数组 / null 都只带 apps 一个键', () => {
+    assert.deepEqual(selectionPatchFor('apps', ['weather-query']), { apps: ['weather-query'] })
+    assert.deepEqual(selectionPatchFor('apps', []), { apps: [] })
+    assert.deepEqual(selectionPatchFor('apps', null), { apps: null })
+    // 只带 apps，不误带 skills/mcps/expert
+    assert.deepEqual(Object.keys(selectionPatchFor('apps', [])), ['apps'])
+  })
 })
 
 describe('expertSwitchPatch', () => {
@@ -59,6 +69,8 @@ describe('expertSwitchPatch', () => {
       skills: null,
       mcps: null,
     })
+    // 换专家**不动 apps 这一格**（apps 与专家预设正交，见 capacityEdit 的 expertSwitchPatch 注释）。
+    assert.equal('apps' in expertSwitchPatch('data-analyst'), false)
   })
 
   it('「跟随默认」只动专家这一格（不顺手清掉手选的技能）', () => {
@@ -72,47 +84,50 @@ describe('expertSwitchPatch', () => {
 
 describe('mergeCapabilityPatch', () => {
   it('只改补丁里出现的格子，另一格原样保留（创建页的本地草稿就靠这条）', () => {
-    const cur = { expert: 'data-analyst', skills: ['a'], mcps: null }
+    const cur = { expert: 'data-analyst', skills: ['a'], mcps: null, apps: null }
     assert.deepEqual(mergeCapabilityPatch(cur, { skills: ['b'] }), {
       expert: 'data-analyst',
       skills: ['b'],
       mcps: null,
+      apps: null,
     })
   })
 
   it('null 是一个要落下去的值（回未声明），不是"没改"', () => {
-    const cur = { expert: 'x', skills: ['a'], mcps: ['m'] }
+    const cur = { expert: 'x', skills: ['a'], mcps: ['m'], apps: null }
     assert.deepEqual(mergeCapabilityPatch(cur, { skills: null, expert: null }), {
       expert: null,
       skills: null,
       mcps: ['m'],
+      apps: null,
     })
   })
 
   it('空数组与 null 合并后仍是两个不同的状态', () => {
-    const cur = { expert: null, skills: null, mcps: null }
+    const cur = { expert: null, skills: null, mcps: null, apps: null }
     assert.deepEqual(mergeCapabilityPatch(cur, { skills: [] }).skills, [])
     assert.deepEqual(mergeCapabilityPatch(cur, { skills: null }).skills, null)
   })
 
   it('与 expertSwitchPatch 组合：换成某个专家后本地就是"专家 + 两格未声明"', () => {
-    const cur = { expert: null, skills: ['a'], mcps: ['m'] }
+    const cur = { expert: null, skills: ['a'], mcps: ['m'], apps: null }
     assert.deepEqual(mergeCapabilityPatch(cur, expertSwitchPatch('data-analyst')), {
       expert: 'data-analyst',
       skills: null,
       mcps: null,
+      apps: null,
     })
   })
 })
 
 describe('capabilityChips', () => {
   it('三格都未声明 → 没有 chip（输入区与默认态逐字一致）', () => {
-    assert.deepEqual(capabilityChips({ expert: null, skills: null, mcps: null }), [])
+    assert.deepEqual(capabilityChips({ expert: null, skills: null, mcps: null, apps: null }), [])
   })
 
   it('声明过的格子才出现，带数量与头像字', () => {
     const chips = capabilityChips(
-      { expert: 'data-analyst', skills: ['a', 'b'], mcps: [] },
+      { expert: 'data-analyst', skills: ['a', 'b'], mcps: [], apps: null },
       '数据分析师',
     )
     assert.deepEqual(
@@ -126,16 +141,32 @@ describe('capabilityChips', () => {
   })
 
   it('「明确不用专家」（空串）也出 chip，显示成「通用」', () => {
-    const chips = capabilityChips({ expert: '', skills: null, mcps: null })
+    const chips = capabilityChips({ expert: '', skills: null, mcps: null, apps: null })
     assert.equal(chips.length, 1)
     assert.equal(chips[0].label, '通用')
     assert.match(chips[0].title, /明确不用/)
   })
 
   it('专家 id 没有名字时用 id 兜底', () => {
-    const chips = capabilityChips({ expert: 'ghost', skills: null, mcps: null })
+    const chips = capabilityChips({ expert: 'ghost', skills: null, mcps: null, apps: null })
     assert.equal(chips[0].label, 'ghost')
     assert.equal(chips[0].avatar, 'g')
+  })
+
+  it('应用声明的才出 chip，带数量', () => {
+    const chips = capabilityChips({ expert: null, skills: null, mcps: null, apps: ['weather-query'] })
+    assert.equal(chips.length, 1)
+    assert.equal(chips[0].kind, 'apps')
+    assert.equal(chips[0].label, '应用')
+    assert.equal(chips[0].count, 1)
+    assert.match(chips[0].title, /启用这 1 个/)
+  })
+
+  it('应用"一个都不要"（空数组）也出 chip，与"未声明"不同', () => {
+    const chips = capabilityChips({ expert: null, skills: null, mcps: null, apps: [] })
+    assert.equal(chips.length, 1)
+    assert.equal(chips[0].count, 0)
+    assert.match(chips[0].title, /不用任何应用/)
   })
 })
 

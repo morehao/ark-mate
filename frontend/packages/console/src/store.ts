@@ -682,7 +682,7 @@ interface MateActions {
     prompt: string,
     model?: ModelRef,
     workspaceId?: string | null,
-    capabilities?: { expert?: string; skills?: string[]; mcps?: string[] },
+    capabilities?: { expert?: string; skills?: string[]; mcps?: string[]; apps?: string[] },
     attachments?: AttachmentMeta[],
   ) => Promise<string | undefined>
   /** 拉取模型目录（来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */

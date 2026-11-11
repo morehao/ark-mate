@@ -39,6 +39,10 @@ type SessionCapabilitiesPatch struct {
 	Skills json.RawMessage `json:"skills"`
 	Mcps   json.RawMessage `json:"mcps"`
 	Expert json.RawMessage `json:"expert"`
+	// Apps 会话启用的 app id 白名单（三态与 Skills/Mcps 同构）：键缺失 = 不改这一格；
+	// `null` = 回「未声明」（→ 无 app 工具）；`[]` = 明确一个都不要；非空 = 白名单。
+	// 它是会话 app 业务工具面的**唯一来源**（设计 §5.5），也是越权红线的守点。
+	Apps json.RawMessage `json:"apps"`
 }
 
 // PromptReq 追加 prompt 请求体（POST /sessions/:id/prompt）。

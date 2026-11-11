@@ -2,20 +2,21 @@ import { useEffect, useRef, useState } from 'react'
 import { Checkbox, Popover, Spin, Tooltip } from 'antd'
 import {
   ApiOutlined,
+  AppstoreOutlined,
   FileAddOutlined,
   PlusOutlined,
   StarOutlined,
   ThunderboltOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import { listExperts, listLibrary, listMcpServers } from '@ark-mate/api'
-import type { Expert, LibraryItem, McpServer, SessionCapabilitiesPatch } from '@ark-mate/types'
+import { listApps, listExperts, listLibrary, listMcpServers } from '@ark-mate/api'
+import type { App as AppType, Expert, LibraryItem, McpServer, SessionCapabilitiesPatch } from '@ark-mate/types'
 import { useMate } from '../store'
 import { Label } from './dirPath'
 import { mcpOptionView, mcpRows, skillOptionView, type CapabilityChoice } from '../console/capabilityView'
 import { capabilityChips, expertSwitchPatch, selectionPatchFor } from '../console/capabilityEdit'
 
-type PanelKind = 'expert' | 'skills' | 'mcps'
+type PanelKind = 'expert' | 'skills' | 'mcps' | 'apps'
 /** 面板此刻从哪儿弹出：`add` = `+` 的位置（还没有 chip）；`chip` = 对应 chip 的位置。 */
 type Panel = { kind: PanelKind; from: 'add' | 'chip' }
 
@@ -59,9 +60,10 @@ const MENU: { kind: PanelKind; label: string; hint: string; icon: React.ReactNod
   { kind: 'expert', label: '专家', hint: '换一个角色：连同它的技能/连接器预设一起换', icon: <UserOutlined /> },
   { kind: 'skills', label: '技能', hint: '只让这个会话用其中几个技能', icon: <ThunderboltOutlined /> },
   { kind: 'mcps', label: '连接器', hint: '这个会话使用哪些连接器', icon: <ApiOutlined /> },
+  { kind: 'apps', label: '应用', hint: '这个会话启用哪些应用的业务工具', icon: <AppstoreOutlined /> },
 ]
 
-const TITLE: Record<PanelKind, string> = { expert: '专家', skills: '技能', mcps: '连接器' }
+const TITLE: Record<PanelKind, string> = { expert: '专家', skills: '技能', mcps: '连接器', apps: '应用' }
 
 /**
  * 能力入口的**统一形态**：`+` 菜单 + 专家/技能/连接器三个选择器 + 选中后才出现的 chip。
@@ -91,6 +93,7 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
   const [library, setLibrary] = useState<LibraryItem[] | null>(null)
   const [servers, setServers] = useState<McpServer[]>([])
   const [experts, setExperts] = useState<Expert[] | null>(null)
+  const [apps, setApps] = useState<AppType[]>([])
   const [loading, setLoading] = useState(false)
 
   const choice = value
@@ -120,17 +123,19 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
     if (!panelOpen) return
     let alive = true
     setLoading(true)
-    Promise.all([listLibrary(), listMcpServers(), listExperts()])
-      .then(([lib, ss, ex]) => {
+    Promise.all([listLibrary(), listMcpServers(), listExperts(), listApps()])
+      .then(([lib, ss, ex, ap]) => {
         if (!alive) return
         setLibrary(lib)
         setServers(ss)
         setExperts(ex)
+        setApps(ap)
       })
       .catch((err) => {
         if (!alive) return
         setLibrary(null)
         setServers([])
+        setApps([])
         showToast(err instanceof Error ? err.message : String(err))
       })
       .finally(() => {
@@ -167,7 +172,11 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
   const inDefaultOf = (applicability: LibraryItem['applicability'], enabled: boolean): boolean =>
     enabled !== false && applicability.length > 0 && applicability.every((a) => a.ok)
 
-  const rowsOf = (kind: 'skills' | 'mcps'): OptionRow[] => {
+  // 某一格的当前白名单（null = 未声明）。
+  const selectedOf = (kind: 'skills' | 'mcps' | 'apps'): string[] | null =>
+    kind === 'skills' ? choice.skills : kind === 'mcps' ? choice.mcps : choice.apps
+
+  const rowsOf = (kind: 'skills' | 'mcps' | 'apps'): OptionRow[] => {
     if (kind === 'skills') {
       return (library ?? [])
         .filter((it) => it.kind === 'skill')
@@ -178,14 +187,28 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
           ...skillOptionView(s),
         }))
     }
+    if (kind === 'apps') {
+      // 应用：无「缺省投放」概念（默认是零 app 工具），inDefault 恒 false。
+      // selectable 只按 enabled（与技能/MCP 同口径）；无 tool_domains 的项可选但标注「无业务工具」。
+      return apps.map((a) => {
+        const noTools = !(a.tool_domains && a.tool_domains.length > 0)
+        return {
+          id: a.id,
+          name: a.name || a.id,
+          selectable: a.enabled,
+          note: !a.enabled ? '未启用' : noTools ? '无业务工具' : '',
+          inDefault: false,
+        }
+      })
+    }
     return mcpRows(servers, library ?? []).map((m) => {
       const view = mcpOptionView(m)
       return { id: m.id, name: m.name || m.id, inDefault: view.selectable && inDefaultOf(m.applicability, m.defEnabled), ...view }
     })
   }
 
-  const toggle = (kind: 'skills' | 'mcps', id: string, checked: boolean) => {
-    const cur = (kind === 'skills' ? choice.skills : choice.mcps) ?? []
+  const toggle = (kind: 'skills' | 'mcps' | 'apps', id: string, checked: boolean) => {
+    const cur = selectedOf(kind) ?? []
     const next = checked ? [...cur, id] : cur.filter((x) => x !== id)
     // 保持清单顺序（服务端也会规范化，但请求体可读性好一点）。
     const order = rowsOf(kind).map((r) => r.id)
@@ -193,21 +216,22 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
     apply(selectionPatchFor(kind, next))
   }
 
-  const setMode = (kind: 'skills' | 'mcps', custom: boolean) => {
+  const setMode = (kind: 'skills' | 'mcps' | 'apps', custom: boolean) => {
     if (!custom) {
       apply(selectionPatchFor(kind, null))
       return
     }
     // 切到自定义时用「缺省本来就会投」的集合预填：用户的常见动作是"减掉几个"。
+    // 应用没有缺省集（默认零），预填为空——从空开始勾。
     const def = rowsOf(kind)
       .filter((r) => r.inDefault)
       .map((r) => r.id)
     apply(selectionPatchFor(kind, def))
   }
 
-  const section = (kind: 'skills' | 'mcps') => {
+  const section = (kind: 'skills' | 'mcps' | 'apps') => {
     const list = rowsOf(kind)
-    const selected = kind === 'skills' ? choice.skills : choice.mcps
+    const selected = selectedOf(kind)
     const custom = selected !== null
     const title = TITLE[kind]
     return (
@@ -502,7 +526,13 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
               <span className="fg-cap-chip-avatar">{chip.avatar}</span>
             ) : (
               <span className="fg-cap-chip-ico">
-                {chip.kind === 'skills' ? <ThunderboltOutlined /> : <ApiOutlined />}
+                {chip.kind === 'skills' ? (
+                  <ThunderboltOutlined />
+                ) : chip.kind === 'apps' ? (
+                  <AppstoreOutlined />
+                ) : (
+                  <ApiOutlined />
+                )}
               </span>
             )}
             <span className="fg-cap-chip-label">{chip.label}</span>
