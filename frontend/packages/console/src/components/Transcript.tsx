@@ -35,6 +35,7 @@ import {
   type TurnModel,
 } from '../console/transcriptView'
 import { Md } from './Md'
+import { PlanCard, TodoCard } from './TodoPlanCards'
 import { ThoughtFoldView } from './ThoughtFoldView'
 import { TurnArtifacts } from './TurnArtifacts'
 
@@ -849,6 +850,14 @@ function ToolDetailBody({ detail }: { detail: ToolDetail }) {
         {notes}
       </>
     )
+  }
+
+  if (detail.kind === 'todo') {
+    return <TodoCard detail={detail} />
+  }
+
+  if (detail.kind === 'plan') {
+    return <PlanCard detail={detail} />
   }
 
   return (
