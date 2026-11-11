@@ -149,6 +149,7 @@ func (h *Interaction) AskElicitation(ctx context.Context, id string, req dtosess
 		Mode:    req.Mode,
 		Message: req.Message,
 		URL:     req.URL,
+		Timed:   req.Timed,
 	}
 	if req.Schema != nil {
 		preq.Schema = &protocol.ElicitationSchema{

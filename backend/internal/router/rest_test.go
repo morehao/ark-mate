@@ -1,6 +1,7 @@
 package router_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -42,6 +43,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
+	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/persistence/model"
 	"github.com/morehao/ark-mate/internal/persistence/store"
 	"github.com/morehao/ark-mate/internal/router"
@@ -137,13 +139,13 @@ type stubSvc struct {
 	cancelledElicSession string
 	resolveElicErr       error
 	// AskElicitation（外部 source 提问）桩记账。
-	askElicCalled    bool
-	askElicSession   string
-	askElicMode      string
-	askElicMessage   string
-	askElicErr       error
-	askElicAction    string
-	askElicContent   map[string]any
+	askElicCalled  bool
+	askElicSession string
+	askElicMode    string
+	askElicMessage string
+	askElicErr     error
+	askElicAction  string
+	askElicContent map[string]any
 
 	skills []dtocapability.SkillResp // P1 能力数据面桩
 	// §13.4 S4 启停桩
@@ -1657,6 +1659,44 @@ func TestAskElicitationPathSession(t *testing.T) {
 	if env, _ := do(t, r, "POST", "/v1/mate/sessions/nope/elicitations/ask",
 		`{"mode":"form","message":"q"}`); env.Code != 40401 {
 		t.Fatalf("未知会话应 40401: %+v", env)
+	}
+}
+
+// TestAskElicitationTokenRequired `/elicitations/ask` 配了 answerer 令牌后：缺头/错值 → 401，
+// 对值放行。这条钉的是路由层真的把 `middleware.AnswererToken` 挂在**这一条**路由上（而不是挂在别处、
+// 或装配处忘了把令牌送进 Deps）——「有实现没接线」是这一族最典型的静默失效。
+func TestAskElicitationTokenRequired(t *testing.T) {
+	svc := &stubSvc{askElicAction: "accept"}
+	deps := stubDeps(t, svc)
+	deps.plane.RegisterSession(&session.SessionRec{ID: "ses_a", Cwd: "/tmp"})
+	rd := deps.deps()
+	rd.AnswererToken = "s3cret"
+	r := router.New(rd)
+
+	req := func(token string) int {
+		body := `{"mode":"form","message":"q"}`
+		rq := httptest.NewRequest("POST", "/v1/mate/sessions/ses_a/elicitations/ask", bytes.NewReader([]byte(body)))
+		rq.Host = "127.0.0.1:10001"
+		rq.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			rq.Header.Set(middleware.AnswererTokenHeader, token)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, rq)
+		return w.Code
+	}
+
+	if code := req(""); code != 401 {
+		t.Fatalf("缺令牌头应 401，got %d", code)
+	}
+	if code := req("wrong"); code != 401 {
+		t.Fatalf("错令牌应 401，got %d", code)
+	}
+	if code := req("s3cret"); code != 200 {
+		t.Fatalf("对令牌应放行 200，got %d", code)
+	}
+	if !svc.askElicCalled {
+		t.Fatal("对令牌放行后应到达用例层的 AskElicitation（桩未记账）")
 	}
 }
 

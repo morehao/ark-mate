@@ -188,16 +188,27 @@ var AnswererEnvKeys = []string{
 // 插件路径解析不到 → 返回 nil（不注入，覆写层 disabled，dsh 自然 NO_PROVIDER，不误开）。
 // 端点为空（如测试/无地址场景）→ 也返回 nil（answerer 如实关闭，不误开）。
 func AnswererEnv(selfEndpoint string) []string {
+	env, _ := AnswererEnvWithToken(selfEndpoint)
+	return env
+}
+
+// AnswererEnvWithToken 同 AnswererEnv，但额外把生成的令牌原样返回，供**服务端保存并比对**。
+//
+// 令牌此前只活在注入给 dsh 的 env 里，平台自己没留副本，于是服务端做不了强校验；这里把
+// 「注入的那一份」与「服务端保存的那一份」收成同一处生成（同一次 AnswererEnv 调用产出的
+// 唯一值），杜绝"两边各生成一个、永远对不上"的静默失效。返回的 token 在未启用时为空串。
+func AnswererEnvWithToken(selfEndpoint string) (env []string, token string) {
 	ep := strings.TrimSpace(selfEndpoint)
 	plugin := ResolveAnswererPlugin()
 	if ep == "" || plugin == "" {
-		return nil
+		return nil, ""
 	}
+	token = genAnswererToken()
 	return []string{
 		"MATE_ANSWERER_ENDPOINT=" + ep,
-		"MATE_ANSWERER_TOKEN=" + genAnswererToken(),
+		"MATE_ANSWERER_TOKEN=" + token,
 		"MATE_ANSWERER_PLUGIN=" + plugin,
-	}
+	}, token
 }
 
 // genAnswererToken 生成每进程一次性令牌（16 字节 hex）。仅本机回环、进程生命周期内有效，
@@ -210,7 +221,7 @@ func genAnswererToken() string {
 	}
 	return hex.EncodeToString(b)
 }
-//
+
 // 优先 `MATE_ANSWERER_PLUGIN`（桌面壳随包资产路径，生产路径）；否则由 `MATE_DSH_ENTRY` 上溯到
 // payloads 根下 `ark-mate-answerer/lib/index.js`（给自装配/测试用）。都不成立返回空串 →
 // profile 不写 answerer 条目（如实关闭，不误开）。校验文件存在。

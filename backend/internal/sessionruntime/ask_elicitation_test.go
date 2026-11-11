@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/core/eventbus"
 	"github.com/morehao/ark-mate/internal/core/protocol"
 	"github.com/morehao/ark-mate/internal/domain/session"
 )
@@ -182,5 +183,99 @@ func TestServiceAskElicitationUnknownNative(t *testing.T) {
 	svc, _, _ := newTestRig(t)
 	if _, err := svc.AskElicitation(context.Background(), "", "no-such-native", protocol.ElicitationRequest{Mode: "form", Message: "q"}); err == nil {
 		t.Fatalf("未知原生 id 应报错（不猜测归属）")
+	}
+}
+
+// TestOrchAskElicitationTimed_PendingThenLateAnswer 限时问答（askTimed）的端到端（编排层）：
+//
+//   - 发起一次 `Timed=true` 的外部提问 → 弹卡（阻塞）；
+//   - 桥接**断开**（底座计时器到期中止 HTTP，模拟 askTimed 拿到 pending）→ 平台转 pending：
+//     `session.elicitation_resolved` action=pending、挂起项保留（卡片仍可回答）；
+//   - 用户**迟到作答**（late=true, accept）：走 ResolveLate → 作为**新一轮**注入（Prompt），
+//     并发 accept/late 收口事件。
+//
+// 这条钉的是设计 §10.5「askTimed pending/continued 迟到回答」的二期接线：超时后仍可答、
+// 回答作为新一轮进入，且不踩 D1（归属仍由 ScopeWire 显式给出）。
+func TestOrchAskElicitationTimed_PendingThenLateAnswer(t *testing.T) {
+	svc, orch, bus := newTestRig(t)
+	orch.svc.sessionPlane.RegisterSession(&session.SessionRec{ID: "ses_t", Cwd: "/tmp"})
+	sub := bus.SubscribeAfter(nil)
+	defer bus.Unsubscribe(sub)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan protocol.ElicitationOutcome, 1)
+	go func() {
+		out, _ := orch.AskElicitation(ctx, "ses_t", protocol.ElicitationRequest{
+			Mode: "form", Message: "用哪个库？", Timed: true,
+		})
+		done <- out
+	}()
+
+	// 等弹卡，拿 elicitation_id，并校验 scope_source=wire（绕开 D1）。
+	var elicID string
+	deadline := time.After(3 * time.Second)
+	for elicID == "" {
+		select {
+		case e := <-sub.C:
+			if e.Type != session.BusElicitationRequest || e.AggregID != "ses_t" {
+				continue
+			}
+			m, _ := e.Payload.(map[string]any)
+			elicID, _ = m["elicitation_id"].(string)
+			if m["scope_source"] != protocol.ScopeWire {
+				t.Fatalf("scope_source 应 wire，实际 %v", m["scope_source"])
+			}
+		case <-deadline:
+			t.Fatalf("未收到 session.elicitation_request")
+		}
+	}
+
+	// 模拟桥接断开（底座计时器到期中止 HTTP）。
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("断开后 AskElicitation 未返回")
+	}
+
+	// 期待一条 pending 收口（卡片保留，不是 cancel）。
+	waitResolvedAction(t, sub, "ses_t", elicID, "pending")
+	// 挂起项必须还在（可回答）。
+	if items := orch.PendingElicitations("ses_t"); len(items) != 1 {
+		t.Fatalf("限时断开后挂起项应保留可回答，got %d 条", len(items))
+	}
+
+	// 迟到作答：走 late=true，把回答作为新一轮注入。
+	_, _ = svc.ResolveElicitation("ses_t", elicID, "accept", map[string]any{"lib": "zap"}, true)
+	// 期待一条 accept/late 收口（ResolveLate 已抹掉挂起项；Prompt 注入新一轮可能因无实时底座报错，
+	// 但收口事件在 Prompt 之前发布，是「已作答」的事实）。
+	waitResolvedAction(t, sub, "ses_t", elicID, "accept")
+	if items := orch.PendingElicitations("ses_t"); len(items) != 0 {
+		t.Fatalf("迟到作答后挂起项应被抹掉，got %d 条", len(items))
+	}
+}
+
+// waitResolvedAction 在事件流里等一条指定 elicitation_id 的 session.elicitation_resolved 且
+// action 匹配（超时 fail）。供限时问答的 pending / late 两处断言复用。
+func waitResolvedAction(t *testing.T, sub *eventbus.Subscription, sessID, elicID, wantAction string) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case e := <-sub.C:
+			if e.Type != session.BusElicitationResolved || e.AggregID != sessID {
+				continue
+			}
+			m, _ := e.Payload.(map[string]any)
+			if m["elicitation_id"] != elicID {
+				continue
+			}
+			if m["action"] != wantAction {
+				t.Fatalf("收口 action 应为 %q，实际 %v（payload=%+v）", wantAction, m["action"], m)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("未等到 %s 的 %q 收口事件", elicID, wantAction)
+		}
 	}
 }

@@ -197,6 +197,12 @@ type ElicitationAskReq struct {
 	// 这一层映射刻意留在平台侧（不在 JS 插件里）：dsh 进程不认识平台会话 uuid，让插件做映射等于
 	// 把平台的簿记逻辑抄一份到 dsh 里——两处迟早漂移。
 	RuntimeSessionID string `json:"runtime_session_id,omitempty"`
+	// Timed 标记这是一次**限时**提问（dsh `ask_user_question` 的 timed 模式 → `askTimed`）。
+	//
+	// 为真时，平台把「answerer 桥接的连接断开」当作「超时转 pending、卡片保留可回答」而不是取消：
+	// 底座在它自己的计时器到期时会中止这一路桥接、拿到 pending 让模型先继续；用户随后作答会作为
+	// **新一轮**用户消息进入（ADR-11，同 ACP elicitation 超时那一支的语义）。缺省 false = 阻塞式。
+	Timed bool `json:"timed,omitempty"`
 }
 
 // ElicitationSchemaPayload 表单模式的结构化 schema（与 protocol.ElicitationSchema 对齐的对外形态）。

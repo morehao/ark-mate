@@ -104,6 +104,11 @@ type Deps struct {
 	//
 	// 与 attachmentstore.Store.FileStore() 是**同一个实例**：上传、去重、附件索引共用一套字节底座。
 	FileStore *filestore.FileStore
+
+	// AnswererToken 是 answerer 桥接插件 `/elicitations/ask` 入口的服务端强校验令牌
+	// （`middleware.AnswererToken`）。由装配根从 `dsh.AnswererEnv` 的同一次生成拿到、与注入
+	// dsh env 的值逐字相同。空串 = 未启用（中间件 no-op，测试路径与未注入令牌的部署）。
+	AnswererToken string
 }
 
 // New 构建 gin.Engine 并注册控制面 REST + WS 实时事件路由。
@@ -161,7 +166,7 @@ func New(d Deps) *gin.Engine {
 
 	registerWorkspace(rest, ctrls.Workspace)
 	registerAttachment(rest, ctrls.Attachment)
-	registerSession(rest, ctrls.Session, ctrls.Search, ctrls.Export)
+	registerSession(rest, ctrls.Session, ctrls.Search, ctrls.Export, d.AnswererToken)
 	registerRuntime(rest, ctrls.Provider, ctrls.Model, ctrls.Runtime)
 	registerCapability(rest, ctrls.Capability)
 	registerApps(rest, ctrls.App)

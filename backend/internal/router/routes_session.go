@@ -5,6 +5,7 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrexport"
 	"github.com/morehao/ark-mate/internal/controller/ctrsearch"
 	"github.com/morehao/ark-mate/internal/controller/ctrsession"
+	"github.com/morehao/ark-mate/internal/middleware"
 )
 
 // registerSession 会话面：概要/详情/新建/轮次执行/历史/权限与结构化提问决策，
@@ -12,7 +13,10 @@ import (
 //
 // 静态路径（/sessions/search、/sessions/export）先于 :id 注册，
 // 保持与历史路由表一致的解析优先级。
-func registerSession(v1 *gin.RouterGroup, ctr ctrsession.SessionCtr, search ctrsearch.SearchCtr, export ctrexport.ExportCtr) {
+//
+// `answererToken` 只用于 `/sessions/:id/elicitations/ask`（answerer 桥接入口）的服务端强校验
+// （`middleware.AnswererToken`）；空串 = 未启用（no-op）。
+func registerSession(v1 *gin.RouterGroup, ctr ctrsession.SessionCtr, search ctrsearch.SearchCtr, export ctrexport.ExportCtr, answererToken string) {
 
 	v1.GET("/sessions", ctr.List)
 	v1.GET("/sessions/search", ctr.Search)
@@ -56,5 +60,6 @@ func registerSession(v1 *gin.RouterGroup, ctr ctrsession.SessionCtr, search ctrs
 	v1.GET("/sessions/:id/elicitations", ctr.Elicitations)
 	v1.POST("/sessions/:id/elicitation", ctr.ResolveElicitation)
 	// 外部 source 结构化提问（answerer 桥接）：阻塞等用户决策后返回 accept/decline/cancel。
-	v1.POST("/sessions/:id/elicitations/ask", ctr.AskElicitation)
+	// 服务端强校验 `X-Mate-Answerer-Token`（装配根从 dsh env 同一次生成拿到；空串 no-op）。
+	v1.POST("/sessions/:id/elicitations/ask", middleware.AnswererToken(answererToken), ctr.AskElicitation)
 }

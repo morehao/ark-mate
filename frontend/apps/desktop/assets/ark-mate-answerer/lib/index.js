@@ -141,6 +141,11 @@ async function bridge(cfg, request, signal) {
   const body = {
     ...requestToElicitation(request),
     runtime_session_id: nativeSessionId(request),
+    // **限时问答标记**（dsh `askTimed` 透传的 `request.wait.timed`）：为真时告诉平台「这次问的是
+    // 限时问题」——平台据此把「这一路桥接断开（底座计时器到期主动中止）」当作「超时转 pending、卡片
+    // 保留可回答」而不是取消。用户随后仍可作答，回答作为**新一轮**用户消息进入（ADR-11）。
+    // 缺省 false = 阻塞式（平台断开即取消）。
+    timed: request?.wait?.timed === true,
   };
   const url = `${cfg.endpoint.replace(/\/+$/, '')}/v1/mate/sessions/-/elicitations/ask`;
   let resp;
