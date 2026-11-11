@@ -259,9 +259,12 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
         </div>
         {!custom ? (
           <div className="fg-cap-note">
-            {list.filter((r) => r.inDefault).length === 0
-              ? `当前没有可用的${title}`
-              : `按默认启用（当前 ${list.filter((r) => r.inDefault).length} 个）`}
+            {kind === 'apps'
+              ? // 应用没有「缺省投放」概念：默认是**零 app 工具**，所以要在这里说清、并引导去「自定义」。
+                `默认不启用任何应用（点「自定义」选择；共 ${list.length} 个可选）`
+              : list.filter((r) => r.inDefault).length === 0
+                ? `当前没有可用的${title}`
+                : `按默认启用（当前 ${list.filter((r) => r.inDefault).length} 个）`}
           </div>
         ) : (
           <>
@@ -298,7 +301,11 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
                     </Checkbox>
                     {row.note && (
                       <Tooltip title={row.note}>
-                        <span className="fg-cap-opt-why">{row.selectable ? '部分不可用' : '不可选'}</span>
+                        {/* 应用的 note 是可直接展示的定性标签（未启用 / 无业务工具），技能/MCP 的 note 仍是
+                            「不可选原因」，可见文案沿用既有口径（部分不可用 / 不可选）。 */}
+                        <span className="fg-cap-opt-why">
+                          {kind === 'apps' ? row.note : row.selectable ? '部分不可用' : '不可选'}
+                        </span>
                       </Tooltip>
                     )}
                   </div>
