@@ -82,6 +82,24 @@ Agent 执行中需要人拍板时，平台把请求变成可交互的卡片：
 > 机制：专家与能力的物化、选择语义见 README 契约摘要的 `/experts`、`/sessions` 能力选定段；页面形态见
 > [`expert-management.md`](./expert-management.md)。
 
+### 5.1 应用与市场（App & Market）
+
+**应用（App）** 是把一个业务场景打包成一等对象——组合既有 expert / automation / skill / mcp，可选携带
+自己的工具域、后端 Slot、页面入口与实体归属，可**整体启停**。应用定义走 `/apps` 六接口（与专家面同构），
+管理面另有 6 个 MCP 工具（`app_create` 等，恒注入），因此**通过对话即可创建/编辑应用**。
+
+- **我的应用页**（`/extensions/my-apps`）：列出**全部** app 定义——包括只通过对话创建、没有独立页面的应用
+  （此前这类应用在界面上不可见）。每行显示生命周期 `state` 徽标（运行中 / 等待中 / 启动失败 / 未启用，失败态带原因）、
+  启停开关、详情与卸载。
+- **应用市场页**（`/extensions/market`）：浏览可安装的应用卡片（图标 / 名称 / 摘要 / 版本 / 装态）并一键
+  安装 / 启用 / 卸载。清单来自内置 `market.json`（`go:embed` 随包分发）或可换源的远端 registry；远端不可达时
+  三级兜底（远端 → 磁盘缓存 → 内置），离线可用。安装复用二期 C 的 `apppkg` 校验（清单 / 完整性 sha256 /
+  min core version 门槛），装到本地应用目录；`url` 远程分发（需签名链）本期不做，卡片置灰。
+- **安全**：`source.dir` 经来源根越界校验（防指向任意本地路径）；安装默认不自动启用；应用页面仍由沙箱 iframe 承载。
+
+> 设计见 [`.dsh/docs/specs/2026-11-10-app-market-design.md`]（本地工作区，未入库）；接口见 README 契约摘要
+> `/apps`、`/apps/market` 段。
+
 ## 6. 定时任务（Automation）
 
 按计划自动发起会话。

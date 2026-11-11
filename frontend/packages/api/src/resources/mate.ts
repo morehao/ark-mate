@@ -2,6 +2,9 @@ import type { Capabilities } from '@ark-mate/desktop-contract'
 import { http } from '../request'
 import type {
   App,
+  AppInstallResp,
+  AppUninstallResp,
+  AppToggleResp,
   Automation,
   AutomationDeleteResp,
   AutomationPreviewResp,
@@ -38,6 +41,7 @@ import type {
   McpToolCallReq,
   McpToolCallResult,
   McpWriteResp,
+  MarketApp,
   MessageSearchResp,
   MetaResp,
   ModelCatalogResp,
@@ -414,6 +418,40 @@ export const listApps = (): Promise<App[]> => http.get<App[]>('/mate/apps')
 /** 读单个应用定义详情（含 settings_schema / page 全量）。 */
 export const getApp = (id: string): Promise<App> =>
   http.get<App>(`/mate/apps/${encodeURIComponent(id)}`)
+
+/**
+ * 应用市场清单（GET /market）：每条带派生的装态
+ * （installed/enabled/updatable/installable/state，由后端 store+appsRoot 算出，不落库）。
+ */
+export const listMarket = (): Promise<MarketApp[]> => http.get<MarketApp[]>('/mate/market')
+
+/** 强制刷新市场缓存（POST /market/refresh）：下次 listMarket 会重拉远端。 */
+export const refreshMarket = (): Promise<void> => http.post<void>('/mate/market/refresh')
+
+/**
+ * 从本地来源目录安装一个应用包（POST /apps/install）。
+ *
+ * `dir` 为来源包目录（含 manifest.json 的包根）；`enable=false` 时装完仅建定义、不起进程，
+ * 启用是显式动作（市场页一键安装默认 false）。
+ */
+export const installApp = (dir: string, enable = false): Promise<AppInstallResp> =>
+  http.post<AppInstallResp>('/mate/apps/install', { dir, enable })
+
+/** 卸载一个应用（DELETE /apps/:id/uninstall）：先停运行期+清包目录，再删定义；幂等。 */
+export const uninstallApp = (id: string): Promise<AppUninstallResp> =>
+  http.delete<AppUninstallResp>(`/mate/apps/${encodeURIComponent(id)}/uninstall`)
+
+/**
+ * 更新一个已安装应用（POST /apps/:id/upgrade）。
+ *
+ * 本期为 C8 版本治理接线点，后端可能返「更新能力接线中」的明确错误（不假装成功）。
+ */
+export const upgradeApp = (id: string): Promise<AppInstallResp> =>
+  http.post<AppInstallResp>(`/mate/apps/${encodeURIComponent(id)}/upgrade`)
+
+/** 启停一个应用定义（PATCH /apps/:id）：启用会起 host 子进程，停用只暂不使用、定义保留。 */
+export const setAppEnabled = (id: string, enabled: boolean): Promise<AppToggleResp> =>
+  http.patch<AppToggleResp>(`/mate/apps/${encodeURIComponent(id)}`, { enabled })
 
 export const listTools = (): Promise<Tool[]> => http.get<Tool[]>('/mate/tools')
 

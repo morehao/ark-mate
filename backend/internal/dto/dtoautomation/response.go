@@ -22,6 +22,9 @@ type AutomationResp struct {
 	LastSessionID string `json:"last_session_id,omitempty"`
 	LastStatus    string `json:"last_status,omitempty"`
 	LastReason    string `json:"last_reason,omitempty"`
+	// LastReasonKind 失败原因码（机器读枚举；空 = 无稳定原因码）。
+	// 前端据此决定给哪种修复按钮（如 target_session_missing → 「改为新建会话」）。
+	LastReasonKind string `json:"last_reason_kind,omitempty"`
 	// ConsecutiveFailures 连续没跑成的次数（跑成一次即清零）。>0 时面板要显眼提示。
 	ConsecutiveFailures int `json:"consecutive_failures,omitempty"`
 	// Error 定义装载失败的原因（**坏定义也会出现在列表里**：写得不对却"列表里没有、
@@ -82,6 +85,8 @@ type RunRecordResp struct {
 	Status string `json:"status"`
 	// Reason 结果说明（人话；overlap/skipped 时说明为什么没跑）。
 	Reason string `json:"reason,omitempty"`
+	// ReasonKind 失败原因码（机器读枚举；空 = 无稳定原因码）。
+	ReasonKind string `json:"reason_kind,omitempty"`
 	// SessionID 本次产生的会话（claimed 之外为空）。
 	SessionID string `json:"session_id,omitempty"`
 	// Trigger scheduled | recovery | manual。

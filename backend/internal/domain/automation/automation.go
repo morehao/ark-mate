@@ -504,6 +504,7 @@ func (r *Rec) View() AutomationView {
 		LastSessionID:       r.Def.LastSessionID,
 		LastStatus:          r.Def.LastStatus,
 		LastReason:          r.Def.LastReason,
+		LastReasonKind:      r.Def.LastReasonKind,
 		ConsecutiveFailures: r.Def.ConsecutiveFailures,
 		Error:               r.LoadErr,
 		RecentRuns:          r.Def.RecentRuns,

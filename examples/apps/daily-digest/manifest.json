@@ -1,0 +1,28 @@
+{
+  "id": "daily-digest",
+  "version": "1.0.0",
+  "api_version": "^1",
+  "requires": {
+    "min_core_version": "1.0.0"
+  },
+  "provides": {
+    "impls": [
+      { "impl_id": "digest.build", "kind": "slot" }
+    ],
+    "tools": [
+      {
+        "domain": "digest",
+        "tools": ["build", "list"]
+      }
+    ],
+    "page": {
+      "nav_label": "每日简报",
+      "route": "/apps/daily-digest"
+    }
+  },
+  "permissions": ["read:usage"],
+  "entrypoint": "entrypoint.sh",
+  "integrity": {
+    "sha256": "988814bcccc462a4a0f70039f7a9aed877638c7f26cc8da3bd25d994e6fd7bb3"
+  }
+}

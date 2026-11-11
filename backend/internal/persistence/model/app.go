@@ -57,6 +57,11 @@ type AppEntity struct {
 	APIVersion string `gorm:"column:api_version;not null;default:'^1'"`
 	// Enabled 是否启用（0/1；缺省 1）。
 	Enabled int `gorm:"column:enabled;not null;default:1"`
+	// Source 应用来源（v41）：`self`=自建（含对话创建）/ `market`=市场下载 / 装包。
+	//
+	// **持久元数据，不是 `capability.App` 的字段**：它记录"这条定义当初是怎么来的"（写面 PUT body
+	// 不含它、UpdateFields 不更新它），读面从本列直接读回 resp。默认 'self'（存量行都是历史自建）。
+	Source string `gorm:"column:source;not null;default:'self'"`
 	// CreatedAt 创建时刻（Unix 毫秒，`objtime.Milli`）。
 	CreatedAt int64 `gorm:"column:created_at;not null"`
 	// UpdatedAt 最后修改时刻（Unix 毫秒，`objtime.Milli`）。

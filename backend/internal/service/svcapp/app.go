@@ -54,6 +54,10 @@ type AppSvc interface {
 	InstallApp(ctx context.Context, req dtoapp.AppInstallReq) (*dtoapp.AppInstallResp, error)
 	// UninstallApp 卸载应用：先停运行期（dispose+停 host）+ 清包目录，再删定义（幂等）。
 	UninstallApp(ctx context.Context, id string) (*dtoapp.AppUninstallResp, error)
+	// MarketApps 把市场清单条目与本地装态合并，派生 installed/enabled/updatable/installable/state
+	// （应用市场 M-A2，GET /apps/market 的出参）。入参是跨层 DTO（不 import infra 的 appmarket），
+	// 由装配根/控制器做 appmarket.Listing → dtoapp.MarketListing 转换。
+	MarketApps(ctx context.Context, listings []dtoapp.MarketListing) ([]dtoapp.MarketAppResp, error)
 }
 
 // appSvc 是 AppSvc 的实现：只持持久化端口（+ 可选运行期生命周期端口，WP-C6）。
@@ -63,6 +67,9 @@ type appSvc struct {
 	runtime AppRuntimePort
 	// appsRootOverride 本地应用根目录覆盖（测试用 t.TempDir；空 = apppkg.DefaultAppsDir）。
 	appsRootOverride string
+	// sourceRoots 应用来源根（绝对路径集合；市场清单 dir 条目在此之内才 installable）。装配根注入
+	// （MATE_APP_SOURCE_ROOTS + 默认发行根 apps/）；空 = 不做来源根解析（installable 恒 false）。
+	sourceRoots []string
 }
 
 // Option 构造选项。
@@ -73,6 +80,11 @@ func WithRuntimePort(p AppRuntimePort) Option { return func(s *appSvc) { s.runti
 
 // WithAppsRoot 覆盖本地应用根目录（测试用；生产走 apppkg.DefaultAppsDir）。
 func WithAppsRoot(dir string) Option { return func(s *appSvc) { s.appsRootOverride = dir } }
+
+// WithSourceRoots 注入应用来源根（市场清单 dir 条目解析根；装配根 M-A7 注入）。空 = 不解析来源根。
+func WithSourceRoots(roots []string) Option {
+	return func(s *appSvc) { s.sourceRoots = append([]string(nil), roots...) }
+}
 
 // NewApp 构造应用定义用例（装配根建一次，控制器只收接口）。
 // 可选注入运行期生命周期端口（WP-C6）；不传则纯 A+Slot 行为（state 恒 off、install/uninstall 拒绝）。
@@ -167,6 +179,9 @@ func (s *appSvc) WriteApp(ctx context.Context, pathID string, req dtoapp.AppWrit
 	if err != nil {
 		return nil, err
 	}
+	// 写面（POST /apps + PUT /apps/:id）产出的定义来源恒为「自建」（v41）。update 路径下
+	// UpdateFields 的 Select 不含 source，故这里的赋值只在 create 时真正落库；PUT 不会改来源。
+	row.Source = AppSourceSelf
 	applied, err := s.store.UpsertAppDefinition(ctx, app.ID, row, members, expectedRev, create, definition.DefinitionWriteActor)
 	if err != nil {
 		return nil, err
@@ -266,6 +281,14 @@ func (s *appSvc) SetAppEnabled(ctx context.Context, id string, enabled bool) (*d
 }
 
 // ——— 内部：构建 / 编解码 / 白名单 ———
+
+// 应用来源枚举（apps.source，v41）。落库值，属持久元数据，不进 `capability.App` 定义本体。
+const (
+	// AppSourceSelf 自建（POST /apps 新建，含对话创建）。
+	AppSourceSelf = "self"
+	// AppSourceMarket 市场下载 / 装包（InstallApp → ensurePackDefinition 新建定义）。
+	AppSourceMarket = "market"
+)
 
 // buildApp 把写面原文对象合并进既有定义（覆盖写）或从零构建（新建），解成强类型 App。
 //
@@ -473,9 +496,11 @@ func appToResp(app *capability.App, row *model.AppEntity, rev int64, withSetting
 		APIVersion:  app.APIVersion,
 		Enabled:     app.IsEnabled(),
 		HasPage:     app.Page != nil,
-		Revision:    rev,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
+		// Source 来源（v41）：从行直接读回（不经 capability.App——它是定义本体，不含持久元数据）。
+		Source:    row.Source,
+		Revision:  rev,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
 	}
 	for _, e := range app.Entities {
 		resp.Entities = append(resp.Entities, dtoapp.AppEntityResp{Kind: e.Kind, Table: e.Table, IDPrefix: e.IDPrefix})

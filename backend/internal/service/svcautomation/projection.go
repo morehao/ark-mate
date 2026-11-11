@@ -26,6 +26,7 @@ func automationResp(v domauto.AutomationView) dtoautomation.AutomationResp {
 		LastSessionID:       v.LastSessionID,
 		LastStatus:          v.LastStatus,
 		LastReason:          v.LastReason,
+		LastReasonKind:      v.LastReasonKind,
 		ConsecutiveFailures: v.ConsecutiveFailures,
 		Error:               v.Error,
 		RecentRuns:          runRecordResps(v.RecentRuns),
@@ -41,6 +42,7 @@ func runRecordResps(in []pkgauto.RunRecord) []dtoautomation.RunRecordResp {
 			FiredAt:      objtime.Milli(r.FiredAt),
 			Status:       r.Status,
 			Reason:       r.Reason,
+			ReasonKind:   r.ReasonKind,
 			SessionID:    r.SessionID,
 			Trigger:      r.Trigger,
 		})

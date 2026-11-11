@@ -9,6 +9,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/core/automation"
 	"github.com/morehao/ark-mate/internal/core/code"
+	"github.com/morehao/ark-mate/internal/core/failure"
 	"github.com/morehao/ark-mate/internal/core/object/objtime"
 
 	"github.com/morehao/ark-mate/internal/core/redact"
@@ -55,6 +56,87 @@ type RunOutcome struct {
 	// Cause 失败原因的原错误（**只给手动触发用**：定时触发把原因写进文件就够了，
 	// 而手动触发时用户就在等一个回答，必须把真实错误码原样给他）。
 	Cause error
+	// ReasonKind 失败原因码（机器读；见 core/automation.ReasonKind*）。空 = 无稳定原因码。
+	// 只对 Failure=true 的结果有意义；写回时落到 last_reason_kind / recent_runs[].reason_kind。
+	ReasonKind string
+}
+
+// reasonTargetSessionMissing 目标会话已不存在的统一人话（巡检与触发失败**共用这一句**，
+// 避免「巡检说一句、失败说另一句」两处漂移——一处事实源）。配合 ReasonKindTargetSessionMissing。
+const reasonTargetSessionMissing = "目标会话已不存在（可能已删除或来自旧版本），无法投递；建议改为「新建会话」或重选目标会话。"
+
+// reasonKindOf 从触发错误里取稳定原因码（目前只认 session_not_found → target_session_missing）。
+// 走 failure.As 读 Code 而不是匹配中文：文案会变，码不会。
+func reasonKindOf(err error) string {
+	if fe, ok := failure.As(err); ok && fe.Code == "session_not_found" {
+		return automation.ReasonKindTargetSessionMissing
+	}
+	return ""
+}
+
+// SweepDeadSessionTargets 巡检 `delivery=session` 的存量定义：**目标会话已不存在**的，
+// 在下次触发之前就标成 `needs_attention` + 原因码 `target_session_missing`，让用户当场面
+// 看到「为什么这条跑不了、该改哪里」，而不是等到（daily 就是明天的）下一次触发才失败。
+//
+// 三条纪律：
+//   - **不推进 last_fired_at**：巡检不是一次触发，不能吃掉 occurrence（否则挡掉今天本该跑的这次）。
+//   - **不动 consecutive_failures**：它不是一次执行失败，只是配置失效的提前标记。
+//   - **幂等**：已是 needs_attention 且原因码一致 → 不重复写盘（否则每 tick 都写一次文件）。
+//
+// 端口未接线（hostOf()==nil，如 `mate mcp automation` 子进程）→ 直接返回：子进程只碰定义 CRUD、
+// 不做会话存在性判断（与写面校验 same 取舍，见 automation_mcp.go 头注释）。
+//
+// 锁纪律：`SessionExists` 必须在 `pl.mu` **之外**调用（它自取会话域锁，见 automation_host.go）。
+func (pl *Plane) SweepDeadSessionTargets(ctx context.Context) {
+	host := pl.hostOf()
+	if host == nil {
+		return
+	}
+	for _, rec := range pl.Recs() {
+		if rec.LoadErr != "" {
+			continue
+		}
+		if automation.NormalizeDelivery(rec.Def.Target.Delivery) != automation.DeliverySession {
+			continue
+		}
+		id := rec.Def.Target.SessionID
+		if id == "" {
+			continue
+		}
+		if host.SessionExists(id) {
+			continue
+		}
+		// 已标过且原因码一致 → 幂等跳过（不重复写盘）。
+		if rec.Def.State == automation.StateNeedsAttention &&
+			rec.Def.LastReasonKind == automation.ReasonKindTargetSessionMissing {
+			continue
+		}
+		overlay := map[string]any{
+			"state":            string(automation.StateNeedsAttention),
+			"last_reason":      reasonTargetSessionMissing,
+			"last_reason_kind": automation.ReasonKindTargetSessionMissing,
+			"last_status":      automation.RunSkipped,
+		}
+		if err := pl.SaveOverlay(ctx, rec.Def.ID, overlay, LastFiredText(rec.Def.LastFiredAt)); err != nil {
+			glog.Warnw(ctx, "automation 巡检：标记失效目标会话写回失败（下一 tick 重试）", "automation", rec.Def.ID, "err", err)
+			continue
+		}
+		// 同步内存快照，避免下一次巡检重复判定（SaveOverlay 只写载体，不刷新 recs 内存态）。
+		pl.mu.Lock()
+		if r, ok := pl.recs[rec.Def.ID]; ok {
+			r.Def.State = automation.StateNeedsAttention
+			r.Def.LastReason = reasonTargetSessionMissing
+			r.Def.LastReasonKind = automation.ReasonKindTargetSessionMissing
+			r.Def.LastStatus = automation.RunSkipped
+		}
+		pl.mu.Unlock()
+		glog.Warnw(ctx, "automation 巡检：目标会话已不存在，标 needs_attention", "automation", rec.Def.ID, "session", id)
+		pl.emitAutomationRun(rec.Def.ID, RunOutcome{
+			Status: automation.RunSkipped, Trigger: automation.TriggerRecovery,
+			Reason: reasonTargetSessionMissing, ReasonKind: automation.ReasonKindTargetSessionMissing,
+			NoRecord: true, // 巡检只推实时事件，不追加 recent_runs（没发生一次真实触发）
+		})
+	}
 }
 
 // StartAutomationScheduler 启动调度循环（幂等；interval<=0 = 关闭，不启 goroutine）。
@@ -78,6 +160,9 @@ func (pl *Plane) StartAutomationScheduler(interval time.Duration) {
 	pl.mu.Unlock()
 
 	pl.StartupPass(ctx)
+	// 启动巡检：会话已由 startRestore 恢复完毕（PhasePersistence 早于本 PhaseBackground 步骤），
+	// 此刻 sessionPlane 有全量会话，可安全判「session 目标是否存在」。见设计 §4.5。
+	pl.SweepDeadSessionTargets(ctx)
 
 	go func() {
 		defer close(done)
@@ -93,6 +178,9 @@ func (pl *Plane) StartAutomationScheduler(interval time.Duration) {
 				// 单测直接调 `Tick` 时会手动拨 in-memory 游标，若 Tick 自身重载会把那个
 				// 拨动冲掉（装配事实见 reloadDefinitionsForTick 的注释）。
 				pl.ReloadDefinitionsForTick(ctx)
+				// 巡检在重载之后、Tick 之前：先让「目标会话已不存在」的定义被标出来，
+				// 再走正常到期扫描（既不误跑、又能提前在面板可见）。
+				pl.SweepDeadSessionTargets(ctx)
 				pl.Tick(ctx, now)
 			}
 		}
@@ -413,7 +501,8 @@ func (pl *Plane) RunOnce(ctx context.Context, rec Rec, ScheduledFor time.Time, t
 		out := RunOutcome{
 			ScheduledFor: ScheduledFor, Status: automation.RunSkipped, Trigger: trigger, Advance: true,
 			Failure: true, Cause: runErr, Claimed: out.Claimed,
-			Reason: "触发失败（已跳过本次，等修好后的下一个 occurrence）：" + errText(runErr),
+			Reason:     "触发失败（已跳过本次，等修好后的下一个 occurrence）：" + errText(runErr),
+			ReasonKind: reasonKindOf(runErr),
 		}
 		glog.Warnw(ctx, "automation 触发失败", "automation", rec.Def.ID, "err", runErr)
 		return pl.FinishAutomationRun(ctx, rec, out)
@@ -492,6 +581,13 @@ func (pl *Plane) FinishAutomationRun(ctx context.Context, rec Rec, out RunOutcom
 		"last_status": out.Status,
 		"last_reason": out.Reason,
 	}
+	// 失败原因码：有就落，没有就显式清空——否则上一次失败的原因码会残留到本次成功记录上，
+	// 前端会一直挂着「目标会话不存在」的修复提示（成功即应清掉）。
+	if out.ReasonKind != "" {
+		overlay["last_reason_kind"] = out.ReasonKind
+	} else {
+		overlay["last_reason_kind"] = ""
+	}
 	if out.Advance {
 		overlay["last_fired_at"] = out.ScheduledFor.UTC().Format(time.RFC3339Nano)
 	}
@@ -520,7 +616,7 @@ func (pl *Plane) FinishAutomationRun(ctx context.Context, rec Rec, out RunOutcom
 	runs := make([]automation.RunRecord, 0, len(rec.Def.RecentRuns)+1)
 	runs = append(runs, automation.RunRecord{
 		ScheduledFor: out.ScheduledFor.UTC(), FiredAt: now, Status: out.Status,
-		Reason: out.Reason, SessionID: out.SessionID, Trigger: out.Trigger,
+		Reason: out.Reason, ReasonKind: out.ReasonKind, SessionID: out.SessionID, Trigger: out.Trigger,
 	})
 	runs = append(runs, rec.Def.RecentRuns...)
 	if len(runs) > automation.RecentRunsMax {

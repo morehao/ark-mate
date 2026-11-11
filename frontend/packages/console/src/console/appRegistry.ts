@@ -30,6 +30,7 @@ import { createElement, lazy, type ComponentType, type ReactNode } from 'react'
 import {
   AppstoreOutlined,
   BarChartOutlined,
+  AppstoreAddOutlined,
   ClockCircleOutlined,
   FolderOpenOutlined,
 } from '@ant-design/icons'
@@ -51,8 +52,8 @@ import {
  */
 export type AppPageComponent = ComponentType<Record<string, never>>
 
-/** 页面入口所属的一级分组（左栏「扩展」等组）。`undefined` = 顶层一级项。 */
-export type AppPageGroup = 'extensions'
+/** 页面入口所属的一级分组（左栏「扩展」「应用」等组）。`undefined` = 顶层一级项。 */
+export type AppPageGroup = 'extensions' | 'apps'
 
 /**
  * 一条页面入口定义（仿 `PreviewDefinition`）。
@@ -111,6 +112,8 @@ export const BUILTIN_PAGE_COMPONENTS: Readonly<Record<string, AppPageComponent>>
   ExpertsPage: lazyPage(() => import('../pages/extensions/ExpertsPage').then((m) => ({ default: m.ExpertsPage }))),
   SkillsPage: lazyPage(() => import('../pages/extensions/SkillsPage').then((m) => ({ default: m.SkillsPage }))),
   ConnectorsPage: lazyPage(() => import('../pages/extensions/ConnectorsPage').then((m) => ({ default: m.ConnectorsPage }))),
+  AppMarketPage: lazyPage(() => import('../pages/app-center/AppMarketPage').then((m) => ({ default: m.AppMarketPage }))),
+  MyAppsPage: lazyPage(() => import('../pages/app-center/MyAppsPage').then((m) => ({ default: m.MyAppsPage }))),
   UsagePage: lazyPage(() => import('../pages/UsagePage').then((m) => ({ default: m.UsagePage }))),
   AutomationsPage: lazyPage(() => import('../pages/AutomationsPage').then((m) => ({ default: m.AutomationsPage }))),
   MaterialPage: lazyPage(() => import('../pages/MaterialPage').then((m) => ({ default: m.MaterialPage }))),
@@ -139,6 +142,20 @@ const BUILTIN_APP_PAGES: readonly AppPageDefinition[] = [
     route: '/extensions/connectors',
     nav: { label: '连接器', order: 23, group: 'extensions' },
     component: BUILTIN_PAGE_COMPONENTS.ConnectorsPage,
+    priority: 'builtin',
+  },
+  {
+    id: 'page:market',
+    route: '/apps/market',
+    nav: { label: '应用市场', order: 1, group: 'apps' },
+    component: BUILTIN_PAGE_COMPONENTS.AppMarketPage,
+    priority: 'builtin',
+  },
+  {
+    id: 'page:my-apps',
+    route: '/apps/my-apps',
+    nav: { label: '我的应用', order: 2, group: 'apps' },
+    component: BUILTIN_PAGE_COMPONENTS.MyAppsPage,
     priority: 'builtin',
   },
   {
@@ -172,6 +189,16 @@ export const EXTENSIONS_GROUP = {
   label: '扩展',
   order: 20,
   icon: createElement(AppstoreOutlined),
+} as const
+
+// 「应用」组的组长元数据（同上：组只承载图标/文案/排序，不是页面入口）。
+// 与「扩展」组并列独立成一级组；图标用 `AppstoreAddOutlined`（九宫格 + 加号，寓意"应用中心/管理应用"），
+// 与扩展组的 `AppstoreOutlined`（纯九宫格）靠加号角标区分。
+export const APPS_GROUP = {
+  id: 'apps',
+  label: '应用',
+  order: 26,
+  icon: createElement(AppstoreAddOutlined),
 } as const
 
 // ── 注册表本体 ────────────────────────────────────────────────────────────────
@@ -263,7 +290,7 @@ export function applyAppPagesFromApps(
     registerAppPage({
       id: `app:${app.id}`,
       route: page.route,
-      nav: { label: page.nav_label || app.name, order: 60, group: 'extensions' },
+      nav: { label: page.nav_label || app.name, order: 60, group: 'apps' },
       component,
       priority: 'app',
     })

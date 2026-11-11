@@ -97,6 +97,16 @@ const (
 	DeliveryNewSession = "new_session"
 )
 
+// ——— 失败原因码（机器读；人话是 LastReason）———
+//
+// 与 `LastStatus=skipped` 正交：status 说"没跑成"，reason_kind 说"为什么没跑成、用户该做什么"。
+// 前端据此区分「配置失效（要改定义）」与「运行期瞬时失败（等下次就好）」，**不靠匹配中文**。
+const (
+	// ReasonKindTargetSessionMissing 目标会话已不存在（delivery=session 的 session_id 指不到对象；
+	// 典型成因：会话来自换代前的旧 id，或会话已被删除）。修复动作：改「新建会话」或重选目标会话。
+	ReasonKindTargetSessionMissing = "target_session_missing"
+)
+
 // NormalizeDelivery 把空串归一为缺省投递模式（`session`）。非法值**不在此处报错**——留给 Validate
 // 显式报错（不静默回落：投递语义是用户意图，猜错等于把会话投到错的地方）。
 func NormalizeDelivery(d string) string {
@@ -130,6 +140,9 @@ type Automation struct {
 	LastSessionID       string     `json:"last_session_id,omitempty"`
 	LastStatus          string     `json:"last_status,omitempty"` // completed | failed | interrupted | skipped
 	LastReason          string     `json:"last_reason,omitempty"` // 最近一次没跑成/失败的原因（人话）
+	// LastReasonKind 最近一次失败的原因码（机器读；见 ReasonKind* 常量）。与 LastReason 正交：
+	// 前者给前端判"该给哪种修复按钮"，后者给人看。常态为空。
+	LastReasonKind      string     `json:"last_reason_kind,omitempty"`
 	ConsecutiveFailures int        `json:"consecutive_failures,omitempty"`
 	// RecentRuns 最近若干次触发的留痕（最新在前，最多 RecentRunsMax 条）。
 	//

@@ -9,7 +9,7 @@
  * 例外：「设置」不是路由入口（它是左栏 footer 的菜单 + 居中弹窗），定义在 `console/settingsView.tsx`。
  */
 import type { ReactNode } from 'react'
-import { EXTENSIONS_GROUP, resolveAppPages } from './appRegistry'
+import { APPS_GROUP, EXTENSIONS_GROUP, resolveAppPages, type AppPageGroup } from './appRegistry'
 import { getRuntimeAppPages } from './runtimeAppPages'
 
 export interface NavLeaf {
@@ -44,10 +44,23 @@ export type NavEntry = NavLeaf | NavGroup
  * 本文件不再手写 `to` / `label` / 图标的字面量——新增页面只在注册表登记一条，
  * `NAV_ENTRIES` 与 `app.tsx` 的 `<Route>` 自动跟随（同源）。派生的规则：
  *   - `nav` 为空的页（纯路由页）不进左栏；
- *   - `nav.group` = `extensions` 的二级项聚成「扩展」组（组元数据取自 `EXTENSIONS_GROUP`）；
+ *   - `nav.group` 命中 `GROUP_META` 的二级项聚进对应一级组（组元数据取自表内 GROUP）；
  *   - 其余 `nav` 为顶层一级项，图标取 `nav.icon`；
  *   - 同级按 `nav.order` 升序（`resolveAppPages` 已排好，这里只做分桶）。
  */
+
+/**
+ * 一级组的元数据表：`group id → 组长元数据`。
+ *
+ * `buildNavEntries` 按本表**遍历**建组（不再 hardcode 单个扩展组的特判）。新增一个一级组 =
+ * 在 appRegistry 加一条 `XXX_GROUP` 常量 + 在此表登记一行，建组逻辑无需再改。
+ * 组的顺序仍由各 `GROUP.order` 决定。
+ */
+const GROUP_META: Readonly<Record<AppPageGroup, { id: string; label: string; order: number; icon: ReactNode }>> = {
+  extensions: EXTENSIONS_GROUP,
+  apps: APPS_GROUP,
+}
+
 function buildNavEntries(): readonly NavEntry[] {
   const leaves: NavLeaf[] = []
   const groupChildren = new Map<string, NavLeaf[]>()
@@ -71,22 +84,26 @@ function buildNavEntries(): readonly NavEntry[] {
   }
 
   const entries: NavEntry[] = [...leaves]
-  // 「扩展」组：仅当有二级项时出现（空组没有意义）。组元数据固定取自 EXTENSIONS_GROUP。
-  // 二期 C（WP-C7）：运行期沙箱应用页作为「扩展」组的二级项并入（与内置页并列），
+  // 按 GROUP_META 表**遍历**建组：每个组仅当有二级项时出现（空组没有意义）。
+  // 二期 C（WP-C7）：运行期沙箱应用页作为「应用」组的二级项并入（与内置页并列），
   // 它们**不**来自 A+Slot 的编译期 `resolveAppPages()`，而是独立运行期注册表
   // （`runtimeAppPages`），渲染走沙箱 iframe（见 app.tsx / SandboxAppFrame）。
-  const extChildren = [...(groupChildren.get('extensions') ?? [])]
-  for (const rp of getRuntimeAppPages()) {
-    extChildren.push({ id: `runtime:${rp.appId}`, label: rp.navLabel, to: rp.route, order: rp.order })
-  }
-  if (extChildren.length > 0) {
-    entries.push({
-      id: EXTENSIONS_GROUP.id,
-      label: EXTENSIONS_GROUP.label,
-      order: EXTENSIONS_GROUP.order,
-      icon: EXTENSIONS_GROUP.icon,
-      children: [...extChildren].sort((a, b) => a.order - b.order),
-    })
+  for (const group of Object.values(GROUP_META)) {
+    const children: NavLeaf[] = [...(groupChildren.get(group.id) ?? [])]
+    if (group.id === 'apps') {
+      for (const rp of getRuntimeAppPages()) {
+        children.push({ id: `runtime:${rp.appId}`, label: rp.navLabel, to: rp.route, order: rp.order })
+      }
+    }
+    if (children.length > 0) {
+      entries.push({
+        id: group.id,
+        label: group.label,
+        order: group.order,
+        icon: group.icon,
+        children: [...children].sort((a, b) => a.order - b.order),
+      })
+    }
   }
 
   return entries.sort((a, b) => a.order - b.order)

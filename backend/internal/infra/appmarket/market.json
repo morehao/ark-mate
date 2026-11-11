@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "apps": [
+    {
+      "id": "weather-query",
+      "name": "天气查询",
+      "icon": "weather",
+      "summary": {
+        "zh": "实时天气与一周预报",
+        "en": "Live weather and a 7-day forecast"
+      },
+      "version": "1.0.0",
+      "homepage": "https://github.com/morehao/ark-mate",
+      "source": {
+        "type": "dir",
+        "dir": "apps/weather-query"
+      },
+      "min_core_version": "1.0.0",
+      "tags": ["工具", "天气"]
+    },
+    {
+      "id": "daily-digest",
+      "name": "每日简报",
+      "icon": "digest",
+      "summary": {
+        "zh": "汇总当天用量与动态，生成一份每日简报",
+        "en": "Compile a daily digest of usage and activity"
+      },
+      "version": "1.0.0",
+      "homepage": "https://github.com/morehao/ark-mate",
+      "source": {
+        "type": "dir",
+        "dir": "apps/daily-digest"
+      },
+      "min_core_version": "1.0.0",
+      "tags": ["工具", "简报"]
+    },
+    {
+      "id": "doc-reviewer",
+      "name": "文档审阅",
+      "icon": "doc",
+      "summary": {
+        "zh": "扫描并总结文档，给出审阅意见",
+        "en": "Scan and summarize documents with review notes"
+      },
+      "version": "1.0.0",
+      "homepage": "https://github.com/morehao/ark-mate",
+      "source": {
+        "type": "dir",
+        "dir": "apps/doc-reviewer"
+      },
+      "min_core_version": "1.0.0",
+      "tags": ["工具", "文档"]
+    }
+  ]
+}

@@ -73,12 +73,21 @@ export type AutomationRunStatus = 'claimed' | 'duplicate' | 'overlap' | 'skipped
 
 export type AutomationRunTrigger = 'scheduled' | 'recovery' | 'manual'
 
+/**
+ * 失败原因码（机器读，与 `reason` 人话正交）。
+ * - `target_session_missing`：delivery=session 的目标会话已不存在（旧 id / 已删除）；
+ *   修复动作＝改「新建会话」或重选目标会话。
+ */
+export type AutomationRunReasonKind = 'target_session_missing'
+
 /** 运行史的一条（最新在前，最多 20 条；**含没跑成的那些**）。 */
 export interface AutomationRunRecord {
   scheduled_for: UnixMillis
   fired_at?: UnixMillis
   status: AutomationRunStatus
   reason?: string
+  /** 失败原因码（机器读枚举；空 = 无稳定原因码）。如 'target_session_missing'。 */
+  reason_kind?: AutomationRunReasonKind
   /** status=claimed 时非空，可直接跳过去看那一轮。 */
   session_id?: string
   trigger?: AutomationRunTrigger
@@ -98,6 +107,8 @@ export interface Automation {
   last_session_id?: string
   last_status?: AutomationRunStatus
   last_reason?: string
+  /** 最近一次失败的原因码（机器读；空 = 无）。前端据此决定给哪种修复按钮。 */
+  last_reason_kind?: AutomationRunReasonKind
   consecutive_failures?: number
   /** 装载失败的原因（坏定义也出现在列表里，不静默消失）。 */
   error?: string

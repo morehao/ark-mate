@@ -393,6 +393,47 @@ function parseArgs(argv) {
   return out
 }
 
+/**
+ * 起核前预检端口：若 HEALTH_URL 已被**另一个进程**服务（旧核/孤儿核占了 :10001），直接 fail-loud。
+ *
+ * 为什么必须显式拦：`waitHealthy` 只轮询"health 回 ok 就算就绪"——一个从上一次 `make dev` 遗留、
+ * 或 `kill -9 make` 后被过继给 launchd 的孤儿核，会**照样回 health ok**。于是新 `go run` 因端口被占
+ * 起不来（很快退出），而 `waitHealthy` 却因"旧核回 ok"判成就绪——用户以为新核起来了，浏览器连的却是
+ * 那个没重启的旧核（旧代码/旧路由），改的东西"看起来没生效"。这正是最阴的一类假活。
+ * 所以这里在 launch('serve') 之前先探一次：只要有人已经在服务这个端口，就停，让人先清掉它。
+ *
+ * 返回 true = 端口空闲可起；false = 已被占用（已打印处置指引，调用方应直接收尾）。
+ */
+async function ensurePortFree() {
+  let occupied = false
+  try {
+    const res = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(1500) })
+    occupied = res.ok
+  } catch {
+    // 连不上/超时 = 没有进程在服务这个端口（或被防火墙挡），当作空闲。
+    occupied = false
+  }
+  if (!occupied) return true
+  const port = (() => {
+    try {
+      return new globalThis.URL(APP_URL).port || '10001'
+    } catch {
+      return '10001'
+    }
+  })()
+  log('')
+  log(`==> 端口 ${port} 已被另一个进程占用（${HEALTH_URL} 回了 ok）。`)
+  log('    多半是上一次 `make dev` 遗留的核心没退干净（`go run` 只杀自己，它编出的核会活下来占端口；')
+  log('    `kill -9 make` 时核还会被过继给 launchd 继续端着端口）。它会回 health ok，导致新核起不来、')
+  log('    界面却仍连着这个旧核——所以这里**主动停下**，不装作起来了。')
+  log('')
+  log(`    处置：先找出并杀掉占用者，再重跑 make dev：`)
+  log(`      lsof -nP -iTCP:${port} -sTCP:LISTEN      # 看占用 PID`)
+  log(`      kill <PID>                               # 不行再 kill -9 <PID>`)
+  log(`      lsof -nP -iTCP:${port} -sTCP:LISTEN      # 确认已空，再 make dev`)
+  return false
+}
+
 /** 轮询健康检查；核心先死则立刻失败（不等到超时才知道）。 */
 async function waitHealthy(name) {
   log(`==> 等待后端健康检查 ${HEALTH_URL} ...`)
@@ -472,6 +513,10 @@ const assetArgs = ['exec', 'vite', 'build', '--watch', '--no-emptyOutDir']
 launch('assets', 'pnpm', assetArgs, { cwd: WEB_APP, longLived: true })
 
 if (options.serve) {
+  // 起核前先确保端口空闲：被旧核/孤儿核占着时立刻停下，不静默连旧核（见 ensurePortFree）。
+  if (!(await ensurePortFree())) {
+    await finish(1)
+  }
   const coreArgs = ['run']
   if (CORE_LDFLAG_ARGS !== '') coreArgs.push('-ldflags', CORE_LDFLAG_ARGS)
   coreArgs.push('./cmd/mate', 'serve', '--web-dir', WEB_DIR)

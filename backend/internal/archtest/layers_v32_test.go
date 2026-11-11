@@ -174,6 +174,9 @@ var v32Layers = map[string]v32Layer{
 	// 内部模型调用的执行器实现（OpenAI 兼容 HTTP 直连）。契约/值在 L1 `core/llm`，本包只做
 	// "与外面说话"，是 L5 与其它 infra 件同层的实现面。
 	"internal/infra/llm": {layer: 5, name: "infra/llm", sameLayer: true},
+	// 应用市场清单拉取/缓存/内置兜底（应用市场 M-A1，2026-11-10）：只做清单读取（HTTP 拉取 + go:embed），
+	// 不执行包代码、不碰装态派生。只依赖标准库 + apppkg，L5 与其它 infra 件同层。
+	"internal/infra/appmarket": {layer: 5, name: "infra/appmarket", sameLayer: true},
 
 	// ——— L6：组合驱动 ———
 	"internal/drivers/gateway": {layer: 6, name: "gateway", sameLayer: true, deny: []string{

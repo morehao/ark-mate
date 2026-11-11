@@ -86,8 +86,8 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 └─ <div .app 100dvh flex-row>
    ├─ NavRail（左栏 288px 白底 + 右侧 hairline；常驻，唯一导航面）
    │   ├─ 品牌区（48px）：ark·mate → /conversations
-   │   ├─ 导航区：一级 4 条（问答 / 扩展 / 用量 / 定时任务）32px；「扩展」是组（专家 · 技能 · 连接器），
-   │   │            组行只切换展开（组没有落地页）
+   │   ├─ 导航区：一级 5 条（问答 / 扩展 / 应用 / 用量 / 定时任务）32px；「扩展」是组（专家 · 技能 · 连接器），
+   │   │            「应用」是组（应用市场 · 我的应用）；组行只切换展开（组没有落地页）
    │   ├─ 会话区（**常驻**，所有页面都在）：视图切换（会话/归档）+ 新建会话 + 搜索 + 会话列表（ConversationPane）
    │   └─ footer：固定左下，这一行**只有「设置」**。点它 → **直接开设置弹窗**（一体式：
    │               标题「设置」+ 左列分节 通用 / 模型 / 命令规则 / 关于 + 右列内容）
@@ -99,8 +99,9 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
    │   │   │   ├─ 无 id（未选中会话）→ StartPanel 新建面板（hero + 当前 Agent 行 + 输入卡 + 示例指令）
    │   │   │   ├─ 有 id → chat：ChatHead（标题 + 当前 Agent 胶囊）/ Transcript（840px 居中）/ Composer
    │   │   ├─ /extensions/skills|/connectors|/experts  扩展二级页（PageContainer 白卡列表；无总览页）
+   │   │   ├─ /apps/market /apps/my-apps  应用二级页（PageContainer + AppCard 卡片网格）
    │   │   ├─ /usage /automations  管理页（PageContainer 白卡列表）
-   │   │   └─ 历史路径：/extensions、/capabilities → /extensions/skills；/settings、/settings/agents、/agents → 打开对应设置弹窗并落回问答页
+   │   │   └─ 历史路径：/extensions、/capabilities → /extensions/skills；/extensions/market → /apps/market、/extensions/my-apps → /apps/my-apps；/settings、/settings/agents、/agents → 打开对应设置弹窗并落回问答页
    │   │       （设置不是页面：分节定义 `console/settingsView.tsx`，弹窗宿主 `components/settings/SettingsModals.tsx`）
    │   └─ StatusBar（30px，**常驻每个页面**）：eventbus 水位（左）+ 会话语义提示（仅问答页）+ WS 连接态（最右）
    └─ toast（右上浮层，仅浮层可带阴影；三态图标：错误红 ⚠ / 成功绿 ✓ / 中性灰 ℹ）
@@ -127,7 +128,7 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 - **模型选择器（ModelSelect）**：关闭态是**药丸**不是表单框——`.fg-model-pill`（h=28 / 999 圆角 / `borderStrong` 边 / mono 11.5 值文案 / 10px 灰箭头），静息贴合文案（min 132、max 240），聚焦展开到 216 并出靛蓝环，hover 抬边+软底；下拉浮层 `.fg-model-pop`（hairline + 12 圆角 + 投影，仅浮层可有阴影）宽约 340，选项为**两行行**（名称 12.5 + 描述 11 灰字单行截断，hover 出全文），分组标题 mono 10.5 弱字。
 - **新建会话面板（StartPanel）**：未选中会话时问答区即为该面板（不再有独立「开始问答」空态页，也无 `/new` 独立路由）——hero 标题 + 当前 Agent 标识行 + 内嵌输入卡（模型 pill / 主色圆形发送）+ 示例指令列表；新建固定用默认 Agent，不展示 agent 选项卡（也不提供跳转，只如实标出用哪个 Agent）。
 - **当前 Agent 标识（AgentBadge）**：**纯展示、不可点**——mono 胶囊 = 状态点（running 绿 / stopped 灰）+「Agent · 名称」（+ 默认 `primary-soft` 小标）；hover 出详情浮层（状态 / provider / runtime 候选 / id）。会话与 Agent 一对一绑定，故只在新建面板与 ChatHead 各标一处，不逐条消息重复。
-- **左栏导航（NavRail）**：条目只在 `packages/console/src/console/navView.tsx` 定义（含 order 与图标），交互态（hover / 选中 / 展开）只在 `console.css.ts` 的 `.fg-rail*` / `.fg-nav*` 类。组的展开态是 `navExpanded[组] ?? 当前路由是否命中该组`：会话页不展开「扩展」（把左栏高度让给会话列表，1440×800 下会话列表可视 ≈7 条），命中扩展二级页时自动展开以露出当前二级项；用户显式收起过的组不再自动展开。**组没有落地页**（2026-11-05 去掉「扩展总览」）：组行整行只切换展开，箭头的视觉与点击面合一；旧 `/extensions`、`/capabilities` 落到 `/extensions/skills`。一级叶子 32px、二级 30px（缩进 26px）；**一级项带 16px 图标**（图标与条目同源在 `navView.tsx`，走统一的 `--fg-menu-*` 交互态：未选中 `textPlaceholder`、hover `text`、选中 `accent`），**二级项不给图标**（缩进子项挂图标会把层级读平）；选中 = `selectedBg` 底 + `accent` 文字（一级/二级同一套）；未实现的项（`pending`）**可读不可点**，右侧挂 mono「待开发」标签并给 hover 说明——不留占位页、不注册路由。主导航只放内容入口（问答 / 扩展 / 用量 / 定时任务），**「设置」不是路由入口**（它是左栏 footer 的菜单，见下一条）；会话区恒常驻所以 footer 自然在栏底，`margin-top: auto` 只是兜底。**footer 那一行只有「设置」**（令牌自 2026-10-10 起收进设置菜单，见下一条）。
+- **左栏导航（NavRail）**：条目只在 `packages/console/src/console/navView.tsx` 定义（含 order 与图标），交互态（hover / 选中 / 展开）只在 `console.css.ts` 的 `.fg-rail*` / `.fg-nav*` 类。组的展开态是 `navExpanded[组] ?? 当前路由是否命中该组`：会话页不展开「扩展」（把左栏高度让给会话列表，1440×800 下会话列表可视 ≈7 条），命中扩展二级页时自动展开以露出当前二级项；用户显式收起过的组不再自动展开。**组没有落地页**（2026-11-05 去掉「扩展总览」）：组行整行只切换展开，箭头的视觉与点击面合一；旧 `/extensions`、`/capabilities` 落到 `/extensions/skills`。一级叶子 32px、二级 30px（缩进 26px）；**一级项带 16px 图标**（图标与条目同源在 `navView.tsx`，走统一的 `--fg-menu-*` 交互态：未选中 `textPlaceholder`、hover `text`、选中 `accent`），**二级项不给图标**（缩进子项挂图标会把层级读平）；选中 = `selectedBg` 底 + `accent` 文字（一级/二级同一套）；未实现的项（`pending`）**可读不可点**，右侧挂 mono「待开发」标签并给 hover 说明——不留占位页、不注册路由。主导航只放内容入口（问答 / 扩展 / 应用 / 用量 / 定时任务），**「设置」不是路由入口**（它是左栏 footer 的菜单，见下一条）；会话区恒常驻所以 footer 自然在栏底，`margin-top: auto` 只是兜底。**footer 那一行只有「设置」**（令牌自 2026-10-10 起收进设置菜单，见下一条）。
 - **底部状态条（StatusBar）**：**按需出现**（挂在 app.tsx 右列末尾，不在 ChatPage 里），30px + top hairline，**只在问答页且确有运行失败时**才渲染一条「助手最近一次运行失败（code）」，正常时返回 null、把高度让还给内容区。**它不再承载会话数量与连接状态**（2026-11-06 对齐修复）：`共 N 个会话` 挪进左栏「会话 / 归档」tab（`会话 36 · 归档 2`，两态计数由 `store.sessionCounts` 提供，因为 `sessions` 一次只装当前视图那一态）；WS 连接态收进左栏 footer「设置」那一行的右端（`.fg-wsdot`：正常只有一枚静息绿点，连接中/断开/未连接才补一行小字）。原因是这些信息原先压在横跨整个窗口的底条里，与上方左栏 288px、主区不同列，永远对不齐。WS 状态只此一处（左栏 footer），底条不再重复。
 - **设置（左栏一个按钮 + 一体式弹窗）**：设置是**同一配置面下的若干动作**，不是并列的内容面——所以它既不是路由页，也不进左栏主导航，更不再有"左栏二级菜单 → 每节一个小弹窗"的两跳：左栏左下「设置」（`.fg-rail-footrow` 里唯一一项，`fg-navitem` 同一套 hover/选中底、与主导航图标同一条竖线）**点一下直接开弹窗**。弹窗（`SettingsDialog`，`centered` + `destroyOnHidden` + `footer={null}`，宽 1120、高 `min(64vh, 640px)`）自己分两列：左列 `.fg-setdlg-nav` 是分节列表（208px，图标 18px + label 13px + hint 11px 两行，命中态 = `selectedBg` 底 + `accent` 文字/图标（与其他菜单项同一套；不再靠 600 字重强调）），右列 `.fg-setdlg-body` 是当前节内容（各节自己出 `.fg-setsec` = 顶部说明 + 右侧动作 + `.fg-setsec-card` 白卡），两列各自滚动、**换节时弹窗高矮不变**；≤920px 分节列表横过来当顶条。**不换页、不改 URL**：从任何页面都能就地改设置、分节之间一步切换；旧深链接（`/settings`、`/settings/agents`、`/agents`）由 `SettingsDeepLink` 打开弹窗对应分节后落回问答页。现有四节：**通用**（工作区目录白名单）、**模型**（供应商 / 模型清单 / 默认模型 / 生效结论）、**命令规则**（哪些命令可直接执行 / 必须确认 / 禁止）、**关于**（产品名 / 核心版本 / 产品身份）。新增一节只改 `console/settingsView.tsx` + `SettingsDialog` 里的一行渲染。理由与 workdsh 一致
 - **管理页（PageContainer + CardToolbar / SectionHeader 工具行）**：`PageContainer` 只出「标题 + 描述 + 白卡外壳」——**页头不带工具**；搜索 / 新建 / 筛选等页面工具下移到白卡顶部的 `SectionHeader` 工具行：左侧是「模块名 + 计数 chip + 说明」的一个语义组，右侧 `spacer` 撑开留白后放 `tools`（搜索/新建）再跟「刷新」。**模块名与工具分层、同一条基线对齐**，不再把"标题 + 刷新"挤成一条细线（这是 v2.0 的版式纠偏）。列表用行 + hairline 分隔，行 hover 出浅底 + 右端动作；ID 与小号码用 mono + tabular-nums。工具行统一收口在两个组件、同一套 `.fg-toolbar` 尺寸：

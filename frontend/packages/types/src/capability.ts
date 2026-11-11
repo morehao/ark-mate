@@ -426,8 +426,20 @@ export interface App {
   settings_schema?: string
   api_version?: string
   enabled: boolean
+  /**
+   * 派生生命周期状态（二期 C，`AppResp.State`）：off/pending/active/failed/disposed。
+   * 由「有无本地包 + enabled + 运行期 host 实时态」派生，非新落库列。
+   */
+  state?: string
+  /** state 的人话原因（failed/pending 时非空，如「子进程崩溃：exit status 3」）。 */
+  why?: string
   /** 是否声明了前端页面入口（列表标记；不回 page 全量）。 */
   has_page: boolean
+  /**
+   * 应用来源（2026-11-11）：`self` = 自建（含对话创建）/ `market` = 市场下载 / 装包。
+   * 后端落库列 `apps.source`。可选：旧响应可能不带该字段（前端容错，缺省不显示来源标签）。
+   */
+  source?: 'self' | 'market'
   /** 写面当前版本（= 最新审计 seq；0 = 从未写过的旧值）。 */
   revision: number
   /** Unix 毫秒（`objtime.Milli`；前端 `new Date(ms)` 零换算）。 */
@@ -440,4 +452,64 @@ export interface App {
   frame_token?: string
   /** 二期 C：清单声明的 permissions（决定沙箱 postMessage 桥放行哪些读；缺省=不放行）。 */
   permissions?: string[]
+}
+
+// ——— 应用市场（App Market；GET /apps/market 派生装态，执行计划 §2.2）———
+//
+// 市场清单描述「可安装的应用包」，与后端 apppkg.Manifest（包内）是两层；
+// `installed/enabled/updatable/installable/state` 都是 svcapp 由 store + appsRoot 派生出的
+// 装态，不落库。
+
+/** 市场条目的来源：dir（随包分发，本期唯一可装）/ url（远程下载，C8，置灰）。 */
+export interface MarketAppSource {
+  type: 'dir' | 'url'
+  /** type=dir 时的相对来源根路径。 */
+  dir?: string | null
+}
+
+/** 市场条目（一条可安装的应用包 + 派生装态）。 */
+export interface MarketApp {
+  id: string
+  name: string
+  /** 内置图标键（前端静态映射；非 URL）。 */
+  icon?: string
+  summary: { zh: string; en?: string }
+  version: string
+  homepage?: string
+  tags?: string[]
+  source: MarketAppSource
+  /** 派生：已装（appsRoot 下有包 或 apps 表有定义）。 */
+  installed: boolean
+  /** 派生：app 定义 enabled（无定义=false）。 */
+  enabled: boolean
+  /** 派生：已装版本 < 清单 version。 */
+  updatable: boolean
+  /** 派生：type=dir 且来源根下目录存在（可一键装）。 */
+  installable: boolean
+  /** 派生：已装时的 state（active/pending/off/failed/disposed）。 */
+  state?: string
+}
+
+/** 安装一个本地应用包的结果（POST /apps/install）。 */
+export interface AppInstallResp {
+  id: string
+  dir: string
+  installed: boolean
+  enabled?: boolean
+  revision?: number
+}
+
+/** 卸载一个应用的结果（DELETE /apps/:id/uninstall；先停运行期+清包目录，再删定义）。 */
+export interface AppUninstallResp {
+  id: string
+  uninstalled: boolean
+  pack_removed: boolean
+  definition_deleted: boolean
+}
+
+/** 启停应用定义的结果（PATCH /apps/:id）。 */
+export interface AppToggleResp {
+  id: string
+  enabled: boolean
+  revision: number
 }

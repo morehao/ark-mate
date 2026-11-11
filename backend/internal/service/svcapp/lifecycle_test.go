@@ -165,3 +165,37 @@ func sha256hex(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
+
+// TestInstallDefinitionSourceMarket v41：InstallApp 新建包定义 → source=market。
+// 覆盖安装（定义已存在）不改既有 source。
+func TestInstallDefinitionSourceMarket(t *testing.T) {
+	_, st := newSvc(t)
+	appsRoot := t.TempDir()
+	rt := newFakeRuntime()
+	svc2 := svcapp.NewApp(st, svcapp.WithRuntimePort(rt), svcapp.WithAppsRoot(appsRoot))
+	ctx := context.Background()
+	src := writeSrcPack(t, t.TempDir(), "mktapp")
+
+	if _, err := svc2.InstallApp(ctx, dtoapp.AppInstallReq{Dir: src}); err != nil {
+		t.Fatalf("install 失败：%v", err)
+	}
+	got, err := svc2.GetApp(ctx, "mktapp")
+	if err != nil {
+		t.Fatalf("GetApp: %v", err)
+	}
+	if got.Source != svcapp.AppSourceMarket {
+		t.Fatalf("装包新建定义 source 应为 %q，实得 %q", svcapp.AppSourceMarket, got.Source)
+	}
+
+	// 覆盖安装（定义已存在）：source 不被改（仍 market），即使中间被改成 self。
+	if err := st.DB().Exec(`UPDATE apps SET source='self' WHERE id='mktapp'`).Error; err != nil {
+		t.Fatalf("篡改 source: %v", err)
+	}
+	if _, err := svc2.InstallApp(ctx, dtoapp.AppInstallReq{Dir: src}); err != nil {
+		t.Fatalf("覆盖安装失败：%v", err)
+	}
+	got2, _ := svc2.GetApp(ctx, "mktapp")
+	if got2.Source != svcapp.AppSourceSelf {
+		t.Fatalf("覆盖安装不应改既有 source（应仍为 self），实得 %q", got2.Source)
+	}
+}

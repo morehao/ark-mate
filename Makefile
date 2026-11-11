@@ -510,13 +510,34 @@ server: web-assets dev/runtime-bin
 # 分工：Makefile 管**环境装配**（require-node / RUNTIME_BIN 转发目录与 PATH / MATE_STORE /
 # ldflags 的**内层**），`scripts/dev-loop.mjs` 管**进程编排**（阶段顺序、健康检查、阶段自死即回红、
 # 按进程组收尾）。各做一件，不把同一份环境判定实现两遍。
+# dev 态默认值（只由 dev 的 recipe 使用；命令行可覆盖）：
+#   - CORE_VERSION：`go run` 不带版本注入时核心报 "dev"，会被应用包的 min_core_version 版本门
+#     **fail-closed 拒绝安装**（装了等于没装，且报错像 bug）。dev 默认注入 1.0.0，开箱即可装应用市场
+#     里的内置示例包；要复现"dev 版本被门拒"可 `make dev CORE_VERSION=`（显式置空覆盖默认）。
+#     命令行显式 `make dev CORE_VERSION=x` 优先；`make dev CORE_VERSION=`（显式置空）也得空=dev 版本
+#     （用 `$(origin)` 区分"命令行给了"与"只是 file 默认空"——见下方 DEV_CORE_VERSION；不用 target-specific
+#     `dev: CORE_VERSION =` 是因为那会新增一行以 `dev:` 开头的声明，破坏 archtest 对 dev 目标首行的假设）。
+#   - MATE_APP_SOURCE_ROOTS：市场清单里的 dir 条目是相对路径（`apps/weather-query`），需要来源根
+#     才能解析成可装目录；不设则所有卡片 installable=false（能看不能装）。dev 默认指向仓库 examples/，
+#     让内置清单的示例包可一键安装。
+#
+# dev 态的核心版本：命令行显式给（含显式空）就用它，否则默认 1.0.0（非 "dev"，避免版本门拒装）。
+DEV_CORE_VERSION = $(if $(filter command line,$(origin CORE_VERSION)),$(CORE_VERSION),$(or $(CORE_VERSION),1.0.0))
+# dev 态 ldflags 内层：与 CORE_LDFLAG_ARGS 同构，只把 Version 换成 DEV_CORE_VERSION（BuildRuntime 同源）。
+DEV_CORE_LDFLAG_ARGS = $(strip $(if $(DEV_CORE_VERSION),-X github.com/morehao/ark-mate/internal/version.Version=$(DEV_CORE_VERSION),) -X github.com/morehao/ark-mate/internal/runtime.BuildRuntime=$(RUNTIME))
+# dev 默认来源根（全局定义：只有 dev 的 recipe 会把它注入核心；其它 target 不引用，无副作用）。
+# 放在这里而非 target-specific，是为了让 `dev:` 只保留唯一的声明行 `dev: dev/runtime-bin`
+# （archtest 用 targetHeader 取 dev 目标首行的假设依赖这一点）。
+MATE_APP_SOURCE_ROOTS_DEV ?= $(CURDIR)/examples
 dev: dev/runtime-bin
 	$(require-node)
-	@echo "==> 后端  go run ./cmd/mate serve  (默认 127.0.0.1:10001, store=$(MATE_STORE), runtime=$(RUNTIME))"
+	@echo "==> 后端  go run ./cmd/mate serve  (默认 127.0.0.1:10001, store=$(MATE_STORE), runtime=$(RUNTIME), core_version=$(if $(DEV_CORE_VERSION),$(DEV_CORE_VERSION),dev))"
+	@echo "==> 应用市场来源根  $(MATE_APP_SOURCE_ROOTS_DEV)"
 	cd $(FRONTEND_ROOT) && \
 	  PATH=$(DEV_PATH_PREFIX)$$PATH MATE_STORE=$(MATE_STORE) \
+	  MATE_APP_SOURCE_ROOTS='$(MATE_APP_SOURCE_ROOTS_DEV)' \
 	  MATE_DEV_WEB_DIR=$(WEB_DIR) MATE_DEV_CORE_DIR=$(CURDIR)/backend \
-	  MATE_DEV_CORE_LDFLAG_ARGS='$(CORE_LDFLAG_ARGS)' MATE_DEV_RUNTIME=$(RUNTIME) \
+	  MATE_DEV_CORE_LDFLAG_ARGS='$(DEV_CORE_LDFLAG_ARGS)' MATE_DEV_RUNTIME=$(RUNTIME) \
 	  MATE_DEV_RUNTIME_BIN='$(RUNTIME_BIN_ABS)' MATE_DEV_RUNTIME_BIN_SOURCE='$(RUNTIME_BIN_SOURCE)' \
 	  MATE_DEV_PAYLOADS_ROOT=$(CURDIR)/$(PAYLOADS_ROOT) MATE_DEV_BIN_DIR=$(DEV_BIN_DIR) \
 	  exec node scripts/dev-loop.mjs

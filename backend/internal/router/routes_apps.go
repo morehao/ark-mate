@@ -18,9 +18,20 @@ import (
 //
 //	POST   /apps/install    从本地来源目录装包（body {dir, enable}；app_invalid / app_runtime_unavailable）
 //	DELETE /apps/:id/uninstall  卸载（先停运行期+清包目录再删定义；幂等）
+//
+// 应用市场（M-A3，独立 /market 前缀，不再挂在 /apps 下）：
+//
+//	GET  /market           市场清单（合并本地装态派生；data 为顶层数组）
+//	POST /market/refresh   强制刷新清单缓存
+//	POST /apps/:id/upgrade 更新已装应用（本期「接线中」明确提示，不假装成功）
+//
+// install/uninstall 复用既有路由，不重复造。
 func registerApps(v1 *gin.RouterGroup, ctr ctrapp.AppCtr) {
 	v1.GET("/apps", ctr.ListApps)
 	v1.POST("/apps", ctr.CreateApp)
+	// 应用市场独立 /market 前缀（方案 B），与 /apps 定义面解耦。
+	v1.GET("/market", ctr.ListMarket)
+	v1.POST("/market/refresh", ctr.RefreshMarket)
 	v1.GET("/apps/:id", ctr.GetApp)
 	v1.PUT("/apps/:id", ctr.UpdateApp)
 	v1.DELETE("/apps/:id", ctr.DeleteApp)
@@ -28,5 +39,6 @@ func registerApps(v1 *gin.RouterGroup, ctr ctrapp.AppCtr) {
 	// 生命周期：install 用静态子路径（POST 树无 :id，避免与 GET/PUT 的 :id 冲突）；
 	// uninstall 挂在 :id 下的静态子段。
 	v1.POST("/apps/install", ctr.InstallApp)
+	v1.POST("/apps/:id/upgrade", ctr.UpgradeApp)
 	v1.DELETE("/apps/:id/uninstall", ctr.UninstallApp)
 }

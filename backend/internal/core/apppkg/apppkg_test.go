@@ -271,3 +271,17 @@ func TestWithinDir(t *testing.T) {
 		t.Error("兄弟目录不应在 dir 内")
 	}
 }
+
+// TestWithinDirExported 断言导出封装 WithinDir 与包内 withinDir 语义一致（供 appmarket 复用）。
+func TestWithinDirExported(t *testing.T) {
+	dir := "/source/root"
+	if !WithinDir(dir, "/source/root/apps/weather-query") {
+		t.Error("来源根内子目录应在 dir 内")
+	}
+	if WithinDir(dir, "/etc/passwd") {
+		t.Error("系统路径 /etc 不应被判在来源根内（防越界）")
+	}
+	if WithinDir(dir, "/source/root/../etc") {
+		t.Error("上跳到兄弟目录应判越界")
+	}
+}
