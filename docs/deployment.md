@@ -355,7 +355,7 @@ make image/run IMAGE_TAG=runtimes                      # 起容器
   交给核心启动时的 `runtime.ProductRegistry` 判定（远程 runtime 的 id 由 `runtimes.json` 声明，
   构建期写不出起始位置偏好）。
 - 版本可用 `--build-arg DSH_VERSION=…` 钉住，默认 `0.2.1-rc.2`（与随包载荷 pin 同源）。**dsh 需含 acp profile
-  模板**（`>= 0.1.2-rc.1`，见 `internal/runtime/adapters.go` 的能力说明），默认值满足。
+  模板**（`>= 0.1.2-rc.1`，见 `internal/infra/dsh/adapter.go` 的 `Spec()` 能力说明），默认值满足。
 - 镜像只装 mate 与所选底座；agent 真要用的工具（git / ripgrep / 语言 SDK 等）请在派生镜像里补：
   `FROM ark-mate:runtimes` + `USER root` + `apt-get install -y …`。
 - **容器里给底座模型凭据**（不内置、也不该内置）：容器以 `uid=10001(mate)`、`HOME=/data` 运行，

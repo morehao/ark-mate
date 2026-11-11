@@ -58,7 +58,7 @@ Agent 执行中需要人拍板时，平台把请求变成可交互的卡片：
 
 平台管理 skill、MCP server、tool 三类能力的**数据与配置**，执行一律归底座。
 
-- **能力目录**：`/capabilities` 全局目录列出全部 skill / mcp / tool；skill 行内可启停、看物化体检。
+- **能力目录**：`/capabilities` 全局目录列出全部 skill / mcp / tool；会话能力条技能行可查看物化体检（逐 runtime 投放状态）。
 - **Skill**：定义存储、启停（overlay，随时可恢复）、正文入表前威胁扫描（critical 直接拒载）、导出为
   底座可读的原生技能文件（物化）；支持 `.zip` 技能包导入。
 - **MCP server**：定义、探测（`tools/list`）、调用工具、读资源、取提示词；stdio / http / streamable_http / sse

@@ -52,7 +52,7 @@
 
 - 再加 **1 条资源表形态守卫**（`provider_model_tables_test.go`：读 `internal/persistence/store/migrate.go` 的 v13 建表语句（剥注释），断言 `providers_v13` / `models_v13` 的列集合 == 白名单，且**不含** `body` / `key_ref` / `key` / `is_default` / `runtime` 这些**刻意没有**的列；同时断言两个实体的 gorm 标签里不再出现 `column:body`，**解析不到即失败**（fail-closed）。它挡的是「键集合封闭却仍停在载体形态」这条静默回退：加一列、或把删掉的 `key_ref` 加回来，别的测试都不会红，而那正是两表列化要消灭的东西）
 
-- 再加 **1 条静态能力基线守卫**（`caps_images_boundary_test.go`：剥注释后 `.Caps.Images` 只许出现在 `internal/runtime/adapters.go`（静态基线的汇入点，只做值拷贝、不做任何判据）——`dsh.Caps.Images=false` 是**按源码声明的保守基线**而不是事实，真值取决于附件仓与**精确路由**，拿它当门禁会把保守基线变成错误结论：用户会在一个其实能收图的 dsh 上被告知「不支持」。它同时**正向**断言连接期事实 `Capabilities().Images` 真的有消费者——否则「以连接期事实为准」只是一句没人执行的话）
+- 再加 **1 条静态能力基线守卫**（`caps_images_boundary_test.go`：剥注释后 `.Caps.Images` 只许出现在 `internal/infra/dsh/adapter.go`（静态基线的汇入点，只做值拷贝、不做任何判据）——`dsh.Caps.Images=false` 是**按源码声明的保守基线**而不是事实，真值取决于附件仓与**精确路由**，拿它当门禁会把保守基线变成错误结论：用户会在一个其实能收图的 dsh 上被告知「不支持」。它同时**正向**断言连接期事实 `Capabilities().Images` 真的有消费者——否则「以连接期事实为准」只是一句没人执行的话）
 
 - 再加 **1 条全局浮层层号守卫**（`toast_layer_test.go` 的 `TestGlobalToastSitsAboveModals`：全局 toast 的层号必须有单一常量（`packages/console/src/app.tsx` 的 `TOAST_Z`）且 ≥ 2000——antd 的 Modal 基础层是 1000、每嵌套一层 +200（本仓「设置」+「供应商/模型」两层实测就是 1000/1200），toast 低于它就被遮罩压暗到看不清：2026-10-11 用户报的「点保存没有反应」，一半原因正是**唯一能解释原因的那句提示画在遮罩底下**（设置弹窗里**每一个**动作的成败提示都共享这一个浮层）。它同时断言 toast 元素用的是这个常量而不是字面量——`zIndex: 90` 那种"看着够高"的值不会让任何别的测试变红，只会让提示静静失效）
 

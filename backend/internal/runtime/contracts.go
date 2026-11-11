@@ -46,9 +46,9 @@ const (
 //
 // 为什么由 adapter 声明而不是父包 switch（本次收口）：变量名是**该底座的私有知识**
 // （实测得来：有的底座读 JS 源码、有的对二进制做 `strings`），父包不该认识任何具体底座。
-// 声明落在**该 adapter 的 Spec 汇入点**（`adapters.go` 里的 `xxxSpec()`，如 `dshSpec()`，
+// 声明落在**该 adapter 的 Spec 汇入点**（`internal/infra/<id>/adapter.go` 里的 `Spec()`，如 dsh 的 `dsh.Spec()`，
 // 与 `Projections` / `ModelConfig` / `Credential` / `SetupSteps` 同一处），父包只做机械投影，
-// 于是"接一个新 runtime"= 新建一个目录 + 加一个 `xxxSpec()`，而不是回来改 frameworks 文件。
+// 于是"接一个新 runtime"= 新建一个目录 + 一个 `Spec()`，而不是回来改 frameworks 文件。
 //
 // 为什么不放进 adapter 实现包（`internal/infra/dsh`）：那会形成父子 import 环（本包要 import adapter
 // 才能汇入 Spec，adapter 又 import 父包才能引用本类型）。这是本仓既有的"adapter 子包只提供纯数据与

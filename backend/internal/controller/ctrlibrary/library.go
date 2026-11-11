@@ -27,7 +27,7 @@ func NewLibraryCtr(svc svclibrary.LibrarySvc) LibraryCtr {
 	return &libraryCtr{svc: svc}
 }
 
-// ListLibrary 统一能力清单：`?kind=skill|mcp|agent|tool`（未知值 → 40000 `invalid_param`）、
+// ListLibrary 统一能力清单：`?kind=skill|mcp|tool`（未知值 → 40000 `invalid_param`）、
 // `?q=`（id/name/description 大小写不敏感子串）。逐条回带**逐 runtime 的可达性**与人话原因，
 // 刻意不给"整体可用吗"的合并结论。
 func (h *libraryCtr) ListLibrary(c *gin.Context) {
