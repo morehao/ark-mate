@@ -25,7 +25,7 @@ import (
 //
 // 只对**本机拉子进程**且**构建期选中的就是 dsh**的底座做：远程端点不读 Launch.Env，别碰。
 // 失败不返回错误——缺 office 能力是降级（agent 退回自带工具链），不该让启动失败；调用方按需记日志。
-func PrepareRuntimeEnv(ctx context.Context, reg *runtime.Registry, homeDir string) {
+func PrepareRuntimeEnv(ctx context.Context, reg *runtime.Registry, homeDir, selfEndpoint string) {
 	if reg == nil || runtime.SelectedRuntime() != dsh.ID {
 		return
 	}
@@ -38,6 +38,27 @@ func PrepareRuntimeEnv(ctx context.Context, reg *runtime.Registry, homeDir strin
 	} else {
 		glog.Infow(ctx, "serve: mate-acp profile 就绪", "dir", config.DisplayHome(dsh.ProfileDir(homeDir)), "files_written", written)
 	}
+	id := runtime.SelectedRuntime()
+
+	// answerer 桥接 env（与 office 能力**独立**注入）：端点 + 令牌 + 插件绝对路径。
+	// 插件路径在 ProvisionProfile 里已解析（同一份 ResolveAnswererPlugin），这里把它与端点一起
+	// 注入到 dsh Launch.Env，供覆写层 answerer 条目的 `disabled: !!js "!MATE_ANSWERER_ENDPOINT"` 与
+	// 插件自身的 MATE_ANSWERER_ENDPOINT/TOKEN 读取。
+	answererEnv := dsh.AnswererEnv(selfEndpoint)
+	if len(answererEnv) == 0 {
+		glog.Warnw(ctx, "serve: answerer 插件未解析到（结构化提问将如实降级为 NO_PROVIDER）",
+			"hint", "需随包 ark-mate-answerer 资产；或用 MATE_ANSWERER_PLUGIN 指定路径")
+	}
+	for _, kv := range answererEnv {
+		k, v, _ := strings.Cut(kv, "=")
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		if err := reg.SetLaunchEnv(id, k, v); err != nil {
+			glog.Warnw(ctx, "serve: 注入 answerer env 失败", "key", k, "err", err)
+		}
+	}
+
 	primaryRuntime, officeSkills := dsh.ResolveBundledDirs()
 	env := dsh.BundledEnv(primaryRuntime, officeSkills)
 	if len(env) == 0 {
@@ -45,7 +66,6 @@ func PrepareRuntimeEnv(ctx context.Context, reg *runtime.Registry, homeDir strin
 			"hint", "需随包 primary-runtime 载荷与 dsh-skill-office/assets；或用 MATE_DSH_BUNDLED_RUNTIME / MATE_DSH_BUNDLED_OFFICE_SKILLS 指定")
 		return
 	}
-	id := runtime.SelectedRuntime()
 	for _, kv := range env {
 		k, v, _ := strings.Cut(kv, "=")
 		if strings.TrimSpace(k) == "" {

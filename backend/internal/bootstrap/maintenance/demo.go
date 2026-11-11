@@ -51,7 +51,7 @@ func Demo(args []string) {
 	reg.ApplyIsolationEnv(cfg.HomeDir)
 	// 拉底座前的统一准备（与 serve 同一套）：落盘 mate-acp profile + 注入 office 随包 env。
 	// 不调它的话 demo 拉不到 mate-acp profile（实测：profile "mate-acp" does not exist）。
-	assembly.PrepareRuntimeEnv(context.Background(), reg, cfg.HomeDir)
+	assembly.PrepareRuntimeEnv(context.Background(), reg, cfg.HomeDir, "http://"+cfg.Addr)
 	svc.SessionPlane().SetTranscriptDir(cfg.TranscriptDir) // demo 会话也落 transcript（wire 事实源）
 	orch := sessionruntime.NewOrchestrator(svc, reg)
 	orch.SetAllowAll(*allowAll)

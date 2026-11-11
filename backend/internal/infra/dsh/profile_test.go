@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // TestProvisionProfileWritesFiles 幂等落盘四份 profile 文件。
@@ -236,5 +238,64 @@ func TestResolveBundledDirsNoEntry(t *testing.T) {
 	pr, os2 := ResolveBundledDirs()
 	if pr != "" || os2 != "" {
 		t.Fatalf("无 entry 无 env 应两空（绝不借桌面端），得到 pr=%q os=%q", pr, os2)
+	}
+}
+
+// TestBuildProfilePatchYMLAnswerer answerer 条目：有路径则追加且 YAML 可解析、含绝对路径与门控；
+// 无路径则不写条目（如实关闭，不误开）。
+func TestBuildProfilePatchYMLAnswerer(t *testing.T) {
+	// 有路径：追加条目，name 是绝对路径，带 disabled 门控。
+	plugin := "/opt/ark-mate/ark-mate-answerer/lib/index.js"
+	withEntry := buildProfilePatchYML(plugin)
+	for _, want := range []string{
+		"id: ark-mate-answerer",
+		"name: '" + plugin + "'",
+		"MATE_ANSWERER_ENDPOINT",
+	} {
+		if !strings.Contains(withEntry, want) {
+			t.Errorf("含 answerer 路径的 patch 缺 %q", want)
+		}
+	}
+	var doc any
+	if err := yaml.Unmarshal([]byte(withEntry), &doc); err != nil {
+		t.Fatalf("含 answerer 条目的 patch 不是合法 YAML: %v", err)
+	}
+	// 无路径：不追加条目。
+	without := buildProfilePatchYML("")
+	if strings.Contains(without, "ark-mate-answerer") {
+		t.Errorf("无路径时不应写 answerer 条目")
+	}
+	if err := yaml.Unmarshal([]byte(without), &doc); err != nil {
+		t.Fatalf("无 answerer 条目的 patch 不是合法 YAML: %v", err)
+	}
+}
+
+// TestAnswererEnv 端点或插件缺失 → nil（如实关闭）；两者都在 → 3 个 KEY=VALUE，令牌非空。
+func TestAnswererEnv(t *testing.T) {
+	// 显式给一个存在的插件文件。
+	dir := t.TempDir()
+	plugin := filepath.Join(dir, "index.js")
+	if err := os.WriteFile(plugin, []byte("export function apply(){}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MATE_ANSWERER_PLUGIN", plugin)
+
+	if env := AnswererEnv(""); len(env) != 0 {
+		t.Fatalf("端点为空应返回 nil，得到 %v", env)
+	}
+	env := AnswererEnv("http://127.0.0.1:10001")
+	if len(env) != 3 {
+		t.Fatalf("应返回 3 个 env，得到 %v", env)
+	}
+	m := map[string]string{}
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		m[k] = v
+	}
+	if m["MATE_ANSWERER_ENDPOINT"] != "http://127.0.0.1:10001" || m["MATE_ANSWERER_PLUGIN"] != plugin {
+		t.Fatalf("env 值不符: %+v", m)
+	}
+	if m["MATE_ANSWERER_TOKEN"] == "" {
+		t.Fatalf("令牌不应为空")
 	}
 }

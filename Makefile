@@ -253,6 +253,13 @@ desktop/payloads:
 	@# 产物落 resources/payloads/primary-runtime；升 dsh 版本时同步 scripts/primary-runtime/lock.json。
 	MATE_VERSION=$(DESKTOP_VERSION) cd $(FRONTEND_ROOT)/apps/desktop && node --experimental-strip-types --no-warnings scripts/prepare-primary-runtime.mjs \
 		$(if $(PR_TARGET),--target $(PR_TARGET),)
+	@# ark-mate 自带 answerer 插件（纯 JS，把 dsh ask_user_question 桥接到平台 elicitation 卡片；
+	@# 见 infra/dsh/profile.go 的 ResolveAnswererPlugin 与 frontend/apps/desktop/src/payload.ts）。
+	@# 静态拷贝到 resources/payloads/ark-mate-answerer/（与 dsh / primary-runtime 并列的载荷位）。
+	@rm -rf $(PAYLOADS_ROOT)/ark-mate-answerer
+	@mkdir -p $(PAYLOADS_ROOT)/ark-mate-answerer
+	@cp -R $(FRONTEND_ROOT)/apps/desktop/assets/ark-mate-answerer/. $(PAYLOADS_ROOT)/ark-mate-answerer/
+	@test -f $(PAYLOADS_ROOT)/ark-mate-answerer/lib/index.js || (echo "answerer 插件拷贝失败：缺 lib/index.js" && exit 1)
 
 .PHONY: desktop/primary-runtime
 desktop/primary-runtime:

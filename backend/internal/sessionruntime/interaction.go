@@ -28,7 +28,10 @@ package sessionruntime
 //	   （§3.1.58 的结论：编排既不是执行面、也不是「读面」）。
 
 import (
+	"context"
+
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"github.com/morehao/ark-mate/internal/core/protocol"
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 )
 
@@ -76,6 +79,27 @@ func (s *Service) ResolveElicitation(sessionID, elicitationID, action string, co
 		return false, failure.NewError(failure.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil)
 	}
 	return s.orch.ResolveElicitation(sessionID, elicitationID, action, content, late)
+}
+
+// AskElicitation 发起一次外部 source 结构化提问并阻塞等用户决策（`svcsession.InteractionDelivery`
+// 的实现；answerer 桥接入口）。
+//
+// 归属解析（native→platform）：优先用调用方给的平台会话 id；为空（answerer 插件占位 `-`）时用
+// `runtimeSessionID`（底座原生 id）经 `platformSessionIDForProvider` 反查——那里是唯一允许做
+// `rt_` 壳包装的边界函数（§4.5.3 / id_shape 守卫白名单），所以解析留在这里，不在用例层。
+func (s *Service) AskElicitation(ctx context.Context, sessionID, runtimeSessionID string, req protocol.ElicitationRequest) (protocol.ElicitationOutcome, error) {
+	if s.orch == nil {
+		return protocol.ElicitationOutcome{}, failure.NewError(failure.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil)
+	}
+	sid := sessionID
+	if sid == "" {
+		sid = s.orch.platformSessionIDForProvider(runtimeSessionID)
+		if sid == "" {
+			return protocol.ElicitationOutcome{}, failure.NewError(failure.ClassRequest,
+				"elicitation_scope_required", "外部结构化提问无法归属会话（native id 未匹配）", nil)
+		}
+	}
+	return s.orch.AskElicitation(ctx, sid, req)
 }
 
 // PermissionMemories 直接透传编排器的会话级权限记忆（供 GetSession 复用；REST 见 ListPermissionMemories）。

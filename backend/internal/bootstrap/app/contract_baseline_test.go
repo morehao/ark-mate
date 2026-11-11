@@ -171,6 +171,7 @@ func contractCases() []contractCase {
 		{"POST", "/v1/mate/sessions/nope/cancel", ""},
 		{"POST", "/v1/mate/sessions/nope/elicitation", "{}"},
 		{"GET", "/v1/mate/sessions/nope/elicitations", ""},
+		{"POST", "/v1/mate/sessions/nope/elicitations/ask", `{"mode":"form","message":"q"}`},
 		{"GET", "/v1/mate/sessions/nope/inputs", ""},
 		{"PATCH", "/v1/mate/sessions/nope/inputs/i1", "{}"},
 		{"DELETE", "/v1/mate/sessions/nope/inputs/i1", ""},

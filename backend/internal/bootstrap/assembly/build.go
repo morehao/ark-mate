@@ -113,7 +113,7 @@ func Build(ctx context.Context, cfg config.Config, sources config.Sources, opts 
 
 	// 拉底座前的统一准备：落盘 mate-acp profile + 注入 office 随包 env（详见 prepare_runtime.go）。
 	// 抽成公共函数是因为 `mate demo` 等控制面命令也拉底座，必须在**每一处**拉底座前都跑。
-	PrepareRuntimeEnv(ctx, reg, cfg.HomeDir)
+	PrepareRuntimeEnv(ctx, reg, cfg.HomeDir, "http://"+cfg.Addr)
 
 	as := &assembly{
 		cfg:     cfg,

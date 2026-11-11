@@ -55,4 +55,6 @@ func registerSession(v1 *gin.RouterGroup, ctr ctrsession.SessionCtr, search ctrs
 	v1.POST("/sessions/:id/permissions/always/revoke", ctr.RevokeMemory)
 	v1.GET("/sessions/:id/elicitations", ctr.Elicitations)
 	v1.POST("/sessions/:id/elicitation", ctr.ResolveElicitation)
+	// 外部 source 结构化提问（answerer 桥接）：阻塞等用户决策后返回 accept/decline/cancel。
+	v1.POST("/sessions/:id/elicitations/ask", ctr.AskElicitation)
 }

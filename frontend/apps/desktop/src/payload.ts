@@ -191,7 +191,29 @@ export function payloadEnvironmentExtras(payloads: ReturnType<typeof resolveRunt
     MATE_DSH_ENTRY: payloads.dsh.entry,
   }
   if (payloads.npxEntry) extras.MATE_NPX_ENTRY = payloads.npxEntry
+  // answerer 插件入口（与 dsh / primary-runtime 并列的自带资产，见
+  // internal/infra/dsh/profile.go 的 ResolveAnswererPlugin）：由 dsh 载荷根推同级
+  // `ark-mate-answerer/lib/index.js`。缺失不算致命——后端解析不到就如实关闭（NO_PROVIDER，
+  // 不误开），与 office 的缺资产降级同一纪律。存在才注入，避免把错路径塞给底座。
+  const answererEntry = answererPluginEntry(payloads)
+  if (answererEntry) extras.MATE_ANSWERER_PLUGIN = answererEntry
   return extras
+}
+
+/**
+ * 由 dsh 载荷根推 answerer 插件入口绝对路径（`<payloads>/ark-mate-answerer/lib/index.js`）。
+ *
+ * answerer 是 ark-mate 自带、随包分发的纯 JS 资产（不随 dsh 上游改动，设计 §8.2）；装配脚本
+ * （Makefile `desktop/payloads`）把它拷到 `resources/payloads/ark-mate-answerer/`。这里只做
+ * "存不存在" 判断并给出入口——不存在就返回 undefined（后端如实关闭该能力）。
+ */
+export function answererPluginEntry(payloads: ReturnType<typeof resolveRuntimePayloads>): string | undefined {
+  const dshRoot = payloads.dsh.payloadRoot
+  if (!dshRoot) return undefined
+  // dshRoot = <payloads>/dsh/<ver>；上溯两级到 <payloads>，再拼 ark-mate-answerer。
+  const payloadsRoot = join(dshRoot, '..', '..')
+  const candidate = join(payloadsRoot, 'ark-mate-answerer', 'lib', 'index.js')
+  return existsSync(candidate) ? candidate : undefined
 }
 
 /** `/meta` 的载荷清单（`--payloads` 的 JSON）：只有 Go 侧契约里的四个字段。 */
