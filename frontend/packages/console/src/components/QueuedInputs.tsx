@@ -68,8 +68,8 @@ export function QueuedInputs({ queue, onCancel, onMove, onSendNow, onPop, onEdit
   }
 
   return (
-    <div style={{ flex: 'none', padding: '0 20px', background: tokens.bg }}>
-      <div style={{ maxWidth: 840, margin: '0 auto' }}>
+    <div style={{ flex: 'none', padding: `0 ${tokens.chatColumnGutter}px`, background: tokens.bg }}>
+      <div style={{ maxWidth: tokens.chatColumnMaxWidth, margin: '0 auto' }}>
         <div
           style={{
             display: 'flex',

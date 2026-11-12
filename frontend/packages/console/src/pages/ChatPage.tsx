@@ -671,11 +671,14 @@ export function ChatPage() {
               <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', overflowX: 'clip', minHeight: 0, scrollBehavior: 'smooth' }}>
                 <div
                   style={{
-                    maxWidth: 840,
+                    // 聊天列宽收口（方案 B）：本块是单层容器（滚动容器内仅此一层），
+                    // 故 maxWidth 需叠加左右 gutter，使**内容宽 = chatColumnMaxWidth**，
+                    // 与底部输入框（外层 gutter + 内层 maxWidth）的内容边缘严格重合。
+                    maxWidth: tokens.chatColumnMaxWidth + tokens.chatColumnGutter * 2,
                     width: '100%',
                     minWidth: 0,
                     margin: '0 auto',
-                    padding: '8px 24px 12px',
+                    padding: `8px ${tokens.chatColumnGutter}px 12px`,
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 0,

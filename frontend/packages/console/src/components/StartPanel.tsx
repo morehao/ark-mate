@@ -328,10 +328,12 @@ export function StartPanel() {
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: tokens.bg }}>
       <div
         style={{
-          maxWidth: 780,
+          // 聊天列宽收口（方案 B）：单层容器，maxWidth 叠加左右 gutter，
+          // 使内容宽 = chatColumnMaxWidth，新建态输入卡与会话态输入框左右边缘一致。
+          maxWidth: tokens.chatColumnMaxWidth + tokens.chatColumnGutter * 2,
           width: '100%',
           margin: '0 auto',
-          padding: '11vh 28px 0',
+          padding: `11vh ${tokens.chatColumnGutter}px 0`,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
