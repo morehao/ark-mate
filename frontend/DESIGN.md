@@ -1,5 +1,5 @@
 ---
-version: 2.4
+version: 2.5
 name: ark-mate-frontend-design
 description: "ark-mate Web 问答控制台（frontend/apps/web）统一视觉语言。**精致冷白（Refined Cool White）**：近乎无色的冷白表面 + 极细 hairline 分层 + **克制的两档控件语言——主按钮品牌实心（靛蓝底 + 白字），次按钮白底可见描边**。**全站只有一个彩色：靛蓝 #3d5afe**（主操作 / 品牌 mark / 选中态 / 焦点环 / 链接），近黑只当正文文字色、不做色块；无卡片阴影（唯一例外：输入卡 composer 的极轻浮起），浮层/toast/抽屉才用阴影；文字三级灰阶、字重字距讲究、全站 tabular-nums。列表优先用「行 + 细分割线」而不是卡片网格。代码事实源：packages/ui/src/theme.ts 的 tokens 对象（本文件与之一一对应，改动需同步两处）。"
 
@@ -56,7 +56,8 @@ spacing:
   nav-item-height: 32px
   nav-subitem-height: 30px
   mobile-bar-height: 52px
-  transcript-max-width: 840px
+  chat-column-max-width: 840px     # 聊天页单一内容列（转录/确认区/队列/输入框/新建面板共用）
+  chat-column-gutter: 20px         # 聊天列左右保底留白（外层提供，不与 max-width 叠加）
   page-max-width: 1600px
   page-gutter: 40px                # padding-inline 上限：clamp(16px, 2.4vw, 40px)
 ---
@@ -97,7 +98,7 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
    │   ├─ 路由区
    │   │   ├─ /conversations[/:id]  ChatPage：
    │   │   │   ├─ 无 id（未选中会话）→ StartPanel 新建面板（hero + 当前 Agent 行 + 输入卡 + 示例指令）
-   │   │   │   ├─ 有 id → chat：ChatHead（标题 + 当前 Agent 胶囊）/ Transcript（840px 居中）/ Composer
+   │   │   │   ├─ 有 id → chat：ChatHead（标题 + 当前 Agent 胶囊）/ Transcript（聊天列 tokens.chatColumnMaxWidth 居中）/ Composer
    │   │   ├─ /extensions/skills|/connectors|/experts  扩展二级页（PageContainer 白卡列表；无总览页）
    │   │   ├─ /apps/market /apps/my-apps  应用二级页（PageContainer + AppCard 卡片网格）
    │   │   ├─ /usage /automations  管理页（PageContainer 白卡列表）

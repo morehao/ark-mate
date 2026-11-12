@@ -320,8 +320,8 @@ export function Composer({
   }
 
   return (
-    <div style={{ flex: 'none', padding: '10px 20px 6px', background: tokens.bg }}>
-      <div style={{ maxWidth: 840, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ flex: 'none', padding: `10px ${tokens.chatColumnGutter}px 6px`, background: tokens.bg }}>
+      <div style={{ maxWidth: tokens.chatColumnMaxWidth, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
         {/* 等待态说明行：贴在卡上方（不是塞进控件行）。等授权/等回答时才出现，文案由 ChatPage 的 busyNote 透传。 */}
         {busy && !canStop && (
           <span className="fg-wait-banner" role="status">

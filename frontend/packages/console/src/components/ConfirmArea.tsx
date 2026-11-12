@@ -41,10 +41,10 @@ export function ConfirmArea({ entries }: Props) {
   ]
 
   return (
-    <div style={{ flex: 'none', padding: '0 20px', background: tokens.bg }}>
+    <div style={{ flex: 'none', padding: `0 ${tokens.chatColumnGutter}px`, background: tokens.bg }}>
       <div
         style={{
-          maxWidth: 840,
+          maxWidth: tokens.chatColumnMaxWidth,
           margin: '0 auto',
           // 上限按视口高给：确认区是"当下的问题"，不该把输入框与最近历史挤出屏幕。
           maxHeight: '46vh',

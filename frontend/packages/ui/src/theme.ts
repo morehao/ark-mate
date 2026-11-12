@@ -65,6 +65,12 @@ export const tokens = {
   // 布局：管理页内容容器上限（配合 padding-inline: clamp(16px, 2.4vw, 40px)）
   pageMaxWidth: 1600,
 
+  // 布局：聊天页「单一内容列」——转录 / 确认区 / 队列 / 输入框 / 新建面板共用同一宽度与 gutter，
+  // 保证各块左右边缘重合。
+  // 口径：gutter 由各块**外层**容器提供，maxWidth 只约束内容层，二者不叠加计算。
+  chatColumnMaxWidth: 840,
+  chatColumnGutter: 20,
+
   // 圆角（精致冷白：克制的小圆角，不外扩成大圆角）
   radiusSm: 7,
   radiusMd: 10,
