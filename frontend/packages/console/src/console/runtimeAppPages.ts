@@ -171,11 +171,6 @@ export function getRuntimeAppPages(): readonly RuntimeAppPage[] {
   return runtimePages
 }
 
-/** 清空运行期页（重拉列表/测试复位用）。 */
-export function clearRuntimeAppPages(): void {
-  runtimePages = []
-}
-
 // ── 受限 postMessage 桥（主窗侧逻辑）─────────────────────────────────────────────
 //
 // 安全基线（v37 / magpie `noFramedAPI`）：页面在 `connect-src 'none'` 的沙箱里自身**发不出**

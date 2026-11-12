@@ -38,6 +38,29 @@ export function defaultLimit(category: LimitCategory): number {
 }
 
 /**
+ * 把预览定义 id（`PreviewDefinition.id`）映射到体积分类（`LimitCategory`）。
+ *
+ * 一对一 switch，无新增数据：Office（doc/docx/ppt/pptx）一律按 doc 粗分类，只做首次拦截；
+ * code / html / text 及一切未识别的兜底都归纯文本（上限 50MB）。
+ */
+export function categoryOf(defId: string): LimitCategory {
+  switch (defId) {
+    case 'pdf':
+      return 'pdf'
+    case 'sheet':
+      return 'sheet'
+    case 'markdown':
+      return 'markdown'
+    case 'image':
+      return 'image'
+    case 'office':
+      return 'doc'
+    default:
+      return 'text'
+  }
+}
+
+/**
  * 是否超出上限（size >= limit 即视为超限；limit 缺省为 Infinity 时永 false）。
  * 判据取 `>=`：单测 V6 要求 size>=limit → true。
  */

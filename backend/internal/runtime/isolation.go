@@ -16,7 +16,7 @@ import (
 // 不重写 HOME / PATH，用户工具链（git / uv / 代理 / SSH_AUTH_SOCK）照旧可见。
 //
 // **本文件不认识任何具体底座**（本次收口）：变量名与落点是**载荷实测值**，属于该 adapter 的私有知识，
-// 由它在自己的 `Spec` 汇入点（`adapters.go` 里的 `xxxSpec()`，如 `dshSpec()`）以 `Spec.Isolation`
+// 由它在自己的 `Spec` 汇入点（`internal/infra/<id>/adapter.go` 里的 `Spec()`，如 dsh 的 `dsh.Spec()`）以 `Spec.Isolation`
 // 声明，父包只做机械投影。新增一个 runtime 因此不需要动本文件。
 //
 // 也不"多注几个以防万一"：多注一个不存在的变量不会报错，只会静默失效，还会让"已经隔离了"变成假象。

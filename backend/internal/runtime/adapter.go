@@ -27,9 +27,6 @@ func NewAdapterRegistry(adapters ...Adapter) *Registry {
 			continue
 		}
 		r.adapters = append(r.adapters, a)
-		if a == nil {
-			continue
-		}
 		spec := a.Spec()
 		r.Register(spec)
 		a.RegisterPorts(r)

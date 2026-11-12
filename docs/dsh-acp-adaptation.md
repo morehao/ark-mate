@@ -3,7 +3,7 @@
 > **这份文档是什么**：平台与内置底座 `dsh` 之间的**接入事实**——启动形态、能力基线、配置隔离、
 > 原生凭据、模型清单交付、权限投影、已知边界。
 >
-> **事实源是代码，不是本文**：声明汇入点是 `backend/internal/runtime/adapters.go` 的 `dshSpec()`，
+> **事实源是代码，不是本文**：声明汇入点是 `backend/internal/infra/dsh/adapter.go` 的 `Spec()`，
 > 实现住在 `backend/internal/infra/dsh/`（`dsh.go` 形态与能力、`config.go` 模型清单交付、
 > `credentials.go` 原生凭据、`route_key.go` 路由键、`model_value.go` 模型取值、`native_permission.go`
 > 权限投影）。**本文与代码冲突时以代码为准**——它是地图，不是契约。

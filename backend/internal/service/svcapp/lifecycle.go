@@ -308,12 +308,6 @@ func (s *appSvc) appsRoot() string {
 	return dir
 }
 
-// packRoot 报告某 app 的本地包目录是否存在（供状态派生）。委托给 runtime（若已接），否则走文件系统。
-func (s *appSvc) hasPackOnDisk(id string) bool {
-	_, err := os.Stat(filepath.Join(s.appsRoot(), id))
-	return err == nil
-}
-
 // copyPackAtomic 把 srcDir 复制到 dstDir（先 dstDir.tmp 再原子 rename；覆盖时先删旧 dstDir）。
 // 只复制常规文件与子目录（拒绝符号链接上跳——包目录来自受信本地目录，但仍 fail-closed 到包根内）。
 func copyPackAtomic(srcDir, dstDir string) error {

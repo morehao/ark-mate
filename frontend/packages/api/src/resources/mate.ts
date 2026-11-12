@@ -415,10 +415,6 @@ export const setExpertEnabled = (id: string, enabled: boolean): Promise<ExpertTo
  */
 export const listApps = (): Promise<App[]> => http.get<App[]>('/mate/apps')
 
-/** 读单个应用定义详情（含 settings_schema / page 全量）。 */
-export const getApp = (id: string): Promise<App> =>
-  http.get<App>(`/mate/apps/${encodeURIComponent(id)}`)
-
 /**
  * 应用市场清单（GET /market）：每条带派生的装态
  * （installed/enabled/updatable/installable/state，由后端 store+appsRoot 算出，不落库）。

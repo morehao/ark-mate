@@ -14,6 +14,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { createContext, useCallback, useContext, useMemo, useState, Suspense, type ReactNode } from 'react'
 import { resolvePreview, type PreviewDefinition } from './routes'
+import { categoryOf, defaultLimit, resolveOversized } from './limits'
+import { OversizedState } from './states/OversizedState'
 import { fetchFileBytes, fetchFileText, fetchFileUrl } from '@ark-mate/api'
 import { PreviewShell } from './PreviewShell'
 import { isPreviewV2Enabled } from './flags'
@@ -57,6 +59,8 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
   >(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 体积超限态：非空时渲染 OversizedState，不进取数、不进渲染器（limits.ts 的真实消费者）。
+  const [oversized, setOversized] = useState<{ def: PreviewDefinition; file: PreviewFile; limitBytes: number } | null>(null)
 
   const openPreview = useCallback((file: PreviewFile) => {
     if (!isPreviewV2Enabled()) {
@@ -69,6 +73,16 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
     }
     const def = resolvePreview(file.name)
     setError(null)
+    // 体积守卫（FE-P3 §3.3）：超限直接落 OversizedState，不进入取数/渲染器，避免大文件卡死浏览器。
+    const cat = categoryOf(def.id)
+    const limitBytes = defaultLimit(cat)
+    if (resolveOversized(file.size_bytes, limitBytes)) {
+      setOpen(null)
+      setLoading(false)
+      setOversized({ def, file, limitBytes })
+      return
+    }
+    setOversized(null)
     setOpen({ def, file, content: '' }) // 先开壳（骨架），再取数
     setLoading(true)
     loadContent(def, file.file_id)
@@ -81,6 +95,7 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
 
   const close = useCallback(() => {
     setOpen(null)
+    setOversized(null)
     setError(null)
     setLoading(false)
   }, [])
@@ -104,6 +119,24 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--text2,#6b7280)' }}>正在加载渲染器…</div>}>
             <open.def.body fileName={open.file.name} content={open.content} sizeBytes={open.file.size_bytes} fileId={open.file.file_id} />
           </Suspense>
+        </PreviewShell>
+      )}
+      {oversized && (
+        // 超限：复用既有外壳（保留标题/关闭/形态），体内渲染 OversizedState；不取数、不挂渲染器。
+        <PreviewShell
+          shape={oversized.def.shape}
+          title={oversized.def.title()}
+          fileName={oversized.file.name}
+          sizeBytes={oversized.file.size_bytes}
+          loading={false}
+          error={null}
+          onClose={close}
+        >
+          <OversizedState
+            fileName={oversized.file.name}
+            sizeBytes={oversized.file.size_bytes}
+            limitBytes={oversized.limitBytes}
+          />
         </PreviewShell>
       )}
     </PreviewContext.Provider>

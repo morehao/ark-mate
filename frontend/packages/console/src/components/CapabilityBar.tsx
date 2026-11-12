@@ -13,6 +13,7 @@ import { listApps, listExperts, listLibrary, listMcpServers } from '@ark-mate/ap
 import type { App as AppType, Expert, LibraryItem, McpServer, SessionCapabilitiesPatch } from '@ark-mate/types'
 import { useMate } from '../store'
 import { Label } from './dirPath'
+import { MaterializationPopover } from './MaterializationPopover'
 import { mcpOptionView, mcpRows, skillOptionView, type CapabilityChoice } from '../console/capabilityView'
 import { capabilityChips, expertSwitchPatch, selectionPatchFor } from '../console/capabilityEdit'
 
@@ -308,6 +309,9 @@ export function CapabilityBar({ value, onChange, disabled, saving, applyHint = '
                         </span>
                       </Tooltip>
                     )}
+                    {/* 技能行行尾「体检」入口：只读查看该技能逐 root/runtime 的物化投放状态。
+                        MCP/应用没有物化体检面，故只在 skills 行出现。 */}
+                    {kind === 'skills' && <MaterializationPopover skillId={row.id} skillName={row.name} />}
                   </div>
                 )
               })}
