@@ -4,10 +4,10 @@ package store
 //
 // 为什么需要它：控制面作为 ark-iam 的 RP，需要在本地存四类**平台侧**数据（设计见
 // `.dsh/docs/specs/2026-11-24-ark-iam-rp-integration-design.md` §详细设计·数据模型）：
-//   1. `control_tenants`       租户的平台属性（隔离档 / 配额 / 展示名）；
-//   2. `control_users`         ark-iam 用户 → 平台映射 + 开通快照（user_id = ark-iam user.id）；
-//   3. `control_identity_audits` 认证/登出审计；
-//   4. `control_logout_jtis`   SLO 的 jti 去重（多副本必需）。
+//  1. `control_tenants`       租户的平台属性（隔离档 / 配额 / 展示名）；
+//  2. `control_users`         ark-iam 用户 → 平台映射 + 开通快照（user_id = ark-iam user.id）；
+//  3. `control_identity_audits` 认证/登出审计；
+//  4. `control_logout_jtis`   SLO 的 jti 去重（多副本必需）。
 //
 // **关键口径（DM-2 / C1）**：这些表**不是登录真源、不是所有权真相**——身份真源唯一 = ark-iam；
 // 鉴权与资源所有权读**实时令牌 claim**，绝不读这里的快照行。表只承载「映射 + 平台属性 + 审计 +
