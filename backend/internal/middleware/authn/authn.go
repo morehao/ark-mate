@@ -40,9 +40,10 @@ type Options struct {
 
 // Authenticator 是可并发复用的验签器。构造一次，随进程存活。
 type Authenticator struct {
-	issuer  string
-	verify  *rp.Verifier
-	closers []func()
+	issuer    string
+	verify    *rp.Verifier
+	keySource rp.KeySource
+	closers   []func()
 }
 
 // New 构造 Authenticator：装配 `rp.Verifier`，必要时预取 JWKS（fail-closed）。
@@ -69,7 +70,15 @@ func New(ctx context.Context, opts Options) (*Authenticator, error) {
 	}
 
 	v := rp.NewVerifier(ks, rp.WithIssuer(opts.Issuer), rp.WithAudiences(opts.Audience))
-	return &Authenticator{issuer: opts.Issuer, verify: v, closers: closers}, nil
+	return &Authenticator{issuer: opts.Issuer, verify: v, keySource: ks, closers: closers}, nil
+}
+
+// KeySource 返回本验签器使用的密钥来源（与 SLO 接收端共享同一份 JWKS，避免二次预取）。
+func (a *Authenticator) KeySource() rp.KeySource {
+	if a == nil {
+		return nil
+	}
+	return a.keySource
 }
 
 // Close 释放密钥集后台刷新（幂等由 Keys.Close 保证）。

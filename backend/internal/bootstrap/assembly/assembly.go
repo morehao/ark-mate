@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/control/slo"
 	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
@@ -85,9 +86,11 @@ type assembly struct {
 	// authenticator 控制面认证验签器（决策 v38：ark-iam RP）。cfg.OIDCEnabled=true 时构造，
 	// 否则 nil（桌面本地态降级，不挂鉴权中间件）。
 	authenticator *authn.Authenticator
-	services      Services
-	controllers   router.Controllers
-	engine        http.Handler
+	// sloReceiver back-channel logout 接收端（决策 v38）。OIDCEnabled + 有持久层时构造。
+	sloReceiver *slo.Receiver
+	services    Services
+	controllers router.Controllers
+	engine      http.Handler
 
 	// appSlotDispose 本次启动 app slot Reconcile 产出的**逆序撤销栈**（WP6）：进程关闭时执行。
 	// nil = 未 reconcile 或无 slot（Dispose 空操作）。
@@ -634,6 +637,18 @@ func (as *assembly) startRouter(ctx context.Context) error {
 			return fmt.Errorf("构造控制面认证（ark-iam RP）失败: %w", err)
 		}
 		as.authenticator = auth
+		// SLO 接收端（设计 §C2）：与验签器共享 JWKS；jti 落表（多副本去重，DM-5）需持久层。
+		// 无持久层（memory 模式）→ 不挂 bc-logout（无法去重，宁可不开也不重复处理登出）。
+		if as.st != nil {
+			as.sloReceiver = slo.New(slo.Options{
+				KeySource: auth.KeySource(),
+				Issuer:    as.cfg.OIDCIssuer,
+				ClientID:  as.cfg.OIDCAudience,
+				JTIStore:  slo.NewDBJTIStore(as.st, nil),
+				// Revoker 暂为 nil：无集中会话登记，页面侧登出靠前端静默续期失败跳登录
+				// （设计 C2-B）；集中会话表随 SaaS session_index 落地再接入。
+			})
+		}
 	}
 	as.engine = router.New(router.Deps{
 		Controllers:   as.controllers,
@@ -643,6 +658,7 @@ func (as *assembly) startRouter(ctx context.Context) error {
 		FileStore:     fileStore,
 		AnswererToken: as.answererToken,
 		Authenticator: as.authenticator,
+		SLOReceiver:   as.sloReceiver,
 	})
 	return nil
 }

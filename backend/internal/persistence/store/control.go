@@ -130,3 +130,18 @@ func (s *Store) InsertControlLogoutJTI(ctx context.Context, jtiHash string, expi
 	}
 	return tx.RowsAffected == 1, nil
 }
+
+// HasControlLogoutJTI 报告某 jti 摘要是否存在且未过期（SLO 去重查询）。
+func (s *Store) HasControlLogoutJTI(ctx context.Context, jtiHash string, nowMilli int64) (bool, error) {
+	if jtiHash == "" {
+		return false, nil
+	}
+	var count int64
+	err := s.db.WithContext(ctx).Model(&model.ControlLogoutJTIEntity{}).
+		Where("jti_hash = ? AND expires_at > ?", jtiHash, nowMilli).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}

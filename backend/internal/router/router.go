@@ -16,6 +16,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/control/slo"
 	"github.com/morehao/ark-mate/internal/controller/ctrapp"
 	"github.com/morehao/ark-mate/internal/controller/ctrartifact"
 	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
@@ -114,6 +115,10 @@ type Deps struct {
 	// 鉴权中间件挂在受保护的 `/control` 组上（完整「全入口保护」随控制面其余模块逐步接入）。
 	Authenticator *authn.Authenticator
 
+	// SLOReceiver 是 back-channel logout 接收端（决策 v38、设计 §C2）。nil = 不挂 `/control/oidc/bc-logout`
+	// （未启用认证 / 无持久层 jti 表时）。它自身验签，不经 authn 中间件。
+	SLOReceiver *slo.Receiver
+
 	// AnswererToken 是 answerer 桥接插件 `/elicitations/ask` 入口的服务端强校验令牌
 	// （`middleware.AnswererToken`）。由装配根从 `dsh.AnswererEnv` 的同一次生成拿到、与注入
 	// dsh env 的值逐字相同。空串 = 未启用（中间件 no-op，测试路径与未注入令牌的部署）。
@@ -185,7 +190,7 @@ func New(d Deps) *gin.Engine {
 	registerArtifact(rest, ctrls.Artifact)
 	registerUsage(rest, ctrls.Usage)
 	registerSystem(rest, ctrls.System)
-	registerControl(rest, ctrls.Control, d.Authenticator)
+	registerControl(rest, ctrls.Control, d.Authenticator, d.SLOReceiver)
 
 	// 全局唯一的上传面（产物溯源 P0′）：golib ginupload 一步挂上整套 `/files` 资源
 	// （上传 / 分片 / 详情 / 删除 / presign / serve）。业务模块只建索引、不再各自收字节。
