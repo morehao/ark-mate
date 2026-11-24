@@ -310,6 +310,34 @@ func selectModel(ctx context.Context, sess protocol.Session) error {
 	return err
 }
 
+// assertSessionLogOnLocalVolume 断言该会话的 DSH JSONL 日志已落到本地卷（DSH_HOME 下）。
+// 只做 glob：在 `<dshHome>/sessions` 下找「路径含 sessionId 且文件名以 session.v*.jsonl(.zstd) 结尾」
+// 的文件。刻意**不**在测试里重实现 DSH 的 projectKey/encodeSegment 路径编码（那是 DSH 内部实现，
+// 复制一份只会随它演进漂移）；这里验的是**事实**——日志在磁盘上、在本地卷里。
+func assertSessionLogOnLocalVolume(t *testing.T, iter int, dshHome, sessionID string) {
+	t.Helper()
+	root := filepath.Join(dshHome, "sessions")
+	found := false
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if !strings.Contains(p, sessionID) {
+			return nil
+		}
+		base := d.Name()
+		if strings.HasPrefix(base, "session.v") && (strings.HasSuffix(base, ".jsonl") || strings.HasSuffix(base, ".jsonl.zstd")) {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if !found {
+		t.Fatalf("[iter %d] 会话日志没有落到本地卷：%s 下找不到 session %s 的 session.v*.jsonl* 文件"+
+			"（M1-2「会话日志落本地卷」未达成）", iter, root, sessionID)
+	}
+}
+
 func TestResumeContextConsistencyV1(t *testing.T) {
 	payload, tmp := resumeProbeEnv(t)
 	iters := 100
@@ -367,6 +395,13 @@ func TestResumeContextConsistencyV1(t *testing.T) {
 			cancel1()
 			// **杀进程**（模拟 worker 崩溃/回收）：关连接即回收子进程；日志已 flush 到本地卷。
 			_ = cl1.Close()
+
+			// M1-2 证据：会话日志**确实落到了本地卷**。DSH 的 JSONL 持久层布局（实测，dsh 0.2.2-rc.5）：
+			//   <DSH_HOME>/sessions/<projectKey(cwd)>/<sessionId>/session.v<N>.jsonl.zstd  （仅追加日志 = 上下文真源）
+			//   .../session.lock （写租约）
+			// 这里只 glob（不重实现 DSH 的路径编码，避免与其内部实现耦合），断言 kill 之后磁盘上
+			// 确有该会话的 .jsonl* 日志——这正是「会话日志落本地卷」这条 M1 要求的实证。
+			assertSessionLogOnLocalVolume(t, i, filepath.Join(home, "runtime", "dsh"), sid)
 
 			// —— 第 2 段进程：resume 同一 session id + 问金丝雀。要求第 2 次请求的历史里
 			//      **没有直接给过金丝雀的新 prompt 文本**，金丝雀只能来自 resume 恢复的日志。 ——
