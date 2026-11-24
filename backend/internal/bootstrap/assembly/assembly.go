@@ -23,6 +23,7 @@ import (
 	"github.com/morehao/ark-mate/internal/drivers/runtimeconn"
 	"github.com/morehao/ark-mate/internal/drivers/transfer"
 	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/ark-mate/internal/middleware/authn"
 	"github.com/morehao/ark-mate/internal/router"
 
 	"github.com/morehao/ark-mate/internal/infra/apphost"
@@ -81,6 +82,9 @@ type assembly struct {
 	// answererToken 是注入给 dsh 的 answerer 令牌（`PrepareRuntimeEnv` 生成并注入 dsh env，
 	// 同一份值交到这里供 `/elicitations/ask` 的服务端强校验）。未启用时为空串（中间件 no-op）。
 	answererToken string
+	// authenticator 控制面认证验签器（决策 v38：ark-iam RP）。cfg.OIDCEnabled=true 时构造，
+	// 否则 nil（桌面本地态降级，不挂鉴权中间件）。
+	authenticator *authn.Authenticator
 	services      Services
 	controllers   router.Controllers
 	engine        http.Handler
@@ -619,6 +623,18 @@ func (as *assembly) startRouter(ctx context.Context) error {
 	if as.attachStore != nil {
 		fileStore = as.attachStore.FileStore()
 	}
+	// 控制面认证（决策 v38）：enabled 时构造 Authenticator（启动期预取 JWKS，fail-closed：
+	// 取不到 JWKS 直接报错，不把服务放出去）。issuer/audience 已由 config 校验非空。
+	if as.cfg.OIDCEnabled {
+		auth, err := authn.New(ctx, authn.Options{
+			Issuer:   as.cfg.OIDCIssuer,
+			Audience: as.cfg.OIDCAudience,
+		})
+		if err != nil {
+			return fmt.Errorf("构造控制面认证（ark-iam RP）失败: %w", err)
+		}
+		as.authenticator = auth
+	}
 	as.engine = router.New(router.Deps{
 		Controllers:   as.controllers,
 		Web:           as.assets,
@@ -626,6 +642,7 @@ func (as *assembly) startRouter(ctx context.Context) error {
 		Origin:        as.origin,
 		FileStore:     fileStore,
 		AnswererToken: as.answererToken,
+		Authenticator: as.authenticator,
 	})
 	return nil
 }

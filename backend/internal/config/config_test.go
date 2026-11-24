@@ -706,3 +706,43 @@ func TestPlatformMcpToggle(t *testing.T) {
 		t.Fatal("非法取值（on）应报错")
 	}
 }
+
+// TestOIDCConfig 控制面认证配置（决策 v38）：三键读取 + enabled 缺 issuer/audience 报错。
+func TestOIDCConfig(t *testing.T) {
+	hermetic(t)
+
+	// 未启用：三个零值，不校验 issuer/audience。
+	c := Load()
+	if c.OIDCEnabled || c.OIDCIssuer != "" || c.OIDCAudience != "" {
+		t.Fatalf("默认应关闭认证：%+v", c)
+	}
+
+	// 启用 + 齐备：读取成功。
+	tsetenv(t, "MATE_OIDC_ENABLED", "true")
+	tsetenv(t, "MATE_OIDC_ISSUER", "http://localhost:8081/oidc")
+	tsetenv(t, "MATE_OIDC_AUDIENCE", "ark_mate_web")
+	c, _, err := LoadResolved("")
+	if err != nil {
+		t.Fatalf("齐备时应加载成功：%v", err)
+	}
+	if !c.OIDCEnabled || c.OIDCIssuer != "http://localhost:8081/oidc" || c.OIDCAudience != "ark_mate_web" {
+		t.Fatalf("OIDC 三键读取不符：%+v", c)
+	}
+}
+
+// TestOIDCEnabledRequiresIssuerAudience 启用但缺 issuer/audience → 报错（fail-closed，不静默降级）。
+func TestOIDCEnabledRequiresIssuerAudience(t *testing.T) {
+	hermetic(t)
+	tsetenv(t, "MATE_OIDC_ENABLED", "true")
+	tsetenv(t, "MATE_OIDC_AUDIENCE", "ark_mate_web")
+	// 缺 issuer
+	if _, _, err := LoadResolved(""); err == nil {
+		t.Fatalf("enabled 但缺 issuer 应报错")
+	}
+	unset(t, "MATE_OIDC_AUDIENCE")
+	tsetenv(t, "MATE_OIDC_ISSUER", "http://x/oidc")
+	// 缺 audience
+	if _, _, err := LoadResolved(""); err == nil {
+		t.Fatalf("enabled 但缺 audience 应报错")
+	}
+}

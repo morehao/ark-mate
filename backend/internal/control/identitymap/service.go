@@ -92,3 +92,10 @@ func (s *Service) Onboard(ctx context.Context, id *contract.Identity) (OnboardRe
 
 	return OnboardResult{Onboarded: true, TenantID: id.TenantID, UserID: id.UserID}, nil
 }
+
+// OnboardErr 是 Onboard 的 error-only 适配（供只关心成败的调用方，如控制器冷路径开通）。
+// 语义与 Onboard 完全一致；tenant_id 为空等「跳过」情形返回 nil（跳过不是错误）。
+func (s *Service) OnboardErr(ctx context.Context, id *contract.Identity) error {
+	_, err := s.Onboard(ctx, id)
+	return err
+}
