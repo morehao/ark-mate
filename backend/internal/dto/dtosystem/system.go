@@ -68,6 +68,20 @@ type MetaInfo struct {
 	// 与 `Runtime` 并存是刻意的：诊断面要知道"这份部署跑在哪个底座上"，而产品面要知道
 	// "用户拿到的是什么产品"。两者的消费者不同，合并成一个段会让"关于"面板顺手读到底座名。
 	Product ProductInfo `json:"product"`
+	// Auth 控制面认证事实（决策 v38）：前端据此决定是否先走 ark-iam 登录。
+	// Enabled=false → 桌面本地态降级，前端门禁直接放行（与旧行为一致）。
+	Auth AuthInfo `json:"auth"`
+}
+
+// AuthInfo 是控制面认证的对外事实（`/meta.auth`）。
+//
+// 前端门禁的唯一输入：`enabled=true` 时用 `issuer` + `clientId` 构造 ark-iam 登录
+// （`@morehao/ark-iam-react` 的 `createAuthProvider`）；`enabled=false` 时不门禁、直接进界面
+// （桌面单机自用的降级形态）。**不含任何密钥**——SPA 是 public client，只需 client_id。
+type AuthInfo struct {
+	Enabled  bool   `json:"enabled"`
+	Issuer   string `json:"issuer"`
+	ClientID string `json:"clientId"`
 }
 
 // Entries 这份部署对外提供哪些入口。

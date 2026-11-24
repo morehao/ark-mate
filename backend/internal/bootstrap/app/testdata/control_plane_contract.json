@@ -51,6 +51,7 @@
     "data_kind": "object",
     "data_keys": [
       "apiContract",
+      "auth",
       "coreVersion",
       "home",
       "payloads",

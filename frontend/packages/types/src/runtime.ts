@@ -84,6 +84,18 @@ export interface MetaResp {
    * 什么产品"。两者的消费者不同，合并成一个段会让「关于」面板顺手读到底座名。
    */
   product: ProductInfo
+  /**
+   * 控制面认证事实（决策 v38）。前端门禁据此决定是否先走 ark-iam 登录：
+   * `enabled=false` → 桌面本地态降级，不门禁、直接进界面（与旧行为一致）。
+   */
+  auth: AuthInfo
+}
+
+/** 控制面认证事实（`/meta` 的 `auth`，决策 v38）。SPA 是 public client，只需 client_id。 */
+export interface AuthInfo {
+  enabled: boolean
+  issuer: string
+  clientId: string
 }
 
 /** 底座进程状态（诊断面的 `state`；与界面上"运行中/已停止"的语义色同源）。 */

@@ -34,6 +34,8 @@ type MetaSource struct {
 	Runtime dtosystem.RuntimeInfo
 	// Product 产品面事实（`ProductInfoOf(version.Version)` 的产物；空 = 由装配层补）。
 	Product dtosystem.ProductInfo
+	// Auth 控制面认证事实（决策 v38）；空值 = 认证未启用（桌面本地态降级）。
+	Auth dtosystem.AuthInfo
 }
 
 // MetaAssets 资产层交给 `/meta` 的那部分。
@@ -62,6 +64,7 @@ func (s MetaSource) Snapshot() dtosystem.MetaInfo {
 		WebBuildID:  s.Assets.BuildID,
 		Runtime:     s.Runtime,
 		Product:     s.Product,
+		Auth:        s.Auth,
 	}
 	if m.Payloads == nil {
 		m.Payloads = []dtosystem.PayloadInfo{}

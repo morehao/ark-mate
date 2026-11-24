@@ -31,6 +31,12 @@ func (as *assembly) metaSource() svcsystem.MetaSource {
 		Payloads:    payloads,
 		// 产品面事实（产品名/版本/身份版本/定位）：**不读** runtime 段——「关于」面板只消费它。
 		Product: svcsystem.ProductInfoOf(version.Version),
+		// 认证事实（决策 v38）：前端门禁据此决定是否先走 ark-iam 登录。enabled=false → 不门禁。
+		Auth: dtosystem.AuthInfo{
+			Enabled:  as.cfg.OIDCEnabled,
+			Issuer:   as.cfg.OIDCIssuer,
+			ClientID: as.cfg.OIDCAudience,
+		},
 	}
 	if as.assets.Has() {
 		src.Assets = svcsystem.MetaAssets{
