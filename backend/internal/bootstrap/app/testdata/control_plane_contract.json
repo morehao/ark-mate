@@ -13,6 +13,20 @@
   },
   {
     "method": "GET",
+    "path": "/v1/mate/control/me",
+    "status": 401,
+    "code": 40101,
+    "msg": "未认证",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "GET",
     "path": "/v1/mate/meta",
     "status": 200,
     "code": 0,
