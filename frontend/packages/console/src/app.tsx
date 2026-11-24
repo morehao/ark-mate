@@ -170,6 +170,10 @@ export function App() {
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           <Routes>
             <Route path="/" element={<Navigate to="/sessions" replace />} />
+            {/* 控制面登录回调（决策 v38）：react-oidc-context 在 AuthProvider 挂载时处理 ?code；
+                这里给一个落点，避免被下方 `*` 直接替换掉 URL（在 OP 回跳处理完成前）。仅渲染占位，
+                RequireAuth 会在认证完成前显示 spinner、完成后放行。 */}
+            <Route path="/auth/callback" element={<div aria-label="登录回调处理中" />} />
             {/* 新建会话不再是独立页面：/sessions 无 id 时问答区即新建面板 */}
             <Route path="/new" element={<Navigate to="/sessions" replace />} />
             <Route path="/sessions" element={<ChatPage />} />
