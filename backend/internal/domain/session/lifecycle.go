@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/morehao/ark-mate/internal/core/failure"
 	pkgidentity "github.com/morehao/ark-mate/internal/core/identity"
@@ -297,7 +298,9 @@ func (l *Lifecycle) StartSession(ctx context.Context, opt StartOptions) (*Create
 		CapabilityJSON: MarshalCapabilitySelection(opt.Selection),
 		// 钉住的原生权限模式（v29）：它决定这个会话跑在**哪个暖进程**上，所以必须与其它
 		// 钉住字段一起落库——漏了它，重启后该会话会悄悄换到一个"不注入原生权限"的进程上。
-		NativeMode: opt.NativeMode})
+		NativeMode: opt.NativeMode,
+		// 新建会话即一次活跃（Unix 毫秒）——M3-1/M3-3 的基线活跃时间。
+		LastActiveAt: time.Now().UnixMilli()})
 	l.plane.BeginTranscript(as.ID, spec.ID, cwd, opt.WorkspaceTemporary) // 未启用时 no-op
 	evt := l.plane.Publish(BusSessionCreated, as.ID, map[string]any{
 		"session_id": as.ID, "runtime": spec.ID,
@@ -455,6 +458,8 @@ func (l *Lifecycle) ConnectSession(ctx context.Context, recIn *SessionRec,
 	if rec.Fingerprint != fingerprint {
 		rec.Fingerprint = fingerprint
 	}
+	// resume 也是一次活跃（Unix 毫秒）：冷会话被拉起即刷新活跃时间。
+	rec.LastActiveAt = time.Now().UnixMilli()
 	l.plane.RegisterSession(&rec)
 	as := NewActiveSession(HandleParams{
 		ID: rec.ID, Runtime: spec.ID, Fingerprint: fingerprint, NativeMode: rec.NativeMode,

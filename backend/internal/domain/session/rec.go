@@ -69,6 +69,10 @@ type SessionRec struct {
 	Archived       bool   // 归档（软删除；会话列表默认不展示）
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// LastActiveAt 最近一次真正活跃（一轮 prompt 开始 / resume 使用）的 Unix 毫秒（0 = 未记录）。
+	// 与 UpdatedAt 分开：UpdatedAt 是行 mtime（改标题/置顶/归档都刷），本字段只由 TouchLastActive
+	// 在「会话被真正使用」时更新——是 M3-1 驻留 LRU 与 M3-3 分层的干净信号。
+	LastActiveAt int64
 }
 
 // RegisterSession 登记一个新会话（已存在则覆盖）；未提供的时间落为当前 UTC。
@@ -88,6 +92,28 @@ func (pl *Plane) RegisterSession(rec *SessionRec) {
 	pl.mu.Unlock()
 	if !restoring {
 		pl.persistSession(rec)
+	}
+}
+
+// TouchLastActive 记录会话「最近一次真正活跃」的时刻（Unix 毫秒），并回写库。
+//
+// 调用点 = 会话被真正使用的地方（一轮 prompt 开始 / resume 使用），**不是**元数据变更——
+// 这正是它与 UpdatedAt（行 mtime）分开的意义：改标题/置顶不该刷新活跃时间，否则热/温/冷分层
+// 与驻留 LRU 会被"改了个标题"误判成"刚用过"。会话不存在则 no-op。
+// 回写走 persistSession（best-effort：失败只告警，不阻断会话流程）。
+func (pl *Plane) TouchLastActive(sessionID string) {
+	pl.mu.Lock()
+	rec, ok := pl.sessions[sessionID]
+	if !ok {
+		pl.mu.Unlock()
+		return
+	}
+	rec.LastActiveAt = time.Now().UnixMilli()
+	snapshot := *rec // 快照一份，锁外落库（persistSession 不持 pl.mu）
+	restoring := pl.restoring
+	pl.mu.Unlock()
+	if !restoring {
+		pl.persistSession(&snapshot)
 	}
 }
 

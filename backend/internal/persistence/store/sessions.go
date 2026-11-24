@@ -49,6 +49,10 @@ func (s *Store) UpsertSession(ctx context.Context, sess model.SessionEntity) err
 			"last_seq":               gorm.Expr("MAX("+model.TableNameSession+".last_seq, ?)", sess.LastSeq),
 			"created_at":             model.FormatTimeOrNow(sess.CreatedAt),
 			"updated_at":             model.FormatTimeOrNow(sess.UpdatedAt),
+			// 最近活跃时间按传入值覆盖：普通持久化/元数据更新传的是记录里同一个值（不变），只有
+			// TouchLastActive 会把它推进到"现在"。不取 MAX——活跃时间语义上是"最后一次使用时刻"，
+			// 允许调用方显式回填/校正（与 last_seq 的触顶语义不同：那是单调水位，这是时间快照）。
+			"last_active_at": sess.LastActiveAt,
 		}),
 	}).Create(&sess).Error
 }

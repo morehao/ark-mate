@@ -209,6 +209,9 @@ func (r *Runner) PromptParts(ctx context.Context, sessionID, text string, parts 
 	client := as.Client()
 	r.busy.Mark(client, as.ID)
 
+	// 记录"最近一次真正活跃"= 现在（M3-1/M3-3 的干净活跃信号；与改标题等元数据变更区分）。
+	r.plane.TouchLastActive(as.ID)
+
 	r.plane.MarkSession(as.ID, SessionStatusInProgress)
 	// 开轮三连（v22，设计 §D2）：① `run.started` 落库拿到本轮的**起点位次** → ② 开轮行
 	// （`run_<ULID>` 身份与事件载荷同源、`first_seq` = 那个位次）→ ③ 用户消息。
