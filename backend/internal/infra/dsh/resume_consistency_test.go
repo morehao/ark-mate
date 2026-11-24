@@ -48,11 +48,9 @@ import (
 	"github.com/morehao/ark-mate/internal/infra/protocol/acp"
 )
 
-func resumeProbeEnv(t *testing.T) (payload, tmp string) {
+// probeEnv 读取并校验 dsh 探针共用的隔离环境（不判开启开关——各探针自己判）。
+func probeEnv(t *testing.T) (payload, tmp string) {
 	t.Helper()
-	if os.Getenv("DSH_RESUME_PROBE") != "1" {
-		t.Skip("resume 一致性探针默认跳过：设 DSH_RESUME_PROBE=1 显式运行")
-	}
 	payload = strings.TrimSpace(os.Getenv("DSH_PROBE_PAYLOAD"))
 	tmp = strings.TrimSpace(os.Getenv("DSH_PROBE_TMP"))
 	if payload == "" || tmp == "" {
@@ -62,6 +60,14 @@ func resumeProbeEnv(t *testing.T) (payload, tmp string) {
 		t.Fatalf("载荷 bin.js 不存在：%v", err)
 	}
 	return payload, tmp
+}
+
+func resumeProbeEnv(t *testing.T) (payload, tmp string) {
+	t.Helper()
+	if os.Getenv("DSH_RESUME_PROBE") != "1" {
+		t.Skip("resume 一致性探针默认跳过：设 DSH_RESUME_PROBE=1 显式运行")
+	}
+	return probeEnv(t)
 }
 
 // fakeMsg 是 OpenAI chat 历史里的一条（判金丝雀用）。
