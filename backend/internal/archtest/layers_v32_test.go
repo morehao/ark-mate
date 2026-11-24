@@ -213,6 +213,12 @@ var v32Layers = map[string]v32Layer{
 		"internal/drivers/gateway", "internal/controller", "internal/middleware", "internal/router",
 		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
 	}},
+	// L7：控制面 SaaS 编排（ark-iam RP 接入的身份映射/准入/SLO，决策 v38）。与 sessionruntime 同为
+	// 执行面编排带：可向内用到 store(L5)/domain(L2)/core(L1)，但不出到入站带（controller/middleware/router）。
+	"internal/control": {layer: 7, name: "control", deny: []string{
+		"internal/drivers/gateway", "internal/controller", "internal/middleware", "internal/router",
+		"internal/bootstrap/assembly", "internal/bootstrap/app", "internal/bootstrap/cliops", "internal/bootstrap/cli",
+	}},
 
 	// ——— L8：入站适配 ———
 	"internal/controller": {layer: 8, name: "controller", deny: []string{
