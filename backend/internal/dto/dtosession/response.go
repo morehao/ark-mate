@@ -66,6 +66,10 @@ type SessionResp struct {
 	ModelName string `json:"model_name,omitempty"`
 	CreatedAt int64  `json:"created_at"` // Unix 毫秒
 	UpdatedAt int64  `json:"updated_at"`
+	// LastActiveAt 最近一次真正活跃时刻（Unix 毫秒；0 = 未记录）。与 `updated_at`（行 mtime，
+	// 改标题/置顶/归档都会刷）分开——它只在会话被真正使用（一轮 prompt / resume）时更新，
+	// 是池化热/温/冷分层与驻留调度的活跃信号，读面回显供诊断与展示。
+	LastActiveAt int64 `json:"last_active_at"`
 	// Origin 会话来源（平台判定，非用户输入）：空 = 人工创建，`automation:<id>` = 该定时任务触发。
 	// 回显的意义与 capabilities 同一条：用户要能看见"这条会话是谁开的"，而不是靠时间去猜。
 	Origin string `json:"origin,omitempty"`
