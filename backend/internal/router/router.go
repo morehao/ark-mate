@@ -21,6 +21,7 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
 	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
 	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
+	"github.com/morehao/ark-mate/internal/controller/ctrcontrol"
 	"github.com/morehao/ark-mate/internal/controller/ctrexport"
 	"github.com/morehao/ark-mate/internal/controller/ctrlibrary"
 	"github.com/morehao/ark-mate/internal/controller/ctrmaterial"
@@ -33,6 +34,7 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrworkspace"
 	"github.com/morehao/ark-mate/internal/controller/ctrws"
 	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/ark-mate/internal/middleware/authn"
 	"github.com/morehao/golib/biz/gserver/ginserver"
 	"github.com/morehao/golib/biz/gserver/ginupload"
 	"github.com/morehao/golib/filestore"
@@ -66,6 +68,8 @@ type Controllers struct {
 	Material ctrmaterial.MaterialCtr
 	// Artifact 产物溯源（v34）。
 	Artifact ctrartifact.ArtifactCtr
+	// Control 控制面身份面（决策 v38：ark-iam RP 认证；`GET /control/me`）。
+	Control ctrcontrol.ControlCtr
 }
 
 // Deps 路由装配依赖（只有已构造的控制器与交付层设施）。
@@ -104,6 +108,11 @@ type Deps struct {
 	//
 	// 与 attachmentstore.Store.FileStore() 是**同一个实例**：上传、去重、附件索引共用一套字节底座。
 	FileStore *filestore.FileStore
+
+	// Authenticator 是控制面认证验签器（决策 v38：ark-iam RP）。nil = 未启用认证（桌面本地态降级 /
+	// 测试夹具），此时 `/control/*` 与受保护面**不挂**鉴权中间件（仅回环自用的旧行为）。非 nil 时
+	// 鉴权中间件挂在受保护的 `/control` 组上（完整「全入口保护」随控制面其余模块逐步接入）。
+	Authenticator *authn.Authenticator
 
 	// AnswererToken 是 answerer 桥接插件 `/elicitations/ask` 入口的服务端强校验令牌
 	// （`middleware.AnswererToken`）。由装配根从 `dsh.AnswererEnv` 的同一次生成拿到、与注入
@@ -176,6 +185,7 @@ func New(d Deps) *gin.Engine {
 	registerArtifact(rest, ctrls.Artifact)
 	registerUsage(rest, ctrls.Usage)
 	registerSystem(rest, ctrls.System)
+	registerControl(rest, ctrls.Control, d.Authenticator)
 
 	// 全局唯一的上传面（产物溯源 P0′）：golib ginupload 一步挂上整套 `/files` 资源
 	// （上传 / 分片 / 详情 / 删除 / presign / serve）。业务模块只建索引、不再各自收字节。

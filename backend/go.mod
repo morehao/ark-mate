@@ -8,7 +8,7 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/morehao/ark-iam/contract v0.1.0
-	github.com/morehao/ark-iam/sdk v0.0.0
+	github.com/morehao/ark-iam/sdk v0.6.3
 	github.com/morehao/golib v1.39.2
 	go.uber.org/goleak v1.3.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -21,7 +21,6 @@ require (
 	github.com/bytedance/sonic/loader v0.5.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.7 // indirect
-	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/gabriel-vasile/mimetype v1.4.16 // indirect
 	github.com/gin-contrib/cors v1.7.11 // indirect
 	github.com/gin-contrib/sse v1.2.1 // indirect
@@ -31,7 +30,6 @@ require (
 	github.com/go-redis/redis_rate/v10 v10.0.1 // indirect
 	github.com/goccy/go-json v0.12.0 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
@@ -41,7 +39,6 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/ncruces/go-sqlite3 v0.38.0 // indirect
-	github.com/ncruces/go-sqlite3-wasm/v2 v2.1.35300 // indirect
 	github.com/ncruces/go-sqlite3-wasm/v6 v6.7.35401 // indirect
 	github.com/ncruces/go-sqlite3/gormlite v0.34.0 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
@@ -66,10 +63,3 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )
-
-// TODO(P1 合并前必须处理)：ark-iam 集成物当前用本地 replace 指向同机检出（开发期桥接）。
-// 正式合并前替换为发布版 `github.com/morehao/ark-iam/sdk v0.4.0`（contract 为传递依赖），删除这两条 replace。
-// 设计见 .dsh/docs/specs/2026-11-24-ark-iam-rp-integration-design.md。
-replace github.com/morehao/ark-iam/sdk => ../../ark-iam/sdk
-
-replace github.com/morehao/ark-iam/contract => ../../ark-iam/contract
