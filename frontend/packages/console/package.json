@@ -28,7 +28,8 @@
     "remark-math": "^6.0.0",
     "shiki": "^4.6.0",
     "xlsx": "^0.18.5",
-    "zustand": "^5.0.15"
+    "zustand": "^5.0.15",
+    "@morehao/ark-iam-react": "^0.3.5"
   },
   "devDependencies": {
     "@ark-mate/tsconfig": "workspace:*",

@@ -279,6 +279,7 @@ var topLevelRoles = map[string]topLevelRole{
 	"runtime":        {role: "底座契约、注册表与隔离投影", bands: []int{1}},
 	"drivers":        {role: "接线：域端口 ↔ 适配体、连接面、导入导出编排", bands: []int{6}},
 	"sessionruntime": {role: "运行期编排（会话执行 / 权限 / 断连语义）", bands: []int{7}},
+	"control":        {role: "控制面 SaaS 编排（ark-iam RP 身份映射 / 准入 / SLO）", bands: []int{7}},
 	"controller":     {role: "入站适配（HTTP / WS 参数解析与响应）", bands: []int{8}},
 	"middleware":     {role: "入站横切（凭据鉴权 / 来源判定）", bands: []int{8}},
 	"router":         {role: "路由表装配与前端资产交付", bands: []int{9}},

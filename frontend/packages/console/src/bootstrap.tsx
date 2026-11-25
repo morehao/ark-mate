@@ -8,12 +8,14 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { AppShell } from '@ark-mate/ui'
-import { listApps } from '@ark-mate/api'
+import { getMeta, listApps } from '@ark-mate/api'
 import { loadCapabilityFacts } from './capabilityFacts'
 import { applyAppPagesFromApps, clearAppPages, resolveAppPages } from './console/appRegistry'
 import { deriveRuntimeAppPages, setRuntimeAppPages } from './console/runtimeAppPages'
 import { watchDevAssets } from './transport/assetWatch'
 import { renderVersionMismatch, runVersionGate } from './versionGate'
+import { AuthGate } from './auth/gate'
+import type { AuthInfo } from '@ark-mate/types'
 
 /**
  * 从 `/apps` 读应用定义，把带 `page` 的 app 补登进统一注册表（`console/appRegistry.ts`）。
@@ -71,16 +73,28 @@ export async function bootstrap(opts: { webBuildId: string }): Promise<void> {
   // 失败不阻断：拉不到 /apps 就只少 app 页，内置页照常（界面不该因为一份列表而少一块）。
   await loadAppPages()
 
+  // 控制面认证事实（决策 v38）：enabled 时包登录门禁，否则直透（桌面本地态降级）。
+  // 读失败按「未启用」处理（fail-open 到旧行为，不把界面锁死——认证是否必需由后端裁决，
+  // 前端读不到事实时不该比后端更严格）。云端态后端会拒未认证请求，界面最终仍会收到 401。
+  let authFact: AuthInfo = { enabled: false, issuer: '', clientId: '' }
+  try {
+    authFact = (await getMeta()).auth ?? authFact
+  } catch (err) {
+    console.warn('[auth] 读取 /meta.auth 失败，按未启用处理：', err)
+  }
+
   // 注册表补登完成后再动态引入应用树（含 navView / app.tsx 的派生），保证同源派生拿到最终页集。
   const { App } = await import('./app')
 
   createRoot(root).render(
     <StrictMode>
-      <AppShell>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </AppShell>
+      <AuthGate auth={authFact}>
+        <AppShell>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </AppShell>
+      </AuthGate>
     </StrictMode>,
   )
 

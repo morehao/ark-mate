@@ -148,7 +148,7 @@ Electron 主进程（桌面态）
 | **L4** | `service/svc<领域>` | 用例层：接口 + 实现 + 构造函数；校验、错误码、响应装配 |
 | **L5** | `persistence/{store,dao}` `infra/{credentials,dbclient,procreg,dsh,host,installed,attachmentstore,materialmcp}` `infra/protocol/{acp,mcp}` | 持久与基础设施（`host` = 宿主短命进程，`installed` = 本机可执行性探测，`attachmentstore` = 附件字节端口，`materialmcp` = 资料库 MCP 工具面；`protocol/*` = 协议绑定——内圈只认 `core/protocol` 平台值，翻译只在连接边界与装配面） |
 | **L6** | `drivers/{gateway,mechanism,registry,runtimeconn,transfer}` `config` | 驱动侧：机制、注册表、连接面、存量定义导入导出编排 |
-| **L7** | `sessionruntime` | 会话编排（Service / Orchestrator / 权限） |
+| **L7** | `sessionruntime` `control` | 会话编排（Service / Orchestrator / 权限）/ **控制面 SaaS 编排**（ark-iam RP 身份映射 / 准入 / SLO，决策 v38） |
 | **L8** | `controller/ctr<领域>` `middleware` | 入站适配（参数解析与响应 / Host-Origin 来源判定） |
 | **L9** | `router` `bootstrap/{assembly,app,cliops,cli,maintenance}` | 路由装配与前端资产交付 / 组合根与生命周期 |
 
@@ -743,6 +743,7 @@ backend/
 │   ├── controller/ctr<域>/   入站适配（16 个：session / capability / model / workspace / automation / attachment / artifact / library / material / app / export / search / usage / runtime / system / ws）
 │   ├── service/svc<域>/      用例层（接口 + 实现 + 构造函数；15 个；svc 之间零互 import）
 │   ├── sessionruntime/       会话编排（L7：Service / Orchestrator / 权限 / 附件 PromptPart 投影）
+│   ├── control/              控制面 SaaS 编排（L7：ark-iam RP 身份映射 / 准入 / SLO，决策 v38）
 │   ├── domain/<域>/          领域平面（session / workspace / provider / skill / mcp / automation / interaction / identity / expert / material / artifact）
 │   ├── dto/dto<域>/          请求/响应 DTO（两侧共用，自身不依赖应用层）
 │   ├── core/                 值对象与平台值（L1）：object/*（含 objid id 铸造 + rt_ 壳）· code · capability（含 App 定义 + ValidateApp）· appslot（应用扩展点契约 + Reconcile）· apppkg（应用包清单/校验/分发）· automation · identity · resource · redact · credential（供应商密钥引用）· definition · eventbus · failure · protocol · scratch（会话过程产物目录 .scratch 约定的纯判定/路径构造）

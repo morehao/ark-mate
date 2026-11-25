@@ -1,11 +1,13 @@
 package assembly
 
 import (
+	"github.com/morehao/ark-mate/internal/control/identitymap"
 	"github.com/morehao/ark-mate/internal/controller/ctrapp"
 	"github.com/morehao/ark-mate/internal/controller/ctrartifact"
 	"github.com/morehao/ark-mate/internal/controller/ctrattachment"
 	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
 	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
+	"github.com/morehao/ark-mate/internal/controller/ctrcontrol"
 	"github.com/morehao/ark-mate/internal/controller/ctrexport"
 	"github.com/morehao/ark-mate/internal/controller/ctrlibrary"
 	"github.com/morehao/ark-mate/internal/controller/ctrmaterial"
@@ -27,10 +29,17 @@ import (
 // 每条构造只传**已构造的用例**与交付层设施（握手来源判定 / 宿主事实）；
 // 控制器内部不再 `New` 任何 `svc*`，也不接收 store/domain 平面。
 func (as *assembly) buildControllers() router.Controllers {
-	return as.services.BuildControllers(as.origin, func() bool {
+	ctrls := as.services.BuildControllers(as.origin, func() bool {
 		// 宿主能不能抬起系统目录面板：判据在领域里（绑回环 + 非 SSH + 有显示会话）。
 		return as.planes.Picker.NativePickerMode() == string(workspace.NativePickerHost)
 	})
+	// 控制面身份面（决策 v38）：装配了持久层时把 `identitymap.Service` 接成 `/control/me` 冷路径
+	// 开通的 onboarder（`*identitymap.Service` 的 OnboardErr 满足 ctrcontrol.Onboarder）。
+	// 无持久层（memory 模式）→ 不接开通（nil），`/control/me` 退化为纯投影。
+	if as.st != nil {
+		ctrls.Control = ctrcontrol.NewControlCtr(identitymap.New(as.st, nil))
+	}
+	return ctrls
 }
 
 // BuildControllers 构造控制器集合（装配根与路由级测试共用同一套）。
@@ -61,5 +70,6 @@ func (s Services) BuildControllers(origin *middleware.OriginPolicy, hostFacts fu
 		Attachment: ctrattachment.NewAttachmentCtr(s.Attachment),
 		Material:   ctrmaterial.NewMaterialCtr(s.Material),
 		Artifact:   ctrartifact.NewArtifactCtr(s.Artifact),
+		Control:    ctrcontrol.NewControlCtr(nil),
 	}
 }

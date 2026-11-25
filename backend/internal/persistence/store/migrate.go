@@ -820,6 +820,10 @@ var schemaMigrations = []migration{
 	// v43 本体在 migrate_v43.go（会话最近活跃时间 `sessions.last_active_at` 落库：Unix 毫秒，
 	// 供 M3-1 驻留 LRU 与 M3-3 热/温/冷分层作判决输入；与行 mtime 的 updated_at 分开——理由写在该文件头）。
 	migrationV43,
+
+	// v44 本体在 migrate_v44.go（控制面认证数据模型：control_tenants/users/identity_audits/logout_jtis
+	// 四表——ark-iam RP 接入的映射/平台属性/审计/jti 去重；身份真源仍是 ark-iam，理由写在该文件头）。
+	migrationV44,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

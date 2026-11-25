@@ -311,6 +311,7 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 			!strings.HasPrefix(p, "/search") && !strings.HasPrefix(p, "/settings/") &&
 			!strings.HasPrefix(p, "/health") &&
 			!strings.HasPrefix(p, "/meta") &&
+			!strings.HasPrefix(p, "/control") &&
 			!strings.HasPrefix(p, "/capabilities") &&
 			!strings.HasPrefix(p, "/attachments") &&
 			// `/files/...` 一族由 golib ginupload 挂载（memory 模式测试引擎不挂它，故不在此提取），
