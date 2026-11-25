@@ -89,8 +89,8 @@ github.com/modern-go/reflect2 v1.0.2 h1:xBagoLtFs94CBntxluKeaWgTMpvLxC4ur3nMaC9G
 github.com/modern-go/reflect2 v1.0.2/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=
 github.com/morehao/ark-iam/contract v0.1.0 h1:O6Uokvt7T3hcR7sNF1fszwzQsd/NSNeLukVyPEUERCM=
 github.com/morehao/ark-iam/contract v0.1.0/go.mod h1:Bhg5Qbszltjymv2KkXFKEBLxY44znGQFJobRuyV8Zio=
-github.com/morehao/ark-iam/sdk v0.6.3 h1:+bKqDu9zWXC0AUvZy4uK+FQ0/N/TqQH9rPpZL3l1B/8=
-github.com/morehao/ark-iam/sdk v0.6.3/go.mod h1:Hs62rVGWmF8w6VLatc/NMURsFf0QCX+z1KGwIuUmU6U=
+github.com/morehao/ark-iam/sdk v0.7.0 h1:fkp6vQ1Vx5DNuTDui/9iYs1w0fPrwrdmiW8KQyw9WdU=
+github.com/morehao/ark-iam/sdk v0.7.0/go.mod h1:Fu8OpCwvOcQYMJRMOxYOSpLl1dEeomI2W7DNk3pe+PI=
 github.com/morehao/golib v1.39.2 h1:cc4EMWoXh6tjzq7k4bStV7cgVhegBalBVFF0yk9OoQQ=
 github.com/morehao/golib v1.39.2/go.mod h1:zwBhE1Uq7tBjLrlBNqbpsc8dA9RV67jiIF+Du03UHho=
 github.com/ncruces/go-sqlite3 v0.38.0 h1:FSy3sxWTaGPzTZgE9mkM+bo6b4Kj0iTvsDjJz2IfB84=
