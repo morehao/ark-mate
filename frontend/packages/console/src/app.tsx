@@ -1,7 +1,7 @@
 // 应用壳（console.html .app）：左栏（导航 + 会话区 + 状态）+ WS reconnecting 横幅 + 路由区 + 全局 toast。
-import { Suspense, useEffect, type ReactNode } from 'react'
+import { Suspense, useEffect, useRef, type ReactNode } from 'react'
 import { MenuOutlined } from '@ant-design/icons'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { tokens } from '@ark-mate/ui'
 import { consoleStyleSheet } from './console.css'
 import { NavRail } from './components/NavRail'
@@ -14,6 +14,7 @@ import { SandboxAppFrame } from './components/SandboxAppFrame'
 import { useMate } from './store'
 import { ChatPage } from './pages/ChatPage'
 import { PreviewProvider } from './components/preview/PreviewProvider'
+import { AUTH_CALLBACK_PATH } from './auth/gate'
 
 /** 全局 toast 的层级。
  *
@@ -80,6 +81,20 @@ export function App() {
   const drawerOpen = useMate((s) => s.drawerOpen)
   const setDrawer = useMate((s) => s.setDrawer)
   const location = useLocation()
+
+  // `/auth/callback`：OP 回跳后把 `?code=...&state=...` 从地址栏清掉、落回界面。
+  // react-oidc-context 的 `AuthProvider` 在挂载时用 `hasAuthParams()` 检出 `?code` 并调用
+  // `userManager.signinCallback()` 完成换 token，随后才放行 children（RequireAuth 之后的
+  // 路由才可渲染）。所以本路由渲染时**一定已认证完成**——不需要再手动
+  // `signinRedirectCallback()`（会与 SDK 内处理重复、二次消费 code）。唯一收尾：用一次
+  // replace 导航把带 code 的 URL 换成 `/`，避免停在空占位页、也避免刷新时重复解析已用过的 code。
+  const navigate = useNavigate()
+  const callbackHandled = useRef(false)
+  useEffect(() => {
+    if (location.pathname !== AUTH_CALLBACK_PATH || callbackHandled.current) return
+    callbackHandled.current = true
+    navigate('/', { replace: true })
+  }, [location.pathname, navigate])
 
   return (
     <PreviewProvider>
@@ -171,9 +186,12 @@ export function App() {
           <Routes>
             <Route path="/" element={<Navigate to="/sessions" replace />} />
             {/* 控制面登录回调（决策 v38）：react-oidc-context 在 AuthProvider 挂载时处理 ?code；
-                这里给一个落点，避免被下方 `*` 直接替换掉 URL（在 OP 回跳处理完成前）。仅渲染占位，
-                RequireAuth 会在认证完成前显示 spinner、完成后放行。 */}
-            <Route path="/auth/callback" element={<div aria-label="登录回调处理中" />} />
+                RequireAuth 在认证完成前显示 spinner、完成后放行到本路由。本路由只作为一个落点，
+                并由 App 的 effect 用 replace 导航回 `/`（不让用户停在回调 URL、也不重复解析 code）。 */}
+            <Route
+              path={AUTH_CALLBACK_PATH}
+              element={<div aria-label="登录回调处理中" style={{ padding: 24, color: tokens.textSecondary, fontSize: 13 }}>登录成功，正在进入…</div>}
+            />
             {/* 新建会话不再是独立页面：/sessions 无 id 时问答区即新建面板 */}
             <Route path="/new" element={<Navigate to="/sessions" replace />} />
             <Route path="/sessions" element={<ChatPage />} />

@@ -11,10 +11,10 @@
  *  3. 未认证时 `signinRedirect()` 跳 OP，认证后渲染界面。
  *
  * **依赖前置**：本模块 `import '@morehao/ark-iam-react/auth'`，前端构建/typecheck 前必须先
- * `pnpm add @morehao/ark-iam-react@^0.2.0`（peer: antd5 / react18 / react-router-dom7）。
+ * `pnpm add @morehao/ark-iam-react@^0.3.5`（peer: antd6 / react19 / react-router-dom7）。
  * 未装包 → 该 specifier 无法解析（这是集成本身的前置，不是 bug）。
  */
-import { useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, type ReactNode } from 'react'
 import { createAuthProvider, useAuthGuard, FullPageSpinner } from '@morehao/ark-iam-react/auth'
 import { setAccessTokenProvider } from '@ark-mate/api'
 import type { AuthInfo } from '@ark-mate/types'
@@ -43,6 +43,21 @@ function RequireAuth({ children }: { children: ReactNode }) {
 }
 
 /**
+ * 认证是否启用（决策 v38）。默认 `false`。只在 `auth.enabled=true` 时由 AuthGate 置 `true`。
+ *
+ * 用途：左栏 footer 的「登出 / 租户切换」UI 必须**只在认证启用时**渲染——`enabled=false`
+ * 的桌面本地态没有 `AuthProvider`（也就没有 `useAuthGuard` 的 context），此时若无条件调用
+ * SDK 的 hooks 会抛错。消费方先用 `useAuthEnabled()` 判断，未启用直接返回 null（不挂载
+ * 调用 SDK hooks 的子组件），从而保证本地态与旧行为完全一致。
+ */
+const AuthEnabledContext = createContext(false)
+
+/** 认证是否启用（AuthGate 之外恒为 false）。 */
+export function useAuthEnabled(): boolean {
+  return useContext(AuthEnabledContext)
+}
+
+/**
  * AuthGate：按 `meta.auth` 决定是否包登录门禁。
  *
  * `auth.enabled=false` → 直透 children（桌面本地态，不门禁、不引 OP）。
@@ -61,9 +76,11 @@ export function AuthGate({ auth, children }: { auth: AuthInfo; children: ReactNo
     postLogoutRedirectPath: '/',
   })
   return (
-    <AuthProvider>
-      <RequireAuth>{children}</RequireAuth>
-    </AuthProvider>
+    <AuthEnabledContext.Provider value={true}>
+      <AuthProvider>
+        <RequireAuth>{children}</RequireAuth>
+      </AuthProvider>
+    </AuthEnabledContext.Provider>
   )
 }
 

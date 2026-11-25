@@ -313,6 +313,69 @@ export const consoleStyleSheet = `
   }
   .fg-wsdot-text { max-width: 84px; overflow: hidden; text-overflow: ellipsis; }
 
+  /* ——— 账号区（footer「设置」行之上，决策 v38）：登出 + 租户切换 ———
+     与「设置」行同一套菜单交互态（--fg-menu-*）：默认灰字 / hover 近黑字 + 软底 /
+     租户行可点（下拉）。整块上方一道 hairline 与「设置」行分群；只在认证启用时由组件渲染。 */
+  .fg-authfoot { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px 0; }
+  .fg-authfoot-row,
+  .fg-authfoot-account .fg-authfoot-user {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    height: 32px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    font-size: 13px;
+    color: var(--fg-menu-idle);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .fg-authfoot-row { width: 100%; }
+  .fg-authfoot-row:hover {
+    background: var(--fg-menu-hover-bg);
+    color: var(--fg-menu-hover-color);
+  }
+  .fg-authfoot-row:hover .fg-navitem-icon { color: var(--fg-menu-hover-color); }
+  /* 租户名：单行省略（长名不把箭头挤掉）。 */
+  .fg-authfoot-tenant { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fg-authfoot-caret {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-authfoot-row:hover .fg-authfoot-caret { color: var(--fg-menu-hover-color); }
+  /* 账号行：用户名为纯展示（不可点、无 hover 底），右端一个明确的登出图标按钮。 */
+  .fg-authfoot-account { display: flex; align-items: center; gap: 4px; }
+  .fg-authfoot-account .fg-authfoot-user { flex: 1; min-width: 0; cursor: default; }
+  .fg-authfoot-logout {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    margin-right: 2px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--fg-menu-idle-icon);
+    font-size: 15px;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .fg-authfoot-logout:hover {
+    background: var(--fg-menu-hover-bg);
+    color: var(--fg-menu-hover-color);
+  }
+
   /* 设置弹窗（一体式）：左列分节列表 + 右列内容，各自滚动；换节时弹窗高矮不变。 */
   .fg-setdlg {
     display: flex;

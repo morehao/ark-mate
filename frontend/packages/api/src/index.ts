@@ -1,4 +1,4 @@
-export { http, HttpError, toErrorMessage, setAccessTokenProvider } from './request'
+export { http, HttpError, toErrorMessage, setAccessTokenProvider, getAccessToken } from './request'
 export * from './resources/mate'
 export * from './resources/library'
 export * from './resources/material'

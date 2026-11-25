@@ -36,6 +36,17 @@ export function setAccessTokenProvider(provider: (() => string | null | undefine
   accessTokenProvider = provider
 }
 
+/**
+ * 读取当前 access token（供 WS 等**无法走 axios 拦截器**的通道自取）。
+ *
+ * 浏览器原生 WebSocket 不能自定义 Authorization 头，令牌只能放进 WS URL 的查询参数（决策 v38、
+ * 设计 §C2：SLO 按 sid 撤连接需要 WS 握手时能验出 sid）。与 axios 拦截器同一份 provider——每请求
+ * 现取、不缓存，静默续期后的新值对 WS 重连同样生效。未注入（未启用认证）→ 返回 null。
+ */
+export function getAccessToken(): string | null {
+  return accessTokenProvider?.() ?? null
+}
+
 // 每个请求按当前 token 附带 Bearer（token 由门禁维护，可能是静默续期后的新值——每请求现取，
 // 不缓存）。enabled=false 时 provider 为 null，直接跳过。
 instance.interceptors.request.use((config) => {

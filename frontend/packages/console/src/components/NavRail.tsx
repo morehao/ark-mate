@@ -1,7 +1,11 @@
+import { useEffect, useRef } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { DownOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons'
+import { DownOutlined, LogoutOutlined, PlusOutlined, RightOutlined, SwapOutlined, UserOutlined } from '@ant-design/icons'
+import { Dropdown } from 'antd'
 import { Dot, tokens } from '@ark-mate/ui'
 import { useMate } from '../store'
+import { useAuthEnabled } from '../auth/gate'
+import { getCurrentTenantId, useAuthGuard, useLogout, useTenantSwitching } from '@morehao/ark-iam-react/auth'
 import {
   NAV_ENTRIES,
   activeChildOf,
@@ -17,9 +21,108 @@ import { SETTINGS_MENU } from '../console/settingsView'
 import { SessionPane } from './SessionPane'
 
 /**
+ * 左栏 footer 的「账号区」（决策 v38）：登出入口 + 租户切换，紧邻「设置」那一行**之上**。
+ *
+ * **只在认证启用时挂载**：`AuthFooterSlot` 先用 `useAuthEnabled()` 判断——`auth.enabled=false`
+ * 的桌面本地态没有 `AuthProvider`，此时直接返回 null，绝不调用 SDK hooks（否则 `useAuth` 会
+ * 因缺 context 抛错）。启用时挂载 `AuthFooterInner`，它在 `RequireAuth` 内部，`useAuthGuard()`
+ * 必然拿到认证上下文。
+ *
+ * 视觉：与「设置」行同一套菜单交互态（`--fg-menu-*`），不写色值、不新增 css 文件；hover 收口在
+ * `console.css.ts` 的 `.fg-authfoot-*`。租户切换只在 `tenants.length > 1` 时才出现——只有
+ * 一个租户时「切换」是个没有第二项的菜单，不渲染（与「菜单里只有一个选项不是菜单」同一纪律）。
+ */
+function AuthFooterInner() {
+  const auth = useAuthGuard()
+  const logout = useLogout()
+  const { tenants, loadTenants, handleSwitchTenant } = useTenantSwitching()
+
+  // 已认证后再拉一次可用租户（SSO 探针/登录态就绪后才带得上 token；失败由 SDK 内 toast 兜底）。
+  const loadedRef = useRef(false)
+  useEffect(() => {
+    if (!auth.isAuthenticated || loadedRef.current) return
+    loadedRef.current = true
+    void loadTenants()
+  }, [auth.isAuthenticated, loadTenants])
+
+  // 当前租户：以 claim 为准（useAuthGuard 已把 token 里的 tenant_id 同步到 currentTenantId），
+  // 在列表里找同名租户展示；找不到就退回 id，避免展示空白。
+  const currentId = getCurrentTenantId()
+  const current = tenants.find((t) => t.tenantID === currentId)
+  const currentName = current?.name ?? currentId
+
+  const profile = auth.user?.profile
+  const accountLabel =
+    (typeof profile?.name === 'string' && profile.name) ||
+    (typeof profile?.preferred_username === 'string' && profile.preferred_username) ||
+    (typeof profile?.email === 'string' && profile.email) ||
+    '已登录'
+
+  const switchable = tenants.length > 1
+
+  return (
+    <div className="fg-authfoot">
+      {switchable && (
+        <Dropdown
+          trigger={['click']}
+          placement="topLeft"
+          menu={{
+            items: tenants.map((t) => ({
+              key: t.tenantID,
+              label: t.name,
+              disabled: t.tenantID === currentId,
+            })),
+            onClick: ({ key }) => {
+              void handleSwitchTenant(key)
+            },
+          }}
+        >
+          <button type="button" className="fg-authfoot-row" title={`切换租户（当前：${currentName}）`}>
+            <span className="fg-navitem-icon" aria-hidden="true">
+              <SwapOutlined />
+            </span>
+            <span className="fg-navitem-label fg-authfoot-tenant">{currentName || '选择租户'}</span>
+            <span className="fg-authfoot-caret" aria-hidden="true">
+              <DownOutlined style={{ fontSize: 10 }} />
+            </span>
+          </button>
+        </Dropdown>
+      )}
+      <div className="fg-authfoot-account">
+        <span className="fg-authfoot-user" title={accountLabel}>
+          <span className="fg-navitem-icon" aria-hidden="true">
+            <UserOutlined />
+          </span>
+          <span className="fg-navitem-label">{accountLabel}</span>
+        </span>
+        <button
+          type="button"
+          className="fg-authfoot-logout"
+          title="退出登录"
+          aria-label="退出登录"
+          onClick={() => {
+            void logout()
+          }}
+        >
+          <LogoutOutlined />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** 认证区插槽：未启用认证时什么都不渲染（桌面本地态保持原样）。 */
+function AuthFooterSlot() {
+  const enabled = useAuthEnabled()
+  return enabled ? <AuthFooterInner /> : null
+}
+
+/**
  * 常驻左栏（唯一导航面）：品牌 + 一级/二级导航 + 会话区 + footer。
- * footer 只有「设置」一个入口：点一下直接开设置弹窗（分节在弹窗内切——
- * 见 console/settingsView.tsx 与 components/settings/SettingsDialog.tsx）。
+ *
+ * footer 常驻「设置」一个入口（点一下直接开设置弹窗，分节在弹窗内切——见
+ * console/settingsView.tsx 与 components/settings/SettingsDialog.tsx）；**认证启用时**其上方
+ * 再挂一块「账号区」（登出 + 租户切换，见上 `AuthFooterInner`），本地态不渲染、保持原样。
  *
  * 纪律：导航条目只在 `console/navView.tsx` 定义；交互态（hover / 选中 / 展开）只在
  * `console.css.ts` 的 `.fg-rail*` / `.fg-nav*` 类里；本组件不写新的样式单。
@@ -176,6 +279,8 @@ export function NavRail() {
       <SessionPane onCreate={openNew} />
 
       <div className="fg-rail-foot">
+        {/* 账号区（决策 v38）：仅在认证启用时渲染登出 + 租户切换，紧邻下方「设置」行。 */}
+        <AuthFooterSlot />
         {/* 固定左下：设置（全局配置，不跟内容导航抢位置，也不随窗口高度被挤走）。
             点一下**直接**开设置弹窗——分节在弹窗内切（不再有左栏二级菜单那一跳）。 */}
         <div className="fg-rail-footrow">
