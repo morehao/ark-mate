@@ -60,6 +60,8 @@ func contractCases() []contractCase {
 		{"GET", "/v1/mate/health", ""},
 		// 控制面身份面（决策 v38）：无 authn 中间件装配 → 控制器 fail-closed 401（稳定形状）。
 		{"GET", "/v1/mate/control/me", ""},
+		// 租户切换（决策 v38）：authn 未装配 → requireTenant 中间件取不到身份 → 401（稳定形状）。
+		{"POST", "/v1/mate/control/tenants/switch", ""},
 		// SLO 接收端：无 logout_token → handler 400（receiver 未接线时也是 400；稳定形状）。
 		{"POST", "/v1/mate/control/oidc/bc-logout", ""},
 		{"GET", "/v1/mate/meta", ""},

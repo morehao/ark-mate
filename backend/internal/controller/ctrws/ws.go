@@ -45,6 +45,31 @@ type Options struct {
 	// `Origin: http://evil.com` 这种 DNS rebinding 形状会从它手里过。所以判定必须由本层在
 	// 升级前完成；Accept 那边继续 InsecureSkipVerify（那是"库的判定不参与"，不是"不判定"）。
 	OriginCheck func(r *http.Request) (status int, err error)
+
+	// VerifySession 是 WS 握手的**会话校验**（决策 v38、设计 §C2）：从握手请求里取 access_token
+	// 本地验签，返回 ark-iam 的 SSO 会话标识 `sid`。返回空 sid 表示令牌合法但无会话标识（不登记，
+	// 单点登出撤不到这条连接）；返回 err 表示令牌无效 → 拒绝握手（按 status 回信封，默认 401）。
+	//
+	// nil = 不校验、不登记（桌面本地态降级 / 测试夹具）：连接照旧建立，只是无法被 SLO 按 sid 撤销。
+	//
+	// 为什么在控制器层做：与 OriginCheck 同理——WS 的入站判定归控制器（在 Accept 之前完成），
+	// 且浏览器 WebSocket 不能自定义 Authorization 头，令牌只能走 query/子协议由本层取出。
+	VerifySession func(r *http.Request) (sid string, status int, err error)
+
+	// Sessions 是 sid → 连接撤销回调的集中会话登记表（decision v38 §C2）。VerifySession 非 nil 且
+	// 解析出 sid 时，本层在连接生命周期内登记一条撤销回调（关闭本连接），连接关闭时注销。SLO 收到
+	// back-channel logout 时按 sid 调用它关闭名下连接（断流即撤权）。nil = 不登记。
+	//
+	// 用窄接口注入（不 import control 包）：控制器只依赖"能登记一条撤销回调"，不感知集中登记实现。
+	Sessions SessionRegistrar
+}
+
+// SessionRegistrar 是集中会话登记的**窄端口**（消费方在 controller 声明；实现见 control/sessions）。
+// 控制器只用它把「本连接的撤销动作」按 sid 登记，并在连接关闭时注销。
+type SessionRegistrar interface {
+	// Register 登记一条属于 sid 的连接的撤销回调（close 在 SLO 撤销该 sid 时被调用）。
+	// 返回的 unregister 幂等，应在连接关闭时调用。
+	Register(sid string, close func()) (unregister func())
 }
 
 // wsCtr 是实时事件通道（WS）的协议薄适配层：
@@ -74,6 +99,10 @@ type wsCtr struct {
 	attachDeadline time.Duration
 	// originCheck 握手来源判定（M3-5；见 Options.OriginCheck）。nil = 不判定。
 	originCheck func(r *http.Request) (status int, err error)
+	// verifySession 握手会话校验（决策 v38；见 Options.VerifySession）。nil = 不校验、不登记。
+	verifySession func(r *http.Request) (sid string, status int, err error)
+	// sessions 集中会话登记表（sid → 撤销回调；见 Options.Sessions）。nil = 不登记。
+	sessions SessionRegistrar
 }
 
 // NewWSCtr 构造 WSCtr。
@@ -81,6 +110,8 @@ func NewWSCtr(bus EventStream, opts ...Options) WSCtr {
 	c := &wsCtr{bus: bus, attachDeadline: defaultAttachDeadline}
 	if len(opts) > 0 {
 		c.originCheck = opts[0].OriginCheck
+		c.verifySession = opts[0].VerifySession
+		c.sessions = opts[0].Sessions
 		if opts[0].AttachDeadline > 0 {
 			c.attachDeadline = opts[0].AttachDeadline
 		}
@@ -160,6 +191,19 @@ func (h *wsCtr) Handle(c *gin.Context) {
 			return
 		}
 	}
+	// 会话校验先于升级（决策 v38、设计 §C2）：令牌无效在握手层就被拒（不建连接、不占订阅位）。
+	// 校验通过后 sid 用于把本连接登记进集中会话表，供 SLO 按 sid 断流。verifySession 为 nil（桌面
+	// 本地态 / 测试）时不校验、不登记，行为与改造前一致。
+	var sid string
+	if h.verifySession != nil {
+		s, status, err := h.verifySession(c.Request)
+		if err != nil {
+			c.Abort()
+			gincontext.FailWithStatus(c, status, err)
+			return
+		}
+		sid = s
+	}
 	// InsecureSkipVerify 的取舍见 Options.OriginCheck：库自带的 origin 校验比本层的矩阵**更松**
 	// （同 Host 即放行），不能作为闸门；真正的闸门是上面那次 Decide。
 	ws, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
@@ -180,6 +224,18 @@ func (h *wsCtr) Handle(c *gin.Context) {
 	}
 	st.ctx, st.cancel = context.WithCancel(context.Background())
 	defer h.shutdown(st)
+
+	// 集中会话登记（决策 v38、设计 §C2）：把本连接登记到 sid 名下，回调 = 关闭本连接（断流即
+	// 撤权）。连接自然关闭时经 defer 注销，登记表只留活连接。sid 为空（令牌无 sid / 未启用校验）
+	// 时不登记——撤不到不等于撤错。
+	if h.sessions != nil && sid != "" {
+		unregister := h.sessions.Register(sid, func() {
+			// SLO 收到该 sid 的 back-channel logout：以策略违规关闭（对端可据此判定被服务端撤销）。
+			glog.Infow(st.ctx, "SLO 按 sid 撤销连接", "sid", sid)
+			h.closeWithStatus(st, websocket.StatusPolicyViolation, "session revoked")
+		})
+		defer unregister()
+	}
 
 	ws.SetReadLimit(wsMaxMessageSize)
 

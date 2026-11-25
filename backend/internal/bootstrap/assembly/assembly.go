@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/config"
+	"github.com/morehao/ark-mate/internal/control/sessions"
 	"github.com/morehao/ark-mate/internal/control/slo"
 	"github.com/morehao/ark-mate/internal/core/credential"
 	"github.com/morehao/ark-mate/internal/core/eventbus"
@@ -88,6 +89,10 @@ type assembly struct {
 	authenticator *authn.Authenticator
 	// sloReceiver back-channel logout 接收端（决策 v38）。OIDCEnabled + 有持久层时构造。
 	sloReceiver *slo.Receiver
+	// sessions 集中会话登记表（决策 v38、设计 §C2）：sid → 该 sid 名下 WS 连接的撤销回调。
+	// OIDCEnabled 时构造（即便 sloReceiver 因无持久层未挂，WS 也按 sid 登记，便于将来接入）。
+	// WS 控制器注入它登记连接；SLO 接收端注入它的 RevokeBySID 做按 sid 断流。
+	sessions    *sessions.Registry
 	services    Services
 	controllers router.Controllers
 	engine      http.Handler
@@ -158,6 +163,7 @@ func (as *assembly) steps() []registry.Step {
 			Name: "附件孤儿清扫", Phase: registry.PhaseBackground,
 			Start: as.startAttachmentSweeper, Stop: as.stopAttachmentSweeper,
 		},
+		{Name: "控制面认证", Phase: registry.PhaseDelivery, Critical: true, Timeout: 30 * time.Second, Start: as.startAuthn},
 		{Name: "用例与控制器", Phase: registry.PhaseDelivery, Critical: true, Start: as.startControllers},
 		{Name: "前端资产", Phase: registry.PhaseDelivery, Critical: true, Timeout: 10 * time.Second, Start: as.startAssets},
 		{
@@ -620,36 +626,56 @@ func (as *assembly) startControllers(context.Context) error {
 	return nil
 }
 
+// startAuthn 构造控制面认证事实（决策 v38）：验签器 + 集中会话登记表 + SLO 接收端。
+//
+// **必须在「用例与控制器」之前**（PhaseDelivery 内独立一步）：WS 控制器构造时要注入验签器与
+// 集中会话登记表（按 sid 登记连接、SLO 按 sid 断流），所以这些事实得先于控制器就位——它们原先
+// 在 startRouter 里构造，晚于控制器，接不上 WS。
+//
+// 控制面认证：enabled 时构造 Authenticator（启动期预取 JWKS，fail-closed：取不到 JWKS 直接报错，
+// 不把服务放出去）。issuer/audience 已由 config 校验非空。
+func (as *assembly) startAuthn(ctx context.Context) error {
+	if !as.cfg.OIDCEnabled {
+		return nil
+	}
+	auth, err := authn.New(ctx, authn.Options{
+		Issuer:   as.cfg.OIDCIssuer,
+		Audience: as.cfg.OIDCAudience,
+	})
+	if err != nil {
+		return fmt.Errorf("构造控制面认证（ark-iam RP）失败: %w", err)
+	}
+	as.authenticator = auth
+	// 集中会话登记表（设计 §C2）：WS 连接按 sid 登记、SLO 按 sid 断流。enabled 即建（即便下面 SLO
+	// 因无持久层不挂，WS 也按 sid 登记，为将来接入留好数据面）。
+	as.sessions = sessions.NewRegistry()
+	// SLO 接收端（设计 §C2）：与验签器共享 JWKS；jti 落表（多副本去重，DM-5）需持久层。
+	// 无持久层（memory 模式）→ 不挂 bc-logout（无法去重，宁可不开也不重复处理登出）。
+	if as.st != nil {
+		registry := as.sessions
+		as.sloReceiver = slo.New(slo.Options{
+			KeySource: auth.KeySource(),
+			Issuer:    as.cfg.OIDCIssuer,
+			ClientID:  as.cfg.OIDCAudience,
+			JTIStore:  slo.NewDBJTIStore(as.st, nil),
+			// Revoker 真接：按 sid 撤销该 sid 名下全部 WS 连接（断流即撤权，设计 §C2 行 428）。
+			Revoker: slo.RevokerFrom(func(ctx context.Context, sid string) error {
+				n, err := registry.RevokeBySID(ctx, sid)
+				glog.Infow(ctx, "SLO 按 sid 撤销服务端会话", "sid", sid, "closed", n)
+				return err
+			}),
+		})
+	}
+	return nil
+}
+
 // startRouter 用已绑定的监听器与已构造的控制器装配 HTTP 引擎（HTTP 服务由 app 壳启停）。
 func (as *assembly) startRouter(ctx context.Context) error {
 	var fileStore *filestore.FileStore
 	if as.attachStore != nil {
 		fileStore = as.attachStore.FileStore()
 	}
-	// 控制面认证（决策 v38）：enabled 时构造 Authenticator（启动期预取 JWKS，fail-closed：
-	// 取不到 JWKS 直接报错，不把服务放出去）。issuer/audience 已由 config 校验非空。
-	if as.cfg.OIDCEnabled {
-		auth, err := authn.New(ctx, authn.Options{
-			Issuer:   as.cfg.OIDCIssuer,
-			Audience: as.cfg.OIDCAudience,
-		})
-		if err != nil {
-			return fmt.Errorf("构造控制面认证（ark-iam RP）失败: %w", err)
-		}
-		as.authenticator = auth
-		// SLO 接收端（设计 §C2）：与验签器共享 JWKS；jti 落表（多副本去重，DM-5）需持久层。
-		// 无持久层（memory 模式）→ 不挂 bc-logout（无法去重，宁可不开也不重复处理登出）。
-		if as.st != nil {
-			as.sloReceiver = slo.New(slo.Options{
-				KeySource: auth.KeySource(),
-				Issuer:    as.cfg.OIDCIssuer,
-				ClientID:  as.cfg.OIDCAudience,
-				JTIStore:  slo.NewDBJTIStore(as.st, nil),
-				// Revoker 暂为 nil：无集中会话登记，页面侧登出靠前端静默续期失败跳登录
-				// （设计 C2-B）；集中会话表随 SaaS session_index 落地再接入。
-			})
-		}
-	}
+	// 认证事实（验签器 / SLO 接收端）已在 startAuthn 构造好（须先于控制器，见该步注释）。
 	as.engine = router.New(router.Deps{
 		Controllers:   as.controllers,
 		Web:           as.assets,

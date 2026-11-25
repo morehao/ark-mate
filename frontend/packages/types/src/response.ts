@@ -22,6 +22,8 @@ export const BizCode = {
   InvalidRequest: 40001,
   /** 未授权：上游（底座/供应商）拒绝访问或凭据无效。 */
   Unauthorized: 40101,
+  /** 无权访问：已认证但缺所需作用域（典型：需租户接口令牌缺 tenant_id；HTTP 403）。 */
+  Forbidden: 40301,
   /** 资源不存在（会话 / runtime / provider / MCP server）。 */
   NotFound: 40401,
   /** 当前形态明确不支持（典型：memory 模式下的 `/usage/summary`）。 */

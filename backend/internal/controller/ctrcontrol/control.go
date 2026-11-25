@@ -31,6 +31,8 @@ type Onboarder interface {
 // ControlCtr 控制面身份面控制器。
 type ControlCtr interface {
 	Me(c *gin.Context)
+	// TenantsSwitch 返回租户切换的候选 + 触发前端重走 OIDC（不在服务端改令牌，设计 §接口设计）。
+	TenantsSwitch(c *gin.Context)
 }
 
 var _ ControlCtr = (*controlCtr)(nil)
@@ -69,4 +71,40 @@ func (h *controlCtr) Me(c *gin.Context) {
 		IsMachine: id.IsMachine,
 		Scopes:    id.Scopes,
 	})
+}
+
+// tenantsSwitchReq 是 `POST /control/tenants/switch` 的可选请求体。
+type tenantsSwitchReq struct {
+	// TenantID 目标租户（可选）：服务端只回显、不改任何状态；空表示"只看候选"。
+	TenantID string `json:"tenantId"`
+}
+
+// TenantsSwitch 返回租户切换的候选租户 + 切换模式（`POST /control/tenants/switch`）。
+//
+// 设计口径（§接口设计）：**不在服务端改令牌**——只返回候选 + 提示前端重走 OIDC（带 tenant hint）。
+// 需挂在 authn 中间件之后；`admission.RequireTenant` 中间件在前把关（令牌缺 tenant_id → 403）。
+//
+// 骨架期：候选枚举来自 ark-iam（人→租户关系，需服务端目录客户端），当前只回填「当前租户」一条；
+// 完整枚举随 M2 目录接入补齐（设计 §已知未覆盖「逐入口 owner 全矩阵 / 目录」）。前端实际切换走
+// SDK 的 useTenantSwitching（直接问 ark-iam + signinRedirect），本接口提供同一语义的服务端契约面。
+func (h *controlCtr) TenantsSwitch(c *gin.Context) {
+	id := contract.IdentityFrom(c.Request.Context())
+	if id == nil {
+		gincontext.FailWithStatus(c, http.StatusUnauthorized, code.Error(code.Unauthorized, "未认证"))
+		return
+	}
+	var req tenantsSwitchReq
+	// 请求体可选：解析失败（空 body 常见）不报错，只是没有目标租户。
+	_ = c.ShouldBindJSON(&req)
+
+	resp := dtoidentity.TenantsSwitchResp{
+		Mode:              "oidc",
+		CurrentTenantID:   id.TenantID,
+		RequestedTenantID: req.TenantID,
+	}
+	// 骨架期候选：只含当前租户（若令牌带 tenant_id）。展示名留空由前端按 id 兜底。
+	if id.TenantID != "" {
+		resp.Tenants = append(resp.Tenants, dtoidentity.TenantCandidate{TenantID: id.TenantID})
+	}
+	gincontext.Success(c, resp)
 }

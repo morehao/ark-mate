@@ -1,6 +1,8 @@
 package assembly
 
 import (
+	"net/http"
+
 	"github.com/morehao/ark-mate/internal/control/identitymap"
 	"github.com/morehao/ark-mate/internal/controller/ctrapp"
 	"github.com/morehao/ark-mate/internal/controller/ctrartifact"
@@ -19,8 +21,10 @@ import (
 	"github.com/morehao/ark-mate/internal/controller/ctrusage"
 	"github.com/morehao/ark-mate/internal/controller/ctrworkspace"
 	"github.com/morehao/ark-mate/internal/controller/ctrws"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/ark-mate/internal/middleware/authn"
 	"github.com/morehao/ark-mate/internal/router"
 )
 
@@ -38,6 +42,16 @@ func (as *assembly) buildControllers() router.Controllers {
 	// 无持久层（memory 模式）→ 不接开通（nil），`/control/me` 退化为纯投影。
 	if as.st != nil {
 		ctrls.Control = ctrcontrol.NewControlCtr(identitymap.New(as.st, nil))
+	}
+	// WS 会话校验 + 集中会话登记（决策 v38、设计 §C2）：仅在有验签器时接入（桌面本地态 / 测试
+	// 保持 nil = 不校验不登记）。重建 WS 控制器，注入 VerifySession（从 query 取 access_token 验签
+	// 得 sid）与集中会话登记表（按 sid 登记连接，SLO 按 sid 断流）。
+	if as.authenticator != nil {
+		ctrls.WS = ctrws.NewWSCtr(as.services.Stream, ctrws.Options{
+			OriginCheck:   as.origin.CheckFunc(),
+			VerifySession: as.verifyWSSession,
+			Sessions:      as.sessions,
+		})
 	}
 	return ctrls
 }
@@ -72,4 +86,29 @@ func (s Services) BuildControllers(origin *middleware.OriginPolicy, hostFacts fu
 		Artifact:   ctrartifact.NewArtifactCtr(s.Artifact),
 		Control:    ctrcontrol.NewControlCtr(nil),
 	}
+}
+
+// verifyWSSession 是 WS 握手的会话校验（决策 v38、设计 §C2）：从握手 query 取 access_token，
+// 本地验签（与 REST 中间件同一份 Authenticator / 同一套 JWKS）→ 返回 ark-iam SSO 会话标识 sid。
+//
+// 令牌走 query 的原因：浏览器原生 WebSocket **不能自定义 Authorization 头**，只能把令牌放进 URL
+// （access_token 查询参数，业界对 WS 的通行做法；本仓 WS 与 REST 同机同源，不走第三方日志）。
+//
+// 返回约定（对齐 ctrws.Options.VerifySession 的三元组）：
+//   - 令牌合法：返回 sid（可能为空——机器令牌无 sid，则不登记、SLO 撤不到）；
+//   - 缺令牌 / 令牌无效：返回 401（未认证）；
+//   - 密钥集不可用：返回 503（不伪装成 401，排障能区分"服务端取不到 JWKS"）。
+func (as *assembly) verifyWSSession(r *http.Request) (sid string, status int, err error) {
+	raw := r.URL.Query().Get("access_token")
+	if raw == "" {
+		return "", http.StatusUnauthorized, code.Error(code.Unauthorized, "缺少 access_token")
+	}
+	id, verr := as.authenticator.Verify(r.Context(), raw)
+	if verr != nil {
+		if authn.IsKeySourceUnavailable(verr) {
+			return "", http.StatusServiceUnavailable, code.Error(code.BadGateway, "认证密钥集暂不可用")
+		}
+		return "", http.StatusUnauthorized, code.Error(code.Unauthorized, "令牌无效")
+	}
+	return id.SessionID, 0, nil
 }

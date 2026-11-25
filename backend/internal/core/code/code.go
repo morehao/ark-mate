@@ -32,6 +32,9 @@ const (
 	InvalidRequest = 40001
 	// Unauthorized 未授权：上游（底座/供应商）拒绝访问或凭据无效。
 	Unauthorized = 40101
+	// Forbidden 已认证但无权执行该操作（HTTP 403）：典型是需租户的接口令牌缺 tenant_id
+	// （ark-iam 自然人→租户映射不唯一时签发侧不写该 claim，见 control/admission 的 RequireTenant）。
+	Forbidden = 40301
 	// NotFound 目标资源不存在（会话/agent/runtime/provider/MCP server…）。
 	NotFound = 40401
 	// NotSupported 该能力在当前形态下明确不支持，且不做臆造降级
@@ -61,6 +64,7 @@ var defaultMessages = gerror.CodeMsgMap{
 	InvalidParam:   "参数错误",
 	InvalidRequest: "请求非法",
 	Unauthorized:   "未授权",
+	Forbidden:      "无权访问",
 	NotFound:       "资源不存在",
 	NotSupported:   "当前形态不支持该能力",
 	Conflict:       "与当前状态冲突",

@@ -4,9 +4,12 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/control/admission"
 	"github.com/morehao/ark-mate/internal/control/slo"
 	"github.com/morehao/ark-mate/internal/controller/ctrcontrol"
+	"github.com/morehao/ark-mate/internal/core/code"
 	"github.com/morehao/ark-mate/internal/middleware/authn"
+	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
 // registerControl 控制面身份面（决策 v38：ark-iam RP 认证）。
@@ -24,10 +27,41 @@ func registerControl(v1 *gin.RouterGroup, ctr ctrcontrol.ControlCtr, auth *authn
 	}
 	group.GET("/me", ctr.Me)
 
+	// 需租户的接口组（决策 v38、DM-4）：在 authn 之后追加 `admission.RequireTenant`——令牌带
+	// tenant_id 才放行，缺则 403（`control.tenant_scope_missing`，用 code.Forbidden）。放在独立子组，
+	// 因为 `/control/me` 本身**不要求** tenant（设计：含 tenant_id 缺失的令牌此处照常返回空 tenantId）。
+	tenantGroup := group.Group("")
+	tenantGroup.Use(requireTenant())
+	// 租户切换（设计 §接口设计）：返回候选租户 + 触发前端重走 OIDC，不在服务端改令牌。
+	tenantGroup.POST("/tenants/switch", ctr.TenantsSwitch)
+
 	// SLO 接收端：独立、免 authn 中间件（注册在 v1 本体上，不继承本组的 authn 中间件）。
 	// 路由**恒定注册**（路由表与接线无关，便于契约守卫稳定）；receiver 为 nil（未启用认证 / 无持久层）
 	// 时处理器返回 400——该路径在这些部署下本就不该被调用。
 	v1.POST("/control/oidc/bc-logout", bcLogoutHandler(sloRcvr))
+}
+
+// requireTenant 是「需租户接口」的准入中间件（决策 v38、DM-4）：把控制面判定原语
+// `admission.RequireTenant` 适配成 gin 中间件。取不到身份（中间件没挂/未通过）→ 401；
+// 身份缺 tenant_id → 403 `control.tenant_scope_missing`。
+//
+// 放在 router 包：control/admission 是 L7 编排带，不能 import gin（gin 围栏只放行 router/controller/
+// middleware）；而 router 是 L9 交付带，可向上 import admission 并持有 gin，正好做这层薄适配。
+func requireTenant() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := authn.IdentityFromGin(c)
+		if id == nil {
+			gincontext.FailWithStatus(c, http.StatusUnauthorized, code.Error(code.Unauthorized, "未认证"))
+			c.Abort()
+			return
+		}
+		if err := admission.RequireTenant(id); err != nil {
+			gincontext.FailWithStatus(c, http.StatusForbidden, code.Error(code.Forbidden, "缺少租户作用域"))
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }
 
 // bcLogoutHandler 把 slo.Receiver.Handle 适配成 gin 处理器。

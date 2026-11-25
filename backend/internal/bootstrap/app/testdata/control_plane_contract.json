@@ -27,6 +27,20 @@
   },
   {
     "method": "POST",
+    "path": "/v1/mate/control/tenants/switch",
+    "status": 401,
+    "code": 40101,
+    "msg": "未认证",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
     "path": "/v1/mate/control/oidc/bc-logout",
     "status": 400,
     "code": 0,
