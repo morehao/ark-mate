@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/dto/dtosystem"
 	"github.com/morehao/ark-mate/internal/service/svcsystem"
 )
 
@@ -76,5 +77,36 @@ func TestMetaSnapshotShape(t *testing.T) {
 	}
 	if string(d3["webDigest"]) != `"sha256:def"` {
 		t.Errorf("摘要照发，实际 %s", d3["webDigest"])
+	}
+}
+
+// TestMetaAuthFact `/meta.auth`（决策 v38）：反映 MetaSource.Auth（前端据此门禁）。
+func TestMetaAuthFact(t *testing.T) {
+	src := svcsystem.MetaSource{
+		Auth: dtosystem.AuthInfo{Enabled: true, Issuer: "http://localhost:8081/oidc", ClientID: "ark_mate_web"},
+	}
+	data := rawMeta(t, src)
+	raw, ok := data["auth"]
+	if !ok {
+		t.Fatalf("/meta 应含 auth 段")
+	}
+	var a dtosystem.AuthInfo
+	if err := json.Unmarshal(raw, &a); err != nil {
+		t.Fatalf("auth 解析失败：%v", err)
+	}
+	if !a.Enabled || a.Issuer != "http://localhost:8081/oidc" || a.ClientID != "ark_mate_web" {
+		t.Fatalf("auth 事实不符：%+v", a)
+	}
+}
+
+// TestMetaAuthDisabledWhenUnset 未配置认证 → enabled=false（桌面本地态降级）。
+func TestMetaAuthDisabledWhenUnset(t *testing.T) {
+	data := rawMeta(t, svcsystem.MetaSource{})
+	var a dtosystem.AuthInfo
+	if err := json.Unmarshal(data["auth"], &a); err != nil {
+		t.Fatalf("auth 解析失败：%v", err)
+	}
+	if a.Enabled {
+		t.Fatalf("未配置时 auth.enabled 应为 false")
 	}
 }

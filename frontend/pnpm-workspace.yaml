@@ -12,3 +12,6 @@ allowBuilds:
   esbuild: false
   # electron-winstaller：只服务 Windows 安装器（M4-3）；届时若确证需要其脚本再改这一行。
   electron-winstaller: false
+
+minimumReleaseAgeExclude:
+  - "@morehao/ark-iam-react@0.4.1"

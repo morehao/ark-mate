@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"github.com/morehao/ark-mate/internal/core/failure"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -93,5 +95,35 @@ func TestHandlesPutKeepsProviderIndex(t *testing.T) {
 	}
 	if got := h.ResolveProvider("native-2"); got != "s1" {
 		t.Fatalf("新原生映射应生效，got %q", got)
+	}
+}
+
+// TestActiveSessionConcurrentBeginRunNoDoubleWrite 是 M2 出口闸「同会话并发正确（零双写）」
+// 在**活跃句柄**这一层的证明：N goroutine 同时 BeginRun 同一会话，**恰好一个**成功，其余全部
+// 得到 run_in_progress——即同一会话任何时刻最多一个在途 run，双写=0。（与 MemorySessionWriter 的
+// 端口级判据互补：这条钉的是**真正跑轮次的状态机入口**，不是抽象端口。）
+func TestActiveSessionConcurrentBeginRunNoDoubleWrite(t *testing.T) {
+	as := NewActiveSession(HandleParams{ID: "race", Runtime: "r"})
+	const n = 256
+	var ok int64
+	var start sync.WaitGroup
+	start.Add(1)
+	var done sync.WaitGroup
+	done.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer done.Done()
+			start.Wait()
+			if _, _, err := as.BeginRun(context.Background(), ""); err == nil {
+				atomic.AddInt64(&ok, 1)
+			} else if ae, isF := failure.As(err); !isF || ae.Code != "run_in_progress" {
+				t.Errorf("非赢家的错误应为 run_in_progress，got %v", err)
+			}
+		}()
+	}
+	start.Done()
+	done.Wait()
+	if ok != 1 {
+		t.Fatalf("同一会话并发 BeginRun 应恰好 1 个成功（零双写），实际 %d 个", ok)
 	}
 }

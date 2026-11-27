@@ -5,12 +5,13 @@
 
 ## 一句话
 
-**底座 + 其上的个人 Agent 助手**：底座是做成的 `mate` 内核（多 runtime 统一接入 + 会话与能力数据面
-+ REST/WS 契约 + 交付形态），其上是面向用户的**个人 Agent 助手**，**聚焦桌面端**；单机、单操作员、
-开箱即用，执行能力来自 ACP 兼容的开源运行时（当前内置 `dsh`）。
+**底座 + 其上的 Agent 助手（双形态）**：底座是做成的 `mate` 内核（多 runtime 统一接入 + 会话与能力
+数据面 + REST/WS 契约 + 统一认证 + 交付形态），其上是面向用户的 Agent 助手——**既可作为本地单操作员
+桌面应用（开箱即用），也可作为云端多租户 SaaS**；两种形态共用同一内核，**均接入 ark-iam 做统一身份
+认证**（决策 v38）。执行能力来自 ACP 兼容的开源运行时（当前内置 `dsh`）。
 
-> A personal agent assistant on top of a reusable agent core — ACP-compatible executors behind one
-> control plane. Desktop-first.
+> A dual-form agent assistant on a reusable agent core — one kernel, usable as a local desktop app
+> **and** a cloud multi-tenant SaaS, both authenticated via ark-iam.
 
 ## 两层结构（职责并列成立）
 
@@ -41,9 +42,10 @@
 2. **数据管理是平台职责**。会话数据（wire transcript / 历史回放 / 读模型）、skill 数据（技能包存储与
    分发）、MCP 数据（服务器定义与注入面）以平台的库为事实源；写面按载体分叉，
    **读模型一律可重建**。
-3. **单机单操作员**。不做多用户 / 团队共享 / 登录与 RBAC；控制面默认只绑回环；凭据体系只解决
-   「REST 面与事件流面分权」。跨 agent 协作（委托 / 子 agent / 并行）同样不在定位内——**一次会话
-   只绑定一个 runtime**。
+3. **双形态、统一认证（决策 v38）**。本地态仍可单操作员、开箱即用（默认只绑回环）；云端态为多租户
+   SaaS。**两种形态均接入 ark-iam 做身份认证**（多用户 / 登录 / 租户与 RBAC 进入产品面，取代本条旧版
+   「不做多用户/登录/RBAC」与决策 v34）。跨 agent 协作（委托 / 子 agent / 并行）仍不在定位内——**一次
+   会话只绑定一个 runtime**。
 4. **底座由构建期固定，用户不能选 runtime**。选中的 id 在编译期注入，不注入即 `dsh`；用户面没有任何
    runtime 选择或读取入口，带被撤掉的**选择键**的写请求一律**显式拒绝**（不静默丢弃——静默会让它变成
    「写了、存了、什么都不发生」的骗人字段）。
@@ -60,7 +62,7 @@
 
 - **桌面 IDE 外壳**：编辑器、终端、文件树、Split View、canvas。注意「聚焦桌面端」说的是交付优先级，
   **不等于**做 IDE 外壳。
-- **多人协作**：多用户、团队共享、登录 / RBAC、计费。
+- **多人协作里的「计费」**：单价/计费交模型网关（决策 v38 / 总纲 D12）；多用户 / 团队共享 / 登录 / RBAC 已由决策 v38 移入产品面，不再属于「不做」。
 - **远程会话通道**：聊天 / webhook / IM 通道接入。
 - **跨 agent 协作**：@委托、子 agent、并行编排。
 - **运行时能力本身**：skill 执行器、MCP 客户端语义、推理循环、工具循环。

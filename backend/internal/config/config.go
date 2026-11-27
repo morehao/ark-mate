@@ -226,6 +226,15 @@ type Config struct {
 	// 为什么它是**进程级**配置而不是会话级：身份是部署级常量（一个二进制对应一个产品身份），
 	// 会话级切换会让同一份 transcript 里的自述随打开顺序变化——那不是产品行为。
 	IdentityMode string
+
+	// OIDC 控制面认证配置（决策 v38：ark-iam RP 接入）。
+	//
+	// 三件套齐备（Enabled + Issuer + Audience）时，装配根构造 `authn.Authenticator` 并挂到
+	// `/control` 受保护面；任一缺失 → 不启用认证（桌面本地态降级，仅回环自用的旧行为）。
+	// 云端态必须启用。设计见 `.dsh/docs/specs/2026-11-24-ark-iam-rp-integration-design.md`。
+	OIDCEnabled  bool
+	OIDCIssuer   string
+	OIDCAudience string
 }
 
 // 原生权限映射开关取值。
@@ -410,6 +419,9 @@ var knownKeys = map[string]string{
 	"platform_mcp":               "MATE_PLATFORM_MCP",
 	"native_permission":          "MATE_NATIVE_PERMISSION",
 	"identity_mode":              "MATE_IDENTITY_MODE",
+	"oidc_enabled":               "MATE_OIDC_ENABLED",
+	"oidc_issuer":                "MATE_OIDC_ISSUER",
+	"oidc_audience":              "MATE_OIDC_AUDIENCE",
 }
 
 // knownListKeys 允许在 config.json 里写成 JSON 数组的多值键。
@@ -943,6 +955,22 @@ func materialize(r *resolver) (Config, error) {
 		}
 		c.IdentityMode = string(m)
 	}
+
+	// 控制面认证（决策 v38）：三键直读，非法取值（如 enabled=true 但缺 issuer/audience）在
+	// Validate 里统一判——这里只搬运原值。
+	if v, ok := r.get("oidc_enabled"); ok {
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return bad("oidc_enabled", fmt.Sprintf("需为布尔值（true/false/1/0），得到 %q", v))
+		}
+		c.OIDCEnabled = b
+	}
+	if v, ok := r.get("oidc_issuer"); ok {
+		c.OIDCIssuer = strings.TrimSpace(v)
+	}
+	if v, ok := r.get("oidc_audience"); ok {
+		c.OIDCAudience = strings.TrimSpace(v)
+	}
 	if v, ok := r.get("mcp_gateway"); ok {
 		mode := strings.ToLower(strings.TrimSpace(v))
 		switch mode {
@@ -1058,6 +1086,17 @@ func materialize(r *resolver) (Config, error) {
 		c.SignSecret = strings.TrimSpace(v)
 	} else {
 		c.SignSecret = DefaultSignSecret
+	}
+
+	// 控制面认证（决策 v38）：enabled=true 时 issuer/audience 必填——缺一即报错（fail-closed，
+	// 不静默降级成"看起来开了其实没验"）。enabled=false 时忽略 issuer/audience。
+	if c.OIDCEnabled {
+		if c.OIDCIssuer == "" {
+			return bad("oidc_enabled", "启用控制面认证时必须同时设置 oidc_issuer")
+		}
+		if c.OIDCAudience == "" {
+			return bad("oidc_enabled", "启用控制面认证时必须同时设置 oidc_audience（本应用 client_id）")
+		}
 	}
 	return c, nil
 }

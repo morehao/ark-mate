@@ -22,6 +22,42 @@ export class HttpError extends Error {
 
 const instance = axios.create({ baseURL: '/v1', timeout: 30_000 })
 
+/**
+ * 控制面认证（决策 v38）：access token 提供者。
+ *
+ * 本包**不依赖** ark-iam 的 SDK（保持与 @morehao/ark-iam-react 解耦、web/desktop 两形态同一份
+ * api 包）；由登录门禁（`console/src/auth`）在启动时 `setAccessTokenProvider(() => token)` 注入。
+ * 未注入（桌面本地态降级 / 未启用认证）→ 不附带 Authorization，行为与旧版一致。
+ */
+let accessTokenProvider: (() => string | null | undefined) | null = null
+
+/** 设置 access token 提供者（登录门禁调用）。传 null 清除。 */
+export function setAccessTokenProvider(provider: (() => string | null | undefined) | null): void {
+  accessTokenProvider = provider
+}
+
+/**
+ * 读取当前 access token（供 WS 等**无法走 axios 拦截器**的通道自取）。
+ *
+ * 浏览器原生 WebSocket 不能自定义 Authorization 头，令牌只能放进 WS URL 的查询参数（决策 v38、
+ * 设计 §C2：SLO 按 sid 撤连接需要 WS 握手时能验出 sid）。与 axios 拦截器同一份 provider——每请求
+ * 现取、不缓存，静默续期后的新值对 WS 重连同样生效。未注入（未启用认证）→ 返回 null。
+ */
+export function getAccessToken(): string | null {
+  return accessTokenProvider?.() ?? null
+}
+
+// 每个请求按当前 token 附带 Bearer（token 由门禁维护，可能是静默续期后的新值——每请求现取，
+// 不缓存）。enabled=false 时 provider 为 null，直接跳过。
+instance.interceptors.request.use((config) => {
+  const token = accessTokenProvider?.()
+  if (token) {
+    config.headers = config.headers ?? {}
+    ;(config.headers as Record<string, string>).Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
 function unwrap<T>(env: Envelope<T> | undefined): T {
   if (!env || env.code !== BizCode.Success) {
     throw new HttpError(env?.code ?? -1, env?.msg || '服务响应异常')

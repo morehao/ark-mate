@@ -78,9 +78,13 @@ type SessionEntity struct {
 	// 用户改了工作空间的默认权限模式，**昨天那些会话**的行为跟着变了，而界面上什么都不会说。
 	NativeMode string `gorm:"column:native_mode;not null;default:''"`
 	// LastSeq 该会话已落库事件的最后 seq（events.seq 全局单调）。
-	LastSeq   int64     `gorm:"column:last_seq"`
-	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
-	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	LastSeq int64 `gorm:"column:last_seq"`
+	// LastActiveAt 最近一次活跃时间（Unix 毫秒；0 = 从未记录）。SaaS 池化 M3-1 驻留 LRU / M3-3
+	// 热/温/冷分层以此为判决输入。**与 UpdatedAt 分开**：UpdatedAt 是行 mtime（改标题/置顶/归档都会刷），
+	// 不代表会话被真正使用；本列只在「一轮 prompt / resume 使用」时更新，是干净的活跃信号。
+	LastActiveAt int64     `gorm:"column:last_active_at;not null;default:0"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 }
 
 // TableName 实现 gormdao.Entity。

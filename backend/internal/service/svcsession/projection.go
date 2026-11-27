@@ -50,6 +50,7 @@ func sessionRespDTO(v session.SessionItem) dtosession.SessionResp {
 		Archived: v.Archived, Cwd: v.Cwd, WorkspaceID: v.WorkspaceID,
 		WorkspaceTitle: v.WorkspaceTitle, WorkspaceTemporary: v.WorkspaceTemporary,
 		Model: v.Model, ModelName: v.ModelName, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt, Origin: v.Origin,
+		LastActiveAt: v.LastActiveAt,
 		Capabilities: capabilitiesDTO(v.Capabilities),
 		NativeMode:   v.NativeMode,
 	}

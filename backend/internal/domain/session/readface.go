@@ -203,6 +203,7 @@ func (pl *Plane) ToSessionRespOf(r *SessionRec) SessionItem {
 		NativeMode:         r.NativeMode,
 		CreatedAt:          objtime.Milli(r.CreatedAt),
 		UpdatedAt:          objtime.Milli(r.UpdatedAt),
+		LastActiveAt:       r.LastActiveAt, // 已是 Unix 毫秒（TouchLastActive 写入），无需再转
 	}
 }
 

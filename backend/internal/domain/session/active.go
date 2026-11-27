@@ -462,3 +462,18 @@ func (h *Handles) Len() int {
 	defer h.mu.Unlock()
 	return len(h.byID)
 }
+
+// Snapshot 返回当前全部活跃句柄的一份**只读切片**（新切片，句柄本身仍是共享指针）。
+//
+// 供只读诊断（如驻留快照）用：调用方拿到后**不得**在这些句柄上做改变会话状态的动作——
+// 它只是"此刻挂着哪些句柄"的视图，不持有任何执行/驱逐语义。返回的切片内部顺序不保证；
+// 需要确定性时由调用方自行排序（例如按会话 id）。
+func (h *Handles) Snapshot() []*ActiveSession {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]*ActiveSession, 0, len(h.byID))
+	for _, as := range h.byID {
+		out = append(out, as)
+	}
+	return out
+}

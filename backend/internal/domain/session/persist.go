@@ -44,6 +44,8 @@ func (pl *Plane) persistSession(rec *SessionRec) {
 		NativeMode: rec.NativeMode,
 		CreatedAt:  rec.CreatedAt,
 		UpdatedAt:  rec.UpdatedAt,
+		// 最近活跃时间（Unix 毫秒；0 = 未记录）。供 M3-1/ M3-3 调度作判决输入。
+		LastActiveAt: rec.LastActiveAt,
 	})
 	if err != nil {
 		glog.Warnw(context.Background(), "store: upsert session failed", "session", rec.ID, "err", err)

@@ -28,6 +28,10 @@ type SessionItem struct {
 
 	UpdatedAt int64
 
+	// LastActiveAt 最近一次真正活跃时刻（Unix 毫秒；0 = 未记录）。与 UpdatedAt（行 mtime）分开，
+	// 是 M3-1 驻留 LRU / M3-3 热/温/冷分层的活跃信号，读面据此可展示/诊断。
+	LastActiveAt int64
+
 	Origin       string
 	Capabilities *SessionCapabilities
 	// NativeMode 会话钉住的原生权限模式（v29；'' = 不注入，跟随工作空间默认）。

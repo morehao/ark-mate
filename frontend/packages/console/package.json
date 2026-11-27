@@ -14,12 +14,12 @@
     "@ark-mate/desktop-contract": "workspace:*",
     "@ark-mate/types": "workspace:*",
     "@ark-mate/ui": "workspace:*",
-    "antd": "^6.6.2",
+    "antd": "^6.7.0",
     "axios": "^1.20.0",
     "katex": "^0.19.1",
     "pdfjs-dist": "^6.5.438",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.3",
     "rehype-katex": "^7.0.1",
@@ -28,7 +28,8 @@
     "remark-math": "^6.0.0",
     "shiki": "^4.6.0",
     "xlsx": "^0.18.5",
-    "zustand": "^5.0.15"
+    "zustand": "^5.0.15",
+    "@morehao/ark-iam-react": "^0.4.1"
   },
   "devDependencies": {
     "@ark-mate/tsconfig": "workspace:*",

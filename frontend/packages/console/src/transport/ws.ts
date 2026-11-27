@@ -1,4 +1,5 @@
 import type { WsClientFrame, WsServerFrame } from '@ark-mate/types'
+import { getAccessToken } from '@ark-mate/api'
 import type { StreamConfig } from '../carrier'
 
 /**
@@ -124,7 +125,13 @@ export class WsTransport {
     }
     // 连接建立后的第一条帧必须是通道级 attach——服务端 5s 内未收到即关闭（1008）。
     // 帧形状的唯一真源是 @ark-mate/desktop-contract 的 buildAttachFrame / types 的 WsClientFrame。
-    const url = `${cfg.baseUrl}/v1/mate/ws/events`
+    //
+    // 控制面认证（决策 v38、设计 §C2）：浏览器原生 WebSocket 不能自定义 Authorization 头，令牌
+    // 只能放查询参数供服务端握手验签出 sid（SLO 据此按 sid 撤连接）。每次连接/重连现取当前 token
+    // （静默续期后的新值生效）；未启用认证（getAccessToken 返回 null）则不附加，行为同旧版。
+    let url = `${cfg.baseUrl}/v1/mate/ws/events`
+    const token = getAccessToken()
+    if (token) url += `?access_token=${encodeURIComponent(token)}`
     this.onState('connecting')
     let ws: WebSocket
     try {

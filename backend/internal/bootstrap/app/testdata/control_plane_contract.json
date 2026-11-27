@@ -13,6 +13,45 @@
   },
   {
     "method": "GET",
+    "path": "/v1/mate/control/me",
+    "status": 401,
+    "code": 40101,
+    "msg": "未认证",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/control/tenants/switch",
+    "status": 401,
+    "code": 40101,
+    "msg": "未认证",
+    "envelope": [
+      "code",
+      "data",
+      "msg",
+      "requestID"
+    ],
+    "data_kind": "object"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/mate/control/oidc/bc-logout",
+    "status": 400,
+    "code": 0,
+    "msg": "",
+    "envelope": [
+      "error"
+    ],
+    "data_kind": "absent"
+  },
+  {
+    "method": "GET",
     "path": "/v1/mate/meta",
     "status": 200,
     "code": 0,
@@ -26,6 +65,7 @@
     "data_kind": "object",
     "data_keys": [
       "apiContract",
+      "auth",
       "coreVersion",
       "home",
       "payloads",
