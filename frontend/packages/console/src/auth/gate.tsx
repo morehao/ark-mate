@@ -11,7 +11,7 @@
  *  3. 未认证时 `signinRedirect()` 跳 OP，认证后渲染界面。
  *
  * **依赖前置**：本模块 `import '@morehao/ark-iam-react/auth'`，前端构建/typecheck 前必须先
- * `pnpm add @morehao/ark-iam-react@^0.4.0`（peer: antd ^6.7.0 / react&react-dom ^19.3.1 /
+ * `pnpm add @morehao/ark-iam-react@^0.4.1`（peer: antd ^6.7.0 / react&react-dom ^19.3.1 /
  * react-router-dom ^7.15.0 / @ant-design/icons ^6.3.4）。
  * 未装包 → 该 specifier 无法解析（这是集成本身的前置，不是 bug）。
  */

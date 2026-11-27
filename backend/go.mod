@@ -9,7 +9,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/morehao/ark-iam/contract v0.1.0
 	github.com/morehao/ark-iam/sdk v0.7.0
-	github.com/morehao/golib v1.39.2
+	github.com/morehao/golib v1.41.1
 	go.uber.org/goleak v1.3.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/gorm v1.31.2
